@@ -224,6 +224,11 @@ pub(crate) fn outdated_packages_in(
                     );
                 }
             }
+            "archive" => {
+                report.status = OutdatedStatus::Skipped;
+                report.note =
+                    Some("archive dependencies are immutable content-hash pins".to_string());
+            }
             other => {
                 report.status = OutdatedStatus::Unknown;
                 report.note = Some(format!("unsupported lock kind '{other}'"));
@@ -377,7 +382,7 @@ pub(crate) fn audit_packages_in(
             }
         }
 
-        if matches!(kind, "git" | "registry") {
+        if matches!(kind, "git" | "registry" | "archive") {
             if let Err(error) = audit_git_entry_integrity(workspace, entry, skip_materialized) {
                 findings.push(AuditFinding {
                     alias: Some(alias.clone()),
@@ -584,12 +589,12 @@ fn compact_value(value: &serde_json::Value) -> String {
 fn lock_entry_kind(entry: &LockEntry) -> &'static str {
     if entry.source.starts_with("path+") {
         "path"
+    } else if entry.registry.is_some() {
+        "registry"
     } else if entry.source.starts_with("git+") {
-        if entry.registry.is_some() {
-            "registry"
-        } else {
-            "git"
-        }
+        "git"
+    } else if entry.source.starts_with("archive+") {
+        "archive"
     } else {
         "unknown"
     }

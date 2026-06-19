@@ -903,12 +903,16 @@ pub enum Dependency {
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct DepTable {
     pub git: Option<String>,
+    #[serde(default, alias = "archive-url", alias = "archive_url")]
+    pub archive: Option<String>,
     pub tag: Option<String>,
     pub rev: Option<String>,
     pub branch: Option<String>,
     pub version: Option<String>,
     pub path: Option<String>,
     pub package: Option<String>,
+    #[serde(default)]
+    pub checksum: Option<String>,
     /// Registry index URL/path the dependency was originally added from.
     /// Persisted in the manifest so registry provenance survives
     /// round-trips and the lockfile can compare against the registry's
@@ -928,6 +932,13 @@ impl Dependency {
     pub(crate) fn git_url(&self) -> Option<&str> {
         match self {
             Dependency::Table(t) => t.git.as_deref(),
+            Dependency::Path(_) => None,
+        }
+    }
+
+    pub(crate) fn archive_url(&self) -> Option<&str> {
+        match self {
+            Dependency::Table(t) => t.archive.as_deref(),
             Dependency::Path(_) => None,
         }
     }
@@ -961,7 +972,7 @@ impl Dependency {
     }
 
     pub(crate) fn requires_git(&self) -> bool {
-        self.git_url().is_some() || self.version().is_some()
+        self.git_url().is_some()
     }
 
     pub(crate) fn local_path(&self) -> Option<&str> {

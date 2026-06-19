@@ -292,10 +292,14 @@ pub(crate) fn compatible_locked_entry(
         }
         let version = parse_registry_semver(&registry.version)?;
         let req = parse_registry_version_req(requirement)?;
-        return Ok(req.matches(&version)
-            && lock.source.starts_with("git+")
-            && lock.commit.is_some()
-            && lock.content_hash.is_some());
+        let resolved_source_is_locked = if lock.source.starts_with("git+") {
+            lock.commit.is_some() && lock.content_hash.is_some()
+        } else if lock.source.starts_with("archive+") {
+            lock.content_hash.is_some()
+        } else {
+            false
+        };
+        return Ok(req.matches(&version) && resolved_source_is_locked);
     }
     if let Some(url) = dependency.git_url() {
         let source = format!("git+{}", normalize_git_url(url)?);
@@ -306,6 +310,10 @@ pub(crate) fn compatible_locked_entry(
             && lock.commit.is_some()
             && lock.content_hash.is_some());
     }
+    if let Some(url) = dependency.archive_url() {
+        let source = archive_source_uri(url)?;
+        return Ok(lock.source == source && lock.content_hash.is_some());
+    }
     Ok(false)
 }
 
@@ -315,7 +323,7 @@ pub(crate) struct PendingDependency {
     dependency: Dependency,
     manifest_dir: PathBuf,
     parent: Option<String>,
-    parent_is_git: bool,
+    parent_is_remote: bool,
 }
 
 pub(crate) fn git_rev_request(
@@ -336,6 +344,19 @@ pub(crate) fn dependency_git_request(dependency: &Dependency) -> Option<&str> {
         .branch()
         .or_else(|| dependency.rev())
         .or_else(|| dependency.tag())
+}
+
+pub(crate) fn dependency_content_hash(
+    alias: &str,
+    dependency: &Dependency,
+) -> Result<String, PackageError> {
+    let Dependency::Table(table) = dependency else {
+        return Err(format!("dependency {alias} is missing checksum").into());
+    };
+    table
+        .checksum
+        .clone()
+        .ok_or_else(|| format!("archive dependency {alias} must specify checksum").into())
 }
 
 pub(crate) fn dependency_manifest_dir(source: &Path) -> Option<PathBuf> {
@@ -509,7 +530,7 @@ pub(crate) fn enqueue_manifest_dependencies(
     manifest: Manifest,
     manifest_dir: PathBuf,
     parent: String,
-    parent_is_git: bool,
+    parent_is_remote: bool,
 ) {
     let mut aliases: Vec<String> = manifest.dependencies.keys().cloned().collect();
     aliases.sort();
@@ -520,7 +541,7 @@ pub(crate) fn enqueue_manifest_dependencies(
                 dependency,
                 manifest_dir: manifest_dir.clone(),
                 parent: Some(parent.clone()),
-                parent_is_git,
+                parent_is_remote,
             });
         }
     }
@@ -537,18 +558,43 @@ fn resolve_registry_version_dependency(
     if table.version.is_none() {
         return Ok(dependency);
     }
-    if table.git.is_some()
-        || table.path.is_some()
-        || table.rev.is_some()
-        || table.tag.is_some()
-        || table.branch.is_some()
+    registry_dependency_from_manifest_constraint_in(workspace, alias, table)
+}
+
+fn validate_dependency_source_shape(
+    alias: &str,
+    dependency: &Dependency,
+) -> Result<(), PackageError> {
+    let Dependency::Table(table) = dependency else {
+        return Ok(());
+    };
+    let source_count = usize::from(table.git.is_some())
+        + usize::from(table.archive.is_some())
+        + usize::from(table.path.is_some());
+    if table.version.is_some()
+        && (source_count > 0
+            || table.rev.is_some()
+            || table.tag.is_some()
+            || table.branch.is_some())
     {
         return Err(format!(
-            "dependency {alias} uses `version`; do not combine registry version constraints with git, path, tag, rev, or branch"
+            "dependency {alias} uses `version`; do not combine registry version constraints with git, archive, path, tag, rev, or branch"
         )
         .into());
     }
-    registry_dependency_from_manifest_constraint_in(workspace, alias, table)
+    if source_count > 1 {
+        return Err(
+            format!("dependency {alias} must specify only one of git, archive, or path").into(),
+        );
+    }
+    if table.archive.is_some()
+        && (table.tag.is_some() || table.rev.is_some() || table.branch.is_some())
+    {
+        return Err(
+            format!("archive dependency {alias} cannot specify tag, rev, or branch").into(),
+        );
+    }
+    Ok(())
 }
 
 pub(crate) fn build_lockfile(
@@ -580,7 +626,7 @@ pub(crate) fn build_lockfile(
             dependency,
             manifest_dir: ctx.dir.clone(),
             parent: None,
-            parent_is_git: false,
+            parent_is_remote: false,
         });
     }
 
@@ -588,10 +634,10 @@ pub(crate) fn build_lockfile(
         let alias = next.alias;
         validate_package_alias(&alias)?;
         let dependency = next.dependency;
-        if dependency.local_path().is_some() && next.parent_is_git {
-            let parent = next.parent.as_deref().unwrap_or("a git package");
+        if dependency.local_path().is_some() && next.parent_is_remote {
+            let parent = next.parent.as_deref().unwrap_or("a remote package");
             return Err(format!(
-                "package {parent} declares local path dependency {alias}, but path dependencies are not supported inside git-installed packages; publish {alias} as a git dependency with `tag`, `rev`, or `version`"
+                "package {parent} declares local path dependency {alias}, but path dependencies are not supported inside remote-installed packages; publish {alias} as a git or registry dependency"
             ).into());
         }
         if dependency.requires_git() {
@@ -600,6 +646,7 @@ pub(crate) fn build_lockfile(
                 git_rev_request(&alias, &dependency)?;
             }
         }
+        validate_dependency_source_shape(&alias, &dependency)?;
         let refresh = refresh_all || refresh_alias == Some(alias.as_str());
         if let Some(existing_lock) = existing.and_then(|lock| lock.find(&alias)) {
             if !refresh
@@ -669,6 +716,42 @@ pub(crate) fn build_lockfile(
                             );
                         }
                     }
+                } else if entry.source.starts_with("archive+") {
+                    let url = archive_url_from_source_uri(&entry.source)?;
+                    let expected_hash = entry
+                        .content_hash
+                        .as_deref()
+                        .ok_or_else(|| format!("missing content hash for {alias}"))?;
+                    ensure_archive_cache_populated_in(
+                        workspace,
+                        url,
+                        &entry.source,
+                        expected_hash,
+                        false,
+                        offline,
+                    )?;
+                    let cache_dir = archive_cache_dir_in(workspace, &entry.source, expected_hash)?;
+                    if entry.manifest_digest.is_none()
+                        || entry.package_version.is_none()
+                        || entry.provenance.is_none()
+                    {
+                        fill_provenance(&mut entry, read_lock_entry_provenance(&cache_dir)?);
+                    }
+                    if entry.registry.is_none() {
+                        entry.registry = dependency.registry_provenance();
+                    }
+                    let inserted = replace_lock_entry(&mut lock, entry.clone())?;
+                    if inserted {
+                        if let Some(manifest) = read_package_manifest_from_dir(&cache_dir)? {
+                            enqueue_manifest_dependencies(
+                                &mut pending,
+                                manifest,
+                                cache_dir,
+                                alias,
+                                true,
+                            );
+                        }
+                    }
                 } else if entry.source.starts_with("path+") {
                     let source = path_from_source_uri(&entry.source)?;
                     let manifest_dir = dependency_manifest_dir(&source);
@@ -706,6 +789,13 @@ pub(crate) fn build_lockfile(
         }
 
         let dependency = resolve_registry_version_dependency(workspace, &alias, dependency)?;
+        validate_dependency_source_shape(&alias, &dependency)?;
+        if dependency.requires_git() {
+            ensure_git_available()?;
+            if dependency.git_url().is_some() {
+                git_rev_request(&alias, &dependency)?;
+            }
+        }
 
         if let Some(path) = dependency.local_path() {
             let source = resolve_path_dependency_source(&next.manifest_dir, path)?;
@@ -745,6 +835,46 @@ pub(crate) fn build_lockfile(
                             false,
                         );
                     }
+                }
+            }
+            continue;
+        }
+
+        if let Some(url) = dependency.archive_url() {
+            let normalized_url = normalize_archive_url(url)?;
+            let source = format!("archive+{normalized_url}");
+            let expected_hash = dependency_content_hash(&alias, &dependency)?;
+            let content_hash = ensure_archive_cache_populated_in(
+                workspace,
+                &normalized_url,
+                &source,
+                &expected_hash,
+                false,
+                offline,
+            )?;
+            let cache_dir = archive_cache_dir_in(workspace, &source, &content_hash)?;
+            let provenance = read_lock_entry_provenance(&cache_dir)?;
+            let mut entry = LockEntry {
+                name: alias.clone(),
+                source: source.clone(),
+                tag: None,
+                rev_request: None,
+                commit: None,
+                content_hash: Some(content_hash.clone()),
+                package_version: None,
+                harn_compat: None,
+                provenance: None,
+                manifest_digest: None,
+                registry: dependency.registry_provenance(),
+                exports: PackageLockExports::default(),
+                permissions: Vec::new(),
+                host_requirements: Vec::new(),
+            };
+            fill_provenance(&mut entry, provenance);
+            let inserted = replace_lock_entry(&mut lock, entry)?;
+            if inserted {
+                if let Some(manifest) = read_package_manifest_from_dir(&cache_dir)? {
+                    enqueue_manifest_dependencies(&mut pending, manifest, cache_dir, alias, true);
                 }
             }
             continue;
@@ -797,7 +927,7 @@ pub(crate) fn build_lockfile(
             continue;
         }
 
-        return Err(format!("dependency {alias} is missing a git or path source").into());
+        return Err(format!("dependency {alias} is missing a git, archive, or path source").into());
     }
     Ok(lock)
 }
@@ -824,27 +954,42 @@ pub(crate) fn materialize_dependencies_from_lock(
             continue;
         }
 
-        let commit = entry
-            .commit
-            .as_deref()
-            .ok_or_else(|| format!("missing locked commit for {alias}"))?;
         let expected_hash = entry
             .content_hash
             .as_deref()
             .ok_or_else(|| format!("missing content hash for {alias}"))?;
         let source = entry.source.clone();
-        let url = source.trim_start_matches("git+");
         let refetch_this = refetch == Some("all") || refetch == Some(alias.as_str());
-        ensure_git_cache_populated_in(
-            workspace,
-            url,
-            &source,
-            commit,
-            Some(expected_hash),
-            refetch_this,
-            offline,
-        )?;
-        let cache_dir = git_cache_dir_in(workspace, &source, commit)?;
+        let cache_dir = if source.starts_with("git+") {
+            let commit = entry
+                .commit
+                .as_deref()
+                .ok_or_else(|| format!("missing locked commit for {alias}"))?;
+            let url = source.trim_start_matches("git+");
+            ensure_git_cache_populated_in(
+                workspace,
+                url,
+                &source,
+                commit,
+                Some(expected_hash),
+                refetch_this,
+                offline,
+            )?;
+            git_cache_dir_in(workspace, &source, commit)?
+        } else if source.starts_with("archive+") {
+            let url = archive_url_from_source_uri(&source)?;
+            ensure_archive_cache_populated_in(
+                workspace,
+                url,
+                &source,
+                expected_hash,
+                refetch_this,
+                offline,
+            )?;
+            archive_cache_dir_in(workspace, &source, expected_hash)?
+        } else {
+            return Err(format!("unsupported locked package source for {alias}: {source}").into());
+        };
         let dest_dir = packages_dir.join(alias);
         if !dest_dir.exists() || !materialized_hash_matches(&dest_dir, expected_hash) {
             remove_materialized_package(&packages_dir, alias)?;
@@ -932,6 +1077,9 @@ pub(crate) fn render_dependency_line(
             if let Some(git) = table.git.as_deref() {
                 fields.push(format!("git = {}", toml_string_literal(git)?));
             }
+            if let Some(archive) = table.archive.as_deref() {
+                fields.push(format!("archive = {}", toml_string_literal(archive)?));
+            }
             if let Some(branch) = table.branch.as_deref() {
                 fields.push(format!("branch = {}", toml_string_literal(branch)?));
             } else if let Some(tag) = table.tag.as_deref() {
@@ -944,6 +1092,9 @@ pub(crate) fn render_dependency_line(
             }
             if let Some(package) = table.package.as_deref() {
                 fields.push(format!("package = {}", toml_string_literal(package)?));
+            }
+            if let Some(checksum) = table.checksum.as_deref() {
+                fields.push(format!("checksum = {}", toml_string_literal(checksum)?));
             }
             if let Some(registry) = table.registry.as_deref() {
                 fields.push(format!("registry = {}", toml_string_literal(registry)?));
@@ -1495,6 +1646,35 @@ mod tests {
     use super::*;
     use crate::package::test_support::*;
 
+    fn write_tar_gz_package_archive(root: &Path, archive_path: &Path) {
+        fn append_files(
+            builder: &mut tar::Builder<flate2::write::GzEncoder<File>>,
+            root: &Path,
+            cursor: &Path,
+        ) {
+            let mut entries = fs::read_dir(cursor)
+                .unwrap()
+                .map(|entry| entry.unwrap().path())
+                .collect::<Vec<_>>();
+            entries.sort();
+            for path in entries {
+                if path.is_dir() {
+                    append_files(builder, root, &path);
+                } else {
+                    let relative = path.strip_prefix(root).unwrap();
+                    builder.append_path_with_name(&path, relative).unwrap();
+                }
+            }
+        }
+
+        let file = File::create(archive_path).unwrap();
+        let encoder = flate2::write::GzEncoder::new(file, flate2::Compression::default());
+        let mut builder = tar::Builder::new(encoder);
+        append_files(&mut builder, root, root);
+        let encoder = builder.into_inner().unwrap();
+        encoder.finish().unwrap();
+    }
+
     #[test]
     fn lock_file_round_trips_typed_schema() {
         let tmp = tempfile::tempdir().unwrap();
@@ -1733,6 +1913,125 @@ tag = "v0.2.0"
             .join(PKG_DIR)
             .join("acme-lib")
             .join("lib.harn")
+            .is_file());
+    }
+
+    #[test]
+    fn registry_archive_dependency_materializes_and_reinstalls_offline() {
+        let package_tmp = tempfile::tempdir().unwrap();
+        let package_root = package_tmp.path().join("acme-rules");
+        fs::create_dir_all(package_root.join("rules")).unwrap();
+        fs::write(
+            package_root.join(MANIFEST),
+            r#"
+    [package]
+    name = "acme-rules"
+    version = "1.0.0"
+
+    [rules]
+    ruleDirs = ["rules"]
+    "#,
+        )
+        .unwrap();
+        fs::write(
+            package_root.join("rules/no_todo.harn"),
+            "pub fn rule() -> string { return \"no todo\" }\n",
+        )
+        .unwrap();
+        let checksum = compute_content_hash(&package_root).unwrap();
+
+        let project_tmp = tempfile::tempdir().unwrap();
+        let root = project_tmp.path();
+        let registry_path = root.join("index.toml");
+        let archive_path = root.join("acme-rules-1.0.0.tar.gz");
+        write_tar_gz_package_archive(&package_root, &archive_path);
+        let archive = normalize_archive_url(archive_path.to_string_lossy().as_ref()).unwrap();
+        let workspace =
+            TestWorkspace::new(root).with_registry_source(registry_path.display().to_string());
+        fs::create_dir_all(root.join(".git")).unwrap();
+        fs::write(
+            &registry_path,
+            format!(
+                r#"
+version = 1
+
+[[package]]
+name = "@acme/rules"
+description = "Rule pack"
+repository = "https://github.com/acme/rules"
+
+[package.rule_pack]
+rule_count = 1
+languages = ["harn"]
+safety_summary = ["advisory:1"]
+
+[[package.version]]
+version = "1.0.0"
+archive = "{archive}"
+package = "acme-rules"
+checksum = "{checksum}"
+"#
+            ),
+        )
+        .unwrap();
+        fs::write(
+            root.join(MANIFEST),
+            r#"
+    [package]
+    name = "workspace"
+    version = "0.1.0"
+    "#,
+        )
+        .unwrap();
+
+        let (alias, installed) = add_package_to(
+            workspace.env(),
+            "@acme/rules@1.0.0",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(alias, "acme-rules");
+        assert_eq!(installed, 1);
+        let manifest = fs::read_to_string(root.join(MANIFEST)).unwrap();
+        assert!(manifest.contains("archive = "));
+        assert!(manifest.contains(&format!("checksum = \"{checksum}\"")));
+        assert!(manifest.contains("registry_name = \"@acme/rules\""));
+        let lock_path = root.join(LOCK_FILE);
+        let lock = LockFile::load(&lock_path).unwrap().unwrap();
+        let entry = lock.find("acme-rules").unwrap();
+        assert!(entry.source.starts_with("archive+file://"));
+        assert_eq!(entry.content_hash.as_deref(), Some(checksum.as_str()));
+        assert!(entry.commit.is_none());
+        assert_eq!(
+            entry
+                .registry
+                .as_ref()
+                .map(|registry| registry.name.as_str()),
+            Some("@acme/rules")
+        );
+        assert!(root
+            .join(PKG_DIR)
+            .join("acme-rules")
+            .join("rules/no_todo.harn")
+            .is_file());
+
+        let original_lock = fs::read_to_string(&lock_path).unwrap();
+        fs::remove_dir_all(root.join(PKG_DIR)).unwrap();
+        fs::remove_file(&archive_path).unwrap();
+        let reinstalled = install_packages_in(workspace.env(), true, None, true).unwrap();
+        assert_eq!(reinstalled, 1);
+        assert_eq!(fs::read_to_string(&lock_path).unwrap(), original_lock);
+        assert!(root
+            .join(PKG_DIR)
+            .join("acme-rules")
+            .join("rules/no_todo.harn")
             .is_file());
     }
 
@@ -2135,7 +2434,7 @@ tag = "v0.2.0"
         let error = install_packages_in(workspace.env(), false, None, false).unwrap_err();
         assert!(error
             .to_string()
-            .contains("path dependencies are not supported inside git-installed packages"));
+            .contains("path dependencies are not supported inside remote-installed packages"));
     }
 
     #[test]

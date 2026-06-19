@@ -2349,6 +2349,14 @@ harn package search --registry ./harn-package-index.toml --json
 
 The registry source comes from `--registry`, `HARN_PACKAGE_REGISTRY`,
 `[registry].url` in `harn.toml`, or Harn's default hosted index.
+Private HTTP(S) registries can be accessed with
+`HARN_PACKAGE_REGISTRY_TOKEN`; Harn sends it as a bearer token when fetching
+the index and any archive URLs listed by that index.
+
+Registry versions may resolve to either a git source or an archive source.
+Archive versions use `archive = "<url>"` plus `checksum = "sha256:<tree>"`;
+Harn expands `.tar.gz` archives into the package cache and verifies the
+expanded tree hash before writing `harn.lock`.
 
 ## harn rule publish / search
 

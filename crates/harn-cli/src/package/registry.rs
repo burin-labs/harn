@@ -68,7 +68,10 @@ pub(crate) struct RegistryRulePackInfo {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct RegistryPackageVersion {
     version: String,
-    git: String,
+    #[serde(default)]
+    git: Option<String>,
+    #[serde(default, alias = "archive-url", alias = "archive_url")]
+    archive: Option<String>,
     #[serde(default)]
     tag: Option<String>,
     #[serde(default)]
@@ -143,12 +146,65 @@ pub(crate) fn git_cache_lock_path_in(
         .join(format!("{}-{commit}.lock", sha256_hex(source))))
 }
 
+pub(crate) fn archive_cache_key(content_hash: &str) -> Result<&str, PackageError> {
+    let Some(value) = content_hash.strip_prefix("sha256:") else {
+        return Err(format!("archive checksum must use sha256:<hex>, got {content_hash}").into());
+    };
+    if value.len() != 64 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(
+            format!("archive checksum must use sha256:<64 hex>, got {content_hash}").into(),
+        );
+    }
+    Ok(value)
+}
+
+pub(crate) fn archive_cache_dir_in(
+    workspace: &PackageWorkspace,
+    source: &str,
+    content_hash: &str,
+) -> Result<PathBuf, PackageError> {
+    Ok(workspace
+        .cache_root()?
+        .join("archive")
+        .join(sha256_hex(source))
+        .join(archive_cache_key(content_hash)?))
+}
+
+pub(crate) fn archive_cache_lock_path_in(
+    workspace: &PackageWorkspace,
+    source: &str,
+    content_hash: &str,
+) -> Result<PathBuf, PackageError> {
+    Ok(workspace.cache_root()?.join("locks").join(format!(
+        "{}-{}.lock",
+        sha256_hex(source),
+        archive_cache_key(content_hash)?
+    )))
+}
+
 pub(crate) fn acquire_git_cache_lock_in(
     workspace: &PackageWorkspace,
     source: &str,
     commit: &str,
 ) -> Result<File, PackageError> {
     let path = git_cache_lock_path_in(workspace, source, commit)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
+    }
+    let file = File::create(&path)
+        .map_err(|error| format!("failed to open {}: {error}", path.display()))?;
+    file.lock_exclusive()
+        .map_err(|error| format!("failed to lock {}: {error}", path.display()))?;
+    Ok(file)
+}
+
+pub(crate) fn acquire_archive_cache_lock_in(
+    workspace: &PackageWorkspace,
+    source: &str,
+    content_hash: &str,
+) -> Result<File, PackageError> {
+    let path = archive_cache_lock_path_in(workspace, source, content_hash)?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
@@ -514,6 +570,16 @@ pub(crate) fn path_from_source_uri(source: &str) -> Result<PathBuf, PackageError
     Ok(PathBuf::from(raw))
 }
 
+pub(crate) fn archive_url_from_source_uri(source: &str) -> Result<&str, PackageError> {
+    source
+        .strip_prefix("archive+")
+        .ok_or_else(|| format!("invalid archive source: {source}").into())
+}
+
+pub(crate) fn archive_source_uri(raw: &str) -> Result<String, PackageError> {
+    Ok(format!("archive+{}", normalize_archive_url(raw)?))
+}
+
 pub(crate) fn registry_file_url_or_path(raw: &str) -> Result<Option<PathBuf>, PackageError> {
     if let Ok(url) = Url::parse(raw) {
         if url.scheme() == "file" {
@@ -524,6 +590,64 @@ pub(crate) fn registry_file_url_or_path(raw: &str) -> Result<Option<PathBuf>, Pa
         return Ok(None);
     }
     Ok(Some(PathBuf::from(raw)))
+}
+
+pub(crate) fn normalize_archive_url(raw: &str) -> Result<String, PackageError> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err("archive URL cannot be empty".to_string().into());
+    }
+    if let Ok(url) = Url::parse(trimmed) {
+        return match url.scheme() {
+            "file" => {
+                let path = url.to_file_path().map_err(|_| {
+                    PackageError::Registry(format!(
+                        "invalid file:// package archive URL: {trimmed}"
+                    ))
+                })?;
+                if path.exists() {
+                    let canonical = path.canonicalize().map_err(|error| {
+                        format!("failed to canonicalize {}: {error}", path.display())
+                    })?;
+                    let url = Url::from_file_path(canonical)
+                        .map_err(|_| format!("failed to convert {trimmed} to file:// URL"))?;
+                    Ok(url.to_string())
+                } else {
+                    Ok(url.to_string())
+                }
+            }
+            "http" | "https" => Ok(url.to_string()),
+            other => Err(format!("unsupported package archive URL scheme: {other}").into()),
+        };
+    }
+
+    let path = PathBuf::from(trimmed);
+    if !path.exists() {
+        return Err(format!("package archive not found: {}", path.display()).into());
+    }
+    let canonical = path
+        .canonicalize()
+        .map_err(|error| format!("failed to canonicalize {}: {error}", path.display()))?;
+    let url = Url::from_file_path(canonical)
+        .map_err(|_| format!("failed to convert {trimmed} to file:// URL"))?;
+    Ok(url.to_string())
+}
+
+fn package_registry_auth_token() -> Option<String> {
+    std::env::var(HARN_PACKAGE_REGISTRY_TOKEN_ENV)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn apply_package_registry_auth(
+    request: reqwest::blocking::RequestBuilder,
+) -> reqwest::blocking::RequestBuilder {
+    if let Some(token) = package_registry_auth_token() {
+        request.bearer_auth(token)
+    } else {
+        request
+    }
 }
 
 pub(crate) fn read_registry_source(source: &str) -> Result<String, PackageError> {
@@ -557,11 +681,11 @@ pub(crate) fn read_registry_source(source: &str) -> Result<String, PackageError>
 }
 
 fn fetch_registry_blocking(url: Url, source: &str) -> Result<String, PackageError> {
-    let response = reqwest::blocking::Client::builder()
+    let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(20))
         .build()
-        .map_err(|error| format!("failed to build package registry client: {error}"))?
-        .get(url)
+        .map_err(|error| format!("failed to build package registry client: {error}"))?;
+    let response = apply_package_registry_auth(client.get(url))
         .send()
         .map_err(|error| format!("failed to fetch package registry {source}: {error}"))?;
     let status = response.status();
@@ -571,6 +695,78 @@ fn fetch_registry_blocking(url: Url, source: &str) -> Result<String, PackageErro
     response.text().map_err(|error| {
         PackageError::Registry(format!("failed to read package registry response: {error}"))
     })
+}
+
+pub(crate) fn read_package_archive_bytes(source: &str) -> Result<Vec<u8>, PackageError> {
+    if let Some(path) = registry_file_url_or_path(source)? {
+        let metadata = fs::metadata(&path).map_err(|error| {
+            format!("failed to stat package archive {}: {error}", path.display())
+        })?;
+        if metadata.len() > PACKAGE_ARCHIVE_MAX_BYTES {
+            return Err(format!(
+                "package archive {} is {} bytes, above the {} byte limit",
+                path.display(),
+                metadata.len(),
+                PACKAGE_ARCHIVE_MAX_BYTES
+            )
+            .into());
+        }
+        return fs::read(&path).map_err(|error| {
+            PackageError::Registry(format!(
+                "failed to read package archive {}: {error}",
+                path.display()
+            ))
+        });
+    }
+
+    let url = Url::parse(source)
+        .map_err(|error| format!("invalid package archive URL {source:?}: {error}"))?;
+    match url.scheme() {
+        "http" | "https" => {}
+        other => return Err(format!("unsupported package archive URL scheme: {other}").into()),
+    }
+    let source_owned = source.to_string();
+    std::thread::scope(|scope| {
+        scope
+            .spawn(move || fetch_package_archive_blocking(url, &source_owned))
+            .join()
+            .map_err(|_| {
+                PackageError::Registry("package archive fetch thread panicked".to_string())
+            })?
+    })
+}
+
+fn fetch_package_archive_blocking(url: Url, source: &str) -> Result<Vec<u8>, PackageError> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|error| format!("failed to build package archive client: {error}"))?;
+    let response = apply_package_registry_auth(client.get(url))
+        .send()
+        .map_err(|error| format!("failed to fetch package archive {source}: {error}"))?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("GET {source} returned HTTP {status}").into());
+    }
+    if response
+        .content_length()
+        .is_some_and(|length| length > PACKAGE_ARCHIVE_MAX_BYTES)
+    {
+        return Err(format!(
+            "package archive {source} is larger than the {PACKAGE_ARCHIVE_MAX_BYTES} byte limit"
+        )
+        .into());
+    }
+    let bytes = response
+        .bytes()
+        .map_err(|error| format!("failed to read package archive response: {error}"))?;
+    if bytes.len() as u64 > PACKAGE_ARCHIVE_MAX_BYTES {
+        return Err(format!(
+            "package archive {source} is larger than the {PACKAGE_ARCHIVE_MAX_BYTES} byte limit"
+        )
+        .into());
+    }
+    Ok(bytes.to_vec())
 }
 
 pub(crate) fn is_valid_registry_segment(segment: &str) -> bool {
@@ -689,25 +885,70 @@ pub(crate) fn validate_package_registry_index(
                 )
                 .into());
             }
-            if selected_git_ref_count(version) != 1 {
-                return Err(format!(
-                    "package registry {source} entry '{}@{}' must specify tag, rev, or branch; rev may accompany tag as a resolved commit pin",
-                    package.name, version.version
-                )
-                .into());
-            }
             parse_registry_semver(&version.version).map_err(|error| {
                 format!(
                     "package registry {source} has invalid semver for '{}@{}': {error}",
                     package.name, version.version
                 )
             })?;
-            normalize_git_url(&version.git).map_err(|error| {
-                format!(
-                    "package registry {source} has invalid git source for '{}@{}': {error}",
-                    package.name, version.version
-                )
-            })?;
+            match (version.git.as_deref(), version.archive.as_deref()) {
+                (Some(git), None) => {
+                    if selected_git_ref_count(version) != 1 {
+                        return Err(format!(
+                            "package registry {source} entry '{}@{}' must specify tag, rev, or branch; rev may accompany tag as a resolved commit pin",
+                            package.name, version.version
+                        )
+                        .into());
+                    }
+                    normalize_git_url(git).map_err(|error| {
+                        format!(
+                            "package registry {source} has invalid git source for '{}@{}': {error}",
+                            package.name, version.version
+                        )
+                    })?;
+                }
+                (None, Some(archive)) => {
+                    if version.tag.is_some() || version.rev.is_some() || version.branch.is_some() {
+                        return Err(format!(
+                            "package registry {source} entry '{}@{}' must not combine archive with tag, rev, or branch",
+                            package.name, version.version
+                        )
+                        .into());
+                    }
+                    normalize_archive_url(archive).map_err(|error| {
+                        format!(
+                            "package registry {source} has invalid archive source for '{}@{}': {error}",
+                            package.name, version.version
+                        )
+                    })?;
+                    let checksum = version.checksum.as_deref().ok_or_else(|| {
+                        format!(
+                            "package registry {source} entry '{}@{}' must specify checksum for archive source",
+                            package.name, version.version
+                        )
+                    })?;
+                    archive_cache_key(checksum).map_err(|error| {
+                        format!(
+                            "package registry {source} has invalid archive checksum for '{}@{}': {error}",
+                            package.name, version.version
+                        )
+                    })?;
+                }
+                (Some(_), Some(_)) => {
+                    return Err(format!(
+                        "package registry {source} entry '{}@{}' must specify only one of git or archive",
+                        package.name, version.version
+                    )
+                    .into());
+                }
+                (None, None) => {
+                    return Err(format!(
+                        "package registry {source} entry '{}@{}' must specify git or archive",
+                        package.name, version.version
+                    )
+                    .into());
+                }
+            }
         }
     }
     index
@@ -1043,32 +1284,19 @@ pub(crate) fn registry_dependency_from_spec_in(
     if selected.yanked {
         return Err(format!("{name}@{version} is yanked in the package registry").into());
     }
-    let git = normalize_git_url(&selected.git)?;
-    let package_name = selected
-        .package
-        .clone()
-        .map(Ok)
-        .unwrap_or_else(|| derive_repo_name_from_source(&git))?;
+    let package_name = registry_package_version_alias(&info.package.name, &selected)?;
     let alias = alias.unwrap_or(package_name.as_str()).to_string();
-    let tag = selected.tag;
-    let rev = if tag.is_some() { None } else { selected.rev };
     let resolved_version = selected.version.clone();
     Ok((
         alias.clone(),
-        Dependency::Table(Box::new(DepTable {
-            git: Some(git),
-            tag,
-            rev,
-            branch: selected.branch,
-            package: (alias != package_name).then_some(package_name),
-            registry: Some(registry_source),
-            // Store the canonical scoped registry name (e.g. `@burin/notion-sdk`)
-            // even when the user typed the bare alias (`notion-sdk-harn`) so
-            // re-resolves stay anchored to the same registry row.
-            registry_name: Some(info.package.name),
-            registry_version: Some(resolved_version),
-            ..DepTable::default()
-        })),
+        registry_dependency_table(
+            info.package.name,
+            selected,
+            package_name,
+            alias,
+            registry_source,
+            resolved_version,
+        )?,
     ))
 }
 
@@ -1092,20 +1320,96 @@ pub(crate) fn registry_dependency_from_manifest_constraint_in(
     let selected = info.selected_version.ok_or_else(|| {
         format!("package registry does not contain {registry_name} matching {requirement}")
     })?;
-    let git = normalize_git_url(&selected.git)?;
-    let tag = selected.tag;
-    let rev = if tag.is_some() { None } else { selected.rev };
-    Ok(Dependency::Table(Box::new(DepTable {
-        git: Some(git),
+    let package_name = selected
+        .package
+        .clone()
+        .or_else(|| table.package.clone())
+        .unwrap_or_else(|| alias.to_string());
+    let resolved_version = selected.version.clone();
+    registry_dependency_table(
+        registry_name.to_string(),
+        selected,
+        package_name,
+        alias.to_string(),
+        registry_source,
+        resolved_version,
+    )
+}
+
+fn registry_package_version_alias(
+    registry_name: &str,
+    selected: &RegistryPackageVersion,
+) -> Result<String, PackageError> {
+    if let Some(package) = selected.package.clone() {
+        return Ok(package);
+    }
+    if let Some(git) = selected.git.as_deref() {
+        return derive_repo_name_from_source(&normalize_git_url(git)?);
+    }
+    derive_registry_alias_from_name(registry_name)
+}
+
+fn derive_registry_alias_from_name(registry_name: &str) -> Result<String, PackageError> {
+    let alias = registry_name
+        .strip_prefix('@')
+        .and_then(|scoped| scoped.split_once('/').map(|(_, package)| package))
+        .unwrap_or(registry_name)
+        .to_string();
+    validate_package_alias(&alias)?;
+    Ok(alias)
+}
+
+fn registry_dependency_table(
+    registry_name: String,
+    selected: RegistryPackageVersion,
+    package_name: String,
+    alias: String,
+    registry_source: String,
+    resolved_version: String,
+) -> Result<Dependency, PackageError> {
+    let package = (alias != package_name).then_some(package_name);
+    let RegistryPackageVersion {
+        git,
+        archive,
         tag,
         rev,
-        branch: selected.branch,
-        package: selected.package.or_else(|| table.package.clone()),
-        registry: Some(registry_source),
-        registry_name: Some(registry_name.to_string()),
-        registry_version: Some(selected.version),
-        ..DepTable::default()
-    })))
+        branch,
+        checksum,
+        ..
+    } = selected;
+    let table = if let Some(git) = git {
+        let git = normalize_git_url(&git)?;
+        let rev = if tag.is_some() { None } else { rev };
+        DepTable {
+            git: Some(git),
+            tag,
+            rev,
+            branch,
+            package,
+            registry: Some(registry_source),
+            // Store the canonical scoped registry name (e.g. `@burin/notion-sdk`)
+            // even when the user typed the bare alias (`notion-sdk-harn`) so
+            // re-resolves stay anchored to the same registry row.
+            registry_name: Some(registry_name),
+            registry_version: Some(resolved_version),
+            ..DepTable::default()
+        }
+    } else if let Some(archive) = archive {
+        DepTable {
+            archive: Some(normalize_archive_url(&archive)?),
+            package,
+            checksum,
+            registry: Some(registry_source),
+            registry_name: Some(registry_name),
+            registry_version: Some(resolved_version),
+            ..DepTable::default()
+        }
+    } else {
+        return Err("registry package version is missing git or archive source"
+            .to_string()
+            .into());
+    };
+    Ok(Dependency::Table(Box::new(table)))
 }
 
 pub(crate) fn is_probable_shorthand_git_url(raw: &str) -> bool {
@@ -1557,26 +1861,177 @@ pub(crate) fn ensure_git_cache_populated_in(
     Ok(hash)
 }
 
+fn archive_entry_relative_path(path: &Path) -> Result<PathBuf, PackageError> {
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::Normal(value) => out.push(value),
+            std::path::Component::CurDir => {}
+            _ => {
+                return Err(format!(
+                    "package archive entry must be relative and contained within the package root: {}",
+                    path.display()
+                )
+                .into());
+            }
+        }
+    }
+    if out.as_os_str().is_empty() {
+        return Err("package archive entry path cannot be empty"
+            .to_string()
+            .into());
+    }
+    Ok(out)
+}
+
+pub(crate) fn unpack_package_archive_bytes(bytes: &[u8], dest: &Path) -> Result<(), PackageError> {
+    let decoder = flate2::read::GzDecoder::new(bytes);
+    let mut archive = tar::Archive::new(decoder);
+    let entries = archive
+        .entries()
+        .map_err(|error| format!("failed to read package archive: {error}"))?;
+    let mut unpacked_bytes = 0u64;
+    for entry in entries {
+        let mut entry =
+            entry.map_err(|error| format!("failed to read package archive entry: {error}"))?;
+        let entry_type = entry.header().entry_type();
+        let raw_path = entry
+            .path()
+            .map_err(|error| format!("failed to read package archive entry path: {error}"))?;
+        let relative = archive_entry_relative_path(&raw_path)?;
+        let target = dest.join(relative);
+        if entry_type.is_dir() {
+            fs::create_dir_all(&target)
+                .map_err(|error| format!("failed to create {}: {error}", target.display()))?;
+        } else if entry_type.is_file() {
+            unpacked_bytes = unpacked_bytes
+                .checked_add(entry.size())
+                .ok_or_else(|| "package archive expanded size overflowed".to_string())?;
+            if unpacked_bytes > PACKAGE_ARCHIVE_MAX_UNPACKED_BYTES {
+                return Err(format!(
+                    "package archive expands above the {PACKAGE_ARCHIVE_MAX_UNPACKED_BYTES} byte limit"
+                )
+                .into());
+            }
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent)
+                    .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
+            }
+            entry
+                .unpack(&target)
+                .map_err(|error| format!("failed to unpack {}: {error}", target.display()))?;
+        } else {
+            return Err(format!(
+                "package archive entry {} has unsupported type {:?}",
+                raw_path.display(),
+                entry_type
+            )
+            .into());
+        }
+    }
+    if !dest.join(MANIFEST).is_file() {
+        return Err(format!("package archive is missing {MANIFEST} at its root").into());
+    }
+    Ok(())
+}
+
+pub(crate) fn ensure_archive_cache_populated_in(
+    workspace: &PackageWorkspace,
+    url: &str,
+    source: &str,
+    expected_hash: &str,
+    refetch: bool,
+    offline: bool,
+) -> Result<String, PackageError> {
+    archive_cache_key(expected_hash)?;
+    let cache_dir = archive_cache_dir_in(workspace, source, expected_hash)?;
+    let _lock = acquire_archive_cache_lock_in(workspace, source, expected_hash)?;
+    if refetch && cache_dir.exists() {
+        fs::remove_dir_all(&cache_dir)
+            .map_err(|error| format!("failed to remove {}: {error}", cache_dir.display()))?;
+    }
+    if cache_dir.exists() {
+        verify_content_hash_or_compute(&cache_dir, expected_hash)?;
+        write_cache_metadata(&cache_dir, source, expected_hash, expected_hash)?;
+        return Ok(expected_hash.to_string());
+    }
+    if offline {
+        return Err(format!(
+            "package cache entry for {source} at {expected_hash} is missing; cannot fetch in offline mode"
+        )
+        .into());
+    }
+
+    let parent = cache_dir
+        .parent()
+        .ok_or_else(|| format!("invalid cache path {}", cache_dir.display()))?;
+    fs::create_dir_all(parent)
+        .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
+    let temp_dir = unique_temp_dir(parent, "tmp")?;
+    let populated = (|| -> Result<String, PackageError> {
+        fs::create_dir_all(&temp_dir)
+            .map_err(|error| format!("failed to create {}: {error}", temp_dir.display()))?;
+        let bytes = read_package_archive_bytes(url)?;
+        unpack_package_archive_bytes(&bytes, &temp_dir)?;
+        let hash = compute_content_hash(&temp_dir)?;
+        if hash != expected_hash {
+            return Err(format!(
+                "content hash mismatch for {source}: expected {expected_hash}, got {hash}"
+            )
+            .into());
+        }
+        write_cached_content_hash(&temp_dir, expected_hash)?;
+        write_cache_metadata(&temp_dir, source, expected_hash, expected_hash)?;
+        fs::rename(&temp_dir, &cache_dir).map_err(|error| {
+            format!(
+                "failed to move {} to {}: {error}",
+                temp_dir.display(),
+                cache_dir.display()
+            )
+        })?;
+        Ok(expected_hash.to_string())
+    })();
+    match populated {
+        Ok(hash) => Ok(hash),
+        Err(error) => {
+            let _ = fs::remove_dir_all(&temp_dir);
+            Err(error)
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct PackageCacheEntry {
     path: PathBuf,
+    kind: &'static str,
     source_hash: String,
     commit: String,
     metadata: Option<PackageCacheMetadata>,
 }
 
-pub(crate) fn git_cache_root_in(workspace: &PackageWorkspace) -> Result<PathBuf, PackageError> {
-    Ok(workspace.cache_root()?.join("git"))
+pub(crate) fn discover_package_cache_entries() -> Result<Vec<PackageCacheEntry>, PackageError> {
+    discover_package_cache_entries_in(&PackageWorkspace::from_current_dir()?)
 }
 
-pub(crate) fn discover_git_cache_entries() -> Result<Vec<PackageCacheEntry>, PackageError> {
-    discover_git_cache_entries_in(&PackageWorkspace::from_current_dir()?)
-}
-
-pub(crate) fn discover_git_cache_entries_in(
+pub(crate) fn discover_package_cache_entries_in(
     workspace: &PackageWorkspace,
 ) -> Result<Vec<PackageCacheEntry>, PackageError> {
-    let root = git_cache_root_in(workspace)?;
+    let mut entries = discover_cache_entries_for_kind(workspace, "git")?;
+    entries.extend(discover_cache_entries_for_kind(workspace, "archive")?);
+    entries.sort_by(|left, right| {
+        left.kind
+            .cmp(right.kind)
+            .then_with(|| left.source_hash.cmp(&right.source_hash))
+            .then_with(|| left.commit.cmp(&right.commit))
+    });
+    Ok(entries)
+}
+
+fn discover_cache_entries_for_kind(
+    workspace: &PackageWorkspace,
+    kind: &'static str,
+) -> Result<Vec<PackageCacheEntry>, PackageError> {
+    let root = workspace.cache_root()?.join(kind);
     let mut entries = Vec::new();
     let source_dirs = match fs::read_dir(&root) {
         Ok(source_dirs) => source_dirs,
@@ -1615,6 +2070,7 @@ pub(crate) fn discover_git_cache_entries_in(
             let metadata = read_cache_metadata(&commit_dir.path())?;
             entries.push(PackageCacheEntry {
                 path: commit_dir.path(),
+                kind,
                 source_hash: source_hash.clone(),
                 commit,
                 metadata,
@@ -1629,21 +2085,30 @@ pub(crate) fn discover_git_cache_entries_in(
     Ok(entries)
 }
 
-pub(crate) fn locked_git_cache_paths_in(
+pub(crate) fn locked_package_cache_paths_in(
     workspace: &PackageWorkspace,
     lock: &LockFile,
 ) -> Result<HashSet<PathBuf>, PackageError> {
     let mut keep = HashSet::new();
     for entry in &lock.packages {
         validate_package_alias(&entry.name)?;
-        if !entry.source.starts_with("git+") {
-            continue;
+        if entry.source.starts_with("git+") {
+            let commit = entry
+                .commit
+                .as_deref()
+                .ok_or_else(|| format!("missing locked commit for {}", entry.name))?;
+            keep.insert(git_cache_dir_in(workspace, &entry.source, commit)?);
+        } else if entry.source.starts_with("archive+") {
+            let expected_hash = entry
+                .content_hash
+                .as_deref()
+                .ok_or_else(|| format!("missing content hash for {}", entry.name))?;
+            keep.insert(archive_cache_dir_in(
+                workspace,
+                &entry.source,
+                expected_hash,
+            )?);
         }
-        let commit = entry
-            .commit
-            .as_deref()
-            .ok_or_else(|| format!("missing locked commit for {}", entry.name))?;
-        keep.insert(git_cache_dir_in(workspace, &entry.source, commit)?);
     }
     Ok(keep)
 }
@@ -1653,29 +2118,36 @@ pub(crate) fn verify_lock_entry_cache_in(
     entry: &LockEntry,
 ) -> Result<bool, PackageError> {
     validate_package_alias(&entry.name)?;
-    if !entry.source.starts_with("git+") {
-        if entry.source.starts_with("path+") {
-            let path = path_from_source_uri(&entry.source)?;
-            if !path.exists() {
-                return Err(format!(
-                    "path dependency {} source is missing: {}",
-                    entry.name,
-                    path.display()
-                )
-                .into());
-            }
+    if entry.source.starts_with("path+") {
+        let path = path_from_source_uri(&entry.source)?;
+        if !path.exists() {
+            return Err(format!(
+                "path dependency {} source is missing: {}",
+                entry.name,
+                path.display()
+            )
+            .into());
         }
         return Ok(false);
     }
-    let commit = entry
-        .commit
-        .as_deref()
-        .ok_or_else(|| format!("missing locked commit for {}", entry.name))?;
     let expected_hash = entry
         .content_hash
         .as_deref()
         .ok_or_else(|| format!("missing content hash for {}", entry.name))?;
-    let cache_dir = git_cache_dir_in(workspace, &entry.source, commit)?;
+    let (cache_dir, cache_key) = if entry.source.starts_with("git+") {
+        let commit = entry
+            .commit
+            .as_deref()
+            .ok_or_else(|| format!("missing locked commit for {}", entry.name))?;
+        (git_cache_dir_in(workspace, &entry.source, commit)?, commit)
+    } else if entry.source.starts_with("archive+") {
+        (
+            archive_cache_dir_in(workspace, &entry.source, expected_hash)?,
+            expected_hash,
+        )
+    } else {
+        return Ok(false);
+    };
     if !cache_dir.is_dir() {
         return Err(format!(
             "package cache entry for {} is missing: {}",
@@ -1688,14 +2160,14 @@ pub(crate) fn verify_lock_entry_cache_in(
     match read_cache_metadata(&cache_dir)? {
         Some(metadata)
             if metadata.source == entry.source
-                && metadata.commit == commit
+                && metadata.commit == cache_key
                 && metadata.content_hash == expected_hash => {}
         Some(metadata) => {
             return Err(format!(
                 "package cache metadata mismatch for {}: expected {} {} {}, got {} {} {}",
                 entry.name,
                 entry.source,
-                commit,
+                cache_key,
                 expected_hash,
                 metadata.source,
                 metadata.commit,
@@ -1703,7 +2175,7 @@ pub(crate) fn verify_lock_entry_cache_in(
             )
             .into());
         }
-        None => write_cache_metadata(&cache_dir, &entry.source, commit, expected_hash)?,
+        None => write_cache_metadata(&cache_dir, &entry.source, cache_key, expected_hash)?,
     }
     Ok(true)
 }
@@ -1727,7 +2199,7 @@ pub(crate) fn verify_materialized_lock_entry(
         }
         return Ok(true);
     }
-    if !entry.source.starts_with("git+") {
+    if !entry.source.starts_with("git+") && !entry.source.starts_with("archive+") {
         return Ok(false);
     }
     let expected_hash = entry
@@ -1779,13 +2251,13 @@ pub(crate) fn clean_package_cache_in(
     workspace: &PackageWorkspace,
     all: bool,
 ) -> Result<usize, PackageError> {
-    let entries = discover_git_cache_entries_in(workspace)?;
+    let entries = discover_package_cache_entries_in(workspace)?;
     if entries.is_empty() {
         return Ok(0);
     }
     if all {
         let root = workspace.cache_root()?;
-        for child in ["git", "locks"] {
+        for child in ["git", "archive", "locks"] {
             let path = root.join(child);
             if path.exists() {
                 fs::remove_dir_all(&path)
@@ -1799,7 +2271,7 @@ pub(crate) fn clean_package_cache_in(
     let lock = LockFile::load(&ctx.lock_path())?
         .ok_or_else(|| format!("{LOCK_FILE} is missing; pass --all to clean every cache entry"))?;
     validate_lock_matches_manifest(workspace, &ctx, &lock)?;
-    let keep = locked_git_cache_paths_in(workspace, &lock)?;
+    let keep = locked_package_cache_paths_in(workspace, &lock)?;
     let mut removed = 0usize;
     for entry in entries {
         if keep.contains(&entry.path) {
@@ -1823,17 +2295,17 @@ pub(crate) fn clean_package_cache_in(
 
 pub fn list_package_cache() {
     let result = (|| -> Result<(PathBuf, Vec<PackageCacheEntry>), PackageError> {
-        Ok((cache_root()?, discover_git_cache_entries()?))
+        Ok((cache_root()?, discover_package_cache_entries()?))
     })();
 
     match result {
         Ok((root, entries)) => {
             println!("Cache root: {}", root.display());
             if entries.is_empty() {
-                println!("No cached git packages.");
+                println!("No cached packages.");
                 return;
             }
-            println!("commit\tcontent_hash\tsource\tpath");
+            println!("kind\tkey\tcontent_hash\tsource\tpath");
             for entry in entries {
                 let (source, content_hash) = entry
                     .metadata
@@ -1841,7 +2313,8 @@ pub fn list_package_cache() {
                     .map(|metadata| (metadata.source.as_str(), metadata.content_hash.as_str()))
                     .unwrap_or(("(unknown)", "(unknown)"));
                 println!(
-                    "{}\t{}\t{}\t{}",
+                    "{}\t{}\t{}\t{}\t{}",
+                    entry.kind,
                     entry.commit,
                     content_hash,
                     source,
@@ -2010,7 +2483,12 @@ pub fn show_package_registry_info(spec: &str, registry: Option<&str>, json: bool
             }
             if let Some(version) = info.selected_version {
                 println!("selected: {}", version.version);
-                println!("git: {}", version.git);
+                if let Some(git) = version.git.as_deref() {
+                    println!("git: {git}");
+                }
+                if let Some(archive) = version.archive.as_deref() {
+                    println!("archive: {archive}");
+                }
                 if let Some(rev) = version.rev.as_deref() {
                     println!("rev: {rev}");
                 }
@@ -2279,7 +2757,7 @@ abc123abc123abc123abc123abc123abc1234567\trefs/tags/v0.0.1\n";
 
         install_packages_in(workspace.env(), false, None, false).unwrap();
         assert_eq!(
-            discover_git_cache_entries_in(workspace.env())
+            discover_package_cache_entries_in(workspace.env())
                 .unwrap()
                 .len(),
             1
@@ -2287,7 +2765,7 @@ abc123abc123abc123abc123abc123abc1234567\trefs/tags/v0.0.1\n";
 
         let removed = clean_package_cache_in(workspace.env(), true).unwrap();
         assert_eq!(removed, 1);
-        assert!(discover_git_cache_entries_in(workspace.env())
+        assert!(discover_package_cache_entries_in(workspace.env())
             .unwrap()
             .is_empty());
     }
@@ -2337,7 +2815,7 @@ abc123abc123abc123abc123abc123abc1234567\trefs/tags/v0.0.1\n";
         assert_eq!(
             info.selected_version
                 .as_ref()
-                .map(|version| version.git.as_str()),
+                .and_then(|version| version.git.as_deref()),
             Some(git.as_str())
         );
     }
@@ -2514,6 +2992,43 @@ tag = "v1.0.0"
             manifest.contains("registry_version = \"1.0.0\""),
             "semver range must resolve to the highest matching exact version: {manifest}"
         );
+    }
+
+    #[test]
+    fn registry_index_accepts_archive_versions_and_requires_checksums() {
+        let content = r#"
+version = 1
+
+[[package]]
+name = "@acme/rules"
+repository = "https://github.com/acme/rules"
+
+[[package.version]]
+version = "1.0.0"
+archive = "https://cdn.example.test/acme-rules-1.0.0.tar.gz"
+package = "acme-rules"
+checksum = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+"#;
+        let index = parse_package_registry_index("fixture", content).unwrap();
+        assert_eq!(index.packages[0].versions[0].git, None);
+        assert_eq!(
+            index.packages[0].versions[0].archive.as_deref(),
+            Some("https://cdn.example.test/acme-rules-1.0.0.tar.gz")
+        );
+
+        let missing_checksum = r#"
+version = 1
+
+[[package]]
+name = "@acme/rules"
+repository = "https://github.com/acme/rules"
+
+[[package.version]]
+version = "1.0.0"
+archive = "https://cdn.example.test/acme-rules-1.0.0.tar.gz"
+"#;
+        let error = parse_package_registry_index("fixture", missing_checksum).unwrap_err();
+        assert!(error.to_string().contains("must specify checksum"));
     }
 
     #[test]

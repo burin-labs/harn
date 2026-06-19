@@ -88,6 +88,7 @@ pub(crate) fn validate_dependencies_for_publish(
             Dependency::Table(table) => {
                 if table.version.is_some()
                     && (table.git.is_some()
+                        || table.archive.is_some()
                         || table.path.is_some()
                         || table.rev.is_some()
                         || table.tag.is_some()
@@ -96,7 +97,7 @@ pub(crate) fn validate_dependencies_for_publish(
                     push_error(
                         errors,
                         &field,
-                        "version dependencies resolve through the registry; do not combine version with git, path, tag, rev, or branch",
+                        "version dependencies resolve through the registry; do not combine version with git, archive, path, tag, rev, or branch",
                     );
                 }
                 if table.path.is_some() {
@@ -106,11 +107,21 @@ pub(crate) fn validate_dependencies_for_publish(
                         "path dependencies are not publishable; pin a git tag, git rev, or registry version",
                     );
                 }
-                if table.git.is_none() && table.path.is_none() && table.version.is_none() {
+                let source_count = usize::from(table.git.is_some())
+                    + usize::from(table.archive.is_some())
+                    + usize::from(table.path.is_some());
+                if source_count > 1 {
+                    push_error(errors, &field, "dependency must specify only one of git, archive, or path");
+                }
+                if table.git.is_none()
+                    && table.archive.is_none()
+                    && table.path.is_none()
+                    && table.version.is_none()
+                {
                     push_error(
                         errors,
                         &field,
-                        "dependency must specify git, registry version, or path",
+                        "dependency must specify git, archive, registry version, or path",
                     );
                 }
                 let git_ref_count = usize::from(table.rev.is_some())
@@ -121,6 +132,9 @@ pub(crate) fn validate_dependencies_for_publish(
                 }
                 if table.git.is_some() && git_ref_count == 0 {
                     push_error(errors, &field, "git dependency must specify tag, rev, or branch");
+                }
+                if table.archive.is_some() && git_ref_count > 0 {
+                    push_error(errors, &field, "archive dependency cannot specify tag, rev, or branch");
                 }
                 if table.branch.is_some() {
                     push_warning(
@@ -137,6 +151,18 @@ pub(crate) fn validate_dependencies_for_publish(
                 if let Some(git) = table.git.as_deref() {
                     if normalize_git_url(git).is_err() {
                         push_error(errors, &field, format!("invalid git source '{git}'"));
+                    }
+                }
+                if let Some(archive) = table.archive.as_deref() {
+                    if normalize_archive_url(archive).is_err() {
+                        push_error(errors, &field, format!("invalid archive source '{archive}'"));
+                    }
+                    match table.checksum.as_deref() {
+                        Some(checksum) if archive_cache_key(checksum).is_ok() => {}
+                        Some(checksum) => {
+                            push_error(errors, &field, format!("invalid archive checksum '{checksum}'"));
+                        }
+                        None => push_error(errors, &field, "archive dependency must specify checksum"),
                     }
                 }
             }
