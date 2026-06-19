@@ -129,13 +129,11 @@ fn write_structural_hash_key(v: &VmValue, out: &mut String) {
             });
             out.push('}');
         }
-        VmValue::Set(items) => {
-            // Sets need sorted keys for order-independence
-            let mut keys: Vec<String> =
-                guard_recursion(|| items.iter().map(value_structural_hash_key).collect());
-            keys.sort();
+        VmValue::Set(set) => {
+            // Sets hash order-independently via their already-resident sorted
+            // structural keys.
             out.push('S');
-            for k in &keys {
+            for k in set.sorted_keys() {
                 out.push_str(k);
                 out.push(',');
             }
@@ -292,8 +290,9 @@ pub fn values_equal(a: &VmValue, b: &VmValue) -> bool {
                 })
         }
         (VmValue::Set(a), VmValue::Set(b)) => {
-            a.len() == b.len()
-                && guard_recursion(|| a.iter().all(|x| b.iter().any(|y| values_equal(x, y))))
+            // Order-independent: equal length plus every member of `a` present
+            // in `b`, using `b`'s O(1) structural-key index.
+            a.len() == b.len() && a.iter().all(|x| b.contains(x))
         }
         (VmValue::Generator(_), VmValue::Generator(_)) => false, // generators are never equal
         (VmValue::Stream(_), VmValue::Stream(_)) => false,       // streams are never equal

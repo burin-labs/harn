@@ -53,8 +53,11 @@ fn vm_value_to_serde_json(value: &VmValue) -> serde_json::Value {
         VmValue::Float(value) => serde_json::json!(value),
         VmValue::String(value) => serde_json::Value::String(value.to_string()),
         VmValue::Bytes(bytes) => tagged_bytes_json(bytes),
-        VmValue::List(items) | VmValue::Set(items) => {
+        VmValue::List(items) => {
             serde_json::Value::Array(items.iter().map(vm_value_to_serde_json).collect())
+        }
+        VmValue::Set(set) => {
+            serde_json::Value::Array(set.iter().map(vm_value_to_serde_json).collect())
         }
         VmValue::Dict(items) => serde_json::Value::Object(
             items

@@ -1,126 +1,62 @@
 use std::sync::Arc;
 
-use crate::value::{values_equal, VmError, VmValue};
+use crate::value::{VmError, VmSet, VmValue};
 
 impl crate::vm::Vm {
     pub(super) fn call_set_method_sync(
-        items: &Arc<Vec<VmValue>>,
+        set: &Arc<VmSet>,
         method: &str,
         args: &[VmValue],
     ) -> Option<Result<VmValue, VmError>> {
         let result = match method {
-            "count" | "len" => Ok(VmValue::Int(items.len() as i64)),
-            "empty" => Ok(VmValue::Bool(items.is_empty())),
+            "count" | "len" => Ok(VmValue::Int(set.len() as i64)),
+            "empty" => Ok(VmValue::Bool(set.is_empty())),
             "contains" => {
                 let needle = args.first().unwrap_or(&VmValue::Nil);
-                Ok(VmValue::Bool(items.iter().any(|x| values_equal(x, needle))))
+                Ok(VmValue::Bool(set.contains(needle)))
             }
             "add" => {
-                let val = args.first().cloned().unwrap_or(VmValue::Nil);
-                let mut new_items = items.to_vec();
-                if !new_items.iter().any(|x| values_equal(x, &val)) {
-                    new_items.push(val);
-                }
-                Ok(VmValue::Set(std::sync::Arc::new(new_items)))
+                let mut new_set = (**set).clone();
+                new_set.insert(args.first().cloned().unwrap_or(VmValue::Nil));
+                Ok(VmValue::set_value(new_set))
             }
             "remove" | "delete" => {
-                let val = args.first().unwrap_or(&VmValue::Nil);
-                let new_items: Vec<VmValue> = items
-                    .iter()
-                    .filter(|x| !values_equal(x, val))
-                    .cloned()
-                    .collect();
-                Ok(VmValue::Set(std::sync::Arc::new(new_items)))
+                let mut new_set = (**set).clone();
+                new_set.remove(args.first().unwrap_or(&VmValue::Nil));
+                Ok(VmValue::set_value(new_set))
             }
-            "union" => {
-                if let Some(VmValue::Set(other)) = args.first() {
-                    let mut result = items.to_vec();
-                    for v in other.iter() {
-                        if !result.iter().any(|x| values_equal(x, v)) {
-                            result.push(v.clone());
-                        }
-                    }
-                    Ok(VmValue::Set(std::sync::Arc::new(result)))
-                } else {
-                    Ok(VmValue::Set(Arc::clone(items)))
+            "union" => match args.first() {
+                Some(VmValue::Set(other)) => Ok(VmValue::set_value(set.union(other))),
+                _ => Ok(VmValue::Set(Arc::clone(set))),
+            },
+            "intersect" | "intersection" => match args.first() {
+                Some(VmValue::Set(other)) => Ok(VmValue::set_value(set.intersect(other))),
+                _ => Ok(VmValue::set_value(VmSet::new())),
+            },
+            "difference" => match args.first() {
+                Some(VmValue::Set(other)) => Ok(VmValue::set_value(set.difference(other))),
+                _ => Ok(VmValue::Set(Arc::clone(set))),
+            },
+            "symmetric_difference" => match args.first() {
+                Some(VmValue::Set(other)) => {
+                    Ok(VmValue::set_value(set.symmetric_difference(other)))
                 }
-            }
-            "intersect" | "intersection" => {
-                if let Some(VmValue::Set(other)) = args.first() {
-                    let result: Vec<VmValue> = items
-                        .iter()
-                        .filter(|x| other.iter().any(|y| values_equal(x, y)))
-                        .cloned()
-                        .collect();
-                    Ok(VmValue::Set(std::sync::Arc::new(result)))
-                } else {
-                    Ok(VmValue::Set(std::sync::Arc::new(Vec::new())))
-                }
-            }
-            "difference" => {
-                if let Some(VmValue::Set(other)) = args.first() {
-                    let result: Vec<VmValue> = items
-                        .iter()
-                        .filter(|x| !other.iter().any(|y| values_equal(x, y)))
-                        .cloned()
-                        .collect();
-                    Ok(VmValue::Set(std::sync::Arc::new(result)))
-                } else {
-                    Ok(VmValue::Set(Arc::clone(items)))
-                }
-            }
-            "symmetric_difference" => {
-                if let Some(VmValue::Set(other)) = args.first() {
-                    let mut result: Vec<VmValue> = items
-                        .iter()
-                        .filter(|x| !other.iter().any(|y| values_equal(x, y)))
-                        .cloned()
-                        .collect();
-                    for v in other.iter() {
-                        if !items.iter().any(|x| values_equal(x, v)) {
-                            result.push(v.clone());
-                        }
-                    }
-                    Ok(VmValue::Set(std::sync::Arc::new(result)))
-                } else {
-                    Ok(VmValue::Set(Arc::clone(items)))
-                }
-            }
-            "is_subset" => {
-                if let Some(VmValue::Set(other)) = args.first() {
-                    Ok(VmValue::Bool(
-                        items
-                            .iter()
-                            .all(|x| other.iter().any(|y| values_equal(x, y))),
-                    ))
-                } else {
-                    Ok(VmValue::Bool(false))
-                }
-            }
-            "is_superset" => {
-                if let Some(VmValue::Set(other)) = args.first() {
-                    Ok(VmValue::Bool(
-                        other
-                            .iter()
-                            .all(|x| items.iter().any(|y| values_equal(x, y))),
-                    ))
-                } else {
-                    Ok(VmValue::Bool(false))
-                }
-            }
-            "is_disjoint" => {
-                if let Some(VmValue::Set(other)) = args.first() {
-                    Ok(VmValue::Bool(
-                        !items
-                            .iter()
-                            .any(|x| other.iter().any(|y| values_equal(x, y))),
-                    ))
-                } else {
-                    Ok(VmValue::Bool(true))
-                }
-            }
-            "to_list" => Ok(VmValue::List(std::sync::Arc::new(items.to_vec()))),
-            "to_set" => Ok(VmValue::Set(Arc::clone(items))),
+                _ => Ok(VmValue::Set(Arc::clone(set))),
+            },
+            "is_subset" => match args.first() {
+                Some(VmValue::Set(other)) => Ok(VmValue::Bool(set.is_subset(other))),
+                _ => Ok(VmValue::Bool(false)),
+            },
+            "is_superset" => match args.first() {
+                Some(VmValue::Set(other)) => Ok(VmValue::Bool(set.is_superset(other))),
+                _ => Ok(VmValue::Bool(false)),
+            },
+            "is_disjoint" => match args.first() {
+                Some(VmValue::Set(other)) => Ok(VmValue::Bool(set.is_disjoint(other))),
+                _ => Ok(VmValue::Bool(true)),
+            },
+            "to_list" => Ok(VmValue::List(set.shared_items())),
+            "to_set" => Ok(VmValue::Set(Arc::clone(set))),
             "map" | "filter" => {
                 if args.first().is_some_and(Self::is_callable_value) {
                     return None;
@@ -146,11 +82,11 @@ impl crate::vm::Vm {
 
     pub(super) async fn call_set_method(
         &mut self,
-        items: &Arc<Vec<VmValue>>,
+        set: &Arc<VmSet>,
         method: &str,
         args: &[VmValue],
     ) -> Result<VmValue, VmError> {
-        if let Some(result) = Self::call_set_method_sync(items, method, args) {
+        if let Some(result) = Self::call_set_method_sync(set, method, args) {
             return result;
         }
 
@@ -159,33 +95,31 @@ impl crate::vm::Vm {
                 let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) else {
                     return Ok(VmValue::Nil);
                 };
-                let mut result = Vec::new();
-                for item in items.iter() {
+                let mut result = VmSet::new();
+                for item in set.iter() {
                     let mapped = self.call_callable_one(callable, item).await?;
-                    if !result.iter().any(|x| values_equal(x, &mapped)) {
-                        result.push(mapped);
-                    }
+                    result.insert(mapped);
                 }
-                Ok(VmValue::Set(std::sync::Arc::new(result)))
+                Ok(VmValue::set_value(result))
             }
             "filter" => {
                 let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) else {
                     return Ok(VmValue::Nil);
                 };
-                let mut result = Vec::new();
-                for item in items.iter() {
+                let mut result = VmSet::new();
+                for item in set.iter() {
                     let keep = self.call_callable_one(callable, item).await?;
                     if keep.is_truthy() {
-                        result.push(item.clone());
+                        result.insert(item.clone());
                     }
                 }
-                Ok(VmValue::Set(std::sync::Arc::new(result)))
+                Ok(VmValue::set_value(result))
             }
             "any" => {
                 let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) else {
                     return Ok(VmValue::Bool(false));
                 };
-                for item in items.iter() {
+                for item in set.iter() {
                     let result = self.call_callable_one(callable, item).await?;
                     if result.is_truthy() {
                         return Ok(VmValue::Bool(true));
@@ -197,7 +131,7 @@ impl crate::vm::Vm {
                 let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) else {
                     return Ok(VmValue::Bool(true));
                 };
-                for item in items.iter() {
+                for item in set.iter() {
                     let result = self.call_callable_one(callable, item).await?;
                     if !result.is_truthy() {
                         return Ok(VmValue::Bool(false));

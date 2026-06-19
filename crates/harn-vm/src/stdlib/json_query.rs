@@ -166,8 +166,11 @@ fn eval_path(input: &VmValue, steps: &[PathStep]) -> Vec<VmValue> {
                     _ => next.push(VmValue::Nil),
                 },
                 PathStep::Iterate => match value {
-                    VmValue::List(items) | VmValue::Set(items) => {
+                    VmValue::List(items) => {
                         next.extend(items.iter().cloned());
+                    }
+                    VmValue::Set(set) => {
+                        next.extend(set.iter().cloned());
                     }
                     VmValue::Dict(map) => {
                         next.extend(map.values().cloned());
@@ -222,8 +225,13 @@ fn normalize_bound(value: i64, len: i64) -> i64 {
 fn collect_recursive(value: &VmValue, out: &mut Vec<VmValue>) {
     out.push(value.clone());
     match value {
-        VmValue::List(items) | VmValue::Set(items) => {
+        VmValue::List(items) => {
             for item in items.iter() {
+                collect_recursive(item, out);
+            }
+        }
+        VmValue::Set(set) => {
+            for item in set.iter() {
                 collect_recursive(item, out);
             }
         }
@@ -248,7 +256,8 @@ fn eval_builtin(builtin: Builtin, input: &VmValue) -> VmValue {
         Builtin::Length => VmValue::Int(match input {
             VmValue::String(s) => string_char_count(s) as i64,
             VmValue::Bytes(bytes) => bytes.len() as i64,
-            VmValue::List(items) | VmValue::Set(items) => items.len() as i64,
+            VmValue::List(items) => items.len() as i64,
+            VmValue::Set(set) => set.len() as i64,
             VmValue::Dict(map) => map.len() as i64,
             VmValue::Nil => 0,
             _ => 1,
@@ -270,7 +279,8 @@ fn eval_builtin(builtin: Builtin, input: &VmValue) -> VmValue {
             VmValue::Dict(map) => {
                 VmValue::List(std::sync::Arc::new(map.values().cloned().collect()))
             }
-            VmValue::List(items) | VmValue::Set(items) => VmValue::List(items.clone()),
+            VmValue::List(items) => VmValue::List(items.clone()),
+            VmValue::Set(set) => VmValue::List(set.shared_items()),
             _ => VmValue::List(std::sync::Arc::new(Vec::new())),
         },
         Builtin::Type => VmValue::String(std::sync::Arc::from(jq_type_name(input))),
