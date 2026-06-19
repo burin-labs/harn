@@ -29,14 +29,16 @@ Rules the runtime enforces:
 
 ## Available tools
 
+These are the only tools you can call. Any name not listed here will be rejected — choose the closest listed tool instead.
+
 {{ expanded_schemas }}
 
-## Example
+## Example (illustrative shape only — `<tool>` stands in for a real tool from the list above)
 
-A file whose content contains a backtick code block survives untouched because it rides inside the JSON string:
+Content that contains a backtick code block survives untouched because it rides inside the JSON string:
 
 ```tool
-{ "name": "write_file", "args": { "path": "README.md", "content": "# Title\n\nUse a fenced block:\n\n```sh\necho hi\n```\n\nDone.\n" } }
+{ "name": "<tool>", "args": { "path": "README.md", "content": "# Title\n\nUse a fenced block:\n\n```sh\necho hi\n```\n\nDone.\n" } }
 ```
 {{ if done_sentinel }}
 After the work is verified, finish with plain text and the sentinel:

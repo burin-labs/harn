@@ -73,14 +73,13 @@ pub(crate) fn normalize_tool_call_shape(
     let normalized_name = normalize_tool_name(name);
     let is_marker_wrapper = is_harmony_marker_wrapper_name(&normalized_name);
     if !is_generic_wrapper_name(&normalized_name) && !is_marker_wrapper {
-        return (recover_namespaced_name(normalized_name), arguments);
+        let recovered = recover_namespaced_name(normalized_name);
+        return resolve_semantic_alias(recovered, arguments);
     }
 
     if let Some((inner_name, inner_arguments)) = unwrap_generic_tool_arguments(&arguments) {
-        return (
-            recover_namespaced_name(normalize_tool_name(&inner_name)),
-            inner_arguments,
-        );
+        let recovered = recover_namespaced_name(normalize_tool_name(&inner_name));
+        return resolve_semantic_alias(recovered, inner_arguments);
     }
 
     if is_marker_wrapper {
@@ -90,6 +89,146 @@ pub(crate) fn normalize_tool_call_shape(
     }
 
     (normalized_name, arguments)
+}
+
+/// Canonicalize SEMANTIC tool aliases that cheap models emit even though the
+/// name was never advertised, so the gate, dispatch, and telemetry all see a
+/// real Harn tool name. Grounded in live fw-gpt-oss-120b denial transcripts:
+/// Codex `repo_browser.*` vocab, `container.exec`, and edit-action verbs called
+/// as top-level tools. The targets here (`look`, `search`, `run`, `edit`) are
+/// the canonical Harn coding tools the executor recognizes, so the rewrite is
+/// safe without a per-turn allowed-tool set.
+///
+/// NOT mapped, deliberately: `write_file` / `delete_file` / `patch_file` →
+/// `edit`. Those are semantically lossy (`edit` is a structured-patch tool with
+/// no raw-write/whole-file-create semantics); silently rewriting them would
+/// rename a call then fail arg validation. They are left UNmapped so the
+/// actionable denial feedback (naming the available tools) can guide the model.
+fn resolve_semantic_alias(
+    name: String,
+    arguments: serde_json::Value,
+) -> (String, serde_json::Value) {
+    // 1. Browser-namespace aliases (Codex / Aider-style file-explorer vocab).
+    //    Strip a known `*_browser.` prefix, then map the verb to look/search.
+    if let Some((canonical, mapped_args)) = resolve_browser_alias(&name, &arguments) {
+        return (canonical, mapped_args);
+    }
+
+    // 2. Shell/exec aliases → run. Remap a command-shaped arg key onto
+    //    `command` so the rename doesn't then fail run's arg validation.
+    if is_shell_alias(&name) {
+        return ("run".to_string(), remap_command_args(arguments));
+    }
+
+    // 3. Edit-action verbs called as top-level tools → edit({action: <verb>}).
+    if is_edit_action_verb(&name) {
+        return ("edit".to_string(), remap_edit_action_args(&name, arguments));
+    }
+
+    (name, arguments)
+}
+
+/// Known file-explorer namespace prefixes cheap models borrow from other
+/// harnesses (Codex `repo_browser.*`, plus the obvious siblings).
+const BROWSER_NAMESPACE_PREFIXES: &[&str] = &[
+    "repo_browser.",
+    "repository_browser.",
+    "workspace_browser.",
+    "file_browser.",
+];
+
+fn resolve_browser_alias(
+    name: &str,
+    arguments: &serde_json::Value,
+) -> Option<(String, serde_json::Value)> {
+    let verb = BROWSER_NAMESPACE_PREFIXES
+        .iter()
+        .find_map(|prefix| name.strip_prefix(prefix))?
+        .trim();
+    if verb.is_empty() {
+        return None;
+    }
+    let canonical = match verb {
+        "open_file" | "view_file" | "cat_file" | "read_file" | "print_tree" | "list_tree"
+        | "list_dir" | "list_directory" | "ls" => "look",
+        "search" | "find" | "grep" => "search",
+        // `*.bundle` is left for downstream recovery: `bundle` is not a
+        // universally registered tool, so rewriting to it could itself trip the
+        // ceiling. Keep the prefix-stripped bare name so the denial feedback can
+        // guide the model rather than silently producing another unknown tool.
+        _ => return Some((verb.to_string(), arguments.clone())),
+    };
+    Some((canonical.to_string(), arguments.clone()))
+}
+
+fn is_shell_alias(name: &str) -> bool {
+    matches!(
+        name,
+        "container.exec" | "container_exec" | "exec" | "sh" | "shell" | "bash"
+    )
+}
+
+/// Move a command-shaped argument (`script` / `cmd`) onto `command` so the
+/// remapped `run` call passes arg validation. Leaves an already-`command`-shaped
+/// or unrecognized object untouched.
+fn remap_command_args(arguments: serde_json::Value) -> serde_json::Value {
+    let serde_json::Value::Object(mut map) = arguments else {
+        return arguments;
+    };
+    if map.contains_key("command") {
+        return serde_json::Value::Object(map);
+    }
+    for key in ["script", "cmd"] {
+        if let Some(value) = map.remove(key) {
+            map.insert("command".to_string(), value);
+            break;
+        }
+    }
+    serde_json::Value::Object(map)
+}
+
+/// Edit-action verbs that exist ONLY as `edit({ action: <verb> })` enum values,
+/// never as standalone advertised tool names — so folding a top-level call of
+/// one into `edit` cannot shadow a real tool.
+///
+/// `replace_symbol` / `remove_symbol` are deliberately EXCLUDED: `replace_symbol`
+/// is a hard-kept standalone tool name in Harn's default agent tool surface
+/// (`__default_tool_surface_hard_keep`), so a top-level `replace_symbol` call is
+/// a LEGITIMATE call the gate allows — rewriting it to `edit` would shadow a
+/// real tool and lose the symbol-level semantics. `remove_symbol` is excluded
+/// for the same symbol-tool symmetry. Both fall through unmapped.
+const EDIT_ACTION_VERBS: &[&str] = &[
+    "replace_range",
+    "replace_body",
+    "insert_after",
+    "insert_function",
+    "delete_range",
+    "exact_patch",
+    "add_import",
+];
+
+fn is_edit_action_verb(name: &str) -> bool {
+    EDIT_ACTION_VERBS.contains(&name)
+}
+
+/// Fold an edit-action-verb-as-tool into `edit({ action: <verb>, ...rest })`.
+/// The verb's own arguments ride through unchanged under the `edit` envelope;
+/// only the `action` key is injected (an existing `action` is preserved).
+fn remap_edit_action_args(verb: &str, arguments: serde_json::Value) -> serde_json::Value {
+    let mut map = match arguments {
+        serde_json::Value::Object(map) => map,
+        serde_json::Value::Null => serde_json::Map::new(),
+        other => {
+            // Non-object args can't carry an `action` key; wrap defensively so
+            // the rename still produces a valid edit envelope shape.
+            let mut map = serde_json::Map::new();
+            map.insert("value".to_string(), other);
+            map
+        }
+    };
+    map.entry("action".to_string())
+        .or_insert_with(|| serde_json::Value::String(verb.to_string()));
+    serde_json::Value::Object(map)
 }
 
 fn is_generic_wrapper_name(name: &str) -> bool {
@@ -278,5 +417,146 @@ mod tests {
 
         assert_eq!(name, "look");
         assert_eq!(normalized_arguments, arguments);
+    }
+
+    // ── F2: semantic alias resolution (cheap-model dialect) ──────────────
+
+    #[test]
+    fn aliases_repo_browser_open_file_to_look() {
+        let args = serde_json::json!({"path": "src/lib.rs"});
+        let (name, mapped) = normalize_tool_call_shape("repo_browser.open_file", args.clone());
+        assert_eq!(name, "look");
+        assert_eq!(mapped, args);
+    }
+
+    #[test]
+    fn aliases_repo_browser_list_dir_to_look() {
+        let (name, _) = normalize_tool_call_shape("repo_browser.list_dir", serde_json::json!({}));
+        assert_eq!(name, "look");
+        // Sibling prefixes resolve the same way.
+        let (name, _) = normalize_tool_call_shape("file_browser.print_tree", serde_json::json!({}));
+        assert_eq!(name, "look");
+    }
+
+    #[test]
+    fn aliases_repo_browser_search_to_search() {
+        let args = serde_json::json!({"query": "needle"});
+        let (name, mapped) = normalize_tool_call_shape("repository_browser.grep", args.clone());
+        assert_eq!(name, "search");
+        assert_eq!(mapped, args);
+    }
+
+    #[test]
+    fn browser_bundle_is_left_for_downstream_recovery() {
+        // `bundle` is not universally registered; rewriting to it could itself
+        // trip the ceiling. The prefix is stripped but the verb is left bare so
+        // the actionable denial feedback can guide the model.
+        let (name, _) =
+            normalize_tool_call_shape("workspace_browser.bundle", serde_json::json!({}));
+        assert_eq!(name, "bundle");
+    }
+
+    #[test]
+    fn aliases_container_exec_to_run_remapping_command_arg() {
+        let (name, mapped) =
+            normalize_tool_call_shape("container.exec", serde_json::json!({"cmd": "cargo test"}));
+        assert_eq!(name, "run");
+        // `cmd` is remapped onto `command` so run's arg validation passes.
+        assert_eq!(mapped["command"], "cargo test");
+        assert!(mapped.get("cmd").is_none());
+    }
+
+    #[test]
+    fn aliases_shell_synonyms_to_run() {
+        for alias in ["exec", "sh", "shell", "bash", "container_exec"] {
+            let (name, mapped) =
+                normalize_tool_call_shape(alias, serde_json::json!({"script": "ls"}));
+            assert_eq!(name, "run", "alias {alias} should map to run");
+            assert_eq!(mapped["command"], "ls", "alias {alias} should remap script");
+        }
+    }
+
+    #[test]
+    fn run_alias_leaves_existing_command_arg_untouched() {
+        let (name, mapped) = normalize_tool_call_shape(
+            "exec",
+            serde_json::json!({"command": "ls", "cmd": "ignored"}),
+        );
+        assert_eq!(name, "run");
+        assert_eq!(mapped["command"], "ls");
+    }
+
+    #[test]
+    fn aliases_edit_action_verb_to_edit_with_action_arg() {
+        let (name, mapped) = normalize_tool_call_shape(
+            "replace_range",
+            serde_json::json!({"path": "a.go", "range_start": 3, "range_end": 5}),
+        );
+        assert_eq!(name, "edit");
+        assert_eq!(mapped["action"], "replace_range");
+        assert_eq!(mapped["path"], "a.go");
+        assert_eq!(mapped["range_start"], 3);
+    }
+
+    #[test]
+    fn edit_action_verb_preserves_explicit_action() {
+        // A pre-existing `action` is not clobbered by the verb.
+        let (name, mapped) = normalize_tool_call_shape(
+            "replace_body",
+            serde_json::json!({"action": "replace_range", "path": "a.go"}),
+        );
+        assert_eq!(name, "edit");
+        assert_eq!(mapped["action"], "replace_range");
+    }
+
+    #[test]
+    fn all_edit_action_verbs_map_to_edit() {
+        for verb in [
+            "replace_range",
+            "replace_body",
+            "insert_after",
+            "insert_function",
+            "delete_range",
+            "exact_patch",
+            "add_import",
+        ] {
+            let (name, mapped) = normalize_tool_call_shape(verb, serde_json::json!({}));
+            assert_eq!(name, "edit", "verb {verb} should map to edit");
+            assert_eq!(mapped["action"], verb);
+        }
+    }
+
+    // NEGATIVE: `replace_symbol` is a hard-kept STANDALONE tool in Harn's default
+    // surface, so a top-level call is legitimate and must NOT be folded into
+    // `edit` (which would shadow the real tool). `remove_symbol` is excluded for
+    // the same symbol-tool symmetry.
+    #[test]
+    fn does_not_alias_symbol_edit_tools() {
+        let (name, mapped) =
+            normalize_tool_call_shape("replace_symbol", serde_json::json!({"symbol": "Foo"}));
+        assert_eq!(name, "replace_symbol");
+        assert!(mapped.get("action").is_none());
+
+        let (name, _) = normalize_tool_call_shape("remove_symbol", serde_json::json!({}));
+        assert_eq!(name, "remove_symbol");
+    }
+
+    // NEGATIVE: raw-write / whole-file tools are semantically lossy against
+    // `edit` (no raw-write semantics), so they must NOT be silently rewritten.
+    // Leaving them unmapped lets the actionable denial feedback guide the model.
+    #[test]
+    fn does_not_alias_write_file_to_edit() {
+        let args = serde_json::json!({"path": "README.md", "content": "hi"});
+        let (name, mapped) = normalize_tool_call_shape("write_file", args.clone());
+        assert_eq!(name, "write_file");
+        assert_eq!(mapped, args);
+    }
+
+    #[test]
+    fn does_not_alias_delete_file_or_patch_file() {
+        let (name, _) = normalize_tool_call_shape("delete_file", serde_json::json!({}));
+        assert_eq!(name, "delete_file");
+        let (name, _) = normalize_tool_call_shape("patch_file", serde_json::json!({}));
+        assert_eq!(name, "patch_file");
     }
 }
