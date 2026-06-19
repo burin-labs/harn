@@ -911,15 +911,44 @@ impl ToolFormatDecision {
 }
 
 /// True when a route's `tool_mode_parity` says the native (provider JSON)
-/// channel cannot be trusted to yield parseable tool calls.
+/// channel cannot be trusted to yield parseable tool calls. `unsupported`
+/// (no working channel) is intentionally excluded: there is no better format
+/// to steer to, so the gate leaves such a route alone rather than rewriting to
+/// another broken channel under a misleading "Using X instead" message.
 fn parity_forbids_native(parity: &str) -> bool {
-    matches!(parity, "native_unreliable" | "text_only" | "unsupported")
+    matches!(parity, "native_unreliable" | "text_only")
 }
 
 /// True when a route's `tool_mode_parity` says a text-channel grammar cannot be
-/// trusted to yield parseable tool calls.
+/// trusted to yield parseable tool calls. See [`parity_forbids_native`] for why
+/// `unsupported` is excluded.
 fn parity_forbids_text(parity: &str) -> bool {
-    matches!(parity, "text_unreliable" | "native_only" | "unsupported")
+    matches!(parity, "text_unreliable" | "native_only")
+}
+
+/// True when the requested wire channel is known not to return parseable tool
+/// calls for a route. The gate auto-corrects only on *positive* evidence of
+/// breakage, never on a "we don't know" default:
+///
+/// - `tool_mode_parity` is an explicit verdict (`parity_forbids_*`).
+/// - `text_tool_wire_format_supported = false` is an explicit declaration that
+///   the text channel does not survive this route (e.g. native-only local
+///   Ollama Qwen3 rows that omit a parity string). It defaults to `true`, so an
+///   unknown route is never wrongly judged text-broken.
+///
+/// `native_tools` is deliberately NOT consulted here: it defaults to `false`
+/// for unknown providers, so treating `!native_tools` as "native is broken"
+/// would wrongly rewrite a custom proxy that does support native tools. The
+/// hard `native` + `!native_tools` capability gate in `extract_llm_options`
+/// already rejects a genuine native-on-non-native mismatch loudly.
+fn channel_forbidden(wire: ToolFormatWire, caps: &Capabilities) -> bool {
+    let parity = caps.tool_mode_parity.as_deref().unwrap_or("unknown");
+    match wire {
+        ToolFormatWire::Native => parity_forbids_native(parity),
+        ToolFormatWire::Text => {
+            parity_forbids_text(parity) || !caps.text_tool_wire_format_supported
+        }
+    }
 }
 
 /// Validate (and, where the registry knows better, auto-correct) a requested
@@ -931,10 +960,13 @@ fn parity_forbids_text(parity: &str) -> bool {
 /// (`preferred_tool_format`). Before this function those fields were advisory
 /// metadata that any alias pin or explicit `--tool-format` flag could silently
 /// override — the footgun behind the DeepSeek V3.2 DSML "vanishing tool calls"
-/// dead-abstain. Now any combo whose requested channel is forbidden by the
-/// route's parity is rewritten to the route's `preferred_tool_format`, with a
-/// `correction` message naming both. Unknown formats and routes with no parity
-/// signal (`unknown`/`interchangeable`) pass through unchanged.
+/// dead-abstain. Now any combo whose requested channel is forbidden — by the
+/// route's `tool_mode_parity` verdict OR by an explicit
+/// `text_tool_wire_format_supported = false` declaration — is rewritten to a
+/// working channel (preferring the route's `preferred_tool_format`), with a
+/// `correction` message naming both. Unknown formats, routes with no adverse
+/// signal (`unknown`/`interchangeable`), and routes with no working channel at
+/// all pass through unchanged.
 pub fn validate_tool_format(provider: &str, model: &str, requested: &str) -> ToolFormatDecision {
     let caps = lookup(provider, model);
     validate_tool_format_with_caps(provider, model, requested, &caps)
@@ -954,27 +986,34 @@ pub fn validate_tool_format_with_caps(
         return ToolFormatDecision::accepted(requested.to_string());
     };
 
-    let parity = caps.tool_mode_parity.as_deref().unwrap_or("unknown");
-    let forbidden = match wire {
-        ToolFormatWire::Native => parity_forbids_native(parity),
-        ToolFormatWire::Text => parity_forbids_text(parity),
-    };
-    if !forbidden {
+    if !channel_forbidden(wire, caps) {
         return ToolFormatDecision::accepted(requested.to_string());
     }
 
-    // The combo is known-broken. Steer to the route's preferred format. If the
-    // preferred format is somehow the very channel we just rejected (a data
-    // bug), fall back across channels so we never hand back the broken combo.
+    // The requested channel is known-broken for this route. Pick the opposite
+    // channel as the steer target, preferring the route's declared
+    // `preferred_tool_format` when it lands on a channel that is itself not
+    // forbidden. If BOTH channels are forbidden (a route with no working tool
+    // surface), there is nothing better to offer — pass the request through
+    // unchanged rather than rewrite to an equally-broken format under a
+    // misleading correction message.
+    let opposite = match wire {
+        ToolFormatWire::Native => ToolFormatWire::Text,
+        ToolFormatWire::Text => ToolFormatWire::Native,
+    };
+    if channel_forbidden(opposite, caps) {
+        return ToolFormatDecision::accepted(requested.to_string());
+    }
     let preferred = caps
         .preferred_tool_format
         .clone()
-        .filter(|fmt| ToolFormatWire::classify(fmt) != Some(wire))
-        .unwrap_or_else(|| match wire {
-            ToolFormatWire::Native => "json".to_string(),
-            ToolFormatWire::Text => "native".to_string(),
+        .filter(|fmt| ToolFormatWire::classify(fmt) == Some(opposite))
+        .unwrap_or_else(|| match opposite {
+            ToolFormatWire::Native => "native".to_string(),
+            ToolFormatWire::Text => "json".to_string(),
         });
 
+    let parity = caps.tool_mode_parity.as_deref().unwrap_or("unknown");
     let mut correction = format!(
         "tool_format `{requested}` is not safe for {provider}/{model} \
          (tool_mode_parity = `{parity}`): this route does not return parseable \
@@ -3000,5 +3039,57 @@ native_tools = true
             .correction
             .expect("text on native_only is corrected");
         assert!(reason.contains("native_only"));
+    }
+
+    #[test]
+    fn validate_tool_format_honors_structural_text_unsupported_bit() {
+        reset();
+        // Real shipping route: ollama/qwen3* declares native_tools = true and
+        // text_tool_wire_format_supported = false with NO tool_mode_parity
+        // string. The gate's contract ("always yields parseable tool calls")
+        // must hold from the structural bit alone — a text/json request is
+        // steered to native, not passed through onto an unsupported channel.
+        let caps = lookup("ollama", "qwen3-coder:30b");
+        assert!(!caps.text_tool_wire_format_supported);
+        for requested in ["text", "json"] {
+            let decision =
+                validate_tool_format_with_caps("ollama", "qwen3-coder:30b", requested, &caps);
+            assert_eq!(
+                decision.effective, "native",
+                "{requested} must be steered to native on a text-unsupported route"
+            );
+            assert!(decision.correction.is_some());
+        }
+        // native is the route's working channel — untouched.
+        let native = validate_tool_format_with_caps("ollama", "qwen3-coder:30b", "native", &caps);
+        assert_eq!(native.effective, "native");
+        assert!(native.correction.is_none());
+    }
+
+    #[test]
+    fn validate_tool_format_passes_through_when_no_channel_works() {
+        reset();
+        // A route with no working tool surface — text_only parity forbids the
+        // native channel, and text_tool_wire_format_supported = false forbids
+        // the text channel — so BOTH channels are forbidden. The gate has
+        // nothing better to steer to; it must NOT rewrite to an equally broken
+        // format under a misleading correction. Pass through unchanged.
+        let overrides: CapabilitiesFile = toml::from_str(
+            "[[provider.acme]]\n\
+             model_match = \"no-tools-*\"\n\
+             native_tools = false\n\
+             tool_mode_parity = \"text_only\"\n\
+             text_tool_wire_format_supported = false\n",
+        )
+        .expect("override parses");
+        let caps = lookup_with_user_overrides("acme", "no-tools-1", Some(&overrides));
+        for requested in ["native", "text", "json"] {
+            let decision = validate_tool_format_with_caps("acme", "no-tools-1", requested, &caps);
+            assert_eq!(
+                decision.effective, requested,
+                "{requested} passes through unchanged"
+            );
+            assert!(decision.correction.is_none());
+        }
     }
 }
