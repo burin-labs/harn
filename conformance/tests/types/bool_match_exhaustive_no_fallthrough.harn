@@ -1,0 +1,11 @@
+fn classify(b: bool) -> string {
+  match b {
+    true -> { return "yes" }
+    false -> { return "no" }
+  }
+}
+
+pipeline default() {
+  __io_println(classify(true))
+  __io_println(classify(false))
+}

@@ -1001,6 +1001,9 @@ impl TypeChecker {
         if arms.iter().any(Self::match_arm_is_unguarded_catch_all) {
             return true;
         }
+        if self.match_covers_bool(value, arms, scope) {
+            return true;
+        }
         if let Some(enum_name) = self.match_enum_name(value, scope) {
             return self.match_covers_enum_variants(&enum_name, arms, scope);
         }
@@ -1008,6 +1011,37 @@ impl TypeChecker {
             return exhaustive;
         }
         self.match_covers_union(value, arms, scope).unwrap_or(false)
+    }
+
+    /// A `match` on a `bool` scrutinee is exhaustive when its unguarded arms
+    /// cover both `true` and `false` — there is no third inhabitant, so no
+    /// wildcard is required. Mirrors how Rust/Swift treat a `match`/`switch`
+    /// over `Bool`. Gated on the scrutinee actually being `bool` so that
+    /// `match someInt { true -> .., false -> .. }` (a pattern/type mismatch
+    /// handled elsewhere) is not mistaken for exhaustive.
+    fn match_covers_bool(&self, value: &SNode, arms: &[MatchArm], scope: &TypeScope) -> bool {
+        let is_bool = matches!(
+            self.infer_type(value, scope)
+                .map(|ty| self.resolve_alias(&ty, scope)),
+            Some(TypeExpr::Named(n)) if n == "bool"
+        );
+        if !is_bool {
+            return false;
+        }
+        let mut covers_true = false;
+        let mut covers_false = false;
+        for arm in arms.iter().filter(|arm| arm.guard.is_none()) {
+            for leaf in pattern_alternatives(&arm.pattern) {
+                if let Node::BoolLiteral(b) = &leaf.node {
+                    if *b {
+                        covers_true = true;
+                    } else {
+                        covers_false = true;
+                    }
+                }
+            }
+        }
+        covers_true && covers_false
     }
 
     fn match_enum_name(&self, value: &SNode, scope: &TypeScope) -> Option<String> {

@@ -40,8 +40,9 @@ let r = llm_call(prompt, nil, {
   schema_retries: 2,
 })
 
-// No compile-time check that r.data has these shape/fields.
-log("verdict=${r.data.verdict}")
+// No compile-time guarantee that r.data carries these fields, so the
+// nilable access still needs `?.` to satisfy the checker.
+log("verdict=${r.data?.verdict}")
 ```
 
 After — one alias, two uses:
