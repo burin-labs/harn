@@ -87,7 +87,10 @@ fn constant_value(expr: &SNode) -> Option<VmValue> {
 
 fn fold_unary(op: &str, value: VmValue) -> Option<VmValue> {
     match (op, value) {
-        ("-", VmValue::Int(value)) => Some(VmValue::Int(value.wrapping_neg())),
+        // Decline to fold the one overflowing case (`-i64::MIN`); the runtime
+        // negate op promotes it to float. Folding to a wrapped `i64::MIN` here
+        // would disagree with the VM.
+        ("-", VmValue::Int(value)) => value.checked_neg().map(VmValue::Int),
         ("-", VmValue::Float(value)) => Some(VmValue::Float(-value)),
         ("!", value) => Some(VmValue::Bool(!value.is_truthy())),
         _ => None,
@@ -135,7 +138,7 @@ fn fold_binary(op: &str, left: VmValue, right: VmValue) -> Option<VmValue> {
 
 fn fold_add(left: VmValue, right: VmValue) -> Option<VmValue> {
     match (left, right) {
-        (VmValue::Int(left), VmValue::Int(right)) => Some(VmValue::Int(left.wrapping_add(right))),
+        (VmValue::Int(left), VmValue::Int(right)) => left.checked_add(right).map(VmValue::Int),
         (VmValue::Float(left), VmValue::Float(right)) => Some(VmValue::Float(left + right)),
         (VmValue::Int(left), VmValue::Float(right)) => Some(VmValue::Float(left as f64 + right)),
         (VmValue::Float(left), VmValue::Int(right)) => Some(VmValue::Float(left + right as f64)),
@@ -178,7 +181,7 @@ fn fold_add(left: VmValue, right: VmValue) -> Option<VmValue> {
 
 fn fold_sub(left: VmValue, right: VmValue) -> Option<VmValue> {
     match (left, right) {
-        (VmValue::Int(left), VmValue::Int(right)) => Some(VmValue::Int(left.wrapping_sub(right))),
+        (VmValue::Int(left), VmValue::Int(right)) => left.checked_sub(right).map(VmValue::Int),
         (VmValue::Float(left), VmValue::Float(right)) => Some(VmValue::Float(left - right)),
         (VmValue::Int(left), VmValue::Float(right)) => Some(VmValue::Float(left as f64 - right)),
         (VmValue::Float(left), VmValue::Int(right)) => Some(VmValue::Float(left - right as f64)),
@@ -188,7 +191,7 @@ fn fold_sub(left: VmValue, right: VmValue) -> Option<VmValue> {
 
 fn fold_mul(left: VmValue, right: VmValue) -> Option<VmValue> {
     match (left, right) {
-        (VmValue::Int(left), VmValue::Int(right)) => Some(VmValue::Int(left.wrapping_mul(right))),
+        (VmValue::Int(left), VmValue::Int(right)) => left.checked_mul(right).map(VmValue::Int),
         (VmValue::Float(left), VmValue::Float(right)) => Some(VmValue::Float(left * right)),
         (VmValue::Int(left), VmValue::Float(right)) => Some(VmValue::Float(left as f64 * right)),
         (VmValue::Float(left), VmValue::Int(right)) => Some(VmValue::Float(left * right as f64)),
@@ -207,6 +210,9 @@ fn fold_mul(left: VmValue, right: VmValue) -> Option<VmValue> {
 
 fn fold_div(left: VmValue, right: VmValue) -> Option<VmValue> {
     match (left, right) {
+        // Integer division by zero is declined here so the runtime raises;
+        // float division by zero deliberately follows IEEE-754 (±inf / NaN),
+        // matching the runtime float-div op and the documented design.
         (VmValue::Int(_), VmValue::Int(0)) => None,
         (VmValue::Int(left), VmValue::Int(right)) => left.checked_div(right).map(VmValue::Int),
         (VmValue::Float(left), VmValue::Float(right)) => Some(VmValue::Float(left / right)),
@@ -233,8 +239,8 @@ fn fold_mod(left: VmValue, right: VmValue) -> Option<VmValue> {
 fn fold_pow(left: VmValue, right: VmValue) -> Option<VmValue> {
     match (left, right) {
         (VmValue::Int(base), VmValue::Int(exp)) => {
-            if u32::try_from(exp).is_ok() {
-                Some(VmValue::Int(base.wrapping_pow(exp as u32)))
+            if let Ok(exp) = u32::try_from(exp) {
+                base.checked_pow(exp).map(VmValue::Int)
             } else {
                 Some(VmValue::Float((base as f64).powf(exp as f64)))
             }
