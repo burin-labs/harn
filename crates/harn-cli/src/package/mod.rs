@@ -18,11 +18,14 @@ const CONTENT_HASH_FILE: &str = ".harn-content-hash";
 const CACHE_METADATA_FILE: &str = ".harn-package-cache.toml";
 const HARN_CACHE_DIR_ENV: &str = "HARN_CACHE_DIR";
 const HARN_PACKAGE_REGISTRY_ENV: &str = "HARN_PACKAGE_REGISTRY";
+const HARN_PACKAGE_REGISTRY_TOKEN_ENV: &str = "HARN_PACKAGE_REGISTRY_TOKEN";
 const DEFAULT_PACKAGE_REGISTRY_URL: &str =
     "https://burin-labs.github.io/harn-cloud/package-index/harn-package-index.toml";
 const CACHE_METADATA_VERSION: u32 = 1;
 const LOCK_FILE_VERSION: u32 = 4;
 const REGISTRY_INDEX_VERSION: u32 = 1;
+const PACKAGE_ARCHIVE_MAX_BYTES: u64 = 64 * 1024 * 1024;
+const PACKAGE_ARCHIVE_MAX_UNPACKED_BYTES: u64 = 64 * 1024 * 1024;
 const PKG_DIR: &str = ".harn/packages";
 const MANIFEST: &str = "harn.toml";
 const LOCK_FILE: &str = "harn.lock";
