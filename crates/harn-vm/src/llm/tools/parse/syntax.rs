@@ -80,8 +80,16 @@ fn tool_alias_hint(name: &str) -> Option<&'static str> {
         "read" | "read_file" | "readFile" | "cat" | "open" => {
             Some("Use `look({ intent: \"read\", ... })` to read a file.")
         }
-        "write" | "write_file" | "writeFile" => {
+        "write" | "write_file" | "writeFile" | "create_file" => {
             Some("Use `edit({ action: \"create\", ... })` to write a file.")
+        }
+        // Cross-harness edit aliases cheap models emit by habit (OpenAI/Codex
+        // `apply_patch`, Anthropic-style `str_replace`/`str_replace_editor`,
+        // generic `edit_file`). All map to Harn's single `edit` tool; the
+        // specific `action` is host-defined, so we point at `edit` without
+        // prescribing one rather than naming an action the host may not have.
+        "apply_patch" | "str_replace" | "str_replace_editor" | "edit_file" | "editFile" => {
+            Some("Use the `edit({ ... })` tool to modify a file.")
         }
         "list" | "ls" | "list_files" => {
             Some("Use `look({ intent: \"list\", ... })` to list files.")
