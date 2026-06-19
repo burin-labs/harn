@@ -42,6 +42,21 @@ pub(crate) struct LoadedModule {
     pub(crate) _module_state: crate::value::ModuleState,
 }
 
+/// An import whose target module was still mid-load (an import cycle) when the
+/// importing module reached it. The target's function closures don't exist yet
+/// at that point, so the binding can't happen inline. We record it here and
+/// resolve it once both modules are fully loaded — see
+/// [`Vm::flush_deferred_cyclic_imports`].
+#[derive(Clone, Debug)]
+pub(crate) struct DeferredCyclicImport {
+    /// Canonical path of the module that issued the import.
+    pub(crate) importer: PathBuf,
+    /// Canonical path of the cyclically-imported target module.
+    pub(crate) target: PathBuf,
+    /// Selectively-imported names, or `None` for a wildcard/side-effect import.
+    pub(crate) selected_names: Option<Vec<String>>,
+}
+
 pub fn resolve_module_import_path(base: &Path, path: &str) -> PathBuf {
     let synthetic_current_file = base.join("__harn_import_base__.harn");
     if let Some(resolved) = harn_modules::resolve_import_path(&synthetic_current_file, path) {
@@ -229,6 +244,21 @@ impl Vm {
         for import in artifact.imports.iter().filter(|import| import.is_pub) {
             let cache_key = self.cache_key_for_import(&import.path);
             let Some(loaded) = self.module_cache.get(&cache_key).cloned() else {
+                // A plain `import`/`import {...}` across a cycle is bound late
+                // by `flush_deferred_cyclic_imports`, but a `pub import`
+                // re-export has to publish the names into *this* module's
+                // public surface right now — and the target is still mid-load,
+                // so its surface does not exist yet. Name the cycle explicitly
+                // instead of the misleading "was not loaded".
+                if self.imported_paths.contains(&cache_key) {
+                    return Err(VmError::Runtime(format!(
+                        "Re-export error: cannot `pub import` from '{}' because it forms an \
+                         import cycle with this module (its public surface is still being \
+                         built). Use a plain `import` here, or re-export from a module that is \
+                         not part of the cycle.",
+                        import.path
+                    )));
+                }
                 return Err(VmError::Runtime(format!(
                     "Re-export error: imported module '{}' was not loaded",
                     import.path
@@ -348,6 +378,22 @@ impl Vm {
                 .canonicalize()
                 .unwrap_or_else(|_| file_path.clone());
             if self.imported_paths.contains(&canonical) {
+                // Import cycle: `canonical` is still mid-load (it sits on the
+                // import stack), so its function closures don't exist yet and
+                // we cannot bind the requested names inline. Record the import
+                // and resolve it once both modules finish loading — otherwise
+                // whichever module happens to close the cycle silently loses
+                // these bindings and fails with `Undefined builtin` at call
+                // time, in a load-order-dependent way.
+                if let Some(importer) = self.imported_paths.last().cloned() {
+                    if importer != canonical {
+                        self.deferred_cyclic_imports.push(DeferredCyclicImport {
+                            importer,
+                            target: canonical.clone(),
+                            selected_names: selected_names.map(<[String]>::to_vec),
+                        });
+                    }
+                }
                 return Ok(());
             }
             if let Some(loaded) = self.module_cache.get(&canonical).cloned() {
@@ -395,8 +441,68 @@ impl Vm {
             Arc::make_mut(&mut self.module_cache).insert(canonical.clone(), loaded.clone());
             self.export_loaded_module(&canonical, &loaded, selected_names)?;
 
+            // Once the import stack fully unwinds, every module reachable from
+            // this top-level import is cached, so any deferred cyclic imports
+            // can now bind against fully-loaded modules.
+            if self.imported_paths.is_empty() {
+                self.flush_deferred_cyclic_imports()?;
+            }
+
             Ok(())
         })
+    }
+
+    /// Bind imports that were deferred because their target module was still
+    /// mid-load (an import cycle). By the time the import stack has unwound,
+    /// both the importing and target modules are fully instantiated and cached,
+    /// so we can resolve the requested names against the target and define them
+    /// into the importer's shared, mutable `module_state`. That env is the one
+    /// every closure from the importing module consults (after its local env)
+    /// at call time, so the late binding becomes visible without needing to
+    /// rewrite the closures' captured lexical snapshots.
+    fn flush_deferred_cyclic_imports(&mut self) -> Result<(), VmError> {
+        if self.deferred_cyclic_imports.is_empty() {
+            return Ok(());
+        }
+        let deferred = std::mem::take(&mut self.deferred_cyclic_imports);
+        let mut still_pending = Vec::new();
+        for import in deferred {
+            let (Some(importer), Some(target)) = (
+                self.module_cache.get(&import.importer).cloned(),
+                self.module_cache.get(&import.target).cloned(),
+            ) else {
+                // One endpoint is not cached yet (a lazy import inside a
+                // function body can defer before the other side loads). Keep
+                // it for a later flush.
+                still_pending.push(import);
+                continue;
+            };
+
+            let export_names: Vec<String> = match &import.selected_names {
+                Some(names) => names.clone(),
+                None if !target.public_names.is_empty() => {
+                    target.public_names.iter().cloned().collect()
+                }
+                None => target.functions.keys().cloned().collect(),
+            };
+
+            let mut module_state = importer._module_state.lock();
+            for name in export_names {
+                let Some(closure) = target.functions.get(&name) else {
+                    return Err(VmError::Runtime(format!(
+                        "Import error: '{name}' is not defined in {}",
+                        import.target.display()
+                    )));
+                };
+                // A real local declaration (or an already-bound non-cyclic
+                // import) wins over the cyclic re-binding.
+                if module_state.get(&name).is_none() {
+                    module_state.define(&name, VmValue::Closure(Arc::clone(closure)), false)?;
+                }
+            }
+        }
+        self.deferred_cyclic_imports = still_pending;
+        Ok(())
     }
 
     /// Return the path key that `execute_import` would use to cache the

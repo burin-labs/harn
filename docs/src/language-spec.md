@@ -1068,6 +1068,17 @@ conflict naming every contributing module.
 Imported pipelines are registered for later invocation.
 Non-pipeline top-level statements (fn declarations, let bindings) are executed immediately.
 
+Import cycles: modules may import each other (directly or transitively).
+A plain `import "m"` or selective `import { name } from "m"` that resolves
+to a module still mid-load is **bound late** — once every module in the
+cycle finishes loading, the name resolves for both bare references and
+calls, regardless of the order the modules happened to load in. A
+`pub import` re-export across a cycle is **not** supported: re-exporting
+must publish the name into the importing module's public surface
+immediately, but that surface does not exist yet while the cycle is
+loading, so it is a load error that names the cycle. Use a plain `import`
+inside the cycle and re-export from a module outside it.
+
 ### Static cross-module resolution
 
 `harn check`, `harn run`, `harn bench`, and the LSP build a **module graph**

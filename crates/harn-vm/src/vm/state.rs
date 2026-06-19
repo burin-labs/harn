@@ -252,6 +252,10 @@ pub struct Vm {
     pub(crate) source_dir: Option<std::path::PathBuf>,
     /// Modules currently being imported (cycle prevention).
     pub(crate) imported_paths: Vec<std::path::PathBuf>,
+    /// Imports that hit an in-progress module (an import cycle) and so could
+    /// not bind inline. Drained by `flush_deferred_cyclic_imports` once the
+    /// involved modules finish loading.
+    pub(crate) deferred_cyclic_imports: Vec<super::modules::DeferredCyclicImport>,
     /// Loaded module cache keyed by canonical or synthetic module path.
     pub(crate) module_cache: Arc<BTreeMap<std::path::PathBuf, LoadedModule>>,
     /// Source text keyed by canonical or synthetic module path for debugger retrieval.
@@ -380,6 +384,7 @@ impl VmBaseline {
             last_line: 0,
             source_dir: self.source_dir.clone(),
             imported_paths: Vec::new(),
+            deferred_cyclic_imports: Vec::new(),
             module_cache: Arc::new(BTreeMap::new()),
             source_cache: Arc::new(source_cache),
             source_file: self.source_file.clone(),
@@ -608,6 +613,7 @@ impl Vm {
             last_line: 0,
             source_dir: None,
             imported_paths: Vec::new(),
+            deferred_cyclic_imports: Vec::new(),
             module_cache: Arc::new(BTreeMap::new()),
             source_cache: Arc::new(BTreeMap::new()),
             source_file: None,
@@ -760,6 +766,7 @@ impl Vm {
             last_line: 0,
             source_dir: self.source_dir.clone(),
             imported_paths: Vec::new(),
+            deferred_cyclic_imports: Vec::new(),
             module_cache: Arc::clone(&self.module_cache),
             source_cache: Arc::clone(&self.source_cache),
             source_file: self.source_file.clone(),

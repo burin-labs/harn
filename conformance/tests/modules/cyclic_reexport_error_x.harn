@@ -1,0 +1,9 @@
+// `pub import` re-export across the b -> m -> x -> b cycle: x's public surface
+// must publish `helper` immediately, but `b` is still mid-load. This is a
+// hard error with an actionable message (unlike a plain `import`, which binds
+// late). See cyclic_import_call for the supported plain-import form.
+pub import { helper } from "cyclic_reexport_error_b"
+
+pub fn x_render() -> string {
+  return "x sees: " + helper()
+}

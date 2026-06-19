@@ -69,10 +69,28 @@ impl Vm {
         if let Some(VmValue::Closure(closure)) = self.env.get(name) {
             return Some(closure);
         }
-        self.frames
+        if let Some(closure) = self
+            .frames
             .last()
             .and_then(|frame| frame.module_functions.as_ref())
             .and_then(|registry| registry.lock().get(name).cloned())
+        {
+            return Some(closure);
+        }
+        // Module-level bindings (top-level `var`/`let` closures and imports
+        // bound late by `flush_deferred_cyclic_imports`) live in the shared
+        // `module_state`. `execute_get_var` already consults it for bare
+        // references; consulting it here keeps name *calls* consistent with
+        // name *reads* and lets cyclically-imported functions resolve.
+        if let Some(VmValue::Closure(closure)) = self
+            .frames
+            .last()
+            .and_then(|frame| frame.module_state.as_ref())
+            .and_then(|state| state.lock().get(name))
+        {
+            return Some(closure);
+        }
+        None
     }
 
     fn prepare_closure_local_slots(

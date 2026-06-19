@@ -1,0 +1,6 @@
+import { helper } from "cyclic_reexport_error_b"
+import { x_render } from "cyclic_reexport_error_x"
+
+pipeline default() {
+  __io_println(x_render())
+}
