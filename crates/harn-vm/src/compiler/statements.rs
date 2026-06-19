@@ -326,11 +326,48 @@ impl Compiler {
     ) -> Result<bool, CompileError> {
         fn is_collection(t: Option<&TypeExpr>) -> bool {
             matches!(t, Some(TypeExpr::List(_)) | Some(TypeExpr::DictType(_, _)))
+                || matches!(t, Some(TypeExpr::Named(n)) if n == "list" || n == "dict")
+        }
+        // A type whose `+` should keep its specialized scalar opcode
+        // (`i += 1`, `total += x`) rather than route through the collection
+        // concat path. `None` (unknown) is deliberately excluded so untyped
+        // accumulators still reach the in-place opcode.
+        fn is_known_scalar(t: Option<&TypeExpr>) -> bool {
+            matches!(
+                t,
+                Some(TypeExpr::Named(n))
+                    if matches!(
+                        n.as_str(),
+                        "int" | "float" | "bool" | "string" | "nil" | "decimal" | "duration"
+                    )
+            )
         }
         if !self.options.optimizations_enabled() {
             return Ok(false);
         }
         let rhs_type = self.infer_expr_type(rhs);
+
+        // Local-slot accumulator: emit the fused `ConcatAssignLocal` opcode.
+        // It reads the slot at runtime and only takes the value in place when
+        // it is actually a List/Dict, so dynamically-typed accumulators get
+        // the amortized-O(n) in-place extend too — not just statically-typed
+        // ones — while a throwing add on a scalar leaves the binding intact.
+        // Skip only when both operands are known scalars so the specialized
+        // numeric opcode keeps its fast lane.
+        if let Some(binding) = self.resolve_local_slot(name) {
+            if is_known_scalar(left_type) && is_known_scalar(rhs_type.as_ref()) {
+                return Ok(false);
+            }
+            self.compile_node(rhs)?; // [e]  (slot live: aliasing rhs sees real x)
+            self.chunk
+                .emit_u16(Op::ConcatAssignLocal, binding.slot, self.line); // x = x + e
+            return Ok(true);
+        }
+
+        // Non-local binding (module-level `var`, global): no slot to take, so
+        // fall back to clearing the binding's reference between `e` and `Add`
+        // so the runtime `try_unwrap` fast path can still fire. Gated to
+        // statically-known collections to preserve existing behavior.
         if !is_collection(left_type) && !is_collection(rhs_type.as_ref()) {
             return Ok(false);
         }

@@ -2,6 +2,8 @@
 [harn] [10, 20, 30]
 [harn] [0, 1, 2, 3, 4, 99]
 [harn] [1, 2, 1, 2]
+[harn] [1, 2]
+[harn] [1]
 [harn] {a: 1, b: 2, c: 3}
 [harn] 8
 [harn] abcd

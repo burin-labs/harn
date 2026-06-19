@@ -116,18 +116,36 @@ impl super::super::Vm {
             let cache_slot = frame.chunk.inline_cache_slot(op_offset);
             (cache_id, slot_count, cache_slot)
         };
+        let b = self.pop()?;
+        let a = self.pop()?;
+        let result = self.adaptive_binary_compute(op, a, b, cache_id, slot_count, cache_slot)?;
+        self.stack.push(result);
+        Ok(())
+    }
+
+    /// Shared adaptive-binary core: apply `op` to owned `a`/`b`, consulting and
+    /// updating the inline cache slot. Split out of [`Vm::execute_adaptive_binary`]
+    /// so other opcodes that synthesize a binary op on operands they already
+    /// hold — notably `ConcatAssignLocal` for the `x = x + e` / `x += e`
+    /// accumulator — keep the same specialization (e.g. `Int`/`Float` add
+    /// quickening) instead of falling back to the generic match on every call.
+    pub(super) fn adaptive_binary_compute(
+        &mut self,
+        op: AdaptiveBinaryOp,
+        a: VmValue,
+        b: VmValue,
+        cache_id: u64,
+        slot_count: usize,
+        cache_slot: Option<usize>,
+    ) -> Result<VmValue, VmError> {
         let cached_state = cache_slot
             .and_then(|slot| self.peek_adaptive_binary_cache_by_key(cache_id, slot_count, slot))
             .filter(|(cached_op, _)| *cached_op == op)
             .map(|(_, state)| state);
 
-        let b = self.pop()?;
-        let a = self.pop()?;
         let shape = BinaryShape::for_values(op, &a, &b);
 
-        let result = if let Some((result, next_state)) =
-            Self::try_specialized_binary(op, cached_state, &a, &b)
-        {
+        if let Some((result, next_state)) = Self::try_specialized_binary(op, cached_state, &a, &b) {
             if let Some(slot) = cache_slot {
                 self.set_inline_cache_entry_by_key(
                     cache_id,
@@ -139,7 +157,7 @@ impl super::super::Vm {
                     },
                 );
             }
-            result
+            Ok(result)
         } else {
             let result = Self::generic_binary_result(self, op, a, b)?;
             if let (Some(slot), Some(shape)) = (cache_slot, shape) {
@@ -154,11 +172,8 @@ impl super::super::Vm {
                     },
                 );
             }
-            result
-        };
-
-        self.stack.push(result);
-        Ok(())
+            Ok(result)
+        }
     }
 
     /// Adaptive-binary specialization fast path. The caller supplies the
