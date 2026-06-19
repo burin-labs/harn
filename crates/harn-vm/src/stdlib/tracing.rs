@@ -98,7 +98,7 @@ fn trace_start_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     span.put_str("trace_id", trace_id);
     span.put_str("span_id", span_id);
     span.put_str("name", name);
-    span.insert("start_ms".to_string(), VmValue::Int(start_ms));
+    span.insert(crate::value::intern_key("start_ms"), VmValue::Int(start_ms));
     Ok(VmValue::dict(span))
 }
 
@@ -111,7 +111,10 @@ fn trace_end_impl(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError
         fields.put_str("trace_id", trace_id);
         fields.put_str("span_id", span_id);
         fields.put_str("name", name);
-        fields.insert("duration_ms".to_string(), VmValue::Int(duration_ms));
+        fields.insert(
+            crate::value::intern_key("duration_ms"),
+            VmValue::Int(duration_ms),
+        );
         let line = vm_build_log_line("info", "span_end", Some(&fields));
         out.push_str(&line);
     }
@@ -140,7 +143,10 @@ fn llm_info_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     let mut info = crate::value::DictMap::new();
     info.put_str("provider", provider);
     info.put_str("model", model);
-    info.insert("api_key_set".to_string(), VmValue::Bool(api_key_set));
+    info.insert(
+        crate::value::intern_key("api_key_set"),
+        VmValue::Bool(api_key_set),
+    );
     Ok(VmValue::dict(info))
 }
 
@@ -198,14 +204,26 @@ fn lifecycle_span_end_impl(args: &[VmValue], _out: &mut String) -> Result<VmValu
 fn llm_usage_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let (total_input, total_output, total_duration, call_count) = crate::llm::peek_trace_summary();
     let mut usage = crate::value::DictMap::new();
-    usage.insert("input_tokens".to_string(), VmValue::Int(total_input));
-    usage.insert("output_tokens".to_string(), VmValue::Int(total_output));
     usage.insert(
-        "total_duration_ms".to_string(),
+        crate::value::intern_key("input_tokens"),
+        VmValue::Int(total_input),
+    );
+    usage.insert(
+        crate::value::intern_key("output_tokens"),
+        VmValue::Int(total_output),
+    );
+    usage.insert(
+        crate::value::intern_key("total_duration_ms"),
         VmValue::Int(total_duration),
     );
-    usage.insert("call_count".to_string(), VmValue::Int(call_count));
-    usage.insert("total_calls".to_string(), VmValue::Int(call_count));
+    usage.insert(
+        crate::value::intern_key("call_count"),
+        VmValue::Int(call_count),
+    );
+    usage.insert(
+        crate::value::intern_key("total_calls"),
+        VmValue::Int(call_count),
+    );
     Ok(VmValue::dict(usage))
 }
 

@@ -462,7 +462,7 @@ mod tests {
     fn dict(pairs: &[(&str, VmValue)]) -> VmValue {
         let mut map: harn_vm::value::DictMap = Default::default();
         for (k, v) in pairs {
-            map.insert((*k).to_string(), v.clone());
+            map.insert(harn_vm::value::intern_key(k), v.clone());
         }
         VmValue::dict(map)
     }

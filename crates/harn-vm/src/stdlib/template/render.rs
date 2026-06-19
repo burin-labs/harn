@@ -210,17 +210,23 @@ fn render_node(
                 let length = items.len() as i64;
                 for (idx, (k, val)) in items.iter().enumerate() {
                     let mut layer: crate::value::DictMap = crate::value::DictMap::new();
-                    layer.insert(value_var.clone(), val.clone());
+                    layer.insert(crate::value::intern_key(value_var), val.clone());
                     if let Some(kv) = key_var {
-                        layer.insert(kv.clone(), k.clone());
+                        layer.insert(crate::value::intern_key(kv), k.clone());
                     }
                     let mut loop_map: crate::value::DictMap = crate::value::DictMap::new();
-                    loop_map.insert("index".into(), VmValue::Int(idx as i64 + 1));
-                    loop_map.insert("index0".into(), VmValue::Int(idx as i64));
-                    loop_map.insert("first".into(), VmValue::Bool(idx == 0));
-                    loop_map.insert("last".into(), VmValue::Bool(idx as i64 == length - 1));
-                    loop_map.insert("length".into(), VmValue::Int(length));
-                    layer.insert("loop".into(), VmValue::dict(loop_map));
+                    loop_map.insert(
+                        crate::value::intern_key("index"),
+                        VmValue::Int(idx as i64 + 1),
+                    );
+                    loop_map.insert(crate::value::intern_key("index0"), VmValue::Int(idx as i64));
+                    loop_map.insert(crate::value::intern_key("first"), VmValue::Bool(idx == 0));
+                    loop_map.insert(
+                        crate::value::intern_key("last"),
+                        VmValue::Bool(idx as i64 == length - 1),
+                    );
+                    loop_map.insert(crate::value::intern_key("length"), VmValue::Int(length));
+                    layer.insert(crate::value::intern_key("loop"), VmValue::dict(loop_map));
                     scope.push(layer);
                     let iter_start = out.len();
                     let res = render_nodes(body, scope, rc, out, spans.as_deref_mut());
@@ -284,7 +290,7 @@ fn render_node(
             if let Some(pairs) = with {
                 for (k, e) in pairs {
                     let v = eval_expr(e, scope, *line, *col)?;
-                    child_bindings.insert(k.clone(), v);
+                    child_bindings.insert(crate::value::intern_key(k), v);
                 }
             }
             let child_nodes = super::assets::parse_cached(&asset)?;
@@ -337,7 +343,10 @@ fn render_node(
         } => {
             let mut evaluated_args = crate::value::DictMap::new();
             for (key, expr) in args {
-                evaluated_args.insert(key.clone(), eval_expr(expr, scope, *line, *col)?);
+                evaluated_args.insert(
+                    crate::value::intern_key(key),
+                    eval_expr(expr, scope, *line, *col)?,
+                );
             }
             let mut body_out = String::new();
             let mut body_spans = spans.as_ref().map(|_| Vec::new());
@@ -575,8 +584,12 @@ fn resolve_path(segs: &[PathSeg], scope: &Scope<'_>) -> VmValue {
     };
     for seg in &segs[1..] {
         cur = match (seg, &cur) {
-            (PathSeg::Field(n), VmValue::Dict(d)) => d.get(n).cloned().unwrap_or(VmValue::Nil),
-            (PathSeg::Key(k), VmValue::Dict(d)) => d.get(k).cloned().unwrap_or(VmValue::Nil),
+            (PathSeg::Field(n), VmValue::Dict(d)) => {
+                d.get(n.as_str()).cloned().unwrap_or(VmValue::Nil)
+            }
+            (PathSeg::Key(k), VmValue::Dict(d)) => {
+                d.get(k.as_str()).cloned().unwrap_or(VmValue::Nil)
+            }
             (PathSeg::Index(i), VmValue::List(items)) => {
                 let idx = if *i < 0 { items.len() as i64 + *i } else { *i };
                 if idx < 0 || (idx as usize) >= items.len() {

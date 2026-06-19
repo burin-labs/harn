@@ -231,7 +231,7 @@ fn fork_worker_transcript(transcript: VmValue) -> VmValue {
                 VmValue::String(arcstr::ArcStr::from(parent_id)),
             )])),
         };
-        next.insert("metadata".to_string(), metadata);
+        next.insert(crate::value::intern_key("metadata"), metadata);
     }
     VmValue::dict(next)
 }
@@ -286,11 +286,11 @@ pub(in super::super) async fn compact_worker_transcript(
     events.extend(outcome.reminder_report.preserved_events);
     let mut next = dict.clone();
     next.insert(
-        "messages".to_string(),
+        crate::value::intern_key("messages"),
         VmValue::List(std::sync::Arc::new(vm_messages)),
     );
     next.insert(
-        "events".to_string(),
+        crate::value::intern_key("events"),
         VmValue::List(std::sync::Arc::new(events)),
     );
     next.put_str("summary", outcome.summary);

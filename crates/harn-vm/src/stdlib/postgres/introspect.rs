@@ -210,17 +210,26 @@ async fn pg_pool_stats_impl(
     let in_use = (size as usize).saturating_sub(idle);
 
     let mut dict = crate::value::DictMap::new();
-    dict.insert("size".to_string(), VmValue::Int(i64::from(size)));
-    dict.insert("idle".to_string(), VmValue::Int(idle as i64));
-    dict.insert("in_use".to_string(), VmValue::Int(in_use as i64));
-    dict.insert("max_connections".to_string(), VmValue::Int(i64::from(max)));
     dict.insert(
-        "statement_cache_capacity".to_string(),
+        crate::value::intern_key("size"),
+        VmValue::Int(i64::from(size)),
+    );
+    dict.insert(crate::value::intern_key("idle"), VmValue::Int(idle as i64));
+    dict.insert(
+        crate::value::intern_key("in_use"),
+        VmValue::Int(in_use as i64),
+    );
+    dict.insert(
+        crate::value::intern_key("max_connections"),
+        VmValue::Int(i64::from(max)),
+    );
+    dict.insert(
+        crate::value::intern_key("statement_cache_capacity"),
         VmValue::Int(record.statement_cache_capacity as i64),
     );
     dict.put_str("read_routing_policy", record.read_routing_policy.as_str());
     dict.insert(
-        "replicas".to_string(),
+        crate::value::intern_key("replicas"),
         VmValue::Int(record.replicas.len() as i64),
     );
     if !record.replicas.is_empty() {
@@ -229,24 +238,30 @@ async fn pg_pool_stats_impl(
             .iter()
             .map(|pool| {
                 let mut entry = crate::value::DictMap::new();
-                entry.insert("size".to_string(), VmValue::Int(i64::from(pool.size())));
-                entry.insert("idle".to_string(), VmValue::Int(pool.num_idle() as i64));
+                entry.insert(
+                    crate::value::intern_key("size"),
+                    VmValue::Int(i64::from(pool.size())),
+                );
+                entry.insert(
+                    crate::value::intern_key("idle"),
+                    VmValue::Int(pool.num_idle() as i64),
+                );
                 VmValue::dict(entry)
             })
             .collect();
         dict.insert(
-            "replica_stats".to_string(),
+            crate::value::intern_key("replica_stats"),
             VmValue::List(std::sync::Arc::new(replica_stats)),
         );
     }
     let circuit_state = record.circuit.snapshot();
     dict.put_str("circuit_state", circuit_state.state);
     dict.insert(
-        "circuit_failures".to_string(),
+        crate::value::intern_key("circuit_failures"),
         VmValue::Int(circuit_state.failures as i64),
     );
     dict.insert(
-        "circuit_opened_at_ms".to_string(),
+        crate::value::intern_key("circuit_opened_at_ms"),
         circuit_state
             .opened_at_ms
             .map(VmValue::Int)
@@ -920,11 +935,11 @@ mod tests {
     fn render_bounds_clause_handles_three_shapes() {
         let from_to = crate::value::DictMap::from_iter([
             (
-                "from".to_string(),
+                crate::value::intern_key("from"),
                 VmValue::String(arcstr::ArcStr::from("2026-01-01")),
             ),
             (
-                "to".to_string(),
+                crate::value::intern_key("to"),
                 VmValue::String(arcstr::ArcStr::from("2026-02-01")),
             ),
         ]);
@@ -933,15 +948,17 @@ mod tests {
             "FOR VALUES FROM ('2026-01-01') TO ('2026-02-01')"
         );
         let in_clause = crate::value::DictMap::from_iter([(
-            "in".to_string(),
+            crate::value::intern_key("in"),
             VmValue::List(std::sync::Arc::new(vec![VmValue::Int(1), VmValue::Int(2)])),
         )]);
         assert_eq!(
             render_bounds_clause(&in_clause).unwrap(),
             "FOR VALUES IN (1, 2)"
         );
-        let default =
-            crate::value::DictMap::from_iter([("default".to_string(), VmValue::Bool(true))]);
+        let default = crate::value::DictMap::from_iter([(
+            crate::value::intern_key("default"),
+            VmValue::Bool(true),
+        )]);
         assert_eq!(render_bounds_clause(&default).unwrap(), "DEFAULT");
         let bad = crate::value::DictMap::new();
         assert!(render_bounds_clause(&bad).is_err());
@@ -958,8 +975,8 @@ mod tests {
     #[test]
     fn render_bounds_clause_handles_hash() {
         let hash = crate::value::DictMap::from_iter([
-            ("modulus".to_string(), VmValue::Int(4)),
-            ("remainder".to_string(), VmValue::Int(0)),
+            (crate::value::intern_key("modulus"), VmValue::Int(4)),
+            (crate::value::intern_key("remainder"), VmValue::Int(0)),
         ]);
         assert_eq!(
             render_bounds_clause(&hash).unwrap(),
@@ -967,14 +984,14 @@ mod tests {
         );
         // remainder must be strictly less than modulus.
         let bad_remainder = crate::value::DictMap::from_iter([
-            ("modulus".to_string(), VmValue::Int(4)),
-            ("remainder".to_string(), VmValue::Int(4)),
+            (crate::value::intern_key("modulus"), VmValue::Int(4)),
+            (crate::value::intern_key("remainder"), VmValue::Int(4)),
         ]);
         assert!(render_bounds_clause(&bad_remainder).is_err());
         // modulus must be >= 1.
         let zero_modulus = crate::value::DictMap::from_iter([
-            ("modulus".to_string(), VmValue::Int(0)),
-            ("remainder".to_string(), VmValue::Int(0)),
+            (crate::value::intern_key("modulus"), VmValue::Int(0)),
+            (crate::value::intern_key("remainder"), VmValue::Int(0)),
         ]);
         assert!(render_bounds_clause(&zero_modulus).is_err());
     }
@@ -1020,9 +1037,15 @@ mod tests {
         let now = chrono::DateTime::parse_from_rfc3339("2026-05-28T12:34:56Z")
             .unwrap()
             .with_timezone(&chrono::Utc);
-        let days = crate::value::DictMap::from_iter([("keep_days".to_string(), VmValue::Int(90))]);
+        let days = crate::value::DictMap::from_iter([(
+            crate::value::intern_key("keep_days"),
+            VmValue::Int(90),
+        )]);
         assert_eq!(retention_cutoff(&days, now).unwrap(), "2026-02-27");
-        let hours = crate::value::DictMap::from_iter([("keep_hours".to_string(), VmValue::Int(6))]);
+        let hours = crate::value::DictMap::from_iter([(
+            crate::value::intern_key("keep_hours"),
+            VmValue::Int(6),
+        )]);
         assert_eq!(
             retention_cutoff(&hours, now).unwrap(),
             "2026-05-28 06:00:00"

@@ -284,11 +284,11 @@ mod cache_key_identity_tests {
     fn base_options() -> crate::value::DictMap {
         let mut map = crate::value::DictMap::new();
         map.insert(
-            "provider".to_string(),
+            crate::value::intern_key("provider"),
             VmValue::String(arcstr::ArcStr::from("mock")),
         );
         map.insert(
-            "model".to_string(),
+            crate::value::intern_key("model"),
             VmValue::String(arcstr::ArcStr::from("mock")),
         );
         map
@@ -310,7 +310,7 @@ mod cache_key_identity_tests {
         let without = key("hello", dict(base_options()));
         let mut with_tools = base_options();
         with_tools.insert(
-            "tools".to_string(),
+            crate::value::intern_key("tools"),
             VmValue::List(Arc::new(vec![VmValue::String(arcstr::ArcStr::from(
                 "read_file",
             ))])),
@@ -324,7 +324,7 @@ mod cache_key_identity_tests {
         let without = key("hello", dict(base_options()));
         let mut with_schema = base_options();
         with_schema.insert(
-            "json_schema".to_string(),
+            crate::value::intern_key("json_schema"),
             VmValue::String(arcstr::ArcStr::from(r#"{"type":"object"}"#)),
         );
         let with = key("hello", dict(with_schema));
@@ -336,7 +336,7 @@ mod cache_key_identity_tests {
         let without = key("hello", dict(base_options()));
         let mut with_stop = base_options();
         with_stop.insert(
-            "stop".to_string(),
+            crate::value::intern_key("stop"),
             VmValue::List(Arc::new(vec![VmValue::String(arcstr::ArcStr::from(
                 "\n\n",
             ))])),

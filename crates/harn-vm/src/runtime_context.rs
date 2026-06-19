@@ -138,7 +138,7 @@ fn runtime_context_get(vm: &crate::vm::Vm, args: &[VmValue]) -> Result<VmValue, 
     Ok(vm
         .runtime_context
         .values
-        .get(&key)
+        .get(key.as_str())
         .cloned()
         .or_else(|| args.get(1).cloned())
         .unwrap_or(VmValue::Nil))
@@ -150,7 +150,7 @@ fn runtime_context_set(vm: &mut crate::vm::Vm, args: &[VmValue]) -> Result<VmVal
     Ok(vm
         .runtime_context
         .values
-        .insert(key, value)
+        .insert(crate::value::intern_key(&key), value)
         .unwrap_or(VmValue::Nil))
 }
 
@@ -159,7 +159,7 @@ fn runtime_context_clear(vm: &mut crate::vm::Vm, args: &[VmValue]) -> Result<VmV
     Ok(vm
         .runtime_context
         .values
-        .remove(&key)
+        .remove(key.as_str())
         .unwrap_or(VmValue::Nil))
 }
 
@@ -309,20 +309,29 @@ pub(crate) fn runtime_context_value(vm: &crate::vm::Vm) -> VmValue {
     insert_string(&mut values, "runner", None);
     insert_string(&mut values, "capacity_class", None);
     values.insert(
-        "context_values".to_string(),
+        crate::value::intern_key("context_values"),
         VmValue::dict(vm.runtime_context.values.clone()),
     );
-    values.insert("cancelled".to_string(), VmValue::Bool(cancelled));
-    values.insert("debug".to_string(), debug_context_value(vm, cancelled));
+    values.insert(
+        crate::value::intern_key("cancelled"),
+        VmValue::Bool(cancelled),
+    );
+    values.insert(
+        crate::value::intern_key("debug"),
+        debug_context_value(vm, cancelled),
+    );
     VmValue::dict(values)
 }
 
 fn debug_context_value(vm: &crate::vm::Vm, cancelled: bool) -> VmValue {
     let mut debug = crate::value::DictMap::new();
-    debug.insert("cancelled".to_string(), VmValue::Bool(cancelled));
-    debug.insert("waiting_reason".to_string(), VmValue::Nil);
     debug.insert(
-        "active_task_ids".to_string(),
+        crate::value::intern_key("cancelled"),
+        VmValue::Bool(cancelled),
+    );
+    debug.insert(crate::value::intern_key("waiting_reason"), VmValue::Nil);
+    debug.insert(
+        crate::value::intern_key("active_task_ids"),
         VmValue::List(std::sync::Arc::new(
             vm.spawned_tasks
                 .keys()
@@ -331,11 +340,11 @@ fn debug_context_value(vm: &crate::vm::Vm, cancelled: bool) -> VmValue {
         )),
     );
     debug.insert(
-        "held_synchronization".to_string(),
+        crate::value::intern_key("held_synchronization"),
         VmValue::List(std::sync::Arc::new(Vec::new())),
     );
     debug.insert(
-        "supervisors".to_string(),
+        crate::value::intern_key("supervisors"),
         crate::stdlib::supervisor::supervisor_debug_values(),
     );
     VmValue::dict(debug)
@@ -343,7 +352,7 @@ fn debug_context_value(vm: &crate::vm::Vm, cancelled: bool) -> VmValue {
 
 fn insert_string(values: &mut crate::value::DictMap, key: &str, value: Option<String>) {
     values.insert(
-        key.to_string(),
+        crate::value::intern_key(key),
         value
             .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
             .unwrap_or(VmValue::Nil),

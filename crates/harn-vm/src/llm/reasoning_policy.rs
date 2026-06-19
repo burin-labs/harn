@@ -67,11 +67,11 @@ pub(crate) fn apply_policy_to_vm_options(
     };
     let mut out = opts.clone();
     out.insert(
-        "thinking".to_string(),
+        crate::value::intern_key("thinking"),
         thinking_to_vm_value(&application.thinking),
     );
     out.insert(
-        "_agent_reasoning_policy_applied".to_string(),
+        crate::value::intern_key("_agent_reasoning_policy_applied"),
         application_metadata_to_vm_value(&application),
     );
     Ok(out)
@@ -415,33 +415,33 @@ fn resolved_route_from_options(opts: &crate::value::DictMap) -> Option<(String, 
 fn thinking_to_vm_value(thinking: &ThinkingConfig) -> VmValue {
     match thinking {
         ThinkingConfig::Disabled => VmValue::dict(crate::value::DictMap::from_iter([(
-            "mode".to_string(),
+            crate::value::intern_key("mode"),
             VmValue::String(arcstr::ArcStr::from("disabled")),
         )])),
         ThinkingConfig::Enabled { budget_tokens } => {
             let mut dict = crate::value::DictMap::from_iter([(
-                "mode".to_string(),
+                crate::value::intern_key("mode"),
                 VmValue::String(arcstr::ArcStr::from("enabled")),
             )]);
             if let Some(budget_tokens) = budget_tokens {
                 dict.insert(
-                    "budget_tokens".to_string(),
+                    crate::value::intern_key("budget_tokens"),
                     VmValue::Int(*budget_tokens as i64),
                 );
             }
             VmValue::dict(dict)
         }
         ThinkingConfig::Adaptive => VmValue::dict(crate::value::DictMap::from_iter([(
-            "mode".to_string(),
+            crate::value::intern_key("mode"),
             VmValue::String(arcstr::ArcStr::from("adaptive")),
         )])),
         ThinkingConfig::Effort { level } => VmValue::dict(crate::value::DictMap::from_iter([
             (
-                "mode".to_string(),
+                crate::value::intern_key("mode"),
                 VmValue::String(arcstr::ArcStr::from("effort")),
             ),
             (
-                "level".to_string(),
+                crate::value::intern_key("level"),
                 VmValue::String(arcstr::ArcStr::from(level.as_str())),
             ),
         ])),
@@ -451,27 +451,27 @@ fn thinking_to_vm_value(thinking: &ThinkingConfig) -> VmValue {
 fn application_metadata_to_vm_value(application: &ReasoningPolicyApplication) -> VmValue {
     VmValue::dict(crate::value::DictMap::from_iter([
         (
-            "policy".to_string(),
+            crate::value::intern_key("policy"),
             VmValue::String(arcstr::ArcStr::from(application.policy.clone())),
         ),
         (
-            "task".to_string(),
+            crate::value::intern_key("task"),
             VmValue::String(arcstr::ArcStr::from(application.task.clone())),
         ),
         (
-            "scale".to_string(),
+            crate::value::intern_key("scale"),
             VmValue::String(arcstr::ArcStr::from(application.scale.clone())),
         ),
         (
-            "level".to_string(),
+            crate::value::intern_key("level"),
             VmValue::String(arcstr::ArcStr::from(application.level.clone())),
         ),
         (
-            "provider".to_string(),
+            crate::value::intern_key("provider"),
             VmValue::String(arcstr::ArcStr::from(application.provider.clone())),
         ),
         (
-            "model".to_string(),
+            crate::value::intern_key("model"),
             VmValue::String(arcstr::ArcStr::from(application.model.clone())),
         ),
     ]))
@@ -489,15 +489,15 @@ mod tests {
     fn high_policy_maps_to_effort_for_openai_reasoning_models() {
         let opts = crate::value::DictMap::from_iter([
             (
-                "provider".to_string(),
+                crate::value::intern_key("provider"),
                 VmValue::String(arcstr::ArcStr::from("openai")),
             ),
             (
-                "model".to_string(),
+                crate::value::intern_key("model"),
                 VmValue::String(arcstr::ArcStr::from("gpt-5")),
             ),
             (
-                "reasoning_policy".to_string(),
+                crate::value::intern_key("reasoning_policy"),
                 VmValue::String(arcstr::ArcStr::from("high")),
             ),
         ]);
@@ -520,15 +520,15 @@ mod tests {
     fn off_policy_floors_to_low_for_cerebras_gpt_oss() {
         let opts = crate::value::DictMap::from_iter([
             (
-                "provider".to_string(),
+                crate::value::intern_key("provider"),
                 VmValue::String(arcstr::ArcStr::from("cerebras")),
             ),
             (
-                "model".to_string(),
+                crate::value::intern_key("model"),
                 VmValue::String(arcstr::ArcStr::from("gpt-oss-120b")),
             ),
             (
-                "reasoning_policy".to_string(),
+                crate::value::intern_key("reasoning_policy"),
                 VmValue::String(arcstr::ArcStr::from("off")),
             ),
         ]);
@@ -568,19 +568,19 @@ mod tests {
         // `local_qwen_route` branch in resolve_policy.
         let opts = crate::value::DictMap::from_iter([
             (
-                "provider".to_string(),
+                crate::value::intern_key("provider"),
                 VmValue::String(arcstr::ArcStr::from("ollama")),
             ),
             (
-                "model".to_string(),
+                crate::value::intern_key("model"),
                 VmValue::String(arcstr::ArcStr::from("qwen3.6:35b-a3b-coding-nvfp4")),
             ),
             (
-                "reasoning_policy".to_string(),
+                crate::value::intern_key("reasoning_policy"),
                 VmValue::String(arcstr::ArcStr::from("auto")),
             ),
             (
-                "reasoning_task".to_string(),
+                crate::value::intern_key("reasoning_task"),
                 VmValue::String(arcstr::ArcStr::from("agent")),
             ),
         ]);
@@ -613,19 +613,19 @@ mod tests {
         // motivated this work).
         let opts = crate::value::DictMap::from_iter([
             (
-                "provider".to_string(),
+                crate::value::intern_key("provider"),
                 VmValue::String(arcstr::ArcStr::from("openrouter")),
             ),
             (
-                "model".to_string(),
+                crate::value::intern_key("model"),
                 VmValue::String(arcstr::ArcStr::from("qwen/qwen3.6-35b-a3b")),
             ),
             (
-                "reasoning_policy".to_string(),
+                crate::value::intern_key("reasoning_policy"),
                 VmValue::String(arcstr::ArcStr::from("auto")),
             ),
             (
-                "reasoning_task".to_string(),
+                crate::value::intern_key("reasoning_task"),
                 VmValue::String(arcstr::ArcStr::from("agent")),
             ),
         ]);
@@ -648,19 +648,19 @@ mod tests {
         // override declares the auto default, not a ceiling.
         let opts = crate::value::DictMap::from_iter([
             (
-                "provider".to_string(),
+                crate::value::intern_key("provider"),
                 VmValue::String(arcstr::ArcStr::from("openrouter")),
             ),
             (
-                "model".to_string(),
+                crate::value::intern_key("model"),
                 VmValue::String(arcstr::ArcStr::from("qwen/qwen3.6-35b-a3b")),
             ),
             (
-                "reasoning_policy".to_string(),
+                crate::value::intern_key("reasoning_policy"),
                 VmValue::String(arcstr::ArcStr::from("high")),
             ),
             (
-                "reasoning_task".to_string(),
+                crate::value::intern_key("reasoning_task"),
                 VmValue::String(arcstr::ArcStr::from("agent")),
             ),
         ]);
@@ -695,19 +695,19 @@ auto_reasoning_overrides = { agent = "off" }
         .expect("override toml");
         let opts = crate::value::DictMap::from_iter([
             (
-                "provider".to_string(),
+                crate::value::intern_key("provider"),
                 VmValue::String(arcstr::ArcStr::from("acme")),
             ),
             (
-                "model".to_string(),
+                crate::value::intern_key("model"),
                 VmValue::String(arcstr::ArcStr::from("custom-thinker")),
             ),
             (
-                "reasoning_policy".to_string(),
+                crate::value::intern_key("reasoning_policy"),
                 VmValue::String(arcstr::ArcStr::from("auto")),
             ),
             (
-                "reasoning_task".to_string(),
+                crate::value::intern_key("reasoning_task"),
                 VmValue::String(arcstr::ArcStr::from("agent")),
             ),
         ]);
@@ -726,19 +726,19 @@ auto_reasoning_overrides = { agent = "off" }
     fn agent_opts(provider: &str, model: &str, task: &str, policy: &str) -> crate::value::DictMap {
         crate::value::DictMap::from_iter([
             (
-                "provider".to_string(),
+                crate::value::intern_key("provider"),
                 VmValue::String(arcstr::ArcStr::from(provider)),
             ),
             (
-                "model".to_string(),
+                crate::value::intern_key("model"),
                 VmValue::String(arcstr::ArcStr::from(model)),
             ),
             (
-                "reasoning_policy".to_string(),
+                crate::value::intern_key("reasoning_policy"),
                 VmValue::String(arcstr::ArcStr::from(policy)),
             ),
             (
-                "reasoning_task".to_string(),
+                crate::value::intern_key("reasoning_task"),
                 VmValue::String(arcstr::ArcStr::from(task)),
             ),
         ])
@@ -850,18 +850,18 @@ auto_reasoning_overrides = { agent = "off" }
     fn explicit_thinking_wins_over_policy() {
         let opts = crate::value::DictMap::from_iter([
             (
-                "provider".to_string(),
+                crate::value::intern_key("provider"),
                 VmValue::String(arcstr::ArcStr::from("openai")),
             ),
             (
-                "model".to_string(),
+                crate::value::intern_key("model"),
                 VmValue::String(arcstr::ArcStr::from("gpt-5")),
             ),
             (
-                "reasoning_policy".to_string(),
+                crate::value::intern_key("reasoning_policy"),
                 VmValue::String(arcstr::ArcStr::from("high")),
             ),
-            ("thinking".to_string(), VmValue::Bool(true)),
+            (crate::value::intern_key("thinking"), VmValue::Bool(true)),
         ]);
         let out = apply_policy_to_vm_options(&opts).expect("policy");
         assert!(matches!(out.get("thinking"), Some(VmValue::Bool(true))));

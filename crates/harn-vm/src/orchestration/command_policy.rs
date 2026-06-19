@@ -134,19 +134,19 @@ pub fn normalize_command_policy_value(config: &VmValue) -> Result<VmValue, VmErr
     };
     let mut normalized = (*map).clone();
     normalized
-        .entry("_type".to_string())
+        .entry(crate::value::intern_key("_type"))
         .or_insert_with(|| VmValue::String(arcstr::ArcStr::from("command_policy")));
     normalized
-        .entry("default_shell_mode".to_string())
+        .entry(crate::value::intern_key("default_shell_mode"))
         .or_insert_with(|| VmValue::String(arcstr::ArcStr::from(DEFAULT_SHELL_MODE)));
     normalized
-        .entry("workspace_roots".to_string())
+        .entry(crate::value::intern_key("workspace_roots"))
         .or_insert_with(|| VmValue::List(std::sync::Arc::new(Vec::new())));
     normalized
-        .entry("deny_patterns".to_string())
+        .entry(crate::value::intern_key("deny_patterns"))
         .or_insert_with(|| VmValue::List(std::sync::Arc::new(Vec::new())));
     normalized
-        .entry("require_approval".to_string())
+        .entry(crate::value::intern_key("require_approval"))
         .or_insert_with(|| VmValue::List(std::sync::Arc::new(Vec::new())));
     parse_command_policy_value(Some(&VmValue::dict(normalized.clone())), "command_policy")?;
     Ok(VmValue::dict(normalized))
@@ -540,7 +540,7 @@ fn attach_policy_audit(
         audit["annotation"] = annotation;
     }
     out.insert(
-        "command_policy".to_string(),
+        crate::value::intern_key("command_policy"),
         crate::stdlib::json_to_vm_value(&audit),
     );
     VmValue::dict(out)
@@ -805,7 +805,7 @@ fn command_request_json(params: &crate::value::DictMap) -> JsonValue {
     if let Some(env) = params.get("env").and_then(|value| value.as_dict()) {
         for (key, value) in env.iter() {
             env_diff.insert(
-                key.clone(),
+                key.to_string(),
                 serde_json::json!({
                     "present": true,
                     "redacted": true,
@@ -1161,7 +1161,7 @@ fn redacted_vm_request(params: &crate::value::DictMap) -> crate::value::DictMap 
     params
         .iter()
         .map(|(key, value)| {
-            if key == "env" || key == "stdin" {
+            if key.as_str() == "env" || key.as_str() == "stdin" {
                 (
                     key.clone(),
                     VmValue::String(arcstr::ArcStr::from("<redacted>")),

@@ -439,7 +439,7 @@ fn run_command_argv_must_be_strings() {
 
 #[test]
 fn run_command_rejects_out_of_range_capture_limit() {
-    let mut capture = BTreeMap::new();
+    let mut capture: BTreeMap<String, VmValue> = BTreeMap::new();
     capture.insert("max_inline_bytes".into(), VmValue::Float(1.0e100));
 
     let mut req = dict();
@@ -998,7 +998,7 @@ fn cancel_handle_can_wait_for_timed_out_result() {
     start_req.insert("argv".into(), vlist_str(&["sleep", "30"]));
     start_req.insert("background".into(), VmValue::Bool(true));
     start_req.insert("capture".into(), {
-        let mut capture = BTreeMap::new();
+        let mut capture: BTreeMap<String, VmValue> = BTreeMap::new();
         capture.insert("max_inline_bytes".into(), VmValue::Int(200));
         VmValue::dict(capture)
     });

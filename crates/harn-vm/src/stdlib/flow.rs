@@ -355,7 +355,7 @@ fn value_to_json(value: &VmValue) -> serde_json::Value {
         VmValue::Dict(map) => {
             let mut object = BTreeMap::new();
             for (key, item) in map.iter() {
-                object.insert(key.clone(), value_to_json(item));
+                object.insert(key.to_string(), value_to_json(item));
             }
             serde_json::Value::Object(object.into_iter().collect())
         }

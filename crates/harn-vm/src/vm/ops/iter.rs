@@ -39,7 +39,7 @@ impl super::super::Vm {
                     .push(super::super::IterState::Vec { items, idx: 0 });
             }
             VmValue::Dict(map) => {
-                let keys = map.keys().cloned().collect();
+                let keys = map.keys().map(|k| k.to_string()).collect();
                 self.iterators.push(super::super::IterState::Dict {
                     entries: map,
                     keys,
@@ -131,13 +131,13 @@ impl super::super::Vm {
             Some(super::super::IterState::Dict { entries, keys, idx }) => {
                 if *idx < keys.len() {
                     let key = &keys[*idx];
-                    let value = entries.get(key).cloned().unwrap_or(VmValue::Nil);
+                    let value = entries.get(key.as_str()).cloned().unwrap_or(VmValue::Nil);
                     let entry_key = VmValue::String(arcstr::ArcStr::from(key.as_str()));
                     *idx += 1;
                     self.stack
                         .push(VmValue::dict(crate::value::DictMap::from_iter([
-                            ("key".to_string(), entry_key),
-                            ("value".to_string(), value),
+                            (crate::value::intern_key("key"), entry_key),
+                            (crate::value::intern_key("value"), value),
                         ])));
                 } else {
                     self.iterators.pop();
@@ -374,8 +374,8 @@ mod tests {
     fn iter_init_dict_keeps_shared_entries_and_snapshots_keys() {
         run_iter_init_test(async {
             let entries = Arc::new(crate::value::DictMap::from_iter([
-                ("a".to_string(), VmValue::Int(1)),
-                ("b".to_string(), VmValue::Int(2)),
+                (crate::value::intern_key("a"), VmValue::Int(1)),
+                (crate::value::intern_key("b"), VmValue::Int(2)),
             ]));
             let mut vm = Vm::new();
             vm.stack.push(VmValue::Dict(entries.clone()));

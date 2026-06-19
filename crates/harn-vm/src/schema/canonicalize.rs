@@ -25,7 +25,7 @@ pub(super) fn resolve_canonical_ref_with_path(
         let decoded = segment.replace("~1", "/").replace("~0", "~");
         normalized_segments.push(encode_json_pointer_segment(&decoded));
         current = match current {
-            VmValue::Dict(ref map) => map.get(&decoded)?.clone(),
+            VmValue::Dict(ref map) => map.get(decoded.as_str())?.clone(),
             VmValue::List(ref list) => {
                 let idx = decoded.parse::<usize>().ok()?;
                 list.get(idx)?.clone()
@@ -88,13 +88,13 @@ fn canonicalize_schema_dict(
         "x-harn-type",
     ] {
         if let Some(value) = schema.get(key) {
-            out.insert(key.to_string(), value.clone());
+            out.insert(crate::value::intern_key(key), value.clone());
         }
     }
 
     if let Some(reference) = schema.get("$ref") {
         traversal.mark_ref();
-        out.insert("$ref".to_string(), reference.clone());
+        out.insert(crate::value::intern_key("$ref"), reference.clone());
     }
 
     if let Some(properties) = schema.get("properties").and_then(VmValue::as_dict) {
@@ -105,12 +105,12 @@ fn canonicalize_schema_dict(
                 canonicalize_schema_value_with(value, traversal)?,
             );
         }
-        out.insert("properties".to_string(), VmValue::dict(next));
+        out.insert(crate::value::intern_key("properties"), VmValue::dict(next));
     }
 
     if let Some(items) = schema.get("items") {
         out.insert(
-            "items".to_string(),
+            crate::value::intern_key("items"),
             canonicalize_schema_value_with(items, traversal)?,
         );
     }
@@ -121,11 +121,14 @@ fn canonicalize_schema_dict(
     {
         match additional {
             VmValue::Bool(value) => {
-                out.insert("additional_properties".to_string(), VmValue::Bool(*value));
+                out.insert(
+                    crate::value::intern_key("additional_properties"),
+                    VmValue::Bool(*value),
+                );
             }
             VmValue::Dict(_) => {
                 out.insert(
-                    "additional_properties".to_string(),
+                    crate::value::intern_key("additional_properties"),
                     canonicalize_schema_value_with(additional, traversal)?,
                 );
             }
@@ -134,51 +137,57 @@ fn canonicalize_schema_dict(
     }
 
     if let Some(required) = schema.get("required") {
-        out.insert("required".to_string(), normalize_string_list(required));
+        out.insert(
+            crate::value::intern_key("required"),
+            normalize_string_list(required),
+        );
     }
 
     if let Some(default) = schema.get("default") {
-        out.insert("default".to_string(), default.clone());
+        out.insert(crate::value::intern_key("default"), default.clone());
     }
     if let Some(const_value) = schema.get("const") {
-        out.insert("const".to_string(), const_value.clone());
+        out.insert(crate::value::intern_key("const"), const_value.clone());
     }
     if let Some(enum_values) = schema.get("enum") {
-        out.insert("enum".to_string(), enum_values.clone());
+        out.insert(crate::value::intern_key("enum"), enum_values.clone());
     }
 
     if let Some(min) = schema.get("min").or_else(|| schema.get("minimum")) {
-        out.insert("min".to_string(), min.clone());
+        out.insert(crate::value::intern_key("min"), min.clone());
     }
     if let Some(max) = schema.get("max").or_else(|| schema.get("maximum")) {
-        out.insert("max".to_string(), max.clone());
+        out.insert(crate::value::intern_key("max"), max.clone());
     }
     if let Some(min_length) = schema.get("min_length").or_else(|| schema.get("minLength")) {
-        out.insert("min_length".to_string(), min_length.clone());
+        out.insert(crate::value::intern_key("min_length"), min_length.clone());
     }
     if let Some(max_length) = schema.get("max_length").or_else(|| schema.get("maxLength")) {
-        out.insert("max_length".to_string(), max_length.clone());
+        out.insert(crate::value::intern_key("max_length"), max_length.clone());
     }
     if let Some(min_items) = schema.get("min_items").or_else(|| schema.get("minItems")) {
-        out.insert("min_items".to_string(), min_items.clone());
+        out.insert(crate::value::intern_key("min_items"), min_items.clone());
     }
     if let Some(max_items) = schema.get("max_items").or_else(|| schema.get("maxItems")) {
-        out.insert("max_items".to_string(), max_items.clone());
+        out.insert(crate::value::intern_key("max_items"), max_items.clone());
     }
     if schema_bool(schema, "unique_items") || schema_bool(schema, "uniqueItems") {
-        out.insert("unique_items".to_string(), VmValue::Bool(true));
+        out.insert(
+            crate::value::intern_key("unique_items"),
+            VmValue::Bool(true),
+        );
     }
     if let Some(pattern) = schema.get("pattern") {
-        out.insert("pattern".to_string(), pattern.clone());
+        out.insert(crate::value::intern_key("pattern"), pattern.clone());
     }
 
     if schema_bool(schema, "nullable") {
-        out.insert("nullable".to_string(), VmValue::Bool(true));
+        out.insert(crate::value::intern_key("nullable"), VmValue::Bool(true));
     }
 
     if let Some(definitions) = schema.get("definitions").and_then(VmValue::as_dict) {
         out.insert(
-            "definitions".to_string(),
+            crate::value::intern_key("definitions"),
             VmValue::dict(canonicalize_schema_map(definitions, traversal)?),
         );
     }
@@ -187,11 +196,14 @@ fn canonicalize_schema_dict(
         let mut next_components = components.clone();
         if let Some(schemas) = components.get("schemas").and_then(VmValue::as_dict) {
             next_components.insert(
-                "schemas".to_string(),
+                crate::value::intern_key("schemas"),
                 VmValue::dict(canonicalize_schema_map(schemas, traversal)?),
             );
         }
-        out.insert("components".to_string(), VmValue::dict(next_components));
+        out.insert(
+            crate::value::intern_key("components"),
+            VmValue::dict(next_components),
+        );
     }
 
     if let Some(union) = schema
@@ -200,14 +212,14 @@ fn canonicalize_schema_dict(
         .or_else(|| schema.get("anyOf"))
     {
         out.insert(
-            "union".to_string(),
+            crate::value::intern_key("union"),
             canonicalize_schema_list(union, traversal)?,
         );
     }
 
     if let Some(all_of) = schema.get("all_of").or_else(|| schema.get("allOf")) {
         out.insert(
-            "all_of".to_string(),
+            crate::value::intern_key("all_of"),
             canonicalize_schema_list(all_of, traversal)?,
         );
     }
@@ -228,7 +240,7 @@ fn canonicalize_schema_dict(
                 })
                 .collect::<Vec<_>>();
             out.insert(
-                "union".to_string(),
+                crate::value::intern_key("union"),
                 VmValue::List(std::sync::Arc::new(union)),
             );
         }
@@ -582,7 +594,7 @@ fn canonical_to_json_schema_with(
             let mut props = serde_json::Map::new();
             for (name, child) in properties.iter() {
                 props.insert(
-                    name.clone(),
+                    name.to_string(),
                     canonical_to_json_schema_with(child, openapi_style, traversal)?,
                 );
             }
@@ -654,7 +666,7 @@ fn canonical_to_json_schema_with(
             let mut exported = serde_json::Map::new();
             for (name, child) in definitions.iter() {
                 exported.insert(
-                    name.clone(),
+                    name.to_string(),
                     canonical_to_json_schema_with(child, openapi_style, traversal)?,
                 );
             }
@@ -666,12 +678,12 @@ fn canonical_to_json_schema_with(
         if let Some(VmValue::Dict(components)) = schema_dict.get("components") {
             let mut next_components = serde_json::Map::new();
             for (key, value) in components.iter() {
-                if key == "schemas" {
+                if key.as_str() == "schemas" {
                     let schema_map = value.as_dict().cloned().unwrap_or_default();
                     let mut exported_schemas = serde_json::Map::new();
                     for (name, child) in schema_map.iter() {
                         exported_schemas.insert(
-                            name.clone(),
+                            name.to_string(),
                             canonical_to_json_schema_with(child, openapi_style, traversal)?,
                         );
                     }
@@ -680,7 +692,7 @@ fn canonical_to_json_schema_with(
                         serde_json::Value::Object(exported_schemas),
                     );
                 } else {
-                    next_components.insert(key.clone(), vm_value_to_serde_json(value));
+                    next_components.insert(key.to_string(), vm_value_to_serde_json(value));
                 }
             }
             out.insert(
@@ -748,7 +760,7 @@ pub fn json_to_vm_value(jv: &serde_json::Value) -> VmValue {
         serde_json::Value::Object(map) => {
             let mut m = crate::value::DictMap::new();
             for (k, v) in map {
-                m.insert(k.clone(), json_to_vm_value(v));
+                m.insert(crate::value::intern_key(k), json_to_vm_value(v));
             }
             VmValue::dict(m)
         }

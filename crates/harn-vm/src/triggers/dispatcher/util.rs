@@ -118,7 +118,7 @@ pub(super) fn event_to_handler_value(event: &TriggerEvent) -> Result<VmValue, Di
         (Some(raw_body), VmValue::Dict(dict)) => {
             let mut map = (*dict).clone();
             map.insert(
-                "raw_body".to_string(),
+                crate::value::intern_key("raw_body"),
                 VmValue::Bytes(std::sync::Arc::new(raw_body.clone())),
             );
             Ok(VmValue::dict(map))

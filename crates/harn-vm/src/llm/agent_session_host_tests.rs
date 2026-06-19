@@ -112,7 +112,7 @@ fn gpt_oss_harmony_leak_persists_clean_reasoning_and_tool_calls() {
 fn initial_user_content_preserves_multimodal_blocks() {
     let mut opts = crate::value::DictMap::new();
     opts.insert(
-        "initial_user_content".to_string(),
+        crate::value::intern_key("initial_user_content"),
         crate::stdlib::json_to_vm_value(&json!([
             {"type": "text", "text": "Describe this image."},
             {
@@ -500,7 +500,7 @@ mod nested_budget_tests {
 
         let mut opts_map = crate::value::DictMap::new();
         opts_map.insert(
-            "policy".to_string(),
+            crate::value::intern_key("policy"),
             policy_value(&CapabilityPolicy {
                 recursion_limit: Some(1),
                 ..Default::default()

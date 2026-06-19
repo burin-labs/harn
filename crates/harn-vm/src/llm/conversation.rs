@@ -455,7 +455,7 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
             _ => crate::value::DictMap::new(),
         };
         compacted.insert(
-            "archived_messages".to_string(),
+            crate::value::intern_key("archived_messages"),
             VmValue::Int(archived_count as i64),
         );
         Ok(VmValue::dict(compacted))
@@ -680,13 +680,13 @@ fn transcript_inject_reminder_builtin(args: &[VmValue]) -> Result<VmValue, VmErr
     );
 
     Ok(VmValue::dict(crate::value::DictMap::from_iter([
-        ("transcript".to_string(), next),
+        (crate::value::intern_key("transcript"), next),
         (
-            "reminder_id".to_string(),
+            crate::value::intern_key("reminder_id"),
             VmValue::String(arcstr::ArcStr::from(reminder_id)),
         ),
         (
-            "deduped_count".to_string(),
+            crate::value::intern_key("deduped_count"),
             VmValue::Int(deduped_reminder_ids.len() as i64),
         ),
     ])))
@@ -736,8 +736,11 @@ fn transcript_clear_reminders_builtin(args: &[VmValue]) -> Result<VmValue, VmErr
     }
 
     Ok(VmValue::dict(crate::value::DictMap::from_iter([
-        ("transcript".to_string(), next),
-        ("removed_count".to_string(), VmValue::Int(removed_count)),
+        (crate::value::intern_key("transcript"), next),
+        (
+            crate::value::intern_key("removed_count"),
+            VmValue::Int(removed_count),
+        ),
     ])))
 }
 
@@ -769,7 +772,7 @@ fn ensure_known_reminder_keys(
     let unknown = options
         .keys()
         .filter(|key| !allowed.contains(&key.as_str()))
-        .map(String::as_str)
+        .map(|key| key.as_str())
         .collect::<Vec<_>>();
     if unknown.is_empty() {
         Ok(())
@@ -1047,7 +1050,7 @@ mod tests {
         VmValue::dict(
             entries
                 .into_iter()
-                .map(|(key, value)| (key.to_string(), value))
+                .map(|(key, value)| (crate::value::intern_key(key), value))
                 .collect::<crate::value::DictMap>(),
         )
     }

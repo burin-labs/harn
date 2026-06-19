@@ -25,11 +25,14 @@ pub(crate) fn schema_partial_dict(schema: &crate::value::DictMap) -> crate::valu
                 next_props.insert(key.clone(), value.clone());
             }
         }
-        partial.insert("properties".to_string(), VmValue::dict(next_props));
+        partial.insert(
+            crate::value::intern_key("properties"),
+            VmValue::dict(next_props),
+        );
     }
     if let Some(VmValue::List(branches)) = schema.get("union") {
         partial.insert(
-            "union".to_string(),
+            crate::value::intern_key("union"),
             VmValue::List(std::sync::Arc::new(
                 branches
                     .iter()
@@ -45,7 +48,7 @@ pub(crate) fn schema_partial_dict(schema: &crate::value::DictMap) -> crate::valu
     }
     if let Some(VmValue::List(branches)) = schema.get("all_of") {
         partial.insert(
-            "all_of".to_string(),
+            crate::value::intern_key("all_of"),
             VmValue::List(std::sync::Arc::new(
                 branches
                     .iter()
@@ -61,13 +64,13 @@ pub(crate) fn schema_partial_dict(schema: &crate::value::DictMap) -> crate::valu
     }
     if let Some(VmValue::Dict(item_schema)) = schema.get("items") {
         partial.insert(
-            "items".to_string(),
+            crate::value::intern_key("items"),
             VmValue::dict(schema_partial_dict(item_schema)),
         );
     }
     if let Some(VmValue::Dict(extra_schema)) = schema.get("additional_properties") {
         partial.insert(
-            "additional_properties".to_string(),
+            crate::value::intern_key("additional_properties"),
             VmValue::dict(schema_partial_dict(extra_schema)),
         );
     }
@@ -82,14 +85,17 @@ pub(crate) fn schema_pick_dict(
     if let Some(VmValue::Dict(properties)) = schema.get("properties") {
         let filtered: crate::value::DictMap = properties
             .iter()
-            .filter(|(key, _)| keys.contains(*key))
+            .filter(|(key, _)| keys.iter().any(|k| k.as_str() == key.as_str()))
             .map(|(key, value)| (key.clone(), value.clone()))
             .collect();
-        picked.insert("properties".to_string(), VmValue::dict(filtered));
+        picked.insert(
+            crate::value::intern_key("properties"),
+            VmValue::dict(filtered),
+        );
     }
     if let Some(VmValue::List(required)) = schema.get("required") {
         picked.insert(
-            "required".to_string(),
+            crate::value::intern_key("required"),
             VmValue::List(std::sync::Arc::new(
                 required
                     .iter()
@@ -110,14 +116,17 @@ pub(crate) fn schema_omit_dict(
     if let Some(VmValue::Dict(properties)) = schema.get("properties") {
         let filtered: crate::value::DictMap = properties
             .iter()
-            .filter(|(key, _)| !keys.contains(*key))
+            .filter(|(key, _)| !keys.iter().any(|k| k.as_str() == key.as_str()))
             .map(|(key, value)| (key.clone(), value.clone()))
             .collect();
-        kept.insert("properties".to_string(), VmValue::dict(filtered));
+        kept.insert(
+            crate::value::intern_key("properties"),
+            VmValue::dict(filtered),
+        );
     }
     if let Some(VmValue::List(required)) = schema.get("required") {
         kept.insert(
-            "required".to_string(),
+            crate::value::intern_key("required"),
             VmValue::List(std::sync::Arc::new(
                 required
                     .iter()

@@ -134,7 +134,12 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
         Ok(VmValue::dict(
             groups
                 .into_iter()
-                .map(|(key, values)| (key, VmValue::List(std::sync::Arc::new(values))))
+                .map(|(key, values)| {
+                    (
+                        crate::value::intern_key(&key),
+                        VmValue::List(std::sync::Arc::new(values)),
+                    )
+                })
                 .collect::<crate::value::DictMap>(),
         ))
     });
@@ -289,7 +294,7 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
         Ok(VmValue::dict(
             counts
                 .into_iter()
-                .map(|(key, count)| (key, VmValue::Int(count)))
+                .map(|(key, count)| (crate::value::intern_key(&key), VmValue::Int(count)))
                 .collect::<crate::value::DictMap>(),
         ))
     });
@@ -477,7 +482,7 @@ fn deep_merge_value(a: &VmValue, b: &VmValue) -> Result<VmValue, VmError> {
         return Ok(VmValue::Dict(right));
     }
     let mut merged = Arc::try_unwrap(left).unwrap_or_else(|d| (*d).clone());
-    let right_entries: Vec<(String, VmValue)> = match Arc::try_unwrap(right) {
+    let right_entries: Vec<(crate::value::HarnStr, VmValue)> = match Arc::try_unwrap(right) {
         Ok(map) => map.into_iter().collect(),
         Err(rc) => rc.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
     };
@@ -535,7 +540,7 @@ fn dict_from_pairs(value: &VmValue) -> Result<VmValue, VmError> {
     let pairs: &[VmValue] = match value {
         VmValue::List(items) => items,
         VmValue::Set(set) => set.items(),
-        VmValue::Nil => return Ok(VmValue::dict(BTreeMap::new())),
+        VmValue::Nil => return Ok(VmValue::dict_map(Default::default())),
         other => {
             return Err(VmError::TypeError(format!(
                 "dict_from_pairs: expected a list of [key, value] pairs, got {}",
@@ -599,7 +604,7 @@ fn dict_pick(data: &VmValue, keys: &VmValue) -> Result<VmValue, VmError> {
     let mut out = BTreeMap::new();
     for key in keys {
         let key = key.display();
-        if let Some(value) = dict.get(&key) {
+        if let Some(value) = dict.get(key.as_str()) {
             if !matches!(value, VmValue::Nil) {
                 out.insert(key, value.clone());
             }
@@ -614,7 +619,7 @@ fn dict_pick_keys(data: &VmValue, keys: &VmValue, drop_nil: bool) -> Result<VmVa
     let mut out = BTreeMap::new();
     for key in keys {
         let key = key.display();
-        if let Some(value) = dict.get(&key) {
+        if let Some(value) = dict.get(key.as_str()) {
             if drop_nil && matches!(value, VmValue::Nil) {
                 continue;
             }
@@ -630,11 +635,11 @@ fn dict_omit(data: &VmValue, keys: &VmValue) -> Result<VmValue, VmError> {
         .iter()
         .map(VmValue::display)
         .collect();
-    if exclude.is_empty() || dict.keys().all(|k| !exclude.contains(k)) {
+    if exclude.is_empty() || dict.keys().all(|k| !exclude.contains(k.as_str())) {
         return Ok(VmValue::Dict(dict));
     }
     let mut out = Arc::try_unwrap(dict).unwrap_or_else(|d| (*d).clone());
-    out.retain(|key, _| !exclude.contains(key));
+    out.retain(|key, _| !exclude.contains(key.as_str()));
     Ok(VmValue::dict(out))
 }
 
@@ -739,7 +744,7 @@ mod tests {
 
     #[test]
     fn shallow_clone_decouples_dict_from_source() {
-        let inner = VmValue::dict(BTreeMap::new());
+        let inner = VmValue::dict_map(Default::default());
         let source = dict(&[("inner", inner)]);
         let copy = shallow_clone(&source);
         match (&source, &copy) {

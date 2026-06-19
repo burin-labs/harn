@@ -259,7 +259,7 @@ pub(super) fn apply_workflow_replay_config(
     }
     options.put_str("parent_worker_id", carry.parent_worker_id);
     if let Some(transcript) = carry.transcript {
-        options.insert("transcript".to_string(), transcript);
+        options.insert(crate::value::intern_key("transcript"), transcript);
     } else {
         options.remove("transcript");
     }

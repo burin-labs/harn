@@ -185,7 +185,7 @@ fn llm_model_defaults_builtin(args: &[VmValue], _out: &mut String) -> Result<VmV
     let params = llm_config::model_params(&model_id);
     let mut dict = crate::value::DictMap::new();
     for (k, v) in &params {
-        dict.insert(k.clone(), toml_value_to_vm_value(v));
+        dict.insert(crate::value::intern_key(k), toml_value_to_vm_value(v));
     }
     Ok(VmValue::dict(dict))
 }
@@ -223,8 +223,8 @@ fn llm_resolved_options_builtin(args: &[VmValue], _out: &mut String) -> Result<V
 
     let mut out = opts.clone();
     for (k, v) in &defaults {
-        if !out.contains_key(k) {
-            out.insert(k.clone(), toml_value_to_vm_value(v));
+        if !out.contains_key(k.as_str()) {
+            out.insert(crate::value::intern_key(k), toml_value_to_vm_value(v));
         }
     }
     out.put_str("provider", final_provider);
@@ -262,7 +262,7 @@ fn toml_value_to_vm_value(value: &toml::Value) -> VmValue {
         toml::Value::Table(table) => {
             let mut dict = crate::value::DictMap::new();
             for (k, v) in table {
-                dict.insert(k.clone(), toml_value_to_vm_value(v));
+                dict.insert(crate::value::intern_key(k), toml_value_to_vm_value(v));
             }
             VmValue::dict(dict)
         }
@@ -459,7 +459,10 @@ pub(crate) fn llm_provider_status_value() -> VmValue {
                 Err(_) => (false, "missing"),
             }
         };
-        entry.insert("available".to_string(), VmValue::Bool(available));
+        entry.insert(
+            crate::value::intern_key("available"),
+            VmValue::Bool(available),
+        );
         entry.put_str("credential_status", credential_status);
         entries.push(VmValue::dict(entry));
     }
@@ -583,7 +586,10 @@ fn llm_config_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
             let mut dict = crate::value::DictMap::new();
             for name in llm_config::provider_names() {
                 if let Some(pdef) = llm_config::provider_config(&name) {
-                    dict.insert(name.clone(), provider_def_to_vm_value(Some(&name), &pdef));
+                    dict.insert(
+                        crate::value::intern_key(&name),
+                        provider_def_to_vm_value(Some(&name), &pdef),
+                    );
                 }
             }
             Ok(VmValue::dict(dict))
@@ -871,11 +877,11 @@ fn provider_region_value(provider_name: Option<&str>) -> Option<VmValue> {
     let mut region = crate::value::DictMap::new();
     region.put_str("override_key", "region");
     region.insert(
-        "envs".to_string(),
+        crate::value::intern_key("envs"),
         string_list_to_vm_value(envs.iter().map(|s| s.to_string()).collect()),
     );
     region.insert(
-        "resolved".to_string(),
+        crate::value::intern_key("resolved"),
         match resolved {
             Some(value) => VmValue::String(arcstr::ArcStr::from(value)),
             None => VmValue::Nil,
@@ -897,14 +903,14 @@ fn provider_def_to_vm_value(
     dict.put_opt_str("base_url_env", pdef.base_url_env.as_deref());
     dict.put_str("auth_style", pdef.auth_style.as_str());
     dict.insert(
-        "auth_envs".to_string(),
+        crate::value::intern_key("auth_envs"),
         string_list_to_vm_value(llm_config::auth_env_names(&pdef.auth_env)),
     );
     if let Some(region) = provider_region_value(provider_name) {
-        dict.insert("region".to_string(), region);
+        dict.insert(crate::value::intern_key("region"), region);
     }
     dict.insert(
-        "auth_available".to_string(),
+        crate::value::intern_key("auth_available"),
         VmValue::Bool(
             provider_name
                 .map(llm_config::provider_key_available)
@@ -916,20 +922,20 @@ fn provider_def_to_vm_value(
     dict.put_opt_str("command", pdef.command.as_deref());
     if !pdef.args.is_empty() {
         dict.insert(
-            "args".to_string(),
+            crate::value::intern_key("args"),
             string_list_to_vm_value(pdef.args.clone()),
         );
     }
     if !pdef.env.is_empty() {
         dict.insert(
-            "env".to_string(),
+            crate::value::intern_key("env"),
             json_to_vm_value(&serde_json::json!(pdef.env)),
         );
     }
     dict.put_opt_str("cwd", pdef.cwd.as_deref());
     if !pdef.mcp_servers.is_empty() {
         dict.insert(
-            "mcp_servers".to_string(),
+            crate::value::intern_key("mcp_servers"),
             json_to_vm_value(&serde_json::Value::Array(pdef.mcp_servers.clone())),
         );
     }
@@ -937,9 +943,15 @@ fn provider_def_to_vm_value(
     if !pdef.extra_headers.is_empty() {
         let mut headers = crate::value::DictMap::new();
         for (k, v) in &pdef.extra_headers {
-            headers.insert(k.clone(), VmValue::String(arcstr::ArcStr::from(v.as_str())));
+            headers.insert(
+                crate::value::intern_key(k),
+                VmValue::String(arcstr::ArcStr::from(v.as_str())),
+            );
         }
-        dict.insert("extra_headers".to_string(), VmValue::dict(headers));
+        dict.insert(
+            crate::value::intern_key("extra_headers"),
+            VmValue::dict(headers),
+        );
     }
     if !pdef.features.is_empty() {
         let features: Vec<VmValue> = pdef
@@ -948,12 +960,12 @@ fn provider_def_to_vm_value(
             .map(|f| VmValue::String(arcstr::ArcStr::from(f.as_str())))
             .collect();
         dict.insert(
-            "features".to_string(),
+            crate::value::intern_key("features"),
             VmValue::List(std::sync::Arc::new(features)),
         );
     }
     if let Some(rpm) = pdef.rpm {
-        dict.insert("rpm".to_string(), VmValue::Int(rpm as i64));
+        dict.insert(crate::value::intern_key("rpm"), VmValue::Int(rpm as i64));
     }
     let rate_limits = pdef
         .rate_limits
@@ -962,18 +974,27 @@ fn provider_def_to_vm_value(
         .with_rpm_fallback(pdef.rpm);
     if let Some(rate_limits) = rate_limits {
         dict.insert(
-            "rate_limits".to_string(),
+            crate::value::intern_key("rate_limits"),
             rate_limits_to_vm_value(&rate_limits),
         );
     }
     if let Some(cost) = pdef.cost_per_1k_in {
-        dict.insert("cost_per_1k_in".to_string(), VmValue::Float(cost));
+        dict.insert(
+            crate::value::intern_key("cost_per_1k_in"),
+            VmValue::Float(cost),
+        );
     }
     if let Some(cost) = pdef.cost_per_1k_out {
-        dict.insert("cost_per_1k_out".to_string(), VmValue::Float(cost));
+        dict.insert(
+            crate::value::intern_key("cost_per_1k_out"),
+            VmValue::Float(cost),
+        );
     }
     if let Some(latency) = pdef.latency_p50_ms {
-        dict.insert("latency_p50_ms".to_string(), VmValue::Int(latency as i64));
+        dict.insert(
+            crate::value::intern_key("latency_p50_ms"),
+            VmValue::Int(latency as i64),
+        );
     }
     VmValue::dict(dict)
 }
@@ -992,7 +1013,7 @@ fn resolved_model_to_vm_value(resolved: &llm_config::ResolvedModel) -> VmValue {
     dict.put_str("id", resolved.id.as_str());
     dict.put_str("provider", resolved.provider.as_str());
     dict.insert(
-        "alias".to_string(),
+        crate::value::intern_key("alias"),
         resolved
             .alias
             .as_deref()
@@ -1013,23 +1034,23 @@ fn model_info_to_vm_value(resolved: &llm_config::ResolvedModel) -> VmValue {
     };
     let caps = super::capabilities::lookup(&resolved.provider, &resolved.id);
     dict.insert(
-        "capabilities".to_string(),
+        crate::value::intern_key("capabilities"),
         capabilities_to_vm_value(&resolved.provider, &resolved.id, &caps),
     );
     dict.insert(
-        "catalog".to_string(),
+        crate::value::intern_key("catalog"),
         llm_config::model_catalog_entry(&resolved.id)
             .map(|entry| model_def_to_vm_value(&resolved.id, &entry))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
-        "qc_default_model".to_string(),
+        crate::value::intern_key("qc_default_model"),
         llm_config::qc_default_model(&resolved.provider)
             .map(|model| VmValue::String(arcstr::ArcStr::from(model)))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
-        "auth_available".to_string(),
+        crate::value::intern_key("auth_available"),
         VmValue::Bool(llm_config::provider_key_available(&resolved.provider)),
     );
     VmValue::dict(dict)
@@ -1043,32 +1064,35 @@ pub(crate) fn capabilities_to_vm_value(
     let mut dict = crate::value::DictMap::new();
     dict.put_str("provider", provider);
     dict.put_str("model", model);
-    dict.insert("native_tools".to_string(), VmValue::Bool(caps.native_tools));
+    dict.insert(
+        crate::value::intern_key("native_tools"),
+        VmValue::Bool(caps.native_tools),
+    );
     dict.put_str("message_wire_format", caps.message_wire_format.clone());
     dict.put_str(
         "native_tool_wire_format",
         caps.native_tool_wire_format.clone(),
     );
     dict.insert(
-        "text_tool_wire_format_supported".to_string(),
+        crate::value::intern_key("text_tool_wire_format_supported"),
         VmValue::Bool(caps.text_tool_wire_format_supported),
     );
     dict.insert(
-        "preferred_tool_format".to_string(),
+        crate::value::intern_key("preferred_tool_format"),
         caps.preferred_tool_format
             .as_deref()
             .map(|format| VmValue::String(arcstr::ArcStr::from(format)))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
-        "tool_mode_parity".to_string(),
+        crate::value::intern_key("tool_mode_parity"),
         caps.tool_mode_parity
             .as_deref()
             .map(|status| VmValue::String(arcstr::ArcStr::from(status)))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
-        "tool_mode_parity_notes".to_string(),
+        crate::value::intern_key("tool_mode_parity_notes"),
         caps.tool_mode_parity_notes
             .as_deref()
             .map(|notes| VmValue::String(arcstr::ArcStr::from(notes)))
@@ -1077,50 +1101,56 @@ pub(crate) fn capabilities_to_vm_value(
     // Mirrors the VM's tool-capability gate at llm_config::effective_model_capability_tags:
     // either native or text-format tool calling counts as tool-capable.
     dict.insert(
-        "tools".to_string(),
+        crate::value::intern_key("tools"),
         VmValue::Bool(caps.native_tools || caps.text_tool_wire_format_supported),
     );
     dict.insert(
-        "defer_loading".to_string(),
+        crate::value::intern_key("defer_loading"),
         VmValue::Bool(caps.defer_loading),
     );
     dict.insert(
-        "tool_search".to_string(),
+        crate::value::intern_key("tool_search"),
         string_list_to_vm_value(caps.tool_search.clone()),
     );
     dict.insert(
-        "responses_api".to_string(),
+        crate::value::intern_key("responses_api"),
         VmValue::Bool(caps.responses_api),
     );
     dict.insert(
-        "hosted_tools".to_string(),
+        crate::value::intern_key("hosted_tools"),
         string_list_to_vm_value(caps.hosted_tools.clone()),
     );
-    dict.insert("remote_mcp".to_string(), VmValue::Bool(caps.remote_mcp));
     dict.insert(
-        "conversation_state".to_string(),
+        crate::value::intern_key("remote_mcp"),
+        VmValue::Bool(caps.remote_mcp),
+    );
+    dict.insert(
+        crate::value::intern_key("conversation_state"),
         VmValue::Bool(caps.conversation_state),
     );
-    dict.insert("compaction".to_string(), VmValue::Bool(caps.compaction));
     dict.insert(
-        "background_mode".to_string(),
+        crate::value::intern_key("compaction"),
+        VmValue::Bool(caps.compaction),
+    );
+    dict.insert(
+        crate::value::intern_key("background_mode"),
         VmValue::Bool(caps.background_mode),
     );
     dict.insert(
-        "tool_approval_policy".to_string(),
+        crate::value::intern_key("tool_approval_policy"),
         caps.tool_approval_policy
             .as_deref()
             .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
-        "max_tools".to_string(),
+        crate::value::intern_key("max_tools"),
         caps.max_tools
             .map(|n| VmValue::Int(n as i64))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
-        "prompt_caching".to_string(),
+        crate::value::intern_key("prompt_caching"),
         VmValue::Bool(caps.prompt_caching),
     );
     dict.put_str(
@@ -1128,11 +1158,11 @@ pub(crate) fn capabilities_to_vm_value(
         caps.cache_breakpoint_style.as_str(),
     );
     dict.insert(
-        "prefers_xml_scaffolding".to_string(),
+        crate::value::intern_key("prefers_xml_scaffolding"),
         VmValue::Bool(caps.prefers_xml_scaffolding),
     );
     dict.insert(
-        "prefers_markdown_scaffolding".to_string(),
+        crate::value::intern_key("prefers_markdown_scaffolding"),
         VmValue::Bool(caps.prefers_markdown_scaffolding),
     );
     dict.put_str(
@@ -1140,72 +1170,72 @@ pub(crate) fn capabilities_to_vm_value(
         caps.structured_output_mode.as_str(),
     );
     dict.insert(
-        "supports_assistant_prefill".to_string(),
+        crate::value::intern_key("supports_assistant_prefill"),
         VmValue::Bool(caps.supports_assistant_prefill),
     );
     dict.insert(
-        "prefers_role_developer".to_string(),
+        crate::value::intern_key("prefers_role_developer"),
         VmValue::Bool(caps.prefers_role_developer),
     );
     dict.insert(
-        "prefers_xml_tools".to_string(),
+        crate::value::intern_key("prefers_xml_tools"),
         VmValue::Bool(caps.prefers_xml_tools),
     );
     dict.insert(
-        "thinking".to_string(),
+        crate::value::intern_key("thinking"),
         VmValue::Bool(!caps.thinking_modes.is_empty()),
     );
     dict.put_str("thinking_block_style", caps.thinking_block_style.as_str());
     dict.insert(
-        "thinking_modes".to_string(),
+        crate::value::intern_key("thinking_modes"),
         string_list_to_vm_value(caps.thinking_modes.clone()),
     );
     dict.insert(
-        "interleaved_thinking_supported".to_string(),
+        crate::value::intern_key("interleaved_thinking_supported"),
         VmValue::Bool(caps.interleaved_thinking_supported),
     );
     dict.insert(
-        "anthropic_beta_features".to_string(),
+        crate::value::intern_key("anthropic_beta_features"),
         string_list_to_vm_value(caps.anthropic_beta_features.clone()),
     );
     dict.insert(
-        "vision_supported".to_string(),
+        crate::value::intern_key("vision_supported"),
         VmValue::Bool(caps.vision_supported),
     );
-    dict.insert("audio".to_string(), VmValue::Bool(caps.audio));
-    dict.insert("pdf".to_string(), VmValue::Bool(caps.pdf));
-    dict.insert("video".to_string(), VmValue::Bool(caps.video));
+    dict.insert(crate::value::intern_key("audio"), VmValue::Bool(caps.audio));
+    dict.insert(crate::value::intern_key("pdf"), VmValue::Bool(caps.pdf));
+    dict.insert(crate::value::intern_key("video"), VmValue::Bool(caps.video));
     dict.insert(
-        "files_api_supported".to_string(),
+        crate::value::intern_key("files_api_supported"),
         VmValue::Bool(caps.files_api_supported),
     );
     dict.insert(
-        "file_upload_wire_format".to_string(),
+        crate::value::intern_key("file_upload_wire_format"),
         caps.file_upload_wire_format
             .as_ref()
             .map(|value| VmValue::String(arcstr::ArcStr::from(value.clone())))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
-        "structured_output".to_string(),
+        crate::value::intern_key("structured_output"),
         caps.structured_output
             .as_deref()
             .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
-        "json_schema".to_string(),
+        crate::value::intern_key("json_schema"),
         caps.json_schema
             .as_deref()
             .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
-        "prefers_xml_scaffolding".to_string(),
+        crate::value::intern_key("prefers_xml_scaffolding"),
         VmValue::Bool(caps.prefers_xml_scaffolding),
     );
     dict.insert(
-        "prefers_markdown_scaffolding".to_string(),
+        crate::value::intern_key("prefers_markdown_scaffolding"),
         VmValue::Bool(caps.prefers_markdown_scaffolding),
     );
     dict.put_str(
@@ -1213,79 +1243,79 @@ pub(crate) fn capabilities_to_vm_value(
         caps.structured_output_mode.as_str(),
     );
     dict.insert(
-        "supports_assistant_prefill".to_string(),
+        crate::value::intern_key("supports_assistant_prefill"),
         VmValue::Bool(caps.supports_assistant_prefill),
     );
     dict.insert(
-        "prefers_role_developer".to_string(),
+        crate::value::intern_key("prefers_role_developer"),
         VmValue::Bool(caps.prefers_role_developer),
     );
     dict.insert(
-        "prefers_xml_tools".to_string(),
+        crate::value::intern_key("prefers_xml_tools"),
         VmValue::Bool(caps.prefers_xml_tools),
     );
     dict.put_str("thinking_block_style", caps.thinking_block_style.as_str());
     dict.insert(
-        "preserve_thinking".to_string(),
+        crate::value::intern_key("preserve_thinking"),
         VmValue::Bool(caps.preserve_thinking),
     );
     dict.insert(
-        "requires_completion_tokens".to_string(),
+        crate::value::intern_key("requires_completion_tokens"),
         VmValue::Bool(caps.requires_completion_tokens),
     );
     dict.insert(
-        "requires_streaming".to_string(),
+        crate::value::intern_key("requires_streaming"),
         VmValue::Bool(caps.requires_streaming),
     );
     dict.insert(
-        "reasoning_effort_supported".to_string(),
+        crate::value::intern_key("reasoning_effort_supported"),
         VmValue::Bool(caps.reasoning_effort_supported),
     );
     dict.insert(
-        "reasoning_none_supported".to_string(),
+        crate::value::intern_key("reasoning_none_supported"),
         VmValue::Bool(caps.reasoning_none_supported),
     );
     dict.insert(
-        "reasoning_disable_supported".to_string(),
+        crate::value::intern_key("reasoning_disable_supported"),
         VmValue::Bool(caps.reasoning_disable_supported),
     );
     dict.insert(
-        "reasoning_text_promotable".to_string(),
+        crate::value::intern_key("reasoning_text_promotable"),
         VmValue::Bool(caps.reasoning_text_promotable),
     );
     dict.insert(
-        "reasoning_wire_format".to_string(),
+        crate::value::intern_key("reasoning_wire_format"),
         caps.reasoning_wire_format
             .as_ref()
             .map(|value| VmValue::String(arcstr::ArcStr::from(value.clone())))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
-        "seed_supported".to_string(),
+        crate::value::intern_key("seed_supported"),
         VmValue::Bool(caps.seed_supported),
     );
     dict.insert(
-        "top_k_supported".to_string(),
+        crate::value::intern_key("top_k_supported"),
         VmValue::Bool(caps.top_k_supported),
     );
     dict.insert(
-        "temperature_supported".to_string(),
+        crate::value::intern_key("temperature_supported"),
         VmValue::Bool(caps.temperature_supported),
     );
     dict.insert(
-        "top_p_supported".to_string(),
+        crate::value::intern_key("top_p_supported"),
         VmValue::Bool(caps.top_p_supported),
     );
     dict.insert(
-        "frequency_penalty_supported".to_string(),
+        crate::value::intern_key("frequency_penalty_supported"),
         VmValue::Bool(caps.frequency_penalty_supported),
     );
     dict.insert(
-        "presence_penalty_supported".to_string(),
+        crate::value::intern_key("presence_penalty_supported"),
         VmValue::Bool(caps.presence_penalty_supported),
     );
     dict.insert(
-        "allowed_tool_choice_modes".to_string(),
+        crate::value::intern_key("allowed_tool_choice_modes"),
         VmValue::List(std::sync::Arc::new(
             caps.allowed_tool_choice_modes
                 .iter()
@@ -1294,13 +1324,13 @@ pub(crate) fn capabilities_to_vm_value(
         )),
     );
     dict.insert(
-        "auto_reasoning_overrides".to_string(),
+        crate::value::intern_key("auto_reasoning_overrides"),
         VmValue::dict(
             caps.auto_reasoning_overrides
                 .iter()
                 .map(|(task, mode)| {
                     (
-                        task.clone(),
+                        crate::value::intern_key(task),
                         VmValue::String(arcstr::ArcStr::from(mode.clone())),
                     )
                 })
@@ -1314,7 +1344,7 @@ pub(crate) fn capabilities_to_vm_value(
     // catalog metadata when any tier is declared.
     let fast_mode = super::fast_mode::lookup(model);
     dict.insert(
-        "fast_mode_supported".to_string(),
+        crate::value::intern_key("fast_mode_supported"),
         VmValue::Bool(
             fast_mode
                 .as_ref()
@@ -1327,7 +1357,7 @@ pub(crate) fn capabilities_to_vm_value(
         fast.put_str("param", fast_mode.param.as_str());
         fast.put_str("value", fast_mode.value.as_str());
         fast.insert(
-            "status".to_string(),
+            crate::value::intern_key("status"),
             fast_mode
                 .status
                 .as_deref()
@@ -1335,7 +1365,7 @@ pub(crate) fn capabilities_to_vm_value(
                 .unwrap_or(VmValue::Nil),
         );
         fast.insert(
-            "beta_header".to_string(),
+            crate::value::intern_key("beta_header"),
             fast_mode
                 .beta_header
                 .as_deref()
@@ -1343,13 +1373,13 @@ pub(crate) fn capabilities_to_vm_value(
                 .unwrap_or(VmValue::Nil),
         );
         fast.insert(
-            "otps_speedup".to_string(),
+            crate::value::intern_key("otps_speedup"),
             fast_mode
                 .otps_speedup
                 .map(VmValue::Float)
                 .unwrap_or(VmValue::Nil),
         );
-        dict.insert("fast_mode".to_string(), VmValue::dict(fast));
+        dict.insert(crate::value::intern_key("fast_mode"), VmValue::dict(fast));
     }
     VmValue::dict(dict)
 }
@@ -1360,11 +1390,11 @@ fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> VmValue {
     dict.put_str("name", model.name.as_str());
     dict.put_str("provider", model.provider.as_str());
     dict.insert(
-        "context_window".to_string(),
+        crate::value::intern_key("context_window"),
         VmValue::Int(model.context_window as i64),
     );
     dict.insert(
-        "logical_model".to_string(),
+        crate::value::intern_key("logical_model"),
         model
             .logical_model
             .as_deref()
@@ -1372,7 +1402,7 @@ fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> VmValue {
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
-        "equivalence_group".to_string(),
+        crate::value::intern_key("equivalence_group"),
         model
             .equivalence_group
             .as_deref()
@@ -1380,7 +1410,7 @@ fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> VmValue {
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
-        "served_variant".to_string(),
+        crate::value::intern_key("served_variant"),
         model
             .served_variant
             .as_deref()
@@ -1388,7 +1418,7 @@ fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> VmValue {
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
-        "wire_model".to_string(),
+        crate::value::intern_key("wire_model"),
         model
             .wire_model
             .as_deref()
@@ -1396,7 +1426,7 @@ fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> VmValue {
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
-        "api_dialect".to_string(),
+        crate::value::intern_key("api_dialect"),
         model
             .api_dialect
             .as_deref()
@@ -1404,7 +1434,7 @@ fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> VmValue {
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
-        "rate_limits".to_string(),
+        crate::value::intern_key("rate_limits"),
         model
             .rate_limits
             .as_ref()
@@ -1413,7 +1443,7 @@ fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> VmValue {
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
-        "architecture".to_string(),
+        crate::value::intern_key("architecture"),
         model
             .architecture
             .as_ref()
@@ -1422,34 +1452,37 @@ fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> VmValue {
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
-        "runtime_context_window".to_string(),
+        crate::value::intern_key("runtime_context_window"),
         model
             .runtime_context_window
             .map(|window| VmValue::Int(window as i64))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
-        "stream_timeout".to_string(),
+        crate::value::intern_key("stream_timeout"),
         model
             .stream_timeout
             .map(VmValue::Float)
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
-        "capabilities".to_string(),
+        crate::value::intern_key("capabilities"),
         string_list_to_vm_value(model.capabilities.clone()),
     );
     dict.insert(
-        "pricing".to_string(),
+        crate::value::intern_key("pricing"),
         model
             .pricing
             .as_ref()
             .map(pricing_to_vm_value)
             .unwrap_or(VmValue::Nil),
     );
-    dict.insert("deprecated".to_string(), VmValue::Bool(model.deprecated));
     dict.insert(
-        "deprecation_note".to_string(),
+        crate::value::intern_key("deprecated"),
+        VmValue::Bool(model.deprecated),
+    );
+    dict.insert(
+        crate::value::intern_key("deprecation_note"),
         model
             .deprecation_note
             .as_deref()
@@ -1457,7 +1490,7 @@ fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> VmValue {
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
-        "superseded_by".to_string(),
+        crate::value::intern_key("superseded_by"),
         model
             .superseded_by
             .as_deref()
@@ -1465,37 +1498,40 @@ fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> VmValue {
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
-        "quality_tags".to_string(),
+        crate::value::intern_key("quality_tags"),
         string_list_to_vm_value(model.quality_tags.clone()),
     );
     dict.put_str("family", llm_config::model_family(&model.provider, id));
     dict.put_str("lineage", llm_config::model_lineage(&model.provider, id));
     dict.insert(
-        "complementary_with".to_string(),
+        crate::value::intern_key("complementary_with"),
         string_list_to_vm_value(model.complementary_with.clone()),
     );
     dict.insert(
-        "avoid_as_reviewer_for".to_string(),
+        crate::value::intern_key("avoid_as_reviewer_for"),
         string_list_to_vm_value(model.avoid_as_reviewer_for.clone()),
     );
     dict.put_str("availability", model.availability.as_str());
     dict.put_str("tier", llm_config::model_tier(id));
     dict.insert(
-        "open_weight".to_string(),
+        crate::value::intern_key("open_weight"),
         model.open_weight.map(VmValue::Bool).unwrap_or(VmValue::Nil),
     );
     dict.insert(
-        "strengths".to_string(),
+        crate::value::intern_key("strengths"),
         string_list_to_vm_value(model.strengths.clone()),
     );
     let benchmarks: crate::value::DictMap = model
         .benchmarks
         .iter()
-        .map(|(key, value)| (key.clone(), VmValue::Float(*value)))
+        .map(|(key, value)| (crate::value::intern_key(key), VmValue::Float(*value)))
         .collect();
-    dict.insert("benchmarks".to_string(), VmValue::dict(benchmarks));
     dict.insert(
-        "fast_mode".to_string(),
+        crate::value::intern_key("benchmarks"),
+        VmValue::dict(benchmarks),
+    );
+    dict.insert(
+        crate::value::intern_key("fast_mode"),
         model
             .fast_mode
             .as_ref()
@@ -1516,22 +1552,22 @@ fn architecture_to_vm_value(architecture: &llm_config::ModelArchitectureDef) -> 
 fn pricing_to_vm_value(pricing: &llm_config::ModelPricing) -> VmValue {
     let mut dict = crate::value::DictMap::new();
     dict.insert(
-        "input_per_mtok".to_string(),
+        crate::value::intern_key("input_per_mtok"),
         VmValue::Float(pricing.input_per_mtok),
     );
     dict.insert(
-        "output_per_mtok".to_string(),
+        crate::value::intern_key("output_per_mtok"),
         VmValue::Float(pricing.output_per_mtok),
     );
     dict.insert(
-        "cache_read_per_mtok".to_string(),
+        crate::value::intern_key("cache_read_per_mtok"),
         pricing
             .cache_read_per_mtok
             .map(VmValue::Float)
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
-        "cache_write_per_mtok".to_string(),
+        crate::value::intern_key("cache_write_per_mtok"),
         pricing
             .cache_write_per_mtok
             .map(VmValue::Float)
@@ -1545,34 +1581,34 @@ fn fast_mode_to_vm_value(fast: &llm_config::FastModeDef) -> VmValue {
     dict.put_str("param", fast.param.as_str());
     dict.put_str("value", fast.value.as_str());
     dict.insert(
-        "beta_header".to_string(),
+        crate::value::intern_key("beta_header"),
         fast.beta_header
             .as_deref()
             .map(|header| VmValue::String(arcstr::ArcStr::from(header)))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
-        "otps_speedup".to_string(),
+        crate::value::intern_key("otps_speedup"),
         fast.otps_speedup
             .map(VmValue::Float)
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
-        "status".to_string(),
+        crate::value::intern_key("status"),
         fast.status
             .as_deref()
             .map(|status| VmValue::String(arcstr::ArcStr::from(status)))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
-        "pricing".to_string(),
+        crate::value::intern_key("pricing"),
         fast.pricing
             .as_ref()
             .map(pricing_to_vm_value)
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
-        "note".to_string(),
+        crate::value::intern_key("note"),
         fast.note
             .as_deref()
             .map(|note| VmValue::String(arcstr::ArcStr::from(note)))
@@ -1596,15 +1632,15 @@ fn provider_catalog_to_vm_value() -> VmValue {
         }
     }
     dict.insert(
-        "providers".to_string(),
+        crate::value::intern_key("providers"),
         VmValue::List(std::sync::Arc::new(providers)),
     );
     dict.insert(
-        "known_model_names".to_string(),
+        crate::value::intern_key("known_model_names"),
         string_list_to_vm_value(llm_config::known_model_names()),
     );
     dict.insert(
-        "available_providers".to_string(),
+        crate::value::intern_key("available_providers"),
         string_list_to_vm_value(llm_config::available_provider_names()),
     );
     let aliases = llm_config::alias_entries()
@@ -1612,7 +1648,7 @@ fn provider_catalog_to_vm_value() -> VmValue {
         .map(|(name, alias)| alias_def_to_vm_value(&name, &alias))
         .collect();
     dict.insert(
-        "aliases".to_string(),
+        crate::value::intern_key("aliases"),
         VmValue::List(std::sync::Arc::new(aliases)),
     );
     let models = llm_config::model_catalog_entries()
@@ -1620,14 +1656,22 @@ fn provider_catalog_to_vm_value() -> VmValue {
         .map(|(id, model)| model_def_to_vm_value(&id, &model))
         .collect();
     dict.insert(
-        "models".to_string(),
+        crate::value::intern_key("models"),
         VmValue::List(std::sync::Arc::new(models)),
     );
     let qc_defaults = llm_config::qc_defaults()
         .into_iter()
-        .map(|(provider, model)| (provider, VmValue::String(arcstr::ArcStr::from(model))))
+        .map(|(provider, model)| {
+            (
+                crate::value::intern_key(&provider),
+                VmValue::String(arcstr::ArcStr::from(model)),
+            )
+        })
         .collect::<crate::value::DictMap>();
-    dict.insert("qc_defaults".to_string(), VmValue::dict(qc_defaults));
+    dict.insert(
+        crate::value::intern_key("qc_defaults"),
+        VmValue::dict(qc_defaults),
+    );
 
     VmValue::dict(dict)
 }
@@ -1638,7 +1682,7 @@ fn alias_def_to_vm_value(name: &str, alias: &llm_config::AliasDef) -> VmValue {
     dict.put_str("id", alias.id.as_str());
     dict.put_str("provider", alias.provider.as_str());
     dict.insert(
-        "tool_format".to_string(),
+        crate::value::intern_key("tool_format"),
         alias
             .tool_format
             .as_deref()
@@ -1676,7 +1720,7 @@ fn readiness_result(readiness: &super::ModelReadiness) -> VmValue {
     meta.put_str("provider", readiness.provider.as_str());
     meta.put_str("model", readiness.model.as_str());
     meta.insert(
-        "url".to_string(),
+        crate::value::intern_key("url"),
         readiness
             .url
             .as_ref()
@@ -1684,14 +1728,14 @@ fn readiness_result(readiness: &super::ModelReadiness) -> VmValue {
             .unwrap_or(VmValue::Nil),
     );
     meta.insert(
-        "status".to_string(),
+        crate::value::intern_key("status"),
         readiness
             .status
             .map(|status| VmValue::Int(status as i64))
             .unwrap_or(VmValue::Nil),
     );
     meta.insert(
-        "available_models".to_string(),
+        crate::value::intern_key("available_models"),
         VmValue::List(std::sync::Arc::new(
             readiness
                 .available_models
@@ -1710,9 +1754,9 @@ fn healthcheck_result_with_meta(
     meta: crate::value::DictMap,
 ) -> VmValue {
     let mut dict = crate::value::DictMap::new();
-    dict.insert("valid".to_string(), VmValue::Bool(valid));
+    dict.insert(crate::value::intern_key("valid"), VmValue::Bool(valid));
     dict.put_str("message", message);
-    dict.insert("metadata".to_string(), VmValue::dict(meta));
+    dict.insert(crate::value::intern_key("metadata"), VmValue::dict(meta));
     VmValue::dict(dict)
 }
 
@@ -1723,7 +1767,7 @@ mod tests {
     fn build_dict(entries: Vec<(&str, VmValue)>) -> VmValue {
         let mut map = crate::value::DictMap::new();
         for (k, v) in entries {
-            map.insert(k.to_string(), v);
+            map.insert(crate::value::intern_key(k), v);
         }
         VmValue::dict(map)
     }

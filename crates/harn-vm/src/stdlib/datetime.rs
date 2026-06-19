@@ -22,7 +22,7 @@ fn date_now_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     let now = Utc::now();
     let mut result = utc_datetime_dict(now);
     result.insert(
-        "timestamp".to_string(),
+        crate::value::intern_key("timestamp"),
         VmValue::Float(now.timestamp_millis() as f64 / 1000.0),
     );
     result.put_str(
@@ -283,14 +283,32 @@ pub(crate) fn vm_error(message: impl Into<String>) -> VmError {
 
 fn utc_datetime_dict(dt: DateTime<Utc>) -> crate::value::DictMap {
     let mut result = crate::value::DictMap::new();
-    result.insert("year".to_string(), VmValue::Int(dt.year() as i64));
-    result.insert("month".to_string(), VmValue::Int(dt.month() as i64));
-    result.insert("day".to_string(), VmValue::Int(dt.day() as i64));
-    result.insert("hour".to_string(), VmValue::Int(dt.hour() as i64));
-    result.insert("minute".to_string(), VmValue::Int(dt.minute() as i64));
-    result.insert("second".to_string(), VmValue::Int(dt.second() as i64));
     result.insert(
-        "weekday".to_string(),
+        crate::value::intern_key("year"),
+        VmValue::Int(dt.year() as i64),
+    );
+    result.insert(
+        crate::value::intern_key("month"),
+        VmValue::Int(dt.month() as i64),
+    );
+    result.insert(
+        crate::value::intern_key("day"),
+        VmValue::Int(dt.day() as i64),
+    );
+    result.insert(
+        crate::value::intern_key("hour"),
+        VmValue::Int(dt.hour() as i64),
+    );
+    result.insert(
+        crate::value::intern_key("minute"),
+        VmValue::Int(dt.minute() as i64),
+    );
+    result.insert(
+        crate::value::intern_key("second"),
+        VmValue::Int(dt.second() as i64),
+    );
+    result.insert(
+        crate::value::intern_key("weekday"),
         VmValue::Int(dt.weekday().num_days_from_sunday() as i64),
     );
     result
@@ -298,22 +316,40 @@ fn utc_datetime_dict(dt: DateTime<Utc>) -> crate::value::DictMap {
 
 fn zoned_datetime_dict(dt: DateTime<Tz>) -> crate::value::DictMap {
     let mut result = crate::value::DictMap::new();
-    result.insert("year".to_string(), VmValue::Int(dt.year() as i64));
-    result.insert("month".to_string(), VmValue::Int(dt.month() as i64));
-    result.insert("day".to_string(), VmValue::Int(dt.day() as i64));
-    result.insert("hour".to_string(), VmValue::Int(dt.hour() as i64));
-    result.insert("minute".to_string(), VmValue::Int(dt.minute() as i64));
-    result.insert("second".to_string(), VmValue::Int(dt.second() as i64));
     result.insert(
-        "weekday".to_string(),
+        crate::value::intern_key("year"),
+        VmValue::Int(dt.year() as i64),
+    );
+    result.insert(
+        crate::value::intern_key("month"),
+        VmValue::Int(dt.month() as i64),
+    );
+    result.insert(
+        crate::value::intern_key("day"),
+        VmValue::Int(dt.day() as i64),
+    );
+    result.insert(
+        crate::value::intern_key("hour"),
+        VmValue::Int(dt.hour() as i64),
+    );
+    result.insert(
+        crate::value::intern_key("minute"),
+        VmValue::Int(dt.minute() as i64),
+    );
+    result.insert(
+        crate::value::intern_key("second"),
+        VmValue::Int(dt.second() as i64),
+    );
+    result.insert(
+        crate::value::intern_key("weekday"),
         VmValue::Int(dt.weekday().num_days_from_sunday() as i64),
     );
     result.insert(
-        "offset_seconds".to_string(),
+        crate::value::intern_key("offset_seconds"),
         VmValue::Int(dt.offset().fix().local_minus_utc() as i64),
     );
     result.insert(
-        "timestamp".to_string(),
+        crate::value::intern_key("timestamp"),
         timestamp_value(dt.with_timezone(&Utc)),
     );
     result.put_str("iso8601", dt.to_rfc3339());

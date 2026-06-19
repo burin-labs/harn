@@ -654,7 +654,7 @@ pub fn normalize_workflow_value(value: &VmValue) -> Result<WorkflowGraph, VmErro
             node.raw_tools = as_dict
                 .get("nodes")
                 .and_then(|nodes| nodes.as_dict())
-                .and_then(|nodes| nodes.get(node_id))
+                .and_then(|nodes| nodes.get(node_id.as_str()))
                 .and_then(|node_value| node_value.as_dict())
                 .and_then(|raw_node| raw_node.get("tools"))
                 .cloned();
@@ -892,7 +892,10 @@ fn insert_json_vm_option<T: Serialize>(
     let json = serde_json::to_value(value).map_err(|error| {
         VmError::Runtime(format!("workflow stage option encode error: {error}"))
     })?;
-    options.insert(key.to_string(), crate::stdlib::json_to_vm_value(&json));
+    options.insert(
+        crate::value::intern_key(key),
+        crate::stdlib::json_to_vm_value(&json),
+    );
     Ok(())
 }
 
@@ -917,7 +920,10 @@ fn preserve_nested_command_policy(options: &mut crate::value::DictMap, node: &Wo
     else {
         return;
     };
-    options.insert("command_policy".to_string(), command_policy.clone());
+    options.insert(
+        crate::value::intern_key("command_policy"),
+        command_policy.clone(),
+    );
 }
 
 fn stage_tools_value(node: &WorkflowNode) -> Option<VmValue> {
@@ -937,7 +943,7 @@ fn add_stage_tools_option(
 ) {
     if !tool_names.is_empty() {
         if let Some(value) = tools_value.clone() {
-            options.insert("tools".to_string(), value);
+            options.insert(crate::value::intern_key("tools"), value);
         }
     }
 }
@@ -959,21 +965,33 @@ fn workflow_stage_llm_options(
 
 fn add_workflow_agent_compaction_options(options: &mut crate::value::DictMap, node: &WorkflowNode) {
     if !node.auto_compact.enabled {
-        options.insert("auto_compact".to_string(), VmValue::Bool(false));
+        options.insert(
+            crate::value::intern_key("auto_compact"),
+            VmValue::Bool(false),
+        );
         return;
     }
-    options.insert("auto_compact".to_string(), VmValue::Bool(true));
+    options.insert(
+        crate::value::intern_key("auto_compact"),
+        VmValue::Bool(true),
+    );
     if let Some(value) = node.auto_compact.token_threshold {
-        options.insert("compact_threshold".to_string(), VmValue::Int(value as i64));
+        options.insert(
+            crate::value::intern_key("compact_threshold"),
+            VmValue::Int(value as i64),
+        );
     }
     if let Some(value) = node.auto_compact.tool_output_max_chars {
         options.insert(
-            "tool_output_max_chars".to_string(),
+            crate::value::intern_key("tool_output_max_chars"),
             VmValue::Int(value as i64),
         );
     }
     if let Some(value) = node.auto_compact.hard_limit_tokens {
-        options.insert("hard_limit_tokens".to_string(), VmValue::Int(value as i64));
+        options.insert(
+            crate::value::intern_key("hard_limit_tokens"),
+            VmValue::Int(value as i64),
+        );
     }
     if let Some(strategy) = node.auto_compact.compact_strategy.as_ref() {
         options.put_str("compact_strategy", strategy.clone());
@@ -984,7 +1002,10 @@ fn add_workflow_agent_compaction_options(options: &mut crate::value::DictMap, no
     if let Some(value) = raw_auto_compact_int(node, "compact_keep_last")
         .or_else(|| raw_auto_compact_int(node, "keep_last"))
     {
-        options.insert("compact_keep_last".to_string(), VmValue::Int(value as i64));
+        options.insert(
+            crate::value::intern_key("compact_keep_last"),
+            VmValue::Int(value as i64),
+        );
     }
     if let Some(prompt) = raw_auto_compact_string(node, "summarize_prompt") {
         options.put_str("summarize_prompt", prompt);
@@ -992,11 +1013,14 @@ fn add_workflow_agent_compaction_options(options: &mut crate::value::DictMap, no
     if let Some(dict) = raw_auto_compact_dict(node) {
         for key in ["compress_callback", "mask_callback"] {
             if let Some(callback) = dict.get(key) {
-                options.insert(key.to_string(), callback.clone());
+                options.insert(crate::value::intern_key(key), callback.clone());
             }
         }
         if let Some(callback) = dict.get("custom_compactor") {
-            options.insert("compact_callback".to_string(), callback.clone());
+            options.insert(
+                crate::value::intern_key("compact_callback"),
+                callback.clone(),
+            );
         }
     }
 }
@@ -1013,12 +1037,12 @@ fn workflow_stage_agent_loop_options(
     if let Some(context) = crate::orchestration::current_workflow_skill_context() {
         if !options.contains_key("skills") {
             if let Some(registry) = context.registry {
-                options.insert("skills".to_string(), registry);
+                options.insert(crate::value::intern_key("skills"), registry);
             }
         }
         if !options.contains_key("skill_match") {
             if let Some(match_config) = context.match_config {
-                options.insert("skill_match".to_string(), match_config);
+                options.insert(crate::value::intern_key("skill_match"), match_config);
             }
         }
     }

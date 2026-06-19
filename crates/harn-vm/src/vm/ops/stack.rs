@@ -87,7 +87,7 @@ impl super::super::Vm {
                 all_vars.entry(k.clone()).or_insert_with(|| v.clone());
             }
             // Include builtin names so typos on builtin refs get suggestions.
-            let mut candidates: Vec<String> = all_vars.keys().cloned().collect();
+            let mut candidates: Vec<String> = all_vars.keys().map(|k| k.to_string()).collect();
             candidates.extend(self.builtins.keys().cloned());
             candidates.extend(self.async_builtins.keys().cloned());
             if let Some(suggestion) =

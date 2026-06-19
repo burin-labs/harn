@@ -227,7 +227,7 @@ pub(crate) fn envelope_from_response(
             .cloned()
             .unwrap_or(JsonValue::Object(Default::default()));
         let validated = validate_accepted_content(&content, requested_schema)?;
-        envelope.insert("content".to_string(), validated);
+        envelope.insert(crate::value::intern_key("content"), validated);
     }
 
     Ok(VmValue::dict(envelope))
@@ -318,7 +318,7 @@ pub(crate) async fn dispatch_inbound_elicitation(
     bridge_params.put_str("server", server_name);
     bridge_params.put_str("message", message.as_str());
     bridge_params.insert(
-        "requestedSchema".to_string(),
+        crate::value::intern_key("requestedSchema"),
         json_to_vm_value(&requested_schema),
     );
 

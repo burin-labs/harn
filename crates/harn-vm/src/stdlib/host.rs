@@ -90,7 +90,7 @@ fn pop_host_mock_scope() -> bool {
 fn capability_manifest_map() -> crate::value::DictMap {
     let mut root = crate::value::DictMap::new();
     root.insert(
-        "process".to_string(),
+        crate::value::intern_key("process"),
         capability(
             "Process execution.",
             &[
@@ -132,21 +132,21 @@ fn capability_manifest_map() -> crate::value::DictMap {
         ),
     );
     root.insert(
-        "template".to_string(),
+        crate::value::intern_key("template"),
         capability(
             "Template rendering.",
             &[op("render", "Render a template file.")],
         ),
     );
     root.insert(
-        "interaction".to_string(),
+        crate::value::intern_key("interaction"),
         capability(
             "User interaction.",
             &[op("ask", "Ask the user a question.")],
         ),
     );
     root.insert(
-        "memory".to_string(),
+        crate::value::intern_key("memory"),
         capability(
             "Vector-aware memory: host-provided embeddings.",
             &[op(
@@ -174,7 +174,7 @@ fn ensure_mocked_capability(
 ) {
     let Some(existing) = root.get(capability_name).cloned() else {
         root.insert(
-            capability_name.to_string(),
+            crate::value::intern_key(capability_name),
             capability(
                 "Mocked host capability registered at runtime for tests.",
                 &[(operation_name.to_string(), mocked_operation_entry())],
@@ -206,12 +206,21 @@ fn ensure_mocked_capability(
         .map(|dict| (*dict).clone())
         .unwrap_or_default();
     operations
-        .entry(operation_name.to_string())
+        .entry(crate::value::intern_key(operation_name))
         .or_insert_with(mocked_operation_entry);
 
-    entry.insert("ops".to_string(), VmValue::List(std::sync::Arc::new(ops)));
-    entry.insert("operations".to_string(), VmValue::dict(operations));
-    root.insert(capability_name.to_string(), VmValue::dict(entry));
+    entry.insert(
+        crate::value::intern_key("ops"),
+        VmValue::List(std::sync::Arc::new(ops)),
+    );
+    entry.insert(
+        crate::value::intern_key("operations"),
+        VmValue::dict(operations),
+    );
+    root.insert(
+        crate::value::intern_key(capability_name),
+        VmValue::dict(entry),
+    );
 }
 
 fn capability_manifest_with_mocks() -> VmValue {
@@ -234,7 +243,7 @@ fn capability(description: &str, ops: &[(String, VmValue)]) -> VmValue {
     let mut entry = crate::value::DictMap::new();
     entry.put_str("description", description);
     entry.insert(
-        "ops".to_string(),
+        crate::value::intern_key("ops"),
         VmValue::List(std::sync::Arc::new(
             ops.iter()
                 .map(|(name, _)| VmValue::String(arcstr::ArcStr::from(name.as_str())))
@@ -243,9 +252,12 @@ fn capability(description: &str, ops: &[(String, VmValue)]) -> VmValue {
     );
     let mut op_dict = crate::value::DictMap::new();
     for (name, op) in ops {
-        op_dict.insert(name.clone(), op.clone());
+        op_dict.insert(crate::value::intern_key(name), op.clone());
     }
-    entry.insert("operations".to_string(), VmValue::dict(op_dict));
+    entry.insert(
+        crate::value::intern_key("operations"),
+        VmValue::dict(op_dict),
+    );
     VmValue::dict(entry)
 }
 
@@ -337,7 +349,10 @@ fn mock_call_value(call: &HostMockCall) -> VmValue {
     let mut item = crate::value::DictMap::new();
     item.put_str("capability", call.capability.clone());
     item.put_str("operation", call.operation.clone());
-    item.insert("params".to_string(), VmValue::dict(call.params.clone()));
+    item.insert(
+        crate::value::intern_key("params"),
+        VmValue::dict(call.params.clone()),
+    );
     VmValue::dict(item)
 }
 
@@ -916,47 +931,53 @@ fn process_exec_response(response: ProcessExecResponse<'_>) -> VmValue {
     );
     result.put_str("status", response.status);
     result.insert(
-        "pid".to_string(),
+        crate::value::intern_key("pid"),
         response
             .pid
             .map(|pid| VmValue::Int(pid as i64))
             .unwrap_or(VmValue::Nil),
     );
     result.insert(
-        "process_group_id".to_string(),
+        crate::value::intern_key("process_group_id"),
         response
             .pid
             .map(|pid| VmValue::Int(pid as i64))
             .unwrap_or(VmValue::Nil),
     );
-    result.insert("handle_id".to_string(), VmValue::Nil);
+    result.insert(crate::value::intern_key("handle_id"), VmValue::Nil);
     result.put_str("started_at", response.started_at);
     result.put_str(
         "ended_at",
         audited_utc_now_rfc3339("host_call/process.exec.ended_at"),
     );
     result.insert(
-        "duration_ms".to_string(),
+        crate::value::intern_key("duration_ms"),
         VmValue::Int(response.started.elapsed().as_millis() as i64),
     );
     result.insert(
-        "exit_code".to_string(),
+        crate::value::intern_key("exit_code"),
         VmValue::Int(response.exit_code as i64),
     );
-    result.insert("signal".to_string(), VmValue::Nil);
-    result.insert("timed_out".to_string(), VmValue::Bool(response.timed_out));
+    result.insert(crate::value::intern_key("signal"), VmValue::Nil);
+    result.insert(
+        crate::value::intern_key("timed_out"),
+        VmValue::Bool(response.timed_out),
+    );
     result.put_str("stdout", response.stdout);
     result.put_str("stderr", response.stderr);
     result.put_str("combined", combined);
     result.insert(
-        "exit_status".to_string(),
+        crate::value::intern_key("exit_status"),
         VmValue::Int(response.exit_code as i64),
     );
     result.insert(
-        "legacy_status".to_string(),
+        crate::value::intern_key("legacy_status"),
         VmValue::Int(response.exit_code as i64),
     );
-    result.insert("success".to_string(), VmValue::Bool(response.success));
+    result.insert(
+        crate::value::intern_key("success"),
+        VmValue::Bool(response.success),
+    );
     VmValue::dict(result)
 }
 
@@ -1075,7 +1096,7 @@ fn optional_string_dict(
                 "host_call process.exec env value for {key:?} must be a string"
             )));
         };
-        out.insert(key.clone(), value.to_string());
+        out.insert(key.to_string(), value.to_string());
     }
     Ok(Some(out))
 }
@@ -1152,7 +1173,7 @@ fn host_has_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     let manifest = capability_manifest_with_mocks();
     let has = manifest
         .as_dict()
-        .and_then(|d| d.get(&capability))
+        .and_then(|d| d.get(capability.as_str()))
         .and_then(|v| v.as_dict())
         .is_some_and(|cap| {
             if let Some(operation) = operation {
@@ -1374,23 +1395,23 @@ mod tests {
         fn list_tools(&self) -> Result<Option<VmValue>, VmError> {
             let tool = VmValue::dict(crate::value::DictMap::from_iter([
                 (
-                    "name".to_string(),
+                    crate::value::intern_key("name"),
                     VmValue::String(arcstr::ArcStr::from("Read".to_string())),
                 ),
                 (
-                    "description".to_string(),
+                    crate::value::intern_key("description"),
                     VmValue::String(arcstr::ArcStr::from(
                         "Read a file from the host".to_string(),
                     )),
                 ),
                 (
-                    "schema".to_string(),
+                    crate::value::intern_key("schema"),
                     VmValue::dict(crate::value::DictMap::from_iter([(
-                        "type".to_string(),
+                        crate::value::intern_key("type"),
                         VmValue::String(arcstr::ArcStr::from("object".to_string())),
                     )])),
                 ),
-                ("deprecated".to_string(), VmValue::Bool(false)),
+                (crate::value::intern_key("deprecated"), VmValue::Bool(false)),
             ]));
             Ok(Some(VmValue::List(std::sync::Arc::new(vec![tool]))))
         }
@@ -1427,11 +1448,11 @@ mod tests {
             self.calls.fetch_add(1, Ordering::SeqCst);
             Ok(Some(VmValue::dict(crate::value::DictMap::from_iter([
                 (
-                    "status".to_string(),
+                    crate::value::intern_key("status"),
                     VmValue::String(arcstr::ArcStr::from("completed".to_string())),
                 ),
-                ("exit_code".to_string(), VmValue::Int(0)),
-                ("success".to_string(), VmValue::Bool(true)),
+                (crate::value::intern_key("exit_code"), VmValue::Int(0)),
+                (crate::value::intern_key("success"), VmValue::Bool(true)),
             ]))))
         }
     }
@@ -1474,7 +1495,7 @@ mod tests {
         run_host_async_test(|| async {
             set_host_call_bridge(Arc::new(TestHostToolBridge));
             let args = VmValue::dict(crate::value::DictMap::from_iter([(
-                "path".to_string(),
+                crate::value::intern_key("path"),
                 VmValue::String(arcstr::ArcStr::from("README.md".to_string())),
             )]));
             let value = dispatch_host_tool_call("Read", &args)
@@ -1509,11 +1530,11 @@ mod tests {
                 "exec",
                 &crate::value::DictMap::from_iter([
                     (
-                        "mode".to_string(),
+                        crate::value::intern_key("mode"),
                         VmValue::String(arcstr::ArcStr::from("shell")),
                     ),
                     (
-                        "command".to_string(),
+                        crate::value::intern_key("command"),
                         VmValue::String(arcstr::ArcStr::from("cat Cargo.toml")),
                     ),
                 ]),
@@ -1551,11 +1572,11 @@ mod tests {
         std::env::set_var("PARENT_VAR", "inherited");
         let mut params = crate::value::DictMap::from_iter([
             (
-                "mode".to_string(),
+                crate::value::intern_key("mode"),
                 VmValue::String(arcstr::ArcStr::from("argv")),
             ),
             (
-                "argv".to_string(),
+                crate::value::intern_key("argv"),
                 VmValue::List(std::sync::Arc::new(vec![
                     // Absolute path so the spawn does not depend on PATH,
                     // which the `replace` case intentionally clears.
@@ -1566,7 +1587,7 @@ mod tests {
                     )),
                 ])),
             ),
-            ("env".to_string(), env),
+            (crate::value::intern_key("env"), env),
         ]);
         if let Some(mode) = env_mode {
             params.put_str("env_mode", mode);
@@ -1588,7 +1609,7 @@ mod tests {
             // No `env_mode`: the provided key must be added WITHOUT clearing
             // the inherited parent environment (the env-clear footgun fix).
             let child_env = VmValue::dict(crate::value::DictMap::from_iter([(
-                "CHILD_VAR".to_string(),
+                crate::value::intern_key("CHILD_VAR"),
                 VmValue::String(arcstr::ArcStr::from("provided")),
             )]));
             let (parent, child) = process_exec_env_probe(child_env, None).await;
@@ -1611,7 +1632,7 @@ mod tests {
             // only the provided key survives. This preserves the ability to
             // fully replace the environment when intentionally requested.
             let child_env = VmValue::dict(crate::value::DictMap::from_iter([(
-                "CHILD_VAR".to_string(),
+                crate::value::intern_key("CHILD_VAR"),
                 VmValue::String(arcstr::ArcStr::from("provided")),
             )]));
             let (parent, child) = process_exec_env_probe(child_env, Some("replace")).await;
@@ -1629,24 +1650,24 @@ mod tests {
         run_host_async_test(|| async {
             let params = crate::value::DictMap::from_iter([
                 (
-                    "mode".to_string(),
+                    crate::value::intern_key("mode"),
                     VmValue::String(arcstr::ArcStr::from("argv")),
                 ),
                 (
-                    "argv".to_string(),
+                    crate::value::intern_key("argv"),
                     VmValue::List(std::sync::Arc::new(vec![VmValue::String(
                         arcstr::ArcStr::from("true"),
                     )])),
                 ),
                 (
-                    "env".to_string(),
+                    crate::value::intern_key("env"),
                     VmValue::dict(crate::value::DictMap::from_iter([(
-                        "CHILD_VAR".to_string(),
+                        crate::value::intern_key("CHILD_VAR"),
                         VmValue::String(arcstr::ArcStr::from("x")),
                     )])),
                 ),
                 (
-                    "env_mode".to_string(),
+                    crate::value::intern_key("env_mode"),
                     VmValue::String(arcstr::ArcStr::from("bogus")),
                 ),
             ]);

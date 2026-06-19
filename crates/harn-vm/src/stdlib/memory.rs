@@ -1277,12 +1277,12 @@ fn memory_record_to_vm(record: &MemoryRecord, score: Option<f64>) -> VmValue {
     map.put_str("namespace", record.namespace.as_str());
     map.put_str("key", record.key.as_str());
     map.insert(
-        "value".to_string(),
+        crate::value::intern_key("value"),
         crate::stdlib::json_to_vm_value(&record.value),
     );
     map.put_str("text", record.text.as_str());
     map.insert(
-        "tags".to_string(),
+        crate::value::intern_key("tags"),
         VmValue::List(std::sync::Arc::new(
             record
                 .tags
@@ -1293,7 +1293,7 @@ fn memory_record_to_vm(record: &MemoryRecord, score: Option<f64>) -> VmValue {
     );
     map.put_str("stored_at", record.stored_at.as_str());
     map.insert(
-        "provenance".to_string(),
+        crate::value::intern_key("provenance"),
         record
             .provenance
             .as_ref()
@@ -1301,7 +1301,7 @@ fn memory_record_to_vm(record: &MemoryRecord, score: Option<f64>) -> VmValue {
             .unwrap_or(VmValue::Nil),
     );
     if let Some(score) = score {
-        map.insert("score".to_string(), VmValue::Float(score));
+        map.insert(crate::value::intern_key("score"), VmValue::Float(score));
     }
     VmValue::dict(map)
 }
@@ -1323,10 +1323,13 @@ fn summary_to_vm(namespace: &str, records: Vec<MemoryRecord>) -> VmValue {
     let mut map = crate::value::DictMap::new();
     map.put_str("_type", "memory_summary");
     map.put_str("namespace", namespace);
-    map.insert("count".to_string(), VmValue::Int(records.len() as i64));
+    map.insert(
+        crate::value::intern_key("count"),
+        VmValue::Int(records.len() as i64),
+    );
     map.put_str("text", text);
     map.insert(
-        "records".to_string(),
+        crate::value::intern_key("records"),
         VmValue::List(std::sync::Arc::new(
             records
                 .iter()
@@ -1343,11 +1346,11 @@ fn forget_result_to_vm(event: &ForgetEvent) -> VmValue {
     map.put_str("id", event.id.as_str());
     map.put_str("namespace", event.namespace.as_str());
     map.insert(
-        "forgotten".to_string(),
+        crate::value::intern_key("forgotten"),
         VmValue::Int(event.forgotten_ids.len() as i64),
     );
     map.insert(
-        "forgotten_ids".to_string(),
+        crate::value::intern_key("forgotten_ids"),
         VmValue::List(std::sync::Arc::new(
             event
                 .forgotten_ids
@@ -1372,7 +1375,7 @@ fn memory_open_to_vm(event: &OpenEvent) -> VmValue {
     };
     map.put_str("backend", backend);
     map.insert(
-        "embed_model_hint".to_string(),
+        crate::value::intern_key("embed_model_hint"),
         event
             .embed_model_hint
             .as_deref()
@@ -1380,21 +1383,21 @@ fn memory_open_to_vm(event: &OpenEvent) -> VmValue {
             .unwrap_or(VmValue::Nil),
     );
     map.insert(
-        "embed_dim".to_string(),
+        crate::value::intern_key("embed_dim"),
         event
             .embed_dim
             .map(|dim| VmValue::Int(dim as i64))
             .unwrap_or(VmValue::Nil),
     );
     map.insert(
-        "bm25_weight".to_string(),
+        crate::value::intern_key("bm25_weight"),
         event
             .bm25_weight
             .map(VmValue::Float)
             .unwrap_or(VmValue::Nil),
     );
     map.insert(
-        "cosine_weight".to_string(),
+        crate::value::intern_key("cosine_weight"),
         event
             .cosine_weight
             .map(VmValue::Float)
@@ -1558,14 +1561,14 @@ mod tests {
     fn parse_embedding_response_validates_dim_and_vector_types() {
         let mut dict = crate::value::DictMap::new();
         dict.insert(
-            "vector".to_string(),
+            crate::value::intern_key("vector"),
             VmValue::List(std::sync::Arc::new(vec![
                 VmValue::Float(0.1),
                 VmValue::Float(0.2),
                 VmValue::Int(1),
             ])),
         );
-        dict.insert("dim".to_string(), VmValue::Int(3));
+        dict.insert(crate::value::intern_key("dim"), VmValue::Int(3));
         dict.put_str("model", "test-model");
         let value = VmValue::dict(dict);
         let parsed = parse_embedding_response(value, "fallback").unwrap();
@@ -1575,10 +1578,10 @@ mod tests {
 
         let mut bad = crate::value::DictMap::new();
         bad.insert(
-            "vector".to_string(),
+            crate::value::intern_key("vector"),
             VmValue::List(std::sync::Arc::new(vec![VmValue::Float(0.1)])),
         );
-        bad.insert("dim".to_string(), VmValue::Int(2));
+        bad.insert(crate::value::intern_key("dim"), VmValue::Int(2));
         let err = parse_embedding_response(VmValue::dict(bad), "fallback")
             .expect_err("dim mismatch must error");
         assert!(err.to_string().contains("dim=2"));

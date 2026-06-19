@@ -388,9 +388,10 @@ impl super::super::Vm {
             (MethodCacheTarget::DictCount, VmValue::Dict(map)) => {
                 Some(VmValue::Int(map.len() as i64))
             }
-            (MethodCacheTarget::DictHas, VmValue::Dict(map)) => Some(VmValue::Bool(
-                map.contains_key(&args.first().map(|arg| arg.display()).unwrap_or_default()),
-            )),
+            (MethodCacheTarget::DictHas, VmValue::Dict(map)) => {
+                let key = args.first().map(|arg| arg.display()).unwrap_or_default();
+                Some(VmValue::Bool(map.contains_key(key.as_str())))
+            }
             (MethodCacheTarget::RangeCount | MethodCacheTarget::RangeLen, VmValue::Range(r)) => {
                 Some(VmValue::Int(r.len()))
             }

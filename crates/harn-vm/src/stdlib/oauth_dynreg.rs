@@ -240,10 +240,10 @@ fn next_store_id() -> String {
 fn store_handle(id: &str) -> VmValue {
     let mut fields = crate::value::DictMap::new();
     fields.insert(
-        HANDLE_KEY_KIND.to_string(),
+        crate::value::intern_key(HANDLE_KEY_KIND),
         VmValue::string(KIND_DYNREG_STORE),
     );
-    fields.insert(HANDLE_KEY_ID.to_string(), VmValue::string(id));
+    fields.insert(crate::value::intern_key(HANDLE_KEY_ID), VmValue::string(id));
     VmValue::dict(fields)
 }
 
@@ -282,9 +282,12 @@ fn validate_metadata_value(metadata: &crate::value::DictMap) -> VmValue {
     let mut errors: Vec<String> = Vec::new();
     validate_metadata(metadata, &mut errors);
     let mut out = crate::value::DictMap::new();
-    out.insert("ok".to_string(), VmValue::Bool(errors.is_empty()));
     out.insert(
-        "errors".to_string(),
+        crate::value::intern_key("ok"),
+        VmValue::Bool(errors.is_empty()),
+    );
+    out.insert(
+        crate::value::intern_key("errors"),
         VmValue::List(std::sync::Arc::new(
             errors.iter().map(VmValue::string).collect::<Vec<_>>(),
         )),
@@ -556,14 +559,15 @@ fn build_client_metadata_value(metadata: &crate::value::DictMap) -> Result<VmVal
     // defaults to `["code"]`; grant_types defaults to `["authorization_code"]`;
     // token_endpoint_auth_method defaults to `client_secret_basic`.
     let mut out: crate::value::DictMap = metadata.clone();
-    out.entry("response_types".to_string())
+    out.entry(crate::value::intern_key("response_types"))
         .or_insert_with(|| VmValue::List(std::sync::Arc::new(vec![VmValue::string("code")])));
-    out.entry("grant_types".to_string()).or_insert_with(|| {
-        VmValue::List(std::sync::Arc::new(vec![VmValue::string(
-            "authorization_code",
-        )]))
-    });
-    out.entry("token_endpoint_auth_method".to_string())
+    out.entry(crate::value::intern_key("grant_types"))
+        .or_insert_with(|| {
+            VmValue::List(std::sync::Arc::new(vec![VmValue::string(
+                "authorization_code",
+            )]))
+        });
+    out.entry(crate::value::intern_key("token_endpoint_auth_method"))
         .or_insert_with(|| VmValue::string("client_secret_basic"));
     Ok(VmValue::dict(out))
 }
@@ -577,33 +581,39 @@ fn build_authorization_server_metadata_value(
     let issuer = derive_issuer(&auth_url)?;
 
     let mut out: crate::value::DictMap = crate::value::DictMap::new();
-    out.insert("issuer".to_string(), VmValue::string(&issuer));
+    out.insert(crate::value::intern_key("issuer"), VmValue::string(&issuer));
     out.insert(
-        "authorization_endpoint".to_string(),
+        crate::value::intern_key("authorization_endpoint"),
         VmValue::string(&auth_url),
     );
-    out.insert("token_endpoint".to_string(), VmValue::string(&token_url));
+    out.insert(
+        crate::value::intern_key("token_endpoint"),
+        VmValue::string(&token_url),
+    );
     if let Some(VmValue::String(s)) = provider.get("device_code_url") {
         out.insert(
-            "device_authorization_endpoint".to_string(),
+            crate::value::intern_key("device_authorization_endpoint"),
             VmValue::string(s.as_str()),
         );
     }
     if let Some(VmValue::String(s)) = provider.get("revoke_url") {
         out.insert(
-            "revocation_endpoint".to_string(),
+            crate::value::intern_key("revocation_endpoint"),
             VmValue::string(s.as_str()),
         );
     }
     if let Some(VmValue::String(s)) = provider.get("userinfo_url") {
-        out.insert("userinfo_endpoint".to_string(), VmValue::string(s.as_str()));
+        out.insert(
+            crate::value::intern_key("userinfo_endpoint"),
+            VmValue::string(s.as_str()),
+        );
     }
     out.insert(
-        "response_types_supported".to_string(),
+        crate::value::intern_key("response_types_supported"),
         VmValue::List(std::sync::Arc::new(vec![VmValue::string("code")])),
     );
     out.insert(
-        "grant_types_supported".to_string(),
+        crate::value::intern_key("grant_types_supported"),
         VmValue::List(std::sync::Arc::new(vec![
             VmValue::string("authorization_code"),
             VmValue::string("refresh_token"),
@@ -611,7 +621,7 @@ fn build_authorization_server_metadata_value(
         ])),
     );
     out.insert(
-        "token_endpoint_auth_methods_supported".to_string(),
+        crate::value::intern_key("token_endpoint_auth_methods_supported"),
         VmValue::List(std::sync::Arc::new(vec![
             VmValue::string("client_secret_basic"),
             VmValue::string("client_secret_post"),
@@ -620,18 +630,18 @@ fn build_authorization_server_metadata_value(
     );
     if let Some(VmValue::Bool(true)) | Some(VmValue::Bool(false)) = provider.get("pkce_required") {
         out.insert(
-            "code_challenge_methods_supported".to_string(),
+            crate::value::intern_key("code_challenge_methods_supported"),
             VmValue::List(std::sync::Arc::new(vec![VmValue::string("S256")])),
         );
     } else {
         out.insert(
-            "code_challenge_methods_supported".to_string(),
+            crate::value::intern_key("code_challenge_methods_supported"),
             VmValue::List(std::sync::Arc::new(vec![VmValue::string("S256")])),
         );
     }
     if let Some(VmValue::List(scopes)) = provider.get("default_scopes") {
         out.insert(
-            "scopes_supported".to_string(),
+            crate::value::intern_key("scopes_supported"),
             VmValue::List(scopes.clone()),
         );
     }
@@ -684,17 +694,17 @@ fn register_client_value(
 
     let mut canonical = metadata.clone();
     canonical
-        .entry("response_types".to_string())
+        .entry(crate::value::intern_key("response_types"))
         .or_insert_with(|| VmValue::List(std::sync::Arc::new(vec![VmValue::string("code")])));
     canonical
-        .entry("grant_types".to_string())
+        .entry(crate::value::intern_key("grant_types"))
         .or_insert_with(|| {
             VmValue::List(std::sync::Arc::new(vec![VmValue::string(
                 "authorization_code",
             )]))
         });
     canonical
-        .entry("token_endpoint_auth_method".to_string())
+        .entry(crate::value::intern_key("token_endpoint_auth_method"))
         .or_insert_with(|| VmValue::string("client_secret_basic"));
 
     let canonical_dict = VmValue::dict(canonical.clone());
@@ -718,11 +728,23 @@ fn register_client_value(
 
     // Build the response dict — full RFC 7591 §3.2.1 success body.
     let mut response: crate::value::DictMap = canonical;
-    response.insert("client_id".to_string(), VmValue::string(&client_id));
-    response.insert("client_secret".to_string(), VmValue::string(&client_secret));
-    response.insert("client_id_issued_at".to_string(), VmValue::Int(issued_at));
+    response.insert(
+        crate::value::intern_key("client_id"),
+        VmValue::string(&client_id),
+    );
+    response.insert(
+        crate::value::intern_key("client_secret"),
+        VmValue::string(&client_secret),
+    );
+    response.insert(
+        crate::value::intern_key("client_id_issued_at"),
+        VmValue::Int(issued_at),
+    );
     // Per RFC 7591 §3.2.1, `client_secret_expires_at: 0` means non-expiring.
-    response.insert("client_secret_expires_at".to_string(), VmValue::Int(0));
+    response.insert(
+        crate::value::intern_key("client_secret_expires_at"),
+        VmValue::Int(0),
+    );
     Ok(VmValue::dict(response))
 }
 
@@ -748,12 +770,18 @@ fn get_client_value(handle: &crate::value::DictMap, client_id: &str) -> VmValue 
             VmValue::Dict(dict) => dict.as_ref().clone(),
             _ => crate::value::DictMap::new(),
         };
-        response.insert("client_id".to_string(), VmValue::string(&client.client_id));
         response.insert(
-            "client_id_issued_at".to_string(),
+            crate::value::intern_key("client_id"),
+            VmValue::string(&client.client_id),
+        );
+        response.insert(
+            crate::value::intern_key("client_id_issued_at"),
             VmValue::Int(client.client_id_issued_at),
         );
-        response.insert("client_secret_expires_at".to_string(), VmValue::Int(0));
+        response.insert(
+            crate::value::intern_key("client_secret_expires_at"),
+            VmValue::Int(0),
+        );
         VmValue::dict(response)
     })
 }
@@ -885,7 +913,7 @@ mod tests {
     fn metadata_with_redirect(uri: &str) -> crate::value::DictMap {
         let mut m = crate::value::DictMap::new();
         m.insert(
-            "redirect_uris".to_string(),
+            crate::value::intern_key("redirect_uris"),
             VmValue::List(std::sync::Arc::new(vec![VmValue::string(uri)])),
         );
         m
@@ -946,7 +974,7 @@ mod tests {
     fn empty_redirect_uris_fails() {
         let mut m = crate::value::DictMap::new();
         m.insert(
-            "redirect_uris".to_string(),
+            crate::value::intern_key("redirect_uris"),
             VmValue::List(std::sync::Arc::new(Vec::new())),
         );
         let mut errors = Vec::new();
@@ -966,7 +994,7 @@ mod tests {
     fn unknown_grant_type_fails() {
         let mut m = metadata_with_redirect("https://app.example/cb");
         m.insert(
-            "grant_types".to_string(),
+            crate::value::intern_key("grant_types"),
             VmValue::List(std::sync::Arc::new(vec![VmValue::string("password")])),
         );
         let mut errors = Vec::new();
@@ -990,11 +1018,11 @@ mod tests {
     fn build_authorization_server_metadata_minimal() {
         let mut provider = crate::value::DictMap::new();
         provider.insert(
-            "auth_url".to_string(),
+            crate::value::intern_key("auth_url"),
             VmValue::string("https://idp.example/authorize"),
         );
         provider.insert(
-            "token_url".to_string(),
+            crate::value::intern_key("token_url"),
             VmValue::string("https://idp.example/token"),
         );
         let built = build_authorization_server_metadata_value(&provider, None).expect("ok");
@@ -1028,8 +1056,11 @@ mod tests {
                 .insert(id.clone(), DynregStore::default());
         });
         let mut handle = crate::value::DictMap::new();
-        handle.insert("kind".to_string(), VmValue::string(KIND_DYNREG_STORE));
-        handle.insert("id".to_string(), VmValue::string(&id));
+        handle.insert(
+            crate::value::intern_key("kind"),
+            VmValue::string(KIND_DYNREG_STORE),
+        );
+        handle.insert(crate::value::intern_key("id"), VmValue::string(&id));
         let m = metadata_with_redirect("https://app.example/cb");
         let response = register_client_value(&handle, &m).expect("registration ok");
         let VmValue::Dict(dict) = response else {
@@ -1061,8 +1092,11 @@ mod tests {
                 .insert(id.clone(), DynregStore::default());
         });
         let mut handle = crate::value::DictMap::new();
-        handle.insert("kind".to_string(), VmValue::string(KIND_DYNREG_STORE));
-        handle.insert("id".to_string(), VmValue::string(&id));
+        handle.insert(
+            crate::value::intern_key("kind"),
+            VmValue::string(KIND_DYNREG_STORE),
+        );
+        handle.insert(crate::value::intern_key("id"), VmValue::string(&id));
         let m = metadata_with_redirect("http://attacker.example/cb");
         let err = register_client_value(&handle, &m).unwrap_err();
         let VmError::Runtime(text) = err else {

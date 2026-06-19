@@ -175,11 +175,20 @@ fn initial_background_snapshot(
         _ => harn_vm::value::DictMap::new(),
     };
     response.put_str("feedback_kind", "tool_progress");
-    response.insert("duration_ms".to_string(), VmValue::Int(wait_ms as i64));
+    response.insert(
+        harn_vm::value::intern_key("duration_ms"),
+        VmValue::Int(wait_ms as i64),
+    );
     response.put_str("stdout", inline_stdout);
     response.put_str("stderr", inline_stderr);
-    response.insert("byte_count".to_string(), VmValue::Int(byte_count as i64));
-    response.insert("line_count".to_string(), VmValue::Int(line_count as i64));
+    response.insert(
+        harn_vm::value::intern_key("byte_count"),
+        VmValue::Int(byte_count as i64),
+    );
+    response.insert(
+        harn_vm::value::intern_key("line_count"),
+        VmValue::Int(line_count as i64),
+    );
     VmValue::dict(response)
 }
 
@@ -210,7 +219,7 @@ fn parse_command(map: &harn_vm::value::DictMap) -> Result<(String, Vec<String>),
             if let Some(shell) = map.get("shell") {
                 match shell {
                     VmValue::Dict(_) => {
-                        invocation.insert("shell".to_string(), shell.clone());
+                        invocation.insert(harn_vm::value::intern_key("shell"), shell.clone());
                     }
                     VmValue::Nil => {}
                     other => {
@@ -223,10 +232,13 @@ fn parse_command(map: &harn_vm::value::DictMap) -> Result<(String, Vec<String>),
                 }
             }
             if let Some(login) = optional_bool(NAME, map, "login")? {
-                invocation.insert("login".to_string(), VmValue::Bool(login));
+                invocation.insert(harn_vm::value::intern_key("login"), VmValue::Bool(login));
             }
             if let Some(interactive) = optional_bool(NAME, map, "interactive")? {
-                invocation.insert("interactive".to_string(), VmValue::Bool(interactive));
+                invocation.insert(
+                    harn_vm::value::intern_key("interactive"),
+                    VmValue::Bool(interactive),
+                );
             }
             let resolved = harn_vm::shells::resolve_invocation_from_vm_params(&invocation)
                 .map_err(|message| HostlibError::InvalidParameter {

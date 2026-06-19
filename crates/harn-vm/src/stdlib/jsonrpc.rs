@@ -175,13 +175,13 @@ fn build_request_options(
     }
     let mut request_options = crate::value::DictMap::new();
     request_options.put_str("body", body);
-    request_options.insert("headers".to_string(), VmValue::dict(headers));
+    request_options.insert(crate::value::intern_key("headers"), VmValue::dict(headers));
     if let Some(d) = options {
         if let Some(timeout) = d.get("timeout_ms") {
-            request_options.insert("timeout_ms".to_string(), timeout.clone());
+            request_options.insert(crate::value::intern_key("timeout_ms"), timeout.clone());
         }
         if let Some(retries) = d.get("retries") {
-            request_options.insert("retries".to_string(), retries.clone());
+            request_options.insert(crate::value::intern_key("retries"), retries.clone());
         }
     }
     request_options
@@ -213,10 +213,10 @@ fn build_envelope(method: &str, params: &VmValue, id: &VmValue, notify: bool) ->
     m.put_str("jsonrpc", "2.0");
     m.put_str("method", method);
     if !matches!(params, VmValue::Nil) {
-        m.insert("params".to_string(), params.clone());
+        m.insert(crate::value::intern_key("params"), params.clone());
     }
     if !notify {
-        m.insert("id".to_string(), id.clone());
+        m.insert(crate::value::intern_key("id"), id.clone());
     }
     VmValue::dict(m)
 }
@@ -284,8 +284,11 @@ fn unwrap_batch_response(response: VmValue, slots: &[BatchSlot]) -> Result<VmVal
             // a synthetic error so the slot is still populated and
             // callers can detect the mismatch.
             let mut err_dict = crate::value::DictMap::new();
-            err_dict.insert("jsonrpc_error".to_string(), VmValue::Bool(true));
-            err_dict.insert("code".to_string(), VmValue::Int(0));
+            err_dict.insert(
+                crate::value::intern_key("jsonrpc_error"),
+                VmValue::Bool(true),
+            );
+            err_dict.insert(crate::value::intern_key("code"), VmValue::Int(0));
             err_dict.put_str("message", "missing response for call");
             out.push(VmValue::dict(err_dict));
             continue;
@@ -340,11 +343,17 @@ fn error_to_dict(err: &serde_json::Value) -> crate::value::DictMap {
         .and_then(|m| m.as_str())
         .unwrap_or("jsonrpc error");
     let mut error_dict = crate::value::DictMap::new();
-    error_dict.insert("jsonrpc_error".to_string(), VmValue::Bool(true));
-    error_dict.insert("code".to_string(), VmValue::Int(code));
+    error_dict.insert(
+        crate::value::intern_key("jsonrpc_error"),
+        VmValue::Bool(true),
+    );
+    error_dict.insert(crate::value::intern_key("code"), VmValue::Int(code));
     error_dict.put_str("message", message);
     if let Some(data) = err.get("data") {
-        error_dict.insert("data".to_string(), crate::schema::json_to_vm_value(data));
+        error_dict.insert(
+            crate::value::intern_key("data"),
+            crate::schema::json_to_vm_value(data),
+        );
     }
     error_dict
 }
@@ -398,7 +407,7 @@ mod tests {
     #[test]
     fn envelope_includes_params_when_present() {
         let mut params = crate::value::DictMap::new();
-        params.insert("x".to_string(), VmValue::Int(42));
+        params.insert(crate::value::intern_key("x"), VmValue::Int(42));
         let env = build_envelope("echo", &VmValue::dict(params), &VmValue::Int(1), false);
         let dict = env.as_dict().unwrap();
         let params = dict.get("params").and_then(VmValue::as_dict).unwrap();
@@ -409,7 +418,7 @@ mod tests {
     fn unwrap_returns_result_field() {
         let body = serde_json::json!({"jsonrpc":"2.0","result":{"ok":true},"id":1});
         let mut response = crate::value::DictMap::new();
-        response.insert("status".to_string(), VmValue::Int(200));
+        response.insert(crate::value::intern_key("status"), VmValue::Int(200));
         response.put_str("body", body.to_string());
         let result = unwrap_jsonrpc_response(VmValue::dict(response)).unwrap();
         let dict = result.as_dict().unwrap();
@@ -427,7 +436,7 @@ mod tests {
             "id":1,
         });
         let mut response = crate::value::DictMap::new();
-        response.insert("status".to_string(), VmValue::Int(200));
+        response.insert(crate::value::intern_key("status"), VmValue::Int(200));
         response.put_str("body", body.to_string());
         let err = unwrap_jsonrpc_response(VmValue::dict(response)).unwrap_err();
         match err {
@@ -447,7 +456,10 @@ mod tests {
         let mut user_headers = crate::value::DictMap::new();
         user_headers.put_str("content-type", "application/x-test");
         let mut opts = crate::value::DictMap::new();
-        opts.insert("headers".to_string(), VmValue::dict(user_headers));
+        opts.insert(
+            crate::value::intern_key("headers"),
+            VmValue::dict(user_headers),
+        );
         let request_options = build_request_options("{}".to_string(), Some(&opts));
         let headers = request_options
             .get("headers")
@@ -479,7 +491,7 @@ mod tests {
             {"jsonrpc":"2.0","result":"first","id":1},
         ]);
         let mut response = crate::value::DictMap::new();
-        response.insert("status".to_string(), VmValue::Int(200));
+        response.insert(crate::value::intern_key("status"), VmValue::Int(200));
         response.put_str("body", body.to_string());
         let slots = vec![
             BatchSlot {
@@ -507,7 +519,7 @@ mod tests {
             {"jsonrpc":"2.0","error":{"code":-32602,"message":"bad params"},"id":2},
         ]);
         let mut response = crate::value::DictMap::new();
-        response.insert("status".to_string(), VmValue::Int(200));
+        response.insert(crate::value::intern_key("status"), VmValue::Int(200));
         response.put_str("body", body.to_string());
         let slots = vec![
             BatchSlot {

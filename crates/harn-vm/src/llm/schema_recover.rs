@@ -607,29 +607,29 @@ fn merge_repair_options(
     // burning the caller's `schema_retries` budget here would amplify
     // cost and the outer recovery cascade has already done what it
     // can. Set explicitly rather than relying on defaults.
-    merged.insert("schema_retries".to_string(), VmValue::Int(0));
+    merged.insert(crate::value::intern_key("schema_retries"), VmValue::Int(0));
     // Strip schema_recover-specific keys so they don't leak into
     // `extract_llm_options` as unknown provider params.
     merged.remove("llm_repair");
     merged.remove("apply_defaults");
     // Install the schema on the call so providers can use their
     // native JSON-mode and so the schema-retry loop's validation runs.
-    merged.insert("output_schema".to_string(), schema.clone());
-    merged.insert("json_schema".to_string(), schema.clone());
+    merged.insert(crate::value::intern_key("output_schema"), schema.clone());
+    merged.insert(crate::value::intern_key("json_schema"), schema.clone());
     merged
-        .entry("output_format".to_string())
+        .entry(crate::value::intern_key("output_format"))
         .or_insert_with(|| {
             let mut fmt = crate::value::DictMap::new();
             fmt.put_str("kind", "json_schema");
-            fmt.insert("schema".to_string(), schema.clone());
-            fmt.insert("strict".to_string(), VmValue::Bool(true));
+            fmt.insert(crate::value::intern_key("schema"), schema.clone());
+            fmt.insert(crate::value::intern_key("strict"), VmValue::Bool(true));
             VmValue::dict(fmt)
         });
     merged
-        .entry("output_validation".to_string())
+        .entry(crate::value::intern_key("output_validation"))
         .or_insert(VmValue::String(arcstr::ArcStr::from("error")));
     merged
-        .entry("response_format".to_string())
+        .entry(crate::value::intern_key("response_format"))
         .or_insert(VmValue::String(arcstr::ArcStr::from("json")));
     for (k, v) in overrides {
         merged.insert(k.clone(), v.clone());
@@ -645,14 +645,20 @@ fn envelope_success(
     repaired: bool,
 ) -> VmValue {
     let mut env = crate::value::DictMap::new();
-    env.insert("ok".to_string(), VmValue::Bool(true));
-    env.insert("data".to_string(), data);
+    env.insert(crate::value::intern_key("ok"), VmValue::Bool(true));
+    env.insert(crate::value::intern_key("data"), data);
     env.put_str("raw_text", raw_text);
     env.put_str("error", "");
-    env.insert("error_category".to_string(), VmValue::Nil);
-    env.insert("attempts".to_string(), VmValue::Int(attempts as i64));
+    env.insert(crate::value::intern_key("error_category"), VmValue::Nil);
+    env.insert(
+        crate::value::intern_key("attempts"),
+        VmValue::Int(attempts as i64),
+    );
     env.put_str("stage", stage);
-    env.insert("repaired".to_string(), VmValue::Bool(repaired));
+    env.insert(
+        crate::value::intern_key("repaired"),
+        VmValue::Bool(repaired),
+    );
     VmValue::dict(env)
 }
 
@@ -664,14 +670,17 @@ fn envelope_failure(
     attempts: usize,
 ) -> VmValue {
     let mut env = crate::value::DictMap::new();
-    env.insert("ok".to_string(), VmValue::Bool(false));
-    env.insert("data".to_string(), VmValue::Nil);
+    env.insert(crate::value::intern_key("ok"), VmValue::Bool(false));
+    env.insert(crate::value::intern_key("data"), VmValue::Nil);
     env.put_str("raw_text", raw_text);
     env.put_str("error", error_message);
     env.put_str("error_category", error_category);
-    env.insert("attempts".to_string(), VmValue::Int(attempts as i64));
+    env.insert(
+        crate::value::intern_key("attempts"),
+        VmValue::Int(attempts as i64),
+    );
     env.put_str("stage", stage);
-    env.insert("repaired".to_string(), VmValue::Bool(false));
+    env.insert(crate::value::intern_key("repaired"), VmValue::Bool(false));
     VmValue::dict(env)
 }
 
@@ -688,17 +697,17 @@ mod tests {
         let mut active = crate::value::DictMap::new();
         active.put_str("type", "boolean");
         let mut props = crate::value::DictMap::new();
-        props.insert("name".to_string(), VmValue::dict(name));
-        props.insert("age".to_string(), VmValue::dict(age));
-        props.insert("active".to_string(), VmValue::dict(active));
+        props.insert(crate::value::intern_key("name"), VmValue::dict(name));
+        props.insert(crate::value::intern_key("age"), VmValue::dict(age));
+        props.insert(crate::value::intern_key("active"), VmValue::dict(active));
         let required = VmValue::List(std::sync::Arc::new(vec![
             VmValue::String(arcstr::ArcStr::from("name")),
             VmValue::String(arcstr::ArcStr::from("age")),
         ]));
         let mut schema = crate::value::DictMap::new();
         schema.put_str("type", "object");
-        schema.insert("properties".to_string(), VmValue::dict(props));
-        schema.insert("required".to_string(), required);
+        schema.insert(crate::value::intern_key("properties"), VmValue::dict(props));
+        schema.insert(crate::value::intern_key("required"), required);
         VmValue::dict(schema)
     }
 
@@ -842,7 +851,7 @@ mod tests {
     #[test]
     fn parse_repair_config_disable_via_bool() {
         let mut opts = crate::value::DictMap::new();
-        opts.insert("llm_repair".to_string(), VmValue::Bool(false));
+        opts.insert(crate::value::intern_key("llm_repair"), VmValue::Bool(false));
         let cfg = parse_llm_repair_config(&Some(opts));
         assert!(!cfg.enabled);
     }
@@ -857,9 +866,12 @@ mod tests {
     fn parse_repair_config_dict_extracts_overrides() {
         let mut repair = crate::value::DictMap::new();
         repair.put_str("model", "local:fix");
-        repair.insert("max_tokens".to_string(), VmValue::Int(400));
+        repair.insert(crate::value::intern_key("max_tokens"), VmValue::Int(400));
         let mut opts = crate::value::DictMap::new();
-        opts.insert("llm_repair".to_string(), VmValue::dict(repair));
+        opts.insert(
+            crate::value::intern_key("llm_repair"),
+            VmValue::dict(repair),
+        );
         let cfg = parse_llm_repair_config(&Some(opts));
         assert!(cfg.enabled);
         assert_eq!(
@@ -876,9 +888,12 @@ mod tests {
     fn merge_repair_caps_schema_retries_and_installs_schema() {
         let schema = person_schema();
         let mut base = crate::value::DictMap::new();
-        base.insert("schema_retries".to_string(), VmValue::Int(7));
-        base.insert("llm_repair".to_string(), VmValue::Bool(true));
-        base.insert("apply_defaults".to_string(), VmValue::Bool(true));
+        base.insert(crate::value::intern_key("schema_retries"), VmValue::Int(7));
+        base.insert(crate::value::intern_key("llm_repair"), VmValue::Bool(true));
+        base.insert(
+            crate::value::intern_key("apply_defaults"),
+            VmValue::Bool(true),
+        );
         let merged = merge_repair_options(Some(&base), &crate::value::DictMap::new(), &schema);
         assert_eq!(
             merged.get("schema_retries").and_then(VmValue::as_int),
@@ -982,7 +997,7 @@ mod tests {
     async fn schema_recover_failure_when_repair_disabled_and_unrecoverable() {
         let schema = person_schema();
         let mut opts = crate::value::DictMap::new();
-        opts.insert("llm_repair".to_string(), VmValue::Bool(false));
+        opts.insert(crate::value::intern_key("llm_repair"), VmValue::Bool(false));
         let args = vec![
             VmValue::String(arcstr::ArcStr::from("nothing useful here at all")),
             schema,

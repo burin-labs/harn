@@ -359,22 +359,25 @@ async fn daemon_resume_builtin(
     let spec = parse_spawn_spec(
         &crate::value::DictMap::from_iter([
             (
-                "name".to_string(),
+                crate::value::intern_key("name"),
                 VmValue::String(arcstr::ArcStr::from(meta.name.clone())),
             ),
             (
-                "task".to_string(),
+                crate::value::intern_key("task"),
                 VmValue::String(arcstr::ArcStr::from(meta.prompt.clone())),
             ),
             (
-                "persist_path".to_string(),
+                crate::value::intern_key("persist_path"),
                 VmValue::String(arcstr::ArcStr::from(persist_root.clone())),
             ),
             (
-                "session_id".to_string(),
+                crate::value::intern_key("session_id"),
                 VmValue::String(arcstr::ArcStr::from(meta.session_id.clone())),
             ),
-            ("options".to_string(), VmValue::dict(options.clone())),
+            (
+                crate::value::intern_key("options"),
+                VmValue::dict(options.clone()),
+            ),
         ]),
         Some(meta.id.clone()),
         meta.system.clone(),
@@ -399,10 +402,11 @@ async fn daemon_resume_builtin(
             daemon.options = options.clone();
             daemon
                 .options
-                .insert("daemon".to_string(), VmValue::Bool(true));
-            daemon
-                .options
-                .insert("loop_until_done".to_string(), VmValue::Bool(false));
+                .insert(crate::value::intern_key("daemon"), VmValue::Bool(true));
+            daemon.options.insert(
+                crate::value::intern_key("loop_until_done"),
+                VmValue::Bool(false),
+            );
             daemon
                 .options
                 .put_str("session_id", spec.session_id.clone());
@@ -446,8 +450,11 @@ async fn daemon_resume_builtin(
     }
 
     let mut resume_options = options;
-    resume_options.insert("daemon".to_string(), VmValue::Bool(true));
-    resume_options.insert("loop_until_done".to_string(), VmValue::Bool(false));
+    resume_options.insert(crate::value::intern_key("daemon"), VmValue::Bool(true));
+    resume_options.insert(
+        crate::value::intern_key("loop_until_done"),
+        VmValue::Bool(false),
+    );
     resume_options.put_str("session_id", spec.session_id.clone());
     resume_options.put_str("persist_path", spec.snapshot_path.clone());
     resume_options.put_str("resume_path", spec.snapshot_path.clone());
@@ -562,8 +569,11 @@ fn parse_spawn_spec(
         .filter(|value| *value > 0)
         .unwrap_or(DEFAULT_EVENT_QUEUE_CAPACITY);
 
-    options.insert("daemon".to_string(), VmValue::Bool(true));
-    options.insert("loop_until_done".to_string(), VmValue::Bool(false));
+    options.insert(crate::value::intern_key("daemon"), VmValue::Bool(true));
+    options.insert(
+        crate::value::intern_key("loop_until_done"),
+        VmValue::Bool(false),
+    );
     options.put_str("session_id", session_id.clone());
     options.put_str("persist_path", paths.snapshot_path.clone());
     options.remove("resume_path");

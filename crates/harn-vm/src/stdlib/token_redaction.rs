@@ -246,11 +246,11 @@ fn token_redaction_drain_audit_impl(
             entry.put_str("code", TOKEN_REDACTION_DIAGNOSTIC);
             entry.put_str("pattern", event.pattern_name.as_str());
             entry.insert(
-                "match_count".to_string(),
+                crate::value::intern_key("match_count"),
                 VmValue::Int(event.match_count as i64),
             );
             entry.insert(
-                "bytes_redacted".to_string(),
+                crate::value::intern_key("bytes_redacted"),
                 VmValue::Int(event.bytes_redacted as i64),
             );
             VmValue::dict(entry)

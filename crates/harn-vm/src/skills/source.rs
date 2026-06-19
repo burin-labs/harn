@@ -417,11 +417,14 @@ pub fn skill_entry_to_vm(skill: &Skill) -> crate::value::VmValue {
     );
     entry.put_opt_str("when_to_use", skill.manifest.when_to_use.as_deref());
     if skill.manifest.disable_model_invocation {
-        entry.insert("disable_model_invocation".to_string(), VmValue::Bool(true));
+        entry.insert(
+            crate::value::intern_key("disable_model_invocation"),
+            VmValue::Bool(true),
+        );
     }
     if !skill.manifest.allowed_tools.is_empty() {
         entry.insert(
-            "allowed_tools".to_string(),
+            crate::value::intern_key("allowed_tools"),
             VmValue::List(std::sync::Arc::new(
                 skill
                     .manifest
@@ -433,11 +436,14 @@ pub fn skill_entry_to_vm(skill: &Skill) -> crate::value::VmValue {
         );
     }
     if skill.manifest.user_invocable {
-        entry.insert("user_invocable".to_string(), VmValue::Bool(true));
+        entry.insert(
+            crate::value::intern_key("user_invocable"),
+            VmValue::Bool(true),
+        );
     }
     if !skill.manifest.paths.is_empty() {
         entry.insert(
-            "paths".to_string(),
+            crate::value::intern_key("paths"),
             VmValue::List(std::sync::Arc::new(
                 skill
                     .manifest
@@ -453,18 +459,24 @@ pub fn skill_entry_to_vm(skill: &Skill) -> crate::value::VmValue {
     if !skill.manifest.hooks.is_empty() {
         let mut hooks: crate::value::DictMap = crate::value::DictMap::new();
         for (k, v) in &skill.manifest.hooks {
-            hooks.insert(k.clone(), VmValue::String(arcstr::ArcStr::from(v.as_str())));
+            hooks.insert(
+                crate::value::intern_key(k),
+                VmValue::String(arcstr::ArcStr::from(v.as_str())),
+            );
         }
-        entry.insert("hooks".to_string(), VmValue::dict(hooks));
+        entry.insert(crate::value::intern_key("hooks"), VmValue::dict(hooks));
     }
     entry.put_opt_str("model", skill.manifest.model.as_deref());
     entry.put_opt_str("effort", skill.manifest.effort.as_deref());
     if skill.manifest.require_signature {
-        entry.insert("require_signature".to_string(), VmValue::Bool(true));
+        entry.insert(
+            crate::value::intern_key("require_signature"),
+            VmValue::Bool(true),
+        );
     }
     if !skill.manifest.trusted_signers.is_empty() {
         entry.insert(
-            "trusted_signers".to_string(),
+            crate::value::intern_key("trusted_signers"),
             VmValue::List(std::sync::Arc::new(
                 skill
                     .manifest
@@ -502,11 +514,14 @@ pub fn skill_manifest_ref_to_vm(skill: &SkillManifestRef) -> crate::value::VmVal
     );
     entry.put_opt_str("when_to_use", skill.manifest.when_to_use.as_deref());
     if skill.manifest.disable_model_invocation {
-        entry.insert("disable_model_invocation".to_string(), VmValue::Bool(true));
+        entry.insert(
+            crate::value::intern_key("disable_model_invocation"),
+            VmValue::Bool(true),
+        );
     }
     if !skill.manifest.allowed_tools.is_empty() {
         entry.insert(
-            "allowed_tools".to_string(),
+            crate::value::intern_key("allowed_tools"),
             VmValue::List(std::sync::Arc::new(
                 skill
                     .manifest
@@ -518,11 +533,14 @@ pub fn skill_manifest_ref_to_vm(skill: &SkillManifestRef) -> crate::value::VmVal
         );
     }
     if skill.manifest.user_invocable {
-        entry.insert("user_invocable".to_string(), VmValue::Bool(true));
+        entry.insert(
+            crate::value::intern_key("user_invocable"),
+            VmValue::Bool(true),
+        );
     }
     if !skill.manifest.paths.is_empty() {
         entry.insert(
-            "paths".to_string(),
+            crate::value::intern_key("paths"),
             VmValue::List(std::sync::Arc::new(
                 skill
                     .manifest
@@ -539,11 +557,11 @@ pub fn skill_manifest_ref_to_vm(skill: &SkillManifestRef) -> crate::value::VmVal
         let mut hooks: crate::value::DictMap = crate::value::DictMap::new();
         for (key, value) in &skill.manifest.hooks {
             hooks.insert(
-                key.clone(),
+                crate::value::intern_key(key),
                 VmValue::String(arcstr::ArcStr::from(value.as_str())),
             );
         }
-        entry.insert("hooks".to_string(), VmValue::dict(hooks));
+        entry.insert(crate::value::intern_key("hooks"), VmValue::dict(hooks));
     }
     entry.put_opt_str("model", skill.manifest.model.as_deref());
     entry.put_opt_str("effort", skill.manifest.effort.as_deref());

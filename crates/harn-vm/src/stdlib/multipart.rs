@@ -425,7 +425,7 @@ fn parse_multipart_body(
 fn headers_value(headers: &BTreeMap<String, String>) -> VmValue {
     let map = headers
         .iter()
-        .map(|(key, value)| (key.clone(), VmValue::string(value)))
+        .map(|(key, value)| (crate::value::intern_key(key), VmValue::string(value)))
         .collect();
     dict_value(map)
 }
@@ -436,15 +436,24 @@ fn parsed_field_value(field: ParsedField) -> VmValue {
         Err(_) => VmValue::Nil,
     };
     let mut map = crate::value::DictMap::new();
-    map.insert("name".to_string(), VmValue::string(field.name));
-    map.insert("filename".to_string(), nil_or_string(field.filename));
     map.insert(
-        "content_type".to_string(),
+        crate::value::intern_key("name"),
+        VmValue::string(field.name),
+    );
+    map.insert(
+        crate::value::intern_key("filename"),
+        nil_or_string(field.filename),
+    );
+    map.insert(
+        crate::value::intern_key("content_type"),
         nil_or_string(field.content_type),
     );
-    map.insert("headers".to_string(), headers_value(&field.headers));
-    map.insert("bytes".to_string(), bytes_value(field.bytes));
-    map.insert("text".to_string(), text);
+    map.insert(
+        crate::value::intern_key("headers"),
+        headers_value(&field.headers),
+    );
+    map.insert(crate::value::intern_key("bytes"), bytes_value(field.bytes));
+    map.insert(crate::value::intern_key("text"), text);
     dict_value(map)
 }
 
@@ -463,13 +472,22 @@ fn multipart_parse_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValu
     let field_count = fields.len() as i64;
 
     let mut result = crate::value::DictMap::new();
-    result.insert("boundary".to_string(), VmValue::string(boundary));
     result.insert(
-        "fields".to_string(),
+        crate::value::intern_key("boundary"),
+        VmValue::string(boundary),
+    );
+    result.insert(
+        crate::value::intern_key("fields"),
         list_value(fields.into_iter().map(parsed_field_value).collect()),
     );
-    result.insert("field_count".to_string(), VmValue::Int(field_count));
-    result.insert("total_bytes".to_string(), VmValue::Int(total_bytes));
+    result.insert(
+        crate::value::intern_key("field_count"),
+        VmValue::Int(field_count),
+    );
+    result.insert(
+        crate::value::intern_key("total_bytes"),
+        VmValue::Int(total_bytes),
+    );
     Ok(dict_value(result))
 }
 
@@ -589,7 +607,7 @@ fn input_headers(
         if value.contains('\r') || value.contains('\n') {
             return Err(builtin_error(builtin, "header values must be single-line"));
         }
-        out.insert(name.clone(), value.to_string());
+        out.insert(name.to_string(), value.to_string());
     }
     Ok(out)
 }
@@ -750,9 +768,15 @@ fn multipart_form_data_builtin(args: &[VmValue], _out: &mut String) -> Result<Vm
 fn form_data_result(boundary: String, body: Vec<u8>) -> Result<VmValue, VmError> {
     let content_type = format!("multipart/form-data; boundary={boundary}");
     let mut result = crate::value::DictMap::new();
-    result.insert("boundary".to_string(), VmValue::string(boundary));
-    result.insert("content_type".to_string(), VmValue::string(content_type));
-    result.insert("body".to_string(), bytes_value(body));
+    result.insert(
+        crate::value::intern_key("boundary"),
+        VmValue::string(boundary),
+    );
+    result.insert(
+        crate::value::intern_key("content_type"),
+        VmValue::string(content_type),
+    );
+    result.insert(crate::value::intern_key("body"), bytes_value(body));
     Ok(dict_value(result))
 }
 
@@ -835,7 +859,7 @@ mod tests {
                 body,
                 s("multipart/form-data; boundary=x"),
                 dict_value(crate::value::DictMap::from_iter([(
-                    "max_fields".to_string(),
+                    crate::value::intern_key("max_fields"),
                     VmValue::Int(0),
                 )])),
             ],

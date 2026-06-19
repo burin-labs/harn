@@ -261,7 +261,7 @@ fn parse_sampling_request(params: &JsonValue) -> Result<SamplingRequest, String>
 async fn ask_host_approval(server_name: &str, params: &JsonValue) -> ApprovalDecision {
     let mut bridge_params: crate::value::DictMap = crate::value::DictMap::new();
     bridge_params.put_str("server", server_name);
-    bridge_params.insert("params".to_string(), json_to_vm_value(params));
+    bridge_params.insert(crate::value::intern_key("params"), json_to_vm_value(params));
 
     let result = dispatch_mock_host_call("mcp", "sample", &bridge_params)
         .or_else(|| dispatch_host_call_bridge("mcp", "sample", &bridge_params));
@@ -398,14 +398,20 @@ fn build_llm_call_args(
     // `extract_llm_options` accepts (a list of `{role, content}` dicts).
     let messages_vm: Vec<VmValue> = parsed.messages.iter().map(json_to_vm_value).collect();
     options.insert(
-        "messages".to_string(),
+        crate::value::intern_key("messages"),
         VmValue::List(std::sync::Arc::new(messages_vm)),
     );
 
-    options.insert("max_tokens".to_string(), VmValue::Int(parsed.max_tokens));
+    options.insert(
+        crate::value::intern_key("max_tokens"),
+        VmValue::Int(parsed.max_tokens),
+    );
 
     if let Some(temperature) = parsed.temperature {
-        options.insert("temperature".to_string(), VmValue::Float(temperature));
+        options.insert(
+            crate::value::intern_key("temperature"),
+            VmValue::Float(temperature),
+        );
     }
 
     if let Some(stop) = parsed.stop_sequences.as_ref() {
@@ -414,7 +420,7 @@ fn build_llm_call_args(
             .map(|s| VmValue::String(arcstr::ArcStr::from(s.as_str())))
             .collect();
         options.insert(
-            "stop".to_string(),
+            crate::value::intern_key("stop"),
             VmValue::List(std::sync::Arc::new(stop_vm)),
         );
     }
@@ -424,19 +430,28 @@ fn build_llm_call_args(
     }
 
     if let Some(tools) = parsed.tools.as_ref() {
-        options.insert("tools".to_string(), json_to_vm_value(tools));
+        options.insert(crate::value::intern_key("tools"), json_to_vm_value(tools));
     }
     if let Some(tool_choice) = parsed.tool_choice.as_ref() {
-        options.insert("tool_choice".to_string(), json_to_vm_value(tool_choice));
+        options.insert(
+            crate::value::intern_key("tool_choice"),
+            json_to_vm_value(tool_choice),
+        );
     }
     if let Some(thinking) = parsed.thinking.as_ref() {
-        options.insert("thinking".to_string(), json_to_vm_value(thinking));
+        options.insert(
+            crate::value::intern_key("thinking"),
+            json_to_vm_value(thinking),
+        );
     }
 
     // Pass-through fields kept on the options map so transcripts and
     // mocks see the original server's intent.
     if let Some(metadata) = parsed.metadata.as_ref() {
-        options.insert("metadata".to_string(), json_to_vm_value(metadata));
+        options.insert(
+            crate::value::intern_key("metadata"),
+            json_to_vm_value(metadata),
+        );
     }
     if let Some(include_context) = parsed.include_context.as_ref() {
         options.put_str("include_context", include_context.as_str());
@@ -629,7 +644,7 @@ mod tests {
         dict.put_str("action", "accept");
         let mut options = crate::value::DictMap::new();
         options.put_str("provider", "mock");
-        dict.insert("options".to_string(), VmValue::dict(options));
+        dict.insert(crate::value::intern_key("options"), VmValue::dict(options));
         match coerce_bridge_response(VmValue::dict(dict)) {
             ApprovalDecision::Accept(map) => {
                 assert_eq!(
@@ -758,7 +773,10 @@ mod tests {
             if capability == "mcp" && operation == "sample" {
                 let mut envelope: crate::value::DictMap = crate::value::DictMap::new();
                 envelope.put_str("action", "accept");
-                envelope.insert("options".to_string(), VmValue::dict(self.overrides.clone()));
+                envelope.insert(
+                    crate::value::intern_key("options"),
+                    VmValue::dict(self.overrides.clone()),
+                );
                 Ok(Some(VmValue::dict(envelope)))
             } else {
                 Ok(None)

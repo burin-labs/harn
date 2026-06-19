@@ -169,9 +169,9 @@ pub(super) fn vm_build_json_schema(params: Option<&crate::value::DictMap>) -> se
                     obj.remove("required");
                 }
             }
-            properties.insert(name.clone(), schema);
+            properties.insert(name.to_string(), schema);
             if is_required {
-                required.push(serde_json::Value::String(name.clone()));
+                required.push(serde_json::Value::String(name.to_string()));
             }
         }
     }

@@ -37,15 +37,18 @@ pub(super) fn apply_active_step_defaults(options: &mut Option<crate::value::Dict
             };
             if let Some(max_tokens) = max_tokens {
                 step_budget_dict
-                    .entry("max_output_tokens".to_string())
+                    .entry(crate::value::intern_key("max_output_tokens"))
                     .or_insert_with(|| VmValue::Int(max_tokens as i64));
             }
             if let Some(max_usd) = max_usd {
                 step_budget_dict
-                    .entry("max_cost_usd".to_string())
+                    .entry(crate::value::intern_key("max_cost_usd"))
                     .or_insert_with(|| VmValue::Float(max_usd));
             }
-            opts.insert("budget".to_string(), VmValue::dict(step_budget_dict));
+            opts.insert(
+                crate::value::intern_key("budget"),
+                VmValue::dict(step_budget_dict),
+            );
         }
     }
 }
@@ -63,7 +66,7 @@ pub(super) fn toml_value_to_vm_value(value: &toml::Value) -> VmValue {
         toml::Value::Table(table) => VmValue::dict(
             table
                 .iter()
-                .map(|(key, value)| (key.clone(), toml_value_to_vm_value(value)))
+                .map(|(key, value)| (crate::value::intern_key(key), toml_value_to_vm_value(value)))
                 .collect::<crate::value::DictMap>(),
         ),
     }
@@ -92,7 +95,7 @@ pub(super) fn apply_model_role_defaults(options: &mut Option<crate::value::DictM
         if key == "model_role" || key == "role" {
             continue;
         }
-        opts.entry(key)
+        opts.entry(crate::value::intern_key(&key))
             .or_insert_with(|| toml_value_to_vm_value(&value));
     }
 }

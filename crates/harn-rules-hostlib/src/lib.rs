@@ -409,7 +409,7 @@ fn parse_severity_overrides(
                     _ => None,
                 };
                 if let Some(severity) = severity {
-                    out.insert(rule.clone(), severity);
+                    out.insert(rule.to_string(), severity);
                 }
             }
         }
@@ -578,7 +578,7 @@ fn capture_metadata_vm(m: &RuleMatch) -> VmValue {
 }
 
 fn binding_metadata_vm(metadata: &BindingMetadata) -> VmValue {
-    let mut entries = BTreeMap::new();
+    let mut entries: BTreeMap<String, harn_vm::VmValue> = BTreeMap::new();
     if let Some(ty) = &metadata.ty {
         entries.insert("type".into(), str_vm(ty));
     }

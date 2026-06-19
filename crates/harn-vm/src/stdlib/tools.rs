@@ -206,7 +206,7 @@ fn tool_registry_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     let mut registry = crate::value::DictMap::new();
     registry.put_str("_type", "tool_registry");
     registry.insert(
-        "tools".to_string(),
+        crate::value::intern_key("tools"),
         VmValue::List(std::sync::Arc::new(Vec::new())),
     );
     Ok(VmValue::dict(registry))
@@ -233,7 +233,7 @@ fn tool_list_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
         if let VmValue::Dict(entry) = tool {
             let mut desc = crate::value::DictMap::new();
             for (key, value) in entry.iter() {
-                if key == "handler" {
+                if key.as_str() == "handler" {
                     continue;
                 }
                 desc.insert(key.clone(), value.clone());
@@ -323,7 +323,7 @@ fn tool_select_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 
     let mut new_registry = (**registry).clone();
     new_registry.insert(
-        "tools".to_string(),
+        crate::value::intern_key("tools"),
         VmValue::List(std::sync::Arc::new(selected)),
     );
     Ok(VmValue::dict(new_registry))
@@ -421,7 +421,7 @@ fn tool_remove_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 
     let mut new_registry = registry;
     new_registry.insert(
-        "tools".to_string(),
+        crate::value::intern_key("tools"),
         VmValue::List(std::sync::Arc::new(filtered)),
     );
     Ok(VmValue::dict(new_registry))
@@ -485,9 +485,9 @@ fn tool_schema_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
             let mut tool_def = crate::value::DictMap::new();
             tool_def.put_str("name", name);
             tool_def.put_str("description", description);
-            tool_def.insert("inputSchema".to_string(), input_schema);
+            tool_def.insert(crate::value::intern_key("inputSchema"), input_schema);
             if let Some(output_schema) = output_schema {
-                tool_def.insert("outputSchema".to_string(), output_schema);
+                tool_def.insert(crate::value::intern_key("outputSchema"), output_schema);
             }
             tool_schemas.push(VmValue::dict(tool_def));
         }
@@ -498,12 +498,18 @@ fn tool_schema_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 
     if let Some(comps) = &components {
         let mut comp_wrapper = crate::value::DictMap::new();
-        comp_wrapper.insert("schemas".to_string(), VmValue::dict(comps.clone()));
-        schema.insert("components".to_string(), VmValue::dict(comp_wrapper));
+        comp_wrapper.insert(
+            crate::value::intern_key("schemas"),
+            VmValue::dict(comps.clone()),
+        );
+        schema.insert(
+            crate::value::intern_key("components"),
+            VmValue::dict(comp_wrapper),
+        );
     }
 
     schema.insert(
-        "tools".to_string(),
+        crate::value::intern_key("tools"),
         VmValue::List(std::sync::Arc::new(tool_schemas)),
     );
     Ok(VmValue::dict(schema))
@@ -750,17 +756,17 @@ fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     let mut tool_entry = crate::value::DictMap::new();
     tool_entry.put_str("name", name.as_str());
     tool_entry.put_str("description", description);
-    tool_entry.insert("handler".to_string(), handler);
-    tool_entry.insert("parameters".to_string(), parameters);
+    tool_entry.insert(crate::value::intern_key("handler"), handler);
+    tool_entry.insert(crate::value::intern_key("parameters"), parameters);
     // Store the canonical executor as a plain string; wire
     // serialization is handled by the ACP adapter.
     tool_entry.put_str("executor", resolved_executor);
     if !matches!(output_schema, VmValue::Nil) {
-        tool_entry.insert("outputSchema".to_string(), output_schema);
+        tool_entry.insert(crate::value::intern_key("outputSchema"), output_schema);
     }
 
     if let Some(annotations) = config.get("annotations") {
-        tool_entry.insert("annotations".to_string(), annotations.clone());
+        tool_entry.insert(crate::value::intern_key("annotations"), annotations.clone());
     }
 
     for (key, value) in config.iter() {
@@ -791,7 +797,7 @@ fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 
     let mut new_registry = registry;
     new_registry.insert(
-        "tools".to_string(),
+        crate::value::intern_key("tools"),
         VmValue::List(std::sync::Arc::new(tools)),
     );
     Ok(VmValue::dict(new_registry))
@@ -1004,7 +1010,7 @@ fn tool_def_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
     if let Some(entry) = vm_find_tool_entry(registry, &name) {
         let mut desc = crate::value::DictMap::new();
         for (key, value) in entry.iter() {
-            if key == "handler" {
+            if key.as_str() == "handler" {
                 continue;
             }
             desc.insert(key.clone(), value.clone());
@@ -1227,7 +1233,7 @@ async fn invoke_synthesized_tool(id: &str, call_args: VmValue) -> Result<VmValue
             let arguments = match &call_args {
                 VmValue::Dict(map) => serde_json::Value::Object(
                     map.iter()
-                        .map(|(key, value)| (key.clone(), crate::llm::vm_value_to_json(value)))
+                        .map(|(key, value)| (key.to_string(), crate::llm::vm_value_to_json(value)))
                         .collect(),
                 ),
                 VmValue::Nil => serde_json::json!({}),
@@ -1289,9 +1295,9 @@ fn synthesized_tool_dry_run_result(spec: &SynthesizedToolSpec, call_args: VmValu
     result.put_str("tool_id", spec.id.as_str());
     result.put_str("name", spec.name.as_str());
     result.put_str("description", spec.description.as_str());
-    result.insert("args".to_string(), call_args);
+    result.insert(crate::value::intern_key("args"), call_args);
     result.insert(
-        "capabilities".to_string(),
+        crate::value::intern_key("capabilities"),
         VmValue::List(std::sync::Arc::new(
             spec.capabilities
                 .iter()
@@ -1313,10 +1319,16 @@ fn synthesized_tool_spec_value(spec: &SynthesizedToolSpec) -> VmValue {
     value.put_str("id", spec.id.as_str());
     value.put_str("name", spec.name.as_str());
     value.put_str("description", spec.description.as_str());
-    value.insert("parameters".to_string(), spec.parameters.clone());
-    value.insert("return_type".to_string(), spec.return_type.clone());
     value.insert(
-        "capabilities".to_string(),
+        crate::value::intern_key("parameters"),
+        spec.parameters.clone(),
+    );
+    value.insert(
+        crate::value::intern_key("return_type"),
+        spec.return_type.clone(),
+    );
+    value.insert(
+        crate::value::intern_key("capabilities"),
         VmValue::List(std::sync::Arc::new(
             spec.capabilities
                 .iter()
@@ -1516,8 +1528,10 @@ fn vm_get_tools(dict: &crate::value::DictMap) -> &[VmValue] {
 fn vm_format_parameters(params: Option<&VmValue>) -> String {
     match params {
         Some(VmValue::Dict(map)) if !map.is_empty() => {
-            let mut pairs: Vec<(String, String)> =
-                map.iter().map(|(k, v)| (k.clone(), v.display())).collect();
+            let mut pairs: Vec<(String, String)> = map
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.display()))
+                .collect();
             pairs.sort_by(|a, b| a.0.cmp(&b.0));
             pairs
                 .iter()
@@ -1536,8 +1550,10 @@ fn vm_format_schema(schema: Option<&VmValue>) -> String {
             if let Some(VmValue::String(reference)) = map.get("$ref") {
                 return format!("$ref({reference})");
             }
-            let mut pairs: Vec<(String, String)> =
-                map.iter().map(|(k, v)| (k.clone(), v.display())).collect();
+            let mut pairs: Vec<(String, String)> = map
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.display()))
+                .collect();
             pairs.sort_by(|a, b| a.0.cmp(&b.0));
             pairs
                 .iter()
@@ -1553,7 +1569,7 @@ fn vm_build_empty_schema() -> crate::value::DictMap {
     let mut schema = crate::value::DictMap::new();
     schema.put_str("schema_version", "harn-tools/1.0");
     schema.insert(
-        "tools".to_string(),
+        crate::value::intern_key("tools"),
         VmValue::List(std::sync::Arc::new(Vec::new())),
     );
     schema
@@ -1570,7 +1586,7 @@ fn vm_build_input_schema(
         Some(VmValue::Dict(map)) if !map.is_empty() => map,
         _ => {
             schema.insert(
-                "properties".to_string(),
+                crate::value::intern_key("properties"),
                 VmValue::dict(crate::value::DictMap::new()),
             );
             return VmValue::dict(schema);
@@ -1586,11 +1602,14 @@ fn vm_build_input_schema(
         required.push(VmValue::String(arcstr::ArcStr::from(key.as_str())));
     }
 
-    schema.insert("properties".to_string(), VmValue::dict(properties));
+    schema.insert(
+        crate::value::intern_key("properties"),
+        VmValue::dict(properties),
+    );
     if !required.is_empty() {
         required.sort_by_key(|a| a.display());
         schema.insert(
-            "required".to_string(),
+            crate::value::intern_key("required"),
             VmValue::List(std::sync::Arc::new(required)),
         );
     }

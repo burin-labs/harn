@@ -86,8 +86,10 @@ impl Debugger {
                 }
             }
             VmValue::Dict(map) => {
-                let children: Vec<(String, VmValue)> =
-                    map.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+                let children: Vec<(String, VmValue)> = map
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.clone()))
+                    .collect();
                 let display = format!("dict<{}>", map.len());
                 if children.is_empty() {
                     (0, display)
@@ -98,8 +100,10 @@ impl Debugger {
             VmValue::StructInstance(si) => {
                 let layout = &si.layout;
                 let fields = val.struct_fields_map().unwrap_or_default();
-                let children: Vec<(String, VmValue)> =
-                    fields.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+                let children: Vec<(String, VmValue)> = fields
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.clone()))
+                    .collect();
                 let display = layout.struct_name().to_string();
                 if children.is_empty() {
                     (0, display)
@@ -218,7 +222,12 @@ impl Debugger {
         }
 
         // Fallback: scope 1 is the locals map.
-        let variable_list: Vec<(String, VmValue)> = self.variables.clone().into_iter().collect();
+        let variable_list: Vec<(String, VmValue)> = self
+            .variables
+            .clone()
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v))
+            .collect();
         let vars: Vec<Variable> = variable_list
             .iter()
             .map(|(name, val)| self.make_variable(name.clone(), val))
@@ -551,7 +560,7 @@ impl Debugger {
                         };
                         list.get(idx)?.clone()
                     }
-                    VmValue::Dict(map) => map.get(&i.to_string())?.clone(),
+                    VmValue::Dict(map) => map.get(i.to_string().as_str())?.clone(),
                     _ => return None,
                 },
             };

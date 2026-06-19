@@ -344,8 +344,11 @@ impl crate::vm::Vm {
                             break;
                         }
                     };
-                    let current = counts.get(&bucket).and_then(|v| v.as_int()).unwrap_or(0);
-                    counts.insert(bucket, VmValue::Int(current + 1));
+                    let current = counts
+                        .get(bucket.as_str())
+                        .and_then(|v| v.as_int())
+                        .unwrap_or(0);
+                    counts.insert(crate::value::intern_key(&bucket), VmValue::Int(current + 1));
                 }
                 if let Some(err) = error {
                     Err(err)
@@ -526,7 +529,12 @@ impl crate::vm::Vm {
                 }
                 let result: crate::value::DictMap = groups
                     .into_iter()
-                    .map(|(k, v)| (k, VmValue::List(std::sync::Arc::new(v))))
+                    .map(|(k, v)| {
+                        (
+                            crate::value::intern_key(&k),
+                            VmValue::List(std::sync::Arc::new(v)),
+                        )
+                    })
                     .collect();
                 Ok(VmValue::dict(result))
             }
@@ -604,7 +612,7 @@ impl crate::vm::Vm {
             }
             "count_by" => {
                 let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) else {
-                    return Ok(VmValue::dict(BTreeMap::new()));
+                    return Ok(VmValue::dict_map(Default::default()));
                 };
                 let mut counts: BTreeMap<String, i64> = BTreeMap::new();
                 for item in items.iter() {
@@ -616,7 +624,7 @@ impl crate::vm::Vm {
                 Ok(VmValue::dict(
                     counts
                         .into_iter()
-                        .map(|(k, v)| (k, VmValue::Int(v)))
+                        .map(|(k, v)| (crate::value::intern_key(&k), VmValue::Int(v)))
                         .collect::<crate::value::DictMap>(),
                 ))
             }

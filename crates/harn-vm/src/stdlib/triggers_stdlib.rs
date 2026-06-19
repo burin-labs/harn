@@ -1490,9 +1490,11 @@ fn parse_trigger_config(config: &crate::value::DictMap) -> Result<TriggerBinding
 
 pub(crate) fn validate_resume_trigger_spec(config: &crate::value::DictMap) -> Result<(), VmError> {
     let mut normalized = config.clone();
-    normalized.entry("handler".to_string()).or_insert_with(|| {
-        VmValue::String(arcstr::ArcStr::from("worker://__resume_auto_resume__"))
-    });
+    normalized
+        .entry(crate::value::intern_key("handler"))
+        .or_insert_with(|| {
+            VmValue::String(arcstr::ArcStr::from("worker://__resume_auto_resume__"))
+        });
     parse_trigger_config(&normalized).map(|_| ())
 }
 
@@ -2747,10 +2749,10 @@ fn parse_webhook_intake_request(
         Some(VmValue::Dict(dict)) => dict
             .iter()
             .map(|(key, value)| match value {
-                VmValue::String(text) => Ok((key.clone(), text.to_string())),
-                VmValue::Int(value) => Ok((key.clone(), value.to_string())),
-                VmValue::Float(value) => Ok((key.clone(), value.to_string())),
-                VmValue::Bool(value) => Ok((key.clone(), value.to_string())),
+                VmValue::String(text) => Ok((key.to_string(), text.to_string())),
+                VmValue::Int(value) => Ok((key.to_string(), value.to_string())),
+                VmValue::Float(value) => Ok((key.to_string(), value.to_string())),
+                VmValue::Bool(value) => Ok((key.to_string(), value.to_string())),
                 other => Err(VmError::Runtime(format!(
                     "webhook_intake_feed: headers.{key} must be a string, got {}",
                     other.type_name()

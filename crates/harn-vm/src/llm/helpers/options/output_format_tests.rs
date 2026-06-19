@@ -7,15 +7,17 @@ fn parses_explicit_json_schema_output_format() {
     let mut fmt = crate::value::DictMap::new();
     fmt.put_str("kind", "json_schema");
     fmt.insert(
-        "schema".to_string(),
+        crate::value::intern_key("schema"),
         VmValue::dict(crate::value::DictMap::from_iter([(
-            "type".to_string(),
+            crate::value::intern_key("type"),
             VmValue::String(arcstr::ArcStr::from("object")),
         )])),
     );
-    fmt.insert("strict".to_string(), VmValue::Bool(false));
-    let options =
-        crate::value::DictMap::from_iter([("output_format".to_string(), VmValue::dict(fmt))]);
+    fmt.insert(crate::value::intern_key("strict"), VmValue::Bool(false));
+    let options = crate::value::DictMap::from_iter([(
+        crate::value::intern_key("output_format"),
+        VmValue::dict(fmt),
+    )]);
 
     let parsed = parse_output_format_option(Some(&options), None, None).expect("output_format");
 

@@ -1103,7 +1103,7 @@ fn parse_reminder_spec(value: &VmValue, context: &str) -> Result<ReminderSpec, V
     let unknown = options
         .keys()
         .filter(|key| !ALLOWED.contains(&key.as_str()))
-        .map(String::as_str)
+        .map(|key| key.as_str())
         .collect::<Vec<_>>();
     if !unknown.is_empty() {
         return Err(reminder_code_error(
@@ -1914,7 +1914,7 @@ mod tests {
         VmValue::dict(
             entries
                 .into_iter()
-                .map(|(key, value)| (key.to_string(), value))
+                .map(|(key, value)| (crate::value::intern_key(key), value))
                 .collect::<crate::value::DictMap>(),
         )
     }

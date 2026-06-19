@@ -41,7 +41,12 @@ impl From<HttpMockResponse> for MockResponse {
             headers: value
                 .headers
                 .into_iter()
-                .map(|(key, value)| (key, VmValue::String(arcstr::ArcStr::from(value))))
+                .map(|(key, value)| {
+                    (
+                        crate::value::intern_key(&key),
+                        VmValue::String(arcstr::ArcStr::from(value)),
+                    )
+                })
                 .collect(),
         }
     }
@@ -131,7 +136,7 @@ pub fn http_mock_calls_snapshot() -> Vec<HttpMockCallSnapshot> {
                 headers: call
                     .headers
                     .iter()
-                    .map(|(key, value)| (key.clone(), value.display()))
+                    .map(|(key, value)| (key.to_string(), value.display()))
                     .collect(),
                 body: call.body.clone(),
             })

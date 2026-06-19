@@ -143,7 +143,7 @@ fn csv_stringify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
         for row in rows.iter() {
             if let VmValue::Dict(d) = row {
                 for k in d.keys() {
-                    keys.insert(k.clone());
+                    keys.insert(k.to_string());
                 }
             }
         }
@@ -163,7 +163,7 @@ fn csv_stringify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
             };
             let cells: Vec<String> = header
                 .iter()
-                .map(|k| d.get(k).map(|v| v.display()).unwrap_or_default())
+                .map(|k| d.get(k.as_str()).map(|v| v.display()).unwrap_or_default())
                 .collect();
             wtr.write_record(&cells).map_err(|e| {
                 VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
@@ -229,7 +229,7 @@ mod tests {
         VmValue::dict(
             items
                 .into_iter()
-                .map(|(key, value)| (key.to_string(), value))
+                .map(|(key, value)| (crate::value::intern_key(key), value))
                 .collect::<crate::value::DictMap>(),
         )
     }

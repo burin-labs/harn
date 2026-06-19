@@ -119,9 +119,15 @@ fn cache_get_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     record_lookup(&options, hit.is_some());
 
     let mut envelope = cache_envelope_base(&options);
-    envelope.insert("hit".to_string(), VmValue::Bool(hit.is_some()));
+    envelope.insert(
+        crate::value::intern_key("hit"),
+        VmValue::Bool(hit.is_some()),
+    );
     if let Some(value) = hit {
-        envelope.insert("value".to_string(), crate::stdlib::json_to_vm_value(&value));
+        envelope.insert(
+            crate::value::intern_key("value"),
+            crate::stdlib::json_to_vm_value(&value),
+        );
     }
     Ok(VmValue::dict(envelope))
 }
@@ -145,7 +151,7 @@ fn cache_put_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     )?;
 
     let mut envelope = cache_envelope_base(&options);
-    envelope.insert("stored".to_string(), VmValue::Bool(true));
+    envelope.insert(crate::value::intern_key("stored"), VmValue::Bool(true));
     envelope.put_str("key", key);
     Ok(VmValue::dict(envelope))
 }
@@ -171,15 +177,15 @@ fn cache_stats_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     let total = snapshot.hits.saturating_add(snapshot.misses);
     let mut dict = cache_envelope_base(&options);
     dict.insert(
-        "hits".to_string(),
+        crate::value::intern_key("hits"),
         VmValue::Int(saturating_u64_to_i64(snapshot.hits)),
     );
     dict.insert(
-        "misses".to_string(),
+        crate::value::intern_key("misses"),
         VmValue::Int(saturating_u64_to_i64(snapshot.misses)),
     );
     dict.insert(
-        "lookups".to_string(),
+        crate::value::intern_key("lookups"),
         VmValue::Int(saturating_u64_to_i64(total)),
     );
     let hit_rate = if total == 0 {
@@ -187,7 +193,10 @@ fn cache_stats_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     } else {
         snapshot.hits as f64 / total as f64
     };
-    dict.insert("hit_rate".to_string(), VmValue::Float(hit_rate));
+    dict.insert(
+        crate::value::intern_key("hit_rate"),
+        VmValue::Float(hit_rate),
+    );
     Ok(VmValue::dict(dict))
 }
 

@@ -274,7 +274,10 @@ async fn vm_call_completion_fallback(
     let has_suffix = suffix.is_some_and(|s| !s.is_empty());
     let mut bindings = crate::value::DictMap::new();
     bindings.put_str("prefix", prefix);
-    bindings.insert("has_suffix".to_string(), VmValue::Bool(has_suffix));
+    bindings.insert(
+        crate::value::intern_key("has_suffix"),
+        VmValue::Bool(has_suffix),
+    );
     bindings.put_str("suffix", suffix.unwrap_or_default());
     let instruction = crate::stdlib::template::render_stdlib_prompt_asset(
         "llm/prompts/completion_fallback_system.harn.prompt",

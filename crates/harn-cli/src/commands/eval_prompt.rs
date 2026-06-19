@@ -562,7 +562,7 @@ fn vm_value_to_json(value: &VmValue) -> JsonValue {
         VmValue::Dict(d) => {
             let mut map = serde_json::Map::new();
             for (k, v) in d.iter() {
-                map.insert(k.clone(), vm_value_to_json(v));
+                map.insert(k.to_string(), vm_value_to_json(v));
             }
             JsonValue::Object(map)
         }

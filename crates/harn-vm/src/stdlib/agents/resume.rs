@@ -388,7 +388,7 @@ pub(super) fn install_resume_continuity_payload(
     });
     if let WorkerConfig::SubAgent { spec } = &mut worker.config {
         spec.options.insert(
-            "_resume_continuity".to_string(),
+            crate::value::intern_key("_resume_continuity"),
             crate::stdlib::json_to_vm_value(&payload),
         );
     }

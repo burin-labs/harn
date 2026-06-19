@@ -205,7 +205,7 @@ pub fn compaction_policy_to_vm_value(policy: &CompactionPolicy) -> VmValue {
         map.put_str("scope", scope.clone());
     }
     map.insert(
-        "preserve".to_string(),
+        crate::value::intern_key("preserve"),
         VmValue::List(std::sync::Arc::new(
             policy
                 .preserve
@@ -215,7 +215,7 @@ pub fn compaction_policy_to_vm_value(policy: &CompactionPolicy) -> VmValue {
         )),
     );
     map.insert(
-        "drop".to_string(),
+        crate::value::intern_key("drop"),
         VmValue::List(std::sync::Arc::new(
             policy
                 .drop_items
@@ -226,7 +226,7 @@ pub fn compaction_policy_to_vm_value(policy: &CompactionPolicy) -> VmValue {
     );
     if let Some(extend_default_instructions) = policy.extend_default_instructions {
         map.insert(
-            "extend_default_instructions".to_string(),
+            crate::value::intern_key("extend_default_instructions"),
             VmValue::Bool(extend_default_instructions),
         );
     }
@@ -852,7 +852,7 @@ fn render_llm_compaction_prompt(
     let mut bindings = crate::value::DictMap::new();
     bindings.put_str("formatted_messages", formatted);
     bindings.insert(
-        "archived_count".to_string(),
+        crate::value::intern_key("archived_count"),
         VmValue::Int(archived_count as i64),
     );
     let Some(path) = summarize_prompt.filter(|path| !path.trim().is_empty()) else {
@@ -880,7 +880,7 @@ fn render_replacement_compaction_prompt(
     bindings.put_str("directives", directives);
     bindings.put_str("formatted_messages", formatted);
     bindings.insert(
-        "archived_count".to_string(),
+        crate::value::intern_key("archived_count"),
         VmValue::Int(archived_count as i64),
     );
     crate::stdlib::template::render_stdlib_prompt_asset(

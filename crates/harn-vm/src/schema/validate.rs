@@ -400,11 +400,11 @@ fn validate_object_fields(
     if let Some(VmValue::List(required_keys)) = schema.get("required") {
         for key_val in required_keys.iter() {
             let key = key_val.display();
-            if !fields.contains_key(&key) {
+            if !fields.contains_key(key.as_str()) {
                 let has_default = schema
                     .get("properties")
                     .and_then(VmValue::as_dict)
-                    .and_then(|props| props.get(&key))
+                    .and_then(|props| props.get(key.as_str()))
                     .and_then(VmValue::as_dict)
                     .is_some_and(|prop_schema| prop_schema.contains_key("default"));
                 if options.apply_defaults && has_default {
@@ -503,7 +503,7 @@ fn validate_object_fields(
         let mut field_names = layout.field_names().to_vec();
         for key in merged.keys() {
             if layout.field_index(key).is_none() {
-                field_names.push(key.clone());
+                field_names.push(key.to_string());
             }
         }
         VmValue::struct_instance_with_layout(layout.struct_name().to_string(), field_names, merged)
@@ -777,23 +777,23 @@ fn first_object_param_error(
     if let Some(VmValue::List(required_keys)) = schema.get("required") {
         for key_value in required_keys.iter() {
             let key = key_value.display();
-            if !fields.contains_key(&key) {
+            if !fields.contains_key(key.as_str()) {
                 let key_initial = key.chars().next();
                 let suggestion = crate::value::closest_match(
                     &key,
                     fields
                         .keys()
-                        .map(String::as_str)
+                        .map(|key| key.as_str())
                         .filter(|candidate| candidate.chars().next() == key_initial),
                 );
                 let expected = schema
                     .get("properties")
                     .and_then(VmValue::as_dict)
-                    .and_then(|props| props.get(&key))
+                    .and_then(|props| props.get(key.as_str()))
                     .and_then(VmValue::as_dict)
                     .map(schema_expected_label)
                     .unwrap_or_else(|| "value".to_string());
-                let actual_keys: Vec<&str> = fields.keys().map(String::as_str).collect();
+                let actual_keys: Vec<&str> = fields.keys().map(|key| key.as_str()).collect();
                 let actual_summary = crate::stdlib::shapes::format_available_fields(&actual_keys);
                 if let Some(suggestion) = suggestion {
                     return Some(format!(

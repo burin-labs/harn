@@ -559,11 +559,11 @@ pub fn redact_transcript_visibility(
     };
     let mut redacted = dict.clone();
     redacted.insert(
-        "messages".to_string(),
+        crate::value::intern_key("messages"),
         VmValue::List(std::sync::Arc::new(public_messages)),
     );
     redacted.insert(
-        "events".to_string(),
+        crate::value::intern_key("events"),
         VmValue::List(std::sync::Arc::new(public_events)),
     );
     Some(VmValue::dict(redacted))
@@ -598,7 +598,7 @@ fn redact_public_message(message: &VmValue) -> Option<VmValue> {
                 public_text = text_fragments_from_blocks(&public_blocks);
             }
             redacted.insert(
-                key.to_string(),
+                crate::value::intern_key(key),
                 VmValue::List(std::sync::Arc::new(public_blocks)),
             );
         }

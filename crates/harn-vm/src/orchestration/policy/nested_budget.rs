@@ -176,11 +176,11 @@ pub fn annotate_nested_execution_options(
     label: &str,
 ) {
     options.insert(
-        NESTED_KIND_OPTION_KEY.to_string(),
+        crate::value::intern_key(NESTED_KIND_OPTION_KEY),
         VmValue::String(arcstr::ArcStr::from(kind.as_str().to_string())),
     );
     options.insert(
-        NESTED_LABEL_OPTION_KEY.to_string(),
+        crate::value::intern_key(NESTED_LABEL_OPTION_KEY),
         VmValue::String(arcstr::ArcStr::from(label.to_string())),
     );
 }

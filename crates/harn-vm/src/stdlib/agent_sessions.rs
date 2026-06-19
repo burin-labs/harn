@@ -572,14 +572,14 @@ fn agent_session_ancestry_builtin(args: &[VmValue], _out: &mut String) -> Result
     };
     Ok(VmValue::dict(crate::value::DictMap::from_iter([
         (
-            "parent_id".to_string(),
+            crate::value::intern_key("parent_id"),
             ancestry
                 .parent_id
                 .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
                 .unwrap_or(VmValue::Nil),
         ),
         (
-            "child_ids".to_string(),
+            crate::value::intern_key("child_ids"),
             VmValue::List(std::sync::Arc::new(
                 ancestry
                     .child_ids
@@ -589,7 +589,7 @@ fn agent_session_ancestry_builtin(args: &[VmValue], _out: &mut String) -> Result
             )),
         ),
         (
-            "root_id".to_string(),
+            crate::value::intern_key("root_id"),
             VmValue::String(arcstr::ArcStr::from(ancestry.root_id)),
         ),
     ])))
@@ -1296,11 +1296,14 @@ fn agent_session_drain_inbox_builtin(
         .into_iter()
         .map(|entry| {
             let mut dict = crate::value::DictMap::new();
-            dict.insert("sequence".to_string(), VmValue::Int(entry.sequence as i64));
+            dict.insert(
+                crate::value::intern_key("sequence"),
+                VmValue::Int(entry.sequence as i64),
+            );
             dict.put_str("kind", entry.kind);
             dict.put_str("content", entry.content);
             dict.put_str("source", entry.source);
-            dict.insert("ts_ms".to_string(), VmValue::Int(entry.ts_ms));
+            dict.insert(crate::value::intern_key("ts_ms"), VmValue::Int(entry.ts_ms));
             VmValue::dict(dict)
         })
         .collect::<Vec<_>>();
@@ -1800,7 +1803,7 @@ async fn cancel_in_flight_tool_call_builtin(
     result.put_str("status", final_status);
     result.put_str("call_id", call_id);
     result.insert(
-        "tool".to_string(),
+        crate::value::intern_key("tool"),
         outcome
             .tool_name
             .map(|name| VmValue::String(arcstr::ArcStr::from(name)))
@@ -1931,7 +1934,7 @@ mod tests {
             "hard_limit_tokens",
         ] {
             let mut opts = crate::value::DictMap::new();
-            opts.insert(key.to_string(), VmValue::Int(-1));
+            opts.insert(crate::value::intern_key(key), VmValue::Int(-1));
             let err = build_compact_config(&opts).expect_err("negative option must fail");
             assert!(err.to_string().contains(key), "{err}");
         }

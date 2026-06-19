@@ -649,7 +649,7 @@ fn vm_value_to_json(value: &crate::value::VmValue) -> serde_json::Value {
         }
         VmValue::Dict(d) => serde_json::Value::Object(
             d.iter()
-                .map(|(k, v)| (k.clone(), vm_value_to_json(v)))
+                .map(|(k, v)| (k.to_string(), vm_value_to_json(v)))
                 .collect(),
         ),
         other => serde_json::Value::String(other.display()),
@@ -1667,7 +1667,7 @@ mod retry_tests {
                 VmValue::dict(
                     pairs
                         .iter()
-                        .map(|(k, v)| ((*k).to_string(), v.clone()))
+                        .map(|(k, v)| (crate::value::intern_key(k), v.clone()))
                         .collect::<crate::value::DictMap>(),
                 )
             };

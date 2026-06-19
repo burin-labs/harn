@@ -529,7 +529,7 @@ pub(super) fn collect_caps(value: Option<&VmValue>, out: &mut std::collections::
         Some(VmValue::Dict(dict)) => {
             for (key, value) in dict.iter() {
                 if !matches!(value, VmValue::Bool(false) | VmValue::Nil) {
-                    out.insert(key.clone());
+                    out.insert(key.to_string());
                 }
             }
         }

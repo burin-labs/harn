@@ -210,8 +210,14 @@ fn memory_handle() -> VmValue {
         format!("memory-{}", *guard)
     };
     let mut fields = crate::value::DictMap::new();
-    fields.insert(HANDLE_KEY_KIND.to_string(), VmValue::string(KIND_MEMORY));
-    fields.insert(HANDLE_KEY_ID.to_string(), VmValue::string(&id));
+    fields.insert(
+        crate::value::intern_key(HANDLE_KEY_KIND),
+        VmValue::string(KIND_MEMORY),
+    );
+    fields.insert(
+        crate::value::intern_key(HANDLE_KEY_ID),
+        VmValue::string(&id),
+    );
     VmValue::dict(fields)
 }
 
@@ -226,9 +232,18 @@ fn file_handle(path: &str, secret: &[u8]) -> VmValue {
         secrets.borrow_mut().insert(id.clone(), secret.to_vec());
     });
     let mut fields = crate::value::DictMap::new();
-    fields.insert(HANDLE_KEY_KIND.to_string(), VmValue::string(KIND_FILE));
-    fields.insert(HANDLE_KEY_ID.to_string(), VmValue::string(&id));
-    fields.insert(HANDLE_KEY_PATH.to_string(), VmValue::string(path));
+    fields.insert(
+        crate::value::intern_key(HANDLE_KEY_KIND),
+        VmValue::string(KIND_FILE),
+    );
+    fields.insert(
+        crate::value::intern_key(HANDLE_KEY_ID),
+        VmValue::string(&id),
+    );
+    fields.insert(
+        crate::value::intern_key(HANDLE_KEY_PATH),
+        VmValue::string(path),
+    );
     VmValue::dict(fields)
 }
 
@@ -239,9 +254,18 @@ fn cloud_handle(kind: &'static str) -> VmValue {
         "session"
     };
     let mut fields = crate::value::DictMap::new();
-    fields.insert(HANDLE_KEY_KIND.to_string(), VmValue::string(kind));
-    fields.insert(HANDLE_KEY_ID.to_string(), VmValue::string(kind));
-    fields.insert(HANDLE_KEY_SCOPE.to_string(), VmValue::string(scope));
+    fields.insert(
+        crate::value::intern_key(HANDLE_KEY_KIND),
+        VmValue::string(kind),
+    );
+    fields.insert(
+        crate::value::intern_key(HANDLE_KEY_ID),
+        VmValue::string(kind),
+    );
+    fields.insert(
+        crate::value::intern_key(HANDLE_KEY_SCOPE),
+        VmValue::string(scope),
+    );
     VmValue::dict(fields)
 }
 
@@ -604,8 +628,8 @@ fn cloud_scope(handle: &crate::value::DictMap) -> Result<String, VmError> {
 async fn cloud_get(handle: &crate::value::DictMap, key: &str) -> Result<VmValue, VmError> {
     let scope = cloud_scope(handle)?;
     let mut params = crate::value::DictMap::new();
-    params.insert("scope".to_string(), VmValue::string(&scope));
-    params.insert("key".to_string(), VmValue::string(key));
+    params.insert(crate::value::intern_key("scope"), VmValue::string(&scope));
+    params.insert(crate::value::intern_key("key"), VmValue::string(key));
     dispatch_host_operation("oauth_storage", "cloud_get", &params).await
 }
 
@@ -617,11 +641,11 @@ async fn cloud_set(
 ) -> Result<(), VmError> {
     let scope = cloud_scope(handle)?;
     let mut params = crate::value::DictMap::new();
-    params.insert("scope".to_string(), VmValue::string(&scope));
-    params.insert("key".to_string(), VmValue::string(key));
-    params.insert("token".to_string(), json_to_vm_dict(&token));
+    params.insert(crate::value::intern_key("scope"), VmValue::string(&scope));
+    params.insert(crate::value::intern_key("key"), VmValue::string(key));
+    params.insert(crate::value::intern_key("token"), json_to_vm_dict(&token));
     if let Some(ttl) = ttl_seconds {
-        params.insert("ttl_seconds".to_string(), VmValue::Int(ttl));
+        params.insert(crate::value::intern_key("ttl_seconds"), VmValue::Int(ttl));
     }
     dispatch_host_operation("oauth_storage", "cloud_set", &params).await?;
     Ok(())
@@ -630,8 +654,8 @@ async fn cloud_set(
 async fn cloud_delete(handle: &crate::value::DictMap, key: &str) -> Result<(), VmError> {
     let scope = cloud_scope(handle)?;
     let mut params = crate::value::DictMap::new();
-    params.insert("scope".to_string(), VmValue::string(&scope));
-    params.insert("key".to_string(), VmValue::string(key));
+    params.insert(crate::value::intern_key("scope"), VmValue::string(&scope));
+    params.insert(crate::value::intern_key("key"), VmValue::string(key));
     dispatch_host_operation("oauth_storage", "cloud_delete", &params).await?;
     Ok(())
 }
@@ -751,7 +775,10 @@ mod tests {
 
     fn token_dict(access: &str) -> crate::value::DictMap {
         let mut dict = crate::value::DictMap::new();
-        dict.insert("access_token".to_string(), VmValue::string(access));
+        dict.insert(
+            crate::value::intern_key("access_token"),
+            VmValue::string(access),
+        );
         dict
     }
 

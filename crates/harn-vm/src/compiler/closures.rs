@@ -150,7 +150,7 @@ impl Compiler {
             };
 
             if p.default_value.is_some() {
-                param_schema.insert("required".to_string(), VmValue::Bool(false));
+                param_schema.insert(crate::value::intern_key("required"), VmValue::Bool(false));
             }
 
             self.emit_vm_value_literal(&VmValue::dict(param_schema));

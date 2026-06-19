@@ -1640,7 +1640,12 @@ pub(crate) fn options_map_to_json(options: &crate::value::DictMap) -> JsonValue 
     JsonValue::Object(
         options
             .iter()
-            .map(|(key, value)| (key.clone(), crate::llm::helpers::vm_value_to_json(value)))
+            .map(|(key, value)| {
+                (
+                    key.to_string(),
+                    crate::llm::helpers::vm_value_to_json(value),
+                )
+            })
             .collect(),
     )
 }

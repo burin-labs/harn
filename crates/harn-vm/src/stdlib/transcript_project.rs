@@ -1480,13 +1480,13 @@ pub(crate) fn result_to_vm(result: &ProjectionResult, policy: &ProjectionPolicy)
     dict.put_str("reason", result.reason.clone());
     dict.put_str("prefix_hash", result.prefix_hash.clone());
     dict.insert(
-        "messages".to_string(),
+        crate::value::intern_key("messages"),
         VmValue::List(std::sync::Arc::new(
             result.messages.iter().map(json_to_vm_value).collect(),
         )),
     );
     dict.insert(
-        "kept_indices".to_string(),
+        crate::value::intern_key("kept_indices"),
         VmValue::List(std::sync::Arc::new(
             result
                 .kept_indices
@@ -1496,7 +1496,7 @@ pub(crate) fn result_to_vm(result: &ProjectionResult, policy: &ProjectionPolicy)
         )),
     );
     dict.insert(
-        "dropped_indices".to_string(),
+        crate::value::intern_key("dropped_indices"),
         VmValue::List(std::sync::Arc::new(
             result
                 .dropped_indices
@@ -1506,15 +1506,15 @@ pub(crate) fn result_to_vm(result: &ProjectionResult, policy: &ProjectionPolicy)
         )),
     );
     dict.insert(
-        "kept_count".to_string(),
+        crate::value::intern_key("kept_count"),
         VmValue::Int(result.kept_indices.len() as i64),
     );
     dict.insert(
-        "dropped_count".to_string(),
+        crate::value::intern_key("dropped_count"),
         VmValue::Int(result.dropped_indices.len() as i64),
     );
     dict.insert(
-        "redacted_indices".to_string(),
+        crate::value::intern_key("redacted_indices"),
         VmValue::List(std::sync::Arc::new(
             result
                 .redacted_indices
@@ -1524,19 +1524,19 @@ pub(crate) fn result_to_vm(result: &ProjectionResult, policy: &ProjectionPolicy)
         )),
     );
     dict.insert(
-        "redacted_count".to_string(),
+        crate::value::intern_key("redacted_count"),
         VmValue::Int(result.redaction_pointers.len() as i64),
     );
     dict.insert(
-        "reclaimed_tokens".to_string(),
+        crate::value::intern_key("reclaimed_tokens"),
         VmValue::Int(result.reclaimed_tokens as i64),
     );
     dict.insert(
-        "reclaimed_chars".to_string(),
+        crate::value::intern_key("reclaimed_chars"),
         VmValue::Int(result.reclaimed_chars as i64),
     );
     dict.insert(
-        "roots_consulted".to_string(),
+        crate::value::intern_key("roots_consulted"),
         VmValue::List(std::sync::Arc::new(
             result
                 .roots_consulted
@@ -1546,7 +1546,7 @@ pub(crate) fn result_to_vm(result: &ProjectionResult, policy: &ProjectionPolicy)
         )),
     );
     dict.insert(
-        "redaction_pointers".to_string(),
+        crate::value::intern_key("redaction_pointers"),
         VmValue::List(std::sync::Arc::new(
             result
                 .redaction_pointers
@@ -1556,10 +1556,13 @@ pub(crate) fn result_to_vm(result: &ProjectionResult, policy: &ProjectionPolicy)
         )),
     );
     dict.insert(
-        "provider_safety_blocked".to_string(),
+        crate::value::intern_key("provider_safety_blocked"),
         VmValue::Bool(result.provider_safety_blocked),
     );
-    dict.insert("event".to_string(), projection_event_value(result, policy));
+    dict.insert(
+        crate::value::intern_key("event"),
+        projection_event_value(result, policy),
+    );
     VmValue::dict(dict)
 }
 

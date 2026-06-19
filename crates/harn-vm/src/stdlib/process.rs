@@ -464,7 +464,10 @@ pub(crate) fn spawn_captured_value(args: &[VmValue]) -> Result<VmValue, VmError>
         .map(|v| v.display())
         .filter(|s| !s.is_empty());
     let env_overrides: Vec<(String, String)> = match opts.get("env") {
-        Some(VmValue::Dict(env)) => env.iter().map(|(k, v)| (k.clone(), v.display())).collect(),
+        Some(VmValue::Dict(env)) => env
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.display()))
+            .collect(),
         None | Some(VmValue::Nil) => Vec::new(),
         Some(other) => {
             return Err(VmError::Runtime(format!(
@@ -700,7 +703,10 @@ fn exec_options(label: &str, options: Option<&VmValue>) -> Result<ExecOptions, V
         }
     };
     let env: Vec<(String, String)> = match opts.get("env") {
-        Some(VmValue::Dict(env)) => env.iter().map(|(k, v)| (k.clone(), v.display())).collect(),
+        Some(VmValue::Dict(env)) => env
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.display()))
+            .collect(),
         None | Some(VmValue::Nil) => Vec::new(),
         Some(other) => {
             return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
@@ -1253,7 +1259,7 @@ mod tests {
         VmValue::dict(
             pairs
                 .iter()
-                .map(|(k, v)| (k.to_string(), v.clone()))
+                .map(|(k, v)| (crate::value::intern_key(k), v.clone()))
                 .collect::<crate::value::DictMap>(),
         )
     }

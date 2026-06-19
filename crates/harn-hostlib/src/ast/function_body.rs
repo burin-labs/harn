@@ -51,13 +51,22 @@ pub(super) struct ExtractedBody {
 impl ExtractedBody {
     fn to_vm_value(&self) -> VmValue {
         let mut dict: harn_vm::value::DictMap = harn_vm::value::DictMap::new();
-        dict.insert("name".into(), str_value(&self.name));
-        dict.insert("body_text".into(), str_value(&self.body_text));
-        dict.insert("start_line".into(), VmValue::Int(self.start_line as i64));
-        dict.insert("end_line".into(), VmValue::Int(self.end_line as i64));
+        dict.insert(harn_vm::value::intern_key("name"), str_value(&self.name));
+        dict.insert(
+            harn_vm::value::intern_key("body_text"),
+            str_value(&self.body_text),
+        );
+        dict.insert(
+            harn_vm::value::intern_key("start_line"),
+            VmValue::Int(self.start_line as i64),
+        );
+        dict.insert(
+            harn_vm::value::intern_key("end_line"),
+            VmValue::Int(self.end_line as i64),
+        );
         let fields: Vec<VmValue> = self.return_object_fields.iter().map(str_value).collect();
         dict.insert(
-            "return_object_fields".into(),
+            harn_vm::value::intern_key("return_object_fields"),
             VmValue::List(Arc::new(fields)),
         );
         VmValue::dict(dict)
@@ -84,32 +93,50 @@ pub(super) fn run_single(args: &[VmValue]) -> Result<VmValue, HostlibError> {
 
     let mut response: harn_vm::value::DictMap = harn_vm::value::DictMap::new();
     response.insert(
-        "path".into(),
+        harn_vm::value::intern_key("path"),
         match path_for_response {
             Some(ref p) => str_value(p),
             None => VmValue::Nil,
         },
     );
-    response.insert("language".into(), str_value(language.name()));
-    response.insert("name".into(), str_value(&function_name));
-    response.insert("brace_based".into(), VmValue::Bool(brace_based));
+    response.insert(
+        harn_vm::value::intern_key("language"),
+        str_value(language.name()),
+    );
+    response.insert(
+        harn_vm::value::intern_key("name"),
+        str_value(&function_name),
+    );
+    response.insert(
+        harn_vm::value::intern_key("brace_based"),
+        VmValue::Bool(brace_based),
+    );
     if let Some(body) = body {
-        response.insert("found".into(), VmValue::Bool(true));
-        response.insert("body_text".into(), str_value(&body.body_text));
-        response.insert("start_line".into(), VmValue::Int(body.start_line as i64));
-        response.insert("end_line".into(), VmValue::Int(body.end_line as i64));
+        response.insert(harn_vm::value::intern_key("found"), VmValue::Bool(true));
+        response.insert(
+            harn_vm::value::intern_key("body_text"),
+            str_value(&body.body_text),
+        );
+        response.insert(
+            harn_vm::value::intern_key("start_line"),
+            VmValue::Int(body.start_line as i64),
+        );
+        response.insert(
+            harn_vm::value::intern_key("end_line"),
+            VmValue::Int(body.end_line as i64),
+        );
         let fields: Vec<VmValue> = body.return_object_fields.iter().map(str_value).collect();
         response.insert(
-            "return_object_fields".into(),
+            harn_vm::value::intern_key("return_object_fields"),
             VmValue::List(Arc::new(fields)),
         );
     } else {
-        response.insert("found".into(), VmValue::Bool(false));
-        response.insert("body_text".into(), str_value(""));
-        response.insert("start_line".into(), VmValue::Int(0));
-        response.insert("end_line".into(), VmValue::Int(0));
+        response.insert(harn_vm::value::intern_key("found"), VmValue::Bool(false));
+        response.insert(harn_vm::value::intern_key("body_text"), str_value(""));
+        response.insert(harn_vm::value::intern_key("start_line"), VmValue::Int(0));
+        response.insert(harn_vm::value::intern_key("end_line"), VmValue::Int(0));
         response.insert(
-            "return_object_fields".into(),
+            harn_vm::value::intern_key("return_object_fields"),
             VmValue::List(Arc::new(Vec::new())),
         );
     }
@@ -129,7 +156,7 @@ pub(super) fn run_bulk(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let mut bodies_dict: harn_vm::value::DictMap = harn_vm::value::DictMap::new();
     for name in &unique {
         if let Some(body) = extract_body(&tree, &source, language, name, container.as_deref()) {
-            bodies_dict.insert(name.clone(), body.to_vm_value());
+            bodies_dict.insert(harn_vm::value::intern_key(name), body.to_vm_value());
         }
     }
 
@@ -137,23 +164,35 @@ pub(super) fn run_bulk(args: &[VmValue]) -> Result<VmValue, HostlibError> {
 
     let mut missing: Vec<VmValue> = Vec::new();
     for name in &unique {
-        if !bodies_dict.contains_key(name) {
+        if !bodies_dict.contains_key(name.as_str()) {
             missing.push(str_value(name));
         }
     }
 
     let mut response: harn_vm::value::DictMap = harn_vm::value::DictMap::new();
     response.insert(
-        "path".into(),
+        harn_vm::value::intern_key("path"),
         match path_for_response {
             Some(ref p) => str_value(p),
             None => VmValue::Nil,
         },
     );
-    response.insert("language".into(), str_value(language.name()));
-    response.insert("brace_based".into(), VmValue::Bool(brace_based));
-    response.insert("bodies".into(), VmValue::dict(bodies_dict));
-    response.insert("missing".into(), VmValue::List(Arc::new(missing)));
+    response.insert(
+        harn_vm::value::intern_key("language"),
+        str_value(language.name()),
+    );
+    response.insert(
+        harn_vm::value::intern_key("brace_based"),
+        VmValue::Bool(brace_based),
+    );
+    response.insert(
+        harn_vm::value::intern_key("bodies"),
+        VmValue::dict(bodies_dict),
+    );
+    response.insert(
+        harn_vm::value::intern_key("missing"),
+        VmValue::List(Arc::new(missing)),
+    );
     Ok(VmValue::dict(response))
 }
 

@@ -2670,11 +2670,11 @@ impl Dispatcher {
             serde_json::to_value(event).map_err(|error| DispatchError::Serde(error.to_string()))?;
         let mut bindings = crate::value::DictMap::new();
         bindings.insert(
-            "event".to_string(),
+            crate::value::intern_key("event"),
             crate::schema::json_to_vm_value(&event_json),
         );
         bindings.insert(
-            "match".to_string(),
+            crate::value::intern_key("match"),
             crate::schema::json_to_vm_value(&serde_json::json!({
                 "matched_at": event_json.get("received_at").cloned().unwrap_or(serde_json::Value::Null),
             })),
@@ -2685,7 +2685,7 @@ impl Dispatcher {
                 .and_then(|payload| payload.get("batch"))
         }) {
             bindings.insert(
-                "batch".to_string(),
+                crate::value::intern_key("batch"),
                 crate::schema::json_to_vm_value(batch_value),
             );
         }

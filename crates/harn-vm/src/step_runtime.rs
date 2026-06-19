@@ -863,13 +863,16 @@ fn budget_exhausted_error(
     dict.put_str("step", definition.name.clone());
     dict.put_str("function", definition.function.clone());
     dict.put_str("limit", limit);
-    dict.insert("limit_value".to_string(), VmValue::Float(limit_value));
     dict.insert(
-        "consumed_tokens".to_string(),
+        crate::value::intern_key("limit_value"),
+        VmValue::Float(limit_value),
+    );
+    dict.insert(
+        crate::value::intern_key("consumed_tokens"),
         VmValue::Float(consumed_tokens),
     );
     dict.insert(
-        "consumed_cost_usd".to_string(),
+        crate::value::intern_key("consumed_cost_usd"),
         VmValue::Float(consumed_cost_usd),
     );
     dict.put_str(
@@ -920,14 +923,14 @@ pub fn mark_escalated(err: VmError, step_name: Option<&str>, function: Option<&s
         return err;
     };
     let mut next = (*dict).clone();
-    next.insert("escalated".to_string(), VmValue::Bool(true));
+    next.insert(crate::value::intern_key("escalated"), VmValue::Bool(true));
     next.put_str("category", "handoff_escalation");
     if let Some(step) = step_name {
-        next.entry("step".to_string())
+        next.entry(crate::value::intern_key("step"))
             .or_insert_with(|| VmValue::String(arcstr::ArcStr::from(step.to_string())));
     }
     if let Some(function) = function {
-        next.entry("function".to_string())
+        next.entry(crate::value::intern_key("function"))
             .or_insert_with(|| VmValue::String(arcstr::ArcStr::from(function.to_string())));
     }
     VmError::Thrown(VmValue::dict(next))
@@ -987,13 +990,13 @@ mod tests {
     fn registers_and_pops_step_from_dict() {
         fresh_state();
         let mut budget: crate::value::DictMap = crate::value::DictMap::new();
-        budget.insert("max_tokens".to_string(), VmValue::Int(100));
-        budget.insert("max_usd".to_string(), VmValue::Float(0.05));
+        budget.insert(crate::value::intern_key("max_tokens"), VmValue::Int(100));
+        budget.insert(crate::value::intern_key("max_usd"), VmValue::Float(0.05));
         let mut meta: crate::value::DictMap = crate::value::DictMap::new();
         meta.put_str("name", "plan");
         meta.put_str("model", "claude-haiku-4-5");
         meta.put_str("error_boundary", "continue");
-        meta.insert("budget".to_string(), VmValue::dict(budget));
+        meta.insert(crate::value::intern_key("budget"), VmValue::dict(budget));
 
         register_step_from_dict(vec![
             VmValue::String(arcstr::ArcStr::from("plan_step")),
@@ -1080,7 +1083,7 @@ mod tests {
         stage_dict.put_str("name", "research");
         // Stage tries to add `edit` on top of a parent that only allowed `read`.
         stage_dict.insert(
-            "allowed_tools".to_string(),
+            crate::value::intern_key("allowed_tools"),
             VmValue::List(std::sync::Arc::new(vec![
                 VmValue::String(arcstr::ArcStr::from("read")),
                 VmValue::String(arcstr::ArcStr::from("edit")),
@@ -1089,7 +1092,7 @@ mod tests {
         let mut persona_meta: crate::value::DictMap = crate::value::DictMap::new();
         persona_meta.put_str("name", "scoped");
         persona_meta.insert(
-            "stages".to_string(),
+            crate::value::intern_key("stages"),
             VmValue::List(std::sync::Arc::new(vec![VmValue::Dict(
                 std::sync::Arc::new(stage_dict),
             )])),
@@ -1129,7 +1132,7 @@ mod tests {
         let mut stage_dict: crate::value::DictMap = crate::value::DictMap::new();
         stage_dict.put_str("name", "research");
         stage_dict.insert(
-            "allowed_tools".to_string(),
+            crate::value::intern_key("allowed_tools"),
             VmValue::List(std::sync::Arc::new(vec![VmValue::String(
                 arcstr::ArcStr::from("read"),
             )])),
@@ -1137,7 +1140,7 @@ mod tests {
         let mut persona_meta: crate::value::DictMap = crate::value::DictMap::new();
         persona_meta.put_str("name", "scoped");
         persona_meta.insert(
-            "stages".to_string(),
+            crate::value::intern_key("stages"),
             VmValue::List(std::sync::Arc::new(vec![VmValue::Dict(
                 std::sync::Arc::new(stage_dict),
             )])),

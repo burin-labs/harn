@@ -157,39 +157,39 @@ fn record_to_map(record: test_parsers::TestRecord) -> harn_vm::value::DictMap {
     map.put_str("name", record.name);
     map.put_str("status", record.status.as_str());
     map.insert(
-        "duration_ms".to_string(),
+        harn_vm::value::intern_key("duration_ms"),
         VmValue::Int(record.duration_ms as i64),
     );
     map.insert(
-        "message".to_string(),
+        harn_vm::value::intern_key("message"),
         record
             .message
             .map(|m| VmValue::String(arcstr::ArcStr::from(m)))
             .unwrap_or(VmValue::Nil),
     );
     map.insert(
-        "stdout".to_string(),
+        harn_vm::value::intern_key("stdout"),
         record
             .stdout
             .map(|s| VmValue::String(arcstr::ArcStr::from(s)))
             .unwrap_or(VmValue::Nil),
     );
     map.insert(
-        "stderr".to_string(),
+        harn_vm::value::intern_key("stderr"),
         record
             .stderr
             .map(|s| VmValue::String(arcstr::ArcStr::from(s)))
             .unwrap_or(VmValue::Nil),
     );
     map.insert(
-        "path".to_string(),
+        harn_vm::value::intern_key("path"),
         record
             .path
             .map(|p| VmValue::String(arcstr::ArcStr::from(p)))
             .unwrap_or(VmValue::Nil),
     );
     map.insert(
-        "line".to_string(),
+        harn_vm::value::intern_key("line"),
         record.line.map(VmValue::Int).unwrap_or(VmValue::Nil),
     );
     map

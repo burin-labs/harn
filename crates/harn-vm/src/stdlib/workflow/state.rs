@@ -168,19 +168,22 @@ pub(super) fn workflow_control_to_vm(
     dict.put_str("state_id", state.state_id.as_str());
     dict.put_str("run_id", state.run.id.as_str());
     dict.insert(
-        "ready_nodes".to_string(),
+        crate::value::intern_key("ready_nodes"),
         string_list_to_vm(&state.ready_nodes),
     );
     dict.insert(
-        "completed_nodes".to_string(),
+        crate::value::intern_key("completed_nodes"),
         string_list_to_vm(&state.completed_nodes),
     );
     dict.insert(
-        "max_steps".to_string(),
+        crate::value::intern_key("max_steps"),
         VmValue::Int(state.max_steps as i64),
     );
     if include_graph {
-        dict.insert("graph".to_string(), workflow_graph_to_vm(&state.graph)?);
+        dict.insert(
+            crate::value::intern_key("graph"),
+            workflow_graph_to_vm(&state.graph)?,
+        );
     }
     Ok(VmValue::dict(dict))
 }
@@ -262,7 +265,10 @@ fn validate_workflow_skill_registry(value: VmValue) -> Option<VmValue> {
         VmValue::List(list) => {
             let mut dict = crate::value::DictMap::new();
             dict.put_str("_type", "skill_registry");
-            dict.insert("skills".to_string(), VmValue::List(list.clone()));
+            dict.insert(
+                crate::value::intern_key("skills"),
+                VmValue::List(list.clone()),
+            );
             Some(VmValue::dict(dict))
         }
         _ => None,
@@ -662,20 +668,20 @@ fn workflow_stage_plan_to_vm(scope: &StageExecutionScope) -> Result<VmValue, VmE
     match &scope.execution {
         StageExecution::Precomputed(executed) => {
             dict.insert(
-                "result".to_string(),
+                crate::value::intern_key("result"),
                 crate::stdlib::json_to_vm_value(&executed.result),
             );
         }
         StageExecution::HarnCall { prepared, .. } => {
             if let Some(result) = &prepared.result {
                 dict.insert(
-                    "result".to_string(),
+                    crate::value::intern_key("result"),
                     crate::stdlib::json_to_vm_value(result),
                 );
             } else {
                 dict.put_str("prompt", prepared.prompt.as_str());
                 dict.insert(
-                    "system".to_string(),
+                    crate::value::intern_key("system"),
                     prepared
                         .system
                         .as_ref()
@@ -683,15 +689,15 @@ fn workflow_stage_plan_to_vm(scope: &StageExecutionScope) -> Result<VmValue, VmE
                         .unwrap_or(VmValue::Nil),
                 );
                 dict.insert(
-                    "run_agent_loop".to_string(),
+                    crate::value::intern_key("run_agent_loop"),
                     VmValue::Bool(prepared.run_agent_loop),
                 );
                 dict.insert(
-                    "llm_options".to_string(),
+                    crate::value::intern_key("llm_options"),
                     VmValue::dict(prepared.llm_options.clone()),
                 );
                 dict.insert(
-                    "agent_loop_options".to_string(),
+                    crate::value::intern_key("agent_loop_options"),
                     VmValue::dict(prepared.agent_loop_options.clone()),
                 );
             }
@@ -701,11 +707,14 @@ fn workflow_stage_plan_to_vm(scope: &StageExecutionScope) -> Result<VmValue, VmE
             map_options,
             ..
         } => {
-            dict.insert("run_map_stage".to_string(), VmValue::Bool(true));
-            dict.insert("node".to_string(), to_vm(&scope.node)?);
-            dict.insert("artifacts".to_string(), to_vm(artifacts)?);
             dict.insert(
-                "map_options".to_string(),
+                crate::value::intern_key("run_map_stage"),
+                VmValue::Bool(true),
+            );
+            dict.insert(crate::value::intern_key("node"), to_vm(&scope.node)?);
+            dict.insert(crate::value::intern_key("artifacts"), to_vm(artifacts)?);
+            dict.insert(
+                crate::value::intern_key("map_options"),
                 VmValue::dict(map_options.clone()),
             );
         }
@@ -1048,7 +1057,7 @@ pub(super) async fn prepare_workflow_stage_state(
         let mut map_options = crate::value::DictMap::new();
         map_options.put_str("task", state.run.task.clone());
         if let Some(transcript) = transcript.clone() {
-            map_options.insert("transcript".to_string(), transcript);
+            map_options.insert(crate::value::intern_key("transcript"), transcript);
         }
         StageExecution::HarnMapCall {
             artifacts: state.artifacts.clone(),

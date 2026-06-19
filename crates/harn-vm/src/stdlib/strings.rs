@@ -177,7 +177,7 @@ fn provenance_result_dict(
 }
 
 fn span_to_vm_dict(span: &PromptSourceSpan) -> VmValue {
-    let mut d = std::collections::BTreeMap::new();
+    let mut d: std::collections::BTreeMap<String, VmValue> = std::collections::BTreeMap::new();
     d.insert(
         "template_line".into(),
         VmValue::Int(span.template_line as i64),

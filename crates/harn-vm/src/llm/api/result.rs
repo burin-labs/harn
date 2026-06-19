@@ -80,43 +80,46 @@ fn build_usage_dict(result: &LlmResult) -> crate::value::DictMap {
 
     let mut usage = crate::value::DictMap::new();
     usage.insert(
-        "input_tokens".to_string(),
+        crate::value::intern_key("input_tokens"),
         VmValue::Int(result.input_tokens),
     );
     usage.insert(
-        "output_tokens".to_string(),
+        crate::value::intern_key("output_tokens"),
         VmValue::Int(result.output_tokens),
     );
     usage.insert(
-        "cache_read_tokens".to_string(),
+        crate::value::intern_key("cache_read_tokens"),
         VmValue::Int(result.cache_read_tokens),
     );
     usage.insert(
-        "cache_write_tokens".to_string(),
+        crate::value::intern_key("cache_write_tokens"),
         VmValue::Int(result.cache_write_tokens),
     );
     usage.insert(
-        "cache_creation_input_tokens".to_string(),
+        crate::value::intern_key("cache_creation_input_tokens"),
         VmValue::Int(result.cache_write_tokens),
     );
     if result.cache_supported {
         usage.insert(
-            "cache_hit_ratio".to_string(),
+            crate::value::intern_key("cache_hit_ratio"),
             VmValue::Float(cache_hit_ratio),
         );
-        usage.insert("cache_visibility".to_string(), VmValue::Nil);
+        usage.insert(crate::value::intern_key("cache_visibility"), VmValue::Nil);
     } else {
         // Native local runtimes report no cache field; a 0.0 ratio here would
         // mislabel a local model as a 100% cache miss. Surface the unknown
         // explicitly instead of fabricating a number.
-        usage.insert("cache_hit_ratio".to_string(), VmValue::Nil);
+        usage.insert(crate::value::intern_key("cache_hit_ratio"), VmValue::Nil);
         usage.put_str("cache_visibility", "unsupported");
     }
     usage.insert(
-        "cache_savings_usd".to_string(),
+        crate::value::intern_key("cache_savings_usd"),
         VmValue::Float(cache_savings_usd),
     );
-    usage.insert("served_fast".to_string(), VmValue::Bool(result.served_fast));
+    usage.insert(
+        crate::value::intern_key("served_fast"),
+        VmValue::Bool(result.served_fast),
+    );
     usage
 }
 
@@ -133,36 +136,39 @@ pub(crate) fn vm_build_llm_result(
     dict.put_str("model", result.model.as_str());
     dict.put_str("provider", result.provider.as_str());
     dict.insert(
-        "input_tokens".to_string(),
+        crate::value::intern_key("input_tokens"),
         VmValue::Int(result.input_tokens),
     );
     dict.insert(
-        "output_tokens".to_string(),
+        crate::value::intern_key("output_tokens"),
         VmValue::Int(result.output_tokens),
     );
     // Cache accounting (0 when provider doesn't report cache info).
     dict.insert(
-        "cache_read_tokens".to_string(),
+        crate::value::intern_key("cache_read_tokens"),
         VmValue::Int(result.cache_read_tokens),
     );
     dict.insert(
-        "cache_write_tokens".to_string(),
+        crate::value::intern_key("cache_write_tokens"),
         VmValue::Int(result.cache_write_tokens),
     );
     dict.insert(
-        "cache_creation_input_tokens".to_string(),
+        crate::value::intern_key("cache_creation_input_tokens"),
         VmValue::Int(result.cache_write_tokens),
     );
-    dict.insert("served_fast".to_string(), VmValue::Bool(result.served_fast));
+    dict.insert(
+        crate::value::intern_key("served_fast"),
+        VmValue::Bool(result.served_fast),
+    );
     let usage = build_usage_dict(result);
     if let Some(value) = usage.get("cache_hit_ratio") {
-        dict.insert("cache_hit_ratio".to_string(), value.clone());
+        dict.insert(crate::value::intern_key("cache_hit_ratio"), value.clone());
     }
     if let Some(value) = usage.get("cache_visibility") {
-        dict.insert("cache_visibility".to_string(), value.clone());
+        dict.insert(crate::value::intern_key("cache_visibility"), value.clone());
     }
     if let Some(value) = usage.get("cache_savings_usd") {
-        dict.insert("cache_savings_usd".to_string(), value.clone());
+        dict.insert(crate::value::intern_key("cache_savings_usd"), value.clone());
     }
     // Surface provider-side timings (Ollama load_duration, prompt_eval_duration,
     // eval_duration; OpenAI usage; llama.cpp `timings`). Evals key off
@@ -171,15 +177,21 @@ pub(crate) fn vm_build_llm_result(
     let telemetry_dict = result.telemetry.as_vm_dict();
     let mut usage = usage;
     if let Some(ref telemetry_dict) = telemetry_dict {
-        usage.insert("provider_telemetry".to_string(), telemetry_dict.clone());
+        usage.insert(
+            crate::value::intern_key("provider_telemetry"),
+            telemetry_dict.clone(),
+        );
     }
-    dict.insert("usage".to_string(), VmValue::dict(usage));
+    dict.insert(crate::value::intern_key("usage"), VmValue::dict(usage));
     if let Some(telemetry_dict) = telemetry_dict {
-        dict.insert("provider_telemetry".to_string(), telemetry_dict);
+        dict.insert(
+            crate::value::intern_key("provider_telemetry"),
+            telemetry_dict,
+        );
     }
 
     if let Some(json_val) = parsed_json {
-        dict.insert("data".to_string(), json_val);
+        dict.insert(crate::value::intern_key("data"), json_val);
     }
 
     let has_tagged_blocks = [
@@ -208,7 +220,7 @@ pub(crate) fn vm_build_llm_result(
     if !merged_tool_calls.is_empty() {
         let calls: Vec<VmValue> = merged_tool_calls.iter().map(json_to_vm_value).collect();
         dict.insert(
-            "tool_calls".to_string(),
+            crate::value::intern_key("tool_calls"),
             VmValue::List(std::sync::Arc::new(calls)),
         );
     }
@@ -218,7 +230,7 @@ pub(crate) fn vm_build_llm_result(
     // just want the unified view.
     let native_calls: Vec<VmValue> = result.tool_calls.iter().map(json_to_vm_value).collect();
     dict.insert(
-        "native_tool_calls".to_string(),
+        crate::value::intern_key("native_tool_calls"),
         VmValue::List(std::sync::Arc::new(native_calls)),
     );
 
@@ -230,7 +242,7 @@ pub(crate) fn vm_build_llm_result(
                 .map(|v| VmValue::String(arcstr::ArcStr::from(v.as_str())))
                 .collect();
             dict.insert(
-                "protocol_violations".to_string(),
+                crate::value::intern_key("protocol_violations"),
                 VmValue::List(std::sync::Arc::new(violations)),
             );
         }
@@ -241,7 +253,7 @@ pub(crate) fn vm_build_llm_result(
                 .map(|e| VmValue::String(arcstr::ArcStr::from(e.as_str())))
                 .collect();
             dict.insert(
-                "tool_parse_errors".to_string(),
+                crate::value::intern_key("tool_parse_errors"),
                 VmValue::List(std::sync::Arc::new(errors)),
             );
         }
@@ -280,7 +292,7 @@ pub(crate) fn vm_build_llm_result(
     }
 
     if let Some(transcript) = transcript {
-        dict.insert("transcript".to_string(), transcript);
+        dict.insert(crate::value::intern_key("transcript"), transcript);
     }
 
     // Prose with fenceless TS tool-call expressions stripped. Agent_loop
@@ -294,7 +306,7 @@ pub(crate) fn vm_build_llm_result(
     };
     dict.put_str("visible_text", visible_text.as_str());
     dict.insert(
-        "blocks".to_string(),
+        crate::value::intern_key("blocks"),
         VmValue::List(std::sync::Arc::new(
             result
                 .blocks
@@ -305,7 +317,7 @@ pub(crate) fn vm_build_llm_result(
     );
     if !result.logprobs.is_empty() {
         dict.insert(
-            "logprobs".to_string(),
+            crate::value::intern_key("logprobs"),
             VmValue::List(std::sync::Arc::new(
                 result
                     .logprobs

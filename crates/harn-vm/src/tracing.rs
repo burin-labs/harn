@@ -566,7 +566,7 @@ pub fn reset_tracing() {
 
 /// Convert a span to a VmValue dict for user access.
 pub fn span_to_vm_value(span: &Span) -> VmValue {
-    let mut d = BTreeMap::new();
+    let mut d: BTreeMap<String, VmValue> = BTreeMap::new();
     d.insert(
         "trace_id".into(),
         VmValue::String(arcstr::ArcStr::from(span.trace_id.as_str())),
@@ -597,7 +597,12 @@ pub fn span_to_vm_value(span: &Span) -> VmValue {
         let meta: crate::value::DictMap = span
             .metadata
             .iter()
-            .map(|(k, v)| (k.clone(), crate::stdlib::json_to_vm_value(v)))
+            .map(|(k, v)| {
+                (
+                    crate::value::intern_key(k),
+                    crate::stdlib::json_to_vm_value(v),
+                )
+            })
             .collect();
         d.insert("metadata".into(), VmValue::dict(meta));
     }

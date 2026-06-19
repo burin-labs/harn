@@ -620,14 +620,17 @@ pub(crate) async fn request_approval_for_side_effect(
     capabilities_requested: Vec<String>,
 ) -> Result<VmValue, VmError> {
     let mut options = crate::value::DictMap::new();
-    options.insert("args".to_string(), crate::stdlib::json_to_vm_value(&detail));
     options.insert(
-        "detail".to_string(),
+        crate::value::intern_key("args"),
+        crate::stdlib::json_to_vm_value(&detail),
+    );
+    options.insert(
+        crate::value::intern_key("detail"),
         crate::stdlib::json_to_vm_value(&detail),
     );
     options.put_str("principal", principal);
     options.insert(
-        "reviewers".to_string(),
+        crate::value::intern_key("reviewers"),
         VmValue::List(std::sync::Arc::new(
             reviewers
                 .into_iter()
@@ -636,7 +639,7 @@ pub(crate) async fn request_approval_for_side_effect(
         )),
     );
     options.insert(
-        "capabilities_requested".to_string(),
+        crate::value::intern_key("capabilities_requested"),
         VmValue::List(std::sync::Arc::new(
             capabilities_requested
                 .into_iter()
@@ -1396,7 +1399,12 @@ async fn maybe_apply_mock_response(
         .cloned()
         .unwrap_or_default()
         .into_iter()
-        .map(|(key, value)| (key, crate::stdlib::json_to_vm_value(&value)))
+        .map(|(key, value)| {
+            (
+                crate::value::intern_key(&key),
+                crate::stdlib::json_to_vm_value(&value),
+            )
+        })
         .collect::<crate::value::DictMap>();
     params.put_str("request_id", request_id);
     let Some(result) = dispatch_mock_host_call("hitl", kind.as_str(), &params) else {

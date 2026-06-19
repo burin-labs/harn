@@ -325,9 +325,12 @@ pipeline test(task) {
 #[test]
 fn test_scopes_and_variables() {
     let mut dbg = Debugger::new();
-    dbg.variables.insert("x".to_string(), VmValue::Int(42));
     dbg.variables
-        .insert("name".to_string(), VmValue::String("hello".into()));
+        .insert(harn_vm::value::intern_key("x"), VmValue::Int(42));
+    dbg.variables.insert(
+        harn_vm::value::intern_key("name"),
+        VmValue::String("hello".into()),
+    );
 
     let responses = dbg.handle_message(make_request(
         1,
@@ -343,7 +346,8 @@ fn test_scopes_and_variables() {
 #[test]
 fn test_evaluate() {
     let mut dbg = Debugger::new();
-    dbg.variables.insert("x".to_string(), VmValue::Int(42));
+    dbg.variables
+        .insert(harn_vm::value::intern_key("x"), VmValue::Int(42));
 
     let responses = dbg.handle_message(make_request(
         1,
@@ -362,7 +366,7 @@ fn test_evaluate_dot_access() {
     let mut inner = BTreeMap::new();
     inner.insert("bar".to_string(), VmValue::Int(99));
     dbg.variables
-        .insert("foo".to_string(), VmValue::dict(inner));
+        .insert(harn_vm::value::intern_key("foo"), VmValue::dict(inner));
 
     let responses = dbg.handle_message(make_request(
         1,
@@ -382,7 +386,8 @@ fn test_evaluate_nested_dot_access() {
     inner.insert("c".to_string(), VmValue::String("deep".into()));
     let mut outer = BTreeMap::new();
     outer.insert("b".to_string(), VmValue::dict(inner));
-    dbg.variables.insert("a".to_string(), VmValue::dict(outer));
+    dbg.variables
+        .insert(harn_vm::value::intern_key("a"), VmValue::dict(outer));
 
     let responses = dbg.handle_message(make_request(
         1,
@@ -399,7 +404,8 @@ fn test_evaluate_complex_value_has_var_ref() {
     let mut dbg = Debugger::new();
     let mut map = BTreeMap::new();
     map.insert("key".to_string(), VmValue::Int(1));
-    dbg.variables.insert("d".to_string(), VmValue::dict(map));
+    dbg.variables
+        .insert(harn_vm::value::intern_key("d"), VmValue::dict(map));
 
     let responses = dbg.handle_message(make_request(
         1,
@@ -432,7 +438,8 @@ fn test_evaluate_undefined_returns_error() {
 #[test]
 fn test_evaluate_with_context() {
     let mut dbg = Debugger::new();
-    dbg.variables.insert("x".to_string(), VmValue::Int(7));
+    dbg.variables
+        .insert(harn_vm::value::intern_key("x"), VmValue::Int(7));
 
     for ctx in &["watch", "repl", "hover"] {
         let responses = dbg.handle_message(make_request(
@@ -1419,7 +1426,7 @@ fn test_hit_condition_matches_parses_all_forms() {
     assert_eq!(hit_condition_matches("= =1", 1), None);
 
     let mut vars = harn_vm::value::DictMap::new();
-    vars.insert("count".to_string(), VmValue::Int(5));
+    vars.insert(harn_vm::value::intern_key("count"), VmValue::Int(5));
     vars.put_str("label", "ready");
 
     assert_eq!(check_condition_literal("count >= 5", &vars), Ok(true));

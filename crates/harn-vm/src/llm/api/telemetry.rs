@@ -392,13 +392,13 @@ fn ms_or_round(value: Option<&serde_json::Value>) -> Option<u64> {
 
 fn insert_opt_u64(dict: &mut crate::value::DictMap, key: &str, value: Option<u64>) {
     if let Some(value) = value {
-        dict.insert(key.to_string(), VmValue::Int(value as i64));
+        dict.insert(crate::value::intern_key(key), VmValue::Int(value as i64));
     }
 }
 
 fn insert_opt_i64(dict: &mut crate::value::DictMap, key: &str, value: Option<i64>) {
     if let Some(value) = value {
-        dict.insert(key.to_string(), VmValue::Int(value));
+        dict.insert(crate::value::intern_key(key), VmValue::Int(value));
     }
 }
 

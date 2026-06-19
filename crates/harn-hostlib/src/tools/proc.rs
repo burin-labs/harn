@@ -321,7 +321,10 @@ pub(crate) fn build_response(
     };
     let mut sandbox = harn_vm::value::DictMap::new();
     sandbox.put_str("kind", sandbox_kind());
-    sandbox.insert("enforced".to_string(), VmValue::Bool(sandbox_enforced()));
+    sandbox.insert(
+        harn_vm::value::intern_key("enforced"),
+        VmValue::Bool(sandbox_enforced()),
+    );
     builder = builder.dict("sandbox", sandbox);
     if let Some(policy_context) = policy_context {
         builder = builder.dict("policy_context", policy_context);
@@ -340,7 +343,10 @@ pub(crate) fn running_response(
     let artifacts = planned_artifact_paths(&command_id);
     let mut sandbox = harn_vm::value::DictMap::new();
     sandbox.put_str("kind", sandbox_kind());
-    sandbox.insert("enforced".to_string(), VmValue::Bool(sandbox_enforced()));
+    sandbox.insert(
+        harn_vm::value::intern_key("enforced"),
+        VmValue::Bool(sandbox_enforced()),
+    );
     let mut builder = ResponseBuilder::new()
         .str("command_id", command_id.clone())
         .str("status", CommandStatus::Running.as_str())

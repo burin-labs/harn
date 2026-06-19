@@ -62,7 +62,7 @@ fn vm_value_to_serde_json(value: &VmValue) -> serde_json::Value {
         VmValue::Dict(items) => serde_json::Value::Object(
             items
                 .iter()
-                .map(|(key, value)| (key.clone(), vm_value_to_serde_json(value)))
+                .map(|(key, value)| (key.to_string(), vm_value_to_serde_json(value)))
                 .collect(),
         ),
         _ => serde_json::Value::String(value.display()),

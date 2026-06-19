@@ -528,7 +528,7 @@ mod reset_leak_tests {
         llm::routing::clear_policy_registry();
         let mut config: crate::value::DictMap = crate::value::DictMap::new();
         config.insert(
-            "chain".to_string(),
+            crate::value::intern_key("chain"),
             VmValue::List(std::sync::Arc::new(vec![VmValue::String(
                 arcstr::ArcStr::from("mock:mock"),
             )])),

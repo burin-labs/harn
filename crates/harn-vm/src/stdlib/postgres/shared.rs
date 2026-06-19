@@ -156,13 +156,13 @@ fn canonical_option_value(value: &VmValue) -> String {
         }
         VmValue::Dict(dict) => {
             // Sort keys for order-independence.
-            let sorted: BTreeMap<&String, &VmValue> = dict.iter().collect();
+            let sorted: BTreeMap<&crate::value::HarnStr, &VmValue> = dict.iter().collect();
             let mut out = String::from("{");
             for (i, (key, val)) in sorted.iter().enumerate() {
                 if i > 0 {
                     out.push(',');
                 }
-                out.push_str(key);
+                out.push_str(key.as_str());
                 out.push('=');
                 out.push_str(&canonical_option_value(val));
             }
@@ -256,7 +256,7 @@ mod tests {
     fn opts(pairs: &[(&str, VmValue)]) -> crate::value::DictMap {
         pairs
             .iter()
-            .map(|(k, v)| ((*k).to_string(), v.clone()))
+            .map(|(k, v)| (crate::value::intern_key(k), v.clone()))
             .collect()
     }
 

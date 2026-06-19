@@ -97,7 +97,7 @@ fn http_error_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     body.put_str("code", code);
     body.put_str("message", message);
     if !matches!(details, VmValue::Nil) {
-        body.insert("details".to_string(), details);
+        body.insert(crate::value::intern_key("details"), details);
     }
     let mut env = envelope_map(
         status,
@@ -105,7 +105,7 @@ fn http_error_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
         BODY_KIND_JSON,
         crate::value::DictMap::new(),
     );
-    env.insert("is_error".to_string(), VmValue::Bool(true));
+    env.insert(crate::value::intern_key("is_error"), VmValue::Bool(true));
     Ok(VmValue::dict(env))
 }
 
@@ -291,7 +291,7 @@ async fn http_sse_impl(
         headers,
     );
     if let Some(retry_ms) = retry_ms {
-        env.insert("retry_ms".to_string(), VmValue::Int(retry_ms));
+        env.insert(crate::value::intern_key("retry_ms"), VmValue::Int(retry_ms));
     }
     Ok(VmValue::dict(env))
 }
@@ -313,14 +313,14 @@ fn envelope_map(
 ) -> crate::value::DictMap {
     let mut map = crate::value::DictMap::new();
     map.insert(
-        HTTP_RESPONSE_TAG_KEY.to_string(),
+        crate::value::intern_key(HTTP_RESPONSE_TAG_KEY),
         VmValue::String(arcstr::ArcStr::from(HTTP_RESPONSE_TAG_VERSION)),
     );
-    map.insert("status".to_string(), VmValue::Int(status));
+    map.insert(crate::value::intern_key("status"), VmValue::Int(status));
     map.put_str("body_kind", body_kind);
-    map.insert("headers".to_string(), VmValue::dict(headers));
+    map.insert(crate::value::intern_key("headers"), VmValue::dict(headers));
     if !matches!(body, VmValue::Nil) {
-        map.insert("body".to_string(), body);
+        map.insert(crate::value::intern_key("body"), body);
     }
     map
 }
@@ -734,10 +734,10 @@ fn http_push_hints_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     );
 
     headers.insert(
-        "Link".to_string(),
+        crate::value::intern_key("Link"),
         VmValue::List(std::sync::Arc::new(combined)),
     );
-    envelope_map.insert("headers".to_string(), VmValue::dict(headers));
+    envelope_map.insert(crate::value::intern_key("headers"), VmValue::dict(headers));
     Ok(VmValue::dict(envelope_map))
 }
 
@@ -847,18 +847,18 @@ fn http_upgrade_ws_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 
     let mut env_map = envelope_map(101, VmValue::Nil, BODY_KIND_NONE, headers);
     env_map.insert(
-        "ws_upgrade".to_string(),
+        crate::value::intern_key("ws_upgrade"),
         VmValue::dict({
             let mut map = crate::value::DictMap::new();
             map.insert(
-                "subprotocol".to_string(),
+                crate::value::intern_key("subprotocol"),
                 match &negotiated {
                     Some(name) => VmValue::String(arcstr::ArcStr::from(name.clone())),
                     None => VmValue::Nil,
                 },
             );
             map.insert(
-                "offered".to_string(),
+                crate::value::intern_key("offered"),
                 VmValue::List(std::sync::Arc::new(
                     offered_subprotocols
                         .iter()
@@ -867,10 +867,13 @@ fn http_upgrade_ws_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
                 )),
             );
             if let Some(ms) = idle_ping_ms {
-                map.insert("idle_ping_ms".to_string(), VmValue::Int(ms));
+                map.insert(crate::value::intern_key("idle_ping_ms"), VmValue::Int(ms));
             }
             if let Some(bytes) = max_message_bytes {
-                map.insert("max_message_bytes".to_string(), VmValue::Int(bytes));
+                map.insert(
+                    crate::value::intern_key("max_message_bytes"),
+                    VmValue::Int(bytes),
+                );
             }
             if let Some(handler) = &on_message {
                 map.put_str("on_message", handler.clone());
@@ -1064,7 +1067,7 @@ mod tests {
     #[test]
     fn http_created_sets_location_header() {
         let body = VmValue::dict(crate::value::DictMap::from_iter([(
-            "id".to_string(),
+            crate::value::intern_key("id"),
             VmValue::String(arcstr::ArcStr::from("sess_1")),
         )]));
         let location = VmValue::String(arcstr::ArcStr::from("/v1/sessions/sess_1"));
@@ -1160,7 +1163,7 @@ mod tests {
     fn http_reply_bytes_uses_bytes_body_kind() {
         let bytes = VmValue::Bytes(std::sync::Arc::new(vec![0x00, 0xff, 0xfe, 0x80]));
         let headers = VmValue::dict(crate::value::DictMap::from_iter([(
-            "Content-Type".to_string(),
+            crate::value::intern_key("Content-Type"),
             VmValue::String(arcstr::ArcStr::from("application/octet-stream")),
         )]));
         let response =
@@ -1179,16 +1182,19 @@ mod tests {
     #[test]
     fn http_reply_from_wraps_stream_body_as_chunk_list() {
         let result = VmValue::dict(crate::value::DictMap::from_iter([
-            ("status".to_string(), VmValue::Int(202)),
-            ("body_kind".to_string(), VmValue::string("stream")),
+            (crate::value::intern_key("status"), VmValue::Int(202)),
             (
-                "headers".to_string(),
+                crate::value::intern_key("body_kind"),
+                VmValue::string("stream"),
+            ),
+            (
+                crate::value::intern_key("headers"),
                 VmValue::dict(crate::value::DictMap::from_iter([(
-                    "Content-Type".to_string(),
+                    crate::value::intern_key("Content-Type"),
                     VmValue::string("text/plain"),
                 )])),
             ),
-            ("body".to_string(), VmValue::string("queued")),
+            (crate::value::intern_key("body"), VmValue::string("queued")),
         ]));
 
         let response = http_reply_from_impl(&[result], &mut String::new()).unwrap();
@@ -1216,9 +1222,12 @@ mod tests {
             VmValue::string("bravo"),
         ]));
         let result = VmValue::dict(crate::value::DictMap::from_iter([
-            ("status".to_string(), VmValue::Int(200)),
-            ("body_kind".to_string(), VmValue::string("stream")),
-            ("body".to_string(), chunks),
+            (crate::value::intern_key("status"), VmValue::Int(200)),
+            (
+                crate::value::intern_key("body_kind"),
+                VmValue::string("stream"),
+            ),
+            (crate::value::intern_key("body"), chunks),
         ]));
 
         let response = http_reply_from_impl(&[result], &mut String::new()).unwrap();
@@ -1236,10 +1245,13 @@ mod tests {
     fn http_reply_from_preserves_raw_body_for_bytes_kind() {
         let raw = VmValue::Bytes(std::sync::Arc::new(vec![0x00, 0xff, 0xfe, 0x80]));
         let result = VmValue::dict(crate::value::DictMap::from_iter([
-            ("status".to_string(), VmValue::Int(200)),
-            ("body_kind".to_string(), VmValue::string("bytes")),
-            ("body".to_string(), VmValue::string("<lossy>")),
-            ("raw_body".to_string(), raw),
+            (crate::value::intern_key("status"), VmValue::Int(200)),
+            (
+                crate::value::intern_key("body_kind"),
+                VmValue::string("bytes"),
+            ),
+            (crate::value::intern_key("body"), VmValue::string("<lossy>")),
+            (crate::value::intern_key("raw_body"), raw),
         ]));
 
         let response = http_reply_from_impl(&[result], &mut String::new()).unwrap();
@@ -1260,9 +1272,15 @@ mod tests {
     #[test]
     fn http_reply_from_rejects_non_bytes_for_bytes_kind() {
         let result = VmValue::dict(crate::value::DictMap::from_iter([
-            ("status".to_string(), VmValue::Int(200)),
-            ("body_kind".to_string(), VmValue::string("bytes")),
-            ("body".to_string(), VmValue::string("not bytes")),
+            (crate::value::intern_key("status"), VmValue::Int(200)),
+            (
+                crate::value::intern_key("body_kind"),
+                VmValue::string("bytes"),
+            ),
+            (
+                crate::value::intern_key("body"),
+                VmValue::string("not bytes"),
+            ),
         ]));
 
         let err =
@@ -1278,9 +1296,12 @@ mod tests {
     #[test]
     fn http_reply_from_falls_back_to_http_reply_for_text_kind() {
         let result = VmValue::dict(crate::value::DictMap::from_iter([
-            ("status".to_string(), VmValue::Int(200)),
-            ("body_kind".to_string(), VmValue::string("text")),
-            ("body".to_string(), VmValue::string("hello")),
+            (crate::value::intern_key("status"), VmValue::Int(200)),
+            (
+                crate::value::intern_key("body_kind"),
+                VmValue::string("text"),
+            ),
+            (crate::value::intern_key("body"), VmValue::string("hello")),
         ]));
 
         let response = http_reply_from_impl(&[result], &mut String::new()).unwrap();
@@ -1357,7 +1378,7 @@ mod tests {
     #[test]
     fn http_sse_sets_event_stream_headers_and_optional_retry() {
         let events = vec![VmValue::dict(crate::value::DictMap::from_iter([(
-            "data".to_string(),
+            crate::value::intern_key("data"),
             VmValue::String(arcstr::ArcStr::from("ping")),
         )]))];
         let response = run_sync(|| {
@@ -1394,7 +1415,7 @@ mod tests {
                 VmValue::String(arcstr::ArcStr::from("not_found")),
                 VmValue::String(arcstr::ArcStr::from("missing")),
                 VmValue::dict(crate::value::DictMap::from_iter([(
-                    "id".to_string(),
+                    crate::value::intern_key("id"),
                     VmValue::String(arcstr::ArcStr::from("sess_404")),
                 )])),
             ],
@@ -1599,7 +1620,7 @@ mod tests {
     #[test]
     fn http_push_hints_rejects_untagged_envelope() {
         let plain = VmValue::dict(crate::value::DictMap::from_iter([(
-            "status".to_string(),
+            crate::value::intern_key("status"),
             VmValue::Int(200),
         )]));
         let paths = VmValue::List(std::sync::Arc::new(vec![VmValue::String(
@@ -1619,7 +1640,7 @@ mod tests {
                 VmValue::Int(200),
                 VmValue::dict(crate::value::DictMap::new()),
                 VmValue::dict(crate::value::DictMap::from_iter([(
-                    "Link".to_string(),
+                    crate::value::intern_key("Link"),
                     VmValue::String(arcstr::ArcStr::from("</legacy.css>; rel=preload; as=style")),
                 )])),
             ],
@@ -1647,14 +1668,14 @@ mod tests {
     #[test]
     fn http_upgrade_ws_envelope_negotiates_subprotocol() {
         let req = VmValue::dict(crate::value::DictMap::from_iter([(
-            "headers".to_string(),
+            crate::value::intern_key("headers"),
             VmValue::dict(crate::value::DictMap::from_iter([(
-                "Sec-WebSocket-Protocol".to_string(),
+                crate::value::intern_key("Sec-WebSocket-Protocol"),
                 VmValue::String(arcstr::ArcStr::from("v0.harn, v1.harn")),
             )])),
         )]));
         let options = VmValue::dict(crate::value::DictMap::from_iter([(
-            "subprotocols".to_string(),
+            crate::value::intern_key("subprotocols"),
             VmValue::List(std::sync::Arc::new(vec![
                 VmValue::String(arcstr::ArcStr::from("v1.harn")),
                 VmValue::String(arcstr::ArcStr::from("v2.harn")),
@@ -1699,14 +1720,14 @@ mod tests {
         // The envelope MUST match what the upgrade handshake echoes
         // back, so we honour client preference everywhere.
         let req = VmValue::dict(crate::value::DictMap::from_iter([(
-            "headers".to_string(),
+            crate::value::intern_key("headers"),
             VmValue::dict(crate::value::DictMap::from_iter([(
-                "Sec-WebSocket-Protocol".to_string(),
+                crate::value::intern_key("Sec-WebSocket-Protocol"),
                 VmValue::String(arcstr::ArcStr::from("v2.harn, v1.harn")),
             )])),
         )]));
         let options = VmValue::dict(crate::value::DictMap::from_iter([(
-            "subprotocols".to_string(),
+            crate::value::intern_key("subprotocols"),
             VmValue::List(std::sync::Arc::new(vec![
                 VmValue::String(arcstr::ArcStr::from("v1.harn")),
                 VmValue::String(arcstr::ArcStr::from("v2.harn")),
@@ -1726,20 +1747,23 @@ mod tests {
     #[test]
     fn parse_envelope_round_trips_ws_upgrade_marker() {
         let req = VmValue::dict(crate::value::DictMap::from_iter([(
-            "headers".to_string(),
+            crate::value::intern_key("headers"),
             VmValue::dict(crate::value::DictMap::from_iter([(
-                "Sec-WebSocket-Protocol".to_string(),
+                crate::value::intern_key("Sec-WebSocket-Protocol"),
                 VmValue::String(arcstr::ArcStr::from("v1.harn")),
             )])),
         )]));
         let options = VmValue::dict(crate::value::DictMap::from_iter([
             (
-                "subprotocols".to_string(),
+                crate::value::intern_key("subprotocols"),
                 VmValue::List(std::sync::Arc::new(vec![VmValue::String(
                     arcstr::ArcStr::from("v1.harn"),
                 )])),
             ),
-            ("idle_ping_ms".to_string(), VmValue::Int(15_000)),
+            (
+                crate::value::intern_key("idle_ping_ms"),
+                VmValue::Int(15_000),
+            ),
         ]));
         let response = http_upgrade_ws_impl(&[req, options], &mut String::new()).unwrap();
         let json = vm_value_to_json(&response);

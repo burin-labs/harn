@@ -232,9 +232,9 @@ fn validate_rule_dict(
     let mut rule = crate::value::DictMap::new();
     rule.put_str("_type", TOOL_RULE_TYPE);
     rule.put_str("id", id.as_str());
-    rule.insert("pattern".to_string(), pattern.clone());
+    rule.insert(crate::value::intern_key("pattern"), pattern.clone());
     rule.insert(
-        "applies_to".to_string(),
+        crate::value::intern_key("applies_to"),
         VmValue::List(std::sync::Arc::new(
             applies_to
                 .into_iter()
@@ -244,25 +244,25 @@ fn validate_rule_dict(
     );
     rule.put_str("severity", severity.as_str());
     rule.insert(
-        "rewrite".to_string(),
+        crate::value::intern_key("rewrite"),
         config.get("rewrite").cloned().unwrap_or(VmValue::Nil),
     );
     rule.insert(
-        "explanation".to_string(),
+        crate::value::intern_key("explanation"),
         config
             .get("explanation")
             .cloned()
             .unwrap_or_else(|| VmValue::String(arcstr::ArcStr::from(""))),
     );
     rule.insert(
-        "references".to_string(),
+        crate::value::intern_key("references"),
         config
             .get("references")
             .cloned()
             .unwrap_or_else(|| VmValue::List(std::sync::Arc::new(Vec::new()))),
     );
     rule.insert(
-        "priority".to_string(),
+        crate::value::intern_key("priority"),
         config.get("priority").cloned().unwrap_or(VmValue::Int(0)),
     );
     Ok(rule)
@@ -335,9 +335,9 @@ fn build_catalogue(config: &crate::value::DictMap) -> Result<VmValue, VmError> {
     catalogue.put_str("stack", stack.as_str());
     catalogue.put_str("version", version.as_str());
     catalogue.put_str("source", source.as_str());
-    catalogue.insert("priority".to_string(), VmValue::Int(priority));
+    catalogue.insert(crate::value::intern_key("priority"), VmValue::Int(priority));
     catalogue.insert(
-        "rules".to_string(),
+        crate::value::intern_key("rules"),
         VmValue::List(std::sync::Arc::new(rules)),
     );
     Ok(VmValue::dict(catalogue))
@@ -469,28 +469,34 @@ fn make_match_record(catalogue: &crate::value::DictMap, rule: &crate::value::Dic
         .cloned()
         .unwrap_or_else(|| VmValue::String(arcstr::ArcStr::from("")));
     let mut out = crate::value::DictMap::new();
-    out.insert("catalogue_id".to_string(), catalogue_id);
-    out.insert("stack".to_string(), stack);
+    out.insert(crate::value::intern_key("catalogue_id"), catalogue_id);
+    out.insert(crate::value::intern_key("stack"), stack);
     out.put_str("rule_id", rule_id(rule).as_str());
     out.put_str("severity", rule_severity(rule).as_str());
     out.insert(
-        "explanation".to_string(),
+        crate::value::intern_key("explanation"),
         rule.get("explanation")
             .cloned()
             .unwrap_or_else(|| VmValue::String(arcstr::ArcStr::from(""))),
     );
     out.insert(
-        "references".to_string(),
+        crate::value::intern_key("references"),
         rule.get("references")
             .cloned()
             .unwrap_or_else(|| VmValue::List(std::sync::Arc::new(Vec::new()))),
     );
-    out.insert("priority".to_string(), VmValue::Int(rule_priority(rule)));
     out.insert(
-        "rewrite".to_string(),
+        crate::value::intern_key("priority"),
+        VmValue::Int(rule_priority(rule)),
+    );
+    out.insert(
+        crate::value::intern_key("rewrite"),
         rule.get("rewrite").cloned().unwrap_or(VmValue::Nil),
     );
-    out.insert("rule".to_string(), VmValue::dict(rule.clone()));
+    out.insert(
+        crate::value::intern_key("rule"),
+        VmValue::dict(rule.clone()),
+    );
     VmValue::dict(out)
 }
 
@@ -528,7 +534,7 @@ fn tool_hooks_registry_impl(_args: &[VmValue], _out: &mut String) -> Result<VmVa
     let mut registry = crate::value::DictMap::new();
     registry.put_str("_type", REGISTRY_TYPE);
     registry.insert(
-        "catalogues".to_string(),
+        crate::value::intern_key("catalogues"),
         VmValue::List(std::sync::Arc::new(Vec::new())),
     );
     Ok(VmValue::dict(registry))
@@ -592,7 +598,7 @@ fn tool_hooks_register_impl(args: &[VmValue], _out: &mut String) -> Result<VmVal
     }
     let mut next = registry;
     next.insert(
-        "catalogues".to_string(),
+        crate::value::intern_key("catalogues"),
         VmValue::List(std::sync::Arc::new(new_catalogues)),
     );
     Ok(VmValue::dict(next))
@@ -640,7 +646,7 @@ fn tool_hooks_unregister_impl(args: &[VmValue], _out: &mut String) -> Result<VmV
         .collect();
     let mut next = registry;
     next.insert(
-        "catalogues".to_string(),
+        crate::value::intern_key("catalogues"),
         VmValue::List(std::sync::Arc::new(new_catalogues)),
     );
     Ok(VmValue::dict(next))
@@ -707,7 +713,7 @@ fn tool_hooks_filter_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
     };
     let mut next = registry;
     next.insert(
-        "catalogues".to_string(),
+        crate::value::intern_key("catalogues"),
         VmValue::List(std::sync::Arc::new(filtered)),
     );
     Ok(VmValue::dict(next))
@@ -736,26 +742,29 @@ fn tool_hooks_list_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
         };
         let mut summary = crate::value::DictMap::new();
         summary.insert(
-            "id".to_string(),
+            crate::value::intern_key("id"),
             dict.get("id").cloned().unwrap_or(VmValue::Nil),
         );
         summary.insert(
-            "stack".to_string(),
+            crate::value::intern_key("stack"),
             dict.get("stack").cloned().unwrap_or(VmValue::Nil),
         );
         summary.insert(
-            "version".to_string(),
+            crate::value::intern_key("version"),
             dict.get("version").cloned().unwrap_or(VmValue::Nil),
         );
         summary.insert(
-            "source".to_string(),
+            crate::value::intern_key("source"),
             dict.get("source").cloned().unwrap_or(VmValue::Nil),
         );
         summary.insert(
-            "priority".to_string(),
+            crate::value::intern_key("priority"),
             dict.get("priority").cloned().unwrap_or(VmValue::Int(0)),
         );
-        summary.insert("rule_count".to_string(), VmValue::Int(rule_count as i64));
+        summary.insert(
+            crate::value::intern_key("rule_count"),
+            VmValue::Int(rule_count as i64),
+        );
         entries.push(VmValue::dict(summary));
     }
     Ok(VmValue::List(std::sync::Arc::new(entries)))
@@ -952,9 +961,12 @@ fn tool_hooks_inject_reminder_impl(
 
     let mut out = crate::value::DictMap::new();
     out.put_str("reminder_id", reminder_id.as_str());
-    out.insert("deduped_count".to_string(), VmValue::Int(deduped_count));
     out.insert(
-        "session_attached".to_string(),
+        crate::value::intern_key("deduped_count"),
+        VmValue::Int(deduped_count),
+    );
+    out.insert(
+        crate::value::intern_key("session_attached"),
         VmValue::Bool(session_attached),
     );
     Ok(VmValue::dict(out))
@@ -1135,7 +1147,7 @@ mod tests {
         config.put_str("id", "rust.cargo.target_dir_conflict");
         config.put_str("pattern", r"^cargo (build|test)\b");
         config.insert(
-            "applies_to".to_string(),
+            crate::value::intern_key("applies_to"),
             VmValue::List(std::sync::Arc::new(vec![VmValue::String(
                 arcstr::ArcStr::from("rust"),
             )])),
@@ -1155,7 +1167,7 @@ mod tests {
         config.put_str("version", "0.1.0");
         config.put_str("source", "harn-canon");
         config.insert(
-            "rules".to_string(),
+            crate::value::intern_key("rules"),
             VmValue::List(std::sync::Arc::new(vec![rule])),
         );
         VmValue::dict(config)
@@ -1266,7 +1278,7 @@ mod tests {
     #[test]
     fn context_stacks_normalizes_shapes() {
         let dict_form = VmValue::dict(crate::value::DictMap::from_iter([(
-            "stacks".to_string(),
+            crate::value::intern_key("stacks"),
             VmValue::List(std::sync::Arc::new(vec![VmValue::String(
                 arcstr::ArcStr::from("rust"),
             )])),
@@ -1274,7 +1286,7 @@ mod tests {
         assert_eq!(context_stacks(Some(&dict_form)), vec!["rust".to_string()]);
 
         let dict_string = VmValue::dict(crate::value::DictMap::from_iter([(
-            "stacks".to_string(),
+            crate::value::intern_key("stacks"),
             VmValue::String(arcstr::ArcStr::from("python")),
         )]));
         assert_eq!(
@@ -1308,7 +1320,7 @@ mod tests {
         shell_cfg.put_str("id", "harn-canon/shell");
         // Stackless catalogue: matches every requested stack — universal rules.
         shell_cfg.insert(
-            "rules".to_string(),
+            crate::value::intern_key("rules"),
             VmValue::List(std::sync::Arc::new(vec![rule.clone()])),
         );
         let shell_cat = call_sync(&vm, "catalogue", &[VmValue::dict(shell_cfg)]).expect("cat");
@@ -1316,7 +1328,7 @@ mod tests {
         python_cfg.put_str("id", "harn-canon/python");
         python_cfg.put_str("stack", "python");
         python_cfg.insert(
-            "rules".to_string(),
+            crate::value::intern_key("rules"),
             VmValue::List(std::sync::Arc::new(vec![rule])),
         );
         let py_cat = call_sync(&vm, "catalogue", &[VmValue::dict(python_cfg)]).expect("cat");
@@ -1401,12 +1413,12 @@ mod tests {
         let mut options: crate::value::DictMap = crate::value::DictMap::new();
         options.put_str("body", body);
         options.insert(
-            "tags".to_string(),
+            crate::value::intern_key("tags"),
             VmValue::List(std::sync::Arc::new(vec![VmValue::String(
                 arcstr::ArcStr::from(tag),
             )])),
         );
-        options.insert("ttl_turns".to_string(), VmValue::Int(ttl));
+        options.insert(crate::value::intern_key("ttl_turns"), VmValue::Int(ttl));
         VmValue::dict(options)
     }
 
@@ -1488,7 +1500,7 @@ mod tests {
         let vm = vm_with_stdlib();
         let mut options: crate::value::DictMap = crate::value::DictMap::new();
         options.insert(
-            "tags".to_string(),
+            crate::value::intern_key("tags"),
             VmValue::List(std::sync::Arc::new(vec![VmValue::String(
                 arcstr::ArcStr::from("x"),
             )])),
@@ -1505,7 +1517,7 @@ mod tests {
     fn verdict_value(kind: &str) -> VmValue {
         let mut dict: crate::value::DictMap = crate::value::DictMap::new();
         dict.put_str("kind", kind);
-        dict.insert("confidence".to_string(), VmValue::Float(0.9));
+        dict.insert(crate::value::intern_key("confidence"), VmValue::Float(0.9));
         VmValue::dict(dict)
     }
 
