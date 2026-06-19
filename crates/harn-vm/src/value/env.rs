@@ -74,11 +74,24 @@ pub(crate) struct Scope {
     pub(crate) vars: Arc<BTreeMap<String, (VmValue, bool)>>, // (value, mutable)
 }
 
+/// Process-wide shared empty binding map.
+///
+/// Every block entry pushes a fresh [`Scope`], but inside a function body its
+/// bindings compile to local slots (`DefLocalSlot`) rather than env writes, so
+/// the pushed scope is overwhelmingly *empty* — a hot loop whose body is a
+/// block would otherwise `Arc::new(BTreeMap::new())`-allocate (and free) one
+/// map per iteration. Sharing a single immutable empty map makes
+/// [`Scope::empty`] a refcount bump instead; the first real `define`/`assign`
+/// copies-on-write away from this shared map via `Arc::make_mut` (the insert
+/// paths already do), so a scope that never binds anything never allocates.
+static EMPTY_SCOPE_VARS: std::sync::LazyLock<Arc<BTreeMap<String, (VmValue, bool)>>> =
+    std::sync::LazyLock::new(|| Arc::new(BTreeMap::new()));
+
 impl Scope {
     #[inline]
     fn empty() -> Self {
         Self {
-            vars: Arc::new(std::collections::BTreeMap::new()),
+            vars: Arc::clone(&EMPTY_SCOPE_VARS),
         }
     }
 }
@@ -263,4 +276,37 @@ pub fn closest_match<'a>(name: &str, candidates: impl Iterator<Item = &'a str>) 
                 .then_with(|| a.cmp(b))
         })
         .map(|(c, _)| c.to_string())
+}
+
+#[cfg(test)]
+mod scope_alloc_tests {
+    use super::*;
+
+    #[test]
+    fn empty_scopes_share_one_backing_map() {
+        // Pushing block scopes (the per-iteration cost in a loop body) must not
+        // allocate: every empty scope shares the process-wide empty map.
+        let mut env = VmEnv::new();
+        env.push_scope();
+        env.push_scope();
+        for scope in &env.scopes {
+            assert!(Arc::ptr_eq(&scope.vars, &EMPTY_SCOPE_VARS));
+        }
+    }
+
+    #[test]
+    fn define_copies_on_write_without_disturbing_siblings() {
+        let mut env = VmEnv::new();
+        env.push_scope(); // shares EMPTY
+        env.define("x", VmValue::Int(1), true).unwrap();
+        // The bound scope copied on write away from the shared empty map...
+        let top = env.scopes.last().unwrap();
+        assert!(!Arc::ptr_eq(&top.vars, &EMPTY_SCOPE_VARS));
+        // ...while the root scope (untouched) still shares it.
+        assert!(Arc::ptr_eq(&env.scopes[0].vars, &EMPTY_SCOPE_VARS));
+        assert!(matches!(env.get("x"), Some(VmValue::Int(1))));
+        // Popping the scope drops the binding entirely.
+        env.pop_scope();
+        assert!(env.get("x").is_none());
+    }
 }
