@@ -62,10 +62,10 @@ prefers_xml_tools = false
 thinking_block_style = "none"
 
 # OpenAI gpt-oss (Harmony) served via OpenRouter. Without an explicit row this
-# slug fell through provider_family openrouter -> openai, matched no `gpt-*`
+# slug falls through provider_family openrouter -> openai, matches no `gpt-*`
 # rule (the `openai/` prefix and the unparseable `oss` "version" both fail the
-# match), and landed on a capability-less catch-all that declares NO reasoning
-# support — so the policy resolver could not even materialize reasoning.
+# match), and lands on a capability-less catch-all that declares NO reasoning
+# support — so the policy resolver cannot even materialize reasoning.
 #
 # `reasoning_required_for_tools = true`: gpt-oss performs tool calls INSIDE the
 # Harmony chain-of-thought channel, so disabling reasoning breaks tool calling.
@@ -78,26 +78,24 @@ thinking_block_style = "none"
 # required-for-tools flag keeps the auto policy from flooring tool tasks to off.
 # Must NOT carry a Qwen-style `auto_reasoning_overrides = "off"`.
 #
-# SECOND footgun — the OpenRouter sub-provider lottery. `openai/gpt-oss-120b`
-# fans out across ~17 upstreams on OpenRouter; even with reasoning ON, some
-# mis-serialize the Harmony tool call and finish billed-noncommittal (0
-# tool_calls). The bad upstreams are intermittent and hard to enumerate, so we
-# ALLOWLIST the known-clean ones instead of denylisting the bad ones.
+# OpenRouter's provider-native tool surface is not stable enough to expose as
+# the default abstraction for this aggregate route. Burin's committed-tree smoke
+# (2026-06-19, openrouter/openai/gpt-oss-120b) passes when it selects Harn's
+# JSON text-channel tools, while the old Harn row still recommended native and
+# produced misleading `recommended_format=native requested_format=json`
+# observability. Keep the quirk in the provider matrix: text tools are the
+# recommended route for OpenRouter GPT-OSS, while direct Cerebras/Groq/DeepInfra
+# GPT-OSS rows remain native.
+#
+# The OpenRouter sub-provider lottery still matters. `openai/gpt-oss-120b` fans
+# out across many upstreams; even with reasoning ON, some mis-serialize Harmony
+# turns and finish billed-noncommittal. Keep the known-clean upstream allowlist:
 # `openrouter_provider_order = ["Cerebras", "Groq"]` materializes to
-# `provider: { order: ["Cerebras","Groq"], allow_fallbacks: false }`, so the
-# route only ever lands on those two upstreams. Live OpenRouter probe
-# (openai/gpt-oss-120b, 2026-06-13, reasoning effort=low, weather-tool request):
-#   - free routing (lottery) x12          -> Groq, 12/12 clean tool calls
-#   - order=[Cerebras,Groq] pin x6        -> Cerebras, 6/6 clean, 0 noncommittal
-#   - Cerebras-only pin x3 / Groq-only x3 -> 6/6 clean
-#   - Together pin x3                      -> 1/3 clean (2 "Provider returned
-#                                             error") -> NOT allowlisted
-# Cerebras and Groq are the blessed upstreams. The footgun gate (capability
-# audit) requires this pin on any reasoning_required_for_tools OpenRouter route.
+# `provider: { order: ["Cerebras","Groq"], allow_fallbacks: false }`.
 [[provider.openrouter]]
 model_match = "openai/gpt-oss-*"
-native_tools = true
-preferred_tool_format = "native"
+native_tools = false
+preferred_tool_format = "json"
 structured_output = "native"
 thinking_modes = ["effort"]
 reasoning_effort_supported = true

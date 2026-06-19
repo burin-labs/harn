@@ -2355,24 +2355,26 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
     }
 
     #[test]
-    fn routed_gpt_oss_requires_reasoning_for_tools_with_provider_specific_tool_wire() {
+    fn gpt_oss_requires_reasoning_for_tools_with_provider_specific_tool_wire() {
         // gpt-oss (Harmony) calls tools INSIDE the chain-of-thought channel, so
         // reasoning-off breaks tool calling. Provider catch-all rules carry no
         // reasoning fields, so without a dedicated `*gpt-oss*` row gpt-oss
         // would fall through to reasoning-OFF and the eval loop would bill a
-        // noncommittal. Tool wire support is provider-specific: Fireworks'
-        // native channel currently bills empty eval completions, while
-        // DeepInfra/SambaNova still use the native Harmony channel.
+        // noncommittal. Tool wire support is provider-specific: OpenRouter and
+        // Fireworks use Harn's JSON text-channel tools, while the direct
+        // Cerebras/DeepInfra/Groq routes still use provider-native tools.
         reset();
         for (provider, model, native_tools, preferred_tool_format) in [
+            ("openrouter", "openai/gpt-oss-120b", false, "json"),
             (
                 "fireworks",
                 "accounts/fireworks/models/gpt-oss-120b",
                 false,
                 "json",
             ),
+            ("cerebras", "gpt-oss-120b", true, "native"),
             ("deepinfra", "openai/gpt-oss-120b", true, "native"),
-            ("sambanova", "gpt-oss-120b", true, "native"),
+            ("groq", "openai/gpt-oss-120b", true, "native"),
         ] {
             let caps = lookup(provider, model);
             assert!(

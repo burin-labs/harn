@@ -86,6 +86,16 @@ pipeline test(task) {
   let together_gpt_oss = provider_capabilities("together", "openai/gpt-oss-120b")
   assert(together_gpt_oss.thinking_modes[0] == "effort", "Together GPT-OSS exposes effort thinking")
   assert(together_gpt_oss.reasoning_effort_supported, "Together GPT-OSS accepts reasoning_effort")
+  let openrouter_gpt_oss = provider_capabilities("openrouter", "openai/gpt-oss-120b")
+  assert(!openrouter_gpt_oss.native_tools, "OpenRouter GPT-OSS disables native tools")
+  assert(
+    openrouter_gpt_oss.preferred_tool_format == "json",
+    "OpenRouter GPT-OSS defaults to JSON text tools",
+  )
+  assert(
+    openrouter_gpt_oss.text_tool_wire_format_supported,
+    "OpenRouter GPT-OSS supports text tool formatting",
+  )
   let fireworks_gpt_oss = provider_capabilities("fireworks", "accounts/fireworks/models/gpt-oss-120b")
   assert(!fireworks_gpt_oss.native_tools, "Fireworks GPT-OSS disables native tools")
   assert(
@@ -96,6 +106,15 @@ pipeline test(task) {
     fireworks_gpt_oss.text_tool_wire_format_supported,
     "Fireworks GPT-OSS supports text tool formatting",
   )
+  let cerebras_gpt_oss = provider_capabilities("cerebras", "gpt-oss-120b")
+  assert(cerebras_gpt_oss.native_tools, "Cerebras GPT-OSS keeps native tools")
+  assert(cerebras_gpt_oss.preferred_tool_format == "native", "Cerebras GPT-OSS defaults native")
+  let deepinfra_gpt_oss = provider_capabilities("deepinfra", "openai/gpt-oss-120b")
+  assert(deepinfra_gpt_oss.native_tools, "DeepInfra GPT-OSS keeps native tools")
+  assert(deepinfra_gpt_oss.preferred_tool_format == "native", "DeepInfra GPT-OSS defaults native")
+  let groq_gpt_oss = provider_capabilities("groq", "openai/gpt-oss-120b")
+  assert(groq_gpt_oss.native_tools, "Groq GPT-OSS keeps native tools")
+  assert(groq_gpt_oss.preferred_tool_format == "native", "Groq GPT-OSS defaults native")
   let together_kimi = provider_capabilities("together", "moonshotai/Kimi-K2.5")
   assert(together_kimi.thinking_modes[0] == "enabled", "Together Kimi exposes reasoning.enabled")
   assert(
