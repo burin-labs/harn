@@ -937,11 +937,17 @@ let captures = regex_captures("(?P<day>[A-Z][a-z]+)", "Mon Tue")
 let words    = regex_split("a, b, c", ",\\s*")
 let ci       = regex_match("hello", "HeLLo", "i")
 let fixed_ci = regex_replace("hello", "hi", "HeLLo", "i")
+let body     = regex_captures("(?is)<body\\b[^>]*>(.*?)</body>", html)
+let body2    = regex_captures("<body\\b[^>]*>(.*?)</body>", html, "is")
 ```
 
 `regex_replace` and `regex_replace_all` both replace every match and
 both support `$1`, `$2`, `${name}` backrefs plus the same optional
-`i`/`m`/`s`/`x` flags as `regex_match`.
+`i`/`m`/`s`/`x` flags as `regex_match`. Inline regex flags such as
+`(?is)` use the same semantics as the trailing flags argument. Each
+`regex_captures` result has `match`, positional `groups` excluding the
+full match, character offsets `start`/`end`, 1-based `line`, and any
+named capture groups as top-level keys.
 
 ## Encoding, bytes, and compression
 

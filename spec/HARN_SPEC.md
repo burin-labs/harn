@@ -5152,9 +5152,15 @@ database.
 
 | Function | Description |
 |---|---|
-| `regex_match(pattern, str)` | Returns match data if `str` matches `pattern`, or `nil` |
-| `regex_replace(pattern, str, replacement)` | Replaces all matches of `pattern` in `str` |
-| `regex_captures(pattern, str)` | Returns a list of capture group dicts for all matches |
+| `regex_match(pattern, text, flags?)` | Returns a list of all non-overlapping matches, or `nil` if none match |
+| `regex_replace(pattern, replacement, text, flags?)` | Replaces all matches of `pattern` in `text` |
+| `regex_captures(pattern, text, flags?)` | Returns a list of capture group dicts for all matches |
+| `regex_split(text, pattern, flags?)` | Splits `text` by regex matches |
+
+The optional `flags` string supports `i` (case-insensitive), `m`
+(multi-line anchors), `s` (dot matches newlines), and `x` (ignore
+pattern whitespace). Regex inline flags such as `(?is)` use the same
+underlying semantics.
 
 #### regex_captures
 
@@ -5162,18 +5168,26 @@ database.
 and returns a list of dicts, one per match. Each dict contains:
 
 - `match`: the full match string
-- `groups`: a list of positional capture group strings (from `(...)`)
+- `groups`: a list of positional capture group values (from `(...)`), in
+  source order and excluding the full match. Unmatched optional groups are
+  `nil`.
+- `start` / `end`: character (code-point) offsets of the full match in
+  `text`
+- `line`: 1-based line number of the match start
 - Any named capture groups (from `(?P<name>...)`) as additional keys
 
 ```harn
 let results = regex_captures("(\\w+)@(\\w+)", "alice@example bob@test")
 // results == [
-//   {match: "alice@example", groups: ["alice", "example"]},
-//   {match: "bob@test", groups: ["bob", "test"]}
+//   {match: "alice@example", groups: ["alice", "example"], start: 0, end: 13, line: 1},
+//   {match: "bob@test", groups: ["bob", "test"], start: 14, end: 22, line: 1}
 // ]
 
 let named = regex_captures("(?P<user>\\w+):(?P<role>\\w+)", "alice:admin")
 // named == [{match: "alice:admin", groups: ["alice", "admin"], user: "alice", role: "admin"}]
+
+let body = regex_captures("(?is)<body\\b[^>]*>(.*?)</body>", html)
+let also_body = regex_captures("<body\\b[^>]*>(.*?)</body>", html, "is")
 ```
 
 Returns an empty list if there are no matches.

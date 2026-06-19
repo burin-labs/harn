@@ -504,6 +504,59 @@ mod tests {
     }
 
     #[test]
+    fn captures_inline_and_trailing_flags_span_newlines() {
+        let mut vm = vm();
+        let text = "before\n<Tool_Result id=\"42\">\nAlpha\nbeta\n</Tool_Result>\nafter";
+
+        let inline = call(
+            &mut vm,
+            "regex_captures",
+            vec![
+                s(r"(?is)<tool_result\b([^>]*)>(.*?)</tool_result>"),
+                s(text),
+            ],
+        )
+        .unwrap();
+        let inline_list = unwrap_list(&inline);
+        assert_eq!(inline_list.len(), 1);
+        let inline_cap = inline_list[0].as_dict().unwrap();
+        assert_eq!(
+            inline_cap.get("match").unwrap().display(),
+            "<Tool_Result id=\"42\">\nAlpha\nbeta\n</Tool_Result>"
+        );
+        let inline_groups = unwrap_list(inline_cap.get("groups").unwrap());
+        assert_eq!(inline_groups.len(), 2);
+        assert_eq!(inline_groups[0].display(), " id=\"42\"");
+        assert_eq!(inline_groups[1].display(), "\nAlpha\nbeta\n");
+        assert_eq!(inline_cap.get("start").unwrap().as_int(), Some(7));
+        assert_eq!(inline_cap.get("end").unwrap().as_int(), Some(54));
+        assert_eq!(inline_cap.get("line").unwrap().as_int(), Some(2));
+
+        let trailing = call(
+            &mut vm,
+            "regex_captures",
+            vec![
+                s(r"<tool_result\b([^>]*)>(.*?)</tool_result>"),
+                s(text),
+                s("is"),
+            ],
+        )
+        .unwrap();
+        assert_eq!(trailing.display(), inline.display());
+
+        let class_any = call(
+            &mut vm,
+            "regex_captures",
+            vec![
+                s(r"(?i)<tool_result\b([^>]*)>([\s\S]*?)</tool_result>"),
+                s(text),
+            ],
+        )
+        .unwrap();
+        assert_eq!(class_any.display(), inline.display());
+    }
+
+    #[test]
     fn nil_flags_arg_means_no_flags() {
         // Forwarding an unset optional (`opts?.flags`) lands a literal `nil` in
         // the flags slot; it must behave like an absent arg, not stringify to

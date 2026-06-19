@@ -71,15 +71,23 @@ pub(crate) const BUILTINS: &[(&str, &str)] = &[
     ("timestamp", "timestamp() -> float"),
     ("exit", "exit(code) -> nil"),
     // Regex
-    ("regex_match", "regex_match(pattern, text) -> list"),
+    (
+        "regex_match",
+        "regex_match(pattern, text, flags?) -> list | nil",
+    ),
     (
         "regex_replace",
-        "regex_replace(pattern, replacement, text) -> string",
+        "regex_replace(pattern, replacement, text, flags?) -> string",
     ),
     (
         "regex_replace_all",
-        "regex_replace_all(pattern, replacement, text) -> string (alias of regex_replace)",
+        "regex_replace_all(pattern, replacement, text, flags?) -> string (alias of regex_replace)",
     ),
+    (
+        "regex_captures",
+        "regex_captures(pattern, text, flags?) -> list",
+    ),
+    ("regex_split", "regex_split(text, pattern, flags?) -> list"),
     // HTTP
     ("http_get", "http_get(url) -> dict"),
     ("http_post", "http_post(url, body, headers?) -> dict"),
@@ -838,13 +846,15 @@ pub(crate) fn builtin_doc(name: &str) -> Option<String> {
         "read_file" => "**read_file(path)** → string — Read file contents",
         "write_file" => "**write_file(path, content)** → nil — Write string to file",
         "exit" => "**exit(code)** — Terminate process with exit code",
-        "regex_match" => "**regex_match(pattern, text)** → list | nil — Find all regex matches",
+        "regex_match" => "**regex_match(pattern, text, flags?)** → list | nil — Find all non-overlapping regex matches. Optional flags: `i`, `m`, `s`, `x`.",
         "regex_replace" => {
-            "**regex_replace(pattern, replacement, text)** → string — Replace every regex match; supports `$1`, `$2`, `${name}` backrefs"
+            "**regex_replace(pattern, replacement, text, flags?)** → string — Replace every regex match; supports `$1`, `$2`, `${name}` backrefs and optional `i`/`m`/`s`/`x` flags"
         }
         "regex_replace_all" => {
-            "**regex_replace_all(pattern, replacement, text)** → string — Alias of `regex_replace`; same semantics, different spelling"
+            "**regex_replace_all(pattern, replacement, text, flags?)** → string — Alias of `regex_replace`; same semantics, different spelling"
         }
+        "regex_captures" => "**regex_captures(pattern, text, flags?)** → list — Find matches with `{match, groups, start, end, line}` plus named capture keys. Optional flags: `i`, `m`, `s`, `x`.",
+        "regex_split" => "**regex_split(text, pattern, flags?)** → list — Split text by regex matches. Optional flags: `i`, `m`, `s`, `x`.",
         "http_get" => "**http_get(url)** → string — HTTP GET request",
         "http_post" => "**http_post(url, body, headers?)** → string — HTTP POST request",
         "llm_call" => "**llm_call(prompt, system?, options?)** → dict — Call an LLM API\n\nReturns: `{text, model, input_tokens, output_tokens, transcript?}`",

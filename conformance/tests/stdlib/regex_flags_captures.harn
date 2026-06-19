@@ -1,0 +1,25 @@
+pipeline test(task) {
+  let text = "before\n<Tool_Result id=\"42\">\nAlpha\nbeta\n</Tool_Result>\nafter"
+  let inline = regex_captures("(?is)<tool_result\\b([^>]*)>(.*?)</tool_result>", text)
+  assert_eq(len(inline), 1)
+  assert_eq(inline[0].match, "<Tool_Result id=\"42\">\nAlpha\nbeta\n</Tool_Result>")
+  assert_eq(inline[0].groups, [" id=\"42\"", "\nAlpha\nbeta\n"])
+  assert_eq(inline[0].start, 7)
+  assert_eq(inline[0].end, 54)
+  assert_eq(inline[0].line, 2)
+  let trailing = regex_captures("<tool_result\\b([^>]*)>(.*?)</tool_result>", text, "is")
+  assert_eq(trailing, inline)
+  let class_any = regex_captures("(?i)<tool_result\\b([^>]*)>([\\s\\S]*?)</tool_result>", text)
+  assert_eq(class_any, inline)
+  let named = regex_captures("(?is)<(?P<tag>tool_result)\\b([^>]*)>(.*?)</(?P<tag_close>tool_result)>", text)
+  assert_eq(named[0].tag, "Tool_Result")
+  assert_eq(named[0].tag_close, "Tool_Result")
+  assert_eq(named[0].groups, ["Tool_Result", " id=\"42\"", "\nAlpha\nbeta\n", "Tool_Result"])
+  assert_eq(regex_match("^beta$", text, "im"), ["beta"])
+  assert_eq(regex_match("<tool_result\\b.*?</tool_result>", text, "is"), [inline[0].match])
+  assert_eq(
+    regex_replace("<tool_result\\b.*?</tool_result>", "RESULT", text, "is"),
+    "before\nRESULT\nafter",
+  )
+  log("regex capture flags ok")
+}
