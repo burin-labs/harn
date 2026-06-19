@@ -1190,6 +1190,15 @@ Type mismatches that are not listed as valid combinations above produce a
 when operand types are statically known. Use `to_string()` or string
 interpolation (`"${expr}"`) for explicit type conversion.
 
+An operand whose static type is nilable (`int?`, `string | nil`, …) is
+rejected at compile time for the arithmetic and concatenation operators
+(`+`, `-`, `*`, `/`, `%`, `**`), because `nil + 1` (etc.) faults at runtime.
+Flow narrowing applies: a binding proven non-nil by an earlier assignment
+(`x = 5`), a `!= nil` guard, or `??` is narrowed to its non-nil type and is
+not flagged. Assignment narrowing covers both variables and reference paths
+(`obj.field = value` narrows `obj.field`), and is invalidated by a later
+reassignment of the binding or its base.
+
 ### Modulo (`%`)
 
 `%` is numeric-only. `int % int` returns `int`; any case involving a `float`

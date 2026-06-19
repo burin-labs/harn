@@ -22,7 +22,7 @@ pipeline test(task) {
   let prompts = capture_stderr_take()
   log(first.ok)
   log(first.status)
-  log("[" + first.value + "]")
+  log("[" + first.value ?? "" + "]")
   log(second.ok)
   log(second.status)
   log(second.value)

@@ -601,6 +601,13 @@ impl TypeChecker {
                     scope.clear_narrowed_paths_rooted_at(base);
                     scope.clear_unknown_ruled_out_paths_rooted_at(base);
                 }
+                // Assignment narrowing: a statically non-nil value flowing into
+                // a nilable binding/path narrows it to non-nil for subsequent
+                // reads, until the next reassignment. Runs after the clears
+                // above so it isn't immediately wiped. Only for plain `=`.
+                if op.is_none() {
+                    self.narrow_after_assignment(target, value, scope);
+                }
             }
 
             Node::TypeDecl {
@@ -861,6 +868,40 @@ impl TypeChecker {
                 // Validate operator/type compatibility
                 let lt = self.infer_type(left, scope);
                 let rt = self.infer_type(right, scope);
+                // A nil-able operand to an arithmetic / concatenation operator
+                // is a definite runtime fault (`nil + 1`, `nil * 2`, … all
+                // throw). Surface it at check time. Equality (`==`/`!=`) is
+                // nil-safe and the short-circuit logical ops already returned
+                // above. A *pure* `nil` operand is left to the `named_pair` arm
+                // below (it reports "can't add nil and int"); here we only
+                // catch the union case (`int?`, where `named_pair` is `None`),
+                // skipping gradual remainders (`any?`). Assignment / guard
+                // narrowing has already run, so a value proven non-nil by an
+                // earlier `=` or `!= nil` check is not flagged.
+                if matches!(op.as_str(), "+" | "-" | "*" | "/" | "%" | "**") {
+                    for (ty, operand) in [(&lt, left), (&rt, right)] {
+                        let Some(ty) = ty else { continue };
+                        let resolved = self.resolve_alias(ty, scope);
+                        if !contains_nil(&resolved) {
+                            continue;
+                        }
+                        let Some(non_nil) = without_nil(&resolved) else {
+                            continue;
+                        };
+                        if matches!(&non_nil, TypeExpr::Named(n) if is_gradual_type_name(n)) {
+                            continue;
+                        }
+                        self.error_at(
+                            Code::InvalidBinaryOperator,
+                            format!(
+                                "operand of '{op}' may be nil (type {}); handle nil first or \
+                                 provide a default with `??`",
+                                format_type(&resolved)
+                            ),
+                            operand.span,
+                        );
+                    }
+                }
                 let named_pair = match (&lt, &rt) {
                     // Gradual operands (`any`/`unknown`/`_`) are compatible with
                     // every operator; the actual check happens at runtime.
@@ -1633,6 +1674,48 @@ impl TypeChecker {
                 continue;
             };
             self.check_node(&expr, scope);
+        }
+    }
+
+    /// After a plain `target = value` assignment, narrow the target to non-nil
+    /// when `value` is statically non-nil and the target's declared type is
+    /// nilable. This is control-flow narrowing for assignment (Rust/TS/Flow do
+    /// the same): once `x` has been assigned a concrete value, reads of `x`
+    /// should not be treated as possibly-nil until the next reassignment.
+    /// Variables narrow via `narrowed_vars`; reference paths (`obj.field`) via
+    /// a `Remove("nil")` path narrowing — the same machinery a `!= nil` guard
+    /// uses, so reads pick it up automatically.
+    fn narrow_after_assignment(&self, target: &SNode, value: &SNode, scope: &mut TypeScope) {
+        let Some(value_ty) = self.infer_type(value, scope) else {
+            return;
+        };
+        // A value that might itself be nil can't narrow anything.
+        if contains_nil(&self.resolve_alias(&value_ty, scope)) {
+            return;
+        }
+        match &target.node {
+            Node::Identifier(name) => {
+                let Some(Some(slot_ty)) = scope.get_var(name) else {
+                    return;
+                };
+                let resolved = self.resolve_alias(slot_ty, scope);
+                if !contains_nil(&resolved) {
+                    return;
+                }
+                if let Some(narrowed) = without_nil(&resolved) {
+                    let original = slot_ty.clone();
+                    scope.define_var(name, Some(narrowed));
+                    // Remember the declared type so the next reassignment (or a
+                    // scope merge) can restore it, exactly like guard narrowing.
+                    scope.narrowed_vars.insert(name.clone(), Some(original));
+                }
+            }
+            Node::PropertyAccess { .. } | Node::OptionalPropertyAccess { .. } => {
+                if let Some(key) = reference_path_key(target) {
+                    scope.set_narrowed_path(&key, PathNarrowing::Remove("nil".into()));
+                }
+            }
+            _ => {}
         }
     }
 }

@@ -29,12 +29,12 @@ use super::super::format::{format_type, is_obvious_type};
 use super::super::is_gradual_type_name;
 use super::super::schema_inference::schema_type_expr_from_node;
 use super::super::scope::{
-    EnumDeclInfo, FnSignature, ImplMethodSig, InferredType, InterfaceDeclInfo, StructDeclInfo,
-    TypeAliasInfo, TypeScope,
+    EnumDeclInfo, FnSignature, ImplMethodSig, InferredType, InterfaceDeclInfo, PathNarrowing,
+    StructDeclInfo, TypeAliasInfo, TypeScope,
 };
 use super::super::union::{
-    collapse_members_opt, discriminant_field, narrow_shape_union_by_tag, narrow_to_single,
-    simplify_union, without_nil, DiscriminantValue,
+    collapse_members_opt, contains_nil, discriminant_field, narrow_shape_union_by_tag,
+    narrow_to_single, reference_path_key, simplify_union, without_nil, DiscriminantValue,
 };
 use super::super::{InlayHintInfo, TypeChecker};
 use super::flow::{pattern_alternatives, resolve_union_shape_members};
