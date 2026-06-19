@@ -1148,7 +1148,7 @@ Comparison between other types returns 0 (equal).
 
 | Left | Right | `+` | `-` | `*` | `/` |
 |---|---|---|---|---|---|
-| int | int | int | int | int | int (truncating) |
+| int | int | int¹ | int¹ | int¹ | int (truncating) |
 | float | float | float | float | float | float |
 | int | float | float | float | float | float |
 | float | int | float | float | float | float |
@@ -1158,6 +1158,12 @@ Comparison between other types returns 0 (equal).
 | list | list | list (concatenation) | **TypeError** | **TypeError** | **TypeError** |
 | dict | dict | dict (merge, right wins) | **TypeError** | **TypeError** | **TypeError** |
 | other | other | **TypeError** | **TypeError** | **TypeError** | **TypeError** |
+
+¹ When an `int` result would overflow the 64-bit range, it promotes to
+`float` rather than wrapping two's-complement (so `i64::MAX + 1` is a large
+`float`, not a negative `int`). This matches `sum`/`abs`, which already promote
+on overflow. In-range integer arithmetic stays `int`. The same applies to
+unary negation (`-i64::MIN`) and `**` (see below).
 
 Division by zero depends on the result type. Integer division by zero
 (`int / int`) raises a runtime error that propagates like any other thrown
@@ -1183,7 +1189,7 @@ regardless of operand types (unlike float division, it never yields `NaN`).
 `2 ** (3 ** 2)`.
 
 - `int ** int` returns `int` for non-negative exponents that fit in `u32`,
-  using wrapping integer exponentiation.
+  promoting to `float` if the result overflows the 64-bit range.
 - Negative or very large integer exponents promote to `float`.
 - Any case involving a `float` returns `float`.
 - Non-numeric operands raise `TypeError`.

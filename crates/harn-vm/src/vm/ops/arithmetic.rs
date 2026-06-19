@@ -14,6 +14,43 @@ fn decimal_result(value: Option<rust_decimal::Decimal>, op: &str) -> Result<VmVa
         .ok_or_else(|| VmError::Runtime(format!("decimal {op} overflowed")))
 }
 
+// Scalar `i64` arithmetic that promotes to `f64` on overflow instead of
+// silently wrapping two's-complement. This matches the language's own
+// aggregate policy — `sum`/`abs` already promote on `i64` overflow (see
+// `vm/methods/list.rs` and `vm/methods/iter.rs`) — so a bare `a + b` no
+// longer disagrees with `[a, b].sum()`. A wrap produces a wrong magnitude
+// silently; promotion preserves it (with float precision), the way Python's
+// int→float-on-need and JS's single number tower behave. Decimal keeps its
+// own checked-overflow-to-error path (exact money math must not go lossy).
+fn int_add(x: i64, y: i64) -> VmValue {
+    x.checked_add(y)
+        .map_or_else(|| VmValue::Float(x as f64 + y as f64), VmValue::Int)
+}
+
+fn int_sub(x: i64, y: i64) -> VmValue {
+    x.checked_sub(y)
+        .map_or_else(|| VmValue::Float(x as f64 - y as f64), VmValue::Int)
+}
+
+fn int_mul(x: i64, y: i64) -> VmValue {
+    x.checked_mul(y)
+        .map_or_else(|| VmValue::Float(x as f64 * y as f64), VmValue::Int)
+}
+
+fn int_neg(n: i64) -> VmValue {
+    // Only `i64::MIN` overflows negation; promote it rather than wrapping
+    // back to `i64::MIN` (the classic surprise). Mirrors `abs(i64::MIN)`.
+    n.checked_neg()
+        .map_or_else(|| VmValue::Float(-(n as f64)), VmValue::Int)
+}
+
+fn int_pow(base: i64, exp: u32) -> VmValue {
+    base.checked_pow(exp).map_or_else(
+        || VmValue::Float((base as f64).powf(exp as f64)),
+        VmValue::Int,
+    )
+}
+
 impl super::super::Vm {
     fn push_binary_result(
         &mut self,
@@ -53,7 +90,7 @@ impl super::super::Vm {
     pub(super) fn execute_negate(&mut self) -> Result<(), VmError> {
         let v = self.pop()?;
         self.stack.push(match v {
-            VmValue::Int(n) => VmValue::Int(n.wrapping_neg()),
+            VmValue::Int(n) => int_neg(n),
             VmValue::Float(n) => VmValue::Float(-n),
             VmValue::Decimal(d) => VmValue::Decimal(-d),
             _ => {
@@ -244,13 +281,13 @@ impl super::super::Vm {
     ) -> Option<VmValue> {
         match (op, shape, a, b) {
             (AdaptiveBinaryOp::Add, BinaryShape::Int, VmValue::Int(x), VmValue::Int(y)) => {
-                Some(VmValue::Int(x.wrapping_add(*y)))
+                Some(int_add(*x, *y))
             }
             (AdaptiveBinaryOp::Sub, BinaryShape::Int, VmValue::Int(x), VmValue::Int(y)) => {
-                Some(VmValue::Int(x.wrapping_sub(*y)))
+                Some(int_sub(*x, *y))
             }
             (AdaptiveBinaryOp::Mul, BinaryShape::Int, VmValue::Int(x), VmValue::Int(y)) => {
-                Some(VmValue::Int(x.wrapping_mul(*y)))
+                Some(int_mul(*x, *y))
             }
             (AdaptiveBinaryOp::Div, BinaryShape::Int, VmValue::Int(_), VmValue::Int(0))
             | (AdaptiveBinaryOp::Mod, BinaryShape::Int, VmValue::Int(_), VmValue::Int(0)) => None,
@@ -379,21 +416,21 @@ impl super::super::Vm {
 
     pub(super) fn execute_add_int(&mut self) -> Result<(), VmError> {
         self.run_typed_binary(AdaptiveBinaryOp::Add, |a, b| match (a, b) {
-            (VmValue::Int(x), VmValue::Int(y)) => Some(Ok(VmValue::Int(x.wrapping_add(*y)))),
+            (VmValue::Int(x), VmValue::Int(y)) => Some(Ok(int_add(*x, *y))),
             _ => None,
         })
     }
 
     pub(super) fn execute_sub_int(&mut self) -> Result<(), VmError> {
         self.run_typed_binary(AdaptiveBinaryOp::Sub, |a, b| match (a, b) {
-            (VmValue::Int(x), VmValue::Int(y)) => Some(Ok(VmValue::Int(x.wrapping_sub(*y)))),
+            (VmValue::Int(x), VmValue::Int(y)) => Some(Ok(int_sub(*x, *y))),
             _ => None,
         })
     }
 
     pub(super) fn execute_mul_int(&mut self) -> Result<(), VmError> {
         self.run_typed_binary(AdaptiveBinaryOp::Mul, |a, b| match (a, b) {
-            (VmValue::Int(x), VmValue::Int(y)) => Some(Ok(VmValue::Int(x.wrapping_mul(*y)))),
+            (VmValue::Int(x), VmValue::Int(y)) => Some(Ok(int_mul(*x, *y))),
             _ => None,
         })
     }
@@ -454,7 +491,7 @@ impl super::super::Vm {
 
     fn add(&self, a: VmValue, b: VmValue) -> Result<VmValue, VmError> {
         match (a, b) {
-            (VmValue::Int(x), VmValue::Int(y)) => Ok(VmValue::Int(x.wrapping_add(y))),
+            (VmValue::Int(x), VmValue::Int(y)) => Ok(int_add(x, y)),
             (VmValue::Float(x), VmValue::Float(y)) => Ok(VmValue::Float(x + y)),
             (VmValue::Int(x), VmValue::Float(y)) => Ok(VmValue::Float(x as f64 + y)),
             (VmValue::Float(x), VmValue::Int(y)) => Ok(VmValue::Float(x + y as f64)),
@@ -527,7 +564,7 @@ impl super::super::Vm {
 
     fn sub(&self, a: VmValue, b: VmValue) -> Result<VmValue, VmError> {
         match (&a, &b) {
-            (VmValue::Int(x), VmValue::Int(y)) => Ok(VmValue::Int(x.wrapping_sub(*y))),
+            (VmValue::Int(x), VmValue::Int(y)) => Ok(int_sub(*x, *y)),
             (VmValue::Float(x), VmValue::Float(y)) => Ok(VmValue::Float(x - y)),
             (VmValue::Int(x), VmValue::Float(y)) => Ok(VmValue::Float(*x as f64 - y)),
             (VmValue::Float(x), VmValue::Int(y)) => Ok(VmValue::Float(x - *y as f64)),
@@ -552,7 +589,7 @@ impl super::super::Vm {
 
     fn mul(&self, a: VmValue, b: VmValue) -> Result<VmValue, VmError> {
         match (&a, &b) {
-            (VmValue::Int(x), VmValue::Int(y)) => Ok(VmValue::Int(x.wrapping_mul(*y))),
+            (VmValue::Int(x), VmValue::Int(y)) => Ok(int_mul(*x, *y)),
             (VmValue::Float(x), VmValue::Float(y)) => Ok(VmValue::Float(x * y)),
             (VmValue::Int(x), VmValue::Float(y)) => Ok(VmValue::Float(*x as f64 * y)),
             (VmValue::Float(x), VmValue::Int(y)) => Ok(VmValue::Float(x * *y as f64)),
@@ -652,7 +689,7 @@ impl super::super::Vm {
         match (&a, &b) {
             (VmValue::Int(base), VmValue::Int(exp)) => {
                 if u32::try_from(*exp).is_ok() {
-                    Ok(VmValue::Int(base.wrapping_pow(*exp as u32)))
+                    Ok(int_pow(*base, *exp as u32))
                 } else {
                     Ok(VmValue::Float((*base as f64).powf(*exp as f64)))
                 }
@@ -694,5 +731,37 @@ impl BinaryShape {
             }
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod overflow_promotion_tests {
+    use super::*;
+
+    #[test]
+    fn add_sub_mul_promote_to_float_on_overflow() {
+        assert!(matches!(int_add(2, 3), VmValue::Int(5)));
+        assert!(matches!(int_add(i64::MAX, 1), VmValue::Float(_)));
+        assert!(matches!(int_sub(i64::MIN, 1), VmValue::Float(_)));
+        assert!(matches!(int_mul(i64::MAX, 2), VmValue::Float(_)));
+        // In-range stays int.
+        assert!(matches!(int_mul(1000, 1000), VmValue::Int(1_000_000)));
+    }
+
+    #[test]
+    fn neg_of_i64_min_promotes_instead_of_wrapping() {
+        // The classic two's-complement surprise: `-i64::MIN` wraps back to
+        // `i64::MIN`. Promotion yields the correct positive magnitude.
+        match int_neg(i64::MIN) {
+            VmValue::Float(f) => assert!(f > 0.0),
+            other => panic!("expected promoted float, got {other:?}"),
+        }
+        assert!(matches!(int_neg(5), VmValue::Int(-5)));
+    }
+
+    #[test]
+    fn pow_promotes_on_overflow() {
+        assert!(matches!(int_pow(2, 10), VmValue::Int(1024)));
+        assert!(matches!(int_pow(2, 100), VmValue::Float(_)));
     }
 }
