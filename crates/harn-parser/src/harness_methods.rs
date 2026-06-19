@@ -126,6 +126,13 @@ pub fn harness_llm_ambient(method: &str) -> Option<&'static str> {
     }
 }
 
+pub fn harness_secrets_ambient(method: &str) -> Option<&'static str> {
+    match method {
+        "read" | "read_bytes" | "write" | "rotate" | "lease" | "lease_bytes" => None,
+        _ => None,
+    }
+}
+
 pub fn harness_tenant_ambient(method: &str) -> Option<&'static str> {
     match method {
         "id" => Some("harness_tenant_id"),
@@ -173,6 +180,7 @@ pub fn harness_sub_handle_ambient(sub_handle: &str, method: &str) -> Option<&'st
         "process" => harness_process_ambient(method),
         "crypto" => harness_crypto_ambient(method),
         "system" => harness_system_ambient(method),
+        "secrets" => harness_secrets_ambient(method),
         "llm" => harness_llm_ambient(method),
         "tenant" => harness_tenant_ambient(method),
         "auth" => harness_auth_ambient(method),
@@ -193,6 +201,7 @@ pub fn harness_type_sub_handle(type_name: &str) -> Option<&'static str> {
         "HarnessProcess" => Some("process"),
         "HarnessCrypto" => Some("crypto"),
         "HarnessSystem" => Some("system"),
+        "HarnessSecrets" => Some("secrets"),
         "HarnessLlm" => Some("llm"),
         "HarnessTenant" => Some("tenant"),
         "HarnessAuth" => Some("auth"),

@@ -1,6 +1,7 @@
 //! Method dispatch for the `Harness` capability handle and its
 //! sub-handles. Every sub-handle (`stdio`, `clock`, `fs`, `env`,
-//! `random`, `net`, `process`, `crypto`, `system`, `llm`, `tenant`, and `obs`)
+//! `random`, `net`, `process`, `crypto`, `system`, `secrets`, `llm`,
+//! `tenant`, and `obs`)
 //! is wired end-to-end in real, mock, and null modes;
 //! sandbox / egress rejections raised inside a sub-handle method are
 //! tagged with the `HARN-CAP-201` diagnostic code so callers can
@@ -91,6 +92,7 @@ impl crate::vm::Vm {
             HarnessKind::Net => self.call_harness_net_method(handle, method, args).await,
             HarnessKind::Process => self.call_harness_process_method(handle, method, args),
             HarnessKind::Crypto => self.call_harness_crypto_method(handle, method, args),
+            HarnessKind::Secrets => self.call_harness_secrets_method(handle, method, args).await,
             HarnessKind::Llm => self.call_harness_llm_method(handle, method, args).await,
             HarnessKind::Tenant => self.call_harness_tenant_method(handle, method, args),
             HarnessKind::Auth => self.call_harness_auth_method(handle, method, args),
@@ -131,6 +133,7 @@ impl crate::vm::Vm {
             | HarnessKind::Net
             | HarnessKind::Process
             | HarnessKind::System
+            | HarnessKind::Secrets
             | HarnessKind::Llm
             | HarnessKind::Obs => None,
         }
@@ -501,6 +504,7 @@ impl crate::vm::Vm {
             | HarnessKind::Fs
             | HarnessKind::Net
             | HarnessKind::Process
+            | HarnessKind::Secrets
             | HarnessKind::Llm
             | HarnessKind::Obs => None,
         };
@@ -673,6 +677,138 @@ impl crate::vm::Vm {
             _ => return Err(method_unsupported(handle, method)),
         };
         Ok(crate::stdlib::json_to_vm_value(&json))
+    }
+
+    async fn call_harness_secrets_method(
+        &mut self,
+        handle: &VmHarness,
+        method: &str,
+        args: &[VmValue],
+    ) -> Result<VmValue, VmError> {
+        let provider =
+            handle
+                .inner()
+                .secret_provider()
+                .cloned()
+                .ok_or_else(|| VmError::CategorizedError {
+                    message: "HarnessSecrets: no secret provider bound to this harness".to_string(),
+                    category: ErrorCategory::NotFound,
+                })?;
+        match method {
+            "read" | "read_bytes" => {
+                if args.len() > 2 {
+                    return Err(VmError::TypeError(format!(
+                        "{}.{method} expects name and optional scope",
+                        handle.type_name()
+                    )));
+                }
+                let name = secret_name_arg(handle, method, args.first())?;
+                let scope = secret_scope_arg(args.get(1))?;
+                let id = secret_id_for_scope(&name, &scope);
+                let secret = provider
+                    .read_scoped(crate::secrets::SecretReadRequest {
+                        id,
+                        scope,
+                        audit: secret_audit_context(),
+                    })
+                    .await
+                    .map_err(secret_error_to_vm)?;
+                if method == "read_bytes" {
+                    return Ok(VmValue::Bytes(std::sync::Arc::new(
+                        secret.with_exposed(|bytes| bytes.to_vec()),
+                    )));
+                }
+                let text = secret.with_exposed(|bytes| {
+                    std::str::from_utf8(bytes)
+                        .map(str::to_string)
+                        .map_err(|error| {
+                            VmError::TypeError(format!(
+                                "{}.read secret `{name}` was not UTF-8: {error}",
+                                handle.type_name()
+                            ))
+                        })
+                })?;
+                Ok(vm_string(text))
+            }
+            "write" => {
+                if args.len() > 4 {
+                    return Err(VmError::TypeError(format!(
+                        "{}.write expects name, value, optional scope, and optional ttl",
+                        handle.type_name()
+                    )));
+                }
+                let name = secret_name_arg(handle, method, args.first())?;
+                let value = secret_value_arg(handle, method, args.get(1), "value")?;
+                let scope = secret_scope_arg(args.get(2))?;
+                let ttl =
+                    optional_duration_arg(args.get(3), &format!("{}.write", handle.type_name()))?;
+                let receipt = provider
+                    .write_scoped(crate::secrets::SecretWriteRequest {
+                        id: secret_id_for_scope(&name, &scope),
+                        scope,
+                        value,
+                        options: crate::secrets::SecretWriteOptions { ttl },
+                        audit: secret_audit_context(),
+                    })
+                    .await
+                    .map_err(secret_error_to_vm)?;
+                Ok(secret_write_receipt_value(receipt))
+            }
+            "rotate" => {
+                if args.len() > 4 {
+                    return Err(VmError::TypeError(format!(
+                        "{}.rotate expects name, generator/value, optional scope, and optional options",
+                        handle.type_name()
+                    )));
+                }
+                let name = secret_name_arg(handle, method, args.first())?;
+                let value = match args.get(1) {
+                    Some(VmValue::Closure(closure)) => {
+                        let generated = self.call_closure_pub(closure, &[]).await?;
+                        secret_value_from_vm(handle, method, &generated, "generator result")?
+                    }
+                    other => secret_value_arg(handle, method, other, "value")?,
+                };
+                let scope = secret_scope_arg(args.get(2))?;
+                let options = secret_rotation_options_arg(args.get(3))?;
+                let receipt = provider
+                    .rotate_scoped(crate::secrets::SecretRotateRequest {
+                        id: secret_id_for_scope(&name, &scope),
+                        scope,
+                        value,
+                        options,
+                        audit: secret_audit_context(),
+                    })
+                    .await
+                    .map_err(secret_error_to_vm)?;
+                Ok(secret_rotation_receipt_value(receipt))
+            }
+            "lease" | "lease_bytes" => {
+                if args.len() > 3 {
+                    return Err(VmError::TypeError(format!(
+                        "{}.{method} expects name, duration, and optional scope",
+                        handle.type_name(),
+                    )));
+                }
+                let name = secret_name_arg(handle, method, args.first())?;
+                let duration = required_duration_arg(
+                    args.get(1),
+                    &format!("{}.{}", handle.type_name(), method),
+                )?;
+                let scope = secret_scope_arg(args.get(2))?;
+                let grant = provider
+                    .lease_scoped(crate::secrets::SecretLeaseRequest {
+                        id: secret_id_for_scope(&name, &scope),
+                        scope,
+                        duration,
+                        audit: secret_audit_context(),
+                    })
+                    .await
+                    .map_err(secret_error_to_vm)?;
+                Ok(secret_lease_grant_value(method == "lease_bytes", grant)?)
+            }
+            _ => Err(method_unsupported(handle, method)),
+        }
     }
 
     async fn call_harness_llm_method(
@@ -1195,6 +1331,7 @@ impl crate::vm::Vm {
             | HarnessKind::Random
             | HarnessKind::Crypto
             | HarnessKind::System
+            | HarnessKind::Secrets
             | HarnessKind::Tenant
             | HarnessKind::Auth => Err(method_unsupported(handle, method)),
             HarnessKind::Fs => match method {
@@ -2040,6 +2177,346 @@ fn optional_string_arg<'a>(
             index + 1,
             other.type_name()
         ))),
+    }
+}
+
+fn secret_name_arg(
+    handle: &VmHarness,
+    method: &str,
+    value: Option<&VmValue>,
+) -> Result<String, VmError> {
+    match value {
+        Some(VmValue::String(name)) if !name.trim().is_empty() => Ok(name.to_string()),
+        Some(VmValue::String(_)) => Err(VmError::TypeError(format!(
+            "{}.{method} expects a non-empty secret name",
+            handle.type_name()
+        ))),
+        Some(other) => Err(VmError::TypeError(format!(
+            "{}.{method} expects name: string, got {}",
+            handle.type_name(),
+            other.type_name()
+        ))),
+        None => Err(VmError::TypeError(format!(
+            "{}.{method} missing required name",
+            handle.type_name()
+        ))),
+    }
+}
+
+fn secret_value_arg(
+    handle: &VmHarness,
+    method: &str,
+    value: Option<&VmValue>,
+    field: &str,
+) -> Result<crate::secrets::SecretBytes, VmError> {
+    let value = value.ok_or_else(|| {
+        VmError::TypeError(format!(
+            "{}.{method} missing required {field}",
+            handle.type_name()
+        ))
+    })?;
+    secret_value_from_vm(handle, method, value, field)
+}
+
+fn secret_value_from_vm(
+    handle: &VmHarness,
+    method: &str,
+    value: &VmValue,
+    field: &str,
+) -> Result<crate::secrets::SecretBytes, VmError> {
+    match value {
+        VmValue::String(text) => Ok(crate::secrets::SecretBytes::from(text.as_ref())),
+        VmValue::Bytes(bytes) => Ok(crate::secrets::SecretBytes::from(bytes.as_slice())),
+        other => Err(VmError::TypeError(format!(
+            "{}.{method} expects {field}: string or bytes, got {}",
+            handle.type_name(),
+            other.type_name()
+        ))),
+    }
+}
+
+fn secret_scope_arg(value: Option<&VmValue>) -> Result<crate::secrets::SecretScope, VmError> {
+    match value {
+        None | Some(VmValue::Nil) => Ok(crate::secrets::SecretScope::tenant(
+            crate::harness_tenant::current_tenant_id().map(|tenant| tenant.0),
+        )),
+        Some(VmValue::String(scope)) => parse_secret_scope_string(scope.as_ref()),
+        Some(VmValue::Dict(dict)) => {
+            let kind = dict
+                .get("kind")
+                .and_then(|value| match value {
+                    VmValue::String(kind) => Some(kind.as_ref()),
+                    _ => None,
+                })
+                .ok_or_else(|| {
+                    VmError::TypeError(
+                        "HarnessSecrets scope dict requires string `kind`".to_string(),
+                    )
+                })?
+                .trim();
+            let id = match dict.get("id") {
+                None | Some(VmValue::Nil) => None,
+                Some(VmValue::String(id)) if !id.is_empty() => Some(id.to_string()),
+                Some(VmValue::String(_)) => None,
+                Some(other) => {
+                    return Err(VmError::TypeError(format!(
+                        "HarnessSecrets scope `id` must be a string or nil, got {}",
+                        other.type_name()
+                    )))
+                }
+            };
+            match kind {
+                "tenant" => Ok(crate::secrets::SecretScope::tenant(id.or_else(|| {
+                    crate::harness_tenant::current_tenant_id().map(|tenant| tenant.0)
+                }))),
+                "workspace" => id
+                    .map(crate::secrets::SecretScope::workspace)
+                    .ok_or_else(|| {
+                        VmError::TypeError(
+                            "HarnessSecrets workspace scope requires non-empty `id`".to_string(),
+                        )
+                    }),
+                "system" if id.is_none() => Ok(crate::secrets::SecretScope::system()),
+                "system" => Err(VmError::TypeError(
+                    "HarnessSecrets system scope does not take an `id`".to_string(),
+                )),
+                other if !other.trim().is_empty() => {
+                    Ok(crate::secrets::SecretScope::custom(other, id))
+                }
+                _ => Err(VmError::TypeError(
+                    "HarnessSecrets scope `kind` must not be empty".to_string(),
+                )),
+            }
+        }
+        Some(other) => Err(VmError::TypeError(format!(
+            "HarnessSecrets scope must be nil, string, or dict, got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+fn parse_secret_scope_string(raw: &str) -> Result<crate::secrets::SecretScope, VmError> {
+    let value = raw.trim();
+    if value.is_empty() || value == "tenant" {
+        return Ok(crate::secrets::SecretScope::tenant(
+            crate::harness_tenant::current_tenant_id().map(|tenant| tenant.0),
+        ));
+    }
+    if value == "system" {
+        return Ok(crate::secrets::SecretScope::system());
+    }
+    if let Some(id) = value.strip_prefix("tenant:") {
+        return Ok(crate::secrets::SecretScope::tenant(
+            (!id.is_empty())
+                .then(|| id.to_string())
+                .or_else(|| crate::harness_tenant::current_tenant_id().map(|tenant| tenant.0)),
+        ));
+    }
+    if let Some(id) = value.strip_prefix("workspace:") {
+        if id.is_empty() {
+            return Err(VmError::TypeError(
+                "HarnessSecrets workspace scope requires an id".to_string(),
+            ));
+        }
+        return Ok(crate::secrets::SecretScope::workspace(id));
+    }
+    if let Some((kind, id)) = value.split_once(':') {
+        if kind.is_empty() {
+            return Err(VmError::TypeError(
+                "HarnessSecrets custom scope kind must not be empty".to_string(),
+            ));
+        }
+        return Ok(crate::secrets::SecretScope::custom(
+            kind,
+            (!id.is_empty()).then(|| id.to_string()),
+        ));
+    }
+    Ok(crate::secrets::SecretScope::custom(value, None))
+}
+
+fn secret_id_for_scope(
+    name: &str,
+    scope: &crate::secrets::SecretScope,
+) -> crate::secrets::SecretId {
+    crate::secrets::SecretId::new(scope.namespace(), name)
+}
+
+fn optional_duration_arg(
+    value: Option<&VmValue>,
+    callee: &str,
+) -> Result<Option<std::time::Duration>, VmError> {
+    match value {
+        None | Some(VmValue::Nil) => Ok(None),
+        Some(value) => required_duration_arg(Some(value), callee).map(Some),
+    }
+}
+
+fn required_duration_arg(
+    value: Option<&VmValue>,
+    callee: &str,
+) -> Result<std::time::Duration, VmError> {
+    let millis = match value {
+        Some(VmValue::Int(ms)) | Some(VmValue::Duration(ms)) => *ms,
+        Some(other) => {
+            return Err(VmError::TypeError(format!(
+                "{callee} expects duration as int milliseconds or duration, got {}",
+                other.type_name()
+            )))
+        }
+        None => {
+            return Err(VmError::TypeError(format!(
+                "{callee} expects duration as int milliseconds or duration"
+            )))
+        }
+    };
+    let millis = u64::try_from(millis)
+        .map_err(|_| VmError::TypeError(format!("{callee} duration must be non-negative")))?;
+    Ok(std::time::Duration::from_millis(millis))
+}
+
+fn secret_rotation_options_arg(
+    value: Option<&VmValue>,
+) -> Result<crate::secrets::SecretRotationOptions, VmError> {
+    let Some(value) = value else {
+        return Ok(crate::secrets::SecretRotationOptions::default());
+    };
+    match value {
+        VmValue::Nil => Ok(crate::secrets::SecretRotationOptions::default()),
+        VmValue::Dict(dict) => Ok(crate::secrets::SecretRotationOptions {
+            grace: optional_duration_arg(dict.get("grace_ms"), "HarnessSecrets.rotate grace_ms")?,
+            ttl: optional_duration_arg(dict.get("ttl_ms"), "HarnessSecrets.rotate ttl_ms")?,
+        }),
+        other => Err(VmError::TypeError(format!(
+            "HarnessSecrets.rotate options must be a dict or nil, got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+fn secret_audit_context() -> crate::secrets::SecretAuditContext {
+    let principal = crate::harness_auth::current_auth_principal();
+    crate::secrets::SecretAuditContext {
+        request_id: crate::observability::request_id::current_request_id(),
+        actor_subject: principal
+            .as_ref()
+            .filter(|principal| !principal.subject.is_empty())
+            .map(|principal| principal.subject.clone()),
+        actor_kind: principal.and_then(|principal| principal.kind.clone()),
+    }
+}
+
+fn secret_scope_value(scope: &crate::secrets::SecretScope) -> VmValue {
+    let mut out = std::collections::BTreeMap::new();
+    out.put_str("kind", scope.kind());
+    out.put_opt_str("id", scope.id());
+    VmValue::dict(out)
+}
+
+fn secret_id_value(id: &crate::secrets::SecretId) -> VmValue {
+    let mut out = std::collections::BTreeMap::new();
+    out.put_str("namespace", &id.namespace);
+    out.put_str("name", &id.name);
+    match id.version {
+        crate::secrets::SecretVersion::Latest => out.put_str("version", "latest"),
+        crate::secrets::SecretVersion::Exact(version) => {
+            out.put_int("version", version.min(i64::MAX as u64) as i64);
+        }
+    }
+    VmValue::dict(out)
+}
+
+fn secret_write_receipt_value(receipt: crate::secrets::SecretWriteReceipt) -> VmValue {
+    let mut out = std::collections::BTreeMap::new();
+    out.put_str("provider", receipt.provider);
+    out.put("id", secret_id_value(&receipt.id));
+    out.put("scope", secret_scope_value(&receipt.scope));
+    out.put_opt(
+        "version",
+        receipt
+            .version
+            .map(|version| VmValue::Int(version.min(i64::MAX as u64) as i64)),
+    );
+    out.put_opt(
+        "expires_at_ms",
+        receipt.expires_at_unix_ms.map(VmValue::Int),
+    );
+    VmValue::dict(out)
+}
+
+fn secret_rotation_receipt_value(receipt: crate::secrets::SecretRotationReceipt) -> VmValue {
+    let mut out = std::collections::BTreeMap::new();
+    out.put_str("provider", receipt.provider);
+    out.put("id", secret_id_value(&receipt.id));
+    out.put("scope", secret_scope_value(&receipt.scope));
+    out.put_opt(
+        "from_version",
+        receipt
+            .from_version
+            .map(|version| VmValue::Int(version.min(i64::MAX as u64) as i64)),
+    );
+    out.put_opt(
+        "to_version",
+        receipt
+            .to_version
+            .map(|version| VmValue::Int(version.min(i64::MAX as u64) as i64)),
+    );
+    out.put_opt(
+        "grace_until_ms",
+        receipt.grace_until_unix_ms.map(VmValue::Int),
+    );
+    out.put_opt(
+        "expires_at_ms",
+        receipt.expires_at_unix_ms.map(VmValue::Int),
+    );
+    VmValue::dict(out)
+}
+
+fn secret_lease_grant_value(
+    bytes_value: bool,
+    grant: crate::secrets::SecretLeaseGrant,
+) -> Result<VmValue, VmError> {
+    let value = grant.value.with_exposed(|bytes| {
+        if bytes_value {
+            return Ok(VmValue::Bytes(std::sync::Arc::new(bytes.to_vec())));
+        }
+        std::str::from_utf8(bytes)
+            .map(str::to_string)
+            .map(vm_string)
+            .map_err(|error| {
+                VmError::TypeError(format!(
+                    "HarnessSecrets.lease secret `{}` was not UTF-8: {error}",
+                    grant.id.name
+                ))
+            })
+    })?;
+    let mut out = std::collections::BTreeMap::new();
+    out.put_str("provider", grant.provider);
+    out.put("id", secret_id_value(&grant.id));
+    out.put("scope", secret_scope_value(&grant.scope));
+    out.put_str("lease_id", grant.lease_id);
+    out.put("value", value);
+    out.put_int("expires_at_ms", grant.expires_at_unix_ms);
+    Ok(VmValue::dict(out))
+}
+
+fn secret_error_to_vm(error: crate::secrets::SecretError) -> VmError {
+    use crate::secrets::SecretError;
+    match error {
+        SecretError::NotFound { .. } | SecretError::NoProviders { .. } => {
+            VmError::CategorizedError {
+                message: error.to_string(),
+                category: ErrorCategory::NotFound,
+            }
+        }
+        SecretError::Unsupported { .. } | SecretError::InvalidInput(_) => {
+            VmError::TypeError(error.to_string())
+        }
+        SecretError::Backend { .. } | SecretError::InvalidConfig(_) | SecretError::All(_) => {
+            VmError::CategorizedError {
+                message: error.to_string(),
+                category: ErrorCategory::ToolError,
+            }
+        }
     }
 }
 

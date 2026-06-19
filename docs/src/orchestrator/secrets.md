@@ -44,6 +44,41 @@ existing VM event sink with the secret id, provider name, caller span,
 mutation session id when present, and a timestamp. The event payload never
 contains the secret bytes.
 
+## Harness primitive
+
+Hosts can attach a managed provider to `Harness::real()` with
+`with_secret_provider(...)`. That enables scripts to use the typed
+`harness.secrets` sub-handle:
+
+```harn
+let scope = {kind: "workspace", id: "workspace-123"}
+let receipt = harness.secrets.write("github.token", "token-v1", scope, 3600000)
+let token = harness.secrets.read("github.token", scope)
+let rotated = harness.secrets.rotate(
+  "github.token",
+  { -> "token-v2" },
+  scope,
+  {grace_ms: 300000, ttl_ms: 3600000},
+)
+let lease = harness.secrets.lease("github.token", 60000, scope)
+```
+
+Methods:
+
+- `read(name, scope?) -> string`
+- `read_bytes(name, scope?) -> bytes`
+- `write(name, value, scope?, ttl_ms?) -> dict`
+- `rotate(name, generator_or_value, scope?, options?) -> dict`
+- `lease(name, duration_ms, scope?) -> dict`
+- `lease_bytes(name, duration_ms, scope?) -> dict`
+
+`scope` may be `nil`, `"tenant"`, `"tenant:<id>"`, `"system"`,
+`"workspace:<id>"`, `"<custom-kind>:<id>"`, or a dict with `{kind, id}`.
+Omitted tenant scope uses the ambient `harness.tenant` id when the host bound
+one. The VM passes the ambient request id and authenticated principal facts to
+the provider for audit, but the provider owns policy, encryption, rotation,
+lease persistence, and any external KMS or vault adapter.
+
 ## Provider chain configuration
 
 The provider order is controlled with `HARN_SECRET_PROVIDERS`:

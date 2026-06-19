@@ -172,8 +172,9 @@ pub use corrections::{
 };
 pub use harness::{
     DenyEvent, Harness, HarnessCall, HarnessClock, HarnessCrypto, HarnessEnv, HarnessFs,
-    HarnessKind, HarnessLlm, HarnessNet, HarnessObs, HarnessProcess, HarnessRandom, HarnessStdio,
-    HarnessSystem, HarnessTenant, HarnessTerm, MockAwareClock, MockHarnessBuilder, VmHarness,
+    HarnessKind, HarnessLlm, HarnessNet, HarnessObs, HarnessProcess, HarnessRandom, HarnessSecrets,
+    HarnessStdio, HarnessSystem, HarnessTenant, HarnessTerm, MockAwareClock, MockHarnessBuilder,
+    VmHarness,
 };
 pub use harness_auth::{
     current_auth_principal, enter_auth_principal, AuthPrincipal, AuthPrincipalScopeGuard,

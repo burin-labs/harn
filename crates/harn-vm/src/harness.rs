@@ -4,10 +4,11 @@
 //! `Harness` is the Harn-language analog of an explicit-capability handle: a
 //! single value the runtime hands to a script's `main` so that stdio,
 //! terminal, clock, filesystem, environment, randomness, network, process,
-//! crypto, system, and LLM catalog access become surface in the type system
+//! crypto, system, secrets, and LLM catalog access become surface in the type system
 //! instead of ambient globals. Each sub-handle (`stdio`, `term`, `clock`, `fs`,
-//! `env`, `random`, `net`, `process`, `crypto`, `system`, `llm`) is a distinct
-//! named type that anchors the surface for its capability slice.
+//! `env`, `random`, `net`, `process`, `crypto`, `system`, `secrets`, `llm`,
+//! `tenant`, `auth`, `obs`) is a distinct named type that anchors the surface
+//! for its capability slice.
 //!
 //! This module defines:
 //!   * The runtime [`Harness`] value and its sub-handle wrappers.
@@ -43,6 +44,7 @@ pub enum HarnessKind {
     Process,
     Crypto,
     System,
+    Secrets,
     Llm,
     /// Tenant sub-handle exposing the ambient `TenantId` (if any) that
     /// the dispatching host bound to this call. See
@@ -78,6 +80,7 @@ impl HarnessKind {
             HarnessKind::Process => "HarnessProcess",
             HarnessKind::Crypto => "HarnessCrypto",
             HarnessKind::System => "HarnessSystem",
+            HarnessKind::Secrets => "HarnessSecrets",
             HarnessKind::Llm => "HarnessLlm",
             HarnessKind::Tenant => "HarnessTenant",
             HarnessKind::Auth => "HarnessAuth",
@@ -100,6 +103,7 @@ impl HarnessKind {
             HarnessKind::Process => Some("process"),
             HarnessKind::Crypto => Some("crypto"),
             HarnessKind::System => Some("system"),
+            HarnessKind::Secrets => Some("secrets"),
             HarnessKind::Llm => Some("llm"),
             HarnessKind::Tenant => Some("tenant"),
             HarnessKind::Auth => Some("auth"),
@@ -120,6 +124,7 @@ impl HarnessKind {
             "process" => Some(HarnessKind::Process),
             "crypto" => Some(HarnessKind::Crypto),
             "system" => Some(HarnessKind::System),
+            "secrets" => Some(HarnessKind::Secrets),
             "llm" => Some(HarnessKind::Llm),
             "tenant" => Some(HarnessKind::Tenant),
             "auth" => Some(HarnessKind::Auth),
@@ -140,6 +145,7 @@ impl HarnessKind {
         HarnessKind::Process,
         HarnessKind::Crypto,
         HarnessKind::System,
+        HarnessKind::Secrets,
         HarnessKind::Llm,
         HarnessKind::Tenant,
         HarnessKind::Auth,
@@ -159,6 +165,7 @@ impl HarnessKind {
         HarnessKind::Process,
         HarnessKind::Crypto,
         HarnessKind::System,
+        HarnessKind::Secrets,
         HarnessKind::Llm,
         HarnessKind::Tenant,
         HarnessKind::Auth,
@@ -171,7 +178,6 @@ impl HarnessKind {
 /// Method implementations (in `crate::vm::methods::harness`) borrow this to
 /// reach the concrete OS-backed primitives. Wrapped in `Arc` so handles are
 /// `Send + Sync` for VM contexts that move work onto other tasks.
-#[derive(Debug)]
 pub struct HarnessInner {
     clock: Arc<dyn Clock>,
     mode: HarnessMode,
@@ -180,6 +186,9 @@ pub struct HarnessInner {
     /// the process-wide `crate::egress` allowlist, if configured).
     /// See `Harness::with_net_policy` and `crate::harness_net`.
     net_policy: Option<crate::harness_net::NetPolicy>,
+    /// Optional provider backing `harness.secrets.*`. Runtime embedders install
+    /// the managed provider that owns custody, audit, leases, and rotation.
+    secret_provider: Option<Arc<dyn crate::secrets::SecretProvider>>,
     /// `true` once a request denied under `OnViolation::Quarantine`
     /// has fired. Sticky for the lifetime of the underlying
     /// `Arc<HarnessInner>` so downstream consumers can pin on the
@@ -187,6 +196,24 @@ pub struct HarnessInner {
     /// is per-`Arc` (i.e. per-`Harness` build) so unrelated harnesses
     /// stay independent.
     quarantined: Mutex<bool>,
+}
+
+impl fmt::Debug for HarnessInner {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("HarnessInner")
+            .field("clock", &"<dyn Clock>")
+            .field("mode", &self.mode)
+            .field("net_policy", &self.net_policy)
+            .field(
+                "secret_provider",
+                &self
+                    .secret_provider
+                    .as_ref()
+                    .map(|provider| provider.namespace().to_string()),
+            )
+            .field("quarantined", &self.is_quarantined())
+            .finish()
+    }
 }
 
 impl HarnessInner {
@@ -200,6 +227,10 @@ impl HarnessInner {
 
     pub fn net_policy(&self) -> Option<&crate::harness_net::NetPolicy> {
         self.net_policy.as_ref()
+    }
+
+    pub fn secret_provider(&self) -> Option<&Arc<dyn crate::secrets::SecretProvider>> {
+        self.secret_provider.as_ref()
     }
 
     pub(crate) fn mark_quarantined(&self) {
@@ -511,6 +542,7 @@ impl Harness {
             clock,
             mode,
             net_policy: None,
+            secret_provider: None,
             quarantined: Mutex::new(false),
         });
         Self { inner }
@@ -531,20 +563,44 @@ impl Harness {
     /// source handle.
     pub fn with_net_policy(&self, policy: crate::harness_net::NetPolicy) -> Self {
         let clock = Arc::clone(&self.inner.clock);
-        let mode = match &self.inner.mode {
-            HarnessMode::Real => HarnessMode::Real,
-            HarnessMode::Null(_) => HarnessMode::Null(NullHarnessState::default()),
-            HarnessMode::Mock(state) => HarnessMode::Mock(Arc::clone(state)),
-        };
+        let mode = self.clone_mode_for_child();
         // See `with_mode` for the rationale on this suppression.
         #[allow(clippy::arc_with_non_send_sync)]
         let inner = Arc::new(HarnessInner {
             clock,
             mode,
             net_policy: Some(policy),
+            secret_provider: self.inner.secret_provider.clone(),
             quarantined: Mutex::new(self.is_quarantined()),
         });
         Self { inner }
+    }
+
+    /// Attach a provider for `harness.secrets.*`.
+    ///
+    /// The provider is intentionally embedder-supplied. Harn owns the typed
+    /// method contract; the host owns custody details such as KMS wrapping,
+    /// lease storage, audit sinks, and scope policy.
+    pub fn with_secret_provider(&self, provider: Arc<dyn crate::secrets::SecretProvider>) -> Self {
+        let clock = Arc::clone(&self.inner.clock);
+        let mode = self.clone_mode_for_child();
+        #[allow(clippy::arc_with_non_send_sync)]
+        let inner = Arc::new(HarnessInner {
+            clock,
+            mode,
+            net_policy: self.inner.net_policy.clone(),
+            secret_provider: Some(provider),
+            quarantined: Mutex::new(self.is_quarantined()),
+        });
+        Self { inner }
+    }
+
+    fn clone_mode_for_child(&self) -> HarnessMode {
+        match &self.inner.mode {
+            HarnessMode::Real => HarnessMode::Real,
+            HarnessMode::Null(_) => HarnessMode::Null(NullHarnessState::default()),
+            HarnessMode::Mock(state) => HarnessMode::Mock(Arc::clone(state)),
+        }
     }
 
     /// `true` if the harness has been marked quarantined by an
@@ -675,6 +731,13 @@ impl Harness {
         }
     }
 
+    /// Field access for `harness.secrets`.
+    pub fn secrets(&self) -> HarnessSecrets {
+        HarnessSecrets {
+            inner: Arc::clone(&self.inner),
+        }
+    }
+
     /// Field access for `harness.llm`.
     pub fn llm(&self) -> HarnessLlm {
         HarnessLlm {
@@ -801,6 +864,12 @@ pub struct HarnessSystem {
     inner: Arc<HarnessInner>,
 }
 
+/// secrets sub-handle: `read`, `write`, `rotate`, `lease`.
+#[derive(Debug, Clone)]
+pub struct HarnessSecrets {
+    inner: Arc<HarnessInner>,
+}
+
 /// llm sub-handle: `catalog`, `providers`.
 #[derive(Debug, Clone)]
 pub struct HarnessLlm {
@@ -865,6 +934,7 @@ sub_handle_inner!(
     HarnessProcess,
     HarnessCrypto,
     HarnessSystem,
+    HarnessSecrets,
     HarnessLlm,
     HarnessTenant,
     HarnessAuth,
@@ -996,6 +1066,260 @@ impl<C: Clock + 'static> Clock for MockAwareClock<C> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::secrets::SecretProvider;
+    use async_trait::async_trait;
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct SecretCall {
+        operation: &'static str,
+        id: crate::secrets::SecretId,
+        scope: crate::secrets::SecretScope,
+        request_id: Option<String>,
+        actor_subject: Option<String>,
+        actor_kind: Option<String>,
+        duration_ms: Option<u64>,
+        grace_ms: Option<u64>,
+        ttl_ms: Option<u64>,
+    }
+
+    #[derive(Clone, Default)]
+    struct RecordingSecretProvider {
+        inner: Arc<RecordingSecretProviderInner>,
+    }
+
+    #[derive(Default)]
+    struct RecordingSecretProviderInner {
+        versions: Mutex<BTreeMap<crate::secrets::SecretId, Vec<Vec<u8>>>>,
+        calls: Mutex<Vec<SecretCall>>,
+    }
+
+    impl RecordingSecretProvider {
+        fn calls(&self) -> Vec<SecretCall> {
+            self.inner
+                .calls
+                .lock()
+                .expect("calls lock poisoned")
+                .clone()
+        }
+
+        fn record(
+            &self,
+            operation: &'static str,
+            id: &crate::secrets::SecretId,
+            scope: &crate::secrets::SecretScope,
+            audit: &crate::secrets::SecretAuditContext,
+            duration_ms: Option<u64>,
+            grace_ms: Option<u64>,
+            ttl_ms: Option<u64>,
+        ) {
+            self.inner
+                .calls
+                .lock()
+                .expect("calls lock poisoned")
+                .push(SecretCall {
+                    operation,
+                    id: id.clone(),
+                    scope: scope.clone(),
+                    request_id: audit.request_id.clone(),
+                    actor_subject: audit.actor_subject.clone(),
+                    actor_kind: audit.actor_kind.clone(),
+                    duration_ms,
+                    grace_ms,
+                    ttl_ms,
+                });
+        }
+
+        fn read_latest(
+            &self,
+            id: &crate::secrets::SecretId,
+        ) -> Result<(u64, Vec<u8>), crate::secrets::SecretError> {
+            let versions = self.inner.versions.lock().expect("versions lock poisoned");
+            let values = versions
+                .get(id)
+                .filter(|values| !values.is_empty())
+                .ok_or_else(|| crate::secrets::SecretError::NotFound {
+                    provider: self.namespace().to_string(),
+                    id: id.clone(),
+                })?;
+            Ok((
+                values.len() as u64,
+                values.last().expect("non-empty").clone(),
+            ))
+        }
+
+        fn write_version(
+            &self,
+            id: &crate::secrets::SecretId,
+            value: &crate::secrets::SecretBytes,
+        ) -> u64 {
+            let mut versions = self.inner.versions.lock().expect("versions lock poisoned");
+            let values = versions.entry(id.clone()).or_default();
+            values.push(value.with_exposed(|bytes| bytes.to_vec()));
+            values.len() as u64
+        }
+    }
+
+    fn duration_ms(duration: Duration) -> u64 {
+        duration.as_millis().min(u128::from(u64::MAX)) as u64
+    }
+
+    #[async_trait]
+    impl crate::secrets::SecretProvider for RecordingSecretProvider {
+        async fn get(
+            &self,
+            id: &crate::secrets::SecretId,
+        ) -> Result<crate::secrets::SecretBytes, crate::secrets::SecretError> {
+            self.read_latest(id)
+                .map(|(_, value)| crate::secrets::SecretBytes::from(value))
+        }
+
+        async fn put(
+            &self,
+            id: &crate::secrets::SecretId,
+            value: crate::secrets::SecretBytes,
+        ) -> Result<(), crate::secrets::SecretError> {
+            self.write_version(id, &value);
+            Ok(())
+        }
+
+        async fn rotate(
+            &self,
+            id: &crate::secrets::SecretId,
+        ) -> Result<crate::secrets::RotationHandle, crate::secrets::SecretError> {
+            let (from_version, value) = self.read_latest(id)?;
+            let to_version =
+                self.write_version(id, &crate::secrets::SecretBytes::from(value.as_slice()));
+            Ok(crate::secrets::RotationHandle {
+                provider: self.namespace().to_string(),
+                id: id
+                    .clone()
+                    .with_version(crate::secrets::SecretVersion::Exact(to_version)),
+                from_version: Some(from_version),
+                to_version: Some(to_version),
+            })
+        }
+
+        async fn list(
+            &self,
+            _prefix: &crate::secrets::SecretId,
+        ) -> Result<Vec<crate::secrets::SecretMeta>, crate::secrets::SecretError> {
+            Ok(Vec::new())
+        }
+
+        async fn read_scoped(
+            &self,
+            request: crate::secrets::SecretReadRequest,
+        ) -> Result<crate::secrets::SecretBytes, crate::secrets::SecretError> {
+            self.record(
+                "read",
+                &request.id,
+                &request.scope,
+                &request.audit,
+                None,
+                None,
+                None,
+            );
+            self.read_latest(&request.id)
+                .map(|(_, value)| crate::secrets::SecretBytes::from(value))
+        }
+
+        async fn write_scoped(
+            &self,
+            request: crate::secrets::SecretWriteRequest,
+        ) -> Result<crate::secrets::SecretWriteReceipt, crate::secrets::SecretError> {
+            let ttl_ms = request.options.ttl.map(duration_ms);
+            self.record(
+                "write",
+                &request.id,
+                &request.scope,
+                &request.audit,
+                None,
+                None,
+                ttl_ms,
+            );
+            let version = self.write_version(&request.id, &request.value);
+            Ok(crate::secrets::SecretWriteReceipt {
+                provider: self.namespace().to_string(),
+                id: request
+                    .id
+                    .with_version(crate::secrets::SecretVersion::Exact(version)),
+                scope: request.scope,
+                version: Some(version),
+                expires_at_unix_ms: ttl_ms.map(|ttl| 1_700_000_000_000_i64 + ttl as i64),
+            })
+        }
+
+        async fn rotate_scoped(
+            &self,
+            request: crate::secrets::SecretRotateRequest,
+        ) -> Result<crate::secrets::SecretRotationReceipt, crate::secrets::SecretError> {
+            let grace_ms = request.options.grace.map(duration_ms);
+            let ttl_ms = request.options.ttl.map(duration_ms);
+            self.record(
+                "rotate",
+                &request.id,
+                &request.scope,
+                &request.audit,
+                None,
+                grace_ms,
+                ttl_ms,
+            );
+            let from_version = self
+                .inner
+                .versions
+                .lock()
+                .expect("versions lock poisoned")
+                .get(&request.id)
+                .map(|values| values.len() as u64);
+            let to_version = self.write_version(&request.id, &request.value);
+            Ok(crate::secrets::SecretRotationReceipt {
+                provider: self.namespace().to_string(),
+                id: request
+                    .id
+                    .with_version(crate::secrets::SecretVersion::Exact(to_version)),
+                scope: request.scope,
+                from_version,
+                to_version: Some(to_version),
+                grace_until_unix_ms: grace_ms.map(|grace| 1_700_000_000_000_i64 + grace as i64),
+                expires_at_unix_ms: ttl_ms.map(|ttl| 1_700_000_000_000_i64 + ttl as i64),
+            })
+        }
+
+        async fn lease_scoped(
+            &self,
+            request: crate::secrets::SecretLeaseRequest,
+        ) -> Result<crate::secrets::SecretLeaseGrant, crate::secrets::SecretError> {
+            let duration = duration_ms(request.duration);
+            self.record(
+                "lease",
+                &request.id,
+                &request.scope,
+                &request.audit,
+                Some(duration),
+                None,
+                None,
+            );
+            let (version, value) = self.read_latest(&request.id)?;
+            Ok(crate::secrets::SecretLeaseGrant {
+                provider: self.namespace().to_string(),
+                id: request
+                    .id
+                    .with_version(crate::secrets::SecretVersion::Exact(version)),
+                scope: request.scope,
+                lease_id: format!("lease-{version}"),
+                value: crate::secrets::SecretBytes::from(value),
+                expires_at_unix_ms: 1_700_000_000_000_i64 + duration as i64,
+            })
+        }
+
+        fn namespace(&self) -> &'static str {
+            "recording"
+        }
+
+        fn supports_versions(&self) -> bool {
+            true
+        }
+    }
 
     #[test]
     fn real_constructs_without_panic() {
@@ -1072,6 +1396,7 @@ mod tests {
             r#"fn main(harness: Harness) { harness.process.spawn_captured({cmd: "printf", args: ["x"]}) }"#,
             r#"fn main(harness: Harness) { harness.crypto.sha256("") }"#,
             r"fn main(harness: Harness) { harness.system.cpu() }",
+            r#"fn main(harness: Harness) { harness.secrets.read("blocked") }"#,
             r"fn main(harness: Harness) { harness.llm.catalog() }",
             r"fn main(harness: Harness) { harness.tenant.id() }",
             r"fn main(harness: Harness) { harness.auth.subject() }",
@@ -1102,6 +1427,7 @@ mod tests {
                 (HarnessKind::Process, "spawn_captured"),
                 (HarnessKind::Crypto, "sha256"),
                 (HarnessKind::System, "cpu"),
+                (HarnessKind::Secrets, "read"),
                 (HarnessKind::Llm, "catalog"),
                 (HarnessKind::Tenant, "id"),
                 (HarnessKind::Auth, "subject"),
@@ -1163,6 +1489,70 @@ fn main(harness: Harness) {
             error.contains("no principal bound"),
             "unexpected error: {error}"
         );
+    }
+
+    #[test]
+    fn secrets_sub_handle_uses_provider_scope_and_audit_context() {
+        use crate::harness_auth::{enter_auth_principal, AuthPrincipal};
+        use crate::harness_tenant::enter_tenant;
+        use crate::observability::request_id::enter_request_id;
+
+        let provider = RecordingSecretProvider::default();
+        let harness = Harness::real().with_secret_provider(Arc::new(provider.clone()));
+        let _tenant = enter_tenant(crate::TenantId::new("tenant-a"));
+        let _request = enter_request_id("req-499");
+        let _principal = enter_auth_principal(AuthPrincipal {
+            subject: "api-key-1".to_string(),
+            scheme: "apikey".to_string(),
+            scopes: ["secrets:read", "secrets:write"]
+                .iter()
+                .map(|scope| scope.to_string())
+                .collect(),
+            kind: Some("tenant_api_key".to_string()),
+        });
+
+        let source = r#"
+fn main(harness: Harness) {
+  let scope = {kind: "workspace", id: "workspace-a"}
+  let written = harness.secrets.write("github.token", "v1", scope, 5000)
+  __io_println(written.provider)
+  __io_println(written.scope.kind)
+  __io_println(written.scope.id)
+  __io_println(written.id.namespace)
+  __io_println(written.version)
+  __io_println(harness.secrets.read("github.token", scope))
+  let rotated = harness.secrets.rotate("github.token", { -> "v2" }, scope, {grace_ms: 250, ttl_ms: 7500})
+  __io_println(rotated.from_version)
+  __io_println(rotated.to_version)
+  let grant = harness.secrets.lease("github.token", 1000, scope)
+  __io_println(grant.value)
+  __io_println(grant.scope.id)
+}
+"#;
+        let output = run_harness_source(source, harness).expect("dispatch succeeds");
+        assert_eq!(
+            output,
+            "recording\nworkspace\nworkspace-a\nharn.workspace.workspace-a\n1\nv1\n1\n2\nv2\nworkspace-a\n"
+        );
+
+        let calls = provider.calls();
+        assert_eq!(
+            calls.iter().map(|call| call.operation).collect::<Vec<_>>(),
+            vec!["write", "read", "rotate", "lease"]
+        );
+        for call in &calls {
+            assert_eq!(
+                call.scope,
+                crate::secrets::SecretScope::workspace("workspace-a")
+            );
+            assert_eq!(call.request_id.as_deref(), Some("req-499"));
+            assert_eq!(call.actor_subject.as_deref(), Some("api-key-1"));
+            assert_eq!(call.actor_kind.as_deref(), Some("tenant_api_key"));
+        }
+        assert_eq!(calls[0].ttl_ms, Some(5_000));
+        assert_eq!(calls[2].grace_ms, Some(250));
+        assert_eq!(calls[2].ttl_ms, Some(7_500));
+        assert_eq!(calls[3].duration_ms, Some(1_000));
     }
 
     #[test]
