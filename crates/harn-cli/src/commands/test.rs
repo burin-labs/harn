@@ -3,18 +3,255 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::{self, Stdio};
 
+use clap::{error::ErrorKind, CommandFactory};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::cli::{Cli, TestArgs};
 use crate::commands::run::{
     install_cli_llm_mock_mode, persist_cli_llm_mock_recording, CliLlmMockMode,
 };
+use crate::commands::{agents_conformance, protocol_conformance};
 use crate::env_guard::ScopedEnvVar;
 use crate::json_envelope::{self, JsonEnvelope, JsonError};
 use crate::test_report::{self, TestCaseReport, TestOutcome, TestReport};
 use crate::test_runner;
 use crate::{execute_with_skill_dirs, execute_with_skill_dirs_and_harness, ExecError};
+
+pub(crate) async fn run_command(args: TestArgs) {
+    if args.watch && (args.junit.is_some() || args.json_out.is_some()) {
+        command_error(
+            "`harn test --watch` cannot combine with --junit or --json-out; the watch loop never terminates so the report would never be written",
+        );
+    }
+
+    let shard_requested = args.shard_index.is_some() || args.shard_total.is_some();
+    if args.target.as_deref() == Some("agents-conformance") {
+        run_agents_conformance_command(args, shard_requested).await;
+        return;
+    }
+    if args.target.as_deref() == Some("protocols") {
+        run_protocols_command(args, shard_requested);
+        return;
+    }
+    if args.evals {
+        if shard_requested {
+            command_error("--evals cannot be combined with test sharding");
+        }
+        if args.determinism || args.record || args.replay || args.watch {
+            command_error(
+                "--evals cannot be combined with --determinism, --record, --replay, or --watch",
+            );
+        }
+        if args.target.as_deref() != Some("package") || args.selection.is_some() {
+            command_error("package evals are run with `harn test package --evals`");
+        }
+        crate::run_package_evals();
+    } else if args.determinism {
+        run_determinism_command(args, shard_requested).await;
+    } else {
+        run_standard_command(args, shard_requested).await;
+    }
+}
+
+async fn run_agents_conformance_command(args: TestArgs, shard_requested: bool) {
+    if args.selection.is_some() {
+        command_error(
+            "`harn test agents-conformance` does not accept a second positional target; use --category instead",
+        );
+    }
+    if args.evals || args.determinism || args.record || args.replay || args.watch || shard_requested
+    {
+        command_error(
+            "`harn test agents-conformance` cannot be combined with --evals, --determinism, --record, --replay, --watch, or test sharding",
+        );
+    }
+    let Some(target_url) = args.agents_target.clone() else {
+        command_error("`harn test agents-conformance` requires --target <url>");
+    };
+    agents_conformance::run_agents_conformance(agents_conformance::AgentsConformanceConfig {
+        target_url,
+        api_key: args.agents_api_key.clone(),
+        categories: args.agents_category.clone(),
+        timeout_ms: args.timeout,
+        verbose: args.verbose,
+        json: args.json,
+        json_out: args.json_out.clone(),
+        workspace_id: args.agents_workspace_id.clone(),
+        session_id: args.agents_session_id.clone(),
+    })
+    .await;
+}
+
+fn run_protocols_command(args: TestArgs, shard_requested: bool) {
+    if args.evals || args.determinism || args.record || args.replay || args.watch {
+        command_error(
+            "`harn test protocols` cannot be combined with --evals, --determinism, --record, --replay, or --watch",
+        );
+    }
+    if args.junit.is_some()
+        || args.agents_target.is_some()
+        || args.agents_api_key.is_some()
+        || !args.agents_category.is_empty()
+        || args.json
+        || args.json_out.is_some()
+        || args.agents_workspace_id.is_some()
+        || args.agents_session_id.is_some()
+        || args.parallel
+        || shard_requested
+        || !args.skill_dir.is_empty()
+    {
+        command_error(
+            "`harn test protocols` accepts only --filter, --verbose, --timing, and an optional fixture selection",
+        );
+    }
+    protocol_conformance::run_protocol_conformance(
+        args.selection.as_deref(),
+        args.filter.as_deref(),
+        args.verbose || args.timing,
+    );
+}
+
+async fn run_determinism_command(args: TestArgs, shard_requested: bool) {
+    if shard_requested {
+        command_error("--determinism cannot be combined with test sharding");
+    }
+    let cli_skill_dirs: Vec<PathBuf> = args.skill_dir.iter().map(PathBuf::from).collect();
+    if args.watch {
+        command_error("--determinism cannot be combined with --watch");
+    }
+    if args.record || args.replay {
+        command_error("--determinism manages its own record/replay cycle");
+    }
+    if let Some(t) = args.target.as_deref() {
+        if t == "conformance" {
+            run_conformance_determinism_tests(
+                t,
+                args.selection.as_deref(),
+                args.filter.as_deref(),
+                args.timeout,
+                &cli_skill_dirs,
+            )
+            .await;
+        } else if args.selection.is_some() {
+            command_error("only `harn test conformance` accepts a second positional target");
+        } else {
+            run_determinism_tests(t, args.filter.as_deref(), args.timeout, &cli_skill_dirs).await;
+        }
+    } else {
+        let test_dir = default_test_dir_or_exit();
+        if args.selection.is_some() {
+            command_error("only `harn test conformance` accepts a second positional target");
+        }
+        run_determinism_tests(
+            &test_dir,
+            args.filter.as_deref(),
+            args.timeout,
+            &cli_skill_dirs,
+        )
+        .await;
+    }
+}
+
+async fn run_standard_command(args: TestArgs, shard_requested: bool) {
+    let cli_skill_dirs: Vec<PathBuf> = args.skill_dir.iter().map(PathBuf::from).collect();
+    if args.record {
+        harn_vm::llm::set_replay_mode(harn_vm::llm::LlmReplayMode::Record, ".harn-fixtures");
+    } else if args.replay {
+        harn_vm::llm::set_replay_mode(harn_vm::llm::LlmReplayMode::Replay, ".harn-fixtures");
+    }
+
+    if let Some(t) = args.target.as_deref() {
+        if t == "conformance" {
+            if shard_requested {
+                command_error("test sharding is only supported for user test suites");
+            }
+            run_conformance_tests(
+                t,
+                args.selection.as_deref(),
+                args.filter.as_deref(),
+                args.junit.as_deref(),
+                args.timeout,
+                ConformanceRunOptions {
+                    verbose: args.verbose,
+                    timing: args.timing,
+                    differential_optimizations: args.differential_optimizations,
+                    json: args.json,
+                    cli_skill_dirs: &cli_skill_dirs,
+                },
+            )
+            .await;
+        } else if args.selection.is_some() {
+            command_error("only `harn test conformance` accepts a second positional target");
+        } else {
+            run_user_test_target(t, &args, &cli_skill_dirs).await;
+        }
+    } else {
+        let test_dir = default_test_dir_or_exit();
+        if args.selection.is_some() {
+            command_error("only `harn test conformance` accepts a second positional target");
+        }
+        run_user_test_target(&test_dir, &args, &cli_skill_dirs).await;
+    }
+}
+
+async fn run_user_test_target(path: &str, args: &TestArgs, cli_skill_dirs: &[PathBuf]) {
+    let run_args = UserTestRunArgs {
+        filter: args.filter.as_deref(),
+        timeout_ms: args.timeout,
+        max_test_ms: args.max_test_ms,
+        max_execute_ms: args.max_execute_ms,
+        parallel: args.parallel,
+        jobs: args.jobs,
+        shard: resolve_user_test_shard(args.shard_index, args.shard_total),
+        verbose: args.verbose,
+        timing: args.timing,
+        diagnose: args.diagnose,
+        cli_skill_dirs,
+    };
+    if args.watch {
+        run_watch_tests(path, run_args).await;
+    } else {
+        run_user_tests(
+            path,
+            run_args,
+            UserTestReportConfig {
+                junit_path: args.junit.as_deref(),
+                json_out_path: args.json_out.as_deref(),
+            },
+        )
+        .await;
+    }
+}
+
+fn default_test_dir_or_exit() -> String {
+    if PathBuf::from("tests").is_dir() {
+        "tests".to_string()
+    } else {
+        command_error("no path specified and no tests/ directory found");
+    }
+}
+
+fn resolve_user_test_shard(
+    shard_index: Option<usize>,
+    shard_total: Option<usize>,
+) -> Option<test_runner::TestShard> {
+    match (shard_index, shard_total) {
+        (None, None) => None,
+        (Some(index), Some(total)) => match test_runner::TestShard::new(index, total) {
+            Ok(shard) => Some(shard),
+            Err(error) => command_error(&error),
+        },
+        _ => command_error("test sharding requires both --shard-index and --shard-total"),
+    }
+}
+
+fn command_error(message: &str) -> ! {
+    Cli::command()
+        .error(ErrorKind::ValueValidation, message)
+        .exit()
+}
 
 /// Report-writing options threaded into `run_user_tests`. Each `Some`
 /// path triggers a write at end-of-run; a missing parent directory or
@@ -42,6 +279,7 @@ pub(crate) struct UserTestRunArgs<'a> {
     pub max_execute_ms: Option<u64>,
     pub parallel: bool,
     pub jobs: Option<usize>,
+    pub shard: Option<test_runner::TestShard>,
     pub verbose: bool,
     pub timing: bool,
     pub diagnose: bool,
@@ -1800,6 +2038,7 @@ async fn run_user_tests_once(path: &Path, args: UserTestRunArgs<'_>) -> test_run
         max_execute_ms: args.max_execute_ms,
         parallel: args.parallel,
         jobs: args.jobs,
+        shard: args.shard,
         cli_skill_dirs: args.cli_skill_dirs.to_vec(),
         progress: Some(user_test_progress(args.verbose)),
         diagnose: args.diagnose,

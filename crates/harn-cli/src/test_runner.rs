@@ -190,6 +190,9 @@ pub struct RunOptions {
     /// available parallelism, capped by a small constant when running in
     /// parallel mode. Ignored when `parallel = false`.
     pub jobs: Option<usize>,
+    /// Optional 1-based shard selection for CI matrix fan-out. Sharding
+    /// happens after discovery/filtering and before execution.
+    pub shard: Option<TestShard>,
     pub cli_skill_dirs: Vec<PathBuf>,
     /// Optional progress callback. When set, the runner emits events as
     /// the suite progresses; consumers (CLI, dev mode) render output.
@@ -198,6 +201,37 @@ pub struct RunOptions {
     /// teardown) to stderr. Also honored via `HARN_TEST_DIAGNOSE=1` so
     /// users can flip the flag without restarting their shell.
     pub diagnose: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TestShard {
+    index: usize,
+    total: usize,
+}
+
+impl TestShard {
+    pub fn new(index: usize, total: usize) -> Result<Self, String> {
+        if total == 0 {
+            return Err("test shard total must be at least 1".to_string());
+        }
+        if index == 0 {
+            return Err("test shard index must be at least 1".to_string());
+        }
+        if index > total {
+            return Err(format!(
+                "test shard index {index} exceeds shard total {total}"
+            ));
+        }
+        Ok(Self { index, total })
+    }
+
+    pub fn index(self) -> usize {
+        self.index
+    }
+
+    pub fn total(self) -> usize {
+        self.total
+    }
 }
 
 impl RunOptions {
@@ -260,6 +294,7 @@ pub async fn run_tests(
         max_execute_ms: test_budget_ms_via_env(HARN_TEST_MAX_EXECUTE_MS_ENV),
         parallel,
         jobs: None,
+        shard: None,
         cli_skill_dirs: cli_skill_dirs.to_vec(),
         progress: None,
         diagnose: diagnose_enabled_via_env(),
@@ -283,6 +318,7 @@ pub async fn run_tests_with_progress(
         max_execute_ms: test_budget_ms_via_env(HARN_TEST_MAX_EXECUTE_MS_ENV),
         parallel,
         jobs: None,
+        shard: None,
         cli_skill_dirs: cli_skill_dirs.to_vec(),
         progress,
         diagnose: diagnose_enabled_via_env(),
@@ -333,26 +369,37 @@ pub async fn run_tests_with_options(path: &Path, options: &RunOptions) -> TestSu
         .map(load_timings_cache)
         .unwrap_or_default();
 
-    let discovery = discover_test_cases(&files, options.filter.as_deref(), workers);
+    let mut discovery = discover_test_cases(&files, options.filter.as_deref(), workers);
+    if let Some(shard) = options.shard {
+        discovery.cases = select_shard_cases(discovery.cases, &timings, shard);
+        if shard.index() > 1 {
+            discovery.discovery_errors.clear();
+        }
+    }
     let collection_ms = collection_start.elapsed().as_millis() as u64;
+    let selected_files_with_tests = if options.shard.is_some() {
+        count_files_with_cases(&discovery.cases)
+    } else {
+        discovery.files_with_tests
+    };
 
     emit_progress(
         &options.progress,
         TestRunEvent::SuiteDiscovered {
             total_tests: discovery.cases.len(),
-            total_files: discovery.files_with_tests,
+            total_files: selected_files_with_tests,
             parallel: options.parallel,
             workers,
         },
     );
     if workers == 1
-        && should_warn_large_sequential_suite(discovery.cases.len(), discovery.files_with_tests)
+        && should_warn_large_sequential_suite(discovery.cases.len(), selected_files_with_tests)
     {
         emit_progress(
             &options.progress,
             TestRunEvent::LargeSequentialSuite {
                 total_tests: discovery.cases.len(),
-                total_files: discovery.files_with_tests,
+                total_files: selected_files_with_tests,
             },
         );
     }
@@ -713,6 +760,56 @@ fn sort_cases_longest_first(cases: &mut [TestCase], timings: &BTreeMap<String, u
             .then_with(|| a.file.cmp(&b.file))
             .then_with(|| a.name.cmp(&b.name))
     });
+}
+
+fn select_shard_cases(
+    cases: Vec<TestCase>,
+    timings: &BTreeMap<String, u64>,
+    shard: TestShard,
+) -> Vec<TestCase> {
+    if shard.total() <= 1 {
+        return cases;
+    }
+
+    let mut ranked = cases.into_iter().collect::<Vec<_>>();
+    ranked.sort_by(|a, b| {
+        estimated_case_cost_ms(b, timings)
+            .cmp(&estimated_case_cost_ms(a, timings))
+            .then_with(|| a.file.cmp(&b.file))
+            .then_with(|| a.name.cmp(&b.name))
+    });
+
+    let mut buckets = (0..shard.total()).map(|_| Vec::new()).collect::<Vec<_>>();
+    let mut costs = vec![0u64; shard.total()];
+    let mut counts = vec![0usize; shard.total()];
+
+    for case in ranked {
+        let bucket_index = (0..shard.total())
+            .min_by_key(|&index| (costs[index], counts[index], index))
+            .unwrap_or(0);
+        costs[bucket_index] =
+            costs[bucket_index].saturating_add(estimated_case_cost_ms(&case, timings));
+        counts[bucket_index] += 1;
+        buckets[bucket_index].push(case);
+    }
+
+    buckets.swap_remove(shard.index() - 1)
+}
+
+fn estimated_case_cost_ms(case: &TestCase, timings: &BTreeMap<String, u64>) -> u64 {
+    timings
+        .get(&timings_key(&case.file, &case.name))
+        .copied()
+        .unwrap_or(case.weight as u64)
+        .max(1)
+}
+
+fn count_files_with_cases(cases: &[TestCase]) -> usize {
+    let mut files = HashSet::new();
+    for case in cases {
+        files.insert(case.file.as_path());
+    }
+    files.len()
 }
 
 fn timings_key(file: &Path, name: &str) -> String {
@@ -1470,6 +1567,53 @@ pipeline test_cli_skills(task) {
         // Slowest tests live at the tail so workers pop them first.
         let order: Vec<&str> = cases.iter().map(|c| c.name.as_str()).collect();
         assert_eq!(order, vec!["test_quick", "test_medium", "test_slow"]);
+    }
+
+    #[test]
+    fn test_shard_validation_rejects_invalid_selection() {
+        assert!(TestShard::new(1, 1).is_ok());
+        assert!(TestShard::new(0, 2).is_err());
+        assert!(TestShard::new(1, 0).is_err());
+        assert!(TestShard::new(3, 2).is_err());
+    }
+
+    #[test]
+    fn select_shard_cases_balances_by_historical_duration() {
+        let source = Arc::new(String::new());
+        let program = Arc::new(Vec::new());
+        let mk = |name: &str| TestCase {
+            file: PathBuf::from("tests/a.harn"),
+            name: name.to_string(),
+            source: Arc::clone(&source),
+            program: Arc::clone(&program),
+            serial_group: None,
+            weight: 1,
+        };
+        let mut timings = BTreeMap::new();
+        timings.insert("tests/a.harn::test_big".to_string(), 100);
+        timings.insert("tests/a.harn::test_mid".to_string(), 60);
+        timings.insert("tests/a.harn::test_small_a".to_string(), 40);
+        timings.insert("tests/a.harn::test_small_b".to_string(), 20);
+
+        let cases = vec![
+            mk("test_big"),
+            mk("test_mid"),
+            mk("test_small_a"),
+            mk("test_small_b"),
+        ];
+        let shard_one = select_shard_cases(cases.clone(), &timings, TestShard::new(1, 2).unwrap());
+        let shard_two = select_shard_cases(cases, &timings, TestShard::new(2, 2).unwrap());
+
+        let names_one = shard_one
+            .iter()
+            .map(|case| case.name.as_str())
+            .collect::<Vec<_>>();
+        let names_two = shard_two
+            .iter()
+            .map(|case| case.name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(names_one, vec!["test_big", "test_small_b"]);
+        assert_eq!(names_two, vec!["test_mid", "test_small_a"]);
     }
 
     #[test]
