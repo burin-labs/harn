@@ -3387,6 +3387,23 @@ mod tests {
             default_tool_format("qwen/qwen3-coder-flash", "openrouter"),
             "text"
         );
+        // GPT-OSS tool defaults are provider-specific: aggregate OpenRouter
+        // and Fireworks routes use Harn's JSON text-channel tools, while direct
+        // native-capable hosts stay on provider-native tool calls.
+        assert_eq!(
+            default_tool_format("openai/gpt-oss-120b", "openrouter"),
+            "json"
+        );
+        assert_eq!(
+            default_tool_format("accounts/fireworks/models/gpt-oss-120b", "fireworks"),
+            "json"
+        );
+        assert_eq!(default_tool_format("gpt-oss-120b", "cerebras"), "native");
+        assert_eq!(
+            default_tool_format("openai/gpt-oss-120b", "deepinfra"),
+            "native"
+        );
+        assert_eq!(default_tool_format("openai/gpt-oss-120b", "groq"), "native");
     }
 
     #[test]
