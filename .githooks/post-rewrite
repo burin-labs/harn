@@ -46,7 +46,7 @@ rewrites=$(cat) || exit 0
 # the workspace's debug harn binary; we fast-path skip the regen if the binary
 # isn't built yet, so a clean checkout doesn't pay a Rust build cost.
 source_pattern='^spec/chapters/.*\.md$'
-generated_paths="spec/HARN_SPEC.md docs/src/language-spec.md"
+generated_paths="spec/HARN_SPEC.md docs/src/language-spec.md docs/src/spec/language docs/src/SUMMARY.md"
 sync_script="scripts/sync_language_spec.harn"
 harn_bin="target/debug/harn"
 

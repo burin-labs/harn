@@ -1,20 +1,30 @@
-// Assemble the language spec from its per-chapter sources and keep the
-// generated single-file copies in sync:
+// Assemble the language spec from its per-chapter sources and keep every
+// generated copy in sync:
 //
 //   spec/chapters/*.md   (the canonical, hand-edited source — one file per
 //                         top-level section, ordered by their `NN-` prefix)
 //        |
-//        +--> spec/HARN_SPEC.md           (generated single-file assembly;
-//        |                                 consumed by verify_language_spec,
-//        |                                 the release tooling, and ctrl-F)
-//        +--> docs/src/language-spec.md    (generated docs mirror, with a
-//                                          "do not edit" header)
+//        +--> spec/HARN_SPEC.md            (generated single-file assembly;
+//        |                                  consumed by verify_language_spec,
+//        |                                  the release tooling, and ctrl-F)
+//        +--> docs/src/language-spec.md     (generated docs landing page: the
+//        |                                  overview chapter plus a table of
+//        |                                  contents linking to the per-chapter
+//        |                                  pages below)
+//        +--> docs/src/spec/language/*.md   (generated per-chapter docs pages,
+//        |                                  one per section after the overview,
+//        |                                  so the hosted site is navigable
+//        |                                  chapter-by-chapter instead of one
+//        |                                  ~7k-line page)
+//        +--> docs/src/SUMMARY.md           (the chapter list between the
+//                                           generated-block markers is rewritten
+//                                           so the site nav lists every chapter)
 //
 // Edit the chapter files, never the generated copies. The pre-commit hook
 // re-runs this so the generated copies never go stale.
 //
 // Usage:
-//   harn run scripts/sync_language_spec.harn               (rewrite both)
+//   harn run scripts/sync_language_spec.harn               (rewrite all)
 //   harn run scripts/sync_language_spec.harn -- --check    (fail if stale)
 import "./compare_generated_text.harn"
 
@@ -24,7 +34,18 @@ let SPEC = "spec/HARN_SPEC.md"
 
 let MIRROR = "docs/src/language-spec.md"
 
+let PAGES_DIR = "docs/src/spec/language"
+
+let SUMMARY = "docs/src/SUMMARY.md"
+
 let HEADER = "<!-- Generated from spec/chapters/*.md by scripts/sync_language_spec.harn -->\n\n"
+
+// Markers delimiting the generated chapter list inside docs/src/SUMMARY.md.
+// Everything between them is rewritten by this script; everything else in
+// SUMMARY.md is hand-edited and preserved verbatim.
+let SUMMARY_BEGIN = "<!-- BEGIN generated: language-spec chapters (scripts/sync_language_spec.harn) -->"
+
+let SUMMARY_END = "<!-- END generated: language-spec chapters -->"
 
 /**
  * Assemble the canonical single-file spec text by concatenating every chapter
@@ -40,19 +61,115 @@ pub fn assemble_spec() -> string {
   return out
 }
 
-/** Render the docs mirror (spec text plus the "do not edit" header). */
+/** Render the "do not edit" header in front of generated chapter text. */
 pub fn render_mirror_from(spec_text: string) -> string {
   return HEADER + spec_text
 }
 
+/** All chapter source paths in `NN-` order. */
+pub fn chapter_paths() -> list<string> {
+  return harness.fs.glob(CHAPTERS_GLOB).sort()
+}
+
+/** Chapter paths after the overview — each becomes its own docs page. */
+pub fn page_paths() -> list<string> {
+  var out: list<string> = []
+  var i = 0
+  for path in chapter_paths() {
+    if i > 0 {
+      out = out + [path]
+    }
+    i = i + 1
+  }
+  return out
+}
+
+/** The slug (basename without extension) for a chapter path. */
+pub fn page_slug(path: string) -> string {
+  let parts = path.split("/")
+  let base = parts[parts.count - 1]
+  return base.replace(".md", "")
+}
+
+/** The chapter title (its first heading text, with leading `#`s stripped). */
+pub fn chapter_title(text: string) -> string {
+  let first = text.split("\n")[0]
+  return first.replace("## ", "").replace("# ", "").trim()
+}
+
+/** The docs path for a chapter's per-chapter page. */
+pub fn page_path(path: string) -> string {
+  return PAGES_DIR + "/" + page_slug(path) + ".md"
+}
+
+/**
+ * The landing page: the overview chapter followed by a generated table of
+ * contents linking to every per-chapter page. The overview is the first
+ * chapter (the only one with a top-level `#` heading).
+ */
+pub fn render_index() -> string {
+  let overview = harness.fs.read_text(chapter_paths()[0]).trim()
+  var toc = "\n\n## Specification chapters\n\nThe language specification is organized into the chapters below.\n\n"
+  for path in page_paths() {
+    let title = chapter_title(harness.fs.read_text(path))
+    toc = toc + "- [" + title + "](./spec/language/" + page_slug(path) + ".md)\n"
+  }
+  return HEADER + overview + toc
+}
+
+/** The SUMMARY.md chapter list (between the generated-block markers). */
+pub fn render_summary_block() -> string {
+  var out = "  " + SUMMARY_BEGIN
+  for path in page_paths() {
+    let title = chapter_title(harness.fs.read_text(path))
+    out = out + "\n  - [" + title + "](./spec/language/" + page_slug(path) + ".md)"
+  }
+  out = out + "\n  " + SUMMARY_END
+  return out
+}
+
+/** Replace the generated chapter list in `current` with `block`. */
+pub fn splice_summary(current: string, block: string) -> string {
+  var out: list<string> = []
+  var skipping = false
+  for line in current.split("\n") {
+    let trimmed = line.trim()
+    if trimmed.starts_with(SUMMARY_BEGIN) {
+      out = out + [block]
+      skipping = true
+    } else if trimmed.starts_with(SUMMARY_END) {
+      skipping = false
+    } else if !skipping {
+      out = out + [line]
+    }
+  }
+  return out.join("\n")
+}
+
+fn stale(generated: string, path: string) -> bool {
+  let disk = if harness.fs.exists(path) {
+    harness.fs.read_text(path)
+  } else {
+    ""
+  }
+  if normalize(generated) != normalize(disk) {
+    __io_eprintln("error: ${path} is stale relative to ${CHAPTERS_GLOB}")
+    __io_eprintln("hint: run 'make sync-language-spec' and commit the result")
+    return true
+  }
+  return false
+}
+
 pipeline main(task) {
-  let chapters = harness.fs.glob(CHAPTERS_GLOB).sort()
+  let chapters = chapter_paths()
   if chapters.count == 0 {
     __io_eprintln("error: no chapter files found at ${CHAPTERS_GLOB}")
     return 1
   }
   let spec_text = assemble_spec()
-  let mirror_text = render_mirror_from(spec_text)
+  let index_text = render_index()
+  let summary_block = render_summary_block()
+  let summary_text = splice_summary(harness.fs.read_text(SUMMARY), summary_block)
   let mode = if argv.count == 0 {
     "write"
   } else {
@@ -60,31 +177,35 @@ pipeline main(task) {
   }
   if mode == "write" {
     harness.fs.write_text(SPEC, spec_text)
-    harness.fs.write_text(MIRROR, mirror_text)
+    harness.fs.write_text(MIRROR, index_text)
+    harness.fs.mkdir(PAGES_DIR)
+    for path in page_paths() {
+      harness.fs.write_text(page_path(path), render_mirror_from(harness.fs.read_text(path)))
+    }
+    harness.fs.write_text(SUMMARY, summary_text)
     return 0
   }
   if mode == "--check" {
-    let spec_disk = if harness.fs.exists(SPEC) {
-      harness.fs.read_text(SPEC)
+    var bad = false
+    if stale(spec_text, SPEC) {
+      bad = true
+    }
+    if stale(index_text, MIRROR) {
+      bad = true
+    }
+    if stale(summary_text, SUMMARY) {
+      bad = true
+    }
+    for path in page_paths() {
+      if stale(render_mirror_from(harness.fs.read_text(path)), page_path(path)) {
+        bad = true
+      }
+    }
+    return if bad {
+      1
     } else {
-      ""
+      0
     }
-    let mirror_disk = if harness.fs.exists(MIRROR) {
-      harness.fs.read_text(MIRROR)
-    } else {
-      ""
-    }
-    if normalize(spec_text) != normalize(spec_disk) {
-      __io_eprintln("error: ${SPEC} is stale relative to ${CHAPTERS_GLOB}")
-      __io_eprintln("hint: run 'make sync-language-spec' and commit the result")
-      return 1
-    }
-    if normalize(mirror_text) != normalize(mirror_disk) {
-      __io_eprintln("error: ${MIRROR} is stale relative to ${CHAPTERS_GLOB}")
-      __io_eprintln("hint: run 'make sync-language-spec' and commit the result")
-      return 1
-    }
-    return 0
   }
   __io_eprintln("usage: sync_language_spec.harn [--check]")
   return 2
