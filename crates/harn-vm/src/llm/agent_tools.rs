@@ -27,10 +27,23 @@ pub(super) fn denied_tool_result(tool_name: &str, reason: impl Into<String>) -> 
     // will be blocked again. Recoverable rejections (bad/missing arguments, an
     // empty tool name) must NOT use this body: see `recoverable_tool_result`,
     // which coaches a retry *with the correction* instead.
+    // Name the tools that ARE callable so the model can self-correct in one
+    // turn instead of re-issuing the denied call or guessing another unlisted
+    // name (live fw-gpt-oss-120b transcripts: cheap models emit Codex/container
+    // vocab they were never shown, read a bare denial, and thrash). The active
+    // policy's allowlist is the source of truth; omit the clause when the
+    // surface is unbounded (allow-all) so we never assert a misleading list.
+    let allowed = crate::orchestration::current_allowed_tool_names();
+    let available_clause = if allowed.is_empty() {
+        String::new()
+    } else {
+        format!(" Available tools: {}.", allowed.join(", "))
+    };
     let next_step = format!(
         "The `{tool_name}` tool is not permitted right now. Do not retry the same call. \
          Make progress with the tools you are allowed to use, or if this capability is \
-         essential, briefly tell the user what you need permission for and why."
+         essential, briefly tell the user what you need permission for and why.\
+         {available_clause}"
     );
     serde_json::json!({
         "error": "permission_denied",
@@ -680,6 +693,49 @@ mod tests {
             next.contains("run"),
             "next_step should name the denied tool: {next}"
         );
+        // No active policy → no allow-all list to assert, so the "Available
+        // tools:" clause is omitted rather than claiming a misleading set.
+        assert!(
+            !next.contains("Available tools:"),
+            "with no active policy the denial should not assert an allow list: {next}"
+        );
+    }
+
+    // F3: when an execution policy advertises an explicit tool allowlist, the
+    // denial must NAME those tools so a cheap model can self-correct in one turn
+    // instead of re-emitting an unlisted name. Grounded in fw-gpt-oss-120b
+    // transcripts where the model called Codex/container vocab it was never
+    // shown and only saw a bare "not permitted" denial.
+    #[test]
+    fn denied_tool_result_names_available_tools_under_policy() {
+        use crate::orchestration::{pop_execution_policy, push_execution_policy, CapabilityPolicy};
+
+        push_execution_policy(CapabilityPolicy {
+            tools: vec![
+                "look".to_string(),
+                "search".to_string(),
+                "edit".to_string(),
+                "run".to_string(),
+                "read_command_output".to_string(),
+            ],
+            ..Default::default()
+        });
+        let result = denied_tool_result("repo_browser.open_file", "tool exceeds tool ceiling");
+        pop_execution_policy();
+
+        let next = result["next_step"]
+            .as_str()
+            .expect("denial should carry a next_step string");
+        assert!(
+            next.contains("Available tools:"),
+            "next_step should name the allowed tools under an active policy: {next}"
+        );
+        for tool in ["look", "search", "edit", "run", "read_command_output"] {
+            assert!(
+                next.contains(tool),
+                "next_step should list the allowed tool {tool}: {next}"
+            );
+        }
     }
 
     // A RECOVERABLE schema/argument rejection must coach a retry WITH the

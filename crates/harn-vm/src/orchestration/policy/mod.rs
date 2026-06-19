@@ -82,6 +82,23 @@ pub fn current_tool_annotations(tool: &str) -> Option<ToolAnnotations> {
     current_execution_policy().and_then(|policy| policy.tool_annotations.get(tool).cloned())
 }
 
+/// The explicit tool allowlist the active execution policy advertises, for
+/// building actionable denial feedback that names what the model *can* call.
+///
+/// Prefers `policy.tools` (the explicit ceiling — what the eval lane sets);
+/// falls back to the annotation registry keys when no explicit list is present.
+/// Returns an empty `Vec` when no policy is active or the surface is unbounded
+/// (allow-all), in which case callers keep their generic guidance.
+pub fn current_allowed_tool_names() -> Vec<String> {
+    let Some(policy) = current_execution_policy() else {
+        return Vec::new();
+    };
+    if !policy.tools.is_empty() {
+        return policy.tools;
+    }
+    policy.tool_annotations.keys().cloned().collect()
+}
+
 pub(super) fn tool_kind_participates_in_write_allowlist(tool_name: &str) -> bool {
     current_tool_annotations(tool_name)
         .map(|annotations| !annotations.kind.is_read_only())

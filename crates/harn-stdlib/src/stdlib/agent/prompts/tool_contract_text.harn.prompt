@@ -28,6 +28,8 @@ Active mode: `{{ mode }}`. Follow this runtime-owned contract even if older prom
 
 {{ end }}## Available tools
 
+These are the only tools you can call. Any name not listed here (or below under "Other tools") will be rejected — choose the closest listed tool instead.
+
 {{ expanded_schemas }}
 {{ if compact_schemas }}
 ## Other tools (call directly. Parameters are intuitive, or call tool_schema for details)
