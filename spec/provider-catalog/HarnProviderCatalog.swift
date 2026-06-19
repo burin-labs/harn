@@ -7747,10 +7747,10 @@ public let harnProviderCatalogJSON = #"""
         ]
       },
       "tool_support": {
-        "native": true,
+        "native": false,
         "text": true,
-        "preferred_format": "native",
-        "parity": "unknown",
+        "preferred_format": "json",
+        "parity": "text_only",
         "tool_search": []
       },
       "structured_output": "native",
