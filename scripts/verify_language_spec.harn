@@ -262,6 +262,13 @@ pipeline main(task) {
     return 1
   }
   let tmpbase = mk.stdout.trim()
+  /* Remove the scratch directory on every exit path — including an early
+   * return or a throw from `write_text`/`spawn_captured` below. Without this
+   * an interrupted run leaks a `harn-spec-verify-*` directory into the
+   * workspace root, where it shows up as a confusing untracked entry. */
+  defer {
+    harness.process.spawn_captured({cmd: "rm", args: ["-rf", tmpbase]})
+  }
   var manifest_lines = []
   var idx = 0
   for fence in fences {
@@ -280,7 +287,6 @@ pipeline main(task) {
   let check_args = argv_prefix.slice(1, argv_prefix.count) + [tmpbase]
   let result = harness.process
     .spawn_captured({cmd: bin, args: check_args})
-  harness.process.spawn_captured({cmd: "rm", args: ["-rf", tmpbase]})
   if result.exit_code != 0 {
     __io_eprintln("language spec verification failed")
     __io_eprintln("")

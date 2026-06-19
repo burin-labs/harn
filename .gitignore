@@ -22,6 +22,11 @@ __pycache__/
 .serena/
 meta_scratch/
 
+# Scratch dir from `scripts/verify_language_spec.harn` (the runtime sandbox
+# forces it into the workspace root; normally removed, but an interrupted run
+# can leak it).
+harn-spec-verify-*/
+
 # Conformance skill fixtures deliberately ship a .harn/ subdir so the
 # project-layer loader (issue #73) has something to discover. The blanket
 # `.harn/` ignore above would drop them otherwise.
