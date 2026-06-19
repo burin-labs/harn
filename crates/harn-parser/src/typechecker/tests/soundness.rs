@@ -444,3 +444,68 @@ fn classify(b: bool) -> string {
         "partial bool match should still report fall-through, got: {errs:?}"
     );
 }
+
+#[test]
+fn arithmetic_on_nullable_operand_is_flagged() {
+    // `x + 1` where `x: int?` is a definite runtime fault — flag it at check
+    // time rather than letting `nil + 1` throw.
+    let errs = errors("fn g(x: int?) -> int { return x + 1 }");
+    assert!(
+        errs.iter().any(|e| e.contains("may be nil")),
+        "expected nilable-operand error, got: {errs:?}"
+    );
+}
+
+#[test]
+fn arithmetic_after_assignment_narrowing_is_clean() {
+    // Assigning a non-nil value narrows the binding, so `x + 1` is fine.
+    let errs = errors(
+        r"
+fn g() -> int {
+  var x: int? = nil
+  x = 5
+  return x + 1
+}
+",
+    );
+    assert!(
+        errs.is_empty(),
+        "expected no errors after narrowing, got: {errs:?}"
+    );
+}
+
+#[test]
+fn arithmetic_after_guard_narrowing_is_clean() {
+    let errs = errors(
+        r"
+fn g(x: int?) -> int {
+  if x == nil { return 0 }
+  return x + 1
+}
+",
+    );
+    assert!(
+        errs.is_empty(),
+        "expected no errors after guard, got: {errs:?}"
+    );
+}
+
+#[test]
+fn property_access_after_assignment_narrowing_is_clean() {
+    // Path narrowing: a nilable field/var assigned a concrete value reads as
+    // non-nil afterward.
+    let errs = errors(
+        r"
+struct Foo { v: int }
+fn g() -> int {
+  var f: Foo? = nil
+  f = Foo {v: 3}
+  return f.v
+}
+",
+    );
+    assert!(
+        errs.is_empty(),
+        "expected no errors after path narrowing, got: {errs:?}"
+    );
+}

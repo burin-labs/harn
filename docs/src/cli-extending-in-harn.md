@@ -285,7 +285,7 @@ let result = parse(spec, argv)
 let err = result.err
 if err != nil {
   __io_eprintln(render_help(spec))
-  __io_eprintln("error: " + err.hint)
+  __io_eprintln("error: " + (err.hint ?? ""))
   exit(2)
 }
 let parsed = result.ok

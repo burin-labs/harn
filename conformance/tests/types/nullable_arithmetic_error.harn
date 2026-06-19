@@ -1,0 +1,7 @@
+fn add_one(x: int?) -> int {
+  return x + 1
+}
+
+pipeline default() {
+  __io_println(0)
+}

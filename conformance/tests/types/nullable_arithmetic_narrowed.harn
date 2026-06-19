@@ -1,0 +1,14 @@
+/**
+ * A nilable binding assigned a concrete value (or guarded with `!= nil`) is
+ * narrowed to non-nil, so arithmetic on it is accepted — no `?? ` needed.
+ */
+pipeline default() {
+  var x: int? = nil
+  x = 5
+  __io_println(x + 1)
+  var y: int? = nil
+  y = 10
+  if y != nil {
+    __io_println(y + 2)
+  }
+}
