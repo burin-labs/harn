@@ -1176,23 +1176,20 @@ fn duration_from_config(
 }
 
 fn parse_duration(raw: &str) -> Result<StdDuration, String> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
+    if raw.trim().is_empty() {
         return Err("cannot be empty".to_string());
     }
-    let (amount, unit) = trimmed
-        .char_indices()
-        .find(|(_, ch)| !ch.is_ascii_digit())
-        .map(|(index, _)| (&trimmed[..index], trimmed[index..].trim()))
-        .unwrap_or((trimmed, "ms"));
+    let (amount, unit) = crate::duration_parse::split_amount_unit(raw)
+        .ok_or_else(|| format!("'{raw}' is not a valid duration"))?;
     let amount = amount
         .parse::<u64>()
         .map_err(|_| format!("'{raw}' is not a valid duration"))?;
+    // Bare numbers are milliseconds; this binding accepts only ms/s/m/h.
+    let unit = if unit.is_empty() { "ms" } else { unit.as_str() };
     match unit {
-        "ms" => Ok(StdDuration::from_millis(amount)),
-        "s" => Ok(StdDuration::from_secs(amount)),
-        "m" => Ok(StdDuration::from_secs(amount.saturating_mul(60))),
-        "h" => Ok(StdDuration::from_secs(amount.saturating_mul(60 * 60))),
+        "ms" | "s" | "m" | "h" => Ok(StdDuration::from_millis(
+            amount.saturating_mul(crate::duration_parse::unit_to_millis(unit).unwrap()),
+        )),
         _ => Err(format!(
             "'{raw}' uses unsupported unit '{unit}'; expected ms, s, m, or h"
         )),
