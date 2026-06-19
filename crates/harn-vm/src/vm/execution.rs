@@ -31,7 +31,23 @@ impl Vm {
     }
 
     /// Execute a compiled chunk.
+    ///
+    /// Convenience entry point for callers that hold a borrowed [`Chunk`] and
+    /// run it once (tests, one-shot CLI invocations). It clones the chunk once
+    /// to obtain the owned [`ChunkRef`] the call frame requires. Callers that
+    /// re-run the same compiled chunk (servers, record filters, triggers)
+    /// should hold a [`ChunkRef`] and call [`Vm::execute_arc`] to skip the
+    /// per-execution deep copy of the bytecode + constant pool.
     pub async fn execute(&mut self, chunk: &Chunk) -> Result<VmValue, VmError> {
+        self.execute_arc(Arc::new(chunk.clone())).await
+    }
+
+    /// Execute a shared compiled chunk without cloning its bytecode.
+    ///
+    /// Threads the existing [`ChunkRef`] straight into the call frame, so
+    /// re-running the same chunk is a refcount bump rather than an
+    /// `O(code + constants)` copy.
+    pub async fn execute_arc(&mut self, chunk: ChunkRef) -> Result<VmValue, VmError> {
         let registry = self.pool_registry.clone();
         crate::stdlib::pool::with_pool_registry_scope(registry, async {
             self.execute_scoped(chunk).await
@@ -39,7 +55,7 @@ impl Vm {
         .await
     }
 
-    async fn execute_scoped(&mut self, chunk: &Chunk) -> Result<VmValue, VmError> {
+    async fn execute_scoped(&mut self, chunk: ChunkRef) -> Result<VmValue, VmError> {
         let _execution_activity = self
             .wait_for_graph
             .register_task(self.runtime_context.task_id.clone());
@@ -234,28 +250,8 @@ impl Vm {
         }
     }
 
-    pub(crate) async fn run_chunk(&mut self, chunk: &Chunk) -> Result<VmValue, VmError> {
-        self.run_chunk_entry(chunk, 0, None, None, None, None).await
-    }
-
-    pub(crate) async fn run_chunk_entry(
-        &mut self,
-        chunk: &Chunk,
-        argc: usize,
-        saved_source_dir: Option<std::path::PathBuf>,
-        module_functions: Option<ModuleFunctionRegistry>,
-        module_state: Option<crate::value::ModuleState>,
-        local_slots: Option<Vec<LocalSlot>>,
-    ) -> Result<VmValue, VmError> {
-        self.run_chunk_ref(
-            Arc::new(chunk.clone()),
-            argc,
-            saved_source_dir,
-            module_functions,
-            module_state,
-            local_slots,
-        )
-        .await
+    pub(crate) async fn run_chunk(&mut self, chunk: ChunkRef) -> Result<VmValue, VmError> {
+        self.run_chunk_ref(chunk, 0, None, None, None, None).await
     }
 
     pub(crate) async fn run_chunk_ref(

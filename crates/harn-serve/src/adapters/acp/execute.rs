@@ -211,7 +211,7 @@ pub(super) async fn execute_chunk(
     };
     harn_vm::stdlib::process::set_thread_execution_context(Some(execution));
     let execute_started = Instant::now();
-    let result = match vm.execute(&chunk).await {
+    let result = match vm.execute_arc(std::sync::Arc::new(chunk)).await {
         Ok(_) => Ok(vm.output().to_string()),
         Err(e) => {
             let formatted = vm.format_runtime_error(&e);
