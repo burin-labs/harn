@@ -1,0 +1,8 @@
+// `internal_helper` is NOT `pub`, and the module marks `public_api` `pub`, so
+// the module opts into explicit exports. Importing the private helper by name
+// is rejected — matching wildcard imports and strict-visibility languages.
+import { internal_helper } from "selective_import_private_rejected_lib"
+
+pipeline default() {
+  __io_println(internal_helper())
+}

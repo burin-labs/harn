@@ -5,7 +5,9 @@ use harn_modules::resolve_import_path;
 use harn_parser::{DiagnosticCode as Code, Node, SNode};
 
 use super::host_capabilities::{is_known_host_operation, load_host_capabilities};
-use super::imports::{scan_import_collisions, scan_re_export_conflicts};
+use super::imports::{
+    scan_import_collisions, scan_re_export_conflicts, scan_selective_import_visibility,
+};
 use super::mock_host::collect_mock_host_capabilities;
 use super::source::parse_resolved_module;
 use crate::package::CheckConfig;
@@ -82,6 +84,7 @@ pub(crate) fn collect_preflight_diagnostics_with_module_graph(
     );
 
     scan_import_collisions(&canonical, source, program, &mut diagnostics);
+    scan_selective_import_visibility(&canonical, source, program, module_graph, &mut diagnostics);
     scan_re_export_conflicts(&canonical, source, program, module_graph, &mut diagnostics);
     scan_static_tool_surface_preflight(&canonical, source, program, config, &mut diagnostics);
     scan_effect_inheritance_preflight(&canonical, source, program, &mut diagnostics);

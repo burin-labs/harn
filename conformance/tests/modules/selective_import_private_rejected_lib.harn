@@ -1,0 +1,7 @@
+pub fn public_api() -> string {
+  return "ok"
+}
+
+fn internal_helper() -> string {
+  return "secret"
+}

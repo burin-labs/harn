@@ -553,9 +553,10 @@ impl ModuleGraph {
     /// The returned set contains:
     /// - all public exports from wildcard-imported modules (transitively
     ///   following `pub import` re-export chains), and
-    /// - selectively imported names that exist either as local
-    ///   declarations in their target module or as a re-exported name —
-    ///   matching what the VM accepts at runtime.
+    /// - selectively imported names that the target module actually exports
+    ///   (its `pub` surface or re-exports) — matching what the VM accepts at
+    ///   runtime. A name that exists only privately in the target is NOT
+    ///   importable.
     pub fn imported_names_for_file(&self, file: &Path) -> Option<HashSet<String>> {
         let file = normalize_path(file);
         let module = self.modules.get(&file)?;
@@ -575,6 +576,14 @@ impl ModuleGraph {
                     names.extend(imported.exports.iter().cloned());
                 }
                 Some(selective) => {
+                    // A selectively imported name is in scope when it exists in
+                    // the target module (as a declaration or a re-export). The
+                    // stricter "must be `pub`" check is reported precisely at
+                    // the import site by the `HARN-IMP-002` preflight scan
+                    // (`scan_selective_import_visibility`) and enforced at load
+                    // time, so it is intentionally *not* duplicated here —
+                    // otherwise a private import would surface both an
+                    // import-site and a redundant call-site error.
                     for name in selective {
                         if imported.declarations.contains_key(name)
                             || imported.exports.contains(name)
@@ -888,6 +897,60 @@ impl ModuleGraph {
         conflicts.sort_by(|a, b| a.name.cmp(&b.name));
         conflicts
     }
+
+    /// Selective imports in `file` that name a symbol the target module
+    /// declares but does not export — a non-`pub` function in a module that
+    /// has opted into explicit exports by marking at least one function `pub`.
+    ///
+    /// Such names are private: importing them by name is no more valid than a
+    /// wildcard import reaching them, and matches the strict visibility of
+    /// TypeScript, Rust, and Go. This is the single source of truth for that
+    /// determination — the CLI maps the result onto import spans and emits
+    /// `HARN-IMP-002`, and the runtime loader enforces the same rule. Returns
+    /// an empty vec for modules with no `pub` markers (the export-everything
+    /// fallback leaves nothing private).
+    pub fn non_exported_selective_imports(&self, file: &Path) -> Vec<NonExportedImport> {
+        let file = normalize_path(file);
+        let Some(module) = self.modules.get(&file) else {
+            return Vec::new();
+        };
+
+        let mut out = Vec::new();
+        for import in &module.imports {
+            let Some(selective) = &import.selective_names else {
+                continue;
+            };
+            let Some(import_path) = &import.path else {
+                continue;
+            };
+            let Some(target) = self
+                .modules
+                .get(import_path)
+                .or_else(|| self.modules.get(&normalize_path(import_path)))
+            else {
+                continue;
+            };
+            // No `pub` markers → every function is exported, so nothing is
+            // private and there is nothing to flag.
+            if !target.has_pub_fn {
+                continue;
+            }
+            for name in selective {
+                // Declared in the target but absent from its export surface
+                // (and not a re-export, which lives in `exports`, not
+                // `declarations`).
+                if target.declarations.contains_key(name) && !target.exports.contains(name) {
+                    out.push(NonExportedImport {
+                        name: name.clone(),
+                        module: import.raw_path.clone(),
+                    });
+                }
+            }
+        }
+        out.sort_by(|a, b| (&a.name, &a.module).cmp(&(&b.name, &b.module)));
+        out.dedup();
+        out
+    }
 }
 
 /// A duplicate or ambiguous re-export inside a single module. Reported by
@@ -896,6 +959,16 @@ impl ModuleGraph {
 pub struct ReExportConflict {
     pub name: String,
     pub sources: Vec<PathBuf>,
+}
+
+/// A selective import of a name the target module declares but does not
+/// export. Reported by [`ModuleGraph::non_exported_selective_imports`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NonExportedImport {
+    /// The non-exported name the import requested.
+    pub name: String,
+    /// The module path exactly as written in the import statement.
+    pub module: String,
 }
 
 fn load_module(path: &Path) -> (ModuleInfo, Option<ParsedModuleSource>) {
@@ -1241,6 +1314,40 @@ mod tests {
             .expect("entry imports should resolve");
         assert!(imported.contains("a"));
         assert!(!imported.contains("b"));
+    }
+
+    #[test]
+    fn non_exported_selective_import_is_flagged_when_module_has_pub() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        write_file(root, "lib.harn", "pub fn api() { 1 }\nfn helper() { 2 }\n");
+        let entry = write_file(root, "entry.harn", "import { helper } from \"./lib\"\n");
+
+        let graph = build(std::slice::from_ref(&entry));
+        let offenders = graph.non_exported_selective_imports(&entry);
+        assert_eq!(offenders.len(), 1);
+        assert_eq!(offenders[0].name, "helper");
+        assert_eq!(offenders[0].module, "./lib");
+
+        // Importing the `pub` name is fine.
+        let entry_ok = write_file(root, "entry_ok.harn", "import { api } from \"./lib\"\n");
+        let graph_ok = build(std::slice::from_ref(&entry_ok));
+        assert!(graph_ok
+            .non_exported_selective_imports(&entry_ok)
+            .is_empty());
+    }
+
+    #[test]
+    fn non_exported_selective_import_allows_everything_when_no_pub() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        // No `pub` markers → the export-everything fallback applies, so a
+        // selective import of any function is valid and nothing is flagged.
+        write_file(root, "util.harn", "fn a() { 1 }\nfn b() { 2 }\n");
+        let entry = write_file(root, "entry.harn", "import { a } from \"./util\"\n");
+
+        let graph = build(std::slice::from_ref(&entry));
+        assert!(graph.non_exported_selective_imports(&entry).is_empty());
     }
 
     #[test]
