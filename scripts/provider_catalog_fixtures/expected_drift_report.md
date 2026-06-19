@@ -38,8 +38,8 @@ _None._
 
 ## Cross-source conflicts (provider-owned wins)
 
-- `claude-haiku-4-5-20251001` (anthropic) `pricing.input_per_mtok`: kept 1 (provider-owned) over 1.5
-- `claude-haiku-4-5-20251001` (anthropic) `pricing.output_per_mtok`: kept 5 (provider-owned) over 7.5
+- `claude-haiku-4-5-20251001` (anthropic) `pricing.input_per_mtok`: kept 1.0 (provider-owned) over 1.5
+- `claude-haiku-4-5-20251001` (anthropic) `pricing.output_per_mtok`: kept 5.0 (provider-owned) over 7.5
 
 ## Unknown pricing
 
