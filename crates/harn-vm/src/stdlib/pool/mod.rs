@@ -1905,7 +1905,7 @@ fn task_state_from_persisted(
     let result = persisted
         .result_display
         .as_ref()
-        .map(|text| VmValue::String(std::sync::Arc::from(text.as_str())));
+        .map(|text| VmValue::String(arcstr::ArcStr::from(text.as_str())));
 
     Arc::new(parking_lot::Mutex::new(TaskState {
         id: persisted.id.clone(),

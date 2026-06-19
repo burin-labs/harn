@@ -19,8 +19,10 @@ impl ResponseBuilder {
     }
 
     pub(crate) fn str(mut self, key: &str, value: impl Into<String>) -> Self {
-        self.inner
-            .insert(key.to_string(), VmValue::String(Arc::from(value.into())));
+        self.inner.insert(
+            key.to_string(),
+            VmValue::String(arcstr::ArcStr::from(value.into())),
+        );
         self
     }
 
@@ -37,8 +39,10 @@ impl ResponseBuilder {
     pub(crate) fn opt_str(mut self, key: &str, value: Option<impl Into<String>>) -> Self {
         match value {
             Some(v) => {
-                self.inner
-                    .insert(key.to_string(), VmValue::String(Arc::from(v.into())));
+                self.inner.insert(
+                    key.to_string(),
+                    VmValue::String(arcstr::ArcStr::from(v.into())),
+                );
             }
             None => {
                 self.inner.insert(key.to_string(), VmValue::Nil);

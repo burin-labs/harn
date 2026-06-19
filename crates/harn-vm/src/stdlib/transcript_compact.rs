@@ -78,7 +78,7 @@ async fn compact_transcript_impl(
 
     let llm_opts = if config.compact_strategy == CompactStrategy::Llm {
         Some(extract_llm_options(&[
-            VmValue::String(std::sync::Arc::from("")),
+            VmValue::String(arcstr::ArcStr::from("")),
             VmValue::Nil,
             raw_options.unwrap_or(VmValue::Nil),
         ])?)

@@ -29,6 +29,18 @@ pub type VmAsyncBuiltinFn = Arc<
 
 type Shared<T> = Arc<T>;
 
+/// Thin, reference-counted, immutable UTF-8 string used by every string-shaped
+/// [`VmValue`] variant (`String`, `BuiltinRef`, `TaskHandle`).
+///
+/// Unlike `Arc<str>` — whose fat pointer (data ptr + length) is 16 bytes and
+/// set the whole-enum size floor — [`arcstr::ArcStr`] is a single word: the
+/// length lives in the heap allocation alongside the refcount and bytes. That
+/// is what lets `VmValue` shrink to 16 bytes (paired with boxing the other
+/// oversized payloads). Cloning is a refcount bump, identical to `Arc<str>`;
+/// the unsafe pointer arithmetic is encapsulated and fuzzed inside the vetted
+/// `arcstr` crate, so the VM carries no hand-rolled unsafe for this.
+pub type HarnStr = arcstr::ArcStr;
+
 /// Backing store for [`VmValue::Dict`]: a persistent, ordered, structurally
 /// shared map.
 ///
@@ -118,18 +130,18 @@ impl StructLayout {
 /// Runtime payload for a Harn enum variant.
 #[derive(Debug, Clone)]
 pub struct VmEnumVariant {
-    pub enum_name: Shared<str>,
-    pub variant: Shared<str>,
+    pub enum_name: HarnStr,
+    pub variant: HarnStr,
     pub fields: Shared<Vec<VmValue>>,
 }
 
 impl VmEnumVariant {
     pub fn has_enum_name(&self, enum_name: &str) -> bool {
-        self.enum_name.as_ref() == enum_name
+        self.enum_name.as_str() == enum_name
     }
 
     pub fn is_variant(&self, enum_name: &str, variant: &str) -> bool {
-        self.has_enum_name(enum_name) && self.variant.as_ref() == variant
+        self.has_enum_name(enum_name) && self.variant.as_str() == variant
     }
 }
 
@@ -142,34 +154,48 @@ impl VmEnumVariant {
 #[derive(Debug, Clone)]
 pub struct VmBuiltinRefId {
     pub id: BuiltinId,
-    pub name: Shared<str>,
+    pub name: HarnStr,
+}
+
+/// Runtime layout + slots for a [`VmValue::StructInstance`].
+///
+/// Boxed behind a single `Shared` pointer so the `{ layout, fields }` pair —
+/// two pointers, 16 bytes inline — does not set the whole-enum size. Cloning a
+/// struct value is then a single refcount bump, and the variant fits in one
+/// word like every other compound payload.
+#[derive(Debug, Clone)]
+pub struct StructInstanceData {
+    pub layout: Shared<StructLayout>,
+    pub fields: Shared<Vec<Option<VmValue>>>,
 }
 
 /// VM runtime value.
 ///
 /// Rare compound payloads use shared pointers so stack/local-slot traffic is
-/// bounded by the common scalar and pointer-sized value shapes. The two
-/// oversized inline payloads — `Range` (a 24-byte `start/end/inclusive`
-/// triple) and `BuiltinRefId` (an id + `Arc<str>` name) — are boxed behind a
-/// `Shared` pointer so no variant exceeds a fat pointer. That keeps `VmValue`
-/// at 24 bytes (down from 32) without inflating the common `Int` / `Float` /
-/// `List` / `Dict` / `String` shapes the interpreter moves on every push,
-/// pop, clone, and local-slot write. Unsafe layouts such as NaN boxing or
-/// tagged pointers are deliberately deferred until Harn has a stronger
-/// object/heap story.
+/// bounded by the common scalar and pointer-sized value shapes. Every variant
+/// is held to a single machine word (8 bytes): the oversized payloads —
+/// `Range` (a 24-byte triple), `BuiltinRefId` (id + name), `Decimal` (16-byte
+/// base-10 mantissa), and `StructInstance` (two pointers) — are boxed behind a
+/// `Shared` pointer, and the string-shaped variants use the thin-pointer
+/// [`HarnStr`] instead of a 16-byte `Arc<str>` fat pointer. That keeps
+/// `VmValue` at 16 bytes (down from 24, and 32 before that) without inflating
+/// the common `Int` / `Float` / `List` / `Dict` / `String` shapes the
+/// interpreter moves on every push, pop, clone, and local-slot write. Unsafe
+/// layouts such as NaN boxing or tagged pointers remain deferred; the thin
+/// string's unsafe is encapsulated in the vetted `arcstr` crate.
 #[derive(Debug, Clone)]
 pub enum VmValue {
     Int(i64),
     Float(f64),
     /// Exact base-10 decimal (96-bit mantissa, up to 28–29 significant digits)
     /// for money and other values where binary float rounding is unacceptable.
-    /// Inline (`rust_decimal::Decimal` is `Copy` and 16 bytes, the same width as
-    /// the existing widest variants). Constructed via the `decimal(value)`
-    /// builtin; it is a distinct type from `Int`/`Float` for
-    /// equality/ordering/hashing (a clean island) but promotes `Int` operands
-    /// exactly in arithmetic. See `docs/src/decimal.md`.
-    Decimal(rust_decimal::Decimal),
-    String(Shared<str>),
+    /// Boxed behind a `Shared` pointer (`rust_decimal::Decimal` is 16 bytes, so
+    /// inlining it would set the whole-enum size); cloning is a refcount bump.
+    /// Constructed via the `decimal(value)` builtin; it is a distinct type from
+    /// `Int`/`Float` for equality/ordering/hashing (a clean island) but
+    /// promotes `Int` operands exactly in arithmetic. See `docs/src/decimal.md`.
+    Decimal(Shared<rust_decimal::Decimal>),
+    String(HarnStr),
     Bytes(Shared<Vec<u8>>),
     Bool(bool),
     Nil,
@@ -179,7 +205,7 @@ pub enum VmValue {
     /// Reference to a registered builtin function, used when a builtin name is
     /// referenced as a value (e.g. `snake_dict.rekey(snake_to_camel)`). The
     /// contained string is the builtin's registered name.
-    BuiltinRef(Shared<str>),
+    BuiltinRef(HarnStr),
     /// Compact builtin reference for callback positions. The boxed
     /// [`VmBuiltinRefId`] carries the id plus the name for policy,
     /// diagnostics, and fallback if the ID cannot be used. Boxed so the
@@ -187,11 +213,8 @@ pub enum VmValue {
     BuiltinRefId(Shared<VmBuiltinRefId>),
     Duration(i64),
     EnumVariant(Shared<VmEnumVariant>),
-    StructInstance {
-        layout: Shared<StructLayout>,
-        fields: Shared<Vec<Option<VmValue>>>,
-    },
-    TaskHandle(Shared<str>),
+    StructInstance(Shared<StructInstanceData>),
+    TaskHandle(HarnStr),
     Channel(Shared<VmChannelHandle>),
     Atomic(Shared<VmAtomicHandle>),
     Rng(Shared<VmRngHandle>),
@@ -226,23 +249,31 @@ pub enum VmValue {
 /// ASCII, so interning the 128 single-char strings lets those paths clone a
 /// cheap `Arc` (a refcount bump) instead of allocating, keeping a full-file
 /// scan linear with a low constant factor.
-static ASCII_CHAR_STRINGS: std::sync::LazyLock<[Arc<str>; 128]> = std::sync::LazyLock::new(|| {
+static ASCII_CHAR_STRINGS: std::sync::LazyLock<[HarnStr; 128]> = std::sync::LazyLock::new(|| {
     std::array::from_fn(|byte| {
         let mut buffer = [0u8; 4];
-        Arc::from((byte as u8 as char).encode_utf8(&mut buffer))
+        HarnStr::from((byte as u8 as char).encode_utf8(&mut buffer))
     })
 });
 
 impl VmValue {
     /// Canonical `VmValue::String` constructor from anything string-like.
     ///
-    /// Collapses the ubiquitous `VmValue::String(std::sync::Arc::from(..))`
+    /// Collapses the ubiquitous `VmValue::String(arcstr::ArcStr::from(..))`
     /// spelling to a single call and performs exactly one allocation via
     /// `Arc::<str>::from(&str)` regardless of whether the input is a `&str`,
     /// `String`, `&String`, or `Cow<str>`. Prefer this over hand-writing the
     /// `Arc::from` at call sites.
     pub fn string(value: impl AsRef<str>) -> Self {
-        VmValue::String(Arc::from(value.as_ref()))
+        VmValue::String(HarnStr::from(value.as_ref()))
+    }
+
+    /// Canonical `VmValue::Decimal` constructor.
+    ///
+    /// Boxes the 16-byte [`rust_decimal::Decimal`] behind a `Shared` pointer so
+    /// the value stays one word wide; see [`VmValue::Decimal`].
+    pub fn decimal(value: rust_decimal::Decimal) -> Self {
+        VmValue::Decimal(Shared::new(value))
     }
 
     /// Builds a `VmValue::String` holding a single character, reusing the
@@ -250,10 +281,10 @@ impl VmValue {
     /// path does not allocate.
     pub fn char_value(ch: char) -> Self {
         if ch.is_ascii() {
-            return VmValue::String(Arc::clone(&ASCII_CHAR_STRINGS[ch as usize]));
+            return VmValue::String(ASCII_CHAR_STRINGS[ch as usize].clone());
         }
         let mut buffer = [0u8; 4];
-        VmValue::String(Arc::from(ch.encode_utf8(&mut buffer)))
+        VmValue::String(HarnStr::from(ch.encode_utf8(&mut buffer)))
     }
 
     /// Materializes a string into a `VmValue::List` of single-character string
@@ -265,8 +296,8 @@ impl VmValue {
     }
 
     pub fn enum_variant(
-        enum_name: impl Into<Shared<str>>,
-        variant: impl Into<Shared<str>>,
+        enum_name: impl Into<HarnStr>,
+        variant: impl Into<HarnStr>,
         fields: Vec<VmValue>,
     ) -> Self {
         VmValue::EnumVariant(Shared::new(VmEnumVariant {
@@ -276,7 +307,7 @@ impl VmValue {
         }))
     }
 
-    pub fn task_handle(id: impl Into<Shared<str>>) -> Self {
+    pub fn task_handle(id: impl Into<HarnStr>) -> Self {
         VmValue::TaskHandle(id.into())
     }
 
@@ -286,7 +317,7 @@ impl VmValue {
     }
 
     /// Construct a boxed [`VmValue::BuiltinRefId`] from its id and name.
-    pub fn builtin_ref_id(id: BuiltinId, name: impl Into<Shared<str>>) -> Self {
+    pub fn builtin_ref_id(id: BuiltinId, name: impl Into<HarnStr>) -> Self {
         VmValue::BuiltinRefId(Shared::new(VmBuiltinRefId {
             id,
             name: name.into(),
@@ -363,7 +394,7 @@ impl VmValue {
             VmValue::Nil => false,
             VmValue::Int(n) => *n != 0,
             VmValue::Float(n) => *n != 0.0,
-            VmValue::Decimal(d) => *d != rust_decimal::Decimal::ZERO,
+            VmValue::Decimal(d) => **d != rust_decimal::Decimal::ZERO,
             VmValue::String(s) => !s.is_empty(),
             VmValue::Bytes(bytes) => !bytes.is_empty(),
             VmValue::List(l) => !l.is_empty(),
@@ -373,7 +404,7 @@ impl VmValue {
             VmValue::BuiltinRefId(_) => true,
             VmValue::Duration(ms) => *ms != 0,
             VmValue::EnumVariant(_) => true,
-            VmValue::StructInstance { .. } => true,
+            VmValue::StructInstance(_) => true,
             VmValue::TaskHandle(_) => true,
             VmValue::Channel(_) => true,
             VmValue::Atomic(_) => true,
@@ -408,7 +439,7 @@ impl VmValue {
             VmValue::BuiltinRefId(_) => "builtin",
             VmValue::Duration(_) => "duration",
             VmValue::EnumVariant(_) => "enum",
-            VmValue::StructInstance { .. } => "struct",
+            VmValue::StructInstance(_) => "struct",
             VmValue::TaskHandle(_) => "task_handle",
             VmValue::Channel(_) => "channel",
             VmValue::Atomic(_) => "atomic",
@@ -432,23 +463,34 @@ impl VmValue {
     /// subject text on every call.
     pub fn as_str_cow(&self) -> std::borrow::Cow<'_, str> {
         match self {
-            VmValue::String(s) => std::borrow::Cow::Borrowed(s),
+            VmValue::String(s) => std::borrow::Cow::Borrowed(s.as_str()),
             other => std::borrow::Cow::Owned(other.display()),
+        }
+    }
+
+    /// Borrows the boxed struct payload (layout + field slots) when this value
+    /// is a struct instance. The single accessor most match sites use instead
+    /// of destructuring the now-boxed variant.
+    pub fn struct_data(&self) -> Option<&StructInstanceData> {
+        match self {
+            VmValue::StructInstance(data) => Some(data),
+            _ => None,
         }
     }
 
     pub fn struct_name(&self) -> Option<&str> {
         match self {
-            VmValue::StructInstance { layout, .. } => Some(layout.struct_name()),
+            VmValue::StructInstance(data) => Some(data.layout.struct_name()),
             _ => None,
         }
     }
 
     pub fn struct_field(&self, field_name: &str) -> Option<&VmValue> {
         match self {
-            VmValue::StructInstance { layout, fields } => layout
+            VmValue::StructInstance(data) => data
+                .layout
                 .field_index(field_name)
-                .and_then(|index| fields.get(index))
+                .and_then(|index| data.fields.get(index))
                 .and_then(Option::as_ref),
             _ => None,
         }
@@ -456,9 +498,7 @@ impl VmValue {
 
     pub fn struct_fields_map(&self) -> Option<crate::value::DictMap> {
         match self {
-            VmValue::StructInstance { layout, fields } => {
-                Some(struct_fields_to_map(layout, fields))
-            }
+            VmValue::StructInstance(data) => Some(struct_fields_to_map(&data.layout, &data.fields)),
             _ => None,
         }
     }
@@ -473,10 +513,10 @@ impl VmValue {
             .iter()
             .map(|name| fields.get(name).cloned())
             .collect();
-        VmValue::StructInstance {
+        VmValue::StructInstance(Shared::new(StructInstanceData {
             layout,
             fields: Shared::new(slots),
-        }
+        }))
     }
 
     pub fn struct_instance_with_layout(
@@ -490,16 +530,17 @@ impl VmValue {
             .iter()
             .map(|name| field_values.get(name).cloned())
             .collect();
-        VmValue::StructInstance {
+        VmValue::StructInstance(Shared::new(StructInstanceData {
             layout,
             fields: Shared::new(fields),
-        }
+        }))
     }
 
     pub fn struct_instance_with_property(&self, field_name: &str, value: VmValue) -> Option<Self> {
-        let VmValue::StructInstance { layout, fields } = self else {
+        let VmValue::StructInstance(data) = self else {
             return None;
         };
+        let (layout, fields) = (&data.layout, &data.fields);
 
         let mut new_fields = fields.as_ref().clone();
         let layout = match layout.field_index(field_name) {
@@ -517,10 +558,10 @@ impl VmValue {
             }
         };
 
-        Some(VmValue::StructInstance {
+        Some(VmValue::StructInstance(Shared::new(StructInstanceData {
             layout,
             fields: Shared::new(new_fields),
-        })
+        })))
     }
 
     pub fn display(&self) -> String {
@@ -636,7 +677,8 @@ impl VmValue {
                     out.push(')');
                 }
             }
-            VmValue::StructInstance { layout, fields } => {
+            VmValue::StructInstance(data) => {
+                let (layout, fields) = (&data.layout, &data.fields);
                 let _ = write!(out, "{} {{", layout.struct_name());
                 crate::value::recursion::guard_recursion(|| {
                     for (i, (k, v)) in struct_fields_to_map(layout, fields).iter().enumerate() {

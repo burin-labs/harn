@@ -231,7 +231,8 @@ fn validate_against_schema_inner(
             errors.extend(next_errors);
             validate_enum_membership(&normalized, schema, path, &mut errors);
         }
-        VmValue::StructInstance { layout, .. } => {
+        VmValue::StructInstance(si) => {
+            let layout = &si.layout;
             let fields = normalized.struct_fields_map().unwrap_or_default();
             let (next_value, next_errors) = validate_object_fields(
                 &fields,
@@ -716,7 +717,7 @@ fn first_param_validation_error_body(
         let struct_fields;
         let fields = match value {
             VmValue::Dict(map) => map.as_ref(),
-            VmValue::StructInstance { .. } => {
+            VmValue::StructInstance(_) => {
                 struct_fields = value.struct_fields_map().unwrap_or_default();
                 &struct_fields
             }
@@ -818,7 +819,7 @@ fn first_object_param_error(
 
             if schema_is_object_like(prop_schema_dict) {
                 match prop_value {
-                    VmValue::Dict(_) | VmValue::StructInstance { .. } => {
+                    VmValue::Dict(_) | VmValue::StructInstance(_) => {
                         let child_param = format!("{param_name}.{key}");
                         if let Some(error) = first_param_validation_error_inner(
                             prop_value,
@@ -886,7 +887,7 @@ fn first_object_param_error(
                 }
                 if schema_is_object_like(extra_schema) {
                     match value {
-                        VmValue::Dict(_) | VmValue::StructInstance { .. } => {
+                        VmValue::Dict(_) | VmValue::StructInstance(_) => {
                             let child_param = format!("{param_name}.{key}");
                             if let Some(error) = first_param_validation_error_inner(
                                 value,

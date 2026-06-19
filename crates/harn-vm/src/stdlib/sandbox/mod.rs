@@ -255,7 +255,7 @@ pub(crate) const MODULE_BUILTINS: &[&crate::stdlib::macros::VmBuiltinDef] = &[
     category = "sandbox"
 )]
 fn sandbox_active_backend_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    Ok(VmValue::String(std::sync::Arc::from(active_backend_name())))
+    Ok(VmValue::String(arcstr::ArcStr::from(active_backend_name())))
 }
 
 #[crate::stdlib::macros::harn_builtin(
@@ -277,7 +277,7 @@ fn sandbox_active_profile_impl(_args: &[VmValue], _out: &mut String) -> Result<V
     let profile = crate::orchestration::current_execution_policy()
         .map(|policy| policy.sandbox_profile)
         .unwrap_or(SandboxProfile::Unrestricted);
-    Ok(VmValue::String(std::sync::Arc::from(profile.as_str())))
+    Ok(VmValue::String(arcstr::ArcStr::from(profile.as_str())))
 }
 
 /// A workspace-root scope violation: a path that resolved outside every
@@ -454,7 +454,7 @@ pub fn command_output(
         crate::testbench::process_tape::intercept_spawn(program, args, config.cwd.as_deref())
     {
         return intercepted.map_err(|message| {
-            VmError::Thrown(crate::value::VmValue::String(std::sync::Arc::from(message)))
+            VmError::Thrown(crate::value::VmValue::String(arcstr::ArcStr::from(message)))
         });
     }
 
@@ -524,7 +524,7 @@ fn neutralize_rustc_wrapper(env: &mut Vec<(String, String)>) {
 fn default_process_cwd_for_policy(policy: &CapabilityPolicy) -> Result<PathBuf, VmError> {
     let roots = normalized_workspace_roots(policy);
     let current = std::env::current_dir().map_err(|error| {
-        VmError::Thrown(crate::value::VmValue::String(std::sync::Arc::from(
+        VmError::Thrown(crate::value::VmValue::String(arcstr::ArcStr::from(
             format!("process cwd resolution failed: {error}"),
         )))
     })?;
@@ -533,7 +533,7 @@ fn default_process_cwd_for_policy(policy: &CapabilityPolicy) -> Result<PathBuf, 
         return Ok(current);
     }
     roots.first().cloned().ok_or_else(|| {
-        VmError::Thrown(crate::value::VmValue::String(std::sync::Arc::from(
+        VmError::Thrown(crate::value::VmValue::String(arcstr::ArcStr::from(
             "process cwd resolution failed: no workspace root available",
         )))
     })
@@ -682,7 +682,7 @@ fn apply_process_config(command: &mut Command, config: &ProcessCommandConfig) {
 }
 
 fn spawn_error(error: std::io::Error) -> VmError {
-    VmError::Thrown(crate::value::VmValue::String(std::sync::Arc::from(
+    VmError::Thrown(crate::value::VmValue::String(arcstr::ArcStr::from(
         format!("process spawn failed: {error}"),
     )))
 }

@@ -58,7 +58,7 @@ fn to_xml_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
     let options = args.get(1).and_then(VmValue::as_dict);
     let opts = XmlOptions::from_dict(options);
     let xml = render_xml(value, &opts)?;
-    Ok(VmValue::String(std::sync::Arc::from(xml)))
+    Ok(VmValue::String(arcstr::ArcStr::from(xml)))
 }
 
 #[harn_builtin(
@@ -535,7 +535,7 @@ impl<'a> Parser<'a> {
 }
 
 fn parse_error(msg: String) -> VmError {
-    VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
         "from_xml: {msg}"
     ))))
 }
@@ -637,7 +637,7 @@ fn finalize_element(
     if !attrs.is_empty() {
         let mut attr_dict = BTreeMap::new();
         for (k, v) in attrs {
-            attr_dict.insert(k, VmValue::String(std::sync::Arc::from(v)));
+            attr_dict.insert(k, VmValue::String(arcstr::ArcStr::from(v)));
         }
         out.insert("@attr".to_string(), VmValue::dict(attr_dict));
     }
@@ -659,7 +659,7 @@ fn scalar_from_text(text: &str) -> VmValue {
     match text {
         "true" => VmValue::Bool(true),
         "false" => VmValue::Bool(false),
-        _ => VmValue::String(std::sync::Arc::from(text.to_string())),
+        _ => VmValue::String(arcstr::ArcStr::from(text.to_string())),
     }
 }
 
@@ -667,7 +667,7 @@ fn attrs_to_value(attrs: Vec<(String, String)>) -> VmValue {
     let mut out = BTreeMap::new();
     let mut attr_dict = BTreeMap::new();
     for (k, v) in attrs {
-        attr_dict.insert(k, VmValue::String(std::sync::Arc::from(v)));
+        attr_dict.insert(k, VmValue::String(arcstr::ArcStr::from(v)));
     }
     out.insert("@attr".to_string(), VmValue::dict(attr_dict));
     VmValue::dict(out)
@@ -701,7 +701,7 @@ mod tests {
     #[test]
     fn renders_flat_dict() {
         let value = dict(&[
-            ("name", VmValue::String(std::sync::Arc::from("Ada"))),
+            ("name", VmValue::String(arcstr::ArcStr::from("Ada"))),
             ("year", VmValue::Int(1815)),
         ]);
         let xml = render_xml(&value, &opts()).unwrap();
@@ -713,8 +713,8 @@ mod tests {
         let value = dict(&[(
             "previous_chats",
             VmValue::List(std::sync::Arc::new(vec![
-                VmValue::String(std::sync::Arc::from("x.jsonl")),
-                VmValue::String(std::sync::Arc::from("y.jsonl")),
+                VmValue::String(arcstr::ArcStr::from("x.jsonl")),
+                VmValue::String(arcstr::ArcStr::from("y.jsonl")),
             ])),
         )]);
         let xml = render_xml(&value, &opts()).unwrap();
@@ -726,7 +726,7 @@ mod tests {
 
     #[test]
     fn escapes_special_chars_in_text() {
-        let value = dict(&[("msg", VmValue::String(std::sync::Arc::from("<a> & </b>")))]);
+        let value = dict(&[("msg", VmValue::String(arcstr::ArcStr::from("<a> & </b>")))]);
         let xml = render_xml(&value, &opts()).unwrap();
         assert_eq!(xml, "<root><msg>&lt;a&gt; &amp; &lt;/b&gt;</msg></root>");
     }
@@ -744,8 +744,8 @@ mod tests {
         let mut o = opts();
         o.pretty = true;
         let value = dict(&[
-            ("a", VmValue::String(std::sync::Arc::from("x"))),
-            ("b", VmValue::String(std::sync::Arc::from("y"))),
+            ("a", VmValue::String(arcstr::ArcStr::from("x"))),
+            ("b", VmValue::String(arcstr::ArcStr::from("y"))),
         ]);
         let xml = render_xml(&value, &o).unwrap();
         assert_eq!(xml, "<root>\n  <a>x</a>\n  <b>y</b>\n</root>");

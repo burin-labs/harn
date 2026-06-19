@@ -95,7 +95,8 @@ impl Debugger {
                     (self.alloc_var_ref(children), display)
                 }
             }
-            VmValue::StructInstance { layout, .. } => {
+            VmValue::StructInstance(si) => {
+                let layout = &si.layout;
                 let fields = val.struct_fields_map().unwrap_or_default();
                 let children: Vec<(String, VmValue)> =
                     fields.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
@@ -468,7 +469,7 @@ impl Debugger {
             // Delegate to the canonical type name so the debugger watch matches
             // the language's `type_of` for every kind (decimal, duration, set,
             // …), instead of a hardcoded subset that returned "unknown".
-            return Some(VmValue::String(std::sync::Arc::from(val.type_name())));
+            return Some(VmValue::String(arcstr::ArcStr::from(val.type_name())));
         }
 
         // Tokenize into a path of `Field(name)` and `Index(n)` segments.
@@ -538,7 +539,7 @@ impl Debugger {
             current = match seg {
                 PathSegment::Field(f) => match &current {
                     VmValue::Dict(map) => map.get(f.as_str())?.clone(),
-                    VmValue::StructInstance { .. } => current.struct_field(f.as_str())?.clone(),
+                    VmValue::StructInstance(_) => current.struct_field(f.as_str())?.clone(),
                     _ => return None,
                 },
                 PathSegment::Index(i) => match &current {

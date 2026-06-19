@@ -177,11 +177,11 @@ pub fn annotate_nested_execution_options(
 ) {
     options.insert(
         NESTED_KIND_OPTION_KEY.to_string(),
-        VmValue::String(std::sync::Arc::from(kind.as_str().to_string())),
+        VmValue::String(arcstr::ArcStr::from(kind.as_str().to_string())),
     );
     options.insert(
         NESTED_LABEL_OPTION_KEY.to_string(),
-        VmValue::String(std::sync::Arc::from(label.to_string())),
+        VmValue::String(arcstr::ArcStr::from(label.to_string())),
     );
 }
 
@@ -472,11 +472,11 @@ mod tests {
             "research-worker",
         );
         match options.get(NESTED_KIND_OPTION_KEY).unwrap() {
-            VmValue::String(text) => assert_eq!(text.as_ref(), "sub_agent_run"),
+            VmValue::String(text) => assert_eq!(text.as_str(), "sub_agent_run"),
             _ => panic!("kind not stored as string"),
         }
         match options.get(NESTED_LABEL_OPTION_KEY).unwrap() {
-            VmValue::String(text) => assert_eq!(text.as_ref(), "research-worker"),
+            VmValue::String(text) => assert_eq!(text.as_str(), "research-worker"),
             _ => panic!("label not stored as string"),
         }
     }

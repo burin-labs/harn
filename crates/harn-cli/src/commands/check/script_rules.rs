@@ -314,7 +314,7 @@ mod imp {
                         diagnostics.push(rule_error_diagnostic(id, error));
                     }
                     LoadedRule::Ok { id, lint } => {
-                        let arg = VmValue::String(Arc::from(source.as_str()));
+                        let arg = VmValue::String(arcstr::ArcStr::from(source.as_str()));
                         match vm.call_closure_pub(lint, &[arg]).await {
                             Ok(value) => map_return(id, &value, &mut diagnostics),
                             Err(error) => {
@@ -345,7 +345,7 @@ mod imp {
         }
 
         fn s(text: &str) -> VmValue {
-            VmValue::String(Arc::from(text))
+            VmValue::String(arcstr::ArcStr::from(text))
         }
 
         #[test]

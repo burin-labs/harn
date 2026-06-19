@@ -320,7 +320,7 @@ mod tests {
     fn parse_on_violation_rejects_unknown_value() {
         let opts = crate::value::DictMap::from_iter([(
             "on_violation".to_string(),
-            VmValue::String(std::sync::Arc::from("warn")),
+            VmValue::String(arcstr::ArcStr::from("warn")),
         )]);
         let err = parse_on_violation(&opts).expect_err("unknown should fail");
         assert!(err.to_string().contains("on_violation"));

@@ -190,14 +190,14 @@ fn build_request_options(
 fn encode_envelope(value: &VmValue, builtin: &str) -> Result<String, VmError> {
     let json = vm_value_to_data_value(value);
     serde_json::to_string(&json).map_err(|e| {
-        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
             "{builtin}: encode envelope: {e}"
         ))))
     })
 }
 
 fn jsonrpc_err(msg: &str) -> VmError {
-    VmError::Thrown(VmValue::String(std::sync::Arc::from(msg)))
+    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(msg)))
 }
 
 fn next_id_value() -> VmValue {

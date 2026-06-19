@@ -96,7 +96,7 @@ fn provider_capabilities_clear_builtin(
 )]
 fn llm_infer_provider_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let model_id = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(std::sync::Arc::from(
+    Ok(VmValue::String(arcstr::ArcStr::from(
         llm_config::infer_provider(&model_id),
     )))
 }
@@ -108,7 +108,7 @@ fn llm_infer_provider_builtin(args: &[VmValue], _out: &mut String) -> Result<VmV
 )]
 fn llm_model_tier_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let model_id = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(std::sync::Arc::from(
+    Ok(VmValue::String(arcstr::ArcStr::from(
         llm_config::model_tier(&model_id),
     )))
 }
@@ -166,7 +166,7 @@ fn llm_qc_default_model_builtin(args: &[VmValue], _out: &mut String) -> Result<V
         ));
     }
     Ok(llm_config::qc_default_model(&provider)
-        .map(|model| VmValue::String(std::sync::Arc::from(model)))
+        .map(|model| VmValue::String(arcstr::ArcStr::from(model)))
         .unwrap_or(VmValue::Nil))
 }
 
@@ -250,11 +250,11 @@ fn llm_apply_reasoning_policy_builtin(
 
 fn toml_value_to_vm_value(value: &toml::Value) -> VmValue {
     match value {
-        toml::Value::String(s) => VmValue::String(std::sync::Arc::from(s.as_str())),
+        toml::Value::String(s) => VmValue::String(arcstr::ArcStr::from(s.as_str())),
         toml::Value::Integer(i) => VmValue::Int(*i),
         toml::Value::Float(f) => VmValue::Float(*f),
         toml::Value::Boolean(b) => VmValue::Bool(*b),
-        toml::Value::Datetime(dt) => VmValue::String(std::sync::Arc::from(dt.to_string())),
+        toml::Value::Datetime(dt) => VmValue::String(arcstr::ArcStr::from(dt.to_string())),
         toml::Value::Array(items) => {
             let list: Vec<VmValue> = items.iter().map(toml_value_to_vm_value).collect();
             VmValue::List(std::sync::Arc::new(list))
@@ -332,7 +332,7 @@ fn llm_providers_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue
     all.extend(registry_names);
     let list: Vec<VmValue> = all
         .into_iter()
-        .map(|n| VmValue::String(std::sync::Arc::from(n)))
+        .map(|n| VmValue::String(arcstr::ArcStr::from(n)))
         .collect();
     Ok(VmValue::List(std::sync::Arc::new(list)))
 }
@@ -877,7 +877,7 @@ fn provider_region_value(provider_name: Option<&str>) -> Option<VmValue> {
     region.insert(
         "resolved".to_string(),
         match resolved {
-            Some(value) => VmValue::String(std::sync::Arc::from(value)),
+            Some(value) => VmValue::String(arcstr::ArcStr::from(value)),
             None => VmValue::Nil,
         },
     );
@@ -937,7 +937,7 @@ fn provider_def_to_vm_value(
     if !pdef.extra_headers.is_empty() {
         let mut headers = crate::value::DictMap::new();
         for (k, v) in &pdef.extra_headers {
-            headers.insert(k.clone(), VmValue::String(std::sync::Arc::from(v.as_str())));
+            headers.insert(k.clone(), VmValue::String(arcstr::ArcStr::from(v.as_str())));
         }
         dict.insert("extra_headers".to_string(), VmValue::dict(headers));
     }
@@ -945,7 +945,7 @@ fn provider_def_to_vm_value(
         let features: Vec<VmValue> = pdef
             .features
             .iter()
-            .map(|f| VmValue::String(std::sync::Arc::from(f.as_str())))
+            .map(|f| VmValue::String(arcstr::ArcStr::from(f.as_str())))
             .collect();
         dict.insert(
             "features".to_string(),
@@ -982,7 +982,7 @@ fn string_list_to_vm_value(items: Vec<String>) -> VmValue {
     VmValue::List(std::sync::Arc::new(
         items
             .into_iter()
-            .map(|item| VmValue::String(std::sync::Arc::from(item)))
+            .map(|item| VmValue::String(arcstr::ArcStr::from(item)))
             .collect(),
     ))
 }
@@ -996,7 +996,7 @@ fn resolved_model_to_vm_value(resolved: &llm_config::ResolvedModel) -> VmValue {
         resolved
             .alias
             .as_deref()
-            .map(|alias| VmValue::String(std::sync::Arc::from(alias)))
+            .map(|alias| VmValue::String(arcstr::ArcStr::from(alias)))
             .unwrap_or(VmValue::Nil),
     );
     dict.put_str("tool_format", resolved.tool_format.as_str());
@@ -1025,7 +1025,7 @@ fn model_info_to_vm_value(resolved: &llm_config::ResolvedModel) -> VmValue {
     dict.insert(
         "qc_default_model".to_string(),
         llm_config::qc_default_model(&resolved.provider)
-            .map(|model| VmValue::String(std::sync::Arc::from(model)))
+            .map(|model| VmValue::String(arcstr::ArcStr::from(model)))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
@@ -1057,21 +1057,21 @@ pub(crate) fn capabilities_to_vm_value(
         "preferred_tool_format".to_string(),
         caps.preferred_tool_format
             .as_deref()
-            .map(|format| VmValue::String(std::sync::Arc::from(format)))
+            .map(|format| VmValue::String(arcstr::ArcStr::from(format)))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
         "tool_mode_parity".to_string(),
         caps.tool_mode_parity
             .as_deref()
-            .map(|status| VmValue::String(std::sync::Arc::from(status)))
+            .map(|status| VmValue::String(arcstr::ArcStr::from(status)))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
         "tool_mode_parity_notes".to_string(),
         caps.tool_mode_parity_notes
             .as_deref()
-            .map(|notes| VmValue::String(std::sync::Arc::from(notes)))
+            .map(|notes| VmValue::String(arcstr::ArcStr::from(notes)))
             .unwrap_or(VmValue::Nil),
     );
     // Mirrors the VM's tool-capability gate at llm_config::effective_model_capability_tags:
@@ -1110,7 +1110,7 @@ pub(crate) fn capabilities_to_vm_value(
         "tool_approval_policy".to_string(),
         caps.tool_approval_policy
             .as_deref()
-            .map(|value| VmValue::String(std::sync::Arc::from(value)))
+            .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
@@ -1183,21 +1183,21 @@ pub(crate) fn capabilities_to_vm_value(
         "file_upload_wire_format".to_string(),
         caps.file_upload_wire_format
             .as_ref()
-            .map(|value| VmValue::String(std::sync::Arc::from(value.clone())))
+            .map(|value| VmValue::String(arcstr::ArcStr::from(value.clone())))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
         "structured_output".to_string(),
         caps.structured_output
             .as_deref()
-            .map(|value| VmValue::String(std::sync::Arc::from(value)))
+            .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
         "json_schema".to_string(),
         caps.json_schema
             .as_deref()
-            .map(|value| VmValue::String(std::sync::Arc::from(value)))
+            .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
@@ -1257,7 +1257,7 @@ pub(crate) fn capabilities_to_vm_value(
         "reasoning_wire_format".to_string(),
         caps.reasoning_wire_format
             .as_ref()
-            .map(|value| VmValue::String(std::sync::Arc::from(value.clone())))
+            .map(|value| VmValue::String(arcstr::ArcStr::from(value.clone())))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
@@ -1289,7 +1289,7 @@ pub(crate) fn capabilities_to_vm_value(
         VmValue::List(std::sync::Arc::new(
             caps.allowed_tool_choice_modes
                 .iter()
-                .map(|mode| VmValue::String(std::sync::Arc::from(mode.as_str())))
+                .map(|mode| VmValue::String(arcstr::ArcStr::from(mode.as_str())))
                 .collect(),
         )),
     );
@@ -1301,7 +1301,7 @@ pub(crate) fn capabilities_to_vm_value(
                 .map(|(task, mode)| {
                     (
                         task.clone(),
-                        VmValue::String(std::sync::Arc::from(mode.clone())),
+                        VmValue::String(arcstr::ArcStr::from(mode.clone())),
                     )
                 })
                 .collect::<crate::value::DictMap>(),
@@ -1331,7 +1331,7 @@ pub(crate) fn capabilities_to_vm_value(
             fast_mode
                 .status
                 .as_deref()
-                .map(|s| VmValue::String(std::sync::Arc::from(s)))
+                .map(|s| VmValue::String(arcstr::ArcStr::from(s)))
                 .unwrap_or(VmValue::Nil),
         );
         fast.insert(
@@ -1339,7 +1339,7 @@ pub(crate) fn capabilities_to_vm_value(
             fast_mode
                 .beta_header
                 .as_deref()
-                .map(|s| VmValue::String(std::sync::Arc::from(s)))
+                .map(|s| VmValue::String(arcstr::ArcStr::from(s)))
                 .unwrap_or(VmValue::Nil),
         );
         fast.insert(
@@ -1368,7 +1368,7 @@ fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> VmValue {
         model
             .logical_model
             .as_deref()
-            .map(|value| VmValue::String(std::sync::Arc::from(value)))
+            .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
@@ -1376,7 +1376,7 @@ fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> VmValue {
         model
             .equivalence_group
             .as_deref()
-            .map(|value| VmValue::String(std::sync::Arc::from(value)))
+            .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
@@ -1384,7 +1384,7 @@ fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> VmValue {
         model
             .served_variant
             .as_deref()
-            .map(|value| VmValue::String(std::sync::Arc::from(value)))
+            .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
@@ -1392,7 +1392,7 @@ fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> VmValue {
         model
             .wire_model
             .as_deref()
-            .map(|value| VmValue::String(std::sync::Arc::from(value)))
+            .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
@@ -1400,7 +1400,7 @@ fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> VmValue {
         model
             .api_dialect
             .as_deref()
-            .map(|value| VmValue::String(std::sync::Arc::from(value)))
+            .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
@@ -1453,7 +1453,7 @@ fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> VmValue {
         model
             .deprecation_note
             .as_deref()
-            .map(|note| VmValue::String(std::sync::Arc::from(note)))
+            .map(|note| VmValue::String(arcstr::ArcStr::from(note)))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
@@ -1461,7 +1461,7 @@ fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> VmValue {
         model
             .superseded_by
             .as_deref()
-            .map(|target| VmValue::String(std::sync::Arc::from(target)))
+            .map(|target| VmValue::String(arcstr::ArcStr::from(target)))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
@@ -1548,7 +1548,7 @@ fn fast_mode_to_vm_value(fast: &llm_config::FastModeDef) -> VmValue {
         "beta_header".to_string(),
         fast.beta_header
             .as_deref()
-            .map(|header| VmValue::String(std::sync::Arc::from(header)))
+            .map(|header| VmValue::String(arcstr::ArcStr::from(header)))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
@@ -1561,7 +1561,7 @@ fn fast_mode_to_vm_value(fast: &llm_config::FastModeDef) -> VmValue {
         "status".to_string(),
         fast.status
             .as_deref()
-            .map(|status| VmValue::String(std::sync::Arc::from(status)))
+            .map(|status| VmValue::String(arcstr::ArcStr::from(status)))
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
@@ -1575,7 +1575,7 @@ fn fast_mode_to_vm_value(fast: &llm_config::FastModeDef) -> VmValue {
         "note".to_string(),
         fast.note
             .as_deref()
-            .map(|note| VmValue::String(std::sync::Arc::from(note)))
+            .map(|note| VmValue::String(arcstr::ArcStr::from(note)))
             .unwrap_or(VmValue::Nil),
     );
     VmValue::dict(dict)
@@ -1625,7 +1625,7 @@ fn provider_catalog_to_vm_value() -> VmValue {
     );
     let qc_defaults = llm_config::qc_defaults()
         .into_iter()
-        .map(|(provider, model)| (provider, VmValue::String(std::sync::Arc::from(model))))
+        .map(|(provider, model)| (provider, VmValue::String(arcstr::ArcStr::from(model))))
         .collect::<crate::value::DictMap>();
     dict.insert("qc_defaults".to_string(), VmValue::dict(qc_defaults));
 
@@ -1642,7 +1642,7 @@ fn alias_def_to_vm_value(name: &str, alias: &llm_config::AliasDef) -> VmValue {
         alias
             .tool_format
             .as_deref()
-            .map(|format| VmValue::String(std::sync::Arc::from(format)))
+            .map(|format| VmValue::String(arcstr::ArcStr::from(format)))
             .unwrap_or(VmValue::Nil),
     );
     VmValue::dict(dict)
@@ -1680,7 +1680,7 @@ fn readiness_result(readiness: &super::ModelReadiness) -> VmValue {
         readiness
             .url
             .as_ref()
-            .map(|url| VmValue::String(std::sync::Arc::from(url.as_str())))
+            .map(|url| VmValue::String(arcstr::ArcStr::from(url.as_str())))
             .unwrap_or(VmValue::Nil),
     );
     meta.insert(
@@ -1696,7 +1696,7 @@ fn readiness_result(readiness: &super::ModelReadiness) -> VmValue {
             readiness
                 .available_models
                 .iter()
-                .map(|model| VmValue::String(std::sync::Arc::from(model.as_str())))
+                .map(|model| VmValue::String(arcstr::ArcStr::from(model.as_str())))
                 .collect(),
         )),
     );
@@ -1739,7 +1739,7 @@ mod tests {
     fn test_llm_rate_limit_sets_and_queries_rich_details() {
         let _guard = crate::llm::env_guard();
         crate::llm::reset_llm_state();
-        let provider = VmValue::String(std::sync::Arc::from("quota-builtin-provider"));
+        let provider = VmValue::String(arcstr::ArcStr::from("quota-builtin-provider"));
         let mut out = String::new();
 
         let set = llm_rate_limit_builtin(
@@ -1811,7 +1811,7 @@ mod tests {
     #[test]
     fn llm_config_surfaces_bedrock_region_block() {
         let mut out = String::new();
-        let args = vec![VmValue::String(std::sync::Arc::from("bedrock"))];
+        let args = vec![VmValue::String(arcstr::ArcStr::from("bedrock"))];
         let result = llm_config_builtin(&args, &mut out).expect("bedrock config");
         let cfg = result.as_dict().expect("config dict");
 
@@ -1843,7 +1843,7 @@ mod tests {
     #[test]
     fn llm_config_omits_region_block_for_single_region_provider() {
         let mut out = String::new();
-        let args = vec![VmValue::String(std::sync::Arc::from("anthropic"))];
+        let args = vec![VmValue::String(arcstr::ArcStr::from("anthropic"))];
         let result = llm_config_builtin(&args, &mut out).expect("anthropic config");
         let cfg = result.as_dict().expect("config dict");
         assert!(
@@ -1856,7 +1856,7 @@ mod tests {
     fn test_llm_model_defaults_returns_empty_for_unknown_model() {
         llm_config::clear_user_overrides();
         let mut out = String::new();
-        let args = vec![VmValue::String(std::sync::Arc::from(
+        let args = vec![VmValue::String(arcstr::ArcStr::from(
             "definitely-not-a-real-model-id-zzzzz",
         ))];
         let result = llm_model_defaults_builtin(&args, &mut out).expect("builtin returned error");
@@ -1904,7 +1904,7 @@ mod tests {
         let args = vec![build_dict(vec![
             (
                 "model",
-                VmValue::String(std::sync::Arc::from("fake-resolved-options-model")),
+                VmValue::String(arcstr::ArcStr::from("fake-resolved-options-model")),
             ),
             ("temperature", VmValue::Float(0.9)),
         ])];
@@ -1915,7 +1915,7 @@ mod tests {
             other => panic!("expected Float(0.9), got {other:?}"),
         }
         match dict.get("model") {
-            Some(VmValue::String(s)) => assert_eq!(s.as_ref(), "fake-resolved-options-model"),
+            Some(VmValue::String(s)) => assert_eq!(s.as_str(), "fake-resolved-options-model"),
             other => panic!("expected model string, got {other:?}"),
         }
 
@@ -1937,7 +1937,7 @@ mod tests {
         let mut out = String::new();
         let args = vec![build_dict(vec![(
             "model",
-            VmValue::String(std::sync::Arc::from("fake-fill-defaults-model")),
+            VmValue::String(arcstr::ArcStr::from("fake-fill-defaults-model")),
         )])];
         let result = llm_resolved_options_builtin(&args, &mut out).expect("builtin returned error");
         let dict = result.as_dict().expect("expected dict");
@@ -1961,13 +1961,13 @@ mod tests {
         let mut out = String::new();
         let args = vec![build_dict(vec![(
             "model",
-            VmValue::String(std::sync::Arc::from("claude-sonnet-4-20250514")),
+            VmValue::String(arcstr::ArcStr::from("claude-sonnet-4-20250514")),
         )])];
         let result = llm_resolved_options_builtin(&args, &mut out).expect("builtin returned error");
         let dict = result.as_dict().expect("expected dict");
         match dict.get("provider") {
             Some(VmValue::String(s)) => {
-                assert_eq!(s.as_ref(), "anthropic", "provider mismatch: {s}");
+                assert_eq!(s.as_str(), "anthropic", "provider mismatch: {s}");
             }
             other => panic!("expected provider string, got {other:?}"),
         }
@@ -1985,8 +1985,8 @@ mod tests {
         super::super::capabilities::clear_user_overrides();
         let mut out = String::new();
         let args = vec![
-            VmValue::String(std::sync::Arc::from("ollama")),
-            VmValue::String(std::sync::Arc::from("qwen3.6:35b-a3b-coding-nvfp4")),
+            VmValue::String(arcstr::ArcStr::from("ollama")),
+            VmValue::String(arcstr::ArcStr::from("qwen3.6:35b-a3b-coding-nvfp4")),
         ];
         let result =
             provider_capabilities_builtin(&args, &mut out).expect("builtin returned error");
@@ -2003,11 +2003,11 @@ mod tests {
         expect_bool("prefers_markdown_scaffolding", true);
         expect_bool("prefers_xml_tools", false);
         match dict.get("structured_output_mode") {
-            Some(VmValue::String(mode)) => assert_eq!(mode.as_ref(), "delimited"),
+            Some(VmValue::String(mode)) => assert_eq!(mode.as_str(), "delimited"),
             other => panic!("expected structured_output_mode string, got {other:?}"),
         }
         match dict.get("thinking_block_style") {
-            Some(VmValue::String(style)) => assert_eq!(style.as_ref(), "inline"),
+            Some(VmValue::String(style)) => assert_eq!(style.as_str(), "inline"),
             other => panic!("expected thinking_block_style string, got {other:?}"),
         }
     }
@@ -2020,15 +2020,15 @@ mod tests {
         // Opus 4.8 advertises a usable (research-preview) fast tier.
         let opus = provider_capabilities_builtin(
             &[
-                VmValue::String(std::sync::Arc::from("anthropic")),
-                VmValue::String(std::sync::Arc::from("claude-opus-4-8")),
+                VmValue::String(arcstr::ArcStr::from("anthropic")),
+                VmValue::String(arcstr::ArcStr::from("claude-opus-4-8")),
             ],
             &mut out,
         )
         .expect("builtin returned error");
         let opus = opus.as_dict().expect("expected dict");
         let expect_str = |dict: &crate::value::DictMap, key: &str, want: &str| match dict.get(key) {
-            Some(VmValue::String(s)) => assert_eq!(s.as_ref(), want, "{key}"),
+            Some(VmValue::String(s)) => assert_eq!(s.as_str(), want, "{key}"),
             other => panic!("expected String for {key}, got {other:?}"),
         };
         assert!(matches!(
@@ -2045,8 +2045,8 @@ mod tests {
         // A model with no fast tier reports false and omits the dict.
         let gpt4o = provider_capabilities_builtin(
             &[
-                VmValue::String(std::sync::Arc::from("openai")),
-                VmValue::String(std::sync::Arc::from("gpt-4o")),
+                VmValue::String(arcstr::ArcStr::from("openai")),
+                VmValue::String(arcstr::ArcStr::from("gpt-4o")),
             ],
             &mut out,
         )
@@ -2064,8 +2064,8 @@ mod tests {
         super::super::capabilities::clear_user_overrides();
         let mut out = String::new();
         let args = vec![
-            VmValue::String(std::sync::Arc::from("anthropic")),
-            VmValue::String(std::sync::Arc::from("claude-opus-4-7")),
+            VmValue::String(arcstr::ArcStr::from("anthropic")),
+            VmValue::String(arcstr::ArcStr::from("claude-opus-4-7")),
         ];
         let result =
             provider_capabilities_builtin(&args, &mut out).expect("builtin returned error");
@@ -2076,7 +2076,7 @@ mod tests {
             other => panic!("expected Bool for {key}, got {other:?}"),
         };
         let expect_string = |key: &str, want: &str| match dict.get(key) {
-            Some(VmValue::String(value)) => assert_eq!(value.as_ref(), want, "{key}"),
+            Some(VmValue::String(value)) => assert_eq!(value.as_str(), want, "{key}"),
             other => panic!("expected String for {key}, got {other:?}"),
         };
 

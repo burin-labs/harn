@@ -299,7 +299,7 @@ pub(crate) fn policy_registry_len() -> usize {
 // ---------------------------------------------------------------------------
 
 fn runtime_error(message: String) -> VmError {
-    VmError::Thrown(VmValue::String(std::sync::Arc::from(message)))
+    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message)))
 }
 
 fn parse_label(dict: &crate::value::DictMap, key: &str) -> Result<String, VmError> {
@@ -698,7 +698,7 @@ fn failover_value(failover: &FailoverRules) -> VmValue {
     let kinds: Vec<VmValue> = failover
         .on_error_kinds
         .iter()
-        .map(|s| VmValue::String(std::sync::Arc::from(s.clone())))
+        .map(|s| VmValue::String(arcstr::ArcStr::from(s.clone())))
         .collect();
     dict.insert(
         "on_error_kinds".to_string(),
@@ -1980,10 +1980,10 @@ mod tests {
             (
                 "chain",
                 VmValue::List(std::sync::Arc::new(vec![
-                    VmValue::String(std::sync::Arc::from("mock:mock")),
+                    VmValue::String(arcstr::ArcStr::from("mock:mock")),
                     VmValue::dict(dict(&[
-                        ("provider", VmValue::String(std::sync::Arc::from("mock"))),
-                        ("model", VmValue::String(std::sync::Arc::from("mock-2"))),
+                        ("provider", VmValue::String(arcstr::ArcStr::from("mock"))),
+                        ("model", VmValue::String(arcstr::ArcStr::from("mock-2"))),
                     ])),
                 ])),
             ),
@@ -2004,7 +2004,7 @@ mod tests {
                 "budget",
                 VmValue::dict(dict(&[
                     ("per_call_usd", VmValue::Float(0.5)),
-                    ("on_exceed", VmValue::String(std::sync::Arc::from("abort"))),
+                    ("on_exceed", VmValue::String(arcstr::ArcStr::from("abort"))),
                 ])),
             ),
         ]);
@@ -2029,15 +2029,15 @@ mod tests {
             VmValue::List(std::sync::Arc::new(vec![
                 // Link 0: explicit region override.
                 VmValue::dict(dict(&[
-                    ("provider", VmValue::String(std::sync::Arc::from("bedrock"))),
+                    ("provider", VmValue::String(arcstr::ArcStr::from("bedrock"))),
                     (
                         "model",
-                        VmValue::String(std::sync::Arc::from("anthropic.claude-3-5-sonnet-v2:0")),
+                        VmValue::String(arcstr::ArcStr::from("anthropic.claude-3-5-sonnet-v2:0")),
                     ),
-                    ("region", VmValue::String(std::sync::Arc::from("eu-west-1"))),
+                    ("region", VmValue::String(arcstr::ArcStr::from("eu-west-1"))),
                 ])),
                 // Link 1: no region -> falls back to env at call time.
-                VmValue::String(std::sync::Arc::from("mock:mock")),
+                VmValue::String(arcstr::ArcStr::from("mock:mock")),
             ])),
         )]);
         let tagged = build_routing_policy(&config).expect("validates");
@@ -2094,7 +2094,7 @@ mod tests {
             (
                 "chain",
                 VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-                    std::sync::Arc::from("mock:mock"),
+                    arcstr::ArcStr::from("mock:mock"),
                 )])),
             ),
             (

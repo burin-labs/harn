@@ -631,7 +631,7 @@ pub(crate) async fn request_approval_for_side_effect(
         VmValue::List(std::sync::Arc::new(
             reviewers
                 .into_iter()
-                .map(|reviewer| VmValue::String(std::sync::Arc::from(reviewer)))
+                .map(|reviewer| VmValue::String(arcstr::ArcStr::from(reviewer)))
                 .collect(),
         )),
     );
@@ -640,12 +640,12 @@ pub(crate) async fn request_approval_for_side_effect(
         VmValue::List(std::sync::Arc::new(
             capabilities_requested
                 .into_iter()
-                .map(|capability| VmValue::String(std::sync::Arc::from(capability)))
+                .map(|capability| VmValue::String(arcstr::ArcStr::from(capability)))
                 .collect(),
         )),
     );
     let args = vec![
-        VmValue::String(std::sync::Arc::from(action.to_string())),
+        VmValue::String(arcstr::ArcStr::from(action.to_string())),
         VmValue::dict(options),
     ];
     request_approval_impl(None, &args).await
@@ -1805,7 +1805,7 @@ fn coerce_like_default(value: &VmValue, default: &VmValue) -> VmValue {
             VmValue::String(text) if text.eq_ignore_ascii_case("false") => VmValue::Bool(false),
             _ => default.clone(),
         },
-        VmValue::String(_) => VmValue::String(std::sync::Arc::from(value.display())),
+        VmValue::String(_) => VmValue::String(arcstr::ArcStr::from(value.display())),
         VmValue::Duration(_) => match value {
             VmValue::Duration(_) => value.clone(),
             VmValue::Int(ms) => VmValue::Duration(*ms),

@@ -131,7 +131,7 @@ impl Compiler {
                 .unwrap_or_else(|| {
                     VmValue::dict(BTreeMap::from([(
                         "type".to_string(),
-                        VmValue::String(std::sync::Arc::from("any")),
+                        VmValue::String(arcstr::ArcStr::from("any")),
                     )]))
                 });
             let public_schema =

@@ -57,7 +57,7 @@ pub(crate) async fn vm_stream_llm(
     let request = resolved.apply_headers(req, &opts.api_key);
 
     let mut es = EventSource::new(request).map_err(|e| {
-        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
             "LLM stream setup error: {e}"
         ))))
     })?;
@@ -94,7 +94,7 @@ pub(crate) async fn vm_stream_llm(
     loop {
         if stream_start.elapsed() >= overall_dur {
             es.close();
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
                 "stream overall deadline exceeded: {overall_budget_secs}s budget reached before stream completed"
             )))));
         }
@@ -118,7 +118,7 @@ pub(crate) async fn vm_stream_llm(
                 } else {
                     (first_token_timeout_secs, "time-to-first-token (prefill)")
                 };
-                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                     format!("stream {phase} timeout: no data received for {secs}s"),
                 ))));
             }
@@ -137,7 +137,7 @@ pub(crate) async fn vm_stream_llm(
                 if let Some(text) = chunk_text {
                     if !text.is_empty()
                         && tx
-                            .send(VmValue::String(std::sync::Arc::from(text)))
+                            .send(VmValue::String(arcstr::ArcStr::from(text)))
                             .await
                             .is_err()
                     {

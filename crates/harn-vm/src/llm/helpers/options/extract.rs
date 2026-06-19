@@ -81,7 +81,7 @@ pub(crate) fn extract_llm_options(
     let caps = crate::llm::capabilities::lookup(&provider, &model);
     let api_mode = parse_api_mode_option(options.as_ref())?;
     if enforce_responses_provider_gate(api_mode, &provider) {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
             "api_mode: \"responses\" is only supported by provider \"openai\"; got provider \"{provider}\""
         )))));
     }
@@ -255,7 +255,7 @@ pub(crate) fn extract_llm_options(
         Some(VmValue::Bool(value)) => *value,
         Some(VmValue::Nil) | None => output_schema.is_some(),
         Some(other) => {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 format!(
                     "llm_call: `schema_stream_abort` must be a bool, got {}",
                     other.type_name()
@@ -269,7 +269,7 @@ pub(crate) fn extract_llm_options(
     // `agent_session_*` builtins; there is no opaque transcript dict to
     // pass around anymore.
     if options.as_ref().and_then(|o| o.get("transcript")).is_some() {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "llm_call / agent_loop: the `transcript` option was removed. \
                  Open or open-and-resume a session with agent_session_open(id) \
                  and pass `session_id: id` instead.",
@@ -321,7 +321,7 @@ pub(crate) fn extract_llm_options(
         && !crate::llm::provider::provider_supports_image_urls(&provider, &model)
         && crate::llm::content::messages_contain_url_images(&messages)?
     {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "llm_call: this provider/model route requires image base64; url image content is not supported",
         ))));
     }
@@ -351,7 +351,7 @@ pub(crate) fn extract_llm_options(
     };
     let provider_tools = parse_provider_tools_option(options.as_ref())?;
     if enforce_capability_gates && !provider_tools.is_empty() && api_mode != LlmApiMode::Responses {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "provider_tools requires api_mode: \"responses\"",
         ))));
     }
@@ -383,7 +383,7 @@ pub(crate) fn extract_llm_options(
         let forced = provider_overrides_force_native(options.as_ref(), &provider);
         let provider_has_native = model_based_native || forced;
         if cfg.variant == ToolSearchVariant::Hybrid && cfg.mode == ToolSearchMode::Native {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 "tool_search: variant \"hybrid\" is client-only; set mode: \"client\" or use \"bm25\"/\"regex\" for native provider tool search",
             ))));
         }
@@ -398,7 +398,7 @@ pub(crate) fn extract_llm_options(
         let resolution = match cfg.mode {
             ToolSearchMode::Native => {
                 if !provider_has_native {
-                    return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                    return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                         format!(
                             "tool_search: provider \"{provider}\" does not expose native \
                          tool-search for model \"{model}\". Set \
@@ -429,7 +429,7 @@ pub(crate) fn extract_llm_options(
             let deferred = extract_deferred_tool_names(tools);
             let total_user_tools = tools.len();
             if total_user_tools > 0 && deferred.len() == total_user_tools {
-                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                     "tool_search: all tools have defer_loading set. At least \
                      one tool must be non-deferred so the model has somewhere \
                      to start. (Matches Anthropic's 400 on the same condition.)",
@@ -546,7 +546,7 @@ pub(crate) fn extract_llm_options(
             || include.is_some()
             || max_tool_calls.is_some())
     {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "Responses-only options require api_mode: \"responses\"",
         ))));
     }
@@ -583,7 +583,7 @@ pub(crate) fn extract_llm_options(
         match crate::llm::fast_mode::gate(&model) {
             crate::llm::fast_mode::FastModeGate::Usable => {}
             crate::llm::fast_mode::FastModeGate::Unsupported => {
-                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                     format!(
                     "fast: model \"{model}\" (provider \"{provider}\") has no accelerated-serving \
                      tier in the catalog; remove `fast` or pick a model that advertises `fast_mode`"
@@ -592,7 +592,7 @@ pub(crate) fn extract_llm_options(
             }
             crate::llm::fast_mode::FastModeGate::Deprecated { note } => {
                 let detail = note.map(|n| format!(" ({n})")).unwrap_or_default();
-                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                     format!(
                     "fast: the accelerated-serving tier for model \"{model}\" is deprecated{detail}"
                 ),

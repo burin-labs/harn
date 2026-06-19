@@ -345,7 +345,7 @@ fn validate_metadata(metadata: &crate::value::DictMap, errors: &mut Vec<String>)
         match value {
             VmValue::Nil => {}
             VmValue::String(s) => {
-                if !ALLOWED_AUTH_METHODS.contains(&s.as_ref()) {
+                if !ALLOWED_AUTH_METHODS.contains(&s.as_str()) {
                     errors.push(err(&format!(
                         "token_endpoint_auth_method `{s}` is not one of: {}",
                         ALLOWED_AUTH_METHODS.join(", ")
@@ -478,7 +478,7 @@ fn validate_enum_list(
             for (i, item) in items.iter().enumerate() {
                 match item {
                     VmValue::String(s) => {
-                        if !allowed.contains(&s.as_ref()) {
+                        if !allowed.contains(&s.as_str()) {
                             errors.push(err(&format!(
                                 "{field}[{i}] `{s}` is not one of: {}",
                                 allowed.join(", ")
@@ -586,17 +586,17 @@ fn build_authorization_server_metadata_value(
     if let Some(VmValue::String(s)) = provider.get("device_code_url") {
         out.insert(
             "device_authorization_endpoint".to_string(),
-            VmValue::string(s.as_ref()),
+            VmValue::string(s.as_str()),
         );
     }
     if let Some(VmValue::String(s)) = provider.get("revoke_url") {
         out.insert(
             "revocation_endpoint".to_string(),
-            VmValue::string(s.as_ref()),
+            VmValue::string(s.as_str()),
         );
     }
     if let Some(VmValue::String(s)) = provider.get("userinfo_url") {
-        out.insert("userinfo_endpoint".to_string(), VmValue::string(s.as_ref()));
+        out.insert("userinfo_endpoint".to_string(), VmValue::string(s.as_str()));
     }
     out.insert(
         "response_types_supported".to_string(),
@@ -1002,7 +1002,7 @@ mod tests {
             panic!("expected dict")
         };
         assert!(
-            matches!(dict.get("issuer"), Some(VmValue::String(s)) if s.as_ref() == "https://idp.example")
+            matches!(dict.get("issuer"), Some(VmValue::String(s)) if s.as_str() == "https://idp.example")
         );
         assert!(matches!(
             dict.get("authorization_endpoint"),

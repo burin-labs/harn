@@ -14,12 +14,12 @@ pub fn values_identical(a: &VmValue, b: &VmValue) -> bool {
         (VmValue::Dict(x), VmValue::Dict(y)) => Arc::ptr_eq(x, y),
         (VmValue::Set(x), VmValue::Set(y)) => Arc::ptr_eq(x, y),
         (VmValue::Closure(x), VmValue::Closure(y)) => Arc::ptr_eq(x, y),
-        (VmValue::String(x), VmValue::String(y)) => Arc::ptr_eq(x, y) || x == y,
+        (VmValue::String(x), VmValue::String(y)) => arcstr::ArcStr::ptr_eq(x, y) || x == y,
         (VmValue::Bytes(x), VmValue::Bytes(y)) => Arc::ptr_eq(x, y) || x == y,
         (VmValue::BuiltinRef(x), VmValue::BuiltinRef(y)) => x == y,
         (VmValue::BuiltinRefId(x), VmValue::BuiltinRefId(y)) => x.name == y.name,
         (VmValue::BuiltinRef(x), VmValue::BuiltinRefId(y))
-        | (VmValue::BuiltinRefId(y), VmValue::BuiltinRef(x)) => x.as_ref() == y.name.as_ref(),
+        | (VmValue::BuiltinRefId(y), VmValue::BuiltinRef(x)) => x.as_str() == y.name.as_str(),
         (VmValue::Pair(x), VmValue::Pair(y)) => Arc::ptr_eq(x, y),
         // Primitives: identity collapses to structural equality.
         _ => values_equal(a, b),
@@ -164,7 +164,8 @@ fn write_structural_hash_key(v: &VmValue, out: &mut String) {
             });
             out.push(';');
         }
-        VmValue::StructInstance { layout, fields } => {
+        VmValue::StructInstance(data) => {
+            let (layout, fields) = (&data.layout, &data.fields);
             // Use the same name-keyed map `values_equal` compares, so field
             // order in the layout never affects the key.
             out.push('I');
@@ -231,7 +232,7 @@ pub fn values_equal(a: &VmValue, b: &VmValue) -> bool {
         (VmValue::BuiltinRef(x), VmValue::BuiltinRef(y)) => x == y,
         (VmValue::BuiltinRefId(x), VmValue::BuiltinRefId(y)) => x.name == y.name,
         (VmValue::BuiltinRef(x), VmValue::BuiltinRefId(y))
-        | (VmValue::BuiltinRefId(y), VmValue::BuiltinRef(x)) => x.as_ref() == y.name.as_ref(),
+        | (VmValue::BuiltinRefId(y), VmValue::BuiltinRef(x)) => x.as_str() == y.name.as_str(),
         (VmValue::Bool(x), VmValue::Bool(y)) => x == y,
         (VmValue::Nil, VmValue::Nil) => true,
         (VmValue::Int(x), VmValue::Float(y)) => (*x as f64) == *y,
@@ -266,16 +267,9 @@ pub fn values_equal(a: &VmValue, b: &VmValue) -> bool {
                         .all(|(x, y)| values_equal(x, y))
                 })
         }
-        (
-            VmValue::StructInstance {
-                layout: a_layout,
-                fields: a_fields,
-            },
-            VmValue::StructInstance {
-                layout: b_layout,
-                fields: b_fields,
-            },
-        ) => {
+        (VmValue::StructInstance(a), VmValue::StructInstance(b)) => {
+            let (a_layout, a_fields) = (&a.layout, &a.fields);
+            let (b_layout, b_fields) = (&b.layout, &b.fields);
             if a_layout.struct_name() != b_layout.struct_name() {
                 return false;
             }

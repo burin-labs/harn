@@ -63,7 +63,7 @@ pub(super) fn microcompact_builtin(
         .map(|v| non_negative_usize(v, "microcompact", "max_chars"))
         .transpose()?
         .unwrap_or(20_000);
-    Ok(VmValue::String(std::sync::Arc::from(
+    Ok(VmValue::String(arcstr::ArcStr::from(
         crate::orchestration::microcompact_tool_output(&text, max_chars),
     )))
 }
@@ -182,7 +182,7 @@ pub(super) async fn transcript_auto_compact_builtin(
     }
     let llm_opts = if config.compact_strategy == crate::orchestration::CompactStrategy::Llm {
         Some(crate::llm::extract_llm_options(&[
-            VmValue::String(std::sync::Arc::from("")),
+            VmValue::String(arcstr::ArcStr::from("")),
             VmValue::Nil,
             args.get(1).cloned().unwrap_or(VmValue::Nil),
         ])?)
@@ -216,7 +216,7 @@ mod tests {
         let mut out = String::new();
         let err = microcompact_builtin(
             &[
-                VmValue::String(std::sync::Arc::from("hello")),
+                VmValue::String(arcstr::ArcStr::from("hello")),
                 VmValue::Int(-1),
             ],
             &mut out,

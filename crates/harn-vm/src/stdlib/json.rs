@@ -26,7 +26,7 @@ fn ensure_serializable_depth(value: &VmValue, builtin: &str) -> Result<(), VmErr
     if crate::value::recursion::depth_within(value, MAX_SERIALIZE_DEPTH) {
         Ok(())
     } else {
-        Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             format!(
                 "{builtin}: value nesting exceeds the maximum serialization depth ({MAX_SERIALIZE_DEPTH})"
             ),
@@ -47,7 +47,7 @@ pub(crate) fn reset_json_state() {
 
 fn require_args(args: &[VmValue], min: usize, name: &str) -> Result<(), VmError> {
     if args.len() < min {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             format!("{name} requires {min} arguments"),
         ))));
     }
@@ -58,7 +58,7 @@ fn schema_key_list(value: &VmValue, builtin_name: &str) -> Result<Vec<String>, V
     let list = match value {
         VmValue::List(list) => list,
         _ => {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 format!("{builtin_name}: keys must be a list"),
             ))));
         }
@@ -75,7 +75,7 @@ pub(crate) fn register_json_builtins(vm: &mut Vm) {
 #[harn_builtin(sig = "json_stringify(value: any) -> string", category = "json")]
 fn json_stringify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = args.first().unwrap_or(&VmValue::Nil);
-    Ok(VmValue::String(std::sync::Arc::from(vm_value_to_json(val))))
+    Ok(VmValue::String(arcstr::ArcStr::from(vm_value_to_json(val))))
 }
 
 #[harn_builtin(sig = "json_stringify_pretty(value: any) -> string", category = "json")]
@@ -83,9 +83,9 @@ fn json_stringify_pretty_impl(args: &[VmValue], _out: &mut String) -> Result<VmV
     let val = args.first().unwrap_or(&VmValue::Nil);
     ensure_serializable_depth(val, "json_stringify_pretty")?;
     serde_json::to_string_pretty(&vm_value_to_data_value(val))
-        .map(|text| VmValue::String(std::sync::Arc::from(text)))
+        .map(|text| VmValue::String(arcstr::ArcStr::from(text)))
         .map_err(|error| {
-            VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
                 "json_stringify_pretty: {error}"
             ))))
         })
@@ -109,7 +109,7 @@ fn json_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
             });
             Ok(parsed)
         }
-        Err(e) => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        Err(e) => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             format!("JSON parse error: {e}"),
         )))),
     }
@@ -121,11 +121,11 @@ fn yaml_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     match serde_yml::from_str::<serde_yml::Value>(&text) {
         Ok(value) => match serde_json::to_value(value) {
             Ok(json_value) => Ok(schema::json_to_vm_value(&json_value)),
-            Err(error) => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            Err(error) => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 format!("yaml_parse: {error}"),
             )))),
         },
-        Err(error) => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        Err(error) => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             format!("YAML parse error: {error}"),
         )))),
     }
@@ -137,9 +137,9 @@ fn yaml_stringify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     ensure_serializable_depth(value, "yaml_stringify")?;
     let data_value = vm_value_to_data_value(value);
     serde_yml::to_string(&data_value)
-        .map(|text| VmValue::String(std::sync::Arc::from(text)))
+        .map(|text| VmValue::String(arcstr::ArcStr::from(text)))
         .map_err(|error| {
-            VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
                 "yaml_stringify: {error}"
             ))))
         })
@@ -151,11 +151,11 @@ fn toml_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     match toml::from_str::<toml::Value>(&text) {
         Ok(value) => match serde_json::to_value(value) {
             Ok(json_value) => Ok(schema::json_to_vm_value(&json_value)),
-            Err(error) => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            Err(error) => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 format!("toml_parse: {error}"),
             )))),
         },
-        Err(error) => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        Err(error) => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             format!("TOML parse error: {error}"),
         )))),
     }
@@ -166,14 +166,14 @@ fn toml_stringify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     let value = args.first().unwrap_or(&VmValue::Nil);
     let data_value = vm_value_to_data_value(value);
     let toml_value = toml::Value::try_from(data_value).map_err(|error| {
-        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
             "toml_stringify: {error}"
         ))))
     })?;
     toml::to_string(&toml_value)
-        .map(|text| VmValue::String(std::sync::Arc::from(text)))
+        .map(|text| VmValue::String(arcstr::ArcStr::from(text)))
         .map_err(|error| {
-            VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
                 "toml_stringify: {error}"
             ))))
         })
@@ -226,7 +226,7 @@ fn schema_of_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     require_args(args, 1, "schema_of")?;
     match &args[0] {
         VmValue::Dict(_) => Ok(args[0].clone()),
-        other => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        other => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             format!(
                 "schema_of: expected a type alias or schema dict, got {}",
                 other.type_name()
@@ -328,7 +328,7 @@ fn schema_omit_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 )]
 fn json_extract_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.is_empty() {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "json_extract requires at least 1 argument: text",
         ))));
     }
@@ -339,7 +339,7 @@ fn json_extract_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     let parsed = match serde_json::from_str::<serde_json::Value>(&json_str) {
         Ok(jv) => schema::json_to_vm_value(&jv),
         Err(e) => {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 format!("json_extract: failed to parse JSON: {e}"),
             ))));
         }
@@ -349,11 +349,11 @@ fn json_extract_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
         Some(k) => match &parsed {
             VmValue::Dict(map) => match map.get(&k) {
                 Some(val) => Ok(val.clone()),
-                None => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                None => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                     format!("json_extract: key '{k}' not found"),
                 )))),
             },
-            _ => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            _ => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 "json_extract: parsed value is not a dict, cannot extract key",
             )))),
         },
@@ -397,7 +397,7 @@ fn jq_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let expr = args[1].display();
     json_query::eval_jq(&args[0], &expr)
         .map(|values| VmValue::List(std::sync::Arc::new(values)))
-        .map_err(|error| VmError::Thrown(VmValue::String(std::sync::Arc::from(error))))
+        .map_err(|error| VmError::Thrown(VmValue::String(arcstr::ArcStr::from(error))))
 }
 
 #[harn_builtin(
@@ -409,7 +409,7 @@ fn jq_first_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
     let expr = args[1].display();
     json_query::eval_jq(&args[0], &expr)
         .map(|values| values.into_iter().next().unwrap_or(VmValue::Nil))
-        .map_err(|error| VmError::Thrown(VmValue::String(std::sync::Arc::from(error))))
+        .map_err(|error| VmError::Thrown(VmValue::String(arcstr::ArcStr::from(error))))
 }
 
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
@@ -448,7 +448,7 @@ fn json_pointer_tokens(ptr: &str, builtin: &str) -> Result<Vec<String>, VmError>
         return Ok(Vec::new());
     }
     if !ptr.starts_with('/') {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             format!("{builtin}: pointer must be empty or start with '/'"),
         ))));
     }
@@ -463,12 +463,12 @@ fn json_pointer_tokens(ptr: &str, builtin: &str) -> Result<Vec<String>, VmError>
                         Some('0') => decoded.push('~'),
                         Some('1') => decoded.push('/'),
                         Some(other) => {
-                            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                                 format!("{builtin}: invalid escape '~{other}' in pointer"),
                             ))));
                         }
                         None => {
-                            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                                 format!("{builtin}: dangling '~' in pointer"),
                             ))));
                         }
@@ -644,7 +644,7 @@ pub(crate) fn vm_value_to_data_value(value: &VmValue) -> serde_json::Value {
         VmValue::Float(_) => serde_json::Value::Null,
         // Decimal serializes as a string to preserve exact precision.
         VmValue::Decimal(d) => serde_json::json!(d.to_string()),
-        VmValue::String(s) => serde_json::json!(s.as_ref()),
+        VmValue::String(s) => serde_json::json!(s.as_str()),
         VmValue::Bool(b) => serde_json::json!(b),
         VmValue::Nil => serde_json::Value::Null,
         VmValue::List(items) => crate::value::recursion::guard_recursion(|| {
@@ -660,7 +660,7 @@ pub(crate) fn vm_value_to_data_value(value: &VmValue) -> serde_json::Value {
                     .collect(),
             )
         }),
-        VmValue::StructInstance { .. } => crate::value::recursion::guard_recursion(|| {
+        VmValue::StructInstance(_) => crate::value::recursion::guard_recursion(|| {
             serde_json::Value::Object(
                 value
                     .struct_fields_map()
@@ -743,7 +743,7 @@ fn write_vm_value_to_json(val: &VmValue, out: &mut String) {
             });
             out.push('}');
         }
-        VmValue::StructInstance { .. } => {
+        VmValue::StructInstance(_) => {
             out.push('{');
             crate::value::recursion::guard_recursion(|| {
                 for (i, (k, v)) in val

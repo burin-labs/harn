@@ -227,7 +227,7 @@ pub(crate) fn vm_build_llm_result(
             let violations: Vec<VmValue> = parse
                 .violations
                 .iter()
-                .map(|v| VmValue::String(std::sync::Arc::from(v.as_str())))
+                .map(|v| VmValue::String(arcstr::ArcStr::from(v.as_str())))
                 .collect();
             dict.insert(
                 "protocol_violations".to_string(),
@@ -238,7 +238,7 @@ pub(crate) fn vm_build_llm_result(
             let errors: Vec<VmValue> = parse
                 .errors
                 .iter()
-                .map(|e| VmValue::String(std::sync::Arc::from(e.as_str())))
+                .map(|e| VmValue::String(arcstr::ArcStr::from(e.as_str())))
                 .collect();
             dict.insert(
                 "tool_parse_errors".to_string(),

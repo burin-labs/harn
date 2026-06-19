@@ -1907,7 +1907,7 @@ mod tests {
     use super::*;
 
     fn vm_string(value: &str) -> VmValue {
-        VmValue::String(std::sync::Arc::from(value))
+        VmValue::String(arcstr::ArcStr::from(value))
     }
 
     fn dict(entries: Vec<(&str, VmValue)>) -> VmValue {

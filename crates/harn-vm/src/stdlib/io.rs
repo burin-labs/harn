@@ -566,9 +566,9 @@ fn color_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
     let text = args.first().map(|a| a.display()).unwrap_or_default();
     let name = args.get(1).map(|a| a.display()).unwrap_or_default();
     if !ansi_enabled_for_stream("stdout") {
-        return Ok(VmValue::String(std::sync::Arc::from(text)));
+        return Ok(VmValue::String(arcstr::ArcStr::from(text)));
     }
-    Ok(VmValue::String(std::sync::Arc::from(ansi_colorize(
+    Ok(VmValue::String(arcstr::ArcStr::from(ansi_colorize(
         &text, &name,
     ))))
 }
@@ -581,9 +581,9 @@ fn color_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 fn bold_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let text = args.first().map(|a| a.display()).unwrap_or_default();
     if !ansi_enabled_for_stream("stdout") {
-        return Ok(VmValue::String(std::sync::Arc::from(text)));
+        return Ok(VmValue::String(arcstr::ArcStr::from(text)));
     }
-    Ok(VmValue::String(std::sync::Arc::from(format!(
+    Ok(VmValue::String(arcstr::ArcStr::from(format!(
         "\u{1b}[1m{text}\u{1b}[0m"
     ))))
 }
@@ -596,9 +596,9 @@ fn bold_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
 fn dim_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let text = args.first().map(|a| a.display()).unwrap_or_default();
     if !ansi_enabled_for_stream("stdout") {
-        return Ok(VmValue::String(std::sync::Arc::from(text)));
+        return Ok(VmValue::String(arcstr::ArcStr::from(text)));
     }
-    Ok(VmValue::String(std::sync::Arc::from(format!(
+    Ok(VmValue::String(arcstr::ArcStr::from(format!(
         "\u{1b}[2m{text}\u{1b}[0m"
     ))))
 }
@@ -615,7 +615,7 @@ fn set_color_mode_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue
         "always" => ColorMode::Always,
         "never" => ColorMode::Never,
         other => {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 format!(
                 "set_color_mode: invalid mode '{other}'. Expected 'auto', 'always', or 'never'."
             ),
@@ -638,7 +638,7 @@ fn ansi_enabled_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
         .unwrap_or_else(|| "stdout".to_string());
     match stream.as_str() {
         "stdin" | "stdout" | "stderr" => Ok(VmValue::Bool(ansi_enabled_for_stream(&stream))),
-        other => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        other => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             format!(
             "__ansi_enabled: invalid stream '{other}'. Expected 'stdin', 'stdout', or 'stderr'."
         ),
@@ -657,10 +657,10 @@ fn read_stdin_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     if let Some(buf) = mocked {
         // After read_stdin, future read_line calls return nil because stdin is consumed.
         STDIN_LINES.with(|lines| *lines.borrow_mut() = Some(VecDeque::new()));
-        return Ok(VmValue::String(std::sync::Arc::from(buf)));
+        return Ok(VmValue::String(arcstr::ArcStr::from(buf)));
     }
     match read_stdin_all_real() {
-        Some(s) => Ok(VmValue::String(std::sync::Arc::from(s))),
+        Some(s) => Ok(VmValue::String(arcstr::ArcStr::from(s))),
         None => Ok(VmValue::Nil),
     }
 }
@@ -671,7 +671,7 @@ pub(crate) fn read_line_legacy_value() -> VmValue {
         ..ReadLineOptions::default()
     };
     match read_line_from_mock_or_real(&options) {
-        ReadLineOutcome::Ok(line) => VmValue::String(std::sync::Arc::from(line)),
+        ReadLineOutcome::Ok(line) => VmValue::String(arcstr::ArcStr::from(line)),
         ReadLineOutcome::Eof => VmValue::Nil,
         #[cfg(unix)]
         ReadLineOutcome::Timeout => VmValue::Nil,
@@ -826,7 +826,7 @@ fn mock_tty_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
             "stdout" => mock.stdout = Some(is_tty),
             "stderr" => mock.stderr = Some(is_tty),
             other => {
-                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                     format!(
                     "mock_tty: invalid stream '{other}'. Expected 'stdin', 'stdout', or 'stderr'."
                 ),
@@ -866,7 +866,7 @@ fn capture_stderr_start_builtin(_args: &[VmValue], _out: &mut String) -> Result<
 fn capture_stderr_take_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let buf = STDERR_BUFFER.with(|s| std::mem::take(&mut *s.borrow_mut()));
     STDERR_CAPTURING.with(|c| *c.borrow_mut() = false);
-    Ok(VmValue::String(std::sync::Arc::from(buf)))
+    Ok(VmValue::String(arcstr::ArcStr::from(buf)))
 }
 
 #[harn_builtin(
@@ -875,7 +875,7 @@ fn capture_stderr_take_builtin(_args: &[VmValue], _out: &mut String) -> Result<V
     doc = "Generate a random version 4 UUID."
 )]
 fn uuid_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    Ok(VmValue::String(std::sync::Arc::from(
+    Ok(VmValue::String(arcstr::ArcStr::from(
         uuid::Uuid::new_v4().to_string(),
     )))
 }
@@ -888,7 +888,7 @@ fn uuid_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 fn uuid_parse_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let raw = args.first().map(|a| a.display()).unwrap_or_default();
     match uuid::Uuid::parse_str(&raw) {
-        Ok(uuid) => Ok(VmValue::String(std::sync::Arc::from(uuid.to_string()))),
+        Ok(uuid) => Ok(VmValue::String(arcstr::ArcStr::from(uuid.to_string()))),
         Err(_) => Ok(VmValue::Nil),
     }
 }
@@ -899,7 +899,7 @@ fn uuid_parse_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     doc = "Generate a time-ordered version 7 UUID."
 )]
 fn uuid_v7_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    Ok(VmValue::String(std::sync::Arc::from(
+    Ok(VmValue::String(arcstr::ArcStr::from(
         uuid::Uuid::now_v7().to_string(),
     )))
 }
@@ -920,7 +920,7 @@ fn uuid_v5_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
         VmError::Runtime("uuid_v5: namespace must be a UUID or one of dns/url/oid/x500".to_string())
     })?;
     let name = args[1].display();
-    Ok(VmValue::String(std::sync::Arc::from(
+    Ok(VmValue::String(arcstr::ArcStr::from(
         uuid::Uuid::new_v5(&namespace, name.as_bytes()).to_string(),
     )))
 }
@@ -931,7 +931,7 @@ fn uuid_v5_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     doc = "Return the nil UUID."
 )]
 fn uuid_nil_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    Ok(VmValue::String(std::sync::Arc::from(
+    Ok(VmValue::String(arcstr::ArcStr::from(
         uuid::Uuid::nil().to_string(),
     )))
 }
@@ -944,7 +944,7 @@ pub(crate) fn prompt_user_value(args: &[VmValue], out: &mut String) -> Result<Vm
         ..ReadLineOptions::default()
     };
     match read_line_from_mock_or_real(&options) {
-        ReadLineOutcome::Ok(line) => Ok(VmValue::String(std::sync::Arc::from(
+        ReadLineOutcome::Ok(line) => Ok(VmValue::String(arcstr::ArcStr::from(
             line.trim_end().to_string(),
         ))),
         ReadLineOutcome::Eof => Ok(VmValue::Nil),
@@ -964,7 +964,7 @@ pub(crate) fn read_password_legacy_value(prompt: &str) -> Result<VmValue, VmErro
         ..ReadLineOptions::default()
     };
     match read_line_from_mock_or_real(&options) {
-        ReadLineOutcome::Ok(line) => Ok(VmValue::String(std::sync::Arc::from(line))),
+        ReadLineOutcome::Ok(line) => Ok(VmValue::String(arcstr::ArcStr::from(line))),
         ReadLineOutcome::Eof => Err(VmError::Runtime(
             "HarnessTerm.read_password: stdin reached EOF".to_string(),
         )),
@@ -1034,7 +1034,7 @@ fn log_set_level_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue,
             VM_MIN_LOG_LEVEL.store(n, Ordering::Relaxed);
             Ok(VmValue::Nil)
         }
-        None => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        None => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             format!(
                 "log_set_level: invalid level '{level_str}'. Expected debug, info, warn, or error"
             ),
@@ -1225,8 +1225,8 @@ mod tests {
         options.insert("width".to_string(), VmValue::Int(10));
 
         let line = render_progress_line(&[
-            VmValue::String(std::sync::Arc::from("build")),
-            VmValue::String(std::sync::Arc::from("Compiling")),
+            VmValue::String(arcstr::ArcStr::from("build")),
+            VmValue::String(arcstr::ArcStr::from("Compiling")),
             VmValue::dict(options),
         ]);
 
@@ -1240,8 +1240,8 @@ mod tests {
         options.insert("step".to_string(), VmValue::Int(2));
 
         let line = render_progress_line(&[
-            VmValue::String(std::sync::Arc::from("sync")),
-            VmValue::String(std::sync::Arc::from("Waiting")),
+            VmValue::String(arcstr::ArcStr::from("sync")),
+            VmValue::String(arcstr::ArcStr::from("Waiting")),
             VmValue::dict(options),
         ]);
 

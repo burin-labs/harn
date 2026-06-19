@@ -1256,7 +1256,7 @@ pub fn scan(event: TriggerEvent) -> dict {
                     // it by bare name, exactly like the stdlib builtins.
                     vm.register_builtin("host_echo", |args, _out| {
                         let x = args.first().map(|a| a.display()).unwrap_or_default();
-                        Ok(harn_vm::VmValue::String(std::sync::Arc::from(
+                        Ok(harn_vm::VmValue::String(arcstr::ArcStr::from(
                             format!("host:{x}").as_str(),
                         )))
                     });

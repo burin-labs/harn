@@ -1,10 +1,8 @@
-use std::sync::Arc;
-
 use crate::value::{string_char_count, VmError, VmValue};
 
 impl crate::vm::Vm {
     pub(super) fn call_string_method(
-        s: &Arc<str>,
+        s: &arcstr::ArcStr,
         method: &str,
         args: &[VmValue],
     ) -> Result<VmValue, VmError> {
@@ -14,7 +12,7 @@ impl crate::vm::Vm {
             "contains" => Ok(VmValue::Bool(
                 s.contains(&*args.first().map(|a| a.as_str_cow()).unwrap_or_default()),
             )),
-            "replace" if args.len() >= 2 => Ok(VmValue::String(std::sync::Arc::from(
+            "replace" if args.len() >= 2 => Ok(VmValue::String(arcstr::ArcStr::from(
                 s.replace(&*args[0].as_str_cow(), &args[1].as_str_cow()),
             ))),
             "split" => {
@@ -24,20 +22,20 @@ impl crate::vm::Vm {
                     .unwrap_or(std::borrow::Cow::Borrowed(","));
                 Ok(VmValue::List(std::sync::Arc::new(
                     s.split(&*sep)
-                        .map(|p| VmValue::String(std::sync::Arc::from(p)))
+                        .map(|p| VmValue::String(arcstr::ArcStr::from(p)))
                         .collect(),
                 )))
             }
-            "trim" => Ok(VmValue::String(std::sync::Arc::from(s.trim()))),
+            "trim" => Ok(VmValue::String(arcstr::ArcStr::from(s.trim()))),
             "starts_with" => Ok(VmValue::Bool(
                 s.starts_with(&*args.first().map(|a| a.as_str_cow()).unwrap_or_default()),
             )),
             "ends_with" => Ok(VmValue::Bool(
                 s.ends_with(&*args.first().map(|a| a.as_str_cow()).unwrap_or_default()),
             )),
-            "lowercase" => Ok(VmValue::String(std::sync::Arc::from(s.to_lowercase()))),
-            "uppercase" => Ok(VmValue::String(std::sync::Arc::from(s.to_uppercase()))),
-            "substring" => Ok(VmValue::String(std::sync::Arc::from(
+            "lowercase" => Ok(VmValue::String(arcstr::ArcStr::from(s.to_lowercase()))),
+            "uppercase" => Ok(VmValue::String(arcstr::ArcStr::from(s.to_uppercase()))),
+            "substring" => Ok(VmValue::String(arcstr::ArcStr::from(
                 crate::stdlib::strings::char_substring(
                     s,
                     args.first().and_then(|a| a.as_int()).unwrap_or(0),
@@ -55,9 +53,9 @@ impl crate::vm::Vm {
             "repeat" => {
                 let n = args.first().and_then(|a| a.as_int()).unwrap_or(1);
                 let repeated = crate::limits::checked_repeat(s, n.max(0) as usize)?;
-                Ok(VmValue::String(std::sync::Arc::from(repeated)))
+                Ok(VmValue::String(arcstr::ArcStr::from(repeated)))
             }
-            "reverse" => Ok(VmValue::String(std::sync::Arc::from(
+            "reverse" => Ok(VmValue::String(arcstr::ArcStr::from(
                 s.chars().rev().collect::<String>(),
             ))),
             "pad_left" | "pad_right" => {
@@ -70,7 +68,7 @@ impl crate::vm::Vm {
                     .unwrap_or(' ');
                 let current_len = string_char_count(s);
                 if current_len >= width {
-                    Ok(VmValue::String(Arc::clone(s)))
+                    Ok(VmValue::String(s.clone()))
                 } else {
                     // Cap script-controlled pad widths so a huge `width` errors
                     // cleanly instead of allocating gigabytes.
@@ -79,21 +77,21 @@ impl crate::vm::Vm {
                         width - current_len,
                     )?;
                     if left {
-                        Ok(VmValue::String(std::sync::Arc::from(format!(
+                        Ok(VmValue::String(arcstr::ArcStr::from(format!(
                             "{padding}{s}"
                         ))))
                     } else {
-                        Ok(VmValue::String(std::sync::Arc::from(format!(
+                        Ok(VmValue::String(arcstr::ArcStr::from(format!(
                             "{s}{padding}"
                         ))))
                     }
                 }
             }
-            "trim_start" => Ok(VmValue::String(std::sync::Arc::from(s.trim_start()))),
-            "trim_end" => Ok(VmValue::String(std::sync::Arc::from(s.trim_end()))),
+            "trim_start" => Ok(VmValue::String(arcstr::ArcStr::from(s.trim_start()))),
+            "trim_end" => Ok(VmValue::String(arcstr::ArcStr::from(s.trim_end()))),
             "lines" => Ok(VmValue::List(std::sync::Arc::new(
                 s.lines()
-                    .map(|l| VmValue::String(std::sync::Arc::from(l)))
+                    .map(|l| VmValue::String(arcstr::ArcStr::from(l)))
                     .collect(),
             ))),
             "char_at" => {
@@ -113,8 +111,8 @@ impl crate::vm::Vm {
                     .map(|byte_pos| s[..byte_pos].chars().count() as i64);
                 Ok(VmValue::Int(idx.unwrap_or(-1)))
             }
-            "lower" | "to_lower" => Ok(VmValue::String(std::sync::Arc::from(s.to_lowercase()))),
-            "upper" | "to_upper" => Ok(VmValue::String(std::sync::Arc::from(s.to_uppercase()))),
+            "lower" | "to_lower" => Ok(VmValue::String(arcstr::ArcStr::from(s.to_lowercase()))),
+            "upper" | "to_upper" => Ok(VmValue::String(arcstr::ArcStr::from(s.to_uppercase()))),
             "len" => Ok(VmValue::Int(string_char_count(s) as i64)),
             _ => Err(VmError::Runtime(format!("string has no method `{method}`"))),
         }

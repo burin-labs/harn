@@ -35,6 +35,6 @@ impl TemplateError {
 
 impl From<TemplateError> for VmError {
     fn from(e: TemplateError) -> Self {
-        VmError::Thrown(VmValue::String(std::sync::Arc::from(e.message())))
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(e.message())))
     }
 }

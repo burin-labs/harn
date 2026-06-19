@@ -43,14 +43,14 @@ pub(super) fn parse_api_mode_option(
                     Ok(crate::llm::api::LlmApiMode::ChatCompletions)
                 }
                 "responses" | "response" => Ok(crate::llm::api::LlmApiMode::Responses),
-                other => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                other => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                     format!(
                         "api_mode: expected \"chat_completions\" or \"responses\", got \"{other}\""
                     ),
                 )))),
             }
         }
-        other => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        other => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             format!("api_mode: expected a string, got {}", other.type_name()),
         )))),
     }
@@ -76,9 +76,9 @@ pub(super) fn parse_provider_tools_option(
         VmValue::List(list) => list
             .iter()
             .map(|value| match value {
-                VmValue::String(kind) => Ok(serde_json::json!({"type": kind.as_ref()})),
+                VmValue::String(kind) => Ok(serde_json::json!({"type": kind.as_str()})),
                 VmValue::Dict(_) => Ok(vm_value_to_json(value)),
-                other => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                other => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                     format!(
                         "provider_tools: expected each entry to be a dict or string, got {}",
                         other.type_name()
@@ -86,7 +86,7 @@ pub(super) fn parse_provider_tools_option(
                 )))),
             })
             .collect(),
-        other => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        other => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             format!(
                 "provider_tools: expected a list or dict, got {}",
                 other.type_name()
@@ -102,7 +102,7 @@ pub(super) fn opt_bool_field(
     match options.and_then(|o| o.get(key)) {
         None | Some(VmValue::Nil) => Ok(None),
         Some(VmValue::Bool(value)) => Ok(Some(*value)),
-        Some(other) => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        Some(other) => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             format!("{key}: expected a bool, got {}", other.type_name()),
         )))),
     }
@@ -134,7 +134,7 @@ pub(super) fn parse_schema_value(
             .map(vm_value_dict_to_json)
             .map(Some)
             .ok_or_else(|| {
-                VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+                VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
                     "{field}: expected a JSON Schema object"
                 ))))
             }),
@@ -142,11 +142,11 @@ pub(super) fn parse_schema_value(
 }
 
 pub(super) fn output_format_error(message: impl Into<String>) -> VmError {
-    VmError::Thrown(VmValue::String(std::sync::Arc::from(message.into())))
+    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message.into())))
 }
 
 pub(super) fn unsupported_option_error(option: &str, provider: &str, model: &str) -> VmError {
-    VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
         "option `{option}` is not supported by `{model}` (provider `{provider}`). See `harn providers matrix` for compatibility."
     ))))
 }

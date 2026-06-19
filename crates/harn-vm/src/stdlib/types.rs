@@ -13,13 +13,13 @@ pub(crate) fn register_type_builtins(vm: &mut Vm) {
 #[harn_builtin(sig = "type_of(...args: any) -> string", category = "types")]
 fn type_of_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = args.first().unwrap_or(&VmValue::Nil);
-    Ok(VmValue::String(std::sync::Arc::from(val.type_name())))
+    Ok(VmValue::String(arcstr::ArcStr::from(val.type_name())))
 }
 
 #[harn_builtin(sig = "to_string(...args: any) -> string", category = "types")]
 fn to_string_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = args.first().unwrap_or(&VmValue::Nil);
-    Ok(VmValue::String(std::sync::Arc::from(val.display())))
+    Ok(VmValue::String(arcstr::ArcStr::from(val.display())))
 }
 
 #[harn_builtin(sig = "to_int(...args: any) -> int", category = "types")]
@@ -85,19 +85,19 @@ fn to_float_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 )]
 fn decimal_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     fn throw(message: String) -> VmError {
-        VmError::Thrown(VmValue::String(std::sync::Arc::from(message)))
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message)))
     }
     let val = args.first().unwrap_or(&VmValue::Nil);
     match val {
-        VmValue::Decimal(d) => Ok(VmValue::Decimal(*d)),
-        VmValue::Int(n) => Ok(VmValue::Decimal(rust_decimal::Decimal::from(*n))),
+        VmValue::Decimal(d) => Ok(VmValue::decimal(**d)),
+        VmValue::Int(n) => Ok(VmValue::decimal(rust_decimal::Decimal::from(*n))),
         VmValue::String(s) => s
             .trim()
             .parse::<rust_decimal::Decimal>()
-            .map(VmValue::Decimal)
+            .map(VmValue::decimal)
             .map_err(|_| throw(format!("decimal: cannot parse {s:?} as a decimal"))),
         VmValue::Float(f) => rust_decimal::Decimal::from_f64_retain(*f)
-            .map(VmValue::Decimal)
+            .map(VmValue::decimal)
             .ok_or_else(|| throw(format!("decimal: cannot represent {f} as a decimal"))),
         other => Err(throw(format!(
             "decimal: cannot convert {} to a decimal",
@@ -240,7 +240,7 @@ fn is_same_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
 #[harn_builtin(sig = "addr_of(value: any) -> string", category = "types")]
 fn addr_of_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let v = args.first().unwrap_or(&VmValue::Nil);
-    Ok(VmValue::String(std::sync::Arc::from(
+    Ok(VmValue::String(arcstr::ArcStr::from(
         crate::value::value_identity_key(v),
     )))
 }
@@ -317,7 +317,7 @@ mod tests {
 
     #[test]
     fn to_int_and_to_float_trim_surrounding_whitespace() {
-        let s = |text: &str| VmValue::String(std::sync::Arc::from(text));
+        let s = |text: &str| VmValue::String(arcstr::ArcStr::from(text));
         assert!(matches!(
             to_int_impl(&[s("  42  ")], &mut String::new()).unwrap(),
             VmValue::Int(42)

@@ -9,7 +9,7 @@ fn dict(pairs: &[(&str, VmValue)]) -> crate::value::DictMap {
 }
 
 fn s(v: &str) -> VmValue {
-    VmValue::String(std::sync::Arc::from(v))
+    VmValue::String(arcstr::ArcStr::from(v))
 }
 
 fn render(tpl: &str, b: &crate::value::DictMap) -> String {

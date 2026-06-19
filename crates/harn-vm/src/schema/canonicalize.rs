@@ -443,7 +443,7 @@ fn normalize_string_list(value: &VmValue) -> VmValue {
         VmValue::List(items) => VmValue::List(std::sync::Arc::new(
             items
                 .iter()
-                .map(|item| VmValue::String(std::sync::Arc::from(item.display())))
+                .map(|item| VmValue::String(arcstr::ArcStr::from(item.display())))
                 .collect(),
         )),
         _ => VmValue::List(std::sync::Arc::new(Vec::new())),
@@ -741,7 +741,7 @@ pub fn json_to_vm_value(jv: &serde_json::Value) -> VmValue {
                 VmValue::Float(n.as_f64().unwrap_or(0.0))
             }
         }
-        serde_json::Value::String(s) => VmValue::String(std::sync::Arc::from(s.as_str())),
+        serde_json::Value::String(s) => VmValue::String(arcstr::ArcStr::from(s.as_str())),
         serde_json::Value::Array(arr) => VmValue::List(std::sync::Arc::new(
             arr.iter().map(json_to_vm_value).collect(),
         )),

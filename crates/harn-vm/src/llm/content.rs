@@ -35,7 +35,7 @@ impl ImageContent {
             .filter(|value| !value.is_empty())
             .map(str::to_string);
         if url.is_some() == base64.is_some() {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 "llm_call image content requires exactly one of url or base64",
             ))));
         }
@@ -45,7 +45,7 @@ impl ImageContent {
             .and_then(|value| value.as_str())
             .filter(|value| !value.is_empty())
             .ok_or_else(|| {
-                VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                     "llm_call image content requires media_type",
                 )))
             })?
@@ -57,7 +57,7 @@ impl ImageContent {
             .map(str::to_string);
         if let Some(detail) = detail.as_deref() {
             if !matches!(detail, "low" | "high" | "auto") {
-                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                     "llm_call image detail must be \"low\", \"high\", or \"auto\"",
                 ))));
             }
@@ -109,7 +109,7 @@ impl VideoContent {
             .filter(|value| !value.is_empty())
             .map(str::to_string);
         if url.is_some() == base64.is_some() {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 "llm_call video content requires exactly one of url or base64",
             ))));
         }
@@ -213,7 +213,7 @@ impl FileContent {
             .map(str::to_string);
         let source_count = url.is_some() as u8 + base64.is_some() as u8 + file_id.is_some() as u8;
         if source_count != 1 {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 format!(
                     "llm_call {} content requires exactly one of url, base64, or file_id",
                     kind.harn_type()
@@ -228,7 +228,7 @@ impl FileContent {
             .map(str::to_string)
             .unwrap_or_else(|| kind.default_media_type().to_string());
         if media_type.is_empty() {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 format!("llm_call {} content requires media_type", kind.harn_type()),
             ))));
         }

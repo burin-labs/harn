@@ -145,7 +145,10 @@ fn register_postgres_namespace(vm: &mut Vm) {
     vm.set_global(
         "pg",
         VmValue::dict(crate::value::DictMap::from_iter([
-            ("_namespace".to_string(), VmValue::String(Arc::from("pg"))),
+            (
+                "_namespace".to_string(),
+                VmValue::String(arcstr::ArcStr::from("pg")),
+            ),
             ("jsonb".to_string(), jsonb),
         ])),
     );
@@ -155,12 +158,12 @@ fn namespace(name: &str, entries: &[(&str, &str)]) -> VmValue {
     VmValue::dict(
         std::iter::once((
             "_namespace".to_string(),
-            VmValue::String(Arc::from(name.to_string())),
+            VmValue::String(arcstr::ArcStr::from(name.to_string())),
         ))
         .chain(entries.iter().map(|(field, builtin)| {
             (
                 (*field).to_string(),
-                VmValue::BuiltinRef(Arc::from(*builtin)),
+                VmValue::BuiltinRef(arcstr::ArcStr::from(*builtin)),
             )
         }))
         .collect::<BTreeMap<_, _>>(),
@@ -1167,8 +1170,8 @@ async fn apply_transaction_settings(
             )));
         }
         let params = vec![
-            VmValue::String(std::sync::Arc::from(key.as_str())),
-            VmValue::String(std::sync::Arc::from(value.display())),
+            VmValue::String(arcstr::ArcStr::from(key.as_str())),
+            VmValue::String(arcstr::ArcStr::from(value.display())),
         ];
         let sql = "select set_config($1, $2, true)";
         let tx = tx_by_id(tx_id)?;
@@ -1204,7 +1207,7 @@ fn reject_non_finite_floats(value: &VmValue) -> Result<(), VmError> {
         VmValue::Float(f) if !f.is_finite() => Err(non_finite_float_error()),
         VmValue::List(list) => list.iter().try_for_each(reject_non_finite_floats),
         VmValue::Dict(dict) => dict.values().try_for_each(reject_non_finite_floats),
-        VmValue::StructInstance { .. } => value
+        VmValue::StructInstance(_) => value
             .struct_fields_map()
             .unwrap_or_default()
             .values()
@@ -1297,7 +1300,7 @@ fn bind_one<'q>(
         VmValue::Duration(ms) => query.bind(*ms),
         // Bind exact decimals to NUMERIC/DECIMAL columns without going through
         // a lossy float — sqlx encodes `rust_decimal::Decimal` natively.
-        VmValue::Decimal(value) => query.bind(*value),
+        VmValue::Decimal(value) => query.bind(**value),
         value => query.bind(sqlx_core::types::Json(vm_value_to_json(value))),
     })
 }
@@ -1577,15 +1580,15 @@ fn column_value(row: &PgRow, index: usize, type_name: &str) -> Result<VmValue, V
         // code reads money columns as `::text`. Wrap the text in `decimal(...)`
         // to get an exact decimal value. (The bind path above DOES accept a
         // `decimal` and encodes it to NUMERIC natively.)
-        "NUMERIC" => VmValue::String(std::sync::Arc::from(
+        "NUMERIC" => VmValue::String(arcstr::ArcStr::from(
             row.try_get::<rust_decimal::Decimal, _>(index)
                 .map_err(decode_error)?
                 .to_string(),
         )),
-        "TEXT" | "VARCHAR" | "BPCHAR" | "NAME" => VmValue::String(std::sync::Arc::from(
+        "TEXT" | "VARCHAR" | "BPCHAR" | "NAME" => VmValue::String(arcstr::ArcStr::from(
             row.try_get::<String, _>(index).map_err(decode_error)?,
         )),
-        "UUID" => VmValue::String(std::sync::Arc::from(
+        "UUID" => VmValue::String(arcstr::ArcStr::from(
             row.try_get::<uuid::Uuid, _>(index)
                 .map_err(decode_error)?
                 .to_string(),
@@ -1599,22 +1602,22 @@ fn column_value(row: &PgRow, index: usize, type_name: &str) -> Result<VmValue, V
         "BYTEA" => VmValue::Bytes(std::sync::Arc::new(
             row.try_get::<Vec<u8>, _>(index).map_err(decode_error)?,
         )),
-        "DATE" => VmValue::String(std::sync::Arc::from(
+        "DATE" => VmValue::String(arcstr::ArcStr::from(
             row.try_get::<time::Date, _>(index)
                 .map_err(decode_error)?
                 .to_string(),
         )),
-        "TIME" => VmValue::String(std::sync::Arc::from(
+        "TIME" => VmValue::String(arcstr::ArcStr::from(
             row.try_get::<time::Time, _>(index)
                 .map_err(decode_error)?
                 .to_string(),
         )),
-        "TIMESTAMP" => VmValue::String(std::sync::Arc::from(
+        "TIMESTAMP" => VmValue::String(arcstr::ArcStr::from(
             row.try_get::<time::PrimitiveDateTime, _>(index)
                 .map_err(decode_error)?
                 .to_string(),
         )),
-        "TIMESTAMPTZ" => VmValue::String(std::sync::Arc::from(
+        "TIMESTAMPTZ" => VmValue::String(arcstr::ArcStr::from(
             row.try_get::<time::OffsetDateTime, _>(index)
                 .map_err(decode_error)?
                 .to_string(),
@@ -1629,10 +1632,10 @@ fn column_value(row: &PgRow, index: usize, type_name: &str) -> Result<VmValue, V
         "FLOAT4[]" => decode_array::<f32>(row, index, |v| VmValue::Float(f64::from(v)))?,
         "FLOAT8[]" => decode_array::<f64>(row, index, VmValue::Float)?,
         "TEXT[]" | "VARCHAR[]" => {
-            decode_array::<String>(row, index, |v| VmValue::String(std::sync::Arc::from(v)))?
+            decode_array::<String>(row, index, |v| VmValue::String(arcstr::ArcStr::from(v)))?
         }
         "UUID[]" => decode_array::<uuid::Uuid>(row, index, |v| {
-            VmValue::String(std::sync::Arc::from(v.to_string()))
+            VmValue::String(arcstr::ArcStr::from(v.to_string()))
         })?,
         "JSON[]" | "JSONB[]" => {
             let values: Vec<serde_json::Value> = row.try_get(index).map_err(decode_error)?;
@@ -1653,22 +1656,22 @@ fn column_value(row: &PgRow, index: usize, type_name: &str) -> Result<VmValue, V
         "NUMRANGE" => range_value(
             row.try_get::<sqlx_postgres::types::PgRange<rust_decimal::Decimal>, _>(index)
                 .map_err(decode_error)?,
-            |v| VmValue::String(Arc::from(v.to_string())),
+            |v| VmValue::String(arcstr::ArcStr::from(v.to_string())),
         ),
         "DATERANGE" => range_value(
             row.try_get::<sqlx_postgres::types::PgRange<time::Date>, _>(index)
                 .map_err(decode_error)?,
-            |v| VmValue::String(Arc::from(v.to_string())),
+            |v| VmValue::String(arcstr::ArcStr::from(v.to_string())),
         ),
         "TSRANGE" => range_value(
             row.try_get::<sqlx_postgres::types::PgRange<time::PrimitiveDateTime>, _>(index)
                 .map_err(decode_error)?,
-            |v| VmValue::String(Arc::from(v.to_string())),
+            |v| VmValue::String(arcstr::ArcStr::from(v.to_string())),
         ),
         "TSTZRANGE" => range_value(
             row.try_get::<sqlx_postgres::types::PgRange<time::OffsetDateTime>, _>(index)
                 .map_err(decode_error)?,
-            |v| VmValue::String(Arc::from(v.to_string())),
+            |v| VmValue::String(arcstr::ArcStr::from(v.to_string())),
         ),
         // HSTORE decodes as a Harn dict<string, string|nil>. sqlx surfaces
         // it as `BTreeMap<String, Option<String>>` already.
@@ -1679,7 +1682,7 @@ fn column_value(row: &PgRow, index: usize, type_name: &str) -> Result<VmValue, V
                 dict.insert(
                     key,
                     value
-                        .map(|v| VmValue::String(std::sync::Arc::from(v)))
+                        .map(|v| VmValue::String(arcstr::ArcStr::from(v)))
                         .unwrap_or(VmValue::Nil),
                 );
             }
@@ -1739,7 +1742,7 @@ fn column_value(row: &PgRow, index: usize, type_name: &str) -> Result<VmValue, V
                 ("radius", VmValue::Float(circle.radius)),
             ])
         }
-        _ => VmValue::String(std::sync::Arc::from(
+        _ => VmValue::String(arcstr::ArcStr::from(
             row.try_get::<String, _>(index).map_err(|error| {
                 runtime_error(format!(
                     "pg_query: unsupported column type {type_name}: {error}"
@@ -1957,7 +1960,7 @@ async fn secret_url(ctx: &crate::vm::AsyncBuiltinCtx, secret_id: &str) -> Result
     let value = child_vm
         .call_named_builtin(
             "secret_get",
-            vec![VmValue::String(std::sync::Arc::from(
+            vec![VmValue::String(arcstr::ArcStr::from(
                 secret_id.trim().to_string(),
             ))],
         )

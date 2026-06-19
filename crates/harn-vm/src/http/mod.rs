@@ -90,7 +90,7 @@ pub fn reset_http_state() {
 }
 
 pub(super) fn vm_error(message: impl Into<String>) -> VmError {
-    VmError::Thrown(VmValue::String(std::sync::Arc::from(message.into())))
+    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message.into())))
 }
 
 pub(super) fn next_transport_handle(prefix: &str) -> String {
@@ -679,7 +679,7 @@ fn register_http_tls_builtins(vm: &mut Vm) {
             VmValue::List(std::sync::Arc::new(
                 hosts
                     .into_iter()
-                    .map(|host| VmValue::String(std::sync::Arc::from(host)))
+                    .map(|host| VmValue::String(arcstr::ArcStr::from(host)))
                     .collect(),
             )),
         );
@@ -1124,7 +1124,7 @@ fn http_server_security_headers(config: &crate::value::DictMap) -> crate::value:
     }
     crate::value::DictMap::from_iter([(
         "strict-transport-security".to_string(),
-        VmValue::String(std::sync::Arc::from(value)),
+        VmValue::String(arcstr::ArcStr::from(value)),
     )])
 }
 

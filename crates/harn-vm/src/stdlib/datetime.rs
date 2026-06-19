@@ -34,7 +34,7 @@ fn date_now_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 
 #[harn_builtin(sig = "date_now_iso() -> string", category = "datetime")]
 fn date_now_iso_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    Ok(VmValue::String(std::sync::Arc::from(
+    Ok(VmValue::String(arcstr::ArcStr::from(
         Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
     )))
 }
@@ -51,11 +51,11 @@ fn date_format_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
         .unwrap_or_else(|| DEFAULT_FORMAT.to_string());
     if let Some(tz_arg) = args.get(2) {
         let tz = parse_timezone(&tz_arg.display(), "date_format")?;
-        return Ok(VmValue::String(std::sync::Arc::from(
+        return Ok(VmValue::String(arcstr::ArcStr::from(
             dt.with_timezone(&tz).format(&fmt).to_string(),
         )));
     }
-    Ok(VmValue::String(std::sync::Arc::from(
+    Ok(VmValue::String(arcstr::ArcStr::from(
         dt.format(&fmt).to_string(),
     )))
 }
@@ -93,7 +93,7 @@ fn date_to_zone_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     let dt = datetime_from_arg(args.first(), "date_to_zone")?;
     let tz_arg = require_arg(args, 1, "date_to_zone", "timezone")?;
     let tz = parse_timezone(&tz_arg.display(), "date_to_zone")?;
-    Ok(VmValue::String(std::sync::Arc::from(
+    Ok(VmValue::String(arcstr::ArcStr::from(
         dt.with_timezone(&tz).to_rfc3339(),
     )))
 }
@@ -195,7 +195,7 @@ fn duration_to_seconds_impl(args: &[VmValue], _out: &mut String) -> Result<VmVal
 )]
 fn duration_to_human_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let duration = require_duration(args.first(), "duration_to_human")?;
-    Ok(VmValue::String(std::sync::Arc::from(
+    Ok(VmValue::String(arcstr::ArcStr::from(
         format_duration_human(duration),
     )))
 }
@@ -213,7 +213,7 @@ fn weekday_name_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
             dt.with_timezone(&tz).format("%A").to_string()
         }
     };
-    Ok(VmValue::String(std::sync::Arc::from(name)))
+    Ok(VmValue::String(arcstr::ArcStr::from(name)))
 }
 
 #[harn_builtin(
@@ -229,7 +229,7 @@ fn month_name_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
             dt.with_timezone(&tz).format("%B").to_string()
         }
     };
-    Ok(VmValue::String(std::sync::Arc::from(name)))
+    Ok(VmValue::String(arcstr::ArcStr::from(name)))
 }
 
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
@@ -278,7 +278,7 @@ fn require_dict<'a>(
 }
 
 pub(crate) fn vm_error(message: impl Into<String>) -> VmError {
-    VmError::Thrown(VmValue::String(std::sync::Arc::from(message.into())))
+    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message.into())))
 }
 
 fn utc_datetime_dict(dt: DateTime<Utc>) -> crate::value::DictMap {

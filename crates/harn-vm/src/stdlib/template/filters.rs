@@ -28,19 +28,19 @@ pub(super) fn apply_filter(
     match name {
         "upper" => {
             need(0, args)?;
-            Ok(VmValue::String(std::sync::Arc::from(
+            Ok(VmValue::String(arcstr::ArcStr::from(
                 str_of(v).to_uppercase(),
             )))
         }
         "lower" => {
             need(0, args)?;
-            Ok(VmValue::String(std::sync::Arc::from(
+            Ok(VmValue::String(arcstr::ArcStr::from(
                 str_of(v).to_lowercase(),
             )))
         }
         "trim" => {
             need(0, args)?;
-            Ok(VmValue::String(std::sync::Arc::from(str_of(v).trim())))
+            Ok(VmValue::String(arcstr::ArcStr::from(str_of(v).trim())))
         }
         "capitalize" => {
             need(0, args)?;
@@ -53,7 +53,7 @@ pub(super) fn apply_filter(
             for c in chars {
                 out.extend(c.to_lowercase());
             }
-            Ok(VmValue::String(std::sync::Arc::from(out)))
+            Ok(VmValue::String(arcstr::ArcStr::from(out)))
         }
         "title" => {
             need(0, args)?;
@@ -71,7 +71,7 @@ pub(super) fn apply_filter(
                     out.extend(c.to_lowercase());
                 }
             }
-            Ok(VmValue::String(std::sync::Arc::from(out)))
+            Ok(VmValue::String(arcstr::ArcStr::from(out)))
         }
         "length" => {
             need(0, args)?;
@@ -100,7 +100,7 @@ pub(super) fn apply_filter(
                 VmValue::String(s) => s
                     .chars()
                     .next()
-                    .map(|c| VmValue::String(std::sync::Arc::from(c.to_string())))
+                    .map(|c| VmValue::String(arcstr::ArcStr::from(c.to_string())))
                     .unwrap_or(VmValue::Nil),
                 _ => VmValue::Nil,
             })
@@ -113,7 +113,7 @@ pub(super) fn apply_filter(
                 VmValue::String(s) => s
                     .chars()
                     .last()
-                    .map(|c| VmValue::String(std::sync::Arc::from(c.to_string())))
+                    .map(|c| VmValue::String(arcstr::ArcStr::from(c.to_string())))
                     .unwrap_or(VmValue::Nil),
                 _ => VmValue::Nil,
             })
@@ -127,7 +127,7 @@ pub(super) fn apply_filter(
                     VmValue::List(std::sync::Arc::new(out))
                 }
                 VmValue::String(s) => {
-                    VmValue::String(std::sync::Arc::from(s.chars().rev().collect::<String>()))
+                    VmValue::String(arcstr::ArcStr::from(s.chars().rev().collect::<String>()))
                 }
                 _ => v.clone(),
             })
@@ -147,7 +147,7 @@ pub(super) fn apply_filter(
                     ));
                 }
             };
-            Ok(VmValue::String(std::sync::Arc::from(parts.join(&sep))))
+            Ok(VmValue::String(arcstr::ArcStr::from(parts.join(&sep))))
         }
         "default" => {
             need(1, args)?;
@@ -169,7 +169,7 @@ pub(super) fn apply_filter(
                 serde_json::to_string(&jv)
             }
             .map_err(|e| TemplateError::new(line, col, format!("json serialization: {e}")))?;
-            Ok(VmValue::String(std::sync::Arc::from(s)))
+            Ok(VmValue::String(arcstr::ArcStr::from(s)))
         }
         "indent" => {
             if args.is_empty() || args.len() > 2 {
@@ -198,14 +198,14 @@ pub(super) fn apply_filter(
                 }
                 out.push_str(line);
             }
-            Ok(VmValue::String(std::sync::Arc::from(out)))
+            Ok(VmValue::String(arcstr::ArcStr::from(out)))
         }
         "lines" => {
             need(0, args)?;
             let s = str_of(v);
             let list: Vec<VmValue> = s
                 .split('\n')
-                .map(|p| VmValue::String(std::sync::Arc::from(p)))
+                .map(|p| VmValue::String(arcstr::ArcStr::from(p)))
                 .collect();
             Ok(VmValue::List(std::sync::Arc::new(list)))
         }
@@ -223,14 +223,14 @@ pub(super) fn apply_filter(
                     _ => out.push(c),
                 }
             }
-            Ok(VmValue::String(std::sync::Arc::from(out)))
+            Ok(VmValue::String(arcstr::ArcStr::from(out)))
         }
         "replace" => {
             need(2, args)?;
             let s = str_of(v);
             let from = str_of(&args[0]);
             let to = str_of(&args[1]);
-            Ok(VmValue::String(std::sync::Arc::from(s.replace(&from, &to))))
+            Ok(VmValue::String(arcstr::ArcStr::from(s.replace(&from, &to))))
         }
         other => Err(TemplateError::new(
             line,

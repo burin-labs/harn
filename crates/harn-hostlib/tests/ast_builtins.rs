@@ -57,7 +57,7 @@ fn dict_field(value: &VmValue, key: &str) -> VmValue {
 
 fn string_value(value: &VmValue) -> &str {
     match value {
-        VmValue::String(s) => s.as_ref(),
+        VmValue::String(s) => s.as_str(),
         other => panic!("expected string, got {other:?}"),
     }
 }
@@ -89,7 +89,7 @@ fn parse_file_produces_flat_node_list_with_root_id_zero() {
     let path = fixture_path("rust/source.rs");
     let payload = dict(&[(
         "path",
-        VmValue::String(Arc::from(path.to_string_lossy().as_ref())),
+        VmValue::String(arcstr::ArcStr::from(path.to_string_lossy().as_ref())),
     )]);
 
     let result = invoke(&registry, "hostlib_ast_parse_file", payload);
@@ -123,8 +123,8 @@ fn parse_file_rejects_unknown_language() {
     let registry = ast_registry();
     let entry = registry.find("hostlib_ast_parse_file").expect("registered");
     let payload = dict(&[
-        ("path", VmValue::String(Arc::from("foo.unknown"))),
-        ("language", VmValue::String(Arc::from("klingon"))),
+        ("path", VmValue::String(arcstr::ArcStr::from("foo.unknown"))),
+        ("language", VmValue::String(arcstr::ArcStr::from("klingon"))),
     ]);
     let err = (entry.handler)(&[payload]).expect_err("must reject unknown language");
     assert!(
@@ -137,11 +137,13 @@ fn parse_file_rejects_unknown_language() {
 fn symbols_filters_by_kind() {
     let registry = ast_registry();
     let path = fixture_path("rust/source.rs");
-    let kinds = VmValue::List(Arc::new(vec![VmValue::String(Arc::from("function"))]));
+    let kinds = VmValue::List(Arc::new(vec![VmValue::String(arcstr::ArcStr::from(
+        "function",
+    ))]));
     let payload = dict(&[
         (
             "path",
-            VmValue::String(Arc::from(path.to_string_lossy().as_ref())),
+            VmValue::String(arcstr::ArcStr::from(path.to_string_lossy().as_ref())),
         ),
         ("kinds", kinds),
     ]);
@@ -160,7 +162,7 @@ fn outline_caps_depth_when_max_depth_supplied() {
     let payload = dict(&[
         (
             "path",
-            VmValue::String(Arc::from(path.to_string_lossy().as_ref())),
+            VmValue::String(arcstr::ArcStr::from(path.to_string_lossy().as_ref())),
         ),
         ("max_depth", VmValue::Int(1)),
     ]);
@@ -186,7 +188,7 @@ fn outline_caps_depth_when_max_depth_supplied() {
 // ---------------------------------------------------------------------------
 
 fn vm_string(s: &str) -> VmValue {
-    VmValue::String(Arc::from(s))
+    VmValue::String(arcstr::ArcStr::from(s))
 }
 
 #[test]
@@ -369,8 +371,8 @@ fn bracket_balance_python_uses_hash_comments() {
 fn parse_errors_returns_clean_payload_for_valid_python() {
     let registry = ast_registry();
     let payload = dict(&[
-        ("content", VmValue::String(Arc::from("x = 1\n"))),
-        ("language", VmValue::String(Arc::from("python"))),
+        ("content", VmValue::String(arcstr::ArcStr::from("x = 1\n"))),
+        ("language", VmValue::String(arcstr::ArcStr::from("python"))),
     ]);
     let result = invoke(&registry, "hostlib_ast_parse_errors", payload);
 
@@ -392,9 +394,12 @@ fn parse_errors_flags_typescript_syntax_error() {
         // MISSING node here.
         (
             "content",
-            VmValue::String(Arc::from("function foo(\n  return 1;\n}")),
+            VmValue::String(arcstr::ArcStr::from("function foo(\n  return 1;\n}")),
         ),
-        ("language", VmValue::String(Arc::from("typescript"))),
+        (
+            "language",
+            VmValue::String(arcstr::ArcStr::from("typescript")),
+        ),
     ]);
     let result = invoke(&registry, "hostlib_ast_parse_errors", payload);
     let errors = list_value(&dict_field(&result, "errors"));
@@ -439,8 +444,8 @@ fn parse_errors_top_level_decl_count_matches_swift_profile() {
     ];
     for (lang, src, want) in cases {
         let payload = dict(&[
-            ("content", VmValue::String(Arc::from(src))),
-            ("language", VmValue::String(Arc::from(lang))),
+            ("content", VmValue::String(arcstr::ArcStr::from(src))),
+            ("language", VmValue::String(arcstr::ArcStr::from(lang))),
         ]);
         let result = invoke(&registry, "hostlib_ast_parse_errors", payload);
         let count = int_value(&dict_field(&result, "top_level_decl_count"));
@@ -454,7 +459,7 @@ fn undefined_names_python_returns_dedup_diagnostics() {
     let payload = dict(&[
         (
             "content",
-            VmValue::String(Arc::from(
+            VmValue::String(arcstr::ArcStr::from(
                 "import os\n\
                  def foo(x):\n    \
                      return x + missing()\n\
@@ -462,7 +467,7 @@ fn undefined_names_python_returns_dedup_diagnostics() {
                  missing()\n",
             )),
         ),
-        ("language", VmValue::String(Arc::from("python"))),
+        ("language", VmValue::String(arcstr::ArcStr::from("python"))),
     ]);
     let result = invoke(&registry, "hostlib_ast_undefined_names", payload);
     let supported = match dict_field(&result, "supported") {
@@ -497,8 +502,11 @@ fn undefined_names_python_returns_dedup_diagnostics() {
 fn undefined_names_marks_unsupported_languages() {
     let registry = ast_registry();
     let payload = dict(&[
-        ("content", VmValue::String(Arc::from("fn main() {}\n"))),
-        ("language", VmValue::String(Arc::from("rust"))),
+        (
+            "content",
+            VmValue::String(arcstr::ArcStr::from("fn main() {}\n")),
+        ),
+        ("language", VmValue::String(arcstr::ArcStr::from("rust"))),
     ]);
     let result = invoke(&registry, "hostlib_ast_undefined_names", payload);
     let supported = match dict_field(&result, "supported") {
@@ -519,13 +527,13 @@ fn structural_diff_payload(before: &str, after: &str, extra: &[(&str, VmValue)])
     let mut pairs = vec![
         (
             "path_a",
-            VmValue::String(Arc::from(before_path.to_string_lossy().as_ref())),
+            VmValue::String(arcstr::ArcStr::from(before_path.to_string_lossy().as_ref())),
         ),
         (
             "path_b",
-            VmValue::String(Arc::from(after_path.to_string_lossy().as_ref())),
+            VmValue::String(arcstr::ArcStr::from(after_path.to_string_lossy().as_ref())),
         ),
-        ("language", VmValue::String(Arc::from("rust"))),
+        ("language", VmValue::String(arcstr::ArcStr::from("rust"))),
     ];
     pairs.extend_from_slice(extra);
     dict(&pairs)

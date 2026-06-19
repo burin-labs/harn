@@ -70,7 +70,7 @@ fn bytes_to_string_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     let bytes = expect_bytes(args, 0, "bytes_to_string")?;
     let text = std::str::from_utf8(bytes)
         .map_err(|error| runtime_error(format!("bytes_to_string: {error}")))?;
-    Ok(VmValue::String(std::sync::Arc::from(text)))
+    Ok(VmValue::String(arcstr::ArcStr::from(text)))
 }
 
 #[harn_builtin(
@@ -79,7 +79,7 @@ fn bytes_to_string_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 )]
 fn bytes_to_string_lossy_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let bytes = expect_bytes(args, 0, "bytes_to_string_lossy")?;
-    Ok(VmValue::String(std::sync::Arc::from(
+    Ok(VmValue::String(arcstr::ArcStr::from(
         String::from_utf8_lossy(bytes).into_owned(),
     )))
 }
@@ -87,7 +87,7 @@ fn bytes_to_string_lossy_impl(args: &[VmValue], _out: &mut String) -> Result<VmV
 #[harn_builtin(sig = "bytes_to_hex(input: bytes) -> string", category = "bytes")]
 fn bytes_to_hex_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let bytes = expect_bytes(args, 0, "bytes_to_hex")?;
-    Ok(VmValue::String(std::sync::Arc::from(hex::encode(bytes))))
+    Ok(VmValue::String(arcstr::ArcStr::from(hex::encode(bytes))))
 }
 
 #[harn_builtin(sig = "bytes_from_hex(text: string?) -> bytes", category = "bytes")]
@@ -103,7 +103,7 @@ fn bytes_to_base64_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     use base64::Engine;
 
     let bytes = expect_bytes(args, 0, "bytes_to_base64")?;
-    Ok(VmValue::String(std::sync::Arc::from(
+    Ok(VmValue::String(arcstr::ArcStr::from(
         base64::engine::general_purpose::STANDARD.encode(bytes),
     )))
 }
@@ -198,7 +198,7 @@ mod tests {
     }
 
     fn s(v: &str) -> VmValue {
-        VmValue::String(std::sync::Arc::from(v))
+        VmValue::String(arcstr::ArcStr::from(v))
     }
 
     fn b(v: &[u8]) -> VmValue {

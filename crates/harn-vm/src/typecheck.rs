@@ -149,7 +149,7 @@ fn matches_type_with_generics(
             "mcp_client" => matches!(value, VmValue::McpClient(_)),
             "pair" => matches!(value, VmValue::Pair(_)),
             "enum" => matches!(value, VmValue::EnumVariant(_)),
-            "struct" => matches!(value, VmValue::StructInstance { .. }),
+            "struct" => matches!(value, VmValue::StructInstance(_)),
             "closure" => matches!(
                 value,
                 VmValue::Closure(_) | VmValue::BuiltinRef(_) | VmValue::BuiltinRefId(_)
@@ -203,7 +203,7 @@ fn matches_type_with_generics(
                 }
                 None => f.optional,
             }),
-            VmValue::StructInstance { .. } => {
+            VmValue::StructInstance(_) => {
                 fields.iter().all(|f| match value.struct_field(&f.name) {
                     Some(VmValue::Nil) if f.optional => true,
                     Some(v) => {
@@ -241,7 +241,7 @@ fn matches_type_with_generics(
             VmValue::Closure(_) | VmValue::BuiltinRef(_) | VmValue::BuiltinRefId(_)
         ),
         TypeExpr::Never => false,
-        TypeExpr::LitString(s) => matches!(value, VmValue::String(rs) if rs.as_ref() == s),
+        TypeExpr::LitString(s) => matches!(value, VmValue::String(rs) if rs.as_str() == s),
         TypeExpr::LitInt(i) => matches!(value, VmValue::Int(rv) if rv == i),
         TypeExpr::Owned(inner) => {
             // `owned<T>` is transparent at runtime — only the wrapped type
@@ -479,7 +479,7 @@ mod tests {
     }
 
     fn vm_string(s: &str) -> VmValue {
-        VmValue::String(std::sync::Arc::from(s))
+        VmValue::String(arcstr::ArcStr::from(s))
     }
 
     fn ty_int() -> TypeExpr {
@@ -641,7 +641,7 @@ mod tests {
     fn validate_user_call_uses_cached_runtime_guard_metadata() {
         let string_schema = VmValue::dict(std::collections::BTreeMap::from([(
             "type".to_string(),
-            VmValue::String(std::sync::Arc::from("string")),
+            VmValue::String(arcstr::ArcStr::from("string")),
         )]));
         let guard = RuntimeParamGuard::CanonicalSchema(
             crate::schema::canonical_param_schema(&string_schema).unwrap(),

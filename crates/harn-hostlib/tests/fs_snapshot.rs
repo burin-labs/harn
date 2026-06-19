@@ -38,7 +38,7 @@ fn dict_arg(entries: &[(&str, VmValue)]) -> Vec<VmValue> {
 }
 
 fn vm_string(s: &str) -> VmValue {
-    VmValue::String(Arc::from(s))
+    VmValue::String(arcstr::ArcStr::from(s))
 }
 
 fn dict_get<'a>(value: &'a VmValue, key: &str) -> &'a VmValue {
@@ -124,7 +124,7 @@ fn explicit_snapshot_then_restore_through_builtins() {
     .unwrap();
     assert!(matches!(
         dict_get(&snapshot, "snapshot_id"),
-        VmValue::String(id) if id.as_ref() == fixture.scope
+        VmValue::String(id) if id.as_str() == fixture.scope
     ));
     assert!(matches!(dict_get(&snapshot, "byte_count"), VmValue::Int(8)));
 

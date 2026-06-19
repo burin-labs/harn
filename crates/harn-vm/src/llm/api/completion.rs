@@ -26,13 +26,13 @@ async fn completion_json_response(
         let message =
             super::classify_provider_http_error(provider, status, retry_after.as_deref(), &body)
                 .message;
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             message,
         ))));
     }
 
     response.json().await.map_err(|e| {
-        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
             "{provider} completion response parse error: {e}"
         ))))
     })
@@ -118,7 +118,7 @@ async fn vm_call_completion_openai_style(
     let req = apply_auth_headers(req, &opts.api_key, pdef.as_ref());
 
     let response = req.send().await.map_err(|e| {
-        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
             "{} completion API error: {e}",
             opts.provider
         ))))
@@ -127,7 +127,7 @@ async fn vm_call_completion_openai_style(
     let json = completion_json_response(&opts.provider, response).await?;
 
     if let Some(err) = json["error"]["message"].as_str() {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             format!("{} completion API error: {err}", opts.provider),
         ))));
     }
@@ -225,14 +225,14 @@ async fn vm_call_completion_ollama(
     let req = apply_auth_headers(req, &opts.api_key, pdef.as_ref());
 
     let response = req.send().await.map_err(|e| {
-        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
             "{} completion API error: {e}",
             opts.provider
         ))))
     })?;
     let json = completion_json_response(&opts.provider, response).await?;
     if let Some(err) = json["error"].as_str() {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             format!("{} completion API error: {err}", opts.provider),
         ))));
     }

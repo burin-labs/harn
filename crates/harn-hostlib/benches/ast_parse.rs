@@ -10,7 +10,6 @@
 
 use std::hint::black_box;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use harn_hostlib::{ast::AstCapability, tools::permissions, BuiltinRegistry, HostlibCapability};
@@ -43,7 +42,7 @@ fn bench_parse_file_warm(c: &mut Criterion) {
     let path = fixture_path("rust/source.rs");
     let payload = dict(&[(
         "path",
-        VmValue::String(Arc::from(path.to_string_lossy().as_ref())),
+        VmValue::String(arcstr::ArcStr::from(path.to_string_lossy().as_ref())),
     )]);
 
     let entry = registry
@@ -130,11 +129,14 @@ fn bench_apply_node_large(c: &mut Criterion) {
         // `dry_run` keeps the bench hermetic (no disk writes) while still
         // exercising read + parse + query + splice + re-validate.
         let payload = dict(&[
-            ("path", VmValue::String(Arc::from(path.as_str()))),
-            ("language", VmValue::String(Arc::from(language))),
-            ("query", VmValue::String(Arc::from(query))),
-            ("replacement", VmValue::String(Arc::from(replacement))),
-            ("select", VmValue::String(Arc::from("first"))),
+            ("path", VmValue::String(arcstr::ArcStr::from(path.as_str()))),
+            ("language", VmValue::String(arcstr::ArcStr::from(language))),
+            ("query", VmValue::String(arcstr::ArcStr::from(query))),
+            (
+                "replacement",
+                VmValue::String(arcstr::ArcStr::from(replacement)),
+            ),
+            ("select", VmValue::String(arcstr::ArcStr::from("first"))),
             ("dry_run", VmValue::Bool(true)),
         ]);
         c.bench_function(

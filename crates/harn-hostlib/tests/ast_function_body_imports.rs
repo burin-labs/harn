@@ -81,7 +81,7 @@ fn fixture_path(rel: &str) -> PathBuf {
 }
 
 fn vstring(s: &str) -> VmValue {
-    VmValue::String(Arc::from(s))
+    VmValue::String(arcstr::ArcStr::from(s))
 }
 
 // -----------------------------------------------------------------------------

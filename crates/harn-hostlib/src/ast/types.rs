@@ -83,22 +83,22 @@ impl Symbol {
         let mut dict: harn_vm::value::DictMap = harn_vm::value::DictMap::new();
         dict.insert(
             "name".into(),
-            VmValue::String(Arc::from(self.name.as_str())),
+            VmValue::String(arcstr::ArcStr::from(self.name.as_str())),
         );
         dict.insert(
             "kind".into(),
-            VmValue::String(Arc::from(self.kind.as_str())),
+            VmValue::String(arcstr::ArcStr::from(self.kind.as_str())),
         );
         dict.insert(
             "container".into(),
             match &self.container {
-                Some(s) => VmValue::String(Arc::from(s.as_str())),
+                Some(s) => VmValue::String(arcstr::ArcStr::from(s.as_str())),
                 None => VmValue::Nil,
             },
         );
         dict.insert(
             "signature".into(),
-            VmValue::String(Arc::from(self.signature.as_str())),
+            VmValue::String(arcstr::ArcStr::from(self.signature.as_str())),
         );
         dict.insert("start_row".into(), VmValue::Int(self.start_row as i64));
         dict.insert("start_col".into(), VmValue::Int(self.start_col as i64));
@@ -125,15 +125,15 @@ impl OutlineItem {
         let mut dict: harn_vm::value::DictMap = harn_vm::value::DictMap::new();
         dict.insert(
             "name".into(),
-            VmValue::String(Arc::from(self.name.as_str())),
+            VmValue::String(arcstr::ArcStr::from(self.name.as_str())),
         );
         dict.insert(
             "kind".into(),
-            VmValue::String(Arc::from(self.kind.as_str())),
+            VmValue::String(arcstr::ArcStr::from(self.kind.as_str())),
         );
         dict.insert(
             "signature".into(),
-            VmValue::String(Arc::from(self.signature.as_str())),
+            VmValue::String(arcstr::ArcStr::from(self.signature.as_str())),
         );
         dict.insert("start_row".into(), VmValue::Int(self.start_row as i64));
         dict.insert("end_row".into(), VmValue::Int(self.end_row as i64));
@@ -170,7 +170,7 @@ impl ParsedNode {
         );
         dict.insert(
             "kind".into(),
-            VmValue::String(Arc::from(self.kind.as_str())),
+            VmValue::String(arcstr::ArcStr::from(self.kind.as_str())),
         );
         dict.insert("is_named".into(), VmValue::Bool(self.is_named));
         dict.insert("start_byte".into(), VmValue::Int(self.start_byte as i64));
@@ -224,11 +224,11 @@ impl ParseError {
         dict.insert("end_byte".into(), VmValue::Int(self.end_byte as i64));
         dict.insert(
             "message".into(),
-            VmValue::String(Arc::from(self.message.as_str())),
+            VmValue::String(arcstr::ArcStr::from(self.message.as_str())),
         );
         dict.insert(
             "snippet".into(),
-            VmValue::String(Arc::from(self.snippet.as_str())),
+            VmValue::String(arcstr::ArcStr::from(self.snippet.as_str())),
         );
         dict.insert("missing".into(), VmValue::Bool(self.missing));
         dict.insert("spans_full_source".into(), VmValue::Bool(spans_full_source));
@@ -252,15 +252,18 @@ impl UndefinedName {
         let mut dict: harn_vm::value::DictMap = harn_vm::value::DictMap::new();
         dict.insert(
             "name".into(),
-            VmValue::String(Arc::from(self.name.as_str())),
+            VmValue::String(arcstr::ArcStr::from(self.name.as_str())),
         );
-        dict.insert("kind".into(), VmValue::String(Arc::from(self.kind)));
+        dict.insert(
+            "kind".into(),
+            VmValue::String(arcstr::ArcStr::from(self.kind)),
+        );
         dict.insert("row".into(), VmValue::Int(self.row as i64));
         dict.insert("column".into(), VmValue::Int(self.column as i64));
         let message = format!("undefined name '{}'", self.name);
         dict.insert(
             "message".into(),
-            VmValue::String(Arc::from(message.as_str())),
+            VmValue::String(arcstr::ArcStr::from(message.as_str())),
         );
         VmValue::dict(dict)
     }

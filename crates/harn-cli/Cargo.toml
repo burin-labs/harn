@@ -124,6 +124,7 @@ which = "8"
 # Cross-platform host memory for memory-aware test-worker sizing. Already in
 # the tree via harn-vm; matched features keep the build unified.
 sysinfo = { version = "0.39", default-features = false, features = ["system"] }
+arcstr = { version = "1", features = ["serde", "std"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

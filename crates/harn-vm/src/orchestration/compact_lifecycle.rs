@@ -870,7 +870,7 @@ fn build_snapshot_asset(
     let mut asset_metadata = BTreeMap::from([
         (
             "strategy".to_string(),
-            VmValue::String(std::sync::Arc::from(compact_strategy_name(engine_strategy))),
+            VmValue::String(arcstr::ArcStr::from(compact_strategy_name(engine_strategy))),
         ),
         (
             "archived_messages".to_string(),
@@ -886,7 +886,7 @@ fn build_snapshot_asset(
         ),
         (
             "instruction_mode".to_string(),
-            VmValue::String(std::sync::Arc::from(config.policy.instruction_mode())),
+            VmValue::String(arcstr::ArcStr::from(config.policy.instruction_mode())),
         ),
     ]);
     if let Some(policy_json) = config.policy.metadata_json() {
@@ -901,22 +901,22 @@ fn build_snapshot_asset(
     let asset = VmValue::dict(BTreeMap::from([
         (
             "id".to_string(),
-            VmValue::String(std::sync::Arc::from(format!(
+            VmValue::String(arcstr::ArcStr::from(format!(
                 "compaction-source-{}",
                 uuid::Uuid::now_v7()
             ))),
         ),
         (
             "kind".to_string(),
-            VmValue::String(std::sync::Arc::from("compaction_source_transcript")),
+            VmValue::String(arcstr::ArcStr::from("compaction_source_transcript")),
         ),
         (
             "title".to_string(),
-            VmValue::String(std::sync::Arc::from("Pre-compaction transcript")),
+            VmValue::String(arcstr::ArcStr::from("Pre-compaction transcript")),
         ),
         (
             "visibility".to_string(),
-            VmValue::String(std::sync::Arc::from("internal")),
+            VmValue::String(arcstr::ArcStr::from("internal")),
         ),
         ("data".to_string(), transcript.clone()),
         ("metadata".to_string(), VmValue::dict(asset_metadata)),

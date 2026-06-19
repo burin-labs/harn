@@ -186,7 +186,7 @@ fn flow_invariant_kind_impl(args: &[VmValue], _out: &mut String) -> Result<VmVal
         Verdict::Block { .. } => "block",
         Verdict::RequireApproval { .. } => "require_approval",
     };
-    Ok(VmValue::String(std::sync::Arc::from(kind)))
+    Ok(VmValue::String(arcstr::ArcStr::from(kind)))
 }
 
 #[harn_builtin(
@@ -398,7 +398,7 @@ mod tests {
         let result = call(
             &vm,
             "flow_invariant_warn",
-            &[VmValue::String(std::sync::Arc::from("untested helper"))],
+            &[VmValue::String(arcstr::ArcStr::from("untested helper"))],
         );
         let decoded = InvariantResult::from_vm_value(&result).unwrap();
         match decoded.verdict {
@@ -414,8 +414,8 @@ mod tests {
             &vm,
             "flow_invariant_block",
             &[
-                VmValue::String(std::sync::Arc::from("missing_test")),
-                VmValue::String(std::sync::Arc::from("no test covers this atom")),
+                VmValue::String(arcstr::ArcStr::from("missing_test")),
+                VmValue::String(arcstr::ArcStr::from("no test covers this atom")),
             ],
         );
         let decoded = InvariantResult::from_vm_value(&result).unwrap();
@@ -432,16 +432,16 @@ mod tests {
             &vm,
             "flow_invariant_require_approval",
             &[
-                VmValue::String(std::sync::Arc::from("principal")),
-                VmValue::String(std::sync::Arc::from("user:alice")),
+                VmValue::String(arcstr::ArcStr::from("principal")),
+                VmValue::String(arcstr::ArcStr::from("user:alice")),
             ],
         );
         let role_value = call(
             &vm,
             "flow_invariant_require_approval",
             &[
-                VmValue::String(std::sync::Arc::from("role")),
-                VmValue::String(std::sync::Arc::from("security-reviewer")),
+                VmValue::String(arcstr::ArcStr::from("role")),
+                VmValue::String(arcstr::ArcStr::from("security-reviewer")),
             ],
         );
         let principal = InvariantResult::from_vm_value(&principal_value).unwrap();
@@ -471,8 +471,8 @@ mod tests {
             .clone();
         let error = builtin(
             &[
-                VmValue::String(std::sync::Arc::from("squad")),
-                VmValue::String(std::sync::Arc::from("ship-captains")),
+                VmValue::String(arcstr::ArcStr::from("squad")),
+                VmValue::String(arcstr::ArcStr::from("ship-captains")),
             ],
             &mut out,
         )
@@ -489,7 +489,7 @@ mod tests {
             &vm,
             "flow_evidence_atom",
             &[
-                VmValue::String(std::sync::Arc::from(atom_hex.as_str())),
+                VmValue::String(arcstr::ArcStr::from(atom_hex.as_str())),
                 VmValue::Int(0),
                 VmValue::Int(64),
             ],
@@ -498,16 +498,16 @@ mod tests {
             &vm,
             "flow_evidence_metadata",
             &[
-                VmValue::String(std::sync::Arc::from("src/auth")),
-                VmValue::String(std::sync::Arc::from("policy")),
-                VmValue::String(std::sync::Arc::from("min_review_count")),
+                VmValue::String(arcstr::ArcStr::from("src/auth")),
+                VmValue::String(arcstr::ArcStr::from("policy")),
+                VmValue::String(arcstr::ArcStr::from("min_review_count")),
             ],
         );
         let transcript_evidence = call(
             &vm,
             "flow_evidence_transcript",
             &[
-                VmValue::String(std::sync::Arc::from("transcript-0001")),
+                VmValue::String(arcstr::ArcStr::from("transcript-0001")),
                 VmValue::Int(128),
                 VmValue::Int(256),
             ],
@@ -516,9 +516,9 @@ mod tests {
             &vm,
             "flow_evidence_citation",
             &[
-                VmValue::String(std::sync::Arc::from("https://harnlang.com/spec")),
-                VmValue::String(std::sync::Arc::from("verdicts may grade")),
-                VmValue::String(std::sync::Arc::from("2026-04-26T00:00:00Z")),
+                VmValue::String(arcstr::ArcStr::from("https://harnlang.com/spec")),
+                VmValue::String(arcstr::ArcStr::from("verdicts may grade")),
+                VmValue::String(arcstr::ArcStr::from("2026-04-26T00:00:00Z")),
             ],
         );
         let evidence_list = VmValue::List(std::sync::Arc::new(vec![
@@ -555,14 +555,14 @@ mod tests {
             &vm,
             "flow_invariant_block",
             &[
-                VmValue::String(std::sync::Arc::from("style")),
-                VmValue::String(std::sync::Arc::from("trailing whitespace")),
+                VmValue::String(arcstr::ArcStr::from("style")),
+                VmValue::String(arcstr::ArcStr::from("trailing whitespace")),
             ],
         );
         let remediation = call(
             &vm,
             "flow_remediation",
-            &[VmValue::String(std::sync::Arc::from(
+            &[VmValue::String(arcstr::ArcStr::from(
                 "strip trailing whitespace",
             ))],
         );
@@ -580,7 +580,7 @@ mod tests {
         let warn = call(
             &vm,
             "flow_invariant_warn",
-            &[VmValue::String(std::sync::Arc::from("low signal"))],
+            &[VmValue::String(arcstr::ArcStr::from("low signal"))],
         );
         let attached = call(&vm, "flow_with_confidence", &[warn, VmValue::Float(1.5)]);
         let decoded = InvariantResult::from_vm_value(&attached).unwrap();
@@ -593,7 +593,7 @@ mod tests {
         let allow = call(&vm, "flow_invariant_allow", &[]);
         let kind = call(&vm, "flow_invariant_kind", &[allow]);
         match kind {
-            VmValue::String(s) => assert_eq!(s.as_ref(), "allow"),
+            VmValue::String(s) => assert_eq!(s.as_str(), "allow"),
             other => panic!("expected string, got {other:?}"),
         }
     }
@@ -606,7 +606,7 @@ mod tests {
         let atom_hex = "ab".repeat(32);
         let error = builtin(
             &[
-                VmValue::String(std::sync::Arc::from(atom_hex.as_str())),
+                VmValue::String(arcstr::ArcStr::from(atom_hex.as_str())),
                 VmValue::Int(64),
                 VmValue::Int(32),
             ],
@@ -623,7 +623,7 @@ mod tests {
         let builtin = vm.builtins.get("flow_evidence_atom").unwrap().clone();
         let error = builtin(
             &[
-                VmValue::String(std::sync::Arc::from("not-hex")),
+                VmValue::String(arcstr::ArcStr::from("not-hex")),
                 VmValue::Int(0),
                 VmValue::Int(8),
             ],

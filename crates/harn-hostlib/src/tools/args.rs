@@ -131,7 +131,7 @@ where
 
 /// Convenience constructor for `VmValue::String` from a `&str`.
 pub fn str_value(s: impl AsRef<str>) -> VmValue {
-    VmValue::String(Arc::from(s.as_ref()))
+    VmValue::string(s)
 }
 
 #[cfg(test)]

@@ -33,7 +33,7 @@ pub(super) async fn llm_stream_builtin(args: Vec<VmValue>) -> Result<VmValue, Vm
             let words: Vec<&str> = prompt_text.split_whitespace().collect();
             for word in &words {
                 let _ = tx_for_task
-                    .send(VmValue::String(std::sync::Arc::from(*word)))
+                    .send(VmValue::String(arcstr::ArcStr::from(*word)))
                     .await;
             }
             close_for_task.close();
@@ -43,7 +43,7 @@ pub(super) async fn llm_stream_builtin(args: Vec<VmValue>) -> Result<VmValue, Vm
         let result = vm_stream_llm(&opts, &tx_for_task).await;
         if let Err(e) = result {
             let _ = tx_for_task
-                .send(VmValue::String(std::sync::Arc::from(format!("error: {e}"))))
+                .send(VmValue::String(arcstr::ArcStr::from(format!("error: {e}"))))
                 .await;
         }
         close_for_task.close();
@@ -73,7 +73,7 @@ fn llm_stream_chunk(
     dict.insert(
         "finish_reason".to_string(),
         finish_reason
-            .map(|reason| VmValue::String(std::sync::Arc::from(reason.to_string())))
+            .map(|reason| VmValue::String(arcstr::ArcStr::from(reason.to_string())))
             .unwrap_or(VmValue::Nil),
     );
     VmValue::dict(dict)
@@ -169,7 +169,7 @@ pub(super) async fn llm_stream_call_impl(args: Vec<VmValue>) -> Result<VmValue, 
                         }
                         Err(join_err) if join_err.is_cancelled() => {}
                         Err(join_err) => {
-                            let err = VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+                            let err = VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
                                 "llm_stream_call background task failed: {join_err}"
                             ))));
                             send_llm_stream_error(&stream_tx, err, &provider, &model).await;
@@ -192,7 +192,6 @@ pub(super) async fn llm_stream_call_impl(args: Vec<VmValue>) -> Result<VmValue, 
 mod tests {
     use crate::value::VmDictExt;
     use std::collections::BTreeMap;
-    use std::sync::Arc;
     use std::time::Duration;
 
     use crate::llm::fake::{install_fake_llm_script, FakeLlmEvent, FakeLlmScript, FakeStopReason};
@@ -261,7 +260,7 @@ mod tests {
         options.put_str("provider", "fake");
         options.put_str("model", "fake");
         vec![
-            VmValue::String(Arc::from("hello".to_string())),
+            VmValue::String(arcstr::ArcStr::from("hello".to_string())),
             VmValue::Nil,
             VmValue::dict(options),
         ]

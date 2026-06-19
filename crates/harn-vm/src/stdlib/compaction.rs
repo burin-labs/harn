@@ -45,12 +45,12 @@ fn register_compaction_namespace(vm: &mut Vm) {
         VmValue::dict(
             std::iter::once((
                 "_namespace".to_string(),
-                VmValue::String(std::sync::Arc::from("compaction")),
+                VmValue::String(arcstr::ArcStr::from("compaction")),
             ))
             .chain(names.into_iter().map(|name| {
                 (
                     name.to_string(),
-                    VmValue::BuiltinRef(std::sync::Arc::from(format!("compaction.{name}"))),
+                    VmValue::BuiltinRef(arcstr::ArcStr::from(format!("compaction.{name}"))),
                 )
             }))
             .collect::<std::collections::BTreeMap<_, _>>(),
@@ -159,7 +159,7 @@ async fn compaction_run_impl(
             VmValue::dict(plan.clone())
         };
         Some(extract_llm_options(&[
-            VmValue::String(std::sync::Arc::from("")),
+            VmValue::String(arcstr::ArcStr::from("")),
             VmValue::Nil,
             raw,
         ])?)

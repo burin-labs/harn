@@ -38,7 +38,7 @@ fn dict_arg(entries: &[(&str, VmValue)]) -> Vec<VmValue> {
 }
 
 fn vm_string(s: &str) -> VmValue {
-    VmValue::String(Arc::from(s))
+    VmValue::String(arcstr::ArcStr::from(s))
 }
 
 fn ensure_git() -> bool {
@@ -173,7 +173,7 @@ fn git_log_returns_structured_entries() {
     assert_eq!(commits.len(), 2);
     if let VmValue::Dict(latest) = &commits[0] {
         if let Some(VmValue::String(s)) = latest.get("subject") {
-            assert_eq!(s.as_ref(), "second commit");
+            assert_eq!(s.as_str(), "second commit");
         }
         if let Some(VmValue::String(sha)) = latest.get("sha") {
             assert_eq!(sha.len(), 40);
@@ -212,7 +212,7 @@ fn git_status_reports_dirty_paths() {
     let data = dict_get(&result, "data");
     let entries = list_of(data);
     assert!(entries.iter().any(|e| match dict_get(e, "path") {
-        VmValue::String(s) => s.as_ref() == "c.txt",
+        VmValue::String(s) => s.as_str() == "c.txt",
         _ => false,
     }));
 }
@@ -229,7 +229,7 @@ fn git_current_branch_returns_main() {
     .unwrap();
     let data = dict_get(&result, "data");
     if let VmValue::String(s) = data {
-        assert_eq!(s.as_ref(), "main");
+        assert_eq!(s.as_str(), "main");
     } else {
         panic!("expected string branch name, got {data:?}");
     }
@@ -249,10 +249,10 @@ fn git_remote_list_returns_origin() {
     let remotes = list_of(data);
     assert_eq!(remotes.len(), 1);
     if let VmValue::Dict(d) = &remotes[0] {
-        assert!(matches!(d.get("name"), Some(VmValue::String(s)) if s.as_ref() == "origin"));
+        assert!(matches!(d.get("name"), Some(VmValue::String(s)) if s.as_str() == "origin"));
         assert!(matches!(
             d.get("url"),
-            Some(VmValue::String(s)) if s.as_ref() == "https://example.invalid/repo.git"
+            Some(VmValue::String(s)) if s.as_str() == "https://example.invalid/repo.git"
         ));
     }
 }
@@ -274,7 +274,7 @@ fn git_blame_returns_authors_per_line() {
     if let VmValue::Dict(first) = &lines[0] {
         assert!(matches!(
             first.get("author"),
-            Some(VmValue::String(s)) if s.as_ref() == "Tester"
+            Some(VmValue::String(s)) if s.as_str() == "Tester"
         ));
         assert!(matches!(first.get("line"), Some(VmValue::Int(1))));
     }
@@ -326,7 +326,7 @@ fn git_branch_list_returns_main() {
     let branches = list_of(data);
     assert_eq!(branches.len(), 1);
     if let VmValue::Dict(d) = &branches[0] {
-        assert!(matches!(d.get("name"), Some(VmValue::String(s)) if s.as_ref() == "main"));
+        assert!(matches!(d.get("name"), Some(VmValue::String(s)) if s.as_str() == "main"));
     }
 }
 

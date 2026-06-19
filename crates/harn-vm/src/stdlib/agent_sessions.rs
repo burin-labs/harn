@@ -360,7 +360,7 @@ fn agent_session_open_builtin(args: &[VmValue], _out: &mut String) -> Result<VmV
         agent_sessions::set_workspace_anchor(&resolved, Some(anchor))
             .map_err(|message| err(format!("agent_session_open: {message}")))?;
     }
-    Ok(VmValue::String(std::sync::Arc::from(resolved)))
+    Ok(VmValue::String(arcstr::ArcStr::from(resolved)))
 }
 
 #[harn_builtin(
@@ -575,7 +575,7 @@ fn agent_session_ancestry_builtin(args: &[VmValue], _out: &mut String) -> Result
             "parent_id".to_string(),
             ancestry
                 .parent_id
-                .map(|value| VmValue::String(std::sync::Arc::from(value)))
+                .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
                 .unwrap_or(VmValue::Nil),
         ),
         (
@@ -584,13 +584,13 @@ fn agent_session_ancestry_builtin(args: &[VmValue], _out: &mut String) -> Result
                 ancestry
                     .child_ids
                     .into_iter()
-                    .map(|value| VmValue::String(std::sync::Arc::from(value)))
+                    .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
                     .collect(),
             )),
         ),
         (
             "root_id".to_string(),
-            VmValue::String(std::sync::Arc::from(ancestry.root_id)),
+            VmValue::String(arcstr::ArcStr::from(ancestry.root_id)),
         ),
     ])))
 }
@@ -605,7 +605,7 @@ fn agent_session_current_id_builtin(
     _out: &mut String,
 ) -> Result<VmValue, VmError> {
     Ok(agent_sessions::current_session_id()
-        .map(|id| VmValue::String(std::sync::Arc::from(id)))
+        .map(|id| VmValue::String(arcstr::ArcStr::from(id)))
         .unwrap_or(VmValue::Nil))
 }
 
@@ -743,7 +743,7 @@ fn agent_session_tool_format_builtin(
         )));
     }
     Ok(agent_sessions::tool_format(&id)
-        .map(|value| VmValue::String(std::sync::Arc::from(value)))
+        .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
         .unwrap_or(VmValue::Nil))
 }
 
@@ -763,7 +763,7 @@ fn agent_session_system_prompt_builtin(
         )));
     }
     Ok(agent_sessions::system_prompt(&id)
-        .map(|value| VmValue::String(std::sync::Arc::from(value)))
+        .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
         .unwrap_or(VmValue::Nil))
 }
 
@@ -914,7 +914,7 @@ fn agent_session_fork_builtin(args: &[VmValue], _out: &mut String) -> Result<VmV
         )));
     }
     match agent_sessions::fork(&src, dst) {
-        Some(new_id) => Ok(VmValue::String(std::sync::Arc::from(new_id))),
+        Some(new_id) => Ok(VmValue::String(arcstr::ArcStr::from(new_id))),
         None => Err(err(format!(
             "agent_session_fork: failed to fork session '{src}'"
         ))),
@@ -939,7 +939,7 @@ fn agent_session_fork_at_builtin(args: &[VmValue], _out: &mut String) -> Result<
         )));
     }
     match agent_sessions::fork_at(&src, keep_first as usize, dst) {
-        Some(new_id) => Ok(VmValue::String(std::sync::Arc::from(new_id))),
+        Some(new_id) => Ok(VmValue::String(arcstr::ArcStr::from(new_id))),
         None => Err(err(format!(
             "agent_session_fork_at: failed to fork session '{src}'"
         ))),
@@ -1532,7 +1532,7 @@ async fn agent_session_reanchor_builtin(
     if compact {
         let _ = agent_session_compact_builtin(
             ctx.clone(),
-            vec![VmValue::String(std::sync::Arc::from(target_id.clone()))],
+            vec![VmValue::String(arcstr::ArcStr::from(target_id.clone()))],
         )
         .await?;
         compacted = true;
@@ -1803,7 +1803,7 @@ async fn cancel_in_flight_tool_call_builtin(
         "tool".to_string(),
         outcome
             .tool_name
-            .map(|name| VmValue::String(std::sync::Arc::from(name)))
+            .map(|name| VmValue::String(arcstr::ArcStr::from(name)))
             .unwrap_or(VmValue::Nil),
     );
     result.put_str("reason", reason);
@@ -1902,7 +1902,7 @@ mod tests {
         crate::agent_sessions::push_current_session("unit-test-session".to_string());
         let current = call_current_id_builtin();
         crate::agent_sessions::pop_current_session();
-        assert!(matches!(current, VmValue::String(value) if value.as_ref() == "unit-test-session"));
+        assert!(matches!(current, VmValue::String(value) if value.as_str() == "unit-test-session"));
     }
 
     #[test]

@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::sync::Arc;
 use std::time::SystemTime;
 
 use base64::Engine;
@@ -20,7 +19,7 @@ fn list(items: Vec<VmValue>) -> VmValue {
     VmValue::List(std::sync::Arc::new(items))
 }
 
-fn string(value: impl Into<Arc<str>>) -> VmValue {
+fn string(value: impl Into<arcstr::ArcStr>) -> VmValue {
     VmValue::String(value.into())
 }
 

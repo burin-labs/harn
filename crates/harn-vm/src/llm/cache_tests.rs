@@ -267,7 +267,11 @@ mod cache_key_identity_tests {
     fn key(prompt: &str, options: VmValue) -> String {
         let mut out = String::new();
         let result = llm_cache_key_builtin(
-            &[VmValue::String(Arc::from(prompt)), VmValue::Nil, options],
+            &[
+                VmValue::String(arcstr::ArcStr::from(prompt)),
+                VmValue::Nil,
+                options,
+            ],
             &mut out,
         )
         .expect("cache key");
@@ -279,8 +283,14 @@ mod cache_key_identity_tests {
 
     fn base_options() -> crate::value::DictMap {
         let mut map = crate::value::DictMap::new();
-        map.insert("provider".to_string(), VmValue::String(Arc::from("mock")));
-        map.insert("model".to_string(), VmValue::String(Arc::from("mock")));
+        map.insert(
+            "provider".to_string(),
+            VmValue::String(arcstr::ArcStr::from("mock")),
+        );
+        map.insert(
+            "model".to_string(),
+            VmValue::String(arcstr::ArcStr::from("mock")),
+        );
         map
     }
 
@@ -301,7 +311,9 @@ mod cache_key_identity_tests {
         let mut with_tools = base_options();
         with_tools.insert(
             "tools".to_string(),
-            VmValue::List(Arc::new(vec![VmValue::String(Arc::from("read_file"))])),
+            VmValue::List(Arc::new(vec![VmValue::String(arcstr::ArcStr::from(
+                "read_file",
+            ))])),
         );
         let with = key("hello", dict(with_tools));
         assert_ne!(without, with, "tools must participate in the cache key");
@@ -313,7 +325,7 @@ mod cache_key_identity_tests {
         let mut with_schema = base_options();
         with_schema.insert(
             "json_schema".to_string(),
-            VmValue::String(Arc::from(r#"{"type":"object"}"#)),
+            VmValue::String(arcstr::ArcStr::from(r#"{"type":"object"}"#)),
         );
         let with = key("hello", dict(with_schema));
         assert_ne!(without, with, "schema must participate in the cache key");
@@ -325,7 +337,9 @@ mod cache_key_identity_tests {
         let mut with_stop = base_options();
         with_stop.insert(
             "stop".to_string(),
-            VmValue::List(Arc::new(vec![VmValue::String(Arc::from("\n\n"))])),
+            VmValue::List(Arc::new(vec![VmValue::String(arcstr::ArcStr::from(
+                "\n\n",
+            ))])),
         );
         let with = key("hello", dict(with_stop));
         assert_ne!(without, with, "stop must participate in the cache key");

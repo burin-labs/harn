@@ -211,11 +211,17 @@ fn duplicate_bucket_keys_are_rejected() {
         "buckets".to_string(),
         VmValue::List(Arc::new(vec![
             VmValue::dict(crate::value::DictMap::from_iter([
-                ("key".to_string(), VmValue::String(Arc::from("same"))),
+                (
+                    "key".to_string(),
+                    VmValue::String(arcstr::ArcStr::from("same")),
+                ),
                 ("limit".to_string(), VmValue::Int(1)),
             ])),
             VmValue::dict(crate::value::DictMap::from_iter([
-                ("key".to_string(), VmValue::String(Arc::from("same"))),
+                (
+                    "key".to_string(),
+                    VmValue::String(arcstr::ArcStr::from("same")),
+                ),
                 ("limit".to_string(), VmValue::Int(1)),
             ])),
         ])),

@@ -38,7 +38,7 @@ fn require_transcript<'a>(
         {
             Ok(d)
         }
-        _ => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        _ => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             format!("{context}: argument must be a transcript"),
         )))),
     }
@@ -84,7 +84,7 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
                 transcript_message_list(d)?
             }
             _ => {
-                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                     "transcript_from_messages: argument must be a message list or transcript",
                 ))));
             }
@@ -109,7 +109,7 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
     vm.register_builtin("transcript_add_asset", |args, _out| {
         let transcript = require_transcript(args, "transcript_add_asset")?;
         let asset_value = args.get(1).cloned().ok_or_else(|| {
-            VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 "transcript_add_asset: missing asset",
             )))
         })?;
@@ -181,7 +181,7 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
 
     vm.register_builtin("transcript_id", |args, _out| {
         let transcript = require_transcript(args, "transcript_id")?;
-        Ok(VmValue::String(std::sync::Arc::from(
+        Ok(VmValue::String(arcstr::ArcStr::from(
             transcript_id(transcript).unwrap_or_default(),
         )))
     });
@@ -215,7 +215,7 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
                 .join("\n"),
             _ => String::new(),
         };
-        Ok(VmValue::String(std::sync::Arc::from(rendered)))
+        Ok(VmValue::String(arcstr::ArcStr::from(rendered)))
     });
 
     vm.register_builtin("transcript_render_full", |args, _out| {
@@ -243,19 +243,19 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
                 .join("\n"),
             _ => String::new(),
         };
-        Ok(VmValue::String(std::sync::Arc::from(rendered)))
+        Ok(VmValue::String(arcstr::ArcStr::from(rendered)))
     });
 
     vm.register_builtin("transcript_export", |args, _out| {
         let transcript = args.first().cloned().unwrap_or(VmValue::Nil);
         if !is_transcript_value(&transcript) {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 "transcript_export: argument must be a transcript",
             ))));
         }
         let json = serde_json::to_string_pretty(&vm_value_to_json(&transcript))
             .map_err(|e| VmError::Runtime(format!("transcript_export: {e}")))?;
-        Ok(VmValue::String(std::sync::Arc::from(json)))
+        Ok(VmValue::String(arcstr::ArcStr::from(json)))
     });
 
     vm.register_builtin("transcript_import", |args, _out| {
@@ -383,7 +383,7 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
     vm.register_async_builtin("transcript_summarize", |_ctx, args| async move {
         let transcript = require_transcript(&args, "transcript_summarize")?;
         let mut opts = extract_llm_options(&[
-            VmValue::String(std::sync::Arc::from("")),
+            VmValue::String(arcstr::ArcStr::from("")),
             VmValue::Nil,
             args.get(1).cloned().unwrap_or(VmValue::Nil),
         ])?;
@@ -469,7 +469,7 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
                 &role,
                 args.get(2)
                     .cloned()
-                    .unwrap_or_else(|| VmValue::String(std::sync::Arc::from(""))),
+                    .unwrap_or_else(|| VmValue::String(arcstr::ArcStr::from(""))),
             ));
             Ok(VmValue::List(std::sync::Arc::new(new_messages)))
         }
@@ -482,7 +482,7 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
                 &role,
                 args.get(2)
                     .cloned()
-                    .unwrap_or_else(|| VmValue::String(std::sync::Arc::from(""))),
+                    .unwrap_or_else(|| VmValue::String(arcstr::ArcStr::from(""))),
             ));
             Ok(rebuild_transcript(
                 d,
@@ -493,7 +493,7 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
                 transcript_state(d),
             ))
         }
-        _ => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        _ => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "add_message: first argument must be a message list or transcript",
         )))),
     });
@@ -540,7 +540,7 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
                 transcript_state(d),
             ))
         }
-        _ => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        _ => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "add_tool_result: first argument must be a message list or transcript",
         )))),
     });
@@ -683,7 +683,7 @@ fn transcript_inject_reminder_builtin(args: &[VmValue]) -> Result<VmValue, VmErr
         ("transcript".to_string(), next),
         (
             "reminder_id".to_string(),
-            VmValue::String(std::sync::Arc::from(reminder_id)),
+            VmValue::String(arcstr::ArcStr::from(reminder_id)),
         ),
         (
             "deduped_count".to_string(),
@@ -1025,7 +1025,7 @@ fn reminder_string_field(reminder: &crate::value::DictMap, key: &str) -> Option<
 }
 
 fn reminder_error(context: &str, message: impl Into<String>) -> VmError {
-    VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
         "{context}: {}",
         message.into()
     ))))
@@ -1040,7 +1040,7 @@ mod tests {
     use super::*;
 
     fn vm_string(value: &str) -> VmValue {
-        VmValue::String(std::sync::Arc::from(value))
+        VmValue::String(arcstr::ArcStr::from(value))
     }
 
     fn dict(entries: Vec<(&str, VmValue)>) -> VmValue {

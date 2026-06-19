@@ -736,7 +736,7 @@ pub(crate) fn base_opts(provider: &str) -> LlmCallOptions {
         thinking: ThinkingConfig::Disabled,
         anthropic_beta_features: Vec::new(),
         vision: false,
-        tools: Some(VmValue::String(std::sync::Arc::from("vm-local-tools"))),
+        tools: Some(VmValue::String(arcstr::ArcStr::from("vm-local-tools"))),
         native_tools: Some(vec![
             serde_json::json!({"type": "function", "function": {"name": "tool"}}),
         ]),

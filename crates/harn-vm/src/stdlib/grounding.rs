@@ -2,7 +2,6 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use chrono::NaiveDate;
 use regex::Regex;
@@ -1014,7 +1013,7 @@ fn parse_date(value: &str) -> Option<NaiveDate> {
 }
 
 fn vm_error(message: impl Into<String>) -> VmError {
-    VmError::Thrown(VmValue::String(Arc::from(message.into())))
+    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message.into())))
 }
 
 const PYTHON_STDLIB: &[&str] = &[

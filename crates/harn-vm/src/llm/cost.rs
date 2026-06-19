@@ -182,13 +182,13 @@ fn numeric_value(value: &VmValue, key: &str) -> Result<f64, VmError> {
         VmValue::Float(f) => *f,
         VmValue::Int(n) => *n as f64,
         _ => {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 format!("budget.{key}: expected a non-negative number"),
             ))));
         }
     };
     if !value.is_finite() || value < 0.0 {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             format!("budget.{key}: expected a non-negative finite number"),
         ))));
     }
@@ -200,13 +200,13 @@ fn integer_value(value: &VmValue, key: &str) -> Result<i64, VmError> {
         VmValue::Int(n) => *n,
         VmValue::Float(f) if f.is_finite() && f.fract() == 0.0 => *f as i64,
         _ => {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 format!("budget.{key}: expected a non-negative integer"),
             ))));
         }
     };
     if value < 0 {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             format!("budget.{key}: expected a non-negative integer"),
         ))));
     }
@@ -244,7 +244,7 @@ pub(crate) fn parse_budget_envelope(
             VmValue::Nil => {}
             VmValue::Dict(fields) => parse_budget_fields(fields, &mut envelope)?,
             _ => {
-                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                     "budget: expected a dict {max_cost_usd?, total_budget_usd?, max_input_tokens?, max_output_tokens?}",
                 ))));
             }
@@ -700,7 +700,7 @@ pub(crate) fn register_cost_builtins(vm: &mut Vm) {
         // rates are recovered exactly. Callers that want a formatted string
         // pass the result to `llm_format_usd`, which accepts decimals.
         let cost = calculate_cost_decimal(&model, input_tokens, output_tokens);
-        Ok(VmValue::Decimal(cost))
+        Ok(VmValue::decimal(cost))
     });
 
     vm.register_builtin_with_metadata(
@@ -757,7 +757,7 @@ pub(crate) fn register_cost_builtins(vm: &mut Vm) {
             Some(VmValue::Float(f)) => *f,
             Some(VmValue::Int(n)) => *n as f64,
             _ => {
-                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                     "llm_budget: requires a numeric argument",
                 ))));
             }
@@ -923,7 +923,7 @@ fn llm_format_usd_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue
         })
         .unwrap_or(false);
     let formatted = format_usd_amount(amount, explicit_precision, sign_always);
-    Ok(VmValue::String(std::sync::Arc::from(formatted)))
+    Ok(VmValue::String(arcstr::ArcStr::from(formatted)))
 }
 
 fn format_usd_amount(amount: f64, precision: Option<usize>, sign_always: bool) -> String {
@@ -1113,7 +1113,7 @@ fn tokenizer_info_to_vm_value(model: &str, info: super::token_count::TokenizerIn
     result.insert(
         "encoder".to_string(),
         info.encoder
-            .map(|encoder| VmValue::String(std::sync::Arc::from(encoder)))
+            .map(|encoder| VmValue::String(arcstr::ArcStr::from(encoder)))
             .unwrap_or(VmValue::Nil),
     );
     VmValue::dict(result)

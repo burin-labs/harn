@@ -14,7 +14,7 @@ struct Fixture {
 }
 
 fn string(value: &str) -> VmValue {
-    VmValue::String(Arc::from(value))
+    VmValue::String(arcstr::ArcStr::from(value))
 }
 
 fn dict(entries: harn_vm::value::DictMap) -> VmValue {

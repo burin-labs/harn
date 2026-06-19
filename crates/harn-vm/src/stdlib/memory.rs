@@ -1287,7 +1287,7 @@ fn memory_record_to_vm(record: &MemoryRecord, score: Option<f64>) -> VmValue {
             record
                 .tags
                 .iter()
-                .map(|tag| VmValue::String(std::sync::Arc::from(tag.as_str())))
+                .map(|tag| VmValue::String(arcstr::ArcStr::from(tag.as_str())))
                 .collect(),
         )),
     );
@@ -1352,7 +1352,7 @@ fn forget_result_to_vm(event: &ForgetEvent) -> VmValue {
             event
                 .forgotten_ids
                 .iter()
-                .map(|id| VmValue::String(std::sync::Arc::from(id.as_str())))
+                .map(|id| VmValue::String(arcstr::ArcStr::from(id.as_str())))
                 .collect(),
         )),
     );
@@ -1376,7 +1376,7 @@ fn memory_open_to_vm(event: &OpenEvent) -> VmValue {
         event
             .embed_model_hint
             .as_deref()
-            .map(|hint| VmValue::String(std::sync::Arc::from(hint)))
+            .map(|hint| VmValue::String(arcstr::ArcStr::from(hint)))
             .unwrap_or(VmValue::Nil),
     );
     map.insert(

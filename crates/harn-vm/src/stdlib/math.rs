@@ -32,7 +32,7 @@ fn min_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
             (VmValue::Float(x), VmValue::Float(y)) => Ok(VmValue::Float(x.min(*y))),
             (VmValue::Int(x), VmValue::Float(y)) => Ok(VmValue::Float((*x as f64).min(*y))),
             (VmValue::Float(x), VmValue::Int(y)) => Ok(VmValue::Float(x.min(*y as f64))),
-            (VmValue::Decimal(x), VmValue::Decimal(y)) => Ok(VmValue::Decimal((*x).min(*y))),
+            (VmValue::Decimal(x), VmValue::Decimal(y)) => Ok(VmValue::decimal((**x).min(**y))),
             _ => Ok(VmValue::Nil),
         }
     } else {
@@ -48,7 +48,7 @@ fn max_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
             (VmValue::Float(x), VmValue::Float(y)) => Ok(VmValue::Float(x.max(*y))),
             (VmValue::Int(x), VmValue::Float(y)) => Ok(VmValue::Float((*x as f64).max(*y))),
             (VmValue::Float(x), VmValue::Int(y)) => Ok(VmValue::Float(x.max(*y as f64))),
-            (VmValue::Decimal(x), VmValue::Decimal(y)) => Ok(VmValue::Decimal((*x).max(*y))),
+            (VmValue::Decimal(x), VmValue::Decimal(y)) => Ok(VmValue::decimal((**x).max(**y))),
             _ => Ok(VmValue::Nil),
         }
     } else {
@@ -81,7 +81,7 @@ fn round_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
         VmValue::Int(n) => Ok(VmValue::Int(*n)),
         // Round to a whole-unit decimal (stays exact + keeps the decimal type),
         // rather than collapsing money to an int.
-        VmValue::Decimal(d) => Ok(VmValue::Decimal(d.round())),
+        VmValue::Decimal(d) => Ok(VmValue::decimal(d.round())),
         _ => Ok(VmValue::Nil),
     }
 }
@@ -371,11 +371,13 @@ fn sign_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
                 Ok(VmValue::Int(-1))
             }
         }
-        VmValue::Decimal(d) => Ok(VmValue::Int(match d.cmp(&rust_decimal::Decimal::ZERO) {
-            std::cmp::Ordering::Less => -1,
-            std::cmp::Ordering::Equal => 0,
-            std::cmp::Ordering::Greater => 1,
-        })),
+        VmValue::Decimal(d) => Ok(VmValue::Int(
+            match (**d).cmp(&rust_decimal::Decimal::ZERO) {
+                std::cmp::Ordering::Less => -1,
+                std::cmp::Ordering::Equal => 0,
+                std::cmp::Ordering::Greater => 1,
+            },
+        )),
         _ => Ok(VmValue::Nil),
     }
 }

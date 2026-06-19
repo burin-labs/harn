@@ -57,7 +57,7 @@ impl Ledger {
     fn parse(opts: &crate::value::DictMap) -> Result<Self, VmError> {
         match opts.get("ledger") {
             None => Ok(Ledger::Harn),
-            Some(VmValue::String(s)) => match s.as_ref() {
+            Some(VmValue::String(s)) => match s.as_str() {
                 "harn" => Ok(Ledger::Harn),
                 "sqlx" => Ok(Ledger::Sqlx),
                 other => Err(runtime_error(format!(
@@ -94,7 +94,7 @@ pub(super) async fn run(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let table_name = match ledger {
         Ledger::Sqlx => {
             if let Some(VmValue::String(s)) = opts.get("table") {
-                if s.as_ref() != SQLX_TABLE {
+                if s.as_str() != SQLX_TABLE {
                     return Err(runtime_error(format!(
                         "pg_migrate: ledger \"sqlx\" always uses table `{SQLX_TABLE}`; \
                          remove the conflicting `table: \"{s}\"`"
@@ -205,7 +205,7 @@ fn dir_arg(dict: &crate::value::DictMap, key: &str) -> Result<PathBuf, VmError> 
         ))
     })?;
     match value {
-        VmValue::String(text) => Ok(PathBuf::from(text.as_ref())),
+        VmValue::String(text) => Ok(PathBuf::from(text.as_str())),
         _ => Err(runtime_error(format!(
             "pg_migrate: option `{key}` must be a string path"
         ))),
@@ -421,7 +421,7 @@ fn build_response(
         VmValue::List(Arc::new(
             items
                 .into_iter()
-                .map(|name| VmValue::String(Arc::from(name)))
+                .map(|name| VmValue::String(arcstr::ArcStr::from(name)))
                 .collect(),
         ))
     }

@@ -1883,7 +1883,7 @@ fn compact_transcript_for_budget(
             .with_hook_dispatch(false)
             .with_evaluate_providers(false);
     let llm_opts = crate::llm::extract_llm_options(&[
-        VmValue::String(std::sync::Arc::from("")),
+        VmValue::String(arcstr::ArcStr::from("")),
         VmValue::Nil,
         VmValue::Nil,
     ])
@@ -3229,7 +3229,7 @@ fn clone_transcript_with_parent(transcript: &VmValue, parent_id: &str) -> VmValu
         }
         _ => VmValue::dict(BTreeMap::from([(
             "parent_session_id".to_string(),
-            VmValue::String(std::sync::Arc::from(parent_id.to_string())),
+            VmValue::String(arcstr::ArcStr::from(parent_id.to_string())),
         )])),
     };
     next.insert("metadata".to_string(), metadata);
@@ -3334,7 +3334,7 @@ fn session_snapshot(state: &SessionState) -> VmValue {
         state
             .parent_id
             .as_ref()
-            .map(|id| VmValue::String(std::sync::Arc::from(id.clone())))
+            .map(|id| VmValue::String(arcstr::ArcStr::from(id.clone())))
             .unwrap_or(VmValue::Nil),
     );
     next.insert(
@@ -3344,7 +3344,7 @@ fn session_snapshot(state: &SessionState) -> VmValue {
                 .child_ids
                 .iter()
                 .cloned()
-                .map(|id| VmValue::String(std::sync::Arc::from(id)))
+                .map(|id| VmValue::String(arcstr::ArcStr::from(id)))
                 .collect(),
         )),
     );
@@ -3360,7 +3360,7 @@ fn session_snapshot(state: &SessionState) -> VmValue {
         state
             .system_prompt
             .as_ref()
-            .map(|prompt| VmValue::String(std::sync::Arc::from(prompt.clone())))
+            .map(|prompt| VmValue::String(arcstr::ArcStr::from(prompt.clone())))
             .unwrap_or(VmValue::Nil),
     );
     next.insert(
@@ -3368,7 +3368,7 @@ fn session_snapshot(state: &SessionState) -> VmValue {
         state
             .tool_format
             .as_ref()
-            .map(|format| VmValue::String(std::sync::Arc::from(format.clone())))
+            .map(|format| VmValue::String(arcstr::ArcStr::from(format.clone())))
             .unwrap_or(VmValue::Nil),
     );
     next.insert(
@@ -3376,7 +3376,7 @@ fn session_snapshot(state: &SessionState) -> VmValue {
         state
             .pinned_model
             .as_ref()
-            .map(|model| VmValue::String(std::sync::Arc::from(model.clone())))
+            .map(|model| VmValue::String(arcstr::ArcStr::from(model.clone())))
             .unwrap_or(VmValue::Nil),
     );
     next.insert(
@@ -3384,7 +3384,7 @@ fn session_snapshot(state: &SessionState) -> VmValue {
         state
             .pinned_reasoning_policy
             .as_ref()
-            .map(|policy| VmValue::String(std::sync::Arc::from(policy.clone())))
+            .map(|policy| VmValue::String(arcstr::ArcStr::from(policy.clone())))
             .unwrap_or(VmValue::Nil),
     );
     next.insert(
@@ -3426,7 +3426,7 @@ fn session_snapshot(state: &SessionState) -> VmValue {
         state
             .live_controller_id
             .as_ref()
-            .map(|id| VmValue::String(std::sync::Arc::from(id.clone())))
+            .map(|id| VmValue::String(arcstr::ArcStr::from(id.clone())))
             .unwrap_or(VmValue::Nil),
     );
     next.insert(

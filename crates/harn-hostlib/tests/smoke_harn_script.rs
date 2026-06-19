@@ -100,7 +100,7 @@ return {{
 
     assert!(matches!(get("listed_count"), VmValue::Int(4)));
     assert!(matches!(get("read_size"), VmValue::Int(12)));
-    assert!(matches!(get("read_content"), VmValue::String(s) if s.as_ref() == "hello\nworld\n"));
+    assert!(matches!(get("read_content"), VmValue::String(s) if s.as_str() == "hello\nworld\n"));
 
     if let VmValue::Int(n) = get("matches") {
         assert!(*n >= 2, "expected at least 2 fn matches, got {n}");
@@ -108,7 +108,7 @@ return {{
         panic!("expected Int matches");
     }
 
-    assert!(matches!(get("outline_first"), VmValue::String(s) if s.as_ref() == "main"));
+    assert!(matches!(get("outline_first"), VmValue::String(s) if s.as_str() == "main"));
     assert!(matches!(get("bytes_written"), VmValue::Int(2)));
     assert!(matches!(get("removed"), VmValue::Bool(true)));
 
@@ -142,7 +142,7 @@ try {{
     };
     let kind = dict.get("kind").expect("kind present");
     let message = dict.get("message").expect("message present");
-    assert!(matches!(kind, VmValue::String(s) if s.as_ref() == "backend_error"));
+    assert!(matches!(kind, VmValue::String(s) if s.as_str() == "backend_error"));
     if let VmValue::String(msg) = message {
         assert!(
             msg.contains("hostlib_enable"),
@@ -212,11 +212,11 @@ return {{
     assert!(matches!(dict.get("log_count").unwrap(), VmValue::Int(1)));
     assert!(matches!(
         dict.get("log_subject").unwrap(),
-        VmValue::String(s) if s.as_ref() == "first"
+        VmValue::String(s) if s.as_str() == "first"
     ));
     assert!(matches!(
         dict.get("branch").unwrap(),
-        VmValue::String(s) if s.as_ref() == "main"
+        VmValue::String(s) if s.as_str() == "main"
     ));
 }
 
@@ -282,10 +282,10 @@ return {{
     };
     let get = |k: &str| dict.get(k).unwrap_or_else(|| panic!("missing {k}"));
 
-    assert!(matches!(get("snapshot_id"), VmValue::String(s) if s.as_ref() == scope));
-    assert!(matches!(get("before_restore"), VmValue::String(s) if s.as_ref() == "clobbered"));
+    assert!(matches!(get("snapshot_id"), VmValue::String(s) if s.as_str() == scope));
+    assert!(matches!(get("before_restore"), VmValue::String(s) if s.as_str() == "clobbered"));
     assert!(matches!(get("restored_count"), VmValue::Int(1)));
-    assert!(matches!(get("after_restore"), VmValue::String(s) if s.as_ref() == original));
+    assert!(matches!(get("after_restore"), VmValue::String(s) if s.as_str() == original));
     assert!(matches!(get("listed_count"), VmValue::Int(1)));
     assert!(matches!(get("listed_after_count"), VmValue::Int(0)));
 }
@@ -335,10 +335,10 @@ return {{
         other => panic!("expected dict, got {other:?}"),
     };
     let get = |k: &str| dict.get(k).unwrap_or_else(|| panic!("missing {k}"));
-    assert!(matches!(get("preview_result"), VmValue::String(s) if s.as_ref() == "applied"));
+    assert!(matches!(get("preview_result"), VmValue::String(s) if s.as_str() == "applied"));
     assert!(matches!(get("preview_dry"), VmValue::Bool(true)));
     assert!(matches!(get("preview_contains_bang"), VmValue::Bool(true)));
-    assert!(matches!(get("applied_result"), VmValue::String(s) if s.as_ref() == "applied"));
+    assert!(matches!(get("applied_result"), VmValue::String(s) if s.as_str() == "applied"));
     assert!(matches!(get("match_count"), VmValue::Int(1)));
 
     // Disk content should reflect the second (non-dry-run) call.
@@ -396,12 +396,12 @@ return {{
         other => panic!("expected dict, got {other:?}"),
     };
     let get = |k: &str| dict.get(k).unwrap_or_else(|| panic!("missing {k}"));
-    assert!(matches!(get("preview_result"), VmValue::String(s) if s.as_ref() == "applied"));
+    assert!(matches!(get("preview_result"), VmValue::String(s) if s.as_str() == "applied"));
     assert!(matches!(get("preview_dry"), VmValue::Bool(true)));
-    assert!(matches!(get("preview_position"), VmValue::String(s) if s.as_ref() == "after"));
+    assert!(matches!(get("preview_position"), VmValue::String(s) if s.as_str() == "after"));
     assert!(matches!(get("preview_contains_beta"), VmValue::Bool(true)));
-    assert!(matches!(get("applied_result"), VmValue::String(s) if s.as_ref() == "applied"));
-    assert!(matches!(get("applied_position"), VmValue::String(s) if s.as_ref() == "after"));
+    assert!(matches!(get("applied_result"), VmValue::String(s) if s.as_str() == "applied"));
+    assert!(matches!(get("applied_position"), VmValue::String(s) if s.as_str() == "after"));
 
     // Disk content should contain all three functions in order, and the
     // dry-run call should not have touched the file before the live one.
@@ -471,7 +471,7 @@ return {{
     };
     let get = |k: &str| dict.get(k).unwrap_or_else(|| panic!("missing {k}"));
 
-    assert!(matches!(get("result"), VmValue::String(s) if s.as_ref() == "ok"));
+    assert!(matches!(get("result"), VmValue::String(s) if s.as_str() == "ok"));
     assert!(matches!(get("files_touched"), VmValue::Int(1)));
     assert!(matches!(get("ops_applied"), VmValue::Int(2)));
     assert!(matches!(get("ops_rejected"), VmValue::Int(0)));
@@ -640,10 +640,10 @@ return {{
     assert!(*hits >= 2, "expected at least 2 hits, got {hits}");
     assert!(matches!(
         get("imports_kind"),
-        VmValue::String(s) if s.as_ref() == "import"
+        VmValue::String(s) if s.as_str() == "import"
     ));
     assert!(matches!(
         get("importer"),
-        VmValue::String(s) if s.as_ref() == "src/index.ts"
+        VmValue::String(s) if s.as_str() == "src/index.ts"
     ));
 }

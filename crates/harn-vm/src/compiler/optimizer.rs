@@ -32,7 +32,7 @@ fn constant_value(expr: &SNode) -> Option<VmValue> {
         Node::IntLiteral(value) => Some(VmValue::Int(*value)),
         Node::FloatLiteral(value) => Some(VmValue::Float(*value)),
         Node::StringLiteral(value) | Node::RawStringLiteral(value) => {
-            Some(VmValue::String(std::sync::Arc::from(value.as_str())))
+            Some(VmValue::String(arcstr::ArcStr::from(value.as_str())))
         }
         Node::BoolLiteral(value) => Some(VmValue::Bool(*value)),
         Node::NilLiteral => Some(VmValue::Nil),
@@ -150,7 +150,7 @@ fn fold_add(left: VmValue, right: VmValue) -> Option<VmValue> {
             let mut out = String::with_capacity(len);
             out.push_str(&left);
             out.push_str(&right);
-            Some(VmValue::String(std::sync::Arc::from(out)))
+            Some(VmValue::String(arcstr::ArcStr::from(out)))
         }
         (VmValue::List(left), VmValue::List(right)) => {
             let len = left.len().checked_add(right.len())?;
@@ -202,7 +202,7 @@ fn fold_mul(left: VmValue, right: VmValue) -> Option<VmValue> {
             if len > MAX_FOLDED_STRING_BYTES {
                 return None;
             }
-            Some(VmValue::String(std::sync::Arc::from(text.repeat(count))))
+            Some(VmValue::String(arcstr::ArcStr::from(text.repeat(count))))
         }
         _ => None,
     }

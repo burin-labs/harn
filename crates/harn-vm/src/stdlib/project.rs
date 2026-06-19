@@ -211,7 +211,7 @@ impl ProjectFingerprint {
             VmValue::List(std::sync::Arc::new(
                 self.languages
                     .into_iter()
-                    .map(|item| VmValue::String(std::sync::Arc::from(item)))
+                    .map(|item| VmValue::String(arcstr::ArcStr::from(item)))
                     .collect(),
             )),
         );
@@ -220,14 +220,14 @@ impl ProjectFingerprint {
             VmValue::List(std::sync::Arc::new(
                 self.frameworks
                     .into_iter()
-                    .map(|item| VmValue::String(std::sync::Arc::from(item)))
+                    .map(|item| VmValue::String(arcstr::ArcStr::from(item)))
                     .collect(),
             )),
         );
         value.insert(
             "package_manager".to_string(),
             self.package_manager
-                .map(|value| VmValue::String(std::sync::Arc::from(value)))
+                .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
                 .unwrap_or(VmValue::Nil),
         );
         value.insert(
@@ -235,26 +235,26 @@ impl ProjectFingerprint {
             VmValue::List(std::sync::Arc::new(
                 self.package_managers
                     .into_iter()
-                    .map(|item| VmValue::String(std::sync::Arc::from(item)))
+                    .map(|item| VmValue::String(arcstr::ArcStr::from(item)))
                     .collect(),
             )),
         );
         value.insert(
             "test_runner".to_string(),
             self.test_runner
-                .map(|value| VmValue::String(std::sync::Arc::from(value)))
+                .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
                 .unwrap_or(VmValue::Nil),
         );
         value.insert(
             "build_tool".to_string(),
             self.build_tool
-                .map(|value| VmValue::String(std::sync::Arc::from(value)))
+                .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
                 .unwrap_or(VmValue::Nil),
         );
         value.insert(
             "vcs".to_string(),
             self.vcs
-                .map(|value| VmValue::String(std::sync::Arc::from(value)))
+                .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
                 .unwrap_or(VmValue::Nil),
         );
         value.insert(
@@ -262,7 +262,7 @@ impl ProjectFingerprint {
             VmValue::List(std::sync::Arc::new(
                 self.ci
                     .into_iter()
-                    .map(|item| VmValue::String(std::sync::Arc::from(item)))
+                    .map(|item| VmValue::String(arcstr::ArcStr::from(item)))
                     .collect(),
             )),
         );
@@ -273,7 +273,7 @@ impl ProjectFingerprint {
             VmValue::List(std::sync::Arc::new(
                 self.lockfile_paths
                     .into_iter()
-                    .map(|item| VmValue::String(std::sync::Arc::from(item)))
+                    .map(|item| VmValue::String(arcstr::ArcStr::from(item)))
                     .collect(),
             )),
         );
@@ -379,7 +379,7 @@ impl ProjectEvidence {
             VmValue::List(std::sync::Arc::new(
                 sorted_confident_labels(&self.language_scores)
                     .into_iter()
-                    .map(|name| VmValue::String(std::sync::Arc::from(name)))
+                    .map(|name| VmValue::String(arcstr::ArcStr::from(name)))
                     .collect(),
             )),
         );
@@ -388,7 +388,7 @@ impl ProjectEvidence {
             VmValue::List(std::sync::Arc::new(
                 sorted_confident_labels(&self.framework_scores)
                     .into_iter()
-                    .map(|name| VmValue::String(std::sync::Arc::from(name)))
+                    .map(|name| VmValue::String(arcstr::ArcStr::from(name)))
                     .collect(),
             )),
         );
@@ -397,14 +397,14 @@ impl ProjectEvidence {
             VmValue::List(std::sync::Arc::new(
                 self.build_systems
                     .into_iter()
-                    .map(|name| VmValue::String(std::sync::Arc::from(name)))
+                    .map(|name| VmValue::String(arcstr::ArcStr::from(name)))
                     .collect(),
             )),
         );
         result.insert(
             "vcs".to_string(),
             self.vcs
-                .map(|value| VmValue::String(std::sync::Arc::from(value)))
+                .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
                 .unwrap_or(VmValue::Nil),
         );
         result.insert(
@@ -412,7 +412,7 @@ impl ProjectEvidence {
             VmValue::List(std::sync::Arc::new(
                 self.lockfiles
                     .into_iter()
-                    .map(|name| VmValue::String(std::sync::Arc::from(name)))
+                    .map(|name| VmValue::String(arcstr::ArcStr::from(name)))
                     .collect(),
             )),
         );
@@ -421,7 +421,7 @@ impl ProjectEvidence {
             VmValue::List(std::sync::Arc::new(
                 self.anchors
                     .into_iter()
-                    .map(|name| VmValue::String(std::sync::Arc::from(name)))
+                    .map(|name| VmValue::String(arcstr::ArcStr::from(name)))
                     .collect(),
             )),
         );
@@ -429,7 +429,7 @@ impl ProjectEvidence {
         result.insert(
             "package_name".to_string(),
             self.package_name
-                .map(|value| VmValue::String(std::sync::Arc::from(value)))
+                .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
                 .unwrap_or(VmValue::Nil),
         );
         result.insert(
@@ -437,7 +437,7 @@ impl ProjectEvidence {
             VmValue::List(std::sync::Arc::new(
                 self.build_commands
                     .into_iter()
-                    .map(|cmd| VmValue::String(std::sync::Arc::from(cmd)))
+                    .map(|cmd| VmValue::String(arcstr::ArcStr::from(cmd)))
                     .collect(),
             )),
         );
@@ -446,7 +446,7 @@ impl ProjectEvidence {
             VmValue::dict(
                 self.declared_scripts
                     .into_iter()
-                    .map(|(k, v)| (k, VmValue::String(std::sync::Arc::from(v))))
+                    .map(|(k, v)| (k, VmValue::String(arcstr::ArcStr::from(v))))
                     .collect::<crate::value::DictMap>(),
             ),
         );
@@ -455,7 +455,7 @@ impl ProjectEvidence {
             VmValue::List(std::sync::Arc::new(
                 self.readme_code_fences
                     .into_iter()
-                    .map(|lang| VmValue::String(std::sync::Arc::from(lang)))
+                    .map(|lang| VmValue::String(arcstr::ArcStr::from(lang)))
                     .collect(),
             )),
         );
@@ -464,7 +464,7 @@ impl ProjectEvidence {
             VmValue::List(std::sync::Arc::new(
                 self.dockerfile_commands
                     .into_iter()
-                    .map(|cmd| VmValue::String(std::sync::Arc::from(cmd)))
+                    .map(|cmd| VmValue::String(arcstr::ArcStr::from(cmd)))
                     .collect(),
             )),
         );
@@ -473,7 +473,7 @@ impl ProjectEvidence {
             VmValue::List(std::sync::Arc::new(
                 self.makefile_targets
                     .into_iter()
-                    .map(|target| VmValue::String(std::sync::Arc::from(target)))
+                    .map(|target| VmValue::String(arcstr::ArcStr::from(target)))
                     .collect(),
             )),
         );
@@ -767,7 +767,7 @@ fn project_context_profile_native_impl(
     _out: &mut String,
 ) -> Result<VmValue, VmError> {
     if args.len() > 2 {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "project_context_profile: expected at most 2 arguments",
         ))));
     }
@@ -792,7 +792,7 @@ fn project_context_profile_native_impl(
 )]
 fn project_fingerprint_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.len() > 1 {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "project_fingerprint: expected at most 1 argument",
         ))));
     }
@@ -2199,13 +2199,13 @@ fn first_ordered_value(values: &[String]) -> Option<String> {
 }
 
 fn path_error(error: std::io::Error) -> VmError {
-    VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
         "project.scan: failed to resolve path: {error}"
     ))))
 }
 
 fn path_missing_error(path: &Path) -> VmError {
-    VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
         "project.scan: path does not exist: {}",
         path.display()
     ))))
@@ -2894,7 +2894,7 @@ fn catalog_entry_value(entry: &ProjectCatalogEntry) -> VmValue {
             entry
                 .languages
                 .iter()
-                .map(|item| VmValue::String(std::sync::Arc::from((*item).to_string())))
+                .map(|item| VmValue::String(arcstr::ArcStr::from((*item).to_string())))
                 .collect(),
         )),
     );
@@ -2904,7 +2904,7 @@ fn catalog_entry_value(entry: &ProjectCatalogEntry) -> VmValue {
             entry
                 .frameworks
                 .iter()
-                .map(|item| VmValue::String(std::sync::Arc::from((*item).to_string())))
+                .map(|item| VmValue::String(arcstr::ArcStr::from((*item).to_string())))
                 .collect(),
         )),
     );
@@ -2914,7 +2914,7 @@ fn catalog_entry_value(entry: &ProjectCatalogEntry) -> VmValue {
             entry
                 .build_systems
                 .iter()
-                .map(|item| VmValue::String(std::sync::Arc::from((*item).to_string())))
+                .map(|item| VmValue::String(arcstr::ArcStr::from((*item).to_string())))
                 .collect(),
         )),
     );
@@ -2924,7 +2924,7 @@ fn catalog_entry_value(entry: &ProjectCatalogEntry) -> VmValue {
             entry
                 .anchors
                 .iter()
-                .map(|item| VmValue::String(std::sync::Arc::from((*item).to_string())))
+                .map(|item| VmValue::String(arcstr::ArcStr::from((*item).to_string())))
                 .collect(),
         )),
     );
@@ -2934,7 +2934,7 @@ fn catalog_entry_value(entry: &ProjectCatalogEntry) -> VmValue {
             entry
                 .lockfiles
                 .iter()
-                .map(|item| VmValue::String(std::sync::Arc::from((*item).to_string())))
+                .map(|item| VmValue::String(arcstr::ArcStr::from((*item).to_string())))
                 .collect(),
         )),
     );
@@ -2944,7 +2944,7 @@ fn catalog_entry_value(entry: &ProjectCatalogEntry) -> VmValue {
             entry
                 .source_globs
                 .iter()
-                .map(|item| VmValue::String(std::sync::Arc::from((*item).to_string())))
+                .map(|item| VmValue::String(arcstr::ArcStr::from((*item).to_string())))
                 .collect(),
         )),
     );
@@ -2952,14 +2952,14 @@ fn catalog_entry_value(entry: &ProjectCatalogEntry) -> VmValue {
         "default_build_cmd".to_string(),
         entry
             .default_build_cmd
-            .map(|value| VmValue::String(std::sync::Arc::from(value.to_string())))
+            .map(|value| VmValue::String(arcstr::ArcStr::from(value.to_string())))
             .unwrap_or(VmValue::Nil),
     );
     value.insert(
         "default_test_cmd".to_string(),
         entry
             .default_test_cmd
-            .map(|value| VmValue::String(std::sync::Arc::from(value.to_string())))
+            .map(|value| VmValue::String(arcstr::ArcStr::from(value.to_string())))
             .unwrap_or(VmValue::Nil),
     );
     VmValue::dict(value)

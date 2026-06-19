@@ -16,5 +16,5 @@ pub(crate) fn sha256_hex(args: &[VmValue]) -> String {
 }
 
 pub(crate) fn sha256_hex_value(args: &[VmValue]) -> VmValue {
-    VmValue::String(std::sync::Arc::from(sha256_hex(args)))
+    VmValue::String(arcstr::ArcStr::from(sha256_hex(args)))
 }

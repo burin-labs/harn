@@ -563,7 +563,7 @@ mod tests {
     }
 
     fn text(value: &str) -> VmValue {
-        VmValue::String(std::sync::Arc::from(value))
+        VmValue::String(arcstr::ArcStr::from(value))
     }
 
     #[test]

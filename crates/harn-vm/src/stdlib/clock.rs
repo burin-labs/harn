@@ -196,7 +196,7 @@ async fn sleep_ms_impl(
 #[harn_builtin(sig = "mock_time(...args: any) -> nil", category = "clock")]
 fn mock_time_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let Some(ms) = args.first().and_then(|a| a.as_int()) else {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "mock_time(ms): expected an integer millisecond timestamp",
         ))));
     };
@@ -208,7 +208,7 @@ fn mock_time_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 fn advance_time_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let ms = args.first().and_then(|a| a.as_int()).unwrap_or(0);
     if !is_mocked() {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "advance_time: no mock active. Call mock_time(ms) first.",
         ))));
     }

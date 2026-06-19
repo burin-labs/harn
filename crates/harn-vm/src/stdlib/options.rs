@@ -41,7 +41,7 @@ impl ErrorKind {
     pub(crate) fn err(self, msg: impl Into<String>) -> VmError {
         match self {
             ErrorKind::Runtime => VmError::Runtime(msg.into()),
-            ErrorKind::Thrown => VmError::Thrown(VmValue::String(std::sync::Arc::from(msg.into()))),
+            ErrorKind::Thrown => VmError::Thrown(VmValue::String(arcstr::ArcStr::from(msg.into()))),
         }
     }
 }
@@ -412,7 +412,7 @@ mod tests {
 
     #[test]
     fn parser_required_string_present() {
-        let d = dict(&[("task", VmValue::String(std::sync::Arc::from("do it")))]);
+        let d = dict(&[("task", VmValue::String(arcstr::ArcStr::from("do it")))]);
         let mut p = OptionsParser::new("daemon_spawn", &d, ErrorKind::Runtime);
         assert_eq!(p.required_string("task").unwrap(), "do it");
     }
@@ -433,21 +433,21 @@ mod tests {
 
     #[test]
     fn parser_required_string_empty() {
-        let d = dict(&[("task", VmValue::String(std::sync::Arc::from("   ")))]);
+        let d = dict(&[("task", VmValue::String(arcstr::ArcStr::from("   ")))]);
         let mut p = OptionsParser::new("daemon_spawn", &d, ErrorKind::Runtime);
         assert!(p.required_string("task").is_err());
     }
 
     #[test]
     fn parser_optional_string_trims() {
-        let d = dict(&[("name", VmValue::String(std::sync::Arc::from("  joe  ")))]);
+        let d = dict(&[("name", VmValue::String(arcstr::ArcStr::from("  joe  ")))]);
         let mut p = OptionsParser::new("agent", &d, ErrorKind::Runtime);
         assert_eq!(p.optional_string("name").unwrap().as_deref(), Some("joe"));
     }
 
     #[test]
     fn parser_optional_string_raw_preserves_whitespace() {
-        let d = dict(&[("prompt", VmValue::String(std::sync::Arc::from("  >  ")))]);
+        let d = dict(&[("prompt", VmValue::String(arcstr::ArcStr::from("  >  ")))]);
         let mut p = OptionsParser::new("std/io.read_line", &d, ErrorKind::Runtime);
         assert_eq!(
             p.optional_string_raw("prompt").unwrap().as_deref(),
@@ -457,7 +457,7 @@ mod tests {
 
     #[test]
     fn parser_optional_string_raw_accepts_empty_string() {
-        let d = dict(&[("prompt", VmValue::String(std::sync::Arc::from("")))]);
+        let d = dict(&[("prompt", VmValue::String(arcstr::ArcStr::from("")))]);
         let mut p = OptionsParser::new("std/io.read_line", &d, ErrorKind::Runtime);
         assert_eq!(
             p.optional_string_raw("prompt").unwrap().as_deref(),
@@ -489,7 +489,7 @@ mod tests {
     #[test]
     fn parser_finish_strict_rejects_unknown() {
         let d = dict(&[
-            ("name", VmValue::String(std::sync::Arc::from("a"))),
+            ("name", VmValue::String(arcstr::ArcStr::from("a"))),
             ("typo_key", VmValue::Bool(true)),
         ]);
         let mut p = OptionsParser::new("agent", &d, ErrorKind::Runtime);

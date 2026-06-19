@@ -587,7 +587,7 @@ fn monitor_headers(wait_id: &str, source_label: Option<&str>) -> BTreeMap<String
 
 fn monitor_record_to_value(record: MonitorWaitRecord) -> Result<VmValue, VmError> {
     if record.status == MonitorWaitStatus::Interrupted {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "kind:cancelled:VM cancelled by host",
         ))));
     }

@@ -106,7 +106,7 @@ pub(crate) struct ExceptionHandler {
     pub(crate) frame_depth: usize,
     pub(crate) env_scope_depth: usize,
     /// When present, this catch only handles errors whose enum_name matches.
-    pub(crate) error_type: Option<Arc<str>>,
+    pub(crate) error_type: Option<crate::value::HarnStr>,
 }
 
 /// A structured-concurrency nursery (`scope { }`). Tasks spawned while this
@@ -1056,7 +1056,7 @@ mod tests {
         vm.set_source_info("baseline_test.harn", source);
         vm.set_global(
             "stable_global",
-            VmValue::String(std::sync::Arc::from("baseline")),
+            VmValue::String(arcstr::ArcStr::from("baseline")),
         );
         vm.baseline()
     }

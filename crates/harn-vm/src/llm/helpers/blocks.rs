@@ -27,15 +27,15 @@ pub(super) fn normalize_message_blocks(content: Option<&VmValue>, role: &str) ->
         Some(other) => vec![VmValue::dict(BTreeMap::from([
             (
                 "type".to_string(),
-                VmValue::String(std::sync::Arc::from("text")),
+                VmValue::String(arcstr::ArcStr::from("text")),
             ),
             (
                 "text".to_string(),
-                VmValue::String(std::sync::Arc::from(other.display())),
+                VmValue::String(arcstr::ArcStr::from(other.display())),
             ),
             (
                 "visibility".to_string(),
-                VmValue::String(std::sync::Arc::from(default_visibility)),
+                VmValue::String(arcstr::ArcStr::from(default_visibility)),
             ),
         ]))],
     }
@@ -45,7 +45,7 @@ fn normalize_transcript_block(block: &VmValue, default_visibility: &str) -> VmVa
     let mut normalized = block.as_dict().cloned().unwrap_or_else(|| {
         crate::value::DictMap::from_iter([(
             "text".to_string(),
-            VmValue::String(std::sync::Arc::from(block.display())),
+            VmValue::String(arcstr::ArcStr::from(block.display())),
         )])
     });
     if !normalized.contains_key("type") {

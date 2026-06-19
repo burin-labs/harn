@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use std::time::Duration;
 
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
@@ -45,7 +44,10 @@ fn unix_socket_options(value: Option<&VmValue>) -> UnixSocketOptions {
 }
 
 fn insert_string(dict: &mut crate::value::DictMap, key: &str, value: impl Into<String>) {
-    dict.insert(key.to_string(), VmValue::String(Arc::from(value.into())));
+    dict.insert(
+        key.to_string(),
+        VmValue::String(arcstr::ArcStr::from(value.into())),
+    );
 }
 
 fn insert_int(dict: &mut crate::value::DictMap, key: &str, value: i64) {
@@ -268,7 +270,7 @@ fn net_unix_socket_json_request_impl(
     let started_ms = crate::stdlib::clock::now_monotonic_ms();
     let path = args.first().map(VmValue::display).unwrap_or_default();
     if path.is_empty() {
-        return Err(VmError::Thrown(VmValue::String(Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "__net_unix_socket_json_request: path is required",
         ))));
     }

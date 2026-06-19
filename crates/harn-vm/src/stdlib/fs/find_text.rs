@@ -65,7 +65,7 @@ struct FindTextSummary {
 }
 
 fn find_text_error(message: impl Into<String>) -> VmError {
-    VmError::Thrown(VmValue::String(std::sync::Arc::from(message.into())))
+    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message.into())))
 }
 
 fn parse_find_text_options(args: &[VmValue]) -> Result<FindTextOptions, VmError> {
@@ -598,13 +598,13 @@ fn find_text_summary_parallel(
 fn find_text_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let root = args.first().map(|a| a.display()).unwrap_or_default();
     if root.is_empty() {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "find_text: root path is required",
         ))));
     }
     let pattern = args.get(1).map(|a| a.display()).unwrap_or_default();
     if pattern.is_empty() {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "find_text: pattern is required",
         ))));
     }

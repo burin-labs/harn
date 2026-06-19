@@ -213,7 +213,7 @@ fn apply_prompt_mode_structured_transport(args: &mut [VmValue]) {
         VmValue::String(text) => Some(text.to_string()),
         _ => None,
     }) {
-        args[0] = VmValue::String(std::sync::Arc::from(prompt_with_schema_contract(
+        args[0] = VmValue::String(arcstr::ArcStr::from(prompt_with_schema_contract(
             &prompt, &schema,
         )));
     }
@@ -332,7 +332,7 @@ async fn run_repair_pass(
     // caller's `output_schema` (already lifted from the `schema`
     // positional arg by `rewrite_structured_args`).
     let args = vec![
-        VmValue::String(std::sync::Arc::from(prompt.as_str())),
+        VmValue::String(arcstr::ArcStr::from(prompt.as_str())),
         // System slot — the prompt carries instructions inline.
         VmValue::Nil,
         VmValue::dict(merged_options),
@@ -639,12 +639,12 @@ mod tests {
     #[test]
     fn structured_output_rejection_detects_provider_400() {
         // The OpenRouter/upstream relay shape we degrade on.
-        let rejected = VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        let rejected = VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "openrouter HTTP 400 Bad Request [invalid_request]: Provider returned error",
         )));
         assert!(is_structured_output_rejection(&rejected));
         // An unrelated transport failure must NOT trigger the structured fallback.
-        let unrelated = VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        let unrelated = VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "connection reset by peer",
         )));
         assert!(!is_structured_output_rejection(&unrelated));
@@ -726,7 +726,7 @@ mod tests {
         let schema = VmValue::dict(crate::value::DictMap::from_iter([
             (
                 "type".to_string(),
-                VmValue::String(std::sync::Arc::from("object")),
+                VmValue::String(arcstr::ArcStr::from("object")),
             ),
             (
                 "properties".to_string(),
@@ -734,7 +734,7 @@ mod tests {
                     "pass".to_string(),
                     VmValue::dict(crate::value::DictMap::from_iter([(
                         "type".to_string(),
-                        VmValue::String(std::sync::Arc::from("boolean")),
+                        VmValue::String(arcstr::ArcStr::from("boolean")),
                     )])),
                 )])),
             ),
@@ -742,18 +742,18 @@ mod tests {
         let options = VmValue::dict(crate::value::DictMap::from_iter([
             (
                 "provider".to_string(),
-                VmValue::String(std::sync::Arc::from("ollama")),
+                VmValue::String(arcstr::ArcStr::from("ollama")),
             ),
             (
                 "model".to_string(),
                 // A capability rule with no structured_output transport, so native
                 // structured transport is unsupported and the loop must fall back to
                 // prompt-mode. (ollama gemma4/devstral now declare format_kw support.)
-                VmValue::String(std::sync::Arc::from("llava:latest")),
+                VmValue::String(arcstr::ArcStr::from("llava:latest")),
             ),
         ]));
         let mut args = crate::llm::rewrite_structured_args(vec![
-            VmValue::String(std::sync::Arc::from("Return a completion verdict.")),
+            VmValue::String(arcstr::ArcStr::from("Return a completion verdict.")),
             schema,
             options,
         ])

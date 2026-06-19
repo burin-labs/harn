@@ -1147,8 +1147,8 @@ fn permission_request_value(
     request.insert(
         "grant_options".to_string(),
         VmValue::List(std::sync::Arc::new(vec![
-            VmValue::String(std::sync::Arc::from("once")),
-            VmValue::String(std::sync::Arc::from("session")),
+            VmValue::String(arcstr::ArcStr::from("once")),
+            VmValue::String(arcstr::ArcStr::from("session")),
             VmValue::Bool(false),
         ])),
     );

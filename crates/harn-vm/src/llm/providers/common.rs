@@ -2,7 +2,7 @@ use crate::llm::api::{DeltaSender, LlmResult, ProviderTelemetry};
 use crate::value::{VmError, VmValue};
 
 pub(super) fn vm_err(message: impl Into<String>) -> VmError {
-    VmError::Thrown(VmValue::String(std::sync::Arc::from(message.into())))
+    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message.into())))
 }
 
 pub(super) fn maybe_emit_delta(delta_tx: Option<DeltaSender>, text: &str) {

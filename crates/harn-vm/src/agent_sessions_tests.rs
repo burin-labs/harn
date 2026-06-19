@@ -19,7 +19,7 @@ fn scratchpad_value(note: &str) -> VmValue {
     VmValue::dict(crate::value::DictMap::from_iter([
         (
             "schema".to_string(),
-            VmValue::String(std::sync::Arc::from("harn.agent_scratchpad.v1")),
+            VmValue::String(arcstr::ArcStr::from("harn.agent_scratchpad.v1")),
         ),
         (
             "facts".to_string(),
@@ -27,11 +27,11 @@ fn scratchpad_value(note: &str) -> VmValue {
                 std::sync::Arc::new(crate::value::DictMap::from_iter([
                     (
                         "text".to_string(),
-                        VmValue::String(std::sync::Arc::from(note.to_string())),
+                        VmValue::String(arcstr::ArcStr::from(note.to_string())),
                     ),
                     (
                         "source_ref".to_string(),
-                        VmValue::String(std::sync::Arc::from("turn:1")),
+                        VmValue::String(arcstr::ArcStr::from("turn:1")),
                     ),
                 ])),
             )])),
@@ -41,7 +41,7 @@ fn scratchpad_value(note: &str) -> VmValue {
             VmValue::List(std::sync::Arc::new(vec![VmValue::Dict(
                 std::sync::Arc::new(crate::value::DictMap::from_iter([(
                     "id".to_string(),
-                    VmValue::String(std::sync::Arc::from("turn:1")),
+                    VmValue::String(arcstr::ArcStr::from("turn:1")),
                 )])),
             )])),
         ),
@@ -469,7 +469,7 @@ fn records_system_prompt_as_metadata_event_without_message() {
         Some("Follow the workflow.")
     );
     assert!(
-        matches!(snapshot_dict.get("system_prompt"), Some(VmValue::String(value)) if value.as_ref() == "Follow the workflow.")
+        matches!(snapshot_dict.get("system_prompt"), Some(VmValue::String(value)) if value.as_str() == "Follow the workflow.")
     );
     assert!(matches!(snapshot_dict.get("length"), Some(VmValue::Int(1))));
 
@@ -713,7 +713,7 @@ fn scratchpad_rejects_non_dict_and_oversized_values() {
 
     let non_dict_error = set_scratchpad(
         &id,
-        VmValue::String(std::sync::Arc::from("nope")),
+        VmValue::String(arcstr::ArcStr::from("nope")),
         "test",
         None,
         serde_json::json!({}),
@@ -723,7 +723,7 @@ fn scratchpad_rejects_non_dict_and_oversized_values() {
 
     let oversized = VmValue::dict(crate::value::DictMap::from_iter([(
         "notes".to_string(),
-        VmValue::String(std::sync::Arc::from("x".repeat(MAX_SCRATCHPAD_BYTES + 1))),
+        VmValue::String(arcstr::ArcStr::from("x".repeat(MAX_SCRATCHPAD_BYTES + 1))),
     )]));
     let oversized_error =
         set_scratchpad(&id, oversized, "test", None, serde_json::json!({})).unwrap_err();
@@ -980,7 +980,7 @@ fn child_sessions_record_parent_lineage() {
         .and_then(|value| value.as_dict())
         .expect("child metadata");
     assert!(
-        matches!(transcript.get("parent_id"), Some(VmValue::String(value)) if value.as_ref() == "parent-session")
+        matches!(transcript.get("parent_id"), Some(VmValue::String(value)) if value.as_str() == "parent-session")
     );
     assert!(
         matches!(transcript.get("child_ids"), Some(VmValue::List(children)) if children.is_empty())
@@ -1000,7 +1000,7 @@ fn child_sessions_record_parent_lineage() {
     ));
     assert!(matches!(
         metadata.get("parent_session_id"),
-        Some(VmValue::String(value)) if value.as_ref() == "parent-session"
+        Some(VmValue::String(value)) if value.as_str() == "parent-session"
     ));
 }
 
@@ -1011,7 +1011,7 @@ fn branch_event_index_counts_non_message_events() {
     let transcript = VmValue::dict(crate::value::DictMap::from_iter([
         (
             "id".to_string(),
-            VmValue::String(std::sync::Arc::from(src.clone())),
+            VmValue::String(arcstr::ArcStr::from(src.clone())),
         ),
         (
             "messages".to_string(),
@@ -1025,15 +1025,15 @@ fn branch_event_index_counts_non_message_events() {
             VmValue::List(std::sync::Arc::new(vec![
                 VmValue::dict(crate::value::DictMap::from_iter([(
                     "kind".to_string(),
-                    VmValue::String(std::sync::Arc::from("message")),
+                    VmValue::String(arcstr::ArcStr::from("message")),
                 )])),
                 VmValue::dict(crate::value::DictMap::from_iter([(
                     "kind".to_string(),
-                    VmValue::String(std::sync::Arc::from("sub_agent_start")),
+                    VmValue::String(arcstr::ArcStr::from("sub_agent_start")),
                 )])),
                 VmValue::dict(crate::value::DictMap::from_iter([(
                     "kind".to_string(),
-                    VmValue::String(std::sync::Arc::from("message")),
+                    VmValue::String(arcstr::ArcStr::from("message")),
                 )])),
             ])),
         ),

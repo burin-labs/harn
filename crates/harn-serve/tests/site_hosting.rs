@@ -151,23 +151,26 @@ impl HostCallBridge for HostReplyBridge {
         }
 
         let cookies = VmValue::List(Arc::new(vec![
-            VmValue::String(Arc::from("sid=abc; Path=/; HttpOnly")),
-            VmValue::String(Arc::from("theme=dark; Path=/; SameSite=Lax")),
+            VmValue::String(arcstr::ArcStr::from("sid=abc; Path=/; HttpOnly")),
+            VmValue::String(arcstr::ArcStr::from("theme=dark; Path=/; SameSite=Lax")),
         ]));
         let headers = harn_vm::value::DictMap::from_iter([
             (
                 "Content-Type".to_string(),
-                VmValue::String(Arc::from("application/octet-stream")),
+                VmValue::String(arcstr::ArcStr::from("application/octet-stream")),
             ),
             ("Set-Cookie".to_string(), cookies),
             (
                 "X-Reply-Source".to_string(),
-                VmValue::String(Arc::from("host-call")),
+                VmValue::String(arcstr::ArcStr::from("host-call")),
             ),
         ]);
         let response = harn_vm::value::DictMap::from_iter([
             ("status".to_string(), VmValue::Int(200)),
-            ("body_kind".to_string(), VmValue::String(Arc::from("bytes"))),
+            (
+                "body_kind".to_string(),
+                VmValue::String(arcstr::ArcStr::from("bytes")),
+            ),
             (
                 "raw_body".to_string(),
                 VmValue::Bytes(Arc::new(vec![0x00, 0xff, 0xfe, 0x80])),

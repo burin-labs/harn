@@ -29,7 +29,7 @@ fn dict() -> harn_vm::value::DictMap {
 }
 
 fn vstr(value: &str) -> VmValue {
-    VmValue::String(Arc::from(value))
+    VmValue::String(arcstr::ArcStr::from(value))
 }
 
 fn vlist_str(values: &[&str]) -> VmValue {

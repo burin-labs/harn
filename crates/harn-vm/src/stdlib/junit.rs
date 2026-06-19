@@ -82,7 +82,7 @@ fn parse_junit_xml_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
         Some(VmValue::Bytes(b)) => (**b).clone(),
         Some(VmValue::Nil) | None => Vec::new(),
         Some(other) => {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 format!(
                     "parse_junit_xml: expected string or bytes, got {}",
                     other.type_name()
@@ -107,21 +107,21 @@ fn record_to_value(record: TestRecord) -> VmValue {
         "message".to_string(),
         record
             .message
-            .map(|s| VmValue::String(std::sync::Arc::from(s)))
+            .map(|s| VmValue::String(arcstr::ArcStr::from(s)))
             .unwrap_or(VmValue::Nil),
     );
     map.insert(
         "stdout".to_string(),
         record
             .stdout
-            .map(|s| VmValue::String(std::sync::Arc::from(s)))
+            .map(|s| VmValue::String(arcstr::ArcStr::from(s)))
             .unwrap_or(VmValue::Nil),
     );
     map.insert(
         "stderr".to_string(),
         record
             .stderr
-            .map(|s| VmValue::String(std::sync::Arc::from(s)))
+            .map(|s| VmValue::String(arcstr::ArcStr::from(s)))
             .unwrap_or(VmValue::Nil),
     );
     VmValue::dict(map)

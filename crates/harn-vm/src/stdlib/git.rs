@@ -406,7 +406,7 @@ fn register_git_namespace(vm: &mut Vm) {
     ] {
         root.insert(
             name.to_string(),
-            VmValue::BuiltinRef(std::sync::Arc::from(builtin)),
+            VmValue::BuiltinRef(arcstr::ArcStr::from(builtin)),
         );
     }
     vm.set_global("git", VmValue::dict(root));
@@ -419,7 +419,7 @@ fn namespace(entries: &[(&str, &str)]) -> VmValue {
             .map(|(name, builtin)| {
                 (
                     name.to_string(),
-                    VmValue::BuiltinRef(std::sync::Arc::from(*builtin)),
+                    VmValue::BuiltinRef(arcstr::ArcStr::from(*builtin)),
                 )
             })
             .collect::<crate::value::DictMap>(),
@@ -586,7 +586,7 @@ async fn exec_argv(command: &GitCommand) -> Result<VmValue, VmError> {
             command
                 .argv
                 .iter()
-                .map(|arg| VmValue::String(std::sync::Arc::from(arg.as_str())))
+                .map(|arg| VmValue::String(arcstr::ArcStr::from(arg.as_str())))
                 .collect(),
         )),
     );
@@ -597,7 +597,7 @@ async fn exec_argv(command: &GitCommand) -> Result<VmValue, VmError> {
         VmValue::List(std::sync::Arc::new(
             GIT_ENV_OVERRIDES
                 .iter()
-                .map(|name| VmValue::String(std::sync::Arc::from(*name)))
+                .map(|name| VmValue::String(arcstr::ArcStr::from(*name)))
                 .collect(),
         )),
     );
@@ -609,7 +609,7 @@ async fn exec_argv(command: &GitCommand) -> Result<VmValue, VmError> {
     for (key, value) in GIT_NONINTERACTIVE_ENV {
         env.insert(
             (*key).to_string(),
-            VmValue::String(std::sync::Arc::from(*value)),
+            VmValue::String(arcstr::ArcStr::from(*value)),
         );
     }
     params.insert("env".to_string(), VmValue::dict(env));
@@ -1088,7 +1088,7 @@ fn repo_path_arg(args: &[VmValue], index: usize, builtin: &str) -> Result<PathBu
         .get(index)
         .ok_or_else(|| VmError::Runtime(format!("{builtin}: missing repo")))?;
     match value {
-        VmValue::String(path) if !path.is_empty() => Ok(PathBuf::from(path.as_ref())),
+        VmValue::String(path) if !path.is_empty() => Ok(PathBuf::from(path.as_str())),
         VmValue::Dict(map) => {
             if let Some(repo) = map.get("repo").and_then(|value| value.as_dict()) {
                 return repo_path_from_map(repo, builtin);
@@ -1111,7 +1111,7 @@ fn repo_path_from_map(map: &crate::value::DictMap, builtin: &str) -> Result<Path
     for key in ["root", "path", "cwd"] {
         if let Some(VmValue::String(path)) = map.get(key) {
             if !path.is_empty() {
-                return Ok(PathBuf::from(path.as_ref()));
+                return Ok(PathBuf::from(path.as_str()));
             }
         }
     }

@@ -231,26 +231,26 @@ pub fn register_mcp_server_builtins(vm: &mut Vm) {
         let dict = match args.first() {
             Some(VmValue::Dict(d)) => d.clone(),
             _ => {
-                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                     "mcp_elicit: argument must be a dict with {message, requestedSchema}",
                 ))));
             }
         };
         let message = dict.get("message").map(VmValue::display).ok_or_else(|| {
-            VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 "mcp_elicit: 'message' is required",
             )))
         })?;
         let requested_schema = dict.get("requestedSchema").or_else(|| dict.get("schema"));
         let requested_schema = requested_schema.ok_or_else(|| {
-            VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 "mcp_elicit: 'requestedSchema' is required",
             )))
         })?;
         let requested_schema_json: JsonValue = crate::mcp::vm_value_to_serde(requested_schema);
 
         let bus = current_bus().ok_or_else(|| {
-            VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 "mcp_elicit: no active MCP client connection — \
                  mcp_elicit can only be called from within a tool/resource/prompt handler \
                  served via `harn serve mcp`",

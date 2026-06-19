@@ -18,7 +18,7 @@ impl crate::vm::Vm {
         let result = match method {
             "keys" => Ok(VmValue::List(std::sync::Arc::new(
                 map.keys()
-                    .map(|k| VmValue::String(std::sync::Arc::from(k.as_str())))
+                    .map(|k| VmValue::String(arcstr::ArcStr::from(k.as_str())))
                     .collect(),
             ))),
             "values" => Ok(VmValue::List(std::sync::Arc::new(
@@ -107,7 +107,7 @@ impl crate::vm::Vm {
                 };
                 let mut result = BTreeMap::new();
                 for (k, v) in map.iter() {
-                    let key = VmValue::String(std::sync::Arc::from(k.as_str()));
+                    let key = VmValue::String(arcstr::ArcStr::from(k.as_str()));
                     let new_key = self.call_callable_one(callable, &key).await?;
                     let new_key_str = new_key.display();
                     result.insert(new_key_str, v.clone());
@@ -143,7 +143,7 @@ impl crate::vm::Vm {
                 VmValue::dict(BTreeMap::from([
                     (
                         "key".to_string(),
-                        VmValue::String(std::sync::Arc::from(k.as_str())),
+                        VmValue::String(arcstr::ArcStr::from(k.as_str())),
                     ),
                     ("value".to_string(), v.clone()),
                 ]))

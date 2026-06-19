@@ -102,11 +102,11 @@ async fn http_mock_records_normalized_headers_and_final_query_url() {
             VmValue::dict(crate::value::DictMap::from_iter([
                 (
                     "Authorization".to_string(),
-                    VmValue::String(std::sync::Arc::from("Bearer secret")),
+                    VmValue::String(arcstr::ArcStr::from("Bearer secret")),
                 ),
                 (
                     "X-Trace".to_string(),
-                    VmValue::String(std::sync::Arc::from("trace-1")),
+                    VmValue::String(arcstr::ArcStr::from("trace-1")),
                 ),
             ])),
         ),
@@ -115,7 +115,7 @@ async fn http_mock_records_normalized_headers_and_final_query_url() {
             VmValue::dict(crate::value::DictMap::from_iter([
                 (
                     "api_key".to_string(),
-                    VmValue::String(std::sync::Arc::from("secret")),
+                    VmValue::String(arcstr::ArcStr::from("secret")),
                 ),
                 ("limit".to_string(), VmValue::Int(2)),
             ])),
@@ -150,15 +150,15 @@ fn mock_call_headers_redact_sensitive_values() {
     let headers = crate::value::DictMap::from_iter([
         (
             "authorization".to_string(),
-            VmValue::String(std::sync::Arc::from("Bearer secret")),
+            VmValue::String(arcstr::ArcStr::from("Bearer secret")),
         ),
         (
             "accept".to_string(),
-            VmValue::String(std::sync::Arc::from("application/json")),
+            VmValue::String(arcstr::ArcStr::from("application/json")),
         ),
         (
             "x-api-key".to_string(),
-            VmValue::String(std::sync::Arc::from("secret")),
+            VmValue::String(arcstr::ArcStr::from("secret")),
         ),
     ]);
     let redacted = mock_call_headers_value(&headers, true);
@@ -203,25 +203,25 @@ async fn multipart_requests_are_mock_visible() {
             VmValue::dict(crate::value::DictMap::from_iter([
                 (
                     "name".to_string(),
-                    VmValue::String(std::sync::Arc::from("meta")),
+                    VmValue::String(arcstr::ArcStr::from("meta")),
                 ),
                 (
                     "value".to_string(),
-                    VmValue::String(std::sync::Arc::from("hello")),
+                    VmValue::String(arcstr::ArcStr::from("hello")),
                 ),
             ])),
             VmValue::dict(crate::value::DictMap::from_iter([
                 (
                     "name".to_string(),
-                    VmValue::String(std::sync::Arc::from("blob")),
+                    VmValue::String(arcstr::ArcStr::from("blob")),
                 ),
                 (
                     "filename".to_string(),
-                    VmValue::String(std::sync::Arc::from("blob.bin")),
+                    VmValue::String(arcstr::ArcStr::from("blob.bin")),
                 ),
                 (
                     "content_type".to_string(),
-                    VmValue::String(std::sync::Arc::from("application/octet-stream")),
+                    VmValue::String(arcstr::ArcStr::from("application/octet-stream")),
                 ),
                 (
                     "value".to_string(),
@@ -441,18 +441,18 @@ async fn http_proxy_routes_requests_through_configured_proxy() {
     let options = crate::value::DictMap::from_iter([
         (
             "proxy".to_string(),
-            VmValue::String(std::sync::Arc::from(proxy.base_url().to_string())),
+            VmValue::String(arcstr::ArcStr::from(proxy.base_url().to_string())),
         ),
         (
             "proxy_auth".to_string(),
             VmValue::dict(crate::value::DictMap::from_iter([
                 (
                     "user".to_string(),
-                    VmValue::String(std::sync::Arc::from("user")),
+                    VmValue::String(arcstr::ArcStr::from("user")),
                 ),
                 (
                     "pass".to_string(),
-                    VmValue::String(std::sync::Arc::from("pass")),
+                    VmValue::String(arcstr::ArcStr::from("pass")),
                 ),
             ])),
         ),
@@ -511,12 +511,12 @@ async fn custom_tls_ca_bundle_and_pin_allow_request() {
         VmValue::dict(crate::value::DictMap::from_iter([
             (
                 "ca_bundle_path".to_string(),
-                VmValue::String(std::sync::Arc::from(cert_path.display().to_string())),
+                VmValue::String(arcstr::ArcStr::from(cert_path.display().to_string())),
             ),
             (
                 "pinned_sha256".to_string(),
                 VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-                    std::sync::Arc::from(pin),
+                    arcstr::ArcStr::from(pin),
                 )])),
             ),
         ])),
@@ -571,12 +571,12 @@ async fn custom_tls_pin_mismatch_is_rejected() {
         VmValue::dict(crate::value::DictMap::from_iter([
             (
                 "ca_bundle_path".to_string(),
-                VmValue::String(std::sync::Arc::from(cert_path.display().to_string())),
+                VmValue::String(arcstr::ArcStr::from(cert_path.display().to_string())),
             ),
             (
                 "pinned_sha256".to_string(),
                 VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-                    std::sync::Arc::from("deadbeef"),
+                    arcstr::ArcStr::from("deadbeef"),
                 )])),
             ),
         ])),
@@ -647,15 +647,15 @@ fn formats_sse_event_fields_and_multiline_data() {
         &VmValue::dict(crate::value::DictMap::from_iter([
             (
                 "event".to_string(),
-                VmValue::String(std::sync::Arc::from("progress")),
+                VmValue::String(arcstr::ArcStr::from("progress")),
             ),
             (
                 "data".to_string(),
-                VmValue::String(std::sync::Arc::from("one\ntwo")),
+                VmValue::String(arcstr::ArcStr::from("one\ntwo")),
             ),
             (
                 "id".to_string(),
-                VmValue::String(std::sync::Arc::from("evt-1")),
+                VmValue::String(arcstr::ArcStr::from("evt-1")),
             ),
             ("retry_ms".to_string(), VmValue::Int(2500)),
         ])),
@@ -673,7 +673,7 @@ fn rejects_sse_event_control_fields_with_newlines() {
     let err = vm_sse_event_frame(
         &VmValue::dict(crate::value::DictMap::from_iter([(
             "event".to_string(),
-            VmValue::String(std::sync::Arc::from("bad\nname")),
+            VmValue::String(arcstr::ArcStr::from("bad\nname")),
         )])),
         &crate::value::DictMap::new(),
     )
@@ -697,11 +697,11 @@ fn server_sse_mock_client_observes_heartbeat_disconnect_and_cancel() {
             &VmValue::dict(crate::value::DictMap::from_iter([
                 (
                     "event".to_string(),
-                    VmValue::String(std::sync::Arc::from("progress")),
+                    VmValue::String(arcstr::ArcStr::from("progress")),
                 ),
                 (
                     "data".to_string(),
-                    VmValue::String(std::sync::Arc::from("50"))
+                    VmValue::String(arcstr::ArcStr::from("50"))
                 ),
             ])),
             &crate::value::DictMap::new(),
@@ -711,7 +711,7 @@ fn server_sse_mock_client_observes_heartbeat_disconnect_and_cancel() {
     assert!(expect_bool(
         vm_sse_server_heartbeat(
             &stream_id,
-            Some(&VmValue::String(std::sync::Arc::from("tick")))
+            Some(&VmValue::String(arcstr::ArcStr::from("tick")))
         )
         .expect("heartbeat")
     ));
@@ -735,7 +735,7 @@ fn server_sse_mock_client_observes_heartbeat_disconnect_and_cancel() {
     assert!(!expect_bool(
         vm_sse_server_send(
             &stream_id,
-            &VmValue::String(std::sync::Arc::from("late")),
+            &VmValue::String(arcstr::ArcStr::from("late")),
             &crate::value::DictMap::new()
         )
         .expect("late send")
@@ -747,7 +747,7 @@ fn server_sse_mock_client_observes_heartbeat_disconnect_and_cancel() {
     assert!(expect_bool(
         vm_sse_server_cancel(
             &cancelled_id,
-            Some(&VmValue::String(std::sync::Arc::from("stop")))
+            Some(&VmValue::String(arcstr::ArcStr::from("stop")))
         )
         .expect("cancel")
     ));
@@ -769,7 +769,7 @@ fn server_sse_rejects_oversized_events() {
     let stream_id = handle_from_value(&response, "test").expect("handle");
     let err = vm_sse_server_send(
         &stream_id,
-        &VmValue::String(std::sync::Arc::from("this is too large")),
+        &VmValue::String(arcstr::ArcStr::from("this is too large")),
         &crate::value::DictMap::new(),
     )
     .expect_err("oversized event should reject");
@@ -830,7 +830,7 @@ async fn ssrf_guard_allow_loopback_hatch_permits_capture_server() {
     crate::egress::install_test_policy(&[
         (
             "block_private",
-            VmValue::String(std::sync::Arc::from("private")),
+            VmValue::String(arcstr::ArcStr::from("private")),
         ),
         ("allow_loopback", VmValue::Bool(true)),
     ]);
@@ -862,7 +862,7 @@ async fn ssrf_guard_block_private_off_permits_capture_server() {
     // Explicit opt-out: block_private:"off" via a thread-local test policy.
     crate::egress::install_test_policy(&[(
         "block_private",
-        VmValue::String(std::sync::Arc::from("off")),
+        VmValue::String(arcstr::ArcStr::from("off")),
     )]);
 
     let (port, handle) = spawn_loopback_ok_server();

@@ -348,8 +348,8 @@ pub struct Chunk {
     inline_caches: Arc<Mutex<Vec<InlineCacheEntry>>>,
     /// Lazily-materialized shared string cache for `Constant::String` entries,
     /// parallel to `constants`. String constants are materialized once per
-    /// unique constant; subsequent pushes are an `Arc` refcount bump.
-    constant_strings: Arc<Mutex<Vec<Option<Arc<str>>>>>,
+    /// unique constant; subsequent pushes are a [`HarnStr`] refcount bump.
+    constant_strings: Arc<Mutex<Vec<Option<crate::value::HarnStr>>>>,
     /// Source-name metadata for slot-indexed locals in this chunk.
     pub(crate) local_slots: Vec<LocalSlotInfo>,
     /// True when this chunk's bytecode emits an opcode that resolves a
@@ -1026,7 +1026,7 @@ impl Chunk {
     /// index, materializing it on first access and caching for reuse.
     /// Returns `None` when the constant at `idx` is not a string (the
     /// caller should fall back to the regular `Constant` match).
-    pub(crate) fn constant_string_rc(&self, idx: usize) -> Option<Arc<str>> {
+    pub(crate) fn constant_string_rc(&self, idx: usize) -> Option<crate::value::HarnStr> {
         // Borrow the side table mutably so we can lazily extend / fill
         // entries. The borrow is scope-confined to this function; the
         // VM never re-enters constant_string_rc for the same chunk
@@ -1036,13 +1036,13 @@ impl Chunk {
             entries.resize(self.constants.len(), None);
         }
         if let Some(Some(existing)) = entries.get(idx) {
-            return Some(Arc::clone(existing));
+            return Some(existing.clone());
         }
         let materialized = match self.constants.get(idx)? {
-            Constant::String(s) => Arc::<str>::from(s.as_str()),
+            Constant::String(s) => crate::value::HarnStr::from(s.as_str()),
             _ => return None,
         };
-        entries[idx] = Some(Arc::clone(&materialized));
+        entries[idx] = Some(materialized.clone());
         Some(materialized)
     }
 

@@ -266,7 +266,7 @@ fn try_regex_recover(
     // schemas (e.g. raw arrays / scalars) skip this stage cleanly.
     let is_object = matches!(
         schema_dict.get("type"),
-        Some(VmValue::String(s)) if s.as_ref() == "object"
+        Some(VmValue::String(s)) if s.as_str() == "object"
     ) || schema_dict.contains_key("properties");
     if !is_object {
         return Ok(None);
@@ -308,7 +308,7 @@ fn field_type_name(field_schema: &VmValue) -> Option<&'static str> {
     let dict = field_schema.as_dict()?;
     let ty = dict.get("type")?;
     match ty {
-        VmValue::String(s) => match s.as_ref() {
+        VmValue::String(s) => match s.as_str() {
             "string" => Some("string"),
             "integer" => Some("integer"),
             "number" => Some("number"),
@@ -318,7 +318,7 @@ fn field_type_name(field_schema: &VmValue) -> Option<&'static str> {
         // Union types like ["string", "null"] — pick the first scalar.
         VmValue::List(items) => items.iter().find_map(|item| {
             if let VmValue::String(s) = item {
-                match s.as_ref() {
+                match s.as_str() {
                     "string" => Some("string"),
                     "integer" => Some("integer"),
                     "number" => Some("number"),
@@ -396,7 +396,7 @@ fn coerce_scalar(raw: &str, field_type: &str, field_schema: &VmValue) -> Option<
             if unescaped.eq_ignore_ascii_case("null") && !field_allows_null(field_schema) {
                 return None;
             }
-            Some(VmValue::String(std::sync::Arc::from(unescaped.as_str())))
+            Some(VmValue::String(arcstr::ArcStr::from(unescaped.as_str())))
         }
         "integer" => {
             let n: i64 = cleaned.parse().ok()?;
@@ -470,10 +470,10 @@ fn field_allows_null(field_schema: &VmValue) -> bool {
         None => return false,
     };
     match dict.get("type") {
-        Some(VmValue::String(s)) => s.as_ref() == "null",
+        Some(VmValue::String(s)) => s.as_str() == "null",
         Some(VmValue::List(items)) => items
             .iter()
-            .any(|item| matches!(item, VmValue::String(s) if s.as_ref() == "null")),
+            .any(|item| matches!(item, VmValue::String(s) if s.as_str() == "null")),
         _ => false,
     }
 }
@@ -552,7 +552,7 @@ async fn run_llm_repair(
     let merged_options = merge_repair_options(base_opts.as_ref(), &repair.overrides, schema);
     let merged_dict = Some(merged_options.clone());
     let args = vec![
-        VmValue::String(std::sync::Arc::from(prompt.as_str())),
+        VmValue::String(arcstr::ArcStr::from(prompt.as_str())),
         // System slot — the prompt carries instructions inline so the
         // repair pass works regardless of any caller-set system text.
         VmValue::Nil,
@@ -627,10 +627,10 @@ fn merge_repair_options(
         });
     merged
         .entry("output_validation".to_string())
-        .or_insert(VmValue::String(std::sync::Arc::from("error")));
+        .or_insert(VmValue::String(arcstr::ArcStr::from("error")));
     merged
         .entry("response_format".to_string())
-        .or_insert(VmValue::String(std::sync::Arc::from("json")));
+        .or_insert(VmValue::String(arcstr::ArcStr::from("json")));
     for (k, v) in overrides {
         merged.insert(k.clone(), v.clone());
     }
@@ -692,8 +692,8 @@ mod tests {
         props.insert("age".to_string(), VmValue::dict(age));
         props.insert("active".to_string(), VmValue::dict(active));
         let required = VmValue::List(std::sync::Arc::new(vec![
-            VmValue::String(std::sync::Arc::from("name")),
-            VmValue::String(std::sync::Arc::from("age")),
+            VmValue::String(arcstr::ArcStr::from("name")),
+            VmValue::String(arcstr::ArcStr::from("age")),
         ]));
         let mut schema = crate::value::DictMap::new();
         schema.put_str("type", "object");
@@ -924,7 +924,7 @@ mod tests {
     async fn schema_recover_stage_parsed_for_clean_json() {
         let schema = person_schema();
         let args = vec![
-            VmValue::String(std::sync::Arc::from(r#"{"name": "Ada", "age": 36}"#)),
+            VmValue::String(arcstr::ArcStr::from(r#"{"name": "Ada", "age": 36}"#)),
             schema,
         ];
         let env = schema_recover_impl(args, None).await.unwrap();
@@ -942,7 +942,7 @@ mod tests {
     async fn schema_recover_stage_extracted_for_fenced_json() {
         let schema = person_schema();
         let args = vec![
-            VmValue::String(std::sync::Arc::from(
+            VmValue::String(arcstr::ArcStr::from(
                 "Sure, here you go:\n```json\n{\"name\": \"Ada\", \"age\": 36}\n```\nDone.",
             )),
             schema,
@@ -960,7 +960,7 @@ mod tests {
     async fn schema_recover_stage_regex_for_yaml_shape() {
         let schema = person_schema();
         let args = vec![
-            VmValue::String(std::sync::Arc::from("name: Ada\nage: 36\nactive: true\n")),
+            VmValue::String(arcstr::ArcStr::from("name: Ada\nage: 36\nactive: true\n")),
             schema,
         ];
         let env = schema_recover_impl(args, None).await.unwrap();
@@ -984,7 +984,7 @@ mod tests {
         let mut opts = crate::value::DictMap::new();
         opts.insert("llm_repair".to_string(), VmValue::Bool(false));
         let args = vec![
-            VmValue::String(std::sync::Arc::from("nothing useful here at all")),
+            VmValue::String(arcstr::ArcStr::from("nothing useful here at all")),
             schema,
             VmValue::dict(opts),
         ];
@@ -1004,8 +1004,8 @@ mod tests {
     #[tokio::test]
     async fn schema_recover_rejects_non_dict_schema() {
         let args = vec![
-            VmValue::String(std::sync::Arc::from("anything")),
-            VmValue::String(std::sync::Arc::from("not a schema")),
+            VmValue::String(arcstr::ArcStr::from("anything")),
+            VmValue::String(arcstr::ArcStr::from("not a schema")),
         ];
         let err = schema_recover_impl(args, None).await.unwrap_err();
         let msg = err.to_string();
@@ -1014,7 +1014,7 @@ mod tests {
 
     #[tokio::test]
     async fn schema_recover_rejects_missing_schema_arg() {
-        let args = vec![VmValue::String(std::sync::Arc::from("anything"))];
+        let args = vec![VmValue::String(arcstr::ArcStr::from("anything"))];
         let err = schema_recover_impl(args, None).await.unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("expected"), "got: {msg}");

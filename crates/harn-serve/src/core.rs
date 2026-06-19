@@ -875,7 +875,7 @@ fn json_to_vm_value(value: &serde_json::Value) -> VmValue {
             .map(VmValue::Int)
             .or_else(|| value.as_f64().map(VmValue::Float))
             .unwrap_or(VmValue::Nil),
-        serde_json::Value::String(value) => VmValue::String(Arc::from(value.as_str())),
+        serde_json::Value::String(value) => VmValue::String(arcstr::ArcStr::from(value.as_str())),
         serde_json::Value::Array(items) => VmValue::List(Arc::new(
             items.iter().map(json_to_vm_value).collect::<Vec<_>>(),
         )),
@@ -1514,11 +1514,11 @@ pub fn whoami(harness: Harness) -> string {
             harn_vm::VmError::Thrown(harn_vm::VmValue::dict(std::collections::BTreeMap::from([
                 (
                     "category".to_string(),
-                    harn_vm::VmValue::String(std::sync::Arc::from("budget_exceeded")),
+                    harn_vm::VmValue::String(arcstr::ArcStr::from("budget_exceeded")),
                 ),
                 (
                     "limit".to_string(),
-                    harn_vm::VmValue::String(std::sync::Arc::from(limit)),
+                    harn_vm::VmValue::String(arcstr::ArcStr::from(limit)),
                 ),
             ])))
         };

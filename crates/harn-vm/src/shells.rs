@@ -569,7 +569,7 @@ fn vm_string_list(value: &VmValue) -> Option<Vec<String>> {
 }
 
 fn string(value: &str) -> VmValue {
-    VmValue::String(std::sync::Arc::from(value.to_string()))
+    VmValue::String(arcstr::ArcStr::from(value.to_string()))
 }
 
 fn string_list(values: &[String]) -> VmValue {

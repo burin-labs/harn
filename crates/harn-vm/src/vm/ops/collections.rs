@@ -90,8 +90,9 @@ impl super::super::Vm {
             }
             (
                 PropertyCacheTarget::StructField { field_name, index },
-                VmValue::StructInstance { layout, fields },
+                VmValue::StructInstance(si),
             ) => {
+                let crate::value::StructInstanceData { layout, fields } = &**si;
                 if layout
                     .field_names()
                     .get(*index)
@@ -129,7 +130,7 @@ impl super::super::Vm {
             (PropertyCacheTarget::PairFirst, VmValue::Pair(p)) => Some(p.0.clone()),
             (PropertyCacheTarget::PairSecond, VmValue::Pair(p)) => Some(p.1.clone()),
             (PropertyCacheTarget::EnumVariant, VmValue::EnumVariant(enum_variant)) => {
-                Some(VmValue::String(Arc::clone(&enum_variant.variant)))
+                Some(VmValue::String(enum_variant.variant.clone()))
             }
             (PropertyCacheTarget::EnumFields, VmValue::EnumVariant(enum_variant)) => {
                 Some(VmValue::List(Arc::clone(&enum_variant.fields)))
@@ -144,7 +145,8 @@ impl super::super::Vm {
     fn property_cache_target(obj: &VmValue, name: &str) -> Option<PropertyCacheTarget> {
         match obj {
             VmValue::Dict(_) => Some(PropertyCacheTarget::DictField(Arc::from(name))),
-            VmValue::StructInstance { layout, .. } => {
+            VmValue::StructInstance(si) => {
+                let layout = &si.layout;
                 layout
                     .field_index(name)
                     .map(|index| PropertyCacheTarget::StructField {
@@ -200,15 +202,18 @@ impl super::super::Vm {
                 _ => VmValue::Nil,
             },
             VmValue::EnumVariant(enum_variant) => match name {
-                "variant" => VmValue::String(Arc::clone(&enum_variant.variant)),
+                "variant" => VmValue::String(enum_variant.variant.clone()),
                 "fields" => VmValue::List(Arc::clone(&enum_variant.fields)),
                 _ => VmValue::Nil,
             },
-            VmValue::StructInstance { layout, fields } => layout
-                .field_index(name)
-                .and_then(|index| fields.get(index))
-                .and_then(Clone::clone)
-                .unwrap_or(VmValue::Nil),
+            VmValue::StructInstance(si) => {
+                let crate::value::StructInstanceData { layout, fields } = &**si;
+                layout
+                    .field_index(name)
+                    .and_then(|index| fields.get(index))
+                    .and_then(Clone::clone)
+                    .unwrap_or(VmValue::Nil)
+            }
             VmValue::Pair(p) => match name {
                 "first" => p.0.clone(),
                 "second" => p.1.clone(),
@@ -292,7 +297,7 @@ impl super::super::Vm {
                 }
             }
             (VmValue::Dict(map), VmValue::String(key)) => {
-                map.get(key.as_ref()).cloned().unwrap_or(VmValue::Nil)
+                map.get(key.as_str()).cloned().unwrap_or(VmValue::Nil)
             }
             (VmValue::Dict(map), _) => map.get(&idx.display()).cloned().unwrap_or(VmValue::Nil),
             (VmValue::Range(r), VmValue::Int(i)) => {
@@ -402,7 +407,7 @@ impl super::super::Vm {
                     }
                 };
                 if start >= end {
-                    VmValue::String(std::sync::Arc::from(""))
+                    VmValue::String(arcstr::ArcStr::from(""))
                 } else {
                     let start_idx = start as usize;
                     let end_idx = end as usize;
@@ -416,7 +421,7 @@ impl super::super::Vm {
                         .nth(end_idx)
                         .map(|(b, _)| b)
                         .unwrap_or(s.len());
-                    VmValue::String(std::sync::Arc::from(&s[byte_start..byte_end]))
+                    VmValue::String(arcstr::ArcStr::from(&s[byte_start..byte_end]))
                 }
             }
             _ => {
@@ -498,7 +503,7 @@ impl super::super::Vm {
                     new_map.insert(prop_name.to_string(), new_value);
                     assign_value(self, VmValue::dict(new_map))?;
                 }
-                VmValue::StructInstance { .. } => {
+                VmValue::StructInstance(_) => {
                     let new_obj = obj
                         .struct_instance_with_property(prop_name, new_value)
                         .expect("struct instance matched above");
@@ -627,7 +632,7 @@ impl super::super::Vm {
             return Ok(());
         }
 
-        if matches!(slot.value, VmValue::StructInstance { .. }) {
+        if matches!(slot.value, VmValue::StructInstance(_)) {
             let next = slot
                 .value
                 .struct_instance_with_property(prop_name, new_value)
@@ -719,7 +724,7 @@ impl super::super::Vm {
         let result = Self::concat_display_values(&self.stack[start..]);
         self.stack.truncate(start);
         self.stack
-            .push(VmValue::String(std::sync::Arc::from(result)));
+            .push(VmValue::String(arcstr::ArcStr::from(result)));
     }
 
     pub(super) fn execute_build_enum(&mut self) -> Result<(), VmError> {

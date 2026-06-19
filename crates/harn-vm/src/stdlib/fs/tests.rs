@@ -16,7 +16,7 @@ fn call(vm: &mut Vm, name: &str, args: Vec<VmValue>) -> Result<VmValue, VmError>
 }
 
 fn s(v: &str) -> VmValue {
-    VmValue::String(std::sync::Arc::from(v))
+    VmValue::String(arcstr::ArcStr::from(v))
 }
 
 fn b(v: bool) -> VmValue {

@@ -128,7 +128,7 @@ pub fn snapshot_to_vm_value(snapshot: Option<&RuntimeIntrospectionSnapshot>) -> 
         "model_alias".to_string(),
         snap.model_alias
             .as_deref()
-            .map(|alias| VmValue::String(std::sync::Arc::from(alias)))
+            .map(|alias| VmValue::String(arcstr::ArcStr::from(alias)))
             .unwrap_or(VmValue::Nil),
     );
     dict.put_str("family", snap.family.as_str());

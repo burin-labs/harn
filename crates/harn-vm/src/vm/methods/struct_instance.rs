@@ -7,9 +7,10 @@ impl crate::vm::Vm {
         method: &str,
         args: &[VmValue],
     ) -> Result<VmValue, VmError> {
-        let VmValue::StructInstance { layout, .. } = obj else {
+        let VmValue::StructInstance(si) = obj else {
             unreachable!("struct instance dispatch only calls struct instance handler");
         };
+        let layout = &si.layout;
 
         let impl_key = format!("__impl_{}", layout.struct_name());
         if let Some(VmValue::Dict(impl_dict)) = self

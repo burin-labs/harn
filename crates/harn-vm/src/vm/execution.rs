@@ -198,7 +198,7 @@ impl Vm {
     pub(crate) fn handle_error(&mut self, error: VmError) -> Result<Option<VmValue>, VmError> {
         let thrown_value = match &error {
             VmError::Thrown(v) => v.clone(),
-            other => VmValue::String(std::sync::Arc::from(other.to_string())),
+            other => VmValue::String(arcstr::ArcStr::from(other.to_string())),
         };
 
         if let Some(handler) = self.exception_handlers.pop() {
@@ -780,11 +780,11 @@ impl crate::vm::Vm {
     }
 
     pub(crate) fn deadline_exceeded_error() -> VmError {
-        VmError::Thrown(VmValue::String(std::sync::Arc::from("Deadline exceeded")))
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from("Deadline exceeded")))
     }
 
     pub(crate) fn cancelled_error() -> VmError {
-        VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "kind:cancelled:VM cancelled by host",
         )))
     }

@@ -569,7 +569,7 @@ pub fn span_to_vm_value(span: &Span) -> VmValue {
     let mut d = BTreeMap::new();
     d.insert(
         "trace_id".into(),
-        VmValue::String(std::sync::Arc::from(span.trace_id.as_str())),
+        VmValue::String(arcstr::ArcStr::from(span.trace_id.as_str())),
     );
     d.insert("span_id".into(), VmValue::Int(span.span_id as i64));
     d.insert(
@@ -580,11 +580,11 @@ pub fn span_to_vm_value(span: &Span) -> VmValue {
     );
     d.insert(
         "kind".into(),
-        VmValue::String(std::sync::Arc::from(span.kind.as_str())),
+        VmValue::String(arcstr::ArcStr::from(span.kind.as_str())),
     );
     d.insert(
         "name".into(),
-        VmValue::String(std::sync::Arc::from(span.name.as_str())),
+        VmValue::String(arcstr::ArcStr::from(span.name.as_str())),
     );
     d.insert("start_ms".into(), VmValue::Int(span.start_ms as i64));
     d.insert(

@@ -697,7 +697,7 @@ pub(super) async fn drain_file_edits_builtin(
             &payload,
         )
         .await?;
-        paths.push(VmValue::String(std::sync::Arc::from(edit.path)));
+        paths.push(VmValue::String(arcstr::ArcStr::from(edit.path)));
     }
     Ok(VmValue::List(std::sync::Arc::new(paths)))
 }
@@ -720,7 +720,7 @@ mod tests {
         let mut out = String::new();
         let err = register_tool_hook_builtin(
             &[dict(&[
-                ("pattern", VmValue::String(std::sync::Arc::from("*"))),
+                ("pattern", VmValue::String(arcstr::ArcStr::from("*"))),
                 ("max_output", VmValue::Int(-1)),
             ])],
             &mut out,

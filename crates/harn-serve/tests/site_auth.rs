@@ -221,7 +221,9 @@ impl HostCallBridge for ContextEchoBridge {
         let rendered = current_auth_context()
             .map(|context| context.to_string())
             .unwrap_or_else(|| "absent".to_string());
-        Ok(Some(VmValue::String(Arc::from(rendered.as_str()))))
+        Ok(Some(VmValue::String(arcstr::ArcStr::from(
+            rendered.as_str(),
+        ))))
     }
 }
 

@@ -144,7 +144,7 @@ fn json_to_vm(jv: &serde_json::Value) -> VmValue {
                 VmValue::Float(n.as_f64().unwrap_or(0.0))
             }
         }
-        serde_json::Value::String(s) => VmValue::String(std::sync::Arc::from(s.as_str())),
+        serde_json::Value::String(s) => VmValue::String(arcstr::ArcStr::from(s.as_str())),
         serde_json::Value::Array(arr) => {
             VmValue::List(std::sync::Arc::new(arr.iter().map(json_to_vm).collect()))
         }
@@ -244,7 +244,7 @@ fn checkpoint_list_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue,
         let keys = state.list();
         Ok(VmValue::List(std::sync::Arc::new(
             keys.into_iter()
-                .map(|k| VmValue::String(std::sync::Arc::from(k)))
+                .map(|k| VmValue::String(arcstr::ArcStr::from(k)))
                 .collect(),
         )))
     })

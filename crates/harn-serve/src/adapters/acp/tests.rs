@@ -61,8 +61,14 @@ async fn recv_json(rx: &mut mpsc::UnboundedReceiver<String>) -> serde_json::Valu
 #[cfg(feature = "hostlib")]
 fn make_acp_test_message(role: &str, content: &str) -> VmValue {
     VmValue::dict(BTreeMap::from([
-        ("role".to_string(), VmValue::String(Arc::from(role))),
-        ("content".to_string(), VmValue::String(Arc::from(content))),
+        (
+            "role".to_string(),
+            VmValue::String(arcstr::ArcStr::from(role)),
+        ),
+        (
+            "content".to_string(),
+            VmValue::String(arcstr::ArcStr::from(content)),
+        ),
     ]))
 }
 
@@ -1381,7 +1387,7 @@ fn normalize_host_capabilities_wraps_array_entries_in_ops_dicts() {
     let mut root = BTreeMap::new();
     root.insert(
         "project".to_string(),
-        VmValue::List(Arc::new(vec![VmValue::String(Arc::from(
+        VmValue::List(Arc::new(vec![VmValue::String(arcstr::ArcStr::from(
             "scope_test_command",
         ))])),
     );

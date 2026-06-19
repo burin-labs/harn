@@ -16,7 +16,6 @@
 use harn_vm::VmDictExt;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use harn_vm::VmValue;
 
@@ -100,7 +99,7 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
             entry.insert(
                 "path".to_string(),
                 d.path
-                    .map(|p| VmValue::String(Arc::from(p)))
+                    .map(|p| VmValue::String(arcstr::ArcStr::from(p)))
                     .unwrap_or(VmValue::Nil),
             );
             entry.insert(

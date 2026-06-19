@@ -303,7 +303,7 @@ async fn trust_graph_record_impl(
         VmError::Runtime("trust_graph_record: expected decision dict".to_string())
     })?;
     let record = append_trust_record_from_decision_for("trust_graph_record", decision).await?;
-    Ok(VmValue::String(std::sync::Arc::from(record.record_id)))
+    Ok(VmValue::String(arcstr::ArcStr::from(record.record_id)))
 }
 
 #[harn_builtin(
@@ -425,7 +425,7 @@ async fn trust_record_ns_impl(
         .first()
         .ok_or_else(|| VmError::Runtime("trust.record: expected decision dict".to_string()))?;
     let record = append_trust_record_from_decision_for("trust.record", decision).await?;
-    Ok(VmValue::String(std::sync::Arc::from(record.record_id)))
+    Ok(VmValue::String(arcstr::ArcStr::from(record.record_id)))
 }
 
 #[harn_builtin(
@@ -542,7 +542,7 @@ async fn corrections_record_ns_impl(
     let record = crate::append_correction_record(&log, &record)
         .await
         .map_err(|error| VmError::Runtime(format!("corrections.record: {error}")))?;
-    Ok(VmValue::String(std::sync::Arc::from(record.correction_id)))
+    Ok(VmValue::String(arcstr::ArcStr::from(record.correction_id)))
 }
 
 #[harn_builtin(
@@ -731,12 +731,12 @@ fn register_trust_namespace(vm: &mut Vm) {
         VmValue::dict(
             std::iter::once((
                 "_namespace".to_string(),
-                VmValue::String(std::sync::Arc::from("trust")),
+                VmValue::String(arcstr::ArcStr::from("trust")),
             ))
             .chain(names.into_iter().map(|name| {
                 (
                     name.to_string(),
-                    VmValue::BuiltinRef(std::sync::Arc::from(format!("trust.{name}"))),
+                    VmValue::BuiltinRef(arcstr::ArcStr::from(format!("trust.{name}"))),
                 )
             }))
             .collect::<BTreeMap<_, _>>(),
@@ -751,12 +751,12 @@ fn register_corrections_namespace(vm: &mut Vm) {
         VmValue::dict(
             std::iter::once((
                 "_namespace".to_string(),
-                VmValue::String(std::sync::Arc::from("corrections")),
+                VmValue::String(arcstr::ArcStr::from("corrections")),
             ))
             .chain(names.into_iter().map(|name| {
                 (
                     name.to_string(),
-                    VmValue::BuiltinRef(std::sync::Arc::from(format!("corrections.{name}"))),
+                    VmValue::BuiltinRef(arcstr::ArcStr::from(format!("corrections.{name}"))),
                 )
             }))
             .collect::<BTreeMap<_, _>>(),
@@ -1316,7 +1316,7 @@ fn parse_trigger_config(config: &crate::value::DictMap) -> Result<TriggerBinding
         .and_then(VmValue::as_int)
         .map(|value| value.max(0) as u64);
     let on_budget_exhausted = match budget.and_then(|map| map.get("on_budget_exhausted")) {
-        Some(VmValue::String(text)) => match text.as_ref() {
+        Some(VmValue::String(text)) => match text.as_str() {
             "false" => crate::TriggerBudgetExhaustionStrategy::False,
             "retry_later" => crate::TriggerBudgetExhaustionStrategy::RetryLater,
             "fail" => crate::TriggerBudgetExhaustionStrategy::Fail,
@@ -1491,7 +1491,7 @@ fn parse_trigger_config(config: &crate::value::DictMap) -> Result<TriggerBinding
 pub(crate) fn validate_resume_trigger_spec(config: &crate::value::DictMap) -> Result<(), VmError> {
     let mut normalized = config.clone();
     normalized.entry("handler".to_string()).or_insert_with(|| {
-        VmValue::String(std::sync::Arc::from("worker://__resume_auto_resume__"))
+        VmValue::String(arcstr::ArcStr::from("worker://__resume_auto_resume__"))
     });
     parse_trigger_config(&normalized).map(|_| ())
 }
@@ -1645,7 +1645,7 @@ fn auto_resume_timeout_spec(
     let on_timeout = match timeout.get("on_timeout") {
         Some(VmValue::String(value))
             if matches!(
-                value.as_ref(),
+                value.as_str(),
                 "resume_with_summary" | "resume_with_input" | "fail"
             ) =>
         {
@@ -1657,7 +1657,7 @@ fn auto_resume_timeout_spec(
                 Code::ResumeTimeoutUnsupported,
                 format!(
                     "auto_resume: unsupported conditions.timeout.on_timeout `{}`; expected resume_with_summary, resume_with_input, or fail",
-                    value.as_ref()
+                    value.as_str()
                 ),
             ))
         }
@@ -1779,7 +1779,7 @@ fn parse_duration_millis(raw: &str) -> Result<u64, VmError> {
 
 fn parse_autonomy_tier(value: &VmValue) -> Result<AutonomyTier, VmError> {
     let raw = match value {
-        VmValue::String(text) => text.as_ref(),
+        VmValue::String(text) => text.as_str(),
         other => {
             return Err(VmError::Runtime(format!(
                 "trigger_register: `autonomy_tier` must be a string, got {}",
@@ -1800,7 +1800,7 @@ fn parse_autonomy_tier(value: &VmValue) -> Result<AutonomyTier, VmError> {
 
 fn parse_trust_outcome(value: &VmValue) -> Result<TrustOutcome, VmError> {
     let raw = match value {
-        VmValue::String(text) => text.as_ref(),
+        VmValue::String(text) => text.as_str(),
         other => {
             return Err(VmError::Runtime(format!(
                 "trust_record: outcome must be a string, got {}",
@@ -2194,7 +2194,7 @@ fn parse_interrupt_and_suspend_handler(
     let target_value = map.get("target_agents").or_else(|| map.get("target"));
     let target_agents = match target_value {
         None | Some(VmValue::Nil) => AgentScope::All,
-        Some(VmValue::String(s)) => match s.as_ref() {
+        Some(VmValue::String(s)) => match s.as_str() {
             "all" | "all_in_scope" => AgentScope::All,
             other if !other.is_empty() => AgentScope::Concrete(vec![other.to_string()]),
             _ => {
@@ -2276,7 +2276,7 @@ fn parse_reminder_inject_handler(
     let target_value = map.get("target").or_else(|| map.get("target_session_id"));
     let target = match target_value {
         None | Some(VmValue::Nil) => TargetExpr::Current,
-        Some(VmValue::String(s)) => match s.as_ref() {
+        Some(VmValue::String(s)) => match s.as_str() {
             "current" => TargetExpr::Current,
             "parent" => TargetExpr::Parent,
             other if !other.is_empty() => TargetExpr::Concrete(other.to_string()),
@@ -2417,7 +2417,7 @@ fn parse_reminder_propagate(
 ) -> Result<crate::llm::helpers::ReminderPropagate, VmError> {
     match map.get("propagate") {
         None | Some(VmValue::Nil) => Ok(crate::llm::helpers::ReminderPropagate::Session),
-        Some(VmValue::String(s)) => match s.as_ref() {
+        Some(VmValue::String(s)) => match s.as_str() {
             "all" => Ok(crate::llm::helpers::ReminderPropagate::All),
             "session" => Ok(crate::llm::helpers::ReminderPropagate::Session),
             "none" => Ok(crate::llm::helpers::ReminderPropagate::None),
@@ -2438,7 +2438,7 @@ fn parse_reminder_role_hint(
 ) -> Result<crate::llm::helpers::ReminderRoleHint, VmError> {
     match map.get("role_hint") {
         None | Some(VmValue::Nil) => Ok(crate::llm::helpers::ReminderRoleHint::System),
-        Some(VmValue::String(s)) => match s.as_ref() {
+        Some(VmValue::String(s)) => match s.as_str() {
             "system" => Ok(crate::llm::helpers::ReminderRoleHint::System),
             "developer" => Ok(crate::llm::helpers::ReminderRoleHint::Developer),
             "user_block" => Ok(crate::llm::helpers::ReminderRoleHint::UserBlock),
@@ -2780,7 +2780,7 @@ fn parse_webhook_intake_request(
     let received_at = match request.get("received_at") {
         Some(VmValue::String(text)) => Some(
             OffsetDateTime::parse(
-                text.as_ref(),
+                text.as_str(),
                 &time::format_description::well_known::Rfc3339,
             )
             .map_err(|error| {
@@ -3072,7 +3072,7 @@ pub fn on_tick_v4(event: TriggerEvent) -> dict {
         let replay = vm
             .call_named_builtin(
                 "trigger_replay",
-                vec![VmValue::String(std::sync::Arc::from("evt-stale"))],
+                vec![VmValue::String(arcstr::ArcStr::from("evt-stale"))],
             )
             .await
             .expect("trigger replay succeeds");

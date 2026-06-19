@@ -58,7 +58,7 @@ impl crate::vm::Vm {
                     .map(|v| v.display())
                     .collect::<Vec<_>>()
                     .join(&sep);
-                Ok(VmValue::String(std::sync::Arc::from(joined)))
+                Ok(VmValue::String(arcstr::ArcStr::from(joined)))
             }
             "contains" => {
                 let needle = args.first().unwrap_or(&VmValue::Nil);
@@ -167,7 +167,7 @@ impl crate::vm::Vm {
                         }
                         VmValue::Decimal(d) => {
                             has_decimal = true;
-                            match decimal_sum.checked_add(*d) {
+                            match decimal_sum.checked_add(**d) {
                                 Some(sum) => decimal_sum = sum,
                                 None => decimal_overflow = true,
                             }
@@ -189,7 +189,7 @@ impl crate::vm::Vm {
                             "sum: decimal addition overflowed".to_string(),
                         )));
                     }
-                    return Some(Ok(VmValue::Decimal(decimal_sum)));
+                    return Some(Ok(VmValue::decimal(decimal_sum)));
                 }
                 if has_float || overflowed {
                     Ok(VmValue::Float(float_sum))

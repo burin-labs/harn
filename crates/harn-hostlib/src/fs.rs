@@ -1661,7 +1661,7 @@ fn commit_result_to_value(result: CommitResult) -> VmValue {
                 result
                     .committed_paths
                     .into_iter()
-                    .map(|path| VmValue::String(Arc::from(path)))
+                    .map(|path| VmValue::String(arcstr::ArcStr::from(path)))
                     .collect(),
             )),
         ),
@@ -1687,7 +1687,7 @@ fn discard_result_to_value(result: DiscardResult) -> VmValue {
             result
                 .discarded_paths
                 .into_iter()
-                .map(|path| VmValue::String(Arc::from(path)))
+                .map(|path| VmValue::String(arcstr::ArcStr::from(path)))
                 .collect(),
         )),
     )])

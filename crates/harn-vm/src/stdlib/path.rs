@@ -208,11 +208,11 @@ fn workspace_path_info_to_vm(info: WorkspacePathInfo) -> VmValue {
     let mut map: crate::value::DictMap = crate::value::DictMap::new();
     map.insert(
         "input".into(),
-        VmValue::String(std::sync::Arc::from(info.input)),
+        VmValue::String(arcstr::ArcStr::from(info.input)),
     );
     map.insert(
         "kind".into(),
-        VmValue::String(std::sync::Arc::from(match info.kind {
+        VmValue::String(arcstr::ArcStr::from(match info.kind {
             crate::workspace_path::WorkspacePathKind::WorkspaceRelative => "workspace_relative",
             crate::workspace_path::WorkspacePathKind::HostAbsolute => "host_absolute",
             crate::workspace_path::WorkspacePathKind::Invalid => "invalid",
@@ -220,18 +220,18 @@ fn workspace_path_info_to_vm(info: WorkspacePathInfo) -> VmValue {
     );
     map.insert(
         "normalized".into(),
-        VmValue::String(std::sync::Arc::from(info.normalized)),
+        VmValue::String(arcstr::ArcStr::from(info.normalized)),
     );
     map.insert(
         "workspace_path".into(),
         info.workspace_path
-            .map(|value| VmValue::String(std::sync::Arc::from(value)))
+            .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
             .unwrap_or(VmValue::Nil),
     );
     map.insert(
         "host_path".into(),
         info.host_path
-            .map(|value| VmValue::String(std::sync::Arc::from(value)))
+            .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
             .unwrap_or(VmValue::Nil),
     );
     map.insert(
@@ -241,7 +241,7 @@ fn workspace_path_info_to_vm(info: WorkspacePathInfo) -> VmValue {
     map.insert(
         "reason".into(),
         info.reason
-            .map(|value| VmValue::String(std::sync::Arc::from(value)))
+            .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
             .unwrap_or(VmValue::Nil),
     );
     VmValue::dict(map)
@@ -259,19 +259,19 @@ fn path_parts_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     let mut map: crate::value::DictMap = crate::value::DictMap::new();
     map.insert(
         "dir".into(),
-        VmValue::String(std::sync::Arc::from(parent(&p))),
+        VmValue::String(arcstr::ArcStr::from(parent(&p))),
     );
     map.insert(
         "file".into(),
-        VmValue::String(std::sync::Arc::from(basename(&p))),
+        VmValue::String(arcstr::ArcStr::from(basename(&p))),
     );
     map.insert(
         "stem".into(),
-        VmValue::String(std::sync::Arc::from(stem(&p))),
+        VmValue::String(arcstr::ArcStr::from(stem(&p))),
     );
     map.insert(
         "ext".into(),
-        VmValue::String(std::sync::Arc::from(extension(&p))),
+        VmValue::String(arcstr::ArcStr::from(extension(&p))),
     );
     let (_, _, segments) = split_segments(&p);
     map.insert(
@@ -279,7 +279,7 @@ fn path_parts_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
         VmValue::List(std::sync::Arc::new(
             segments
                 .into_iter()
-                .map(|s| VmValue::String(std::sync::Arc::from(s.as_str())))
+                .map(|s| VmValue::String(arcstr::ArcStr::from(s.as_str())))
                 .collect(),
         )),
     );
@@ -289,25 +289,25 @@ fn path_parts_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 #[harn_builtin(sig = "path_parent(path: string?) -> string", category = "path")]
 fn path_parent_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let p = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(std::sync::Arc::from(parent(&p))))
+    Ok(VmValue::String(arcstr::ArcStr::from(parent(&p))))
 }
 
 #[harn_builtin(sig = "path_basename(path: string?) -> string", category = "path")]
 fn path_basename_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let p = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(std::sync::Arc::from(basename(&p))))
+    Ok(VmValue::String(arcstr::ArcStr::from(basename(&p))))
 }
 
 #[harn_builtin(sig = "path_stem(path: string?) -> string", category = "path")]
 fn path_stem_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let p = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(std::sync::Arc::from(stem(&p))))
+    Ok(VmValue::String(arcstr::ArcStr::from(stem(&p))))
 }
 
 #[harn_builtin(sig = "path_extension(path: string?) -> string", category = "path")]
 fn path_extension_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let p = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(std::sync::Arc::from(extension(&p))))
+    Ok(VmValue::String(arcstr::ArcStr::from(extension(&p))))
 }
 
 #[harn_builtin(
@@ -317,7 +317,7 @@ fn path_extension_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 fn path_with_extension_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let p = args.first().map(|a| a.display()).unwrap_or_default();
     let ext = args.get(1).map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(std::sync::Arc::from(with_extension(
+    Ok(VmValue::String(arcstr::ArcStr::from(with_extension(
         &p, &ext,
     ))))
 }
@@ -329,7 +329,7 @@ fn path_with_extension_impl(args: &[VmValue], _out: &mut String) -> Result<VmVal
 fn path_with_stem_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let p = args.first().map(|a| a.display()).unwrap_or_default();
     let s = args.get(1).map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(std::sync::Arc::from(with_stem(&p, &s))))
+    Ok(VmValue::String(arcstr::ArcStr::from(with_stem(&p, &s))))
 }
 
 #[harn_builtin(sig = "path_is_absolute(path: string?) -> bool", category = "path")]
@@ -347,7 +347,7 @@ fn path_is_relative_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 #[harn_builtin(sig = "path_normalize(path: string?) -> string", category = "path")]
 fn path_normalize_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let p = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(std::sync::Arc::from(normalize(&p))))
+    Ok(VmValue::String(arcstr::ArcStr::from(normalize(&p))))
 }
 
 #[harn_builtin(
@@ -358,7 +358,7 @@ fn path_relative_to_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
     let p = args.first().map(|a| a.display()).unwrap_or_default();
     let base = args.get(1).map(|a| a.display()).unwrap_or_default();
     match relative_to(&p, &base) {
-        Some(rel) => Ok(VmValue::String(std::sync::Arc::from(rel))),
+        Some(rel) => Ok(VmValue::String(arcstr::ArcStr::from(rel))),
         None => Ok(VmValue::Nil),
     }
 }
@@ -366,13 +366,13 @@ fn path_relative_to_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 #[harn_builtin(sig = "path_to_posix(path: string?) -> string", category = "path")]
 fn path_to_posix_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let p = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(std::sync::Arc::from(to_posix(&p))))
+    Ok(VmValue::String(arcstr::ArcStr::from(to_posix(&p))))
 }
 
 #[harn_builtin(sig = "path_to_native(path: string?) -> string", category = "path")]
 fn path_to_native_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let p = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(std::sync::Arc::from(to_native(&p))))
+    Ok(VmValue::String(arcstr::ArcStr::from(to_native(&p))))
 }
 
 #[harn_builtin(
@@ -406,7 +406,7 @@ fn path_workspace_normalize_impl(args: &[VmValue], _out: &mut String) -> Result<
         .map(std::path::PathBuf::from)
         .unwrap_or_else(crate::stdlib::process::execution_root_path);
     Ok(normalize_workspace_path(&path, Some(&workspace_root))
-        .map(|value| VmValue::String(std::sync::Arc::from(value)))
+        .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
         .unwrap_or(VmValue::Nil))
 }
 
@@ -417,7 +417,7 @@ fn path_segments_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     Ok(VmValue::List(std::sync::Arc::new(
         segments
             .into_iter()
-            .map(|s| VmValue::String(std::sync::Arc::from(s.as_str())))
+            .map(|s| VmValue::String(arcstr::ArcStr::from(s.as_str())))
             .collect(),
     )))
 }

@@ -381,7 +381,7 @@ impl super::super::Vm {
                             results.push(VmValue::enum_variant(
                                 "Result",
                                 "Err",
-                                vec![VmValue::String(std::sync::Arc::from(e.to_string()))],
+                                vec![VmValue::String(arcstr::ArcStr::from(e.to_string()))],
                             ));
                         }
                     }

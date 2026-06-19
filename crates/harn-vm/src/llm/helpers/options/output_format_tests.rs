@@ -10,7 +10,7 @@ fn parses_explicit_json_schema_output_format() {
         "schema".to_string(),
         VmValue::dict(crate::value::DictMap::from_iter([(
             "type".to_string(),
-            VmValue::String(std::sync::Arc::from("object")),
+            VmValue::String(arcstr::ArcStr::from("object")),
         )])),
     );
     fmt.insert("strict".to_string(), VmValue::Bool(false));

@@ -27,7 +27,7 @@ pub(super) fn result_err_value(errors: Vec<String>, value: Option<VmValue>) -> V
         VmValue::List(std::sync::Arc::new(
             errors
                 .into_iter()
-                .map(|err| VmValue::String(std::sync::Arc::from(err)))
+                .map(|err| VmValue::String(arcstr::ArcStr::from(err)))
                 .collect(),
         )),
     );

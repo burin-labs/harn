@@ -72,7 +72,7 @@ pub fn vm_value_to_json(val: &VmValue) -> serde_json::Value {
         // Decimal crosses the host bridge as a string to preserve exact
         // precision (binary-float JSON numbers would corrupt money values).
         VmValue::Decimal(d) => serde_json::json!(d.to_string()),
-        VmValue::String(s) => serde_json::json!(s.as_ref()),
+        VmValue::String(s) => serde_json::json!(s.as_str()),
         VmValue::Bytes(bytes) => crate::schema::tagged_bytes_json(bytes),
         VmValue::Bool(b) => serde_json::json!(b),
         VmValue::Nil => serde_json::Value::Null,
@@ -80,7 +80,7 @@ pub fn vm_value_to_json(val: &VmValue) -> serde_json::Value {
             serde_json::Value::Array(list.iter().map(vm_value_to_json).collect())
         }
         VmValue::Dict(d) => vm_value_dict_to_json(d),
-        VmValue::StructInstance { .. } => {
+        VmValue::StructInstance(_) => {
             vm_value_dict_to_json(&val.struct_fields_map().unwrap_or_default())
         }
         _ => serde_json::json!(val.display()),
@@ -167,7 +167,7 @@ mod tests {
         // pre-fix code would have returned "local".
         let opts = Some(crate::value::DictMap::from_iter([(
             "model".to_string(),
-            VmValue::String(std::sync::Arc::from("anthropic/claude-sonnet-4-6")),
+            VmValue::String(arcstr::ArcStr::from("anthropic/claude-sonnet-4-6")),
         )]));
         assert_eq!(vm_resolve_provider(&opts), "openrouter");
 
@@ -175,7 +175,7 @@ mod tests {
         // so users with a custom local server keep working.
         let opts_unknown = Some(crate::value::DictMap::from_iter([(
             "model".to_string(),
-            VmValue::String(std::sync::Arc::from("my-custom-local-tag")),
+            VmValue::String(arcstr::ArcStr::from("my-custom-local-tag")),
         )]));
         assert_eq!(vm_resolve_provider(&opts_unknown), "local");
 
@@ -205,15 +205,15 @@ mod tests {
         let message = VmValue::dict(crate::value::DictMap::from_iter([
             (
                 "role".to_string(),
-                VmValue::String(std::sync::Arc::from("tool")),
+                VmValue::String(arcstr::ArcStr::from("tool")),
             ),
             (
                 "tool_call_id".to_string(),
-                VmValue::String(std::sync::Arc::from("call_123")),
+                VmValue::String(arcstr::ArcStr::from("call_123")),
             ),
             (
                 "content".to_string(),
-                VmValue::String(std::sync::Arc::from("ok")),
+                VmValue::String(arcstr::ArcStr::from("ok")),
             ),
         ]));
 
@@ -239,7 +239,7 @@ mod tests {
             transcript,
         )]));
         let err = extract_llm_options(&[
-            VmValue::String(std::sync::Arc::from("")),
+            VmValue::String(arcstr::ArcStr::from("")),
             VmValue::Nil,
             options,
         ])
@@ -284,7 +284,7 @@ mod tests {
 
         let options = Some(crate::value::DictMap::from_iter([(
             "model_tier".to_string(),
-            VmValue::String(std::sync::Arc::from("small")),
+            VmValue::String(arcstr::ArcStr::from("small")),
         )]));
         let provider = vm_resolve_provider(&options);
         let resolved = vm_resolve_model(&options, &provider);
@@ -329,7 +329,7 @@ mod tests {
 
         let options = Some(crate::value::DictMap::from_iter([(
             "model_tier".to_string(),
-            VmValue::String(std::sync::Arc::from("small")),
+            VmValue::String(arcstr::ArcStr::from("small")),
         )]));
         let provider = vm_resolve_provider(&options);
         let resolved = vm_resolve_model(&options, &provider);
@@ -456,11 +456,11 @@ mod tests {
         let opts = crate::value::DictMap::from_iter([
             (
                 "provider".to_string(),
-                VmValue::String(std::sync::Arc::from("auto")),
+                VmValue::String(arcstr::ArcStr::from("auto")),
             ),
             (
                 "model".to_string(),
-                VmValue::String(std::sync::Arc::from("unclassified-provider-model-for-test")),
+                VmValue::String(arcstr::ArcStr::from("unclassified-provider-model-for-test")),
             ),
         ]);
 

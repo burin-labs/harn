@@ -87,7 +87,7 @@ impl super::super::Vm {
     ) -> Result<StepPreHookAction, VmError> {
         match value {
             VmValue::Nil => Ok(StepPreHookAction::Allow(current_args)),
-            VmValue::String(text) if text.as_ref() == "Allow" => {
+            VmValue::String(text) if text.as_str() == "Allow" => {
                 Ok(StepPreHookAction::Allow(current_args))
             }
             VmValue::Dict(map) => {
@@ -122,7 +122,7 @@ impl super::super::Vm {
     ) -> Result<VmValue, VmError> {
         match value {
             VmValue::Nil => Ok(current_output),
-            VmValue::String(text) if text.as_ref() == "Pass" => Ok(current_output),
+            VmValue::String(text) if text.as_str() == "Pass" => Ok(current_output),
             VmValue::Dict(map) => Ok(map
                 .get("output")
                 .or_else(|| map.get("result"))
@@ -219,19 +219,19 @@ impl super::super::Vm {
         VmError::Thrown(VmValue::dict(std::collections::BTreeMap::from([
             (
                 "category".to_string(),
-                VmValue::String(std::sync::Arc::from("hook_denied")),
+                VmValue::String(arcstr::ArcStr::from("hook_denied")),
             ),
             (
                 "event".to_string(),
-                VmValue::String(std::sync::Arc::from("PreStep")),
+                VmValue::String(arcstr::ArcStr::from("PreStep")),
             ),
             (
                 "reason".to_string(),
-                VmValue::String(std::sync::Arc::from(reason)),
+                VmValue::String(arcstr::ArcStr::from(reason)),
             ),
             (
                 "step".to_string(),
-                VmValue::String(std::sync::Arc::from(step_name.to_string())),
+                VmValue::String(arcstr::ArcStr::from(step_name.to_string())),
             ),
         ])))
     }
@@ -638,7 +638,7 @@ impl super::super::Vm {
         if name == "cancel" {
             crate::typecheck::validate_builtin_call(name, args, None)?;
             if let Some(VmValue::TaskHandle(id)) = args.first() {
-                if let Some(handle) = self.spawned_tasks.remove(id.as_ref()) {
+                if let Some(handle) = self.spawned_tasks.remove(id.as_str()) {
                     handle.handle.abort();
                 }
             }
@@ -679,14 +679,14 @@ impl super::super::Vm {
                                     self.stack.push(VmValue::enum_variant(
                                         "Result",
                                         "Err",
-                                        vec![VmValue::String(std::sync::Arc::from(e.to_string()))],
+                                        vec![VmValue::String(arcstr::ArcStr::from(e.to_string()))],
                                     ));
                                 }
                                 Err(e) => {
                                     self.stack.push(VmValue::enum_variant(
                                         "Result",
                                         "Err",
-                                        vec![VmValue::String(std::sync::Arc::from(format!("Task join error: {e}")))],
+                                        vec![VmValue::String(arcstr::ArcStr::from(format!("Task join error: {e}")))],
                                     ));
                                 }
                             }
@@ -696,7 +696,7 @@ impl super::super::Vm {
                             self.stack.push(VmValue::enum_variant(
                                 "Result",
                                 "Err",
-                                vec![VmValue::String(std::sync::Arc::from(
+                                vec![VmValue::String(arcstr::ArcStr::from(
                                     "cancel_graceful: timeout, task forcefully aborted",
                                 ))],
                             ));
@@ -1312,7 +1312,7 @@ impl super::super::Vm {
         let callee_idx = self.stack.len().checked_sub(argc + 1)?;
         let resolved = match self.stack.get(callee_idx)? {
             VmValue::Closure(c) => Ok(Arc::clone(c)),
-            VmValue::String(name) => Err(Arc::clone(name)),
+            VmValue::String(name) => Err(name.clone()),
             _ => return None,
         };
         let closure = match resolved {

@@ -491,43 +491,43 @@ pub(crate) fn register_workflow_message_builtins(vm: &mut Vm) {
         VmValue::dict(BTreeMap::from([
             (
                 "signal".to_string(),
-                VmValue::BuiltinRef(std::sync::Arc::from("workflow.signal")),
+                VmValue::BuiltinRef(arcstr::ArcStr::from("workflow.signal")),
             ),
             (
                 "query".to_string(),
-                VmValue::BuiltinRef(std::sync::Arc::from("workflow.query")),
+                VmValue::BuiltinRef(arcstr::ArcStr::from("workflow.query")),
             ),
             (
                 "update".to_string(),
-                VmValue::BuiltinRef(std::sync::Arc::from("workflow.update")),
+                VmValue::BuiltinRef(arcstr::ArcStr::from("workflow.update")),
             ),
             (
                 "publish_query".to_string(),
-                VmValue::BuiltinRef(std::sync::Arc::from("workflow.publish_query")),
+                VmValue::BuiltinRef(arcstr::ArcStr::from("workflow.publish_query")),
             ),
             (
                 "receive".to_string(),
-                VmValue::BuiltinRef(std::sync::Arc::from("workflow.receive")),
+                VmValue::BuiltinRef(arcstr::ArcStr::from("workflow.receive")),
             ),
             (
                 "respond_update".to_string(),
-                VmValue::BuiltinRef(std::sync::Arc::from("workflow.respond_update")),
+                VmValue::BuiltinRef(arcstr::ArcStr::from("workflow.respond_update")),
             ),
             (
                 "pause".to_string(),
-                VmValue::BuiltinRef(std::sync::Arc::from("workflow.pause")),
+                VmValue::BuiltinRef(arcstr::ArcStr::from("workflow.pause")),
             ),
             (
                 "resume".to_string(),
-                VmValue::BuiltinRef(std::sync::Arc::from("workflow.resume")),
+                VmValue::BuiltinRef(arcstr::ArcStr::from("workflow.resume")),
             ),
             (
                 "status".to_string(),
-                VmValue::BuiltinRef(std::sync::Arc::from("workflow.status")),
+                VmValue::BuiltinRef(arcstr::ArcStr::from("workflow.status")),
             ),
             (
                 "continue_as_new".to_string(),
-                VmValue::BuiltinRef(std::sync::Arc::from("workflow.continue_as_new")),
+                VmValue::BuiltinRef(arcstr::ArcStr::from("workflow.continue_as_new")),
             ),
         ])),
     );

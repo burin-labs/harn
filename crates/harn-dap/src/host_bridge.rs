@@ -205,7 +205,7 @@ impl DapHostBridge {
         operation: &str,
     ) -> Result<DapHostCallReply, VmError> {
         rx.recv_timeout(REVERSE_REQUEST_TIMEOUT).map_err(|_| {
-            VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
                 "harnHostCall timed out after {}s ({capability}.{operation})",
                 REVERSE_REQUEST_TIMEOUT.as_secs()
             ))))
@@ -238,7 +238,7 @@ impl HostCallBridge for DapHostBridge {
                 "host_call",
                 &format!("✗ {capability}.{operation} ({elapsed_ms}ms): {detail}"),
             );
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 detail,
             ))));
         }
@@ -378,7 +378,7 @@ fn json_to_vm_value(value: Value) -> VmValue {
                 VmValue::Nil
             }
         }
-        Value::String(s) => VmValue::String(std::sync::Arc::from(s)),
+        Value::String(s) => VmValue::String(arcstr::ArcStr::from(s)),
         Value::Array(arr) => VmValue::List(std::sync::Arc::new(
             arr.into_iter().map(json_to_vm_value).collect(),
         )),
@@ -532,7 +532,7 @@ mod tests {
         );
 
         let mut params = harn_vm::value::DictMap::new();
-        params.insert("path".into(), VmValue::String(std::sync::Arc::from("foo")));
+        params.insert("path".into(), VmValue::String(arcstr::ArcStr::from("foo")));
         let result = bridge
             .dispatch("workspace", "read_text", &params)
             .expect("dispatch ok")

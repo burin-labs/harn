@@ -816,7 +816,7 @@ mod tests {
     use super::*;
 
     fn vm_str(s: &str) -> VmValue {
-        VmValue::String(std::sync::Arc::from(s))
+        VmValue::String(arcstr::ArcStr::from(s))
     }
 
     fn mcp_executor(server: &str) -> VmValue {

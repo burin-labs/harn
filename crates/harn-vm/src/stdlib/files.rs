@@ -302,7 +302,7 @@ pub(crate) fn register_file_builtins(vm: &mut Vm) {
         let path = expect_string(&args, 0, "__files_upload")?;
         let provider = expect_string(&args, 1, "__files_upload")?;
         let file_id = upload_file(path, provider).await?;
-        Ok(VmValue::String(std::sync::Arc::from(file_id)))
+        Ok(VmValue::String(arcstr::ArcStr::from(file_id)))
     });
 }
 

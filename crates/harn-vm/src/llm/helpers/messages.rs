@@ -19,7 +19,7 @@ pub(crate) fn vm_messages_to_json(msg_list: &[VmValue]) -> Result<Vec<serde_json
             let content = d
                 .get("content")
                 .cloned()
-                .unwrap_or_else(|| VmValue::String(std::sync::Arc::from("")));
+                .unwrap_or_else(|| VmValue::String(arcstr::ArcStr::from("")));
             let content_json = match &content {
                 VmValue::String(text) => serde_json::Value::String(text.to_string()),
                 other => vm_value_to_json(other),
@@ -70,7 +70,7 @@ pub(crate) fn vm_messages_to_json(msg_list: &[VmValue]) -> Result<Vec<serde_json
 }
 
 pub(crate) fn vm_message(role: &str, content: &str) -> VmValue {
-    vm_message_value(role, VmValue::String(std::sync::Arc::from(content)))
+    vm_message_value(role, VmValue::String(arcstr::ArcStr::from(content)))
 }
 
 pub(crate) fn vm_message_value(role: &str, content: VmValue) -> VmValue {
@@ -137,7 +137,7 @@ pub(crate) fn vm_add_role_message(args: &[VmValue], role: &str) -> Result<VmValu
                 role,
                 args.get(1)
                     .cloned()
-                    .unwrap_or_else(|| VmValue::String(std::sync::Arc::from(""))),
+                    .unwrap_or_else(|| VmValue::String(arcstr::ArcStr::from(""))),
             ));
             Ok(VmValue::List(std::sync::Arc::new(new_messages)))
         }
@@ -149,7 +149,7 @@ pub(crate) fn vm_add_role_message(args: &[VmValue], role: &str) -> Result<VmValu
                 role,
                 args.get(1)
                     .cloned()
-                    .unwrap_or_else(|| VmValue::String(std::sync::Arc::from(""))),
+                    .unwrap_or_else(|| VmValue::String(arcstr::ArcStr::from(""))),
             ));
             Ok(new_transcript_with_events(
                 transcript_id(d),
@@ -164,7 +164,7 @@ pub(crate) fn vm_add_role_message(args: &[VmValue], role: &str) -> Result<VmValu
                 }),
             ))
         }
-        _ => Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        _ => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             format!("add_{role}: first argument must be a message list or transcript"),
         )))),
     }

@@ -206,7 +206,7 @@ async fn execute_worker_config(
                 "std/workflow/execute",
                 "workflow_execute",
                 &[
-                    VmValue::String(std::sync::Arc::from(task)),
+                    VmValue::String(arcstr::ArcStr::from(task)),
                     super::super::workflow::workflow_graph_to_vm(&graph)?,
                     crate::stdlib::json_to_vm_value(
                         &serde_json::to_value(&artifacts).unwrap_or_default(),

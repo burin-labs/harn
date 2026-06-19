@@ -97,11 +97,11 @@ fn system_text_reminders_are_excluded_from_system_string() {
     let options = crate::value::DictMap::from_iter([
         (
             "system_prompt_parts".to_string(),
-            VmValue::String(std::sync::Arc::from("parts")),
+            VmValue::String(arcstr::ArcStr::from("parts")),
         ),
         (
             "system_appendix".to_string(),
-            VmValue::String(std::sync::Arc::from("appendix")),
+            VmValue::String(arcstr::ArcStr::from("appendix")),
         ),
     ]);
     // A `SystemText` reminder must NOT appear in the assembled `system`
@@ -127,7 +127,7 @@ fn system_text_reminders_are_excluded_from_system_string() {
 }
 
 fn s(text: &str) -> VmValue {
-    VmValue::String(std::sync::Arc::from(text))
+    VmValue::String(arcstr::ArcStr::from(text))
 }
 
 fn dict(pairs: &[(&str, VmValue)]) -> VmValue {

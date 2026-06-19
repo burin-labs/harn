@@ -390,7 +390,7 @@ fn register_accepted_websocket(event: WebSocketServerEvent) -> Result<VmValue, V
         VmValue::dict(
             headers
                 .into_iter()
-                .map(|(name, value)| (name, VmValue::String(std::sync::Arc::from(value))))
+                .map(|(name, value)| (name, VmValue::String(arcstr::ArcStr::from(value))))
                 .collect::<crate::value::DictMap>(),
         ),
     );
@@ -643,7 +643,7 @@ pub(super) async fn vm_websocket_connect(
             message_type: None,
             data: None,
         });
-        return Ok(VmValue::String(std::sync::Arc::from(id)));
+        return Ok(VmValue::String(arcstr::ArcStr::from(id)));
     }
 
     if !url.starts_with("ws://") && !url.starts_with("wss://") {
@@ -677,7 +677,7 @@ pub(super) async fn vm_websocket_connect(
         handles.insert(id.clone(), handle);
         Ok(())
     })?;
-    Ok(VmValue::String(std::sync::Arc::from(id)))
+    Ok(VmValue::String(arcstr::ArcStr::from(id)))
 }
 
 /// Connect with bounded retries on transient TCP-level failures.

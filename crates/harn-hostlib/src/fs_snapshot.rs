@@ -518,7 +518,7 @@ fn snapshot_builtin(args: &[VmValue]) -> Result<VmValue, HostlibError> {
                 result
                     .captured_paths
                     .into_iter()
-                    .map(|path| VmValue::String(Arc::from(path)))
+                    .map(|path| VmValue::String(arcstr::ArcStr::from(path)))
                     .collect(),
             )),
         ),
@@ -541,7 +541,7 @@ fn restore_builtin(args: &[VmValue]) -> Result<VmValue, HostlibError> {
                 result
                     .restored_paths
                     .into_iter()
-                    .map(|path| VmValue::String(Arc::from(path)))
+                    .map(|path| VmValue::String(arcstr::ArcStr::from(path)))
                     .collect(),
             )),
         ),
@@ -596,7 +596,7 @@ fn snapshot_summary_value(summary: SnapshotSummary) -> VmValue {
                 summary
                     .captured_paths
                     .into_iter()
-                    .map(|path| VmValue::String(Arc::from(path)))
+                    .map(|path| VmValue::String(arcstr::ArcStr::from(path)))
                     .collect(),
             )),
         ),

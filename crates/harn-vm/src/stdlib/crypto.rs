@@ -74,7 +74,7 @@ fn jwt_sign_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
     let token = jsonwebtoken::encode(&Header::new(algorithm), &claims, &key)
         .map_err(|error| jwt_error(format!("signing failed: {error}")))?;
 
-    Ok(VmValue::String(std::sync::Arc::from(token)))
+    Ok(VmValue::String(arcstr::ArcStr::from(token)))
 }
 
 #[derive(Clone, Debug)]
@@ -385,7 +385,7 @@ fn signed_url_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
     let mut signed_pairs = parts.query_pairs;
     signed_pairs.push((options.signature_param, signature));
     let signed_query = canonical_query(&signed_pairs);
-    Ok(VmValue::String(std::sync::Arc::from(append_query(
+    Ok(VmValue::String(arcstr::ArcStr::from(append_query(
         &parts.output_prefix,
         &signed_query,
     ))))
@@ -414,7 +414,7 @@ fn verification_result(
     );
     result.insert(
         "kid".to_string(),
-        kid.map(|kid| VmValue::String(std::sync::Arc::from(kid)))
+        kid.map(|kid| VmValue::String(arcstr::ArcStr::from(kid)))
             .unwrap_or(VmValue::Nil),
     );
     result.insert("claims".to_string(), VmValue::dict(claims));
@@ -544,7 +544,7 @@ fn verify_signed_url_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
         {
             claims.insert(
                 key.clone(),
-                VmValue::String(std::sync::Arc::from(value.as_str())),
+                VmValue::String(arcstr::ArcStr::from(value.as_str())),
             );
         }
     }
@@ -761,7 +761,7 @@ pub(crate) fn register_crypto_builtins(vm: &mut Vm) {
 fn base64_encode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let bytes = bytes_or_string_input(args.first())?;
     use base64::Engine;
-    Ok(VmValue::String(std::sync::Arc::from(
+    Ok(VmValue::String(arcstr::ArcStr::from(
         base64::engine::general_purpose::STANDARD.encode(bytes),
     )))
 }
@@ -771,7 +771,7 @@ fn base64_decode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     let val = display_arg(args);
     use base64::Engine;
     match base64::engine::general_purpose::STANDARD.decode(val.as_bytes()) {
-        Ok(bytes) => Ok(VmValue::String(std::sync::Arc::from(
+        Ok(bytes) => Ok(VmValue::String(arcstr::ArcStr::from(
             String::from_utf8_lossy(&bytes).into_owned(),
         ))),
         Err(e) => Err(VmError::Runtime(format!("base64 decode error: {e}"))),
@@ -785,7 +785,7 @@ fn base64_decode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 fn base64url_encode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let bytes = bytes_or_string_input(args.first())?;
     use base64::Engine;
-    Ok(VmValue::String(std::sync::Arc::from(
+    Ok(VmValue::String(arcstr::ArcStr::from(
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes),
     )))
 }
@@ -795,7 +795,7 @@ fn base64url_decode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
     let val = display_arg(args);
     use base64::Engine;
     match base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(val.as_bytes()) {
-        Ok(bytes) => Ok(VmValue::String(std::sync::Arc::from(
+        Ok(bytes) => Ok(VmValue::String(arcstr::ArcStr::from(
             String::from_utf8_lossy(&bytes).into_owned(),
         ))),
         Err(e) => Err(VmError::Runtime(format!("base64url decode error: {e}"))),
@@ -812,7 +812,7 @@ fn base64url_decode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 fn bytes_to_base64url_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use base64::Engine;
     let bytes = bytes_or_string_input(args.first())?;
-    Ok(VmValue::String(std::sync::Arc::from(
+    Ok(VmValue::String(arcstr::ArcStr::from(
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes),
     )))
 }
@@ -829,7 +829,7 @@ fn sha256_base64url_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
     use sha2::Digest;
     let bytes = bytes_or_string_input(args.first())?;
     let digest = sha2::Sha256::digest(&bytes);
-    Ok(VmValue::String(std::sync::Arc::from(
+    Ok(VmValue::String(arcstr::ArcStr::from(
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest),
     )))
 }
@@ -870,7 +870,7 @@ fn crypto_random_bytes_impl(args: &[VmValue], _out: &mut String) -> Result<VmVal
 )]
 fn base32_encode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let bytes = bytes_or_string_input(args.first())?;
-    Ok(VmValue::String(std::sync::Arc::from(
+    Ok(VmValue::String(arcstr::ArcStr::from(
         data_encoding::BASE32.encode(&bytes),
     )))
 }
@@ -879,7 +879,7 @@ fn base32_encode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 fn base32_decode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = display_arg(args);
     match data_encoding::BASE32.decode(val.as_bytes()) {
-        Ok(bytes) => Ok(VmValue::String(std::sync::Arc::from(
+        Ok(bytes) => Ok(VmValue::String(arcstr::ArcStr::from(
             String::from_utf8_lossy(&bytes).into_owned(),
         ))),
         Err(e) => Err(VmError::Runtime(format!("base32 decode error: {e}"))),
@@ -892,14 +892,14 @@ fn base32_decode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 )]
 fn hex_encode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let bytes = bytes_or_string_input(args.first())?;
-    Ok(VmValue::String(std::sync::Arc::from(hex::encode(bytes))))
+    Ok(VmValue::String(arcstr::ArcStr::from(hex::encode(bytes))))
 }
 
 #[harn_builtin(sig = "hex_decode(text: string?) -> string", category = "crypto")]
 fn hex_decode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = display_arg(args);
     match hex::decode(val.as_bytes()) {
-        Ok(bytes) => Ok(VmValue::String(std::sync::Arc::from(
+        Ok(bytes) => Ok(VmValue::String(arcstr::ArcStr::from(
             String::from_utf8_lossy(&bytes).into_owned(),
         ))),
         Err(e) => Err(VmError::Runtime(format!("hex decode error: {e}"))),
@@ -924,7 +924,7 @@ fn hash_value_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 fn sha256_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use sha2::Digest;
     let bytes = bytes_or_string_input(args.first())?;
-    Ok(VmValue::String(std::sync::Arc::from(hex::encode(
+    Ok(VmValue::String(arcstr::ArcStr::from(hex::encode(
         sha2::Sha256::digest(&bytes),
     ))))
 }
@@ -933,7 +933,7 @@ fn sha256_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
 fn sha224_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use sha2::Digest;
     let bytes = bytes_or_string_input(args.first())?;
-    Ok(VmValue::String(std::sync::Arc::from(hex::encode(
+    Ok(VmValue::String(arcstr::ArcStr::from(hex::encode(
         sha2::Sha224::digest(&bytes),
     ))))
 }
@@ -942,7 +942,7 @@ fn sha224_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
 fn sha384_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use sha2::Digest;
     let bytes = bytes_or_string_input(args.first())?;
-    Ok(VmValue::String(std::sync::Arc::from(hex::encode(
+    Ok(VmValue::String(arcstr::ArcStr::from(hex::encode(
         sha2::Sha384::digest(&bytes),
     ))))
 }
@@ -951,7 +951,7 @@ fn sha384_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
 fn sha512_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use sha2::Digest;
     let bytes = bytes_or_string_input(args.first())?;
-    Ok(VmValue::String(std::sync::Arc::from(hex::encode(
+    Ok(VmValue::String(arcstr::ArcStr::from(hex::encode(
         sha2::Sha512::digest(&bytes),
     ))))
 }
@@ -963,7 +963,7 @@ fn sha512_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
 fn sha512_256_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use sha2::Digest;
     let bytes = bytes_or_string_input(args.first())?;
-    Ok(VmValue::String(std::sync::Arc::from(hex::encode(
+    Ok(VmValue::String(arcstr::ArcStr::from(hex::encode(
         sha2::Sha512_256::digest(&bytes),
     ))))
 }
@@ -972,7 +972,7 @@ fn sha512_256_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 fn md5_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use md5::Digest;
     let bytes = bytes_or_string_input(args.first())?;
-    Ok(VmValue::String(std::sync::Arc::from(hex::encode(
+    Ok(VmValue::String(arcstr::ArcStr::from(hex::encode(
         md5::Md5::digest(&bytes),
     ))))
 }
@@ -1001,7 +1001,7 @@ fn hmac_sha256_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     let msg = args.get(1).map(|a| a.display()).unwrap_or_default();
     let mac = crate::connectors::hmac::hmac_sha256(key.as_bytes(), msg.as_bytes());
     let hex: String = mac.iter().map(|b| format!("{b:02x}")).collect();
-    Ok(VmValue::String(std::sync::Arc::from(hex)))
+    Ok(VmValue::String(arcstr::ArcStr::from(hex)))
 }
 
 // HMAC-SHA256 returning standard base64 (used by Slack-style signatures).
@@ -1014,7 +1014,7 @@ fn hmac_sha256_base64_impl(args: &[VmValue], _out: &mut String) -> Result<VmValu
     let key = args.first().map(|a| a.display()).unwrap_or_default();
     let msg = args.get(1).map(|a| a.display()).unwrap_or_default();
     let mac = crate::connectors::hmac::hmac_sha256(key.as_bytes(), msg.as_bytes());
-    Ok(VmValue::String(std::sync::Arc::from(
+    Ok(VmValue::String(arcstr::ArcStr::from(
         base64::engine::general_purpose::STANDARD.encode(&mac),
     )))
 }
@@ -1031,7 +1031,7 @@ fn hmac_sha1_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     let msg = args.get(1).map(|a| a.display()).unwrap_or_default();
     let mac = crate::connectors::hmac::hmac_sha1(key.as_bytes(), msg.as_bytes());
     let hex: String = mac.iter().map(|b| format!("{b:02x}")).collect();
-    Ok(VmValue::String(std::sync::Arc::from(hex)))
+    Ok(VmValue::String(arcstr::ArcStr::from(hex)))
 }
 
 #[harn_builtin(
@@ -1092,7 +1092,7 @@ fn url_encode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
             _ => format!("%{b:02X}"),
         })
         .collect();
-    Ok(VmValue::String(std::sync::Arc::from(encoded)))
+    Ok(VmValue::String(arcstr::ArcStr::from(encoded)))
 }
 
 #[harn_builtin(sig = "url_decode(text: string?) -> string", category = "crypto")]
@@ -1116,7 +1116,7 @@ fn url_decode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
         }
         i += 1;
     }
-    Ok(VmValue::String(std::sync::Arc::from(
+    Ok(VmValue::String(arcstr::ArcStr::from(
         String::from_utf8_lossy(&result).into_owned(),
     )))
 }
@@ -1128,7 +1128,7 @@ fn sha3_256_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
     use sha3::{Digest, Sha3_256};
     let input = bytes_or_string_input(args.first())?;
     let digest = Sha3_256::digest(&input);
-    Ok(VmValue::String(std::sync::Arc::from(hex::encode(digest))))
+    Ok(VmValue::String(arcstr::ArcStr::from(hex::encode(digest))))
 }
 
 #[harn_builtin(sig = "sha3_512(input: string | bytes) -> string", category = "crypto")]
@@ -1136,14 +1136,14 @@ fn sha3_512_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
     use sha3::{Digest, Sha3_512};
     let input = bytes_or_string_input(args.first())?;
     let digest = Sha3_512::digest(&input);
-    Ok(VmValue::String(std::sync::Arc::from(hex::encode(digest))))
+    Ok(VmValue::String(arcstr::ArcStr::from(hex::encode(digest))))
 }
 
 #[harn_builtin(sig = "blake3(input: string | bytes) -> string", category = "crypto")]
 fn blake3_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let input = bytes_or_string_input(args.first())?;
     let digest = blake3::hash(&input);
-    Ok(VmValue::String(std::sync::Arc::from(
+    Ok(VmValue::String(arcstr::ArcStr::from(
         digest.to_hex().to_string(),
     )))
 }
@@ -1171,25 +1171,25 @@ fn ed25519_keypair_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue,
 fn ed25519_sign_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use ed25519_dalek::{Signer, SigningKey};
     if args.len() < 2 {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "ed25519_sign: expected (private_hex, message)",
         ))));
     }
     let priv_hex = args[0].display();
     let msg = bytes_or_string_input(Some(&args[1]))?;
     let priv_bytes = hex::decode(&priv_hex).map_err(|e| {
-        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
             "ed25519_sign: invalid hex private key: {e}"
         ))))
     })?;
     let priv_arr: [u8; 32] = priv_bytes.as_slice().try_into().map_err(|_| {
-        VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "ed25519_sign: private key must be 32 bytes",
         )))
     })?;
     let signing = SigningKey::from_bytes(&priv_arr);
     let sig = signing.sign(&msg);
-    Ok(VmValue::String(std::sync::Arc::from(hex::encode(
+    Ok(VmValue::String(arcstr::ArcStr::from(hex::encode(
         sig.to_bytes(),
     ))))
 }
@@ -1201,7 +1201,7 @@ fn ed25519_sign_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 fn ed25519_verify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use ed25519_dalek::{Signature, Verifier, VerifyingKey};
     if args.len() < 3 {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "ed25519_verify: expected (public_hex, message, signature_hex)",
         ))));
     }
@@ -1256,36 +1256,36 @@ fn x25519_keypair_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 fn x25519_agree_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use x25519_dalek::{PublicKey, StaticSecret};
     if args.len() < 2 {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "x25519_agree: expected (private_hex, peer_public_hex)",
         ))));
     }
     let priv_hex = args[0].display();
     let pub_hex = args[1].display();
     let priv_bytes = hex::decode(&priv_hex).map_err(|e| {
-        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
             "x25519_agree: invalid private hex: {e}"
         ))))
     })?;
     let pub_bytes = hex::decode(&pub_hex).map_err(|e| {
-        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
             "x25519_agree: invalid public hex: {e}"
         ))))
     })?;
     let priv_arr: [u8; 32] = priv_bytes.as_slice().try_into().map_err(|_| {
-        VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "x25519_agree: private must be 32 bytes",
         )))
     })?;
     let pub_arr: [u8; 32] = pub_bytes.as_slice().try_into().map_err(|_| {
-        VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "x25519_agree: public must be 32 bytes",
         )))
     })?;
     let secret = StaticSecret::from(priv_arr);
     let peer = PublicKey::from(pub_arr);
     let shared = secret.diffie_hellman(&peer);
-    Ok(VmValue::String(std::sync::Arc::from(hex::encode(
+    Ok(VmValue::String(arcstr::ArcStr::from(hex::encode(
         shared.as_bytes(),
     ))))
 }
@@ -1299,7 +1299,7 @@ fn x25519_agree_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 fn jwt_verify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     use jsonwebtoken::{decode, DecodingKey, Validation};
     if args.len() < 3 {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "jwt_verify: expected (alg, token, key)",
         ))));
     }
@@ -1311,7 +1311,7 @@ fn jwt_verify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
         "ES256" => Algorithm::ES256,
         "RS256" => Algorithm::RS256,
         other => {
-            return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 format!("jwt_verify: unsupported algorithm '{other}'"),
             ))));
         }
@@ -1319,12 +1319,12 @@ fn jwt_verify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     let decoding_key = match algorithm {
         Algorithm::HS256 => DecodingKey::from_secret(key_str.as_bytes()),
         Algorithm::ES256 => DecodingKey::from_ec_pem(key_str.as_bytes()).map_err(|e| {
-            VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
                 "jwt_verify: invalid ES256 public key: {e}"
             ))))
         })?,
         Algorithm::RS256 => DecodingKey::from_rsa_pem(key_str.as_bytes()).map_err(|e| {
-            VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
                 "jwt_verify: invalid RS256 public key: {e}"
             ))))
         })?,
@@ -1337,7 +1337,7 @@ fn jwt_verify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     validation.validate_nbf = false;
     validation.required_spec_claims.clear();
     let decoded = decode::<serde_json::Value>(&token, &decoding_key, &validation).map_err(|e| {
-        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
             "jwt_verify: {e}"
         ))))
     })?;
@@ -1418,7 +1418,7 @@ C/edCMRM78P8eQTBCDUTK1ywSYaszvQZvneiW6gNtWEJndSreEcyyUdVvg==\n\
     }
 
     fn s(v: &str) -> VmValue {
-        VmValue::String(std::sync::Arc::from(v))
+        VmValue::String(arcstr::ArcStr::from(v))
     }
 
     fn jwt_claims() -> VmValue {

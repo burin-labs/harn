@@ -357,7 +357,7 @@ fn file_path(handle: &crate::value::DictMap) -> Result<PathBuf, VmError> {
     handle
         .get(HANDLE_KEY_PATH)
         .and_then(|value| match value {
-            VmValue::String(s) => Some(PathBuf::from(s.as_ref())),
+            VmValue::String(s) => Some(PathBuf::from(s.as_str())),
             _ => None,
         })
         .ok_or_else(|| VmError::Runtime("oauth storage file handle is missing `path`".to_string()))

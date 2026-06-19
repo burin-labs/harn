@@ -8,7 +8,6 @@
 //! the single contract every language must satisfy.
 
 use std::io::Write;
-use std::sync::Arc;
 
 use harn_hostlib::{ast::AstCapability, tools::permissions, BuiltinRegistry, HostlibCapability};
 use harn_vm::VmValue;
@@ -29,7 +28,7 @@ fn dict(pairs: &[(&str, VmValue)]) -> VmValue {
 }
 
 fn vm_string(s: &str) -> VmValue {
-    VmValue::String(Arc::from(s))
+    VmValue::String(arcstr::ArcStr::from(s))
 }
 
 fn invoke(registry: &BuiltinRegistry, name: &str, payload: VmValue) -> VmValue {

@@ -440,7 +440,7 @@ async fn vm_call_llm_api_with_body_inner(
                     is_anthropic_style,
                     is_ollama,
                 );
-                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(msg))));
+                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(msg))));
             }
             let is_sse = response
                 .headers()
@@ -519,11 +519,11 @@ async fn vm_call_llm_api_with_body_inner(
             is_anthropic_style,
             is_ollama,
         );
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(msg))));
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(msg))));
     }
 
     let json: serde_json::Value = response.json().await.map_err(|e| {
-        VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
             "{provider} response parse error: {e}"
         ))))
     })?;
@@ -677,7 +677,7 @@ fn reqwest_send_error(provider: &str, phase: &str, error: reqwest::Error) -> VmE
     };
     match category {
         Some(category) => VmError::CategorizedError { message, category },
-        None => VmError::Thrown(VmValue::String(std::sync::Arc::from(message))),
+        None => VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message))),
     }
 }
 
@@ -805,7 +805,7 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
                 // 133s and came back with output_tokens=0). Surface it in the
                 // same transient stream-error class other transports use so
                 // the existing retry machinery picks it up.
-                return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                     format!("{provider} stream error (mid-stream read): {error}"),
                 ))));
             }
@@ -1264,7 +1264,7 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
         && tool_calls.is_empty()
         && !has_tool_search_block
     {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
             "openai-compatible model {model} reported completion_tokens={output_tokens} but delivered no content, reasoning, or tool calls"
         )))));
     }
@@ -1402,7 +1402,7 @@ where
         let line = next_ollama_ndjson_line(&mut lines, model, unload_grace, warmup_gate)
             .await
             .map_err(|error| {
-                VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+                VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
                     "ollama stream error: unexpected EOF or read failure before done=true: {error}"
                 ))))
             })?;
@@ -1418,7 +1418,7 @@ where
             break;
         }
         let json: serde_json::Value = serde_json::from_str(data).map_err(|error| {
-            VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
                 "ollama stream parse error: partial or invalid NDJSON frame before done=true: {error}; line={}",
                 &data[..data.len().min(200)]
             ))))
@@ -1477,7 +1477,7 @@ where
         } else {
             " before any chunks"
         };
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             format!("ollama stream error: unexpected EOF before done=true{suffix}"),
         ))));
     }
@@ -1509,7 +1509,7 @@ where
         && output_tokens > 0
         && done_reason.as_deref() != Some("length")
     {
-        return Err(VmError::Thrown(VmValue::String(std::sync::Arc::from(format!(
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
             "ollama model {model} reported eval_count={output_tokens} but delivered no content or thinking [ollama_empty_content_parser_bug]"
         )))));
     }

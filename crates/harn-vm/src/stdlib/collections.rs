@@ -19,7 +19,7 @@ fn dict_arg(value: &VmValue, builtin: &str) -> Result<Arc<crate::value::DictMap>
 fn keep_filter_nil(value: &VmValue) -> bool {
     match value {
         VmValue::Nil => false,
-        VmValue::String(s) => !s.is_empty() && s.as_ref() != "null",
+        VmValue::String(s) => !s.is_empty() && s.as_str() != "null",
         _ => true,
     }
 }
@@ -654,7 +654,7 @@ mod tests {
         VmValue::List(std::sync::Arc::new(
             items
                 .iter()
-                .map(|k| VmValue::String(std::sync::Arc::from(*k)))
+                .map(|k| VmValue::String(arcstr::ArcStr::from(*k)))
                 .collect(),
         ))
     }
@@ -664,8 +664,8 @@ mod tests {
         let input = dict(&[
             ("keep", VmValue::Int(1)),
             ("nil_value", VmValue::Nil),
-            ("empty", VmValue::String(std::sync::Arc::from(""))),
-            ("null_string", VmValue::String(std::sync::Arc::from("null"))),
+            ("empty", VmValue::String(arcstr::ArcStr::from(""))),
+            ("null_string", VmValue::String(arcstr::ArcStr::from("null"))),
             ("kept_zero", VmValue::Int(0)),
         ]);
         let result = dict_filter_nil(&input).unwrap();
@@ -849,11 +849,11 @@ mod tests {
     fn dict_from_pairs_accepts_two_element_lists() {
         let pairs = VmValue::List(std::sync::Arc::new(vec![
             VmValue::List(std::sync::Arc::new(vec![
-                VmValue::String(std::sync::Arc::from("a")),
+                VmValue::String(arcstr::ArcStr::from("a")),
                 VmValue::Int(1),
             ])),
             VmValue::List(std::sync::Arc::new(vec![
-                VmValue::String(std::sync::Arc::from("b")),
+                VmValue::String(arcstr::ArcStr::from("b")),
                 VmValue::Int(2),
             ])),
         ]));

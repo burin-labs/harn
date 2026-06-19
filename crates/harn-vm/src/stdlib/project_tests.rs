@@ -231,7 +231,7 @@ fn context_profile_consumes_supplied_code_librarian_signals_without_scanning() {
         has_ci: false,
         lockfile_paths: Vec::new(),
     });
-    options.remote = remote_signal_from_value(&VmValue::String(std::sync::Arc::from(
+    options.remote = remote_signal_from_value(&VmValue::String(arcstr::ArcStr::from(
         "https://github.com/burin-labs/harn.git",
     )));
 

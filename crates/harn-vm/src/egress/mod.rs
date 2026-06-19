@@ -1075,7 +1075,7 @@ fn policy_summary() -> VmValue {
                     .policy
                     .allow
                     .iter()
-                    .map(|rule| VmValue::String(std::sync::Arc::from(rule.raw.as_str())))
+                    .map(|rule| VmValue::String(arcstr::ArcStr::from(rule.raw.as_str())))
                     .collect(),
             )),
         );
@@ -1086,7 +1086,7 @@ fn policy_summary() -> VmValue {
                     .policy
                     .deny
                     .iter()
-                    .map(|rule| VmValue::String(std::sync::Arc::from(rule.raw.as_str())))
+                    .map(|rule| VmValue::String(arcstr::ArcStr::from(rule.raw.as_str())))
                     .collect(),
             )),
         );
@@ -1264,7 +1264,7 @@ fn redact_sensitive_url(url: &str) -> String {
 }
 
 fn vm_error(message: impl Into<String>) -> VmError {
-    VmError::Thrown(VmValue::String(std::sync::Arc::from(message.into())))
+    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message.into())))
 }
 
 impl EgressBlocked {
@@ -1325,7 +1325,7 @@ mod tests {
         VmValue::List(std::sync::Arc::new(
             values
                 .iter()
-                .map(|value| VmValue::String(std::sync::Arc::from(*value)))
+                .map(|value| VmValue::String(arcstr::ArcStr::from(*value)))
                 .collect(),
         ))
     }
@@ -1334,7 +1334,7 @@ mod tests {
     fn exact_host_and_port_restriction() {
         let _guard = install(&[
             ("allow", strings(&["api.example.com:443"])),
-            ("default", VmValue::String(std::sync::Arc::from("deny"))),
+            ("default", VmValue::String(arcstr::ArcStr::from("deny"))),
         ]);
         assert!(check_url("http_get", "https://api.example.com/users")
             .unwrap()
@@ -1350,7 +1350,7 @@ mod tests {
     fn suffix_wildcard_matches_subdomains_only() {
         let _guard = install(&[
             ("allow", strings(&["*.example.com"])),
-            ("default", VmValue::String(std::sync::Arc::from("deny"))),
+            ("default", VmValue::String(arcstr::ArcStr::from("deny"))),
         ]);
         assert!(check_url("http_get", "https://api.example.com")
             .unwrap()
@@ -1364,7 +1364,7 @@ mod tests {
     fn cidr_matches_ip_literals() {
         let _guard = install(&[
             ("allow", strings(&["127.0.0.0/8"])),
-            ("default", VmValue::String(std::sync::Arc::from("deny"))),
+            ("default", VmValue::String(arcstr::ArcStr::from("deny"))),
         ]);
         assert!(check_url("http_get", "http://127.10.20.30:8080")
             .unwrap()
@@ -1379,7 +1379,7 @@ mod tests {
         let _guard = install(&[
             ("allow", strings(&["*.example.com"])),
             ("deny", strings(&["blocked.example.com"])),
-            ("default", VmValue::String(std::sync::Arc::from("deny"))),
+            ("default", VmValue::String(arcstr::ArcStr::from("deny"))),
         ]);
         let blocked = check_url("http_get", "https://blocked.example.com")
             .unwrap()
@@ -1389,7 +1389,7 @@ mod tests {
 
     #[test]
     fn blocked_urls_redact_sensitive_query_values() {
-        let _guard = install(&[("default", VmValue::String(std::sync::Arc::from("deny")))]);
+        let _guard = install(&[("default", VmValue::String(arcstr::ArcStr::from("deny")))]);
         let blocked = check_url(
             "http_get",
             "https://api.example.com/resource?access_token=secret-token&ok=1",
@@ -1483,7 +1483,7 @@ mod tests {
     fn install_block_private() -> std::sync::MutexGuard<'static, ()> {
         install(&[(
             "block_private",
-            VmValue::String(std::sync::Arc::from("private")),
+            VmValue::String(arcstr::ArcStr::from("private")),
         )])
     }
 
@@ -1527,9 +1527,9 @@ mod tests {
             ("allow", strings(&["127.0.0.1"])),
             (
                 "block_private",
-                VmValue::String(std::sync::Arc::from("private")),
+                VmValue::String(arcstr::ArcStr::from("private")),
             ),
-            ("default", VmValue::String(std::sync::Arc::from("deny"))),
+            ("default", VmValue::String(arcstr::ArcStr::from("deny"))),
         ]);
         assert!(check_url("http_get", "http://127.0.0.1").unwrap().is_some());
     }
@@ -1556,7 +1556,7 @@ mod tests {
         let _guard = install(&[
             (
                 "block_private",
-                VmValue::String(std::sync::Arc::from("private")),
+                VmValue::String(arcstr::ArcStr::from("private")),
             ),
             ("allow_loopback", VmValue::Bool(true)),
         ]);
@@ -1594,7 +1594,7 @@ mod tests {
         reset_egress_policy_for_tests();
         install_test_policy(&[(
             "block_private",
-            VmValue::String(std::sync::Arc::from("off")),
+            VmValue::String(arcstr::ArcStr::from("off")),
         )]);
         let _scope = require_ssrf_guard_for_host();
         // Explicit off overrides the default-on guard.
@@ -1720,7 +1720,7 @@ mod tests {
         // decision from the sync layer).
         let pol = policy(&[
             ("allow", strings(&["10.0.0.0/8"])),
-            ("default", VmValue::String(std::sync::Arc::from("deny"))),
+            ("default", VmValue::String(arcstr::ArcStr::from("deny"))),
         ]);
         assert!(evaluate_resolved_addrs(
             Some(&pol),
@@ -1737,7 +1737,7 @@ mod tests {
     fn resolved_ip_outside_allow_cidr_blocks_hostname_under_default_deny() {
         let pol = policy(&[
             ("allow", strings(&["10.0.0.0/8"])),
-            ("default", VmValue::String(std::sync::Arc::from("deny"))),
+            ("default", VmValue::String(arcstr::ArcStr::from("deny"))),
         ]);
         let blocked = evaluate_resolved_addrs(
             Some(&pol),
@@ -1758,7 +1758,7 @@ mod tests {
         let pol = policy(&[
             ("allow", strings(&["10.0.0.0/8"])),
             ("deny", strings(&["10.6.0.0/16"])),
-            ("default", VmValue::String(std::sync::Arc::from("deny"))),
+            ("default", VmValue::String(arcstr::ArcStr::from("deny"))),
         ]);
         let blocked = evaluate_resolved_addrs(
             Some(&pol),
@@ -1825,7 +1825,7 @@ mod tests {
         // resolves to a private address (existing behavior, kept).
         let pol = policy(&[(
             "block_private",
-            VmValue::String(std::sync::Arc::from("private")),
+            VmValue::String(arcstr::ArcStr::from("private")),
         )]);
         let blocked = evaluate_resolved_addrs(
             Some(&pol),
@@ -1849,7 +1849,7 @@ mod tests {
         // rule could still grant it after resolution.
         let _guard = install(&[
             ("allow", strings(&["10.0.0.0/8"])),
-            ("default", VmValue::String(std::sync::Arc::from("deny"))),
+            ("default", VmValue::String(arcstr::ArcStr::from("deny"))),
         ]);
         match check_url_decision("http_get", "https://internal.example.com").unwrap() {
             SyncCheck::DeferToResolution(_) => {}
@@ -1872,7 +1872,7 @@ mod tests {
         drop(_guard);
         let _guard = install(&[
             ("allow", strings(&["api.example.com"])),
-            ("default", VmValue::String(std::sync::Arc::from("deny"))),
+            ("default", VmValue::String(arcstr::ArcStr::from("deny"))),
         ]);
         assert!(matches!(
             check_url_decision("http_get", "https://other.example.com").unwrap(),
@@ -1895,7 +1895,7 @@ mod tests {
                     "10.0.0.0/8:443",
                 ]),
             ),
-            ("default", VmValue::String(std::sync::Arc::from("deny"))),
+            ("default", VmValue::String(arcstr::ArcStr::from("deny"))),
         ]);
         let rules = resolved_ip_rules_for(&pol.policy);
         assert_eq!(

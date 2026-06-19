@@ -256,7 +256,7 @@ return {{
     assert!(!bool_at("unknown_known"));
     assert!(matches!(
         d.get("on_active").unwrap(),
-        VmValue::String(s) if s.as_ref() == "topic/test"
+        VmValue::String(s) if s.as_str() == "topic/test"
     ));
     assert!(matches!(d.get("off_active").unwrap(), VmValue::Nil));
 }

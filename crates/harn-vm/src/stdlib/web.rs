@@ -10,7 +10,7 @@ use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 fn vm_str(value: impl AsRef<str>) -> VmValue {
-    VmValue::String(std::sync::Arc::from(value.as_ref()))
+    VmValue::String(arcstr::ArcStr::from(value.as_ref()))
 }
 
 fn vm_list(values: Vec<VmValue>) -> VmValue {

@@ -1314,7 +1314,7 @@ mod tests {
         let tools = VmValue::dict(std::collections::BTreeMap::from_iter([
             (
                 "_type".into(),
-                VmValue::String(std::sync::Arc::from("tool_registry")),
+                VmValue::String(arcstr::ArcStr::from("tool_registry")),
             ),
             (
                 "tools".into(),
@@ -1322,7 +1322,7 @@ mod tests {
                     std::sync::Arc::new(crate::value::DictMap::from_iter([
                         (
                             "name".to_string(),
-                            VmValue::String(std::sync::Arc::from("run")),
+                            VmValue::String(arcstr::ArcStr::from("run")),
                         ),
                         (
                             "parameters".to_string(),
@@ -1330,7 +1330,7 @@ mod tests {
                         ),
                         (
                             "executor".to_string(),
-                            VmValue::String(std::sync::Arc::from("host_bridge")),
+                            VmValue::String(arcstr::ArcStr::from("host_bridge")),
                         ),
                     ])),
                 )])),

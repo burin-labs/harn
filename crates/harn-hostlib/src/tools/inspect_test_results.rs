@@ -18,7 +18,6 @@ use harn_vm::VmDictExt;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
 use std::sync::{LazyLock, Mutex};
 
 use harn_vm::VmValue;
@@ -165,28 +164,28 @@ fn record_to_map(record: test_parsers::TestRecord) -> harn_vm::value::DictMap {
         "message".to_string(),
         record
             .message
-            .map(|m| VmValue::String(Arc::from(m)))
+            .map(|m| VmValue::String(arcstr::ArcStr::from(m)))
             .unwrap_or(VmValue::Nil),
     );
     map.insert(
         "stdout".to_string(),
         record
             .stdout
-            .map(|s| VmValue::String(Arc::from(s)))
+            .map(|s| VmValue::String(arcstr::ArcStr::from(s)))
             .unwrap_or(VmValue::Nil),
     );
     map.insert(
         "stderr".to_string(),
         record
             .stderr
-            .map(|s| VmValue::String(Arc::from(s)))
+            .map(|s| VmValue::String(arcstr::ArcStr::from(s)))
             .unwrap_or(VmValue::Nil),
     );
     map.insert(
         "path".to_string(),
         record
             .path
-            .map(|p| VmValue::String(Arc::from(p)))
+            .map(|p| VmValue::String(arcstr::ArcStr::from(p)))
             .unwrap_or(VmValue::Nil),
     );
     map.insert(

@@ -127,9 +127,9 @@ pub(crate) async fn call_agent_loop(
         "agent_loop",
         "workflow_stage_agent_loop",
         &[
-            VmValue::String(std::sync::Arc::from(prompt)),
+            VmValue::String(arcstr::ArcStr::from(prompt)),
             system
-                .map(|value| VmValue::String(std::sync::Arc::from(value)))
+                .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
                 .unwrap_or(VmValue::Nil),
             VmValue::dict(options),
         ],

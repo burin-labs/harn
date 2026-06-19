@@ -293,7 +293,7 @@ fn llm_cache_key_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue,
         ))
     })?)?;
     let digest = Sha256::digest(&canonical);
-    Ok(VmValue::String(std::sync::Arc::from(format!(
+    Ok(VmValue::String(arcstr::ArcStr::from(format!(
         "sha256:{}",
         hex::encode(digest)
     ))))

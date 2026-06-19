@@ -2,7 +2,6 @@
 
 use std::fs;
 use std::path::Path;
-use std::sync::Arc;
 
 use harn_hostlib::tools::permissions;
 use harn_hostlib::{tools::ToolsCapability, BuiltinRegistry, HostlibCapability, HostlibError};
@@ -26,7 +25,7 @@ fn dict_arg(entries: &[(&str, VmValue)]) -> Vec<VmValue> {
 }
 
 fn vm_string(s: &str) -> VmValue {
-    VmValue::String(Arc::from(s))
+    VmValue::String(arcstr::ArcStr::from(s))
 }
 
 fn dict_get<'a>(value: &'a VmValue, key: &str) -> &'a VmValue {
@@ -50,9 +49,9 @@ fn read_file_returns_utf8_payload_with_size() {
     let entry = reg.find("hostlib_tools_read_file").unwrap();
     let result = (entry.handler)(&dict_arg(&[("path", vm_string(&path_str(&file)))])).unwrap();
 
-    assert!(matches!(dict_get(&result, "encoding"), VmValue::String(s) if s.as_ref() == "utf-8"));
+    assert!(matches!(dict_get(&result, "encoding"), VmValue::String(s) if s.as_str() == "utf-8"));
     assert!(
-        matches!(dict_get(&result, "content"), VmValue::String(s) if s.as_ref() == "hello world")
+        matches!(dict_get(&result, "content"), VmValue::String(s) if s.as_str() == "hello world")
     );
     assert!(matches!(dict_get(&result, "size"), VmValue::Int(11)));
     assert!(matches!(
@@ -76,7 +75,7 @@ fn read_file_offset_and_limit_apply() {
     ]))
     .unwrap();
 
-    assert!(matches!(dict_get(&result, "content"), VmValue::String(s) if s.as_ref() == "2345"));
+    assert!(matches!(dict_get(&result, "content"), VmValue::String(s) if s.as_str() == "2345"));
     assert!(matches!(
         dict_get(&result, "truncated"),
         VmValue::Bool(true)
@@ -96,7 +95,7 @@ fn read_file_binary_returns_base64() {
         ("encoding", vm_string("binary")),
     ]))
     .unwrap();
-    assert!(matches!(dict_get(&result, "encoding"), VmValue::String(s) if s.as_ref() == "base64"));
+    assert!(matches!(dict_get(&result, "encoding"), VmValue::String(s) if s.as_str() == "base64"));
 }
 
 #[test]
@@ -108,7 +107,7 @@ fn read_file_invalid_utf8_falls_back_to_base64() {
     let reg = registry();
     let entry = reg.find("hostlib_tools_read_file").unwrap();
     let result = (entry.handler)(&dict_arg(&[("path", vm_string(&path_str(&file)))])).unwrap();
-    assert!(matches!(dict_get(&result, "encoding"), VmValue::String(s) if s.as_ref() == "base64"));
+    assert!(matches!(dict_get(&result, "encoding"), VmValue::String(s) if s.as_str() == "base64"));
 }
 
 #[test]

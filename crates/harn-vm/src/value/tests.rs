@@ -11,16 +11,22 @@ static_assertions::assert_impl_all!(VmAsyncBuiltinFn: Send, Sync);
 #[cfg(target_pointer_width = "64")]
 #[test]
 fn vm_value_layout_budget() {
-    // The two oversized inline payloads (`Range` and `BuiltinRefId`, each 24
-    // bytes) are boxed behind a `Shared` pointer, so the widest variant is now
-    // a 16-byte fat pointer (`Arc<str>`) and the whole enum is 24 bytes — down
-    // from 32. Shrinking further requires a thin-pointer string type (tracked
-    // separately); `Arc<str>` is what currently sets the 16-byte floor.
-    assert_eq!(std::mem::size_of::<VmValue>(), 24);
-    assert_eq!(std::mem::size_of::<Option<VmValue>>(), 24);
+    // Every variant is held to a single machine word so the whole enum is 16
+    // bytes (down from 24, and 32 before that): the oversized payloads
+    // (`Range`, `BuiltinRefId`, `Decimal`, `StructInstance`) are boxed behind a
+    // `Shared` pointer, and the string-shaped variants use the thin-pointer
+    // `HarnStr` (`arcstr::ArcStr`, one word) instead of a 16-byte `Arc<str>`
+    // fat pointer. Guard each of those so a regression that re-inlines one of
+    // them — re-widening the value the interpreter moves on every push, pop,
+    // clone, and local-slot write — fails loudly here.
+    assert_eq!(std::mem::size_of::<VmValue>(), 16);
+    assert_eq!(std::mem::size_of::<Option<VmValue>>(), 16);
+    assert_eq!(std::mem::size_of::<HarnStr>(), 8);
     assert_eq!(std::mem::size_of::<Arc<VmEnumVariant>>(), 8);
     assert_eq!(std::mem::size_of::<Arc<VmRange>>(), 8);
     assert_eq!(std::mem::size_of::<Arc<VmBuiltinRefId>>(), 8);
+    assert_eq!(std::mem::size_of::<Arc<rust_decimal::Decimal>>(), 8);
+    assert_eq!(std::mem::size_of::<Arc<StructInstanceData>>(), 8);
     assert_eq!(std::mem::size_of::<VmChannelHandle>(), 40);
     assert_eq!(std::mem::size_of::<Arc<VmChannelHandle>>(), 8);
     assert_eq!(std::mem::size_of::<VmAtomicHandle>(), 8);
@@ -29,7 +35,7 @@ fn vm_value_layout_budget() {
 }
 
 fn s(val: &str) -> VmValue {
-    VmValue::String(std::sync::Arc::from(val))
+    VmValue::String(arcstr::ArcStr::from(val))
 }
 
 fn i(val: i64) -> VmValue {
@@ -289,8 +295,8 @@ fn vm_range_to_vec_matches_direct_iteration() {
     );
 }
 
-/// Helper: unwrap a `VmValue::String` to its backing `Arc<str>`.
-fn arc_of(value: &VmValue) -> &Arc<str> {
+/// Helper: unwrap a `VmValue::String` to its backing `HarnStr`.
+fn arc_of(value: &VmValue) -> &arcstr::ArcStr {
     match value {
         VmValue::String(s) => s,
         other => panic!("expected string, got {other:?}"),
@@ -304,18 +310,18 @@ fn char_value_interns_ascii() {
     // large source file into `chars(...)` allocation-free on the common path.
     let a = VmValue::char_value('{');
     let b = VmValue::char_value('{');
-    assert!(Arc::ptr_eq(arc_of(&a), arc_of(&b)));
-    assert_eq!(arc_of(&a).as_ref(), "{");
+    assert!(arcstr::ArcStr::ptr_eq(arc_of(&a), arc_of(&b)));
+    assert_eq!(arc_of(&a).as_str(), "{");
 
     // Distinct ASCII chars use distinct interned slots.
     let nl = VmValue::char_value('\n');
-    assert!(!Arc::ptr_eq(arc_of(&a), arc_of(&nl)));
+    assert!(!arcstr::ArcStr::ptr_eq(arc_of(&a), arc_of(&nl)));
 }
 
 #[test]
 fn char_value_handles_non_ascii() {
     let e = VmValue::char_value('é');
-    assert_eq!(arc_of(&e).as_ref(), "é");
+    assert_eq!(arc_of(&e).as_str(), "é");
 }
 
 #[test]
@@ -325,14 +331,14 @@ fn chars_list_materializes_each_scalar() {
         other => panic!("expected list, got {other:?}"),
     };
     assert_eq!(cs.len(), 4);
-    assert_eq!(arc_of(&cs[0]).as_ref(), "a");
-    assert_eq!(arc_of(&cs[1]).as_ref(), "{");
-    assert_eq!(arc_of(&cs[2]).as_ref(), "é");
-    assert_eq!(arc_of(&cs[3]).as_ref(), "}");
+    assert_eq!(arc_of(&cs[0]).as_str(), "a");
+    assert_eq!(arc_of(&cs[1]).as_str(), "{");
+    assert_eq!(arc_of(&cs[2]).as_str(), "é");
+    assert_eq!(arc_of(&cs[3]).as_str(), "}");
 
     // ASCII entries reuse the interned table rather than allocating per char.
     let brace = VmValue::char_value('{');
-    assert!(Arc::ptr_eq(arc_of(&cs[1]), arc_of(&brace)));
+    assert!(arcstr::ArcStr::ptr_eq(arc_of(&cs[1]), arc_of(&brace)));
 
     assert!(matches!(VmValue::chars_list(""), VmValue::List(items) if items.is_empty()));
 }
@@ -471,7 +477,7 @@ fn depth_within_reports_nesting_correctly() {
 }
 
 fn dec(s: &str) -> VmValue {
-    VmValue::Decimal(s.parse().unwrap())
+    VmValue::decimal(s.parse().unwrap())
 }
 
 #[test]

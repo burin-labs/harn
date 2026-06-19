@@ -644,8 +644,8 @@ mod tests {
         config.insert(
             "kinds".to_string(),
             VmValue::List(std::sync::Arc::new(vec![
-                VmValue::String(std::sync::Arc::from("access")),
-                VmValue::String(std::sync::Arc::from("other")),
+                VmValue::String(arcstr::ArcStr::from("access")),
+                VmValue::String(arcstr::ArcStr::from("other")),
             ])),
         );
         let mut filter = filter(root.clone(), None);

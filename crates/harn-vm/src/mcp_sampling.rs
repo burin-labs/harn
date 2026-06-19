@@ -411,7 +411,7 @@ fn build_llm_call_args(
     if let Some(stop) = parsed.stop_sequences.as_ref() {
         let stop_vm: Vec<VmValue> = stop
             .iter()
-            .map(|s| VmValue::String(std::sync::Arc::from(s.as_str())))
+            .map(|s| VmValue::String(arcstr::ArcStr::from(s.as_str())))
             .collect();
         options.insert(
             "stop".to_string(),
@@ -451,11 +451,11 @@ fn build_llm_call_args(
     let system_value = parsed
         .system
         .as_ref()
-        .map(|s| VmValue::String(std::sync::Arc::from(s.as_str())))
+        .map(|s| VmValue::String(arcstr::ArcStr::from(s.as_str())))
         .unwrap_or(VmValue::Nil);
 
     let args = vec![
-        VmValue::String(std::sync::Arc::from("")),
+        VmValue::String(arcstr::ArcStr::from("")),
         system_value,
         VmValue::dict(options.clone()),
     ];

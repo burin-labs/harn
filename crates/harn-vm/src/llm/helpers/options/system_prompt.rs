@@ -8,7 +8,7 @@ pub(super) enum SystemPromptPosition {
 }
 
 pub(super) fn system_prompt_error(message: impl Into<String>) -> VmError {
-    VmError::Thrown(VmValue::String(std::sync::Arc::from(message.into())))
+    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message.into())))
 }
 
 pub(super) fn system_prompt_position(

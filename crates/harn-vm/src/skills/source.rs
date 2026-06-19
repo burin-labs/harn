@@ -427,7 +427,7 @@ pub fn skill_entry_to_vm(skill: &Skill) -> crate::value::VmValue {
                     .manifest
                     .allowed_tools
                     .iter()
-                    .map(|t| VmValue::String(std::sync::Arc::from(t.as_str())))
+                    .map(|t| VmValue::String(arcstr::ArcStr::from(t.as_str())))
                     .collect(),
             )),
         );
@@ -443,7 +443,7 @@ pub fn skill_entry_to_vm(skill: &Skill) -> crate::value::VmValue {
                     .manifest
                     .paths
                     .iter()
-                    .map(|p| VmValue::String(std::sync::Arc::from(p.as_str())))
+                    .map(|p| VmValue::String(arcstr::ArcStr::from(p.as_str())))
                     .collect(),
             )),
         );
@@ -453,7 +453,7 @@ pub fn skill_entry_to_vm(skill: &Skill) -> crate::value::VmValue {
     if !skill.manifest.hooks.is_empty() {
         let mut hooks: crate::value::DictMap = crate::value::DictMap::new();
         for (k, v) in &skill.manifest.hooks {
-            hooks.insert(k.clone(), VmValue::String(std::sync::Arc::from(v.as_str())));
+            hooks.insert(k.clone(), VmValue::String(arcstr::ArcStr::from(v.as_str())));
         }
         entry.insert("hooks".to_string(), VmValue::dict(hooks));
     }
@@ -470,7 +470,7 @@ pub fn skill_entry_to_vm(skill: &Skill) -> crate::value::VmValue {
                     .manifest
                     .trusted_signers
                     .iter()
-                    .map(|fingerprint| VmValue::String(std::sync::Arc::from(fingerprint.as_str())))
+                    .map(|fingerprint| VmValue::String(arcstr::ArcStr::from(fingerprint.as_str())))
                     .collect(),
             )),
         );
@@ -512,7 +512,7 @@ pub fn skill_manifest_ref_to_vm(skill: &SkillManifestRef) -> crate::value::VmVal
                     .manifest
                     .allowed_tools
                     .iter()
-                    .map(|tool| VmValue::String(std::sync::Arc::from(tool.as_str())))
+                    .map(|tool| VmValue::String(arcstr::ArcStr::from(tool.as_str())))
                     .collect(),
             )),
         );
@@ -528,7 +528,7 @@ pub fn skill_manifest_ref_to_vm(skill: &SkillManifestRef) -> crate::value::VmVal
                     .manifest
                     .paths
                     .iter()
-                    .map(|path| VmValue::String(std::sync::Arc::from(path.as_str())))
+                    .map(|path| VmValue::String(arcstr::ArcStr::from(path.as_str())))
                     .collect(),
             )),
         );
@@ -540,7 +540,7 @@ pub fn skill_manifest_ref_to_vm(skill: &SkillManifestRef) -> crate::value::VmVal
         for (key, value) in &skill.manifest.hooks {
             hooks.insert(
                 key.clone(),
-                VmValue::String(std::sync::Arc::from(value.as_str())),
+                VmValue::String(arcstr::ArcStr::from(value.as_str())),
             );
         }
         entry.insert("hooks".to_string(), VmValue::dict(hooks));

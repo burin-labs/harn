@@ -360,19 +360,19 @@ async fn daemon_resume_builtin(
         &crate::value::DictMap::from_iter([
             (
                 "name".to_string(),
-                VmValue::String(std::sync::Arc::from(meta.name.clone())),
+                VmValue::String(arcstr::ArcStr::from(meta.name.clone())),
             ),
             (
                 "task".to_string(),
-                VmValue::String(std::sync::Arc::from(meta.prompt.clone())),
+                VmValue::String(arcstr::ArcStr::from(meta.prompt.clone())),
             ),
             (
                 "persist_path".to_string(),
-                VmValue::String(std::sync::Arc::from(persist_root.clone())),
+                VmValue::String(arcstr::ArcStr::from(persist_root.clone())),
             ),
             (
                 "session_id".to_string(),
-                VmValue::String(std::sync::Arc::from(meta.session_id.clone())),
+                VmValue::String(arcstr::ArcStr::from(meta.session_id.clone())),
             ),
             ("options".to_string(), VmValue::dict(options.clone())),
         ]),
@@ -808,9 +808,9 @@ fn spawn_daemon_task(state: Arc<parking_lot::Mutex<DaemonState>>, mut vm: crate:
     let task_state = state.clone();
     let handle = tokio::task::spawn_local(async move {
         let args = vec![
-            VmValue::String(std::sync::Arc::from(prompt)),
+            VmValue::String(arcstr::ArcStr::from(prompt)),
             match system {
-                Some(text) => VmValue::String(std::sync::Arc::from(text)),
+                Some(text) => VmValue::String(arcstr::ArcStr::from(text)),
                 None => VmValue::Nil,
             },
             VmValue::dict(options),

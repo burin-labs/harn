@@ -45,13 +45,13 @@ fn testbench_fs_diff_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValu
             let (kind_str, content_val) = match entry.kind {
                 DiffKind::Added { content } => (
                     "added",
-                    VmValue::String(std::sync::Arc::from(
+                    VmValue::String(arcstr::ArcStr::from(
                         String::from_utf8_lossy(&content).as_ref(),
                     )),
                 ),
                 DiffKind::Modified { content } => (
                     "modified",
-                    VmValue::String(std::sync::Arc::from(
+                    VmValue::String(arcstr::ArcStr::from(
                         String::from_utf8_lossy(&content).as_ref(),
                     )),
                 ),
