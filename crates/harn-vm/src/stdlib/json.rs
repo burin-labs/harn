@@ -697,7 +697,15 @@ fn write_vm_value_to_json(val: &VmValue, out: &mut String) {
             out.push('}');
         }
         VmValue::Int(n) => out.push_str(&n.to_string()),
-        VmValue::Float(n) if n.is_finite() => out.push_str(&n.to_string()),
+        // Render finite floats through serde's `Number` so the compact output
+        // matches `json_stringify_pretty` (which goes through serde) byte for
+        // byte: a whole-number float keeps its `.0` and round-trips back as a
+        // `float` instead of `f64::to_string()` collapsing `2.0` to `"2"`
+        // (which `json_parse` would then read as an `int`).
+        VmValue::Float(n) if n.is_finite() => match serde_json::Number::from_f64(*n) {
+            Some(num) => out.push_str(&num.to_string()),
+            None => out.push_str("null"),
+        },
         VmValue::Float(_) => out.push_str("null"),
         // Decimal serializes as a JSON string to preserve exact precision.
         VmValue::Decimal(d) => out.push_str(&escape_json_string_vm(&d.to_string())),
@@ -829,6 +837,20 @@ mod tests {
     fn extract_from_code_fence() {
         let text = "Here is the result:\n```json\n{\"key\": \"value\"}\n```\nDone.";
         assert_eq!(extract_json_from_text(text), "{\"key\": \"value\"}");
+    }
+
+    #[test]
+    fn whole_number_float_keeps_decimal_point() {
+        // A `float` with no fractional part must serialize as `2.0`, not `2`,
+        // so it round-trips as a float and matches the pretty printer.
+        assert_eq!(vm_value_to_json(&VmValue::Float(2.0)), "2.0");
+        assert_eq!(vm_value_to_json(&VmValue::Float(-5.0)), "-5.0");
+        assert_eq!(vm_value_to_json(&VmValue::Float(2.5)), "2.5");
+        // Ints are still bare.
+        assert_eq!(vm_value_to_json(&VmValue::Int(2)), "2");
+        // Inside a container, too.
+        let list = VmValue::List(std::sync::Arc::new(vec![VmValue::Float(1.0)]));
+        assert_eq!(vm_value_to_json(&list), "[1.0]");
     }
 
     fn deep_list(depth: usize) -> VmValue {
