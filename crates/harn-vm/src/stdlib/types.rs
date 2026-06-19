@@ -34,7 +34,15 @@ fn to_int_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
             Ok(d.trunc().to_i64().map(VmValue::Int).unwrap_or(VmValue::Nil))
         }
         VmValue::Bool(value) => Ok(VmValue::Int(i64::from(*value))),
-        VmValue::String(s) => Ok(s.parse::<i64>().map(VmValue::Int).unwrap_or(VmValue::Nil)),
+        // Trim surrounding whitespace before parsing, matching `decimal(...)`
+        // and Python's `int(" 42 ")`/JS `Number(" 42 ")`. A string is exactly
+        // the case `std/coerce` exists for (numbers rendered by an LLM/JSON),
+        // and a stray newline should not silently produce `nil`.
+        VmValue::String(s) => Ok(s
+            .trim()
+            .parse::<i64>()
+            .map(VmValue::Int)
+            .unwrap_or(VmValue::Nil)),
         _ => Ok(VmValue::Nil),
     }
 }
@@ -57,7 +65,11 @@ fn to_float_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
             use rust_decimal::prelude::ToPrimitive;
             Ok(d.to_f64().map(VmValue::Float).unwrap_or(VmValue::Nil))
         }
-        VmValue::String(s) => Ok(s.parse::<f64>().map(VmValue::Float).unwrap_or(VmValue::Nil)),
+        VmValue::String(s) => Ok(s
+            .trim()
+            .parse::<f64>()
+            .map(VmValue::Float)
+            .unwrap_or(VmValue::Nil)),
         _ => Ok(VmValue::Nil),
     }
 }
@@ -301,5 +313,27 @@ mod tests {
             let converted = to_int_impl(&[VmValue::Float(value)], &mut String::new()).unwrap();
             assert!(matches!(converted, VmValue::Nil));
         }
+    }
+
+    #[test]
+    fn to_int_and_to_float_trim_surrounding_whitespace() {
+        let s = |text: &str| VmValue::String(std::sync::Arc::from(text));
+        assert!(matches!(
+            to_int_impl(&[s("  42  ")], &mut String::new()).unwrap(),
+            VmValue::Int(42)
+        ));
+        assert!(matches!(
+            to_int_impl(&[s("42\n")], &mut String::new()).unwrap(),
+            VmValue::Int(42)
+        ));
+        match to_float_impl(&[s("  1.5  ")], &mut String::new()).unwrap() {
+            VmValue::Float(f) => assert!((f - 1.5).abs() < 1e-9),
+            other => panic!("expected 1.5, got {other:?}"),
+        }
+        // Non-numeric strings still return nil.
+        assert!(matches!(
+            to_int_impl(&[s("nope")], &mut String::new()).unwrap(),
+            VmValue::Nil
+        ));
     }
 }
