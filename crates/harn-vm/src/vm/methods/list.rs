@@ -354,15 +354,7 @@ impl crate::vm::Vm {
                 }
             }
             "to_list" => Ok(VmValue::List(Arc::clone(items))),
-            "to_set" => {
-                let mut out: Vec<VmValue> = Vec::with_capacity(items.len());
-                for v in items.iter() {
-                    if !out.iter().any(|x| values_equal(x, v)) {
-                        out.push(v.clone());
-                    }
-                }
-                Ok(VmValue::Set(std::sync::Arc::new(out)))
-            }
+            "to_set" => Ok(VmValue::set(items.iter().cloned())),
             _ => Err(VmError::Runtime(format!("list has no method `{method}`"))),
         };
         Some(result)

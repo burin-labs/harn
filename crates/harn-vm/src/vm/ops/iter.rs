@@ -46,9 +46,11 @@ impl super::super::Vm {
                     idx: 0,
                 });
             }
-            VmValue::Set(items) => {
-                self.iterators
-                    .push(super::super::IterState::Vec { items, idx: 0 });
+            VmValue::Set(set) => {
+                self.iterators.push(super::super::IterState::Vec {
+                    items: set.shared_items(),
+                    idx: 0,
+                });
             }
             VmValue::Channel(ch) => {
                 self.iterators.push(super::super::IterState::Channel {
@@ -348,9 +350,10 @@ mod tests {
     #[test]
     fn iter_init_set_keeps_shared_backing_store() {
         run_iter_init_test(async {
-            let items = Arc::new(vec![VmValue::Int(1), VmValue::Int(2)]);
+            let set: crate::value::VmSet = [VmValue::Int(1), VmValue::Int(2)].into_iter().collect();
+            let backing = set.shared_items();
             let mut vm = Vm::new();
-            vm.stack.push(VmValue::Set(items.clone()));
+            vm.stack.push(VmValue::set_value(set));
 
             vm.execute_iter_init().unwrap();
 
@@ -359,7 +362,7 @@ mod tests {
                     items: iter_items,
                     idx,
                 } => {
-                    assert!(Arc::ptr_eq(&items, iter_items));
+                    assert!(Arc::ptr_eq(&backing, iter_items));
                     assert_eq!(*idx, 0);
                 }
                 _ => panic!("expected vec iterator state"),

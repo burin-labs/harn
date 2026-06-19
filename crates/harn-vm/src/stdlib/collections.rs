@@ -26,7 +26,8 @@ fn keep_filter_nil(value: &VmValue) -> bool {
 
 fn key_list_arg<'a>(value: &'a VmValue, builtin: &str) -> Result<&'a [VmValue], VmError> {
     match value {
-        VmValue::List(items) | VmValue::Set(items) => Ok(items.as_slice()),
+        VmValue::List(items) => Ok(items.as_slice()),
+        VmValue::Set(set) => Ok(set.items()),
         other => Err(VmError::TypeError(format!(
             "{builtin}: keys argument must be a list or set, got {}",
             other.type_name()
@@ -504,8 +505,9 @@ fn deep_merge_value(a: &VmValue, b: &VmValue) -> Result<VmValue, VmError> {
 /// scripts) via `value_structural_hash_key`, so two structurally equal
 /// dicts collapse to a single entry.
 fn list_unique(value: &VmValue) -> Result<VmValue, VmError> {
-    let items = match value {
-        VmValue::List(items) | VmValue::Set(items) => Arc::clone(items),
+    let items: &[VmValue] = match value {
+        VmValue::List(items) => items,
+        VmValue::Set(set) => set.items(),
         VmValue::Nil => return Ok(VmValue::List(std::sync::Arc::new(Vec::new()))),
         other => {
             return Err(VmError::TypeError(format!(
@@ -530,8 +532,9 @@ fn list_unique(value: &VmValue) -> Result<VmValue, VmError> {
 /// later pairs override earlier ones — matching the `__dict_merge`
 /// right-wins convention.
 fn dict_from_pairs(value: &VmValue) -> Result<VmValue, VmError> {
-    let pairs = match value {
-        VmValue::List(items) | VmValue::Set(items) => Arc::clone(items),
+    let pairs: &[VmValue] = match value {
+        VmValue::List(items) => items,
+        VmValue::Set(set) => set.items(),
         VmValue::Nil => return Ok(VmValue::dict(BTreeMap::new())),
         other => {
             return Err(VmError::TypeError(format!(

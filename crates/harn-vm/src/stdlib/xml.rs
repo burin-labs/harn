@@ -157,7 +157,12 @@ fn write_node(
             out.push_str(&tag);
             out.push('>');
         }
-        VmValue::List(items) | VmValue::Set(items) => {
+        VmValue::List(_) | VmValue::Set(_) => {
+            let items: &[VmValue] = match value {
+                VmValue::Set(set) => set.items(),
+                VmValue::List(items) => items,
+                _ => &[],
+            };
             push_indent(out, opts, depth);
             out.push('<');
             out.push_str(&tag);

@@ -246,7 +246,8 @@ fn validate_against_schema_inner(
             errors.extend(next_errors);
             validate_enum_membership(&normalized, schema, path, &mut errors);
         }
-        VmValue::List(items) | VmValue::Set(items) => {
+        VmValue::List(_) | VmValue::Set(_) => {
+            let items = collection_items(&normalized);
             if let Some(min_items) = schema_i64(schema, "min_items") {
                 if (items.len() as i64) < min_items {
                     errors.push(format!(
@@ -285,7 +286,7 @@ fn validate_against_schema_inner(
                     }
                 }
                 normalized = match &normalized {
-                    VmValue::Set(_) => VmValue::Set(std::sync::Arc::new(normalized_items)),
+                    VmValue::Set(_) => VmValue::set(normalized_items),
                     _ => VmValue::List(std::sync::Arc::new(normalized_items)),
                 };
             }
@@ -512,11 +513,20 @@ fn validate_object_fields(
     (normalized, errors)
 }
 
+/// Borrow the element slice of a list or set; empty for any other value.
+fn collection_items(value: &VmValue) -> &[VmValue] {
+    match value {
+        VmValue::List(items) => items,
+        VmValue::Set(set) => set.items(),
+        _ => &[],
+    }
+}
+
 fn items_are_unique(value: &VmValue) -> bool {
-    let items = match value {
-        VmValue::List(items) | VmValue::Set(items) => items,
-        _ => return true,
-    };
+    if !matches!(value, VmValue::List(_) | VmValue::Set(_)) {
+        return true;
+    }
+    let items = collection_items(value);
     for (index, item) in items.iter().enumerate() {
         if items[index + 1..]
             .iter()

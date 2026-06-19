@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 
-use crate::value::{compare_values, values_equal, VmError, VmValue};
+use crate::value::{compare_values, VmError, VmValue};
 use crate::vm::iter::{drain, iter_from_value, next_handle, VmIter, VmIterHandle};
 
 impl crate::vm::Vm {
@@ -177,13 +177,7 @@ impl crate::vm::Vm {
             }
             "to_set" => {
                 let items = drain(&handle, self).await?;
-                let mut out: Vec<VmValue> = Vec::new();
-                for v in items {
-                    if !out.iter().any(|x| values_equal(x, &v)) {
-                        out.push(v);
-                    }
-                }
-                Ok(VmValue::Set(std::sync::Arc::new(out)))
+                Ok(VmValue::set(items))
             }
             "to_dict" => {
                 let items = drain(&handle, self).await?;

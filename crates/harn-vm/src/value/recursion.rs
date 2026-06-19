@@ -71,8 +71,13 @@ pub fn depth_within(value: &VmValue, limit: usize) -> bool {
             return false;
         }
         match value {
-            VmValue::List(items) | VmValue::Set(items) => {
+            VmValue::List(items) => {
                 for item in items.iter() {
+                    stack.push((item, depth + 1));
+                }
+            }
+            VmValue::Set(set) => {
+                for item in set.iter() {
                     stack.push((item, depth + 1));
                 }
             }
@@ -122,9 +127,14 @@ pub fn dismantle_values<I: IntoIterator<Item = VmValue>>(values: I) {
     let mut stack: Vec<VmValue> = values.into_iter().collect();
     while let Some(value) = stack.pop() {
         match value {
-            VmValue::List(items) | VmValue::Set(items) => {
+            VmValue::List(items) => {
                 if let Some(mut items) = Arc::into_inner(items) {
                     stack.append(&mut items);
+                }
+            }
+            VmValue::Set(set) => {
+                if let Some(set) = Arc::into_inner(set) {
+                    stack.extend(set.into_items());
                 }
             }
             VmValue::Dict(map) => {

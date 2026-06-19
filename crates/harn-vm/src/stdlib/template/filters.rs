@@ -96,7 +96,7 @@ pub(super) fn apply_filter(
             need(0, args)?;
             Ok(match v {
                 VmValue::List(items) => items.first().cloned().unwrap_or(VmValue::Nil),
-                VmValue::Set(items) => items.first().cloned().unwrap_or(VmValue::Nil),
+                VmValue::Set(set) => set.items().first().cloned().unwrap_or(VmValue::Nil),
                 VmValue::String(s) => s
                     .chars()
                     .next()
@@ -109,7 +109,7 @@ pub(super) fn apply_filter(
             need(0, args)?;
             Ok(match v {
                 VmValue::List(items) => items.last().cloned().unwrap_or(VmValue::Nil),
-                VmValue::Set(items) => items.last().cloned().unwrap_or(VmValue::Nil),
+                VmValue::Set(set) => set.items().last().cloned().unwrap_or(VmValue::Nil),
                 VmValue::String(s) => s
                     .chars()
                     .last()

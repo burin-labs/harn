@@ -1166,7 +1166,10 @@ pub fn iter_from_value(v: VmValue) -> Result<VmValue, VmError> {
             done: range_initial_done(r.start, r.end, r.inclusive),
         },
         VmValue::List(items) => VmIter::Vec { items, idx: 0 },
-        VmValue::Set(items) => VmIter::Vec { items, idx: 0 },
+        VmValue::Set(set) => VmIter::Vec {
+            items: set.shared_items(),
+            idx: 0,
+        },
         VmValue::Dict(entries) => {
             let keys: Vec<String> = entries.keys().cloned().collect();
             VmIter::Dict {

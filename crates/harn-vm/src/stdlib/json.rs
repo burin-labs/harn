@@ -647,11 +647,12 @@ pub(crate) fn vm_value_to_data_value(value: &VmValue) -> serde_json::Value {
         VmValue::String(s) => serde_json::json!(s.as_ref()),
         VmValue::Bool(b) => serde_json::json!(b),
         VmValue::Nil => serde_json::Value::Null,
-        VmValue::List(items) | VmValue::Set(items) => {
-            crate::value::recursion::guard_recursion(|| {
-                serde_json::Value::Array(items.iter().map(vm_value_to_data_value).collect())
-            })
-        }
+        VmValue::List(items) => crate::value::recursion::guard_recursion(|| {
+            serde_json::Value::Array(items.iter().map(vm_value_to_data_value).collect())
+        }),
+        VmValue::Set(set) => crate::value::recursion::guard_recursion(|| {
+            serde_json::Value::Array(set.iter().map(vm_value_to_data_value).collect())
+        }),
         VmValue::Dict(map) => crate::value::recursion::guard_recursion(|| {
             serde_json::Value::Object(
                 map.iter()
@@ -703,7 +704,12 @@ fn write_vm_value_to_json(val: &VmValue, out: &mut String) {
         VmValue::Decimal(d) => out.push_str(&escape_json_string_vm(&d.to_string())),
         VmValue::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
         VmValue::Nil => out.push_str("null"),
-        VmValue::List(items) | VmValue::Set(items) => {
+        VmValue::List(_) | VmValue::Set(_) => {
+            let items: &[VmValue] = match val {
+                VmValue::Set(set) => set.items(),
+                VmValue::List(items) => items,
+                _ => &[],
+            };
             out.push('[');
             crate::value::recursion::guard_recursion(|| {
                 for (i, item) in items.iter().enumerate() {

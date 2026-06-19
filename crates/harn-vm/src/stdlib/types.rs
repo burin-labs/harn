@@ -191,7 +191,7 @@ fn unreachable_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 #[harn_builtin(sig = "to_list(...args: any) -> list", category = "types")]
 fn to_list_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     match args.first().unwrap_or(&VmValue::Nil) {
-        VmValue::Set(s) => Ok(VmValue::List(std::sync::Arc::new(s.to_vec()))),
+        VmValue::Set(s) => Ok(VmValue::List(s.shared_items())),
         VmValue::List(l) => Ok(VmValue::List(l.clone())),
         other => Ok(VmValue::List(std::sync::Arc::new(vec![other.clone()]))),
     }

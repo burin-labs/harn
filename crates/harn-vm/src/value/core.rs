@@ -8,7 +8,7 @@ use crate::mcp::VmMcpClientHandle;
 use crate::BuiltinId;
 
 use super::{
-    VmAtomicHandle, VmChannelHandle, VmClosure, VmError, VmGenerator, VmRange, VmRngHandle,
+    VmAtomicHandle, VmChannelHandle, VmClosure, VmError, VmGenerator, VmRange, VmRngHandle, VmSet,
     VmStream, VmSyncPermitHandle,
 };
 
@@ -197,7 +197,7 @@ pub enum VmValue {
     Rng(Shared<VmRngHandle>),
     SyncPermit(Shared<VmSyncPermitHandle>),
     McpClient(Shared<VmMcpClientHandle>),
-    Set(Shared<Vec<VmValue>>),
+    Set(Shared<VmSet>),
     Generator(Shared<VmGenerator>),
     Stream(Shared<VmStream>),
     /// Lazy numeric range. Boxed behind a `Shared` pointer so its 24-byte
@@ -305,6 +305,17 @@ impl VmValue {
     /// Construct a [`VmValue::Dict`] from an already-built [`DictMap`].
     pub fn dict_map(map: DictMap) -> Self {
         VmValue::Dict(Shared::new(map))
+    }
+
+    /// Construct a [`VmValue::Set`] from any iterator of values, deduplicating
+    /// by structural equality and preserving first-seen insertion order.
+    pub fn set(values: impl IntoIterator<Item = VmValue>) -> Self {
+        VmValue::Set(Shared::new(values.into_iter().collect::<VmSet>()))
+    }
+
+    /// Construct a [`VmValue::Set`] from an already-built [`VmSet`].
+    pub fn set_value(set: VmSet) -> Self {
+        VmValue::Set(Shared::new(set))
     }
 
     pub fn channel(handle: VmChannelHandle) -> Self {
