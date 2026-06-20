@@ -76,6 +76,7 @@ fn gpt_oss_harmony_leak_persists_clean_reasoning_and_tool_calls() {
         "model": "gpt-oss-120b",
         "text": dirty,
         "prose": dirty,
+        "_agent_tool_format": "native",
         "native_tool_calls": [],
         "tool_calls": [{
             "id": "native_fallback",
@@ -106,6 +107,33 @@ fn gpt_oss_harmony_leak_persists_clean_reasoning_and_tool_calls() {
             .contains("suppress warnings"),
         "verifier-gaming CoT leaked into persisted content"
     );
+}
+
+#[test]
+fn text_tool_calls_replay_as_text_history_even_on_native_capable_routes() {
+    let text_call = "<tool_call>\nlookup_ping({ query: \"catalog-refresh\" })\n</tool_call>";
+    let result = crate::stdlib::json_to_vm_value(&json!({
+        "provider": "moonshot",
+        "model": "moonshot/kimi-k2.7-code-highspeed",
+        "text": text_call,
+        "_agent_tool_format": "text",
+        "native_tool_calls": [],
+        "tool_calls": [{
+            "id": "tc_0",
+            "name": "lookup_ping",
+            "arguments": {"query": "catalog-refresh"}
+        }],
+    }));
+
+    let message = vm_to_json(&assistant_message_from_llm_result(&result));
+
+    assert_eq!(message["role"], "assistant");
+    assert_eq!(message["content"], text_call);
+    assert!(
+        message.get("tool_calls").is_none(),
+        "text-mode parsed calls must not poison provider-native history"
+    );
+    assert!(message.get("reasoning").is_none());
 }
 
 #[test]

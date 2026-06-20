@@ -9,14 +9,14 @@
  *
  * **Why we pass raw bytes instead of re-emitting.** Harn's JSON
  * round-trip normalises integer-valued floats (e.g. `1.0` → `1`), and
- * the legacy catalog includes pricing fields like `cache_write_per_mtok
- * = 1.0` that the parity test would otherwise see as divergent. By
+ * the catalog includes pricing fields like `cache_write_per_mtok =
+ * 1.0` that should not be normalised. By
  * keeping the bytes intact we avoid touching the JSON shape at all —
  * the script's only contribution is the dispatch wedge plumbing.
  *
  * Inputs (from the dispatch shim):
  *   HARN_PROVIDER_CATALOG_PAYLOAD_JSON — pre-built JSON string whose
- *     shape matches the legacy `print_provider_catalog` output:
+ *     shape matches the provider catalog output:
  *       {
  *         "providers": [...],
  *         "known_model_names": [...],
@@ -25,9 +25,8 @@
  *         "models": [...],
  *         "qc_defaults": {...},
  *       }
- *   HARN_OUTPUT_JSON — ignored. This subcommand is JSON-only on both
- *     impls; the dispatch wedge still sets it for symmetry with peer
- *     scripts.
+ *   HARN_OUTPUT_JSON — ignored. This subcommand is JSON-only; the
+ *     dispatch wedge still sets it for symmetry with peer scripts.
  */
 fn main(harness: Harness) -> int {
   let raw = harness.env.get_or("HARN_PROVIDER_CATALOG_PAYLOAD_JSON", "")
@@ -37,9 +36,8 @@ fn main(harness: Harness) -> int {
     return 70
   }
   // Forward the bytes verbatim — see docstring for why we avoid a
-  // parse/re-emit round-trip. The legacy Rust impl emits via
-  // `println!`, which adds exactly one trailing newline;
-  // `harness.stdio.println` does the same.
+  // parse/re-emit round-trip. `harness.stdio.println` adds exactly one
+  // trailing newline.
   harness.stdio.println(raw)
   return 0
 }

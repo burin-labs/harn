@@ -1,23 +1,15 @@
 #![recursion_limit = "256"]
 
-//! `harn explain` port verification (harn#2304 / W4).
+//! `harn explain` dispatch contract tests.
 //!
-//! Pins the `.harn` dispatch impl against the legacy Rust path. The
-//! single-code render is asserted byte-for-byte for human text and
-//! structurally for the JSON envelope (Harn's `json_stringify` sorts
-//! dict keys alphabetically; serde emits struct fields in declaration
-//! order, so the wire-format byte order differs but the parsed shape
-//! must match).
-//!
-//! `--catalog` and `--invariant` stay in Rust by design (see
-//! `crates/harn-stdlib/src/stdlib/cli/explain.harn` for the rationale);
-//! they're exercised here too to confirm the dispatch shim still routes
-//! them to the legacy path.
+//! Single-code explanation rendering lives in the self-hosted CLI script.
+//! `--catalog` and `--invariant` remain host-side because they are
+//! diagnostics codegen surfaces.
 
 use std::process::Command;
 
 #[test]
-fn single_code_human_text_matches_rust_byte_for_byte() {
+fn single_code_human_text_renders_code_summary_and_body() {
     let harn = run_explain(&["HARN-TYP-014"], &[]);
     assert_eq!(harn.exit_code, 0, "stderr={}", harn.stderr);
     assert!(
@@ -25,18 +17,22 @@ fn single_code_human_text_matches_rust_byte_for_byte() {
         "stdout should begin with the code+summary header, got: {}",
         harn.stdout
     );
-    let rust = run_explain(&["HARN-TYP-014"], &[("HARN_CLI_IMPL", "rust")]);
-    assert_eq!(rust.exit_code, 0, "rust stderr={}", rust.stderr);
-    assert_eq!(
-        harn.stdout, rust.stdout,
-        "rust vs .harn human text diverged"
+    assert!(
+        harn.stdout.contains("## What it means"),
+        "stdout should include explanation body, got: {}",
+        harn.stdout
+    );
+    assert!(
+        harn.stdout.contains("See also:"),
+        "stdout should include related diagnostics, got: {}",
+        harn.stdout
     );
 }
 
 #[test]
 fn single_code_with_repair_includes_repair_line() {
     // HARN-OWN-001 (immutable assignment) is one of the codes that maps
-    // to a repair template. Both impls must surface the same repair
+    // to a repair template. The renderer must surface the same repair
     // header.
     let harn = run_explain(&["HARN-OWN-001"], &[]);
     assert_eq!(harn.exit_code, 0, "stderr={}", harn.stderr);
@@ -45,50 +41,39 @@ fn single_code_with_repair_includes_repair_line() {
         "expected repair line in stdout, got: {}",
         harn.stdout
     );
-    let rust = run_explain(&["HARN-OWN-001"], &[("HARN_CLI_IMPL", "rust")]);
-    assert_eq!(harn.stdout, rust.stdout, "repair line diverged");
 }
 
 #[test]
-fn single_code_json_matches_rust_structurally() {
+fn single_code_json_renders_canonical_envelope() {
     let harn = run_explain(&["HARN-TYP-014", "--json"], &[]);
     assert_eq!(harn.exit_code, 0, "stderr={}", harn.stderr);
-    let rust = run_explain(&["HARN-TYP-014", "--json"], &[("HARN_CLI_IMPL", "rust")]);
-    assert_eq!(rust.exit_code, 0, "rust stderr={}", rust.stderr);
     let harn_value: serde_json::Value =
         serde_json::from_str(&harn.stdout).expect("harn JSON parses");
-    let rust_value: serde_json::Value =
-        serde_json::from_str(&rust.stdout).expect("rust JSON parses");
-    assert_eq!(
-        rust_value, harn_value,
-        "JSON envelope diverged\nrust:\n{}\nharn:\n{}",
-        rust.stdout, harn.stdout
-    );
+    assert_eq!(harn_value["schemaVersion"], 1);
+    assert_eq!(harn_value["code"], "HARN-TYP-014");
+    assert_eq!(harn_value["category"], "TYP");
+    assert!(harn_value["summary"].is_string());
+    assert!(harn_value["body"].is_string());
 }
 
 #[test]
-fn unknown_code_exits_two_on_both_impls() {
+fn unknown_code_exits_two() {
     let harn = run_explain(&["HARN-ZZZ-999"], &[]);
     assert_eq!(harn.exit_code, 2, "harn stderr={}", harn.stderr);
-    let rust = run_explain(&["HARN-ZZZ-999"], &[("HARN_CLI_IMPL", "rust")]);
-    assert_eq!(rust.exit_code, 2, "rust stderr={}", rust.stderr);
 }
 
 #[test]
-fn catalog_flag_stays_in_rust_path() {
-    // --catalog is out of scope for the .harn port — it's a codegen
-    // tool consumed by `make sync-diagnostics-catalog`. The dispatch
-    // shim must keep routing it to the Rust renderer regardless of
-    // HARN_CLI_IMPL, since both branches share the same Rust handler.
+fn catalog_flag_stays_on_host_codegen_path() {
+    // --catalog is out of scope for the .harn renderer. It is a codegen
+    // tool consumed by `make sync-diagnostics-catalog`, so the dispatch
+    // shim keeps routing it to the host-side catalog renderer.
     let harn = run_explain(&["--catalog", "--format", "json"], &[]);
     assert_eq!(harn.exit_code, 0, "stderr={}", harn.stderr);
-    let rust = run_explain(
-        &["--catalog", "--format", "json"],
-        &[("HARN_CLI_IMPL", "rust")],
-    );
-    assert_eq!(
-        harn.stdout, rust.stdout,
-        "catalog should be identical regardless of impl"
+    let value: serde_json::Value = serde_json::from_str(&harn.stdout).expect("catalog JSON parses");
+    assert_eq!(value["schemaVersion"], 1);
+    assert!(
+        value["categories"].is_array(),
+        "catalog should include category rows"
     );
 }
 

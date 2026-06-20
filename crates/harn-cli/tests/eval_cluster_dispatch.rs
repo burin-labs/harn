@@ -1,12 +1,11 @@
 #![recursion_limit = "256"]
 
-//! Partial-port verification for `harn eval context` / `eval tool-calls`
+//! Dispatch contract tests for `harn eval context` / `eval tool-calls`
 //! / `eval model-selector` (harn#2306 / W6).
 //!
 //! The rendering layer for each command ships in
 //! `crates/harn-stdlib/src/stdlib/cli/eval/*.harn`. This test asserts
-//! parity against the legacy Rust render path on every output the wedge
-//! actually owns:
+//! the expected shape for every output the dispatch path owns:
 //!
 //!   * `eval context` — markdown body of `summary.md` (byte-identical)
 //!     plus the one-line stdout summary and the `--json` pretty form
@@ -18,13 +17,8 @@
 //!     (kv form, colon form, alias dict, unknown alias fallback).
 //!
 //! Aggregation (manifest load, evaluate, scoring, llm-call fanout)
-//! stays in Rust on both impls — only the formatting differs — so the
-//! parity bar is byte-identity for text/markdown surfaces and
-//! structural equality for JSON.
-//!
-//! `HARN_CLI_IMPL=rust` keeps the legacy direct-render path so this
-//! test can compare both sides at runtime until the C1 ratchet (#2314)
-//! deletes it.
+//! stays host-side. These tests pin text/markdown bytes where output is
+//! deterministic and structural equality for JSON.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -36,53 +30,44 @@ use harn_cli::dispatch::run_embedded_script;
 // ─── eval context ────────────────────────────────────────────────────────
 
 #[test]
-fn eval_context_summary_md_is_byte_identical_between_impls() {
+fn eval_context_summary_md_is_byte_identical_across_runs() {
     let manifest = workspace_root().join("examples/evals/context-engineering-smoke.json");
     let harn_dir = tempfile::tempdir().expect("tempdir");
-    let rust_dir = tempfile::tempdir().expect("tempdir");
+    let repeat_dir = tempfile::tempdir().expect("tempdir");
 
     let harn = run_eval_context(&manifest, harn_dir.path(), false, &[]);
     assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
-    let rust = run_eval_context(
-        &manifest,
-        rust_dir.path(),
-        false,
-        &[("HARN_CLI_IMPL", "rust")],
-    );
-    assert_eq!(rust.exit_code, 0, "rust stderr={}", rust.stderr);
+    let repeat = run_eval_context(&manifest, repeat_dir.path(), false, &[]);
+    assert_eq!(repeat.exit_code, 0, "repeat stderr={}", repeat.stderr);
 
     let harn_md = fs::read_to_string(harn_dir.path().join("summary.md")).expect("harn summary.md");
-    let rust_md = fs::read_to_string(rust_dir.path().join("summary.md")).expect("rust summary.md");
+    let repeat_md =
+        fs::read_to_string(repeat_dir.path().join("summary.md")).expect("repeat summary.md");
     assert_eq!(
-        harn_md, rust_md,
-        "summary.md diverged\n--- rust ---\n{rust_md}\n--- harn ---\n{harn_md}"
+        harn_md, repeat_md,
+        "summary.md diverged\n--- repeat ---\n{repeat_md}\n--- harn ---\n{harn_md}"
     );
 }
 
 #[test]
-fn eval_context_stdout_summary_line_is_byte_identical_between_impls() {
+fn eval_context_stdout_summary_line_is_byte_identical_across_runs() {
     let manifest = workspace_root().join("examples/evals/context-engineering-smoke.json");
     let harn_dir = tempfile::tempdir().expect("tempdir");
-    let rust_dir = tempfile::tempdir().expect("tempdir");
+    let repeat_dir = tempfile::tempdir().expect("tempdir");
 
     let harn = run_eval_context(&manifest, harn_dir.path(), false, &[]);
-    let rust = run_eval_context(
-        &manifest,
-        rust_dir.path(),
-        false,
-        &[("HARN_CLI_IMPL", "rust")],
-    );
+    let repeat = run_eval_context(&manifest, repeat_dir.path(), false, &[]);
     assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
-    assert_eq!(rust.exit_code, 0, "rust stderr={}", rust.stderr);
+    assert_eq!(repeat.exit_code, 0, "repeat stderr={}", repeat.stderr);
     assert_eq!(
-        harn.stdout, rust.stdout,
-        "stdout summary line diverged\n--- rust ---\n{}\n--- harn ---\n{}",
-        rust.stdout, harn.stdout
+        harn.stdout, repeat.stdout,
+        "stdout summary line diverged\n--- repeat ---\n{}\n--- harn ---\n{}",
+        repeat.stdout, harn.stdout
     );
 }
 
 #[test]
-fn eval_context_json_stdout_is_structurally_identical_between_impls() {
+fn eval_context_json_stdout_is_structurally_identical_across_runs() {
     // Harn's `json_stringify_pretty` sorts dict keys alphabetically;
     // serde's `to_string_pretty` emits struct fields in declaration
     // order. The wire byte order can therefore differ even though the
@@ -90,57 +75,47 @@ fn eval_context_json_stdout_is_structurally_identical_between_impls() {
     // identity, for the JSON path.
     let manifest = workspace_root().join("examples/evals/context-engineering-smoke.json");
     let harn_dir = tempfile::tempdir().expect("tempdir");
-    let rust_dir = tempfile::tempdir().expect("tempdir");
+    let repeat_dir = tempfile::tempdir().expect("tempdir");
 
     let harn = run_eval_context(&manifest, harn_dir.path(), true, &[]);
-    let rust = run_eval_context(
-        &manifest,
-        rust_dir.path(),
-        true,
-        &[("HARN_CLI_IMPL", "rust")],
-    );
+    let repeat = run_eval_context(&manifest, repeat_dir.path(), true, &[]);
     assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
-    assert_eq!(rust.exit_code, 0, "rust stderr={}", rust.stderr);
+    assert_eq!(repeat.exit_code, 0, "repeat stderr={}", repeat.stderr);
     let harn_value: serde_json::Value =
         serde_json::from_str(&harn.stdout).expect("harn --json stdout parses");
-    let rust_value: serde_json::Value =
-        serde_json::from_str(&rust.stdout).expect("rust --json stdout parses");
+    let repeat_value: serde_json::Value =
+        serde_json::from_str(&repeat.stdout).expect("repeat --json stdout parses");
     assert_eq!(
-        rust_value, harn_value,
+        repeat_value, harn_value,
         "--json stdout diverged structurally"
     );
 }
 
 #[test]
-fn eval_context_summary_json_artifact_stays_byte_identical_across_impls() {
+fn eval_context_summary_json_artifact_stays_byte_identical_across_runs() {
     // The on-disk `summary.json` is consumed by regression-check and
     // hosted ingestion; both paths depend on serde's struct-field order,
-    // so the artifact must stay byte-identical with the legacy renderer.
+    // so the artifact must stay byte-identical with the current renderer.
     // This guards against an accidental future port that routes the JSON
     // artifact through Harn's alphabetical-key serialiser.
     let manifest = workspace_root().join("examples/evals/context-engineering-smoke.json");
     let harn_dir = tempfile::tempdir().expect("tempdir");
-    let rust_dir = tempfile::tempdir().expect("tempdir");
+    let repeat_dir = tempfile::tempdir().expect("tempdir");
 
     run_eval_context(&manifest, harn_dir.path(), false, &[]);
-    run_eval_context(
-        &manifest,
-        rust_dir.path(),
-        false,
-        &[("HARN_CLI_IMPL", "rust")],
-    );
+    run_eval_context(&manifest, repeat_dir.path(), false, &[]);
 
     let harn_json =
         fs::read_to_string(harn_dir.path().join("summary.json")).expect("harn summary.json");
-    let rust_json =
-        fs::read_to_string(rust_dir.path().join("summary.json")).expect("rust summary.json");
-    assert_eq!(harn_json, rust_json, "summary.json byte-diverged");
+    let repeat_json =
+        fs::read_to_string(repeat_dir.path().join("summary.json")).expect("repeat summary.json");
+    assert_eq!(harn_json, repeat_json, "summary.json byte-diverged");
 }
 
 // ─── eval tool-calls regression-check ────────────────────────────────────
 
 #[test]
-fn tool_calls_regression_success_line_is_byte_identical_between_impls() {
+fn tool_calls_regression_success_line_is_byte_identical_across_runs() {
     let dir = tempfile::tempdir().expect("tempdir");
     let baseline = dir.path().join("baseline.json");
     let current = dir.path().join("current.json");
@@ -156,17 +131,17 @@ fn tool_calls_regression_success_line_is_byte_identical_between_impls() {
     .unwrap();
 
     let harn = run_tool_calls_regression(&current, &baseline, &[]);
-    let rust = run_tool_calls_regression(&current, &baseline, &[("HARN_CLI_IMPL", "rust")]);
+    let repeat = run_tool_calls_regression(&current, &baseline, &[]);
     assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
-    assert_eq!(rust.exit_code, 0, "rust stderr={}", rust.stderr);
+    assert_eq!(repeat.exit_code, 0, "repeat stderr={}", repeat.stderr);
     assert_eq!(
-        harn.stdout, rust.stdout,
+        harn.stdout, repeat.stdout,
         "regression success stdout diverged"
     );
 }
 
 #[test]
-fn tool_calls_regression_over_budget_failure_is_byte_identical_between_impls() {
+fn tool_calls_regression_over_budget_failure_is_byte_identical_across_runs() {
     let dir = tempfile::tempdir().expect("tempdir");
     let baseline = dir.path().join("baseline.json");
     let current = dir.path().join("current.json");
@@ -182,22 +157,26 @@ fn tool_calls_regression_over_budget_failure_is_byte_identical_between_impls() {
     .unwrap();
 
     let harn = run_tool_calls_regression(&current, &baseline, &[]);
-    let rust = run_tool_calls_regression(&current, &baseline, &[("HARN_CLI_IMPL", "rust")]);
+    let repeat = run_tool_calls_regression(&current, &baseline, &[]);
     assert_eq!(harn.exit_code, 1, "expected over-budget exit 1 on harn");
-    assert_eq!(rust.exit_code, 1, "expected over-budget exit 1 on rust");
+    assert_eq!(repeat.exit_code, 1, "expected over-budget exit 1 on repeat");
     assert_eq!(
-        harn.stderr, rust.stderr,
+        harn.stderr, repeat.stderr,
         "regression failure stderr diverged"
     );
     // The over-budget failure path emits nothing on stdout on either
     // impl — pin that too so a future contributor doesn't accidentally
     // route the failure line through stdout under one impl.
     assert!(harn.stdout.is_empty(), "harn stdout was {}", harn.stdout);
-    assert!(rust.stdout.is_empty(), "rust stdout was {}", rust.stdout);
+    assert!(
+        repeat.stdout.is_empty(),
+        "repeat stdout was {}",
+        repeat.stdout
+    );
 }
 
 #[test]
-fn tool_calls_regression_total_cases_mismatch_is_byte_identical_between_impls() {
+fn tool_calls_regression_total_cases_mismatch_is_byte_identical_across_runs() {
     let dir = tempfile::tempdir().expect("tempdir");
     let baseline = dir.path().join("baseline.json");
     let current = dir.path().join("current.json");
@@ -213,20 +192,20 @@ fn tool_calls_regression_total_cases_mismatch_is_byte_identical_between_impls() 
     .unwrap();
 
     let harn = run_tool_calls_regression(&current, &baseline, &[]);
-    let rust = run_tool_calls_regression(&current, &baseline, &[("HARN_CLI_IMPL", "rust")]);
+    let repeat = run_tool_calls_regression(&current, &baseline, &[]);
     assert_eq!(harn.exit_code, 1, "expected mismatch exit 1 on harn");
-    assert_eq!(rust.exit_code, 1, "expected mismatch exit 1 on rust");
+    assert_eq!(repeat.exit_code, 1, "expected mismatch exit 1 on repeat");
     assert_eq!(
-        harn.stderr, rust.stderr,
+        harn.stderr, repeat.stderr,
         "total-cases-mismatch stderr diverged"
     );
 }
 
 // ─── eval/model_selector helper script ───────────────────────────────────
 //
-// The model_selector dispatch surface is helper-only — no Rust CLI
+// The model_selector dispatch surface is helper-only — no host CLI
 // subcommand actually calls into it today (sibling .harn scripts and
-// the Rust-side `eval_model_selector::resolve_selector` are the
+// the host-side `eval_model_selector::resolve_selector` are the
 // production consumers). Exercising it directly through the wedge
 // black-boxes the resolution branches and pins them against the
 // expected behaviors.
@@ -272,7 +251,7 @@ async fn model_selector_resolves_alias_via_provided_dict() {
 
 #[tokio::test]
 async fn model_selector_falls_back_to_input_when_alias_missing() {
-    // Mirrors the legacy Rust `resolve_selector` fallback when
+    // Mirrors the current host `resolve_selector` fallback when
     // `harn_vm::llm_config::resolve_model_info` returns the input
     // verbatim — provider and model both echo the unknown selector.
     let outcome = dispatch_model_selector("unknown-alias", "{}").await;
@@ -368,7 +347,7 @@ fn run_harn(argv: &[String], extra_env: &[(&str, &str)]) -> SubprocessOutcome {
     }
     // Drop ambient env that could perturb terminal renders across the
     // two subprocess invocations.
-    for key in ["NO_COLOR", "HARN_COLOR", "HARN_CLI_IMPL"] {
+    for key in ["NO_COLOR", "HARN_COLOR"] {
         cmd.env_remove(key);
     }
     let mut env_map: BTreeMap<&str, &str> = BTreeMap::new();

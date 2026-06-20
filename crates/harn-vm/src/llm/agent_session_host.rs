@@ -912,6 +912,7 @@ fn assistant_message_from_llm_result(llm_result: &VmValue) -> VmValue {
         .map(vm_to_json)
         .collect::<Vec<_>>();
     let thinking = dict_get(llm_result, "thinking").map(|v| v.display());
+    let agent_tool_format = dict_get(llm_result, "_agent_tool_format").map(|v| v.display());
     if native_calls_json.is_empty() {
         // gpt-oss / harmony channel-leak backstop. A native-tools model is
         // supposed to split its harmony channels at the wire: analysis ->
@@ -942,7 +943,8 @@ fn assistant_message_from_llm_result(llm_result: &VmValue) -> VmValue {
         // NEXT turn's text parser to re-read, so those keep the verbatim-text
         // path below.
         let caps = crate::llm::capabilities::lookup(&provider, &model);
-        if caps.native_tools {
+        let native_history_requested = agent_tool_format.as_deref().unwrap_or("native") == "native";
+        if native_history_requested && caps.native_tools {
             let recovered_calls = list_items(
                 &dict_get(llm_result, "tool_calls")
                     .cloned()

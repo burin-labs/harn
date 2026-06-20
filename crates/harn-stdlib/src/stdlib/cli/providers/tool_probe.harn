@@ -1,7 +1,7 @@
 /**
  * `harn provider-tool-probe` ported to .harn — see harn#2310 (W10).
  *
- * **Pragmatic partial port.** The legacy Rust impl either fires an HTTP
+ * Host aggregation either fires an HTTP
  * probe through `run_tool_conformance_probe` or replays a fixture
  * through `classify_tool_conformance_fixture`. Both stay in Rust: the
  * probe machinery is sandbox-blocked, and the fixture classifier is a
@@ -11,7 +11,7 @@
  *
  * Inputs (from the dispatch shim):
  *   HARN_PROVIDER_TOOL_PROBE_PAYLOAD_JSON — JSON envelope matching the
- *     legacy `ToolConformanceReport` shape; see
+ *     `ToolConformanceReport` shape; see
  *     `crates/harn-vm/src/llm/tool_conformance.rs` for the canonical
  *     definition. Required keys:
  *       provider, model, cases[], tool_calling{native, text,
@@ -49,13 +49,13 @@ fn __safe_bool(value, fallback: bool) -> bool {
 
 /**
  * Mirror Rust's `Debug` format for `ToolProbeClassification`: serde
- * emits snake_case in the JSON wire shape, but the legacy human
- * output uses `{:?}` which prints the original `UpperCamelCase`
- * variant name. Map back so the parity test sees identical bytes.
+ * emits snake_case in the JSON wire shape, but human output uses the
+ * original `UpperCamelCase` debug variant name. Map back so dispatch
+ * output stays stable.
  *
  * Order matches the enum declaration. Unknown values pass through
  * verbatim so a future variant addition doesn't silently print "?";
- * the parity test catches the divergence and the new branch can be
+ * dispatch tests catch the divergence and the new branch can be
  * added here.
  */
 fn __classification_debug(value: string) -> string {

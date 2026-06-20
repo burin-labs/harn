@@ -90,30 +90,9 @@ pub(crate) struct DoctorOptions {
 }
 
 pub(crate) async fn run_doctor_with_options(opts: DoctorOptions) {
-    if std::env::var("HARN_CLI_IMPL").as_deref() == Ok("rust") {
-        run_legacy(opts).await;
-        return;
-    }
     let exit_code = run_dispatch(opts).await;
     if exit_code != 0 {
         std::process::exit(exit_code);
-    }
-}
-
-/// Legacy direct-render path. Kept verbatim for the parity-snapshot
-/// harness (#2299) until the C1 ratchet (#2314) lands.
-async fn run_legacy(opts: DoctorOptions) {
-    let report = build_report(&opts).await;
-    let failed = report.summary.blocking > 0;
-
-    if opts.json {
-        println!("{}", to_string_pretty(&report.into_envelope()));
-    } else {
-        render_text(&report);
-    }
-
-    if failed {
-        std::process::exit(1);
     }
 }
 
@@ -203,101 +182,9 @@ async fn build_report(opts: &DoctorOptions) -> DoctorReport {
     }
 }
 
-fn render_text(report: &DoctorReport) {
-    println!("Harn doctor");
-    println!();
-    for check in &report.checks {
-        println!(
-            "{:>4}  {:<24} {}",
-            check.status.to_uppercase(),
-            check.label,
-            check.detail
-        );
-        if check.status != "ok" && check.status != "skip" {
-            if let Some(fix) = &check.fix_command {
-                println!("       fix: {fix}");
-            }
-            if let Some(docs) = &check.docs_url {
-                println!("       docs: {docs}");
-            }
-            if !check.blocks.is_empty() {
-                println!("       blocks: {}", check.blocks.join(", "));
-            }
-        }
-    }
-
-    println!();
-    println!("--- Targets ---");
-    for target in &report.targets {
-        let buildable = match target.buildable {
-            Some(true) => "buildable",
-            Some(false) => "not buildable",
-            None => "not probed",
-        };
-        let installed = if target.installed {
-            "installed"
-        } else {
-            "missing"
-        };
-        println!("  {:<32} {installed}, {buildable}", target.triple);
-        for reason in &target.reasons {
-            println!("       {reason}");
-        }
-    }
-
-    println!();
-    println!("--- Providers ---");
-    for provider in &report.providers {
-        let configured = if provider.configured {
-            "configured"
-        } else {
-            "no credentials"
-        };
-        let reachable = match (provider.probed, provider.reachable) {
-            (true, Some(true)) => match provider.latency_ms {
-                Some(ms) => format!("reachable ({ms}ms)"),
-                None => "reachable".to_string(),
-            },
-            (true, Some(false)) => "unreachable".to_string(),
-            (true, None) => "probed".to_string(),
-            (false, _) => "not probed".to_string(),
-        };
-        println!("  {:<24} {configured}, {reachable}", provider.name);
-        for error in &provider.errors {
-            println!("       {error}");
-        }
-    }
-
-    println!();
-    println!("--- Stdlib capabilities ---");
-    for capability in &report.capabilities {
-        println!(
-            "  {:<24} sandbox: {}",
-            capability.name,
-            capability.available_in_sandbox_profile.join(", ")
-        );
-    }
-
-    println!();
-    println!("--- Summary ---");
-    println!(
-        "OK={ok} WARN={warn} FAIL={fail} SKIP={skip}",
-        ok = report.summary.ok,
-        warn = report.summary.warning,
-        fail = report.summary.blocking,
-        skip = report.summary.skip,
-    );
-    if !report.summary.blocked_flows.is_empty() {
-        println!("blocked: {}", report.summary.blocked_flows.join(", "));
-    }
-    println!();
-    println!("--- Next step ---");
-    println!("{}", report.next_step);
-}
-
 /// The complete machine-readable report. Wrapped in [`JsonEnvelope`] for
-/// `--json` and consumed directly by [`render_text`] for the human view, so
-/// both surfaces draw from the same numbers.
+/// `--json`; the embedded `.harn` renderer consumes the same structure for the
+/// human view.
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct DoctorReport {
     pub host: HostInfo,

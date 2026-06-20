@@ -1,7 +1,7 @@
 /**
  * `harn provider-probe` ported to .harn — see harn#2310 (W10).
  *
- * **Pragmatic partial port.** The legacy Rust impl combines provider
+ * Host aggregation combines provider
  * readiness (`/v1/models` or equivalent), Ollama `/api/ps` runtime
  * state, and `local_runtime_profile_report`. None of those reach
  * across the script sandbox today — the HTTP probes run with Rust
@@ -12,7 +12,7 @@
  *
  * Inputs (from the dispatch shim):
  *   HARN_PROVIDER_PROBE_PAYLOAD_JSON — JSON envelope matching the
- *     legacy `ProviderProbe` shape:
+ *     `ProviderProbe` shape:
  *       {
  *         "provider": string,
  *         "base_url": string?,
@@ -63,7 +63,7 @@ fn __safe_bool(value, fallback: bool) -> bool {
   return fallback
 }
 
-/** Mirror the legacy `fmt_bytes`: `Some(n) → "{n}B"`, `None → "-"`. */
+/** Mirror host `fmt_bytes`: `Some(n) → "{n}B"`, `None → "-"`. */
 fn __fmt_bytes(value) -> string {
   if type_of(value) == "int" {
     return to_string(value) + "B"
@@ -71,7 +71,7 @@ fn __fmt_bytes(value) -> string {
   return "-"
 }
 
-/** Mirror the legacy `fmt_u64`: `Some(n) → "{n}"`, `None → "-"`. */
+/** Mirror host `fmt_u64`: `Some(n) → "{n}"`, `None → "-"`. */
 fn __fmt_u64(value) -> string {
   if type_of(value) == "int" {
     return to_string(value)
@@ -123,9 +123,10 @@ fn main(harness: Harness) -> int {
   if json_mode {
     let pretty = harness.env.get_or("HARN_PROVIDER_PROBE_PAYLOAD_PRETTY", raw)
     harness.stdio.println(pretty)
-    // The legacy impl checks `readiness.ok` only after the print to
-    // decide the exit code; parse the raw bytes to find it. (Floats
-    // are not in the field we touch, so the round-trip is safe here.)
+    // Decide the exit code after printing so stdout is still available
+    // for failing readiness probes. Parse the raw bytes to find
+    // `readiness.ok`. Floats are not in the field we touch, so the
+    // round-trip is safe here.
     let parsed_ok = try {
       json_parse(raw)
     } catch (_) {

@@ -90,9 +90,6 @@ pub(crate) fn run_matrix(args: &ProvidersMatrixArgs) -> Result<(), String> {
 }
 
 pub(crate) async fn run_recommend(args: &ProvidersRecommendArgs) -> Result<(), String> {
-    if std::env::var("HARN_CLI_IMPL").as_deref() == Ok("rust") {
-        return run_recommend_legacy(args);
-    }
     let exit_code = run_recommend_dispatch(args).await?;
     if exit_code != 0 {
         std::process::exit(exit_code);
@@ -106,8 +103,7 @@ async fn run_recommend_dispatch(args: &ProvidersRecommendArgs) -> Result<i32, St
         .map_err(|error| format!("failed to serialise recommend payload: {error}"))?;
     // Pretty companion so the script can forward bytes verbatim in
     // `--json` mode — Harn's JSON round-trip would otherwise normalise
-    // integer-valued floats and lose serde fidelity. The legacy impl
-    // emits `serde_json::to_string_pretty(&report)`.
+    // integer-valued floats and lose serde fidelity.
     let payload_pretty = serde_json::to_string_pretty(&report)
         .map_err(|error| format!("failed to render recommend payload: {error}"))?;
 
@@ -146,43 +142,4 @@ fn load_filtered_recommend_report(
         report,
         args.provider.as_deref(),
     ))
-}
-
-/// Legacy direct-render path. Kept verbatim for the parity-snapshot
-/// harness (#2299) until C1 (#2314) deletes it.
-fn run_recommend_legacy(args: &ProvidersRecommendArgs) -> Result<(), String> {
-    let report = load_filtered_recommend_report(args)?;
-    if args.json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&report)
-                .map_err(|error| format!("failed to render recommendation JSON: {error}"))?
-        );
-        return Ok(());
-    }
-    println!("local provider recommendations");
-    println!("source: {}", report.source);
-    if report.recommendations.is_empty() {
-        println!("(no local model outcomes found)");
-        return Ok(());
-    }
-    for recommendation in &report.recommendations {
-        let tool = recommendation
-            .recommended_tool_format
-            .as_deref()
-            .unwrap_or("unproven");
-        println!(
-            "{}. {} {} ({}, selector {}, tools {})",
-            recommendation.rank,
-            recommendation.provider,
-            recommendation.model,
-            recommendation.status,
-            recommendation.selector,
-            tool
-        );
-        for caveat in &recommendation.caveats {
-            println!("   caveat: {caveat}");
-        }
-    }
-    Ok(())
 }

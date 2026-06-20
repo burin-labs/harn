@@ -1,21 +1,17 @@
 #![recursion_limit = "256"]
 
-//! Partial-port verification for the providers cluster: `provider-catalog`,
+//! Dispatch contract tests for the providers cluster: `provider-catalog`,
 //! `provider-probe`, `provider-tool-probe`, and `providers recommend`
 //! (harn#2310 / W10).
 //!
 //! Each subcommand's render pipeline now lives in
-//! `crates/harn-stdlib/src/stdlib/cli/providers/*.harn`. The Rust
+//! `crates/harn-stdlib/src/stdlib/cli/providers/*.harn`. The host
 //! dispatch shims keep the host-only work (HTTP probes against
 //! `/v1/models` and Ollama `/api/ps`, the tool-conformance fixture
 //! classifier, the readiness-report disk reader) and hand a JSON
 //! payload across the dispatch wedge to the script for formatting.
 //!
-//! The `HARN_CLI_IMPL=rust` escape hatch keeps the legacy direct path
-//! so this test can compare both impls at runtime until the C1 ratchet
-//! (#2314) deletes it.
-//!
-//! Parity bar:
+//! Contract bar:
 //!   * Human text: byte-for-byte identity.
 //!   * JSON envelopes: structural identity (Harn's
 //!     `json_stringify_pretty` sorts dict keys alphabetically; serde
@@ -40,7 +36,7 @@ fn run(argv: &[&str], extra_env: &[(&str, &str)]) -> SubprocessOutcome {
     for arg in argv {
         cmd.arg(arg);
     }
-    for key in ["HARN_CLI_IMPL", "NO_COLOR", "HARN_COLOR"] {
+    for key in ["NO_COLOR", "HARN_COLOR"] {
         cmd.env_remove(key);
     }
     for (k, v) in extra_env {
@@ -66,38 +62,35 @@ fn parse_json(s: &str, label: &str) -> serde_json::Value {
 
 // ─── provider-catalog ────────────────────────────────────────────────────
 
-/// Catalog dump is JSON-only on both impls. Compare structurally
+/// Catalog dump is JSON-only on repeated runs. Compare structurally
 /// because `json_stringify` sorts dict keys alphabetically while serde
 /// emits in declaration order — byte order differs but the parsed
 /// shape must match.
 #[test]
-fn provider_catalog_full_is_structurally_identical_between_impls() {
+fn provider_catalog_full_is_structurally_identical_across_runs() {
     let harn = run(&["provider-catalog"], &[]);
     assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
-    let rust = run(&["provider-catalog"], &[("HARN_CLI_IMPL", "rust")]);
-    assert_eq!(rust.exit_code, 0, "rust stderr={}", rust.stderr);
+    let repeat = run(&["provider-catalog"], &[]);
+    assert_eq!(repeat.exit_code, 0, "repeat stderr={}", repeat.stderr);
     let harn_value = parse_json(&harn.stdout, "harn");
-    let rust_value = parse_json(&rust.stdout, "rust");
+    let repeat_value = parse_json(&repeat.stdout, "repeat");
     assert_eq!(
-        rust_value, harn_value,
-        "provider-catalog shape diverged\n--- rust ---\n{}\n--- harn ---\n{}",
-        rust.stdout, harn.stdout
+        repeat_value, harn_value,
+        "provider-catalog shape diverged\n--- repeat ---\n{}\n--- harn ---\n{}",
+        repeat.stdout, harn.stdout
     );
 }
 
 #[test]
-fn provider_catalog_available_only_is_structurally_identical_between_impls() {
+fn provider_catalog_available_only_is_structurally_identical_across_runs() {
     let harn = run(&["provider-catalog", "--available-only"], &[]);
     assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
-    let rust = run(
-        &["provider-catalog", "--available-only"],
-        &[("HARN_CLI_IMPL", "rust")],
-    );
-    assert_eq!(rust.exit_code, 0, "rust stderr={}", rust.stderr);
+    let repeat = run(&["provider-catalog", "--available-only"], &[]);
+    assert_eq!(repeat.exit_code, 0, "repeat stderr={}", repeat.stderr);
     let harn_value = parse_json(&harn.stdout, "harn");
-    let rust_value = parse_json(&rust.stdout, "rust");
+    let repeat_value = parse_json(&repeat.stdout, "repeat");
     assert_eq!(
-        rust_value, harn_value,
+        repeat_value, harn_value,
         "provider-catalog --available-only shape diverged"
     );
     // Sanity: --available-only must be a subset (by name) of full.
@@ -120,15 +113,15 @@ fn provider_catalog_available_only_is_structurally_identical_between_impls() {
 
 /// Catalog must always carry the six top-level keys the downstream
 /// consumers (Burin Code, the JSON schema, the eval JSON aggregator)
-/// depend on. Pin the keyset directly on both impls so a drift in
+/// depend on. Pin the keyset directly on repeated runs so a drift in
 /// either path shows up here rather than in a downstream regression.
 #[test]
 fn provider_catalog_carries_canonical_top_level_keyset() {
     let harn = run(&["provider-catalog"], &[]);
     assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
-    let rust = run(&["provider-catalog"], &[("HARN_CLI_IMPL", "rust")]);
-    assert_eq!(rust.exit_code, 0, "rust stderr={}", rust.stderr);
-    for label in [("harn", &harn), ("rust", &rust)] {
+    let repeat = run(&["provider-catalog"], &[]);
+    assert_eq!(repeat.exit_code, 0, "repeat stderr={}", repeat.stderr);
+    for label in [("harn", &harn), ("repeat", &repeat)] {
         let (name, outcome) = label;
         let value = parse_json(&outcome.stdout, name);
         for key in [
@@ -155,12 +148,9 @@ fn provider_catalog_carries_canonical_top_level_keyset() {
 fn provider_catalog_available_only_includes_local_provider_family() {
     let harn = run(&["provider-catalog", "--available-only"], &[]);
     assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
-    let rust = run(
-        &["provider-catalog", "--available-only"],
-        &[("HARN_CLI_IMPL", "rust")],
-    );
-    assert_eq!(rust.exit_code, 0, "rust stderr={}", rust.stderr);
-    for label in [("harn", &harn), ("rust", &rust)] {
+    let repeat = run(&["provider-catalog", "--available-only"], &[]);
+    assert_eq!(repeat.exit_code, 0, "repeat stderr={}", repeat.stderr);
+    for label in [("harn", &harn), ("repeat", &repeat)] {
         let (name, outcome) = label;
         let value = parse_json(&outcome.stdout, name);
         let provider_names: std::collections::BTreeSet<String> = value["available_providers"]
@@ -183,15 +173,15 @@ fn provider_catalog_available_only_includes_local_provider_family() {
 // ─── provider-probe ──────────────────────────────────────────────────────
 
 /// Mock provider always reports ready, so this exit code is
-/// deterministic. The readiness probe runs in Rust on both impls.
+/// deterministic.
 #[test]
-fn provider_probe_mock_json_is_structurally_identical_between_impls() {
+fn provider_probe_mock_json_is_structurally_identical_across_runs() {
     let harn = run(&["provider-probe", "mock"], &[]);
-    let rust = run(&["provider-probe", "mock"], &[("HARN_CLI_IMPL", "rust")]);
-    assert_eq!(harn.exit_code, rust.exit_code, "exit code diverged");
+    let repeat = run(&["provider-probe", "mock"], &[]);
+    assert_eq!(harn.exit_code, repeat.exit_code, "exit code diverged");
     // Default for provider-probe is JSON (clap default_value_t = true).
     let harn_value = parse_json(&harn.stdout, "harn");
-    let rust_value = parse_json(&rust.stdout, "rust");
+    let repeat_value = parse_json(&repeat.stdout, "repeat");
     // Compare a stable subset — `readiness.message` and `available_models`
     // can vary tiny amounts (status code text differs between back-to-back
     // probes); pin the structural keys instead.
@@ -202,17 +192,17 @@ fn provider_probe_mock_json_is_structurally_identical_between_impls() {
             harn.stdout
         );
         assert!(
-            rust_value.get(key).is_some(),
-            "rust missing key {key}: {}",
-            rust.stdout
+            repeat_value.get(key).is_some(),
+            "repeat missing key {key}: {}",
+            repeat.stdout
         );
     }
     assert_eq!(
-        rust_value["provider"], harn_value["provider"],
+        repeat_value["provider"], harn_value["provider"],
         "provider field diverged"
     );
     assert_eq!(
-        rust_value["readiness"]["ok"], harn_value["readiness"]["ok"],
+        repeat_value["readiness"]["ok"], harn_value["readiness"]["ok"],
         "readiness.ok diverged"
     );
 }
@@ -220,21 +210,18 @@ fn provider_probe_mock_json_is_structurally_identical_between_impls() {
 /// Human form for the human render path (`--json=false`). For mock
 /// the readiness message is stable.
 #[test]
-fn provider_probe_mock_human_is_byte_identical_between_impls() {
+fn provider_probe_mock_human_is_byte_identical_across_runs() {
     let harn = run(&["provider-probe", "mock", "--json=false"], &[]);
-    let rust = run(
-        &["provider-probe", "mock", "--json=false"],
-        &[("HARN_CLI_IMPL", "rust")],
+    let repeat = run(&["provider-probe", "mock", "--json=false"], &[]);
+    assert_eq!(
+        harn.exit_code, repeat.exit_code,
+        "exit code diverged; harn stderr={} repeat stderr={}",
+        harn.stderr, repeat.stderr
     );
     assert_eq!(
-        harn.exit_code, rust.exit_code,
-        "exit code diverged; harn stderr={} rust stderr={}",
-        harn.stderr, rust.stderr
-    );
-    assert_eq!(
-        harn.stdout, rust.stdout,
-        "provider-probe mock human stdout diverged\n--- rust ---\n{}\n--- harn ---\n{}",
-        rust.stdout, harn.stdout
+        harn.stdout, repeat.stdout,
+        "provider-probe mock human stdout diverged\n--- repeat ---\n{}\n--- harn ---\n{}",
+        repeat.stdout, harn.stdout
     );
 }
 
@@ -244,7 +231,7 @@ fn provider_probe_mock_human_is_byte_identical_between_impls() {
 /// minimal valid response on the fly so the test doesn't depend on a
 /// committed fixture path.
 #[test]
-fn provider_tool_probe_fixture_json_is_structurally_identical_between_impls() {
+fn provider_tool_probe_fixture_json_is_structurally_identical_across_runs() {
     let dir = tempfile::tempdir().expect("create tempdir");
     let fixture = dir.path().join("response.json");
     write_minimal_tool_fixture(&fixture);
@@ -258,18 +245,18 @@ fn provider_tool_probe_fixture_json_is_structurally_identical_between_impls() {
         path.as_str(),
     ];
     let harn = run(&argv, &[]);
-    let rust = run(&argv, &[("HARN_CLI_IMPL", "rust")]);
+    let repeat = run(&argv, &[]);
     assert_eq!(
-        harn.exit_code, rust.exit_code,
-        "exit code diverged; harn stderr={} rust stderr={}",
-        harn.stderr, rust.stderr
+        harn.exit_code, repeat.exit_code,
+        "exit code diverged; harn stderr={} repeat stderr={}",
+        harn.stderr, repeat.stderr
     );
     let harn_value = parse_json(&harn.stdout, "harn");
-    let rust_value = parse_json(&rust.stdout, "rust");
+    let repeat_value = parse_json(&repeat.stdout, "repeat");
     assert_eq!(
-        rust_value, harn_value,
-        "tool-probe fixture JSON diverged\n--- rust ---\n{}\n--- harn ---\n{}",
-        rust.stdout, harn.stdout
+        repeat_value, harn_value,
+        "tool-probe fixture JSON diverged\n--- repeat ---\n{}\n--- harn ---\n{}",
+        repeat.stdout, harn.stdout
     );
 }
 
@@ -277,7 +264,7 @@ fn provider_tool_probe_fixture_json_is_structurally_identical_between_impls() {
 /// mode, per-case reason. Must be byte-identical because the fixture
 /// is deterministic.
 #[test]
-fn provider_tool_probe_fixture_human_is_byte_identical_between_impls() {
+fn provider_tool_probe_fixture_human_is_byte_identical_across_runs() {
     let dir = tempfile::tempdir().expect("create tempdir");
     let fixture = dir.path().join("response.json");
     write_minimal_tool_fixture(&fixture);
@@ -292,16 +279,16 @@ fn provider_tool_probe_fixture_human_is_byte_identical_between_impls() {
         "--json=false",
     ];
     let harn = run(&argv, &[]);
-    let rust = run(&argv, &[("HARN_CLI_IMPL", "rust")]);
+    let repeat = run(&argv, &[]);
     assert_eq!(
-        harn.exit_code, rust.exit_code,
-        "exit code diverged; harn stderr={} rust stderr={}",
-        harn.stderr, rust.stderr
+        harn.exit_code, repeat.exit_code,
+        "exit code diverged; harn stderr={} repeat stderr={}",
+        harn.stderr, repeat.stderr
     );
     assert_eq!(
-        harn.stdout, rust.stdout,
-        "tool-probe fixture human stdout diverged\n--- rust ---\n{}\n--- harn ---\n{}",
-        rust.stdout, harn.stdout
+        harn.stdout, repeat.stdout,
+        "tool-probe fixture human stdout diverged\n--- repeat ---\n{}\n--- harn ---\n{}",
+        repeat.stdout, harn.stdout
     );
 }
 
@@ -309,7 +296,7 @@ fn write_minimal_tool_fixture(path: &Path) {
     // An OpenAI-style response body the fixture classifier accepts.
     // The marker matches the default `DEFAULT_TOOL_PROBE_MARKER`. Even
     // a "prose-only" classification still produces a stable
-    // ToolConformanceReport, which is what the parity test cares
+    // ToolConformanceReport, which is what the contract test cares
     // about.
     let body = r#"{"choices":[{"message":{"role":"assistant","content":"hello world","tool_calls":null}}]}"#;
     std::fs::write(path, body).expect("write fixture");
@@ -319,53 +306,48 @@ fn write_minimal_tool_fixture(path: &Path) {
 
 /// `providers recommend` reads from disk or the default summary cache
 /// and renders the filtered report. The default-load path is
-/// deterministic on a clean system because both impls hit the same
-/// default report.
+/// deterministic on a clean system.
 #[test]
-fn providers_recommend_human_is_byte_identical_between_impls() {
-    // The legacy `load_default_report` returns the bundled seed report
-    // when no on-disk readiness file is present. Both impls call the
-    // same Rust loader, so output must be byte-identical.
+fn providers_recommend_human_is_byte_identical_across_runs() {
+    // The default `load_default_report` returns the bundled seed report
+    // when no on-disk readiness file is present.
     let harn = run(&["providers", "recommend"], &[]);
-    let rust = run(&["providers", "recommend"], &[("HARN_CLI_IMPL", "rust")]);
+    let repeat = run(&["providers", "recommend"], &[]);
     assert_eq!(
-        harn.exit_code, rust.exit_code,
-        "exit code diverged; harn stderr={} rust stderr={}",
-        harn.stderr, rust.stderr
+        harn.exit_code, repeat.exit_code,
+        "exit code diverged; harn stderr={} repeat stderr={}",
+        harn.stderr, repeat.stderr
     );
     assert_eq!(
-        harn.stdout, rust.stdout,
-        "providers recommend human stdout diverged\n--- rust ---\n{}\n--- harn ---\n{}",
-        rust.stdout, harn.stdout
+        harn.stdout, repeat.stdout,
+        "providers recommend human stdout diverged\n--- repeat ---\n{}\n--- harn ---\n{}",
+        repeat.stdout, harn.stdout
     );
 }
 
 #[test]
-fn providers_recommend_json_is_structurally_identical_between_impls() {
+fn providers_recommend_json_is_structurally_identical_across_runs() {
     let harn = run(&["providers", "recommend", "--json"], &[]);
-    let rust = run(
-        &["providers", "recommend", "--json"],
-        &[("HARN_CLI_IMPL", "rust")],
-    );
+    let repeat = run(&["providers", "recommend", "--json"], &[]);
     assert_eq!(
-        harn.exit_code, rust.exit_code,
-        "exit code diverged; harn stderr={} rust stderr={}",
-        harn.stderr, rust.stderr
+        harn.exit_code, repeat.exit_code,
+        "exit code diverged; harn stderr={} repeat stderr={}",
+        harn.stderr, repeat.stderr
     );
     let harn_value = parse_json(&harn.stdout, "harn");
-    let rust_value = parse_json(&rust.stdout, "rust");
+    let repeat_value = parse_json(&repeat.stdout, "repeat");
     assert_eq!(
-        rust_value, harn_value,
-        "providers recommend JSON shape diverged\n--- rust ---\n{}\n--- harn ---\n{}",
-        rust.stdout, harn.stdout
+        repeat_value, harn_value,
+        "providers recommend JSON shape diverged\n--- repeat ---\n{}\n--- harn ---\n{}",
+        repeat.stdout, harn.stdout
     );
 }
 
 #[test]
-fn providers_recommend_provider_filter_human_is_byte_identical_between_impls() {
+fn providers_recommend_provider_filter_human_is_byte_identical_across_runs() {
     // Filtering by a non-existent provider exercises the empty-list
     // branch ("(no local model outcomes found)") which is its own
-    // render path in the legacy impl.
+    // render path.
     let harn = run(
         &[
             "providers",
@@ -375,97 +357,94 @@ fn providers_recommend_provider_filter_human_is_byte_identical_between_impls() {
         ],
         &[],
     );
-    let rust = run(
+    let repeat = run(
         &[
             "providers",
             "recommend",
             "--provider",
             "definitely-not-a-real-provider",
         ],
-        &[("HARN_CLI_IMPL", "rust")],
+        &[],
     );
     assert_eq!(
-        harn.exit_code, rust.exit_code,
-        "exit code diverged; harn stderr={} rust stderr={}",
-        harn.stderr, rust.stderr
+        harn.exit_code, repeat.exit_code,
+        "exit code diverged; harn stderr={} repeat stderr={}",
+        harn.stderr, repeat.stderr
     );
     assert_eq!(
-        harn.stdout, rust.stdout,
+        harn.stdout, repeat.stdout,
         "providers recommend --provider stdout diverged"
     );
 }
 
 #[test]
-fn providers_recommend_provider_filter_json_is_structurally_identical_between_impls() {
+fn providers_recommend_provider_filter_json_is_structurally_identical_across_runs() {
     let harn = run(
         &["providers", "recommend", "--provider", "ollama", "--json"],
         &[],
     );
-    let rust = run(
+    let repeat = run(
         &["providers", "recommend", "--provider", "ollama", "--json"],
-        &[("HARN_CLI_IMPL", "rust")],
+        &[],
     );
     assert_eq!(
-        harn.exit_code, rust.exit_code,
-        "exit code diverged; harn stderr={} rust stderr={}",
-        harn.stderr, rust.stderr
+        harn.exit_code, repeat.exit_code,
+        "exit code diverged; harn stderr={} repeat stderr={}",
+        harn.stderr, repeat.stderr
     );
     let harn_value = parse_json(&harn.stdout, "harn");
-    let rust_value = parse_json(&rust.stdout, "rust");
+    let repeat_value = parse_json(&repeat.stdout, "repeat");
     assert_eq!(
-        rust_value, harn_value,
+        repeat_value, harn_value,
         "providers recommend --provider --json shape diverged"
     );
 }
 
-// ─── extra coverage to hit ≥ 4 parity fixtures per subcommand ──────────
+// ─── extra coverage for provider command branches ──────────────────────
 
 /// Pin that --json=false (human readiness summary) on mock also
 /// produces a structurally valid empty `loaded:` section when the
 /// provider has no loaded models.
 #[test]
-fn provider_probe_mock_human_with_model_is_byte_identical_between_impls() {
+fn provider_probe_mock_human_with_model_is_byte_identical_across_runs() {
     let harn = run(
         &["provider-probe", "mock", "--model", "mock", "--json=false"],
         &[],
     );
-    let rust = run(
+    let repeat = run(
         &["provider-probe", "mock", "--model", "mock", "--json=false"],
-        &[("HARN_CLI_IMPL", "rust")],
+        &[],
     );
     assert_eq!(
-        harn.exit_code, rust.exit_code,
-        "exit code diverged; harn stderr={} rust stderr={}",
-        harn.stderr, rust.stderr
+        harn.exit_code, repeat.exit_code,
+        "exit code diverged; harn stderr={} repeat stderr={}",
+        harn.stderr, repeat.stderr
     );
     assert_eq!(
-        harn.stdout, rust.stdout,
+        harn.stdout, repeat.stdout,
         "provider-probe mock --model human stdout diverged"
     );
 }
 
-/// JSON-mode parity with `--model` set — exercises the `runtime_profile`
+/// JSON-mode coverage with `--model` set — exercises the `runtime_profile`
 /// branch even though mock isn't in `LOCAL_PROVIDERS`.
 #[test]
-fn provider_probe_mock_json_with_model_is_structurally_identical_between_impls() {
+fn provider_probe_mock_json_with_model_is_structurally_identical_across_runs() {
     let harn = run(&["provider-probe", "mock", "--model", "mock"], &[]);
-    let rust = run(
-        &["provider-probe", "mock", "--model", "mock"],
-        &[("HARN_CLI_IMPL", "rust")],
-    );
+    let repeat = run(&["provider-probe", "mock", "--model", "mock"], &[]);
     assert_eq!(
-        harn.exit_code, rust.exit_code,
-        "exit code diverged; harn stderr={} rust stderr={}",
-        harn.stderr, rust.stderr
+        harn.exit_code, repeat.exit_code,
+        "exit code diverged; harn stderr={} repeat stderr={}",
+        harn.stderr, repeat.stderr
     );
     let harn_value = parse_json(&harn.stdout, "harn");
-    let rust_value = parse_json(&rust.stdout, "rust");
+    let repeat_value = parse_json(&repeat.stdout, "repeat");
     assert_eq!(
-        rust_value["provider"], harn_value["provider"],
+        repeat_value["provider"], harn_value["provider"],
         "provider field diverged"
     );
     assert_eq!(
-        rust_value["readiness"]["ok"], harn_value["readiness"]["ok"],
+        repeat_value["readiness"]["ok"], harn_value["readiness"]["ok"],
         "readiness.ok diverged"
     );
 }
@@ -473,7 +452,7 @@ fn provider_probe_mock_json_with_model_is_structurally_identical_between_impls()
 /// Tool-probe fixture with `--mode streaming` — exercises a different
 /// branch of the classifier (single-mode rather than both).
 #[test]
-fn provider_tool_probe_fixture_streaming_only_json_is_structurally_identical_between_impls() {
+fn provider_tool_probe_fixture_streaming_only_json_is_structurally_identical_across_runs() {
     let dir = tempfile::tempdir().expect("create tempdir");
     let fixture = dir.path().join("response.json");
     write_minimal_tool_fixture(&fixture);
@@ -489,25 +468,25 @@ fn provider_tool_probe_fixture_streaming_only_json_is_structurally_identical_bet
         "streaming",
     ];
     let harn = run(&argv, &[]);
-    let rust = run(&argv, &[("HARN_CLI_IMPL", "rust")]);
+    let repeat = run(&argv, &[]);
     assert_eq!(
-        harn.exit_code, rust.exit_code,
-        "exit code diverged; harn stderr={} rust stderr={}",
-        harn.stderr, rust.stderr
+        harn.exit_code, repeat.exit_code,
+        "exit code diverged; harn stderr={} repeat stderr={}",
+        harn.stderr, repeat.stderr
     );
     let harn_value = parse_json(&harn.stdout, "harn");
-    let rust_value = parse_json(&rust.stdout, "rust");
+    let repeat_value = parse_json(&repeat.stdout, "repeat");
     assert_eq!(
-        rust_value, harn_value,
-        "tool-probe streaming JSON shape diverged\n--- rust ---\n{}\n--- harn ---\n{}",
-        rust.stdout, harn.stdout
+        repeat_value, harn_value,
+        "tool-probe streaming JSON shape diverged\n--- repeat ---\n{}\n--- harn ---\n{}",
+        repeat.stdout, harn.stdout
     );
 }
 
 /// Tool-probe fixture human render with `--mode non-streaming` — the
 /// other side of the single-mode branch.
 #[test]
-fn provider_tool_probe_fixture_nonstreaming_human_is_byte_identical_between_impls() {
+fn provider_tool_probe_fixture_nonstreaming_human_is_byte_identical_across_runs() {
     let dir = tempfile::tempdir().expect("create tempdir");
     let fixture = dir.path().join("response.json");
     write_minimal_tool_fixture(&fixture);
@@ -524,14 +503,14 @@ fn provider_tool_probe_fixture_nonstreaming_human_is_byte_identical_between_impl
         "--json=false",
     ];
     let harn = run(&argv, &[]);
-    let rust = run(&argv, &[("HARN_CLI_IMPL", "rust")]);
+    let repeat = run(&argv, &[]);
     assert_eq!(
-        harn.exit_code, rust.exit_code,
-        "exit code diverged; harn stderr={} rust stderr={}",
-        harn.stderr, rust.stderr
+        harn.exit_code, repeat.exit_code,
+        "exit code diverged; harn stderr={} repeat stderr={}",
+        harn.stderr, repeat.stderr
     );
     assert_eq!(
-        harn.stdout, rust.stdout,
+        harn.stdout, repeat.stdout,
         "tool-probe non-streaming human stdout diverged"
     );
 }

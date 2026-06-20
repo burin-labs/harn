@@ -2,8 +2,8 @@
  * `harn precompile` ported to .harn — see harn#2313 (W13).
  *
  * Walks a file or directory tree, dispatches each `.harn` source to a
- * `harn precompile <single-file>` child that runs the legacy Rust
- * compiler. The .harn port owns:
+ * `harn precompile <single-file>` child that runs the Rust compiler
+ * entrypoint. The .harn script owns:
  *
  *   * argv parsing (target, --out, --keep-going, --quiet)
  *   * directory walking (single source vs recursive .harn discovery)
@@ -12,10 +12,10 @@
  *     failed" summary
  *
  * The actual parse+typecheck+compile work stays in Rust on the spawned
- * child (toggled via HARN_CLI_IMPL=rust so the child doesn't recurse
+ * child (toggled via HARN_PRECOMPILE_INNER=1 so the child doesn't recurse
  * back into this script). That keeps the bytecode-cache wire-format,
  * compiler diagnostics, and module artifact emission untouched while
- * letting the orchestration / file-walk layer move into Harn.
+ * letting the orchestration / file-walk layer live in Harn.
  *
  * Inputs (from the dispatch shim in crates/harn-cli/src/commands/precompile.rs):
  *   HARN_CLI_SELF_EXE   — absolute path to the running `harn` binary,
@@ -94,10 +94,9 @@ fn __ensure_parent(harness: Harness, path: string) {
 }
 
 fn __spawn_precompile(harness: Harness, bin: string, source_path: string, per_file_out: string) -> dict {
-  // Always force the child onto the Rust path: this script IS the .harn
-  // dispatch target, so leaving HARN_CLI_IMPL unset would re-enter us
-  // and spin forever. HARN_CLI_IMPL=rust short-circuits the dispatch
-  // wedge in crates/harn-cli/src/commands/precompile.rs.
+  // Always force the child into the Rust compiler entrypoint: this script IS
+  // the .harn dispatch target, so leaving HARN_PRECOMPILE_INNER unset would
+  // re-enter us and spin forever.
   //
   // --quiet on the child suppresses its own per-file println; the
   // parent script owns the user-visible output so the byte-for-byte
@@ -107,7 +106,7 @@ fn __spawn_precompile(harness: Harness, bin: string, source_path: string, per_fi
     args = args.push("--out")
     args = args.push(per_file_out)
   }
-  let env = {HARN_CLI_IMPL: "rust"}
+  let env = {HARN_PRECOMPILE_INNER: "1"}
   return harness.process.spawn_captured({cmd: bin, args: args, env: env})
 }
 

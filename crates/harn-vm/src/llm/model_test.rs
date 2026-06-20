@@ -47,9 +47,20 @@ pub async fn run_model_smoke_test(
 
     if let Some(def) = crate::llm_config::provider_config(&provider) {
         if super::supports_model_readiness_probe(&def) {
-            let readiness =
-                super::probe_openai_compatible_model(&provider, &model_id, &api_key).await;
-            if readiness.category == "model_missing" || readiness.category == "invalid_url" {
+            let readiness = super::readiness::probe_provider_readiness_with_options(
+                &provider,
+                super::readiness::ProviderReadinessOptions {
+                    requested_model: Some(&model_id),
+                    base_url_override: None,
+                    api_key_override: Some(&api_key),
+                },
+            )
+            .await;
+            if matches!(
+                readiness.status,
+                super::readiness::ReadinessStatus::ModelMissing
+                    | super::readiness::ReadinessStatus::InvalidUrl
+            ) {
                 return Err(readiness.message);
             }
         }

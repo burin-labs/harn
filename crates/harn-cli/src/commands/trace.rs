@@ -1,6 +1,4 @@
-use std::fs;
-use std::path::Path;
-
+#[cfg(test)]
 use serde_json::{json, Map, Value};
 
 use crate::cli::{TraceArgs, TraceCommand, TraceImportArgs};
@@ -14,9 +12,6 @@ pub(crate) async fn handle(args: TraceArgs) -> Result<(), String> {
 }
 
 async fn run_import(args: TraceImportArgs) -> Result<(), String> {
-    if std::env::var("HARN_CLI_IMPL").as_deref() == Ok("rust") {
-        return run_import_rust(args);
-    }
     let _file = ScopedEnvVar::set("HARN_TRACE_FILE", &args.trace_file);
     let _out = ScopedEnvVar::set("HARN_TRACE_OUTPUT", &args.output);
     let _id_guard = args
@@ -35,30 +30,7 @@ async fn run_import(args: TraceImportArgs) -> Result<(), String> {
     Ok(())
 }
 
-/// Legacy Rust path, kept behind `HARN_CLI_IMPL=rust` for the parity
-/// harness (#2299). The C1 ratchet (#2314) removes this once the
-/// `.harn` impl is the default everywhere.
-fn run_import_rust(args: TraceImportArgs) -> Result<(), String> {
-    let content = fs::read_to_string(&args.trace_file)
-        .map_err(|error| format!("failed to read {}: {error}", args.trace_file))?;
-    let lines = convert_trace_jsonl(&content, args.trace_id.as_deref())?;
-    let body = if lines.is_empty() {
-        String::new()
-    } else {
-        format!("{}\n", lines.join("\n"))
-    };
-    if let Some(parent) = Path::new(&args.output).parent() {
-        if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent)
-                .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
-        }
-    }
-    fs::write(&args.output, body)
-        .map_err(|error| format!("failed to write {}: {error}", args.output))?;
-    println!("{}", args.output);
-    Ok(())
-}
-
+#[cfg(test)]
 fn convert_trace_jsonl(content: &str, trace_id: Option<&str>) -> Result<Vec<String>, String> {
     let mut fixtures = Vec::new();
     for (idx, raw_line) in content.lines().enumerate() {
@@ -83,6 +55,7 @@ fn convert_trace_jsonl(content: &str, trace_id: Option<&str>) -> Result<Vec<Stri
     Ok(fixtures)
 }
 
+#[cfg(test)]
 fn trace_record_to_fixture(value: &Value, line_no: usize) -> Result<String, String> {
     let object = value
         .as_object()
@@ -157,6 +130,7 @@ fn trace_record_to_fixture(value: &Value, line_no: usize) -> Result<String, Stri
     })
 }
 
+#[cfg(test)]
 fn parse_tool_calls(value: Option<&Value>) -> Result<Vec<Value>, String> {
     let Some(value) = value else {
         return Ok(Vec::new());
@@ -185,6 +159,7 @@ fn parse_tool_calls(value: Option<&Value>) -> Result<Vec<Value>, String> {
         .collect()
 }
 
+#[cfg(test)]
 fn optional_string(object: &Map<String, Value>, key: &str) -> Option<String> {
     object.get(key).and_then(Value::as_str).map(str::to_string)
 }

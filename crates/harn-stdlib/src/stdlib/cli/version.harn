@@ -7,9 +7,8 @@
  * `env!("CARGO_PKG_NAME")` etc. so they always reflect the workspace
  * version that built this binary.
  *
- * The banner and JSON envelope shapes must stay byte-for-byte
- * compatible with the Rust handler — the parity harness
- * (crates/harn-cli/tests/parity_dispatch.rs) pins them.
+ * The banner and JSON envelope shapes are pinned by
+ * crates/harn-cli/tests/version_dispatch.rs.
  */
 fn render_banner(version: string) -> string {
   return "\n ╱▔▔╲\n ╱    ╲    harn v" + version
@@ -19,8 +18,7 @@ fn render_banner(version: string) -> string {
 fn render_json(name: string, version: string, description: string) -> string {
   // Mirrors json_envelope::JsonEnvelope::ok(VERSION_SCHEMA_VERSION, payload)
   // from harn-cli — schemaVersion 1, ok: true, data: {name, version, description},
-  // error: null, warnings: []. The key order matches serde's struct order so
-  // the parity snapshot lines up byte-for-byte with the Rust handler.
+  // error: null, warnings: [].
   let env = {
     schemaVersion: 1,
     ok: true,

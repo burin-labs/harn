@@ -1,0 +1,225 @@
+# ---------- NVIDIA NIM — OpenAI-compatible API Catalog -----------------------
+# NVIDIA NIM exposes these routes on /v1/chat/completions. Keep family
+# semantics explicit because the provider mixes Nemotron, DeepSeek, MiniMax,
+# Kimi, Mistral, GPT-OSS, GLM, and Step models behind one OpenAI-compatible
+# endpoint.
+
+[[provider.nvidia]]
+model_match = "*gpt-oss-*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high"]
+reasoning_required_for_tools = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
+
+[[provider.nvidia]]
+model_match = "*nemotron-3-nano-omni*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+vision = true
+vision_supported = true
+video = true
+audio = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.nvidia]]
+model_match = "*nemotron-3-nano-30b-a3b*"
+native_tools = true
+preferred_tool_format = "native"
+tool_mode_parity = "interchangeable"
+tool_mode_parity_notes = "2026-06-20 Harn agent-loop smoke: NVIDIA NIM Nemotron 3 Nano completed both native and JSON tool loops with reasoning disabled. Earlier native false negatives were caused by Harn's parser treating terse final answers as billed no-ops; keep native preferred."
+structured_output = "native"
+thinking_modes = ["enabled"]
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.nvidia]]
+model_match = "*nemotron-3*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.nvidia]]
+model_match = "*deepseek-v4*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+prompt_caching = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.nvidia]]
+model_match = "*minimax-m3*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "delimited"
+thinking_modes = ["adaptive"]
+vision = true
+vision_supported = true
+video = true
+prompt_caching = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.nvidia]]
+model_match = "*minimax-m2.7*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "delimited"
+thinking_modes = ["enabled"]
+prompt_caching = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.nvidia]]
+model_match = "*kimi-k2.6*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+prompt_caching = true
+vision = true
+vision_supported = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.nvidia]]
+model_match = "*glm-5*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+prompt_caching = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.nvidia]]
+model_match = "*step-3.7-flash*"
+native_tools = true
+preferred_tool_format = "native"
+tool_mode_parity = "interchangeable"
+prompt_caching = true
+structured_output = "native"
+thinking_modes = ["enabled"]
+reasoning_disable_supported = false
+vision = true
+vision_supported = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.nvidia]]
+model_match = "*mistral*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
+
+[[provider.nvidia]]
+model_match = "*gemma-4*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+vision = true
+vision_supported = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.nvidia]]
+model_match = "*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"

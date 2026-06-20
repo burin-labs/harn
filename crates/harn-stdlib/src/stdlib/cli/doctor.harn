@@ -22,11 +22,10 @@
  *     (see the struct in doctor.rs for the canonical shape).
  *   HARN_DOCTOR_REPORT_ENVELOPE_JSON — JSON-serialised
  *     `JsonEnvelope<DoctorReport>` — used verbatim for `--json` so the
- *     byte stream matches the legacy `serde_json::to_string_pretty`
- *     output (declaration-order field layout, `null` for absent
- *     fields). Harn's `json_stringify_pretty` would alphabetise the
- *     keys, which would break downstream JSON consumers that expect
- *     the declared shape.
+ *     byte stream preserves serde's declaration-order field layout
+ *     and `null` for absent fields. Harn's `json_stringify_pretty`
+ *     would alphabetise the keys, which would break downstream JSON
+ *     consumers that expect the declared shape.
  *   HARN_OUTPUT_JSON                 — "1" for the JSON envelope, else
  *                                       human-readable text.
  */
@@ -88,7 +87,7 @@ fn __status_upper(status: string) -> string {
 }
 
 /**
- * Render the `checks:` section. Layout matches the legacy Rust impl:
+ * Render the `checks:` section. Layout matches the host formatter:
  *   `{status:>4}  {label:<24} {detail}`
  * where status is uppercased, padded to width 4 with a leading space,
  * and label is left-justified to width 24. Failing/warning checks
@@ -226,8 +225,8 @@ fn __render_summary_section(summary: dict) -> string {
 }
 
 /**
- * Render the full human-readable report. Layout follows the legacy
- * Rust impl byte-for-byte:
+ * Render the full human-readable report. Layout follows the host
+ * formatter:
  *   `Harn doctor\n`
  *   `\n`
  *   <checks>...
@@ -280,8 +279,8 @@ fn main(harness: Harness) -> int {
   let json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
   if json_mode {
     // Use the pre-serialised envelope from the Rust shim verbatim so
-    // the byte stream matches the legacy `serde_json::to_string_pretty`
-    // output (declaration-order field layout). Re-serialising via
+    // the byte stream keeps serde's declaration-order field layout.
+    // Re-serialising via
     // `json_stringify_pretty` here would alphabetise the keys.
     let envelope_raw = harness.env.get_or("HARN_DOCTOR_REPORT_ENVELOPE_JSON", "")
     if envelope_raw == "" {
@@ -291,10 +290,9 @@ fn main(harness: Harness) -> int {
     }
     harness.stdio.println(envelope_raw)
   } else {
-    // The legacy renderer ends with a single `println!("{next_step}")`
-    // so the buffer ends with one trailing newline. `__render_human`
-    // does not add that newline itself; let `harness.stdio.println`
-    // add exactly one to match.
+    // The human renderer should end with one trailing newline.
+    // `__render_human` does not add that newline itself; let
+    // `harness.stdio.println` add exactly one.
     harness.stdio.println(__render_human(report))
   }
   let summary = __safe_dict(report["summary"])

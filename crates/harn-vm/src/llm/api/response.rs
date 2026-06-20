@@ -510,19 +510,6 @@ pub(crate) fn parse_openai_responses_response(
     })
 }
 
-/// Minimum number of non-whitespace characters a clean, tool-less completion
-/// must carry to count as a committed answer rather than a billed no-op. The
-/// canonical violation is OpenRouter's `Ambient` upstream for
-/// `qwen/qwen3.6-35b-a3b`: it narrates the intended tool call on the reasoning
-/// channel, emits a tiny `content` preamble (e.g. `"creating files\n\n"`), then
-/// finishes with `finish_reason: "stop"` and EMPTY `tool_calls` — billing
-/// thousands of reasoning tokens while dispatching nothing. A short preamble
-/// defeats a bare `text.is_empty()` guard, so we require a structural floor of
-/// committed visible characters before accepting a clean, tool-offered turn
-/// that produced no tool call. This is a fixed structural threshold, not a
-/// token ratio.
-pub(crate) const MIN_COMMITTED_ANSWER_CHARS: usize = 24;
-
 /// Structural signals describing a finished LLM turn, used by
 /// [`is_billed_noncommittal_completion`]. All fields are derived from the
 /// parsed response plus the outbound request; none involve model-name or
@@ -556,8 +543,13 @@ pub(crate) struct CompletionContractSignals<'a> {
 ///   tool-less prompt is never flagged),
 /// - no dispatchable tool call was captured,
 /// - no server-side tool-search block was present, and
-/// - the committed visible text is below [`MIN_COMMITTED_ANSWER_CHARS`]
-///   non-whitespace characters.
+/// - no committed visible text was present.
+///
+/// Do not use a minimum visible-text length here. Agent loops often request a
+/// terse token or sentinel answer after a tool result; rejecting those in the
+/// parser masks successful native tool loops. Non-empty committed text belongs
+/// to `agent_loop`, which can accept it, nudge for more work, or fail required
+/// tool policy.
 pub(crate) fn is_billed_noncommittal_completion(signals: &CompletionContractSignals) -> bool {
     let finished_clean = !matches!(signals.stop_reason, Some("length"));
     finished_clean
@@ -565,7 +557,7 @@ pub(crate) fn is_billed_noncommittal_completion(signals: &CompletionContractSign
         && signals.tools_offered
         && signals.tool_call_count == 0
         && !signals.has_tool_search_block
-        && signals.text.trim().chars().count() < MIN_COMMITTED_ANSWER_CHARS
+        && signals.text.trim().is_empty()
 }
 
 /// Build the loud, actionable error returned when
@@ -581,9 +573,11 @@ pub(crate) fn billed_noncommittal_completion_error(
         "provider {provider} model {model} returned billed output \
          (completion_tokens={output_tokens}) with no dispatchable tool call or answer \
          (upstream contract violation): the model finished cleanly but committed neither a \
-         tool call nor a substantive text answer. This usually means a broken OpenRouter \
-         upstream serialized the tool call onto the reasoning channel only; consider a \
-         provider_route_denylist for the offending upstream."
+         tool call nor visible text. This usually means the route serialized \
+         the action only in a private reasoning channel or returned an empty committed \
+         message. For OpenRouter aggregate routes, consider provider_route_denylist or \
+         provider_order; for first-party routes, prefer a Harn text/json tool format or \
+         disable auto reasoning when the capability row documents it."
     ))))
 }
 
@@ -756,8 +750,9 @@ pub(crate) fn parse_llm_response(
         })?;
         let finish_reason = choice["finish_reason"].as_str();
         let caps = crate::llm::capabilities::lookup(provider, model);
+        let promote_reasoning_to_text = caps.reasoning_text_promotable && !tools_offered;
         let (text, extracted_thinking) =
-            normalize_openai_message_text(message, finish_reason, caps.reasoning_text_promotable);
+            normalize_openai_message_text(message, finish_reason, promote_reasoning_to_text);
         let reasoning_summary = extract_openai_reasoning_summary(json, message);
         let mut blocks = if text.is_empty() {
             Vec::new()
@@ -893,12 +888,10 @@ pub(crate) fn parse_llm_response(
             ),
             ))));
         }
-        // Deterministic upstream contract-violation backstop. A short, clean,
-        // tool-offered completion that billed output but dispatched no tool
-        // call (and carried no tool-search block) is a billed no-op — the
-        // structured action went only to the reasoning channel or nowhere.
-        // This catches the case the `text.is_empty()` guard above misses
-        // because the upstream emitted a tiny content preamble.
+        // Deterministic upstream contract-violation backstop. A clean,
+        // tool-offered completion that billed output but committed no visible
+        // text and dispatched no tool call is a billed no-op: the structured
+        // action went only to a hidden reasoning channel or nowhere.
         if is_billed_noncommittal_completion(&CompletionContractSignals {
             stop_reason: stop_reason.as_deref(),
             output_tokens,
@@ -1083,15 +1076,15 @@ mod tests {
 
     #[test]
     fn contract_violation_fires_on_billed_noop_tool_turn() {
-        // Ambient shape: clean `stop`, billed tokens, tools offered, no tool
-        // call, no tool-search, tiny content preamble below the floor.
+        // Hidden-action shape: clean `stop`, billed tokens, tools offered, no
+        // visible text, no tool call, no tool-search.
         let signals = CompletionContractSignals {
             stop_reason: Some("stop"),
             output_tokens: 342,
             tools_offered: true,
             tool_call_count: 0,
             has_tool_search_block: false,
-            text: "creating files\n\n",
+            text: "",
         };
         assert!(is_billed_noncommittal_completion(&signals));
     }
@@ -1110,14 +1103,14 @@ mod tests {
     }
 
     #[test]
-    fn contract_violation_silent_on_substantive_text_answer() {
+    fn contract_violation_silent_on_committed_text_answer() {
         let signals = CompletionContractSignals {
             stop_reason: Some("stop"),
             output_tokens: 120,
             tools_offered: true,
             tool_call_count: 0,
             has_tool_search_block: false,
-            text: "Here is the full explanation you asked for, in detail.",
+            text: "pong:catalog-refresh",
         };
         assert!(!is_billed_noncommittal_completion(&signals));
     }
@@ -1131,7 +1124,7 @@ mod tests {
             tools_offered: true,
             tool_call_count: 0,
             has_tool_search_block: false,
-            text: "creating files\n\n",
+            text: "",
         };
         assert!(!is_billed_noncommittal_completion(&signals));
     }
@@ -1165,10 +1158,10 @@ mod tests {
 
     #[test]
     fn parse_llm_response_rejects_ambient_billed_noop() {
-        // End-to-end through the openai-compat parser: the Ambient response
-        // shape (clean stop, billed reasoning tokens, tiny content preamble,
-        // empty tool_calls) must surface a loud contract-violation error
-        // rather than a silent empty success.
+        // End-to-end through the openai-compat parser: clean stop, billed
+        // hidden reasoning, no visible content, and empty tool_calls must
+        // surface a loud contract-violation error rather than a silent empty
+        // success.
         let response = serde_json::json!({
             "id": "gen-ambient",
             "model": "qwen/qwen3.6-35b-a3b",
@@ -1176,7 +1169,11 @@ mod tests {
             "choices": [{
                 "index": 0,
                 "finish_reason": "stop",
-                "message": { "role": "assistant", "content": "creating files\n\n" }
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "reasoning_content": "creating files"
+                }
             }],
             "usage": { "prompt_tokens": 321, "completion_tokens": 342 }
         });
@@ -1212,6 +1209,31 @@ mod tests {
         )
         .expect("short answer with no tools offered parses cleanly");
         assert_eq!(result.text.trim(), "creating files");
+    }
+
+    #[test]
+    fn parse_llm_response_allows_short_committed_answer_when_tools_were_offered() {
+        // Agent loops often request a terse final token after a tool result.
+        // The parser must not guess that a short visible answer is a no-op.
+        let response = serde_json::json!({
+            "id": "gen-terse-tool-answer",
+            "model": "claude-haiku-4-5-20251001",
+            "choices": [{
+                "index": 0,
+                "finish_reason": "stop",
+                "message": { "role": "assistant", "content": "pong:catalog-refresh" }
+            }],
+            "usage": { "prompt_tokens": 321, "completion_tokens": 9 }
+        });
+        let result = parse_llm_response(
+            &response,
+            "anthropic",
+            "claude-haiku-4-5-20251001",
+            false,
+            true,
+        )
+        .expect("short committed answer with tools offered parses cleanly");
+        assert_eq!(result.text.trim(), "pong:catalog-refresh");
     }
 
     #[test]

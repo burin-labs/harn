@@ -15,9 +15,8 @@ use crate::parse_source_file;
 /// registry as a new VM builtin) and hands the result off as JSON.
 const EXPLAIN_ENTRY_ENV: &str = "HARN_EXPLAIN_ENTRY_JSON";
 
-/// JSON envelope returned by `harn explain <CODE> --json`. Stable shape —
-/// downstream tooling (LSPs, IDEs, hosted error pages, agents) can dispatch
-/// on `schemaVersion` and `code` without parsing prose.
+/// JSON envelope returned by `harn explain <CODE> --json`.
+#[cfg(test)]
 #[derive(Debug, Serialize)]
 struct ExplainEnvelope<'a> {
     #[serde(rename = "schemaVersion")]
@@ -43,13 +42,10 @@ struct RepairEnvelope<'a> {
     summary: &'a str,
 }
 
-/// Run `harn explain`. Dispatches the single-code render path to the
-/// embedded `cli/explain.harn` script (see harn#2304 / W4) by default.
-/// `--catalog`, `--invariant`, and `HARN_CLI_IMPL=rust` keep the legacy
-/// Rust handlers — the first two by design (see the script docstring;
-/// catalog is a codegen tool, invariant is the legacy control-flow path
-/// explainer that is explicitly out of scope), the third for the
-/// parity-snapshot harness (#2299) until the C1 ratchet (#2314) lands.
+/// Run `harn explain`. The single-code render path dispatches to the
+/// embedded `cli/explain.harn` script. `--catalog` and `--invariant`
+/// remain Rust handlers by design: catalog is a codegen tool, and the
+/// invariant explainer reaches parser/control-flow internals.
 pub(crate) async fn run_explain(args: &ExplainArgs) -> i32 {
     if args.catalog {
         return run_catalog(args.format);
@@ -80,14 +76,6 @@ pub(crate) async fn run_explain(args: &ExplainArgs) -> i32 {
             return 2;
         }
     };
-
-    if std::env::var("HARN_CLI_IMPL").as_deref() == Ok("rust") {
-        return if args.json {
-            print_code_json(code)
-        } else {
-            print_code_text(code)
-        };
-    }
 
     run_explain_dispatch(code, args.json).await
 }
@@ -163,28 +151,7 @@ fn run_catalog(format: CatalogFormat) -> i32 {
     0
 }
 
-fn print_code_text(code: Code) -> i32 {
-    println!("{} — {}", code, code.summary());
-    println!();
-    println!("{}", code.explanation().trim_end());
-    if let Some(template) = code.repair_template() {
-        println!();
-        println!(
-            "Repair: {} [{}] — {}",
-            template.id, template.safety, template.summary
-        );
-    }
-    let related = code.related();
-    if !related.is_empty() {
-        println!();
-        println!("See also:");
-        for other in related {
-            println!("  - {} — {}", other, other.summary());
-        }
-    }
-    0
-}
-
+#[cfg(test)]
 fn build_envelope(code: Code) -> ExplainEnvelope<'static> {
     let related_strs: Vec<&'static str> = code.related().iter().map(|c| c.as_str()).collect();
     let repairs = code
@@ -206,20 +173,6 @@ fn build_envelope(code: Code) -> ExplainEnvelope<'static> {
         repairs,
         related: related_strs,
         api_stability: "stable",
-    }
-}
-
-fn print_code_json(code: Code) -> i32 {
-    let envelope = build_envelope(code);
-    match serde_json::to_string_pretty(&envelope) {
-        Ok(json) => {
-            println!("{json}");
-            0
-        }
-        Err(err) => {
-            eprintln!("failed to serialise explain envelope: {err}");
-            1
-        }
     }
 }
 

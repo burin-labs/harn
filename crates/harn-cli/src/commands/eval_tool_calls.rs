@@ -1,7 +1,7 @@
 //! `harn eval tool-calls` — tool-call accuracy / latency / cost eval runner
 //! plus regression-check subcommand.
 //!
-//! ## .harn dispatch (W6 partial port — see harn#2306)
+//! ## .harn dispatch
 //!
 //! The **eval pipeline** (planner / binder / judge fanout, scoring,
 //! per-case streaming output) stays in Rust — every LLM call goes
@@ -19,9 +19,6 @@
 //!      runs in the `harn run` sandbox where `harness.fs.read_text` is
 //!      restricted to `workspace_roots`, but `--against /tmp/foo.json`
 //!      is a common invocation pattern.
-//!
-//! `HARN_CLI_IMPL=rust` keeps the legacy direct-render path for the
-//! parity-snapshot harness (#2299) until the C1 ratchet (#2314) lands.
 
 use std::fs;
 use std::io::Write as _;
@@ -227,29 +224,13 @@ async fn run_eval(args: EvalToolCallsArgs) -> i32 {
         output_dir.join("per_case.jsonl").display()
     );
 
-    let summary_line = if std::env::var("HARN_CLI_IMPL").as_deref() == Ok("rust") {
-        // Legacy direct-render path kept for the parity-snapshot harness
-        // (#2299) until C1 (#2314) deletes this escape hatch.
-        legacy_summary_line(&summary)
-    } else {
-        match dispatch_summary_line(&summary).await {
-            Ok(line) => line,
-            Err(code) => return code,
-        }
+    let summary_line = match dispatch_summary_line(&summary).await {
+        Ok(line) => line,
+        Err(code) => return code,
     };
     println!("{summary_line}");
 
     i32::from(had_infra_error)
-}
-
-fn legacy_summary_line(summary: &EvalSummary) -> String {
-    format!(
-        "tool-call eval: {}/{} passed ({:.1}%), total_cost_usd={:.6}",
-        summary.passed_cases,
-        summary.total_cases,
-        summary.pass_rate * 100.0,
-        summary.total_cost_usd,
-    )
 }
 
 #[derive(Debug, Serialize)]
@@ -970,44 +951,7 @@ async fn run_regression_check(args: EvalToolCallsRegressionArgs) -> i32 {
         .unwrap_or("current")
         .to_string();
 
-    if std::env::var("HARN_CLI_IMPL").as_deref() == Ok("rust") {
-        // Legacy direct-render path kept for the parity-snapshot harness
-        // (#2299) until C1 (#2314) deletes this escape hatch.
-        return legacy_regression_render(&current, &baseline, &label, args.max_drop_pp);
-    }
     dispatch_regression_render(&current, &baseline, &label, args.max_drop_pp).await
-}
-
-fn legacy_regression_render(
-    current: &RegressionSummary,
-    baseline: &RegressionSummary,
-    label: &str,
-    max_drop_pp: f64,
-) -> i32 {
-    if let (Some(current_cases), Some(baseline_cases)) = (current.total_cases, baseline.total_cases)
-    {
-        if current_cases != baseline_cases {
-            eprintln!(
-                "error: current summary has {current_cases} cases but baseline has {baseline_cases}"
-            );
-            return 1;
-        }
-    }
-    let drop_pp = (baseline.pass_rate - current.pass_rate) * 100.0;
-    if drop_pp > max_drop_pp {
-        eprintln!(
-            "error: {label} pass rate dropped by {drop_pp:.2} pp, above max {max_drop_pp:.2} pp"
-        );
-        return 1;
-    }
-    println!(
-        "{label}: pass rate {:.1}% vs baseline {:.1}% (drop {:.2} pp, max {:.2} pp)",
-        current.pass_rate * 100.0,
-        baseline.pass_rate * 100.0,
-        drop_pp.max(0.0),
-        max_drop_pp
-    );
-    0
 }
 
 #[derive(Debug, Serialize)]
@@ -1058,9 +1002,7 @@ async fn dispatch_regression_render(
     }
     if !outcome.stdout.is_empty() {
         // The script's stdout already terminates with a newline (via
-        // harness.stdio.println), so forward it verbatim. Trim is not
-        // applied so byte-identity with the legacy `println!` path
-        // (which also emits a single trailing newline) stays trivial.
+        // harness.stdio.println), so forward it verbatim.
         let _ = std::io::stdout().write_all(outcome.stdout.as_bytes());
     }
     outcome.exit_code

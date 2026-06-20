@@ -296,7 +296,7 @@ path = "/models"
 base_url = "https://api.moonshot.ai/v1"
 base_url_env = "MOONSHOT_BASE_URL"
 auth_style = "bearer"
-auth_env = ["MOONSHOT_API_KEY", "KIMI_API_KEY"]
+auth_env = ["MOONSHOT_API_KEY", "MOONSHOT_AI_API_KEY", "KIMI_API_KEY"]
 chat_endpoint = "/chat/completions"
 completion_endpoint = "/completions"
 cost_per_1k_in = 0.0006
@@ -348,6 +348,25 @@ latency_p50_ms = 350
 features = ["native_tools"]
 
 [providers.sambanova.healthcheck]
+method = "GET"
+path = "/models"
+
+# NVIDIA NIM — OpenAI-compatible hosted inference through the NVIDIA API
+# Catalog. Use NVIDIA_NIM_BASE_URL for self-hosted NIM or enterprise
+# gateways; the generic NVIDIA_BASE_URL is intentionally not consumed here
+# because common examples set it to the host root, while the OpenAI-compatible
+# API lives under /v1.
+[providers.nvidia]
+base_url = "https://integrate.api.nvidia.com/v1"
+base_url_env = "NVIDIA_NIM_BASE_URL"
+auth_style = "bearer"
+auth_env = ["NVIDIA_API_KEY", "NIM_API_KEY"]
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+latency_p50_ms = 1400
+features = ["native_tools"]
+
+[providers.nvidia.healthcheck]
 method = "GET"
 path = "/models"
 
@@ -460,4 +479,3 @@ latency_p50_ms = 950
 [providers.tgi.healthcheck]
 method = "GET"
 path = "/health"
-

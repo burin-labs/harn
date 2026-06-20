@@ -1,21 +1,17 @@
 #![recursion_limit = "256"]
 
-//! Partial-port verification for `harn routes` + `harn graph` (W11 —
+//! Dispatch contract tests for `harn routes` + `harn graph` (W11 —
 //! harn#2311).
 //!
 //! Each subcommand's render layer now lives in
-//! `crates/harn-stdlib/src/stdlib/cli/{routes,graph}.harn`. The Rust
+//! `crates/harn-stdlib/src/stdlib/cli/{routes,graph}.harn`. The host
 //! dispatch shims keep doing the host-only work (manifest cache +
 //! IR analyser for routes; collect_harn_targets + build_module_graph +
 //! per-module IR walk for graph) and hand a JSON `RoutesReport` /
 //! `GraphReport` across the dispatch wedge to the script for
 //! formatting.
 //!
-//! The `HARN_CLI_IMPL=rust` escape hatch keeps the legacy direct path
-//! so this test can compare both impls at runtime until the C1
-//! ratchet (#2314) deletes it.
-//!
-//! Parity bar:
+//! Contract bar:
 //!   * Human text: byte-for-byte identity.
 //!   * JSON envelopes: structural identity (Harn's
 //!     `json_stringify_pretty` sorts dict keys alphabetically; serde
@@ -43,7 +39,7 @@ fn run(argv: &[&str], extra_env: &[(&str, &str)]) -> SubprocessOutcome {
     for arg in argv {
         cmd.arg(arg);
     }
-    for key in ["HARN_CLI_IMPL", "NO_COLOR", "HARN_COLOR"] {
+    for key in ["NO_COLOR", "HARN_COLOR"] {
         cmd.env_remove(key);
     }
     for (k, v) in extra_env {
@@ -158,7 +154,7 @@ name = "empty-fixture"
 fn write_routes_single_cron_fixture(root: &Path) {
     // Single cron trigger that resolves through `worker://` (no local
     // handler module). Exercises the no-path + non-local-handler path
-    // through both impls.
+    // through repeated runs.
     fs::write(
         root.join("harn.toml"),
         r#"
@@ -181,35 +177,35 @@ fn fixture_root(temp: &TempDir) -> &str {
     temp.path().to_str().expect("temp path utf8")
 }
 
-// ─── routes parity tests ─────────────────────────────────────────────────
+// ─── routes contract tests ─────────────────────────────────────────────────
 
 #[test]
-fn routes_text_is_byte_identical_between_impls() {
+fn routes_text_is_byte_identical_across_runs() {
     let temp = TempDir::new().unwrap();
     write_routes_fixture(temp.path());
     let root = fixture_root(&temp);
     let harn = run(&["routes", root], &[]);
     assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
-    let rust = run(&["routes", root], &[("HARN_CLI_IMPL", "rust")]);
-    assert_eq!(rust.exit_code, 0, "rust stderr={}", rust.stderr);
-    assert_eq!(harn.stdout, rust.stdout, "routes text stdout diverged");
+    let repeat = run(&["routes", root], &[]);
+    assert_eq!(repeat.exit_code, 0, "repeat stderr={}", repeat.stderr);
+    assert_eq!(harn.stdout, repeat.stdout, "routes text stdout diverged");
 }
 
 #[test]
-fn routes_json_is_structurally_identical_between_impls() {
+fn routes_json_is_structurally_identical_across_runs() {
     let temp = TempDir::new().unwrap();
     write_routes_fixture(temp.path());
     let root = fixture_root(&temp);
     let harn = run(&["routes", root, "--json"], &[]);
     assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
-    let rust = run(&["routes", root, "--json"], &[("HARN_CLI_IMPL", "rust")]);
-    assert_eq!(rust.exit_code, 0, "rust stderr={}", rust.stderr);
+    let repeat = run(&["routes", root, "--json"], &[]);
+    assert_eq!(repeat.exit_code, 0, "repeat stderr={}", repeat.stderr);
     let harn_value = parse_json(&harn.stdout, "harn");
-    let rust_value = parse_json(&rust.stdout, "rust");
+    let repeat_value = parse_json(&repeat.stdout, "repeat");
     assert_eq!(
-        rust_value, harn_value,
-        "routes JSON envelope diverged\n--- rust ---\n{}\n--- harn ---\n{}",
-        rust.stdout, harn.stdout
+        repeat_value, harn_value,
+        "routes JSON envelope diverged\n--- repeat ---\n{}\n--- harn ---\n{}",
+        repeat.stdout, harn.stdout
     );
     // Sanity-check the wrapping envelope shape — the script must
     // re-emit `schemaVersion: 1` / `ok: true` so consumers can
@@ -220,16 +216,16 @@ fn routes_json_is_structurally_identical_between_impls() {
 }
 
 #[test]
-fn routes_empty_manifest_is_byte_identical_between_impls() {
+fn routes_empty_manifest_is_byte_identical_across_runs() {
     let temp = TempDir::new().unwrap();
     write_routes_empty_fixture(temp.path());
     let root = fixture_root(&temp);
     let harn = run(&["routes", root], &[]);
     assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
-    let rust = run(&["routes", root], &[("HARN_CLI_IMPL", "rust")]);
-    assert_eq!(rust.exit_code, 0, "rust stderr={}", rust.stderr);
+    let repeat = run(&["routes", root], &[]);
+    assert_eq!(repeat.exit_code, 0, "repeat stderr={}", repeat.stderr);
     assert_eq!(
-        harn.stdout, rust.stdout,
+        harn.stdout, repeat.stdout,
         "routes empty text stdout diverged"
     );
     // Header row must still be emitted on the empty path.
@@ -241,24 +237,28 @@ fn routes_empty_manifest_is_byte_identical_between_impls() {
 }
 
 #[test]
-fn routes_single_cron_no_path_byte_identical_between_impls() {
-    // Cron triggers omit `path` entirely on the Rust side — verify the
+fn routes_single_cron_no_path_byte_identical_across_runs() {
+    // Cron triggers omit `path` entirely in the host report — verify the
     // script renders `-` in the path column and drops `path` from the
-    // JSON envelope to match the legacy `skip_serializing_if = "Option::is_none"`.
+    // JSON envelope to match the current `skip_serializing_if = "Option::is_none"`.
     let temp = TempDir::new().unwrap();
     write_routes_single_cron_fixture(temp.path());
     let root = fixture_root(&temp);
     let harn_text = run(&["routes", root], &[]);
-    let rust_text = run(&["routes", root], &[("HARN_CLI_IMPL", "rust")]);
+    let repeat_text = run(&["routes", root], &[]);
     assert_eq!(harn_text.exit_code, 0, "harn stderr={}", harn_text.stderr);
-    assert_eq!(rust_text.exit_code, 0, "rust stderr={}", rust_text.stderr);
-    assert_eq!(harn_text.stdout, rust_text.stdout);
+    assert_eq!(
+        repeat_text.exit_code, 0,
+        "repeat stderr={}",
+        repeat_text.stderr
+    );
+    assert_eq!(harn_text.stdout, repeat_text.stdout);
 
     let harn_json = run(&["routes", root, "--json"], &[]);
-    let rust_json = run(&["routes", root, "--json"], &[("HARN_CLI_IMPL", "rust")]);
+    let repeat_json = run(&["routes", root, "--json"], &[]);
     let harn_value = parse_json(&harn_json.stdout, "harn");
-    let rust_value = parse_json(&rust_json.stdout, "rust");
-    assert_eq!(rust_value, harn_value);
+    let repeat_value = parse_json(&repeat_json.stdout, "repeat");
+    assert_eq!(repeat_value, harn_value);
     assert!(
         harn_value["data"]["triggers"][0].get("path").is_none(),
         "cron trigger should omit `path` field, got: {harn_value}"
@@ -266,18 +266,18 @@ fn routes_single_cron_no_path_byte_identical_between_impls() {
 }
 
 #[test]
-fn routes_missing_manifest_errors_byte_identical_between_impls() {
+fn routes_missing_manifest_errors_byte_identical_across_runs() {
     // Pointing `harn routes` at a directory without `harn.toml` must
     // surface the same `no harn.toml found from <path>` stderr line on
-    // both impls. The shim renders the error envelope on the Rust side
+    // repeated runs. The shim renders the error envelope on the host side
     // before dispatch, so this verifies the error path doesn't drift.
     let temp = TempDir::new().unwrap();
     let root = fixture_root(&temp);
     let harn = run(&["routes", root], &[]);
-    let rust = run(&["routes", root], &[("HARN_CLI_IMPL", "rust")]);
+    let repeat = run(&["routes", root], &[]);
     assert_eq!(harn.exit_code, 1, "harn stderr={}", harn.stderr);
-    assert_eq!(rust.exit_code, 1, "rust stderr={}", rust.stderr);
-    assert_eq!(harn.stderr, rust.stderr, "routes error stderr diverged");
+    assert_eq!(repeat.exit_code, 1, "repeat stderr={}", repeat.stderr);
+    assert_eq!(harn.stderr, repeat.stderr, "routes error stderr diverged");
     assert!(
         harn.stderr.contains("no harn.toml"),
         "expected `no harn.toml` in stderr, got: {}",
@@ -290,12 +290,12 @@ fn routes_missing_manifest_error_envelope_structurally_identical() {
     let temp = TempDir::new().unwrap();
     let root = fixture_root(&temp);
     let harn = run(&["routes", root, "--json"], &[]);
-    let rust = run(&["routes", root, "--json"], &[("HARN_CLI_IMPL", "rust")]);
+    let repeat = run(&["routes", root, "--json"], &[]);
     assert_eq!(harn.exit_code, 1, "harn stderr={}", harn.stderr);
-    assert_eq!(rust.exit_code, 1, "rust stderr={}", rust.stderr);
+    assert_eq!(repeat.exit_code, 1, "repeat stderr={}", repeat.stderr);
     let harn_value = parse_json(&harn.stdout, "harn");
-    let rust_value = parse_json(&rust.stdout, "rust");
-    assert_eq!(rust_value, harn_value);
+    let repeat_value = parse_json(&repeat.stdout, "repeat");
+    assert_eq!(repeat_value, harn_value);
     assert_eq!(harn_value["ok"], false);
     assert_eq!(harn_value["error"]["code"], "routes_error");
 }
@@ -384,42 +384,42 @@ fn main(harness: Harness) {
     .unwrap();
 }
 
-// ─── graph parity tests ──────────────────────────────────────────────────
+// ─── graph contract tests ──────────────────────────────────────────────────
 
 #[test]
-fn graph_text_is_byte_identical_between_impls() {
+fn graph_text_is_byte_identical_across_runs() {
     let temp = TempDir::new().unwrap();
     write_graph_fixture(temp.path());
     let root = fixture_root(&temp);
     let harn = run(&["graph", root], &[]);
     assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
-    let rust = run(&["graph", root], &[("HARN_CLI_IMPL", "rust")]);
-    assert_eq!(rust.exit_code, 0, "rust stderr={}", rust.stderr);
-    assert_eq!(harn.stdout, rust.stdout, "graph text stdout diverged");
+    let repeat = run(&["graph", root], &[]);
+    assert_eq!(repeat.exit_code, 0, "repeat stderr={}", repeat.stderr);
+    assert_eq!(harn.stdout, repeat.stdout, "graph text stdout diverged");
 }
 
 #[test]
-fn graph_json_is_structurally_identical_between_impls() {
+fn graph_json_is_structurally_identical_across_runs() {
     let temp = TempDir::new().unwrap();
     write_graph_fixture(temp.path());
     let root = fixture_root(&temp);
     let harn = run(&["graph", root, "--json"], &[]);
     assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
-    let rust = run(&["graph", root, "--json"], &[("HARN_CLI_IMPL", "rust")]);
-    assert_eq!(rust.exit_code, 0, "rust stderr={}", rust.stderr);
+    let repeat = run(&["graph", root, "--json"], &[]);
+    assert_eq!(repeat.exit_code, 0, "repeat stderr={}", repeat.stderr);
     let harn_value = parse_json(&harn.stdout, "harn");
-    let rust_value = parse_json(&rust.stdout, "rust");
+    let repeat_value = parse_json(&repeat.stdout, "repeat");
     assert_eq!(
-        rust_value, harn_value,
-        "graph JSON envelope diverged\n--- rust ---\n{}\n--- harn ---\n{}",
-        rust.stdout, harn.stdout
+        repeat_value, harn_value,
+        "graph JSON envelope diverged\n--- repeat ---\n{}\n--- harn ---\n{}",
+        repeat.stdout, harn.stdout
     );
     assert_eq!(harn_value["schemaVersion"], 1);
     assert_eq!(harn_value["ok"], true);
 }
 
 #[test]
-fn graph_metadata_round_trips_byte_identical_between_impls() {
+fn graph_metadata_round_trips_byte_identical_across_runs() {
     // Public fns with declared stdlib metadata frontmatter must round-
     // trip the parsed dict through serde -> JSON env var -> json_parse
     // unchanged. The dispatch shim hands the metadata as a serialised
@@ -429,17 +429,17 @@ fn graph_metadata_round_trips_byte_identical_between_impls() {
     write_graph_metadata_fixture(temp.path());
     let root = fixture_root(&temp);
     let harn = run(&["graph", root, "--json"], &[]);
-    let rust = run(&["graph", root, "--json"], &[("HARN_CLI_IMPL", "rust")]);
+    let repeat = run(&["graph", root, "--json"], &[]);
     assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
-    assert_eq!(rust.exit_code, 0, "rust stderr={}", rust.stderr);
+    assert_eq!(repeat.exit_code, 0, "repeat stderr={}", repeat.stderr);
     let harn_value = parse_json(&harn.stdout, "harn");
-    let rust_value = parse_json(&rust.stdout, "rust");
-    assert_eq!(rust_value, harn_value);
+    let repeat_value = parse_json(&repeat.stdout, "repeat");
+    assert_eq!(repeat_value, harn_value);
     // Symbols sort by name: count_lines first, read_file second.
     let count_lines = &harn_value["data"]["modules"][0]["public_symbols"][0];
     assert_eq!(count_lines["name"], "count_lines");
     // No authored @example → the derived one must survive the dispatch
-    // round-trip identically in both impls.
+    // round-trip identically in repeated runs.
     assert_eq!(
         count_lines["derived_example"],
         "let out = count_lines(text)"
@@ -451,15 +451,15 @@ fn graph_metadata_round_trips_byte_identical_between_impls() {
 }
 
 #[test]
-fn graph_harness_sub_calls_byte_identical_between_impls() {
+fn graph_harness_sub_calls_byte_identical_across_runs() {
     let temp = TempDir::new().unwrap();
     write_graph_harness_fixture(temp.path());
     let root = fixture_root(&temp);
     let harn = run(&["graph", root], &[]);
-    let rust = run(&["graph", root], &[("HARN_CLI_IMPL", "rust")]);
+    let repeat = run(&["graph", root], &[]);
     assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
-    assert_eq!(rust.exit_code, 0, "rust stderr={}", rust.stderr);
-    assert_eq!(harn.stdout, rust.stdout);
+    assert_eq!(repeat.exit_code, 0, "repeat stderr={}", repeat.stderr);
+    assert_eq!(harn.stdout, repeat.stdout);
     // The harness.fs / harness.net classifier surfaces workspace
     // read/write requirements and network.http; the text path must
     // list them on a `requires` line.
@@ -471,29 +471,26 @@ fn graph_harness_sub_calls_byte_identical_between_impls() {
 }
 
 #[test]
-fn graph_module_filter_byte_identical_between_impls() {
+fn graph_module_filter_byte_identical_across_runs() {
     let temp = TempDir::new().unwrap();
     write_graph_fixture(temp.path());
     let root = fixture_root(&temp);
     let harn = run(&["graph", root, "--module", "util"], &[]);
-    let rust = run(
-        &["graph", root, "--module", "util"],
-        &[("HARN_CLI_IMPL", "rust")],
-    );
+    let repeat = run(&["graph", root, "--module", "util"], &[]);
     assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
-    assert_eq!(rust.exit_code, 0, "rust stderr={}", rust.stderr);
-    assert_eq!(harn.stdout, rust.stdout);
+    assert_eq!(repeat.exit_code, 0, "repeat stderr={}", repeat.stderr);
+    assert_eq!(harn.stdout, repeat.stdout);
 }
 
 #[test]
-fn graph_missing_root_errors_byte_identical_between_impls() {
+fn graph_missing_root_errors_byte_identical_across_runs() {
     // Pointing `harn graph` at a non-existent path must surface the
-    // same stderr line on both impls.
+    // same stderr line on repeated runs.
     let bogus = PathBuf::from("/tmp/harn-graph-port-does-not-exist-9f3d2");
     let root = bogus.to_str().unwrap();
     let harn = run(&["graph", root], &[]);
-    let rust = run(&["graph", root], &[("HARN_CLI_IMPL", "rust")]);
+    let repeat = run(&["graph", root], &[]);
     assert_eq!(harn.exit_code, 1, "harn stderr={}", harn.stderr);
-    assert_eq!(rust.exit_code, 1, "rust stderr={}", rust.stderr);
-    assert_eq!(harn.stderr, rust.stderr, "graph error stderr diverged");
+    assert_eq!(repeat.exit_code, 1, "repeat stderr={}", repeat.stderr);
+    assert_eq!(harn.stderr, repeat.stderr, "graph error stderr diverged");
 }

@@ -1992,7 +1992,7 @@ mod retry_tests {
             "provider openrouter model qwen/qwen3.6-35b-a3b returned billed output \
              (completion_tokens=342) with no dispatchable tool call or answer \
              (upstream contract violation): the model finished cleanly but committed \
-             neither a tool call nor a substantive text answer.",
+             neither a tool call nor visible text.",
         );
         assert!(
             !is_retryable_llm_error(&billed),
@@ -2198,8 +2198,8 @@ mod empty_completion_retry_tests {
 
     /// The *thrown* billed-noncommittal failure. The response/transport parsers
     /// raise `billed_noncommittal_completion_error` when a clean-finish turn
-    /// bills output but commits no tool call or answer (the action went only to
-    /// the reasoning channel). The fake provider can't drive the real parser,
+    /// bills output but commits no tool call or visible text (the action went
+    /// only to the reasoning channel). The fake provider can't drive the real parser,
     /// so we re-create the exact wire-error message under a *non-transient*
     /// `Generic` category — proving the retry comes from the empty-completion
     /// budget, not from `is_retryable_llm_error` (which returns false here).
@@ -2209,7 +2209,7 @@ mod empty_completion_retry_tests {
             "provider openrouter model qwen/qwen3.6-35b-a3b returned billed output \
              (completion_tokens=342) with no dispatchable tool call or answer \
              (upstream contract violation): the model finished cleanly but committed \
-             neither a tool call nor a substantive text answer.",
+             neither a tool call nor visible text.",
         ))
     }
 

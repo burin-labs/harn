@@ -1,3 +1,4 @@
+import { agent_loop_options } from "std/agent/options"
 import { agent_budget, agent_preset } from "std/agent/presets"
 
 pipeline default() {
@@ -11,6 +12,17 @@ pipeline default() {
   __io_println(audit.turn_policy.allow_done_sentinel)
   __io_println(audit.max_nudges)
   __io_println(audit?.thinking == nil)
+  __io_println(audit.reasoning_policy)
+  __io_println(audit.reasoning_scale)
+  __io_println(audit.reasoning_task)
+  let json_audit = agent_loop_options(
+    agent_preset("audit", {provider: "mock", tools: tool_registry(), tool_format: "json"}),
+  )
+  __io_println(json_audit.done_sentinel)
+  let native_audit = agent_loop_options(
+    agent_preset("audit", {provider: "mock", tools: tool_registry(), tool_format: "native"}),
+  )
+  __io_println(native_audit.done_sentinel == nil)
   let summary = agent_preset("summary")
   __io_println(summary.profile)
   __io_println(summary?.tool_choice == nil)

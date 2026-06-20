@@ -39,6 +39,17 @@ tier = "frontier"
 open_weight = true
 strengths = ["agentic", "coding", "long_context", "tool_use", "reasoning"]
 complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
+[models."zai-org/GLM-5.2"]
+name = "GLM 5.2 (Together)"
+provider = "together"
+context_window = 1048576
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 1.40, output_per_mtok = 4.40, cache_read_per_mtok = 0.26 }
+
+tier = "frontier"
+open_weight = true
+strengths = ["agentic", "coding", "long_context", "tool_use", "reasoning"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
 [models."MiniMaxAI/MiniMax-M2.7"]
 name = "MiniMax M2.7 (Together)"
 provider = "together"

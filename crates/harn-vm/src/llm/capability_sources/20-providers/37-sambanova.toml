@@ -5,6 +5,24 @@
 # are non-thinking multimodal. Catalog keys are `sambanova/<wire>`.
 
 [[provider.sambanova]]
+model_match = "*deepseek-v3.2*"
+native_tools = true
+preferred_tool_format = "native"
+tool_mode_parity = "interchangeable"
+tool_mode_parity_notes = "2026-06-20 Harn agent-loop smoke: SambaNova DeepSeek-V3.2 completed both native and JSON tool loops with reasoning disabled. Earlier native false negatives were caused by Harn's parser treating terse final answers as billed no-ops; keep native preferred."
+structured_output = "native"
+thinking_modes = ["enabled"]
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.sambanova]]
 model_match = "*deepseek*"
 native_tools = true
 preferred_tool_format = "native"
@@ -34,6 +52,39 @@ supports_assistant_prefill = false
 prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "none"
+
+[[provider.sambanova]]
+model_match = "*minimax*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+prompt_caching = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.sambanova]]
+model_match = "*gemma-4*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+vision = true
+vision_supported = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
 
 # SambaNova-hosted GPT-OSS is the same Harmony model as cerebras/fireworks
 # gpt-oss-120b. Placed BEFORE the catch-all `*` rule (first match wins) so it

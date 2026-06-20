@@ -12,7 +12,6 @@ mod ollama;
 mod openai_normalize;
 pub(crate) mod options;
 mod partial_tool_args;
-mod readiness;
 mod response;
 mod result;
 mod schema_stream;
@@ -50,10 +49,6 @@ pub(crate) use options::{
     LlmRouteAlternative, LlmRouteFallback, LlmRoutePolicy, LlmRoutingDecision, OutputFormat,
     ReasoningEffort, ReminderLifecycleEmission, ThinkingConfig, ToolSearchConfig, ToolSearchMode,
     ToolSearchVariant,
-};
-pub use readiness::{
-    probe_openai_compatible_model, selected_model_for_provider, supports_model_readiness_probe,
-    ModelReadiness,
 };
 pub(crate) use response::parse_llm_response as parse_llm_response_for_provider;
 pub(crate) use response::parse_openai_responses_response;

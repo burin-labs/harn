@@ -1,16 +1,12 @@
 #![recursion_limit = "256"]
 
-//! Parity tests for the scaffolding cluster (harn#2308 / W8).
+//! Contract tests for the scaffolding cluster.
 //!
-//! Each test runs the same `harn` subcommand twice — once with the
-//! default `.harn` dispatch impl, and once with `HARN_CLI_IMPL=rust`
-//! forcing the legacy handler — and asserts that the generated file
-//! tree is byte-identical between the two. Subprocesses are used
-//! because the dispatched `.harn` script spawns a full VM and would
-//! overflow the default `#[tokio::test]` thread stack if run in-process.
-//!
-//! The C1 ratchet (harn#2314) removes the legacy Rust paths once these
-//! parity tests have ridden in production for a release.
+//! Each test runs the same `harn` subcommand in isolated tempdirs and
+//! asserts that the generated file tree is deterministic. Subprocesses
+//! are used because the dispatched `.harn` script spawns a full VM and
+//! would overflow the default `#[tokio::test]` thread stack if run
+//! in-process.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -25,16 +21,9 @@ fn harn_bin() -> &'static str {
     env!("CARGO_BIN_EXE_harn")
 }
 
-fn run_scaffold(args: &[&str], cwd: &Path, rust_impl: bool) -> Output {
+fn run_scaffold(args: &[&str], cwd: &Path) -> Output {
     let mut cmd = Command::new(harn_bin());
     cmd.args(args).current_dir(cwd);
-    if rust_impl {
-        cmd.env("HARN_CLI_IMPL", "rust");
-    } else {
-        // Inherit env, but make sure no stale parity selector from the
-        // user's shell leaks in and pins the run to the legacy impl.
-        cmd.env_remove("HARN_CLI_IMPL");
-    }
     cmd.output().expect("spawn harn subcommand")
 }
 
@@ -68,22 +57,22 @@ fn snapshot_tree(root: &Path) -> Snapshot {
     out
 }
 
-fn assert_snapshots_match(label: &str, harn_snapshot: &Snapshot, rust_snapshot: &Snapshot) {
+fn assert_snapshots_match(label: &str, harn_snapshot: &Snapshot, repeat_snapshot: &Snapshot) {
     let harn_keys: Vec<&String> = harn_snapshot.keys().collect();
-    let rust_keys: Vec<&String> = rust_snapshot.keys().collect();
+    let repeat_keys: Vec<&String> = repeat_snapshot.keys().collect();
     assert_eq!(
-        harn_keys, rust_keys,
-        "{label}: file list diverges between .harn and rust impls"
+        harn_keys, repeat_keys,
+        "{label}: file list diverges between repeated scaffold runs"
     );
     for (path, harn_bytes) in harn_snapshot {
-        let rust_bytes = rust_snapshot
+        let repeat_bytes = repeat_snapshot
             .get(path)
-            .unwrap_or_else(|| panic!("{label}: missing {path} in rust snapshot"));
-        if harn_bytes != rust_bytes {
+            .unwrap_or_else(|| panic!("{label}: missing {path} in repeat snapshot"));
+        if harn_bytes != repeat_bytes {
             let harn_text = String::from_utf8_lossy(harn_bytes);
-            let rust_text = String::from_utf8_lossy(rust_bytes);
+            let repeat_text = String::from_utf8_lossy(repeat_bytes);
             panic!(
-                "{label}: byte mismatch in {path}\n--- harn impl ---\n{harn_text}\n--- rust impl ---\n{rust_text}\n",
+                "{label}: byte mismatch in {path}\n--- first run ---\n{harn_text}\n--- repeat run ---\n{repeat_text}\n",
             );
         }
     }
@@ -95,47 +84,47 @@ fn pair_run(
     project_subdir: Option<&str>,
 ) -> (Snapshot, Snapshot) {
     let harn_tmp = tempfile::tempdir().expect("tempdir harn");
-    let rust_tmp = tempfile::tempdir().expect("tempdir rust");
+    let repeat_tmp = tempfile::tempdir().expect("tempdir repeat");
 
     let harn_args = args_with(harn_tmp.path());
-    let rust_args = args_with(rust_tmp.path());
+    let repeat_args = args_with(repeat_tmp.path());
     let harn_argv: Vec<&str> = harn_args.iter().map(String::as_str).collect();
-    let rust_argv: Vec<&str> = rust_args.iter().map(String::as_str).collect();
+    let repeat_argv: Vec<&str> = repeat_args.iter().map(String::as_str).collect();
 
-    let harn_out = run_scaffold(&harn_argv, harn_tmp.path(), false);
+    let harn_out = run_scaffold(&harn_argv, harn_tmp.path());
     assert!(
         harn_out.status.success(),
         "{label}: .harn dispatch failed: stdout={} stderr={}",
         String::from_utf8_lossy(&harn_out.stdout),
         String::from_utf8_lossy(&harn_out.stderr),
     );
-    let rust_out = run_scaffold(&rust_argv, rust_tmp.path(), true);
+    let repeat_out = run_scaffold(&repeat_argv, repeat_tmp.path());
     assert!(
-        rust_out.status.success(),
-        "{label}: rust impl failed: stdout={} stderr={}",
-        String::from_utf8_lossy(&rust_out.stdout),
-        String::from_utf8_lossy(&rust_out.stderr),
+        repeat_out.status.success(),
+        "{label}: repeat run failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&repeat_out.stdout),
+        String::from_utf8_lossy(&repeat_out.stderr),
     );
 
     let harn_root: PathBuf = project_subdir
         .map(|s| harn_tmp.path().join(s))
         .unwrap_or_else(|| harn_tmp.path().to_path_buf());
-    let rust_root: PathBuf = project_subdir
-        .map(|s| rust_tmp.path().join(s))
-        .unwrap_or_else(|| rust_tmp.path().to_path_buf());
+    let repeat_root: PathBuf = project_subdir
+        .map(|s| repeat_tmp.path().join(s))
+        .unwrap_or_else(|| repeat_tmp.path().to_path_buf());
     let harn_snap = snapshot_tree(&harn_root);
-    let rust_snap = snapshot_tree(&rust_root);
+    let repeat_snap = snapshot_tree(&repeat_root);
     assert!(
         !harn_snap.is_empty(),
         "{label}: .harn impl produced no files under {}",
         harn_root.display()
     );
-    (harn_snap, rust_snap)
+    (harn_snap, repeat_snap)
 }
 
 #[test]
-fn tool_new_dispatch_matches_rust_impl() {
-    let (harn_snap, rust_snap) = pair_run(
+fn tool_new_dispatch_is_deterministic() {
+    let (harn_snap, repeat_snap) = pair_run(
         "tool new",
         |tmp| {
             vec![
@@ -145,12 +134,12 @@ fn tool_new_dispatch_matches_rust_impl() {
                 "--dir".into(),
                 tmp.join("acme-tool").display().to_string(),
                 "--description".into(),
-                "Acme tool for testing parity.".into(),
+                "Acme tool for testing determinism.".into(),
             ]
         },
         Some("acme-tool"),
     );
-    assert_snapshots_match("tool new", &harn_snap, &rust_snap);
+    assert_snapshots_match("tool new", &harn_snap, &repeat_snap);
     // Spot-check key files so a structural drift fails loudly even if
     // the byte comparison happens to coincide.
     assert!(harn_snap.contains_key("harn.toml"), "harn.toml present");
@@ -180,7 +169,6 @@ fn tool_new_force_preserves_pre_existing_files() {
             "--force",
         ],
         tmp.path(),
-        false,
     );
     assert!(
         out.status.success(),
@@ -192,11 +180,11 @@ fn tool_new_force_preserves_pre_existing_files() {
 }
 
 #[test]
-fn init_basic_dispatch_matches_rust_impl() {
+fn init_basic_dispatch_is_deterministic() {
     // `harn init` writes into the current working directory, so each
     // impl runs inside its own tempdir.
-    let (harn_snap, rust_snap) = pair_run("init basic", |_tmp| vec!["init".into()], None);
-    assert_snapshots_match("init basic", &harn_snap, &rust_snap);
+    let (harn_snap, repeat_snap) = pair_run("init basic", |_tmp| vec!["init".into()], None);
+    assert_snapshots_match("init basic", &harn_snap, &repeat_snap);
     assert!(harn_snap.contains_key("harn.toml"));
     assert!(harn_snap.contains_key("main.harn"));
     assert!(harn_snap.contains_key("lib/helpers.harn"));
@@ -204,76 +192,76 @@ fn init_basic_dispatch_matches_rust_impl() {
 }
 
 #[test]
-fn new_package_dispatch_matches_rust_impl() {
-    let (harn_snap, rust_snap) = pair_run(
+fn new_package_dispatch_is_deterministic() {
+    let (harn_snap, repeat_snap) = pair_run(
         "new package",
         |_tmp| vec!["new".into(), "package".into(), "sample-pkg".into()],
         Some("sample-pkg"),
     );
-    assert_snapshots_match("new package", &harn_snap, &rust_snap);
+    assert_snapshots_match("new package", &harn_snap, &repeat_snap);
     assert!(harn_snap.contains_key("harn.toml"));
     assert!(harn_snap.contains_key("lib/main.harn"));
     assert!(harn_snap.contains_key("docs/api.md"));
 }
 
 #[test]
-fn new_connector_dispatch_matches_rust_impl() {
-    let (harn_snap, rust_snap) = pair_run(
+fn new_connector_dispatch_is_deterministic() {
+    let (harn_snap, repeat_snap) = pair_run(
         "new connector",
         |_tmp| vec!["new".into(), "connector".into(), "sample-conn".into()],
         Some("sample-conn"),
     );
-    assert_snapshots_match("new connector", &harn_snap, &rust_snap);
+    assert_snapshots_match("new connector", &harn_snap, &repeat_snap);
     assert!(harn_snap.contains_key("connectors/echo.harn"));
 }
 
 #[test]
-fn init_agent_dispatch_matches_rust_impl() {
-    let (harn_snap, rust_snap) = pair_run(
+fn init_agent_dispatch_is_deterministic() {
+    let (harn_snap, repeat_snap) = pair_run(
         "init agent",
         |_tmp| vec!["init".into(), "--template".into(), "agent".into()],
         None,
     );
-    assert_snapshots_match("init agent", &harn_snap, &rust_snap);
+    assert_snapshots_match("init agent", &harn_snap, &repeat_snap);
     assert!(harn_snap.contains_key("tests/test_agent.harn"));
 }
 
 #[test]
-fn init_chat_dispatch_matches_rust_impl() {
-    let (harn_snap, rust_snap) = pair_run(
+fn init_chat_dispatch_is_deterministic() {
+    let (harn_snap, repeat_snap) = pair_run(
         "init chat",
         |_tmp| vec!["init".into(), "--template".into(), "chat".into()],
         None,
     );
-    assert_snapshots_match("init chat", &harn_snap, &rust_snap);
+    assert_snapshots_match("init chat", &harn_snap, &repeat_snap);
 }
 
 #[test]
-fn init_mcp_server_dispatch_matches_rust_impl() {
-    let (harn_snap, rust_snap) = pair_run(
+fn init_mcp_server_dispatch_is_deterministic() {
+    let (harn_snap, repeat_snap) = pair_run(
         "init mcp-server",
         |_tmp| vec!["init".into(), "--template".into(), "mcp-server".into()],
         None,
     );
-    assert_snapshots_match("init mcp-server", &harn_snap, &rust_snap);
+    assert_snapshots_match("init mcp-server", &harn_snap, &repeat_snap);
 }
 
 #[test]
-fn init_eval_dispatch_matches_rust_impl() {
-    let (harn_snap, rust_snap) = pair_run(
+fn init_eval_dispatch_is_deterministic() {
+    let (harn_snap, repeat_snap) = pair_run(
         "init eval",
         |_tmp| vec!["init".into(), "--template".into(), "eval".into()],
         None,
     );
-    assert_snapshots_match("init eval", &harn_snap, &rust_snap);
+    assert_snapshots_match("init eval", &harn_snap, &repeat_snap);
 }
 
 #[test]
-fn init_pipeline_lab_dispatch_matches_rust_impl() {
-    let (harn_snap, rust_snap) = pair_run(
+fn init_pipeline_lab_dispatch_is_deterministic() {
+    let (harn_snap, repeat_snap) = pair_run(
         "init pipeline-lab",
         |_tmp| vec!["init".into(), "--template".into(), "pipeline-lab".into()],
         None,
     );
-    assert_snapshots_match("init pipeline-lab", &harn_snap, &rust_snap);
+    assert_snapshots_match("init pipeline-lab", &harn_snap, &repeat_snap);
 }

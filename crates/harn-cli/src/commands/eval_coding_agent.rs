@@ -29,9 +29,6 @@
 //! `experiments/step-judge/run.sh`, the local-readiness regression
 //! check, and hosted ingestion — all of which depend on the serde
 //! struct-field byte order.
-//!
-//! `HARN_CLI_IMPL=rust` keeps the direct-render path available for
-//! parity snapshot coverage.
 
 mod live_verify;
 
@@ -61,7 +58,6 @@ use crate::commands::tool_mode_parity::{
 };
 use crate::dispatch;
 use crate::env_guard::ScopedEnvVar;
-use crate::format::escape_md;
 #[cfg(test)]
 use live_verify::{coding_agent_live_verify_cases, tool_format_override_warning_line};
 use live_verify::{
@@ -82,6 +78,7 @@ const CODING_AGENT_EVAL_PACK_ID: &str = "coding-agent";
 /// form). Defaulted to `"summary"` if unset so the script stays robust
 /// against future Rust-side bugs.
 const CODING_AGENT_MODE_ENV: &str = "HARN_EVAL_CODING_AGENT_MODE";
+const TOOL_FORMAT_OVERRIDE_WARNING_PREFIX: &str = "warning: tool_format override:";
 
 /// Serialises the dispatch-render path so concurrent in-process
 /// callers (the existing `eval_coding_agent_cli` integration test plus
@@ -96,8 +93,6 @@ const CODING_AGENT_MODE_ENV: &str = "HARN_EVAL_CODING_AGENT_MODE";
 static DISPATCH_RENDER_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 const CODING_AGENT_SUITE_HARN: &str = include_str!("../../assets/evals/coding_agent_suite.harn");
-const TOOL_FORMAT_OVERRIDE_WARNING_PREFIX: &str = "warning: tool_format override:";
-
 #[derive(Debug, Clone, Serialize)]
 struct LoadedEnvKey {
     key: String,
@@ -391,25 +386,6 @@ pub async fn run(args: EvalCodingAgentArgs) -> i32 {
     if let Err(error) = write_json_artifacts(&output_dir, &summary) {
         eprintln!("error: failed to write benchmark outputs: {error}");
         return 1;
-    }
-
-    // `HARN_CLI_IMPL=rust` keeps the legacy direct-render path so the
-    // parity-snapshot harness (#2299) can compare both impls until C1
-    // (#2314) deletes this escape hatch.
-    let use_legacy = std::env::var("HARN_CLI_IMPL").as_deref() == Ok("rust");
-
-    if use_legacy {
-        if let Err(error) = write_markdown_artifacts_legacy(&output_dir, &summary) {
-            eprintln!("error: {error}");
-            return 1;
-        }
-        announce_output_paths(&output_dir);
-        if args.json {
-            print_json_legacy(&summary);
-        } else {
-            print_summary_legacy(&summary);
-        }
-        return i32::from(had_error);
     }
 
     if let Err(code) = write_markdown_artifacts_dispatch(&output_dir, &summary).await {
@@ -1115,30 +1091,6 @@ fn announce_output_paths(output_dir: &Path) {
     );
 }
 
-// ─── Legacy direct-render path (gated by HARN_CLI_IMPL=rust) ────────────
-
-fn write_markdown_artifacts_legacy(output_dir: &Path, summary: &EvalSummary) -> Result<(), String> {
-    fs::write(output_dir.join("summary.md"), render_markdown(summary))
-        .map_err(|error| format!("failed to write summary.md: {error}"))?;
-    fs::write(output_dir.join("followups.md"), render_followups(summary))
-        .map_err(|error| format!("failed to write followups.md: {error}"))?;
-    Ok(())
-}
-
-fn print_summary_legacy(summary: &EvalSummary) {
-    println!(
-        "coding-agent eval: {}/{} passed, {} skipped, total_cost_usd={:.6}",
-        summary.passed_runs, summary.total_runs, summary.skipped_runs, summary.total_cost_usd
-    );
-}
-
-fn print_json_legacy(summary: &EvalSummary) {
-    match serde_json::to_string_pretty(summary) {
-        Ok(payload) => println!("{payload}"),
-        Err(error) => eprintln!("warning: failed to render summary JSON: {error}"),
-    }
-}
-
 // ─── Dispatch (.harn) render path ────────────────────────────────────────
 
 async fn write_markdown_artifacts_dispatch(
@@ -1161,8 +1113,6 @@ async fn write_markdown_artifacts_dispatch(
 async fn print_summary_dispatch(summary: &EvalSummary) -> Result<(), i32> {
     let payload = render_via_dispatch(summary, "summary").await?;
     print!("{payload}");
-    // The script emits exactly the legacy summary line (no trailing
-    // newline); add one to match the legacy `println!` semantics.
     if !payload.ends_with('\n') {
         println!();
     }
@@ -1224,217 +1174,6 @@ fn write_jsonl<T: Serialize>(path: &Path, items: &[T]) -> Result<(), String> {
     fs::write(path, body).map_err(|error| error.to_string())
 }
 
-fn render_markdown(summary: &EvalSummary) -> String {
-    let mut out = String::new();
-    out.push_str("# Coding Agent Harness Quality Suite\n\n");
-    out.push_str(&format!(
-        "- fixtures: `{}`\n- passed: {}/{}\n- skipped: {}\n- total_cost_usd: {:.6}\n\n",
-        summary.fixture_ids.join("`, `"),
-        summary.passed_runs,
-        summary.total_runs,
-        summary.skipped_runs,
-        summary.total_cost_usd
-    ));
-    render_rollup_table(&mut out, "By Fixture", &summary.rollups.by_fixture);
-    render_rollup_table(&mut out, "By Provider", &summary.rollups.by_provider);
-    render_rollup_table(&mut out, "By Model", &summary.rollups.by_model);
-    render_rollup_table(&mut out, "By Tool Format", &summary.rollups.by_tool_format);
-    render_rollup_table(
-        &mut out,
-        "By Tool Sequence",
-        &summary.rollups.by_tool_sequence,
-    );
-
-    out.push_str("\n## Runs\n\n");
-    out.push_str("| fixture | run | provider | model | tool format | fixture sequence | tool calls | status | iterations | tokens | cost | transcript | output |\n");
-    out.push_str("|---|---|---|---|---|---|---|---|---:|---:|---:|---|---|\n");
-    for run in &summary.runs {
-        let tool_sequence = if run.tool_sequence.is_empty() {
-            "-".to_string()
-        } else {
-            escape_md(&run.tool_sequence.join(", "))
-        };
-        out.push_str(&format!(
-            "| `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | {} | {} | {} | {:.6} | {} | `{}` |\n",
-            run.fixture_id,
-            run.run_id,
-            run.selector.provider,
-            escape_md(&run.selector.model),
-            run.tool_format,
-            run.fixture_tool_sequence,
-            tool_sequence,
-            run.status,
-            run.iterations,
-            run.input_tokens + run.output_tokens,
-            run.cost_usd,
-            markdown_link(
-                &run.transcript_event_count.to_string(),
-                &run.transcript_events_path
-            ),
-            run.output_dir
-        ));
-    }
-    if let Some(comparison) = &summary.baseline_comparison {
-        out.push_str("\n## Baseline Comparison\n\n");
-        out.push_str(&format!(
-            "Compared against `{}`{}.\n\n",
-            comparison.baseline_path,
-            if comparison.baseline_label.is_empty() {
-                String::new()
-            } else {
-                format!(" (label: `{}`)", comparison.baseline_label)
-            },
-        ));
-        out.push_str(&format!(
-            "- regressions: **{}** (baseline passed, this cell failed)\n- recoveries: **{}** (baseline failed, this cell passed)\n- net lift: **{:+.1}pp**\n\n",
-            comparison.regressions_count,
-            comparison.recoveries_count,
-            comparison.net_lift_pp,
-        ));
-        if !comparison.regressions.is_empty() {
-            out.push_str("### Regressions\n\n");
-            for delta in &comparison.regressions {
-                out.push_str(&format!(
-                    "- `{}`: `{}` → `{}`\n",
-                    delta.fixture_id, delta.baseline_status, delta.cell_status,
-                ));
-            }
-            out.push('\n');
-        }
-        if !comparison.recoveries.is_empty() {
-            out.push_str("### Recoveries\n\n");
-            for delta in &comparison.recoveries {
-                out.push_str(&format!(
-                    "- `{}`: `{}` → `{}`\n",
-                    delta.fixture_id, delta.baseline_status, delta.cell_status,
-                ));
-            }
-            out.push('\n');
-        }
-    }
-    if !summary.comparisons.is_empty() {
-        out.push_str("\n## Native/Text Comparison\n\n");
-        out.push_str("| fixture | selector | native | text | equivalent | verifier | tools | rejected delta | token delta | iteration delta | evidence |\n");
-        out.push_str("|---|---|---|---|---|---|---|---:|---:|---:|---|\n");
-        for comparison in &summary.comparisons {
-            out.push_str(&format!(
-                "| `{}` | `{}` | {} | {} | {} | {} | {} | {} | {} | {} | {} |\n",
-                comparison.fixture_id,
-                selector_label(&comparison.selector),
-                comparison
-                    .native_status
-                    .clone()
-                    .unwrap_or_else(|| "-".to_string()),
-                comparison
-                    .text_status
-                    .clone()
-                    .unwrap_or_else(|| "-".to_string()),
-                optional_bool_mark(comparison.equivalent),
-                optional_bool_mark(comparison.verifier_match),
-                optional_bool_mark(comparison.tool_sequence_match),
-                comparison
-                    .rejected_tool_call_delta_text_minus_native
-                    .map(|v| v.to_string())
-                    .unwrap_or_else(|| "-".to_string()),
-                comparison
-                    .token_delta_text_minus_native
-                    .map(|v| v.to_string())
-                    .unwrap_or_else(|| "-".to_string()),
-                comparison
-                    .iteration_delta_text_minus_native
-                    .map(|v| v.to_string())
-                    .unwrap_or_else(|| "-".to_string()),
-                comparison_evidence_links(comparison)
-            ));
-        }
-    }
-    if !summary.parity_by_pair.is_empty() {
-        out.push_str("\n## Parity report — native vs text\n\n");
-        out.push_str("| selector | sample | native pass | text pass | agreement | verifier divergence | native_only | text_only | both_pass | both_fail |\n");
-        out.push_str("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n");
-        for pair in &summary.parity_by_pair {
-            out.push_str(&format!(
-                "| `{}` | {} | {:.1}% | {:.1}% | {:.1}% | {:.1}% | {} | {} | {} | {} |\n",
-                selector_label(&ModelSelector {
-                    selector: format!("{}:{}", pair.provider, pair.model),
-                    provider: pair.provider.clone(),
-                    model: pair.model.clone(),
-                }),
-                pair.sample_size,
-                pair.native.pass_rate * 100.0,
-                pair.text.pass_rate * 100.0,
-                pair.agreement_rate * 100.0,
-                pair.verifier_divergence_rate * 100.0,
-                pair.divergence_counts.native_only_pass,
-                pair.divergence_counts.text_only_pass,
-                pair.divergence_counts.both_pass,
-                pair.divergence_counts.both_fail,
-            ));
-        }
-    }
-    let diverged = summary
-        .comparisons
-        .iter()
-        .filter(|comparison| !comparison.divergence_reasons.is_empty())
-        .collect::<Vec<_>>();
-    if !diverged.is_empty() {
-        out.push_str("\n## Native/Text Divergence Evidence\n\n");
-        for comparison in diverged {
-            out.push_str(&format!(
-                "- `{}` `{}`: {}\n",
-                comparison.fixture_id,
-                selector_label(&comparison.selector),
-                comparison.divergence_reasons.join("; ")
-            ));
-            if !comparison.evidence_paths.is_empty() {
-                out.push_str(&format!(
-                    "  Evidence: {}\n",
-                    comparison_evidence_links(comparison)
-                ));
-            }
-        }
-    }
-    out
-}
-
-fn render_rollup_table(out: &mut String, title: &str, rollups: &[RollupReport]) {
-    out.push_str(&format!("## {title}\n\n"));
-    out.push_str("| key | passed | failed | skipped | total | cost |\n");
-    out.push_str("|---|---:|---:|---:|---:|---:|\n");
-    for rollup in rollups {
-        out.push_str(&format!(
-            "| `{}` | {} | {} | {} | {} | {:.6} |\n",
-            escape_md(&rollup.key),
-            rollup.passed_runs,
-            rollup.failed_runs,
-            rollup.skipped_runs,
-            rollup.total_runs,
-            rollup.total_cost_usd
-        ));
-    }
-    out.push('\n');
-}
-
-fn render_followups(summary: &EvalSummary) -> String {
-    let mut out = String::new();
-    out.push_str("# Follow-up Issue Candidates\n\n");
-    if summary.followups.is_empty() {
-        out.push_str("No follow-up issue candidates were generated from this run.\n");
-        return out;
-    }
-    for followup in &summary.followups {
-        out.push_str(&format!("## {}\n\n{}\n\n", followup.title, followup.body));
-        if !followup.run_ids.is_empty() {
-            out.push_str(&format!("- run_ids: `{}`\n", followup.run_ids.join("`, `")));
-        }
-        if !followup.labels.is_empty() {
-            out.push_str(&format!("- labels: `{}`\n", followup.labels.join("`, `")));
-        }
-        out.push('\n');
-    }
-    out
-}
-
 fn read_run_summary(run_dir: &Path) -> Option<JsonValue> {
     let raw = fs::read_to_string(run_dir.join("summary.json")).ok()?;
     serde_json::from_str(&raw).ok()
@@ -1480,40 +1219,6 @@ fn tool_call_sequence(value: Option<&JsonValue>) -> Option<Vec<String>> {
         }
     }
     (!sequence.is_empty()).then_some(sequence)
-}
-
-fn optional_bool_mark(value: Option<bool>) -> &'static str {
-    match value {
-        Some(true) => "yes",
-        Some(false) => "no",
-        None => "-",
-    }
-}
-
-fn comparison_evidence_links(comparison: &FormatComparison) -> String {
-    let mut links = Vec::new();
-    if let Some(native) = comparison.native_evidence_path.as_deref() {
-        links.push(markdown_link("native", native));
-    }
-    if let Some(text) = comparison.text_evidence_path.as_deref() {
-        links.push(markdown_link("text", text));
-    }
-    if links.is_empty() {
-        "-".to_string()
-    } else {
-        links.join("<br>")
-    }
-}
-
-fn markdown_link(label: &str, target: &str) -> String {
-    format!(
-        "[{}]({})",
-        escape_md(label),
-        target
-            .replace(' ', "%20")
-            .replace('(', "%28")
-            .replace(')', "%29")
-    )
 }
 
 fn run_id_for(fixture: &EvalPackCase, selector: &ModelSelector, tool_format: &str) -> String {

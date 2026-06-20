@@ -7,13 +7,11 @@
 //! eval pipelines decode it with the same shape they use for per-call
 //! `provider_telemetry`.
 //!
-//! ## .harn dispatch (W10 — see harn#2310)
+//! ## .harn dispatch
 //!
 //! Aggregation stays in Rust (sandboxed scripts can't run the
 //! readiness HTTP probe + `/api/ps` calls), the rendering layer lives
 //! in `crates/harn-stdlib/src/stdlib/cli/providers/{probe,tool_probe}.harn`.
-//! `HARN_CLI_IMPL=rust` keeps the legacy direct path for the parity-
-//! snapshot harness (#2299) until the C1 ratchet (#2314) deletes it.
 
 use std::io::Write as _;
 use std::process;
@@ -62,10 +60,6 @@ struct ProviderProbe {
 }
 
 pub(crate) async fn run_provider_probe(args: ProviderProbeArgs) {
-    if std::env::var("HARN_CLI_IMPL").as_deref() == Ok("rust") {
-        run_provider_probe_legacy(args).await;
-        return;
-    }
     let exit_code = dispatch_provider_probe(args).await;
     if exit_code != 0 {
         process::exit(exit_code);
@@ -99,9 +93,9 @@ async fn dispatch_provider_probe(args: ProviderProbeArgs) -> i32 {
     if !outcome.stdout.is_empty() {
         let _ = std::io::stdout().write_all(outcome.stdout.as_bytes());
     }
-    // The script's own exit code reflects readiness (1 on failure),
-    // matching the legacy path. If the script itself errored at the
-    // 70 level (internal) we still want to surface that to the user.
+    // The script's own exit code reflects readiness (1 on failure).
+    // If the script itself errored at the 70 level (internal), surface
+    // that to the user instead.
     if outcome.exit_code != 0 {
         outcome.exit_code
     } else {
@@ -157,46 +151,7 @@ async fn aggregate_provider_probe(args: &ProviderProbeArgs) -> ProviderProbe {
     }
 }
 
-/// Legacy direct-render path. Kept verbatim for the parity-snapshot
-/// harness (#2299) until C1 (#2314) deletes it.
-async fn run_provider_probe_legacy(args: ProviderProbeArgs) {
-    let probe = aggregate_provider_probe(&args).await;
-    let exit_code = i32::from(!probe.readiness.ok);
-
-    if args.json {
-        match serde_json::to_string_pretty(&probe) {
-            Ok(payload) => println!("{payload}"),
-            Err(error) => eprintln!("error: {error}"),
-        }
-    } else if probe.readiness.ok {
-        println!("{}", probe.readiness.message);
-        if !probe.loaded_models.is_empty() {
-            println!("loaded:");
-            for model in &probe.loaded_models {
-                println!(
-                    "  - {} (size={} vram={} ctx={} expires={})",
-                    model.name,
-                    fmt_bytes(model.size_bytes),
-                    fmt_bytes(model.size_vram_bytes),
-                    fmt_u64(model.context_length),
-                    model.expires_at.as_deref().unwrap_or("-"),
-                );
-            }
-        }
-    } else {
-        eprintln!("{}", probe.readiness.message);
-    }
-
-    if exit_code != 0 {
-        process::exit(exit_code);
-    }
-}
-
 pub(crate) async fn run_provider_tool_probe(args: ProviderToolProbeArgs) {
-    if std::env::var("HARN_CLI_IMPL").as_deref() == Ok("rust") {
-        run_provider_tool_probe_legacy(args).await;
-        return;
-    }
     let exit_code = dispatch_provider_tool_probe(args).await;
     if exit_code != 0 {
         process::exit(exit_code);
@@ -275,53 +230,6 @@ async fn aggregate_tool_conformance_report(
     }
 }
 
-/// Legacy direct-render path. Kept verbatim for the parity-snapshot
-/// harness (#2299) until C1 (#2314) deletes it.
-async fn run_provider_tool_probe_legacy(args: ProviderToolProbeArgs) {
-    let report = match aggregate_tool_conformance_report(&args).await {
-        Ok(report) => report,
-        Err(error) => {
-            eprintln!("{error}");
-            process::exit(1);
-        }
-    };
-
-    if args.json {
-        match serde_json::to_string_pretty(&report) {
-            Ok(payload) => println!("{payload}"),
-            Err(error) => {
-                eprintln!("error: failed to render probe JSON: {error}");
-                process::exit(1);
-            }
-        }
-    } else {
-        println!(
-            "{} {} fallback={} native={} text={} streaming_native={}",
-            report.provider,
-            report.model,
-            report.tool_calling.fallback_mode.as_str(),
-            report.tool_calling.native.as_str(),
-            report.tool_calling.text.as_str(),
-            report.tool_calling.streaming_native.as_str(),
-        );
-        for case in &report.cases {
-            println!(
-                "  {}: {:?} ok={} reason={}",
-                case.mode.as_str(),
-                case.classification,
-                case.ok,
-                case.failure_reason.as_deref().unwrap_or("-"),
-            );
-        }
-    }
-
-    if report.tool_calling.fallback_mode
-        == harn_vm::llm::tool_conformance::ToolProbeFallbackMode::Disabled
-    {
-        process::exit(1);
-    }
-}
-
 fn modes_for_arg(
     mode: ProviderToolProbeModeArg,
 ) -> Vec<harn_vm::llm::tool_conformance::ToolProbeMode> {
@@ -333,16 +241,4 @@ fn modes_for_arg(
         ProviderToolProbeModeArg::NonStreaming => vec![ToolProbeMode::NonStreaming],
         ProviderToolProbeModeArg::Streaming => vec![ToolProbeMode::Streaming],
     }
-}
-
-fn fmt_bytes(value: Option<u64>) -> String {
-    value
-        .map(|n| format!("{n}B"))
-        .unwrap_or_else(|| "-".to_string())
-}
-
-fn fmt_u64(value: Option<u64>) -> String {
-    value
-        .map(|n| n.to_string())
-        .unwrap_or_else(|| "-".to_string())
 }

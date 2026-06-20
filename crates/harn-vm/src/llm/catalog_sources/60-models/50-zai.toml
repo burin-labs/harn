@@ -1,5 +1,5 @@
-# Z.AI GLM-5 family. GLM-5.1 (released 2026-04-07) is the 754B open-weight
-# flagship; GLM-5 is the prior generation. Direct Z.AI tariff via the
+# Z.AI GLM-5 family. GLM-5.2 is the current 1M-context open-weight flagship;
+# GLM-5.1 / GLM-5 are kept for pinned callers. Direct Z.AI tariff via the
 # OpenAI-compatible /v1 endpoint. OpenRouter mirrors live below.
 tier = "mid"
 open_weight = true
@@ -19,14 +19,24 @@ provider = "zai"
 context_window = 202752
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 1.40, output_per_mtok = 4.40, cache_read_per_mtok = 0.26 }
-
-# OpenRouter mirror of GLM-5 family so callers without a Z.AI key still
-# resolve a route. OR doesn't list GLM-4.6/4.7 — the canonical OR slugs
-# are the GLM-5 generation.
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
 benchmarks = { swe_bench_pro_lead = 1.0 }
+[models."glm-5.2"]
+name = "GLM 5.2"
+provider = "zai"
+context_window = 1048576
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 1.40, output_per_mtok = 4.40, cache_read_per_mtok = 0.26 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
+benchmarks = { swe_bench_pro_lead = 1.0 }
+
+# OpenRouter mirror of GLM-5 family so callers without a Z.AI key still
+# resolve a route. OR doesn't list GLM-4.6/4.7 — the canonical OR slugs
+# are the GLM-5 generation.
 [models."z-ai/glm-5"]
 name = "GLM 5 (via OpenRouter)"
 provider = "openrouter"
@@ -45,10 +55,18 @@ pricing = { input_per_mtok = 0.98, output_per_mtok = 3.08 }
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
+[models."z-ai/glm-5.2"]
+name = "GLM 5.2 (via OpenRouter)"
+provider = "openrouter"
+context_window = 1048576
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 1.20, output_per_mtok = 4.10 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
 [models."z-ai/glm-5v-turbo"]
 name = "GLM 5V Turbo (via OpenRouter)"
 provider = "openrouter"
 context_window = 202752
 capabilities = ["tools", "streaming", "vision"]
 pricing = { input_per_mtok = 1.20, output_per_mtok = 4.00 }
-

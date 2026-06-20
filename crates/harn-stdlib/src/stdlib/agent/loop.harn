@@ -2645,7 +2645,8 @@ fn __agent_loop_run(message, session, initial_opts) {
       let raw_text = llm_result?.text ?? ""
       let parsed = agent_parse_tool_calls(raw_text, turn_opts?.tools, turn_opts?.tool_format)
       let visible_text = __visible_text(parsed, raw_text)
-      let normalized = llm_result + {text: visible_text, visible_text: visible_text}
+      let normalized = llm_result
+        + {text: visible_text, visible_text: visible_text, _agent_tool_format: turn_opts?.tool_format ?? ""}
       let fallback_outcome = __detect_native_fallback(
         llm_result,
         parsed,
@@ -3096,11 +3097,9 @@ fn __agent_loop_run(message, session, initial_opts) {
       turns_since_progress = __next_progress_count(made_progress, turns_since_progress)
       let turn_max_nudges = turn_opts?.max_nudges ?? 8
       let turn_loop_until_done = turn_opts?.loop_until_done ?? false
-      if turn_loop_until_done && tool_count == 0 && consecutive_text_only > turn_max_nudges {
-        final_status = "stuck"
-        stop_reason = "max_nudges"
-        break
-      }
+      let text_only_nudge_budget_exceeded = turn_loop_until_done
+        && tool_count == 0
+        && consecutive_text_only > turn_max_nudges
       let missing_required_for_loop = agent_required_tools_missing_from_session(opts, successful_tools_seen)
       let cadence_loop_state = agent_loop_snapshot_state(
         {
@@ -3250,6 +3249,11 @@ fn __agent_loop_run(message, session, initial_opts) {
         }
       }
       if should_continue {
+        if text_only_nudge_budget_exceeded {
+          final_status = "stuck"
+          stop_reason = "max_nudges"
+          break
+        }
         agent_scratchpad_reorganize_if_due(
           session,
           opts,

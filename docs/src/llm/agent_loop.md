@@ -44,6 +44,20 @@ log(result.status)         // "done", "stuck", "budget_exhausted", "idle", "watc
 log(result.llm.iterations) // number of LLM round-trips
 ```
 
+### Choosing tool mode
+
+Most agent loops should not set `tool_format`. Pick the provider and model you
+want, pass a tool registry, and let Harn use the catalog default for that route.
+The default is chosen from real agent-loop runs: native tools when they complete
+cleanly, and Harn's text or JSON tool format when that provider/model is more
+reliable without native tool calls.
+
+For action stages where a tool must run, add `require_successful_tools`. That
+keeps the loop honest even when a model narrates an action or gives a final
+answer without actually calling the tool. When debugging a provider route, set
+`llm_transcript_dir` and inspect the JSONL transcript before overriding
+`tool_format`; forced overrides are best kept to probes and eval harnesses.
+
 ### How it works
 
 1. Sends the prompt to the model
@@ -661,16 +675,15 @@ Captain layers are opt-in: the preset only adds an `audit_sink` /
 `escalate_predicate` (cheap-by-default with frontier escalation, per
 the cost-moat substrate) and an optional `logging_sink` for receipts.
 
-Each preset also installs a provider-aware `thinking` choice when the caller
-hasn't already set one:
+Each preset installs `reasoning_policy: "auto"`, `reasoning_scale: "small"`,
+and a role-appropriate `reasoning_task` when the caller has not already set a
+low-level `thinking` / `reasoning_effort` option or a reasoning policy hint.
+`agent_loop_options` then applies the same provider-aware defaults used by
+`llm_call`, so known model quirks are handled consistently instead of being
+duplicated in each preset.
 
-- adaptive thinking on models that advertise `"adaptive"` in `thinking_modes`,
-- `effort` (medium for audit/repair, low for verify) on models with
-  `reasoning_effort_supported`,
-- `disabled` for `summary` when supported,
-- otherwise leaves `thinking` unset.
-
-Caller-supplied `thinking` and `iteration_budget` always win. Sugar:
+Caller-supplied `thinking`, `reasoning_effort`, `reasoning_policy`,
+`reasoning_scale`, `reasoning_task`, and `iteration_budget` always win. Sugar:
 `iteration_budget: "adaptive"` keeps the preset's numeric defaults and
 explicitly switches the mode to adaptive.
 

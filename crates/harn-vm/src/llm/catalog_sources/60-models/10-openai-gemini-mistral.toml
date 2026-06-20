@@ -11,7 +11,7 @@
 [models."gpt-5.5"]
 name = "GPT-5.5"
 provider = "openai"
-context_window = 400000
+context_window = 1050000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 5.00, output_per_mtok = 30.00, cache_read_per_mtok = 0.50 }
 tier = "frontier"
@@ -19,6 +19,17 @@ open_weight = false
 strengths = ["reasoning", "coding", "tool_use", "long_context", "agentic"]
 complementary_with = ["anthropic-claude", "google-gemini", "qwen", "deepseek", "kimi"]
 fast_mode = { param = "service_tier", value = "fast", otps_speedup = 1.5, status = "ga", pricing = { input_per_mtok = 12.50, output_per_mtok = 75.00, cache_read_per_mtok = 1.25 }, note = "Codex \"Fast mode\" (service_tier=\"fast\", ~1.5x faster output) and API priority processing (service_tier=\"priority\") both bill at 2.5x standard. Not offered for long-context, fine-tuned models, or embeddings." }
+
+[models."gpt-5.5-pro"]
+name = "GPT-5.5 Pro"
+provider = "openai"
+context_window = 1050000
+capabilities = ["tools", "streaming", "thinking"]
+pricing = { input_per_mtok = 30.00, output_per_mtok = 180.00 }
+tier = "frontier"
+open_weight = false
+strengths = ["reasoning", "coding", "tool_use", "long_context", "agentic"]
+complementary_with = ["anthropic-claude", "google-gemini", "qwen", "deepseek", "kimi"]
 
 # GPT-4o retired from ChatGPT 2026-02-13; chatgpt-4o-latest removed
 # from API 2026-02-17 (Enterprise/Edu grace until 2026-04-03).
@@ -107,14 +118,28 @@ context_window = 1048576
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 0.10, output_per_mtok = 0.40, cache_read_per_mtok = 0.025 }
 
-# OpenRouter-routed variant of the same model — kept as a distinct
+# Gemini 3.5 Flash is Google's current speed/cost frontier route for agentic
+# workflows. Google lists a 1,048,576-token input window and 65,536-token
+# output ceiling on the Gemini API model page.
+tier = "mid"
+open_weight = false
+strengths = ["speed", "long_context", "vision", "cheap", "tool_use", "agentic"]
+complementary_with = ["anthropic-claude", "openai-gpt", "qwen", "deepseek", "kimi"]
+[models."gemini-3.5-flash"]
+name = "Gemini 3.5 Flash"
+provider = "gemini"
+context_window = 1048576
+capabilities = ["tools", "vision", "streaming", "prompt_caching"]
+pricing = { input_per_mtok = 1.50, output_per_mtok = 9.00, cache_read_per_mtok = 0.375 }
+tier = "frontier"
+open_weight = false
+strengths = ["speed", "long_context", "vision", "tool_use", "agentic"]
+complementary_with = ["anthropic-claude", "openai-gpt", "qwen", "deepseek", "kimi"]
+
+# OpenRouter-routed variants of the same models — kept as distinct
 # catalog entry so the `qc_defaults.openrouter` lookup resolves to a
 # registered ID. Pricing matches the native Gemini API; OpenRouter adds
 # its own margin at request time.
-tier = "mid"
-open_weight = false
-strengths = ["speed", "long_context", "vision", "cheap", "tool_use"]
-complementary_with = ["anthropic-claude", "openai-gpt", "qwen", "deepseek", "kimi"]
 [models."google/gemini-2.5-flash"]
 name = "Gemini 2.5 Flash (via OpenRouter)"
 provider = "openrouter"
@@ -124,6 +149,16 @@ pricing = { input_per_mtok = 0.10, output_per_mtok = 0.40, cache_read_per_mtok =
 tier = "mid"
 open_weight = false
 strengths = ["speed", "long_context", "vision", "cheap", "tool_use"]
+complementary_with = ["anthropic-claude", "openai-gpt", "qwen", "deepseek", "kimi"]
+[models."google/gemini-3.5-flash"]
+name = "Gemini 3.5 Flash (via OpenRouter)"
+provider = "openrouter"
+context_window = 1048576
+capabilities = ["tools", "vision", "streaming", "prompt_caching"]
+pricing = { input_per_mtok = 1.50, output_per_mtok = 9.00, cache_read_per_mtok = 0.375 }
+tier = "frontier"
+open_weight = false
+strengths = ["speed", "long_context", "vision", "tool_use", "agentic"]
 complementary_with = ["anthropic-claude", "openai-gpt", "qwen", "deepseek", "kimi"]
 [models."gemini-2.5-pro"]
 name = "Gemini 2.5 Pro"
@@ -138,6 +173,19 @@ open_weight = false
 strengths = ["long_context", "vision", "reasoning", "coding"]
 benchmarks = { swe_bench_verified = 63.8 }
 complementary_with = ["anthropic-claude", "openai-gpt", "qwen", "deepseek", "kimi"]
+[models."mistral-medium-3-5"]
+name = "Mistral Medium 3.5"
+provider = "mistral"
+context_window = 262144
+logical_model = "mistral-medium-3.5-128b"
+equivalence_group = "mistral-medium-3.5-128b"
+api_dialect = "openai_chat_compat"
+capabilities = ["tools", "vision", "streaming", "thinking"]
+pricing = { input_per_mtok = 1.50, output_per_mtok = 7.50 }
+architecture = { parameter_count_b = 128.0, moe = false, license = "Modified MIT", source_url = "https://docs.mistral.ai/models/model-cards/mistral-medium-3-5-26-04", last_verified = "2026-06-20" }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "tool_use", "reasoning", "long_context", "vision", "agentic"]
 [models."mistral-large-2512"]
 name = "Mistral Large 3 2512"
 provider = "mistral"
@@ -164,6 +212,20 @@ architecture = { parameter_count_b = 119.0, active_parameter_count_b = 6.5, moe 
 tier = "mid"
 open_weight = true
 strengths = ["cheap", "coding", "speed", "tool_use", "long_context"]
+[models."mistralai/mistral-medium-3-5"]
+name = "Mistral Medium 3.5 (via OpenRouter)"
+provider = "openrouter"
+context_window = 262144
+logical_model = "mistral-medium-3.5-128b"
+equivalence_group = "mistral-medium-3.5-128b"
+served_variant = "openrouter"
+api_dialect = "openai_chat"
+capabilities = ["tools", "vision", "streaming", "thinking"]
+pricing = { input_per_mtok = 1.50, output_per_mtok = 7.50 }
+architecture = { parameter_count_b = 128.0, moe = false, license = "Modified MIT", source_url = "https://docs.mistral.ai/models/model-cards/mistral-medium-3-5-26-04", last_verified = "2026-06-20" }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "tool_use", "reasoning", "long_context", "vision", "agentic"]
 [models."mistralai/mistral-large-2512"]
 name = "Mistral Large 3 2512"
 provider = "openrouter"
@@ -189,4 +251,3 @@ api_dialect = "openai_chat"
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60, cache_read_per_mtok = 0.015 }
 architecture = { parameter_count_b = 119.0, active_parameter_count_b = 6.5, moe = true, license = "Apache-2.0", source_url = "https://docs.mistral.ai/models/model-cards/mistral-small-4-0-26-03", last_verified = "2026-06-05" }
-

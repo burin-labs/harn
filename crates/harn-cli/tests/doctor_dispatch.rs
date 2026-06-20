@@ -1,28 +1,10 @@
 #![recursion_limit = "256"]
 
-//! Partial-port verification for `harn doctor` (harn#2312 / W12).
+//! `harn doctor` dispatch contract tests.
 //!
-//! The Rust shim in `crates/harn-cli/src/commands/doctor.rs` still
-//! runs every probe (toolchain, providers, MCP, manifest health,
-//! capability matrix, hardware snapshot, ollama, target probes) and
-//! assembles a structured [`DoctorReport`]. The rendering layer
-//! (human-readable section layout + JSON envelope pass-through) lives
-//! in `crates/harn-stdlib/src/stdlib/cli/doctor.harn` and is
-//! dispatched through the wedge so it ratchets onto the
-//! self-hosted `.harn` CLI stack.
-//!
-//! `HARN_CLI_IMPL=rust` keeps the legacy direct-render path for the
-//! parity harness (#2299) until the C1 ratchet (#2314) deletes it.
-//!
-//! Parity bar:
-//!   * Default text: byte-for-byte identity between impls (both
-//!     paths share the same `build_report`, so any per-call host
-//!     variance — e.g. provider healthcheck latency — is identical
-//!     because each test invocation runs the probes once and hands
-//!     the result to the renderer).
-//!   * JSON envelope: byte-for-byte identity between impls — the
-//!     dispatch shim pre-serialises the envelope and the script
-//!     echoes the bytes verbatim.
+//! The host gathers toolchain, provider, manifest, capability,
+//! hardware, Ollama, and target-probe data into a structured report.
+//! Rendering lives in `crates/harn-stdlib/src/stdlib/cli/doctor.harn`.
 
 use std::collections::HashSet;
 use std::process::{Command, Output};
@@ -38,17 +20,16 @@ struct SubprocessOutcome {
 }
 
 /// Spawn `harn` with a controlled environment. The fixture scrubs
-/// `HARN_CLI_IMPL` / `NO_COLOR` / `HARN_COLOR` so the test owns the
-/// dispatch path and terminal detection, and accepts any number of
-/// per-test env overrides. Inherits the rest of the env (PATH, HOME,
-/// the user's keyring backend) so the toolchain and credential probes
-/// stay representative of the legacy code path.
+/// `NO_COLOR` / `HARN_COLOR` so the test owns terminal detection, and
+/// accepts any number of per-test env overrides. It inherits the rest
+/// of the env (PATH, HOME, the user's keyring backend) so toolchain and
+/// credential probes stay representative.
 fn run(argv: &[&str], extra_env: &[(&str, &str)]) -> SubprocessOutcome {
     let mut cmd = Command::new(harn_binary());
     for arg in argv {
         cmd.arg(arg);
     }
-    for key in ["HARN_CLI_IMPL", "NO_COLOR", "HARN_COLOR"] {
+    for key in ["NO_COLOR", "HARN_COLOR"] {
         cmd.env_remove(key);
     }
     for (k, v) in extra_env {
@@ -72,45 +53,43 @@ fn parse_json(s: &str, label: &str) -> serde_json::Value {
     })
 }
 
-/// Default `harn doctor` text output must match byte-for-byte across
-/// impls. Both the dispatch path and the legacy path share the same
-/// `build_report`, so any host-derived detail (`rustc` version,
-/// installed targets, provider credential presence, free disk) is
-/// folded into the structured report before either renderer sees it.
 #[test]
-fn doctor_human_text_is_byte_identical_between_impls() {
-    let harn = run(&["doctor"], &[]);
-    let rust = run(&["doctor"], &[("HARN_CLI_IMPL", "rust")]);
-    // The exit code reflects whether the user's host has any blocking
-    // checks failing today (e.g. `rustc` missing) — both impls return
-    // the same code because they consume the same report.
-    assert_eq!(
-        harn.exit_code, rust.exit_code,
-        "doctor exit code diverged: harn={} rust={}\n--- harn stderr ---\n{}\n--- rust stderr ---\n{}",
-        harn.exit_code, rust.exit_code, harn.stderr, rust.stderr
+fn doctor_human_text_renders_core_sections() {
+    let outcome = run(&["doctor"], &[]);
+    assert!(
+        [0, 1].contains(&outcome.exit_code),
+        "unexpected doctor exit code {}; stderr={}",
+        outcome.exit_code,
+        outcome.stderr
     );
-    assert_eq!(harn.stdout, rust.stdout, "doctor human stdout diverged");
+    for needle in [
+        "Harn doctor",
+        "--- Targets ---",
+        "--- Providers ---",
+        "--- Stdlib capabilities ---",
+        "--- Summary ---",
+        "--- Next step ---",
+    ] {
+        assert!(
+            outcome.stdout.contains(needle),
+            "doctor stdout missing {needle:?}:\n{}",
+            outcome.stdout
+        );
+    }
 }
 
-/// `--json` output must also match byte-for-byte. The dispatch shim
-/// pre-serialises the [`JsonEnvelope`] in Rust and hands the script
-/// the canonical bytes via `HARN_DOCTOR_REPORT_ENVELOPE_JSON`; the
-/// script echoes them verbatim instead of re-rendering through
-/// `json_stringify_pretty` (which would alphabetise the keys).
 #[test]
-fn doctor_json_envelope_is_byte_identical_between_impls() {
-    let harn = run(&["doctor", "--json"], &[]);
-    let rust = run(&["doctor", "--json"], &[("HARN_CLI_IMPL", "rust")]);
-    assert_eq!(
-        harn.exit_code, rust.exit_code,
-        "doctor --json exit code diverged: harn={} rust={}\n--- harn stderr ---\n{}\n--- rust stderr ---\n{}",
-        harn.exit_code, rust.exit_code, harn.stderr, rust.stderr
+fn doctor_json_envelope_parses() {
+    let outcome = run(&["doctor", "--json"], &[]);
+    assert!(
+        [0, 1].contains(&outcome.exit_code),
+        "unexpected doctor --json exit code {}; stderr={}",
+        outcome.exit_code,
+        outcome.stderr
     );
-    assert_eq!(
-        harn.stdout, rust.stdout,
-        "doctor --json stdout diverged\n--- rust ---\n{}\n--- harn ---\n{}",
-        rust.stdout, harn.stdout
-    );
+    let value = parse_json(&outcome.stdout, "doctor --json");
+    assert_eq!(value["schemaVersion"], 2);
+    assert_eq!(value["ok"], true);
 }
 
 /// The `--json` envelope must carry the canonical doctor schema
@@ -174,43 +153,22 @@ fn doctor_json_envelope_carries_schema_and_top_level_keys() {
 }
 
 /// Run `harn doctor` against an empty temp dir to exercise the
-/// "no manifest / no skills / no metadata" path on both impls. This
-/// pushes a different mix of WARN/SKIP rows through the renderer than
-/// the cwd-of-the-test invocation and proves the script handles the
-/// alternate shape without diverging from the Rust legacy path.
+/// "no manifest / no skills / no metadata" renderer path.
 #[test]
-fn doctor_in_empty_dir_is_byte_identical_between_impls() {
+fn doctor_in_empty_dir_renders_no_manifest_path() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let cwd = tmp.path().to_string_lossy().into_owned();
 
-    let mut harn_cmd = Command::new(harn_binary());
-    harn_cmd.arg("doctor").current_dir(&cwd);
-    for key in ["HARN_CLI_IMPL", "NO_COLOR", "HARN_COLOR"] {
-        harn_cmd.env_remove(key);
-    }
-    let harn_out = harn_cmd.output().expect("spawn harn");
-
-    let mut rust_cmd = Command::new(harn_binary());
-    rust_cmd
-        .arg("doctor")
-        .current_dir(&cwd)
-        .env("HARN_CLI_IMPL", "rust");
+    let mut cmd = Command::new(harn_binary());
+    cmd.arg("doctor").current_dir(&cwd);
     for key in ["NO_COLOR", "HARN_COLOR"] {
-        rust_cmd.env_remove(key);
+        cmd.env_remove(key);
     }
-    let rust_out = rust_cmd.output().expect("spawn harn");
+    let output = cmd.output().expect("spawn harn");
 
-    let harn_stdout = String::from_utf8_lossy(&harn_out.stdout).into_owned();
-    let rust_stdout = String::from_utf8_lossy(&rust_out.stdout).into_owned();
-    let harn_exit = harn_out.status.code().unwrap_or(-1);
-    let rust_exit = rust_out.status.code().unwrap_or(-1);
-
-    assert_eq!(
-        harn_exit, rust_exit,
-        "doctor exit code diverged in empty dir: harn={harn_exit} rust={rust_exit}"
-    );
-    assert_eq!(
-        harn_stdout, rust_stdout,
-        "doctor stdout diverged in empty dir"
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("no harn.toml found"),
+        "empty-dir doctor output should mention missing manifest:\n{stdout}"
     );
 }

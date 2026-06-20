@@ -1,12 +1,12 @@
 //! `harn precompile` — dispatches the directory-walk + per-file fanout
-//! to the embedded `cli/precompile.harn` script (see harn#2313 / W13).
+//! to the embedded `cli/precompile.harn` script.
 //!
 //! The .harn port owns argv parsing, walking, --out path mirroring, and
-//! the per-file progress + summary render. The actual parse + typecheck
-//! + compile work stays on the legacy Rust path: the script spawns
-//!   `harn precompile <single-file>` per source with `HARN_CLI_IMPL=rust`
-//!   so the child resolves to [`run_legacy`] instead of recursing back
-//!   into the wedge.
+//! the per-file progress and summary render. The actual parse, typecheck,
+//! and compile work stays in Rust behind a command-specific internal mode:
+//! the script spawns `harn precompile <single-file>` per source with
+//! `HARN_PRECOMPILE_INNER=1` so the child compiles one source instead of
+//! recursing back into the directory walker.
 //!
 //! Phase deferrals: `harn time` and `harn bench` (the other two W13
 //! commands) stay Rust-only in this PR — both depend on in-process VM
@@ -18,10 +18,6 @@
 //! preconditions for porting each are filed as #2348 (`harn bench` →
 //! `--emit-summary-json`) and #2350 (`harn time` → `--emit-phase-json`).
 //!
-//! `HARN_CLI_IMPL=rust` keeps the legacy Rust impl reachable for the
-//! parity-snapshot harness (#2299) and the C1 LOC ratchet (#2314)
-//! until the .harn impl is the default everywhere.
-
 use std::path::{Path, PathBuf};
 
 use harn_parser::DiagnosticSeverity;
@@ -46,10 +42,11 @@ pub const PRECOMPILE_BIN_ENV: &str = "HARN_CLI_SELF_EXE";
 const PRECOMPILE_OUT_ENV: &str = "HARN_PRECOMPILE_OUT";
 const PRECOMPILE_KEEP_GOING_ENV: &str = "HARN_PRECOMPILE_KEEP_GOING";
 const PRECOMPILE_QUIET_ENV: &str = "HARN_PRECOMPILE_QUIET";
+pub const PRECOMPILE_INNER_ENV: &str = "HARN_PRECOMPILE_INNER";
 
 pub async fn run(args: PrecompileArgs) {
-    if std::env::var("HARN_CLI_IMPL").as_deref() == Ok("rust") {
-        run_legacy(args);
+    if std::env::var(PRECOMPILE_INNER_ENV).as_deref() == Ok("1") {
+        run_inner_compile(args);
         return;
     }
 
@@ -105,11 +102,9 @@ struct PrecompileArtifacts {
     module_artifact: Option<ModuleArtifact>,
 }
 
-/// Legacy Rust impl, kept behind `HARN_CLI_IMPL=rust` for the
-/// parity-snapshot harness and as the inner compiler the .harn port
-/// dispatches each per-file child to. The C1 ratchet (#2314) removes
-/// this once the .harn impl is the production default everywhere.
-pub fn run_legacy(args: PrecompileArgs) {
+/// Rust compiler entrypoint used by the `.harn` directory-walk driver for
+/// each source file.
+pub fn run_inner_compile(args: PrecompileArgs) {
     let target = args.target.clone();
     if !target.exists() {
         command_error(&format!("target does not exist: {}", target.display()));

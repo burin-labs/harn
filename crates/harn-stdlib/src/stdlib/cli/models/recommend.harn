@@ -1,8 +1,7 @@
 /**
- * `harn models recommend` ported to .harn — see harn#2309 (W9).
+ * `harn models recommend` renderer.
  *
- * **Aggregation in Rust, render + lookup in .harn.** The Rust dispatch
- * shim does the work that needs OS-level capabilities — hardware
+ * The dispatch shim does the work that needs OS-level capabilities: hardware
  * probing (`sysctl` / `/proc/meminfo` / `nvidia-smi` / `MetalPerformanceShaders`),
  * provider credential detection (which reaches into
  * `llm_config::provider_key_available`), and parsing the bundled
@@ -70,8 +69,7 @@ fn __safe_int(value) -> int? {
 }
 
 /**
- * Mirror the Rust impl's `bytes_to_gib_floor` (integer division). The
- * Rust impl gates on `RamBucket::from_available_bytes`:
+ * Convert bytes to the recommendation RAM buckets:
  *   None         → "lt8"
  *   0..=7  GiB   → "lt8"
  *   8..=15 GiB   → "8_16"
@@ -96,10 +94,7 @@ fn __ram_bucket_from_bytes(available_bytes) -> string {
   return "32_plus"
 }
 
-/**
- * Round half-up GiB conversion. Matches `bytes_to_gib_rounded` in the
- * Rust impl — used only for the human rationale string.
- */
+/** Round half-up GiB conversion for the human rationale string. */
 fn __ram_gib_rounded(bytes) -> int {
   let b = __safe_int(bytes) ?? 0
   return (b + GIB / 2) / GIB
@@ -117,11 +112,9 @@ fn __gpu_label(gpu: string) -> string {
 
 /**
  * Find the rule matching `(ram_bucket, gpu, has_provider_key)`. The
- * Rust impl already validates uniqueness + full coverage of the
- * cross-product at table-load time; the script trusts that gate and
- * uses a linear scan. Returns nil when no match exists (the dispatch
- * shim treats that as an internal error since the table is bundled
- * pre-validated).
+ * Dispatch already validates uniqueness + full coverage of the
+ * cross-product at table-load time, so the script trusts that gate and
+ * uses a linear scan. Returns nil when no match exists.
  */
 fn __find_rule(rules: list, ram_bucket: string, gpu: string, has_provider_key: bool) -> dict? {
   for rule in rules {
@@ -140,8 +133,7 @@ fn __find_rule(rules: list, ram_bucket: string, gpu: string, has_provider_key: b
 
 /**
  * Normalize a `(provider, model_id)` pair to the selector the user
- * passes to `--model`. Matches the Rust impl's `harn_selector_for`
- * exactly:
+ * passes to `--model`:
  *   * For ollama, `ollama/foo:bar` → `ollama:foo:bar`; otherwise pass
  *     through (already in `provider:model` form).
  *   * Otherwise strip the leading `provider/` if present.

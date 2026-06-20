@@ -320,13 +320,10 @@ fn __render_terminal(report) -> string {
  * ─── JSON rendering ───────────────────────────────────────────────────────
  */
 fn __render_json(report) -> string {
-  // The Rust impl emits serde_json's pretty form of the PromptReport
-  // verbatim. Harn's `json_stringify_pretty` sorts keys alphabetically,
-  // so the wire byte order differs from serde's struct-field order —
-  // but parsing both sides into a serde_json::Value compares equal.
-  // The dispatch parity tests assert structural equality, not byte
-  // identity, for the JSON path. The trailing newline matches Rust's
-  // `format!("{s}\n")`.
+  // Harn's `json_stringify_pretty` sorts keys alphabetically, so the
+  // wire byte order differs from serde's struct-field order. Tests
+  // assert structural equality, not byte identity, for the JSON path.
+  // The trailing newline matches the host renderer's `format!("{s}\n")`.
   return json_stringify_pretty(report) + "\n"
 }
 

@@ -52,3 +52,5 @@ top_k_supported = false
 [provider_defaults.sambanova]
 top_k_supported = false
 
+[provider_defaults.nvidia]
+top_k_supported = false

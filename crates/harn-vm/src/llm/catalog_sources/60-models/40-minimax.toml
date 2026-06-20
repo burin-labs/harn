@@ -126,4 +126,3 @@ provider = "openrouter"
 context_window = 204800
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 0.33, output_per_mtok = 1.20 }
-

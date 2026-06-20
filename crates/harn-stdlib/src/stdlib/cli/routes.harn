@@ -38,7 +38,7 @@
  * Error envelopes for the inventory-extraction step stay in the Rust
  * shim — building them on the .harn side would require re-implementing
  * the trigger/manifest/IR analyser. The shim only dispatches when the
- * extraction succeeded; failures take the legacy direct render path.
+ * extraction succeeded.
  */
 fn __safe_string(value, fallback: string) -> string {
   if type_of(value) == "string" {
@@ -77,7 +77,7 @@ fn __safe_int(value, fallback: int) -> int {
 
 /**
  * Truncate `value` to at most `width` Unicode scalars. Mirrors the
- * legacy Rust `truncate(&str, width)` — strings ≤ width pass through
+ * host `truncate(&str, width)` helper — strings ≤ width pass through
  * unchanged, strings > width get an ASCII ellipsis suffix that fits
  * inside the column, and widths ≤ 3 collapse to a row of dots.
  */
@@ -100,7 +100,7 @@ fn __truncate(value: string, width: int) -> string {
 /**
  * Right-pad `value` with spaces so the total displayed width is
  * `width`. Matches Rust's `{:<width}` formatter for ASCII inputs (the
- * legacy renderer uses no wide chars in its column headers / payload
+ * route renderer uses no wide chars in its column headers / payload
  * fields, so the byte/char-count equivalence holds).
  */
 fn __pad_right(value: string, width: int) -> string {
@@ -226,17 +226,16 @@ fn __render_text(report: dict) -> string {
 }
 
 /**
- * Build the JSON envelope for `--json`. Matches
- * `JsonEnvelope::ok(ROUTES_SCHEMA_VERSION, report)` in the legacy
- * Rust path. Harn's `json_stringify_pretty` sorts keys alphabetically,
- * so the wire byte order differs from serde's struct-field order — the
- * parity test parses both into serde_json::Value and compares.
+ * Build the JSON envelope for `--json`. Harn's
+ * `json_stringify_pretty` sorts keys alphabetically, so the wire byte
+ * order differs from serde's struct-field order; tests compare the
+ * parsed shape.
  *
  * The `triggers[].path`, `triggers[].events`, and various
  * `budgets.*` keys are absent (not null) on the Rust side when their
  * `Option`/empty `Vec` source values would be skipped by serde
- * (`skip_serializing_if`). Re-stripping them here keeps structural
- * parity with the legacy envelope.
+ * (`skip_serializing_if`). Re-stripping them here keeps the structural
+ * envelope contract.
  */
 fn __strip_absent(report: dict) -> dict {
   let triggers = __safe_list(report["triggers"])
@@ -306,9 +305,7 @@ fn main(harness: Harness) -> int {
     harness.stdio.println(__render_envelope(report))
     return 0
   }
-  // Strip the trailing newline so `println` re-adds exactly one — the
-  // legacy `print_text_report` ends every row with `println!()` which
-  // emits `\n`, so the total stream ends with one terminating `\n`.
+  // Strip the trailing newline so `println` re-adds exactly one.
   let text = __render_text(report)
   let trimmed = if len(text) > 0 && text[len(text) - 1] == "\n" {
     text[0:len(text) - 1]

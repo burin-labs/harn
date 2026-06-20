@@ -95,12 +95,19 @@ pub(crate) async fn run(args: ModelsInstallArgs) {
     }
     println!("\nPulled {}", resolved.id);
 
-    // Best-effort warm probe through the OpenAI-compatible interface. Skip
-    // silently if it fails — the pull itself succeeded.
+    // Best-effort warm probe through provider readiness. Skip silently if it
+    // fails; the pull itself succeeded.
     let api_key = std::env::var("OLLAMA_API_KEY").unwrap_or_default();
-    let readiness =
-        harn_vm::llm::probe_openai_compatible_model("ollama", &resolved.id, &api_key).await;
-    if readiness.valid {
+    let readiness = harn_vm::llm::readiness::probe_provider_readiness_with_options(
+        "ollama",
+        harn_vm::llm::readiness::ProviderReadinessOptions {
+            requested_model: Some(&resolved.id),
+            base_url_override: None,
+            api_key_override: Some(&api_key),
+        },
+    )
+    .await;
+    if readiness.ok {
         println!("Warm probe: ok");
     } else {
         println!("Warm probe: skipped ({})", readiness.message);

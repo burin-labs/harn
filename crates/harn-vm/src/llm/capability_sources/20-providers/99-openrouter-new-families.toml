@@ -40,9 +40,21 @@ structured_output = "delimited"
 [[provider.openrouter]]
 model_match = "z-ai/glm-5*"
 native_tools = true
-preferred_tool_format = "native"
+preferred_tool_format = "text"
+tool_mode_parity = "native_unreliable"
+tool_mode_parity_notes = "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and hallucinated a result token; heredoc text tools completed the loop. OpenRouter reasoning-on text tools emitted malformed tool markup, so auto reasoning is off for agent/code/verify tasks."
 text_tool_wire_format_supported = true
 structured_output = "native"
+thinking_modes = ["enabled"]
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
+prompt_caching = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
 
 [[provider.openrouter]]
 model_match = "kwaipilot/kat-coder-pro-v2"

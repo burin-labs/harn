@@ -1,33 +1,17 @@
 #![recursion_limit = "256"]
 
-//! CLI parity-snapshot harness (harn#2299 / G6).
+//! CLI dispatch snapshot harness.
 //!
-//! Drives the dispatch wedge against golden fixtures so each ported
-//! subcommand stays byte-for-byte compatible with the Rust handler it
-//! replaces. Per-fixture format and recording flow are documented in
-//! `crates/harn-cli/tests/parity_fixtures/README.md`.
-//!
-//! ## Today (groundwork)
-//!
-//! No real subcommand uses the wedge yet — see harn#2293's W1-W13. The
-//! harness runs against the `cli/echo` script that ships with G1 to
-//! prove the round-trip and to act as the reference for how W tickets
-//! should structure their fixtures.
-//!
-//! ## After a W ticket lands
-//!
-//! Each port wave switches its Rust handler to a dispatch shim that
-//! consults the `HARN_CLI_IMPL` env var (`"rust"` keeps the legacy
-//! handler, `"harn"` routes through the wedge — `"harn"` becomes the
-//! default once the wave is merged). The fixture harness reruns the
-//! same fixture against both impls and asserts byte-identical stdout,
-//! stderr, and exit code.
+//! Drives embedded CLI scripts against golden fixtures so script stdout,
+//! stderr, and exit code stay stable. Per-fixture format and recording
+//! flow are documented in
+//! `crates/harn-cli/tests/dispatch_fixtures/README.md`.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const RECORD_ENV: &str = "HARN_CLI_PARITY_RECORD";
+const RECORD_ENV: &str = "HARN_CLI_DISPATCH_RECORD";
 
 #[derive(Debug)]
 struct Fixture {
@@ -153,10 +137,8 @@ fn run_via_harn_bin(fixture: &Fixture) -> ProcessOutcome {
 }
 
 /// Invoke the dispatch wedge in-process via the public test helper.
-/// Used today as the comparison point for `cli/echo` since echo has no
-/// Rust handler — it's a dispatch-only demo. W tickets will replace
-/// this with a real subprocess-vs-subprocess comparison toggled by
-/// `HARN_CLI_IMPL`.
+/// Used as the comparison point for `cli/echo`, which is a
+/// dispatch-only demo script.
 fn run_via_in_process_dispatch(fixture: &Fixture) -> ProcessOutcome {
     let argv = fixture.argv.clone();
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -208,7 +190,7 @@ fn read_env(path: &Path) -> BTreeMap<String, String> {
 }
 
 fn fixtures_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/parity_fixtures")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/dispatch_fixtures")
 }
 
 #[test]
@@ -223,12 +205,10 @@ fn echo_round_trip_matches_in_process_snapshot() {
 
 #[test]
 fn echo_subprocess_matches_snapshot() {
-    // Today `harn echo` isn't wired as a subcommand — the dispatch
-    // wedge lives behind the public API. This test stays as a
-    // forward-looking placeholder so that when W tickets wire the
-    // first real subcommand-shim, the subprocess path is already
-    // exercised. Skipped at the body level until then.
-    if std::env::var_os("HARN_CLI_PARITY_REQUIRE_SUBPROCESS").is_none() {
+    // `harn echo` is not wired as a public subcommand; the dispatch
+    // script lives behind the public API. Keep this opt-in smoke so
+    // subprocess fixture support is easy to exercise when needed.
+    if std::env::var_os("HARN_CLI_DISPATCH_REQUIRE_SUBPROCESS").is_none() {
         return;
     }
     let command_dir = fixtures_dir().join("echo");
@@ -237,8 +217,7 @@ fn echo_subprocess_matches_snapshot() {
     fixture.assert_matches("subprocess", &actual);
 }
 
-// Silence the unused-helper warning until W tickets light up the
-// subprocess path for real subcommands.
+// Silence the unused-helper warning for the opt-in subprocess smoke.
 #[allow(dead_code)]
 fn _force_link_run_via_harn_bin() -> ProcessOutcome {
     run_via_harn_bin(&Fixture {
