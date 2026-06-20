@@ -2873,6 +2873,26 @@ mod tests {
     }
 
     #[test]
+    fn fireworks_gpt_oss_route_has_real_context_window() {
+        // Regression: the Fireworks-served `accounts/fireworks/models/gpt-oss-120b`
+        // wire id had NO catalog row, so its context window resolved to None and
+        // the agent's auto-compaction budget had nothing to enforce — the prompt
+        // grew until Fireworks rejected the turn with HTTP 400 [context_overflow]
+        // (session 019ee303: 197467 tokens > 131071 max). Cataloging the real
+        // 131072 window lets compaction trigger before the hard limit.
+        reset_overrides();
+
+        let entry = model_catalog_entry("accounts/fireworks/models/gpt-oss-120b")
+            .expect("Fireworks gpt-oss-120b must be in the model catalog");
+        assert_eq!(entry.context_window, 131_072);
+        assert_eq!(entry.provider, "fireworks");
+        assert_eq!(
+            entry.equivalence_group.as_deref(),
+            Some("openai-gpt-oss-120b"),
+        );
+    }
+
+    #[test]
     fn test_user_catalog_overlay_re_homes_model_provider() {
         // Users can re-home a built-in model by overlaying a catalog row;
         // the exact-match catalog lookup must honor overlays as well as the

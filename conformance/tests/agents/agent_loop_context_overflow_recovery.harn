@@ -1,0 +1,123 @@
+import { llm_done, with_llm_script } from "std/testing"
+
+/**
+ * A provider can reject a turn with HTTP 400 [context_overflow] when the
+ * assembled prompt outgrows the model's real context window (large repo, or an
+ * under-cataloged window so auto-compaction never fired). The agent must NOT
+ * die: it emergency-compacts the live transcript (deterministic observation
+ * masking) and RETRIES the turn, bounded so a pathological irreducible prompt
+ * can't loop forever. Only a still-overflowing, no-longer-shrinkable transcript
+ * becomes a genuinely terminal error — distinct from auth / invalid-model
+ * failures which stay terminal immediately.
+ */
+fn lookup_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "lookup",
+    "Return evidence",
+    {
+      handler: { args -> "evidence for " + to_string(args?.query) },
+      parameters: {query: {type: "string"}},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  return tools
+}
+
+fn overflow_turn() {
+  return {
+    error: {
+      status: 400,
+      reason: "context_overflow",
+      message: "fireworks HTTP 400 [context_overflow]: prompt is too long: 197467 tokens exceeds maximum context length of 131071",
+    },
+  }
+}
+
+pipeline main() {
+  // (a) Accrue several tool observations so the transcript has masking
+  // headroom, hit context_overflow, then recover: emergency compaction archives
+  // older observations and the retried turn succeeds and finishes.
+  with_llm_script(
+    [
+      {tool_calls: [{id: "lookup_1", name: "lookup", arguments: {query: "a"}}]},
+      {tool_calls: [{id: "lookup_2", name: "lookup", arguments: {query: "b"}}]},
+      {tool_calls: [{id: "lookup_3", name: "lookup", arguments: {query: "c"}}]},
+      {tool_calls: [{id: "lookup_4", name: "lookup", arguments: {query: "d"}}]},
+      overflow_turn(),
+      llm_done(),
+    ],
+    { ->
+      let result = agent_loop(
+        "Inspect evidence and finish.",
+        nil,
+        {
+          provider: "mock",
+          model: "qwen-local",
+          tools: lookup_tools(),
+          tool_format: "native",
+          loop_until_done: true,
+          max_iterations: 12,
+        },
+      )
+      __io_println(result.status)
+      __io_println(contains(json_stringify(result.transcript), "context_overflow_recovery"))
+      __io_println(contains(json_stringify(result.transcript), "\"reason\":\"context_overflow\""))
+      __io_println(!contains(json_stringify(result.transcript), "agent_loop_terminal_error"))
+    },
+  )
+  // (b) Bounded: when EVERY turn overflows (nothing left to shed once the
+  // recovery budget is spent), the loop stops with a terminal context_overflow
+  // error instead of spinning forever.
+  with_llm_script(
+    [
+      {tool_calls: [{id: "lookup_1", name: "lookup", arguments: {query: "a"}}]},
+      {tool_calls: [{id: "lookup_2", name: "lookup", arguments: {query: "b"}}]},
+      overflow_turn(),
+      overflow_turn(),
+      overflow_turn(),
+      overflow_turn(),
+      overflow_turn(),
+      overflow_turn(),
+    ],
+    { ->
+      let result = agent_loop(
+        "Inspect evidence and finish.",
+        nil,
+        {
+          provider: "mock",
+          model: "qwen-local",
+          tools: lookup_tools(),
+          tool_format: "native",
+          loop_until_done: true,
+          max_iterations: 12,
+        },
+      )
+      __io_println(result.status)
+      __io_println(result.error.reason)
+    },
+  )
+  // (c) A genuinely-terminal error (auth) is NOT routed through overflow
+  // recovery — it stops immediately with no recovery event.
+  with_llm_script(
+    [{error: {category: "auth", message: "missing API key"}}, llm_done()],
+    { ->
+      let result = agent_loop(
+        "Inspect evidence and finish.",
+        nil,
+        {
+          provider: "mock",
+          model: "qwen-local",
+          tools: lookup_tools(),
+          tool_format: "native",
+          loop_until_done: true,
+          max_iterations: 12,
+        },
+      )
+      __io_println(result.status)
+      __io_println(!contains(json_stringify(result.transcript), "context_overflow_recovery"))
+    },
+  )
+}
