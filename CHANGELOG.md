@@ -8,6 +8,14 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.130
+
+### Changed
+
+Provider catalog exports now keep `provider-catalog.json` as the only checked-in
+catalog data artifact; TypeScript and Swift provider-catalog bindings are
+type-only schema contracts for hosts that load the JSON directly.
+
 ## v0.8.129
 
 ### Added
