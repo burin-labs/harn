@@ -8,6 +8,58 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.127
+
+### Changed
+
+- **User-function calls allocate less on the call hot path.** Entering a closure
+  frame previously performed two `VmEnv` (scope-stack) heap clones plus a
+  reallocation when the cloned callee env was grown by the empty scope every
+  call pushes. The caller-env snapshot is now a move (`std::mem::replace`)
+  rather than a clone, and the callee-env clone reserves room for the pushed
+  scope so it no longer reallocates. A measured user-function call drops from 5
+  heap allocations / 81 bytes to 3 / 41 bytes, with identical scoping,
+  recursion, and closure-capture semantics and no `harn` language behavior
+  change (#3474).
+
+### Fixed
+
+- **Provider `context_overflow` no longer kills the agent loop.** When a
+  provider rejects a request because the prompt exceeds its context window,
+  the loop now performs an emergency compaction and retries instead of
+  recording a terminal `provider_call_error` and ending the run. The
+  Fireworks `gpt-oss-120b` route gained a real catalog context window so its
+  auto-compaction budget resolves correctly rather than falling back to a
+  placeholder (#3475). Context-overflow classification
+  (`is_context_overflow`) is now provider-agnostic: it recognizes overflow
+  phrasings from providers that do not use the literal word "context" (e.g.
+  Gemini's "input token count … exceeds the maximum"), so the recovery path
+  generalizes to every provider, with transparent single-shot surfacing
+  rather than misclassification as a generic `invalid_request` (#3479).
+- **`tool_define`'d native tool schemas now surface in nested agent loops.**
+  A nested `agent_loop` (e.g. an agentic rubric judge or sub-agent) that pins
+  `tool_format: "native"` for a route whose capability matrix marks the native
+  channel unreliable (`tool_mode_parity = native_unreliable`) previously lost
+  every tool call — the model emitted the call as prose instead of a real
+  invocation. The stdlib `tool_format` resolution and the wire-level capability
+  gate now agree for parity-forbidden explicit pins, so cheap-model graders
+  and sub-agents emit real tool calls (#3476).
+- **`run` tool accepts an argv vector under the `command` field.** Models
+  frequently conflate the `command` (string) and `argv` (array) fields and
+  pass `run({command: ["bash", "-lc", "…"]})`. The host `run_command` request
+  builder now coerces a list under `command` into argv mode instead of
+  throwing `argv must be a non-empty list of strings` (#3477).
+- **Security (SB-3): cwd-scoped recursive deletes are flagged as
+  destructive.** The deterministic destructive-command detector previously
+  only matched root-anchored wipes (`rm -rf /`, `mkfs`, `dd if=`). A
+  prompt-injected workspace-relative wipe (`rm -rf .`, `rm -rf ./*`,
+  `rm -rf *`, `find . -delete`, `find . -exec rm`) got no `destructive`
+  label and was recommended for auto-approval — a data-loss-from-injection
+  vector. A new token-based `has_cwd_wipe_tokens` check now flags these for
+  UNIX shells, Windows `cmd.exe`, and PowerShell, insensitive to flag order
+  and whitespace and catching wrapped forms (`sh -c rm -rf .`,
+  `cd x && rm -rf .`) (#3478).
+
 ## v0.8.126
 
 ### Added
