@@ -939,6 +939,7 @@
       "classification": "hosted",
       "auth_env": [
         "MOONSHOT_API_KEY",
+        "MOONSHOT_AI_API_KEY",
         "KIMI_API_KEY"
       ],
       "recommended": {
@@ -961,6 +962,59 @@
         "tool_mode_parity": "unknown",
         "structured_output_transport": "native",
         "structured_output_mode": "native_json",
+        "streaming": true,
+        "reasoning_knobs": [
+          "enabled"
+        ],
+        "prompt_or_context_cache": true,
+        "usage_accounting_confidence": "high"
+      },
+      "empirical": {
+        "status": "not_recorded",
+        "sources": [],
+        "total_runs": 0,
+        "passed_runs": 0,
+        "failed_runs": 0,
+        "skipped_runs": 0,
+        "best_tool_format": null,
+        "native_text_parity": null,
+        "evidence": []
+      },
+      "notes": [],
+      "caveats": [],
+      "mcp_notes": [],
+      "local_setup_notes": []
+    },
+    {
+      "id": "nvidia",
+      "display_name": "Nvidia",
+      "catalog_provider": "nvidia",
+      "endpoint_style": "OpenAI-compatible chat completions",
+      "classification": "hosted",
+      "auth_env": [
+        "NVIDIA_API_KEY",
+        "NIM_API_KEY"
+      ],
+      "recommended": {
+        "selector": "nvidia:nvidia/minimax-m2.7",
+        "provider": "nvidia",
+        "model": "nvidia/minimax-m2.7",
+        "display_name": "MiniMax M2.7 (NVIDIA NIM)",
+        "tool_format": "native",
+        "harn_options": [
+          "provider = \"nvidia\"",
+          "model = \"nvidia/minimax-m2.7\"",
+          "tool_format = \"native\"",
+          "structured_output_mode = \"delimited\""
+        ]
+      },
+      "capabilities": {
+        "native_tools": true,
+        "text_tools": true,
+        "preferred_tool_format": "native",
+        "tool_mode_parity": "unknown",
+        "structured_output_transport": "delimited",
+        "structured_output_mode": "delimited",
         "streaming": true,
         "reasoning_knobs": [
           "enabled"
@@ -1161,14 +1215,14 @@
         "SAMBANOVA_API_KEY"
       ],
       "recommended": {
-        "selector": "sambanova:sambanova/DeepSeek-V4-Pro",
+        "selector": "sambanova:sambanova/gpt-oss-120b",
         "provider": "sambanova",
-        "model": "sambanova/DeepSeek-V4-Pro",
-        "display_name": "DeepSeek V4 Pro (SambaNova)",
+        "model": "sambanova/gpt-oss-120b",
+        "display_name": "GPT-OSS 120B (SambaNova)",
         "tool_format": "native",
         "harn_options": [
           "provider = \"sambanova\"",
-          "model = \"sambanova/DeepSeek-V4-Pro\"",
+          "model = \"sambanova/gpt-oss-120b\"",
           "tool_format = \"native\"",
           "structured_output_mode = \"native_json\""
         ]
@@ -1182,7 +1236,8 @@
         "structured_output_mode": "native_json",
         "streaming": true,
         "reasoning_knobs": [
-          "enabled"
+          "effort",
+          "reasoning_effort"
         ],
         "prompt_or_context_cache": false,
         "usage_accounting_confidence": "high"

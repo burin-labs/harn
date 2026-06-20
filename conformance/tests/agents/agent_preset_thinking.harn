@@ -1,27 +1,36 @@
+import { agent_loop_options } from "std/agent/options"
 import { agent_preset } from "std/agent/presets"
 
 pipeline default() {
-  // Anthropic claude-opus-4-7 advertises adaptive thinking.
-  let audit_anthropic = agent_preset("audit", {provider: "anthropic", model: "claude-opus-4-7"})
+  // Presets install a small automatic reasoning policy; agent_loop_options
+  // lowers that through the shared provider-aware policy implementation.
+  let audit_anthropic = agent_loop_options(agent_preset("audit", {provider: "anthropic", model: "claude-opus-4-7"}))
   __io_println(audit_anthropic.thinking.mode)
+  __io_println(audit_anthropic._agent_reasoning_policy_applied.policy)
+  __io_println(audit_anthropic._agent_reasoning_policy_applied.scale)
+  __io_println(audit_anthropic._agent_reasoning_policy_applied.task)
   // Caller-set thinking always wins.
-  let audit_explicit = agent_preset(
-    "audit",
-    {provider: "anthropic", model: "claude-opus-4-7", thinking: {mode: "disabled"}},
+  let audit_explicit = agent_loop_options(
+    agent_preset(
+      "audit",
+      {provider: "anthropic", model: "claude-opus-4-7", thinking: {mode: "disabled"}},
+    ),
   )
   __io_println(audit_explicit.thinking.mode)
-  // OpenAI o3 supports reasoning_effort but not adaptive.
-  let audit_openai = agent_preset("audit", {provider: "openai", model: "o3"})
+  // OpenAI o3 supports reasoning_effort; presets keep the default effort low.
+  let audit_openai = agent_loop_options(agent_preset("audit", {provider: "openai", model: "o3"}))
   __io_println(audit_openai.thinking.mode)
   __io_println(audit_openai.thinking.level)
   // verify preset prefers low effort on effort-capable providers.
-  let verify_openai = agent_preset("verify", {provider: "openai", model: "o3"})
+  let verify_openai = agent_loop_options(agent_preset("verify", {provider: "openai", model: "o3"}))
   __io_println(verify_openai.thinking.mode)
   __io_println(verify_openai.thinking.level)
   // Model with no advertised thinking modes leaves thinking unset.
-  let audit_unknown = agent_preset("audit", {provider: "ollama", model: "ollama-something-without-thinking"})
+  let audit_unknown = agent_loop_options(
+    agent_preset("audit", {provider: "ollama", model: "ollama-something-without-thinking"}),
+  )
   __io_println(audit_unknown?.thinking == nil)
   // summary preset prefers disabled mode when supported, else nothing.
-  let summary_anthropic = agent_preset("summary", {provider: "anthropic", model: "claude-opus-4-7"})
+  let summary_anthropic = agent_loop_options(agent_preset("summary", {provider: "anthropic", model: "claude-opus-4-7"}))
   __io_println(summary_anthropic?.thinking == nil || summary_anthropic.thinking.mode == "disabled")
 }

@@ -2330,6 +2330,8 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
         let glm = lookup("together", "zai-org/GLM-5.1");
         assert!(glm.native_tools);
         assert!(glm.prompt_caching);
+        assert_eq!(glm.preferred_tool_format.as_deref(), Some("text"));
+        assert_eq!(glm.tool_mode_parity.as_deref(), Some("native_unreliable"));
         assert_eq!(
             glm.auto_reasoning_overrides
                 .get("agent")
@@ -2340,6 +2342,11 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
         let minimax = lookup("together", "MiniMaxAI/MiniMax-M2.7");
         assert!(minimax.native_tools);
         assert!(minimax.prompt_caching);
+        assert_eq!(minimax.preferred_tool_format.as_deref(), Some("json"));
+        assert_eq!(
+            minimax.tool_mode_parity.as_deref(),
+            Some("native_unreliable")
+        );
         assert!(!minimax.reasoning_text_promotable);
 
         let step = lookup("openrouter", "stepfun/step-3.7-flash");

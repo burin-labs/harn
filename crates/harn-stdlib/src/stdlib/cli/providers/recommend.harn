@@ -1,7 +1,7 @@
 /**
  * `harn providers recommend` ported to .harn — see harn#2310 (W10).
  *
- * **Pragmatic partial port.** The legacy Rust impl reads coding-agent
+ * Host aggregation reads coding-agent
  * readiness JSON / summary JSON / default-report from disk (with a
  * non-trivial summary→outcome reduction pipeline), filters by
  * `--provider`, then renders. File I/O + the reduction pipeline stays
@@ -108,7 +108,7 @@ fn main(harness: Harness) -> int {
     return 0
   }
   let text = __render_human(report)
-  // The legacy renderer always ends each line with `println!`; the
+  // The host renderer always ended each line with `println!`; the
   // last println leaves a single trailing newline. Strip the trailing
   // newline so `harness.stdio.println` can re-add exactly one and the
   // bytes match the Rust path.

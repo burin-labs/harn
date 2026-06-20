@@ -84,6 +84,42 @@ fn __install_fixture_mocks(harness: Harness) {
   )
 }
 
+fn __install_live_egress_policy() {
+  egress_policy(
+    {
+      allow: [
+        "www.anthropic.com",
+        "anthropic.com",
+        "claude.com",
+        "platform.openai.com",
+        "developers.openai.com",
+        "openai.com",
+        "openrouter.ai",
+        "api.anthropic.com",
+        "api.openai.com",
+        "router.huggingface.co",
+        "generativelanguage.googleapis.com",
+        "api.mistral.ai",
+        "api.cohere.ai",
+        "api.x.ai",
+        "api.together.xyz",
+        "api.groq.com",
+        "api.cerebras.ai",
+        "api.deepseek.com",
+        "api.fireworks.ai",
+        "dashscope-intl.aliyuncs.com",
+        "api.minimax.io",
+        "api.z.ai",
+        "api.moonshot.ai",
+        "api.deepinfra.com",
+        "api.sambanova.ai",
+        "integrate.api.nvidia.com",
+      ],
+      default: "deny",
+    },
+  )
+}
+
 fn __rate_per_mtok_from_per_token(value) {
   if value == nil {
     return nil
@@ -128,6 +164,52 @@ fn __openrouter_mapper(payload) {
   return entries
 }
 
+fn __pricing_from_per_token_record(pricing) {
+  if pricing == nil {
+    return nil
+  }
+  var pricing_dict = {}
+  let input_rate = __rate_per_mtok_from_per_token(pricing?.prompt ?? pricing?.input)
+  let output_rate = __rate_per_mtok_from_per_token(pricing?.completion ?? pricing?.output)
+  let cache_read = __rate_per_mtok_from_per_token(pricing?.input_cache_read ?? pricing?.cache_read)
+  if input_rate != nil {
+    pricing_dict = pricing_dict + {input_per_mtok: input_rate}
+  }
+  if output_rate != nil {
+    pricing_dict = pricing_dict + {output_per_mtok: output_rate}
+  }
+  if cache_read != nil {
+    pricing_dict = pricing_dict + {cache_read_per_mtok: cache_read}
+  }
+  if len(pricing_dict) == 0 {
+    return nil
+  }
+  return pricing_dict
+}
+
+fn __generic_models_mapper(payload) {
+  var entries = []
+  for record in payload?.data ?? payload?.models ?? [] {
+    let id = record?.id ?? record?.name
+    if id == nil || id == "" {
+      continue
+    }
+    let context = record?.context_length
+      ?? record?.context_window
+      ?? record?.max_context_length
+      ?? record?.max_model_len
+      ?? record?.max_input_tokens
+    let entry = {
+      model_id: id,
+      name: record?.display_name ?? record?.name ?? record?.id,
+      context_window: context,
+      pricing: __pricing_from_per_token_record(record?.pricing),
+    }
+    entries = entries + [entry]
+  }
+  return entries
+}
+
 fn __fireworks_mapper(payload) {
   var entries = []
   for record in payload?.data ?? [] {
@@ -149,6 +231,50 @@ fn __fireworks_adapter(env) {
     mapper: __fireworks_mapper,
   }
   return json_api_adapter(env, config)
+}
+
+fn __keyed_models_spec(
+  id: string,
+  provider: string,
+  source_url: string,
+  key_envs: list<string>,
+  options: dict,
+) -> dict {
+  let config = {
+    id: id,
+    kind: "json",
+    provider: provider,
+    source_owner: "provider",
+    source_url: source_url,
+    key_envs: key_envs,
+    confidence: options?.confidence ?? "high",
+    terms_notes: options?.terms_notes ?? "Provider-owned /models endpoint.",
+    auth_header: options?.auth_header,
+    auth_prefix: options?.auth_prefix,
+    extra_headers: options?.extra_headers,
+    mapper: options?.mapper ?? __generic_models_mapper,
+  }
+  return {
+    key_envs: config.key_envs,
+    run_fn: { env -> key_required_adapter(
+      env,
+      config
+        + {
+        adapter: { adapter_env -> json_api_adapter(
+          adapter_env,
+          {
+            id: config.id,
+            provider: config.provider,
+            source_url: config.source_url,
+            source_owner: config.source_owner,
+            confidence: config.confidence,
+            terms_notes: config.terms_notes,
+            mapper: config.mapper,
+          },
+        ) },
+      },
+    ) },
+  }
 }
 
 fn __anthropic_spec() {
@@ -213,11 +339,150 @@ fn __fireworks_spec() {
   return {key_envs: config.key_envs, run_fn: { env -> key_required_adapter(env, config) }}
 }
 
-fn __adapter_specs() {
+fn __adapter_specs(live) {
+  if live {
+    return [__openrouter_spec(), __fireworks_spec()]
+  }
   return [__anthropic_spec(), __openai_spec(), __openrouter_spec(), __fireworks_spec()]
 }
 
-fn __load_secrets(harness: Harness, live, specs) {
+fn __live_adapter_specs() {
+  return [
+    __keyed_models_spec(
+      "anthropic-models-api",
+      "anthropic",
+      "https://api.anthropic.com/v1/models",
+      ["ANTHROPIC_API_KEY"],
+      {
+        auth_header: "x-api-key",
+        auth_prefix: "",
+        extra_headers: {"anthropic-version": "2023-06-01"},
+        terms_notes: "Provider-owned /v1/models endpoint.",
+      },
+    ),
+    __keyed_models_spec(
+      "openai-models-api",
+      "openai",
+      "https://api.openai.com/v1/models",
+      ["OPENAI_API_KEY"],
+      {terms_notes: "Provider-owned /v1/models endpoint."},
+    ),
+    __keyed_models_spec(
+      "huggingface-router-models-api",
+      "huggingface",
+      "https://router.huggingface.co/v1/models",
+      ["HF_TOKEN", "HUGGINGFACE_API_KEY"],
+      {terms_notes: "Hugging Face Router /v1/models endpoint."},
+    ),
+    __keyed_models_spec(
+      "gemini-models-api",
+      "gemini",
+      "https://generativelanguage.googleapis.com/v1beta/models",
+      ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
+      {auth_header: "x-goog-api-key", auth_prefix: "", terms_notes: "Gemini API model index."},
+    ),
+    __keyed_models_spec(
+      "mistral-models-api",
+      "mistral",
+      "https://api.mistral.ai/v1/models",
+      ["MISTRAL_API_KEY"],
+      {terms_notes: "Provider-owned /v1/models endpoint."},
+    ),
+    __keyed_models_spec(
+      "cohere-models-api",
+      "cohere",
+      "https://api.cohere.ai/compatibility/v1/models",
+      ["COHERE_API_KEY"],
+      {terms_notes: "Cohere OpenAI-compatible /models endpoint."},
+    ),
+    __keyed_models_spec(
+      "xai-models-api",
+      "xai",
+      "https://api.x.ai/v1/models",
+      ["XAI_API_KEY"],
+      {terms_notes: "Provider-owned /v1/models endpoint."},
+    ),
+    __keyed_models_spec(
+      "together-models-api",
+      "together",
+      "https://api.together.xyz/v1/models",
+      ["TOGETHER_AI_API_KEY"],
+      {terms_notes: "Provider-owned /v1/models endpoint."},
+    ),
+    __keyed_models_spec(
+      "groq-models-api",
+      "groq",
+      "https://api.groq.com/openai/v1/models",
+      ["GROQ_API_KEY"],
+      {terms_notes: "Groq OpenAI-compatible /models endpoint."},
+    ),
+    __keyed_models_spec(
+      "cerebras-models-api",
+      "cerebras",
+      "https://api.cerebras.ai/v1/models",
+      ["CEREBRAS_API_KEY"],
+      {terms_notes: "Provider-owned /v1/models endpoint."},
+    ),
+    __keyed_models_spec(
+      "deepseek-models-api",
+      "deepseek",
+      "https://api.deepseek.com/v1/models",
+      ["DEEPSEEK_API_KEY"],
+      {terms_notes: "Provider-owned /v1/models endpoint."},
+    ),
+    __keyed_models_spec(
+      "dashscope-models-api",
+      "dashscope",
+      "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+      ["DASHSCOPE_API_KEY"],
+      {terms_notes: "DashScope OpenAI-compatible /models endpoint."},
+    ),
+    __keyed_models_spec(
+      "minimax-models-api",
+      "minimax",
+      "https://api.minimax.io/v1/models",
+      ["MINIMAX_API_KEY"],
+      {terms_notes: "Provider-owned /v1/models endpoint."},
+    ),
+    __keyed_models_spec(
+      "zai-models-api",
+      "zai",
+      "https://api.z.ai/v1/models",
+      ["ZAI_API_KEY", "ZHIPU_API_KEY"],
+      {terms_notes: "Z.AI OpenAI-compatible /models endpoint."},
+    ),
+    __keyed_models_spec(
+      "moonshot-models-api",
+      "moonshot",
+      "https://api.moonshot.ai/v1/models",
+      ["MOONSHOT_API_KEY", "MOONSHOT_AI_API_KEY", "KIMI_API_KEY"],
+      {terms_notes: "Provider-owned /v1/models endpoint."},
+    ),
+    __keyed_models_spec(
+      "deepinfra-models-api",
+      "deepinfra",
+      "https://api.deepinfra.com/v1/openai/models",
+      ["DEEPINFRA_API_KEY", "DEEPINFRA_TOKEN"],
+      {terms_notes: "DeepInfra OpenAI-compatible /models endpoint."},
+    ),
+    __keyed_models_spec(
+      "sambanova-models-api",
+      "sambanova",
+      "https://api.sambanova.ai/v1/models",
+      ["SAMBANOVA_API_KEY"],
+      {terms_notes: "Provider-owned /v1/models endpoint."},
+    ),
+    __keyed_models_spec(
+      "nvidia-nim-models-api",
+      "nvidia",
+      "https://integrate.api.nvidia.com/v1/models",
+      ["NVIDIA_API_KEY", "NIM_API_KEY"],
+      {terms_notes: "NVIDIA NIM API Catalog OpenAI-compatible /models endpoint."},
+    ),
+  ]
+}
+
+fn __load_secrets(harness: Harness, live: bool, specs: list<dict>) -> dict {
   if !live {
     return {}
   }
@@ -256,11 +521,11 @@ fn __ensure_run_dir(harness: Harness) {
   }
 }
 
-fn __build_meta(run_mode, observed_at) {
+fn __build_meta(run_mode: string, observed_at: string) -> dict {
   return {generated_at: observed_at, run_mode: run_mode}
 }
 
-fn __compose_report(env, specs, catalog, run_mode) {
+fn __compose_report(env: dict, specs: list<dict>, catalog: dict, run_mode: string) -> dict {
   let adapter_outcome = run_adapters(env, specs)
   let normalized = normalize_observations(adapter_outcome.observations)
   let drift = build_drift(normalized.observations, catalog)
@@ -274,13 +539,13 @@ fn __compose_report(env, specs, catalog, run_mode) {
   }
 }
 
-fn __write_outputs(harness: Harness, outcome) {
+fn __write_outputs(harness: Harness, outcome: dict) {
   __ensure_run_dir(harness)
   harness.fs.write_text(path_join(RUN_OUTPUT_DIR, "drift-report.md"), outcome.report)
   harness.fs.write_text(path_join(RUN_OUTPUT_DIR, "candidate.toml"), outcome.candidate)
 }
 
-fn __check_against_golden(harness: Harness, outcome, update) -> int {
+fn __check_against_golden(harness: Harness, outcome: dict, update: bool) -> int {
   if update {
     harness.fs.write_text(EXPECTED_REPORT_PATH, outcome.report)
     harness.fs.write_text(EXPECTED_CANDIDATE_PATH, outcome.candidate)
@@ -315,7 +580,11 @@ pipeline main(task) {
   let live = argv.contains("--live")
   let check = argv.contains("--check")
   let update = argv.contains("--update")
-  let specs = __adapter_specs()
+  let specs = if live {
+    __adapter_specs(live) + __live_adapter_specs()
+  } else {
+    __adapter_specs(live)
+  }
   let observed_at = if live {
     date_now_iso()
   } else {
@@ -323,12 +592,14 @@ pipeline main(task) {
   }
   if !live {
     __install_fixture_mocks(harness)
+  } else {
+    __install_live_egress_policy()
   }
   let env_data = {
     observed_at: observed_at,
     secrets: __load_secrets(harness, live, specs),
     http_options: if live {
-      nil
+      {max_response_bytes: 8388608}
     } else {
       {fetched_at: FIXED_FETCHED_AT}
     },

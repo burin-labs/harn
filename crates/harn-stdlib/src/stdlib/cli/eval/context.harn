@@ -11,7 +11,7 @@
  * exposing the orchestration surface.
  *
  * What this script owns: the **markdown report body** rendered into
- * `summary.md`, plus the one-line human summary the legacy handler
+ * `summary.md`, plus the one-line human summary the host handler
  * prints to stdout, plus the JSON pretty rendering used when the
  * caller passes `--json`. The Rust shim writes the JSON artifacts and
  * the markdown file on its side (the script runs in the standard
@@ -25,8 +25,8 @@
  *     "summary"  — render the one-line human summary to stdout.
  *     "json"     — render the JSON pretty form to stdout for `--json`.
  *
- * The wider port (replacing the Rust shim) is gated on G4 (#2297).
- * C1 (#2314) will delete the `HARN_CLI_IMPL=rust` escape hatch.
+ * Moving more of the evaluation pipeline into .harn is gated on G4
+ * (#2297).
  */
 fn __safe_string(value, fallback: string) -> string {
   if type_of(value) == "string" {
@@ -52,7 +52,7 @@ fn __safe_dict(value) -> dict {
 /**
  * Format a float as `"X.YYYY"` (4 decimals, half-up padded).
  * Mirrors Rust's `format!("{:.4}", x)` exactly so the markdown body
- * stays byte-identical with the legacy renderer.
+ * stays byte-identical with the host formatter.
  */
 fn __format_float_4(value) -> string {
   let f = to_float(value) ?? 0.0

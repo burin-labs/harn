@@ -1,0 +1,18 @@
+import { llm_text, with_llm_script } from "std/testing"
+
+pipeline default() {
+  with_llm_script(
+    [llm_text("Still checking."), llm_text("finished ##DONE##")],
+    { ->
+      let result = agent_loop(
+        "Finish with the sentinel after one retry.",
+        nil,
+        {provider: "mock", loop_until_done: true, max_iterations: 3, max_nudges: 1},
+      )
+      __io_println(result.status)
+      __io_println(result.stop_reason)
+      __io_println(result.visible_text)
+      __io_println(result.llm.iterations)
+    },
+  )
+}

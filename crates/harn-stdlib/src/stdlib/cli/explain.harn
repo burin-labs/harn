@@ -12,7 +12,7 @@
  *     gate in `make check-diagnostics-catalog`. Re-porting the 300-LOC
  *     markdown renderer to .harn for zero functional gain is not worth
  *     the byte-for-byte risk.
- *   * `--invariant` is the legacy control-flow path explainer; it
+ *   * `--invariant` is the control-flow path explainer; it
  *     reaches into `harn_ir::explain_handler_invariant` and is
  *     explicitly out of scope per #2304.
  *
@@ -59,10 +59,9 @@ fn render_human(entry: dict) -> string {
 }
 
 fn render_envelope_json(entry: dict) -> string {
-  // Build the same envelope shape the legacy Rust impl emits. Harn's
-  // json_stringify sorts dict keys alphabetically, so the wire-order
-  // differs from serde's struct-field order — the parity test parses
-  // both sides into serde_json::Value and compares structurally.
+  // Build the canonical envelope shape. Harn's json_stringify sorts
+  // dict keys alphabetically, so the wire-order differs from serde's
+  // struct-field order; callers compare this surface structurally.
   let related_codes = []
   var related_strs = related_codes
   let related = entry["related"] ?? []
@@ -101,8 +100,7 @@ fn main(harness: Harness) {
     harness.stdio.println(render_envelope_json(entry))
   } else {
     // print! (no trailing newline) — `render_human` already emits its
-    // own newlines so the output matches the legacy Rust println chain
-    // byte-for-byte. Drop the last newline that would be doubled.
+    // own newlines. Drop the last newline that would be doubled.
     let text = render_human(entry)
     let trimmed = if len(text) > 0 && text[len(text) - 1] == "\n" {
       text[0:len(text) - 1]

@@ -13,7 +13,7 @@
  * What this script owns: two narrow rendering surfaces that are
  * decoupled from the run pipeline —
  *
- *   1. The post-run **summary line** the legacy handler prints to
+ *   1. The post-run **summary line** the host handler prints to
  *      stdout after the per-case lines (`tool-call eval: N/M passed
  *      (X.Y%), total_cost_usd=...`). The per-case streaming lines stay
  *      in Rust because they're emitted *during* the eval loop, not
@@ -37,8 +37,8 @@
  *                   max_drop_pp, label, total_cases_mismatch (bool),
  *                   current_total_cases, baseline_total_cases}
  *
- * The wider port (replacing the Rust pipeline) is gated on G4 (#2297).
- * C1 (#2314) will delete the `HARN_CLI_IMPL=rust` escape hatch.
+ * Moving more of the evaluation pipeline into .harn is gated on G4
+ * (#2297).
  */
 fn __safe_string(value, fallback: string) -> string {
   if type_of(value) == "string" {
@@ -154,9 +154,8 @@ fn __render_summary_line(envelope: dict) -> string {
 /**
  * Render the regression-check verdict. Returns a dict
  * `{stdout: "...", stderr: "...", exit_code: N}` so the Rust dispatch
- * shim can route each channel to the right destination — keeping the
- * legacy behavior where the success line goes to stdout and the
- * failure line goes to stderr.
+ * shim can route each channel to the right destination: the success
+ * line goes to stdout and the failure line goes to stderr.
  */
 fn __render_regression(envelope: dict) -> dict {
   let current_total = envelope["current_total_cases"]

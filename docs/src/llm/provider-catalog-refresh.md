@@ -29,9 +29,9 @@ an explicit promotion-period field.
 # under .harn-runs/provider_catalog/.
 harn run scripts/update_provider_catalog.harn
 
-# Live mode: hit real provider sources. Key-required adapters read
-# their secrets from env vars (e.g. FIREWORKS_API_KEY); missing keys
-# produce a "skipped" diagnostic in the report instead of a failure.
+# Live mode: hit real provider sources. Key-required adapters attach
+# the configured auth header from env vars; missing keys produce a
+# "skipped" diagnostic in the report instead of a failure.
 harn run scripts/update_provider_catalog.harn -- --live
 
 # CI gate: same fixture replay, but compare against the committed
@@ -44,6 +44,15 @@ harn run scripts/update_provider_catalog.harn -- --check --update
 
 The CI gate is wired into `make check-provider-catalog-drift` and runs
 from `make all`.
+
+Fixture mode intentionally covers only deterministic public sources.
+Live mode adds provider-owned `/models` sources across the hosted
+provider set: Anthropic, OpenAI, Hugging Face Router, Gemini, Mistral,
+Cohere, xAI, Together, Groq, Cerebras, DeepSeek, Fireworks, DashScope,
+MiniMax, Z.AI, Moonshot, DeepInfra, SambaNova, and NVIDIA NIM. For
+NVIDIA, set `NVIDIA_API_KEY`; set `NVIDIA_NIM_BASE_URL` only when you
+need a self-hosted NIM or gateway URL. The built-in NVIDIA default is
+`https://integrate.api.nvidia.com/v1`.
 
 ## Catalog source and generated artifacts
 

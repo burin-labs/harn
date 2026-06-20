@@ -2,15 +2,15 @@
 
 //! `harn precompile` port verification (harn#2313 / W13).
 //!
-//! Pins the .harn dispatch impl against the legacy Rust path. The
+//! Pins the .harn dispatch impl against the host inner compiler. The
 //! .harn impl spawns `harn precompile <single-file>` per source with
-//! `HARN_CLI_IMPL=rust` so the inner compile work stays in Rust; this
-//! test exercises both impls against the same input and asserts:
+//! `HARN_PRECOMPILE_INNER=1` so the inner compile work stays in the host inner compiler; this
+//! test exercises the dispatch path and inner compiler against the same input and asserts:
 //!
 //!   * stdout lines (the per-file `source -> dest` reports) match
 //!     when sorted — the dispatch wedge flushes stderr before stdout,
 //!     so the merged stream ordering naturally diverges from the
-//!     Rust path. Comparing each stream independently after a sort is
+//!     inner compiler. Comparing each stream independently after a sort is
 //!     the right contract for downstream consumers (build pipes,
 //!     editor integrations) that read either stream alone.
 //!   * stderr summary line is byte-identical.
@@ -27,15 +27,15 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 #[test]
-fn single_file_dispatch_matches_rust() {
+fn single_file_dispatch_matches_inner_compile() {
     let workdir = tempfile::tempdir().expect("workdir");
     let source = write_hello(workdir.path(), "hello.harn");
 
-    let rust = run_precompile(
+    let inner = run_precompile(
         &[source.to_string_lossy().as_ref()],
-        &[("HARN_CLI_IMPL", "rust")],
+        &[("HARN_PRECOMPILE_INNER", "1")],
     );
-    assert_eq!(rust.exit_code, 0, "rust stderr={}", rust.stderr);
+    assert_eq!(inner.exit_code, 0, "inner stderr={}", inner.stderr);
 
     cleanup_artifacts(workdir.path());
 
@@ -43,10 +43,10 @@ fn single_file_dispatch_matches_rust() {
     assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
 
     assert_eq!(
-        sort_lines(&rust.stdout),
+        sort_lines(&inner.stdout),
         sort_lines(&harn.stdout),
         "stdout lines diverged\nrust:\n{}\nharn:\n{}",
-        rust.stdout,
+        inner.stdout,
         harn.stdout,
     );
     assert!(
@@ -63,12 +63,12 @@ fn directory_dispatch_emits_artifacts_for_every_source() {
     std::fs::create_dir(workdir.path().join("nested")).expect("mkdir nested");
     write_hello(&workdir.path().join("nested"), "beta.harn");
 
-    let rust = run_precompile(
+    let inner = run_precompile(
         &[workdir.path().to_string_lossy().as_ref()],
-        &[("HARN_CLI_IMPL", "rust")],
+        &[("HARN_PRECOMPILE_INNER", "1")],
     );
-    assert_eq!(rust.exit_code, 0, "rust stderr={}", rust.stderr);
-    let rust_artifacts = collect_artifacts(workdir.path());
+    assert_eq!(inner.exit_code, 0, "inner stderr={}", inner.stderr);
+    let inner_artifacts = collect_artifacts(workdir.path());
     cleanup_artifacts(workdir.path());
 
     let harn = run_precompile(&[workdir.path().to_string_lossy().as_ref()], &[]);
@@ -76,8 +76,8 @@ fn directory_dispatch_emits_artifacts_for_every_source() {
     let harn_artifacts = collect_artifacts(workdir.path());
 
     assert_eq!(
-        rust_artifacts, harn_artifacts,
-        "Rust and .harn impls produced different artifact sets"
+        inner_artifacts, harn_artifacts,
+        "current path and inner compiler produced different artifact sets"
     );
     assert!(
         harn.stderr.contains("2 succeeded, 0 failed"),
@@ -86,7 +86,7 @@ fn directory_dispatch_emits_artifacts_for_every_source() {
     );
     // Both reports should mention every source by stdout line, just
     // possibly in a different stream-flush order.
-    assert_eq!(sort_lines(&harn.stdout), sort_lines(&rust.stdout));
+    assert_eq!(sort_lines(&harn.stdout), sort_lines(&inner.stdout));
 }
 
 /// A pipeline that calls a stdlib export whose name collides with a
@@ -113,7 +113,7 @@ pipeline default(task) {
 
     let outcome = run_precompile(
         &[source.to_string_lossy().as_ref()],
-        &[("HARN_CLI_IMPL", "rust")],
+        &[("HARN_PRECOMPILE_INNER", "1")],
     );
     assert_eq!(
         outcome.exit_code, 0,
@@ -135,16 +135,16 @@ fn out_directory_mirrors_source_tree_under_target() {
     std::fs::create_dir(workdir.path().join("nested")).expect("mkdir nested");
     write_hello(&workdir.path().join("nested"), "beta.harn");
 
-    let rust_out = tempfile::tempdir().expect("rust outdir");
-    let rust = run_precompile(
+    let inner_out = tempfile::tempdir().expect("inner outdir");
+    let inner = run_precompile(
         &[
             workdir.path().to_string_lossy().as_ref(),
             "--out",
-            rust_out.path().to_string_lossy().as_ref(),
+            inner_out.path().to_string_lossy().as_ref(),
         ],
-        &[("HARN_CLI_IMPL", "rust")],
+        &[("HARN_PRECOMPILE_INNER", "1")],
     );
-    assert_eq!(rust.exit_code, 0, "rust stderr={}", rust.stderr);
+    assert_eq!(inner.exit_code, 0, "inner stderr={}", inner.stderr);
 
     let harn = run_precompile(
         &[
@@ -159,11 +159,11 @@ fn out_directory_mirrors_source_tree_under_target() {
     // Relative paths under each out-dir should match exactly. We compare
     // relative paths (not absolute) since the two tempdirs have
     // different prefixes.
-    let rust_rel = relative_artifacts(rust_out.path());
+    let inner_rel = relative_artifacts(inner_out.path());
     let harn_rel = relative_artifacts(outdir.path());
     assert_eq!(
-        rust_rel, harn_rel,
-        "out-dir layouts diverged\nrust: {rust_rel:?}\nharn: {harn_rel:?}"
+        inner_rel, harn_rel,
+        "out-dir layouts diverged\ninner: {inner_rel:?}\nharn: {harn_rel:?}"
     );
     assert!(
         harn_rel.iter().any(|p| p == "nested/beta.harnbc"),
@@ -172,17 +172,17 @@ fn out_directory_mirrors_source_tree_under_target() {
 }
 
 #[test]
-fn missing_target_exits_nonzero_on_both_impls() {
+fn missing_target_exits_nonzero_on_dispatch_and_inner_compile() {
     let workdir = tempfile::tempdir().expect("workdir");
     let bogus = workdir.path().join("does-not-exist.harn");
 
-    let rust = run_precompile(
+    let inner = run_precompile(
         &[bogus.to_string_lossy().as_ref()],
-        &[("HARN_CLI_IMPL", "rust")],
+        &[("HARN_PRECOMPILE_INNER", "1")],
     );
     let harn = run_precompile(&[bogus.to_string_lossy().as_ref()], &[]);
 
-    assert_ne!(rust.exit_code, 0, "rust should fail on missing target");
+    assert_ne!(inner.exit_code, 0, "inner should fail on missing target");
     assert_ne!(harn.exit_code, 0, "harn should fail on missing target");
 }
 

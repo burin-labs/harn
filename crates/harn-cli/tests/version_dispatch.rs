@@ -1,16 +1,10 @@
 #![recursion_limit = "256"]
 
-//! `harn version` port verification (harn#2301 / W1).
+//! `harn version` dispatch contract tests.
 //!
-//! Runs the dispatched `.harn` implementation and the legacy Rust one
-//! through the public dispatch helper, then asserts shape parity for
-//! both human-banner and JSON-envelope outputs. We can't byte-pin the
-//! version string (it bumps every release), so the test extracts the
-//! payload and compares structure.
-//!
-//! When the parity-snapshot harness (harn#2299 / G6) graduates to
-//! per-W-ticket fixtures, the byte-exact comparison will move there
-//! with a record-on-bump update flow.
+//! The command renders through the self-hosted CLI script. These tests
+//! keep the human banner and JSON envelope shape pinned without
+//! byte-pinning the release version string.
 
 use std::process::Command;
 
@@ -30,33 +24,19 @@ fn version_dispatch_renders_banner_with_version() {
         "banner version prefix missing; stdout={}",
         outcome.stdout
     );
-    // The Rust-path baseline must produce identical output.
-    let rust = run_version_subprocess(false, &[("HARN_CLI_IMPL", "rust")]);
-    assert_eq!(
-        rust.stdout, outcome.stdout,
-        "rust vs .harn banner output diverged"
-    );
 }
 
 #[test]
-fn version_json_dispatch_matches_rust_envelope() {
+fn version_json_dispatch_renders_canonical_envelope() {
     let harn = run_version_subprocess(true, &[]);
     assert_eq!(harn.exit_code, 0, "stderr={}", harn.stderr);
-    let rust = run_version_subprocess(true, &[("HARN_CLI_IMPL", "rust")]);
-    assert_eq!(rust.exit_code, 0, "rust stderr={}", rust.stderr);
-    // Structural compare: byte-for-byte differs because Harn's
-    // json_stringify sorts dict keys alphabetically while serde
-    // emits struct fields in declaration order. Both serialize the
-    // same VersionInfo envelope.
-    let rust_value: serde_json::Value =
-        serde_json::from_str(&rust.stdout).expect("rust JSON parses");
     let harn_value: serde_json::Value =
         serde_json::from_str(&harn.stdout).expect("harn JSON parses");
-    assert_eq!(
-        rust_value, harn_value,
-        "rust vs .harn JSON envelope diverged\nrust:\n{}\nharn:\n{}",
-        rust.stdout, harn.stdout
-    );
+    assert_eq!(harn_value["schemaVersion"], 1);
+    assert_eq!(harn_value["ok"], true);
+    assert!(harn_value["data"]["version"].is_string());
+    assert!(harn_value["data"]["commit"].is_null() || harn_value["data"]["commit"].is_string());
+    assert!(harn_value["data"]["built_at"].is_null() || harn_value["data"]["built_at"].is_string());
 }
 
 struct SubprocessOutcome {

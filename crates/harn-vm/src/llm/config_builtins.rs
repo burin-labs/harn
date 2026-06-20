@@ -807,9 +807,19 @@ async fn llm_healthcheck_builtin(
                     .clone()
                     .or_else(|| super::resolve_api_key(&provider_name).ok())
                     .unwrap_or_default();
-                let readiness =
-                    super::probe_openai_compatible_model(&provider_name, &model, &key).await;
-                return Ok(readiness_result(&readiness));
+                let readiness = super::readiness::probe_provider_readiness_with_options(
+                    &provider_name,
+                    super::readiness::ProviderReadinessOptions {
+                        requested_model: Some(&model),
+                        base_url_override: None,
+                        api_key_override: Some(&key),
+                    },
+                )
+                .await;
+                let json = serde_json::to_value(readiness).map_err(|error| {
+                    VmError::Runtime(format!("llm_healthcheck: serialize readiness: {error}"))
+                })?;
+                return Ok(crate::schema::json_to_vm_value(&json));
             }
         }
     }
@@ -1712,52 +1722,6 @@ fn healthcheck_model_arg(args: &[VmValue]) -> Option<String> {
     };
     let (resolved, _) = llm_config::resolve_model(raw.trim());
     Some(resolved)
-}
-
-fn readiness_result(readiness: &super::ModelReadiness) -> VmValue {
-    let mut meta = crate::value::DictMap::new();
-    meta.put_str("category", readiness.category.as_str());
-    meta.put_str("provider", readiness.provider.as_str());
-    meta.put_str("model", readiness.model.as_str());
-    meta.insert(
-        crate::value::intern_key("url"),
-        readiness
-            .url
-            .as_ref()
-            .map(|url| VmValue::String(arcstr::ArcStr::from(url.as_str())))
-            .unwrap_or(VmValue::Nil),
-    );
-    meta.insert(
-        crate::value::intern_key("status"),
-        readiness
-            .status
-            .map(|status| VmValue::Int(status as i64))
-            .unwrap_or(VmValue::Nil),
-    );
-    meta.insert(
-        crate::value::intern_key("available_models"),
-        VmValue::List(std::sync::Arc::new(
-            readiness
-                .available_models
-                .iter()
-                .map(|model| VmValue::String(arcstr::ArcStr::from(model.as_str())))
-                .collect(),
-        )),
-    );
-    healthcheck_result_with_meta(readiness.valid, &readiness.message, meta)
-}
-
-/// Build a healthcheck result dict with optional metadata.
-fn healthcheck_result_with_meta(
-    valid: bool,
-    message: &str,
-    meta: crate::value::DictMap,
-) -> VmValue {
-    let mut dict = crate::value::DictMap::new();
-    dict.insert(crate::value::intern_key("valid"), VmValue::Bool(valid));
-    dict.put_str("message", message);
-    dict.insert(crate::value::intern_key("metadata"), VmValue::dict(meta));
-    VmValue::dict(dict)
 }
 
 #[cfg(test)]

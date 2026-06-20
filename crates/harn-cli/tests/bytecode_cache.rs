@@ -202,7 +202,7 @@ fn precompile_then_run_skips_compile() {
             // Call the in-process Rust path directly. The async dispatch
             // wrapper (`precompile::run`) spawns child processes which
             // wouldn't see the in-process state these tests are pinning.
-            precompile::run_legacy(PrecompileArgs {
+            precompile::run_inner_compile(PrecompileArgs {
                 target,
                 out: None,
                 keep_going: false,
@@ -267,7 +267,7 @@ fn precompiled_imported_module_uses_adjacent_artifact() {
             // Call the in-process Rust path directly. The async dispatch
             // wrapper (`precompile::run`) spawns child processes which
             // wouldn't see the in-process state these tests are pinning.
-            precompile::run_legacy(PrecompileArgs {
+            precompile::run_inner_compile(PrecompileArgs {
                 target,
                 out: None,
                 keep_going: false,

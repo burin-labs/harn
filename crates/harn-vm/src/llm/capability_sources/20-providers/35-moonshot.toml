@@ -8,13 +8,20 @@
 [[provider.moonshot]]
 model_match = "*kimi-k2.7-code*"
 native_tools = true
-preferred_tool_format = "native"
+preferred_tool_format = "json"
+tool_mode_parity = "native_unreliable"
+tool_mode_parity_notes = "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and claimed the tool was unavailable. Harn JSON tools completed the loop; text tools also pass after fixing text-mode history projection."
 structured_output = "native"
 thinking_modes = ["enabled"]
 vision = true
 vision_supported = true
 video_supported = true
 prompt_caching = true
+allowed_tool_choice_modes = ["auto", "none"]
+temperature_supported = false
+top_p_supported = false
+frequency_penalty_supported = false
+presence_penalty_supported = false
 text_tool_wire_format_supported = true
 prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true

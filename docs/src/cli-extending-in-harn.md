@@ -30,11 +30,10 @@ subcommand name, the same global `harn run -- a b c` exposes) and
 reads the `HARN_OUTPUT_JSON` env var to decide between human and JSON
 output. Build-time constants and other host-provided context travel
 through scoped env vars rather than new builtins, so the script's
-contract stays small. Every ported handler keeps its legacy Rust path
-behind `HARN_CLI_IMPL=rust` — the parity-snapshot harness flips that
-switch to assert both implementations produce byte-identical output
-([C1 ratchet, #2314]). The flag will go away when the LOC ratchet
-flat-lines.
+contract stays small. Ported handlers should cut over directly to the
+embedded `.harn` implementation. Keep Rust only for clap parsing and
+host data collection that scripts cannot perform yet, then test the
+new output contract directly.
 
 ## Walkthrough — port a fictional `harn greet <name>`
 
@@ -83,18 +82,14 @@ pub(crate) enum Command {
 `crates/harn-cli/src/commands/greet.rs`:
 
 ```rust
-//! `harn greet` dispatch shim. The Rust path stays behind
-//! `HARN_CLI_IMPL=rust` until the C1 ratchet (#2314) tightens its
-//! budget to zero.
+//! `harn greet` dispatch shim. Clap parsing stays in Rust; rendering
+//! and command behavior live in `stdlib/cli/greet.harn`.
 
 use crate::cli::GreetArgs;
 use crate::dispatch;
 use crate::env_guard::ScopedEnvVar;
 
 pub(crate) async fn run(args: GreetArgs) -> i32 {
-    if std::env::var("HARN_CLI_IMPL").as_deref() == Ok("rust") {
-        return run_rust(&args);
-    }
     let _name = ScopedEnvVar::set("HARN_GREET_NAME", &args.name);
     let argv = if args.json {
         vec!["--json".to_string()]
@@ -102,17 +97,6 @@ pub(crate) async fn run(args: GreetArgs) -> i32 {
         Vec::new()
     };
     dispatch::dispatch_to_embedded_script("greet", argv, args.json).await
-}
-
-/// Legacy Rust implementation. Kept behind `HARN_CLI_IMPL=rust` for the
-/// parity harness; removed when the C1 ratchet flat-lines the budget.
-fn run_rust(args: &GreetArgs) -> i32 {
-    if args.json {
-        println!(r#"{{"schemaVersion":1,"ok":true,"data":{{"greeting":"hello {}"}},"error":null,"warnings":[]}}"#, args.name);
-    } else {
-        println!("hello {}", args.name);
-    }
-    0
 }
 ```
 
@@ -175,37 +159,32 @@ The `name` is the lookup key the dispatch wedge passes in step 3;
 nested paths like `"eval/prompt"` are fine too (they're collapsed to
 `eval-prompt-` in the temp file prefix so the OS doesn't care).
 
-### 6. Parity test
+### 6. Contract test
 
 `crates/harn-cli/tests/greet_dispatch.rs`, following the established
-`*_dispatch.rs` pattern that `version_dispatch.rs`,
-`scaffold_dispatch.rs`, and `eval_prompt_dispatch.rs` all use — drive
-both implementations as subprocesses, flip `HARN_CLI_IMPL=rust` for the
-baseline, and structurally compare:
+`*_dispatch.rs` pattern: drive the command as a subprocess and assert
+the human and JSON output contracts directly.
 
 ```rust
 #[test]
-fn greet_matches_rust_baseline() {
+fn greet_human_output_is_stable() {
     let harn = run_subprocess(&["greet", "kenneth"], &[]);
-    let rust = run_subprocess(&["greet", "kenneth"], &[("HARN_CLI_IMPL", "rust")]);
-    assert_eq!(harn.stdout, rust.stdout);
     assert_eq!(harn.exit_code, 0);
+    assert_eq!(harn.stdout, "hello kenneth\n");
 }
 
 #[test]
-fn greet_json_envelope_matches() {
+fn greet_json_envelope_is_stable() {
     let harn = run_subprocess(&["greet", "kenneth", "--json"], &[]);
-    let rust = run_subprocess(&["greet", "kenneth", "--json"], &[("HARN_CLI_IMPL", "rust")]);
     let h: serde_json::Value = serde_json::from_str(&harn.stdout).unwrap();
-    let r: serde_json::Value = serde_json::from_str(&rust.stdout).unwrap();
-    assert_eq!(h, r);
+    assert_eq!(h["schemaVersion"], 1);
+    assert_eq!(h["ok"], true);
+    assert_eq!(h["data"]["greeting"], "hello kenneth");
 }
 ```
 
-JSON envelopes get compared as parsed `serde_json::Value` rather than
-byte-for-byte because Harn's `json_stringify_pretty` sorts dict keys
-alphabetically while serde emits struct fields in declaration order.
-Both serialize the same envelope.
+JSON envelopes should be asserted as parsed `serde_json::Value` so tests
+care about the contract instead of key ordering.
 
 ### 7. Tighten the LOC budget
 

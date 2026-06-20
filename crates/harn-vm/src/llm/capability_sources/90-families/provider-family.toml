@@ -18,3 +18,4 @@ mlx = "openai"
 # `[[provider.zai]]` blocks above.
 minimax = "openai"
 zai = "openai"
+nvidia = "openai"

@@ -47,7 +47,14 @@ fn __context_window_from_string(text) {
   return to_int(stripped)
 }
 
-fn __build_run(id, kind, source_owner, url, status, options) {
+fn __build_run(
+  id: string,
+  kind: string,
+  source_owner: string,
+  url: string?,
+  status: string,
+  options: dict,
+) -> dict {
   return {
     id: id,
     kind: kind,
@@ -62,7 +69,7 @@ fn __build_run(id, kind, source_owner, url, status, options) {
   }
 }
 
-fn __fetch_failure_run(id, kind, source_owner, url, response) {
+fn __fetch_failure_run(id: string, kind: string, source_owner: string, url: string, response: dict) -> dict {
   return __build_run(
     id,
     kind,
@@ -71,6 +78,28 @@ fn __fetch_failure_run(id, kind, source_owner, url, response) {
     "error",
     {reason: "fetch failed with status " + to_string(response?.status ?? 0)},
   )
+}
+
+fn __first_available_secret(env: dict, key_envs: list<string>) -> dict? {
+  let secrets = env?.secrets ?? {}
+  for name in key_envs ?? [] {
+    let value = secrets[name]
+    if value != nil && value != "" {
+      return {name: name, value: value}
+    }
+  }
+  return nil
+}
+
+fn __env_with_auth_header(env: dict, config: dict, secret: dict) -> dict {
+  let base_options = env?.http_options ?? {}
+  let base_headers = base_options?.headers ?? {}
+  let auth_header = config?.auth_header ?? "Authorization"
+  let auth_prefix = config?.auth_prefix ?? "Bearer "
+  let auth_value = auth_prefix + secret.value
+  let headers = base_headers + config?.extra_headers ?? {}
+    + {Accept: "application/json", [auth_header]: auth_value}
+  return env + {http_options: base_options + {headers: headers}}
 }
 
 /**
@@ -85,7 +114,7 @@ fn __fetch_failure_run(id, kind, source_owner, url, response) {
  *   id, provider, source_url, table_index?, column_map (dict),
  *   header_match?, confidence (default "high"), terms_notes?.
  */
-pub fn html_pricing_table_adapter(env, config) {
+pub fn html_pricing_table_adapter(env: dict, config: dict) -> dict {
   let url = config.source_url
   let response = web_fetch(url, env?.http_options ?? {})
   if !response.ok {
@@ -198,7 +227,7 @@ pub fn html_pricing_table_adapter(env, config) {
  *   id, provider, source_url, mapper, source_owner ("aggregator" or
  *   "provider"), confidence (default "high"), terms_notes?.
  */
-pub fn json_api_adapter(env, config) {
+pub fn json_api_adapter(env: dict, config: dict) -> dict {
   let url = config.source_url
   let response = web_fetch(url, env?.http_options ?? {})
   if !response.ok {
@@ -258,16 +287,10 @@ pub fn json_api_adapter(env, config) {
  * surfaces the gap instead of silently treating the source as a
  * removal.
  */
-pub fn key_required_adapter(env, config) {
+pub fn key_required_adapter(env: dict, config: dict) -> dict {
   let key_envs = config.key_envs ?? []
-  var available = false
-  let secrets = env?.secrets ?? {}
-  for name in key_envs {
-    if secrets[name] != nil && secrets[name] != "" {
-      available = true
-    }
-  }
-  if !available {
+  let secret = __first_available_secret(env, key_envs)
+  if secret == nil {
     return {
       run: __build_run(
         config.id,
@@ -280,7 +303,8 @@ pub fn key_required_adapter(env, config) {
       observations: [],
     }
   }
-  let result = config.adapter(env)
+  let adapter_env = __env_with_auth_header(env, config, secret)
+  let result = config.adapter(adapter_env)
   let augmented = result.run + {requires_key: true, key_envs: key_envs}
   return {run: augmented, observations: result.observations}
 }
@@ -307,7 +331,7 @@ pub fn key_required_adapter(env, config) {
  * authoritative), so this adapter restricts itself to the benchmark
  * surface to avoid spurious drift.
  */
-pub fn artificialanalysis_adapter(env, config) {
+pub fn artificialanalysis_adapter(env: dict, config: dict) -> dict {
   let url = config.source_url
   let response = web_fetch(url, env?.http_options ?? {})
   if !response.ok {

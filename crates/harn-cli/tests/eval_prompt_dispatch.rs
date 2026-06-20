@@ -1,18 +1,13 @@
 #![recursion_limit = "256"]
 
-//! `harn eval prompt` partial-port verification (harn#2305 / W5).
+//! `harn eval prompt` dispatch contract tests.
 //!
 //! Asserts that the rendering layer ported to
 //! `crates/harn-stdlib/src/stdlib/cli/eval/prompt.harn` produces the
-//! same output as the legacy Rust path. Aggregation (fleet rendering,
-//! run/judge fanout, context-fixture evaluation) stays in Rust on both
-//! impls — only the formatting differs — so byte-for-byte parity is
-//! the bar for terminal/HTML, and structural-JSON parity is the bar
-//! for `--output json`.
-//!
-//! The `HARN_CLI_IMPL=rust` escape hatch keeps the legacy direct-render
-//! path so this test can compare both sides at runtime until the C1
-//! ratchet (#2314) deletes it.
+//! expected output shape. Aggregation (fleet rendering, run/judge
+//! fanout, context-fixture evaluation) stays host-side. These tests pin
+//! terminal, HTML, JSON, out-file, and help behavior for the shipped
+//! dispatch path.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -39,7 +34,7 @@ const FLEET: &[&str] = &[
 ];
 
 #[test]
-fn terminal_output_is_byte_identical_between_impls() {
+fn terminal_output_is_byte_identical_across_runs() {
     let dir = tempfile::tempdir().expect("tempdir");
     let template = dir.path().join("system.harn.prompt");
     fs::write(&template, RENDER_TEMPLATE).expect("write template");
@@ -47,18 +42,18 @@ fn terminal_output_is_byte_identical_between_impls() {
     let harn = run_eval_prompt(&template, "terminal", &[]);
     assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
 
-    let rust = run_eval_prompt(&template, "terminal", &[("HARN_CLI_IMPL", "rust")]);
-    assert_eq!(rust.exit_code, 0, "rust stderr={}", rust.stderr);
+    let repeat = run_eval_prompt(&template, "terminal", &[]);
+    assert_eq!(repeat.exit_code, 0, "repeat stderr={}", repeat.stderr);
 
     assert_eq!(
-        harn.stdout, rust.stdout,
-        "terminal stdout diverged\n--- rust ---\n{}\n--- harn ---\n{}",
-        rust.stdout, harn.stdout
+        harn.stdout, repeat.stdout,
+        "terminal stdout diverged\n--- repeat ---\n{}\n--- harn ---\n{}",
+        repeat.stdout, harn.stdout
     );
 }
 
 #[test]
-fn html_output_is_byte_identical_between_impls() {
+fn html_output_is_byte_identical_across_runs() {
     let dir = tempfile::tempdir().expect("tempdir");
     let template = dir.path().join("system.harn.prompt");
     fs::write(&template, RENDER_TEMPLATE).expect("write template");
@@ -66,18 +61,18 @@ fn html_output_is_byte_identical_between_impls() {
     let harn = run_eval_prompt(&template, "html", &[]);
     assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
 
-    let rust = run_eval_prompt(&template, "html", &[("HARN_CLI_IMPL", "rust")]);
-    assert_eq!(rust.exit_code, 0, "rust stderr={}", rust.stderr);
+    let repeat = run_eval_prompt(&template, "html", &[]);
+    assert_eq!(repeat.exit_code, 0, "repeat stderr={}", repeat.stderr);
 
     assert_eq!(
-        harn.stdout, rust.stdout,
-        "html stdout diverged\n--- rust ---\n{}\n--- harn ---\n{}",
-        rust.stdout, harn.stdout
+        harn.stdout, repeat.stdout,
+        "html stdout diverged\n--- repeat ---\n{}\n--- harn ---\n{}",
+        repeat.stdout, harn.stdout
     );
 }
 
 #[test]
-fn json_output_is_structurally_identical_between_impls() {
+fn json_output_is_structurally_identical_across_runs() {
     // Harn's `json_stringify_pretty` sorts dict keys alphabetically;
     // serde's `to_string_pretty` emits struct fields in declaration
     // order. The wire byte order can therefore differ even though the
@@ -90,22 +85,22 @@ fn json_output_is_structurally_identical_between_impls() {
     let harn = run_eval_prompt(&template, "json", &[]);
     assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
 
-    let rust = run_eval_prompt(&template, "json", &[("HARN_CLI_IMPL", "rust")]);
-    assert_eq!(rust.exit_code, 0, "rust stderr={}", rust.stderr);
+    let repeat = run_eval_prompt(&template, "json", &[]);
+    assert_eq!(repeat.exit_code, 0, "repeat stderr={}", repeat.stderr);
 
     let harn_value: serde_json::Value =
         serde_json::from_str(&harn.stdout).expect("harn JSON parses");
-    let rust_value: serde_json::Value =
-        serde_json::from_str(&rust.stdout).expect("rust JSON parses");
+    let repeat_value: serde_json::Value =
+        serde_json::from_str(&repeat.stdout).expect("repeat JSON parses");
     assert_eq!(
-        rust_value, harn_value,
-        "json shape diverged\n--- rust ---\n{}\n--- harn ---\n{}",
-        rust.stdout, harn.stdout
+        repeat_value, harn_value,
+        "json shape diverged\n--- repeat ---\n{}\n--- harn ---\n{}",
+        repeat.stdout, harn.stdout
     );
 }
 
 #[test]
-fn out_file_writes_match_between_impls() {
+fn out_file_writes_match_across_runs() {
     // Exercises the script's `--out-file` (HARN_EVAL_PROMPT_OUT_FILE)
     // branch: the rendered payload goes to disk, and a "wrote <path>"
     // line goes to stderr. Both stdout and on-disk bytes must match.
@@ -114,7 +109,7 @@ fn out_file_writes_match_between_impls() {
     fs::write(&template, RENDER_TEMPLATE).expect("write template");
 
     let harn_out = dir.path().join("harn.txt");
-    let rust_out = dir.path().join("rust.txt");
+    let repeat_out = dir.path().join("repeat.txt");
 
     let harn = run_eval_prompt_with(
         &[
@@ -131,7 +126,7 @@ fn out_file_writes_match_between_impls() {
     assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
     assert!(harn.stdout.is_empty(), "out_file should suppress stdout");
 
-    let rust = run_eval_prompt_with(
+    let repeat = run_eval_prompt_with(
         &[
             template.to_str().unwrap(),
             "--fleet",
@@ -139,33 +134,33 @@ fn out_file_writes_match_between_impls() {
             "--output",
             "terminal",
             "--out-file",
-            rust_out.to_str().unwrap(),
+            repeat_out.to_str().unwrap(),
         ],
-        &[("HARN_CLI_IMPL", "rust")],
+        &[],
     );
-    assert_eq!(rust.exit_code, 0, "rust stderr={}", rust.stderr);
-    assert!(rust.stdout.is_empty(), "out_file should suppress stdout");
+    assert_eq!(repeat.exit_code, 0, "repeat stderr={}", repeat.stderr);
+    assert!(repeat.stdout.is_empty(), "out_file should suppress stdout");
 
     let harn_bytes = fs::read_to_string(&harn_out).expect("harn out_file");
-    let rust_bytes = fs::read_to_string(&rust_out).expect("rust out_file");
+    let repeat_bytes = fs::read_to_string(&repeat_out).expect("repeat out_file");
     assert_eq!(
-        harn_bytes, rust_bytes,
-        "out_file contents diverged\n--- rust ---\n{rust_bytes}\n--- harn ---\n{harn_bytes}"
+        harn_bytes, repeat_bytes,
+        "out_file contents diverged\n--- repeat ---\n{repeat_bytes}\n--- harn ---\n{harn_bytes}"
     );
 }
 
 #[test]
-fn help_is_byte_identical_between_impls() {
-    // Clap intercepts `--help` before either impl ever runs, so the
+fn help_is_byte_identical_across_runs() {
+    // Clap intercepts `--help` before the dispatch script runs, so the
     // env var has no effect — pin the equality anyway so we catch a
     // future regression where someone routes --help through the wedge.
     let harn = run_eval_prompt_with(&["--help"], &[]);
-    let rust = run_eval_prompt_with(&["--help"], &[("HARN_CLI_IMPL", "rust")]);
+    let repeat = run_eval_prompt_with(&["--help"], &[]);
     assert_eq!(harn.exit_code, 0);
-    assert_eq!(rust.exit_code, 0);
+    assert_eq!(repeat.exit_code, 0);
     assert_eq!(
-        harn.stdout, rust.stdout,
-        "--help stdout diverged across impls"
+        harn.stdout, repeat.stdout,
+        "--help stdout diverged across repeat runs"
     );
 }
 
@@ -200,7 +195,7 @@ fn run_eval_prompt_with(argv: &[&str], extra_env: &[(&str, &str)]) -> ProcessOut
     // subprocess invocations: terminal-detection env vars (`NO_COLOR`,
     // `HARN_COLOR`) and any inherited provider keys aren't needed for
     // mock-free render mode and would only add noise to the diff.
-    for key in ["NO_COLOR", "HARN_COLOR", "HARN_CLI_IMPL"] {
+    for key in ["NO_COLOR", "HARN_COLOR"] {
         cmd.env_remove(key);
     }
     let mut env_map: BTreeMap<&str, &str> = BTreeMap::new();

@@ -7,6 +7,11 @@ adaptive
 false
 1
 true
+auto
+small
+verify
+##DONE##
+true
 completer
 true
 fixed

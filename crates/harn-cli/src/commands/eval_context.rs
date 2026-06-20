@@ -1,6 +1,6 @@
 //! `harn eval context` — deterministic context-engineering mode runner.
 //!
-//! ## .harn dispatch (W6 partial port — see harn#2306)
+//! ## .harn dispatch
 //!
 //! The **evaluation pipeline** (manifest load, `evaluate_context_eval_manifest`
 //! invocation, per-run scoring) stays in Rust — it reaches into
@@ -21,9 +21,6 @@
 //! the on-disk format is consumed by the regression-check / hosted
 //! ingestion paths that depend on the serde struct-field order.
 //!
-//! `HARN_CLI_IMPL=rust` keeps the legacy direct-render path for the
-//! parity-snapshot harness (#2299) until the C1 ratchet (#2314) lands.
-
 use std::fs;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -36,7 +33,6 @@ use harn_vm::orchestration::{
 use crate::cli::EvalContextArgs;
 use crate::dispatch;
 use crate::env_guard::ScopedEnvVar;
-use crate::format::escape_md;
 
 /// Env var the embedded `cli/eval/context` script reads to pick up the
 /// pre-serialised `ContextEvalReport`. The Rust shim does all the
@@ -83,27 +79,6 @@ pub async fn run(args: EvalContextArgs) -> i32 {
         return 1;
     }
 
-    // `HARN_CLI_IMPL=rust` keeps the legacy direct-render path so the
-    // parity-snapshot harness (#2299) can compare both impls byte-for-byte
-    // until C1 (#2314) deletes it.
-    let use_legacy = std::env::var("HARN_CLI_IMPL").as_deref() == Ok("rust");
-
-    if use_legacy {
-        if let Err(error) = write_markdown_legacy(&output_dir, &report) {
-            eprintln!("error: failed to write context eval markdown: {error}");
-            return 1;
-        }
-        announce_output_paths(&output_dir);
-        if args.json {
-            if let Err(code) = print_json_legacy(&report) {
-                return code;
-            }
-        } else {
-            print_summary_legacy(&report);
-        }
-        return post_render_exit_code(&report);
-    }
-
     match write_markdown_dispatch(&output_dir, &report).await {
         Ok(()) => {}
         Err(code) => return code,
@@ -120,8 +95,6 @@ pub async fn run(args: EvalContextArgs) -> i32 {
 }
 
 /// Build the aggregated [`ContextEvalReport`] without any rendering.
-/// Pulled out of [`run`] so both the legacy direct-render path and the
-/// .harn dispatch path see the same report.
 fn aggregate_report(args: &EvalContextArgs) -> Result<ContextEvalReport, i32> {
     let manifest = match load_context_eval_manifest(&args.manifest) {
         Ok(manifest) => manifest,
@@ -174,78 +147,6 @@ fn write_jsonl(path: PathBuf, runs: &[ContextEvalRunReport]) -> Result<(), Strin
     Ok(())
 }
 
-// ─── Legacy direct-render path (gated by HARN_CLI_IMPL=rust) ────────────
-
-fn write_markdown_legacy(output_dir: &Path, report: &ContextEvalReport) -> Result<(), String> {
-    fs::write(
-        output_dir.join("summary.md"),
-        legacy_render_markdown(report),
-    )
-    .map_err(|error| error.to_string())
-}
-
-fn print_json_legacy(report: &ContextEvalReport) -> Result<(), i32> {
-    match serde_json::to_string_pretty(report) {
-        Ok(payload) => {
-            println!("{payload}");
-            Ok(())
-        }
-        Err(error) => {
-            eprintln!("error: failed to serialize context eval summary: {error}");
-            Err(1)
-        }
-    }
-}
-
-fn print_summary_legacy(report: &ContextEvalReport) {
-    println!(
-        "context eval: {}/{} passed, mean_correctness={:.2}, mean_tool_quality={:.2}",
-        report.passed_runs,
-        report.total_runs,
-        report.aggregate.mean_final_correctness,
-        report.aggregate.mean_tool_call_quality
-    );
-}
-
-fn legacy_render_markdown(report: &ContextEvalReport) -> String {
-    let mut out = String::new();
-    out.push_str(&format!(
-        "# Context Eval: {}\n\n",
-        report
-            .manifest_name
-            .as_deref()
-            .unwrap_or(report.manifest_id.as_str())
-    ));
-    out.push_str(&format!(
-        "- status: {}\n- runs: {}/{} passed\n- mean correctness: {:.4}\n- mean tool quality: {:.4}\n- input tokens: {}\n- output tokens: {}\n- cost USD: {:.6}\n\n",
-        if report.pass { "PASS" } else { "FAIL" },
-        report.passed_runs,
-        report.total_runs,
-        report.aggregate.mean_final_correctness,
-        report.aggregate.mean_tool_call_quality,
-        report.aggregate.total_input_tokens,
-        report.aggregate.total_output_tokens,
-        report.aggregate.total_cost_usd,
-    ));
-    out.push_str("| task | mode | pass | correctness | tools | reads before edit | input tokens | compactions | cache key |\n");
-    out.push_str("|---|---|---:|---:|---:|---:|---:|---:|---|\n");
-    for run in &report.runs {
-        out.push_str(&format!(
-            "| {} | {} | {} | {:.4} | {:.4} | {} | {} | {} | `{}` |\n",
-            escape_md(&run.task_id),
-            escape_md(&run.mode_id),
-            if run.passed { "yes" } else { "no" },
-            run.final_correctness.score,
-            run.tool_call_quality.score,
-            run.reads_before_first_edit,
-            run.input_tokens,
-            run.compaction_count,
-            run.cache.key,
-        ));
-    }
-    out
-}
-
 // ─── Dispatch (.harn) render path ────────────────────────────────────────
 
 async fn write_markdown_dispatch(output_dir: &Path, report: &ContextEvalReport) -> Result<(), i32> {
@@ -260,8 +161,6 @@ async fn write_markdown_dispatch(output_dir: &Path, report: &ContextEvalReport) 
 async fn print_summary_dispatch(report: &ContextEvalReport) -> Result<(), i32> {
     let payload = render_via_dispatch(report, "summary").await?;
     print!("{payload}");
-    // The script emits exactly the legacy summary line (no trailing
-    // newline); add one to match the legacy `println!` semantics.
     if !payload.ends_with('\n') {
         println!();
     }

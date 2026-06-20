@@ -1361,13 +1361,9 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
         }
         Command::ProviderCatalog(args) => {
             refresh_provider_catalog_if_requested(&args).await;
-            if std::env::var("HARN_CLI_IMPL").as_deref() == Ok("rust") {
-                print_provider_catalog(args.available_only);
-            } else {
-                let exit_code = dispatch_provider_catalog(args.available_only).await;
-                if exit_code != 0 {
-                    process::exit(exit_code);
-                }
+            let exit_code = dispatch_provider_catalog(args.available_only).await;
+            if exit_code != 0 {
+                process::exit(exit_code);
             }
         }
         Command::ProviderReady(args) => {
@@ -1471,56 +1467,13 @@ fn serve_subcommand_names() -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn print_version() {
-    println!(
-        r"
- ╱▔▔╲
- ╱    ╲    harn v{}
- │ ◆  │    the agent harness language
- │    │
- ╰──╯╱
-   ╱╱
-",
-        env!("CARGO_PKG_VERSION")
-    );
-}
-
 /// Schema version for `harn version --json`. Bump when the data shape
 /// changes; new optional fields can be added freely.
 pub(crate) const VERSION_SCHEMA_VERSION: u32 = 1;
 
-#[derive(serde::Serialize)]
-struct VersionInfo {
-    name: &'static str,
-    version: &'static str,
-    description: &'static str,
-}
-
-fn print_version_json() {
-    let payload = VersionInfo {
-        name: env!("CARGO_PKG_NAME"),
-        version: env!("CARGO_PKG_VERSION"),
-        description: env!("CARGO_PKG_DESCRIPTION"),
-    };
-    let envelope = json_envelope::JsonEnvelope::ok(VERSION_SCHEMA_VERSION, payload);
-    println!("{}", json_envelope::to_string_pretty(&envelope));
-}
-
-/// Run `harn version`. Dispatches to the embedded `.harn` script by
-/// default; set `HARN_CLI_IMPL=rust` to keep the legacy Rust handlers
-/// (used by the parity-snapshot harness to compare both impls).
+/// Run `harn version`. Build-time constants travel to the embedded
+/// `.harn` script via scoped env vars rather than a new builtin.
 async fn run_version(args: cli::VersionArgs) -> i32 {
-    if std::env::var("HARN_CLI_IMPL").as_deref() == Ok("rust") {
-        if args.json {
-            print_version_json();
-        } else {
-            print_version();
-        }
-        return 0;
-    }
-    // Build-time constants travel to the script via scoped env vars
-    // rather than a new builtin — the script reads them with
-    // `env_or("HARN_BUILD_VERSION", "unknown")`.
     let _name = env_guard::ScopedEnvVar::set("HARN_BUILD_NAME", env!("CARGO_PKG_NAME"));
     let _version = env_guard::ScopedEnvVar::set("HARN_BUILD_VERSION", env!("CARGO_PKG_VERSION"));
     let _description =
@@ -1540,7 +1493,7 @@ async fn print_model_info(args: &ModelInfoArgs) -> bool {
     let api_key = api_key_result.unwrap_or_default();
     let context_window =
         harn_vm::llm::fetch_provider_max_context(&resolved.provider, &resolved.id, &api_key).await;
-    let readiness = local_openai_readiness(&resolved.provider, &resolved.id, &api_key).await;
+    let readiness = local_provider_readiness(&resolved.provider, &resolved.id, &api_key).await;
     let catalog = harn_vm::llm_config::model_catalog_entry(&resolved.id);
     let runtime_context_window = catalog
         .as_ref()
@@ -1636,7 +1589,7 @@ async fn print_model_info(args: &ModelInfoArgs) -> bool {
     ok
 }
 
-async fn local_openai_readiness(
+async fn local_provider_readiness(
     provider: &str,
     model: &str,
     api_key: &str,
@@ -1645,16 +1598,22 @@ async fn local_openai_readiness(
     if def.auth_style != "none" || !harn_vm::llm::supports_model_readiness_probe(&def) {
         return None;
     }
-    let readiness = harn_vm::llm::probe_openai_compatible_model(provider, model, api_key).await;
-    Some(serde_json::json!({
-        "valid": readiness.valid,
-        "category": readiness.category,
-        "message": readiness.message,
-        "provider": readiness.provider,
-        "model": readiness.model,
-        "url": readiness.url,
-        "status": readiness.status,
-        "available_models": readiness.available_models,
+    let readiness = harn_vm::llm::readiness::probe_provider_readiness_with_options(
+        provider,
+        harn_vm::llm::readiness::ProviderReadinessOptions {
+            requested_model: Some(model),
+            base_url_override: None,
+            api_key_override: Some(api_key),
+        },
+    )
+    .await;
+    Some(serde_json::to_value(readiness).unwrap_or_else(|error| {
+        serde_json::json!({
+            "ok": false,
+            "status": "bad_response",
+            "message": format!("failed to serialize readiness result: {error}"),
+            "provider": provider,
+        })
     }))
 }
 
@@ -1720,16 +1679,6 @@ fn build_provider_catalog_payload(available_only: bool) -> serde_json::Value {
         "models": models,
         "qc_defaults": harn_vm::llm_config::qc_defaults(),
     })
-}
-
-fn print_provider_catalog(available_only: bool) {
-    let payload = build_provider_catalog_payload(available_only);
-    println!(
-        "{}",
-        serde_json::to_string(&payload).unwrap_or_else(|error| {
-            command_error(&format!("failed to serialize provider catalog: {error}"))
-        })
-    );
 }
 
 /// Dispatch shim for `harn provider-catalog`. Aggregation stays in

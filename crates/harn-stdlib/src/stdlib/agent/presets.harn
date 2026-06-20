@@ -4,12 +4,11 @@
 // authors say "audit", "repair", "summary", "verify" for the generic
 // roles, or "merge_captain", "review_captain", "oncall_captain",
 // "release_captain" for opinionated captain templates. The presets bundle
-// completion behavior, iteration budgeting, provider-specific reasoning
-// configuration, the LLM handler stack from `std/llm/handlers`, and the
-// tool middleware stack from `std/llm/tool_middleware` so durable
-// personas declare their service contracts by name instead of
-// re-deriving the knobs at every call site. All defaults remain
-// caller-overridable.
+// completion behavior, iteration budgeting, provider-aware reasoning policy,
+// the LLM handler stack from `std/llm/handlers`, and the tool middleware stack
+// from `std/llm/tool_middleware` so durable personas declare their service
+// contracts by name instead of re-deriving the knobs at every call site. All
+// defaults remain caller-overridable.
 import { agent_loop } from "std/agent/loop"
 import { agent_tool_format_resolution } from "std/agent/options"
 import { compose, default_llm_caller, with_logging, with_routing } from "std/llm/handlers"
@@ -62,81 +61,42 @@ fn __preset_kind(value) {
   return kind
 }
 
-fn __caller_set_thinking(opts) {
-  if __has_key(opts, "thinking") {
+fn __caller_set_low_level_reasoning(opts) {
+  if __has_key(opts, "thinking") || __has_key(opts, "reasoning_effort") {
     return true
   }
   let llm_overrides = opts?.llm_options
-  if type_of(llm_overrides) == "dict" && contains(llm_overrides.keys(), "thinking") {
+  if type_of(llm_overrides) == "dict"
+    && (contains(llm_overrides.keys(), "thinking")
+    || contains(llm_overrides.keys(), "reasoning_effort")) {
     return true
   }
   return false
 }
 
-fn __provider_capabilities_for(opts) {
-  let provider = opts?.provider
-  let model = opts?.model
-  if provider == nil || provider == "" || model == nil || model == "" {
-    return nil
-  }
-  let caps = try {
-    provider_capabilities(provider, model)
-  }
-  if is_err(caps) {
-    return nil
-  }
-  return unwrap(caps)
+fn __caller_set_reasoning_policy(opts) {
+  return __has_key(opts, "reasoning_policy") || __has_key(opts, "thinking_policy")
 }
 
-fn __caps_supports(caps, mode) {
-  if caps == nil {
-    return false
-  }
-  let modes = caps?.thinking_modes ?? []
-  return contains(modes, mode)
+fn __caller_set_reasoning_scale(opts) {
+  return __has_key(opts, "reasoning_scale") || __has_key(opts, "problem_scale")
 }
 
-fn __caps_reasoning_effort(caps) {
-  if caps == nil {
-    return false
-  }
-  return caps?.reasoning_effort_supported ?? false
+fn __caller_set_reasoning_task(opts) {
+  return __has_key(opts, "reasoning_task") || __has_key(opts, "task_kind") || __has_key(opts, "task")
 }
 
-fn __thinking_choice_for_kind(kind, caps) {
+fn __reasoning_task_for_kind(kind) {
   if kind == "summary" {
-    if __caps_supports(caps, "disabled") {
-      return {mode: "disabled"}
-    }
-    return nil
+    return "summarize"
   }
-  if kind == "verify" {
-    if __caps_reasoning_effort(caps) {
-      return {mode: "effort", level: "low"}
-    }
-    if __caps_supports(caps, "adaptive") {
-      return {mode: "adaptive"}
-    }
-    return nil
+  if kind == "verify" || kind == "audit" {
+    return "verify"
   }
-  // audit + repair + every captain: prefer adaptive thinking when
-  // offered, else medium reasoning effort. Fall back to nothing when
-  // neither is available so we don't break local/Ollama-style providers.
-  if __caps_supports(caps, "adaptive") {
-    return {mode: "adaptive"}
+  if kind == "repair" {
+    return "code"
   }
-  if __caps_reasoning_effort(caps) {
-    return {mode: "effort", level: "medium"}
-  }
-  return nil
-}
-
-fn __preset_thinking(kind, opts) {
-  if __caller_set_thinking(opts) {
-    return nil
-  }
-  let caps = __provider_capabilities_for(opts)
-  return __thinking_choice_for_kind(kind, caps)
+  return "agent"
 }
 
 fn __default_budget_for_kind(kind) {
@@ -228,13 +188,12 @@ fn __tool_using_defaults(kind) {
   return {
     profile: profile,
     loop_until_done: true,
-    done_sentinel: nil,
     done_judge: nil,
     native_tool_fallback: "allow_once",
     max_nudges: max_nudges,
     // The repair knobs ride inside `stall_diagnostics` (where
-    // `__agent_stall_config` parses them) and default OFF, so the preset is
-    // backward-compatible: `repair_aware:false` makes every repair field inert.
+    // `__agent_stall_config` parses them) and default OFF; `repair_aware:false`
+    // makes every repair field inert until a harness opts into the behavior.
     stall_diagnostics: {
       enabled: true,
       threshold: 3,
@@ -276,12 +235,21 @@ fn __kind_defaults(kind, opts) {
   return __tool_using_defaults(kind)
 }
 
-fn __apply_thinking(opts, kind) {
-  let preset = __preset_thinking(kind, opts)
-  if preset == nil {
+fn __apply_reasoning_defaults(opts, kind) {
+  if __caller_set_low_level_reasoning(opts) {
     return opts
   }
-  return opts + {thinking: preset, _preset_thinking_applied: preset}
+  var resolved = opts
+  if !__caller_set_reasoning_policy(opts) {
+    resolved = resolved + {reasoning_policy: "auto"}
+  }
+  if !__caller_set_reasoning_scale(opts) {
+    resolved = resolved + {reasoning_scale: "small"}
+  }
+  if !__caller_set_reasoning_task(opts) {
+    resolved = resolved + {reasoning_task: __reasoning_task_for_kind(kind)}
+  }
+  return resolved
 }
 
 fn __apply_iteration_budget(opts, kind) {
@@ -497,7 +465,7 @@ pub fn agent_preset(kind, options = nil) {
   opts = __apply_kind_defaults(resolved_kind, opts)
   opts = __apply_iteration_budget(opts, resolved_kind)
   opts = __apply_turn_policy(opts, resolved_kind)
-  opts = __apply_thinking(opts, resolved_kind)
+  opts = __apply_reasoning_defaults(opts, resolved_kind)
   opts = __apply_captain_tool_caller(opts, resolved_kind)
   opts = __apply_captain_llm_caller(opts, resolved_kind)
   opts = __apply_tool_format(opts, resolved_kind)

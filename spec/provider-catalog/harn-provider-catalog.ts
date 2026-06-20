@@ -735,6 +735,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "style": "bearer",
         "env": [
           "MOONSHOT_API_KEY",
+          "MOONSHOT_AI_API_KEY",
           "KIMI_API_KEY"
         ],
         "required": true
@@ -749,6 +750,33 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       ],
       "caveats": [],
       "latency_p50_ms": 1900
+    },
+    {
+      "id": "nvidia",
+      "display_name": "Nvidia",
+      "classification": "hosted",
+      "endpoint": {
+        "base_url": "https://integrate.api.nvidia.com/v1",
+        "base_url_env": "NVIDIA_NIM_BASE_URL",
+        "chat_endpoint": "/chat/completions",
+        "completion_endpoint": "/completions"
+      },
+      "auth": {
+        "style": "bearer",
+        "env": [
+          "NVIDIA_API_KEY",
+          "NIM_API_KEY"
+        ],
+        "required": true
+      },
+      "protocols": [
+        "openai_chat_completions"
+      ],
+      "features": [
+        "native_tools"
+      ],
+      "caveats": [],
+      "latency_p50_ms": 1400
     },
     {
       "id": "ollama",
@@ -1056,7 +1084,9 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "cache_write_per_mtok": 1.0
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "Retired 2026-02-19 per Anthropic deprecations page. Use claude-haiku-4-5-20251001.",
+        "superseded_by": "claude-haiku-4-5-20251001"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -1133,7 +1163,9 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "cache_write_per_mtok": 3.75
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "Retired 2025-10-28 per Anthropic deprecations page. Use claude-sonnet-4-5-20250929 or claude-sonnet-4-6.",
+        "superseded_by": "claude-sonnet-4-6"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -1210,7 +1242,9 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "cache_write_per_mtok": 3.75
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "Retired 2025-10-28 per Anthropic deprecations page. Use claude-sonnet-4-5-20250929 or claude-sonnet-4-6.",
+        "superseded_by": "claude-sonnet-4-6"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -1664,6 +1698,89 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "benchmarks": {
         "swe_bench_verified": 77.6
       }
+    },
+    {
+      "id": "claude-opus-4-5-20251101",
+      "name": "Claude Opus 4.5",
+      "provider": "anthropic",
+      "aliases": [],
+      "context_window": 200000,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": [
+          "bm25",
+          "regex"
+        ],
+        "max_tools": 10000
+      },
+      "structured_output": "tool_use",
+      "format_preferences": {
+        "prefers_xml_scaffolding": true,
+        "prefers_markdown_scaffolding": false,
+        "structured_output_mode": "xml_tagged",
+        "supports_assistant_prefill": true,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": true,
+        "thinking_block_style": "thinking_blocks"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 5.0,
+        "output_per_mtok": 25.0,
+        "cache_read_per_mtok": 0.5,
+        "cache_write_per_mtok": 6.25
+      },
+      "deprecation": {
+        "status": "active",
+        "superseded_by": "claude-opus-4-8"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "tool_search",
+        "vision",
+        "audio",
+        "pdf",
+        "files",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "anthropic-claude",
+      "lineage": "claude-sonnet-opus",
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "reasoning",
+        "coding",
+        "long_context",
+        "agentic"
+      ]
     },
     {
       "id": "claude-opus-4-6",
@@ -2124,7 +2241,94 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       },
       "deprecation": {
         "status": "deprecated",
-        "note": "Sunset 2026-05-15 per Anthropic deprecations page. Replaced by claude-sonnet-4-6."
+        "note": "Undated compatibility selector. Anthropic's active API id is claude-sonnet-4-5-20250929; prefer that dated id or claude-sonnet-4-6.",
+        "superseded_by": "claude-sonnet-4-5-20250929"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "tool_search",
+        "vision",
+        "audio",
+        "pdf",
+        "files",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "anthropic-claude",
+      "lineage": "claude-sonnet-opus",
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "reasoning",
+        "tool_use",
+        "long_context",
+        "agentic"
+      ],
+      "benchmarks": {
+        "swe_bench_verified": 77.2
+      }
+    },
+    {
+      "id": "claude-sonnet-4-5-20250929",
+      "name": "Claude Sonnet 4.5",
+      "provider": "anthropic",
+      "aliases": [],
+      "context_window": 200000,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": [
+          "bm25",
+          "regex"
+        ],
+        "max_tools": 10000
+      },
+      "structured_output": "tool_use",
+      "format_preferences": {
+        "prefers_xml_scaffolding": true,
+        "prefers_markdown_scaffolding": false,
+        "structured_output_mode": "xml_tagged",
+        "supports_assistant_prefill": true,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": true,
+        "thinking_block_style": "thinking_blocks"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 3.0,
+        "output_per_mtok": 15.0,
+        "cache_read_per_mtok": 0.3,
+        "cache_write_per_mtok": 3.75
+      },
+      "deprecation": {
+        "status": "active"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -2576,7 +2780,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "cohere",
         "command-a-plus"
       ],
-      "context_window": 256000,
+      "context_window": 128000,
       "logical_model": "command-a-plus-05-2026",
       "equivalence_group": "command-a-plus-05-2026",
       "api_dialect": "openai_chat_compat",
@@ -2748,6 +2952,172 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       ]
     },
     {
+      "id": "deepinfra/Qwen/Qwen3.7-Max",
+      "name": "Qwen3.7 Max (DeepInfra)",
+      "provider": "deepinfra",
+      "aliases": [],
+      "context_window": 1000000,
+      "logical_model": "qwen3.7-max",
+      "equivalence_group": "qwen3.7-max",
+      "served_variant": "deepinfra",
+      "wire_model": "Qwen/Qwen3.7-Max",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 1.25,
+        "output_per_mtok": 3.75,
+        "cache_read_per_mtok": 0.125,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "qwen",
+      "lineage": "qwen3",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "google-gemini",
+        "deepseek",
+        "kimi"
+      ],
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "long_context",
+        "cheap"
+      ]
+    },
+    {
+      "id": "deepinfra/deepseek-ai/DeepSeek-V3.2",
+      "name": "DeepSeek V3.2 (DeepInfra)",
+      "provider": "deepinfra",
+      "aliases": [],
+      "context_window": 163840,
+      "logical_model": "deepseek-v3.2",
+      "equivalence_group": "deepseek-v3.2",
+      "served_variant": "deepinfra",
+      "wire_model": "deepseek-ai/DeepSeek-V3.2",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 0.5,
+        "output_per_mtok": 1.5,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "deepseek",
+      "lineage": "deepseek",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "google-gemini",
+        "qwen",
+        "kimi"
+      ],
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "reasoning",
+        "coding",
+        "tool_use",
+        "long_context",
+        "cheap"
+      ]
+    },
+    {
       "id": "deepinfra/deepseek-ai/DeepSeek-V4-Pro",
       "name": "DeepSeek V4 Pro (DeepInfra)",
       "provider": "deepinfra",
@@ -2830,6 +3200,265 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "tool_use",
         "long_context",
         "cheap"
+      ]
+    },
+    {
+      "id": "deepinfra/moonshotai/Kimi-K2.7-Code",
+      "name": "Kimi K2.7 Code (DeepInfra)",
+      "provider": "deepinfra",
+      "aliases": [
+        "deepinfra-kimi-k2.7-code"
+      ],
+      "context_window": 262144,
+      "logical_model": "moonshot-kimi-k2.7-code",
+      "equivalence_group": "moonshot-kimi-k2.7-code",
+      "served_variant": "deepinfra",
+      "wire_model": "moonshotai/Kimi-K2.7-Code",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 0.8,
+        "output_per_mtok": 3.2,
+        "cache_read_per_mtok": 0.2,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "video",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "kimi",
+      "lineage": "kimi",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "google-gemini",
+        "qwen",
+        "deepseek"
+      ],
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
+        "long_context",
+        "tool_use",
+        "reasoning",
+        "vision"
+      ]
+    },
+    {
+      "id": "deepinfra/openai/gpt-oss-120b",
+      "name": "GPT-OSS 120B (DeepInfra)",
+      "provider": "deepinfra",
+      "aliases": [],
+      "context_window": 131072,
+      "logical_model": "openai-gpt-oss-120b",
+      "equivalence_group": "openai-gpt-oss-120b",
+      "served_variant": "deepinfra",
+      "wire_model": "openai/gpt-oss-120b",
+      "api_dialect": "openai_chat",
+      "architecture": {
+        "parameter_count_b": 117.0,
+        "active_parameter_count_b": 5.1,
+        "moe": true,
+        "license": "Apache-2.0",
+        "source_url": "https://developers.openai.com/api/docs/models/gpt-oss-120b",
+        "last_verified": "2026-06-20"
+      },
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.15,
+        "output_per_mtok": 0.6,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "openai-gpt",
+      "lineage": "openai-legacy",
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "speed",
+        "cheap",
+        "tool_use",
+        "reasoning"
+      ]
+    },
+    {
+      "id": "deepinfra/zai-org/GLM-5.2",
+      "name": "GLM 5.2 (DeepInfra)",
+      "provider": "deepinfra",
+      "aliases": [
+        "deepinfra-glm-5.2"
+      ],
+      "context_window": 1048576,
+      "logical_model": "glm-5.2",
+      "equivalence_group": "glm-5.2",
+      "served_variant": "deepinfra",
+      "wire_model": "zai-org/GLM-5.2",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "json",
+        "parity": "native_unreliable",
+        "parity_notes": "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted a malformed native call whose function name was the whole JSON payload; fenced JSON text-channel tools completed the loop.",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 1.4,
+        "output_per_mtok": 4.4,
+        "cache_read_per_mtok": 0.26,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "glm",
+      "lineage": "glm",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "google-gemini",
+        "qwen",
+        "deepseek"
+      ],
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "long_context"
       ]
     },
     {
@@ -3122,6 +3751,159 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       }
     },
     {
+      "id": "accounts/fireworks/models/deepseek-v4-pro",
+      "name": "DeepSeek V4 Pro (Fireworks)",
+      "provider": "fireworks",
+      "aliases": [],
+      "context_window": 1048576,
+      "logical_model": "deepseek-v4-pro",
+      "equivalence_group": "deepseek-v4-pro",
+      "served_variant": "fireworks",
+      "wire_model": "accounts/fireworks/models/deepseek-v4-pro",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 0.6,
+        "output_per_mtok": 1.2,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "deepseek",
+      "lineage": "deepseek",
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "long_context"
+      ]
+    },
+    {
+      "id": "accounts/fireworks/models/glm-5p2",
+      "name": "GLM 5.2 (Fireworks)",
+      "provider": "fireworks",
+      "aliases": [],
+      "context_window": 1048576,
+      "logical_model": "glm-5.2",
+      "equivalence_group": "glm-5.2",
+      "served_variant": "fireworks",
+      "wire_model": "accounts/fireworks/models/glm-5p2",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "json",
+        "parity": "native_unreliable",
+        "parity_notes": "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted XML `<tool_use>` text instead of provider-native tool_calls. JSON tools completed the loop when auto reasoning was disabled; text tools did not.",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 1.4,
+        "output_per_mtok": 4.4,
+        "cache_read_per_mtok": 0.26,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "glm",
+      "lineage": "glm",
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "long_context"
+      ]
+    },
+    {
       "id": "accounts/fireworks/models/gpt-oss-120b",
       "name": "GPT-OSS 120B (Fireworks)",
       "provider": "fireworks",
@@ -3201,6 +3983,85 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "cheap",
         "tool_use",
         "reasoning"
+      ]
+    },
+    {
+      "id": "accounts/fireworks/models/kimi-k2p6",
+      "name": "Kimi K2.6 (Fireworks)",
+      "provider": "fireworks",
+      "aliases": [],
+      "context_window": 262144,
+      "logical_model": "moonshot-kimi-k2.6",
+      "equivalence_group": "moonshot-kimi-k2.6",
+      "served_variant": "fireworks",
+      "wire_model": "accounts/fireworks/models/kimi-k2p6",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 0.6,
+        "output_per_mtok": 2.5,
+        "cache_read_per_mtok": 0.15,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "kimi",
+      "lineage": "kimi",
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
+        "long_context",
+        "tool_use",
+        "reasoning",
+        "vision"
       ]
     },
     {
@@ -3287,7 +4148,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "long_context",
         "vision",
         "cheap",
-        "tool_use"
+        "tool_use",
+        "agentic"
       ]
     },
     {
@@ -3378,6 +4240,93 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "benchmarks": {
         "swe_bench_verified": 63.8
       }
+    },
+    {
+      "id": "gemini-3.5-flash",
+      "name": "Gemini 3.5 Flash",
+      "provider": "gemini",
+      "aliases": [],
+      "context_window": 1048576,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": true,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled",
+          "adaptive"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 1.5,
+        "output_per_mtok": 9.0,
+        "cache_read_per_mtok": 0.375,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "audio",
+        "pdf",
+        "files",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "google-gemini",
+      "lineage": "gemini-flash",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "qwen",
+        "deepseek",
+        "kimi"
+      ],
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "speed",
+        "long_context",
+        "vision",
+        "tool_use",
+        "agentic"
+      ]
     },
     {
       "id": "models/gemma-4-26b-a4b-it",
@@ -3596,6 +4545,96 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "family": "openai-gpt",
       "lineage": "openai-legacy",
       "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "speed",
+        "cheap",
+        "tool_use",
+        "reasoning"
+      ]
+    },
+    {
+      "id": "groq/openai/gpt-oss-20b",
+      "name": "GPT-OSS 20B (Groq)",
+      "provider": "groq",
+      "aliases": [],
+      "context_window": 131072,
+      "logical_model": "openai-gpt-oss-20b",
+      "equivalence_group": "openai-gpt-oss-20b",
+      "served_variant": "groq-lpu",
+      "wire_model": "openai/gpt-oss-20b",
+      "api_dialect": "openai_chat",
+      "rate_limits": {
+        "rpm": 1000,
+        "tpm": 250000,
+        "tier": "developer",
+        "source_url": "https://console.groq.com/docs/models",
+        "last_verified": "2026-06-20"
+      },
+      "architecture": {
+        "parameter_count_b": 21.0,
+        "active_parameter_count_b": 3.6,
+        "moe": true,
+        "license": "Apache-2.0",
+        "source_url": "https://developers.openai.com/api/docs/models/gpt-oss-20b",
+        "last_verified": "2026-06-20"
+      },
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.1,
+        "output_per_mtok": 0.5,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "openai-gpt",
+      "lineage": "openai-legacy",
+      "tier": "mid",
       "open_weight": true,
       "strengths": [
         "speed",
@@ -4549,8 +5588,9 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": true,
         "text": true,
-        "preferred_format": "native",
-        "parity": "unknown",
+        "preferred_format": "json",
+        "parity": "native_unreliable",
+        "parity_notes": "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and prose claiming the tool had run; fenced JSON text-channel tools completed the loop.",
         "tool_search": []
       },
       "structured_output": "delimited",
@@ -4623,8 +5663,9 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": true,
         "text": true,
-        "preferred_format": "native",
-        "parity": "unknown",
+        "preferred_format": "json",
+        "parity": "native_unreliable",
+        "parity_notes": "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and prose claiming the tool had run; fenced JSON text-channel tools completed the loop.",
         "tool_search": []
       },
       "structured_output": "delimited",
@@ -4896,6 +5937,90 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       ]
     },
     {
+      "id": "mistral-medium-3-5",
+      "name": "Mistral Medium 3.5",
+      "provider": "mistral",
+      "aliases": [],
+      "context_window": 262144,
+      "logical_model": "mistral-medium-3.5-128b",
+      "equivalence_group": "mistral-medium-3.5-128b",
+      "api_dialect": "openai_chat_compat",
+      "architecture": {
+        "parameter_count_b": 128.0,
+        "moe": false,
+        "license": "Modified MIT",
+        "source_url": "https://docs.mistral.ai/models/model-cards/mistral-medium-3-5-26-04",
+        "last_verified": "2026-06-20"
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 1.5,
+        "output_per_mtok": 7.5,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "mistral",
+      "lineage": "mistral",
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "tool_use",
+        "reasoning",
+        "long_context",
+        "vision",
+        "agentic"
+      ]
+    },
+    {
       "id": "mistral-small-2603",
       "name": "Mistral Small 4",
       "provider": "mistral",
@@ -5159,8 +6284,9 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": true,
         "text": true,
-        "preferred_format": "native",
-        "parity": "unknown",
+        "preferred_format": "json",
+        "parity": "native_unreliable",
+        "parity_notes": "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and claimed the tool was unavailable. Harn JSON tools completed the loop; text tools also pass after fixing text-mode history projection.",
         "tool_search": []
       },
       "structured_output": "native",
@@ -5221,6 +6347,1206 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "tool_use",
         "reasoning",
         "vision"
+      ]
+    },
+    {
+      "id": "moonshot/kimi-k2.7-code-highspeed",
+      "name": "Kimi K2.7 Code Highspeed (Moonshot direct)",
+      "provider": "moonshot",
+      "aliases": [
+        "moonshot-kimi-k2.7-code-highspeed"
+      ],
+      "context_window": 262144,
+      "logical_model": "moonshot-kimi-k2.7-code",
+      "equivalence_group": "moonshot-kimi-k2.7-code",
+      "served_variant": "moonshot-direct-highspeed",
+      "wire_model": "kimi-k2.7-code-highspeed",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "json",
+        "parity": "native_unreliable",
+        "parity_notes": "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and claimed the tool was unavailable. Harn JSON tools completed the loop; text tools also pass after fixing text-mode history projection.",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 0.8,
+        "output_per_mtok": 3.2,
+        "cache_read_per_mtok": 0.2,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "video",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "kimi",
+      "lineage": "kimi",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "google-gemini",
+        "qwen",
+        "deepseek"
+      ],
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "speed",
+        "coding",
+        "agentic",
+        "long_context",
+        "tool_use",
+        "reasoning",
+        "vision"
+      ]
+    },
+    {
+      "id": "nvidia/deepseek-v4-flash",
+      "name": "DeepSeek V4 Flash (NVIDIA NIM)",
+      "provider": "nvidia",
+      "aliases": [],
+      "context_window": 1048576,
+      "logical_model": "deepseek-v4-flash",
+      "equivalence_group": "deepseek-v4-flash",
+      "served_variant": "nvidia-nim",
+      "wire_model": "deepseek-ai/deepseek-v4-flash",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "deepseek",
+      "lineage": "deepseek",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "google-gemini",
+        "qwen",
+        "kimi"
+      ],
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "speed",
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "long_context"
+      ]
+    },
+    {
+      "id": "nvidia/deepseek-v4-pro",
+      "name": "DeepSeek V4 Pro (NVIDIA NIM)",
+      "provider": "nvidia",
+      "aliases": [
+        "nvidia-deepseek-v4-pro"
+      ],
+      "context_window": 1048576,
+      "logical_model": "deepseek-v4-pro",
+      "equivalence_group": "deepseek-v4-pro",
+      "served_variant": "nvidia-nim",
+      "wire_model": "deepseek-ai/deepseek-v4-pro",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "deepseek",
+      "lineage": "deepseek",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "google-gemini",
+        "qwen",
+        "kimi"
+      ],
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "long_context"
+      ]
+    },
+    {
+      "id": "nvidia/kimi-k2.6",
+      "name": "Kimi K2.6 (NVIDIA NIM)",
+      "provider": "nvidia",
+      "aliases": [
+        "nvidia-kimi-k2.6"
+      ],
+      "context_window": 262144,
+      "logical_model": "moonshot-kimi-k2.6",
+      "equivalence_group": "moonshot-kimi-k2.6",
+      "served_variant": "nvidia-nim",
+      "wire_model": "moonshotai/kimi-k2.6",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 0.6,
+        "output_per_mtok": 2.5,
+        "cache_read_per_mtok": 0.15,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "kimi",
+      "lineage": "kimi",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "google-gemini",
+        "qwen",
+        "deepseek"
+      ],
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
+        "long_context",
+        "tool_use",
+        "reasoning",
+        "vision"
+      ]
+    },
+    {
+      "id": "nvidia/minimax-m2.7",
+      "name": "MiniMax M2.7 (NVIDIA NIM)",
+      "provider": "nvidia",
+      "aliases": [],
+      "context_window": 196608,
+      "logical_model": "minimax-m2.7",
+      "equivalence_group": "minimax-m2.7",
+      "served_variant": "nvidia-nim",
+      "wire_model": "minimaxai/minimax-m2.7",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "delimited",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "delimited",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 0.3,
+        "output_per_mtok": 1.2,
+        "cache_read_per_mtok": 0.06,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "minimax",
+      "lineage": "minimax",
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "speed",
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "long_context"
+      ]
+    },
+    {
+      "id": "nvidia/minimax-m3",
+      "name": "MiniMax M3 (NVIDIA NIM)",
+      "provider": "nvidia",
+      "aliases": [
+        "nvidia-minimax-m3"
+      ],
+      "context_window": 1048576,
+      "logical_model": "minimax-m3",
+      "equivalence_group": "minimax-m3",
+      "served_variant": "nvidia-nim",
+      "wire_model": "minimaxai/minimax-m3",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "delimited",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "delimited",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "adaptive"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 0.6,
+        "output_per_mtok": 2.4,
+        "cache_read_per_mtok": 0.12,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "video",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "minimax",
+      "lineage": "minimax",
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "long_context",
+        "vision"
+      ]
+    },
+    {
+      "id": "nvidia/mistral-medium-3.5-128b",
+      "name": "Mistral Medium 3.5 128B (NVIDIA NIM)",
+      "provider": "nvidia",
+      "aliases": [],
+      "context_window": 262144,
+      "logical_model": "mistral-medium-3.5-128b",
+      "equivalence_group": "mistral-medium-3.5-128b",
+      "served_variant": "nvidia-nim",
+      "wire_model": "mistralai/mistral-medium-3.5-128b",
+      "api_dialect": "openai_chat",
+      "architecture": {
+        "parameter_count_b": 128.0,
+        "source_url": "https://build.nvidia.com/models",
+        "last_verified": "2026-06-20"
+      },
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "structured_output"
+      ],
+      "family": "mistral",
+      "lineage": "mistral",
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use"
+      ]
+    },
+    {
+      "id": "nvidia/nemotron-3-nano-30b-a3b",
+      "name": "Nemotron 3 Nano 30B A3B (NVIDIA NIM)",
+      "provider": "nvidia",
+      "aliases": [
+        "nvidia-nemotron-nano"
+      ],
+      "context_window": 262144,
+      "logical_model": "nemotron-3-nano-30b-a3b",
+      "equivalence_group": "nemotron-3-nano-30b-a3b",
+      "served_variant": "nvidia-nim",
+      "api_dialect": "openai_chat",
+      "architecture": {
+        "parameter_count_b": 30.0,
+        "active_parameter_count_b": 3.0,
+        "moe": true,
+        "source_url": "https://build.nvidia.com/nvidia/nemotron-3-nano-30b-a3b/modelcard",
+        "last_verified": "2026-06-20"
+      },
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "interchangeable",
+        "parity_notes": "2026-06-20 Harn agent-loop smoke: NVIDIA NIM Nemotron 3 Nano completed both native and JSON tool loops with reasoning disabled. Earlier native false negatives were caused by Harn's parser treating terse final answers as billed no-ops; keep native preferred.",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "nvidia",
+      "lineage": "nvidia",
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "speed",
+        "cheap",
+        "reasoning",
+        "coding",
+        "tool_use",
+        "long_context"
+      ]
+    },
+    {
+      "id": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+      "name": "Nemotron 3 Nano Omni 30B A3B Reasoning (NVIDIA NIM)",
+      "provider": "nvidia",
+      "aliases": [],
+      "context_window": 262144,
+      "logical_model": "nemotron-3-nano-omni-30b-a3b-reasoning",
+      "equivalence_group": "nemotron-3-nano-omni-30b-a3b-reasoning",
+      "served_variant": "nvidia-nim",
+      "api_dialect": "openai_chat",
+      "architecture": {
+        "parameter_count_b": 30.0,
+        "active_parameter_count_b": 3.0,
+        "moe": true,
+        "source_url": "https://build.nvidia.com/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning/modelcard",
+        "last_verified": "2026-06-20"
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "video"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "audio",
+        "video",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "nvidia",
+      "lineage": "nvidia",
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "vision",
+        "reasoning",
+        "tool_use",
+        "summarization",
+        "long_context"
+      ]
+    },
+    {
+      "id": "nvidia/nemotron-3-super-120b-a12b",
+      "name": "Nemotron 3 Super 120B A12B (NVIDIA NIM)",
+      "provider": "nvidia",
+      "aliases": [
+        "nvidia-nemotron-super"
+      ],
+      "context_window": 1048576,
+      "logical_model": "nemotron-3-super-120b-a12b",
+      "equivalence_group": "nemotron-3-super-120b-a12b",
+      "served_variant": "nvidia-nim",
+      "api_dialect": "openai_chat",
+      "architecture": {
+        "parameter_count_b": 120.0,
+        "active_parameter_count_b": 12.0,
+        "moe": true,
+        "source_url": "https://build.nvidia.com/nvidia/nemotron-3-super-120b-a12b/modelcard",
+        "last_verified": "2026-06-20"
+      },
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "nvidia",
+      "lineage": "nvidia",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "google-gemini",
+        "qwen",
+        "deepseek",
+        "kimi"
+      ],
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "agentic",
+        "reasoning",
+        "coding",
+        "tool_use",
+        "long_context",
+        "speed"
+      ]
+    },
+    {
+      "id": "nvidia/nemotron-3-ultra-550b-a55b",
+      "name": "Nemotron 3 Ultra 550B A55B (NVIDIA NIM)",
+      "provider": "nvidia",
+      "aliases": [
+        "nvidia-nemotron-ultra"
+      ],
+      "context_window": 1048576,
+      "logical_model": "nemotron-3-ultra-550b-a55b",
+      "equivalence_group": "nemotron-3-ultra-550b-a55b",
+      "served_variant": "nvidia-nim",
+      "api_dialect": "openai_chat",
+      "architecture": {
+        "parameter_count_b": 550.0,
+        "active_parameter_count_b": 55.0,
+        "moe": true,
+        "source_url": "https://build.nvidia.com/nvidia/nemotron-3-ultra-550b-a55b/modelcard",
+        "last_verified": "2026-06-20"
+      },
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "nvidia",
+      "lineage": "nvidia",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "google-gemini",
+        "qwen",
+        "deepseek",
+        "kimi"
+      ],
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "agentic",
+        "reasoning",
+        "coding",
+        "tool_use",
+        "long_context"
+      ]
+    },
+    {
+      "id": "nvidia/openai/gpt-oss-120b",
+      "name": "GPT-OSS 120B (NVIDIA NIM)",
+      "provider": "nvidia",
+      "aliases": [],
+      "context_window": 131072,
+      "logical_model": "openai-gpt-oss-120b",
+      "equivalence_group": "openai-gpt-oss-120b",
+      "served_variant": "nvidia-nim",
+      "wire_model": "openai/gpt-oss-120b",
+      "api_dialect": "openai_chat",
+      "architecture": {
+        "parameter_count_b": 117.0,
+        "active_parameter_count_b": 5.1,
+        "moe": true,
+        "license": "Apache-2.0",
+        "source_url": "https://developers.openai.com/api/docs/models/gpt-oss-120b",
+        "last_verified": "2026-06-20"
+      },
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "openai-gpt",
+      "lineage": "openai-legacy",
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "cheap",
+        "tool_use",
+        "reasoning"
+      ]
+    },
+    {
+      "id": "nvidia/openai/gpt-oss-20b",
+      "name": "GPT-OSS 20B (NVIDIA NIM)",
+      "provider": "nvidia",
+      "aliases": [],
+      "context_window": 131072,
+      "logical_model": "openai-gpt-oss-20b",
+      "equivalence_group": "openai-gpt-oss-20b",
+      "served_variant": "nvidia-nim",
+      "wire_model": "openai/gpt-oss-20b",
+      "api_dialect": "openai_chat",
+      "architecture": {
+        "parameter_count_b": 21.0,
+        "active_parameter_count_b": 3.6,
+        "moe": true,
+        "license": "Apache-2.0",
+        "source_url": "https://developers.openai.com/api/docs/models/gpt-oss-20b",
+        "last_verified": "2026-06-20"
+      },
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "openai-gpt",
+      "lineage": "openai-legacy",
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "speed",
+        "cheap",
+        "tool_use",
+        "reasoning"
+      ]
+    },
+    {
+      "id": "nvidia/step-3.7-flash",
+      "name": "Step 3.7 Flash (NVIDIA NIM)",
+      "provider": "nvidia",
+      "aliases": [],
+      "context_window": 131072,
+      "logical_model": "step-3.7-flash",
+      "equivalence_group": "step-3.7-flash",
+      "served_variant": "nvidia-nim",
+      "wire_model": "stepfun-ai/step-3.7-flash",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "interchangeable",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "nvidia",
+      "lineage": "nvidia",
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "agentic",
+        "long_context",
+        "tool_use",
+        "reasoning",
+        "vision"
+      ]
+    },
+    {
+      "id": "nvidia/z-ai/glm-5.1",
+      "name": "GLM 5.1 (NVIDIA NIM)",
+      "provider": "nvidia",
+      "aliases": [],
+      "context_window": 202752,
+      "logical_model": "glm-5.1",
+      "equivalence_group": "glm-5.1",
+      "served_variant": "nvidia-nim",
+      "wire_model": "z-ai/glm-5.1",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 1.4,
+        "output_per_mtok": 4.4,
+        "cache_read_per_mtok": 0.26,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "glm",
+      "lineage": "glm",
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "long_context"
       ]
     },
     {
@@ -5825,7 +8151,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "name": "GPT-5.5",
       "provider": "openai",
       "aliases": [],
-      "context_window": 400000,
+      "context_window": 1050000,
       "modalities": {
         "input": [
           "text",
@@ -5916,6 +8242,90 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         },
         "note": "Codex \"Fast mode\" (service_tier=\"fast\", ~1.5x faster output) and API priority processing (service_tier=\"priority\") both bill at 2.5x standard. Not offered for long-context, fine-tuned models, or embeddings."
       }
+    },
+    {
+      "id": "gpt-5.5-pro",
+      "name": "GPT-5.5 Pro",
+      "provider": "openai",
+      "aliases": [],
+      "context_window": 1050000,
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": [
+          "hosted",
+          "client"
+        ]
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "none_supported": true,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 30.0,
+        "output_per_mtok": 180.0,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "tool_search",
+        "vision",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "openai-gpt",
+      "lineage": "openai-gpt5",
+      "complementary_with": [
+        "anthropic-claude",
+        "google-gemini",
+        "qwen",
+        "deepseek",
+        "kimi"
+      ],
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "reasoning",
+        "coding",
+        "tool_use",
+        "long_context",
+        "agentic"
+      ]
     },
     {
       "id": "o1",
@@ -6262,6 +8672,80 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       ]
     },
     {
+      "id": "anthropic/claude-fable-5",
+      "name": "Claude Fable 5 (via OpenRouter)",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 1000000,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "tool_use",
+      "format_preferences": {
+        "prefers_xml_scaffolding": true,
+        "prefers_markdown_scaffolding": false,
+        "structured_output_mode": "xml_tagged",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": true,
+        "thinking_block_style": "thinking_blocks"
+      },
+      "reasoning": {
+        "modes": [
+          "adaptive"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": true,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 10.0,
+        "output_per_mtok": 50.0,
+        "cache_read_per_mtok": 1.0,
+        "cache_write_per_mtok": 12.5
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "anthropic-claude",
+      "lineage": "claude-sonnet-opus",
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "reasoning",
+        "coding",
+        "long_context",
+        "agentic"
+      ],
+      "benchmarks": {
+        "swe_bench_pro": 80.3
+      }
+    },
+    {
       "id": "anthropic/claude-haiku-4-5",
       "name": "Claude Haiku 4.5 (via OpenRouter)",
       "provider": "openrouter",
@@ -6331,6 +8815,81 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "tool_use",
         "summarization"
       ]
+    },
+    {
+      "id": "anthropic/claude-opus-4.8",
+      "name": "Claude Opus 4.8 (via OpenRouter)",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 1000000,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "tool_use",
+      "format_preferences": {
+        "prefers_xml_scaffolding": true,
+        "prefers_markdown_scaffolding": false,
+        "structured_output_mode": "xml_tagged",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": true,
+        "thinking_block_style": "thinking_blocks"
+      },
+      "reasoning": {
+        "modes": [
+          "adaptive"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": true,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 5.0,
+        "output_per_mtok": 25.0,
+        "cache_read_per_mtok": 0.5,
+        "cache_write_per_mtok": 6.25
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "anthropic-claude",
+      "lineage": "claude-sonnet-opus",
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "reasoning",
+        "coding",
+        "long_context",
+        "agentic"
+      ],
+      "benchmarks": {
+        "swe_bench_pro": 69.2,
+        "swe_bench_verified": 88.6
+      }
     },
     {
       "id": "anthropic/claude-sonnet-4-6",
@@ -6718,6 +9277,92 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "vision",
         "cheap",
         "tool_use"
+      ]
+    },
+    {
+      "id": "google/gemini-3.5-flash",
+      "name": "Gemini 3.5 Flash (via OpenRouter)",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 1048576,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled",
+          "adaptive"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 1.5,
+        "output_per_mtok": 9.0,
+        "cache_read_per_mtok": 0.375,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "audio",
+        "pdf",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "google-gemini",
+      "lineage": "gemini-flash",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "qwen",
+        "deepseek",
+        "kimi"
+      ],
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "speed",
+        "long_context",
+        "vision",
+        "tool_use",
+        "agentic"
       ]
     },
     {
@@ -7288,6 +9933,91 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "coding",
         "tool_use",
         "long_context"
+      ]
+    },
+    {
+      "id": "mistralai/mistral-medium-3-5",
+      "name": "Mistral Medium 3.5 (via OpenRouter)",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 262144,
+      "logical_model": "mistral-medium-3.5-128b",
+      "equivalence_group": "mistral-medium-3.5-128b",
+      "served_variant": "openrouter",
+      "api_dialect": "openai_chat",
+      "architecture": {
+        "parameter_count_b": 128.0,
+        "moe": false,
+        "license": "Modified MIT",
+        "source_url": "https://docs.mistral.ai/models/model-cards/mistral-medium-3-5-26-04",
+        "last_verified": "2026-06-20"
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 1.5,
+        "output_per_mtok": 7.5,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "mistral",
+      "lineage": "mistral",
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "tool_use",
+        "reasoning",
+        "long_context",
+        "vision",
+        "agentic"
       ]
     },
     {
@@ -7963,28 +10693,31 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": true,
         "text": true,
-        "preferred_format": "native",
-        "parity": "unknown",
+        "preferred_format": "text",
+        "parity": "native_unreliable",
+        "parity_notes": "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and hallucinated a result token; heredoc text tools completed the loop. OpenRouter reasoning-on text tools emitted malformed tool markup, so auto reasoning is off for agent/code/verify tasks.",
         "tool_search": []
       },
       "structured_output": "native",
       "format_preferences": {
         "prefers_xml_scaffolding": false,
-        "prefers_markdown_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
         "structured_output_mode": "native_json",
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
         "prefers_xml_tools": false,
-        "thinking_block_style": "none"
+        "thinking_block_style": "inline"
       },
       "reasoning": {
-        "modes": [],
+        "modes": [
+          "enabled"
+        ],
         "effort_supported": false,
         "none_supported": false,
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "pricing": {
         "input_per_mtok": 1.2,
         "output_per_mtok": 4.0,
@@ -7999,6 +10732,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "capability_tags": [
         "streaming",
         "tools",
+        "prompt_caching",
+        "thinking",
         "structured_output"
       ],
       "family": "glm",
@@ -8027,28 +10762,31 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": true,
         "text": true,
-        "preferred_format": "native",
-        "parity": "unknown",
+        "preferred_format": "text",
+        "parity": "native_unreliable",
+        "parity_notes": "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and hallucinated a result token; heredoc text tools completed the loop. OpenRouter reasoning-on text tools emitted malformed tool markup, so auto reasoning is off for agent/code/verify tasks.",
         "tool_search": []
       },
       "structured_output": "native",
       "format_preferences": {
         "prefers_xml_scaffolding": false,
-        "prefers_markdown_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
         "structured_output_mode": "native_json",
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
         "prefers_xml_tools": false,
-        "thinking_block_style": "none"
+        "thinking_block_style": "inline"
       },
       "reasoning": {
-        "modes": [],
+        "modes": [
+          "enabled"
+        ],
         "effort_supported": false,
         "none_supported": false,
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "pricing": {
         "input_per_mtok": 0.98,
         "output_per_mtok": 3.08,
@@ -8063,6 +10801,82 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "capability_tags": [
         "streaming",
         "tools",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "glm",
+      "lineage": "glm",
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "long_context"
+      ]
+    },
+    {
+      "id": "z-ai/glm-5.2",
+      "name": "GLM 5.2 (via OpenRouter)",
+      "provider": "openrouter",
+      "aliases": [
+        "openrouter-glm-5.2"
+      ],
+      "context_window": 1048576,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "text",
+        "parity": "native_unreliable",
+        "parity_notes": "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and hallucinated a result token; heredoc text tools completed the loop. OpenRouter reasoning-on text tools emitted malformed tool markup, so auto reasoning is off for agent/code/verify tasks.",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 1.2,
+        "output_per_mtok": 4.1,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
         "structured_output"
       ],
       "family": "glm",
@@ -8094,28 +10908,31 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": true,
         "text": true,
-        "preferred_format": "native",
-        "parity": "unknown",
+        "preferred_format": "text",
+        "parity": "native_unreliable",
+        "parity_notes": "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and hallucinated a result token; heredoc text tools completed the loop. OpenRouter reasoning-on text tools emitted malformed tool markup, so auto reasoning is off for agent/code/verify tasks.",
         "tool_search": []
       },
       "structured_output": "native",
       "format_preferences": {
         "prefers_xml_scaffolding": false,
-        "prefers_markdown_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
         "structured_output_mode": "native_json",
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
         "prefers_xml_tools": false,
-        "thinking_block_style": "none"
+        "thinking_block_style": "inline"
       },
       "reasoning": {
-        "modes": [],
+        "modes": [
+          "enabled"
+        ],
         "effort_supported": false,
         "none_supported": false,
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "pricing": {
         "input_per_mtok": 1.2,
         "output_per_mtok": 4.0,
@@ -8130,6 +10947,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "capability_tags": [
         "streaming",
         "tools",
+        "prompt_caching",
+        "thinking",
         "structured_output"
       ],
       "family": "glm",
@@ -8142,12 +10961,94 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       ]
     },
     {
-      "id": "sambanova/DeepSeek-V4-Pro",
-      "name": "DeepSeek V4 Pro (SambaNova)",
+      "id": "sambanova/DeepSeek-V3.2",
+      "name": "DeepSeek V3.2 (SambaNova)",
       "provider": "sambanova",
       "aliases": [
         "sambanova-deepseek"
       ],
+      "context_window": 32768,
+      "logical_model": "deepseek-v3.2",
+      "equivalence_group": "deepseek-v3.2",
+      "served_variant": "sambanova-rdu",
+      "wire_model": "DeepSeek-V3.2",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "interchangeable",
+        "parity_notes": "2026-06-20 Harn agent-loop smoke: SambaNova DeepSeek-V3.2 completed both native and JSON tool loops with reasoning disabled. Earlier native false negatives were caused by Harn's parser treating terse final answers as billed no-ops; keep native preferred.",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 3.0,
+        "output_per_mtok": 4.5,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "deepseek",
+      "lineage": "deepseek",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "google-gemini",
+        "qwen",
+        "kimi"
+      ],
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "speed",
+        "reasoning",
+        "coding",
+        "tool_use"
+      ]
+    },
+    {
+      "id": "sambanova/DeepSeek-V4-Pro",
+      "name": "DeepSeek V4 Pro (SambaNova)",
+      "provider": "sambanova",
+      "aliases": [],
       "context_window": 163840,
       "logical_model": "deepseek-v4-pro",
       "equivalence_group": "deepseek-v4-pro",
@@ -8196,7 +11097,9 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "Not returned from SambaNova /v1/models on 2026-06-20. Use sambanova/DeepSeek-V3.2 or another DeepSeek V4 Pro host.",
+        "superseded_by": "sambanova/DeepSeek-V3.2"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -8229,9 +11132,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "id": "sambanova/Llama-4-Maverick",
       "name": "Llama 4 Maverick (SambaNova)",
       "provider": "sambanova",
-      "aliases": [
-        "sambanova-llama"
-      ],
+      "aliases": [],
       "context_window": 131072,
       "logical_model": "llama-4-maverick",
       "equivalence_group": "llama-4-maverick",
@@ -8279,7 +11180,9 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "Not returned from SambaNova /v1/models on 2026-06-20. Use sambanova/Meta-Llama-3.3-70B-Instruct for the live Llama route.",
+        "superseded_by": "sambanova/Meta-Llama-3.3-70B-Instruct"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -8309,6 +11212,335 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       ]
     },
     {
+      "id": "sambanova/Meta-Llama-3.3-70B-Instruct",
+      "name": "Llama 3.3 70B Instruct (SambaNova)",
+      "provider": "sambanova",
+      "aliases": [
+        "sambanova-llama"
+      ],
+      "context_window": 131072,
+      "logical_model": "llama-3.3-70b-instruct",
+      "equivalence_group": "llama-3.3-70b-instruct",
+      "served_variant": "sambanova-rdu",
+      "wire_model": "Meta-Llama-3.3-70B-Instruct",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.6,
+        "output_per_mtok": 1.2,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "structured_output"
+      ],
+      "family": "llama",
+      "lineage": "llama",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "google-gemini",
+        "deepseek",
+        "kimi"
+      ],
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "speed",
+        "tool_use",
+        "cheap"
+      ]
+    },
+    {
+      "id": "sambanova/MiniMax-M2.7",
+      "name": "MiniMax M2.7 (SambaNova)",
+      "provider": "sambanova",
+      "aliases": [
+        "sambanova-minimax-m2.7"
+      ],
+      "context_window": 196608,
+      "logical_model": "minimax-m2.7",
+      "equivalence_group": "minimax-m2.7",
+      "served_variant": "sambanova-rdu",
+      "wire_model": "MiniMax-M2.7",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 0.6,
+        "output_per_mtok": 2.4,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "minimax",
+      "lineage": "minimax",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "google-gemini",
+        "qwen",
+        "deepseek"
+      ],
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "speed",
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "long_context"
+      ]
+    },
+    {
+      "id": "sambanova/gemma-4-31B-it",
+      "name": "Gemma 4 31B (SambaNova)",
+      "provider": "sambanova",
+      "aliases": [],
+      "context_window": 131072,
+      "logical_model": "gemma-4-31b-it",
+      "equivalence_group": "gemma-4-31b-it",
+      "served_variant": "sambanova-rdu",
+      "wire_model": "gemma-4-31B-it",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.38,
+        "output_per_mtok": 1.15,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "gemma",
+      "lineage": "gemma4",
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "speed",
+        "vision",
+        "reasoning",
+        "coding",
+        "cheap"
+      ]
+    },
+    {
+      "id": "sambanova/gpt-oss-120b",
+      "name": "GPT-OSS 120B (SambaNova)",
+      "provider": "sambanova",
+      "aliases": [
+        "sambanova-gpt-oss-120b"
+      ],
+      "context_window": 131072,
+      "logical_model": "openai-gpt-oss-120b",
+      "equivalence_group": "openai-gpt-oss-120b",
+      "served_variant": "sambanova-rdu",
+      "wire_model": "gpt-oss-120b",
+      "api_dialect": "openai_chat",
+      "architecture": {
+        "parameter_count_b": 117.0,
+        "active_parameter_count_b": 5.1,
+        "moe": true,
+        "license": "Apache-2.0",
+        "source_url": "https://developers.openai.com/api/docs/models/gpt-oss-120b",
+        "last_verified": "2026-06-20"
+      },
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.22,
+        "output_per_mtok": 0.59,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "openai-gpt",
+      "lineage": "openai-legacy",
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "speed",
+        "cheap",
+        "tool_use",
+        "reasoning"
+      ]
+    },
+    {
       "id": "MiniMaxAI/MiniMax-M2.7",
       "name": "MiniMax M2.7 (Together)",
       "provider": "together",
@@ -8327,8 +11559,9 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": true,
         "text": true,
-        "preferred_format": "native",
-        "parity": "unknown",
+        "preferred_format": "json",
+        "parity": "native_unreliable",
+        "parity_notes": "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and prose claiming the tool had run; fenced JSON text-channel tools completed the loop.",
         "tool_search": []
       },
       "structured_output": "native",
@@ -8703,8 +11936,9 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": true,
         "text": true,
-        "preferred_format": "native",
-        "parity": "unknown",
+        "preferred_format": "text",
+        "parity": "native_unreliable",
+        "parity_notes": "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and hallucinated a result token; heredoc text tools completed the loop.",
         "tool_search": []
       },
       "structured_output": "native",
@@ -8762,6 +11996,171 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "long_context",
         "tool_use",
         "reasoning"
+      ]
+    },
+    {
+      "id": "zai-org/GLM-5.2",
+      "name": "GLM 5.2 (Together)",
+      "provider": "together",
+      "aliases": [
+        "together-glm-5.2"
+      ],
+      "context_window": 1048576,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "text",
+        "parity": "native_unreliable",
+        "parity_notes": "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and hallucinated a result token; heredoc text tools completed the loop.",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 1.4,
+        "output_per_mtok": 4.4,
+        "cache_read_per_mtok": 0.26,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "glm",
+      "lineage": "glm",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "google-gemini",
+        "qwen",
+        "deepseek"
+      ],
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "agentic",
+        "coding",
+        "long_context",
+        "tool_use",
+        "reasoning"
+      ]
+    },
+    {
+      "id": "grok-4.3",
+      "name": "Grok 4.3",
+      "provider": "xai",
+      "aliases": [
+        "grok",
+        "grok-4.3"
+      ],
+      "context_window": 1000000,
+      "logical_model": "grok-4.3",
+      "equivalence_group": "grok-4.3",
+      "api_dialect": "openai_chat_compat",
+      "rate_limits": {
+        "source_url": "https://docs.x.ai/developers/models",
+        "last_verified": "2026-06-20"
+      },
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "adaptive"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 1.25,
+        "output_per_mtok": 2.5,
+        "cache_read_per_mtok": 0.2,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "xai",
+      "lineage": "xai",
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "vision",
+        "long_context"
       ]
     },
     {
@@ -8926,10 +12325,86 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "name": "GLM 5.1",
       "provider": "zai",
       "aliases": [
-        "glm",
         "glm-5.1"
       ],
       "context_window": 202752,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 1.4,
+        "output_per_mtok": 4.4,
+        "cache_read_per_mtok": 0.26,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "glm",
+      "lineage": "glm",
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "long_context"
+      ],
+      "benchmarks": {
+        "swe_bench_pro_lead": 1.0
+      }
+    },
+    {
+      "id": "glm-5.2",
+      "name": "GLM 5.2",
+      "provider": "zai",
+      "aliases": [
+        "glm",
+        "glm-5.2"
+      ],
+      "context_window": 1048576,
       "modalities": {
         "input": [
           "text"
@@ -9017,6 +12492,18 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_format": "native"
     },
     {
+      "name": "deepinfra-glm-5.2",
+      "model_id": "deepinfra/zai-org/GLM-5.2",
+      "provider": "deepinfra",
+      "tool_format": "native"
+    },
+    {
+      "name": "deepinfra-kimi-k2.7-code",
+      "model_id": "deepinfra/moonshotai/Kimi-K2.7-Code",
+      "provider": "deepinfra",
+      "tool_format": "native"
+    },
+    {
       "name": "deepinfra-qwen3.6",
       "model_id": "deepinfra/Qwen/Qwen3.6-35B-A3B",
       "provider": "deepinfra",
@@ -9074,8 +12561,9 @@ export const harnProviderCatalog: HarnProviderCatalog = {
     },
     {
       "name": "glm",
-      "model_id": "glm-5.1",
-      "provider": "zai"
+      "model_id": "glm-5.2",
+      "provider": "zai",
+      "tool_format": "native"
     },
     {
       "name": "glm-5",
@@ -9086,6 +12574,24 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "name": "glm-5.1",
       "model_id": "glm-5.1",
       "provider": "zai"
+    },
+    {
+      "name": "glm-5.2",
+      "model_id": "glm-5.2",
+      "provider": "zai",
+      "tool_format": "native"
+    },
+    {
+      "name": "grok",
+      "model_id": "grok-4.3",
+      "provider": "xai",
+      "tool_format": "native"
+    },
+    {
+      "name": "grok-4.3",
+      "model_id": "grok-4.3",
+      "provider": "xai",
+      "tool_format": "native"
     },
     {
       "name": "grok-code",
@@ -9265,6 +12771,48 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_format": "native"
     },
     {
+      "name": "moonshot-kimi-k2.7-code-highspeed",
+      "model_id": "moonshot/kimi-k2.7-code-highspeed",
+      "provider": "moonshot",
+      "tool_format": "native"
+    },
+    {
+      "name": "nvidia-deepseek-v4-pro",
+      "model_id": "nvidia/deepseek-v4-pro",
+      "provider": "nvidia",
+      "tool_format": "native"
+    },
+    {
+      "name": "nvidia-kimi-k2.6",
+      "model_id": "nvidia/kimi-k2.6",
+      "provider": "nvidia",
+      "tool_format": "native"
+    },
+    {
+      "name": "nvidia-minimax-m3",
+      "model_id": "nvidia/minimax-m3",
+      "provider": "nvidia",
+      "tool_format": "native"
+    },
+    {
+      "name": "nvidia-nemotron-nano",
+      "model_id": "nvidia/nemotron-3-nano-30b-a3b",
+      "provider": "nvidia",
+      "tool_format": "native"
+    },
+    {
+      "name": "nvidia-nemotron-super",
+      "model_id": "nvidia/nemotron-3-super-120b-a12b",
+      "provider": "nvidia",
+      "tool_format": "native"
+    },
+    {
+      "name": "nvidia-nemotron-ultra",
+      "model_id": "nvidia/nemotron-3-ultra-550b-a55b",
+      "provider": "nvidia",
+      "tool_format": "native"
+    },
+    {
       "name": "ollama-devstral-small-2",
       "model_id": "devstral-small-2:24b",
       "provider": "ollama"
@@ -9318,6 +12866,12 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "provider": "openrouter"
     },
     {
+      "name": "openrouter-glm-5.2",
+      "model_id": "z-ai/glm-5.2",
+      "provider": "openrouter",
+      "tool_format": "native"
+    },
+    {
       "name": "openrouter-kat-coder-pro-v2",
       "model_id": "kwaipilot/kat-coder-pro-v2",
       "provider": "openrouter"
@@ -9364,13 +12918,25 @@ export const harnProviderCatalog: HarnProviderCatalog = {
     },
     {
       "name": "sambanova-deepseek",
-      "model_id": "sambanova/DeepSeek-V4-Pro",
+      "model_id": "sambanova/DeepSeek-V3.2",
+      "provider": "sambanova",
+      "tool_format": "native"
+    },
+    {
+      "name": "sambanova-gpt-oss-120b",
+      "model_id": "sambanova/gpt-oss-120b",
       "provider": "sambanova",
       "tool_format": "native"
     },
     {
       "name": "sambanova-llama",
-      "model_id": "sambanova/Llama-4-Maverick",
+      "model_id": "sambanova/Meta-Llama-3.3-70B-Instruct",
+      "provider": "sambanova",
+      "tool_format": "native"
+    },
+    {
+      "name": "sambanova-minimax-m2.7",
+      "model_id": "sambanova/MiniMax-M2.7",
       "provider": "sambanova",
       "tool_format": "native"
     },
@@ -9422,6 +12988,11 @@ export const harnProviderCatalog: HarnProviderCatalog = {
     {
       "name": "together-glm-5.1",
       "model_id": "zai-org/GLM-5.1",
+      "provider": "together"
+    },
+    {
+      "name": "together-glm-5.2",
+      "model_id": "zai-org/GLM-5.2",
       "provider": "together"
     },
     {

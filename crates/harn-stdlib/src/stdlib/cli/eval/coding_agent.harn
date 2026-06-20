@@ -44,10 +44,9 @@
  * test plus any future fanout caller) don't clobber each other mid-
  * dispatch. Pattern mirrors W5 / W6.
  *
- * The wider port (replacing the Rust shim) is gated on G4 (#2297)
+ * Moving more of the execution pipeline into .harn is gated on G4 (#2297)
  * exposing `execute_run`, `snapshot_provider`, `llm_pricing_per_1k`,
- * and `provider_key_available` to script-land. C1 (#2314) will delete
- * the `HARN_CLI_IMPL=rust` escape hatch.
+ * and `provider_key_available` to script-land.
  */
 fn __safe_string(value, fallback: string) -> string {
   if type_of(value) == "string" {
@@ -73,7 +72,7 @@ fn __safe_dict(value) -> dict {
 /**
  * Format a float as `"X.YYYYYY"` (6 decimals, half-up padded). Mirrors
  * Rust's `format!("{:.6}", x)` rounding/padding so the rendered
- * markdown/summary lines stay byte-identical with the legacy path.
+ * markdown/summary lines stay byte-identical with the host formatter.
  */
 fn __format_float_6(value) -> string {
   let f = to_float(value) ?? 0.0
@@ -175,7 +174,7 @@ fn __selector_label(selector: dict) -> string {
 
 /**
  * Format an `Option<i64>` as the rendered `i64.to_string()` or `"-"`
- * for `None`. Mirrors the legacy
+ * for `None`. Mirrors the host-side
  * `value.map(|v| v.to_string()).unwrap_or_else(|| "-".to_string())`
  * pattern used in the native/text comparison table.
  */

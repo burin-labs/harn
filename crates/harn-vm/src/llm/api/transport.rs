@@ -1239,15 +1239,21 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
     // final answer. Leave `text` empty and expose the partial trace only via
     // `thinking`, mirroring `openai_normalize::normalize_openai_message_text`.
     let truncated = stop_reason.as_deref() == Some("length");
-    // When the turn also carries a tool call, the reasoning is intermediate
-    // chain-of-thought (the tool call is the real action), not a final answer.
+    // When the turn also carries a tool call, or tools were offered for this
+    // turn, the reasoning is intermediate chain-of-thought or hidden action
+    // planning, not committed final answer text.
     // gpt-oss / harmony models stream their analysis channel into the reasoning
     // delta and emit a tool call with no committed content; promoting that
     // reasoning into `.text` leaks private chain-of-thought into the user-facing
     // assistant message AND the transcript the eval grader mines. Keep `.text`
     // empty and surface the reasoning only via `thinking`, mirroring
     // `openai_normalize::normalize_openai_message_text`.
-    if !truncated && tool_calls.is_empty() && text.is_empty() && !thinking_text.is_empty() {
+    if !truncated
+        && !tools_offered
+        && tool_calls.is_empty()
+        && text.is_empty()
+        && !thinking_text.is_empty()
+    {
         text = thinking_text.clone();
         blocks
             .push(serde_json::json!({"type": "output_text", "text": text, "visibility": "public"}));
@@ -1270,10 +1276,9 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
     }
     // Deterministic upstream contract-violation backstop (streaming path).
     // Mirrors the non-streaming detector in `response::parse_llm_response`: a
-    // short, clean, tool-offered turn that billed output but dispatched no tool
-    // call is a billed no-op (the action went only to the reasoning channel).
-    // The bare `text.is_empty()` guard above misses it because the upstream
-    // emitted a tiny content preamble.
+    // clean, tool-offered turn that billed output but committed no visible text
+    // and dispatched no tool call is a billed no-op (the action went only to a
+    // hidden reasoning channel or nowhere).
     if is_billed_noncommittal_completion(&CompletionContractSignals {
         stop_reason: stop_reason.as_deref(),
         output_tokens,

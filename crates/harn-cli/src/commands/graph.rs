@@ -73,14 +73,10 @@ pub(crate) struct GraphEdge {
     pub to: String,
 }
 
-/// Run `harn graph`. Dispatches the render to the embedded
-/// `cli/graph.harn` script (see W11 / harn#2311) by default; the
-/// `HARN_CLI_IMPL=rust` escape hatch keeps the legacy direct render
-/// path for the parity-snapshot harness (#2299) until the C1 ratchet
-/// (#2314) deletes it.
-/// The module-graph extraction itself stays in Rust until Harn exposes a
-/// `harness.modules.compile_view` host capability. Extraction failures render
-/// the same error envelope / stderr line in both modes.
+/// Run `harn graph`. Rust owns module-graph extraction; the embedded
+/// `cli/graph.harn` script owns rendering. Extraction failures render the
+/// error envelope / stderr line directly because no view exists to pass into
+/// the script.
 pub(crate) async fn run(args: GraphArgs) -> i32 {
     let report = match analyze_graph(&args.root, args.module.as_deref()) {
         Ok(report) => report,
@@ -96,20 +92,7 @@ pub(crate) async fn run(args: GraphArgs) -> i32 {
         }
     };
 
-    if std::env::var("HARN_CLI_IMPL").as_deref() == Ok("rust") {
-        return run_legacy_render(&report, args.json);
-    }
     run_dispatch(&report, args.json).await
-}
-
-fn run_legacy_render(report: &GraphReport, json: bool) -> i32 {
-    if json {
-        let envelope = JsonEnvelope::ok(GRAPH_SCHEMA_VERSION, report.clone());
-        println!("{}", to_string_pretty(&envelope));
-    } else {
-        print_text_report(report);
-    }
-    0
 }
 
 async fn run_dispatch(report: &GraphReport, json: bool) -> i32 {
@@ -697,19 +680,4 @@ fn module_matches_filter(path: &Path, filter: &str, root_dir: &Path) -> bool {
         || display.strip_suffix(".harn") == Some(filter)
         || path.file_stem().and_then(|stem| stem.to_str()) == Some(filter)
         || path.file_name().and_then(|name| name.to_str()) == Some(filter)
-}
-
-fn print_text_report(report: &GraphReport) {
-    for module in &report.modules {
-        println!("{}", module.path);
-        for symbol in &module.public_symbols {
-            println!("  {} {}", symbol.kind, symbol.signature);
-        }
-        for import in &module.imports {
-            println!("  import {import}");
-        }
-        if !module.requires_capabilities.is_empty() {
-            println!("  requires {}", module.requires_capabilities.join(", "));
-        }
-    }
 }

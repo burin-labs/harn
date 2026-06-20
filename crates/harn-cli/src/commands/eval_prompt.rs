@@ -9,7 +9,7 @@
 //! pipeline so credentialed LLM calls, mock fixtures, and the
 //! `LlmRenderContext` injection all stay on the canonical path.
 //!
-//! ## .harn dispatch (W5 partial port — see harn#2305)
+//! ## .harn dispatch
 //!
 //! The **aggregation layer** (fleet resolution, per-model rendering via
 //! `LlmRenderContext`, run/judge fanout, context-fixture evaluation)
@@ -24,13 +24,9 @@
 //! through the standard dispatch wedge. The script just reads the
 //! report, picks a formatter, and emits the payload (or writes it to
 //! `--out-file`).
-//!
-//! `HARN_CLI_IMPL=rust` keeps the legacy direct-render path for the
-//! parity-snapshot harness (#2299) until the C1 ratchet (#2314) lands.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use harn_vm::llm_config;
@@ -154,23 +150,7 @@ pub async fn run(args: EvalPromptArgs) -> i32 {
         Err(code) => return code,
     };
 
-    // Compute the post-render exit code from the aggregated report —
-    // both the legacy direct-render path and the .harn dispatch path
-    // must return the same code for the same report.
     let exit_code = post_render_exit_code(&report);
-
-    // `HARN_CLI_IMPL=rust` keeps the legacy direct-render path so the
-    // parity-snapshot harness (#2299) can compare both impls byte-for-byte
-    // (terminal/html) and structurally (json) until C1 (#2314) deletes it.
-    let use_legacy = std::env::var("HARN_CLI_IMPL").as_deref() == Ok("rust");
-
-    if use_legacy {
-        if let Err(code) = legacy_render(&report, args.output, args.out_file.as_deref()) {
-            return code;
-        }
-        return exit_code;
-    }
-
     match dispatch_render(&report, args.output, args.out_file.as_deref()).await {
         Ok(()) => exit_code,
         Err(code) => code,
@@ -179,10 +159,10 @@ pub async fn run(args: EvalPromptArgs) -> i32 {
 
 /// Build the aggregated [`PromptReport`] without rendering it.
 ///
-/// Pulled out of [`run`] so both the legacy direct-render path and the
-/// new `.harn` dispatch path see the *same* report. Returns an exit
-/// code on any aggregation failure (template read, fleet resolution,
-/// context fixture parse / evaluate, run/judge dispatch).
+/// Pulled out of [`run`] so host aggregation stays separate from the
+/// `.harn` rendering script. Returns an exit code on any aggregation
+/// failure (template read, fleet resolution, context fixture parse /
+/// evaluate, run/judge dispatch).
 async fn aggregate_report(args: &EvalPromptArgs) -> Result<PromptReport, i32> {
     let template_path = match fs::canonicalize(&args.file) {
         Ok(p) => p,
@@ -287,33 +267,6 @@ async fn aggregate_report(args: &EvalPromptArgs) -> Result<PromptReport, i32> {
     Ok(report)
 }
 
-fn legacy_render(
-    report: &PromptReport,
-    output: EvalPromptOutput,
-    out_file: Option<&Path>,
-) -> Result<(), i32> {
-    let payload = match output {
-        EvalPromptOutput::Terminal => render_terminal(report),
-        EvalPromptOutput::Json => render_json(report),
-        EvalPromptOutput::Html => render_html(report),
-    };
-
-    match out_file {
-        Some(path) => {
-            if let Err(error) = fs::write(path, &payload) {
-                eprintln!("error: failed to write {}: {error}", path.display());
-                return Err(1);
-            }
-            eprintln!("wrote {}", path.display());
-        }
-        None => {
-            let mut stdout = std::io::stdout().lock();
-            let _ = stdout.write_all(payload.as_bytes());
-        }
-    }
-    Ok(())
-}
-
 /// Dispatch to the embedded `cli/eval/prompt` script for the rendering
 /// pass. The script reads the pre-serialised report from
 /// [`PROMPT_REPORT_ENV`] and picks a formatter based on
@@ -322,9 +275,7 @@ fn legacy_render(
 /// `--out-file` is honored on the Rust side (capture-mode dispatch)
 /// rather than in the script: the script runs inside the standard
 /// `harn run` sandbox, where `harness.fs.write_text` is constrained to
-/// `workspace_roots`. The legacy direct-render path used `std::fs::write`
-/// which has no such restriction, so writing the captured stdout out
-/// here preserves parity with the prior `--out-file /tmp/...` flow.
+/// `workspace_roots`.
 ///
 /// **Concurrency.** Held under [`DISPATCH_RENDER_LOCK`] so concurrent
 /// in-process callers don't race on the global env vars that hand the
@@ -394,8 +345,8 @@ async fn dispatch_render(
     Ok(())
 }
 
-/// Compute the post-render exit code. Extracted so both the legacy
-/// path and the dispatch path agree on what counts as a non-zero exit.
+/// Compute the post-render exit code shared by host aggregation and
+/// the dispatch renderer.
 fn post_render_exit_code(report: &PromptReport) -> i32 {
     let context_eval_active = report.context_eval.is_some();
     if !context_eval_active && report.renders.iter().any(|r| r.error.is_some()) {
@@ -872,259 +823,6 @@ struct JudgeEntry {
     response: String,
 }
 
-// ─── Output rendering ──────────────────────────────────────────────────────
-
-fn render_terminal(report: &PromptReport) -> String {
-    let mut out = String::new();
-    out.push_str(&format!(
-        "# harn eval prompt — {} (mode: {})\n\n",
-        report.template_path.display(),
-        report.mode,
-    ));
-
-    let baseline_lines: Option<Vec<&str>> = report
-        .renders
-        .iter()
-        .find_map(|r| r.rendered.as_deref())
-        .map(|s| s.lines().collect());
-
-    for (idx, render) in report.renders.iter().enumerate() {
-        out.push_str(&format!(
-            "## [{idx}] {} ({}/{})  family={}\n",
-            render.selector, render.provider, render.model, render.family,
-        ));
-        if !render.auth_available {
-            out.push_str("    auth: not configured\n");
-        }
-        if let Some(error) = render.error.as_ref() {
-            out.push_str(&format!("    render error: {error}\n\n"));
-            continue;
-        }
-        let Some(rendered) = render.rendered.as_deref() else {
-            continue;
-        };
-        out.push_str("---\n");
-        out.push_str(rendered);
-        if !rendered.ends_with('\n') {
-            out.push('\n');
-        }
-        out.push_str("---\n");
-        // Annotate diff vs the first non-error render so the user can
-        // eyeball wire-format drift without scanning the full body.
-        if idx > 0 {
-            if let Some(baseline) = baseline_lines.as_deref() {
-                let summary = line_diff_summary(baseline, &rendered.lines().collect::<Vec<_>>());
-                if !summary.is_empty() {
-                    out.push_str(&format!("    diff vs #0: {summary}\n"));
-                }
-            }
-        }
-        out.push('\n');
-    }
-
-    if let Some(context_eval) = report.context_eval.as_ref() {
-        out.push_str(&format!(
-            "\n# Context fixture gates: {} passed / {} total\n",
-            context_eval.passed, context_eval.total,
-        ));
-        for fixture in &context_eval.fixtures {
-            out.push_str(&format!(
-                "\n## {} ({} passed / {} total)\n",
-                fixture.path.display(),
-                fixture.passed,
-                fixture.total,
-            ));
-            for case in &fixture.cases {
-                out.push_str(&format!(
-                    "- {}: {} score={:.3} selected=[{}] tokens={}/{}\n",
-                    case.id,
-                    if case.pass { "pass" } else { "fail" },
-                    case.score.overall,
-                    case.selected_artifact_ids.join(", "),
-                    case.budget.total_tokens,
-                    case.budget.budget_tokens,
-                ));
-                for failure in &case.failures {
-                    out.push_str(&format!("    failure: {failure}\n"));
-                }
-            }
-        }
-    }
-
-    if !report.runs.is_empty() {
-        out.push_str("\n# Model responses\n");
-        for render in &report.renders {
-            let Some(run) = report.runs.get(&render.selector) else {
-                continue;
-            };
-            out.push_str(&format!("\n## {} ({})\n", render.selector, render.model));
-            if run.skipped {
-                out.push_str("    skipped: unauthenticated provider\n");
-                continue;
-            }
-            if let Some(error) = run.error.as_ref() {
-                out.push_str(&format!("    error: {error}\n"));
-                continue;
-            }
-            if let Some(response) = run.response.as_deref() {
-                out.push_str("---\n");
-                out.push_str(response);
-                if !response.ends_with('\n') {
-                    out.push('\n');
-                }
-                out.push_str("---\n");
-            }
-        }
-    }
-
-    if let Some(judge) = report.judge.as_ref() {
-        out.push_str(&format!(
-            "\n# Judge verdict ({}): \n{}\n",
-            judge.judge_model, judge.verdict,
-        ));
-    }
-
-    out
-}
-
-/// Summarize line-level differences between two renders without pulling
-/// in a full diff dependency. Reports counts of unique lines on either
-/// side; the body is already printed adjacently so the reader can dig in
-/// from there.
-fn line_diff_summary(baseline: &[&str], candidate: &[&str]) -> String {
-    let baseline_set: BTreeSet<&str> = baseline.iter().copied().collect();
-    let candidate_set: BTreeSet<&str> = candidate.iter().copied().collect();
-    let only_in_baseline = baseline_set.difference(&candidate_set).count();
-    let only_in_candidate = candidate_set.difference(&baseline_set).count();
-    if only_in_baseline == 0 && only_in_candidate == 0 {
-        let total_baseline = baseline.len();
-        let total_candidate = candidate.len();
-        if total_baseline == total_candidate {
-            String::new()
-        } else {
-            format!(
-                "{total_baseline} vs {total_candidate} lines (same content set, different ordering or repeats)",
-            )
-        }
-    } else {
-        format!(
-            "{only_in_baseline} line(s) only in baseline, {only_in_candidate} line(s) only here",
-        )
-    }
-}
-
-fn render_json(report: &PromptReport) -> String {
-    match serde_json::to_string_pretty(report) {
-        Ok(s) => format!("{s}\n"),
-        Err(error) => format!("{{\"error\": \"serialize: {error}\"}}\n"),
-    }
-}
-
-// CSS rules embed `{color:#...}` syntax that clippy mistakes for format args.
-#[allow(clippy::literal_string_with_formatting_args)]
-fn render_html(report: &PromptReport) -> String {
-    let mut out = String::new();
-    out.push_str(
-        "<!doctype html><html><head><meta charset=\"utf-8\"><title>harn eval prompt report</title>",
-    );
-    out.push_str(
-        "<style>body{font-family:system-ui,sans-serif;margin:2rem;color:#222}h1{margin-bottom:0}",
-    );
-    out.push_str(".meta{color:#666;font-size:0.9rem;margin-bottom:1.5rem}");
-    out.push_str(
-        ".grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(28rem,1fr));gap:1rem}",
-    );
-    out.push_str(".card{border:1px solid #ddd;border-radius:6px;padding:1rem;background:#fafafa}");
-    out.push_str(".card h2{margin-top:0;font-size:1rem}");
-    out.push_str("pre{background:#fff;border:1px solid #eee;padding:0.75rem;overflow:auto;white-space:pre-wrap;font-size:0.85rem}");
-    out.push_str(".err{color:#b00}.skip{color:#888;font-style:italic}");
-    out.push_str("</style></head><body>");
-    out.push_str(&format!(
-        "<h1>harn eval prompt</h1><div class=\"meta\">{} · mode: {}</div>",
-        crate::format::escape_html(&report.template_path.to_string_lossy()),
-        report.mode,
-    ));
-    out.push_str("<div class=\"grid\">");
-    for render in &report.renders {
-        out.push_str(&format!(
-            "<div class=\"card\"><h2>{} <span class=\"meta\">({} / {} · {})</span></h2>",
-            crate::format::escape_html(&render.selector),
-            crate::format::escape_html(&render.provider),
-            crate::format::escape_html(&render.model),
-            crate::format::escape_html(&render.family),
-        ));
-        if !render.auth_available {
-            out.push_str("<p class=\"skip\">auth: not configured</p>");
-        }
-        match (&render.rendered, &render.error) {
-            (_, Some(error)) => {
-                out.push_str(&format!(
-                    "<p class=\"err\">render error: {}</p>",
-                    crate::format::escape_html(error)
-                ));
-            }
-            (Some(rendered), _) => {
-                out.push_str(&format!(
-                    "<pre>{}</pre>",
-                    crate::format::escape_html(rendered)
-                ));
-            }
-            _ => {}
-        }
-        if let Some(run) = report.runs.get(&render.selector) {
-            if run.skipped {
-                out.push_str("<p class=\"skip\">run: skipped (no credentials)</p>");
-            } else if let Some(err) = run.error.as_ref() {
-                out.push_str(&format!(
-                    "<p class=\"err\">run error: {}</p>",
-                    crate::format::escape_html(err)
-                ));
-            } else if let Some(response) = run.response.as_ref() {
-                out.push_str("<h3>response</h3>");
-                out.push_str(&format!(
-                    "<pre>{}</pre>",
-                    crate::format::escape_html(response)
-                ));
-            }
-        }
-        out.push_str("</div>");
-    }
-    out.push_str("</div>");
-    if let Some(context_eval) = report.context_eval.as_ref() {
-        out.push_str(&format!(
-            "<h2>Context fixture gates</h2><p>{} passed / {} total</p>",
-            context_eval.passed, context_eval.total,
-        ));
-        for fixture in &context_eval.fixtures {
-            out.push_str(&format!(
-                "<h3>{}</h3><ul>",
-                crate::format::escape_html(&fixture.path.to_string_lossy()),
-            ));
-            for case in &fixture.cases {
-                out.push_str(&format!(
-                    "<li><strong>{}</strong>: {} · score {:.3} · selected [{}] · tokens {}/{}</li>",
-                    crate::format::escape_html(&case.id),
-                    if case.pass { "pass" } else { "fail" },
-                    case.score.overall,
-                    crate::format::escape_html(&case.selected_artifact_ids.join(", ")),
-                    case.budget.total_tokens,
-                    case.budget.budget_tokens,
-                ));
-            }
-            out.push_str("</ul>");
-        }
-    }
-    if let Some(judge) = report.judge.as_ref() {
-        out.push_str(&format!(
-            "<h2>Judge ({})</h2><pre>{}</pre>",
-            crate::format::escape_html(&judge.judge_model),
-            crate::format::escape_html(&judge.verdict),
-        ));
-    }
-    out.push_str("</body></html>\n");
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1170,21 +868,5 @@ mod tests {
         assert_eq!(renders.len(), 1);
         assert!(renders[0].error.is_none(), "{:?}", renders[0].error);
         assert!(renders[0].rendered.is_some());
-    }
-
-    #[test]
-    fn line_diff_summary_reports_unique_lines() {
-        let baseline = vec!["a", "b", "c"];
-        let candidate = vec!["a", "b", "d"];
-        let summary = line_diff_summary(&baseline, &candidate);
-        assert!(summary.contains("1 line(s) only in baseline"));
-        assert!(summary.contains("1 line(s) only here"));
-    }
-
-    #[test]
-    fn line_diff_summary_quiet_on_identical() {
-        let baseline = vec!["a", "b", "c"];
-        let candidate = vec!["a", "b", "c"];
-        assert_eq!(line_diff_summary(&baseline, &candidate), "");
     }
 }

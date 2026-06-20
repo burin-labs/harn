@@ -1,13 +1,12 @@
 /**
- * `harn models test` rendering layer ported to .harn — see harn#2309
- * (W9).
+ * `harn models test` renderer.
  *
- * **Pragmatic partial port.** The actual smoke test runs in Rust —
+ * The actual smoke test runs in a host primitive —
  * `harn_vm::llm::run_model_smoke_test` builds bespoke
  * `LlmCallOptions`, streams via `vm_call_llm_full_streaming`, probes
  * provider readiness, and computes pricing. None of that is reachable
- * from script-land today without a wider VM surface than W9 should
- * ship. The Rust shim runs the smoke test, captures the result (or
+ * from script-land today without a wider VM surface. The shim runs the
+ * smoke test, captures the result (or
  * error), and hands a single JSON envelope here for formatting.
  *
  * Inputs (from the dispatch shim):
@@ -38,36 +37,38 @@ fn __safe_dict(value) -> dict {
 }
 
 /**
- * Format a float as `"X.YYYYYY"` (6 decimals, half-up padded). Matches
- * Rust's `format!("{:.6}", x)` for the legacy text-output cost field.
+ * Round display costs to a compact number of significant digits. Internal
+ * accounting keeps full precision; this renderer owns user-facing readability.
  */
-fn __format_float_6(value) -> string {
+fn __round_sig(value, digits: int) -> float {
   let f = to_float(value) ?? 0.0
+  if f == 0.0 {
+    return 0.0
+  }
+  let scale = pow(10, digits - 1 - floor(log10(abs(f))))
+  return round(f * scale) / scale
+}
+
+fn __format_cost(value) -> string {
+  let f = __round_sig(value, 4)
   let negative = f < 0.0
   let abs_f = if negative {
     -f
   } else {
     f
   }
-  let scaled = to_int(round(abs_f * 1000000.0)) ?? 0
-  let whole = scaled / 1000000
-  let frac = scaled - whole * 1000000
-  var frac_str = to_string(frac)
-  while len(frac_str) < 6 {
-    frac_str = "0" + frac_str
-  }
-  let sign = if negative && (whole != 0 || frac != 0) {
+  let sign = if negative && abs_f != 0.0 {
     "-"
   } else {
     ""
   }
-  return sign + to_string(whole) + "." + frac_str
+  return sign + to_string(abs_f)
 }
 
 /**
- * Render the success line. Order matches the legacy Rust impl:
+ * Render the success line:
  * `model_id=... provider=... latency_ms=... first_token_ms=... \
- *  input_tokens=... output_tokens=... estimated_cost_usd={:.6}`.
+ *  input_tokens=... output_tokens=... estimated_cost_usd=<4 sig figs>`.
  * `first_token_ms` is `"-"` when the streaming probe didn't see a
  * delta in time.
  */
@@ -89,17 +90,14 @@ fn __render_success_line(result: dict) -> string {
     + " output_tokens="
     + to_string(result["output_tokens"] ?? 0)
     + " estimated_cost_usd="
-    + __format_float_6(result["estimated_cost_usd"] ?? 0.0)
+    + __format_cost(result["estimated_cost_usd"] ?? 0.0)
 }
 
 /**
- * Build the success JSON envelope. The legacy Rust impl emits
- * `serde_json::to_string_pretty(&result)` directly — fields are:
+ * Build the success JSON envelope. Fields are:
  * `model_id`, `provider`, `latency_ms`, `first_token_ms?`,
- * `input_tokens`, `output_tokens`, `estimated_cost_usd`. The
- * `#[serde(skip_serializing_if = "Option::is_none")]` attribute on
- * `first_token_ms` means absent when nil; mirror that here so the
- * parity test's structural compare lines up.
+ * `input_tokens`, `output_tokens`, `estimated_cost_usd`.
+ * `first_token_ms` is absent when nil.
  */
 fn __render_success_envelope(result: dict) -> string {
   var envelope = {
@@ -108,7 +106,7 @@ fn __render_success_envelope(result: dict) -> string {
     latency_ms: result["latency_ms"] ?? 0,
     input_tokens: result["input_tokens"] ?? 0,
     output_tokens: result["output_tokens"] ?? 0,
-    estimated_cost_usd: result["estimated_cost_usd"] ?? 0.0,
+    estimated_cost_usd: __round_sig(result["estimated_cost_usd"] ?? 0.0, 4),
   }
   if result["first_token_ms"] != nil {
     envelope = envelope + {first_token_ms: result["first_token_ms"]}
@@ -117,11 +115,8 @@ fn __render_success_envelope(result: dict) -> string {
 }
 
 /**
- * Render the failure JSON envelope. Matches the legacy
- * `serde_json::json!({ "ok": false, "error": error })` — note that
- * the Rust impl uses `to_string()` (compact, no trailing newline)
- * for this branch, not `to_string_pretty`. Replicate the compact
- * form so the parity test's structural compare lines up regardless.
+ * Render the failure JSON envelope in compact form for shell-friendly
+ * piping.
  */
 fn __render_failure_envelope(error: string) -> string {
   return json_stringify({ok: false, error: error})
@@ -153,9 +148,8 @@ fn main(harness: Harness) -> int {
   }
   let error = __safe_string(envelope["error"], "unknown error")
   if json_mode {
-    // Legacy impl writes the compact `{ok, error}` to STDOUT (not
-    // stderr) with `println!` and then `process::exit(1)`. Mirror
-    // that — the channel split matters for shells piping `--json`.
+    // JSON failures go to STDOUT, not stderr; the channel split matters
+    // for shells piping `--json`.
     harness.stdio.println(__render_failure_envelope(error))
   } else {
     harness.stdio.eprintln(error)

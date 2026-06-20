@@ -1,7 +1,10 @@
 adaptive
+auto
+small
+verify
 disabled
 effort
-medium
+low
 effort
 low
 true

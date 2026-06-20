@@ -142,9 +142,24 @@ id = "moonshot/kimi-k2.7-code"
 provider = "moonshot"
 tool_format = "native"
 
+[aliases."moonshot-kimi-k2.7-code-highspeed"]
+id = "moonshot/kimi-k2.7-code-highspeed"
+provider = "moonshot"
+tool_format = "native"
+
 # DeepInfra — open-weight OpenAI-compatible host.
 [aliases."deepinfra-deepseek"]
 id = "deepinfra/deepseek-ai/DeepSeek-V4-Pro"
+provider = "deepinfra"
+tool_format = "native"
+
+[aliases."deepinfra-glm-5.2"]
+id = "deepinfra/zai-org/GLM-5.2"
+provider = "deepinfra"
+tool_format = "native"
+
+[aliases."deepinfra-kimi-k2.7-code"]
+id = "deepinfra/moonshotai/Kimi-K2.7-Code"
 provider = "deepinfra"
 tool_format = "native"
 
@@ -155,12 +170,22 @@ tool_format = "native"
 
 # SambaNova Cloud — fast RDU inference.
 [aliases."sambanova-deepseek"]
-id = "sambanova/DeepSeek-V4-Pro"
+id = "sambanova/DeepSeek-V3.2"
 provider = "sambanova"
 tool_format = "native"
 
 [aliases."sambanova-llama"]
-id = "sambanova/Llama-4-Maverick"
+id = "sambanova/Meta-Llama-3.3-70B-Instruct"
+provider = "sambanova"
+tool_format = "native"
+
+[aliases."sambanova-minimax-m2.7"]
+id = "sambanova/MiniMax-M2.7"
+provider = "sambanova"
+tool_format = "native"
+
+[aliases."sambanova-gpt-oss-120b"]
+id = "sambanova/gpt-oss-120b"
 provider = "sambanova"
 tool_format = "native"
 
@@ -222,9 +247,44 @@ provider = "openrouter"
 id = "zai-org/GLM-5.1"
 provider = "together"
 
+[aliases."together-glm-5.2"]
+id = "zai-org/GLM-5.2"
+provider = "together"
+
 [aliases."together-minimax-m2.7"]
 id = "MiniMaxAI/MiniMax-M2.7"
 provider = "together"
+
+# NVIDIA NIM.
+[aliases."nvidia-nemotron-ultra"]
+id = "nvidia/nemotron-3-ultra-550b-a55b"
+provider = "nvidia"
+tool_format = "native"
+
+[aliases."nvidia-nemotron-super"]
+id = "nvidia/nemotron-3-super-120b-a12b"
+provider = "nvidia"
+tool_format = "native"
+
+[aliases."nvidia-nemotron-nano"]
+id = "nvidia/nemotron-3-nano-30b-a3b"
+provider = "nvidia"
+tool_format = "native"
+
+[aliases."nvidia-deepseek-v4-pro"]
+id = "nvidia/deepseek-v4-pro"
+provider = "nvidia"
+tool_format = "native"
+
+[aliases."nvidia-minimax-m3"]
+id = "nvidia/minimax-m3"
+provider = "nvidia"
+tool_format = "native"
+
+[aliases."nvidia-kimi-k2.6"]
+id = "nvidia/kimi-k2.6"
+provider = "nvidia"
+tool_format = "native"
 
 # qwen3.6 has no working Ollama route — Ollama's qwen3.5-family server-side
 # tool-call parser 500s on text-tool output (ollama/ollama#14986, #14570).
@@ -298,8 +358,9 @@ provider = "minimax"
 
 # Z.AI GLM aliases.
 [aliases.glm]
-id = "glm-5.1"
+id = "glm-5.2"
 provider = "zai"
+tool_format = "native"
 
 [aliases."glm-5"]
 id = "glm-5"
@@ -308,6 +369,16 @@ provider = "zai"
 [aliases."glm-5.1"]
 id = "glm-5.1"
 provider = "zai"
+
+[aliases."glm-5.2"]
+id = "glm-5.2"
+provider = "zai"
+tool_format = "native"
+
+[aliases."openrouter-glm-5.2"]
+id = "z-ai/glm-5.2"
+provider = "openrouter"
+tool_format = "native"
 
 # DeepSeek V4 direct API aliases.
 [aliases.deepseek]
@@ -337,6 +408,16 @@ provider = "cohere"
 [aliases."command-a-plus"]
 id = "command-a-plus-05-2026"
 provider = "cohere"
+
+[aliases.grok]
+id = "grok-4.3"
+provider = "xai"
+tool_format = "native"
+
+[aliases."grok-4.3"]
+id = "grok-4.3"
+provider = "xai"
+tool_format = "native"
 
 [aliases.grok-code]
 id = "grok-build-0.1"

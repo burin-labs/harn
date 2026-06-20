@@ -56,10 +56,56 @@ impl ProviderReadiness {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ProviderReadinessOptions<'a> {
+    pub requested_model: Option<&'a str>,
+    pub base_url_override: Option<&'a str>,
+    pub api_key_override: Option<&'a str>,
+}
+
+pub fn supports_model_readiness_probe(def: &ProviderDef) -> bool {
+    let healthcheck_uses_models = def.healthcheck.as_ref().is_some_and(|hc| {
+        hc.method.eq_ignore_ascii_case("GET") && {
+            hc.path
+                .as_deref()
+                .is_some_and(|path| path.contains("models"))
+                || hc.url.as_deref().is_some_and(|url| url.contains("models"))
+        }
+    });
+    healthcheck_uses_models || def.chat_endpoint.ends_with("/chat/completions")
+}
+
+pub fn selected_model_for_provider(provider: &str) -> Option<String> {
+    configured_model_for_provider(provider).map(|model| {
+        let (resolved, _) = llm_config::resolve_model(model.trim());
+        resolved
+    })
+}
+
+pub fn build_models_url(def: &ProviderDef) -> Result<String, String> {
+    let base_url = llm_config::resolve_base_url(def);
+    models_url(def, &base_url)
+}
+
 pub async fn probe_provider_readiness(
     provider: &str,
     requested_model: Option<&str>,
     base_url_override: Option<&str>,
+) -> ProviderReadiness {
+    probe_provider_readiness_with_options(
+        provider,
+        ProviderReadinessOptions {
+            requested_model,
+            base_url_override,
+            api_key_override: None,
+        },
+    )
+    .await
+}
+
+pub async fn probe_provider_readiness_with_options(
+    provider: &str,
+    options: ProviderReadinessOptions<'_>,
 ) -> ProviderReadiness {
     let Some(def) = llm_config::provider_config(provider) else {
         return ProviderReadiness::fail(
@@ -68,13 +114,14 @@ pub async fn probe_provider_readiness(
             format!("Unknown provider: {provider}"),
             None,
             None,
-            requested_model.map(ToOwned::to_owned),
-            requested_model.map(ToOwned::to_owned),
+            options.requested_model.map(ToOwned::to_owned),
+            options.requested_model.map(ToOwned::to_owned),
             None,
         );
     };
 
-    let base_url = base_url_override
+    let base_url = options
+        .base_url_override
         .filter(|value| !value.trim().is_empty())
         .map(|value| value.trim().to_string())
         .unwrap_or_else(|| llm_config::resolve_base_url(&def));
@@ -87,14 +134,15 @@ pub async fn probe_provider_readiness(
                 message,
                 Some(base_url),
                 None,
-                requested_model.map(ToOwned::to_owned),
-                requested_model.map(ToOwned::to_owned),
+                options.requested_model.map(ToOwned::to_owned),
+                options.requested_model.map(ToOwned::to_owned),
                 None,
             );
         }
     };
 
-    let (raw_model, resolved_model) = requested_model
+    let (raw_model, resolved_model) = options
+        .requested_model
         .filter(|model| !model.trim().is_empty())
         .map(|model| {
             let trimmed = model.trim();
@@ -110,7 +158,11 @@ pub async fn probe_provider_readiness(
         });
 
     let client = super::shared_utility_client();
-    let api_key = resolve_api_key(provider).unwrap_or_default();
+    let api_key = options
+        .api_key_override
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| value.trim().to_string())
+        .unwrap_or_else(|| resolve_api_key(provider).unwrap_or_default());
     let request = client.get(&url).header("Content-Type", "application/json");
     let request = apply_auth_headers(request, &api_key, Some(&def));
     let request = def
@@ -193,14 +245,22 @@ pub async fn probe_provider_readiness(
         }
     };
 
-    if let Some(model) = resolved_model.as_deref() {
+    let readiness_model = resolved_model.as_deref().map(llm_config::wire_model_id);
+
+    if let Some(model) = readiness_model.as_deref() {
         if !model_is_served(model, &served_models) {
+            let display_model = resolved_model.as_deref().unwrap_or(model);
+            let model_label = if display_model == model {
+                format!("Model '{display_model}'")
+            } else {
+                format!("Model '{display_model}' (wire model '{model}')")
+            };
             return ProviderReadiness {
                 provider: provider.to_string(),
                 ok: false,
                 status: ReadinessStatus::ModelMissing,
                 message: format!(
-                    "Model '{model}' is not served by {provider} at {base_url}. Currently served: {}",
+                    "{model_label} is not served by {provider} at {base_url}. Currently served: {}",
                     served_models.join(", ")
                 ),
                 base_url: Some(base_url),
@@ -213,9 +273,12 @@ pub async fn probe_provider_readiness(
         }
     }
 
-    let message = match resolved_model.as_deref() {
-        Some(model) => format!("{provider} is ready at {base_url}; model '{model}' is served"),
-        None => format!(
+    let message = match (resolved_model.as_deref(), readiness_model.as_deref()) {
+        (Some(model), Some(wire_model)) if model != wire_model => format!(
+            "{provider} is ready at {base_url}; model '{model}' is served as '{wire_model}'"
+        ),
+        (Some(model), _) => format!("{provider} is ready at {base_url}; model '{model}' is served"),
+        (None, _) => format!(
             "{provider} is reachable at {base_url}; served models: {}",
             served_models.join(", ")
         ),
@@ -237,6 +300,10 @@ pub async fn probe_provider_readiness(
 
 pub fn parse_model_ids(body: &str) -> Result<Vec<String>, serde_json::Error> {
     let payload: serde_json::Value = serde_json::from_str(body)?;
+    Ok(parse_model_ids_from_value(&payload))
+}
+
+pub fn parse_model_ids_from_value(payload: &serde_json::Value) -> Vec<String> {
     let mut models = Vec::new();
     if let Some(entries) = payload.as_array() {
         collect_model_ids(entries, &mut models);
@@ -249,7 +316,7 @@ pub fn parse_model_ids(body: &str) -> Result<Vec<String>, serde_json::Error> {
     }
     models.sort();
     models.dedup();
-    Ok(models)
+    models
 }
 
 fn collect_model_ids(entries: &[serde_json::Value], models: &mut Vec<String>) {
@@ -300,6 +367,21 @@ pub fn configured_model_for_provider(provider: &str) -> Option<String> {
 }
 
 fn models_url(def: &ProviderDef, base_url: &str) -> Result<String, String> {
+    if let Some(url) = def.healthcheck.as_ref().and_then(|healthcheck| {
+        if healthcheck.method.eq_ignore_ascii_case("GET") {
+            healthcheck
+                .url
+                .as_deref()
+                .filter(|url| url.contains("models"))
+        } else {
+            None
+        }
+    }) {
+        return reqwest::Url::parse(url)
+            .map(|_| normalize_loopback(url))
+            .map_err(|error| format!("Invalid provider models URL '{url}': {error}"));
+    }
+
     let path = def
         .healthcheck
         .as_ref()
@@ -308,20 +390,16 @@ fn models_url(def: &ProviderDef, base_url: &str) -> Result<String, String> {
                 healthcheck
                     .path
                     .as_deref()
-                    .filter(|path| path.ends_with("/models") || *path == "/models")
+                    .filter(|path| path.contains("models"))
             } else {
                 None
             }
         })
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| model_path_from_chat_endpoint(&def.chat_endpoint));
-    let url = if path.starts_with('/') {
-        format!("{}{}", base_url.trim_end_matches('/'), path)
-    } else {
-        format!("{}/{}", base_url.trim_end_matches('/'), path)
-    };
+    let url = join_base_and_path(base_url, &path);
     reqwest::Url::parse(&url)
-        .map(|_| url.clone())
+        .map(|_| normalize_loopback(&url))
         .map_err(|error| format!("Invalid provider models URL '{url}': {error}"))
 }
 
@@ -335,6 +413,21 @@ fn model_path_from_chat_endpoint(chat_endpoint: &str) -> String {
     } else {
         "/v1/models".to_string()
     }
+}
+
+fn join_base_and_path(base: &str, path: &str) -> String {
+    let base = base.trim_end_matches('/');
+    if path.is_empty() {
+        base.to_string()
+    } else if path.starts_with('/') {
+        format!("{base}{path}")
+    } else {
+        format!("{base}/{path}")
+    }
+}
+
+fn normalize_loopback(url: &str) -> String {
+    url.replace("://localhost:", "://127.0.0.1:")
 }
 
 #[cfg(test)]
@@ -400,7 +493,7 @@ mod tests {
 
         assert_eq!(
             models_url(&def, &def.base_url).expect("models url"),
-            "http://localhost:11434/v1/models"
+            "http://127.0.0.1:11434/v1/models"
         );
     }
 
@@ -429,6 +522,42 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn probe_provider_readiness_verifies_wire_model_for_catalog_key() {
+        let (base_url, handle) = spawn_models_stub(200, r#"{"data":[{"id":"zai-org/GLM-5.2"}]}"#);
+        let result = probe_provider_readiness(
+            "deepinfra",
+            Some("deepinfra/zai-org/GLM-5.2"),
+            Some(&base_url),
+        )
+        .await;
+        handle.join().expect("stub joins");
+        assert!(result.ok, "{}", result.message);
+        assert_eq!(result.status, ReadinessStatus::Ok);
+        assert_eq!(result.model.as_deref(), Some("deepinfra/zai-org/GLM-5.2"));
+        assert!(result.message.contains("served as 'zai-org/GLM-5.2'"));
+    }
+
+    #[tokio::test]
+    async fn probe_provider_readiness_uses_explicit_api_key_override() {
+        let (base_url, handle) = spawn_models_stub_with_expected_header(
+            200,
+            r#"{"data":[{"id":"zai-org/GLM-5.2"}]}"#,
+            Some("authorization: Bearer test-key"),
+        );
+        let result = probe_provider_readiness_with_options(
+            "deepinfra",
+            ProviderReadinessOptions {
+                requested_model: Some("deepinfra/zai-org/GLM-5.2"),
+                base_url_override: Some(&base_url),
+                api_key_override: Some("test-key"),
+            },
+        )
+        .await;
+        handle.join().expect("stub joins");
+        assert!(result.ok, "{}", result.message);
+    }
+
+    #[tokio::test]
     async fn probe_provider_readiness_reports_missing_model() {
         let (base_url, handle) = spawn_models_stub(200, r#"{"data":[{"id":"other-model"}]}"#);
         let result = probe_provider_readiness("mlx", Some("mlx-qwen36-27b"), Some(&base_url)).await;
@@ -439,6 +568,14 @@ mod tests {
     }
 
     fn spawn_models_stub(status: u16, body: &'static str) -> (String, std::thread::JoinHandle<()>) {
+        spawn_models_stub_with_expected_header(status, body, None)
+    }
+
+    fn spawn_models_stub_with_expected_header(
+        status: u16,
+        body: &'static str,
+        expected_header: Option<&'static str>,
+    ) -> (String, std::thread::JoinHandle<()>) {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind models stub");
         let addr = listener.local_addr().expect("stub addr");
         // Block on `accept()` directly rather than polling. The
@@ -456,7 +593,18 @@ mod tests {
             let mut buf = vec![0u8; 4096];
             let n = stream.read(&mut buf).expect("read request");
             let request = String::from_utf8_lossy(&buf[..n]);
-            assert!(request.starts_with("GET /v1/models HTTP/1.1\r\n"));
+            assert!(
+                request.starts_with("GET /v1/models HTTP/1.1\r\n")
+                    || request.starts_with("GET /models HTTP/1.1\r\n")
+            );
+            if let Some(header) = expected_header {
+                assert!(
+                    request
+                        .lines()
+                        .any(|line| line.eq_ignore_ascii_case(header)),
+                    "expected request header {header:?}, got:\n{request}"
+                );
+            }
             let response = format!(
                 "HTTP/1.1 {status} OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
                 body.len(),

@@ -88,18 +88,14 @@ struct LocalRouteAnalysis {
     framework_overhead_tokens: u64,
 }
 
-/// Run `harn routes`. Dispatches the render to the embedded
-/// `cli/routes.harn` script (see W11 / harn#2311) by default; the
-/// `HARN_CLI_IMPL=rust` escape hatch keeps the legacy direct render path
-/// for the parity-snapshot harness (#2299) until the C1 ratchet (#2314)
-/// deletes it.
+/// Run `harn routes`. Rust owns manifest-cache and IR extraction; the
+/// embedded `cli/routes.harn` script owns rendering.
 ///
 /// The inventory extraction itself (manifest cache + IR analyser) stays
 /// in Rust — porting it would require a new `harness.modules.compile_view`
-/// host capability the W11 spec calls out as future scope. On
-/// extraction failure, the shim renders the same error envelope /
-/// stderr line the legacy path emits so behavior is identical
-/// regardless of the dispatch mode.
+/// host capability. On extraction failure, the shim renders the error
+/// envelope / stderr line directly because no view exists to pass into
+/// the script.
 pub(crate) async fn run(args: RoutesArgs) -> i32 {
     let report = match analyze_routes(&args.root).await {
         Ok(report) => report,
@@ -115,20 +111,7 @@ pub(crate) async fn run(args: RoutesArgs) -> i32 {
         }
     };
 
-    if std::env::var("HARN_CLI_IMPL").as_deref() == Ok("rust") {
-        return run_legacy_render(&report, args.json);
-    }
     run_dispatch(&report, args.json).await
-}
-
-fn run_legacy_render(report: &RoutesReport, json: bool) -> i32 {
-    if json {
-        let envelope = JsonEnvelope::ok(ROUTES_SCHEMA_VERSION, report.clone());
-        println!("{}", to_string_pretty(&envelope));
-    } else {
-        print_text_report(report);
-    }
-    0
 }
 
 async fn run_dispatch(report: &RoutesReport, json: bool) -> i32 {
@@ -730,46 +713,6 @@ fn display_module_path(path: &Path, manifest_dir: &Path) -> String {
         .unwrap_or(path)
         .display()
         .to_string()
-}
-
-fn print_text_report(report: &RoutesReport) {
-    println!(
-        "{:<28} {:<10} {:<12} {:<24} {:<22} {:<18} {:<7} {:>8}  capabilities",
-        "id", "kind", "provider", "path", "module", "handler", "vendor", "fw_tokens"
-    );
-    for trigger in &report.triggers {
-        let capabilities = if trigger.requires_capabilities.is_empty() {
-            "-".to_string()
-        } else {
-            trigger.requires_capabilities.join(",")
-        };
-        println!(
-            "{:<28} {:<10} {:<12} {:<24} {:<22} {:<18} {:<7} {:>8}  {}",
-            truncate(&trigger.id, 28),
-            trigger.kind.as_str(),
-            truncate(&trigger.provider, 12),
-            truncate(trigger.path.as_deref().unwrap_or("-"), 24),
-            truncate(&trigger.module, 22),
-            truncate(&trigger.handler, 18),
-            if trigger.vendor_locked { "yes" } else { "no" },
-            trigger.framework_overhead_tokens,
-            capabilities
-        );
-    }
-}
-
-fn truncate(value: &str, width: usize) -> String {
-    if value.chars().count() <= width {
-        return value.to_string();
-    }
-    if width <= 3 {
-        return ".".repeat(width);
-    }
-    value
-        .chars()
-        .take(width.saturating_sub(3))
-        .collect::<String>()
-        + "..."
 }
 
 #[cfg(test)]

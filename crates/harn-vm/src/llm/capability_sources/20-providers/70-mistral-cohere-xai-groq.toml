@@ -1,6 +1,26 @@
 # ---------- Mistral / Cohere / xAI / Groq OpenAI-compatible routes ------------
 
 [[provider.mistral]]
+model_match = "mistral-medium-3-5*"
+native_tools = true
+preferred_tool_format = "native"
+recommended_endpoint = "/chat/completions"
+text_tool_wire_format_supported = true
+structured_output = "native"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high"]
+vision_supported = true
+vision = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
+
+[[provider.mistral]]
 model_match = "mistral-*"
 native_tools = true
 preferred_tool_format = "native"
@@ -120,4 +140,3 @@ supports_assistant_prefill = false
 prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "none"
-

@@ -7,7 +7,9 @@
 
 # Anthropic ─ pricing pages: https://www.anthropic.com/pricing &
 # https://platform.claude.com/docs/en/about-claude/model-deprecations.
-# Sonnet 4.5 retired 2026-05-15; Sonnet 4 and Opus 4 retire 2026-06-15.
+# Verified 2026-06-20 against the provider /v1/models API and the
+# deprecations page: Sonnet 4 / Opus 4 are retired, Opus 4.1 is deprecated,
+# and dated Sonnet 4.5 remains active.
 
 [models."claude-3-5-haiku-20241022"]
 name = "Claude Haiku 3.5"
@@ -15,6 +17,9 @@ provider = "anthropic"
 context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 0.80, output_per_mtok = 4.00, cache_read_per_mtok = 0.08, cache_write_per_mtok = 1.00 }
+deprecated = true
+deprecation_note = "Retired 2026-02-19 per Anthropic deprecations page. Use claude-haiku-4-5-20251001."
+superseded_by = "claude-haiku-4-5-20251001"
 tier = "small"
 open_weight = false
 strengths = ["speed", "cheap", "summarization", "tool_use"]
@@ -35,6 +40,9 @@ provider = "anthropic"
 context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75 }
+deprecated = true
+deprecation_note = "Retired 2025-10-28 per Anthropic deprecations page. Use claude-sonnet-4-5-20250929 or claude-sonnet-4-6."
+superseded_by = "claude-sonnet-4-6"
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "reasoning", "tool_use", "long_context"]
@@ -44,6 +52,9 @@ provider = "anthropic"
 context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75 }
+deprecated = true
+deprecation_note = "Retired 2025-10-28 per Anthropic deprecations page. Use claude-sonnet-4-5-20250929 or claude-sonnet-4-6."
+superseded_by = "claude-sonnet-4-6"
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "reasoning", "tool_use", "long_context"]
@@ -66,7 +77,18 @@ context_window = 200000
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75 }
 deprecated = true
-deprecation_note = "Sunset 2026-05-15 per Anthropic deprecations page. Replaced by claude-sonnet-4-6."
+deprecation_note = "Undated compatibility selector. Anthropic's active API id is claude-sonnet-4-5-20250929; prefer that dated id or claude-sonnet-4-6."
+superseded_by = "claude-sonnet-4-5-20250929"
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "reasoning", "tool_use", "long_context", "agentic"]
+benchmarks = { swe_bench_verified = 77.2 }
+[models."claude-sonnet-4-5-20250929"]
+name = "Claude Sonnet 4.5"
+provider = "anthropic"
+context_window = 200000
+capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75 }
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "reasoning", "tool_use", "long_context", "agentic"]
@@ -111,6 +133,16 @@ pricing = { input_per_mtok = 1.00, output_per_mtok = 5.00, cache_read_per_mtok =
 tier = "mid"
 open_weight = false
 strengths = ["speed", "cheap", "coding", "tool_use", "summarization"]
+[models."anthropic/claude-fable-5"]
+name = "Claude Fable 5 (via OpenRouter)"
+provider = "openrouter"
+context_window = 1000000
+capabilities = ["tools", "streaming", "prompt_caching"]
+pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 1.00, cache_write_per_mtok = 12.50 }
+tier = "frontier"
+open_weight = false
+strengths = ["reasoning", "coding", "long_context", "agentic"]
+benchmarks = { swe_bench_pro = 80.3 }
 [models."anthropic/claude-sonnet-4-6"]
 name = "Claude Sonnet 4.6 (via OpenRouter)"
 provider = "openrouter"
@@ -156,6 +188,16 @@ tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
 benchmarks = { swe_bench_verified = 78.9 }
+[models."claude-opus-4-5-20251101"]
+name = "Claude Opus 4.5"
+provider = "anthropic"
+context_window = 200000
+capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25 }
+superseded_by = "claude-opus-4-8"
+tier = "frontier"
+open_weight = false
+strengths = ["reasoning", "coding", "long_context", "agentic"]
 [models."claude-opus-4-6"]
 name = "Claude Opus 4.6"
 provider = "anthropic"
@@ -211,6 +253,17 @@ complementary_with = ["openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
 # Fast mode (research preview): 2x standard pricing, ~2.5x output tok/s.
 fast_mode = { param = "speed", value = "fast", beta_header = "fast-mode-2026-02-01", otps_speedup = 2.5, status = "research_preview", pricing = { input_per_mtok = 10.00, output_per_mtok = 50.00, cache_read_per_mtok = 1.00, cache_write_per_mtok = 12.50 }, note = "Claude API + Managed Agents only (not Bedrock/Vertex/Foundry); excluded from Batch and Priority Tier. Switching speed invalidates the prompt cache. Waitlist/account-manager gated." }
 
+[models."anthropic/claude-opus-4.8"]
+name = "Claude Opus 4.8 (via OpenRouter)"
+provider = "openrouter"
+context_window = 1000000
+capabilities = ["tools", "streaming", "prompt_caching"]
+pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25 }
+tier = "frontier"
+open_weight = false
+strengths = ["reasoning", "coding", "long_context", "agentic"]
+benchmarks = { swe_bench_verified = 88.6, swe_bench_pro = 69.2 }
+
 # Claude Fable 5 (released 2026-06-09) — Anthropic's most capable widely
 # released model: the first generally available Mythos-class model, a new
 # tier *above* Opus (Opus 4.8 stays current and keeps the `opus` alias;
@@ -238,4 +291,3 @@ open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
 benchmarks = { swe_bench_pro = 80.3 }
 complementary_with = ["openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
-

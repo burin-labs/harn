@@ -136,6 +136,16 @@ fn __agent_required_tools_emit_friction(result: dict, opts, missing: list<string
   }
 }
 
+fn __agent_required_tools_preserve_terminal_error(result: dict) -> bool {
+  if result?.error != nil {
+    return true
+  }
+  let status = to_string(result?.status ?? "")
+  let final_status = to_string(result?.final_status ?? "")
+  let terminal_statuses = ["provider_error", "error", "blocked", "suspended", "cancelled", "scope_alert"]
+  return contains(terminal_statuses, status) || contains(terminal_statuses, final_status)
+}
+
 /**
  * agent_required_tools_enforce fails results that missed required tools.
  *
@@ -144,6 +154,9 @@ fn __agent_required_tools_emit_friction(result: dict, opts, missing: list<string
  * @api_stability: experimental
  */
 pub fn agent_required_tools_enforce(result: dict, opts) -> dict {
+  if __agent_required_tools_preserve_terminal_error(result) {
+    return result
+  }
   let missing = agent_required_tools_missing_from_result(result, opts)
   if len(missing) == 0 {
     return result

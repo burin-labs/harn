@@ -1,18 +1,12 @@
 //! `harn try "<prompt>"` dispatches to the embedded `cli/try.harn`
 //! script. The shim stays intentionally tiny because agent-loop option
 //! wiring belongs in the script.
-//!
-//! `HARN_CLI_IMPL=rust` keeps the legacy path available for parity
-//! snapshot coverage.
 
 use harn_vm::llm_config;
 
 use crate::cli::TryArgs;
 use crate::dispatch;
 use crate::env_guard::ScopedEnvVar;
-
-#[path = "try_cmd_legacy.rs"]
-mod legacy;
 
 pub(crate) async fn run(args: TryArgs) {
     if !mock_provider_active() && llm_config::available_provider_names().is_empty() {
@@ -21,11 +15,6 @@ pub(crate) async fn run(args: TryArgs) {
     }
 
     let resolved = resolve_try_model();
-
-    if std::env::var("HARN_CLI_IMPL").as_deref() == Ok("rust") {
-        legacy::run(args, &resolved.provider, &resolved.model).await;
-        return;
-    }
 
     let _max = ScopedEnvVar::set("HARN_TRY_MAX_ITERS", &args.max_iterations.to_string());
     let _provider = ScopedEnvVar::set("HARN_TRY_PROVIDER", &resolved.provider);

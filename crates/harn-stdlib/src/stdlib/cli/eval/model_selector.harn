@@ -64,9 +64,8 @@ fn __parse_provider_model_kv(raw: string) -> dict {
  *   3. Alias lookup via the pre-resolved `aliases` dict (the Rust
  *      caller supplies this via `HARN_MODEL_SELECTOR_ALIASES_JSON`).
  *      When the alias is absent the selector falls back to itself as
- *      both the provider and model — the legacy Rust path used the
- *      VM's `llm_config::resolve_model_info` which returns the same
- *      string in both fields for an unknown alias.
+ *      both the provider and model, matching
+ *      `llm_config::resolve_model_info` for an unknown alias.
  */
 fn resolve_selector(raw: string, aliases: dict) -> dict {
   let trimmed = raw.trim()
@@ -119,7 +118,7 @@ fn selector_is_local(selector: dict) -> bool {
 /**
  * Private `__safe_string` (kept local so this module stays
  * self-contained and re-readable as a unit). Kept byte-identical with
- * the copy in `_runner.harn`; the parity tests catch any drift.
+ * the copy in `_runner.harn`; dispatch tests catch any drift.
  */
 fn __safe_string_local(value, fallback: string) -> string {
   if type_of(value) == "string" {
@@ -129,12 +128,10 @@ fn __safe_string_local(value, fallback: string) -> string {
 }
 
 /**
- * Dispatch entrypoint for `HARN_CLI_IMPL=harn` callers that want to
- * resolve a single selector through the .harn helper. The Rust shim
- * has no such caller today — the helper is consumed in-process by
- * sibling .harn scripts — but exposing `main` keeps the dispatch
- * surface symmetrical and lets the parity tests black-box the helper
- * via the wedge.
+ * Dispatch entrypoint for callers that want to resolve a single
+ * selector through the .harn helper. The helper is consumed in-process
+ * by sibling .harn scripts, but exposing `main` keeps the dispatch
+ * surface easy to exercise in black-box tests.
  *
  * Inputs:
  *   HARN_MODEL_SELECTOR_INPUT        — raw selector string.

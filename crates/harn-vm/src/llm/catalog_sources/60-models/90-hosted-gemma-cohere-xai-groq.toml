@@ -65,6 +65,23 @@ tier = "frontier"
 open_weight = true
 strengths = ["speed", "cheap", "tool_use", "reasoning"]
 
+[models."groq/openai/gpt-oss-20b"]
+name = "GPT-OSS 20B (Groq)"
+provider = "groq"
+context_window = 131072
+logical_model = "openai-gpt-oss-20b"
+equivalence_group = "openai-gpt-oss-20b"
+served_variant = "groq-lpu"
+wire_model = "openai/gpt-oss-20b"
+api_dialect = "openai_chat"
+capabilities = ["tools", "streaming", "thinking"]
+pricing = { input_per_mtok = 0.10, output_per_mtok = 0.50 }
+rate_limits = { rpm = 1000, tpm = 250000, tier = "developer", source_url = "https://console.groq.com/docs/models", last_verified = "2026-06-20" }
+architecture = { parameter_count_b = 21.0, active_parameter_count_b = 3.6, moe = true, license = "Apache-2.0", source_url = "https://developers.openai.com/api/docs/models/gpt-oss-20b", last_verified = "2026-06-20" }
+tier = "mid"
+open_weight = true
+strengths = ["speed", "cheap", "tool_use", "reasoning"]
+
 # Fireworks-hosted gpt-oss routes. Without a catalog row the wire id
 # `accounts/fireworks/models/gpt-oss-*` has NO context window, so the
 # agent's auto-compaction budget falls back to a placeholder and the prompt
@@ -88,6 +105,51 @@ architecture = { parameter_count_b = 117.0, active_parameter_count_b = 5.1, moe 
 tier = "frontier"
 open_weight = true
 strengths = ["speed", "cheap", "tool_use", "reasoning"]
+
+[models."accounts/fireworks/models/glm-5p2"]
+name = "GLM 5.2 (Fireworks)"
+provider = "fireworks"
+context_window = 1048576
+logical_model = "glm-5.2"
+equivalence_group = "glm-5.2"
+served_variant = "fireworks"
+wire_model = "accounts/fireworks/models/glm-5p2"
+api_dialect = "openai_chat"
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 1.40, output_per_mtok = 4.40, cache_read_per_mtok = 0.26 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
+
+[models."accounts/fireworks/models/deepseek-v4-pro"]
+name = "DeepSeek V4 Pro (Fireworks)"
+provider = "fireworks"
+context_window = 1048576
+logical_model = "deepseek-v4-pro"
+equivalence_group = "deepseek-v4-pro"
+served_variant = "fireworks"
+wire_model = "accounts/fireworks/models/deepseek-v4-pro"
+api_dialect = "openai_chat"
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.60, output_per_mtok = 1.20 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
+
+[models."accounts/fireworks/models/kimi-k2p6"]
+name = "Kimi K2.6 (Fireworks)"
+provider = "fireworks"
+context_window = 262144
+logical_model = "moonshot-kimi-k2.6"
+equivalence_group = "moonshot-kimi-k2.6"
+served_variant = "fireworks"
+wire_model = "accounts/fireworks/models/kimi-k2p6"
+api_dialect = "openai_chat"
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.60, output_per_mtok = 2.50, cache_read_per_mtok = 0.15 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
 
 [models."llama-3.3-70b-versatile"]
 name = "Llama 3.3 70B Versatile (Groq)"
@@ -128,7 +190,7 @@ strengths = ["speed", "cheap"]
 [models."command-a-plus-05-2026"]
 name = "Command A+"
 provider = "cohere"
-context_window = 256000
+context_window = 128000
 logical_model = "command-a-plus-05-2026"
 equivalence_group = "command-a-plus-05-2026"
 api_dialect = "openai_chat_compat"
@@ -139,6 +201,20 @@ architecture = { parameter_count_b = 111.0, moe = true, source_url = "https://do
 tier = "frontier"
 open_weight = true
 strengths = ["agentic", "tool_use", "reasoning", "multilingual", "vision"]
+
+[models."grok-4.3"]
+name = "Grok 4.3"
+provider = "xai"
+context_window = 1000000
+logical_model = "grok-4.3"
+equivalence_group = "grok-4.3"
+api_dialect = "openai_chat_compat"
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 1.25, output_per_mtok = 2.50, cache_read_per_mtok = 0.20 }
+rate_limits = { source_url = "https://docs.x.ai/developers/models", last_verified = "2026-06-20" }
+tier = "frontier"
+open_weight = false
+strengths = ["agentic", "tool_use", "reasoning", "vision", "long_context"]
 
 [models."grok-build-0.1"]
 name = "Grok Build 0.1"

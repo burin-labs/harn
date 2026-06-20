@@ -2,7 +2,7 @@
  * Shared rendering helpers for the embedded eval scripts scripts.
  *
  * The leading underscore marks this as a private helper module: it is
- * registered in `STDLIB_CLI_SCRIPTS` for discoverability and parity
+ * registered in `STDLIB_CLI_SCRIPTS` for discoverability and drift
  * lints, but `main` is a no-op that exits non-zero — sibling scripts
  * read its source as text and inline the helpers they need.
  *
@@ -10,9 +10,9 @@
  * `import`s across embedded scripts, so the sibling renderers
  * (`context.harn`, `tool_calls.harn`, `model_selector.harn`) duplicate
  * the helpers they need. This module is the canonical source — sibling
- * scripts must keep the inlined copies byte-identical, and the parity
- * tests in `crates/harn-cli/tests/eval_cluster_dispatch.rs` enforce
- * that the rendered outputs match the legacy Rust paths.
+ * scripts must keep the inlined copies byte-identical, and the tests in
+ * `crates/harn-cli/tests/eval_cluster_dispatch.rs` enforce the rendered
+ * output contracts.
  *
  * Once #2300 / G7 (AOT bytecode embedding) ships the cross-script
  * import surface, the duplicated bodies collapse to `import` lines
@@ -57,8 +57,8 @@ fn __safe_dict(value) -> dict {
 /**
  * Format a float with N decimal places, padded with trailing zeros.
  * Mirrors Rust's `format!("{:.N}", x)` rounding (half-up via int math)
- * and padding behavior so the rendered terminal/markdown output stays
- * byte-identical with the legacy Rust path.
+ * and padding behavior so rendered terminal/markdown output stays
+ * byte-identical with the host formatter.
  */
 fn __format_float_n(value, decimals: int) -> string {
   let f = to_float(value) ?? 0.0
@@ -105,7 +105,7 @@ fn __md_escape(s: string) -> string {
  * Stub entrypoint — this module is a helper-only file. The dispatch
  * wedge surfaces a software-error exit code if anyone tries to invoke
  * it directly. Registered in `STDLIB_CLI_SCRIPTS` for discoverability
- * (so `harn cli scripts list` shows it) and parity-lint coverage.
+ * (so `harn cli scripts list` shows it) and drift-check coverage.
  * Returns an int rather than calling `exit()` so the dispatch wedge's
  * captured stderr buffer flushes back to the Rust shim.
  */

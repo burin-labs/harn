@@ -1,3 +1,4 @@
+import { agent_required_tools_missing_from_session } from "std/agent/required_tools"
 import {
   agent_emit_event,
   agent_session_apply_reminder_post_turn,
@@ -225,6 +226,14 @@ fn __maybe_inject_completion_confirmation(session, opts, has_tool_calls, text, i
     {iteration: iteration, visible_text_prefix: visible_text_excerpt(text)},
   )
   return true
+}
+
+fn __required_tools_text_completion(opts, has_tool_calls, text) {
+  if has_tool_calls || trim(text) == "" || opts?.require_successful_tools == nil {
+    return false
+  }
+  let successful = opts?._session_successful_tools ?? []
+  return len(agent_required_tools_missing_from_session(opts, successful)) == 0
 }
 
 /**
@@ -1010,6 +1019,12 @@ pub fn agent_compute_post_turn(session, llm_result, dispatch, opts, iteration) {
   }
   if __native_tool_text_completion(opts, has_tool_calls, text) {
     return __post_turn_with_narrowing(__completion_result(opts, payload, "natural"), narrowing)
+  }
+  if __required_tools_text_completion(opts, has_tool_calls, text) {
+    return __post_turn_with_narrowing(
+      __completion_result(opts, payload, "required_tools_satisfied"),
+      narrowing,
+    )
   }
   let {loop_until_done = false, daemon = false} = opts ?? {}
   if !has_tool_calls && !loop_until_done && !daemon {

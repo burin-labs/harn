@@ -249,11 +249,8 @@ pub(crate) use self::agent_runtime::{
     current_host_bridge, emit_agent_event_sync as emit_live_agent_event_sync,
     emit_agent_event_with_ctx as emit_live_agent_event_with_ctx,
 };
+pub use self::api::fetch_provider_max_context;
 pub(crate) use self::api::vm_call_llm_full;
-pub use self::api::{
-    fetch_provider_max_context, probe_openai_compatible_model, selected_model_for_provider,
-    supports_model_readiness_probe, ModelReadiness,
-};
 pub(crate) use self::call::{
     execute_llm_call, execute_schema_retry_loop, extract_structured_data, rewrite_structured_args,
     structured_output_errors, structured_safe_envelope_err, structured_safe_envelope_ok,
@@ -278,6 +275,7 @@ pub use self::mock::{
     take_cli_llm_recordings, LlmMock, LlmReplayMode, MockError,
 };
 pub use self::model_test::{run_model_smoke_test, ModelSmokeTestOptions, ModelSmokeTestResult};
+pub use self::readiness::{selected_model_for_provider, supports_model_readiness_probe};
 pub use self::trace::{
     agent_trace_summary, enable_tracing, peek_agent_trace, peek_trace, peek_trace_summary,
     take_agent_trace, take_trace, AgentTraceEvent, LlmTraceEntry,
