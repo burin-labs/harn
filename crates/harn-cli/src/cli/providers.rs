@@ -18,7 +18,7 @@ pub(crate) enum ProvidersCommand {
     BuildConfig(ProvidersBuildConfigArgs),
     /// Generate or check the embedded capability TOML from source fragments.
     BuildCapabilities(ProvidersBuildCapabilitiesArgs),
-    /// Generate JSON, schema, TypeScript, and Swift catalog artifacts.
+    /// Generate provider catalog JSON, schema, and type artifacts.
     Export(ProvidersExportArgs),
     /// Generate or check the provider capability matrix docs.
     Matrix(ProvidersMatrixArgs),

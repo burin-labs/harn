@@ -218,13 +218,13 @@ pre_push = false
 
 [[artifact]]
 id = "provider-catalog"
-description = "Checked-in provider/model catalog JSON + schema + downstream TS/Swift bindings, exported from the live ProviderCatalog."
+description = "Checked-in provider/model catalog JSON + schema + downstream type bindings, exported from the live ProviderCatalog."
 gen = "gen-provider-catalog"
 check = "check-provider-catalog"
 outputs = [
   "spec/provider-catalog/provider-catalog.json",
   "spec/provider-catalog/provider-catalog.schema.json",
-  "spec/provider-catalog/harn-provider-catalog.ts",
+  "spec/provider-catalog/harn-provider-catalog.d.ts",
   "spec/provider-catalog/HarnProviderCatalog.swift",
 ]
 sources = [

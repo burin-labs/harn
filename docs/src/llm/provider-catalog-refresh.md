@@ -94,14 +94,10 @@ so downstream hosts do not need to parse Harn internals:
   healthcheck probes, and provider caveats;
 - `provider-catalog.schema.json` — JSON Schema for the catalog
   contract;
-- `harn-provider-catalog.ts` — TypeScript types plus compatibility
-  helpers such as `MODEL_CATALOG`, `ALIASES`, `QC_DEFAULTS`,
-  `entryFor`, and `pricingFor`;
-- `harn-provider-catalog.d.ts` — type-only TypeScript declarations
-  for hosts that load `provider-catalog.json` directly instead of
-  vendoring the data-bearing compatibility binding;
-- `HarnProviderCatalog.swift` — Swift `Codable` types plus the
-  embedded catalog JSON string.
+- `harn-provider-catalog.d.ts` — type-only TypeScript declarations for
+  hosts that load `provider-catalog.json` directly;
+- `HarnProviderCatalog.swift` — Swift `Codable` types for hosts that
+  load `provider-catalog.json` directly.
 
 Use the `providers` command group for the artifact lifecycle:
 

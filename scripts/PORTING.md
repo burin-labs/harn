@@ -63,9 +63,9 @@ script's purpose or fight a tool that is JS/Python by design.
 - **`crates/harn-hostlib/tests/fixtures/ast/**` (`source.jsx`, `source.rb`,
   `source.ts`, `source.py`, …)** — AST-parser test *inputs*; must be in the
   foreign languages they exercise.
-- **`spec/protocol-artifacts/*.ts`, `python/harn_protocol.py`, `harn-protocol.ts`,
-  `spec/provider-catalog/harn-provider-catalog.ts`** — generated multi-language
-  SDK bindings for external consumers.
+- **`spec/protocol-artifacts/*.ts`, `python/harn_protocol.py`,
+  `harn-protocol.ts`** — generated multi-language SDK bindings for external
+  consumers.
 - **`check_protocol_bindings.py`, `check_burin_protocol_bindings.py`,
   `verify_tree_sitter_parse.py`** — these *import the generated foreign bindings
   / compiled grammar and round-trip through them*. Porting to Harn would stop

@@ -176,11 +176,6 @@ fn generated_artifacts(
                 .map_err(|error| format!("failed to generate catalog schema: {error}"))?,
         },
         GeneratedArtifact {
-            relative_path: "harn-provider-catalog.ts",
-            body: harn_vm::provider_catalog::typescript_binding_embedded(overlay, capabilities)
-                .map_err(|error| format!("failed to generate TypeScript binding: {error}"))?,
-        },
-        GeneratedArtifact {
             relative_path: "harn-provider-catalog.d.ts",
             body: harn_vm::provider_catalog::typescript_declarations(),
         },
@@ -225,7 +220,6 @@ mod tests {
             .collect();
         assert!(names.contains(&"provider-catalog.json"));
         assert!(names.contains(&"provider-catalog.schema.json"));
-        assert!(names.contains(&"harn-provider-catalog.ts"));
         assert!(names.contains(&"harn-provider-catalog.d.ts"));
         assert!(names.contains(&"HarnProviderCatalog.swift"));
     }
