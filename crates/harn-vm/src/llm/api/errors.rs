@@ -648,6 +648,18 @@ mod tests {
     }
 
     #[test]
+    fn classify_explicit_overflow_wins_even_with_throttle_words() {
+        // An explicit "maximum context length" signature must classify as
+        // overflow even if the body coincidentally also mentions a rate limit —
+        // the explicit branch returns before the throttle veto.
+        assert_overflow(
+            "openai",
+            reqwest::StatusCode::BAD_REQUEST,
+            r#"{"error":{"code":"context_length_exceeded","message":"This model's maximum context length is 8192 tokens. (rate limit note: unrelated)"}}"#,
+        );
+    }
+
+    #[test]
     fn classify_openai_quota_is_not_context_overflow() {
         // insufficient_quota mentions tokens but is a billing throttle, not overflow.
         assert_not_overflow(
