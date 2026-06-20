@@ -348,10 +348,45 @@ fn __agent_host_command_cwd(args, options) {
   return __agent_host_resolve_path(cwd, opts)
 }
 
-fn __agent_host_command_request(args, options) {
-  let opts = __agent_host_options(options)
+fn __agent_host_list_of_strings(value) {
+  if type_of(value) != "list" || len(value) == 0 {
+    return false
+  }
+  for element in value {
+    if type_of(element) != "string" {
+      return false
+    }
+  }
+  return true
+}
+
+fn __agent_host_resolve_argv(args) {
+  // Resolve the effective argv from EITHER the canonical `argv` field OR a
+  // list passed in `command`. The schema declares `argv` as the array and
+  // `command` as a string, but the tool description tells the model to "pass
+  // argv as an array of strings", so models routinely conflate the two and
+  // send the array under `command`. Accept both spellings so the tool works
+  // regardless of which field carries the list; a string `command` still
+  // routes to shell mode below.
   let argv = args?.argv
   if type_of(argv) == "list" && len(argv) > 0 {
+    return argv
+  }
+  if (argv == nil || (type_of(argv) == "list" && len(argv) == 0))
+    && type_of(args?.command) == "list" {
+    return args.command
+  }
+  return nil
+}
+
+fn __agent_host_command_request(args, options) {
+  let opts = __agent_host_options(options)
+  let resolved_argv = __agent_host_resolve_argv(args)
+  if resolved_argv != nil {
+    if !__agent_host_list_of_strings(resolved_argv) {
+      throw "run_command: argv must be a non-empty list of strings"
+    }
+    let argv = resolved_argv
     if !__agent_host_argv_allowed(argv, opts) {
       return __agent_host_blocked_command(argv, opts)
     }
@@ -379,6 +414,12 @@ fn __agent_host_command_request(args, options) {
       req = req + {interactive: args.interactive}
     }
     return __agent_host_apply_command_policy(__agent_host_command_request_common(req, args, opts), args, opts)
+  }
+  if type_of(args?.command) == "string" && trim(args.command) != "" {
+    // A non-empty shell string was supplied, but shell mode is disabled for
+    // this tool. Tell the model exactly how to recover instead of claiming
+    // the (absent) argv is malformed.
+    throw "run_command: shell commands are disabled for this tool; pass argv as a list of strings, e.g. argv: [\"bash\", \"-lc\", \"...\"]"
   }
   throw "run_command: argv must be a non-empty list of strings"
 }
@@ -699,7 +740,7 @@ pub fn agent_command_tools(registry = nil, options = nil) {
       __agent_host_description(
         opts,
         key,
-        "Run one argv-based command from the configured cwd. Pass argv as an array of strings. Output is capped inline; use the returned command_id with the command-output reader tools for full stdout/stderr. Background progress can be enabled per call or through agent_command_tools command_behavior.",
+        "Run one argv-based command from the configured cwd. Pass argv as an array of strings (an array passed under `command` is also accepted as argv). Output is capped inline; use the returned command_id with the command-output reader tools for full stdout/stderr. Background progress can be enabled per call or through agent_command_tools command_behavior.",
       ),
       __agent_host_config(
         opts,
