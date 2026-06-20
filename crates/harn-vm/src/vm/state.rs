@@ -502,7 +502,7 @@ impl Vm {
         closure: &crate::value::VmClosure,
     ) -> VmEnv {
         if closure.module_state().is_some() {
-            return closure.env.clone();
+            return closure.env.cloned_for_call();
         }
         let call_env = Self::closure_call_env(&self.env, closure);
         // Same compile-time short-circuit as the env walk in

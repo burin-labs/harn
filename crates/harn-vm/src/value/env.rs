@@ -136,6 +136,21 @@ impl VmEnv {
         self.scopes.push(Scope::empty());
     }
 
+    /// Clone the scope stack for a fresh call frame, reserving room for the
+    /// one empty scope every invocation pushes for the callee's body.
+    ///
+    /// `Vec::clone` allocates at exactly `len` capacity, so the `push_scope`
+    /// that immediately follows on the call hot path would otherwise force a
+    /// reallocation and copy of the whole scope stack. Reserving the extra
+    /// slot up front folds those two allocations into one. When a caller does
+    /// not end up pushing (no path currently does, but it stays correct if one
+    /// is added), the only cost is a single unused `Scope` slot of capacity.
+    pub(crate) fn cloned_for_call(&self) -> VmEnv {
+        let mut scopes = Vec::with_capacity(self.scopes.len() + 1);
+        scopes.extend(self.scopes.iter().cloned());
+        VmEnv { scopes }
+    }
+
     pub fn pop_scope(&mut self) {
         if self.scopes.len() > 1 {
             self.scopes.pop();

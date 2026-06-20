@@ -33,9 +33,9 @@ impl Vm {
     /// entirely as a fast path for context-builder workloads.
     pub(crate) fn closure_call_env(caller_env: &VmEnv, closure: &VmClosure) -> VmEnv {
         if closure.module_state().is_some() {
-            return closure.env.clone();
+            return closure.env.cloned_for_call();
         }
-        let call_env = closure.env.clone();
+        let call_env = closure.env.cloned_for_call();
         // Compile-time guard: the late-bind walk only matters when the
         // callee body actually reads a name through the runtime env
         // (GetVar / SetVar / CallBuiltin / ...). For pure-arithmetic
@@ -125,8 +125,6 @@ impl Vm {
         initial_local_slots: Option<Vec<LocalSlot>>,
         step_args: &[VmValue],
     ) {
-        let saved_env = self.env.clone();
-
         // If this closure originated from an imported module, switch
         // the thread-local source dir so that render() and other
         // source-relative builtins resolve relative to the module.
@@ -138,6 +136,12 @@ impl Vm {
             None
         };
 
+        // `closure_call_env_for_current_frame` still reads the caller's
+        // `self.env`, so build the callee env first, then *move* the caller
+        // env into the frame. `self.env` is about to be overwritten anyway —
+        // it only needs to survive in `saved_env` for restore-on-return — so a
+        // clone here would allocate a whole scope-stack copy on every call for
+        // nothing.
         let mut call_env = self.closure_call_env_for_current_frame(closure);
         call_env.push_scope();
 
@@ -146,7 +150,7 @@ impl Vm {
         } else {
             None
         };
-        self.env = call_env;
+        let saved_env = std::mem::replace(&mut self.env, call_env);
 
         // Function-name breakpoint latch: record the name so the step
         // loop can raise a single "function breakpoint" stop on the
