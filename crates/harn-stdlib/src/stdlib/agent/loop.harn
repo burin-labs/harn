@@ -1,5 +1,5 @@
 // @harn-entrypoint-category agent.stdlib
-import { agent_autocompact_if_needed } from "std/agent/autocompact"
+import { agent_autocompact_if_needed, agent_emergency_compact } from "std/agent/autocompact"
 import { agent_budget_post_call_blocked, agent_budget_pre_call_blocked } from "std/agent/budget"
 import {
   agent_loop_apply_command,
@@ -319,6 +319,107 @@ fn __invoke_llm_with_autocontinue(
     call = __invoke_llm(message, turn_system, retry_opts)
   }
   return call
+}
+
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * Context-overflow recovery.
+ *
+ * A provider can reject a turn with a `context_overflow` error when the
+ * assembled prompt exceeds the model's real context window — typically on a
+ * large repo where tool observations accreted past the budget, OR when the
+ * model's window is mis/under-cataloged so auto-compaction never fired. The
+ * agent must NOT die on this: it is a recoverable, self-inflicted condition.
+ *
+ * Recovery is a bounded loop: emergency-compact the live transcript
+ * (deterministic observation masking — never an LLM call, which would itself
+ * overflow), then re-issue the SAME turn. Each attempt compacts more
+ * aggressively (shorter preserved tail). We stop when either the retry
+ * succeeds, or emergency compaction can no longer shrink the transcript
+ * (`archived == 0`, i.e. an irreducible system-prompt + single oversized
+ * message), at which point the overflow is genuinely terminal.
+ */
+fn __agent_loop_is_context_overflow(error) {
+  if type_of(error) != "dict" {
+    return false
+  }
+  let reason = to_string(error?.reason ?? "")
+  if reason == "context_overflow" {
+    return true
+  }
+  // Defensive fallback: some routes surface the condition only in the message
+  // text (uncataloged provider, no structured `reason`). Match the canonical
+  // classifier tag the Rust LLM layer stamps onto the error string.
+  let message = to_string(error?.message ?? "")
+  return contains(message, "[context_overflow]")
+}
+
+fn __agent_loop_context_overflow_max_recoveries(llm_opts) {
+  let configured = llm_opts?.context_overflow_recover_max
+  if type_of(configured) == "int" && configured >= 0 {
+    return configured
+  }
+  return 3
+}
+
+/**
+ * On a `context_overflow` provider error, emergency-compact + retry (bounded).
+ * Returns a fresh `{ok, ...}` call result: `ok:true` when a retry succeeded,
+ * or the last `ok:false` result (so the caller's terminal path runs unchanged)
+ * when recovery is exhausted or the transcript is irreducible.
+ */
+fn __agent_loop_recover_context_overflow(
+  call,
+  message,
+  turn_system,
+  llm_opts,
+  turn_opts,
+  session,
+  iteration_index,
+) {
+  let max_recoveries = __agent_loop_context_overflow_max_recoveries(llm_opts)
+  var current = call
+  var attempt = 0
+  while attempt < max_recoveries && !current.ok
+    && __agent_loop_is_context_overflow(current?.error) {
+    attempt = attempt + 1
+    let archived = agent_emergency_compact(session, llm_opts, attempt)
+    agent_emit_event(
+      session.session_id,
+      "context_overflow_recovery",
+      {
+        iteration: iteration_index + 1,
+        attempt: attempt,
+        max_recoveries: max_recoveries,
+        archived_messages: archived,
+        provider_error: current?.error ?? {},
+      },
+    )
+    // Nothing left to shed: the prompt is irreducible (system prompt + a single
+    // oversized message). Re-issuing would overflow identically, so surface the
+    // original terminal error rather than spin.
+    if archived <= 0 {
+      break
+    }
+    // Rebuild the turn prompt against the now-compacted transcript and re-issue.
+    let turn_prompt = __agent_loop_build_turn_prompt(session, llm_opts, iteration_index)
+    let retry_opts = llm_opts
+      + {
+      messages: turn_prompt.messages,
+      _system_fragments: turn_prompt.fragments,
+      _context_overflow_recovery_attempt: attempt,
+    }
+    current = __invoke_llm_with_autocontinue(
+      message,
+      turn_prompt.system,
+      retry_opts,
+      turn_opts,
+      session.session_id,
+      iteration_index,
+    )
+  }
+  return current
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -2468,7 +2569,7 @@ fn __agent_loop_run(message, session, initial_opts) {
         _iteration: iteration_index + 1,
         _system_fragments: turn_prompt.fragments,
       }
-      let call = __invoke_llm_with_autocontinue(
+      var call = __invoke_llm_with_autocontinue(
         message,
         turn_prompt.system,
         llm_opts,
@@ -2476,6 +2577,17 @@ fn __agent_loop_run(message, session, initial_opts) {
         session.session_id,
         iteration_index,
       )
+      if !call.ok && __agent_loop_is_context_overflow(call?.error) {
+        call = __agent_loop_recover_context_overflow(
+          call,
+          message,
+          turn_prompt.system,
+          llm_opts,
+          turn_opts,
+          session,
+          iteration_index,
+        )
+      }
       if !call.ok {
         let failure_config = __agent_loop_consecutive_failure_config(budget)
         if __agent_loop_tracks_failure(call?.error, failure_config) {
@@ -3323,6 +3435,9 @@ fn __agent_loop_run(message, session, initial_opts) {
   return unwrap(run)
 }
 
+// Recoverable: emergency-compact the transcript and retry the turn
+// before treating overflow as a failure. The agent must keep working
+// on a large repo, not die when the prompt outgrows the window.
 // A SUCCESSFUL terminal hand-back (clean done / a passing verify_completion)
 // must not report a stale current_failure: a run can complete without ever
 // flowing a passing verification result through the fold. Clear the

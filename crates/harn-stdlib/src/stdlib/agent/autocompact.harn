@@ -453,3 +453,99 @@ pub fn agent_autocompact_if_needed(session, opts) {
   }
   return nil
 }
+
+/**
+ * Force an emergency compaction of the live session transcript, IGNORING the
+ * normal compaction policy/threshold gate. This is the recovery path for a
+ * provider `context_overflow` error: the prompt already exceeded the model's
+ * real context window, so we must shrink it unconditionally and retry — there
+ * is no "should we compact?" decision left to make.
+ *
+ * Uses deterministic observation masking (never an LLM round-trip, which would
+ * itself overflow) with a `compact_threshold` of 1 so masking always engages,
+ * and an `attempt`-decreasing `keep_last` so successive emergency attempts drop
+ * more of the recent tail. Returns the number of archived messages: `0` means
+ * compaction could not shrink the transcript further (irreducible — e.g. the
+ * system prompt plus a single oversized message), which the agent loop treats
+ * as a genuinely terminal overflow.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_emergency_compact(session, opts, attempt) {
+  let messages = __host_agent_session_messages(session.session_id)
+  // Shrink the preserved tail as attempts escalate: a longer tail is tried
+  // first (least lossy), collapsing toward keeping only the latest user turn so
+  // a pathological recent observation can still be masked out.
+  let base_keep = if attempt <= 1 {
+    8
+  } else if attempt == 2 {
+    4
+  } else {
+    1
+  }
+  // Clamp the preserved tail well below the live message count so masking
+  // always has a span to archive — a `keep_last` that swallows the whole
+  // transcript would make `transcript_auto_compact` a no-op (archived == 0),
+  // which the loop reads as "irreducible" and gives up on prematurely. Leaving
+  // at most a third of the messages guarantees forward progress while still
+  // dropping the smallest tail it can.
+  let one_third = to_int(len(messages) / 3)
+  let ceiling = if one_third < 1 {
+    1
+  } else {
+    one_third
+  }
+  let keep_last = if base_keep < ceiling {
+    base_keep
+  } else {
+    ceiling
+  }
+  let compact_opts = {compact_strategy: "observation_mask", compact_threshold: 1, keep_last: keep_last}
+  let pre_payload = {
+    session: {id: session.session_id},
+    reason: "context_overflow",
+    strategy: "observation_mask",
+    engine_strategy: "observation_mask",
+    message_count: len(messages),
+    keep_last: keep_last,
+    attempt: attempt,
+    estimated_tokens_before: estimate_tokens(messages),
+  }
+  __host_fire_session_hook("pre_compact", pre_payload)
+  let compacted = transcript_auto_compact(messages, compact_opts)
+  let summary = __auto_compact_summary(messages, compacted)
+  let archived = if summary != "" {
+    len(messages) - len(compacted) + 1
+  } else {
+    0
+  }
+  if archived > 0 {
+    __host_agent_session_replace_messages(session.session_id, compacted, summary)
+    let metadata = {
+      mode: "emergency",
+      reason: "context_overflow",
+      strategy: "observation_mask",
+      engine_strategy: "observation_mask",
+      archived_messages: archived,
+      new_summary_len: len(summary),
+      keep_last: keep_last,
+      attempt: attempt,
+      estimated_tokens_before: estimate_tokens(messages),
+      estimated_tokens_after: estimate_tokens(compacted),
+    }
+    agent_record_compaction(session.session_id, metadata)
+    let post_payload = pre_payload
+      + {
+      archived_messages: archived,
+      new_summary_len: len(summary),
+      remaining_messages: len(compacted),
+      summary: summary,
+      estimated_tokens_after: estimate_tokens(compacted),
+    }
+    __host_fire_session_hook("post_compact", post_payload)
+    agent_reminder_providers_fire(session.session_id, "post_compact", post_payload, opts)
+  }
+  return archived
+}

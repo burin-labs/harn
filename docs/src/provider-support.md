@@ -19,7 +19,7 @@ No benchmark summary is baked into this checked-in page. To layer local empirica
 | `Dashscope` | OpenAI-compatible chat completions | `dashscope:qwen3.6*` | `native` | yes | yes | `native` / `delimited` | `disable_directive:/no_think,enabled` | no | `provider_default` | `not_recorded` |
 | `Deepinfra` | OpenAI-compatible chat completions | `deepinfra:deepinfra/Qwen/Qwen3.6-35B-A3B` | `native` | yes | yes | `native` / `native_json` | `enabled` | no | `high` | `not_recorded` |
 | `Deepseek` | OpenAI-compatible chat completions | `deepseek:deepseek-v4-flash` | `native` | yes | yes | `native` / `native_json` | `enabled` | yes | `high` | `not_recorded` |
-| `Fireworks` | OpenAI-compatible chat completions | `fireworks:accounts/fireworks/models/gpt-oss-*` | `json` | no | yes | `none` / `native_json` | `effort,reasoning_effort` | no | `provider_default` | `not_recorded` |
+| `Fireworks` | OpenAI-compatible chat completions | `fireworks:accounts/fireworks/models/gpt-oss-120b` | `json` | no | yes | `none` / `native_json` | `effort,reasoning_effort` | no | `high` | `not_recorded` |
 | `Gemini API` | Gemini generateContent | `gemini:gemini-2.5-flash` | `native` | yes | yes | `native` / `native_json` | `adaptive,effort,enabled` | yes | `medium` | `not_recorded` |
 | `Groq` | OpenAI-compatible chat completions | `groq:llama-3.1-8b-instant` | `native` | yes | yes | `native` / `native_json` | none | no | `high` | `not_recorded` |
 | `Huggingface` | OpenAI-compatible chat completions | `huggingface:qwen/qwen3.6*` | `native` | yes | yes | `native` / `delimited` | `disable_directive:/no_think,enabled` | no | `provider_default` | `not_recorded` |

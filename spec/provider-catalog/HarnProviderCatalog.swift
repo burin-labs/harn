@@ -3386,6 +3386,88 @@ public let harnProviderCatalogJSON = #"""
       }
     },
     {
+      "id": "accounts/fireworks/models/gpt-oss-120b",
+      "name": "GPT-OSS 120B (Fireworks)",
+      "provider": "fireworks",
+      "aliases": [],
+      "context_window": 131072,
+      "logical_model": "openai-gpt-oss-120b",
+      "equivalence_group": "openai-gpt-oss-120b",
+      "served_variant": "fireworks",
+      "wire_model": "accounts/fireworks/models/gpt-oss-120b",
+      "api_dialect": "openai_chat",
+      "architecture": {
+        "parameter_count_b": 117.0,
+        "active_parameter_count_b": 5.1,
+        "moe": true,
+        "license": "Apache-2.0",
+        "source_url": "https://developers.openai.com/api/docs/models/gpt-oss-120b",
+        "last_verified": "2026-06-19"
+      },
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": false,
+        "text": true,
+        "preferred_format": "json",
+        "parity": "text_only",
+        "tool_search": []
+      },
+      "structured_output": "none",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.15,
+        "output_per_mtok": 0.6,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "extended_thinking"
+      ],
+      "family": "openai-gpt",
+      "lineage": "openai-legacy",
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "speed",
+        "cheap",
+        "tool_use",
+        "reasoning"
+      ]
+    },
+    {
       "id": "gemini-2.5-flash",
       "name": "Gemini 2.5 Flash",
       "provider": "gemini",

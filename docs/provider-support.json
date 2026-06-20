@@ -444,13 +444,14 @@
         "FIREWORKS_API_KEY"
       ],
       "recommended": {
-        "selector": "fireworks:accounts/fireworks/models/gpt-oss-*",
+        "selector": "fireworks:accounts/fireworks/models/gpt-oss-120b",
         "provider": "fireworks",
-        "model": "accounts/fireworks/models/gpt-oss-*",
-        "display_name": null,
+        "model": "accounts/fireworks/models/gpt-oss-120b",
+        "display_name": "GPT-OSS 120B (Fireworks)",
         "tool_format": "json",
         "harn_options": [
           "provider = \"fireworks\"",
+          "model = \"accounts/fireworks/models/gpt-oss-120b\"",
           "tool_format = \"json\"",
           "structured_output_mode = \"native_json\""
         ]
@@ -468,7 +469,7 @@
           "reasoning_effort"
         ],
         "prompt_or_context_cache": false,
-        "usage_accounting_confidence": "provider_default"
+        "usage_accounting_confidence": "high"
       },
       "empirical": {
         "status": "not_recorded",

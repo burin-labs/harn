@@ -1848,6 +1848,7 @@ async fn host_agent_emit_event(
             | "tool_call_audit"
             | "budget_exhausted"
             | "budget_circuit_breaker"
+            | "context_overflow_recovery"
             | "loop_checkpoint"
     ) {
         let role = if matches!(
@@ -2377,6 +2378,23 @@ fn build_agent_event(
                 get_usize("raised_max_tokens"),
                 get_usize("attempt"),
                 get_usize("max_continuations"),
+            ),
+        }),
+        // `context_overflow_recovery` fires when a provider rejected the turn
+        // with a context_overflow error and the loop emergency-compacted the
+        // transcript (deterministic observation masking) before re-issuing the
+        // turn — the recovery that keeps the agent working on a large repo
+        // instead of dying. Engine-emitted; surfaced on the FeedbackInjected
+        // stream like the sibling recoveries. `content` summarizes the attempt
+        // and how many messages were archived to fit under the window.
+        "context_overflow_recovery" => Ok(AgentEvent::FeedbackInjected {
+            session_id: session_id.to_string(),
+            kind: "context_overflow_recovery".to_string(),
+            content: format!(
+                "attempt {}/{} archived {} messages",
+                get_usize("attempt"),
+                get_usize("max_recoveries"),
+                get_usize("archived_messages"),
             ),
         }),
         other => Err(VmError::Runtime(format!(
