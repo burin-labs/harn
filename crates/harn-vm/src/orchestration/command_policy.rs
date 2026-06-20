@@ -958,6 +958,213 @@ fn has_destructive_tokens(lower: &str) -> bool {
         || lower.contains(":(){")
         || lower.contains("chmod -r 777 /")
         || lower.contains("chown -r ")
+        || has_cwd_wipe_tokens(lower)
+}
+
+/// Detects recursive deletes that destroy the current workspace itself —
+/// `rm -rf .` / `rm -rf ./*` / `rm -rf *` and the `find . -delete` /
+/// `find . -exec rm ...` family. Root-anchored wipes (`rm -rf /`) are caught by
+/// the substring checks above; this covers the cwd-/workspace-relative shapes a
+/// prompt injection can use to wipe everything under the working directory
+/// without ever naming `/`.
+///
+/// Boundary (deliberate): a recursive delete of a *named* subdirectory
+/// (`rm -rf build/`, `rm -rf node_modules`, `rm -rf ./src`) is a normal clean
+/// and is intentionally NOT flagged here. The dangerous set is limited to
+/// targets that resolve to the whole working tree: `.`, `./`, `./*`, `*`, and
+/// bare `find .` deletes. Flag order (`-rf` / `-fr` / `-r -f`), an optional
+/// `--` end-of-options marker, and surrounding whitespace are all normalized.
+fn has_cwd_wipe_tokens(lower: &str) -> bool {
+    // Split on shell statement separators so a benign prefix
+    // (`cd foo && rm -rf .`) does not hide a wipe in a later clause.
+    lower
+        .split(['\n', ';', '|', '&'])
+        .any(segment_is_workspace_wipe)
+}
+
+fn segment_is_workspace_wipe(segment: &str) -> bool {
+    let tokens: Vec<&str> = segment.split_whitespace().collect();
+    // Evaluate every dangerous command word, not just the segment head: the
+    // real command text is frequently wrapped (`sh -c rm -rf .`, `cd x && rm
+    // -rf .`, `sudo rm -rf .`, `powershell -c "rm -r -fo ."`, `cmd /c "rd /s /q
+    // ."`), so the dangerous verb is rarely token 0. We scan for the verb
+    // anywhere and judge the tokens that follow it.
+    //
+    // The PowerShell `Remove-Item` family and the UNIX `rm` deliberately share
+    // the `rm_targets_workspace` judge: the aliases (`rm`/`del`/`rmdir`/`ri`/…)
+    // overlap with UNIX verbs, and both treat `-r`/`-recurse` as the wipe
+    // trigger with the cwd/glob/drive-root target set. `del`/`rmdir`/`rd` route
+    // through BOTH the PowerShell-alias path and the cmd.exe path so a `del /s
+    // /q .` (cmd) and `del -recurse .` (ps alias) are each caught.
+    tokens.iter().enumerate().any(|(idx, token)| {
+        let rest = &tokens[idx + 1..];
+        match *token {
+            // UNIX rm + PowerShell `Remove-Item` and its `rm`/`ri` aliases.
+            "rm" | "remove-item" | "ri" => rm_targets_workspace(rest),
+            "find" => find_deletes_workspace(rest),
+            // cmd.exe directory/file deletes use `/s /q` flags + a cwd/drive
+            // target. `del`/`rmdir`/`rd`/`erase` are ALSO PowerShell aliases, so
+            // try both judges (either matching is dangerous).
+            "rmdir" | "rd" | "del" | "erase" => {
+                cmd_delete_targets_workspace(rest) || rm_targets_workspace(rest)
+            }
+            // `format` / `format.com` reformatting a volume is unconditionally
+            // destructive once a drive target is present.
+            "format" | "format.com" => format_targets_drive(rest),
+            _ => false,
+        }
+    })
+}
+
+/// cmd.exe `rmdir`/`rd`/`del`/`erase` wipe judge. The danger signature is a
+/// recursive flag (`/s`) together with a target that resolves to the whole
+/// working tree or a drive root (`.`, `*`, `*.*`, `c:\`, `\`). Flag order is
+/// irrelevant (`/s /q` vs `/q /s`) and `/q` (quiet) does not change the
+/// judgment — `/s` alone wipes. cmd flags are case-insensitive (`/S`), but the
+/// caller already lowercased the command text.
+fn cmd_delete_targets_workspace(args: &[&str]) -> bool {
+    let mut recursive = false;
+    let mut cwd_target = false;
+    let mut drive_target = false;
+    for arg in args {
+        if let Some(flag) = arg.strip_prefix('/') {
+            // `/s`, `/q`, `/f`, and combined forms like `/s/q` (no space).
+            if flag.split('/').any(|f| f.starts_with('s')) {
+                recursive = true;
+            }
+            continue;
+        }
+        if is_drive_root(arg) {
+            // A whole-volume target (`c:\`, `c:\*.*`, `\`) is destructive on its
+            // own — `del c:\*.*` clears the drive root without any `/s`.
+            drive_target = true;
+        } else if is_workspace_wipe_target(arg) {
+            cwd_target = true;
+        }
+    }
+    // Drive-root wipe is unconditional; a cwd/glob wipe needs recursion (`/s`)
+    // to reach the whole tree (`rmdir /s /q .`, `del /f /s /q *`).
+    drive_target || (recursive && cwd_target)
+}
+
+/// `format <drive>` reformats a whole volume; a drive-letter or device target
+/// (`c:`, `c:\`, `\\.\…`) is the destructive shape. A `format /?` help query or
+/// a bare `format` with no volume is not.
+fn format_targets_drive(args: &[&str]) -> bool {
+    args.iter()
+        .any(|arg| !arg.starts_with('/') && (is_drive_root(arg) || arg.starts_with("\\\\.\\")))
+}
+
+/// True when an `rm` invocation is both recursive *and* targets the whole
+/// working tree (`.`, `./`, `./*`, or `*`). Named paths are left alone.
+fn rm_targets_workspace(args: &[&str]) -> bool {
+    let mut recursive = false;
+    let mut wipe_target = false;
+    let mut end_of_options = false;
+
+    for arg in args {
+        if !end_of_options && *arg == "--" {
+            end_of_options = true;
+            continue;
+        }
+        if !end_of_options && arg.starts_with('-') && arg.len() > 1 {
+            // GNU long option (`--recursive`), UNIX short clusters (`-rf`,
+            // `-fr`, `-r`), AND PowerShell single-dash options (`-recurse`,
+            // `-r`, `-rec`, `-force`, `-fo`, `-literalpath`/`-path`).
+            // `-f`/`--force`/`-force`/`-fo` is irrelevant to the wipe judgment:
+            // an interactive `rm -r .` (or `Remove-Item -Recurse .`) still
+            // destroys the tree. Input is already lowercased by the caller.
+            if let Some(long) = arg.strip_prefix("--") {
+                if long == "recursive" {
+                    recursive = true;
+                }
+            } else {
+                let opt = &arg[1..];
+                // PowerShell `-Recurse` (and prefix-abbreviations `-r`, `-rec`,
+                // `-recurse`): `recurse` starts with `opt`, so `-r`/`-rec` match.
+                // UNIX short clusters (`-rf`, `-fr`) embed `r` as a flag char.
+                // A pure PowerShell `-force`/`-fo`/`-path` must NOT set
+                // recursion — guard against `force`/`path` etc. matching the
+                // `r`-cluster scan by only treating multi-letter tokens that are
+                // an abbreviation of a known long option as such.
+                if "recurse".starts_with(opt) && !opt.is_empty() {
+                    // `-r`, `-re`, `-rec`, `-recu`, … `-recurse`.
+                    recursive = true;
+                } else if !is_powershell_long_option(opt) {
+                    // UNIX short cluster: any `r`/`R` char triggers recursion.
+                    for ch in opt.chars() {
+                        if ch == 'r' || ch == 'R' {
+                            recursive = true;
+                        }
+                    }
+                }
+            }
+            continue;
+        }
+        if is_workspace_wipe_target(arg) {
+            wipe_target = true;
+        }
+    }
+
+    // Require recursion: a non-recursive `rm .` cannot remove the tree anyway.
+    recursive && wipe_target
+}
+
+/// True when `opt` (the text after a single leading `-`, lowercased) is an
+/// abbreviation of a PowerShell named parameter other than `-Recurse`. These
+/// tokens must NOT be scanned as a UNIX short-flag cluster (otherwise `-force`
+/// would falsely set recursion via its `r`, and `-path`/`-literalpath` likewise
+/// contain no `r` but should still be treated as PS options, not clusters).
+fn is_powershell_long_option(opt: &str) -> bool {
+    const PS_LONG: &[&str] = &[
+        "force",
+        "path",
+        "literalpath",
+        "confirm",
+        "whatif",
+        "verbose",
+    ];
+    PS_LONG.iter().any(|long| long.starts_with(opt))
+}
+
+/// A target string that resolves to the entire working directory or a drive
+/// root. Covers UNIX cwd/glob shapes, the PowerShell `$pwd`/`.\*` forms, and
+/// Windows drive roots (`c:\`, `c:`, `\`, `*.*`).
+fn is_workspace_wipe_target(arg: &str) -> bool {
+    matches!(
+        arg,
+        "." | "./" | "./*" | "*" | ".*" | "./." | ".\\" | ".\\*" | "*.*" | "$pwd" | "${pwd}" | "\\"
+    ) || is_drive_root(arg)
+}
+
+/// Windows drive-root target: `c:`, `c:\`, `c:/`, or `c:\*`. A drive letter
+/// followed by only a separator and optional glob wipes the whole volume.
+fn is_drive_root(arg: &str) -> bool {
+    let bytes = arg.as_bytes();
+    if bytes.len() < 2 || !bytes[0].is_ascii_alphabetic() || bytes[1] != b':' {
+        return false;
+    }
+    // After `x:` the remainder must be empty, a bare separator, or a root glob.
+    matches!(&arg[2..], "" | "\\" | "/" | "\\*" | "/*" | "\\*.*" | "*.*")
+}
+
+/// True when a `find` invocation roots at the cwd (`.` / `./`) and carries a
+/// destructive action (`-delete`, or `-exec`/`-execdir` running `rm`).
+fn find_deletes_workspace(args: &[&str]) -> bool {
+    // The first non-option token is the search root; a cwd root is the
+    // dangerous case. `find -delete` (no explicit root) also defaults to cwd.
+    let roots_at_cwd = match args.iter().find(|arg| !arg.starts_with('-')) {
+        Some(&root) => matches!(root, "." | "./"),
+        None => true,
+    };
+    if !roots_at_cwd {
+        return false;
+    }
+    let has_delete = args.contains(&"-delete");
+    let has_exec_rm = args
+        .windows(2)
+        .any(|pair| matches!(pair[0], "-exec" | "-execdir") && pair[1] == "rm");
+    has_delete || has_exec_rm
 }
 
 fn has_write_intent(lower: &str) -> bool {
@@ -1326,5 +1533,149 @@ mod tests {
             first_deny_pattern(&policy, &ctx(&["sh", "-c", "echo ok; rm -rf build"])),
             Some("*rm -rf*".to_string())
         );
+    }
+
+    fn is_destructive(cmd: &str) -> bool {
+        let scan = command_risk_scan_json(&ctx(&["sh", "-c", cmd]), None);
+        labels(&scan).contains(&"destructive".to_string())
+    }
+
+    #[test]
+    fn cwd_wipe_deletes_are_flagged_destructive() {
+        // SB-3: cwd/workspace-relative recursive wipes a prompt injection can use
+        // without ever naming `/`. All must be labeled destructive (-> deny).
+        for cmd in [
+            "rm -rf .",
+            "rm -rf ./",
+            "rm -rf ./*",
+            "rm -fr .",
+            "rm -rf *",
+            "rm -r -f .",
+            "rm -f -r .",
+            "rm -rf -- .",
+            "rm --recursive --force .",
+            "rm    -rf     .",
+            "cd src && rm -rf .",
+            "echo hi; rm -rf .",
+            "find . -delete",
+            "find ./ -delete",
+            "find . -type f -delete",
+            "find . -exec rm {} +",
+            "find . -execdir rm {} +",
+            "find -delete",
+        ] {
+            assert!(is_destructive(cmd), "expected destructive: {cmd}");
+            // Confirm it also routes to a deny recommendation.
+            let scan = command_risk_scan_json(&ctx(&["sh", "-c", cmd]), None);
+            assert_eq!(scan["recommended_action"], "deny", "deny for: {cmd}");
+        }
+    }
+
+    #[test]
+    fn scoped_and_named_deletes_are_not_over_flagged() {
+        // Deliberate boundary: a recursive delete of a *named* subdirectory is a
+        // normal clean, not a workspace wipe. These must NOT be flagged.
+        for cmd in [
+            "rm -rf build/",
+            "rm -rf node_modules",
+            "rm -rf ./src",
+            "rm -rf target",
+            "rm -rf dist build",
+            "rm file.txt",
+            "rm -f stale.log",
+            "rm -rf .cache", // named hidden dir, not the cwd
+            "find . -type f -name '*.tmp' -print",
+            "find ./build -delete",
+            "find src -delete",
+        ] {
+            assert!(!is_destructive(cmd), "should NOT be destructive: {cmd}");
+        }
+    }
+
+    #[test]
+    fn windows_cmd_wipe_deletes_are_flagged_destructive() {
+        // SB-3 (Windows): cmd.exe whole-tree / drive-root wipes. Flag order is
+        // insensitive (`/s /q` vs `/q /s`); `/q` (quiet) and `/f` (force) do not
+        // change the judgment; a drive-root target is destructive without `/s`.
+        for cmd in [
+            "rmdir /s /q .",
+            "rmdir /q /s .",
+            "rd /s /q .",
+            "rd /s /q c:\\",
+            "del /s /q .",
+            "del /f /s /q *",
+            "del /q /f /s *.*",
+            "erase /s /q .",
+            "del c:\\*.*",
+            "rd /s /q d:\\",
+            "format c:",
+            "format c:\\",
+            "format.com d:",
+            // Wrapped forms — the dangerous verb is not token 0.
+            "cmd /c rd /s /q .",
+            "cd build & del /s /q .",
+        ] {
+            assert!(is_destructive(cmd), "expected destructive (cmd): {cmd}");
+            let scan = command_risk_scan_json(&ctx(&["sh", "-c", cmd]), None);
+            assert_eq!(scan["recommended_action"], "deny", "deny for: {cmd}");
+        }
+    }
+
+    #[test]
+    fn windows_powershell_wipe_deletes_are_flagged_destructive() {
+        // SB-3 (PowerShell): Remove-Item + aliases, recurse alone wipes (force is
+        // irrelevant), abbreviated/explicit flags, -Path/-LiteralPath, $pwd.
+        for cmd in [
+            "remove-item -recurse -force .",
+            "remove-item -recurse .",
+            "remove-item -r -fo .",
+            "ri -recurse -force .",
+            "rm -r -fo .",
+            "rm -recurse .",
+            "remove-item -recurse ./*",
+            "remove-item -rec -force .\\*",
+            "remove-item -recurse $pwd",
+            "remove-item -force -recurse -literalpath .",
+            "remove-item -path . -recurse",
+            "del -recurse -force .",
+            "rmdir -recurse .",
+            // Wrapped form.
+            "powershell -c rm -r -fo .",
+        ] {
+            assert!(is_destructive(cmd), "expected destructive (ps): {cmd}");
+            let scan = command_risk_scan_json(&ctx(&["sh", "-c", cmd]), None);
+            assert_eq!(scan["recommended_action"], "deny", "deny for: {cmd}");
+        }
+    }
+
+    #[test]
+    fn windows_scoped_and_named_deletes_are_not_over_flagged() {
+        // Deliberate boundary (Windows): a recursive delete of a *named*
+        // subdirectory or single file is a normal clean — NOT a wipe.
+        for cmd in [
+            // cmd.exe named-target / non-recursive / help.
+            "rmdir /s /q build",
+            "rd /s /q node_modules",
+            "del /q stale.log",
+            "del /s /q target\\debug",
+            "rmdir build",
+            "del file.txt",
+            "format /?",
+            "format",
+            // PowerShell named-target / force-without-recurse / non-wipe.
+            "remove-item -recurse build\\",
+            "remove-item -recurse .\\src",
+            "remove-item -force .", // force alone, no recurse
+            "remove-item -recurse node_modules",
+            "remove-item stale.log",
+            "remove-item -path .\\dist -recurse",
+            "ri -force config.json",
+            "rm -fo stale.log", // ps -Force (no recurse), single file
+        ] {
+            assert!(
+                !is_destructive(cmd),
+                "should NOT be destructive (windows): {cmd}"
+            );
+        }
     }
 }
