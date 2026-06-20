@@ -357,9 +357,47 @@ fn __apply_judge_defaults(schema, options) {
   return resolved + {repair: repair}
 }
 
+/**
+ * Single-shot context-overflow detection on a structured/llm error.
+ *
+ * A single-shot structured call (judge, router, classifier, cached lookup) has
+ * NO live session transcript, so it cannot emergency-compact-and-retry the way
+ * the agent loop does — there is nothing to mask. The least-surprising thing we
+ * CAN do is surface the condition TRANSPARENTLY so a harness author sees
+ * "this call overflowed the model's window" instead of a generic `error` that
+ * looks like a dead judge or a flaky 400.
+ *
+ * Mirrors the Rust classifier's `[context_overflow]` reason tag and the
+ * structured `reason`/`error_category` fields, so detection stays consistent
+ * with the agent-loop recovery path and is provider-agnostic.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn is_context_overflow_error(err) {
+  if type_of(err) == "dict" {
+    let reason = to_string(err?.reason ?? "")
+    if reason == "context_overflow" {
+      return true
+    }
+    let category = to_string(err?.error_category ?? "")
+    if category == "context_overflow" {
+      return true
+    }
+    let message = to_string(err?.message ?? "") + " " + to_string(err?.error ?? "")
+    return contains(message, "[context_overflow]")
+  }
+  return contains(to_string(err), "[context_overflow]")
+}
+
 fn __augment_envelope(envelope) {
   if type_of(envelope) != "dict" {
-    return {ok: false, status: "exception", value: {}, error: envelope}
+    let exc_status = if is_context_overflow_error(envelope) {
+      "context_overflow"
+    } else {
+      "exception"
+    }
+    return {ok: false, status: exc_status, value: {}, error: envelope}
   }
   let ok_flag = envelope?.ok ?? false
   let data = if type_of(envelope?.data) == "dict" {
@@ -370,6 +408,8 @@ fn __augment_envelope(envelope) {
   let normalized = with_case_insensitive_keys(data)
   let status = if ok_flag {
     "ok"
+  } else if is_context_overflow_error(envelope) {
+    "context_overflow"
   } else {
     let category = envelope?.error_category
     if category != nil {
@@ -380,3 +420,7 @@ fn __augment_envelope(envelope) {
   }
   return envelope + {value: normalized, status: status}
 }
+// Distinct, machine-readable status so callers/harness authors can SEE that
+// a no-session single-shot call hit the context window (vs. a generic 400 or
+// a dead judge). The agent loop recovers overflow via compaction; this path
+// cannot, but it must never be silent.
