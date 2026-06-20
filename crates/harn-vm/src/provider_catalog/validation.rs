@@ -52,6 +52,10 @@ pub fn validate_artifact(artifact: &ProviderCatalogArtifact) -> ProviderCatalogV
                 &mut result,
             );
         }
+        validate_extra_headers(provider, &mut result);
+        if let Some(healthcheck) = &provider.healthcheck {
+            validate_provider_healthcheck(provider, healthcheck, &mut result);
+        }
         if let Some(local_runtime) = &provider.local_runtime {
             validate_local_runtime(&provider.id, local_runtime, &mut result);
         }

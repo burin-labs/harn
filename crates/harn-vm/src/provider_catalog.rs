@@ -9,8 +9,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::llm;
 use crate::llm_config::{
-    self, AliasDef, AliasToolCallingDef, LocalMemoryDef, ModelArchitectureDef, ModelDef,
-    ModelPricing, ProviderDef, RateLimitsDef,
+    self, AliasDef, AliasToolCallingDef, HealthcheckDef, LocalMemoryDef, ModelArchitectureDef,
+    ModelDef, ModelPricing, ProviderDef, RateLimitsDef,
 };
 use chrono::{NaiveDate, Utc};
 
@@ -41,6 +41,7 @@ mod validation;
 
 pub use bindings::{
     swift_binding, swift_binding_embedded, typescript_binding, typescript_binding_embedded,
+    typescript_declarations,
 };
 pub use remote::{refresh_runtime_catalog, CatalogRefreshOptions, CatalogRefreshReport};
 pub use schema::{schema_json, schema_value};
@@ -102,8 +103,13 @@ fn provider_def_from_catalog(provider: &CatalogProvider) -> llm_config::Provider
             [one] => llm_config::AuthEnv::Single(one.clone()),
             many => llm_config::AuthEnv::Multiple(many.to_vec()),
         },
+        extra_headers: provider.extra_headers.clone(),
         chat_endpoint: provider.endpoint.chat_endpoint.clone(),
         completion_endpoint: provider.endpoint.completion_endpoint.clone(),
+        healthcheck: provider
+            .healthcheck
+            .clone()
+            .map(healthcheck_def_from_catalog),
         features: provider.features.clone(),
         rpm: provider.rpm,
         rate_limits: provider.rate_limits.clone(),
@@ -331,6 +337,11 @@ fn catalog_provider(id: String, provider: ProviderDef) -> CatalogProvider {
             env: llm_config::auth_env_names(&provider.auth_env),
             required: provider.auth_style != "none",
         },
+        extra_headers: provider.extra_headers.clone(),
+        healthcheck: provider
+            .healthcheck
+            .clone()
+            .map(catalog_provider_healthcheck),
         protocols: provider_protocols(&id, &provider),
         features: provider.features.clone(),
         caveats: provider_caveats(&id, &provider),
@@ -343,6 +354,24 @@ fn catalog_provider(id: String, provider: ProviderDef) -> CatalogProvider {
         local_runtime: provider.local_runtime.clone(),
         latency_p50_ms: provider.latency_p50_ms,
         id,
+    }
+}
+
+fn catalog_provider_healthcheck(healthcheck: HealthcheckDef) -> CatalogProviderHealthcheck {
+    CatalogProviderHealthcheck {
+        method: healthcheck.method,
+        path: healthcheck.path,
+        url: healthcheck.url,
+        body: healthcheck.body,
+    }
+}
+
+fn healthcheck_def_from_catalog(healthcheck: CatalogProviderHealthcheck) -> HealthcheckDef {
+    HealthcheckDef {
+        method: healthcheck.method,
+        path: healthcheck.path,
+        url: healthcheck.url,
+        body: healthcheck.body,
     }
 }
 
@@ -683,6 +712,59 @@ fn validate_rate_limits(
         rate_limits.last_verified.as_deref(),
         result,
     );
+}
+
+fn validate_extra_headers(provider: &CatalogProvider, result: &mut ProviderCatalogValidation) {
+    for (name, value) in &provider.extra_headers {
+        if name.trim().is_empty() {
+            result.errors.push(format!(
+                "provider {} extra_headers key cannot be empty",
+                provider.id
+            ));
+        }
+        if value.trim().is_empty() {
+            result.errors.push(format!(
+                "provider {} extra_headers.{} cannot be empty",
+                provider.id, name
+            ));
+        }
+    }
+}
+
+fn validate_provider_healthcheck(
+    provider: &CatalogProvider,
+    healthcheck: &CatalogProviderHealthcheck,
+    result: &mut ProviderCatalogValidation,
+) {
+    let owner = format!("provider {}", provider.id);
+    if healthcheck.method.trim().is_empty() {
+        result
+            .errors
+            .push(format!("{owner} healthcheck.method cannot be empty"));
+    }
+    if healthcheck.path.is_none() && healthcheck.url.is_none() {
+        result.errors.push(format!(
+            "{owner} healthcheck must declare either path or url"
+        ));
+    }
+    for (field, value) in [
+        ("path", healthcheck.path.as_deref()),
+        ("url", healthcheck.url.as_deref()),
+        ("body", healthcheck.body.as_deref()),
+    ] {
+        if value.is_some_and(|value| value.trim().is_empty()) {
+            result
+                .errors
+                .push(format!("{owner} healthcheck.{field} cannot be empty"));
+        }
+    }
+    if let Some(url) = healthcheck.url.as_deref() {
+        if !(url.starts_with("https://") || url.starts_with("http://")) {
+            result
+                .warnings
+                .push(format!("{owner} healthcheck.url should be an absolute URL"));
+        }
+    }
 }
 
 fn validate_local_runtime(

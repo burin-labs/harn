@@ -31,6 +31,8 @@ public struct HarnCatalogProvider: Codable, Sendable, Equatable {
     public let classification: String
     public let endpoint: HarnProviderEndpoint
     public let auth: HarnProviderAuth
+    public let extraHeaders: [String: String]?
+    public let healthcheck: HarnProviderHealthcheck?
     public let protocols: [String]
     public let features: [String]
     public let caveats: [String]
@@ -46,6 +48,8 @@ public struct HarnCatalogProvider: Codable, Sendable, Equatable {
         case classification
         case endpoint
         case auth
+        case extraHeaders = "extra_headers"
+        case healthcheck
         case protocols
         case features
         case caveats
@@ -54,6 +58,13 @@ public struct HarnCatalogProvider: Codable, Sendable, Equatable {
         case localRuntime = "local_runtime"
         case latencyP50Ms = "latency_p50_ms"
     }
+}
+
+public struct HarnProviderHealthcheck: Codable, Sendable, Equatable {
+    public let method: String
+    public let path: String?
+    public let url: String?
+    public let body: String?
 }
 
 public struct HarnLocalRuntime: Codable, Sendable, Equatable {
@@ -537,6 +548,14 @@ public let harnProviderCatalogJSON = #"""
         ],
         "required": true
       },
+      "extra_headers": {
+        "anthropic-version": "2023-06-01"
+      },
+      "healthcheck": {
+        "method": "POST",
+        "path": "/messages/count_tokens",
+        "body": "{\"model\":\"claude-sonnet-4-6\",\"messages\":[{\"role\":\"user\",\"content\":\"x\"}]}"
+      },
       "protocols": [
         "anthropic_messages"
       ],
@@ -618,6 +637,10 @@ public let harnProviderCatalogJSON = #"""
         ],
         "required": true
       },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/models"
+      },
       "protocols": [
         "openai_chat_completions"
       ],
@@ -643,6 +666,10 @@ public let harnProviderCatalogJSON = #"""
           "COHERE_API_KEY"
         ],
         "required": true
+      },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/models"
       },
       "protocols": [
         "openai_chat_completions"
@@ -671,6 +698,10 @@ public let harnProviderCatalogJSON = #"""
         ],
         "required": true
       },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/models"
+      },
       "protocols": [
         "openai_chat_completions"
       ],
@@ -695,6 +726,10 @@ public let harnProviderCatalogJSON = #"""
           "DEEPINFRA_TOKEN"
         ],
         "required": true
+      },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/models"
       },
       "protocols": [
         "openai_chat_completions"
@@ -722,6 +757,10 @@ public let harnProviderCatalogJSON = #"""
         ],
         "required": true
       },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/models"
+      },
       "protocols": [
         "openai_chat_completions"
       ],
@@ -745,6 +784,10 @@ public let harnProviderCatalogJSON = #"""
           "FIREWORKS_API_KEY"
         ],
         "required": true
+      },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/models"
       },
       "protocols": [
         "openai_chat_completions"
@@ -771,6 +814,10 @@ public let harnProviderCatalogJSON = #"""
         ],
         "required": true
       },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/v1beta/models"
+      },
       "protocols": [
         "gemini_generate_content"
       ],
@@ -794,6 +841,10 @@ public let harnProviderCatalogJSON = #"""
           "GROQ_API_KEY"
         ],
         "required": true
+      },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/models"
       },
       "protocols": [
         "openai_chat_completions"
@@ -819,6 +870,10 @@ public let harnProviderCatalogJSON = #"""
         ],
         "required": true
       },
+      "healthcheck": {
+        "method": "GET",
+        "url": "https://huggingface.co/api/whoami-v2"
+      },
       "protocols": [
         "openai_chat_completions"
       ],
@@ -840,6 +895,10 @@ public let harnProviderCatalogJSON = #"""
         "style": "none",
         "env": [],
         "required": false
+      },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/v1/models"
       },
       "protocols": [
         "openai_chat_completions"
@@ -893,6 +952,10 @@ public let harnProviderCatalogJSON = #"""
         "env": [],
         "required": false
       },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/v1/models"
+      },
       "protocols": [
         "openai_chat_completions"
       ],
@@ -916,6 +979,10 @@ public let harnProviderCatalogJSON = #"""
           "MINIMAX_API_KEY"
         ],
         "required": true
+      },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/models"
       },
       "protocols": [
         "openai_chat_completions"
@@ -941,6 +1008,10 @@ public let harnProviderCatalogJSON = #"""
         ],
         "required": true
       },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/models"
+      },
       "protocols": [
         "openai_chat_completions"
       ],
@@ -964,6 +1035,10 @@ public let harnProviderCatalogJSON = #"""
         "style": "none",
         "env": [],
         "required": false
+      },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/v1/models"
       },
       "protocols": [
         "openai_chat_completions"
@@ -1004,6 +1079,10 @@ public let harnProviderCatalogJSON = #"""
         ],
         "required": true
       },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/models"
+      },
       "protocols": [
         "openai_chat_completions"
       ],
@@ -1033,6 +1112,10 @@ public let harnProviderCatalogJSON = #"""
         ],
         "required": true
       },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/models"
+      },
       "protocols": [
         "openai_chat_completions"
       ],
@@ -1056,6 +1139,10 @@ public let harnProviderCatalogJSON = #"""
         "style": "none",
         "env": [],
         "required": false
+      },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/api/tags"
       },
       "protocols": [
         "ollama_native"
@@ -1091,6 +1178,10 @@ public let harnProviderCatalogJSON = #"""
         ],
         "required": true
       },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/models"
+      },
       "protocols": [
         "openai_chat_completions"
       ],
@@ -1113,6 +1204,10 @@ public let harnProviderCatalogJSON = #"""
           "OPENROUTER_API_KEY"
         ],
         "required": true
+      },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/auth/key"
       },
       "protocols": [
         "openai_chat_completions"
@@ -1138,6 +1233,10 @@ public let harnProviderCatalogJSON = #"""
         ],
         "required": true
       },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/models"
+      },
       "protocols": [
         "openai_chat_completions"
       ],
@@ -1162,6 +1261,10 @@ public let harnProviderCatalogJSON = #"""
         "env": [],
         "required": false
       },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/health"
+      },
       "protocols": [
         "openai_chat_completions"
       ],
@@ -1185,6 +1288,10 @@ public let harnProviderCatalogJSON = #"""
           "TOGETHER_AI_API_KEY"
         ],
         "required": true
+      },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/models"
       },
       "protocols": [
         "openai_chat_completions"
@@ -1235,6 +1342,10 @@ public let harnProviderCatalogJSON = #"""
         "env": [],
         "required": false
       },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/v1/models"
+      },
       "protocols": [
         "openai_chat_completions"
       ],
@@ -1258,6 +1369,10 @@ public let harnProviderCatalogJSON = #"""
           "XAI_API_KEY"
         ],
         "required": true
+      },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/models"
       },
       "protocols": [
         "openai_chat_completions"
@@ -1287,6 +1402,10 @@ public let harnProviderCatalogJSON = #"""
           "ZHIPU_API_KEY"
         ],
         "required": true
+      },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/models"
       },
       "protocols": [
         "openai_chat_completions"

@@ -4,6 +4,10 @@ pub fn typescript_binding() -> Result<String, serde_json::Error> {
     Ok(typescript_binding_from_json(&artifact_json()?))
 }
 
+pub fn typescript_declarations() -> String {
+    typescript_declarations_body()
+}
+
 /// Hermetic counterpart of [`typescript_binding`] for generating the
 /// checked-in `harn-provider-catalog.ts` artifact. See [`artifact_embedded`].
 pub fn typescript_binding_embedded(
@@ -18,13 +22,20 @@ pub fn typescript_binding_embedded(
 
 fn typescript_binding_from_json(json: &str) -> String {
     format!(
-        "{}{}{}{}{}",
-        generated_header("//", "typescript"),
-        TYPESCRIPT_TYPES,
+        "{}{}{}{}",
+        typescript_type_block("typescript"),
         "\nexport const harnProviderCatalog: HarnProviderCatalog = ",
         json.trim_end(),
         ";\n",
     ) + TYPESCRIPT_COMPAT_EXPORTS
+}
+
+fn typescript_declarations_body() -> String {
+    typescript_type_block("typescript declarations")
+}
+
+fn typescript_type_block(language: &str) -> String {
+    format!("{}{}", generated_header("//", language), TYPESCRIPT_TYPES)
 }
 
 pub fn swift_binding() -> Result<String, serde_json::Error> {
@@ -76,6 +87,8 @@ export interface HarnCatalogProvider {
   classification: "hosted" | "local"
   endpoint: HarnProviderEndpoint
   auth: HarnProviderAuth
+  extra_headers?: Record<string, string>
+  healthcheck?: HarnProviderHealthcheck
   protocols: string[]
   features: string[]
   caveats: string[]
@@ -120,6 +133,13 @@ export interface HarnProviderAuth {
   header?: string
   env: string[]
   required: boolean
+}
+
+export interface HarnProviderHealthcheck {
+  method: string
+  path?: string
+  url?: string
+  body?: string
 }
 
 export interface HarnCatalogAlias {
@@ -386,6 +406,8 @@ public struct HarnCatalogProvider: Codable, Sendable, Equatable {
     public let classification: String
     public let endpoint: HarnProviderEndpoint
     public let auth: HarnProviderAuth
+    public let extraHeaders: [String: String]?
+    public let healthcheck: HarnProviderHealthcheck?
     public let protocols: [String]
     public let features: [String]
     public let caveats: [String]
@@ -401,6 +423,8 @@ public struct HarnCatalogProvider: Codable, Sendable, Equatable {
         case classification
         case endpoint
         case auth
+        case extraHeaders = "extra_headers"
+        case healthcheck
         case protocols
         case features
         case caveats
@@ -409,6 +433,13 @@ public struct HarnCatalogProvider: Codable, Sendable, Equatable {
         case localRuntime = "local_runtime"
         case latencyP50Ms = "latency_p50_ms"
     }
+}
+
+public struct HarnProviderHealthcheck: Codable, Sendable, Equatable {
+    public let method: String
+    public let path: String?
+    public let url: String?
+    public let body: String?
 }
 
 public struct HarnLocalRuntime: Codable, Sendable, Equatable {

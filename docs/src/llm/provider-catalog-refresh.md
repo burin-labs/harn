@@ -90,12 +90,16 @@ so downstream hosts do not need to parse Harn internals:
   the structured `superseded_by` migration pointer), fast-mode tier
   metadata (the accelerated-serving opt-in knob, its premium pricing,
   and lifecycle — described but off by default), serverless-vs-dedicated
-  availability, endpoint/auth metadata, and provider caveats;
+  availability, endpoint/auth/extra-header metadata, provider
+  healthcheck probes, and provider caveats;
 - `provider-catalog.schema.json` — JSON Schema for the catalog
   contract;
 - `harn-provider-catalog.ts` — TypeScript types plus compatibility
   helpers such as `MODEL_CATALOG`, `ALIASES`, `QC_DEFAULTS`,
   `entryFor`, and `pricingFor`;
+- `harn-provider-catalog.d.ts` — type-only TypeScript declarations
+  for hosts that load `provider-catalog.json` directly instead of
+  vendoring the data-bearing compatibility binding;
 - `HarnProviderCatalog.swift` — Swift `Codable` types plus the
   embedded catalog JSON string.
 
