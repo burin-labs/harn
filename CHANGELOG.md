@@ -8,6 +8,16 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.129
+
+### Added
+
+- **Provider catalog artifacts now expose provider healthcheck metadata
+  (#3484).** The catalog includes provider extra headers and free
+  healthcheck probes, and `harn providers export` emits a type-only
+  `harn-provider-catalog.d.ts` artifact for hosts that load the JSON catalog
+  directly.
+
 ## v0.8.128
 
 ### Changed
