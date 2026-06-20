@@ -8,6 +8,94 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.126
+
+### Added
+
+- **Package registry archive sources.** Registry entries can now resolve to
+  checksum-verified `.tar.gz` package archives, and private HTTP(S) registries
+  can use `HARN_PACKAGE_REGISTRY_TOKEN` for both index and archive fetches.
+- Provider-side prompt caching now defaults ON for routes whose capability
+  matrix declares `prompt_caching`. The stable system-prompt + tool-definitions
+  prefix re-sent on every turn of a multi-turn agent loop (and across the rubric
+  grader's turns×trials) is marked cacheable, so supporting providers discount
+  it heavily — Anthropic ephemeral caching (~90% off cached input), OpenRouter
+  `cache_control` passthrough, and implicit DeepSeek / gpt-oss caching. The win
+  is largest for the cheap value models the product steers toward. Routes that
+  do not advertise prompt caching are unaffected: the resolved `cache` flag
+  defaults to `false` for them, leaving the outgoing request byte-identical. An
+  explicit `cache:` option is always honoured verbatim — `cache: false` opts out
+  anywhere, and an explicit `cache: true` on a non-caching route still errors
+  loudly via the capability gate.
+
+### Changed
+
+- **Synchronous builtin calls now dispatch on the fast (sync) interpreter
+  path.** A bare builtin call such as `abs(x)` / `len(xs)` previously fell
+  through `Op::CallBuiltin`'s sync handler to the async handler, which re-ran
+  name resolution (a second local-slot scan, env walk, and — inside imported
+  modules — the `module_functions` + `module_state` mutexes) and spun up the
+  async state machine only to reach the same synchronous builtin. The sync
+  handler now dispatches synchronous builtins directly once it has confirmed the
+  name is not a user closure, eliminating the redundant resolution and the async
+  hop; asynchronous builtins are unchanged. Resolution semantics are identical —
+  a user `fn` that shadows a builtin name still wins — and the change holds one
+  fewer lock per call inside imported modules, so it is friendly to the
+  multi-threaded runtime. No `harn` language behavior changes.
+- **Dict keys are now interned, refcounted strings instead of owned `String`s.**
+  The map backing every `VmValue::Dict` changed from `OrdMap<String, VmValue>` to
+  `OrdMap<HarnStr, VmValue>` (the thin one-word `arcstr::ArcStr` from the value
+  shrink), and keys flow through a bounded interner (`harn_vm::value::intern_key`).
+  Agent workloads are dict-heavy — the same field names (`role`, `content`,
+  `arguments`, …) recur across thousands of message/JSON dicts — so each recurring
+  key now shares a single allocation (a refcount bump) instead of allocating a
+  fresh `String` per key, and dict tree nodes hold an 8-byte key instead of a
+  24-byte one. The interner is bounded (keys up to 64 bytes, at most 8192 distinct
+  entries) so high-cardinality or adversarial keys fall back to a plain allocation
+  and can never grow it without bound. `VmValue::dict(...)` still accepts the
+  `BTreeMap<String, _>` / `DictMap` maps callers already build (it interns on the
+  way in). No `harn` language behavior changes.
+
+### Fixed
+
+- Cheap-model tool-call dialect: three fixes that stop advertised-only-tool
+  lanes (e.g. the Burin eval lane: `look`/`search`/`edit`/`run`/
+  `read_command_output`) from denying calls models emit in another harness's
+  vocabulary. (1) The tool-calling contract (both the text and fenced-JSON
+  prompts) now states under `## Available tools` that these are the ONLY callable
+  tools and that any unlisted name is rejected — pick the closest listed tool;
+  the JSON contract's worked `## Example` no longer primes the unlisted
+  `write_file` name (it now uses an illustrative `<tool>` placeholder). (2) The
+  tool-name normalizer resolves SEMANTIC aliases to canonical Harn tools so the
+  gate, dispatch, and telemetry all see a real name: `repo_browser.*` /
+  `repository_browser.*` / `workspace_browser.*` / `file_browser.*` file/list
+  verbs → `look`, their search/find/grep verbs → `search`; `container.exec` /
+  `container_exec` / `exec` / `sh` / `shell` / `bash` → `run` (remapping a
+  `script` / `cmd` arg onto `command`); and edit-action verbs called as
+  top-level tools (`replace_range`, `replace_body`, `insert_after`,
+  `insert_function`, `delete_range`, `exact_patch`, `add_import`) →
+  `edit({ action: <verb>, … })`. Raw-write/whole-file tools (`write_file` /
+  `delete_file` / `patch_file`) are deliberately NOT aliased to `edit` — they are
+  semantically lossy — and the symbol-level edit tools (`replace_symbol` /
+  `remove_symbol`) are NOT folded into `edit` either, since `replace_symbol` is a
+  hard-kept standalone tool in the default surface; all fall through to the
+  denial feedback instead. (3) The permission-denial feedback now NAMES the active
+  policy's allowed tools (`… Available tools: look, search, edit, run,
+  read_command_output.`) so the model can self-correct in one turn. Sibling to
+  the `tool.`/`functions.` namespace-prefix strip.
+- Tool-name normalization now strips a leading `tool.` / `tools.` / `functions.`
+  / `function.` namespace prefix that cheap OpenAI-compatible hosts (notably
+  `gpt-oss-120b`) prepend to native tool calls — `tool.look` → `look`,
+  `functions.search` → `search` — so the call resolves to a real tool instead of
+  being denied as an unknown name (which previously sent the model into give-up /
+  thrash loops). The strip is guarded against the generic-wrapper names
+  (`tool.call` / `tool.exec` / `function.call`), which still unwrap their inner
+  `{ name, args }` payload rather than collapsing to `call` / `exec`. The
+  unknown-tool feedback also recognizes cross-harness edit aliases
+  (`apply_patch`, `str_replace`, `str_replace_editor`, `edit_file`, `create_file`)
+  and points the model at the `edit` tool instead of issuing a bare denial. This
+  is the tool-name-normalization sibling to the tool-format dialect gate.
+
 ## v0.8.125
 
 ### Added
