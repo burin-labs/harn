@@ -1,0 +1,85 @@
+// A single-shot structured call (judge, router, classifier, cached lookup) has
+// no live session transcript, so it cannot emergency-compact-and-retry the way
+// the agent loop does. It must still surface a provider context-overflow
+// TRANSPARENTLY — a distinct `status: "context_overflow"` — instead of an
+// opaque generic `error` that masquerades as a dead judge or a flaky 400.
+//
+// This guards the no-session transparency path that complements the agent
+// loop's recovery path: detection mirrors the Rust classifier's
+// `[context_overflow]` reason tag and is provider-agnostic.
+import { is_context_overflow_error, safe_structured_call } from "std/llm/safe"
+import { with_llm_script } from "std/testing"
+
+pipeline main() {
+  let schema = {type: "object", required: ["verdict"], properties: {verdict: {type: "string"}}}
+  // (a) A provider 400 [context_overflow] on a single-shot structured call is
+  // surfaced with a distinct, machine-readable status (not "ok", not a generic
+  // "error"/"missing_json"), so a harness author can SEE the window was blown.
+  with_llm_script(
+    [
+      {
+        error: {
+          status: 400,
+          reason: "context_overflow",
+          message: "fireworks HTTP 400 [context_overflow]: prompt is too long: 197467 tokens exceeds maximum context length of 131071",
+        },
+      },
+    ],
+    { ->
+      let envelope = safe_structured_call(
+        "Grade this output.",
+        schema,
+        {provider: "mock", model: "mock-model", max_tokens: 200},
+      )
+      __io_println(envelope.ok)
+      __io_println(envelope.status)
+    },
+  )
+  // (b) A different provider's phrasing (Gemini, no "context" word) is detected
+  // the same way — provider-agnostic.
+  with_llm_script(
+    [
+      {
+        error: {
+          status: 400,
+          message: "gemini HTTP 400 [context_overflow]: The input token count (1052431) exceeds the maximum number of tokens allowed (1048576).",
+        },
+      },
+    ],
+    { ->
+      let envelope = safe_structured_call(
+        "Grade this output.",
+        schema,
+        {provider: "mock", model: "mock-model", max_tokens: 200},
+      )
+      __io_println(envelope.status)
+    },
+  )
+  // (c) An UNRELATED provider error (rate limit) is NOT mislabeled as overflow —
+  // it keeps its own category so callers can still back off rather than
+  // (futilely) trying to shrink the prompt.
+  with_llm_script(
+    [
+      {
+        error: {
+          status: 429,
+          reason: "rate_limited",
+          message: "anthropic HTTP 429 [rate_limited]: quota exceeded (retry-after: 12)",
+        },
+      },
+    ],
+    { ->
+      let envelope = safe_structured_call(
+        "Grade this output.",
+        schema,
+        {provider: "mock", model: "mock-model", max_tokens: 200},
+      )
+      __io_println(envelope.status != "context_overflow")
+    },
+  )
+  // (d) The exported detector works on both a dict error and a bare string.
+  __io_println(is_context_overflow_error({reason: "context_overflow"}))
+  __io_println(is_context_overflow_error({error_category: "context_overflow"}))
+  __io_println(is_context_overflow_error("x HTTP 400 [context_overflow]: too long"))
+  __io_println(is_context_overflow_error("x HTTP 429 [rate_limited]: slow down"))
+}

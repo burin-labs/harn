@@ -323,19 +323,93 @@ fn classify_error_message_taxonomy(msg: &str) -> Option<(LlmErrorKind, LlmErrorR
     None
 }
 
+/// Provider-agnostic detection of a "the assembled prompt is bigger than the
+/// model's context window" error.
+///
+/// This is the single point that decides whether the agent loop is allowed to
+/// recover (emergency-compact + retry) instead of treating the turn as a
+/// terminal failure, so it must catch the condition no matter which provider's
+/// 400/413/429 phrasing arrives. Every provider funnels its FULL raw error body
+/// through here, so we match on substrings of the whole body rather than any
+/// single parsed field; adding a new provider's phrasing is a one-line edit.
+///
+/// Known provider phrasings covered (see the table in the conformance tests):
+/// - OpenAI / OpenRouter / Fireworks / Azure / Nvidia / SambaNova / DeepInfra
+///   (OpenAI-compatible): `context_length_exceeded`, "maximum context length".
+/// - Anthropic: "prompt is too long: N tokens > M maximum".
+/// - vLLM: "this model's maximum context length is …".
+/// - Ollama: "model context exceeded".
+/// - Google / Gemini: "input token count (N) exceeds the maximum number of
+///   tokens allowed (M)" / "the input token count … exceeds …".
+/// - Cerebras: "please reduce the length of the messages or completion".
+/// - Moonshot / Kimi: "exceeded model token limit" / "max tokens per request".
+/// - Together: "input validation error: `inputs` tokens + `max_new_tokens` …".
+/// - Groq: "request too large" / "reduce the length …" (TPM-style 413/429 — see
+///   the `throttle` veto below so a genuine rate-limit is not stolen).
 fn is_context_overflow(lower: &str) -> bool {
-    lower.contains("maximum context length")
+    // Unambiguous signatures — the body explicitly names the context window or a
+    // canonical OpenAI-style code, so no co-occurrence gate is needed.
+    let explicit = lower.contains("maximum context length")
         || lower.contains("context length")
         || lower.contains("model context exceeded")
         || lower.contains("context exceeded")
         || lower.contains("context_length_exceeded")
         || lower.contains("context_overflow")
+        || lower.contains("context window")
         || lower.contains("prompt is too long")
+        || lower.contains("input is too long")
+        || lower.contains("input too long")
         || lower.contains("prompt_tokens_exceeded")
         || lower.contains("this model's maximum context")
         || lower.contains("exceeds the maximum")
         || (lower.contains("context") && lower.contains("exceed"))
-        || (lower.contains("max_tokens") && lower.contains("exceed"))
+        || (lower.contains("max_tokens") && lower.contains("exceed"));
+    if explicit {
+        return true;
+    }
+
+    // Token-shaped signatures that DON'T name "context" explicitly. These are
+    // genuinely about prompt size on several providers, but a couple of the
+    // phrasings ("request too large", "reduce the length …") are also emitted
+    // by some providers for tokens-per-minute rate limits. To avoid stealing a
+    // real rate-limit (whose correct reaction is back-off, not compaction), only
+    // treat them as overflow when the body also talks about tokens/length AND
+    // does NOT look like a per-minute / quota throttle.
+    let throttle = lower.contains("per minute")
+        || lower.contains("per-minute")
+        || lower.contains("per day")
+        || lower.contains("requests per")
+        || lower.contains("tokens per minute")
+        || lower.contains("tpm")
+        || lower.contains("rpm")
+        || lower.contains("quota")
+        || lower.contains("retry-after")
+        || lower.contains("retry after")
+        || lower.contains("rate_limit")
+        || lower.contains("rate limit")
+        || lower.contains("insufficient_quota");
+    if throttle {
+        return false;
+    }
+
+    let mentions_tokens =
+        lower.contains("token") || lower.contains("length") || lower.contains("messages");
+    if !mentions_tokens {
+        return false;
+    }
+
+    // Provider-specific size phrasings, only after the throttle veto above.
+    lower.contains("token limit")          // Moonshot / Kimi: "exceeded model token limit"
+        || lower.contains("token count")    // Gemini: "input token count … exceeds …"
+        || lower.contains("too many tokens")
+        || lower.contains("request too large") // Groq (non-throttle 413)
+        || lower.contains("too large for")
+        || lower.contains("input validation error") // Together
+        || lower.contains("reduce the length")       // Cerebras
+        || lower.contains("reduce the number of tokens")
+        || lower.contains("please reduce")
+        || (lower.contains("token") && lower.contains("exceed"))
+        || (lower.contains("token") && lower.contains("limit") && lower.contains("exceed"))
 }
 
 fn extract_token_count_hint(body: &str) -> Option<u64> {
@@ -485,6 +559,114 @@ mod tests {
         assert_eq!(info.reason, LlmErrorReason::ContextOverflow);
         assert!(info.message.contains("[context_overflow]"));
         assert!(info.message.contains("offending_tokens: 49152"));
+    }
+
+    /// Helper: assert that a provider's HTTP-error body classifies as a
+    /// recoverable context overflow with the `[context_overflow]` tag stamped.
+    fn assert_overflow(provider: &str, status: reqwest::StatusCode, body: &str) {
+        let info = classify_provider_http_error(provider, status, None, body);
+        assert_eq!(
+            info.reason,
+            LlmErrorReason::ContextOverflow,
+            "expected context_overflow for {provider}; body={body}; msg={}",
+            info.message
+        );
+        assert_eq!(info.kind, LlmErrorKind::Terminal);
+        assert!(
+            info.message.contains("[context_overflow]"),
+            "missing tag for {provider}: {}",
+            info.message
+        );
+    }
+
+    fn assert_not_overflow(provider: &str, status: reqwest::StatusCode, body: &str) {
+        let info = classify_provider_http_error(provider, status, None, body);
+        assert_ne!(
+            info.reason,
+            LlmErrorReason::ContextOverflow,
+            "unexpectedly classified as context_overflow for {provider}; body={body}; msg={}",
+            info.message
+        );
+    }
+
+    #[test]
+    fn classify_gemini_token_count_exceeds_as_context_overflow() {
+        // Gemini phrases overflow without the word "context".
+        assert_overflow(
+            "gemini",
+            reqwest::StatusCode::BAD_REQUEST,
+            r#"{"error":{"code":400,"message":"The input token count (1052431) exceeds the maximum number of tokens allowed (1048576).","status":"INVALID_ARGUMENT"}}"#,
+        );
+    }
+
+    #[test]
+    fn classify_moonshot_token_limit_as_context_overflow() {
+        assert_overflow(
+            "moonshot",
+            reqwest::StatusCode::BAD_REQUEST,
+            r#"{"error":{"type":"invalid_request_error","message":"Your request exceeded model token limit: 262144"}}"#,
+        );
+    }
+
+    #[test]
+    fn classify_together_input_validation_error_as_context_overflow() {
+        assert_overflow(
+            "together",
+            reqwest::StatusCode::BAD_REQUEST,
+            r#"{"error":{"message":"Input validation error: `inputs` tokens + `max_new_tokens` must be <= 131073. Given: 198342 `inputs` tokens","type":"invalid_request_error"}}"#,
+        );
+    }
+
+    #[test]
+    fn classify_cerebras_reduce_length_as_context_overflow() {
+        assert_overflow(
+            "cerebras",
+            reqwest::StatusCode::BAD_REQUEST,
+            r#"{"message":"Please reduce the length of the messages or completion.","type":"invalid_request_error"}"#,
+        );
+    }
+
+    #[test]
+    fn classify_groq_request_too_large_as_context_overflow() {
+        // Groq's non-throttle 413 for a single oversized request.
+        assert_overflow(
+            "groq",
+            reqwest::StatusCode::PAYLOAD_TOO_LARGE,
+            r#"{"error":{"message":"Request too large for model with 131072 tokens. Reduce the number of tokens.","type":"invalid_request_error","code":"request_too_large"}}"#,
+        );
+    }
+
+    #[test]
+    fn classify_groq_tpm_rate_limit_is_not_context_overflow() {
+        // The SAME "request too large" phrasing, but a per-minute throttle: must
+        // NOT be stolen as context_overflow (correct reaction is back-off).
+        assert_not_overflow(
+            "groq",
+            reqwest::StatusCode::TOO_MANY_REQUESTS,
+            r#"{"error":{"message":"Rate limit reached: Request too large. Limit 6000 tokens per minute. Please try again.","type":"tokens","code":"rate_limit_exceeded"}}"#,
+        );
+    }
+
+    #[test]
+    fn classify_explicit_overflow_wins_even_with_throttle_words() {
+        // An explicit "maximum context length" signature must classify as
+        // overflow even if the body coincidentally also mentions a rate limit —
+        // the explicit branch returns before the throttle veto.
+        assert_overflow(
+            "openai",
+            reqwest::StatusCode::BAD_REQUEST,
+            r#"{"error":{"code":"context_length_exceeded","message":"This model's maximum context length is 8192 tokens. (rate limit note: unrelated)"}}"#,
+        );
+    }
+
+    #[test]
+    fn classify_openai_quota_is_not_context_overflow() {
+        // insufficient_quota mentions tokens but is a billing throttle, not overflow.
+        assert_not_overflow(
+            "openai",
+            reqwest::StatusCode::TOO_MANY_REQUESTS,
+            r#"{"error":{"code":"insufficient_quota","message":"You exceeded your current quota, please check your plan and billing details."}}"#,
+        );
     }
 
     #[test]
