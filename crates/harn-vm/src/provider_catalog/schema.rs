@@ -38,6 +38,8 @@ pub fn schema_value() -> Value {
                     "classification": {"enum": ["hosted", "local"]},
                     "endpoint": {"$ref": "#/$defs/endpoint"},
                     "auth": {"$ref": "#/$defs/auth"},
+                    "extra_headers": {"type": "object", "additionalProperties": {"type": "string"}},
+                    "healthcheck": {"$ref": "#/$defs/healthcheck"},
                     "protocols": {"type": "array", "items": {"type": "string"}},
                     "features": {"type": "array", "items": {"type": "string"}},
                     "caveats": {"type": "array", "items": {"type": "string"}},
@@ -113,6 +115,21 @@ pub fn schema_value() -> Value {
                     "env": {"type": "array", "items": {"type": "string"}},
                     "required": {"type": "boolean"}
                 },
+                "additionalProperties": false
+            },
+            "healthcheck": {
+                "type": "object",
+                "required": ["method"],
+                "properties": {
+                    "method": {"type": "string", "minLength": 1},
+                    "path": {"type": "string", "minLength": 1},
+                    "url": {"type": "string", "minLength": 1},
+                    "body": {"type": "string", "minLength": 1}
+                },
+                "anyOf": [
+                    {"required": ["path"]},
+                    {"required": ["url"]}
+                ],
                 "additionalProperties": false
             },
             "alias": {

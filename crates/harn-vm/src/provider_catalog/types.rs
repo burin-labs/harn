@@ -28,6 +28,10 @@ pub struct CatalogProvider {
     pub classification: ProviderClassification,
     pub endpoint: ProviderEndpoint,
     pub auth: ProviderAuth,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub extra_headers: BTreeMap<String, String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub healthcheck: Option<CatalogProviderHealthcheck>,
     pub protocols: Vec<String>,
     pub features: Vec<String>,
     pub caveats: Vec<String>,
@@ -65,6 +69,17 @@ pub struct ProviderAuth {
     pub header: Option<String>,
     pub env: Vec<String>,
     pub required: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CatalogProviderHealthcheck {
+    pub method: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

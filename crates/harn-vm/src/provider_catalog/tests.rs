@@ -158,6 +158,80 @@ fn generated_catalog_validates() {
     );
 }
 
+#[test]
+fn generated_catalog_exports_provider_healthcheck_metadata() {
+    llm_config::clear_user_overrides();
+    let catalog = artifact();
+
+    let anthropic = catalog
+        .providers
+        .iter()
+        .find(|provider| provider.id == "anthropic")
+        .expect("anthropic provider is exported");
+    assert_eq!(
+        anthropic
+            .extra_headers
+            .get("anthropic-version")
+            .map(String::as_str),
+        Some("2023-06-01")
+    );
+    let anthropic_healthcheck = anthropic
+        .healthcheck
+        .as_ref()
+        .expect("anthropic healthcheck is exported");
+    assert_eq!(anthropic_healthcheck.method, "POST");
+    assert_eq!(
+        anthropic_healthcheck.path.as_deref(),
+        Some("/messages/count_tokens")
+    );
+    assert!(
+        anthropic_healthcheck
+            .body
+            .as_deref()
+            .is_some_and(|body| body.contains("claude-sonnet-4-6")),
+        "anthropic healthcheck body should include a token-count model"
+    );
+
+    let openrouter = catalog
+        .providers
+        .iter()
+        .find(|provider| provider.id == "openrouter")
+        .expect("openrouter provider is exported");
+    assert_eq!(
+        openrouter
+            .healthcheck
+            .as_ref()
+            .and_then(|healthcheck| healthcheck.path.as_deref()),
+        Some("/auth/key")
+    );
+}
+
+#[test]
+fn catalog_roundtrips_provider_healthcheck_metadata_into_config() {
+    llm_config::clear_user_overrides();
+    let catalog = artifact();
+    let config = config_from_artifact(&catalog);
+    let anthropic = config
+        .providers
+        .get("anthropic")
+        .expect("anthropic provider roundtrips");
+
+    assert_eq!(
+        anthropic
+            .extra_headers
+            .get("anthropic-version")
+            .map(String::as_str),
+        Some("2023-06-01")
+    );
+    assert_eq!(
+        anthropic
+            .healthcheck
+            .as_ref()
+            .and_then(|healthcheck| healthcheck.path.as_deref()),
+        Some("/messages/count_tokens")
+    );
+}
+
 #[tokio::test]
 async fn runtime_refresh_installs_valid_remote_catalog_overlay() {
     let guard = RuntimeCatalogGuard::new();

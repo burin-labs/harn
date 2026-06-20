@@ -245,6 +245,43 @@
       ],
       "type": "object"
     },
+    "healthcheck": {
+      "additionalProperties": false,
+      "anyOf": [
+        {
+          "required": [
+            "path"
+          ]
+        },
+        {
+          "required": [
+            "url"
+          ]
+        }
+      ],
+      "properties": {
+        "body": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "method": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "path": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "url": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "method"
+      ],
+      "type": "object"
+    },
     "local_memory": {
       "additionalProperties": false,
       "properties": {
@@ -639,11 +676,20 @@
         "endpoint": {
           "$ref": "#/$defs/endpoint"
         },
+        "extra_headers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
         "features": {
           "items": {
             "type": "string"
           },
           "type": "array"
+        },
+        "healthcheck": {
+          "$ref": "#/$defs/healthcheck"
         },
         "icon": {
           "type": "string"

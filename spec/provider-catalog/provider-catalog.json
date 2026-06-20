@@ -19,6 +19,14 @@
         ],
         "required": true
       },
+      "extra_headers": {
+        "anthropic-version": "2023-06-01"
+      },
+      "healthcheck": {
+        "method": "POST",
+        "path": "/messages/count_tokens",
+        "body": "{\"model\":\"claude-sonnet-4-6\",\"messages\":[{\"role\":\"user\",\"content\":\"x\"}]}"
+      },
       "protocols": [
         "anthropic_messages"
       ],
@@ -100,6 +108,10 @@
         ],
         "required": true
       },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/models"
+      },
       "protocols": [
         "openai_chat_completions"
       ],
@@ -125,6 +137,10 @@
           "COHERE_API_KEY"
         ],
         "required": true
+      },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/models"
       },
       "protocols": [
         "openai_chat_completions"
@@ -153,6 +169,10 @@
         ],
         "required": true
       },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/models"
+      },
       "protocols": [
         "openai_chat_completions"
       ],
@@ -177,6 +197,10 @@
           "DEEPINFRA_TOKEN"
         ],
         "required": true
+      },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/models"
       },
       "protocols": [
         "openai_chat_completions"
@@ -204,6 +228,10 @@
         ],
         "required": true
       },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/models"
+      },
       "protocols": [
         "openai_chat_completions"
       ],
@@ -227,6 +255,10 @@
           "FIREWORKS_API_KEY"
         ],
         "required": true
+      },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/models"
       },
       "protocols": [
         "openai_chat_completions"
@@ -253,6 +285,10 @@
         ],
         "required": true
       },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/v1beta/models"
+      },
       "protocols": [
         "gemini_generate_content"
       ],
@@ -276,6 +312,10 @@
           "GROQ_API_KEY"
         ],
         "required": true
+      },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/models"
       },
       "protocols": [
         "openai_chat_completions"
@@ -301,6 +341,10 @@
         ],
         "required": true
       },
+      "healthcheck": {
+        "method": "GET",
+        "url": "https://huggingface.co/api/whoami-v2"
+      },
       "protocols": [
         "openai_chat_completions"
       ],
@@ -322,6 +366,10 @@
         "style": "none",
         "env": [],
         "required": false
+      },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/v1/models"
       },
       "protocols": [
         "openai_chat_completions"
@@ -375,6 +423,10 @@
         "env": [],
         "required": false
       },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/v1/models"
+      },
       "protocols": [
         "openai_chat_completions"
       ],
@@ -398,6 +450,10 @@
           "MINIMAX_API_KEY"
         ],
         "required": true
+      },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/models"
       },
       "protocols": [
         "openai_chat_completions"
@@ -423,6 +479,10 @@
         ],
         "required": true
       },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/models"
+      },
       "protocols": [
         "openai_chat_completions"
       ],
@@ -446,6 +506,10 @@
         "style": "none",
         "env": [],
         "required": false
+      },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/v1/models"
       },
       "protocols": [
         "openai_chat_completions"
@@ -486,6 +550,10 @@
         ],
         "required": true
       },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/models"
+      },
       "protocols": [
         "openai_chat_completions"
       ],
@@ -515,6 +583,10 @@
         ],
         "required": true
       },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/models"
+      },
       "protocols": [
         "openai_chat_completions"
       ],
@@ -538,6 +610,10 @@
         "style": "none",
         "env": [],
         "required": false
+      },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/api/tags"
       },
       "protocols": [
         "ollama_native"
@@ -573,6 +649,10 @@
         ],
         "required": true
       },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/models"
+      },
       "protocols": [
         "openai_chat_completions"
       ],
@@ -595,6 +675,10 @@
           "OPENROUTER_API_KEY"
         ],
         "required": true
+      },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/auth/key"
       },
       "protocols": [
         "openai_chat_completions"
@@ -620,6 +704,10 @@
         ],
         "required": true
       },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/models"
+      },
       "protocols": [
         "openai_chat_completions"
       ],
@@ -644,6 +732,10 @@
         "env": [],
         "required": false
       },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/health"
+      },
       "protocols": [
         "openai_chat_completions"
       ],
@@ -667,6 +759,10 @@
           "TOGETHER_AI_API_KEY"
         ],
         "required": true
+      },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/models"
       },
       "protocols": [
         "openai_chat_completions"
@@ -717,6 +813,10 @@
         "env": [],
         "required": false
       },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/v1/models"
+      },
       "protocols": [
         "openai_chat_completions"
       ],
@@ -740,6 +840,10 @@
           "XAI_API_KEY"
         ],
         "required": true
+      },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/models"
       },
       "protocols": [
         "openai_chat_completions"
@@ -769,6 +873,10 @@
           "ZHIPU_API_KEY"
         ],
         "required": true
+      },
+      "healthcheck": {
+        "method": "GET",
+        "path": "/models"
       },
       "protocols": [
         "openai_chat_completions"
