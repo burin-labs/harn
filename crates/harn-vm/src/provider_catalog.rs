@@ -39,10 +39,7 @@ mod tests;
 mod types;
 mod validation;
 
-pub use bindings::{
-    swift_binding, swift_binding_embedded, typescript_binding, typescript_binding_embedded,
-    typescript_declarations,
-};
+pub use bindings::{swift_binding, swift_binding_embedded, typescript_declarations};
 pub use remote::{refresh_runtime_catalog, CatalogRefreshOptions, CatalogRefreshReport};
 pub use schema::{schema_json, schema_value};
 pub use types::*;

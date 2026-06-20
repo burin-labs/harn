@@ -747,7 +747,7 @@ fn generated_schema_accepts_generated_artifact_shape() {
 
 #[test]
 fn downstream_bindings_include_empirical_tool_parity_shape() {
-    let typescript = typescript_binding().expect("typescript binding renders");
+    let typescript = typescript_declarations();
     assert!(typescript.contains("empirical_parity?: HarnToolEmpiricalParity"));
     assert!(typescript.contains("export interface HarnToolEmpiricalParity"));
 
@@ -769,7 +769,7 @@ fn fast_mode_and_supersession_surface_in_contract() {
     );
     assert!(schema["$defs"]["deprecation"]["properties"]["superseded_by"].is_object());
 
-    let typescript = typescript_binding().expect("typescript binding renders");
+    let typescript = typescript_declarations();
     assert!(typescript.contains("export interface HarnModelFastMode"));
     assert!(typescript.contains("fast_mode?: HarnModelFastMode"));
     assert!(typescript.contains("superseded_by?: string"));
@@ -856,7 +856,6 @@ fn embedded_artifact_generation_is_hermetic_against_ambient_overlay() {
     llm_config::clear_user_overrides();
     let baseline = artifact_embedded(None, None);
     let baseline_json = artifact_json_embedded(None, None).expect("baseline json");
-    let baseline_ts = typescript_binding_embedded(None, None).expect("baseline ts");
     let baseline_swift = swift_binding_embedded(None, None).expect("baseline swift");
 
     assert!(
@@ -888,14 +887,9 @@ fn embedded_artifact_generation_is_hermetic_against_ambient_overlay() {
             "embedded provider-catalog.json must be byte-identical with/without ambient overlay"
         );
         assert_eq!(
-            typescript_binding_embedded(None, None).expect("polluted ts"),
-            baseline_ts,
-            "embedded TypeScript binding must be byte-identical with/without ambient overlay"
-        );
-        assert_eq!(
             swift_binding_embedded(None, None).expect("polluted swift"),
             baseline_swift,
-            "embedded Swift binding must be byte-identical with/without ambient overlay"
+            "embedded Swift declarations must be byte-identical with/without ambient overlay"
         );
     }
 

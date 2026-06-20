@@ -234,29 +234,3 @@ export interface HarnCatalogVariant {
   source: string
 }
 
-export interface CatalogEntry {
-  id: string
-  name: string
-  provider: string
-  contextWindow: number
-  runtimeContextWindow?: number
-  capabilities: string[]
-  family: string
-  lineage: string
-  pricing?: {
-    inputPerMTok: number
-    outputPerMTok: number
-    cacheReadPerMTok?: number | null
-    cacheWritePerMTok?: number | null
-  }
-  streamTimeout?: number
-}
-
-export interface CatalogAlias {
-  alias: string
-  id: string
-  provider: string
-  toolFormat?: string
-  toolCalling?: HarnAliasToolCalling
-}
-

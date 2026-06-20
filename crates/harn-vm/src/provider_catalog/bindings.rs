@@ -1,36 +1,6 @@
 use super::*;
 
-pub fn typescript_binding() -> Result<String, serde_json::Error> {
-    Ok(typescript_binding_from_json(&artifact_json()?))
-}
-
 pub fn typescript_declarations() -> String {
-    typescript_declarations_body()
-}
-
-/// Hermetic counterpart of [`typescript_binding`] for generating the
-/// checked-in `harn-provider-catalog.ts` artifact. See [`artifact_embedded`].
-pub fn typescript_binding_embedded(
-    explicit_overlay: Option<&crate::llm_config::ProvidersConfig>,
-    explicit_capabilities: Option<&crate::llm::capabilities::CapabilitiesFile>,
-) -> Result<String, serde_json::Error> {
-    Ok(typescript_binding_from_json(&artifact_json_embedded(
-        explicit_overlay,
-        explicit_capabilities,
-    )?))
-}
-
-fn typescript_binding_from_json(json: &str) -> String {
-    format!(
-        "{}{}{}{}",
-        typescript_type_block("typescript"),
-        "\nexport const harnProviderCatalog: HarnProviderCatalog = ",
-        json.trim_end(),
-        ";\n",
-    ) + TYPESCRIPT_COMPAT_EXPORTS
-}
-
-fn typescript_declarations_body() -> String {
     typescript_type_block("typescript declarations")
 }
 
@@ -39,28 +9,20 @@ fn typescript_type_block(language: &str) -> String {
 }
 
 pub fn swift_binding() -> Result<String, serde_json::Error> {
-    Ok(swift_binding_from_json(&artifact_json()?))
+    Ok(swift_binding_body())
 }
 
 /// Hermetic counterpart of [`swift_binding`] for generating the checked-in
 /// `HarnProviderCatalog.swift` artifact. See [`artifact_embedded`].
 pub fn swift_binding_embedded(
-    explicit_overlay: Option<&crate::llm_config::ProvidersConfig>,
-    explicit_capabilities: Option<&crate::llm::capabilities::CapabilitiesFile>,
+    _explicit_overlay: Option<&crate::llm_config::ProvidersConfig>,
+    _explicit_capabilities: Option<&crate::llm::capabilities::CapabilitiesFile>,
 ) -> Result<String, serde_json::Error> {
-    Ok(swift_binding_from_json(&artifact_json_embedded(
-        explicit_overlay,
-        explicit_capabilities,
-    )?))
+    Ok(swift_binding_body())
 }
 
-fn swift_binding_from_json(json: &str) -> String {
-    format!(
-        "{}{}\npublic let harnProviderCatalogJSON = #\"\"\"\n{}\"\"\"#\n",
-        generated_header("//", "swift"),
-        SWIFT_TYPES,
-        json
-    )
+fn swift_binding_body() -> String {
+    format!("{}{}", generated_header("//", "swift"), SWIFT_TYPES)
 }
 
 fn generated_header(comment: &str, language: &str) -> String {
@@ -301,80 +263,6 @@ export interface HarnCatalogVariant {
   source: string
 }
 
-export interface CatalogEntry {
-  id: string
-  name: string
-  provider: string
-  contextWindow: number
-  runtimeContextWindow?: number
-  capabilities: string[]
-  family: string
-  lineage: string
-  pricing?: {
-    inputPerMTok: number
-    outputPerMTok: number
-    cacheReadPerMTok?: number | null
-    cacheWritePerMTok?: number | null
-  }
-  streamTimeout?: number
-}
-
-export interface CatalogAlias {
-  alias: string
-  id: string
-  provider: string
-  toolFormat?: string
-  toolCalling?: HarnAliasToolCalling
-}
-
-"#;
-
-const TYPESCRIPT_COMPAT_EXPORTS: &str = r#"
-export const MODEL_CATALOG: readonly CatalogEntry[] = harnProviderCatalog.models.map((model) => ({
-  id: model.id,
-  name: model.name,
-  provider: model.provider,
-  contextWindow: model.context_window,
-  runtimeContextWindow: model.runtime_context_window,
-  capabilities: model.capability_tags,
-  family: model.family,
-  lineage: model.lineage,
-  pricing: model.pricing
-    ? {
-        inputPerMTok: model.pricing.input_per_mtok,
-        outputPerMTok: model.pricing.output_per_mtok,
-        cacheReadPerMTok: model.pricing.cache_read_per_mtok,
-        cacheWritePerMTok: model.pricing.cache_write_per_mtok,
-      }
-    : undefined,
-  streamTimeout: model.stream_timeout,
-}))
-
-export const ALIASES: readonly CatalogAlias[] = harnProviderCatalog.aliases.map((alias) => ({
-  alias: alias.name,
-  id: alias.model_id,
-  provider: alias.provider,
-  toolFormat: alias.tool_format,
-  toolCalling: alias.tool_calling,
-}))
-
-export const QC_DEFAULTS: Readonly<Record<string, string>> = harnProviderCatalog.qc_defaults
-
-export function pricingFor(modelId: string): CatalogEntry["pricing"] | undefined {
-  return entryFor(modelId)?.pricing
-}
-
-export function entryFor(modelId: string): CatalogEntry | undefined {
-  return MODEL_CATALOG.find((entry) => entry.id === modelId)
-}
-
-export function aliasesByProvider(provider: string): readonly CatalogAlias[] {
-  return ALIASES.filter((alias) => alias.provider === provider)
-}
-
-export function qcDefaultModel(provider: string): string | undefined {
-  return QC_DEFAULTS[provider]
-}
 "#;
 
 const SWIFT_TYPES: &str = r#"public struct HarnProviderCatalog: Codable, Sendable, Equatable {
