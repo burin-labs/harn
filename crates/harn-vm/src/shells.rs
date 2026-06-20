@@ -169,35 +169,53 @@ pub fn resolve_shell_from_vm_params(
 
 pub fn shell_descriptor_to_vm_value(shell: &ShellDescriptor) -> VmValue {
     let mut map = crate::value::DictMap::new();
-    map.insert("id".to_string(), string(&shell.id));
-    map.insert("label".to_string(), string(&shell.label));
-    map.insert("path".to_string(), string(&shell.path));
-    map.insert("platform".to_string(), string(&shell.platform));
-    map.insert("available".to_string(), VmValue::Bool(shell.available));
+    map.insert(crate::value::intern_key("id"), string(&shell.id));
+    map.insert(crate::value::intern_key("label"), string(&shell.label));
+    map.insert(crate::value::intern_key("path"), string(&shell.path));
     map.insert(
-        "supports_login".to_string(),
+        crate::value::intern_key("platform"),
+        string(&shell.platform),
+    );
+    map.insert(
+        crate::value::intern_key("available"),
+        VmValue::Bool(shell.available),
+    );
+    map.insert(
+        crate::value::intern_key("supports_login"),
         VmValue::Bool(shell.supports_login),
     );
     map.insert(
-        "supports_interactive".to_string(),
+        crate::value::intern_key("supports_interactive"),
         VmValue::Bool(shell.supports_interactive),
     );
-    map.insert("default_args".to_string(), string_list(&shell.default_args));
-    map.insert("login_args".to_string(), string_list(&shell.login_args));
-    map.insert("source".to_string(), string(&shell.source));
+    map.insert(
+        crate::value::intern_key("default_args"),
+        string_list(&shell.default_args),
+    );
+    map.insert(
+        crate::value::intern_key("login_args"),
+        string_list(&shell.login_args),
+    );
+    map.insert(crate::value::intern_key("source"), string(&shell.source));
     VmValue::dict(map)
 }
 
 pub fn shell_invocation_to_vm_value(invocation: &ShellInvocation) -> VmValue {
     let mut map = crate::value::DictMap::new();
-    map.insert("program".to_string(), string(&invocation.program));
-    map.insert("args".to_string(), string_list(&invocation.args));
     map.insert(
-        "command_arg_index".to_string(),
+        crate::value::intern_key("program"),
+        string(&invocation.program),
+    );
+    map.insert(
+        crate::value::intern_key("args"),
+        string_list(&invocation.args),
+    );
+    map.insert(
+        crate::value::intern_key("command_arg_index"),
         VmValue::Int(invocation.command_arg_index as i64),
     );
     map.insert(
-        "shell".to_string(),
+        crate::value::intern_key("shell"),
         shell_descriptor_to_vm_value(&invocation.shell),
     );
     VmValue::dict(map)
@@ -206,7 +224,7 @@ pub fn shell_invocation_to_vm_value(invocation: &ShellInvocation) -> VmValue {
 fn shell_catalog_to_vm_value(catalog: &ShellCatalog) -> VmValue {
     let mut map = crate::value::DictMap::new();
     map.insert(
-        "shells".to_string(),
+        crate::value::intern_key("shells"),
         VmValue::List(std::sync::Arc::new(
             catalog
                 .shells
@@ -216,7 +234,7 @@ fn shell_catalog_to_vm_value(catalog: &ShellCatalog) -> VmValue {
         )),
     );
     map.insert(
-        "default_shell_id".to_string(),
+        crate::value::intern_key("default_shell_id"),
         catalog
             .default_shell_id
             .as_ref()
@@ -630,7 +648,10 @@ mod tests {
         let default_shell = get_default_shell().expect("test host should expose a default shell");
 
         let mut params = crate::value::DictMap::new();
-        params.insert("command".to_string(), string("echo default-shell"));
+        params.insert(
+            crate::value::intern_key("command"),
+            string("echo default-shell"),
+        );
 
         let invocation = resolve_invocation_from_vm_params(&params).unwrap();
         assert_eq!(invocation.shell, default_shell);
@@ -644,14 +665,14 @@ mod tests {
     #[test]
     fn malformed_explicit_shell_fields_do_not_fall_back_to_default() {
         let mut params = crate::value::DictMap::new();
-        params.insert("shell".to_string(), VmValue::Int(1));
+        params.insert(crate::value::intern_key("shell"), VmValue::Int(1));
         assert_eq!(
             resolve_shell_from_vm_params(&params).unwrap_err(),
             "shell must be a dict, got int"
         );
 
         let mut params = crate::value::DictMap::new();
-        params.insert("shell_id".to_string(), VmValue::Int(1));
+        params.insert(crate::value::intern_key("shell_id"), VmValue::Int(1));
         assert_eq!(
             resolve_shell_from_vm_params(&params).unwrap_err(),
             "shell_id must be a string, got int"

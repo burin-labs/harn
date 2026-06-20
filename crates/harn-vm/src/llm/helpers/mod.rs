@@ -60,7 +60,7 @@ pub(super) const TRANSCRIPT_VERSION: i64 = 2;
 pub(crate) fn vm_value_dict_to_json(dict: &crate::value::DictMap) -> serde_json::Value {
     let mut map = serde_json::Map::new();
     for (k, v) in dict {
-        map.insert(k.clone(), vm_value_to_json(v));
+        map.insert(k.to_string(), vm_value_to_json(v));
     }
     serde_json::Value::Object(map)
 }
@@ -166,7 +166,7 @@ mod tests {
         // to the openrouter provider. With LOCAL_LLM_BASE_URL set the
         // pre-fix code would have returned "local".
         let opts = Some(crate::value::DictMap::from_iter([(
-            "model".to_string(),
+            crate::value::intern_key("model"),
             VmValue::String(arcstr::ArcStr::from("anthropic/claude-sonnet-4-6")),
         )]));
         assert_eq!(vm_resolve_provider(&opts), "openrouter");
@@ -174,7 +174,7 @@ mod tests {
         // An unknown id with no catalog hit still falls into "local"
         // so users with a custom local server keep working.
         let opts_unknown = Some(crate::value::DictMap::from_iter([(
-            "model".to_string(),
+            crate::value::intern_key("model"),
             VmValue::String(arcstr::ArcStr::from("my-custom-local-tag")),
         )]));
         assert_eq!(vm_resolve_provider(&opts_unknown), "local");
@@ -204,15 +204,15 @@ mod tests {
     fn vm_messages_to_json_preserves_tool_message_fields() {
         let message = VmValue::dict(crate::value::DictMap::from_iter([
             (
-                "role".to_string(),
+                crate::value::intern_key("role"),
                 VmValue::String(arcstr::ArcStr::from("tool")),
             ),
             (
-                "tool_call_id".to_string(),
+                crate::value::intern_key("tool_call_id"),
                 VmValue::String(arcstr::ArcStr::from("call_123")),
             ),
             (
-                "content".to_string(),
+                crate::value::intern_key("content"),
                 VmValue::String(arcstr::ArcStr::from("ok")),
             ),
         ]));
@@ -235,7 +235,7 @@ mod tests {
 
         let transcript = new_transcript_with(None, Vec::new(), None, None);
         let options = VmValue::dict(crate::value::DictMap::from_iter([(
-            "transcript".to_string(),
+            crate::value::intern_key("transcript"),
             transcript,
         )]));
         let err = extract_llm_options(&[
@@ -283,7 +283,7 @@ mod tests {
         reset_provider_key_cache();
 
         let options = Some(crate::value::DictMap::from_iter([(
-            "model_tier".to_string(),
+            crate::value::intern_key("model_tier"),
             VmValue::String(arcstr::ArcStr::from("small")),
         )]));
         let provider = vm_resolve_provider(&options);
@@ -328,7 +328,7 @@ mod tests {
         reset_provider_key_cache();
 
         let options = Some(crate::value::DictMap::from_iter([(
-            "model_tier".to_string(),
+            crate::value::intern_key("model_tier"),
             VmValue::String(arcstr::ArcStr::from("small")),
         )]));
         let provider = vm_resolve_provider(&options);
@@ -455,11 +455,11 @@ mod tests {
 
         let opts = crate::value::DictMap::from_iter([
             (
-                "provider".to_string(),
+                crate::value::intern_key("provider"),
                 VmValue::String(arcstr::ArcStr::from("auto")),
             ),
             (
-                "model".to_string(),
+                crate::value::intern_key("model"),
                 VmValue::String(arcstr::ArcStr::from("unclassified-provider-model-for-test")),
             ),
         ]);

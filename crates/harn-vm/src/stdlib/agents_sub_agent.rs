@@ -266,7 +266,7 @@ fn prepare_sub_agent_options(
     options.put_str("session_id", session_id);
     match requested_policy {
         Some(policy) => {
-            options.insert("policy".to_string(), super::to_vm(policy)?);
+            options.insert(crate::value::intern_key("policy"), super::to_vm(policy)?);
         }
         None => {
             options.remove("policy");
@@ -281,12 +281,12 @@ fn inject_sub_agent_skill_context(options: &mut crate::value::DictMap) {
     };
     if !options.contains_key("skills") {
         if let Some(registry) = context.registry {
-            options.insert("skills".to_string(), registry);
+            options.insert(crate::value::intern_key("skills"), registry);
         }
     }
     if !options.contains_key("skill_match") {
         if let Some(match_config) = context.match_config {
-            options.insert("skill_match".to_string(), match_config);
+            options.insert(crate::value::intern_key("skill_match"), match_config);
         }
     }
 }
@@ -314,17 +314,23 @@ fn sub_agent_base_envelope(
     session_id: &str,
 ) -> crate::value::DictMap {
     let mut envelope = crate::value::DictMap::new();
-    envelope.insert("ok".to_string(), VmValue::Bool(true));
+    envelope.insert(crate::value::intern_key("ok"), VmValue::Bool(true));
     envelope.put_str("summary", summary);
-    envelope.insert("artifacts".to_string(), artifacts);
-    envelope.insert("evidence_added".to_string(), VmValue::Int(evidence_added));
-    envelope.insert("tokens_used".to_string(), VmValue::Int(tokens_used));
+    envelope.insert(crate::value::intern_key("artifacts"), artifacts);
     envelope.insert(
-        "budget_exceeded".to_string(),
+        crate::value::intern_key("evidence_added"),
+        VmValue::Int(evidence_added),
+    );
+    envelope.insert(
+        crate::value::intern_key("tokens_used"),
+        VmValue::Int(tokens_used),
+    );
+    envelope.insert(
+        crate::value::intern_key("budget_exceeded"),
         VmValue::Bool(budget_exceeded),
     );
-    envelope.insert("data".to_string(), VmValue::Nil);
-    envelope.insert("error".to_string(), VmValue::Nil);
+    envelope.insert(crate::value::intern_key("data"), VmValue::Nil);
+    envelope.insert(crate::value::intern_key("error"), VmValue::Nil);
     envelope.put_str("session_id", session_id);
     envelope
 }
@@ -347,10 +353,10 @@ fn wrap_sub_agent_error(
         budget_exceeded,
         session_id,
     );
-    envelope.insert("ok".to_string(), VmValue::Bool(false));
-    envelope.insert("error".to_string(), error);
+    envelope.insert(crate::value::intern_key("ok"), VmValue::Bool(false));
+    envelope.insert(crate::value::intern_key("error"), error);
     if let Some(transcript) = transcript {
-        envelope.insert("transcript".to_string(), transcript);
+        envelope.insert(crate::value::intern_key("transcript"), transcript);
     }
     VmValue::dict(envelope)
 }
@@ -872,12 +878,12 @@ pub(super) async fn execute_sub_agent(
         budget_exceeded,
         &spec.session_id,
     );
-    envelope.insert("transcript".to_string(), transcript.clone());
+    envelope.insert(crate::value::intern_key("transcript"), transcript.clone());
 
     if spec.returns_schema.is_none() && option_requests_structured_output(&spec.options) {
         if let Some(candidate) = synthesized.structured_json.as_ref() {
             envelope.insert(
-                "data".to_string(),
+                crate::value::intern_key("data"),
                 crate::stdlib::json_to_vm_value(&candidate.value),
             );
         }
@@ -886,7 +892,7 @@ pub(super) async fn execute_sub_agent(
     if let Some(schema) = spec.returns_schema.as_ref() {
         match parse_structured_sub_agent_data(synthesized.structured_json.as_ref(), schema) {
             Ok(data) => {
-                envelope.insert("data".to_string(), data);
+                envelope.insert(crate::value::intern_key("data"), data);
             }
             Err(error) => {
                 let message = error.to_string();
@@ -1000,11 +1006,11 @@ mod tests {
     fn assistant_message(text: &str) -> VmValue {
         VmValue::dict(crate::value::DictMap::from_iter([
             (
-                "role".to_string(),
+                crate::value::intern_key("role"),
                 VmValue::String(arcstr::ArcStr::from("assistant")),
             ),
             (
-                "content".to_string(),
+                crate::value::intern_key("content"),
                 VmValue::String(arcstr::ArcStr::from(text)),
             ),
         ]))
@@ -1013,16 +1019,16 @@ mod tests {
     fn normalized_request(extra: Vec<(&str, VmValue)>) -> VmValue {
         let mut request = crate::value::DictMap::from_iter([
             (
-                "_type".to_string(),
+                crate::value::intern_key("_type"),
                 VmValue::String(arcstr::ArcStr::from("sub_agent_request")),
             ),
             (
-                "task".to_string(),
+                crate::value::intern_key("task"),
                 VmValue::String(arcstr::ArcStr::from("summarize")),
             ),
         ]);
         for (key, value) in extra {
-            request.insert(key.to_string(), value);
+            request.insert(crate::value::intern_key(key), value);
         }
         VmValue::dict(request)
     }
@@ -1059,32 +1065,32 @@ mod tests {
         for (path, mount_mode) in additional {
             roots.push(VmValue::dict(crate::value::DictMap::from_iter([
                 (
-                    "path".to_string(),
+                    crate::value::intern_key("path"),
                     VmValue::String(arcstr::ArcStr::from(path)),
                 ),
                 (
-                    "mount_mode".to_string(),
+                    crate::value::intern_key("mount_mode"),
                     VmValue::String(arcstr::ArcStr::from(mount_mode)),
                 ),
                 (
-                    "mounted_at".to_string(),
+                    crate::value::intern_key("mounted_at"),
                     VmValue::String(arcstr::ArcStr::from("2026-05-24T00:00:00Z")),
                 ),
             ])));
         }
         let mut anchor = crate::value::DictMap::from_iter([
             (
-                "primary".to_string(),
+                crate::value::intern_key("primary"),
                 VmValue::String(arcstr::ArcStr::from(primary)),
             ),
             (
-                "anchored_at".to_string(),
+                crate::value::intern_key("anchored_at"),
                 VmValue::String(arcstr::ArcStr::from("2026-05-24T00:00:00Z")),
             ),
         ]);
         if !roots.is_empty() {
             anchor.insert(
-                "additional_roots".to_string(),
+                crate::value::intern_key("additional_roots"),
                 VmValue::List(std::sync::Arc::new(roots)),
             );
         }
@@ -1280,14 +1286,14 @@ mod tests {
             system: None,
             options: crate::value::DictMap::from_iter([
                 (
-                    "provider".to_string(),
+                    crate::value::intern_key("provider"),
                     VmValue::String(arcstr::ArcStr::from("mock")),
                 ),
                 (
-                    "model".to_string(),
+                    crate::value::intern_key("model"),
                     VmValue::String(arcstr::ArcStr::from("mock")),
                 ),
-                ("max_iterations".to_string(), VmValue::Int(1)),
+                (crate::value::intern_key("max_iterations"), VmValue::Int(1)),
             ]),
             returns_schema: None,
             session_id: "child-subagent".to_string(),
@@ -1356,14 +1362,14 @@ mod tests {
         let parent = crate::agent_sessions::open_or_create(Some("parent-budget".into()));
         let mut options = crate::value::DictMap::from_iter([
             (
-                "provider".to_string(),
+                crate::value::intern_key("provider"),
                 VmValue::String(arcstr::ArcStr::from("mock")),
             ),
             (
-                "model".to_string(),
+                crate::value::intern_key("model"),
                 VmValue::String(arcstr::ArcStr::from("mock")),
             ),
-            ("max_iterations".to_string(), VmValue::Int(1)),
+            (crate::value::intern_key("max_iterations"), VmValue::Int(1)),
         ]);
         annotate_nested_execution_options(
             &mut options,

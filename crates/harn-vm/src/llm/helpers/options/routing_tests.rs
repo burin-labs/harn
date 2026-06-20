@@ -151,7 +151,7 @@ fn extract_with_policy(policy: &str) -> crate::llm::api::LlmCallOptions {
     let mut options = crate::value::DictMap::new();
     options.put_str("route_policy", policy);
     options.insert(
-        "fallback_chain".to_string(),
+        crate::value::intern_key("fallback_chain"),
         VmValue::List(std::sync::Arc::new(vec![VmValue::String(
             arcstr::ArcStr::from("fast".to_string()),
         )])),
@@ -193,7 +193,7 @@ fn extract_with_options(
 
 fn model_role_options(role: &str) -> crate::value::DictMap {
     crate::value::DictMap::from_iter([(
-        "model_role".to_string(),
+        crate::value::intern_key("model_role"),
         VmValue::String(arcstr::ArcStr::from(role.to_string())),
     )])
 }
@@ -272,7 +272,7 @@ fn explicit_options_win_over_model_role_defaults() {
 
     let mut options = model_role_options("merge");
     options.put_str("model", "mock-explicit");
-    options.insert("max_tokens".to_string(), VmValue::Int(512));
+    options.insert(crate::value::intern_key("max_tokens"), VmValue::Int(512));
     let opts = extract_with_options(options).expect("options");
 
     assert_eq!(opts.provider, "mock");
@@ -406,7 +406,7 @@ fn model_role_config_keys_normalize_like_call_options() {
 fn fast_options(model: &str) -> crate::value::DictMap {
     let mut options = crate::value::DictMap::new();
     options.put_str("model", model);
-    options.insert("fast".to_string(), VmValue::Bool(true));
+    options.insert(crate::value::intern_key("fast"), VmValue::Bool(true));
     options
 }
 
@@ -465,14 +465,17 @@ fn preference_list_cheapest_first_sets_route_fallbacks() {
     policy.put_str("mode", "preference_list");
     policy.put_str("strategy", "cheapest_first");
     policy.insert(
-        "prefer".to_string(),
+        crate::value::intern_key("prefer"),
         VmValue::List(std::sync::Arc::new(vec![
             VmValue::String(arcstr::ArcStr::from("fast-mid")),
             VmValue::String(arcstr::ArcStr::from("cheap-mid")),
         ])),
     );
     let mut options = crate::value::DictMap::new();
-    options.insert("route_policy".to_string(), VmValue::dict(policy));
+    options.insert(
+        crate::value::intern_key("route_policy"),
+        VmValue::dict(policy),
+    );
     let opts = extract_llm_options(&[
         VmValue::String(arcstr::ArcStr::from("hello".to_string())),
         VmValue::Nil,
@@ -493,17 +496,20 @@ fn preference_list_cheapest_first_sets_route_fallbacks() {
 fn equivalent_failover_builds_catalog_backed_routing_policy() {
     install_equivalent_routes();
     let mut failover = crate::value::DictMap::new();
-    failover.insert("max_routes".to_string(), VmValue::Int(2));
+    failover.insert(crate::value::intern_key("max_routes"), VmValue::Int(2));
     let opts = extract_with_options(crate::value::DictMap::from_iter([
         (
-            "provider".to_string(),
+            crate::value::intern_key("provider"),
             VmValue::String(arcstr::ArcStr::from("primary")),
         ),
         (
-            "model".to_string(),
+            crate::value::intern_key("model"),
             VmValue::String(arcstr::ArcStr::from("primary-model")),
         ),
-        ("equivalent_failover".to_string(), VmValue::dict(failover)),
+        (
+            crate::value::intern_key("equivalent_failover"),
+            VmValue::dict(failover),
+        ),
     ]))
     .expect("options");
 
@@ -531,18 +537,24 @@ fn equivalent_failover_builds_catalog_backed_routing_policy() {
 fn equivalent_failover_enables_no_dispatch_failover_when_requested() {
     install_equivalent_routes();
     let mut failover = crate::value::DictMap::new();
-    failover.insert("max_routes".to_string(), VmValue::Int(2));
-    failover.insert("on_no_dispatch".to_string(), VmValue::Bool(true));
+    failover.insert(crate::value::intern_key("max_routes"), VmValue::Int(2));
+    failover.insert(
+        crate::value::intern_key("on_no_dispatch"),
+        VmValue::Bool(true),
+    );
     let opts = extract_with_options(crate::value::DictMap::from_iter([
         (
-            "provider".to_string(),
+            crate::value::intern_key("provider"),
             VmValue::String(arcstr::ArcStr::from("primary")),
         ),
         (
-            "model".to_string(),
+            crate::value::intern_key("model"),
             VmValue::String(arcstr::ArcStr::from("primary-model")),
         ),
-        ("equivalent_failover".to_string(), VmValue::dict(failover)),
+        (
+            crate::value::intern_key("equivalent_failover"),
+            VmValue::dict(failover),
+        ),
     ]))
     .expect("options");
 
@@ -559,20 +571,23 @@ fn equivalent_failover_rejects_non_bool_no_dispatch_option() {
     install_equivalent_routes();
     let mut failover = crate::value::DictMap::new();
     failover.insert(
-        "on_no_dispatch".to_string(),
+        crate::value::intern_key("on_no_dispatch"),
         VmValue::String(arcstr::ArcStr::from("yes")),
     );
 
     let err = match extract_with_options(crate::value::DictMap::from_iter([
         (
-            "provider".to_string(),
+            crate::value::intern_key("provider"),
             VmValue::String(arcstr::ArcStr::from("primary")),
         ),
         (
-            "model".to_string(),
+            crate::value::intern_key("model"),
             VmValue::String(arcstr::ArcStr::from("primary-model")),
         ),
-        ("equivalent_failover".to_string(), VmValue::dict(failover)),
+        (
+            crate::value::intern_key("equivalent_failover"),
+            VmValue::dict(failover),
+        ),
     ])) {
         Ok(_) => panic!("non-bool on_no_dispatch should fail"),
         Err(err) => err,
@@ -598,32 +613,35 @@ fn equivalent_failover_rejects_explicit_routing_policy() {
     let chain = VmValue::List(std::sync::Arc::new(vec![VmValue::Dict(
         std::sync::Arc::new(crate::value::DictMap::from_iter([
             (
-                "provider".to_string(),
+                crate::value::intern_key("provider"),
                 VmValue::String(arcstr::ArcStr::from("primary")),
             ),
             (
-                "model".to_string(),
+                crate::value::intern_key("model"),
                 VmValue::String(arcstr::ArcStr::from("primary-model")),
             ),
         ])),
     )]));
     let routing = crate::llm::routing::build_routing_policy(&crate::value::DictMap::from_iter([(
-        "chain".to_string(),
+        crate::value::intern_key("chain"),
         chain,
     )]))
     .expect("routing policy");
 
     let err = match extract_with_options(crate::value::DictMap::from_iter([
         (
-            "provider".to_string(),
+            crate::value::intern_key("provider"),
             VmValue::String(arcstr::ArcStr::from("primary")),
         ),
         (
-            "model".to_string(),
+            crate::value::intern_key("model"),
             VmValue::String(arcstr::ArcStr::from("primary-model")),
         ),
-        ("routing".to_string(), routing),
-        ("equivalent_failover".to_string(), VmValue::Bool(true)),
+        (crate::value::intern_key("routing"), routing),
+        (
+            crate::value::intern_key("equivalent_failover"),
+            VmValue::Bool(true),
+        ),
     ])) {
         Ok(_) => panic!("ambiguous routing should fail"),
         Err(err) => err,
@@ -656,9 +674,9 @@ fn thinking_dict_enabled_false_disables_thinking() {
     options.put_str("provider", "mock");
     options.put_str("model", "gpt-5.4");
     options.insert(
-        "thinking".to_string(),
+        crate::value::intern_key("thinking"),
         VmValue::dict(crate::value::DictMap::from_iter([(
-            "enabled".to_string(),
+            crate::value::intern_key("enabled"),
             VmValue::Bool(false),
         )])),
     );
@@ -677,13 +695,16 @@ fn thinking_dict_enabled_budget_parses_typed_config() {
     options.put_str("provider", "mock");
     options.put_str("model", "claude-opus-4-6");
     options.insert(
-        "thinking".to_string(),
+        crate::value::intern_key("thinking"),
         VmValue::dict(crate::value::DictMap::from_iter([
             (
-                "mode".to_string(),
+                crate::value::intern_key("mode"),
                 VmValue::String(arcstr::ArcStr::from("enabled".to_string())),
             ),
-            ("budget_tokens".to_string(), VmValue::Int(8000)),
+            (
+                crate::value::intern_key("budget_tokens"),
+                VmValue::Int(8000),
+            ),
         ])),
     );
     let opts = extract_llm_options(&[
@@ -710,7 +731,7 @@ fn anthropic_beta_features_parse_and_dedupe_with_interleaved_flag() {
     options.put_str("provider", "mock");
     options.put_str("model", "claude-opus-4-6");
     options.insert(
-        "anthropic_beta_features".to_string(),
+        crate::value::intern_key("anthropic_beta_features"),
         VmValue::List(std::sync::Arc::new(vec![
             VmValue::String(arcstr::ArcStr::from(
                 "fine-grained-tool-streaming-2025-05-14",
@@ -720,7 +741,10 @@ fn anthropic_beta_features_parse_and_dedupe_with_interleaved_flag() {
             )),
         ])),
     );
-    options.insert("interleaved_thinking".to_string(), VmValue::Bool(true));
+    options.insert(
+        crate::value::intern_key("interleaved_thinking"),
+        VmValue::Bool(true),
+    );
 
     let opts = extract_llm_options(&[
         VmValue::String(arcstr::ArcStr::from("hello".to_string())),
@@ -741,15 +765,15 @@ fn anthropic_beta_features_parse_and_dedupe_with_interleaved_flag() {
 fn anthropic_beta_features_reject_invalid_header_names() {
     let options = crate::value::DictMap::from_iter([
         (
-            "provider".to_string(),
+            crate::value::intern_key("provider"),
             VmValue::String(arcstr::ArcStr::from("mock".to_string())),
         ),
         (
-            "model".to_string(),
+            crate::value::intern_key("model"),
             VmValue::String(arcstr::ArcStr::from("claude-opus-4-6".to_string())),
         ),
         (
-            "anthropic_beta_features".to_string(),
+            crate::value::intern_key("anthropic_beta_features"),
             VmValue::String(arcstr::ArcStr::from("bad\r\nheader".to_string())),
         ),
     ]);
@@ -771,14 +795,14 @@ fn thinking_effort_parses_typed_level() {
     options.put_str("provider", "mock");
     options.put_str("model", "o3");
     options.insert(
-        "thinking".to_string(),
+        crate::value::intern_key("thinking"),
         VmValue::dict(crate::value::DictMap::from_iter([
             (
-                "mode".to_string(),
+                crate::value::intern_key("mode"),
                 VmValue::String(arcstr::ArcStr::from("effort".to_string())),
             ),
             (
-                "level".to_string(),
+                crate::value::intern_key("level"),
                 VmValue::String(arcstr::ArcStr::from("high".to_string())),
             ),
         ])),
@@ -800,16 +824,16 @@ fn thinking_effort_parses_typed_level() {
 fn unsupported_local_options(extra: Vec<(&str, VmValue)>) -> VmError {
     let mut options = crate::value::DictMap::from_iter([
         (
-            "provider".to_string(),
+            crate::value::intern_key("provider"),
             VmValue::String(arcstr::ArcStr::from("local".to_string())),
         ),
         (
-            "model".to_string(),
+            crate::value::intern_key("model"),
             VmValue::String(arcstr::ArcStr::from("unsupported-model".to_string())),
         ),
     ]);
     for (key, value) in extra {
-        options.insert(key.to_string(), value);
+        options.insert(crate::value::intern_key(key), value);
     }
     match extract_llm_options(&[
         VmValue::String(arcstr::ArcStr::from("hello".to_string())),
@@ -840,15 +864,15 @@ fn one_tool_list() -> VmValue {
     VmValue::List(std::sync::Arc::new(vec![VmValue::Dict(
         std::sync::Arc::new(crate::value::DictMap::from_iter([
             (
-                "name".to_string(),
+                crate::value::intern_key("name"),
                 VmValue::String(arcstr::ArcStr::from("lookup")),
             ),
             (
-                "description".to_string(),
+                crate::value::intern_key("description"),
                 VmValue::String(arcstr::ArcStr::from("Look something up")),
             ),
             (
-                "parameters".to_string(),
+                crate::value::intern_key("parameters"),
                 VmValue::dict(crate::value::DictMap::new()),
             ),
         ])),
@@ -929,15 +953,15 @@ fn tool_choice_accepted_on_text_tool_routes() {
 
     let options = crate::value::DictMap::from_iter([
         (
-            "provider".to_string(),
+            crate::value::intern_key("provider"),
             VmValue::String(arcstr::ArcStr::from("ollama".to_string())),
         ),
         (
-            "model".to_string(),
+            crate::value::intern_key("model"),
             VmValue::String(arcstr::ArcStr::from("devstral-small-2:24b".to_string())),
         ),
         (
-            "tool_choice".to_string(),
+            crate::value::intern_key("tool_choice"),
             VmValue::String(arcstr::ArcStr::from("none".to_string())),
         ),
     ]);
@@ -957,18 +981,18 @@ fn text_tool_format_does_not_emit_native_provider_tools() {
 
     let options = crate::value::DictMap::from_iter([
         (
-            "provider".to_string(),
+            crate::value::intern_key("provider"),
             VmValue::String(arcstr::ArcStr::from("ollama".to_string())),
         ),
         (
-            "model".to_string(),
+            crate::value::intern_key("model"),
             VmValue::String(arcstr::ArcStr::from("devstral-small-2:24b".to_string())),
         ),
         (
-            "tool_format".to_string(),
+            crate::value::intern_key("tool_format"),
             VmValue::String(arcstr::ArcStr::from("text".to_string())),
         ),
-        ("tools".to_string(), one_tool_list()),
+        (crate::value::intern_key("tools"), one_tool_list()),
     ]);
     let opts = extract_llm_options(&[
         VmValue::String(arcstr::ArcStr::from("hello".to_string())),
@@ -985,15 +1009,15 @@ fn text_tool_format_does_not_emit_native_provider_tools() {
 fn standalone_reasoning_effort_maps_to_thinking_effort_when_supported() {
     let options = crate::value::DictMap::from_iter([
         (
-            "provider".to_string(),
+            crate::value::intern_key("provider"),
             VmValue::String(arcstr::ArcStr::from("mock".to_string())),
         ),
         (
-            "model".to_string(),
+            crate::value::intern_key("model"),
             VmValue::String(arcstr::ArcStr::from("o3".to_string())),
         ),
         (
-            "reasoning_effort".to_string(),
+            crate::value::intern_key("reasoning_effort"),
             VmValue::String(arcstr::ArcStr::from("high".to_string())),
         ),
     ]);
@@ -1017,15 +1041,15 @@ fn standalone_reasoning_effort_maps_to_thinking_effort_when_supported() {
 fn standalone_reasoning_effort_accepts_minimal_when_supported() {
     let options = crate::value::DictMap::from_iter([
         (
-            "provider".to_string(),
+            crate::value::intern_key("provider"),
             VmValue::String(arcstr::ArcStr::from("mock".to_string())),
         ),
         (
-            "model".to_string(),
+            crate::value::intern_key("model"),
             VmValue::String(arcstr::ArcStr::from("o3".to_string())),
         ),
         (
-            "reasoning_effort".to_string(),
+            crate::value::intern_key("reasoning_effort"),
             VmValue::String(arcstr::ArcStr::from("minimal".to_string())),
         ),
     ]);
@@ -1049,15 +1073,15 @@ fn standalone_reasoning_effort_accepts_minimal_when_supported() {
 fn reasoning_policy_maps_to_provider_aware_thinking_when_explicit() {
     let options = crate::value::DictMap::from_iter([
         (
-            "provider".to_string(),
+            crate::value::intern_key("provider"),
             VmValue::String(arcstr::ArcStr::from("mock".to_string())),
         ),
         (
-            "model".to_string(),
+            crate::value::intern_key("model"),
             VmValue::String(arcstr::ArcStr::from("gpt-5.5".to_string())),
         ),
         (
-            "reasoning_policy".to_string(),
+            crate::value::intern_key("reasoning_policy"),
             VmValue::String(arcstr::ArcStr::from("off".to_string())),
         ),
     ]);
@@ -1087,11 +1111,11 @@ fn session_pinned_reasoning_policy_is_llm_call_default() {
     let _session_guard = crate::agent_sessions::enter_current_session(session_id);
     let options = crate::value::DictMap::from_iter([
         (
-            "provider".to_string(),
+            crate::value::intern_key("provider"),
             VmValue::String(arcstr::ArcStr::from("mock".to_string())),
         ),
         (
-            "model".to_string(),
+            crate::value::intern_key("model"),
             VmValue::String(arcstr::ArcStr::from("o3".to_string())),
         ),
     ]);
@@ -1125,14 +1149,14 @@ fn explicit_thinking_wins_over_session_pinned_reasoning_policy() {
     let _session_guard = crate::agent_sessions::enter_current_session(session_id);
     let options = crate::value::DictMap::from_iter([
         (
-            "provider".to_string(),
+            crate::value::intern_key("provider"),
             VmValue::String(arcstr::ArcStr::from("mock".to_string())),
         ),
         (
-            "model".to_string(),
+            crate::value::intern_key("model"),
             VmValue::String(arcstr::ArcStr::from("o3".to_string())),
         ),
-        ("thinking".to_string(), VmValue::Bool(false)),
+        (crate::value::intern_key("thinking"), VmValue::Bool(false)),
     ]);
 
     let opts = extract_llm_options(&[
@@ -1156,15 +1180,15 @@ fn standalone_reasoning_effort_accepts_none_and_xhigh_when_supported() {
     ] {
         let options = crate::value::DictMap::from_iter([
             (
-                "provider".to_string(),
+                crate::value::intern_key("provider"),
                 VmValue::String(arcstr::ArcStr::from("mock".to_string())),
             ),
             (
-                "model".to_string(),
+                crate::value::intern_key("model"),
                 VmValue::String(arcstr::ArcStr::from("gpt-5.5".to_string())),
             ),
             (
-                "reasoning_effort".to_string(),
+                crate::value::intern_key("reasoning_effort"),
                 VmValue::String(arcstr::ArcStr::from(raw.to_string())),
             ),
         ]);
@@ -1195,11 +1219,11 @@ fn standalone_reasoning_effort_rejects_cerebras_gpt_oss_unsupported_levels() {
             "thinking",
             VmValue::dict(crate::value::DictMap::from_iter([
                 (
-                    "mode".to_string(),
+                    crate::value::intern_key("mode"),
                     VmValue::String(arcstr::ArcStr::from("effort".to_string())),
                 ),
                 (
-                    "level".to_string(),
+                    crate::value::intern_key("level"),
                     VmValue::String(arcstr::ArcStr::from("minimal".to_string())),
                 ),
             ])),
@@ -1207,14 +1231,14 @@ fn standalone_reasoning_effort_rejects_cerebras_gpt_oss_unsupported_levels() {
     ] {
         let options = crate::value::DictMap::from_iter([
             (
-                "provider".to_string(),
+                crate::value::intern_key("provider"),
                 VmValue::String(arcstr::ArcStr::from("cerebras".to_string())),
             ),
             (
-                "model".to_string(),
+                crate::value::intern_key("model"),
                 VmValue::String(arcstr::ArcStr::from("gpt-oss-120b".to_string())),
             ),
-            (key.to_string(), value),
+            (crate::value::intern_key(key), value),
         ]);
 
         let err = match extract_with_options(options) {
@@ -1234,15 +1258,15 @@ fn standalone_reasoning_effort_rejects_cerebras_gpt_oss_unsupported_levels() {
 fn standalone_reasoning_effort_none_disables_thinking_without_effort_capability() {
     let options = crate::value::DictMap::from_iter([
         (
-            "provider".to_string(),
+            crate::value::intern_key("provider"),
             VmValue::String(arcstr::ArcStr::from("local".to_string())),
         ),
         (
-            "model".to_string(),
+            crate::value::intern_key("model"),
             VmValue::String(arcstr::ArcStr::from("no-effort-model".to_string())),
         ),
         (
-            "reasoning_effort".to_string(),
+            crate::value::intern_key("reasoning_effort"),
             VmValue::String(arcstr::ArcStr::from("none".to_string())),
         ),
     ]);
@@ -1297,39 +1321,39 @@ thinking_modes = ["effort"]
 fn image_content_sets_vision_and_requires_capability() {
     let image_block = VmValue::dict(crate::value::DictMap::from_iter([
         (
-            "type".to_string(),
+            crate::value::intern_key("type"),
             VmValue::String(arcstr::ArcStr::from("image")),
         ),
         (
-            "base64".to_string(),
+            crate::value::intern_key("base64"),
             VmValue::String(arcstr::ArcStr::from("iVBORw0KGgo=")),
         ),
         (
-            "media_type".to_string(),
+            crate::value::intern_key("media_type"),
             VmValue::String(arcstr::ArcStr::from("image/png")),
         ),
     ]));
     let message = VmValue::dict(crate::value::DictMap::from_iter([
         (
-            "role".to_string(),
+            crate::value::intern_key("role"),
             VmValue::String(arcstr::ArcStr::from("user")),
         ),
         (
-            "content".to_string(),
+            crate::value::intern_key("content"),
             VmValue::List(std::sync::Arc::new(vec![image_block])),
         ),
     ]));
     let options = VmValue::dict(crate::value::DictMap::from_iter([
         (
-            "provider".to_string(),
+            crate::value::intern_key("provider"),
             VmValue::String(arcstr::ArcStr::from("mock")),
         ),
         (
-            "model".to_string(),
+            crate::value::intern_key("model"),
             VmValue::String(arcstr::ArcStr::from("gpt-4o")),
         ),
         (
-            "messages".to_string(),
+            crate::value::intern_key("messages"),
             VmValue::List(std::sync::Arc::new(vec![message.clone()])),
         ),
     ]));
@@ -1343,15 +1367,15 @@ fn image_content_sets_vision_and_requires_capability() {
 
     let bad_options = VmValue::dict(crate::value::DictMap::from_iter([
         (
-            "provider".to_string(),
+            crate::value::intern_key("provider"),
             VmValue::String(arcstr::ArcStr::from("mock")),
         ),
         (
-            "model".to_string(),
+            crate::value::intern_key("model"),
             VmValue::String(arcstr::ArcStr::from("gpt-3.5-turbo")),
         ),
         (
-            "messages".to_string(),
+            crate::value::intern_key("messages"),
             VmValue::List(std::sync::Arc::new(vec![message])),
         ),
     ]));
@@ -1366,39 +1390,39 @@ fn image_content_sets_vision_and_requires_capability() {
 
     let url_image = VmValue::dict(crate::value::DictMap::from_iter([
         (
-            "type".to_string(),
+            crate::value::intern_key("type"),
             VmValue::String(arcstr::ArcStr::from("image")),
         ),
         (
-            "url".to_string(),
+            crate::value::intern_key("url"),
             VmValue::String(arcstr::ArcStr::from("https://example.com/image.png")),
         ),
         (
-            "media_type".to_string(),
+            crate::value::intern_key("media_type"),
             VmValue::String(arcstr::ArcStr::from("image/png")),
         ),
     ]));
     let url_message = VmValue::dict(crate::value::DictMap::from_iter([
         (
-            "role".to_string(),
+            crate::value::intern_key("role"),
             VmValue::String(arcstr::ArcStr::from("user")),
         ),
         (
-            "content".to_string(),
+            crate::value::intern_key("content"),
             VmValue::List(std::sync::Arc::new(vec![url_image])),
         ),
     ]));
     let ollama_options = VmValue::dict(crate::value::DictMap::from_iter([
         (
-            "provider".to_string(),
+            crate::value::intern_key("provider"),
             VmValue::String(arcstr::ArcStr::from("ollama")),
         ),
         (
-            "model".to_string(),
+            crate::value::intern_key("model"),
             VmValue::String(arcstr::ArcStr::from("llava:latest")),
         ),
         (
-            "messages".to_string(),
+            crate::value::intern_key("messages"),
             VmValue::List(std::sync::Arc::new(vec![url_message])),
         ),
     ]));
@@ -1416,49 +1440,49 @@ fn image_content_sets_vision_and_requires_capability() {
 fn pdf_and_audio_content_require_capabilities() {
     let pdf_block = VmValue::dict(crate::value::DictMap::from_iter([
         (
-            "type".to_string(),
+            crate::value::intern_key("type"),
             VmValue::String(arcstr::ArcStr::from("pdf")),
         ),
         (
-            "file_id".to_string(),
+            crate::value::intern_key("file_id"),
             VmValue::String(arcstr::ArcStr::from("file_123")),
         ),
     ]));
     let audio_block = VmValue::dict(crate::value::DictMap::from_iter([
         (
-            "type".to_string(),
+            crate::value::intern_key("type"),
             VmValue::String(arcstr::ArcStr::from("audio")),
         ),
         (
-            "base64".to_string(),
+            crate::value::intern_key("base64"),
             VmValue::String(arcstr::ArcStr::from("UklGRg==")),
         ),
         (
-            "media_type".to_string(),
+            crate::value::intern_key("media_type"),
             VmValue::String(arcstr::ArcStr::from("audio/wav")),
         ),
     ]));
     let message = VmValue::dict(crate::value::DictMap::from_iter([
         (
-            "role".to_string(),
+            crate::value::intern_key("role"),
             VmValue::String(arcstr::ArcStr::from("user")),
         ),
         (
-            "content".to_string(),
+            crate::value::intern_key("content"),
             VmValue::List(std::sync::Arc::new(vec![pdf_block, audio_block])),
         ),
     ]));
     let options = VmValue::dict(crate::value::DictMap::from_iter([
         (
-            "provider".to_string(),
+            crate::value::intern_key("provider"),
             VmValue::String(arcstr::ArcStr::from("mock")),
         ),
         (
-            "model".to_string(),
+            crate::value::intern_key("model"),
             VmValue::String(arcstr::ArcStr::from("claude-sonnet-4-7")),
         ),
         (
-            "messages".to_string(),
+            crate::value::intern_key("messages"),
             VmValue::List(std::sync::Arc::new(vec![message.clone()])),
         ),
     ]));
@@ -1474,15 +1498,15 @@ fn pdf_and_audio_content_require_capabilities() {
 
     let bad_options = VmValue::dict(crate::value::DictMap::from_iter([
         (
-            "provider".to_string(),
+            crate::value::intern_key("provider"),
             VmValue::String(arcstr::ArcStr::from("mock")),
         ),
         (
-            "model".to_string(),
+            crate::value::intern_key("model"),
             VmValue::String(arcstr::ArcStr::from("gpt-3.5-turbo")),
         ),
         (
-            "messages".to_string(),
+            crate::value::intern_key("messages"),
             VmValue::List(std::sync::Arc::new(vec![message])),
         ),
     ]));
@@ -1508,39 +1532,39 @@ video_supported = true
     .expect("capability override");
     let video_block = VmValue::dict(crate::value::DictMap::from_iter([
         (
-            "type".to_string(),
+            crate::value::intern_key("type"),
             VmValue::String(arcstr::ArcStr::from("video")),
         ),
         (
-            "base64".to_string(),
+            crate::value::intern_key("base64"),
             VmValue::String(arcstr::ArcStr::from("AAAA")),
         ),
         (
-            "media_type".to_string(),
+            crate::value::intern_key("media_type"),
             VmValue::String(arcstr::ArcStr::from("video/mp4")),
         ),
     ]));
     let message = VmValue::dict(crate::value::DictMap::from_iter([
         (
-            "role".to_string(),
+            crate::value::intern_key("role"),
             VmValue::String(arcstr::ArcStr::from("user")),
         ),
         (
-            "content".to_string(),
+            crate::value::intern_key("content"),
             VmValue::List(std::sync::Arc::new(vec![video_block])),
         ),
     ]));
     let options = VmValue::dict(crate::value::DictMap::from_iter([
         (
-            "provider".to_string(),
+            crate::value::intern_key("provider"),
             VmValue::String(arcstr::ArcStr::from("local")),
         ),
         (
-            "model".to_string(),
+            crate::value::intern_key("model"),
             VmValue::String(arcstr::ArcStr::from("video-model")),
         ),
         (
-            "messages".to_string(),
+            crate::value::intern_key("messages"),
             VmValue::List(std::sync::Arc::new(vec![message.clone()])),
         ),
     ]));
@@ -1554,15 +1578,15 @@ video_supported = true
 
     let bad_options = VmValue::dict(crate::value::DictMap::from_iter([
         (
-            "provider".to_string(),
+            crate::value::intern_key("provider"),
             VmValue::String(arcstr::ArcStr::from("mock")),
         ),
         (
-            "model".to_string(),
+            crate::value::intern_key("model"),
             VmValue::String(arcstr::ArcStr::from("gpt-4o")),
         ),
         (
-            "messages".to_string(),
+            crate::value::intern_key("messages"),
             VmValue::List(std::sync::Arc::new(vec![message])),
         ),
     ]));

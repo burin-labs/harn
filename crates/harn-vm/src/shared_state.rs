@@ -159,7 +159,10 @@ impl VmSharedStateRuntime {
     pub(crate) fn map_set(&self, scoped: &ScopedKey, key: String, value: VmValue) -> VmValue {
         let mut maps = self.maps.lock();
         let map = maps.entry(scoped.clone()).or_default();
-        let old = map.entries.insert(key, value).unwrap_or(VmValue::Nil);
+        let old = map
+            .entries
+            .insert(crate::value::intern_key(&key), value)
+            .unwrap_or(VmValue::Nil);
         map.version = map.version.saturating_add(1);
         map.metrics.write_count += 1;
         old
@@ -185,15 +188,20 @@ impl VmSharedStateRuntime {
     ) -> bool {
         let mut maps = self.maps.lock();
         let map = maps.entry(scoped.clone()).or_default();
-        let current = map.entries.get(&key).cloned().unwrap_or(VmValue::Nil);
+        let current = map
+            .entries
+            .get(key.as_str())
+            .cloned()
+            .unwrap_or(VmValue::Nil);
         let (expected_value, expected_version) = snapshot_expected(expected);
         let version_matches = expected_version.is_none_or(|version| version == map.version);
         let value_matches = values_equal(&current, &expected_value);
         if version_matches && value_matches {
             if matches!(new_value, VmValue::Nil) {
-                map.entries.remove(&key);
+                map.entries.remove(key.as_str());
             } else {
-                map.entries.insert(key, new_value);
+                map.entries
+                    .insert(crate::value::intern_key(&key), new_value);
             }
             map.version = map.version.saturating_add(1);
             map.metrics.write_count += 1;

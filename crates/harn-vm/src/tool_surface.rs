@@ -1311,7 +1311,7 @@ mod tests {
         policy
             .tool_annotations
             .insert("run".into(), execute_annotations());
-        let tools = VmValue::dict(std::collections::BTreeMap::from_iter([
+        let tools = VmValue::dict(std::collections::BTreeMap::<String, VmValue>::from_iter([
             (
                 "_type".into(),
                 VmValue::String(arcstr::ArcStr::from("tool_registry")),
@@ -1321,15 +1321,15 @@ mod tests {
                 VmValue::List(std::sync::Arc::new(vec![VmValue::Dict(
                     std::sync::Arc::new(crate::value::DictMap::from_iter([
                         (
-                            "name".to_string(),
+                            crate::value::intern_key("name"),
                             VmValue::String(arcstr::ArcStr::from("run")),
                         ),
                         (
-                            "parameters".to_string(),
+                            crate::value::intern_key("parameters"),
                             VmValue::dict(crate::value::DictMap::new()),
                         ),
                         (
-                            "executor".to_string(),
+                            crate::value::intern_key("executor"),
                             VmValue::String(arcstr::ArcStr::from("host_bridge")),
                         ),
                     ])),

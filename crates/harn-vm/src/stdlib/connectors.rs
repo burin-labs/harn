@@ -47,7 +47,7 @@ async fn connector_call_impl(
                 "connector_call: params must be a dict when provided",
             ))));
         }
-        _ => vm_value_to_json(&VmValue::dict(BTreeMap::new())),
+        _ => vm_value_to_json(&VmValue::dict_map(Default::default())),
     };
 
     let client = active_connector_client(&provider).ok_or_else(|| {
@@ -242,7 +242,7 @@ fn optional_headers_arg(
         None | Some(VmValue::Nil) => Ok(BTreeMap::new()),
         Some(VmValue::Dict(dict)) => Ok(dict
             .iter()
-            .map(|(key, value)| (key.clone(), value.display()))
+            .map(|(key, value)| (key.to_string(), value.display()))
             .collect()),
         Some(_other) => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             format!("{builtin}: headers must be a dict when provided"),

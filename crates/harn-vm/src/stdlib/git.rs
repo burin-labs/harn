@@ -390,8 +390,8 @@ fn register_git_namespace(vm: &mut Vm) {
     ]);
     let mut root = crate::value::DictMap::new();
     root.put_str("_namespace", "git");
-    root.insert("repo".to_string(), repo);
-    root.insert("worktree".to_string(), worktree);
+    root.insert(crate::value::intern_key("repo"), repo);
+    root.insert(crate::value::intern_key("worktree"), worktree);
     for (name, builtin) in [
         ("fetch", "git.fetch"),
         ("rebase", "git.rebase"),
@@ -405,7 +405,7 @@ fn register_git_namespace(vm: &mut Vm) {
         ("worktree_remove", "git.worktree.remove"),
     ] {
         root.insert(
-            name.to_string(),
+            crate::value::intern_key(name),
             VmValue::BuiltinRef(arcstr::ArcStr::from(builtin)),
         );
     }
@@ -418,7 +418,7 @@ fn namespace(entries: &[(&str, &str)]) -> VmValue {
             .iter()
             .map(|(name, builtin)| {
                 (
-                    name.to_string(),
+                    crate::value::intern_key(name),
                     VmValue::BuiltinRef(arcstr::ArcStr::from(*builtin)),
                 )
             })
@@ -581,7 +581,7 @@ async fn exec_argv(command: &GitCommand) -> Result<VmValue, VmError> {
     let mut params = crate::value::DictMap::new();
     params.put_str("mode", "argv");
     params.insert(
-        "argv".to_string(),
+        crate::value::intern_key("argv"),
         VmValue::List(std::sync::Arc::new(
             command
                 .argv
@@ -591,9 +591,12 @@ async fn exec_argv(command: &GitCommand) -> Result<VmValue, VmError> {
         )),
     );
     params.put_str("cwd", display_path(&command.cwd));
-    params.insert("timeout_ms".to_string(), VmValue::Int(120_000));
     params.insert(
-        "env_remove".to_string(),
+        crate::value::intern_key("timeout_ms"),
+        VmValue::Int(120_000),
+    );
+    params.insert(
+        crate::value::intern_key("env_remove"),
         VmValue::List(std::sync::Arc::new(
             GIT_ENV_OVERRIDES
                 .iter()
@@ -608,11 +611,11 @@ async fn exec_argv(command: &GitCommand) -> Result<VmValue, VmError> {
     let mut env = crate::value::DictMap::new();
     for (key, value) in GIT_NONINTERACTIVE_ENV {
         env.insert(
-            (*key).to_string(),
+            crate::value::intern_key(key),
             VmValue::String(arcstr::ArcStr::from(*value)),
         );
     }
-    params.insert("env".to_string(), VmValue::dict(env));
+    params.insert(crate::value::intern_key("env"), VmValue::dict(env));
     params.put_str("env_mode", "merge");
     let caller = json!({
         "surface": "stdlib.git",

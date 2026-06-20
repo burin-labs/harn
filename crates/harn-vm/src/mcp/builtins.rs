@@ -16,7 +16,7 @@ pub(crate) fn vm_value_to_serde(val: &VmValue) -> serde_json::Value {
         VmValue::Dict(map) => {
             let obj: serde_json::Map<String, serde_json::Value> = map
                 .iter()
-                .map(|(k, v)| (k.clone(), vm_value_to_serde(v)))
+                .map(|(k, v)| (k.to_string(), vm_value_to_serde(v)))
                 .collect();
             serde_json::Value::Object(obj)
         }
@@ -420,7 +420,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
             Some(VmValue::Dict(d)) => {
                 let obj: serde_json::Map<String, serde_json::Value> = d
                     .iter()
-                    .map(|(k, v)| (k.clone(), vm_value_to_serde(v)))
+                    .map(|(k, v)| (k.to_string(), vm_value_to_serde(v)))
                     .collect();
                 serde_json::Value::Object(obj)
             }
@@ -632,7 +632,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
             Some(VmValue::Dict(d)) => {
                 let obj: serde_json::Map<String, serde_json::Value> = d
                     .iter()
-                    .map(|(k, v)| (k.clone(), vm_value_to_serde(v)))
+                    .map(|(k, v)| (k.to_string(), vm_value_to_serde(v)))
                     .collect();
                 serde_json::Value::Object(obj)
             }
@@ -799,7 +799,7 @@ pub(crate) fn register_supervised_mcp_host_builtins(vm: &mut Vm) {
             Some(VmValue::Dict(d)) => {
                 let obj: serde_json::Map<String, serde_json::Value> = d
                     .iter()
-                    .map(|(k, v)| (k.clone(), vm_value_to_serde(v)))
+                    .map(|(k, v)| (k.to_string(), vm_value_to_serde(v)))
                     .collect();
                 serde_json::Value::Object(obj)
             }

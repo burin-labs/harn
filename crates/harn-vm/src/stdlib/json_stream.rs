@@ -823,7 +823,7 @@ fn early_invalid_object(
         index = skip_ws(buffer, index);
 
         let child_path = child_json_path(path, &key);
-        if let Some(child_schema) = properties.get(&key).and_then(VmValue::as_dict) {
+        if let Some(child_schema) = properties.get(key.as_str()).and_then(VmValue::as_dict) {
             let first = char_at(buffer, index)?;
             if let Some(invalid) = invalid_type_start(first, child_schema, &child_path) {
                 return Some(invalid);
@@ -1090,7 +1090,7 @@ mod tests {
         VmValue::dict(
             entries
                 .into_iter()
-                .map(|(key, value)| (key.to_string(), value))
+                .map(|(key, value)| (crate::value::intern_key(key), value))
                 .collect::<crate::value::DictMap>(),
         )
     }

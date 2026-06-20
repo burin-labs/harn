@@ -89,9 +89,9 @@ async fn host_agent_capture_events_impl(
         })
         .unwrap_or_default();
     let mut envelope = crate::value::DictMap::new();
-    envelope.insert("result".to_string(), result);
+    envelope.insert(crate::value::intern_key("result"), result);
     envelope.insert(
-        "events".to_string(),
+        crate::value::intern_key("events"),
         json_to_vm_value(&serde_json::Value::Array(events)),
     );
     Ok(VmValue::dict(envelope))
@@ -1962,14 +1962,20 @@ mod security_gate_tests {
     #[test]
     fn tool_descriptor_extracts_description_and_schema_changed() {
         let mut tool = crate::value::DictMap::new();
-        tool.insert("name".to_string(), vm_str("linear__create"));
-        tool.insert("description".to_string(), vm_str("Create an issue"));
-        tool.insert("_mcp_server".to_string(), vm_str("linear"));
-        tool.insert("_schema_changed".to_string(), VmValue::Bool(true));
+        tool.insert(crate::value::intern_key("name"), vm_str("linear__create"));
+        tool.insert(
+            crate::value::intern_key("description"),
+            vm_str("Create an issue"),
+        );
+        tool.insert(crate::value::intern_key("_mcp_server"), vm_str("linear"));
+        tool.insert(
+            crate::value::intern_key("_schema_changed"),
+            VmValue::Bool(true),
+        );
         let catalog = {
             let mut dict = crate::value::DictMap::new();
             dict.insert(
-                "tools".to_string(),
+                crate::value::intern_key("tools"),
                 VmValue::List(Arc::new(vec![VmValue::dict(tool)])),
             );
             VmValue::dict(dict)

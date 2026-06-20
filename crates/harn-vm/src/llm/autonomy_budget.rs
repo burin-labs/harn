@@ -358,7 +358,7 @@ mod tests {
     fn missing_caps_returns_none() {
         let mut opts = crate::value::DictMap::new();
         opts.insert(
-            "autonomy_budget".to_string(),
+            crate::value::intern_key("autonomy_budget"),
             VmValue::dict(crate::value::DictMap::new()),
         );
         let parsed = parse_autonomy_budget(Some(&opts), "session-1", "agent_loop").expect("parse");

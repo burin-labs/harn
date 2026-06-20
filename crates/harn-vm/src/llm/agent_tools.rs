@@ -829,14 +829,14 @@ mod tests {
             .into_iter()
             .map(|(name, mut entry)| {
                 entry
-                    .entry("name".to_string())
+                    .entry(crate::value::intern_key("name"))
                     .or_insert_with(|| VmValue::String(arcstr::ArcStr::from(name.to_string())));
                 VmValue::dict(entry)
             })
             .collect();
         let mut dict = crate::value::DictMap::new();
         dict.insert(
-            "tools".to_string(),
+            crate::value::intern_key("tools"),
             VmValue::List(std::sync::Arc::new(list)),
         );
         VmValue::dict(dict)
@@ -946,11 +946,14 @@ mod tests {
         function.put_str("name", "create_issue");
         function.put_str("_mcp_server", "linear");
         let mut entry = crate::value::DictMap::new();
-        entry.insert("function".to_string(), VmValue::dict(function));
+        entry.insert(
+            crate::value::intern_key("function"),
+            VmValue::dict(function),
+        );
         // The outer entry has no `name` — fall back to function.name.
         let mut dict = crate::value::DictMap::new();
         dict.insert(
-            "tools".to_string(),
+            crate::value::intern_key("tools"),
             VmValue::List(std::sync::Arc::new(vec![VmValue::Dict(
                 std::sync::Arc::new(entry),
             )])),

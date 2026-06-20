@@ -85,7 +85,10 @@ fn parse_structural_experiment_dict(
                 ) {
                     continue;
                 }
-                args.insert(key.clone(), crate::llm::helpers::vm_value_to_json(value));
+                args.insert(
+                    key.to_string(),
+                    crate::llm::helpers::vm_value_to_json(value),
+                );
             }
             serde_json::Value::Object(args)
         });
@@ -297,20 +300,20 @@ pub(crate) async fn apply_structural_experiment(
                 })?;
             let mut ctx = crate::value::DictMap::new();
             ctx.insert(
-                "messages".to_string(),
+                crate::value::intern_key("messages"),
                 VmValue::List(std::sync::Arc::new(
                     crate::llm::helpers::json_messages_to_vm(&current_messages),
                 )),
             );
             ctx.insert(
-                "system".to_string(),
+                crate::value::intern_key("system"),
                 current_system
                     .as_ref()
                     .map(|value| VmValue::String(arcstr::ArcStr::from(value.as_str())))
                     .unwrap_or(VmValue::Nil),
             );
             ctx.insert(
-                "iteration".to_string(),
+                crate::value::intern_key("iteration"),
                 iteration
                     .map(|value| VmValue::Int(value as i64))
                     .unwrap_or(VmValue::Nil),
@@ -318,7 +321,7 @@ pub(crate) async fn apply_structural_experiment(
             ctx.put_str("label", config.label.as_str());
             ctx.put_str("name", config.name.as_str());
             ctx.insert(
-                "args".to_string(),
+                crate::value::intern_key("args"),
                 crate::stdlib::json_to_vm_value(&config.args),
             );
             interpret_closure_result(

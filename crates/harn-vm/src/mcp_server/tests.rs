@@ -49,8 +49,8 @@ fn test_params_to_json_schema_with_params() {
     let mut param_def = crate::value::DictMap::new();
     param_def.put_str("type", "string");
     param_def.put_str("description", "A file path");
-    param_def.insert("required".to_string(), VmValue::Bool(true));
-    params.insert("path".to_string(), VmValue::dict(param_def));
+    param_def.insert(crate::value::intern_key("required"), VmValue::Bool(true));
+    params.insert(crate::value::intern_key("path"), VmValue::dict(param_def));
 
     let schema = params_to_json_schema(Some(&VmValue::dict(params)));
     assert_eq!(
@@ -67,21 +67,24 @@ fn test_params_to_json_schema_with_params() {
 fn test_params_to_json_schema_preserves_file_input_descriptor() {
     let mut file_descriptor = crate::value::DictMap::new();
     file_descriptor.insert(
-        "accept".to_string(),
+        crate::value::intern_key("accept"),
         VmValue::List(std::sync::Arc::new(vec![VmValue::String(
             arcstr::ArcStr::from("text/*"),
         )])),
     );
-    file_descriptor.insert("maxSize".to_string(), VmValue::Int(64));
+    file_descriptor.insert(crate::value::intern_key("maxSize"), VmValue::Int(64));
 
     let mut param_def = crate::value::DictMap::new();
     param_def.put_str("type", "string");
     param_def.put_str("format", "uri");
-    param_def.insert("x-mcp-file".to_string(), VmValue::dict(file_descriptor));
-    param_def.insert("required".to_string(), VmValue::Bool(true));
+    param_def.insert(
+        crate::value::intern_key("x-mcp-file"),
+        VmValue::dict(file_descriptor),
+    );
+    param_def.insert(crate::value::intern_key("required"), VmValue::Bool(true));
 
     let mut params = crate::value::DictMap::new();
-    params.insert("upload".to_string(), VmValue::dict(param_def));
+    params.insert(crate::value::intern_key("upload"), VmValue::dict(param_def));
 
     let schema = params_to_json_schema(Some(&VmValue::dict(params)));
     assert_eq!(schema["properties"]["upload"]["type"], "string");

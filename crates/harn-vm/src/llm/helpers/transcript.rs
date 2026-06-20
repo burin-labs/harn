@@ -505,15 +505,15 @@ pub(crate) fn transcript_event(
         VmValue::List(std::sync::Arc::new(vec![VmValue::Dict(
             std::sync::Arc::new(crate::value::DictMap::from_iter([
                 (
-                    "type".to_string(),
+                    crate::value::intern_key("type"),
                     VmValue::String(arcstr::ArcStr::from("text")),
                 ),
                 (
-                    "text".to_string(),
+                    crate::value::intern_key("text"),
                     VmValue::String(arcstr::ArcStr::from(text)),
                 ),
                 (
-                    "visibility".to_string(),
+                    crate::value::intern_key("visibility"),
                     VmValue::String(arcstr::ArcStr::from(visibility)),
                 ),
             ])),
@@ -542,7 +542,7 @@ pub(crate) fn normalize_transcript_asset(value: &VmValue) -> VmValue {
     }
     if value.as_dict().is_none() {
         asset.insert(
-            "storage".to_string(),
+            crate::value::intern_key("storage"),
             VmValue::dict(BTreeMap::from([(
                 "path".to_string(),
                 VmValue::String(arcstr::ArcStr::from(value.display())),
@@ -585,7 +585,7 @@ pub(crate) fn transcript_reminder_event(reminder: &SystemReminder) -> VmValue {
     // home for the lifecycle payload; `metadata` is the back-compat
     // mirror observers already key off.
     event.insert(
-        "reminder".to_string(),
+        crate::value::intern_key("reminder"),
         crate::stdlib::json_to_vm_value(&reminder_json),
     );
     VmValue::dict(event)
@@ -657,13 +657,16 @@ pub(crate) fn apply_reminder_post_turn(transcript: &VmValue, turn: i64) -> Remin
 
     let mut next = dict.clone();
     next.insert(
-        "events".to_string(),
+        crate::value::intern_key("events"),
         VmValue::List(std::sync::Arc::new(next_events)),
     );
     if !expired.is_empty() {
         let mut lifecycle = BTreeMap::new();
         lifecycle.insert("last_post_turn".to_string(), VmValue::Int(turn));
-        next.insert("reminder_lifecycle".to_string(), VmValue::dict(lifecycle));
+        next.insert(
+            crate::value::intern_key("reminder_lifecycle"),
+            VmValue::dict(lifecycle),
+        );
     }
     ReminderPostTurnReport {
         transcript: Some(VmValue::dict(next)),
@@ -848,7 +851,7 @@ fn lifecycle_transcript_event(
     let envelope = transcript_event(kind, "system", "public", text, Some(payload.clone()));
     let mut event = envelope.as_dict().cloned().unwrap_or_default();
     event.insert(
-        payload_key.to_string(),
+        crate::value::intern_key(payload_key),
         crate::stdlib::json_to_vm_value(payload),
     );
     VmValue::dict(event)
@@ -995,8 +998,8 @@ pub(crate) fn replace_reminder_payload(event: &VmValue, reminder: &SystemReminde
     let reminder_json = serde_json::to_value(reminder).unwrap_or(JsonValue::Null);
     let reminder_value = crate::stdlib::json_to_vm_value(&reminder_json);
     let mut dict = event.as_dict().cloned().unwrap_or_default();
-    dict.insert("reminder".to_string(), reminder_value.clone());
-    dict.insert("metadata".to_string(), reminder_value);
+    dict.insert(crate::value::intern_key("reminder"), reminder_value.clone());
+    dict.insert(crate::value::intern_key("metadata"), reminder_value);
     VmValue::dict(dict)
 }
 

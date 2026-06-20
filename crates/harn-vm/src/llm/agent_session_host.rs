@@ -410,17 +410,20 @@ async fn host_agent_session_init(
     control.put_str("session_id", resolved);
     control.put_str("task", message);
     control.insert(
-        "system".to_string(),
+        crate::value::intern_key("system"),
         system
             .map(|s| VmValue::String(arcstr::ArcStr::from(s)))
             .unwrap_or(VmValue::Nil),
     );
-    control.insert("max_iterations".to_string(), VmValue::Int(max_iterations));
     control.insert(
-        "max_verify_attempts".to_string(),
+        crate::value::intern_key("max_iterations"),
+        VmValue::Int(max_iterations),
+    );
+    control.insert(
+        crate::value::intern_key("max_verify_attempts"),
         VmValue::Int(max_verify_attempts),
     );
-    control.insert("done".to_string(), VmValue::Bool(false));
+    control.insert(crate::value::intern_key("done"), VmValue::Bool(false));
     Ok(VmValue::dict(control))
 }
 
@@ -527,15 +530,18 @@ fn agent_init_control_done(
     control.put_str("session_id", session_id);
     control.put_str("task", task);
     control.insert(
-        "system".to_string(),
+        crate::value::intern_key("system"),
         system
             .map(|s| VmValue::String(arcstr::ArcStr::from(s.to_string())))
             .unwrap_or(VmValue::Nil),
     );
-    control.insert("max_iterations".to_string(), VmValue::Int(0));
-    control.insert("max_verify_attempts".to_string(), VmValue::Int(0));
-    control.insert("done".to_string(), VmValue::Bool(true));
-    control.insert("result".to_string(), result);
+    control.insert(crate::value::intern_key("max_iterations"), VmValue::Int(0));
+    control.insert(
+        crate::value::intern_key("max_verify_attempts"),
+        VmValue::Int(0),
+    );
+    control.insert(crate::value::intern_key("done"), VmValue::Bool(true));
+    control.insert(crate::value::intern_key("result"), result);
     VmValue::dict(control)
 }
 
@@ -1345,8 +1351,14 @@ fn host_agent_session_record_usage_builtin(
     )
     .map_err(VmError::Runtime)?;
     let mut out = crate::value::DictMap::new();
-    out.insert("tokens_used".to_string(), VmValue::Int(totals.0));
-    out.insert("cost_usd".to_string(), VmValue::Float(totals.1));
+    out.insert(
+        crate::value::intern_key("tokens_used"),
+        VmValue::Int(totals.0),
+    );
+    out.insert(
+        crate::value::intern_key("cost_usd"),
+        VmValue::Float(totals.1),
+    );
     Ok(VmValue::dict(out))
 }
 
@@ -1410,8 +1422,11 @@ fn host_agent_session_drain_feedback_builtin(
             item.put_str("kind", entry.kind);
             item.put_str("content", entry.content);
             item.put_str("source", entry.source);
-            item.insert("sequence".to_string(), VmValue::Int(entry.sequence as i64));
-            item.insert("ts_ms".to_string(), VmValue::Int(entry.ts_ms));
+            item.insert(
+                crate::value::intern_key("sequence"),
+                VmValue::Int(entry.sequence as i64),
+            );
+            item.insert(crate::value::intern_key("ts_ms"), VmValue::Int(entry.ts_ms));
             VmValue::dict(item)
         })
         .collect::<Vec<_>>();
@@ -1433,8 +1448,14 @@ fn host_agent_session_totals_builtin(
         Ok((session.tokens_used, session.cost_used))
     })?;
     let mut out = crate::value::DictMap::new();
-    out.insert("tokens_used".to_string(), VmValue::Int(totals.0));
-    out.insert("cost_usd".to_string(), VmValue::Float(totals.1));
+    out.insert(
+        crate::value::intern_key("tokens_used"),
+        VmValue::Int(totals.0),
+    );
+    out.insert(
+        crate::value::intern_key("cost_usd"),
+        VmValue::Float(totals.1),
+    );
     Ok(VmValue::dict(out))
 }
 
@@ -3057,18 +3078,18 @@ async fn host_autonomy_budget_check(
         .unwrap_or_else(|| format!("agent_session_{}", now_id()));
     let mut opts = crate::value::DictMap::new();
     if let Some(config) = args.get(1) {
-        opts.insert("autonomy_budget".to_string(), config.clone());
+        opts.insert(crate::value::intern_key("autonomy_budget"), config.clone());
     }
     match check_autonomy_budget(&opts, &session_id).await? {
         AutonomyCheck::Denied(result) => {
             let mut out = crate::value::DictMap::new();
-            out.insert("approved".to_string(), VmValue::Bool(false));
-            out.insert("denial_result".to_string(), result);
+            out.insert(crate::value::intern_key("approved"), VmValue::Bool(false));
+            out.insert(crate::value::intern_key("denial_result"), result);
             Ok(VmValue::dict(out))
         }
         AutonomyCheck::Approved(_) | AutonomyCheck::NoBudget => {
             let mut out = crate::value::DictMap::new();
-            out.insert("approved".to_string(), VmValue::Bool(true));
+            out.insert(crate::value::intern_key("approved"), VmValue::Bool(true));
             Ok(VmValue::dict(out))
         }
     }

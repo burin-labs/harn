@@ -124,7 +124,7 @@ where
 {
     let mut map: harn_vm::value::DictMap = harn_vm::value::DictMap::new();
     for (k, v) in entries {
-        map.insert(k.into(), v);
+        map.insert(harn_vm::value::intern_key(&k.into()), v);
     }
     VmValue::dict(map)
 }
@@ -141,7 +141,7 @@ mod tests {
     fn dict(entries: [(&'static str, VmValue); 1]) -> harn_vm::value::DictMap {
         entries
             .into_iter()
-            .map(|(key, value)| (key.to_string(), value))
+            .map(|(key, value)| (harn_vm::value::intern_key(key), value))
             .collect()
     }
 

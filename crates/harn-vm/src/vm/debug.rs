@@ -271,7 +271,11 @@ impl Vm {
     /// `completions` (#109) so the REPL autocomplete surfaces
     /// everything the unified evaluator can reach.
     pub fn identifiers_in_scope(&self, _frame_id: usize) -> Vec<String> {
-        let mut out: Vec<String> = self.visible_variables().keys().cloned().collect();
+        let mut out: Vec<String> = self
+            .visible_variables()
+            .keys()
+            .map(|k| k.to_string())
+            .collect();
         out.extend(self.builtins.keys().cloned());
         out.extend(self.async_builtins.keys().cloned());
         out.sort();

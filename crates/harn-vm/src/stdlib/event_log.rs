@@ -227,7 +227,7 @@ fn parse_headers(
             for (key, value) in dict.iter() {
                 match value {
                     VmValue::String(value) => {
-                        out.insert(key.clone(), value.to_string());
+                        out.insert(key.to_string(), value.to_string());
                     }
                     other => {
                         return Err(VmError::TypeError(format!(

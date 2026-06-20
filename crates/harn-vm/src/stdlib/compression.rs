@@ -446,8 +446,8 @@ fn tar_extract_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
         total_extracted = total_extracted.saturating_add(content.len() as u64);
 
         let mut fields = crate::value::DictMap::new();
-        fields.insert("content".to_string(), bytes_value(content));
-        fields.insert("mode".to_string(), VmValue::Int(mode));
+        fields.insert(crate::value::intern_key("content"), bytes_value(content));
+        fields.insert(crate::value::intern_key("mode"), VmValue::Int(mode));
         fields.put_str("path", path);
         output.push(entry_value(fields));
     }
@@ -519,7 +519,7 @@ fn zip_extract_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
         total_extracted = total_extracted.saturating_add(content.len() as u64);
 
         let mut fields = crate::value::DictMap::new();
-        fields.insert("content".to_string(), bytes_value(content));
+        fields.insert(crate::value::intern_key("content"), bytes_value(content));
         fields.put_str("path", path);
         output.push(entry_value(fields));
     }
@@ -591,7 +591,10 @@ mod tests {
         )
         .unwrap();
         let mut options = crate::value::DictMap::new();
-        options.insert("max_decompressed_bytes".to_string(), VmValue::Int(1024));
+        options.insert(
+            crate::value::intern_key("max_decompressed_bytes"),
+            VmValue::Int(1024),
+        );
         let result = call(
             &mut vm,
             "gzip_decode",
@@ -622,7 +625,10 @@ mod tests {
         )
         .unwrap();
         let mut options = crate::value::DictMap::new();
-        options.insert("max_decompressed_bytes".to_string(), VmValue::Int(1024));
+        options.insert(
+            crate::value::intern_key("max_decompressed_bytes"),
+            VmValue::Int(1024),
+        );
         let result = call(
             &mut vm,
             "zstd_decode",
@@ -634,9 +640,9 @@ mod tests {
     #[test]
     fn tar_round_trip_preserves_mode() {
         let mut fields = crate::value::DictMap::new();
-        fields.insert("path".to_string(), text("bin/run"));
-        fields.insert("content".to_string(), text("echo hi"));
-        fields.insert("mode".to_string(), VmValue::Int(0o755));
+        fields.insert(crate::value::intern_key("path"), text("bin/run"));
+        fields.insert(crate::value::intern_key("content"), text("echo hi"));
+        fields.insert(crate::value::intern_key("mode"), VmValue::Int(0o755));
 
         let mut vm = vm();
         let archive = call(

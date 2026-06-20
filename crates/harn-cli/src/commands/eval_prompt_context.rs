@@ -529,32 +529,35 @@ fn context_case_bindings(
             .as_object()
             .ok_or_else(|| "context fixture case bindings must be a JSON object".to_string())?;
         for (key, value) in object {
-            bindings.insert(key.clone(), harn_vm::json_to_vm_value(value));
+            bindings.insert(
+                harn_vm::value::intern_key(key),
+                harn_vm::json_to_vm_value(value),
+            );
         }
     }
 
     let context_text = render_assembled_chunks(assembled);
     bindings.insert(
-        "candidate_artifacts".to_string(),
+        harn_vm::value::intern_key("candidate_artifacts"),
         harn_vm::json_to_vm_value(
             &serde_json::to_value(artifacts)
                 .map_err(|error| format!("failed to serialize candidate artifacts: {error}"))?,
         ),
     );
     bindings.insert(
-        "assembled_context".to_string(),
+        harn_vm::value::intern_key("assembled_context"),
         harn_vm::json_to_vm_value(&assembled_context_to_json(assembled)),
     );
     bindings.insert(
-        "context".to_string(),
+        harn_vm::value::intern_key("context"),
         harn_vm::json_to_vm_value(&JsonValue::String(context_text)),
     );
     bindings.insert(
-        "selected_artifact_ids".to_string(),
+        harn_vm::value::intern_key("selected_artifact_ids"),
         harn_vm::json_to_vm_value(&json!(selected_artifact_ids)),
     );
     bindings.insert(
-        "dropped_artifact_ids".to_string(),
+        harn_vm::value::intern_key("dropped_artifact_ids"),
         harn_vm::json_to_vm_value(&json!(dropped_artifact_ids)),
     );
     Ok(bindings)

@@ -4,7 +4,7 @@ use crate::value::VmValue;
 fn dict(pairs: &[(&str, VmValue)]) -> crate::value::DictMap {
     pairs
         .iter()
-        .map(|(k, v)| (k.to_string(), v.clone()))
+        .map(|(k, v)| (crate::value::intern_key(k), v.clone()))
         .collect()
 }
 
@@ -33,7 +33,7 @@ fn bare_interp() {
 #[test]
 fn provenance_expr_span_matches_output_range() {
     let mut user = crate::value::DictMap::new();
-    user.insert("name".to_string(), s("alice"));
+    user.insert(crate::value::intern_key("name"), s("alice"));
     let b = dict(&[("user", VmValue::dict(user)), ("count", VmValue::Int(42))]);
     let (out, spans) = render_with_spans("hello {{ user.name }} ({{ count | default: 0 }})", &b);
     assert_eq!(out, "hello alice (42)");
@@ -96,7 +96,7 @@ fn provenance_includes_loop_iterations() {
 #[test]
 fn provenance_preview_is_truncated() {
     let mut wrap = crate::value::DictMap::new();
-    wrap.insert("val".to_string(), s(&"x".repeat(500)));
+    wrap.insert(crate::value::intern_key("val"), s(&"x".repeat(500)));
     let b = dict(&[("blob", VmValue::dict(wrap))]);
     let (_, spans) = render_with_spans("{{blob.val}}", &b);
     let expr = spans
@@ -275,15 +275,15 @@ fn logical_section_scaffolding_follows_llm_capabilities() {
 #[test]
 fn logical_section_tools_and_output_format_use_section_args() {
     let tool = VmValue::dict(crate::value::DictMap::from_iter([
-        ("name".to_string(), s("read_file")),
-        ("description".to_string(), s("Read a file")),
+        (crate::value::intern_key("name"), s("read_file")),
+        (crate::value::intern_key("description"), s("Read a file")),
     ]));
     let schema = VmValue::dict(crate::value::DictMap::from_iter([
-        ("type".to_string(), s("object")),
+        (crate::value::intern_key("type"), s("object")),
         (
-            "properties".to_string(),
+            crate::value::intern_key("properties"),
             VmValue::dict(crate::value::DictMap::from_iter([(
-                "answer".to_string(),
+                crate::value::intern_key("answer"),
                 s("string"),
             )])),
         ),

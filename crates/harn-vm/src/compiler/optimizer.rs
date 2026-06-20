@@ -261,7 +261,7 @@ fn fold_pow(left: VmValue, right: VmValue) -> Option<VmValue> {
 fn contains_value(item: &VmValue, collection: &VmValue) -> bool {
     match collection {
         VmValue::List(items) => items.iter().any(|value| values_equal(value, item)),
-        VmValue::Dict(entries) => entries.contains_key(&item.display()),
+        VmValue::Dict(entries) => entries.contains_key(item.display().as_str()),
         VmValue::String(text) => match item {
             VmValue::String(substr) => text.contains(&**substr),
             other => text.contains(&other.display()),
@@ -292,7 +292,7 @@ fn value_to_snode(value: VmValue, span: harn_lexer::Span) -> Option<SNode> {
                 .map(|(key, value)| {
                     Some(DictEntry {
                         key: SNode {
-                            node: Node::StringLiteral(key.clone()),
+                            node: Node::StringLiteral(key.to_string()),
                             span,
                         },
                         value: value_to_snode(value.clone(), span)?,

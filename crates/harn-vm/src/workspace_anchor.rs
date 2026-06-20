@@ -271,7 +271,7 @@ mod tests {
 
     #[test]
     fn parse_anchor_dict_rejects_missing_primary() {
-        let dict = VmValue::dict(BTreeMap::new());
+        let dict = VmValue::dict_map(Default::default());
         let err = parse_anchor_dict(&dict).expect_err("missing primary should fail");
         assert!(err.contains("primary"));
     }

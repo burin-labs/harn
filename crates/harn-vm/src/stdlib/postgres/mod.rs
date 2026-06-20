@@ -146,10 +146,10 @@ fn register_postgres_namespace(vm: &mut Vm) {
         "pg",
         VmValue::dict(crate::value::DictMap::from_iter([
             (
-                "_namespace".to_string(),
+                crate::value::intern_key("_namespace"),
                 VmValue::String(arcstr::ArcStr::from("pg")),
             ),
-            ("jsonb".to_string(), jsonb),
+            (crate::value::intern_key("jsonb"), jsonb),
         ])),
     );
 }
@@ -315,13 +315,13 @@ fn stmt_cache_clear_result(
     connections_skipped: i64,
 ) -> VmValue {
     let mut result = crate::value::DictMap::new();
-    result.insert("pools".to_string(), VmValue::Int(pools));
+    result.insert(crate::value::intern_key("pools"), VmValue::Int(pools));
     result.insert(
-        "connections_cleared".to_string(),
+        crate::value::intern_key("connections_cleared"),
         VmValue::Int(connections_cleared),
     );
     result.insert(
-        "connections_skipped".to_string(),
+        crate::value::intern_key("connections_skipped"),
         VmValue::Int(connections_skipped),
     );
     VmValue::dict(result)
@@ -749,19 +749,19 @@ fn register_local_pool_handle(
     });
     let mut meta = crate::value::DictMap::new();
     meta.insert(
-        "max_connections".to_string(),
+        crate::value::intern_key("max_connections"),
         VmValue::Int(i64::from(record.max_connections)),
     );
     meta.insert(
-        "single_connection".to_string(),
+        crate::value::intern_key("single_connection"),
         VmValue::Bool(single_connection),
     );
     meta.insert(
-        "replicas".to_string(),
+        crate::value::intern_key("replicas"),
         VmValue::Int(record.replicas.len() as i64),
     );
     meta.insert(
-        "statement_cache_capacity".to_string(),
+        crate::value::intern_key("statement_cache_capacity"),
         VmValue::Int(record.statement_cache_capacity as i64),
     );
     meta.put_str("read_routing_policy", record.read_routing_policy.as_str());
@@ -1550,7 +1550,7 @@ pub(super) fn row_to_value(row: PgRow) -> Result<VmValue, VmError> {
     for (index, column) in row.columns().iter().enumerate() {
         let name = column.name().to_string();
         let value = column_value(&row, index, column.type_info().name())?;
-        map.insert(name, value);
+        map.insert(crate::value::intern_key(&name), value);
     }
     Ok(VmValue::dict(map))
 }
@@ -1680,7 +1680,7 @@ fn column_value(row: &PgRow, index: usize, type_name: &str) -> Result<VmValue, V
             let mut dict = crate::value::DictMap::new();
             for (key, value) in map.0 {
                 dict.insert(
-                    key,
+                    crate::value::intern_key(&key),
                     value
                         .map(|v| VmValue::String(arcstr::ArcStr::from(v)))
                         .unwrap_or(VmValue::Nil),
@@ -1808,7 +1808,7 @@ fn dict_value<const N: usize>(pairs: [(&'static str, VmValue); N]) -> VmValue {
     VmValue::dict(
         pairs
             .into_iter()
-            .map(|(key, value)| (key.to_string(), value))
+            .map(|(key, value)| (crate::value::intern_key(key), value))
             .collect::<crate::value::DictMap>(),
     )
 }
@@ -1898,11 +1898,11 @@ fn query_result_value(result: PgQueryResult, duration: std::time::Duration) -> V
 fn execute_result_value(rows_affected: u64, duration: std::time::Duration) -> VmValue {
     let mut map = crate::value::DictMap::new();
     map.insert(
-        "rows_affected".to_string(),
+        crate::value::intern_key("rows_affected"),
         VmValue::Int(rows_affected as i64),
     );
     map.insert(
-        "duration_ms".to_string(),
+        crate::value::intern_key("duration_ms"),
         VmValue::Int(duration.as_millis() as i64),
     );
     VmValue::dict(map)

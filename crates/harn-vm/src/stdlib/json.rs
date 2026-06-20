@@ -347,7 +347,7 @@ fn json_extract_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 
     match key {
         Some(k) => match &parsed {
-            VmValue::Dict(map) => match map.get(&k) {
+            VmValue::Dict(map) => match map.get(k.as_str()) {
                 Some(val) => Ok(val.clone()),
                 None => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                     format!("json_extract: key '{k}' not found"),
@@ -488,7 +488,7 @@ fn json_pointer_get(value: &VmValue, ptr: &str) -> Result<VmValue, VmError> {
     for token in tokens {
         match current {
             VmValue::Dict(map) => {
-                let Some(next) = map.get(&token) else {
+                let Some(next) = map.get(token.as_str()) else {
                     return Ok(VmValue::Nil);
                 };
                 current = next;
@@ -524,10 +524,13 @@ fn pointer_set_at(value: &VmValue, tokens: &[String], replacement: VmValue) -> V
         VmValue::Dict(map) => {
             let mut next = map.as_ref().clone();
             if tail.is_empty() {
-                next.insert(head.clone(), replacement);
+                next.insert(crate::value::intern_key(head), replacement);
                 VmValue::dict(next)
-            } else if let Some(child) = map.get(head) {
-                next.insert(head.clone(), pointer_set_at(child, tail, replacement));
+            } else if let Some(child) = map.get(head.as_str()) {
+                next.insert(
+                    crate::value::intern_key(head),
+                    pointer_set_at(child, tail, replacement),
+                );
                 VmValue::dict(next)
             } else {
                 value.clone()
@@ -578,10 +581,13 @@ fn pointer_delete_at(value: &VmValue, tokens: &[String]) -> VmValue {
         VmValue::Dict(map) => {
             let mut next = map.as_ref().clone();
             if tail.is_empty() {
-                next.remove(head);
+                next.remove(head.as_str());
                 VmValue::dict(next)
-            } else if let Some(child) = map.get(head) {
-                next.insert(head.clone(), pointer_delete_at(child, tail));
+            } else if let Some(child) = map.get(head.as_str()) {
+                next.insert(
+                    crate::value::intern_key(head),
+                    pointer_delete_at(child, tail),
+                );
                 VmValue::dict(next)
             } else {
                 value.clone()
@@ -656,7 +662,7 @@ pub(crate) fn vm_value_to_data_value(value: &VmValue) -> serde_json::Value {
         VmValue::Dict(map) => crate::value::recursion::guard_recursion(|| {
             serde_json::Value::Object(
                 map.iter()
-                    .map(|(key, value)| (key.clone(), vm_value_to_data_value(value)))
+                    .map(|(key, value)| (key.to_string(), vm_value_to_data_value(value)))
                     .collect(),
             )
         }),
@@ -666,7 +672,7 @@ pub(crate) fn vm_value_to_data_value(value: &VmValue) -> serde_json::Value {
                     .struct_fields_map()
                     .unwrap_or_default()
                     .iter()
-                    .map(|(key, value)| (key.clone(), vm_value_to_data_value(value)))
+                    .map(|(key, value)| (key.to_string(), vm_value_to_data_value(value)))
                     .collect(),
             )
         }),

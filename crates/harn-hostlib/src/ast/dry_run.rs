@@ -302,8 +302,11 @@ fn delegate_to_builtin(
 ) -> OpOutcome {
     let mut forwarded: harn_vm::value::DictMap = (**raw).clone();
     forwarded.remove("op");
-    forwarded.insert("session_id".to_string(), str_value(session_id));
-    forwarded.insert("dry_run".to_string(), VmValue::Bool(false));
+    forwarded.insert(
+        harn_vm::value::intern_key("session_id"),
+        str_value(session_id),
+    );
+    forwarded.insert(harn_vm::value::intern_key("dry_run"), VmValue::Bool(false));
     let request = VmValue::dict(forwarded);
     match runner(&[request]) {
         Ok(VmValue::Dict(result)) => parse_builtin_outcome(&result, op_label),
@@ -388,10 +391,13 @@ fn run_rename_symbol(
     };
     let mut forwarded: harn_vm::value::DictMap = (**raw).clone();
     forwarded.remove("op");
-    forwarded.insert("session_id".to_string(), str_value(session_id));
-    forwarded.insert("dry_run".to_string(), VmValue::Bool(false));
+    forwarded.insert(
+        harn_vm::value::intern_key("session_id"),
+        str_value(session_id),
+    );
+    forwarded.insert(harn_vm::value::intern_key("dry_run"), VmValue::Bool(false));
     forwarded
-        .entry("scope".to_string())
+        .entry(harn_vm::value::intern_key("scope"))
         .or_insert_with(|| str_value("workspace"));
 
     let request = VmValue::dict(forwarded);
@@ -827,7 +833,7 @@ mod tests {
     fn vm_dict(pairs: &[(&str, VmValue)]) -> VmValue {
         let mut map: harn_vm::value::DictMap = Default::default();
         for (k, v) in pairs {
-            map.insert((*k).to_string(), v.clone());
+            map.insert(harn_vm::value::intern_key(k), v.clone());
         }
         VmValue::dict(map)
     }

@@ -350,7 +350,7 @@ fn completion_sources_from_dict(value: Option<&VmValue>) -> BTreeMap<String, Mcp
     sources
         .iter()
         .filter_map(|(name, value)| {
-            completion_source_from_value(value).map(|source| (name.clone(), source))
+            completion_source_from_value(value).map(|source| (name.to_string(), source))
         })
         .collect()
 }

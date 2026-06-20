@@ -400,13 +400,13 @@ pub(crate) fn build_llm_error_dict(err: &VmError, provider: &str, model: &str) -
     let llm_error = api::classify_llm_error(category.clone(), &message);
     if let VmError::Thrown(VmValue::Dict(existing)) = err {
         let mut dict = existing.as_ref().clone();
-        dict.entry("category".to_string())
+        dict.entry(crate::value::intern_key("category"))
             .or_insert_with(|| VmValue::String(arcstr::ArcStr::from(category.as_str())));
-        dict.entry("kind".to_string())
+        dict.entry(crate::value::intern_key("kind"))
             .or_insert_with(|| VmValue::String(arcstr::ArcStr::from(llm_error.kind.as_str())));
-        dict.entry("reason".to_string())
+        dict.entry(crate::value::intern_key("reason"))
             .or_insert_with(|| VmValue::String(arcstr::ArcStr::from(llm_error.reason.as_str())));
-        dict.entry("message".to_string())
+        dict.entry(crate::value::intern_key("message"))
             .or_insert_with(|| VmValue::String(arcstr::ArcStr::from(message.as_str())));
         dict.put_str("provider", provider);
         dict.put_str("model", model);
@@ -604,7 +604,10 @@ fn attach_routing_block(
         "session_cost_usd".to_string(),
         VmValue::Float(trace.session_cost_usd),
     );
-    dict.insert("routing".to_string(), VmValue::dict(routing_dict));
+    dict.insert(
+        crate::value::intern_key("routing"),
+        VmValue::dict(routing_dict),
+    );
     VmValue::dict(dict)
 }
 
@@ -862,22 +865,22 @@ pub(crate) fn rewrite_structured_args(args: Vec<VmValue>) -> Result<Vec<VmValue>
     let retries_alias = options.remove("retries").and_then(|v| v.as_int());
     if let Some(n) = retries_alias {
         options
-            .entry("schema_retries".to_string())
+            .entry(crate::value::intern_key("schema_retries"))
             .or_insert(VmValue::Int(n));
     } else {
         options
-            .entry("schema_retries".to_string())
+            .entry(crate::value::intern_key("schema_retries"))
             .or_insert(VmValue::Int(3));
     }
 
     options
-        .entry("output_schema".to_string())
+        .entry(crate::value::intern_key("output_schema"))
         .or_insert(schema.clone());
     options
-        .entry("json_schema".to_string())
+        .entry(crate::value::intern_key("json_schema"))
         .or_insert(schema.clone());
     options
-        .entry("output_format".to_string())
+        .entry(crate::value::intern_key("output_format"))
         .or_insert_with(|| {
             let mut fmt = std::collections::BTreeMap::new();
             fmt.put_str("kind", "json_schema");
@@ -886,10 +889,10 @@ pub(crate) fn rewrite_structured_args(args: Vec<VmValue>) -> Result<Vec<VmValue>
             VmValue::dict(fmt)
         });
     options
-        .entry("response_format".to_string())
+        .entry(crate::value::intern_key("response_format"))
         .or_insert(VmValue::String(arcstr::ArcStr::from("json")));
     options
-        .entry("output_validation".to_string())
+        .entry(crate::value::intern_key("output_validation"))
         .or_insert(VmValue::String(arcstr::ArcStr::from("error")));
 
     Ok(vec![
@@ -967,7 +970,10 @@ mod schema_stream_abort_retry_tests {
 
     fn options_with_retries(retries: i64) -> crate::value::DictMap {
         let mut opts = crate::value::DictMap::new();
-        opts.insert("schema_retries".to_string(), VmValue::Int(retries));
+        opts.insert(
+            crate::value::intern_key("schema_retries"),
+            VmValue::Int(retries),
+        );
         opts
     }
 
@@ -1003,21 +1009,22 @@ mod schema_stream_abort_retry_tests {
         let chain = VmValue::List(std::sync::Arc::new(vec![VmValue::Dict(
             std::sync::Arc::new(crate::value::DictMap::from_iter([
                 (
-                    "provider".to_string(),
+                    crate::value::intern_key("provider"),
                     VmValue::String(arcstr::ArcStr::from("fake")),
                 ),
                 (
-                    "model".to_string(),
+                    crate::value::intern_key("model"),
                     VmValue::String(arcstr::ArcStr::from("fake-stream")),
                 ),
             ])),
         )]));
         let tagged = routing::build_routing_policy(&crate::value::DictMap::from_iter([(
-            "chain".to_string(),
+            crate::value::intern_key("chain"),
             chain,
         )]))
         .expect("routing policy validates");
-        let options = crate::value::DictMap::from_iter([("routing".to_string(), tagged)]);
+        let options =
+            crate::value::DictMap::from_iter([(crate::value::intern_key("routing"), tagged)]);
         routing::extract_routing_policy(Some(&options))
             .expect("routing policy extracts")
             .expect("routing policy present")
@@ -1033,7 +1040,7 @@ mod schema_stream_abort_retry_tests {
         let opts = api::options::base_opts("fake");
         for spelling in ["max_tokens", "MAX_TOKENS", "length", "LENGTH"] {
             let dict = VmValue::dict(crate::value::DictMap::from_iter([(
-                "stop_reason".to_string(),
+                crate::value::intern_key("stop_reason"),
                 VmValue::String(arcstr::ArcStr::from(spelling)),
             )]));
             let errors = structured_output_errors(&dict, &opts);
@@ -1044,7 +1051,7 @@ mod schema_stream_abort_retry_tests {
         }
         // A non-truncation stop_reason must NOT add the token-limit error.
         let dict = VmValue::dict(crate::value::DictMap::from_iter([(
-            "stop_reason".to_string(),
+            crate::value::intern_key("stop_reason"),
             VmValue::String(arcstr::ArcStr::from("stop")),
         )]));
         let errors = structured_output_errors(&dict, &opts);

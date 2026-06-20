@@ -825,7 +825,10 @@ fn build_pipeline_globals(
             for (index, param) in function.params.iter().enumerate() {
                 match values.get(index) {
                     Some(value) => {
-                        globals.insert(param.name.clone(), json_to_vm_value(value));
+                        globals.insert(
+                            harn_vm::value::intern_key(&param.name),
+                            json_to_vm_value(value),
+                        );
                     }
                     None if param.has_default => {}
                     None => {
@@ -841,7 +844,10 @@ fn build_pipeline_globals(
             for param in &function.params {
                 match values.get(&param.name) {
                     Some(value) => {
-                        globals.insert(param.name.clone(), json_to_vm_value(value));
+                        globals.insert(
+                            harn_vm::value::intern_key(&param.name),
+                            json_to_vm_value(value),
+                        );
                     }
                     None if param.has_default => {}
                     None => {

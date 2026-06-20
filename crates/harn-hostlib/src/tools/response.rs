@@ -20,19 +20,21 @@ impl ResponseBuilder {
 
     pub(crate) fn str(mut self, key: &str, value: impl Into<String>) -> Self {
         self.inner.insert(
-            key.to_string(),
+            harn_vm::value::intern_key(key),
             VmValue::String(arcstr::ArcStr::from(value.into())),
         );
         self
     }
 
     pub(crate) fn int(mut self, key: &str, value: i64) -> Self {
-        self.inner.insert(key.to_string(), VmValue::Int(value));
+        self.inner
+            .insert(harn_vm::value::intern_key(key), VmValue::Int(value));
         self
     }
 
     pub(crate) fn bool(mut self, key: &str, value: bool) -> Self {
-        self.inner.insert(key.to_string(), VmValue::Bool(value));
+        self.inner
+            .insert(harn_vm::value::intern_key(key), VmValue::Bool(value));
         self
     }
 
@@ -40,30 +42,35 @@ impl ResponseBuilder {
         match value {
             Some(v) => {
                 self.inner.insert(
-                    key.to_string(),
+                    harn_vm::value::intern_key(key),
                     VmValue::String(arcstr::ArcStr::from(v.into())),
                 );
             }
             None => {
-                self.inner.insert(key.to_string(), VmValue::Nil);
+                self.inner
+                    .insert(harn_vm::value::intern_key(key), VmValue::Nil);
             }
         }
         self
     }
 
     pub(crate) fn nil(mut self, key: &str) -> Self {
-        self.inner.insert(key.to_string(), VmValue::Nil);
+        self.inner
+            .insert(harn_vm::value::intern_key(key), VmValue::Nil);
         self
     }
 
     pub(crate) fn dict(mut self, key: &str, value: harn_vm::value::DictMap) -> Self {
-        self.inner.insert(key.to_string(), VmValue::dict(value));
+        self.inner
+            .insert(harn_vm::value::intern_key(key), VmValue::dict(value));
         self
     }
 
     pub(crate) fn list(mut self, key: &str, value: Vec<VmValue>) -> Self {
-        self.inner
-            .insert(key.to_string(), VmValue::List(Arc::new(value)));
+        self.inner.insert(
+            harn_vm::value::intern_key(key),
+            VmValue::List(Arc::new(value)),
+        );
         self
     }
 

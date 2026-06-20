@@ -43,7 +43,7 @@ pub(super) fn extract_params_from_vm_dict(
                 )
             };
             params.push(ToolParamSchema {
-                name: pname.clone(),
+                name: pname.to_string(),
                 ty,
                 description: desc,
                 required,

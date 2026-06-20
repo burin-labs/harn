@@ -179,8 +179,11 @@ fn closure_arg(args: &[VmValue], index: usize, builtin: &str) -> Result<Arc<VmCl
 
 fn http_server_handle_value(id: &str) -> VmValue {
     let mut dict = crate::value::DictMap::new();
-    dict.insert("id".to_string(), VmValue::string(id));
-    dict.insert("kind".to_string(), VmValue::string("http_server"));
+    dict.insert(crate::value::intern_key("id"), VmValue::string(id));
+    dict.insert(
+        crate::value::intern_key("kind"),
+        VmValue::string("http_server"),
+    );
     dict_value(dict)
 }
 
@@ -201,14 +204,20 @@ fn headers_from_value(value: &VmValue) -> crate::value::DictMap {
                 headers
                     .iter()
                     .map(|(key, value)| {
-                        (key.to_ascii_lowercase(), VmValue::string(value.display()))
+                        (
+                            crate::value::intern_key(&key.to_ascii_lowercase()),
+                            VmValue::string(value.display()),
+                        )
                     })
                     .collect()
             })
             .unwrap_or_else(|| {
                 dict.iter()
                     .map(|(key, value)| {
-                        (key.to_ascii_lowercase(), VmValue::string(value.display()))
+                        (
+                            crate::value::intern_key(&key.to_ascii_lowercase()),
+                            VmValue::string(value.display()),
+                        )
                     })
                     .collect()
             }),
@@ -220,7 +229,12 @@ fn normalize_headers(value: Option<&VmValue>) -> crate::value::DictMap {
     match value.and_then(VmValue::as_dict) {
         Some(headers) => headers
             .iter()
-            .map(|(key, value)| (key.to_ascii_lowercase(), VmValue::string(value.display())))
+            .map(|(key, value)| {
+                (
+                    crate::value::intern_key(&key.to_ascii_lowercase()),
+                    VmValue::string(value.display()),
+                )
+            })
             .collect(),
         None => crate::value::DictMap::new(),
     }
@@ -263,7 +277,10 @@ fn split_path_and_query(raw_path: &str) -> (String, crate::value::DictMap) {
     let mut query_map = crate::value::DictMap::new();
     for pair in query.split('&').filter(|part| !part.is_empty()) {
         let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
-        query_map.insert(percent_decode(key), VmValue::string(percent_decode(value)));
+        query_map.insert(
+            crate::value::intern_key(&percent_decode(key)),
+            VmValue::string(percent_decode(value)),
+        );
     }
     (
         if path.is_empty() { "/" } else { path }.to_string(),
@@ -299,16 +316,16 @@ fn request_value(
     let headers = normalize_headers(input.get("headers"));
     let body = String::from_utf8_lossy(body_bytes).into_owned();
     let mut request = crate::value::DictMap::new();
-    request.insert("method".to_string(), VmValue::string(method));
-    request.insert("path".to_string(), VmValue::string(path));
+    request.insert(crate::value::intern_key("method"), VmValue::string(method));
+    request.insert(crate::value::intern_key("path"), VmValue::string(path));
     let path_params = dict_value(path_params);
-    request.insert("path_params".to_string(), path_params.clone());
-    request.insert("params".to_string(), path_params);
-    request.insert("query".to_string(), dict_value(query));
-    request.insert("headers".to_string(), dict_value(headers));
-    request.insert("body".to_string(), VmValue::string(body));
+    request.insert(crate::value::intern_key("path_params"), path_params.clone());
+    request.insert(crate::value::intern_key("params"), path_params);
+    request.insert(crate::value::intern_key("query"), dict_value(query));
+    request.insert(crate::value::intern_key("headers"), dict_value(headers));
+    request.insert(crate::value::intern_key("body"), VmValue::string(body));
     request.insert(
-        "raw_body".to_string(),
+        crate::value::intern_key("raw_body"),
         if retain_raw_body {
             VmValue::Bytes(std::sync::Arc::new(body_bytes.to_vec()))
         } else {
@@ -316,11 +333,11 @@ fn request_value(
         },
     );
     request.insert(
-        "body_bytes".to_string(),
+        crate::value::intern_key("body_bytes"),
         VmValue::Int(body_bytes.len() as i64),
     );
     request.insert(
-        "remote_addr".to_string(),
+        crate::value::intern_key("remote_addr"),
         input
             .get("remote_addr")
             .or_else(|| input.get("remote"))
@@ -328,7 +345,7 @@ fn request_value(
             .unwrap_or(VmValue::Nil),
     );
     request.insert(
-        "client_ip".to_string(),
+        crate::value::intern_key("client_ip"),
         input
             .get("client_ip")
             .or_else(|| input.get("remote_ip"))
@@ -358,36 +375,42 @@ fn response_with_kind(
     if body_kind == "json" && matches!(header_lookup_value(&headers, "content-type"), VmValue::Nil)
     {
         headers.insert(
-            "content-type".to_string(),
+            crate::value::intern_key("content-type"),
             VmValue::string("application/json; charset=utf-8"),
         );
     } else if body_kind == "text"
         && matches!(header_lookup_value(&headers, "content-type"), VmValue::Nil)
     {
         headers.insert(
-            "content-type".to_string(),
+            crate::value::intern_key("content-type"),
             VmValue::string("text/plain; charset=utf-8"),
         );
     }
-    response.insert("status".to_string(), VmValue::Int(status));
-    response.insert("headers".to_string(), dict_value(headers));
+    response.insert(crate::value::intern_key("status"), VmValue::Int(status));
+    response.insert(crate::value::intern_key("headers"), dict_value(headers));
     response.insert(
-        "ok".to_string(),
+        crate::value::intern_key("ok"),
         VmValue::Bool((200..300).contains(&status)),
     );
-    response.insert("body_kind".to_string(), VmValue::string(body_kind));
+    response.insert(
+        crate::value::intern_key("body_kind"),
+        VmValue::string(body_kind),
+    );
     match body {
         VmValue::Bytes(bytes) => {
             response.insert(
-                "body".to_string(),
+                crate::value::intern_key("body"),
                 VmValue::string(String::from_utf8_lossy(&bytes)),
             );
-            response.insert("raw_body".to_string(), VmValue::Bytes(bytes));
+            response.insert(crate::value::intern_key("raw_body"), VmValue::Bytes(bytes));
         }
         other => {
-            response.insert("body".to_string(), VmValue::string(other.display()));
             response.insert(
-                "raw_body".to_string(),
+                crate::value::intern_key("body"),
+                VmValue::string(other.display()),
+            );
+            response.insert(
+                crate::value::intern_key("raw_body"),
                 VmValue::Bytes(std::sync::Arc::new(other.display().into_bytes())),
             );
         }
@@ -425,12 +448,15 @@ fn normalize_response(value: VmValue) -> VmValue {
 fn body_limit_response(limit: usize, actual: usize) -> VmValue {
     let mut headers = crate::value::DictMap::new();
     headers.insert(
-        "content-type".to_string(),
+        crate::value::intern_key("content-type"),
         VmValue::string("text/plain; charset=utf-8"),
     );
-    headers.insert("connection".to_string(), VmValue::string("close"));
     headers.insert(
-        "x-harn-body-limit".to_string(),
+        crate::value::intern_key("connection"),
+        VmValue::string("close"),
+    );
+    headers.insert(
+        crate::value::intern_key("x-harn-body-limit"),
         VmValue::string(limit.to_string()),
     );
     response_with_kind(
@@ -472,12 +498,12 @@ fn route_template_match(template: &str, path: &str) -> Option<crate::value::Dict
     for (tmpl, actual) in template_segments.iter().zip(path_segments.iter()) {
         if tmpl.starts_with('{') && tmpl.ends_with('}') && tmpl.len() > 2 {
             params.insert(
-                tmpl[1..tmpl.len() - 1].to_string(),
+                crate::value::intern_key(&tmpl[1..tmpl.len() - 1]),
                 VmValue::string(percent_decode(actual)),
             );
         } else if tmpl.starts_with(':') && tmpl.len() > 1 {
             params.insert(
-                tmpl[1..].to_string(),
+                crate::value::intern_key(&tmpl[1..]),
                 VmValue::string(percent_decode(actual)),
             );
         } else if tmpl != actual {
@@ -675,7 +701,7 @@ fn register_http_tls_builtins(vm: &mut Vm) {
         })?;
         let mut extra = crate::value::DictMap::new();
         extra.insert(
-            "hosts".to_string(),
+            crate::value::intern_key("hosts"),
             VmValue::List(std::sync::Arc::new(
                 hosts
                     .into_iter()
@@ -1073,9 +1099,12 @@ fn http_server_tls_config_value(
 ) -> VmValue {
     let mut dict = crate::value::DictMap::new();
     dict.put_str("mode", mode);
-    dict.insert("terminate_tls".to_string(), VmValue::Bool(terminate_tls));
+    dict.insert(
+        crate::value::intern_key("terminate_tls"),
+        VmValue::Bool(terminate_tls),
+    );
     dict.put_str("scheme", scheme);
-    dict.insert("hsts".to_string(), VmValue::Bool(hsts));
+    dict.insert(crate::value::intern_key("hsts"), VmValue::Bool(hsts));
     for (key, value) in extra {
         dict.insert(key, value);
     }
@@ -1085,7 +1114,7 @@ fn http_server_tls_config_value(
 fn hsts_options(options: &crate::value::DictMap) -> crate::value::DictMap {
     let mut hsts = crate::value::DictMap::new();
     hsts.insert(
-        "hsts_max_age_seconds".to_string(),
+        crate::value::intern_key("hsts_max_age_seconds"),
         VmValue::Int(vm_get_int_option(
             options,
             "hsts_max_age_seconds",
@@ -1093,7 +1122,7 @@ fn hsts_options(options: &crate::value::DictMap) -> crate::value::DictMap {
         )),
     );
     hsts.insert(
-        "hsts_include_subdomains".to_string(),
+        crate::value::intern_key("hsts_include_subdomains"),
         VmValue::Bool(vm_get_bool_option(
             options,
             "hsts_include_subdomains",
@@ -1101,7 +1130,7 @@ fn hsts_options(options: &crate::value::DictMap) -> crate::value::DictMap {
         )),
     );
     hsts.insert(
-        "hsts_preload".to_string(),
+        crate::value::intern_key("hsts_preload"),
         VmValue::Bool(vm_get_bool_option(options, "hsts_preload", false)),
     );
     hsts
@@ -1123,7 +1152,7 @@ fn http_server_security_headers(config: &crate::value::DictMap) -> crate::value:
         value.push_str("; preload");
     }
     crate::value::DictMap::from_iter([(
-        "strict-transport-security".to_string(),
+        crate::value::intern_key("strict-transport-security"),
         VmValue::String(arcstr::ArcStr::from(value)),
     )])
 }

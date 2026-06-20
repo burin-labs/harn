@@ -558,7 +558,7 @@ pub(crate) fn extract_llm_options(
 
     let provider_overrides = options
         .as_ref()
-        .and_then(|o| o.get(&provider))
+        .and_then(|o| o.get(provider.as_str()))
         .and_then(|v| v.as_dict())
         .map(vm_value_dict_to_json);
     let previous_response_id =
@@ -849,7 +849,7 @@ mod cache_default_tests {
     #[test]
     fn explicit_cache_false_opts_out_on_supporting_route() {
         let mut options = caching_route();
-        options.insert("cache".to_string(), VmValue::Bool(false));
+        options.put("cache", VmValue::Bool(false));
         assert!(
             !opts_with(options).cache,
             "explicit `cache: false` must opt out"
@@ -862,7 +862,7 @@ mod cache_default_tests {
         // on a route that cannot cache surfaces a loud error rather than a
         // silent no-op (unchanged behavior).
         let mut options = non_caching_route();
-        options.insert("cache".to_string(), VmValue::Bool(true));
+        options.put("cache", VmValue::Bool(true));
         assert!(
             try_opts_with(options).is_err(),
             "explicit `cache: true` on a non-supporting route must error"

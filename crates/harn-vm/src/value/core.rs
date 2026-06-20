@@ -52,7 +52,66 @@ pub type HarnStr = arcstr::ArcStr;
 /// `range` / `len`) match `BTreeMap`, so dict reads are unchanged. The `Arc`
 /// wrapper is retained so reference identity (`Arc::ptr_eq`) — used by the `===`
 /// operator and `value_identity_key` — keeps its current semantics.
-pub type DictMap = imbl::OrdMap<String, VmValue>;
+pub type DictMap = imbl::OrdMap<HarnStr, VmValue>;
+
+/// Intern a dict key into a shared [`HarnStr`].
+///
+/// Agent workloads are dict-heavy and the same field names (`role`, `content`,
+/// `arguments`, …) recur across thousands of message/JSON dicts. Interning
+/// short keys lets every occurrence share one allocation (a refcount bump on
+/// reuse) instead of allocating a fresh string per key. The table is *bounded*
+/// — only keys up to [`MAX_INTERNED_KEY_LEN`] bytes are eligible, and once
+/// [`MAX_INTERNED_KEYS`] distinct keys are cached no new entries are added — so
+/// adversarial or high-cardinality keys (UUIDs, user input) fall back to a
+/// plain allocation and can never grow the table without bound.
+pub fn intern_key(key: &str) -> HarnStr {
+    const MAX_INTERNED_KEY_LEN: usize = 64;
+    const MAX_INTERNED_KEYS: usize = 8192;
+    static INTERNED_KEYS: std::sync::LazyLock<parking_lot::Mutex<HashMap<Box<str>, HarnStr>>> =
+        std::sync::LazyLock::new(|| parking_lot::Mutex::new(HashMap::new()));
+
+    if key.len() > MAX_INTERNED_KEY_LEN {
+        return HarnStr::from(key);
+    }
+    let mut table = INTERNED_KEYS.lock();
+    if let Some(existing) = table.get(key) {
+        return existing.clone();
+    }
+    let interned = HarnStr::from(key);
+    if table.len() < MAX_INTERNED_KEYS {
+        table.insert(Box::from(key), interned.clone());
+    }
+    interned
+}
+
+/// Conversion into an interned dict key.
+///
+/// Lets [`VmValue::dict`] accept the maps callers already build —
+/// `BTreeMap<String, _>` and the persistent [`DictMap`] (`OrdMap<HarnStr, _>`) —
+/// while routing freshly-owned string keys through [`intern_key`] and passing an
+/// already-shared [`HarnStr`] (e.g. from re-wrapping an existing dict) straight
+/// through without re-interning.
+pub trait IntoDictKey {
+    fn into_dict_key(self) -> HarnStr;
+}
+
+impl IntoDictKey for String {
+    fn into_dict_key(self) -> HarnStr {
+        intern_key(&self)
+    }
+}
+
+impl IntoDictKey for &str {
+    fn into_dict_key(self) -> HarnStr {
+        intern_key(self)
+    }
+}
+
+impl IntoDictKey for HarnStr {
+    fn into_dict_key(self) -> HarnStr {
+        self
+    }
+}
 
 /// Character count with a byte-length fast path for ASCII text.
 ///
@@ -96,7 +155,10 @@ impl StructLayout {
     }
 
     pub fn from_map(struct_name: impl Into<String>, fields: &crate::value::DictMap) -> Self {
-        Self::new(struct_name, fields.keys().cloned().collect())
+        Self::new(
+            struct_name,
+            fields.keys().map(|key| key.to_string()).collect(),
+        )
     }
 
     pub fn struct_name(&self) -> &str {
@@ -329,8 +391,13 @@ impl VmValue {
     /// `IntoIterator<Item = (String, VmValue)>`) and collects it into the
     /// persistent [`DictMap`], so callers keep their familiar map-building code
     /// while the stored value gains structural sharing.
-    pub fn dict(entries: impl IntoIterator<Item = (String, VmValue)>) -> Self {
-        VmValue::Dict(Shared::new(entries.into_iter().collect::<DictMap>()))
+    pub fn dict<K: IntoDictKey>(entries: impl IntoIterator<Item = (K, VmValue)>) -> Self {
+        VmValue::Dict(Shared::new(
+            entries
+                .into_iter()
+                .map(|(k, v)| (k.into_dict_key(), v))
+                .collect::<DictMap>(),
+        ))
     }
 
     /// Construct a [`VmValue::Dict`] from an already-built [`DictMap`].
@@ -511,7 +578,7 @@ impl VmValue {
         let slots = layout
             .field_names()
             .iter()
-            .map(|name| fields.get(name).cloned())
+            .map(|name| fields.get(name.as_str()).cloned())
             .collect();
         VmValue::StructInstance(Shared::new(StructInstanceData {
             layout,
@@ -528,7 +595,7 @@ impl VmValue {
         let fields = layout
             .field_names()
             .iter()
-            .map(|name| field_values.get(name).cloned())
+            .map(|name| field_values.get(name.as_str()).cloned())
             .collect();
         VmValue::StructInstance(Shared::new(StructInstanceData {
             layout,
@@ -804,7 +871,7 @@ pub fn struct_fields_to_map(
             fields
                 .get(index)
                 .and_then(Option::as_ref)
-                .map(|value| (name.clone(), value.clone()))
+                .map(|value| (intern_key(name), value.clone()))
         })
         .collect()
 }

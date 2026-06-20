@@ -642,7 +642,7 @@ mod tests {
         let root = std::env::current_dir().unwrap();
         let mut config = harn_vm::value::DictMap::new();
         config.insert(
-            "kinds".to_string(),
+            harn_vm::value::intern_key("kinds"),
             VmValue::List(std::sync::Arc::new(vec![
                 VmValue::String(arcstr::ArcStr::from("access")),
                 VmValue::String(arcstr::ArcStr::from("other")),

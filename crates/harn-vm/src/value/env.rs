@@ -191,7 +191,7 @@ impl VmEnv {
         let mut vars = crate::value::DictMap::new();
         for scope in &self.scopes {
             for (name, (value, _)) in scope.vars.iter() {
-                vars.insert(name.clone(), value.clone());
+                vars.insert(crate::value::intern_key(name), value.clone());
             }
         }
         vars

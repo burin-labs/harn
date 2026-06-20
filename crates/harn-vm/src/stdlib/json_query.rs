@@ -158,7 +158,7 @@ fn eval_path(input: &VmValue, steps: &[PathStep]) -> Vec<VmValue> {
             match step {
                 PathStep::Field(name) => match value {
                     VmValue::Dict(map) => {
-                        next.push(map.get(name).cloned().unwrap_or(VmValue::Nil));
+                        next.push(map.get(name.as_str()).cloned().unwrap_or(VmValue::Nil));
                     }
                     VmValue::StructInstance { .. } => {
                         next.push(value.struct_field(name).cloned().unwrap_or(VmValue::Nil));

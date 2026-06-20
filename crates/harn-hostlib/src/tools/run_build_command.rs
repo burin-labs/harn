@@ -97,17 +97,17 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
             entry.put_str("severity", d.severity.as_str());
             entry.put_str("message", d.message);
             entry.insert(
-                "path".to_string(),
+                harn_vm::value::intern_key("path"),
                 d.path
                     .map(|p| VmValue::String(arcstr::ArcStr::from(p)))
                     .unwrap_or(VmValue::Nil),
             );
             entry.insert(
-                "line".to_string(),
+                harn_vm::value::intern_key("line"),
                 d.line.map(VmValue::Int).unwrap_or(VmValue::Nil),
             );
             entry.insert(
-                "column".to_string(),
+                harn_vm::value::intern_key("column"),
                 d.column.map(VmValue::Int).unwrap_or(VmValue::Nil),
             );
             VmValue::dict(entry)

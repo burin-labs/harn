@@ -122,7 +122,7 @@ async fn pg_listen_impl(
 
     let mut meta = crate::value::DictMap::new();
     meta.insert(
-        "channels".to_string(),
+        crate::value::intern_key("channels"),
         VmValue::List(std::sync::Arc::new(
             channels
                 .iter()
@@ -130,7 +130,7 @@ async fn pg_listen_impl(
                 .collect(),
         )),
     );
-    meta.insert("bridge".to_string(), VmValue::Bool(bridge));
+    meta.insert(crate::value::intern_key("bridge"), VmValue::Bool(bridge));
     Ok(handle_value(HANDLE_LISTENER, &id, meta))
 }
 
@@ -180,7 +180,7 @@ async fn pg_listener_recv_impl(
     dict.put_str("channel", channel.clone());
     dict.put_str("payload", payload.clone());
     dict.insert(
-        "process_id".to_string(),
+        crate::value::intern_key("process_id"),
         VmValue::Int(i64::from(notification.process_id())),
     );
     let value = VmValue::dict(dict);

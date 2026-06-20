@@ -195,12 +195,12 @@ async fn execute_worker_config(
                 );
             }
             options.insert(
-                "execution".to_string(),
+                crate::value::intern_key("execution"),
                 crate::stdlib::json_to_vm_value(
                     &serde_json::to_value(&execution_record).unwrap_or_default(),
                 ),
             );
-            options.insert("delegated".to_string(), VmValue::Bool(true));
+            options.insert(crate::value::intern_key("delegated"), VmValue::Bool(true));
             let result = call_worker_harn_export(
                 ctx,
                 "std/workflow/execute",

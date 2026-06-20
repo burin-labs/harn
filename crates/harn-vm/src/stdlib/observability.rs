@@ -506,7 +506,7 @@ fn span_to_vm_value(span: &ObsSpan) -> VmValue {
     out.put_str("span_id", span.id.as_str());
     out.put_str("name", span.name.as_str());
     out.insert(
-        "attrs".to_string(),
+        crate::value::intern_key("attrs"),
         json_to_vm_value(&serde_json::Value::Object(span.attrs.clone())),
     );
     VmValue::dict(out)
@@ -857,7 +857,7 @@ fn pretty_payload(event: &serde_json::Value) -> serde_json::Value {
     let mut fields = crate::value::DictMap::new();
     if let Some(serde_json::Value::Object(map)) = event.get("fields") {
         for (key, value) in map {
-            fields.insert(key.clone(), json_to_vm_value(value));
+            fields.insert(crate::value::intern_key(key), json_to_vm_value(value));
         }
     }
     serde_json::Value::String(
@@ -915,14 +915,14 @@ pub(crate) fn vm_value_to_json(value: &VmValue) -> serde_json::Value {
         VmValue::Dict(map) => {
             let mut out = serde_json::Map::new();
             for (key, value) in map.iter() {
-                out.insert(key.clone(), vm_value_to_json(value));
+                out.insert(key.to_string(), vm_value_to_json(value));
             }
             serde_json::Value::Object(out)
         }
         VmValue::StructInstance { .. } => {
             let mut out = serde_json::Map::new();
             for (key, value) in value.struct_fields_map().unwrap_or_default().iter() {
-                out.insert(key.clone(), vm_value_to_json(value));
+                out.insert(key.to_string(), vm_value_to_json(value));
             }
             serde_json::Value::Object(out)
         }

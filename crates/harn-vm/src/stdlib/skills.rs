@@ -125,11 +125,11 @@ fn who_signed_entry(entry: &crate::value::DictMap) -> VmValue {
         None => crate::value::DictMap::new(),
     };
     out.put_str("skill_id", vm_skill_entry_id(entry).as_str());
-    out.entry("signed".to_string())
+    out.entry(crate::value::intern_key("signed"))
         .or_insert(VmValue::Bool(false));
-    out.entry("trusted".to_string())
+    out.entry(crate::value::intern_key("trusted"))
         .or_insert(VmValue::Bool(false));
-    out.entry("endorsements".to_string())
+    out.entry(crate::value::intern_key("endorsements"))
         .or_insert_with(|| VmValue::List(std::sync::Arc::new(Vec::new())));
     VmValue::dict(out)
 }
@@ -360,7 +360,7 @@ fn skill_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
         }
     }
     for (k, v) in config.iter() {
-        entry.insert(k.clone(), v.clone());
+        entry.insert(k.to_string(), v.clone());
     }
     let entry_value = VmValue::dict(entry);
 
@@ -385,7 +385,7 @@ fn skill_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 
     let mut new_registry = registry;
     new_registry.insert(
-        "skills".to_string(),
+        crate::value::intern_key("skills"),
         VmValue::List(std::sync::Arc::new(new_skills)),
     );
     Ok(VmValue::dict(new_registry))
@@ -414,7 +414,7 @@ fn skill_list_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
                 if matches!(value, VmValue::Closure(_) | VmValue::BuiltinRef(_)) {
                     continue;
                 }
-                desc.insert(key.clone(), value.clone());
+                desc.insert(key.to_string(), value.clone());
             }
             result.push(VmValue::dict(desc));
         }
@@ -571,7 +571,7 @@ fn skill_select_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 
     let mut new_registry = (**registry).clone();
     new_registry.insert(
-        "skills".to_string(),
+        crate::value::intern_key("skills"),
         VmValue::List(std::sync::Arc::new(selected)),
     );
     Ok(VmValue::dict(new_registry))
@@ -664,7 +664,7 @@ fn skill_remove_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 
     let mut new_registry = registry;
     new_registry.insert(
-        "skills".to_string(),
+        crate::value::intern_key("skills"),
         VmValue::List(std::sync::Arc::new(filtered)),
     );
     Ok(VmValue::dict(new_registry))

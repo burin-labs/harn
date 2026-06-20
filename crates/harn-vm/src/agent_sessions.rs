@@ -1428,11 +1428,11 @@ fn truncate_state(state: &mut SessionState, keep_first: usize) -> Option<Session
         new_tip_turn_id = turn_event_id_for_count(&retained_events, kept_turn_count);
         let mut next = dict;
         next.insert(
-            "events".to_string(),
+            crate::value::intern_key("events"),
             VmValue::List(std::sync::Arc::new(retained_events)),
         );
         next.insert(
-            "messages".to_string(),
+            crate::value::intern_key("messages"),
             VmValue::List(std::sync::Arc::new(retained)),
         );
         next.remove("summary");
@@ -1501,13 +1501,13 @@ pub fn trim(id: &str, keep_last: usize) -> Option<usize> {
         let kept = retained.len();
         let mut next = dict;
         next.insert(
-            "events".to_string(),
+            crate::value::intern_key("events"),
             VmValue::List(std::sync::Arc::new(
                 crate::llm::helpers::transcript_events_from_messages(&retained),
             )),
         );
         next.insert(
-            "messages".to_string(),
+            crate::value::intern_key("messages"),
             VmValue::List(std::sync::Arc::new(retained)),
         );
         apply_transcript_with_budget(state, VmValue::dict(next), "trim").ok()?;
@@ -1554,11 +1554,11 @@ pub fn inject_message(id: &str, message: VmValue) -> Result<(), String> {
         messages.push(new_message);
         let mut next = dict;
         next.insert(
-            "events".to_string(),
+            crate::value::intern_key("events"),
             VmValue::List(std::sync::Arc::new(events)),
         );
         next.insert(
-            "messages".to_string(),
+            crate::value::intern_key("messages"),
             VmValue::List(std::sync::Arc::new(messages)),
         );
         let persisted_message = next
@@ -1787,7 +1787,7 @@ fn append_event_to_transcript(transcript: VmValue, event: VmValue) -> VmValue {
     let mut events = transcript_events_from_dict(&next);
     events.push(event);
     next.insert(
-        "events".to_string(),
+        crate::value::intern_key("events"),
         VmValue::List(std::sync::Arc::new(events)),
     );
     VmValue::dict(next)
@@ -1820,13 +1820,13 @@ fn trim_transcript_for_budget(
     let retained: Vec<VmValue> = messages.into_iter().skip(start).collect();
     let mut next = dict;
     next.insert(
-        "events".to_string(),
+        crate::value::intern_key("events"),
         VmValue::List(std::sync::Arc::new(
             crate::llm::helpers::transcript_events_from_messages(&retained),
         )),
     );
     next.insert(
-        "messages".to_string(),
+        crate::value::intern_key("messages"),
         VmValue::List(std::sync::Arc::new(retained)),
     );
     next.remove("summary");
@@ -1926,11 +1926,11 @@ fn compact_transcript_for_budget(
 
     let mut next = dict;
     next.insert(
-        "events".to_string(),
+        crate::value::intern_key("events"),
         VmValue::List(std::sync::Arc::new(events)),
     );
     next.insert(
-        "messages".to_string(),
+        crate::value::intern_key("messages"),
         VmValue::List(std::sync::Arc::new(retained)),
     );
     if let Some(summary) = summary {
@@ -2468,7 +2468,7 @@ pub fn prune_invalid_reminder_events(id: &str) -> usize {
         if pruned > 0 {
             let mut next = dict;
             next.insert(
-                "events".to_string(),
+                crate::value::intern_key("events"),
                 VmValue::List(std::sync::Arc::new(kept)),
             );
             let _ = apply_transcript_with_budget(
@@ -2584,7 +2584,7 @@ pub fn inject_reminder(
         events.push(crate::llm::helpers::transcript_reminder_event(&reminder));
         let mut next = dict;
         next.insert(
-            "events".to_string(),
+            crate::value::intern_key("events"),
             VmValue::List(std::sync::Arc::new(events)),
         );
         apply_transcript_with_budget(state, VmValue::dict(next), "inject_reminder")?;
@@ -2670,7 +2670,7 @@ fn append_event_to_state(
     events.push(event);
     let mut next = dict;
     next.insert(
-        "events".to_string(),
+        crate::value::intern_key("events"),
         VmValue::List(std::sync::Arc::new(events)),
     );
     apply_transcript_with_budget(state, VmValue::dict(next), action)
@@ -2709,13 +2709,13 @@ pub fn replace_messages_with_summary(
             .collect();
         let mut next = dict;
         next.insert(
-            "events".to_string(),
+            crate::value::intern_key("events"),
             VmValue::List(std::sync::Arc::new(
                 crate::llm::helpers::transcript_events_from_messages(&vm_messages),
             )),
         );
         next.insert(
-            "messages".to_string(),
+            crate::value::intern_key("messages"),
             VmValue::List(std::sync::Arc::new(vm_messages)),
         );
         if let Some(summary) = summary {
@@ -2855,7 +2855,7 @@ pub fn record_system_prompt(id: &str, system_prompt: &str) -> Result<(), String>
                 )),
             ));
             next.insert(
-                "events".to_string(),
+                crate::value::intern_key("events"),
                 VmValue::List(std::sync::Arc::new(events)),
             );
         }
@@ -3232,7 +3232,7 @@ fn clone_transcript_with_parent(transcript: &VmValue, parent_id: &str) -> VmValu
             VmValue::String(arcstr::ArcStr::from(parent_id.to_string())),
         )])),
     };
-    next.insert("metadata".to_string(), metadata);
+    next.insert(crate::value::intern_key("metadata"), metadata);
     VmValue::dict(next)
 }
 
@@ -3242,12 +3242,15 @@ fn apply_system_prompt_metadata(next: &mut crate::value::DictMap, system_prompt:
         _ => crate::value::DictMap::new(),
     };
     metadata.insert(
-        "system_prompt".to_string(),
+        crate::value::intern_key("system_prompt"),
         crate::stdlib::json_to_vm_value(&crate::llm::helpers::system_prompt_metadata(
             system_prompt,
         )),
     );
-    next.insert("metadata".to_string(), VmValue::dict(metadata));
+    next.insert(
+        crate::value::intern_key("metadata"),
+        VmValue::dict(metadata),
+    );
 }
 
 fn transcript_with_session_metadata(transcript: VmValue, state: &SessionState) -> VmValue {
@@ -3261,33 +3264,42 @@ fn transcript_with_session_metadata(transcript: VmValue, state: &SessionState) -
     };
     if let Some(tool_format) = state.tool_format.as_ref() {
         metadata.put_str("tool_format", tool_format.clone());
-        metadata.insert("tool_mode_locked".to_string(), VmValue::Bool(true));
+        metadata.insert(
+            crate::value::intern_key("tool_mode_locked"),
+            VmValue::Bool(true),
+        );
     }
     if let Some(system_prompt) = state.system_prompt.as_ref() {
         metadata.insert(
-            "system_prompt".to_string(),
+            crate::value::intern_key("system_prompt"),
             crate::stdlib::json_to_vm_value(&crate::llm::helpers::system_prompt_metadata(
                 system_prompt,
             )),
         );
     }
     if let Some(actor_chain) = state.actor_chain.as_ref() {
-        metadata.insert("actor_chain".to_string(), actor_chain.to_vm_value());
+        metadata.insert(
+            crate::value::intern_key("actor_chain"),
+            actor_chain.to_vm_value(),
+        );
     } else {
         metadata.remove("actor_chain");
     }
     if let Some(anchor) = state.workspace_anchor.as_ref() {
         metadata.insert(
-            WORKSPACE_ANCHOR_METADATA_KEY.to_string(),
+            crate::value::intern_key(WORKSPACE_ANCHOR_METADATA_KEY),
             anchor.to_vm_value(),
         );
     } else {
         metadata.remove(WORKSPACE_ANCHOR_METADATA_KEY);
     }
     if let Some(scratchpad) = state.scratchpad.as_ref() {
-        metadata.insert("agent_scratchpad".to_string(), scratchpad.clone());
         metadata.insert(
-            "agent_scratchpad_version".to_string(),
+            crate::value::intern_key("agent_scratchpad"),
+            scratchpad.clone(),
+        );
+        metadata.insert(
+            crate::value::intern_key("agent_scratchpad_version"),
             VmValue::Int(state.scratchpad_version as i64),
         );
     } else {
@@ -3300,7 +3312,7 @@ fn transcript_with_session_metadata(transcript: VmValue, state: &SessionState) -
             state.transcript_budget_policy.max_approx_bytes.is_some(),
         );
         metadata.insert(
-            "transcript_budget".to_string(),
+            crate::value::intern_key("transcript_budget"),
             crate::stdlib::json_to_vm_value(&serde_json::json!({
                 "policy": transcript_budget_policy_json(&state.transcript_budget_policy.normalized()),
                 "usage": transcript_budget_usage_json(&usage),
@@ -3309,7 +3321,10 @@ fn transcript_with_session_metadata(transcript: VmValue, state: &SessionState) -
         );
     }
     if !metadata.is_empty() {
-        next.insert("metadata".to_string(), VmValue::dict(metadata));
+        next.insert(
+            crate::value::intern_key("metadata"),
+            VmValue::dict(metadata),
+        );
     }
     VmValue::dict(next)
 }
@@ -3327,10 +3342,10 @@ fn session_snapshot(state: &SessionState) -> VmValue {
             _ => None,
         })
         .unwrap_or(0);
-    next.insert("length".to_string(), VmValue::Int(length));
+    next.insert(crate::value::intern_key("length"), VmValue::Int(length));
     next.put_str("created_at", state.created_at.clone());
     next.insert(
-        "parent_id".to_string(),
+        crate::value::intern_key("parent_id"),
         state
             .parent_id
             .as_ref()
@@ -3338,7 +3353,7 @@ fn session_snapshot(state: &SessionState) -> VmValue {
             .unwrap_or(VmValue::Nil),
     );
     next.insert(
-        "child_ids".to_string(),
+        crate::value::intern_key("child_ids"),
         VmValue::List(std::sync::Arc::new(
             state
                 .child_ids
@@ -3349,14 +3364,14 @@ fn session_snapshot(state: &SessionState) -> VmValue {
         )),
     );
     next.insert(
-        "branched_at_event_index".to_string(),
+        crate::value::intern_key("branched_at_event_index"),
         state
             .branched_at_event_index
             .map(|index| VmValue::Int(index as i64))
             .unwrap_or(VmValue::Nil),
     );
     next.insert(
-        "system_prompt".to_string(),
+        crate::value::intern_key("system_prompt"),
         state
             .system_prompt
             .as_ref()
@@ -3364,7 +3379,7 @@ fn session_snapshot(state: &SessionState) -> VmValue {
             .unwrap_or(VmValue::Nil),
     );
     next.insert(
-        "tool_format".to_string(),
+        crate::value::intern_key("tool_format"),
         state
             .tool_format
             .as_ref()
@@ -3372,7 +3387,7 @@ fn session_snapshot(state: &SessionState) -> VmValue {
             .unwrap_or(VmValue::Nil),
     );
     next.insert(
-        "pinned_model".to_string(),
+        crate::value::intern_key("pinned_model"),
         state
             .pinned_model
             .as_ref()
@@ -3380,7 +3395,7 @@ fn session_snapshot(state: &SessionState) -> VmValue {
             .unwrap_or(VmValue::Nil),
     );
     next.insert(
-        "pinned_reasoning_policy".to_string(),
+        crate::value::intern_key("pinned_reasoning_policy"),
         state
             .pinned_reasoning_policy
             .as_ref()
@@ -3388,7 +3403,7 @@ fn session_snapshot(state: &SessionState) -> VmValue {
             .unwrap_or(VmValue::Nil),
     );
     next.insert(
-        "actor_chain".to_string(),
+        crate::value::intern_key("actor_chain"),
         state
             .actor_chain
             .as_ref()
@@ -3396,15 +3411,15 @@ fn session_snapshot(state: &SessionState) -> VmValue {
             .unwrap_or(VmValue::Nil),
     );
     next.insert(
-        "scratchpad".to_string(),
+        crate::value::intern_key("scratchpad"),
         state.scratchpad.clone().unwrap_or(VmValue::Nil),
     );
     next.insert(
-        "scratchpad_version".to_string(),
+        crate::value::intern_key("scratchpad_version"),
         VmValue::Int(state.scratchpad_version as i64),
     );
     next.insert(
-        "workspace_anchor".to_string(),
+        crate::value::intern_key("workspace_anchor"),
         state
             .workspace_anchor
             .as_ref()
@@ -3412,17 +3427,17 @@ fn session_snapshot(state: &SessionState) -> VmValue {
             .unwrap_or(VmValue::Nil),
     );
     next.insert(
-        "workspace_policy".to_string(),
+        crate::value::intern_key("workspace_policy"),
         state.workspace_policy.to_vm_value(),
     );
     next.insert(
-        "live_clients".to_string(),
+        crate::value::intern_key("live_clients"),
         crate::stdlib::json_to_vm_value(&serde_json::Value::Array(
             state.live_clients.values().map(live_client_json).collect(),
         )),
     );
     next.insert(
-        "live_controller_id".to_string(),
+        crate::value::intern_key("live_controller_id"),
         state
             .live_controller_id
             .as_ref()
@@ -3430,11 +3445,11 @@ fn session_snapshot(state: &SessionState) -> VmValue {
             .unwrap_or(VmValue::Nil),
     );
     next.insert(
-        "completed_turn_checkpoint_count".to_string(),
+        crate::value::intern_key("completed_turn_checkpoint_count"),
         VmValue::Int(state.completed_turn_checkpoints.len() as i64),
     );
     next.insert(
-        "redo_checkpoint_count".to_string(),
+        crate::value::intern_key("redo_checkpoint_count"),
         VmValue::Int(state.redo_stack.len() as i64),
     );
     VmValue::dict(next)

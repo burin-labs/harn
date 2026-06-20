@@ -10,7 +10,7 @@ fn dict(pairs: &[(&str, VmValue)]) -> VmValue {
     VmValue::dict(
         pairs
             .iter()
-            .map(|(key, value)| ((*key).to_string(), value.clone()))
+            .map(|(key, value)| (crate::value::intern_key(key), value.clone()))
             .collect::<crate::value::DictMap>(),
     )
 }
@@ -84,7 +84,7 @@ fn routing_record(replicas: usize, policy: ReadRoutingPolicy) -> Arc<PoolRecord>
 #[test]
 fn read_routing_policy_options_parse_named_modes() {
     let pool_options = crate::value::DictMap::from_iter([(
-        "read_routing_policy".to_string(),
+        crate::value::intern_key("read_routing_policy"),
         s("round_robin_replica"),
     )]);
     assert_eq!(
@@ -92,21 +92,26 @@ fn read_routing_policy_options_parse_named_modes() {
         ReadRoutingPolicy::RoundRobinReplica
     );
 
-    let query_options = crate::value::DictMap::from_iter([("route".to_string(), s("replica"))]);
+    let query_options =
+        crate::value::DictMap::from_iter([(crate::value::intern_key("route"), s("replica"))]);
     assert_eq!(
         routing_from_options(Some(&query_options)).unwrap(),
         QueryRouting::Policy(ReadRoutingPolicy::Replica)
     );
 
-    let read_only_options =
-        crate::value::DictMap::from_iter([("read_only".to_string(), VmValue::Bool(true))]);
+    let read_only_options = crate::value::DictMap::from_iter([(
+        crate::value::intern_key("read_only"),
+        VmValue::Bool(true),
+    )]);
     assert_eq!(
         routing_from_options(Some(&read_only_options)).unwrap(),
         QueryRouting::ReadOnly
     );
 
-    let bad_options =
-        crate::value::DictMap::from_iter([("routing_policy".to_string(), s("nearby"))]);
+    let bad_options = crate::value::DictMap::from_iter([(
+        crate::value::intern_key("routing_policy"),
+        s("nearby"),
+    )]);
     assert!(routing_from_options(Some(&bad_options)).is_err());
 }
 
@@ -282,9 +287,9 @@ async fn postgres_round_trip_when_env_url_is_set() {
     };
     reset_postgres_state();
     let mut options = crate::value::DictMap::new();
-    options.insert("max_connections".to_string(), VmValue::Int(1));
+    options.insert(crate::value::intern_key("max_connections"), VmValue::Int(1));
     options.insert(
-        "application_name".to_string(),
+        crate::value::intern_key("application_name"),
         s("harn-postgres-stdlib-test"),
     );
     let ctx = crate::vm::AsyncBuiltinCtx::for_test(crate::Vm::new());
@@ -324,8 +329,11 @@ async fn postgres_round_trip_when_env_url_is_set() {
 /// reuses the same physical connection (and prepared-statement cache).
 async fn open_single_conn_pool(url: &str) -> VmValue {
     let mut options = crate::value::DictMap::new();
-    options.insert("max_connections".to_string(), VmValue::Int(1));
-    options.insert("application_name".to_string(), s("harn-postgres-bind-test"));
+    options.insert(crate::value::intern_key("max_connections"), VmValue::Int(1));
+    options.insert(
+        crate::value::intern_key("application_name"),
+        s("harn-postgres-bind-test"),
+    );
     let ctx = crate::vm::AsyncBuiltinCtx::for_test(crate::Vm::new());
     open_pool(&ctx, &s(url), Some(&options), false)
         .await

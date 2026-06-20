@@ -79,7 +79,12 @@ fn sub_agent_spec_from_json(value: &serde_json::Value) -> Result<SubAgentRunSpec
         .map(|options| {
             options
                 .iter()
-                .map(|(key, value)| (key.clone(), crate::stdlib::json_to_vm_value(value)))
+                .map(|(key, value)| {
+                    (
+                        crate::value::intern_key(key),
+                        crate::stdlib::json_to_vm_value(value),
+                    )
+                })
                 .collect::<crate::value::DictMap>()
         })
         .unwrap_or_default();
@@ -148,7 +153,12 @@ fn worker_config_from_json(value: &serde_json::Value) -> Result<WorkerConfig, Vm
         .map(|object| {
             object
                 .iter()
-                .map(|(key, value)| (key.clone(), crate::stdlib::json_to_vm_value(value)))
+                .map(|(key, value)| {
+                    (
+                        crate::value::intern_key(key),
+                        crate::stdlib::json_to_vm_value(value),
+                    )
+                })
                 .collect::<crate::value::DictMap>()
         })
         .unwrap_or_default();
@@ -500,7 +510,7 @@ pub(in super::super) fn parse_worker_config(value: &VmValue) -> Result<WorkerIni
                 .and_then(|value| value.as_dict())
                 .cloned()
                 .unwrap_or_default();
-            raw_model_policy.insert("permissions".to_string(), permissions);
+            raw_model_policy.insert(crate::value::intern_key("permissions"), permissions);
             node.raw_model_policy = Some(VmValue::dict(raw_model_policy));
         }
         let artifacts = parse_artifact_list(artifacts_value)?;

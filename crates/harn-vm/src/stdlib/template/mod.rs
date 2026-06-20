@@ -255,7 +255,7 @@ fn augment_bindings_with_llm(
         return None;
     }
     let mut merged = bindings.cloned().unwrap_or_default();
-    merged.insert("llm".to_string(), ctx.to_vm_value());
+    merged.insert(crate::value::intern_key("llm"), ctx.to_vm_value());
     Some(merged)
 }
 

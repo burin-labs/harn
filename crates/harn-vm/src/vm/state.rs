@@ -466,7 +466,7 @@ impl Vm {
         };
         for (slot, info) in frame.local_slots.iter().zip(frame.chunk.local_slots.iter()) {
             if slot.initialized && info.scope_depth <= frame.local_scope_depth {
-                vars.insert(info.name.clone(), slot.value.clone());
+                vars.insert(crate::value::intern_key(&info.name), slot.value.clone());
             }
         }
         vars
@@ -851,7 +851,7 @@ impl Vm {
     /// Set a global constant (e.g. `pi`, `e`).
     /// Stored separately from the environment so user-defined variables can shadow them.
     pub fn set_global(&mut self, name: &str, value: VmValue) {
-        Arc::make_mut(&mut self.globals).insert(name.to_string(), value);
+        Arc::make_mut(&mut self.globals).insert(crate::value::intern_key(name), value);
     }
 
     /// Read a previously-installed global (the value `set_global` /

@@ -100,7 +100,7 @@ fn extract_meta(document: &Html) -> VmValue {
             .or_else(|| element.value().attr("charset"))
             .map(|key| key.trim().to_ascii_lowercase());
         if let Some(key) = key.filter(|key| !key.is_empty()) {
-            meta.insert(key, vm_str(value));
+            meta.insert(crate::value::intern_key(&key), vm_str(value));
         }
     }
     vm_dict(meta)
@@ -131,16 +131,22 @@ fn extract_links(document: &Html, base: Option<&Url>) -> VmValue {
             continue;
         };
         let mut row = crate::value::DictMap::new();
-        row.insert("href".to_string(), vm_str(href));
-        row.insert("url".to_string(), vm_str(resolve_url(base, href)));
-        row.insert("text".to_string(), vm_str(element_text(element)));
+        row.insert(crate::value::intern_key("href"), vm_str(href));
+        row.insert(
+            crate::value::intern_key("url"),
+            vm_str(resolve_url(base, href)),
+        );
+        row.insert(
+            crate::value::intern_key("text"),
+            vm_str(element_text(element)),
+        );
         if let Some(title) = element
             .value()
             .attr("title")
             .map(str::trim)
             .filter(|value| !value.is_empty())
         {
-            row.insert("title".to_string(), vm_str(title));
+            row.insert(crate::value::intern_key("title"), vm_str(title));
         }
         if let Some(rel) = element
             .value()
@@ -148,7 +154,7 @@ fn extract_links(document: &Html, base: Option<&Url>) -> VmValue {
             .map(str::trim)
             .filter(|value| !value.is_empty())
         {
-            row.insert("rel".to_string(), vm_str(rel));
+            row.insert(crate::value::intern_key("rel"), vm_str(rel));
         }
         links.push(vm_dict(row));
     }
@@ -196,7 +202,7 @@ fn extract_tables(document: &Html) -> VmValue {
             .next()
             .map(element_text)
             .unwrap_or_default();
-        rendered.insert("caption".to_string(), vm_str(caption));
+        rendered.insert(crate::value::intern_key("caption"), vm_str(caption));
 
         let mut headers: Vec<VmValue> = Vec::new();
         let mut rows: Vec<VmValue> = Vec::new();
@@ -224,8 +230,8 @@ fn extract_tables(document: &Html) -> VmValue {
                 rows.push(vm_list(cells));
             }
         }
-        rendered.insert("headers".to_string(), vm_list(headers));
-        rendered.insert("rows".to_string(), vm_list(rows));
+        rendered.insert(crate::value::intern_key("headers"), vm_list(headers));
+        rendered.insert(crate::value::intern_key("rows"), vm_list(rows));
         tables.push(vm_dict(rendered));
     }
     vm_list(tables)
@@ -244,16 +250,28 @@ fn extract_html(html: &str, source_url: Option<&str>) -> VmValue {
         .unwrap_or(VmValue::Nil);
 
     let mut out = crate::value::DictMap::new();
-    out.insert("title".to_string(), title);
-    out.insert("meta".to_string(), extract_meta(&document));
+    out.insert(crate::value::intern_key("title"), title);
+    out.insert(crate::value::intern_key("meta"), extract_meta(&document));
     out.insert(
-        "canonical_url".to_string(),
+        crate::value::intern_key("canonical_url"),
         extract_canonical(&document, base.as_ref()),
     );
-    out.insert("links".to_string(), extract_links(&document, base.as_ref()));
-    out.insert("tables".to_string(), extract_tables(&document));
-    out.insert("json_ld".to_string(), extract_json_ld(&document));
-    out.insert("text".to_string(), vm_str(html_text_without_scripts(html)));
+    out.insert(
+        crate::value::intern_key("links"),
+        extract_links(&document, base.as_ref()),
+    );
+    out.insert(
+        crate::value::intern_key("tables"),
+        extract_tables(&document),
+    );
+    out.insert(
+        crate::value::intern_key("json_ld"),
+        extract_json_ld(&document),
+    );
+    out.insert(
+        crate::value::intern_key("text"),
+        vm_str(html_text_without_scripts(html)),
+    );
     vm_dict(out)
 }
 

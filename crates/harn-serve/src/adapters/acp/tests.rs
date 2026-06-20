@@ -1416,7 +1416,7 @@ fn normalize_host_capabilities_derives_ops_from_operation_metadata() {
     let mut operations = BTreeMap::new();
     operations.insert(
         "get_default_shell".to_string(),
-        VmValue::dict(BTreeMap::new()),
+        VmValue::dict_map(Default::default()),
     );
     let mut process = BTreeMap::new();
     process.insert("operations".to_string(), VmValue::dict(operations));

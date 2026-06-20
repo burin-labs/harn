@@ -136,12 +136,12 @@ fn build_http_response(
     final_url: &str,
 ) -> VmValue {
     let mut result = crate::value::DictMap::new();
-    result.insert("status".to_string(), VmValue::Int(status));
-    result.insert("headers".to_string(), VmValue::dict(headers));
+    result.insert(crate::value::intern_key("status"), VmValue::Int(status));
+    result.insert(crate::value::intern_key("headers"), VmValue::dict(headers));
     result.put_str("body", body);
     result.put_str("final_url", final_url);
     result.insert(
-        "ok".to_string(),
+        crate::value::intern_key("ok"),
         VmValue::Bool((200..300).contains(&(status as u16))),
     );
     VmValue::dict(result)
@@ -153,14 +153,14 @@ fn build_http_download_response(
     bytes_written: u64,
 ) -> VmValue {
     let mut result = crate::value::DictMap::new();
-    result.insert("status".to_string(), VmValue::Int(status));
-    result.insert("headers".to_string(), VmValue::dict(headers));
+    result.insert(crate::value::intern_key("status"), VmValue::Int(status));
+    result.insert(crate::value::intern_key("headers"), VmValue::dict(headers));
     result.insert(
-        "bytes_written".to_string(),
+        crate::value::intern_key("bytes_written"),
         VmValue::Int(u64_to_vm_int(bytes_written)),
     );
     result.insert(
-        "ok".to_string(),
+        crate::value::intern_key("ok"),
         VmValue::Bool((200..300).contains(&(status as u16))),
     );
     VmValue::dict(result)
@@ -175,7 +175,7 @@ fn response_headers(headers: &reqwest::header::HeaderMap) -> crate::value::DictM
     for (name, value) in headers {
         if let Ok(v) = value.to_str() {
             resp_headers.insert(
-                name.as_str().to_string(),
+                crate::value::intern_key(name.as_str()),
                 VmValue::String(arcstr::ArcStr::from(v)),
             );
         }
@@ -831,7 +831,7 @@ pub(super) fn parse_http_request_parts(
                 .map_err(|e| vm_error(format!("http: invalid header value for '{k}': {e}")))?;
             header_map.insert(name, val);
             recorded_headers.insert(
-                k.to_ascii_lowercase(),
+                crate::value::intern_key(&k.to_ascii_lowercase()),
                 VmValue::String(arcstr::ArcStr::from(v.display())),
             );
         }
@@ -1574,10 +1574,16 @@ pub(super) fn vm_http_stream_info(stream_id: &str) -> Result<VmValue, VmError> {
             .get(stream_id)
             .ok_or_else(|| vm_error(format!("http_stream_info: unknown stream '{stream_id}'")))?;
         let mut dict = crate::value::DictMap::new();
-        dict.insert("status".to_string(), VmValue::Int(handle.status));
-        dict.insert("headers".to_string(), VmValue::dict(handle.headers.clone()));
         dict.insert(
-            "ok".to_string(),
+            crate::value::intern_key("status"),
+            VmValue::Int(handle.status),
+        );
+        dict.insert(
+            crate::value::intern_key("headers"),
+            VmValue::dict(handle.headers.clone()),
+        );
+        dict.insert(
+            crate::value::intern_key("ok"),
             VmValue::Bool((200..300).contains(&(handle.status as u16))),
         );
         Ok(VmValue::dict(dict))
@@ -1733,18 +1739,18 @@ mod tests {
     fn proxy_options(password: &str) -> crate::value::DictMap {
         crate::value::DictMap::from_iter([
             (
-                "proxy".to_string(),
+                crate::value::intern_key("proxy"),
                 VmValue::String(arcstr::ArcStr::from("http://proxy.local:8080")),
             ),
             (
-                "proxy_auth".to_string(),
+                crate::value::intern_key("proxy_auth"),
                 VmValue::dict(crate::value::DictMap::from_iter([
                     (
-                        "user".to_string(),
+                        crate::value::intern_key("user"),
                         VmValue::String(arcstr::ArcStr::from("alice")),
                     ),
                     (
-                        "pass".to_string(),
+                        crate::value::intern_key("pass"),
                         VmValue::String(arcstr::ArcStr::from(password)),
                     ),
                 ])),

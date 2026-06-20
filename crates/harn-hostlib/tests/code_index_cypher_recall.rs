@@ -21,7 +21,7 @@ fn fixture_root() -> PathBuf {
 fn dict(entries: &[(&str, VmValue)]) -> VmValue {
     let mut map: harn_vm::value::DictMap = Default::default();
     for (k, v) in entries {
-        map.insert((*k).to_string(), v.clone());
+        map.insert(harn_vm::value::intern_key(k), v.clone());
     }
     VmValue::dict(map)
 }

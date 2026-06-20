@@ -193,7 +193,7 @@ fn matches_type_with_generics(
         // a closed shape; the row tail just means "and possibly more fields,"
         // which any dict already satisfies — so no extra runtime constraint.
         TypeExpr::Shape(fields) | TypeExpr::OpenShape { fields, .. } => match value {
-            VmValue::Dict(map) => fields.iter().all(|f| match map.get(&f.name) {
+            VmValue::Dict(map) => fields.iter().all(|f| match map.get(f.name.as_str()) {
                 // Optional fields treat an explicit `nil` value the same as
                 // "field missing" so callers can write `{flag: nil}` to mean
                 // "default" without having to omit the key entirely.
@@ -573,7 +573,7 @@ mod tests {
         good.insert("x".to_string(), vm_int(7));
         assert!(matches_type(&VmValue::dict(good), &shape));
         assert!(!matches_type(
-            &VmValue::dict(std::collections::BTreeMap::new()),
+            &VmValue::dict_map(Default::default()),
             &shape
         ));
     }

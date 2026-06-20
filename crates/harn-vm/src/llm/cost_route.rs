@@ -35,7 +35,7 @@ fn route_policy_dict(
         dict.put_str("target", target);
     }
     if let Some(prefer) = prefer {
-        dict.insert("prefer".to_string(), prefer);
+        dict.insert(crate::value::intern_key("prefer"), prefer);
     }
     if let Some(strategy) = strategy {
         dict.put_str("strategy", strategy);
@@ -52,12 +52,12 @@ fn merge_budget_aliases(options: &mut crate::value::DictMap) {
         _ => crate::value::DictMap::new(),
     };
     budget
-        .entry("max_cost_usd".to_string())
+        .entry(crate::value::intern_key("max_cost_usd"))
         .or_insert(budget_usd.clone());
     options
-        .entry("max_cost_usd".to_string())
+        .entry(crate::value::intern_key("max_cost_usd"))
         .or_insert(budget_usd);
-    options.insert("budget".to_string(), VmValue::dict(budget));
+    options.insert(crate::value::intern_key("budget"), VmValue::dict(budget));
 }
 
 fn normalize_config(mut config: crate::value::DictMap) -> crate::value::DictMap {
@@ -69,7 +69,7 @@ fn normalize_config(mut config: crate::value::DictMap) -> crate::value::DictMap 
     if let Some(prefer) = config.get("prefer").cloned() {
         let strategy = strategy_text(&config).unwrap_or_else(|| "prefer_order".to_string());
         config.insert(
-            "route_policy".to_string(),
+            crate::value::intern_key("route_policy"),
             route_policy_dict("preference_list", None, Some(prefer), Some(strategy)),
         );
         return config;
@@ -84,7 +84,7 @@ fn normalize_config(mut config: crate::value::DictMap) -> crate::value::DictMap 
         };
         if let Some(mode) = mode {
             config.insert(
-                "route_policy".to_string(),
+                crate::value::intern_key("route_policy"),
                 route_policy_dict(mode, Some(quality_text(&config)), None, None),
             );
         }
@@ -98,7 +98,7 @@ fn merge_budget(inherited: Option<&VmValue>, explicit: Option<&VmValue>) -> Opti
         Some(VmValue::Dict(dict)) => dict.as_ref().clone(),
         Some(value) => {
             let mut dict = crate::value::DictMap::new();
-            dict.insert("max_cost_usd".to_string(), value.clone());
+            dict.insert(crate::value::intern_key("max_cost_usd"), value.clone());
             dict
         }
         None => crate::value::DictMap::new(),
@@ -108,7 +108,7 @@ fn merge_budget(inherited: Option<&VmValue>, explicit: Option<&VmValue>) -> Opti
             merged.insert(key.clone(), value.clone());
         }
     } else if let Some(value) = explicit {
-        merged.insert("max_cost_usd".to_string(), value.clone());
+        merged.insert(crate::value::intern_key("max_cost_usd"), value.clone());
     }
     (!merged.is_empty()).then(|| VmValue::dict(merged))
 }
@@ -139,7 +139,7 @@ pub(crate) fn merge_context_options(
             merged.insert(key, value);
         }
         if let Some(budget) = budget {
-            merged.insert("budget".to_string(), budget);
+            merged.insert(crate::value::intern_key("budget"), budget);
         }
     }
     Some(merged)

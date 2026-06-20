@@ -924,7 +924,7 @@ pub(super) fn run_cypher(index: &SharedIndex, args: &[VmValue]) -> Result<VmValu
         .map(|row| {
             let mut map: harn_vm::value::DictMap = harn_vm::value::DictMap::new();
             for (k, v) in row {
-                map.insert(k, v.to_vm());
+                map.insert(harn_vm::value::intern_key(&k), v.to_vm());
             }
             VmValue::dict(map)
         })
@@ -1316,15 +1316,15 @@ fn hit_to_value(hit: Hit) -> VmValue {
 
 fn import_entry(module: &str, resolved: Option<&str>, kind: &str) -> VmValue {
     let mut map: harn_vm::value::DictMap = harn_vm::value::DictMap::new();
-    map.insert("module".into(), str_value(module));
+    map.insert(harn_vm::value::intern_key("module"), str_value(module));
     map.insert(
-        "resolved_path".into(),
+        harn_vm::value::intern_key("resolved_path"),
         match resolved {
             Some(p) => str_value(p),
             None => VmValue::Nil,
         },
     );
-    map.insert("kind".into(), str_value(kind));
+    map.insert(harn_vm::value::intern_key("kind"), str_value(kind));
     VmValue::dict(map)
 }
 

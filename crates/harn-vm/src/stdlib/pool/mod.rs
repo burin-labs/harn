@@ -903,40 +903,52 @@ fn pool_snapshot_value(pool: &PoolEntry) -> VmValue {
     snapshot.put_str("id", pool.id.as_str());
     snapshot.put_str("name", pool.name.as_str());
     snapshot.insert(
-        "max_concurrent".to_string(),
+        crate::value::intern_key("max_concurrent"),
         VmValue::Int(pool.max_concurrent as i64),
     );
     snapshot.put_str("created_at", pool.created_at.as_str());
-    snapshot.insert("active".to_string(), VmValue::Int(active));
-    snapshot.insert("queued".to_string(), VmValue::Int(queued));
-    snapshot.insert("completed".to_string(), VmValue::Int(completed));
-    snapshot.insert("failed".to_string(), VmValue::Int(failed));
-    snapshot.insert("rejected".to_string(), VmValue::Int(rejected));
-    snapshot.insert("total".to_string(), VmValue::Int(pool.tasks.len() as i64));
+    snapshot.insert(crate::value::intern_key("active"), VmValue::Int(active));
+    snapshot.insert(crate::value::intern_key("queued"), VmValue::Int(queued));
+    snapshot.insert(
+        crate::value::intern_key("completed"),
+        VmValue::Int(completed),
+    );
+    snapshot.insert(crate::value::intern_key("failed"), VmValue::Int(failed));
+    snapshot.insert(crate::value::intern_key("rejected"), VmValue::Int(rejected));
+    snapshot.insert(
+        crate::value::intern_key("total"),
+        VmValue::Int(pool.tasks.len() as i64),
+    );
     snapshot.put_str("queue_strategy", pool.queue_strategy.name());
     snapshot.insert(
-        "backpressure".to_string(),
+        crate::value::intern_key("backpressure"),
         backpressure_snapshot_value(&pool.backpressure),
     );
     snapshot.insert(
-        "blocked_submitters".to_string(),
+        crate::value::intern_key("blocked_submitters"),
         VmValue::Int(pool.space_waiters.len() as i64),
     );
     snapshot.insert(
-        "tasks".to_string(),
+        crate::value::intern_key("tasks"),
         VmValue::List(std::sync::Arc::new(tasks)),
     );
     snapshot.put_str("scope", pool.scope.as_str());
     if !pool.scope_id.is_empty() {
         snapshot.put_str("scope_id", pool.scope_id.as_str());
     }
-    snapshot.insert("durable".to_string(), VmValue::Bool(pool.store.is_some()));
     snapshot.insert(
-        "stale_after_ms".to_string(),
+        crate::value::intern_key("durable"),
+        VmValue::Bool(pool.store.is_some()),
+    );
+    snapshot.insert(
+        crate::value::intern_key("stale_after_ms"),
         VmValue::Int(pool.stale_after_ms),
     );
     if !pool.config.is_empty() {
-        snapshot.insert("config".to_string(), VmValue::dict(pool.config.clone()));
+        snapshot.insert(
+            crate::value::intern_key("config"),
+            VmValue::dict(pool.config.clone()),
+        );
     }
     VmValue::dict(snapshot)
 }
@@ -946,7 +958,10 @@ fn backpressure_snapshot_value(backpressure: &BackpressureStrategy) -> VmValue {
     value.put_str("_type", "backpressure");
     value.put_str("kind", backpressure.name());
     if let Some(max_depth) = backpressure.max_depth() {
-        value.insert("max_depth".to_string(), VmValue::Int(max_depth as i64));
+        value.insert(
+            crate::value::intern_key("max_depth"),
+            VmValue::Int(max_depth as i64),
+        );
     }
     if let BackpressureStrategy::Queue { on_full, .. } = backpressure {
         value.put_str("on_full", on_full.as_str());
@@ -971,13 +986,16 @@ fn task_snapshot_value(task: &TaskState) -> VmValue {
     entry.put_str("pool_id", task.pool_id.as_str());
     entry.put_str("pool", task.pool_name.as_str());
     entry.put_str("status", task.status.as_str());
-    entry.insert("priority".to_string(), VmValue::Int(task.priority));
+    entry.insert(
+        crate::value::intern_key("priority"),
+        VmValue::Int(task.priority),
+    );
     entry.put_str("submitted_at", task.submitted_at.as_str());
     entry.put_opt_str("key", task.key.as_deref());
     entry.put_opt_str("started_at", task.started_at.as_deref());
     entry.put_opt_str("finished_at", task.finished_at.as_deref());
     if let Some(result) = &task.result {
-        entry.insert("result".to_string(), result.clone());
+        entry.insert(crate::value::intern_key("result"), result.clone());
     }
     entry.put_opt_str("error", task.error.as_deref());
     entry.put_opt_str("rejection_reason", task.rejection_reason.as_deref());
@@ -1004,7 +1022,7 @@ fn ordered_pool_config(opts: &crate::value::DictMap) -> crate::value::DictMap {
     let mut config = crate::value::DictMap::new();
     for key in ["queue", "backpressure", "priority"] {
         if let Some(value) = opts.get(key) {
-            config.insert(key.to_string(), value.clone());
+            config.insert(crate::value::intern_key(key), value.clone());
         }
     }
     config

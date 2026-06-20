@@ -61,15 +61,15 @@ async fn self_certainty_builtin(
     }
 
     let mut call_options = options;
-    call_options.insert("logprobs".to_string(), VmValue::Bool(true));
+    call_options.insert(crate::value::intern_key("logprobs"), VmValue::Bool(true));
     call_options
-        .entry("stream".to_string())
+        .entry(crate::value::intern_key("stream"))
         .or_insert(VmValue::Bool(false));
     call_options
-        .entry("temperature".to_string())
+        .entry(crate::value::intern_key("temperature"))
         .or_insert(VmValue::Float(0.0));
     call_options
-        .entry("max_tokens".to_string())
+        .entry(crate::value::intern_key("max_tokens"))
         .or_insert(VmValue::Int(estimate_echo_tokens(&text)));
 
     let prompt = format!("{SELF_CERTAINTY_PROMPT_PREFIX}{text}{SELF_CERTAINTY_PROMPT_SUFFIX}");
@@ -101,7 +101,7 @@ fn vm_logprobs(value: &VmValue) -> Result<Vec<serde_json::Value>, VmError> {
             }
             Ok(vec![serde_json::Value::Object(
                 dict.iter()
-                    .map(|(key, value)| (key.clone(), super::helpers::vm_value_to_json(value)))
+                    .map(|(key, value)| (key.to_string(), super::helpers::vm_value_to_json(value)))
                     .collect(),
             )])
         }

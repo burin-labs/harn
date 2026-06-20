@@ -399,8 +399,11 @@ fn open_db(path: &str, options: Option<&crate::value::DictMap>) -> Result<VmValu
     configure_connection(&conn, options, read_only)?;
     let id = next_id("sqlitedb");
     let mut meta = crate::value::DictMap::new();
-    meta.insert("read_only".to_string(), VmValue::Bool(read_only));
-    meta.insert("memory".to_string(), VmValue::Bool(is_memory));
+    meta.insert(
+        crate::value::intern_key("read_only"),
+        VmValue::Bool(read_only),
+    );
+    meta.insert(crate::value::intern_key("memory"), VmValue::Bool(is_memory));
     if let Some(path) = &stored_path {
         meta.put_str("path", path.to_string_lossy());
     }
@@ -645,13 +648,16 @@ async fn migrate(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     }
 
     let mut response = crate::value::DictMap::new();
-    response.insert("applied".to_string(), string_list(applied_now));
-    response.insert("skipped".to_string(), string_list(skipped));
     response.insert(
-        "available".to_string(),
+        crate::value::intern_key("applied"),
+        string_list(applied_now),
+    );
+    response.insert(crate::value::intern_key("skipped"), string_list(skipped));
+    response.insert(
+        crate::value::intern_key("available"),
         string_list(entries.iter().map(|entry| entry.name.clone()).collect()),
     );
-    response.insert("dry_run".to_string(), VmValue::Bool(dry_run));
+    response.insert(crate::value::intern_key("dry_run"), VmValue::Bool(dry_run));
     response.put_str("table", table);
     Ok(VmValue::dict(response))
 }
@@ -805,7 +811,7 @@ fn row_to_value(
             }
             ValueRef::Blob(bytes) => VmValue::Bytes(Arc::new(bytes.to_vec())),
         };
-        map.insert(name.clone(), value);
+        map.insert(crate::value::intern_key(name), value);
     }
     Ok(VmValue::dict(map))
 }
@@ -909,7 +915,7 @@ fn mock_query(
 
 fn execute_result_value(rows_affected: u64) -> VmValue {
     VmValue::dict(crate::value::DictMap::from_iter([(
-        "rows_affected".to_string(),
+        crate::value::intern_key("rows_affected"),
         VmValue::Int(rows_affected as i64),
     )]))
 }
@@ -1141,7 +1147,7 @@ mod tests {
         VmValue::dict(
             pairs
                 .iter()
-                .map(|(key, value)| ((*key).to_string(), value.clone()))
+                .map(|(key, value)| (crate::value::intern_key(key), value.clone()))
                 .collect::<crate::value::DictMap>(),
         )
     }

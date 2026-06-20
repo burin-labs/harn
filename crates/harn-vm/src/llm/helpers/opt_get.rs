@@ -38,7 +38,7 @@ mod tests {
     #[test]
     fn opt_str_treats_nil_as_unset() {
         let mut options = crate::value::DictMap::new();
-        options.insert("path".to_string(), VmValue::Nil);
+        options.insert(crate::value::intern_key("path"), VmValue::Nil);
 
         assert_eq!(opt_str(&Some(options), "path"), None);
     }

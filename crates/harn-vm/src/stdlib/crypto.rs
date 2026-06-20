@@ -340,7 +340,7 @@ fn claims_arg<'a>(
         &options.expires_param,
         &options.kid_param,
     ] {
-        if dict.contains_key(reserved) {
+        if dict.contains_key(reserved.as_str()) {
             return Err(signed_url_error(format!(
                 "claims cannot contain reserved parameter `{reserved}`"
             )));
@@ -368,7 +368,7 @@ fn signed_url_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
             && key != &options.kid_param
     });
     for (key, value) in claims.iter() {
-        parts.query_pairs.push((key.clone(), value.display()));
+        parts.query_pairs.push((key.to_string(), value.display()));
     }
     parts
         .query_pairs
@@ -401,23 +401,23 @@ fn verification_result(
     claims: crate::value::DictMap,
 ) -> VmValue {
     let mut result = crate::value::DictMap::new();
-    result.insert("valid".to_string(), VmValue::Bool(valid));
+    result.insert(crate::value::intern_key("valid"), VmValue::Bool(valid));
     result.put_str("reason", reason);
     result.insert(
-        "signature_valid".to_string(),
+        crate::value::intern_key("signature_valid"),
         VmValue::Bool(signature_valid),
     );
-    result.insert("expired".to_string(), VmValue::Bool(expired));
+    result.insert(crate::value::intern_key("expired"), VmValue::Bool(expired));
     result.insert(
-        "expires_at".to_string(),
+        crate::value::intern_key("expires_at"),
         expires_at.map(VmValue::Int).unwrap_or(VmValue::Nil),
     );
     result.insert(
-        "kid".to_string(),
+        crate::value::intern_key("kid"),
         kid.map(|kid| VmValue::String(arcstr::ArcStr::from(kid)))
             .unwrap_or(VmValue::Nil),
     );
-    result.insert("claims".to_string(), VmValue::dict(claims));
+    result.insert(crate::value::intern_key("claims"), VmValue::dict(claims));
     VmValue::dict(result)
 }
 
@@ -543,7 +543,7 @@ fn verify_signed_url_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
             && key != &options.kid_param
         {
             claims.insert(
-                key.clone(),
+                crate::value::intern_key(key),
                 VmValue::String(arcstr::ArcStr::from(value.as_str())),
             );
         }
@@ -628,7 +628,7 @@ fn aws_sigv4_headers_arg(
         None | Some(VmValue::Nil) => Ok(std::collections::BTreeMap::new()),
         Some(VmValue::Dict(headers)) => Ok(headers
             .iter()
-            .map(|(key, value)| (key.clone(), value.display()))
+            .map(|(key, value)| (key.to_string(), value.display()))
             .collect()),
         Some(value) => Err(aws_sigv4_error(format!(
             "headers must be a dict when provided, got {}",
@@ -1343,8 +1343,8 @@ fn jwt_verify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     })?;
     let claims_value = crate::schema::json_to_vm_value(&decoded.claims);
     let mut dict = crate::value::DictMap::new();
-    dict.insert("valid".to_string(), VmValue::Bool(true));
-    dict.insert("claims".to_string(), claims_value);
+    dict.insert(crate::value::intern_key("valid"), VmValue::Bool(true));
+    dict.insert(crate::value::intern_key("claims"), claims_value);
     Ok(VmValue::dict(dict))
 }
 
@@ -1423,9 +1423,9 @@ C/edCMRM78P8eQTBCDUTK1ywSYaszvQZvneiW6gNtWEJndSreEcyyUdVvg==\n\
 
     fn jwt_claims() -> VmValue {
         VmValue::dict(crate::value::DictMap::from_iter([
-            ("exp".to_string(), VmValue::Int(4_102_444_800)),
-            ("iat".to_string(), VmValue::Int(1_700_000_000)),
-            ("iss".to_string(), s("12345")),
+            (crate::value::intern_key("exp"), VmValue::Int(4_102_444_800)),
+            (crate::value::intern_key("iat"), VmValue::Int(1_700_000_000)),
+            (crate::value::intern_key("iss"), s("12345")),
         ]))
     }
 
@@ -1433,7 +1433,7 @@ C/edCMRM78P8eQTBCDUTK1ywSYaszvQZvneiW6gNtWEJndSreEcyyUdVvg==\n\
         VmValue::dict(
             items
                 .iter()
-                .map(|(key, value)| (key.to_string(), value.clone()))
+                .map(|(key, value)| (crate::value::intern_key(key), value.clone()))
                 .collect::<crate::value::DictMap>(),
         )
     }

@@ -122,9 +122,12 @@ async fn project_enrich_impl(
         + estimate_tokens(&canonical_json(&vm_value_to_json(&options.schema)));
     if estimated_input_tokens > options.budget_tokens {
         let mut budget_result = (*base_dict).clone();
-        budget_result.insert("budget_exceeded".to_string(), VmValue::Bool(true));
         budget_result.insert(
-            "_provenance".to_string(),
+            crate::value::intern_key("budget_exceeded"),
+            VmValue::Bool(true),
+        );
+        budget_result.insert(
+            crate::value::intern_key("_provenance"),
             provenance_value(None, estimated_input_tokens, 0, false),
         );
         return Ok(VmValue::dict(budget_result));
@@ -455,7 +458,7 @@ fn augment_project_evidence(
     let mut merged = (*dict).clone();
     if include_operator_meta {
         merged.insert(
-            "ci".to_string(),
+            crate::value::intern_key("ci"),
             ci_evidence_value(collect_ci_evidence(root)),
         );
     }
@@ -1486,20 +1489,26 @@ fn enrichment_bindings(
 ) -> crate::value::DictMap {
     let mut bindings = crate::value::DictMap::new();
     bindings.put_str("path", root.to_string_lossy());
-    bindings.insert("base_evidence".to_string(), base_evidence.clone());
-    bindings.insert("evidence".to_string(), base_evidence.clone());
+    bindings.insert(
+        crate::value::intern_key("base_evidence"),
+        base_evidence.clone(),
+    );
+    bindings.insert(crate::value::intern_key("evidence"), base_evidence.clone());
     let file_values = files
         .iter()
         .map(|file| {
             let mut value = crate::value::DictMap::new();
             value.put_str("path", file.rel_path.clone());
             value.put_str("content", file.content.clone());
-            value.insert("truncated".to_string(), VmValue::Bool(file.truncated));
+            value.insert(
+                crate::value::intern_key("truncated"),
+                VmValue::Bool(file.truncated),
+            );
             VmValue::dict(value)
         })
         .collect::<Vec<_>>();
     bindings.insert(
-        "files".to_string(),
+        crate::value::intern_key("files"),
         VmValue::List(std::sync::Arc::new(file_values)),
     );
     if let Some(dict) = base_evidence.as_dict() {
@@ -1515,17 +1524,23 @@ fn llm_options_value(options: &ProjectEnrichOptions, rendered_prompt: &str) -> V
     llm_options.put_str("provider", options.provider.clone());
     llm_options.put_str("model", options.model.clone());
     if let Some(temperature) = options.temperature {
-        llm_options.insert("temperature".to_string(), VmValue::Float(temperature));
+        llm_options.insert(
+            crate::value::intern_key("temperature"),
+            VmValue::Float(temperature),
+        );
     }
-    llm_options.insert("output_schema".to_string(), options.schema.clone());
+    llm_options.insert(
+        crate::value::intern_key("output_schema"),
+        options.schema.clone(),
+    );
     llm_options.put_str("output_validation", "error");
     llm_options.insert(
-        "schema_retries".to_string(),
+        crate::value::intern_key("schema_retries"),
         VmValue::Int(options.schema_retries as i64),
     );
     llm_options.put_str("response_format", "json");
     llm_options.insert(
-        "messages".to_string(),
+        crate::value::intern_key("messages"),
         VmValue::List(std::sync::Arc::new(vec![json_to_vm_value(
             &serde_json::json!({
                 "role": "user",
@@ -1544,10 +1559,13 @@ fn validation_envelope(
     output_tokens: i64,
 ) -> VmValue {
     let mut dict = crate::value::DictMap::new();
-    dict.insert("base_evidence".to_string(), base_evidence.clone());
+    dict.insert(
+        crate::value::intern_key("base_evidence"),
+        base_evidence.clone(),
+    );
     dict.put_str("validation_error", message);
     dict.insert(
-        "_provenance".to_string(),
+        crate::value::intern_key("_provenance"),
         provenance_value(model, input_tokens, output_tokens, false),
     );
     VmValue::dict(dict)
@@ -1564,16 +1582,16 @@ fn attach_provenance(
         VmValue::Dict(dict) => {
             let mut merged = (*dict).clone();
             merged.insert(
-                "_provenance".to_string(),
+                crate::value::intern_key("_provenance"),
                 provenance_value(model, input_tokens, output_tokens, cached),
             );
             VmValue::dict(merged)
         }
         other => {
             let mut wrapped = crate::value::DictMap::new();
-            wrapped.insert("data".to_string(), other);
+            wrapped.insert(crate::value::intern_key("data"), other);
             wrapped.insert(
-                "_provenance".to_string(),
+                crate::value::intern_key("_provenance"),
                 provenance_value(model, input_tokens, output_tokens, cached),
             );
             VmValue::dict(wrapped)
@@ -1591,12 +1609,12 @@ fn attach_ci_metadata(value: VmValue, base_evidence: &VmValue) -> VmValue {
     };
     let Some(dict) = value.as_dict() else {
         let mut wrapped = crate::value::DictMap::new();
-        wrapped.insert("data".to_string(), value);
-        wrapped.insert("ci".to_string(), ci_value);
+        wrapped.insert(crate::value::intern_key("data"), value);
+        wrapped.insert(crate::value::intern_key("ci"), ci_value);
         return VmValue::dict(wrapped);
     };
     let mut merged = (*dict).clone();
-    merged.insert("ci".to_string(), ci_value);
+    merged.insert(crate::value::intern_key("ci"), ci_value);
     VmValue::dict(merged)
 }
 
@@ -1607,18 +1625,18 @@ fn provenance_value(
     cached: bool,
 ) -> VmValue {
     let mut tokens = crate::value::DictMap::new();
-    tokens.insert("in".to_string(), VmValue::Int(input_tokens));
-    tokens.insert("out".to_string(), VmValue::Int(output_tokens));
+    tokens.insert(crate::value::intern_key("in"), VmValue::Int(input_tokens));
+    tokens.insert(crate::value::intern_key("out"), VmValue::Int(output_tokens));
 
     let mut provenance = crate::value::DictMap::new();
     provenance.insert(
-        "model".to_string(),
+        crate::value::intern_key("model"),
         model
             .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
             .unwrap_or(VmValue::Nil),
     );
-    provenance.insert("tokens".to_string(), VmValue::dict(tokens));
-    provenance.insert("cached".to_string(), VmValue::Bool(cached));
+    provenance.insert(crate::value::intern_key("tokens"), VmValue::dict(tokens));
+    provenance.insert(crate::value::intern_key("cached"), VmValue::Bool(cached));
     VmValue::dict(provenance)
 }
 
@@ -1632,8 +1650,11 @@ fn result_with_cached_flag(value: VmValue, cached: bool) -> VmValue {
         .and_then(VmValue::as_dict)
         .map(|value| (*value).clone())
         .unwrap_or_default();
-    provenance.insert("cached".to_string(), VmValue::Bool(cached));
-    merged.insert("_provenance".to_string(), VmValue::dict(provenance));
+    provenance.insert(crate::value::intern_key("cached"), VmValue::Bool(cached));
+    merged.insert(
+        crate::value::intern_key("_provenance"),
+        VmValue::dict(provenance),
+    );
     VmValue::dict(merged)
 }
 
@@ -2116,19 +2137,19 @@ jobs:
 
         let base = VmValue::dict(crate::value::DictMap::from_iter([
             (
-                "languages".to_string(),
+                crate::value::intern_key("languages"),
                 VmValue::List(std::sync::Arc::new(vec![VmValue::String(
                     arcstr::ArcStr::from("rust"),
                 )])),
             ),
             (
-                "anchors".to_string(),
+                crate::value::intern_key("anchors"),
                 VmValue::List(std::sync::Arc::new(vec![VmValue::String(
                     arcstr::ArcStr::from("Cargo.toml"),
                 )])),
             ),
             (
-                "lockfiles".to_string(),
+                crate::value::intern_key("lockfiles"),
                 VmValue::List(std::sync::Arc::new(vec![VmValue::String(
                     arcstr::ArcStr::from("Cargo.lock"),
                 )])),
@@ -2147,18 +2168,18 @@ jobs:
     #[test]
     fn attach_ci_metadata_merges_ci_block_into_result() {
         let base = VmValue::dict(crate::value::DictMap::from_iter([(
-            "ci".to_string(),
+            crate::value::intern_key("ci"),
             VmValue::dict(crate::value::DictMap::from_iter([(
-                "merge_policy".to_string(),
+                crate::value::intern_key("merge_policy"),
                 VmValue::dict(crate::value::DictMap::from_iter([(
-                    "squash_only".to_string(),
+                    crate::value::intern_key("squash_only"),
                     VmValue::Bool(true),
                 )])),
             )])),
         )]));
         let result = attach_ci_metadata(
             VmValue::dict(crate::value::DictMap::from_iter([(
-                "summary".to_string(),
+                crate::value::intern_key("summary"),
                 VmValue::String(arcstr::ArcStr::from("ok")),
             )])),
             &base,

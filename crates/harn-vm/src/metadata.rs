@@ -844,7 +844,7 @@ fn metadata_set_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     let mut data = BTreeMap::new();
     if let VmValue::Dict(dict) = &data_val {
         for (k, v) in dict.iter() {
-            data.insert(k.clone(), vm_to_json(v));
+            data.insert(k.to_string(), vm_to_json(v));
         }
     }
 
@@ -1132,7 +1132,7 @@ fn path_metadata_set_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
     let mut data = BTreeMap::new();
     if let VmValue::Dict(dict) = &data_val {
         for (k, v) in dict.iter() {
-            data.insert(k.clone(), vm_to_json(v));
+            data.insert(k.to_string(), vm_to_json(v));
         }
     }
     if data.is_empty() {

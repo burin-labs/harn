@@ -470,7 +470,7 @@ fn json_dict_field(
     };
     Ok(entries
         .iter()
-        .map(|(key, value)| (key.clone(), vm_value_to_json(value)))
+        .map(|(key, value)| (key.to_string(), vm_value_to_json(value)))
         .collect())
 }
 

@@ -213,7 +213,10 @@ impl FilePrompt {
 
         let mut bindings = harn_vm::value::DictMap::new();
         for (key, value) in object {
-            bindings.insert(key.clone(), harn_vm::json_to_vm_value(value));
+            bindings.insert(
+                harn_vm::value::intern_key(key),
+                harn_vm::json_to_vm_value(value),
+            );
         }
 
         let rendered = harn_vm::stdlib::template::render_template_to_string(

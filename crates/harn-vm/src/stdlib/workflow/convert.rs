@@ -31,17 +31,17 @@ pub(in crate::stdlib) fn workflow_graph_to_vm(graph: &WorkflowGraph) -> Result<V
         let Some(raw_tools) = node.raw_tools.clone() else {
             continue;
         };
-        let Some(node_value) = nodes.get(node_id).cloned() else {
+        let Some(node_value) = nodes.get(node_id.as_str()).cloned() else {
             continue;
         };
         let VmValue::Dict(node_dict) = node_value else {
             continue;
         };
         let mut node_map = (*node_dict).clone();
-        node_map.insert("tools".to_string(), raw_tools);
-        nodes.insert(node_id.clone(), VmValue::dict(node_map));
+        node_map.insert(crate::value::intern_key("tools"), raw_tools);
+        nodes.insert(crate::value::intern_key(node_id), VmValue::dict(node_map));
     }
-    graph_dict.insert("nodes".to_string(), VmValue::dict(nodes));
+    graph_dict.insert(crate::value::intern_key("nodes"), VmValue::dict(nodes));
     Ok(VmValue::dict(graph_dict))
 }
 
@@ -117,7 +117,7 @@ pub(super) fn filter_workflow_tools_vm(tools: &VmValue, allowed: &[String]) -> V
                 .get("tools")
                 .map(|value| filter_workflow_tools_vm(value, allowed))
                 .unwrap_or_else(|| VmValue::List(std::sync::Arc::new(Vec::new())));
-            filtered.insert("tools".to_string(), tool_items);
+            filtered.insert(crate::value::intern_key("tools"), tool_items);
             VmValue::dict(filtered)
         }
         VmValue::Dict(map) => {

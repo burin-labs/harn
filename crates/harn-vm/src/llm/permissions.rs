@@ -252,7 +252,7 @@ fn parse_rule_set(value: Option<&VmValue>, label: &str) -> Result<Vec<Permission
                     continue;
                 }
                 rules.push(PermissionRule {
-                    tool_pattern: tool_pattern.clone(),
+                    tool_pattern: tool_pattern.to_string(),
                     matcher: parse_matcher(matcher, &format!("{label}.{tool_pattern}"))?,
                 });
             }

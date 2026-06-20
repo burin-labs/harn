@@ -337,7 +337,7 @@ pub fn deliver_reply(pending: &PendingMap, request_seq: i64, reply: DapHostCallR
 fn vm_dict_to_json(params: &harn_vm::value::DictMap) -> Value {
     let mut map = serde_json::Map::with_capacity(params.len());
     for (k, v) in params.iter() {
-        map.insert(k.clone(), vm_value_to_json(v));
+        map.insert(k.to_string(), vm_value_to_json(v));
     }
     Value::Object(map)
 }
@@ -355,7 +355,7 @@ fn vm_value_to_json(value: &VmValue) -> Value {
         VmValue::Dict(map) => {
             let mut obj = serde_json::Map::with_capacity(map.len());
             for (k, v) in map.iter() {
-                obj.insert(k.clone(), vm_value_to_json(v));
+                obj.insert(k.to_string(), vm_value_to_json(v));
             }
             Value::Object(obj)
         }

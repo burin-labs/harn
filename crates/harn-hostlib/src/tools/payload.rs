@@ -109,7 +109,7 @@ pub(crate) fn optional_string_map(
                         message: format!("value for {k:?} must be string, got {}", describe(v)),
                     });
                 };
-                out.insert(k.clone(), s.to_string());
+                out.insert(k.to_string(), s.to_string());
             }
             Ok(Some(out))
         }

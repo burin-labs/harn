@@ -29,7 +29,7 @@ pub(crate) fn vm_to_storage_json(val: &VmValue) -> serde_json::Value {
         VmValue::Dict(map) => {
             let obj: serde_json::Map<String, serde_json::Value> = map
                 .iter()
-                .map(|(k, v)| (k.clone(), vm_to_storage_json(v)))
+                .map(|(k, v)| (k.to_string(), vm_to_storage_json(v)))
                 .collect();
             serde_json::Value::Object(obj)
         }

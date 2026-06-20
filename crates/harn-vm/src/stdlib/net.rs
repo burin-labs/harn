@@ -45,13 +45,13 @@ fn unix_socket_options(value: Option<&VmValue>) -> UnixSocketOptions {
 
 fn insert_string(dict: &mut crate::value::DictMap, key: &str, value: impl Into<String>) {
     dict.insert(
-        key.to_string(),
+        crate::value::intern_key(key),
         VmValue::String(arcstr::ArcStr::from(value.into())),
     );
 }
 
 fn insert_int(dict: &mut crate::value::DictMap, key: &str, value: i64) {
-    dict.insert(key.to_string(), VmValue::Int(value));
+    dict.insert(crate::value::intern_key(key), VmValue::Int(value));
 }
 
 fn elapsed_ms(started_ms: i64) -> i64 {
@@ -68,7 +68,7 @@ fn socket_result(
     response: Option<VmValue>,
 ) -> VmValue {
     let mut out = crate::value::DictMap::new();
-    out.insert("ok".to_string(), VmValue::Bool(ok));
+    out.insert(crate::value::intern_key("ok"), VmValue::Bool(ok));
     insert_string(&mut out, "status", status);
     insert_string(&mut out, "path", path);
     insert_int(&mut out, "duration_ms", elapsed_ms(started_ms));
@@ -80,7 +80,7 @@ fn socket_result(
         insert_string(&mut out, "raw_response", raw_response);
     }
     if let Some(response) = response {
-        out.insert("response".to_string(), response);
+        out.insert(crate::value::intern_key("response"), response);
     }
     VmValue::dict(out)
 }

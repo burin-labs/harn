@@ -102,10 +102,10 @@ pub(super) fn params_to_json_schema(params: Option<&VmValue>) -> serde_json::Val
             } else {
                 def.iter()
                     .filter_map(|(key, value)| {
-                        if key == "required" {
+                        if key.as_str() == "required" {
                             return None;
                         }
-                        Some((key.clone(), vm_value_to_json(value)))
+                        Some((key.to_string(), vm_value_to_json(value)))
                     })
                     .collect::<serde_json::Map<_, _>>()
             };
@@ -114,16 +114,16 @@ pub(super) fn params_to_json_schema(params: Option<&VmValue>) -> serde_json::Val
                     .or_insert_with(|| serde_json::Value::String(d.to_string()));
             }
             if matches!(def.get("required"), Some(VmValue::Bool(true))) {
-                required.push(serde_json::Value::String(param_name.clone()));
+                required.push(serde_json::Value::String(param_name.to_string()));
             }
-            properties.insert(param_name.clone(), serde_json::Value::Object(prop));
+            properties.insert(param_name.to_string(), serde_json::Value::Object(prop));
         } else if let VmValue::String(type_str) = param_def {
             let mut prop = serde_json::Map::new();
             prop.insert(
                 "type".into(),
                 serde_json::Value::String(type_str.to_string()),
             );
-            properties.insert(param_name.clone(), serde_json::Value::Object(prop));
+            properties.insert(param_name.to_string(), serde_json::Value::Object(prop));
         }
     }
 

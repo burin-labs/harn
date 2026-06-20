@@ -340,7 +340,7 @@ fn parse_xml(text: &str, parse_opts: &ParseOptions) -> Result<VmValue, VmError> 
     };
     p.skip_ws_and_prologue()?;
     if p.pos >= p.src.len() {
-        return Ok(VmValue::dict(BTreeMap::new()));
+        return Ok(VmValue::dict_map(Default::default()));
     }
     let (tag, value) = p.parse_element()?;
     p.skip_ws_and_prologue().ok();

@@ -299,7 +299,10 @@ impl super::super::Vm {
             (VmValue::Dict(map), VmValue::String(key)) => {
                 map.get(key.as_str()).cloned().unwrap_or(VmValue::Nil)
             }
-            (VmValue::Dict(map), _) => map.get(&idx.display()).cloned().unwrap_or(VmValue::Nil),
+            (VmValue::Dict(map), _) => map
+                .get(idx.display().as_str())
+                .cloned()
+                .unwrap_or(VmValue::Nil),
             (VmValue::Range(r), VmValue::Int(i)) => {
                 let len = r.len();
                 let pos = if *i < 0 { len + *i } else { *i };
@@ -500,7 +503,7 @@ impl super::super::Vm {
             match obj {
                 VmValue::Dict(map) => {
                     let mut new_map = (*map).clone();
-                    new_map.insert(prop_name.to_string(), new_value);
+                    new_map.insert(crate::value::intern_key(prop_name), new_value);
                     assign_value(self, VmValue::dict(new_map))?;
                 }
                 VmValue::StructInstance(_) => {
@@ -554,7 +557,7 @@ impl super::super::Vm {
                     return Ok(());
                 }
                 VmValue::Dict(map) => {
-                    let key = index.display();
+                    let key = crate::value::intern_key(&index.display());
                     if let Some(previous) = Arc::make_mut(map).insert(key, new_value) {
                         crate::value::recursion::dismantle(previous);
                     }
@@ -583,7 +586,7 @@ impl super::super::Vm {
                         .assign(var_name, VmValue::List(std::sync::Arc::new(new_items)))?;
                 }
                 VmValue::Dict(map) => {
-                    let key = index.display();
+                    let key = crate::value::intern_key(&index.display());
                     let mut new_map = Arc::try_unwrap(map).unwrap_or_else(|map| (*map).clone());
                     new_map.insert(key, new_value);
                     self.env.assign(var_name, VmValue::dict(new_map))?;
@@ -625,7 +628,9 @@ impl super::super::Vm {
         }
 
         if let VmValue::Dict(map) = &mut slot.value {
-            if let Some(previous) = Arc::make_mut(map).insert(prop_name.to_string(), new_value) {
+            if let Some(previous) =
+                Arc::make_mut(map).insert(crate::value::intern_key(prop_name), new_value)
+            {
                 crate::value::recursion::dismantle(previous);
             }
             slot.synced = false;
@@ -688,7 +693,7 @@ impl super::super::Vm {
                 Ok(())
             }
             VmValue::Dict(map) => {
-                let key = index.display();
+                let key = crate::value::intern_key(&index.display());
                 if let Some(previous) = Arc::make_mut(map).insert(key, new_value) {
                     crate::value::recursion::dismantle(previous);
                 }

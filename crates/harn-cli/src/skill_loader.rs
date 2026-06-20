@@ -138,7 +138,10 @@ pub fn load_skills(inputs: &SkillLoaderInputs) -> LoadedSkills {
         };
         let strip_hooks = should_strip_executable_frontmatter(provenance.as_ref());
         if let Some(report) = provenance.as_ref() {
-            entry.insert("provenance".to_string(), provenance_to_vm(report));
+            entry.insert(
+                harn_vm::value::intern_key("provenance"),
+                provenance_to_vm(report),
+            );
             if strip_hooks && strip_untrusted_command_frontmatter(&mut entry) {
                 loader_warnings.push(format!(
                     "skills: {} command frontmatter omitted because provenance check did not verify: {}",
@@ -181,7 +184,7 @@ pub fn load_skills(inputs: &SkillLoaderInputs) -> LoadedSkills {
     let mut registry: harn_vm::value::DictMap = harn_vm::value::DictMap::new();
     registry.put_str("_type", "skill_registry");
     registry.insert(
-        "skills".to_string(),
+        harn_vm::value::intern_key("skills"),
         VmValue::List(std::sync::Arc::new(entries)),
     );
     let registry_value = VmValue::dict(registry);
@@ -393,7 +396,10 @@ fn provenance_to_vm(report: &VerificationReport) -> VmValue {
                 VmValue::Dict(map) => (*map).clone(),
                 _ => harn_vm::value::DictMap::new(),
             };
-            item.insert("trusted".to_string(), VmValue::Bool(endorsement.trusted));
+            item.insert(
+                harn_vm::value::intern_key("trusted"),
+                VmValue::Bool(endorsement.trusted),
+            );
             item.put_str("status", status_label(endorsement.status));
             if let Some(error) = endorsement.error.as_deref() {
                 item.put_str("error", error);

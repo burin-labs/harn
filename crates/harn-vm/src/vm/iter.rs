@@ -221,7 +221,7 @@ impl VmIter {
             VmIter::Dict { entries, keys, idx } => {
                 if *idx < keys.len() {
                     let k = &keys[*idx];
-                    let v = entries.get(k).cloned().unwrap_or(VmValue::Nil);
+                    let v = entries.get(k.as_str()).cloned().unwrap_or(VmValue::Nil);
                     *idx += 1;
                     Ok(Some(VmValue::Pair(std::sync::Arc::new((
                         VmValue::String(arcstr::ArcStr::from(k.as_str())),
@@ -1171,7 +1171,7 @@ pub fn iter_from_value(v: VmValue) -> Result<VmValue, VmError> {
             idx: 0,
         },
         VmValue::Dict(entries) => {
-            let keys: Vec<String> = entries.keys().cloned().collect();
+            let keys: Vec<String> = entries.keys().map(|k| k.to_string()).collect();
             VmIter::Dict {
                 entries,
                 keys,

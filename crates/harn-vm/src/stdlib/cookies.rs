@@ -201,8 +201,14 @@ fn raw_cookie_headers(value: &VmValue) -> Result<Vec<String>, VmError> {
 
 fn invalid_segment(segment: &str, reason: &str) -> VmValue {
     dict(crate::value::DictMap::from_iter([
-        ("segment".to_string(), string(segment.to_string())),
-        ("reason".to_string(), string(reason.to_string())),
+        (
+            crate::value::intern_key("segment"),
+            string(segment.to_string()),
+        ),
+        (
+            crate::value::intern_key("reason"),
+            string(reason.to_string()),
+        ),
     ]))
 }
 
@@ -245,15 +251,15 @@ fn parse_cookie_header_value(raw: &str) -> ParsedCookieHeader {
             continue;
         }
         cookies
-            .entry(name.to_string())
+            .entry(crate::value::intern_key(name))
             .or_insert_with(|| string(value.clone()));
         all_values
             .entry(name.to_string())
             .or_default()
             .push(value.clone());
         pairs.push(dict(crate::value::DictMap::from_iter([
-            ("name".to_string(), string(name.to_string())),
-            ("value".to_string(), string(value)),
+            (crate::value::intern_key("name"), string(name.to_string())),
+            (crate::value::intern_key("value"), string(value)),
         ])));
     }
 
@@ -289,7 +295,7 @@ fn parse_cookie_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
         .filter_map(|(name, values)| {
             if values.len() > 1 {
                 Some((
-                    name,
+                    crate::value::intern_key(&name),
                     list(values.into_iter().map(string).collect::<Vec<_>>()),
                 ))
             } else {
@@ -299,10 +305,10 @@ fn parse_cookie_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
         .collect();
 
     Ok(dict(crate::value::DictMap::from_iter([
-        ("cookies".to_string(), dict(cookies)),
-        ("pairs".to_string(), list(pairs)),
-        ("duplicates".to_string(), dict(duplicates)),
-        ("invalid".to_string(), list(invalid)),
+        (crate::value::intern_key("cookies"), dict(cookies)),
+        (crate::value::intern_key("pairs"), list(pairs)),
+        (crate::value::intern_key("duplicates"), dict(duplicates)),
+        (crate::value::intern_key("invalid"), list(invalid)),
     ])))
 }
 
@@ -465,9 +471,15 @@ fn cookie_sign_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
 
 fn cookie_verify_result(ok: bool, value: Option<String>, error: Option<&str>) -> VmValue {
     let mut result = crate::value::DictMap::new();
-    result.insert("ok".to_string(), bool_value(ok));
-    result.insert("value".to_string(), value.map(string).unwrap_or_else(nil));
-    result.insert("error".to_string(), error.map(string).unwrap_or_else(nil));
+    result.insert(crate::value::intern_key("ok"), bool_value(ok));
+    result.insert(
+        crate::value::intern_key("value"),
+        value.map(string).unwrap_or_else(nil),
+    );
+    result.insert(
+        crate::value::intern_key("error"),
+        error.map(string).unwrap_or_else(nil),
+    );
     dict(result)
 }
 
@@ -497,9 +509,12 @@ fn session_sign_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
 
 fn session_verify_result(ok: bool, payload: VmValue, error: Option<&str>) -> VmValue {
     dict(crate::value::DictMap::from_iter([
-        ("ok".to_string(), bool_value(ok)),
-        ("payload".to_string(), payload),
-        ("error".to_string(), error.map(string).unwrap_or_else(nil)),
+        (crate::value::intern_key("ok"), bool_value(ok)),
+        (crate::value::intern_key("payload"), payload),
+        (
+            crate::value::intern_key("error"),
+            error.map(string).unwrap_or_else(nil),
+        ),
     ]))
 }
 
@@ -557,7 +572,7 @@ fn session_from_cookies_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
     let secret = args[2].display();
     let token = match &parsed {
         VmValue::Dict(result) => match result.get("cookies") {
-            Some(VmValue::Dict(cookies)) => cookies.get(&name).map(VmValue::display),
+            Some(VmValue::Dict(cookies)) => cookies.get(name.as_str()).map(VmValue::display),
             _ => None,
         },
         _ => None,
@@ -652,7 +667,7 @@ fn cookie_round_trip_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
     if let VmValue::Dict(result) = parsed_request {
         if let Some(VmValue::Dict(parsed)) = result.get("cookies") {
             for (name, value) in parsed.iter() {
-                cookies.insert(name.clone(), value.display());
+                cookies.insert(name.to_string(), value.display());
             }
         }
     }
@@ -670,11 +685,11 @@ fn cookie_round_trip_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
     let header = cookie_header_from_map(&cookies);
     let cookie_values = cookies
         .iter()
-        .map(|(name, value)| (name.clone(), string(value.clone())))
+        .map(|(name, value)| (crate::value::intern_key(name), string(value.clone())))
         .collect::<crate::value::DictMap>();
     Ok(dict(crate::value::DictMap::from_iter([
-        ("cookie_header".to_string(), string(header)),
-        ("cookies".to_string(), dict(cookie_values)),
+        (crate::value::intern_key("cookie_header"), string(header)),
+        (crate::value::intern_key("cookies"), dict(cookie_values)),
     ])))
 }
 

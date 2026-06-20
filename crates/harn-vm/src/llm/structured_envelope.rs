@@ -373,7 +373,7 @@ fn merge_repair_options(
     // retries from the main call (cost amplification) and do not let
     // the main call's transient retry budget propagate either —
     // repair is best-effort and should fail fast.
-    merged.insert("schema_retries".to_string(), VmValue::Int(0));
+    merged.insert(crate::value::intern_key("schema_retries"), VmValue::Int(0));
     // Drop any nested `repair` key from the base options so a repair
     // call cannot recursively trigger another repair pass.
     merged.remove("repair");
@@ -420,18 +420,24 @@ fn envelope_success(outcome: &SchemaLoopOutcome, repaired: bool) -> VmValue {
     let (model, provider) = result_model_provider(outcome);
 
     let mut env = crate::value::DictMap::new();
-    env.insert("ok".to_string(), VmValue::Bool(true));
-    env.insert("data".to_string(), data);
+    env.insert(crate::value::intern_key("ok"), VmValue::Bool(true));
+    env.insert(crate::value::intern_key("data"), data);
     env.put_str("raw_text", outcome.raw_text.as_str());
     env.put_str("error", "");
-    env.insert("error_category".to_string(), VmValue::Nil);
+    env.insert(crate::value::intern_key("error_category"), VmValue::Nil);
     env.insert(
-        "attempts".to_string(),
+        crate::value::intern_key("attempts"),
         VmValue::Int(outcome.attempts as i64),
     );
-    env.insert("repaired".to_string(), VmValue::Bool(repaired));
-    env.insert("extracted_json".to_string(), VmValue::Bool(extracted_json));
-    env.insert("usage".to_string(), usage);
+    env.insert(
+        crate::value::intern_key("repaired"),
+        VmValue::Bool(repaired),
+    );
+    env.insert(
+        crate::value::intern_key("extracted_json"),
+        VmValue::Bool(extracted_json),
+    );
+    env.insert(crate::value::intern_key("usage"), usage);
     env.put_str("model", model.as_str());
     env.put_str("provider", provider.as_str());
     VmValue::dict(env)
@@ -452,18 +458,24 @@ fn envelope_failure(
     };
 
     let mut env = crate::value::DictMap::new();
-    env.insert("ok".to_string(), VmValue::Bool(false));
-    env.insert("data".to_string(), VmValue::Nil);
+    env.insert(crate::value::intern_key("ok"), VmValue::Bool(false));
+    env.insert(crate::value::intern_key("data"), VmValue::Nil);
     env.put_str("raw_text", outcome.raw_text.as_str());
     env.put_str("error", message.as_str());
     env.put_str("error_category", kind.category());
     env.insert(
-        "attempts".to_string(),
+        crate::value::intern_key("attempts"),
         VmValue::Int(outcome.attempts as i64),
     );
-    env.insert("repaired".to_string(), VmValue::Bool(repaired));
-    env.insert("extracted_json".to_string(), VmValue::Bool(extracted_json));
-    env.insert("usage".to_string(), usage);
+    env.insert(
+        crate::value::intern_key("repaired"),
+        VmValue::Bool(repaired),
+    );
+    env.insert(
+        crate::value::intern_key("extracted_json"),
+        VmValue::Bool(extracted_json),
+    );
+    env.insert(crate::value::intern_key("usage"), usage);
     env.put_str("model", model.as_str());
     env.put_str("provider", provider.as_str());
     VmValue::dict(env)
@@ -481,15 +493,21 @@ fn envelope_from_transport_error(err: &VmError, provider: &str, model: &str) -> 
         _ => err.to_string(),
     };
     let mut env = crate::value::DictMap::new();
-    env.insert("ok".to_string(), VmValue::Bool(false));
-    env.insert("data".to_string(), VmValue::Nil);
+    env.insert(crate::value::intern_key("ok"), VmValue::Bool(false));
+    env.insert(crate::value::intern_key("data"), VmValue::Nil);
     env.put_str("raw_text", "");
     env.put_str("error", message.as_str());
     env.put_str("error_category", category.as_str());
-    env.insert("attempts".to_string(), VmValue::Int(0));
-    env.insert("repaired".to_string(), VmValue::Bool(false));
-    env.insert("extracted_json".to_string(), VmValue::Bool(false));
-    env.insert("usage".to_string(), VmValue::dict(empty_usage_dict()));
+    env.insert(crate::value::intern_key("attempts"), VmValue::Int(0));
+    env.insert(crate::value::intern_key("repaired"), VmValue::Bool(false));
+    env.insert(
+        crate::value::intern_key("extracted_json"),
+        VmValue::Bool(false),
+    );
+    env.insert(
+        crate::value::intern_key("usage"),
+        VmValue::dict(empty_usage_dict()),
+    );
     env.put_str("model", model);
     env.put_str("provider", provider);
     VmValue::dict(env)
@@ -504,13 +522,28 @@ fn envelope_from_arg_error(err: &VmError) -> VmValue {
 
 fn empty_usage_dict() -> crate::value::DictMap {
     let mut usage = crate::value::DictMap::new();
-    usage.insert("input_tokens".to_string(), VmValue::Int(0));
-    usage.insert("output_tokens".to_string(), VmValue::Int(0));
-    usage.insert("cache_read_tokens".to_string(), VmValue::Int(0));
-    usage.insert("cache_write_tokens".to_string(), VmValue::Int(0));
-    usage.insert("cache_creation_input_tokens".to_string(), VmValue::Int(0));
-    usage.insert("cache_hit_ratio".to_string(), VmValue::Float(0.0));
-    usage.insert("cache_savings_usd".to_string(), VmValue::Float(0.0));
+    usage.insert(crate::value::intern_key("input_tokens"), VmValue::Int(0));
+    usage.insert(crate::value::intern_key("output_tokens"), VmValue::Int(0));
+    usage.insert(
+        crate::value::intern_key("cache_read_tokens"),
+        VmValue::Int(0),
+    );
+    usage.insert(
+        crate::value::intern_key("cache_write_tokens"),
+        VmValue::Int(0),
+    );
+    usage.insert(
+        crate::value::intern_key("cache_creation_input_tokens"),
+        VmValue::Int(0),
+    );
+    usage.insert(
+        crate::value::intern_key("cache_hit_ratio"),
+        VmValue::Float(0.0),
+    );
+    usage.insert(
+        crate::value::intern_key("cache_savings_usd"),
+        VmValue::Float(0.0),
+    );
     usage
 }
 
@@ -533,7 +566,7 @@ fn build_usage_dict(outcome: &SchemaLoopOutcome) -> VmValue {
         "cache_savings_usd",
     ] {
         if let Some(v) = dict.get(key) {
-            usage.insert(key.to_string(), v.clone());
+            usage.insert(crate::value::intern_key(key), v.clone());
         }
     }
     VmValue::dict(usage)
@@ -679,9 +712,9 @@ mod tests {
     fn merge_repair_caps_schema_retries_and_drops_nested_repair() {
         let mut base = crate::value::DictMap::new();
         base.put_str("provider", "auto");
-        base.insert("schema_retries".to_string(), VmValue::Int(5));
+        base.insert(crate::value::intern_key("schema_retries"), VmValue::Int(5));
         base.insert(
-            "repair".to_string(),
+            crate::value::intern_key("repair"),
             VmValue::dict(crate::value::DictMap::new()),
         );
         let overrides = {
@@ -716,7 +749,7 @@ mod tests {
             parse_repair_value(&VmValue::dict(crate::value::DictMap::new())).unwrap();
         assert!(dict_no_enabled.enabled);
         let mut disabled = crate::value::DictMap::new();
-        disabled.insert("enabled".to_string(), VmValue::Bool(false));
+        disabled.insert(crate::value::intern_key("enabled"), VmValue::Bool(false));
         let dict_disabled = parse_repair_value(&VmValue::dict(disabled)).unwrap();
         assert!(!dict_disabled.enabled);
     }
@@ -725,15 +758,15 @@ mod tests {
     fn prompt_mode_structured_transport_keeps_harn_side_validation() {
         let schema = VmValue::dict(crate::value::DictMap::from_iter([
             (
-                "type".to_string(),
+                crate::value::intern_key("type"),
                 VmValue::String(arcstr::ArcStr::from("object")),
             ),
             (
-                "properties".to_string(),
+                crate::value::intern_key("properties"),
                 VmValue::dict(crate::value::DictMap::from_iter([(
-                    "pass".to_string(),
+                    crate::value::intern_key("pass"),
                     VmValue::dict(crate::value::DictMap::from_iter([(
-                        "type".to_string(),
+                        crate::value::intern_key("type"),
                         VmValue::String(arcstr::ArcStr::from("boolean")),
                     )])),
                 )])),
@@ -741,11 +774,11 @@ mod tests {
         ]));
         let options = VmValue::dict(crate::value::DictMap::from_iter([
             (
-                "provider".to_string(),
+                crate::value::intern_key("provider"),
                 VmValue::String(arcstr::ArcStr::from("ollama")),
             ),
             (
-                "model".to_string(),
+                crate::value::intern_key("model"),
                 // A capability rule with no structured_output transport, so native
                 // structured transport is unsupported and the loop must fall back to
                 // prompt-mode. (ollama gemma4/devstral now declare format_kw support.)

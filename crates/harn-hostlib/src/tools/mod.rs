@@ -219,8 +219,11 @@ fn handle_enable(args: &[VmValue]) -> Result<VmValue, HostlibError> {
             let newly_enabled = permissions::enable(&feature);
             let mut map: harn_vm::value::DictMap = harn_vm::value::DictMap::new();
             map.put_str("feature", feature);
-            map.insert("enabled".to_string(), VmValue::Bool(true));
-            map.insert("newly_enabled".to_string(), VmValue::Bool(newly_enabled));
+            map.insert(harn_vm::value::intern_key("enabled"), VmValue::Bool(true));
+            map.insert(
+                harn_vm::value::intern_key("newly_enabled"),
+                VmValue::Bool(newly_enabled),
+            );
             Ok(VmValue::dict(map))
         }
         other => Err(HostlibError::InvalidParameter {

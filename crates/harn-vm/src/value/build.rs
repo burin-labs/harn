@@ -29,7 +29,7 @@ impl DictInsert for BTreeMap<String, VmValue> {
 
 impl DictInsert for DictMap {
     fn dict_insert(&mut self, key: String, value: VmValue) {
-        self.insert(key, value);
+        self.insert(super::intern_key(&key), value);
     }
 }
 
@@ -61,11 +61,11 @@ pub trait VmDictExt {
 /// read identically. Cold-path helper (filter/dedup), so the rebuild cost is
 /// not on any hot loop.
 pub trait DictRetain {
-    fn retain(&mut self, keep: impl FnMut(&String, &mut VmValue) -> bool);
+    fn retain(&mut self, keep: impl FnMut(&super::HarnStr, &mut VmValue) -> bool);
 }
 
 impl DictRetain for DictMap {
-    fn retain(&mut self, mut keep: impl FnMut(&String, &mut VmValue) -> bool) {
+    fn retain(&mut self, mut keep: impl FnMut(&super::HarnStr, &mut VmValue) -> bool) {
         let mut result = DictMap::new();
         for (k, v) in self.iter() {
             let mut v = v.clone();

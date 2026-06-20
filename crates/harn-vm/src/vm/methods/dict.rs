@@ -26,9 +26,14 @@ impl crate::vm::Vm {
             ))),
             "entries" => Ok(VmValue::List(std::sync::Arc::new(Self::dict_entries(map)))),
             "count" => Ok(VmValue::Int(map.len() as i64)),
-            "has" => Ok(VmValue::Bool(map.contains_key(
-                &args.first().map(|a| a.display()).unwrap_or_default(),
-            ))),
+            "has" => Ok(VmValue::Bool(
+                map.contains_key(
+                    args.first()
+                        .map(|a| a.display())
+                        .unwrap_or_default()
+                        .as_str(),
+                ),
+            )),
             "merge" => {
                 if let Some(VmValue::Dict(other)) = args.first() {
                     if map.is_empty() {
@@ -53,13 +58,13 @@ impl crate::vm::Vm {
             "remove" => {
                 let key = args.first().map(|a| a.display()).unwrap_or_default();
                 let mut result = (**map).clone();
-                result.remove(&key);
+                result.remove(key.as_str());
                 Ok(VmValue::dict(result))
             }
             "get" => {
                 let key = args.first().map(|a| a.display()).unwrap_or_default();
                 let default = args.get(1).cloned().unwrap_or(VmValue::Nil);
-                Ok(map.get(&key).cloned().unwrap_or(default))
+                Ok(map.get(key.as_str()).cloned().unwrap_or(default))
             }
             "to_dict" => Ok(VmValue::Dict(Arc::clone(map))),
             "to_list" => Ok(VmValue::List(std::sync::Arc::new(Self::dict_entries(map)))),

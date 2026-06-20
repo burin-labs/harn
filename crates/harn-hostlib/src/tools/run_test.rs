@@ -121,9 +121,18 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
 
 fn summary_to_dict(summary: TestSummaryData) -> harn_vm::value::DictMap {
     let mut map = harn_vm::value::DictMap::new();
-    map.insert("passed".to_string(), VmValue::Int(summary.passed as i64));
-    map.insert("failed".to_string(), VmValue::Int(summary.failed as i64));
-    map.insert("skipped".to_string(), VmValue::Int(summary.skipped as i64));
+    map.insert(
+        harn_vm::value::intern_key("passed"),
+        VmValue::Int(summary.passed as i64),
+    );
+    map.insert(
+        harn_vm::value::intern_key("failed"),
+        VmValue::Int(summary.failed as i64),
+    );
+    map.insert(
+        harn_vm::value::intern_key("skipped"),
+        VmValue::Int(summary.skipped as i64),
+    );
     map
 }
 

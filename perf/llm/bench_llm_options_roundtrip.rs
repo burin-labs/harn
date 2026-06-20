@@ -37,30 +37,36 @@ fn override_value(index: usize) -> VmValue {
 
 fn provider_overrides() -> VmValue {
     let mut overrides = harn_vm::value::DictMap::new();
-    overrides.insert("override_000".to_string(), override_value(0));
+    overrides.insert(
+        harn_vm::value::intern_key("override_000"),
+        override_value(0),
+    );
     dict(overrides)
 }
 
 fn build_options(key_count: usize) -> harn_vm::value::DictMap {
     let mut options = harn_vm::value::DictMap::new();
-    options.insert("provider".to_string(), string("mock"));
+    options.insert(harn_vm::value::intern_key("provider"), string("mock"));
 
     if key_count >= 2 {
-        options.insert("model".to_string(), string("gpt-4o-mini"));
+        options.insert(harn_vm::value::intern_key("model"), string("gpt-4o-mini"));
     }
     if key_count >= 3 {
-        options.insert("stream".to_string(), VmValue::Bool(false));
+        options.insert(harn_vm::value::intern_key("stream"), VmValue::Bool(false));
     }
     if key_count >= 4 {
-        options.insert("max_tokens".to_string(), VmValue::Int(512));
+        options.insert(harn_vm::value::intern_key("max_tokens"), VmValue::Int(512));
     }
     if key_count >= 5 {
-        options.insert("mock".to_string(), provider_overrides());
+        options.insert(harn_vm::value::intern_key("mock"), provider_overrides());
     }
 
     while options.len() < key_count {
         let index = options.len();
-        options.insert(format!("passthrough_{index:03}"), override_value(index));
+        options.insert(
+            harn_vm::value::intern_key(&format!("passthrough_{index:03}")),
+            override_value(index),
+        );
     }
 
     options

@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use crate::orchestration::MutationSessionRecord;
 use crate::value::{VmError, VmValue};
 
@@ -9,7 +7,7 @@ pub(super) fn parse_worker_audit(
     let audit_value = dict
         .get("audit")
         .cloned()
-        .unwrap_or_else(|| VmValue::dict(BTreeMap::new()));
+        .unwrap_or_else(|| VmValue::dict_map(Default::default()));
     let parent_session = crate::orchestration::current_mutation_session();
     let mut audit: MutationSessionRecord =
         serde_json::from_value(crate::llm::vm_value_to_json(&audit_value))

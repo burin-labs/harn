@@ -100,25 +100,25 @@ fn record_to_value(record: TestRecord) -> VmValue {
     map.put_str("name", record.name.as_str());
     map.put_str("status", record.status.as_str());
     map.insert(
-        "duration_ms".to_string(),
+        crate::value::intern_key("duration_ms"),
         VmValue::Int(record.duration_ms as i64),
     );
     map.insert(
-        "message".to_string(),
+        crate::value::intern_key("message"),
         record
             .message
             .map(|s| VmValue::String(arcstr::ArcStr::from(s)))
             .unwrap_or(VmValue::Nil),
     );
     map.insert(
-        "stdout".to_string(),
+        crate::value::intern_key("stdout"),
         record
             .stdout
             .map(|s| VmValue::String(arcstr::ArcStr::from(s)))
             .unwrap_or(VmValue::Nil),
     );
     map.insert(
-        "stderr".to_string(),
+        crate::value::intern_key("stderr"),
         record
             .stderr
             .map(|s| VmValue::String(arcstr::ArcStr::from(s)))

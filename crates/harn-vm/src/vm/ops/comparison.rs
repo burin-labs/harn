@@ -33,7 +33,7 @@ impl super::super::Vm {
             VmValue::List(items) => items.iter().any(|v| values_equal(v, &item)),
             VmValue::Dict(map) => {
                 let key = item.display();
-                map.contains_key(&key)
+                map.contains_key(key.as_str())
             }
             VmValue::Set(items) => items.iter().any(|v| values_equal(v, &item)),
             VmValue::Range(r) => match &item {
