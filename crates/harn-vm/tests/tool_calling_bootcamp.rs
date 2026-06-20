@@ -500,11 +500,19 @@ fn override_reason_forces_marked_impossible_side() {
 }
 
 #[test]
-fn unreliable_parity_warns_but_does_not_reject() {
-    // *_unreliable is recoverable, not impossible: the requested side still
-    // works (with a warning the harness author can act on), so resolution must
-    // ACCEPT it rather than reject. This is the boundary between the warn path
-    // and the hard-reject path.
+fn unreliable_parity_steers_to_safe_channel_without_rejecting() {
+    // *_unreliable is recoverable, not impossible — but "recoverable" means the
+    // resolver STEERS the explicit pin to the route's safe channel, not that it
+    // honors the forbidden side verbatim. Honoring `native` here verbatim was
+    // the deepseek-v3.2 footgun: the loop built a native-channel prompt while
+    // the Rust `extract_llm_options` capability gate silently steered the wire
+    // request to the text channel, so the model saw no usable tool surface and
+    // improvised unparseable prose. Resolution must now match the wire and
+    // steer to a text-channel format (this synthetic row declares
+    // preferred_tool_format = native, which is not on the recommended text
+    // channel, so the fallback is the canonical text format `json`). It must
+    // accept (steer) rather than hard-reject — that is the boundary between the
+    // steer path and the *_only hard-reject path.
     match resolve_with_parity(
         "bootcamp-native-unreliable-model",
         "native_unreliable",
@@ -512,8 +520,8 @@ fn unreliable_parity_warns_but_does_not_reject() {
         "native",
     ) {
         Outcome::Accepted { tool_format, .. } => assert_eq!(
-            tool_format, "native",
-            "native_unreliable should still honor an explicit native request"
+            tool_format, "json",
+            "native_unreliable must steer an explicit native pin to the safe text channel"
         ),
         Outcome::Rejected(err) => {
             panic!("native_unreliable wrongly hard-rejected the recoverable side: {err}")

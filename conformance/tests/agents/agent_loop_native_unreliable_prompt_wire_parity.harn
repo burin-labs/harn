@@ -1,0 +1,82 @@
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * Regression: a route whose `tool_mode_parity` forbids the native channel
+ * (`native_unreliable`, e.g. openrouter/deepseek-v3.2) used to resolve an
+ * explicit `tool_format: "native"` pin verbatim in the stdlib loop, so the
+ * loop built a NATIVE-channel prompt (native tool-calling instructions, native
+ * tool schemas) while the Rust `extract_llm_options` capability gate silently
+ * steered the wire request to the route's safe TEXT channel — shipping no
+ * native tool schemas (`native_tool_count == 0`) and no text-format tool
+ * contract either. The model then saw no usable tool surface and improvised
+ * unparseable prose (e.g. `emit_judgment(verdict="...")`), so the tool call was
+ * lost. This bit nested judge / sub-agent loops that pin `native` for a route
+ * the matrix says is native-unreliable.
+ *
+ * The loop's `agent_tool_format_resolution` now mirrors the wire gate: a
+ * parity-forbidden explicit pin (with no `tool_format_override_reason`) is
+ * steered to the recommended channel, so the prompt and the provider request
+ * agree. The judge-shaped loop below pins `native` on a native-unreliable
+ * route and must build a TEXT-mode prompt (mentions `<tool_call>`, NOT the
+ * native channel) and accept a text-format `emit_judgment` tool call.
+ */
+fn judge_tools() {
+  let tools = tool_registry()
+  return tool_define(
+    tools,
+    "emit_judgment",
+    "Emit the final judgment exactly once",
+    {
+      handler: { args -> return {accepted: true, verdict: args?.verdict ?? "unclear"} },
+      parameters: {verdict: {type: "string", description: "complete | incomplete | unclear"}},
+      returns: {type: "object"},
+      annotations: {kind: "judgment", side_effect_level: "read_only"},
+    },
+  )
+}
+
+pipeline main() {
+  provider_capabilities_install(
+    """
+[[provider.testcatalog]]
+model_match = "native-unreliable-*"
+native_tools = true
+preferred_tool_format = "text"
+tool_mode_parity = "native_unreliable"
+""",
+  )
+  defer {
+    provider_capabilities_clear()
+  }
+  with_llm_script(
+    [
+      llm_text("<tool_call>\nemit_judgment({ verdict: \"complete\" })\n</tool_call>"),
+      llm_text("<user_response>graded</user_response>"),
+    ],
+    { ->
+      let result = agent_loop(
+        "Judge the candidate and call emit_judgment.",
+        "You are a judge.",
+        {
+          provider: "testcatalog",
+          model: "native-unreliable-route",
+          tools: judge_tools(),
+          tool_format: "native",
+          allowed_tools: ["emit_judgment"],
+          max_iterations: 3,
+          session_id: "native-unreliable-parity-" + uuid(),
+        },
+      )
+      let calls = llm_mock_calls()
+      __io_println(contains(calls[0].system, "<tool_call>"))
+      __io_println(!contains(calls[0].system, "native tool-calling channel"))
+      __io_println(len(calls[0].tools ?? []))
+      __io_println(result.status)
+    },
+  )
+}
+// Asserts, in order: the prompt rides the steered TEXT channel (carries
+// the `<tool_call>` contract, never advertises the forbidden native
+// channel); no native tool schemas ship on the wire (consistent with the
+// steered text channel, not a silent native drop); the text-format tool
+// call parsed and dispatched (status `done`).

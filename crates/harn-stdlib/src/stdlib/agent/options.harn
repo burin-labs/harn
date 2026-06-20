@@ -240,6 +240,31 @@ fn __parity_recommended_tool_format(parity) {
   return nil
 }
 
+/**
+ * Pick the concrete tool_format to steer a parity-forbidden explicit pin to,
+ * mirroring the Rust `validate_tool_format_with_caps` target selection exactly:
+ * use the route's declared `preferred_tool_format` when it rides the
+ * recommended (opposite) channel, otherwise fall back to that channel's
+ * canonical name (`json` for the text channel, `native` for the native
+ * channel). Keeping these two implementations in lockstep is what guarantees
+ * the loop's prompt and the provider wire request agree on the tool dialect.
+ */
+fn __steer_tool_format(parity, preferred) {
+  let recommended_channel = __parity_recommended_tool_format(parity)
+  if recommended_channel == nil {
+    return nil
+  }
+  let recommended_is_text = __tool_format_is_text_channel(recommended_channel)
+  if preferred != nil && __tool_format_is_text_channel(preferred) == recommended_is_text {
+    return preferred
+  }
+  return if recommended_is_text {
+    "json"
+  } else {
+    "native"
+  }
+}
+
 fn __parity_conflicts_with_requested(parity, requested) {
   if parity == "native_unreliable" {
     return requested == "native"
@@ -380,23 +405,40 @@ pub fn agent_tool_format_resolution(options = nil) {
         parity = resolved_caps?.tool_mode_parity
       }
     }
-    __validate_tool_format_parity(
-      pair,
-      explicit,
-      parity,
-      __optional_text(opts?.tool_format_override_reason),
-    )
+    let override_reason = __optional_text(opts?.tool_format_override_reason)
+    __validate_tool_format_parity(pair, explicit, parity, override_reason)
+    let override_event = __tool_format_override_event(pair, explicit, preferred, parity, override_reason)
+    // Parity steering must match the wire. The Rust `extract_llm_options`
+    // capability gate silently rewrites a tool-bearing request whose channel
+    // the route's `tool_mode_parity` forbids (e.g. `native` on a
+    // `native_unreliable` route like deepseek-v3.2) to the route's safe
+    // channel. If we honored the explicit pin verbatim here, the loop would
+    // build a prompt for the requested channel (native instructions, native
+    // tool schemas) while the wire actually ships the steered channel with no
+    // matching tool surface — the model then sees no usable tool contract and
+    // improvises unparseable prose. Steer the resolved format the same way the
+    // wire does so the prompt and the provider request agree. An explicit
+    // `tool_format_override_reason` opts out (the author is forcing a known-risky
+    // channel deliberately, and the Rust gate is bypassed in mock/replay too).
+    let steered = if override_reason == nil
+      && __parity_conflicts_with_requested(__catalog_parity(parity), explicit) {
+      __steer_tool_format(__catalog_parity(parity), preferred)
+    } else {
+      nil
+    }
+    if steered != nil {
+      return {
+        tool_format: steered,
+        source: "explicit_parity_steered",
+        capability_gap_event: nil,
+        tool_format_override_event: override_event,
+      }
+    }
     return {
       tool_format: explicit,
       source: "explicit",
       capability_gap_event: nil,
-      tool_format_override_event: __tool_format_override_event(
-        pair,
-        explicit,
-        preferred,
-        parity,
-        __optional_text(opts?.tool_format_override_reason),
-      ),
+      tool_format_override_event: override_event,
     }
   }
   let pair = __tool_format_pair(opts)
@@ -438,6 +480,10 @@ pub fn agent_tool_format_resolution(options = nil) {
   return {tool_format: nil, source: "unresolved", capability_gap_event: nil, tool_format_override_event: nil}
 }
 
+// Mirror the Rust gate's target selection: prefer the route's declared
+// `preferred_tool_format` when it rides the recommended channel (so
+// deepseek-v3.2's explicit `text` carve-out is honored over a bare
+// `text`/`native` channel name), else fall back to the channel name.
 /**
  * Return the concrete tool format a prompt-building helper should use.
  *
