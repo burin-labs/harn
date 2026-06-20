@@ -958,6 +958,103 @@ fn has_destructive_tokens(lower: &str) -> bool {
         || lower.contains(":(){")
         || lower.contains("chmod -r 777 /")
         || lower.contains("chown -r ")
+        || has_cwd_wipe_tokens(lower)
+}
+
+/// Detects recursive deletes that destroy the current workspace itself —
+/// `rm -rf .` / `rm -rf ./*` / `rm -rf *` and the `find . -delete` /
+/// `find . -exec rm ...` family. Root-anchored wipes (`rm -rf /`) are caught by
+/// the substring checks above; this covers the cwd-/workspace-relative shapes a
+/// prompt injection can use to wipe everything under the working directory
+/// without ever naming `/`.
+///
+/// Boundary (deliberate): a recursive delete of a *named* subdirectory
+/// (`rm -rf build/`, `rm -rf node_modules`, `rm -rf ./src`) is a normal clean
+/// and is intentionally NOT flagged here. The dangerous set is limited to
+/// targets that resolve to the whole working tree: `.`, `./`, `./*`, `*`, and
+/// bare `find .` deletes. Flag order (`-rf` / `-fr` / `-r -f`), an optional
+/// `--` end-of-options marker, and surrounding whitespace are all normalized.
+fn has_cwd_wipe_tokens(lower: &str) -> bool {
+    // Split on shell statement separators so a benign prefix
+    // (`cd foo && rm -rf .`) does not hide a wipe in a later clause.
+    lower
+        .split(['\n', ';', '|', '&'])
+        .any(|segment| segment_is_workspace_wipe(segment))
+}
+
+fn segment_is_workspace_wipe(segment: &str) -> bool {
+    let tokens: Vec<&str> = segment.split_whitespace().collect();
+    // Evaluate every `rm` / `find` command word, not just the segment head: the
+    // real command text is frequently wrapped (`sh -c rm -rf .`, `cd x && rm
+    // -rf .`, `sudo rm -rf .`), so the dangerous verb is rarely token 0. We scan
+    // for the verb anywhere and judge the tokens that follow it.
+    tokens.iter().enumerate().any(|(idx, token)| match *token {
+        "rm" => rm_targets_workspace(&tokens[idx + 1..]),
+        "find" => find_deletes_workspace(&tokens[idx + 1..]),
+        _ => false,
+    })
+}
+
+/// True when an `rm` invocation is both recursive *and* targets the whole
+/// working tree (`.`, `./`, `./*`, or `*`). Named paths are left alone.
+fn rm_targets_workspace(args: &[&str]) -> bool {
+    let mut recursive = false;
+    let mut wipe_target = false;
+    let mut end_of_options = false;
+
+    for arg in args {
+        if !end_of_options && *arg == "--" {
+            end_of_options = true;
+            continue;
+        }
+        if !end_of_options && arg.starts_with('-') && arg.len() > 1 {
+            // Long option (`--recursive`) and short clusters (`-rf`, `-fr`,
+            // `-r`). `-f`/`--force` is irrelevant to the wipe judgment: an
+            // interactive `rm -r .` still destroys the tree.
+            if let Some(long) = arg.strip_prefix("--") {
+                if long == "recursive" {
+                    recursive = true;
+                }
+            } else {
+                for ch in arg[1..].chars() {
+                    if ch == 'r' || ch == 'R' {
+                        recursive = true;
+                    }
+                }
+            }
+            continue;
+        }
+        if is_workspace_wipe_target(arg) {
+            wipe_target = true;
+        }
+    }
+
+    // Require recursion: a non-recursive `rm .` cannot remove the tree anyway.
+    recursive && wipe_target
+}
+
+/// A target string that resolves to the entire working directory.
+fn is_workspace_wipe_target(arg: &str) -> bool {
+    matches!(arg, "." | "./" | "./*" | "*" | ".*" | "./.")
+}
+
+/// True when a `find` invocation roots at the cwd (`.` / `./`) and carries a
+/// destructive action (`-delete`, or `-exec`/`-execdir` running `rm`).
+fn find_deletes_workspace(args: &[&str]) -> bool {
+    // The first non-option token is the search root; a cwd root is the
+    // dangerous case. `find -delete` (no explicit root) also defaults to cwd.
+    let roots_at_cwd = match args.iter().find(|arg| !arg.starts_with('-')) {
+        Some(&root) => matches!(root, "." | "./"),
+        None => true,
+    };
+    if !roots_at_cwd {
+        return false;
+    }
+    let has_delete = args.iter().any(|arg| *arg == "-delete");
+    let has_exec_rm = args
+        .windows(2)
+        .any(|pair| matches!(pair[0], "-exec" | "-execdir") && pair[1] == "rm");
+    has_delete || has_exec_rm
 }
 
 fn has_write_intent(lower: &str) -> bool {
@@ -1326,5 +1423,62 @@ mod tests {
             first_deny_pattern(&policy, &ctx(&["sh", "-c", "echo ok; rm -rf build"])),
             Some("*rm -rf*".to_string())
         );
+    }
+
+    fn is_destructive(cmd: &str) -> bool {
+        let scan = command_risk_scan_json(&ctx(&["sh", "-c", cmd]), None);
+        labels(&scan).contains(&"destructive".to_string())
+    }
+
+    #[test]
+    fn cwd_wipe_deletes_are_flagged_destructive() {
+        // SB-3: cwd/workspace-relative recursive wipes a prompt injection can use
+        // without ever naming `/`. All must be labeled destructive (-> deny).
+        for cmd in [
+            "rm -rf .",
+            "rm -rf ./",
+            "rm -rf ./*",
+            "rm -fr .",
+            "rm -rf *",
+            "rm -r -f .",
+            "rm -f -r .",
+            "rm -rf -- .",
+            "rm --recursive --force .",
+            "rm    -rf     .",
+            "cd src && rm -rf .",
+            "echo hi; rm -rf .",
+            "find . -delete",
+            "find ./ -delete",
+            "find . -type f -delete",
+            "find . -exec rm {} +",
+            "find . -execdir rm {} +",
+            "find -delete",
+        ] {
+            assert!(is_destructive(cmd), "expected destructive: {cmd}");
+            // Confirm it also routes to a deny recommendation.
+            let scan = command_risk_scan_json(&ctx(&["sh", "-c", cmd]), None);
+            assert_eq!(scan["recommended_action"], "deny", "deny for: {cmd}");
+        }
+    }
+
+    #[test]
+    fn scoped_and_named_deletes_are_not_over_flagged() {
+        // Deliberate boundary: a recursive delete of a *named* subdirectory is a
+        // normal clean, not a workspace wipe. These must NOT be flagged.
+        for cmd in [
+            "rm -rf build/",
+            "rm -rf node_modules",
+            "rm -rf ./src",
+            "rm -rf target",
+            "rm -rf dist build",
+            "rm file.txt",
+            "rm -f stale.log",
+            "rm -rf .cache", // named hidden dir, not the cwd
+            "find . -type f -name '*.tmp' -print",
+            "find ./build -delete",
+            "find src -delete",
+        ] {
+            assert!(!is_destructive(cmd), "should NOT be destructive: {cmd}");
+        }
     }
 }
