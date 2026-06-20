@@ -186,6 +186,10 @@ harness = false
 name = "fs_find_text"
 harness = false
 
+[[bench]]
+name = "vm_name_resolution"
+harness = false
+
 [lints]
 workspace = true
 
