@@ -18,7 +18,9 @@ use std::collections::BTreeMap;
 use serde_json::Value;
 
 use crate::mcp_oauth::StoredMcpToken;
-use crate::mcp_presets::{self, IdentityProbeDescriptor, IdentityProbeKind};
+use crate::mcp_presets::{
+    self, IdentityProbeDescriptor, IdentityProbeKind, IdentityResolutionKind,
+};
 
 /// The identity descriptor for a server URL, from the preset catalog (including
 /// any runtime overlay). `None` when the server isn't a known preset or the
@@ -47,6 +49,9 @@ pub fn render_identity(
     descriptor: &IdentityProbeDescriptor,
     token_response: Option<&Value>,
 ) -> Option<String> {
+    if descriptor.resolution == IdentityResolutionKind::None {
+        return None;
+    }
     for source in &descriptor.sources {
         if source.kind != IdentityProbeKind::TokenResponse {
             // `tool` / `http` need a live session; resolved by a follow-up.
@@ -146,11 +151,16 @@ fn tidy(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mcp_presets::{IdentityProbeKind, IdentityProbeSource};
+    use crate::mcp_presets::{
+        IdentityDescriptorConfidence, IdentityProbeKind, IdentityProbeSource,
+    };
     use serde_json::json;
 
     fn notion_descriptor() -> IdentityProbeDescriptor {
         IdentityProbeDescriptor {
+            resolution: IdentityResolutionKind::User,
+            confidence: Some(IdentityDescriptorConfidence::Documented),
+            source_url: Some("https://developers.notion.com/reference/create-a-token".to_string()),
             display_template: "{name} <{email}> — {workspace}".to_string(),
             sources: vec![IdentityProbeSource {
                 kind: IdentityProbeKind::TokenResponse,
@@ -221,6 +231,9 @@ mod tests {
     #[test]
     fn skips_live_probe_only_sources() {
         let descriptor = IdentityProbeDescriptor {
+            resolution: IdentityResolutionKind::User,
+            confidence: Some(IdentityDescriptorConfidence::Observed),
+            source_url: Some("https://example.com/mcp".to_string()),
             display_template: "{name}".to_string(),
             sources: vec![IdentityProbeSource {
                 kind: IdentityProbeKind::Tool,
@@ -230,6 +243,24 @@ mod tests {
             }],
         };
         // Tool source isn't resolved synchronously yet → None even with payload.
+        let payload = json!({"name": "Jane"});
+        assert!(render_identity(&descriptor, Some(&payload)).is_none());
+    }
+
+    #[test]
+    fn none_resolution_never_renders() {
+        let descriptor = IdentityProbeDescriptor {
+            resolution: IdentityResolutionKind::None,
+            confidence: Some(IdentityDescriptorConfidence::None),
+            source_url: Some("https://example.com/mcp".to_string()),
+            display_template: "{name}".to_string(),
+            sources: vec![IdentityProbeSource {
+                kind: IdentityProbeKind::TokenResponse,
+                tool: None,
+                url: None,
+                fields: BTreeMap::from([("name".to_string(), "name".to_string())]),
+            }],
+        };
         let payload = json!({"name": "Jane"});
         assert!(render_identity(&descriptor, Some(&payload)).is_none());
     }
