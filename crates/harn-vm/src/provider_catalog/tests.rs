@@ -383,6 +383,156 @@ fn validation_rejects_duplicate_and_dangling_aliases() {
 }
 
 #[test]
+fn live_catalog_has_one_tier_per_equivalence_group() {
+    // The shipping catalog must not tier the same logical model differently by
+    // provider/runtime — that gives identical weights different escalation
+    // eligibility by host. validate_current() runs the full live artifact; this
+    // asserts the equivalence_group tier-consistency check finds no conflict.
+    let report = validate_current();
+    assert!(
+        !report
+            .errors
+            .iter()
+            .any(|message| message.contains("conflicting tiers")),
+        "live catalog has an equivalence_group with conflicting tiers: {:?}",
+        report
+            .errors
+            .iter()
+            .filter(|m| m.contains("conflicting tiers"))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn validation_rejects_conflicting_tiers_within_an_equivalence_group() {
+    // Tier is a capability of the logical model. Two active rows in the same
+    // equivalence_group declaring different tiers must fail at catalog-build
+    // time. Build the violation by grouping two non-deprecated rows that
+    // currently agree, then flipping one tier.
+    let mut catalog = artifact();
+    // Find any non-deprecated model with an equivalence_group, give a second
+    // non-deprecated model the same group + a different tier.
+    let (group, base_tier) = catalog
+        .models
+        .iter()
+        .find(|m| {
+            m.deprecation.status != DeprecationStatus::Deprecated
+                && m.equivalence_group
+                    .as_deref()
+                    .is_some_and(|g| !g.trim().is_empty())
+        })
+        .map(|m| {
+            (
+                m.equivalence_group.clone().expect("group present"),
+                m.tier.clone(),
+            )
+        })
+        .expect("catalog has at least one grouped model");
+    let conflicting_tier = if base_tier == "frontier" {
+        "mid"
+    } else {
+        "frontier"
+    };
+    let victim = catalog
+        .models
+        .iter_mut()
+        .find(|m| {
+            m.deprecation.status != DeprecationStatus::Deprecated
+                && m.equivalence_group.as_deref() != Some(group.as_str())
+        })
+        .expect("catalog has a second non-deprecated model");
+    victim.equivalence_group = Some(group.clone());
+    victim.tier = conflicting_tier.to_string();
+
+    let report = validate_artifact(&catalog);
+    assert!(
+        report.errors.iter().any(
+            |message| message.contains("conflicting tiers") && message.contains(group.as_str())
+        ),
+        "expected an equivalence_group conflicting-tiers error for {group}, got {:?}",
+        report.errors
+    );
+}
+
+#[test]
+fn live_catalog_has_no_local_strengths_decoration_over_baseline() {
+    // Gaming guard: no local-runtime route may carry strengths beyond its
+    // equivalence_group's conservative baseline (which would read as
+    // already-capable and suppress real escalations). The live artifact must be
+    // clean.
+    let report = validate_current();
+    assert!(
+        !report
+            .errors
+            .iter()
+            .any(|message| message.contains("beyond the group's conservative baseline")),
+        "live catalog has a local route decorated above its group baseline: {:?}",
+        report
+            .errors
+            .iter()
+            .filter(|m| m.contains("beyond the group's conservative baseline"))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn validation_rejects_local_strengths_inheriting_cloud_decoration() {
+    // The exact gaming vector: a local-runtime route placed in a cloud peer's
+    // equivalence_group and decorated with the cloud row's "agentic" strength
+    // it never earned locally. The guard must reject the superset.
+    let mut catalog = artifact();
+    let local_provider = catalog
+        .providers
+        .iter()
+        .find(|p| p.local_runtime.is_some())
+        .map(|p| p.id.clone())
+        .expect("catalog has a local-runtime provider");
+    // Pick any non-deprecated cloud-hosted model that already has an
+    // equivalence_group; use its group + a richer strengths set as the cloud
+    // baseline the local row must NOT exceed.
+    let (group, cloud_strengths) = catalog
+        .models
+        .iter()
+        .find(|m| {
+            m.deprecation.status != DeprecationStatus::Deprecated
+                && m.equivalence_group
+                    .as_deref()
+                    .is_some_and(|g| !g.trim().is_empty())
+                && !m.strengths.is_empty()
+        })
+        .map(|m| (m.equivalence_group.clone().unwrap(), m.strengths.clone()))
+        .expect("a grouped cloud model with strengths exists");
+    // Find a local-provider row and graft it into that group with a strict
+    // superset of the cloud strengths (cloud set + a strength it lacks).
+    let extra = ["agentic", "reasoning", "long_context", "vision", "speed"]
+        .into_iter()
+        .find(|s| !cloud_strengths.iter().any(|c| c == s))
+        .unwrap_or("agentic")
+        .to_string();
+    let victim = catalog
+        .models
+        .iter_mut()
+        .find(|m| {
+            m.provider == local_provider && m.deprecation.status != DeprecationStatus::Deprecated
+        })
+        .expect("catalog has a local-provider model");
+    victim.equivalence_group = Some(group.clone());
+    let mut grafted = cloud_strengths;
+    grafted.push(extra.clone());
+    victim.strengths = grafted;
+
+    let report = validate_artifact(&catalog);
+    assert!(
+        report.errors.iter().any(|message| {
+            message.contains("beyond the group's conservative baseline")
+                && message.contains(group.as_str())
+        }),
+        "expected a local-strengths-over-baseline error for {group} (extra {extra}), got {:?}",
+        report.errors
+    );
+}
+
+#[test]
 fn validation_rejects_alias_tool_format_not_a_known_format() {
     // A typo / wrong value in an alias's tool_format pin must be caught at
     // catalog-build time, not silently degraded at call time. The known set is

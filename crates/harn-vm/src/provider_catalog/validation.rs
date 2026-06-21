@@ -169,6 +169,122 @@ pub fn validate_artifact(artifact: &ProviderCatalogArtifact) -> ProviderCatalogV
         }
     }
 
+    // Tier is a CAPABILITY of the logical model, not of who hosts it. The
+    // model-agnostic routing/escalation layer reads `tier` to decide
+    // "already capable, do not escalate" vs "escalate me" — so if the same
+    // weights are tiered `frontier` on one provider row and `mid` on another,
+    // the identical model gets different escalation eligibility purely by host.
+    // Enforce one tier per `equivalence_group` at catalog-build time so the
+    // divergence cannot be reintroduced silently. Deprecated rows are excluded
+    // (a superseded row may legitimately keep a stale tier until removed).
+    {
+        let mut tiers_by_group: BTreeMap<&str, BTreeMap<&str, BTreeSet<&str>>> = BTreeMap::new();
+        for model in &artifact.models {
+            if model.deprecation.status == DeprecationStatus::Deprecated {
+                continue;
+            }
+            let Some(group) = model.equivalence_group.as_deref() else {
+                continue;
+            };
+            if group.trim().is_empty() {
+                continue;
+            }
+            tiers_by_group
+                .entry(group)
+                .or_default()
+                .entry(model.tier.as_str())
+                .or_default()
+                .insert(model.id.as_str());
+        }
+        for (group, tiers) in &tiers_by_group {
+            if tiers.len() > 1 {
+                let detail = tiers
+                    .iter()
+                    .map(|(tier, ids)| {
+                        format!(
+                            "{tier} ({})",
+                            ids.iter().copied().collect::<Vec<_>>().join(", ")
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                result.errors.push(format!(
+                    "equivalence_group {group} declares conflicting tiers across its \
+                     provider rows: {detail}. tier is a capability of the logical model — \
+                     give every active row in the group the same tier (the conservative \
+                     least-capable host baseline), not a per-provider value."
+                ));
+            }
+        }
+    }
+
+    // GAMING GUARD (L3): within an equivalence_group, a LOCAL-runtime host row
+    // must not be decorated with MORE strengths than the least-decorated host in
+    // the group. `strengths` feeds the routing layer's "already capable, do not
+    // escalate" verdict (a local route claiming "agentic" reads as capable and
+    // SUPPRESSES a needed escalation). If a local route inherited a decorated
+    // cloud row's strengths it would gain capability it never earned on the
+    // local serving stack and inflate apparent local convergence — so a local
+    // row's strengths must be a SUBSET of every co-grouped row's strengths (the
+    // conservative weights-intrinsic baseline), never a superset. Providers with
+    // a `local_runtime` descriptor are the local hosts; this is data-driven, not
+    // a hardcoded name list. Deprecated rows are excluded.
+    {
+        let local_provider_ids: BTreeSet<&str> = artifact
+            .providers
+            .iter()
+            .filter(|p| p.local_runtime.is_some())
+            .map(|p| p.id.as_str())
+            .collect();
+        // Group active rows by equivalence_group, keeping each row's strengths.
+        let mut rows_by_group: BTreeMap<&str, Vec<&CatalogModel>> = BTreeMap::new();
+        for model in &artifact.models {
+            if model.deprecation.status == DeprecationStatus::Deprecated {
+                continue;
+            }
+            let Some(group) = model.equivalence_group.as_deref() else {
+                continue;
+            };
+            if group.trim().is_empty() {
+                continue;
+            }
+            rows_by_group.entry(group).or_default().push(model);
+        }
+        for (group, rows) in &rows_by_group {
+            // The group's conservative baseline is the intersection of every
+            // row's strengths — what holds for the weights regardless of host.
+            let mut baseline: Option<BTreeSet<&str>> = None;
+            for model in rows {
+                let row: BTreeSet<&str> = model.strengths.iter().map(String::as_str).collect();
+                baseline = Some(match baseline {
+                    None => row,
+                    Some(acc) => acc.intersection(&row).copied().collect(),
+                });
+            }
+            let baseline = baseline.unwrap_or_default();
+            for model in rows {
+                if !local_provider_ids.contains(model.provider.as_str()) {
+                    continue;
+                }
+                let row: BTreeSet<&str> = model.strengths.iter().map(String::as_str).collect();
+                let extras: Vec<&str> = row.difference(&baseline).copied().collect();
+                if !extras.is_empty() {
+                    result.errors.push(format!(
+                        "local-runtime row {}/{} in equivalence_group {group} claims strengths \
+                         [{}] beyond the group's conservative baseline [{}]. A local route must \
+                         not inherit a cloud peer's decoration — strengths must be the \
+                         least-capable host baseline (a subset of every co-grouped row), or the \
+                         local route reads as already-capable and suppresses real escalations.",
+                        model.provider,
+                        model.id,
+                        extras.join(", "),
+                        baseline.iter().copied().collect::<Vec<_>>().join(", "),
+                    ));
+                }
+            }
+        }
+    }
+
     // Index models by (provider, id) so alias tool_format can be checked
     // against the target model's declared tool support. An alias is the one
     // place a harness author can pin `native` / `text` per model, so a typo
