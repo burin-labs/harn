@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/embed/similarity.response.json",
+  "title": "embed.similarity response",
+  "description": "Cosine similarity in [-1, 1] and a clamped relatedness in [0, 1].",
+  "type": "object",
+  "properties": {
+    "similarity": { "type": "number", "minimum": -1, "maximum": 1 },
+    "relatedness": { "type": "number", "minimum": 0, "maximum": 1 }
+  },
+  "required": ["similarity", "relatedness"],
+  "additionalProperties": false
+}

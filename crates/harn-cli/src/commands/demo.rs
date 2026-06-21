@@ -75,6 +75,17 @@ const SCENARIOS: &[Scenario] = &[
         tape: include_str!("../../assets/demo/stdlib-toolkit/tape.jsonl"),
     },
     Scenario {
+        id: "embed-similarity",
+        title: "hostlib_embed_* ranks code-agent context offline",
+        description: "Drive the cross-platform hostlib embedding surface fully offline: inspect \
+                      the active backend, embed one symbol-like query, compare related vs \
+                      unrelated text, and top-k rank a small context corpus. Demonstrates the \
+                      shared similarity contract Burin can reuse for push-context retrieval and \
+                      symbol relevance without macOS-only NaturalLanguage or live model calls.",
+        script: include_str!("../../assets/demo/embed-similarity/scenario.harn"),
+        tape: include_str!("../../assets/demo/embed-similarity/tape.jsonl"),
+    },
+    Scenario {
         id: "command-capture",
         title: "run_command preserves a slow command's full output past a `| tail` filter",
         description: "Walk the std/agent/command_capture recognizer: rewrite `producer | tail/wc/grep` \

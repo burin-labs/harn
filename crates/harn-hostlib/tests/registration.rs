@@ -8,7 +8,7 @@
 //! removed builtin.
 
 use harn_hostlib::{
-    ast::AstCapability, code_index::CodeIndexCapability, fs::FsCapability,
+    ast::AstCapability, code_index::CodeIndexCapability, embed::EmbedCapability, fs::FsCapability,
     fs_snapshot::FsSnapshotCapability, fs_watch::FsWatchCapability, scanner::ScannerCapability,
     schemas, secret_store::SecretStoreCapability, tools::permissions, tools::ToolsCapability,
     BuiltinRegistry, HostlibCapability, HostlibError, HostlibRegistry,
@@ -430,6 +430,7 @@ fn install_default_wires_every_module_into_a_vm() {
             "ast",
             "code_index",
             "scanner",
+            "embed",
             "fs",
             "fs",
             "fs_watch",
@@ -439,9 +440,31 @@ fn install_default_wires_every_module_into_a_vm() {
     );
     // Builtin count: 15 ast (incl. apply_node + insert_at_anchor) +
     // 28 code_index (incl. add_readonly_roots, #2403 follow-up) + 2 scanner
-    // + 4 fs + 4 fs_snapshot + 2 fs_watch + 14 tools + 1 hostlib_enable
-    // + 4 secret_store = 74.
-    assert!(registry.builtins().len() >= 74);
+    // + 4 embed + 4 fs + 4 fs_snapshot + 2 fs_watch + 14 tools
+    // + 1 hostlib_enable + 4 secret_store = 78.
+    assert!(registry.builtins().len() >= 78);
+}
+
+#[test]
+fn embed_capability_registers_documented_methods() {
+    let registry = collect_into_registry(EmbedCapability::default());
+    let names: Vec<_> = registry.iter().map(|b| b.name).collect();
+    assert_eq!(
+        names,
+        vec![
+            "hostlib_embed_similarity",
+            "hostlib_embed_top_k",
+            "hostlib_embed_vector",
+            "hostlib_embed_info",
+        ]
+    );
+    // The default backend is the always-available lexical floor and every
+    // method must round-trip without a model asset present.
+    let info = registry
+        .find("hostlib_embed_info")
+        .expect("info builtin registered");
+    let out = (info.handler)(&[]).expect("info runs with no args");
+    assert!(matches!(out, harn_vm::VmValue::Dict(_)));
 }
 
 #[test]
@@ -450,6 +473,7 @@ fn every_registered_builtin_has_request_and_response_schemas() {
         .with(AstCapability)
         .with(CodeIndexCapability::new())
         .with(ScannerCapability)
+        .with(EmbedCapability::default())
         .with(FsCapability)
         .with(FsSnapshotCapability)
         .with(FsWatchCapability)

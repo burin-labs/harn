@@ -252,6 +252,7 @@
 - [Editor integration](./editor-integration.md)
 - [Testing](./testing.md)
 - [Secret store (hostlib)](./hostlib/secret_store.md)
+- [Text similarity / embeddings (hostlib)](./hostlib/embed.md)
 - [Staged filesystem (hostlib)](./hostlib/staged-fs.md)
 - [Per-tool-call FS snapshots (hostlib)](./hostlib/fs-snapshot.md)
 

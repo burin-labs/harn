@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/embed/similarity.request.json",
+  "title": "embed.similarity request",
+  "description": "Cosine similarity between two strings via the active embedding backend.",
+  "type": "object",
+  "properties": {
+    "a": { "type": "string" },
+    "b": { "type": "string" }
+  },
+  "required": ["a", "b"],
+  "additionalProperties": false
+}

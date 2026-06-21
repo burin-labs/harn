@@ -1068,6 +1068,54 @@ pub const SCHEMAS: &[(&str, &str, SchemaKind, &str)] = &[
         SchemaKind::Response,
         include_str!("../schemas/secret_store/list.response.json"),
     ),
+    (
+        "embed",
+        "similarity",
+        SchemaKind::Request,
+        include_str!("../schemas/embed/similarity.request.json"),
+    ),
+    (
+        "embed",
+        "similarity",
+        SchemaKind::Response,
+        include_str!("../schemas/embed/similarity.response.json"),
+    ),
+    (
+        "embed",
+        "top_k",
+        SchemaKind::Request,
+        include_str!("../schemas/embed/top_k.request.json"),
+    ),
+    (
+        "embed",
+        "top_k",
+        SchemaKind::Response,
+        include_str!("../schemas/embed/top_k.response.json"),
+    ),
+    (
+        "embed",
+        "vector",
+        SchemaKind::Request,
+        include_str!("../schemas/embed/vector.request.json"),
+    ),
+    (
+        "embed",
+        "vector",
+        SchemaKind::Response,
+        include_str!("../schemas/embed/vector.response.json"),
+    ),
+    (
+        "embed",
+        "info",
+        SchemaKind::Request,
+        include_str!("../schemas/embed/info.request.json"),
+    ),
+    (
+        "embed",
+        "info",
+        SchemaKind::Response,
+        include_str!("../schemas/embed/info.response.json"),
+    ),
 ];
 
 /// Look up a single schema as raw JSON text.
