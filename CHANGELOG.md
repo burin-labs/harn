@@ -8,6 +8,17 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.132
+
+### Added
+
+Add vetted identity metadata for bundled MCP presets, including documented source URLs and drift tests for descriptor shape.
+
+### Fixed
+
+Prune Harn/Burin runtime artifact directories from the hostlib code index.
+Startup indexing now ignores eval transcripts and generated run state.
+
 ## v0.8.131
 
 ### Added
