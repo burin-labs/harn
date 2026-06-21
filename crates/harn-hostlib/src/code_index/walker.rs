@@ -56,8 +56,12 @@ const SKIP_DIRS: &[&str] = &[
     // Test coverage
     "coverage",
     ".nyc_output",
-    // Legacy host cache
+    // Managed host/runtime artifacts
     ".burin",
+    ".burin-evals",
+    ".burin-live-evals",
+    ".harn",
+    ".harn-runs",
     // Claude Code
     ".claude",
     // Misc
@@ -327,10 +331,18 @@ mod tests {
         fs::create_dir_all(root.join("src")).unwrap();
         fs::create_dir_all(root.join("node_modules/foo")).unwrap();
         fs::create_dir_all(root.join(".git/objects")).unwrap();
+        fs::create_dir_all(root.join(".burin-evals/run")).unwrap();
+        fs::create_dir_all(root.join(".burin-live-evals/run")).unwrap();
+        fs::create_dir_all(root.join(".harn/state")).unwrap();
+        fs::create_dir_all(root.join(".harn-runs/session")).unwrap();
         fs::write(root.join("src/main.rs"), b"fn main() {}").unwrap();
         fs::write(root.join("src/.env"), b"SECRET=x").unwrap();
         fs::write(root.join("node_modules/foo/lib.js"), b"x").unwrap();
         fs::write(root.join(".git/objects/pack"), b"git").unwrap();
+        fs::write(root.join(".burin-evals/run/transcript.jsonl"), b"{}").unwrap();
+        fs::write(root.join(".burin-live-evals/run/live.jsonl"), b"{}").unwrap();
+        fs::write(root.join(".harn/state/session.json"), b"{}").unwrap();
+        fs::write(root.join(".harn-runs/session/trace.harn"), b"fn noisy() {}").unwrap();
         fs::write(
             root.join("oversize.json"),
             vec![b'a'; (MAX_FILE_BYTES + 1) as usize],
