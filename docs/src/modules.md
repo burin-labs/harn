@@ -80,7 +80,7 @@ code or inside any pipeline.
 `import "std/..."` is only needed for the Harn-written helper modules
 described below (`std/text`, `std/json`, `std/math`, `std/collections`,
 `std/ansi`, `std/table`, `std/diff`, `std/path`, `std/fs`, `std/os`,
-`std/slug`, `std/edit`, `std/disclosure`, `std/artifact/web`, `std/ui_resource`, `std/cache`,
+`std/slug`, `std/edit`, `std/identity`, `std/disclosure`, `std/artifact/web`, `std/ui_resource`, `std/cache`,
 `std/llm/handlers`, `std/llm/budget`, `std/llm/prompts`, `std/vision`,
 `std/context`, `std/agent_state`, `std/agents`, `std/agent/user`,
 `std/agent/fact`, `std/agent/probe`, `std/agent/scratchpad`,
@@ -112,6 +112,7 @@ import "std/connectors/shared"
 import "std/context"
 import "std/disclosure"
 import "std/edit"
+import "std/identity"
 import "std/artifact/web"
 import "std/ui_resource"
 import "std/experiments"
@@ -486,6 +487,38 @@ import "std/slug"
 let run_name = random_slug({segments: 3})
 let stable = slug_from({repo: "harn", pr: 42}, {segments: 4, salt: "ci"})
 let id = slugify("Agent 007 / Fast Verify")
+```
+
+### std/identity
+
+ActorChain inspection helpers for provenance, logs, status displays, and
+surface adapters:
+
+| Function | Description |
+|---|---|
+| `actor_chain_report(chain)` | Validate an ActorChain dict without throwing; returns `{ok, issues, subjects, current, origin, actors, prior_actors, depth, delegated, may_act?}` |
+| `actor_chain_require(chain)` | Return the report or throw a concise `std/identity` error for malformed chains |
+| `actor_chain_subjects(chain)` | Return validated subjects ordered current actor first and origin last |
+| `actor_chain_summary(chain)` | Return the stable summary fields from a valid chain |
+| `actor_chain_format(chain, options?)` | Format `current for origin`, including prior actors by default, or use `{style: "arrow"}` for the full chain |
+| `actor_chain_subject_parts(subject)` | Split `kind:id` subjects into `{kind, id}`; subjects without `:` become `{kind: "principal", id: subject}` |
+
+```harn
+import { actor_chain_format, actor_chain_report } from "std/identity"
+
+pipeline default() {
+  let chain = {
+    sub: "user:owner",
+    scopes: ["repo:read", "repo:write"],
+    act: {sub: "agent:reviewer", scopes: ["repo:read"]},
+  }
+  let report = actor_chain_report(chain)
+  let current = report.current
+  require current != nil, "chain should have a current subject"
+  log(current.subject)                    // "agent:reviewer"
+  log(actor_chain_format(chain))          // "agent:reviewer for user:owner"
+  log(actor_chain_format(chain, {style: "arrow"})) // "agent:reviewer -> user:owner"
+}
 ```
 
 ### std/eval/stats

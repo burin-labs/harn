@@ -150,6 +150,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/stdlib_schema.harn"),
     },
     StdlibSource {
+        module: "identity",
+        source: include_str!("stdlib/stdlib_identity.harn"),
+    },
+    StdlibSource {
         module: "disclosure",
         source: include_str!("stdlib/stdlib_disclosure.harn"),
     },

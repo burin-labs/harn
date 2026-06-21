@@ -275,10 +275,20 @@ pub fn sweep_expired() {
 #[derive(Clone, Debug)]
 pub struct RegistryStatus {
     pub name: String,
+    pub transport: String,
+    pub url: Option<String>,
     pub lazy: bool,
     pub active: bool,
     pub ref_count: usize,
     pub card: Option<String>,
+}
+
+fn spec_string(spec: &serde_json::Value, key: &str) -> Option<String> {
+    spec.get(key)
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
 }
 
 pub fn snapshot_status() -> Vec<RegistryStatus> {
@@ -288,6 +298,8 @@ pub fn snapshot_status() -> Vec<RegistryStatus> {
         let active = guard.active.get(name);
         out.push(RegistryStatus {
             name: name.clone(),
+            transport: spec_string(&server.spec, "transport").unwrap_or_else(|| "stdio".into()),
+            url: spec_string(&server.spec, "url"),
             lazy: server.lazy,
             active: active.is_some(),
             ref_count: active.map(|a| a.ref_count).unwrap_or(0),
@@ -329,6 +341,8 @@ mod tests {
         let snap = snapshot_status();
         assert_eq!(snap.len(), 1);
         assert_eq!(snap[0].name, "x");
+        assert_eq!(snap[0].transport, "stdio");
+        assert!(snap[0].url.is_none());
         assert!(snap[0].lazy);
         assert!(!snap[0].active);
         assert_eq!(snap[0].card.as_deref(), Some("card.json"));

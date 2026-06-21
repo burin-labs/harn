@@ -42,6 +42,39 @@ pub fn display_identity(server_url: &str, token: &StoredMcpToken) -> Option<Stri
     render_identity(descriptor, token.token_response_extra.as_ref())
 }
 
+/// Resolve a display-identity string from Harn's stored MCP OAuth token state.
+///
+/// This is the shared status-surface helper: callers get the same behavior in
+/// CLI status, host status, and Harn scripts without each reimplementing OAuth
+/// discovery, resource-indicator canonicalization, token lookup, and graceful
+/// fallback. Returns `None` for unknown servers, servers without token-response
+/// identity descriptors, missing tokens, discovery/storage errors, or tokens
+/// that predate captured token-response extras.
+pub async fn display_identity_from_store(
+    server_url: &str,
+    client_id_hint: Option<&str>,
+) -> Option<String> {
+    let descriptor = descriptor_for(server_url)?;
+    if descriptor.resolution == IdentityResolutionKind::None
+        || !descriptor
+            .sources
+            .iter()
+            .any(|source| source.kind == IdentityProbeKind::TokenResponse)
+    {
+        return None;
+    }
+    let discovery = crate::mcp_oauth::discover(server_url).await.ok()?;
+    let resource = crate::mcp_auth::canonical_resource_indicator(server_url).ok()?;
+    let token = crate::mcp_oauth::load_token(
+        &resource,
+        &discovery.authorization_server_issuer,
+        client_id_hint,
+    )
+    .await
+    .ok()??;
+    render_identity(descriptor, token.token_response_extra.as_ref())
+}
+
 /// Render a descriptor against an optional captured token-response payload.
 /// Tries each `token_response` source in order; returns the first non-empty
 /// render. Pure — the unit of behavior the tests exercise.
@@ -294,5 +327,12 @@ mod tests {
         let mut other = token;
         other.resource = "https://unknown.example/mcp".into();
         assert!(display_identity("https://unknown.example/mcp", &other).is_none());
+    }
+
+    #[tokio::test]
+    async fn store_lookup_skips_unknown_servers_without_discovery() {
+        let rendered =
+            display_identity_from_store("https://identity.example.invalid/mcp", None).await;
+        assert!(rendered.is_none());
     }
 }

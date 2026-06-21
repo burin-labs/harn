@@ -4,6 +4,9 @@
 RFC 8693-style `ActorChain` value. Use it when a host or connector needs the
 same actor chain represented in a surface-native form such as Git trailers,
 a Slack byline, or a GitHub author-mode decision.
+Generic ActorChain validation, traversal, and compact formatting live in
+[`std/identity`](./identity.md); disclosure reuses that module and adds only
+surface-specific rendering policy.
 
 ```harn
 import { append_git_trailers, render, slack_message_disclosure } from "std/disclosure"

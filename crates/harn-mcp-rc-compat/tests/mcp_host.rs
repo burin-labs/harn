@@ -85,7 +85,7 @@ async fn status_reflects_active_server_and_clears_on_stop() {
         .await
         .expect("spawn should succeed");
 
-    let snap = mcp_host::status();
+    let snap = mcp_host::status().await;
     let entry = snap
         .iter()
         .find(|s| s.name == "alpha")
@@ -97,7 +97,7 @@ async fn status_reflects_active_server_and_clears_on_stop() {
     assert!(!entry.ejected);
 
     mcp_host::stop("alpha").expect("stop should succeed");
-    let snap_after = mcp_host::status();
+    let snap_after = mcp_host::status().await;
     assert!(
         snap_after.iter().all(|s| !s.active || s.name != "alpha"),
         "alpha should no longer be active after stop"
@@ -180,7 +180,7 @@ async fn reload_drops_active_connection_but_subsequent_call_reconnects() {
     // Reload — the underlying connection is dropped; the registration
     // and supervision state are reset.
     mcp_host::reload("hot").expect("reload should succeed");
-    let snap = mcp_host::status();
+    let snap = mcp_host::status().await;
     let entry = snap.iter().find(|s| s.name == "hot").expect("entry exists");
     assert_eq!(entry.restart_count, 0, "reload should reset restart_count");
     assert_eq!(entry.consecutive_failures, 0);
@@ -285,7 +285,7 @@ async fn lazy_spawn_does_not_eagerly_connect() {
         .expect("lazy spawn must not perform an eager connect");
     assert_eq!(id, "lazy");
 
-    let snap = mcp_host::status();
+    let snap = mcp_host::status().await;
     let entry = snap.iter().find(|s| s.name == "lazy").expect("registered");
     assert!(entry.lazy);
     assert!(

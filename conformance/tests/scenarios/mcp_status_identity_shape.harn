@@ -1,0 +1,30 @@
+pipeline default() {
+  let name = harn.mcp
+    .spawn(
+    {name: "identity-shape", transport: "http", url: "https://identity.example.invalid/mcp"},
+    {lazy: true},
+  )
+  let status = harn.mcp.status()
+  var entry = nil
+  for item in status {
+    if item.name == name {
+      entry = item
+    }
+  }
+  require entry != nil, "status should include the lazy server"
+  __io_println(entry.name)
+  __io_println(entry.transport)
+  __io_println(entry.url)
+  __io_println(entry.display_identity == nil)
+  __io_println(entry.active)
+  __io_println(entry.lazy)
+  var registry_entry = nil
+  for item in mcp_registry_status() {
+    if item.name == name {
+      registry_entry = item
+    }
+  }
+  require registry_entry != nil, "registry status should include the lazy server"
+  __io_println(registry_entry.transport)
+  __io_println(registry_entry.url)
+}

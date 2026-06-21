@@ -1,0 +1,8 @@
+identity-shape
+http
+https://identity.example.invalid/mcp
+true
+false
+true
+http
+https://identity.example.invalid/mcp

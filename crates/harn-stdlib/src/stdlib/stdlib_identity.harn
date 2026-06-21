@@ -1,0 +1,330 @@
+/**
+ * std/identity - ActorChain inspection and provenance helpers.
+ *
+ * Import: import { actor_chain_report } from "std/identity"
+ *
+ * @effects: []
+ * @errors: []
+ */
+type ActorChainIssue = {code: string, path: string, message: string}
+
+type ActorChainSubject = {
+  subject: string,
+  kind: string,
+  id: string,
+  role: string,
+  position: int,
+  path: string,
+  scopes: list<string>,
+}
+
+type ActorChainReport = {
+  ok: bool,
+  issues: list<ActorChainIssue>,
+  subjects: list<ActorChainSubject>,
+  current?: ActorChainSubject,
+  origin?: ActorChainSubject,
+  actors: list<ActorChainSubject>,
+  prior_actors: list<ActorChainSubject>,
+  depth: int,
+  delegated: bool,
+  may_act?: string,
+}
+
+type ActorChainFormatOptions = {style?: string, include_prior?: bool}
+
+fn __issue(code: string, path: string, message: string) -> ActorChainIssue {
+  return {code: code, path: path, message: message}
+}
+
+fn __append_unique(values: list<string>, value: string) -> list<string> {
+  let normalized = trim(value)
+  if normalized == "" || contains(values, normalized) {
+    return values
+  }
+  return values + [normalized]
+}
+
+fn __subject_parts(subject: string) -> dict {
+  let split_at = subject.index_of(":")
+  if split_at < 0 {
+    return {kind: "principal", id: subject}
+  }
+  return {kind: substring(subject, 0, split_at), id: substring(subject, split_at + 1)}
+}
+
+fn __scope_claims(node: dict, path: string) -> dict {
+  var issues = []
+  var scopes = []
+  if node?.scopes != nil {
+    if type_of(node.scopes) != "list" {
+      issues = issues
+        + [__issue("actor_chain.scopes_type", path + ".scopes", "scopes must be a list of strings")]
+    } else {
+      for {index, value} in node.scopes.enumerate() {
+        if type_of(value) != "string" {
+          issues = issues
+            + [
+            __issue(
+              "actor_chain.scope_type",
+              path + ".scopes[" + to_string(index) + "]",
+              "scope entries must be strings",
+            ),
+          ]
+        } else {
+          scopes = __append_unique(scopes, value)
+        }
+      }
+    }
+  }
+  if node?.scope != nil {
+    if type_of(node.scope) != "string" {
+      issues = issues
+        + [__issue("actor_chain.scope_type", path + ".scope", "scope must be a whitespace-delimited string")]
+    } else {
+      for value in split(node.scope, " ") {
+        scopes = __append_unique(scopes, value)
+      }
+    }
+  }
+  return {issues: issues, scopes: scopes}
+}
+
+fn __entry(node, path: string) -> dict {
+  var issues = []
+  if type_of(node) != "dict" {
+    return {issues: [__issue("actor_chain.node_type", path, "node must be a dict")], entry: nil}
+  }
+  if type_of(node?.sub) != "string" || trim(node.sub) == "" {
+    return {
+      issues: [__issue("actor_chain.sub_type", path + ".sub", "sub must be a non-empty string")],
+      entry: nil,
+    }
+  }
+  let scope_result = __scope_claims(node, path)
+  issues = issues + scope_result.issues
+  let subject = to_string(node.sub)
+  let parts = __subject_parts(subject)
+  return {
+    issues: issues,
+    entry: {subject: subject, kind: parts.kind, id: parts.id, path: path + ".sub", scopes: scope_result.scopes},
+  }
+}
+
+fn __may_act(chain: dict) -> dict {
+  if chain?.may_act == nil {
+    return {issues: [], value: nil}
+  }
+  if type_of(chain.may_act) != "dict" {
+    return {
+      issues: [__issue("actor_chain.may_act_type", "may_act", "may_act must be a dict with a sub string")],
+      value: nil,
+    }
+  }
+  if type_of(chain.may_act?.sub) != "string" || trim(chain.may_act.sub) == "" {
+    return {
+      issues: [__issue("actor_chain.may_act_sub_type", "may_act.sub", "may_act.sub must be a non-empty string")],
+      value: nil,
+    }
+  }
+  return {issues: [], value: to_string(chain.may_act.sub)}
+}
+
+fn __with_roles(entries: list<dict>) -> list<ActorChainSubject> {
+  var subjects = []
+  let origin_index = len(entries) - 1
+  for {index, value} in entries.enumerate() {
+    let role = if index == 0 {
+      "current"
+    } else if index == origin_index {
+      "origin"
+    } else {
+      "actor"
+    }
+    subjects = subjects + [value + {role: role, position: index}]
+  }
+  return subjects
+}
+
+fn __report(issues: list<ActorChainIssue>, entries: list<dict>, may_act) -> ActorChainReport {
+  let subjects = __with_roles(entries)
+  var current = nil
+  var origin = nil
+  var actors = []
+  var prior_actors = []
+  if len(subjects) > 0 {
+    current = subjects[0]
+    origin = subjects[len(subjects) - 1]
+  }
+  if len(subjects) > 1 {
+    actors = subjects.slice(0, len(subjects) - 1)
+  }
+  if len(actors) > 1 {
+    prior_actors = actors.slice(1, len(actors))
+  }
+  var report = {
+    ok: len(issues) == 0,
+    issues: issues,
+    subjects: subjects,
+    current: current,
+    origin: origin,
+    actors: actors,
+    prior_actors: prior_actors,
+    depth: len(subjects),
+    delegated: len(actors) > 0,
+  }
+  if may_act != nil {
+    report = report + {may_act: may_act}
+  }
+  return report
+}
+
+/**
+ * Split an ActorChain subject (`kind:id`) into displayable parts.
+ *
+ * Subjects without a colon are treated as `{kind: "principal", id: subject}`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn actor_chain_subject_parts(subject: string) -> dict {
+  return __subject_parts(subject)
+}
+
+/**
+ * Validate and inspect an RFC 8693-style ActorChain dict without throwing.
+ *
+ * Returned subjects are ordered current actor first and origin last, matching
+ * Harn's Rust `ActorChain::entries()` traversal. Each subject preserves `scope`
+ * / `scopes` claims as a deduplicated list.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn actor_chain_report(chain) -> ActorChainReport {
+  var issues = []
+  var entries = []
+  if type_of(chain) != "dict" {
+    return __report([__issue("actor_chain.type", "$", "chain must be a dict")], [], nil)
+  }
+  var node = chain?.act
+  var path = "act"
+  while node != nil {
+    let result = __entry(node, path)
+    issues = issues + result.issues
+    if result.entry == nil {
+      return __report(issues, entries, nil)
+    }
+    entries = entries + [result.entry]
+    node = node?.act
+    path = path + ".act"
+  }
+  let origin = __entry(chain, "$")
+  issues = issues + origin.issues
+  if origin.entry != nil {
+    entries = entries + [origin.entry]
+  }
+  let may_act = __may_act(chain)
+  issues = issues + may_act.issues
+  return __report(issues, entries, may_act.value)
+}
+
+/**
+ * Validate an ActorChain and return the same report as `actor_chain_report`.
+ *
+ * Throws a concise message when the chain is malformed; use
+ * `actor_chain_report` when callers need to collect structured issues.
+ *
+ * @effects: []
+ * @errors: [TypeError, ValueError]
+ */
+pub fn actor_chain_require(chain) -> ActorChainReport {
+  let report = actor_chain_report(chain)
+  if report.ok {
+    return report
+  }
+  var messages = []
+  for issue in report.issues {
+    messages = messages + [issue.path + ": " + issue.message]
+  }
+  throw "std/identity: invalid ActorChain: " + join(messages, "; ")
+}
+
+/**
+ * Return validated ActorChain subjects ordered current-first, origin-last.
+ *
+ * @effects: []
+ * @errors: [TypeError, ValueError]
+ */
+pub fn actor_chain_subjects(chain) -> list<ActorChainSubject> {
+  return actor_chain_require(chain).subjects
+}
+
+/**
+ * Return the stable summary fields from a validated ActorChain.
+ *
+ * @effects: []
+ * @errors: [TypeError, ValueError]
+ */
+pub fn actor_chain_summary(chain) -> dict {
+  let report = actor_chain_require(chain)
+  var summary = {
+    subjects: report.subjects,
+    current: report.current,
+    origin: report.origin,
+    actors: report.actors,
+    prior_actors: report.prior_actors,
+    actor_count: len(report.actors),
+    depth: report.depth,
+    delegated: report.delegated,
+  }
+  if report.may_act != nil {
+    summary = summary + {may_act: report.may_act}
+  }
+  return summary
+}
+
+fn __subject_names(subjects: list<ActorChainSubject>) -> list<string> {
+  var names = []
+  for subject in subjects {
+    names = names + [subject.subject]
+  }
+  return names
+}
+
+/**
+ * Format an ActorChain for compact logs and status displays.
+ *
+ * Default style renders `current for origin` and includes prior actors as
+ * `via a, b`. Pass `{style: "arrow"}` for the full current-to-origin chain.
+ *
+ * @effects: []
+ * @errors: [TypeError, ValueError]
+ */
+pub fn actor_chain_format(chain, options: ActorChainFormatOptions = {}) -> string {
+  let report = actor_chain_require(chain)
+  if report.depth == 0 {
+    return ""
+  }
+  let style = lowercase(trim(to_string(options.style ?? "for")))
+  if style == "arrow" {
+    return join(__subject_names(report.subjects), " -> ")
+  }
+  let origin = report.origin
+  if origin == nil {
+    return ""
+  }
+  if !report.delegated {
+    return origin.subject
+  }
+  let current = report.current
+  if current == nil {
+    return origin.subject
+  }
+  var rendered = current.subject + " for " + origin.subject
+  let include_prior = options.include_prior ?? true
+  if include_prior && len(report.prior_actors) > 0 {
+    rendered = rendered + " via " + join(__subject_names(report.prior_actors), ", ")
+  }
+  return rendered
+}
