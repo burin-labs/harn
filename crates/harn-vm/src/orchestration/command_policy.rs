@@ -1222,8 +1222,7 @@ fn shell_token(token: &str) -> ShellToken {
     let mut mode = QuoteMode::None;
     let mut text = String::new();
     let mut single_quoted = Vec::new();
-    let mut chars = token.trim().chars().peekable();
-    while let Some(ch) = chars.next() {
+    for ch in token.trim().chars() {
         match (mode, ch) {
             (QuoteMode::None, '\'') => mode = QuoteMode::Single,
             (QuoteMode::Single, '\'') => mode = QuoteMode::None,
@@ -1281,10 +1280,10 @@ fn is_pwd_workspace_target(token: &ShellToken, arg: &str) -> bool {
     if starts_with_unquoted(token, arg, "${pwd") {
         let rest = &arg["${pwd".len()..];
         if let Some((parameter, suffix)) = rest.split_once('}') {
-            if unquoted_prefix(token, "${pwd".len() + parameter.len() + 1) {
-                if parameter.is_empty() || parameter.starts_with(':') {
-                    return pwd_suffix_wipes_workspace(suffix);
-                }
+            if unquoted_prefix(token, "${pwd".len() + parameter.len() + 1)
+                && (parameter.is_empty() || parameter.starts_with(':'))
+            {
+                return pwd_suffix_wipes_workspace(suffix);
             }
         }
     }
@@ -1729,6 +1728,11 @@ mod tests {
     fn cwd_wipe_deletes_are_flagged_destructive() {
         // SB-3: cwd/workspace-relative recursive wipes a prompt injection can use
         // without ever naming `/`. All must be labeled destructive (-> deny).
+        let guarded_pwd_expansion = "rm -rf $".to_string() + "{" + "PWD:?" + "}" + "/*";
+        assert!(
+            is_destructive(&guarded_pwd_expansion),
+            "expected destructive: {guarded_pwd_expansion}"
+        );
         for cmd in [
             "rm -rf .",
             "rm -rf ./",
@@ -1746,7 +1750,6 @@ mod tests {
             "rm -rf \"$PWD\"",
             "rm -rf \"$PWD\"/*",
             "rm -rf ${PWD}/*",
-            "rm -rf ${PWD:?}/*",
             "rm -rf \"$(pwd)\"/*",
             "rm -rf `pwd`/*",
             "sh -c 'rm -rf .'",
