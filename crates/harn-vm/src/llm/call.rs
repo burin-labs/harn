@@ -551,6 +551,7 @@ async fn execute_routing_schema_retry_loop(
 
         let more_attempts = attempt < schema_retries;
         if more_attempts {
+            escalate_max_tokens_on_truncation(&mut opts, &errors);
             let nudge = build_schema_nudge(&errors, opts.output_schema.as_ref(), &nudge_mode);
             emit_agent_event(AgentTraceEvent::SchemaRetry {
                 attempt: attempt + 1,
@@ -730,6 +731,7 @@ pub(crate) async fn execute_schema_retry_loop(
 
         let more_attempts = attempt < schema_retries;
         if more_attempts {
+            escalate_max_tokens_on_truncation(&mut opts, &errors);
             let nudge = build_schema_nudge(&errors, opts.output_schema.as_ref(), &nudge_mode);
             emit_agent_event(AgentTraceEvent::SchemaRetry {
                 attempt: attempt + 1,
@@ -764,6 +766,49 @@ pub(crate) async fn execute_schema_retry_loop(
         });
     }
     unreachable!("schema retry loop exited without returning");
+}
+
+/// Hard ceiling for an auto-escalated structured-output retry budget. A
+/// single doubling step is usually enough to clear a reasoning model's
+/// hidden-channel spend; the ceiling stops a pathological loop from
+/// requesting an unbounded completion when the model never converges.
+const MAX_TOKENS_RETRY_CEILING: i64 = 32_768;
+
+/// When a structured/schema attempt failed because the response ran out of
+/// output-token budget mid-JSON (`is_length_truncation` -> the canonical
+/// "hit the token limit" marker `structured_output_errors` appends), grow
+/// `opts.max_tokens` before the retry so the next attempt has room to emit a
+/// complete object.
+///
+/// This is the generalizing fix for reasoning models (gpt-oss/Harmony,
+/// DeepSeek-R, o-series): their reasoning/analysis channel is billed against
+/// the same output budget but is invisible in the parsed text, so a
+/// `max_tokens` that comfortably fits a non-reasoning model's JSON is consumed
+/// entirely by reasoning, truncating the visible JSON to empty. Replaying the
+/// identical under-budget just re-truncates — burning a retry slot and, once
+/// the slots are exhausted, returning a DEAD `length_truncation` envelope (an
+/// empty judge verdict that silently falls through to the deterministic
+/// grader). Returns `true` when the budget was grown so the caller can trace
+/// the escalation.
+fn escalate_max_tokens_on_truncation(opts: &mut api::LlmCallOptions, errors: &[String]) -> bool {
+    let truncated = errors.iter().any(|e| e.contains("hit the token limit"));
+    if !truncated || opts.max_tokens >= MAX_TOKENS_RETRY_CEILING {
+        return false;
+    }
+    let before = opts.max_tokens;
+    let grown = before
+        .saturating_mul(2)
+        .clamp(before + 1, MAX_TOKENS_RETRY_CEILING);
+    opts.max_tokens = grown;
+    crate::events::log_info(
+        "llm",
+        &format!(
+            "structured retry: response truncated at max_tokens={before}; \
+             escalating retry budget to max_tokens={grown} \
+             (reasoning channel can consume the output budget)"
+        ),
+    );
+    true
 }
 
 /// Render the schema-stream abort as a validation-style error string so
@@ -1260,5 +1305,53 @@ mod schema_stream_abort_retry_tests {
 
             reset_agent_trace_state();
         });
+    }
+
+    // A structured retry after a token-limit truncation must grow the
+    // output-token budget so a reasoning model (whose analysis channel is
+    // billed against the same budget but invisible in parsed text) gets room
+    // to emit complete JSON instead of re-truncating to empty.
+    #[test]
+    fn truncation_retry_escalates_max_tokens() {
+        let mut opts = api::options::base_opts("fake");
+        opts.max_tokens = 640;
+        let errors =
+            vec!["response hit the token limit before producing complete JSON".to_string()];
+        let grew = escalate_max_tokens_on_truncation(&mut opts, &errors);
+        assert!(grew, "truncation marker should escalate the budget");
+        assert_eq!(opts.max_tokens, 1280, "640 should double to 1280");
+    }
+
+    // A non-truncation failure (e.g. a schema-validation miss) must NOT touch
+    // the budget — escalation is reserved for the under-budget root cause.
+    #[test]
+    fn non_truncation_failure_leaves_max_tokens_unchanged() {
+        let mut opts = api::options::base_opts("fake");
+        opts.max_tokens = 640;
+        let errors = vec!["data.age: expected integer, got string".to_string()];
+        let grew = escalate_max_tokens_on_truncation(&mut opts, &errors);
+        assert!(!grew, "non-truncation failure must not escalate");
+        assert_eq!(opts.max_tokens, 640);
+    }
+
+    // The escalation is clamped at the retry ceiling so a pathological
+    // never-converging loop can't request an unbounded completion.
+    #[test]
+    fn truncation_retry_clamps_at_ceiling() {
+        let mut opts = api::options::base_opts("fake");
+        opts.max_tokens = MAX_TOKENS_RETRY_CEILING - 100;
+        let errors =
+            vec!["response hit the token limit before producing complete JSON".to_string()];
+        let grew = escalate_max_tokens_on_truncation(&mut opts, &errors);
+        assert!(grew, "below the ceiling, the budget should still grow");
+        assert_eq!(opts.max_tokens, MAX_TOKENS_RETRY_CEILING);
+
+        // Already at the ceiling: no further growth, no wasted retry signal.
+        let grew_again = escalate_max_tokens_on_truncation(&mut opts, &errors);
+        assert!(
+            !grew_again,
+            "at the ceiling the budget must not grow further"
+        );
+        assert_eq!(opts.max_tokens, MAX_TOKENS_RETRY_CEILING);
     }
 }
