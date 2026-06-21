@@ -3074,6 +3074,44 @@ native_tools = true
     }
 
     #[test]
+    fn tool_format_resolution_is_serving_stack_aware_for_same_weights() {
+        // The (model x serving-stack) insight: the SAME Qwen3.6 weights resolve
+        // to DIFFERENT working tool-call channels depending on who serves them.
+        // This divergence lives in the capability matrix as data (provider rows),
+        // NOT in alias pins — so an alias refactor must not be able to regress
+        // it. Locking the three live serving stacks here makes that explicit.
+        reset();
+
+        // llama.cpp (:8001) — native is probe-validated and trusted.
+        let llamacpp = validate_tool_format("llamacpp", "qwen3.6-35b-a3b-ud-q4-k-xl", "native");
+        assert_eq!(
+            llamacpp.effective, "native",
+            "llama.cpp serves qwen3.6 native"
+        );
+        assert!(llamacpp.correction.is_none());
+
+        // Ollama (/v1) — the embedded qwen tool-call parser 500s on text-mode
+        // output, so this route is served on the text/json channel: a native
+        // request must be auto-corrected to json (never silently dropped).
+        let ollama = validate_tool_format("ollama", "qwen3.6-35b-a3b", "native");
+        assert_eq!(
+            ollama.effective, "json",
+            "ollama qwen3.6 must steer native -> json (server-side parser 500 leak)"
+        );
+        assert!(
+            ollama.correction.is_some(),
+            "the native->json steer must be explained, not silent"
+        );
+
+        // A native_unreliable cloud route (deepinfra GLM-5) carries the same
+        // serving-stack verdict via tool_mode_parity + empirical notes, and is
+        // likewise steered off native.
+        let glm = validate_tool_format("deepinfra", "deepinfra/glm-5.2", "native");
+        assert_eq!(glm.effective, "json");
+        assert!(glm.correction.is_some());
+    }
+
+    #[test]
     fn validate_tool_format_passes_through_when_no_channel_works() {
         reset();
         // A route with no working tool surface — text_only parity forbids the
