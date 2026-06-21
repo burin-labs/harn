@@ -22,8 +22,12 @@ url = "https://mcp.notion.com/mcp"
 auth_kind = "oauth"
 
 # Notion returns the authorizing user + workspace inline in its OAuth token
-# response, so the "logged in as …" string needs no extra call (harn#3349).
+# response, so the primary "logged in as ..." string needs no extra call.
+# Source: https://developers.notion.com/reference/create-a-token
 [presets.identity]
+resolution = "user"
+confidence = "documented"
+source_url = "https://developers.notion.com/reference/create-a-token"
 display_template = "{name} <{email}> — {workspace}"
 
 [[presets.identity.sources]]
@@ -32,6 +36,15 @@ kind = "token_response"
 name = "owner.user.name"
 email = "owner.user.person.email"
 workspace = "workspace_name"
+
+# Fallback shape from Notion's self endpoint.
+# Source: https://developers.notion.com/reference/get-self
+[[presets.identity.sources]]
+kind = "tool"
+tool = "notion-get-self"
+[presets.identity.sources.fields]
+name = "name"
+email = "person.email"
 
 [[presets]]
 id = "linear"
@@ -43,6 +56,22 @@ transport = "http"
 url = "https://mcp.linear.app/mcp"
 auth_kind = "oauth"
 oauth_scopes = "read write"
+
+# Linear documents the remote MCP endpoint; the user identity probe is based on
+# the first-party viewer-style surface observed during #3351 vetting.
+# Source: https://linear.app/docs/mcp
+[presets.identity]
+resolution = "user"
+confidence = "observed"
+source_url = "https://linear.app/docs/mcp"
+display_template = "{name} <{email}>"
+
+[[presets.identity.sources]]
+kind = "tool"
+tool = "viewer"
+[presets.identity.sources.fields]
+name = "name"
+email = "email"
 
 [[presets]]
 id = "github"
@@ -60,6 +89,155 @@ key = "GITHUB_PERSONAL_ACCESS_TOKEN"
 label = "GitHub personal access token"
 target = "env"
 required = true
+
+# GitHub's official MCP server ships a users toolset; get_me returns the
+# authenticated GitHub user. The existing preset remains local/stdio for
+# compatibility with clients that fill GITHUB_PERSONAL_ACCESS_TOKEN.
+# Source: https://github.com/github/github-mcp-server
+[presets.identity]
+resolution = "user"
+confidence = "observed"
+source_url = "https://github.com/github/github-mcp-server"
+display_template = "{login} <{email}>"
+
+[[presets.identity.sources]]
+kind = "tool"
+tool = "get_me"
+[presets.identity.sources.fields]
+login = "login"
+name = "name"
+email = "email"
+
+[[presets]]
+id = "sentry"
+name = "Sentry"
+description = "Issues, releases, and error context from Sentry."
+icon = "exclamationmark.triangle.fill"
+category = "development"
+transport = "http"
+url = "https://mcp.sentry.dev/mcp"
+auth_kind = "oauth"
+
+# Sentry's public MCP server exposes whoami for authenticated user display.
+# Source: https://github.com/getsentry/sentry-mcp
+[presets.identity]
+resolution = "user"
+confidence = "observed"
+source_url = "https://github.com/getsentry/sentry-mcp"
+display_template = "{name} <{email}>"
+
+[[presets.identity.sources]]
+kind = "tool"
+tool = "whoami"
+[presets.identity.sources.fields]
+name = "name"
+email = "email"
+
+[[presets]]
+id = "figma"
+name = "Figma"
+description = "Design files, variables, assets, and design-context tools from Figma."
+icon = "paintpalette.fill"
+category = "design"
+transport = "http"
+url = "https://mcp.figma.com/mcp"
+auth_kind = "oauth"
+
+# Figma documents whoami as a remote-only tool returning the authenticated
+# user's email, plans, and seat types.
+# Source: https://developers.figma.com/docs/figma-mcp-server/tools-and-prompts/
+[presets.identity]
+resolution = "user"
+confidence = "documented"
+source_url = "https://developers.figma.com/docs/figma-mcp-server/tools-and-prompts/"
+display_template = "{email}"
+
+[[presets.identity.sources]]
+kind = "tool"
+tool = "whoami"
+[presets.identity.sources.fields]
+email = "email"
+name = "name"
+
+[[presets]]
+id = "atlassian"
+name = "Atlassian"
+description = "Jira, Confluence, Compass, and Bitbucket context via Rovo MCP."
+icon = "bolt.horizontal.circle.fill"
+category = "productivity"
+transport = "http"
+url = "https://mcp.atlassian.com/v1/mcp/authv2"
+auth_kind = "oauth"
+
+# Atlassian documents the Rovo MCP endpoint; atlassianUserInfo is the
+# first-party identity probe observed during #3351 vetting.
+# Source: https://support.atlassian.com/atlassian-rovo-mcp-server/docs/setting-up-ides/
+[presets.identity]
+resolution = "user"
+confidence = "observed"
+source_url = "https://support.atlassian.com/atlassian-rovo-mcp-server/docs/setting-up-ides/"
+display_template = "{name} <{email}> ({account_id})"
+
+[[presets.identity.sources]]
+kind = "tool"
+tool = "atlassianUserInfo"
+[presets.identity.sources.fields]
+name = "name"
+email = "email"
+account_id = "accountId"
+
+[[presets]]
+id = "stripe"
+name = "Stripe"
+description = "Customers, payments, billing, and account data from Stripe."
+icon = "creditcard.fill"
+category = "finance"
+transport = "http"
+url = "https://mcp.stripe.com"
+auth_kind = "oauth"
+
+# Stripe documents get_stripe_account_info as its account retrieval tool.
+# This surfaces account identity, not a stable human principal.
+# Source: https://docs.stripe.com/mcp
+[presets.identity]
+resolution = "account"
+confidence = "account_only"
+source_url = "https://docs.stripe.com/mcp"
+display_template = "{business_name} <{email}> ({account_id})"
+
+[[presets.identity.sources]]
+kind = "tool"
+tool = "get_stripe_account_info"
+[presets.identity.sources.fields]
+account_id = "id"
+business_name = "business_profile.name"
+email = "email"
+
+[[presets]]
+id = "cloudflare"
+name = "Cloudflare"
+description = "Cloudflare API access across accounts, zones, Workers, R2, DNS, and Zero Trust."
+icon = "cloud.fill"
+category = "cloud"
+transport = "http"
+url = "https://mcp.cloudflare.com/mcp"
+auth_kind = "oauth"
+
+# Cloudflare documents a managed remote API MCP endpoint. Account listing is
+# the available identity-like surface; it does not prove a human principal.
+# Source: https://developers.cloudflare.com/agents/model-context-protocol/cloudflare/servers-for-cloudflare/
+[presets.identity]
+resolution = "account"
+confidence = "account_only"
+source_url = "https://developers.cloudflare.com/agents/model-context-protocol/cloudflare/servers-for-cloudflare/"
+display_template = "{name} ({account_id})"
+
+[[presets.identity.sources]]
+kind = "tool"
+tool = "accounts_list"
+[presets.identity.sources.fields]
+name = "result.0.name"
+account_id = "result.0.id"
 
 [[presets]]
 id = "filesystem"

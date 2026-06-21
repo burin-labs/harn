@@ -29,11 +29,10 @@ use std::sync::OnceLock;
 use serde::{Deserialize, Serialize};
 
 /// JSON schema version for the preset catalog. Increment on any breaking
-/// shape change to [`PresetCatalog`] / [`McpPreset`]. The optional
-/// [`McpPreset::identity`] field. Bumped to 2 in harn#3349 when the first vetted
-/// identity descriptor (Notion) began shipping in the catalog, so consumers can
-/// detect that presets may now carry an `identity` recipe.
-pub const PRESET_CATALOG_SCHEMA_VERSION: u32 = 2;
+/// shape change to [`PresetCatalog`] / [`McpPreset`]. Bumped to 3 in harn#3351
+/// when identity descriptors gained explicit resolution/confidence/source
+/// metadata and the catalog expanded to vetted remote MCP servers.
+pub const PRESET_CATALOG_SCHEMA_VERSION: u32 = 3;
 
 /// Bundled default catalog. Editable here; overlayable at runtime.
 const BUILTIN_TOML: &str = include_str!("mcp_presets.toml");
@@ -69,6 +68,9 @@ pub enum PresetAuthKind {
 pub enum PresetCategory {
     Productivity,
     Development,
+    Design,
+    Finance,
+    Cloud,
     Local,
 }
 
@@ -113,14 +115,54 @@ pub enum PlaceholderTarget {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "snake_case"))]
 pub struct IdentityProbeDescriptor {
+    /// What kind of identity this descriptor can surface. Defaults to a user
+    /// identity for older overlay descriptors.
+    #[serde(default)]
+    pub resolution: IdentityResolutionKind,
+    /// Confidence level for the descriptor, based on source quality.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<IdentityDescriptorConfidence>,
+    /// Primary public source that documents the server URL or identity tool.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_url: Option<String>,
     /// Display template referencing captured field names in braces, e.g.
     /// `"{name} <{email}> — {workspace}"`. The runner elides unresolved
     /// `{field}` placeholders (and any bracketed segment left empty).
+    #[serde(default)]
     pub display_template: String,
     /// Ordered probe sources; the runner tries each until one yields a
     /// non-empty identity.
     #[serde(default)]
     pub sources: Vec<IdentityProbeSource>,
+}
+
+/// The type of authenticated identity a descriptor represents.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IdentityResolutionKind {
+    /// Human user/workspace identity.
+    #[default]
+    User,
+    /// Account/workspace identity only; no stable human principal is exposed.
+    Account,
+    /// No known identity surface. Clients should display only the server label
+    /// or any separately configured account name.
+    None,
+}
+
+/// Confidence in a descriptor's shape.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IdentityDescriptorConfidence {
+    /// Directly documented by the provider's public MCP/API documentation.
+    Documented,
+    /// Empirically observed or documented by a first-party source without a
+    /// fully specified result schema.
+    Observed,
+    /// Provider only exposes account/workspace identity, not a user principal.
+    AccountOnly,
+    /// Provider has no known identity surface.
+    None,
 }
 
 /// Where the identity runner looks. A flat struct (rather than a tagged enum)
@@ -305,7 +347,7 @@ mod tests {
     #[test]
     fn bundled_catalog_parses() {
         let presets = base_presets();
-        assert_eq!(presets.len(), 4, "bundled catalog should ship 4 presets");
+        assert_eq!(presets.len(), 9, "bundled catalog should ship 9 presets");
     }
 
     #[test]
@@ -324,7 +366,17 @@ mod tests {
 
     #[test]
     fn ships_the_well_known_servers() {
-        for id in ["notion", "linear", "github", "filesystem"] {
+        for id in [
+            "notion",
+            "linear",
+            "github",
+            "sentry",
+            "figma",
+            "atlassian",
+            "stripe",
+            "cloudflare",
+            "filesystem",
+        ] {
             assert!(preset(id).is_some(), "missing preset {id}");
         }
     }
@@ -374,7 +426,7 @@ mod tests {
     #[test]
     fn json_shape_is_stable() {
         let json = serde_json::to_value(catalog()).expect("serialize catalog");
-        assert_eq!(json["schemaVersion"], serde_json::json!(2));
+        assert_eq!(json["schemaVersion"], serde_json::json!(3));
         let notion = json["presets"]
             .as_array()
             .expect("presets array")
@@ -392,6 +444,15 @@ mod tests {
             "Notion MCP does not currently expose configurable OAuth scopes"
         );
         // Notion now ships a token_response identity descriptor (harn#3349).
+        assert_eq!(notion["identity"]["resolution"], serde_json::json!("user"));
+        assert_eq!(
+            notion["identity"]["confidence"],
+            serde_json::json!("documented")
+        );
+        assert_eq!(
+            notion["identity"]["sourceUrl"],
+            serde_json::json!("https://developers.notion.com/reference/create-a-token")
+        );
         assert_eq!(
             notion["identity"]["displayTemplate"],
             serde_json::json!("{name} <{email}> — {workspace}")
@@ -400,6 +461,142 @@ mod tests {
             notion["identity"]["sources"][0]["kind"],
             serde_json::json!("token_response")
         );
+    }
+
+    #[test]
+    fn vetted_identity_descriptors_are_declared_for_well_known_servers() {
+        let presets = base_presets();
+        let expected = [
+            ("notion", IdentityResolutionKind::User),
+            ("linear", IdentityResolutionKind::User),
+            ("github", IdentityResolutionKind::User),
+            ("sentry", IdentityResolutionKind::User),
+            ("figma", IdentityResolutionKind::User),
+            ("atlassian", IdentityResolutionKind::User),
+            ("stripe", IdentityResolutionKind::Account),
+            ("cloudflare", IdentityResolutionKind::Account),
+        ];
+
+        for (id, resolution) in expected {
+            let preset = presets
+                .iter()
+                .find(|preset| preset.id == id)
+                .unwrap_or_else(|| panic!("missing preset {id}"));
+            let identity = preset
+                .identity
+                .as_ref()
+                .unwrap_or_else(|| panic!("{id} must declare an identity descriptor"));
+            assert_eq!(
+                identity.resolution, resolution,
+                "{id} identity resolution drifted"
+            );
+            assert!(
+                identity.confidence.is_some(),
+                "{id} identity must declare confidence"
+            );
+            assert!(
+                identity
+                    .source_url
+                    .as_deref()
+                    .is_some_and(|url| url.starts_with("https://")),
+                "{id} identity must cite an https source"
+            );
+            assert!(
+                !identity.display_template.trim().is_empty(),
+                "{id} identity needs a display template"
+            );
+            assert!(
+                !identity.sources.is_empty(),
+                "{id} identity needs at least one source"
+            );
+        }
+    }
+
+    #[test]
+    fn identity_source_shapes_are_coherent() {
+        for preset in base_presets() {
+            let Some(identity) = preset.identity.as_ref() else {
+                continue;
+            };
+            if identity.resolution == IdentityResolutionKind::None {
+                assert!(
+                    identity.sources.is_empty(),
+                    "{} none identity must not carry sources",
+                    preset.id
+                );
+                assert!(
+                    identity.display_template.trim().is_empty(),
+                    "{} none identity must not carry a display template",
+                    preset.id
+                );
+                continue;
+            }
+
+            assert!(
+                !identity.display_template.trim().is_empty(),
+                "{} identity must render a display template",
+                preset.id
+            );
+            for source in &identity.sources {
+                assert!(
+                    !source.fields.is_empty(),
+                    "{} identity source {:?} must map fields",
+                    preset.id,
+                    source.kind
+                );
+                for (name, path) in &source.fields {
+                    assert!(
+                        !name.trim().is_empty() && !path.trim().is_empty(),
+                        "{} identity source fields must not be blank",
+                        preset.id
+                    );
+                }
+                match source.kind {
+                    IdentityProbeKind::TokenResponse => {
+                        assert!(
+                            source.tool.is_none(),
+                            "{} token_response source must not set tool",
+                            preset.id
+                        );
+                        assert!(
+                            source.url.is_none(),
+                            "{} token_response source must not set url",
+                            preset.id
+                        );
+                    }
+                    IdentityProbeKind::Tool => {
+                        assert!(
+                            source
+                                .tool
+                                .as_deref()
+                                .is_some_and(|tool| !tool.trim().is_empty()),
+                            "{} tool source must name a tool",
+                            preset.id
+                        );
+                        assert!(
+                            source.url.is_none(),
+                            "{} tool source must not set url",
+                            preset.id
+                        );
+                    }
+                    IdentityProbeKind::Http => {
+                        assert!(
+                            source
+                                .url
+                                .as_deref()
+                                .is_some_and(|url| url.starts_with("https://")),
+                            "{} http source must cite an https url",
+                            preset.id
+                        );
+                        assert!(
+                            source.tool.is_none(),
+                            "{} http source must not set tool",
+                            preset.id
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]
@@ -450,9 +647,9 @@ auth_kind = "oauth"
         assert_eq!(notion.url, "https://notion.corp.example/mcp");
         assert!(
             base.iter().any(|preset| preset.id == "sentry"),
-            "new overlay preset should be appended"
+            "existing sentry preset should remain present after replacement"
         );
-        assert_eq!(base.len(), 5, "4 base + 1 appended");
+        assert_eq!(base.len(), 9, "sentry overlay replaces bundled preset");
     }
 
     #[test]
@@ -492,6 +689,9 @@ email = "person.email"
             .identity
             .as_ref()
             .expect("notion has identity descriptor");
+        assert_eq!(identity.resolution, IdentityResolutionKind::User);
+        assert!(identity.confidence.is_none());
+        assert!(identity.source_url.is_none());
         assert_eq!(identity.display_template, "{name} <{email}> — {workspace}");
         assert_eq!(identity.sources.len(), 2);
         assert_eq!(identity.sources[0].kind, IdentityProbeKind::TokenResponse);
