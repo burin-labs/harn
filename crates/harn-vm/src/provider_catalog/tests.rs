@@ -517,7 +517,7 @@ fn validation_rejects_local_strengths_inheriting_cloud_decoration() {
         })
         .expect("catalog has a local-provider model");
     victim.equivalence_group = Some(group.clone());
-    let mut grafted = cloud_strengths.clone();
+    let mut grafted = cloud_strengths;
     grafted.push(extra.clone());
     victim.strengths = grafted;
 
