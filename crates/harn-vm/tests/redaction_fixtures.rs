@@ -43,6 +43,22 @@ fn stripe_fixture() -> String {
     format!("{head}_{}", "abcdefghijklmnopqrstuvwxyz")
 }
 
+fn huggingface_fixture() -> String {
+    format!("hf_{}", "a".repeat(24))
+}
+
+fn cerebras_fixture() -> String {
+    format!("csk-{}", "b".repeat(48))
+}
+
+fn together_fixture() -> String {
+    format!("tgp_v1_{}", "c".repeat(32))
+}
+
+fn google_api_key_fixture() -> String {
+    format!("AIza{}", "D".repeat(35))
+}
+
 fn bearer_fixture() -> String {
     format!("Bearer {}", "abcDEF123_-+/=longenoughtoken")
 }
@@ -57,6 +73,10 @@ fn fixture_secrets() -> Vec<String> {
         github_pat_fixture(),
         openai_fixture(),
         stripe_fixture(),
+        huggingface_fixture(),
+        cerebras_fixture(),
+        together_fixture(),
+        google_api_key_fixture(),
         bearer_fixture(),
         url_with_credentials_fixture(),
     ]
@@ -110,6 +130,16 @@ fn fixture_receipt() -> Receipt {
     metadata.insert(
         "audit_note".to_string(),
         JsonValue::String(format!("found {} in env", aws_fixture())),
+    );
+    metadata.insert(
+        "ai_provider_keys".to_string(),
+        JsonValue::String(format!(
+            "{} {} {} {}",
+            huggingface_fixture(),
+            cerebras_fixture(),
+            together_fixture(),
+            google_api_key_fixture()
+        )),
     );
     receipt.metadata = metadata;
     receipt

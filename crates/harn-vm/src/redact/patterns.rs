@@ -366,6 +366,28 @@ mod tests {
     }
 
     #[test]
+    fn replaces_ai_provider_tokens() {
+        run_clean();
+        let huggingface = format!("hf_{}", "a".repeat(24));
+        let cerebras = format!("csk-{}", "b".repeat(48));
+        let together = format!("tgp_v1_{}", "c".repeat(32));
+        let google = format!("AIza{}", "D".repeat(35));
+        let input = format!("{huggingface} {cerebras} {together} {google}");
+
+        let out = scan_secret_patterns(&input, crate::redact::REDACTED_PLACEHOLDER);
+        let rendered = out.into_owned();
+
+        assert!(rendered.contains("<redacted:huggingface_token:"));
+        assert!(rendered.contains("<redacted:cerebras_key:"));
+        assert!(rendered.contains("<redacted:together_key:"));
+        assert!(rendered.contains("<redacted:google_api_key:"));
+        assert!(!rendered.contains(&huggingface));
+        assert!(!rendered.contains(&cerebras));
+        assert!(!rendered.contains(&together));
+        assert!(!rendered.contains(&google));
+    }
+
+    #[test]
     fn custom_pattern_redacts_and_is_introspectable() {
         run_clean();
         register_custom_pattern("acme_token", r"\bACME-[A-Z0-9]{8}\b").unwrap();
@@ -440,6 +462,10 @@ mod tests {
         assert!(names.contains(&"github_pat_fine"));
         assert!(names.contains(&"slack_token"));
         assert!(names.contains(&"aws_access_key"));
+        assert!(names.contains(&"huggingface_token"));
+        assert!(names.contains(&"cerebras_key"));
+        assert!(names.contains(&"together_key"));
+        assert!(names.contains(&"google_api_key"));
         assert!(names.contains(&"private_key_block"));
         assert!(names.contains(&"bearer_token"));
     }

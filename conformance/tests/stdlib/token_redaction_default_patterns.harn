@@ -18,7 +18,18 @@ pipeline test(task) {
   // The catalog must include every default provider so audit
   // consumers can rely on the names being stable across releases.
   let catalog = default_patterns()
-  let expected_names = ["jwt", "github_token", "github_pat_fine", "slack_token", "aws_access_key", "bearer_token"]
+  let expected_names = [
+    "jwt",
+    "github_token",
+    "github_pat_fine",
+    "slack_token",
+    "aws_access_key",
+    "huggingface_token",
+    "cerebras_key",
+    "together_key",
+    "google_api_key",
+    "bearer_token",
+  ]
   for name in expected_names {
     if !contains(to_string(catalog), name) {
       throw "default catalog missing `" + name + "`: " + to_string(catalog)
@@ -60,6 +71,14 @@ pipeline test(task) {
     "aws_access_key",
     "AKIAABCDEFGHIJKLMNOP",
   )
+  let huggingface = "hf_" + "abcdefghijklmnopqrstuvwx"
+  expect_redacted("huggingface_token", "hf=" + huggingface + " ok", "huggingface_token", huggingface)
+  let cerebras = "csk-" + "aaaaaaaaaaaaaaaaaaaaaaaa" + "aaaaaaaaaaaaaaaaaaaaaaaa"
+  expect_redacted("cerebras_key", "cerebras=" + cerebras + " ok", "cerebras_key", cerebras)
+  let together = "tgp_v1_" + "aaaaaaaaaaaaaaaa" + "aaaaaaaaaaaaaaaa"
+  expect_redacted("together_key", "together=" + together + " ok", "together_key", together)
+  let google = "AI" + "za" + "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi"
+  expect_redacted("google_api_key", "google=" + google + " ok", "google_api_key", google)
   // `Authorization: Bearer <token>` header form. Using a non-prefixed
   // opaque token here so no earlier provider-specific pattern wins.
   expect_redacted(
