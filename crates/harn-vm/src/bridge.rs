@@ -275,7 +275,12 @@ impl QueuedUserMessageMode {
     fn from_str(value: &str) -> Self {
         match value {
             "interrupt_immediate" | "interrupt" => Self::InterruptImmediate,
-            "finish_step" | "after_current_operation" => Self::FinishStep,
+            // `steer` is the ACP `session/inject` alias for mid-turn
+            // user-message delivery at the next tool boundary; it maps to
+            // the same `FinishStep` checkpoint as `finish_step`.
+            "finish_step" | "after_current_operation" | "steer" => Self::FinishStep,
+            // `queue` is the explicit ACP alias for the audit-only path.
+            "queue" => Self::AuditOnly,
             // Unknown / missing modes fall through to the safest option:
             // record for audit, do not preempt the loop. Pre-#2212 hosts
             // that send `wait_for_completion` are caught by this arm —
