@@ -255,6 +255,71 @@ fn is_empty_completion_retry_error(err: &VmError) -> bool {
             && lower.contains("upstream contract violation"))
 }
 
+/// A failure that looks like the *provider's native tool-call channel itself*
+/// is broken for this route — not a generic transient hiccup. The marquee case
+/// is the documented Ollama leak: the embedded qwen3-family tool-call extractor
+/// runs server-side on `/v1/chat/completions`, fails its EOF/parse on the
+/// model's output, and Ollama returns an HTTP 500 instead of degrading to raw
+/// content (ollama/ollama#14986, #14570 — no opt-out flag). The same shape
+/// appears on any serving stack that parses tool calls server-side and 500s /
+/// EOFs when the native assumption is wrong, so this is keyed on the failure
+/// SIGNATURE, never on a model or provider name.
+///
+/// Deliberately conservative: only a 5xx `ServerError` OR an EOF/stream-cut
+/// transport error carrying a tool-call-parser fingerprint qualifies. A plain
+/// 503 "service unavailable" with no parser fingerprint stays an ordinary
+/// transient retry (retrying native is the right move — the link, not the
+/// channel, hiccuped). This keeps the degrade a genuine last-resort safety net.
+fn is_native_tool_channel_failure(err: &VmError) -> bool {
+    let msg = match err {
+        VmError::Thrown(crate::value::VmValue::String(s)) => s.as_ref(),
+        VmError::CategorizedError { message, .. } => message.as_str(),
+        VmError::Runtime(s) => s.as_str(),
+        VmError::Thrown(crate::value::VmValue::Dict(d)) => {
+            return d
+                .get("message")
+                .map(|v| v.display())
+                .map(|m| message_is_native_tool_channel_failure(&m))
+                .unwrap_or(false);
+        }
+        _ => return false,
+    };
+    message_is_native_tool_channel_failure(msg)
+}
+
+/// The string-level half of [`is_native_tool_channel_failure`], split out so the
+/// dict-carrier and string-carrier paths share one fingerprint definition.
+fn message_is_native_tool_channel_failure(msg: &str) -> bool {
+    let lower = msg.to_lowercase();
+
+    // The failure must classify as a server error (5xx) or an EOF / stream cut.
+    // A tool-call parser that chokes server-side surfaces as one of these; a
+    // 4xx (bad request / auth) or a context-overflow is a different problem the
+    // degrade would not fix.
+    let server_error = lower.contains("[http_error]")
+        || lower.contains("server_error")
+        || lower.contains(" 500")
+        || lower.contains("status 500")
+        || lower.contains("status: 500")
+        || lower.contains("502")
+        || lower.contains("api_error");
+    let stream_cut = lower.contains("unexpected eof")
+        || lower.contains("eof while parsing")
+        || lower.contains("error decoding stream");
+    if !server_error && !stream_cut {
+        return false;
+    }
+
+    // ...AND it must carry a tool-call-parser fingerprint. This is what
+    // distinguishes "the native tool channel is broken for this route" from a
+    // generic 500 (a generic 500 stays an ordinary transient native retry).
+    lower.contains("tool")
+        && (lower.contains("parse")
+            || lower.contains("parser")
+            || lower.contains("extract")
+            || lower.contains("eof"))
+}
+
 /// A wire-level "success" that carries nothing at all: zero output tokens, no
 /// text, no thinking, no tool calls, and no server-side tool-search activity.
 /// Observed live (OpenRouter): a provider stall that ends with an empty 200
@@ -1151,6 +1216,30 @@ fn rand_range_inclusive<R: rand::RngExt>(max: u64, rng: &mut R) -> u64 {
     rng.random_range(0..max.saturating_add(1))
 }
 
+/// Rewrite a native-tool-format request onto the text channel for a retry,
+/// without rebuilding the whole request from scratch. Mirrors the established
+/// "text-channel request" shape (see the Ollama raw-generate test in `api.rs`):
+/// drop the provider-native tool payload, force `Text` output, and clear the
+/// structured-output mirrors so the transport serves a plain chat completion
+/// the model answers in content. The agent loop's text-tool parser then reads
+/// the calls back out of the assistant text.
+///
+/// This is the wire-level half of the runtime tool_format fallback. It does NOT
+/// re-render the system prompt's tool exemplar (that lives in the pipeline), so
+/// the goal is strictly to stop a native-channel failure from hard-failing or
+/// parse-looping the call — letting the model produce *parseable* output on a
+/// working channel — not to guarantee identical guidance to a text-pinned run.
+fn degrade_options_to_text_channel(
+    opts: &super::api::LlmCallOptions,
+) -> super::api::LlmCallOptions {
+    let mut degraded = opts.clone();
+    degraded.native_tools = None;
+    degraded.output_format = super::api::OutputFormat::Text;
+    degraded.response_format = None;
+    degraded.json_schema = None;
+    degraded
+}
+
 // ---------------------------------------------------------------------------
 // observed_llm_call — shared single-LLM-call wrapper with full observability
 // ---------------------------------------------------------------------------
@@ -1169,7 +1258,7 @@ pub(crate) async fn observed_llm_call(
     streaming_detector: Option<StreamingDetectorContext>,
 ) -> Result<super::api::LlmResult, VmError> {
     let _in_flight_guard = super::call::InFlightLlmCallGuard::enter(opts);
-    let effective_tool_format = tool_format
+    let mut effective_tool_format = tool_format
         .map(str::to_string)
         .or_else(|| {
             std::env::var("HARN_AGENT_TOOL_FORMAT")
@@ -1177,8 +1266,16 @@ pub(crate) async fn observed_llm_call(
                 .filter(|value| !value.trim().is_empty())
         })
         .unwrap_or_else(|| crate::llm_config::default_tool_format(&opts.model, &opts.provider));
+    // Working request. Starts as the caller's `opts` (zero-copy) and is only
+    // cloned when the runtime tool_format fallback degrades a native-channel
+    // request to text mid-retry (see the `Err` arm below). Once degraded, the
+    // degraded copy persists for every remaining attempt this call makes.
+    let mut working: std::borrow::Cow<'_, super::api::LlmCallOptions> =
+        std::borrow::Cow::Borrowed(opts);
+    let mut degraded_to_text = false;
     let mut attempt = 0usize;
     loop {
+        let opts: &super::api::LlmCallOptions = working.as_ref();
         // Network-only circuit breaker: if this route has seen sustained
         // NetworkError/Timeout failures, fail fast instead of burning the retry
         // budget against a dead link (laptop disconnect / DNS failure). 429s do
@@ -1476,8 +1573,24 @@ pub(crate) async fn observed_llm_call(
                 // eval layer can still classify it as infra, not capability.
                 let empty_completion_retry = is_empty_completion_retry_error(&error)
                     && attempt < empty_completion_retry_budget(retry_config, &opts.provider);
-                let can_retry =
-                    (retryable && attempt < retry_config.retries) || empty_completion_retry;
+                // Runtime tool_format fallback: a native-channel request whose
+                // failure fingerprint says the provider's *server-side tool-call
+                // parser* choked (the documented Ollama 500 / EOF leak, or any
+                // serving stack that 500s/EOFs on the native assumption) cannot
+                // be rescued by retrying native — every retry re-feeds the same
+                // broken channel. Degrade ONCE to the text channel instead and
+                // retry there, so the call yields parseable output rather than
+                // hard-failing or parse-looping. Keyed on the failure SIGNATURE
+                // (5xx/EOF + tool-parser fingerprint), never a model name; only
+                // fires when the request actually carried provider-native tools.
+                let native_tool_channel_degrade = !degraded_to_text
+                    && crate::llm_config::tool_format_channel(&effective_tool_format)
+                        == Some(crate::llm_config::ToolFormatChannel::Native)
+                    && opts.native_tools.is_some()
+                    && is_native_tool_channel_failure(&error);
+                let can_retry = (retryable && attempt < retry_config.retries)
+                    || empty_completion_retry
+                    || native_tool_channel_degrade;
                 let status = if can_retry {
                     "retrying"
                 } else if retryable {
@@ -1559,6 +1672,13 @@ pub(crate) async fn observed_llm_call(
                         },
                     );
                 }
+                // Apply the runtime tool_format degrade for the next attempt:
+                // swap the working request to its text-channel form, flip the
+                // effective format reported to telemetry, and record why. The
+                // clone severs the shared borrow of `working` so it can be
+                // reassigned; `opts` is not used again before the loop restarts.
+                let degraded_options =
+                    native_tool_channel_degrade.then(|| degrade_options_to_text_channel(opts));
                 attempt += 1;
                 let backoff = llm_retry_backoff_ms(&error, retry_config, attempt, &opts.provider);
                 crate::events::log_warn(
@@ -1568,6 +1688,38 @@ pub(crate) async fn observed_llm_call(
                         error, backoff, attempt, retry_config.retries
                     ),
                 );
+                if let Some(degraded) = degraded_options {
+                    let detail = format!(
+                        "provider {} model {} native tool channel failed (server-side tool-call \
+                         parser 500/EOF: {error}); degrading tool_format native -> json and \
+                         retrying on the text channel",
+                        degraded.provider, degraded.model
+                    );
+                    crate::events::log_warn("llm", &detail);
+                    append_llm_observability_entry(
+                        "tool_format_degrade",
+                        serde_json::Map::from_iter([
+                            (
+                                "iteration".to_string(),
+                                serde_json::json!(iteration.unwrap_or(0)),
+                            ),
+                            ("attempt".to_string(), serde_json::json!(attempt)),
+                            ("provider".to_string(), serde_json::json!(degraded.provider)),
+                            ("model".to_string(), serde_json::json!(degraded.model)),
+                            ("from".to_string(), serde_json::json!("native")),
+                            ("to".to_string(), serde_json::json!("json")),
+                            ("error".to_string(), serde_json::json!(error.to_string())),
+                        ]),
+                    );
+                    annotate_current_span(&[
+                        ("tool_format_degrade", serde_json::json!(true)),
+                        ("tool_format_degrade_from", serde_json::json!("native")),
+                        ("tool_format_degrade_to", serde_json::json!("json")),
+                    ]);
+                    effective_tool_format = "json".to_string();
+                    degraded_to_text = true;
+                    working = std::borrow::Cow::Owned(degraded);
+                }
                 if backoff > 0 {
                     crate::clock_mock::sleep(std::time::Duration::from_millis(backoff)).await;
                 }
@@ -1590,6 +1742,76 @@ mod retry_tests {
             message: msg.to_string(),
             category,
         }
+    }
+
+    // ----- runtime tool_format fallback (native -> text) ---------------------
+
+    #[test]
+    fn native_tool_channel_failure_matches_ollama_500_parser_signature() {
+        // The documented Ollama leak: the server-side qwen3 tool-call extractor
+        // EOFs and the server returns HTTP 500 instead of degrading to content.
+        assert!(is_native_tool_channel_failure(&thrown(
+            "[http_error] ollama 500: tool call parser hit unexpected EOF while parsing"
+        )));
+        // The same shape carried as a CategorizedError.
+        assert!(is_native_tool_channel_failure(&categorized(
+            "status 500: server tool extractor failed to parse tool_calls",
+            ErrorCategory::ServerError
+        )));
+        // A stream-cut EOF in the tool-call extractor (no explicit status code).
+        assert!(is_native_tool_channel_failure(&thrown(
+            "error decoding stream: EOF while parsing a tool call"
+        )));
+    }
+
+    #[test]
+    fn native_tool_channel_failure_ignores_generic_and_keyword_only_errors() {
+        // A plain 503 with no tool-parser fingerprint stays an ordinary
+        // transient retry — retrying native is correct when the LINK hiccuped.
+        assert!(!is_native_tool_channel_failure(&thrown(
+            "service unavailable (503): upstream temporarily overloaded"
+        )));
+        // A 429 rate limit is never a tool-channel failure.
+        assert!(!is_native_tool_channel_failure(&thrown(
+            "[rate_limited] too many requests"
+        )));
+        // The word "tool" alone, without a 5xx/EOF, must not trip the degrade
+        // (e.g. a 400 complaining about a malformed tool schema).
+        assert!(!is_native_tool_channel_failure(&thrown(
+            "bad request: tool schema invalid"
+        )));
+        // A 500 with no tool-parser fingerprint is a generic server error.
+        assert!(!is_native_tool_channel_failure(&thrown(
+            "[http_error] 500 internal server error"
+        )));
+    }
+
+    #[test]
+    fn degrade_options_to_text_channel_strips_native_tool_payload() {
+        let mut opts = crate::llm::api::options::base_opts("ollama");
+        opts.model = "qwen3.6-35b-a3b".to_string();
+        opts.native_tools = Some(vec![serde_json::json!({"name": "edit"})]);
+        opts.output_format = crate::llm::api::OutputFormat::JsonObject;
+        opts.response_format = Some("json".to_string());
+        opts.json_schema = Some(serde_json::json!({"type": "object"}));
+
+        let degraded = degrade_options_to_text_channel(&opts);
+
+        assert!(
+            degraded.native_tools.is_none(),
+            "the provider-native tool payload must be dropped"
+        );
+        assert!(
+            matches!(degraded.output_format, crate::llm::api::OutputFormat::Text),
+            "output must fall back to plain Text so the model answers in content"
+        );
+        assert!(degraded.response_format.is_none());
+        assert!(degraded.json_schema.is_none());
+        // The logical request is otherwise unchanged.
+        assert_eq!(degraded.provider, "ollama");
+        assert_eq!(degraded.model, "qwen3.6-35b-a3b");
+        // The original is untouched (we degrade a clone).
+        assert!(opts.native_tools.is_some());
     }
 
     #[test]
@@ -2538,6 +2760,93 @@ mod empty_completion_retry_tests {
             assert!(
                 is_retryable_llm_error(&err),
                 "the surfaced 429 should classify as retryable"
+            );
+        });
+    }
+
+    fn native_opts() -> crate::llm::api::LlmCallOptions {
+        let mut opts = fake_opts();
+        opts.native_tools = Some(vec![serde_json::json!({"name": "edit"})]);
+        opts.tools = Some(crate::value::VmValue::Nil);
+        opts
+    }
+
+    #[test]
+    fn native_tool_channel_failure_degrades_to_text_and_recovers() {
+        // The runtime tool_format fallback: a native-pinned tool call whose
+        // server-side parser 500/EOFs degrades to the text channel and recovers
+        // on the retry. Crucially this fires at retries=0 (the transient budget
+        // is spent) — retrying native would re-feed the broken parser forever;
+        // the productive move is to switch channels. The _guard drop asserts the
+        // second (text-channel) turn was actually consumed.
+        current_thread_runtime().block_on(async {
+            let _guard = install_fake_llm_script(
+                FakeLlmScript::new()
+                    .push(FakeLlmTurn::Error(crate::llm::fake::FakeLlmError::new(
+                        crate::value::ErrorCategory::ServerError,
+                        "[http_error] ollama 500: tool call parser hit unexpected EOF \
+                         while parsing tool_calls",
+                    )))
+                    .push(FakeLlmTurn::stream(vec![
+                        FakeLlmEvent::Token(
+                            "<tool_call>\nedit({ path: \"a.rs\" })\n</tool_call>".into(),
+                        ),
+                        FakeLlmEvent::Done(FakeStopReason::EndTurn),
+                    ])),
+            );
+            let result = observed_llm_call(
+                &native_opts(),
+                Some("native"),
+                None,
+                &retry_config(0),
+                None,
+                false,
+                false,
+                None,
+            )
+            .await
+            .expect("native tool-channel failure should degrade to text and recover");
+            assert!(
+                result.text.contains("edit({ path: \"a.rs\" })"),
+                "the degraded text-channel turn should be returned"
+            );
+        });
+    }
+
+    #[test]
+    fn native_tool_channel_failure_degrade_fires_at_most_once() {
+        // The degrade is one-shot per call: if the text-channel retry ALSO
+        // fails (a different problem), the loop does not keep re-degrading. With
+        // retries=0 and two failing turns scripted, only the FIRST degrade may
+        // fire; the second failure must surface as a hard error. Exactly two
+        // turns are scripted, so a third call would panic the guard on drop.
+        current_thread_runtime().block_on(async {
+            let _guard = install_fake_llm_script(
+                FakeLlmScript::new()
+                    .push(FakeLlmTurn::Error(crate::llm::fake::FakeLlmError::new(
+                        crate::value::ErrorCategory::ServerError,
+                        "[http_error] 500: tool call parser unexpected EOF",
+                    )))
+                    .push(FakeLlmTurn::Error(crate::llm::fake::FakeLlmError::new(
+                        crate::value::ErrorCategory::ServerError,
+                        "[http_error] 500: tool call parser unexpected EOF",
+                    ))),
+            );
+            let err = observed_llm_call(
+                &native_opts(),
+                Some("native"),
+                None,
+                &retry_config(0),
+                None,
+                false,
+                false,
+                None,
+            )
+            .await
+            .expect_err("a second tool-channel failure after degrade must surface");
+            assert!(
+                err.to_string().to_lowercase().contains("tool call parser"),
+                "the surfaced error is the second (post-degrade) failure"
             );
         });
     }
