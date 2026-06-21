@@ -976,7 +976,6 @@ pub(super) async fn vm_sse_receive(stream_id: &str, timeout_ms: u64) -> Result<V
                 "sse_receive: stream '{stream_id}' exceeded max_events"
             ))));
         }
-        handle.received += 1;
         let url = handle.url.clone();
         let max_message_bytes = handle.max_message_bytes;
         let kind = match &handle.kind {
@@ -1013,6 +1012,7 @@ pub(super) async fn vm_sse_receive(stream_id: &str, timeout_ms: u64) -> Result<V
                     "sse_receive: message exceeded max_message_bytes ({max_message_bytes})"
                 )));
             }
+            record_sse_event_received(stream_id)?;
             Ok(sse_event_value(&event))
         }
         SseHandleKind::Real(stream) => {
@@ -1033,10 +1033,29 @@ pub(super) async fn vm_sse_receive(stream_id: &str, timeout_ms: u64) -> Result<V
                         "sse_receive: message exceeded max_message_bytes ({max_message_bytes})"
                     )));
                 }
+                record_sse_event_received(stream_id)?;
             }
             Ok(real_sse_event_value(event))
         }
     }
+}
+
+fn record_sse_event_received(stream_id: &str) -> Result<(), VmError> {
+    SSE_HANDLES.with(|handles| {
+        let mut handles = handles.borrow_mut();
+        let Some(handle) = handles.get_mut(stream_id) else {
+            return Err(vm_error(format!(
+                "sse_receive: unknown stream '{stream_id}'"
+            )));
+        };
+        if handle.received >= handle.max_events {
+            return Err(vm_error(format!(
+                "sse_receive: stream '{stream_id}' exceeded max_events"
+            )));
+        }
+        handle.received += 1;
+        Ok(())
+    })
 }
 
 pub(super) fn register_http_streaming_builtins(vm: &mut Vm) {
@@ -1233,4 +1252,58 @@ pub(super) fn register_http_streaming_builtins(vm: &mut Vm) {
             .collect::<Vec<_>>();
         Ok(VmValue::List(std::sync::Arc::new(values)))
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn field(value: &VmValue, key: &str) -> String {
+        value
+            .as_dict()
+            .and_then(|dict| dict.get(key))
+            .map(VmValue::display)
+            .unwrap_or_default()
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn sse_receive_open_does_not_count_toward_max_events() {
+        reset_streaming_state();
+        let url = "https://events.example.test/stream";
+        SSE_MOCKS.with(|mocks| {
+            mocks.borrow_mut().push(SseMock {
+                url_pattern: url.to_string(),
+                events: vec![MockStreamEvent {
+                    event_type: "message".to_string(),
+                    data: "one".to_string(),
+                    id: None,
+                    retry_ms: None,
+                }],
+            });
+        });
+
+        let stream = vm_sse_connect(
+            "GET",
+            url,
+            &crate::value::DictMap::from_iter([("max_events".to_string(), VmValue::Int(1))]),
+        )
+        .await
+        .expect("mock stream");
+        let stream_id = handle_from_value(&stream, "test").expect("stream id");
+
+        let open = vm_sse_receive(&stream_id, 0).await.expect("open event");
+        assert_eq!(field(&open, "type"), "open");
+
+        let event = vm_sse_receive(&stream_id, 0)
+            .await
+            .expect("first data event");
+        assert_eq!(field(&event, "type"), "event");
+        assert_eq!(field(&event, "data"), "one");
+
+        let err = vm_sse_receive(&stream_id, 0)
+            .await
+            .expect_err("one data event should consume max_events=1");
+        assert!(err.to_string().contains("exceeded max_events"), "{err}");
+        reset_streaming_state();
+    }
 }
