@@ -202,7 +202,7 @@ pub fn on_finish_handoff_to(target_pipeline, options = nil) {
       return return_value
     }
     let envelope = {unsettled: unsettled, origin: harness.current_pipeline_id()}
-      + options ?? {}
+      + (options ?? {})
     return harness.handoff_to(target_pipeline, envelope)
   }
 }

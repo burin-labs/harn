@@ -306,6 +306,49 @@ let first = xs?[0]
     }
 
     #[test]
+    fn parses_nil_coalescing_inside_looser_binary_ops() {
+        let source = r"
+let comparison = classified == fixture?.expect_missing_dep ?? false
+let threshold = snap?.total_iterations ?? 0 < 2
+";
+        let program = parse_source(source).expect("should parse");
+
+        let Node::LetBinding {
+            value: comparison, ..
+        } = &program[0].node
+        else {
+            panic!("expected comparison let binding");
+        };
+        let Node::BinaryOp {
+            op: comparison_op,
+            right: comparison_right,
+            ..
+        } = &comparison.node
+        else {
+            panic!("expected top-level comparison binary op");
+        };
+        assert_eq!(comparison_op, "==");
+        assert!(matches!(&comparison_right.node, Node::BinaryOp { op, .. } if op == "??"));
+
+        let Node::LetBinding {
+            value: threshold, ..
+        } = &program[1].node
+        else {
+            panic!("expected threshold let binding");
+        };
+        let Node::BinaryOp {
+            op: threshold_op,
+            left: threshold_left,
+            ..
+        } = &threshold.node
+        else {
+            panic!("expected top-level threshold binary op");
+        };
+        assert_eq!(threshold_op, "<");
+        assert!(matches!(&threshold_left.node, Node::BinaryOp { op, .. } if op == "??"));
+    }
+
+    #[test]
     fn parses_multiline_ternary_with_leading_or_trailing_operators() {
         // Previously the parser rejected ternary wraps that put `?` or `:`
         // at the end of the previous line: a `?` at end-of-line was

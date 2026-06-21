@@ -309,7 +309,7 @@ pub fn heuristic_semantic_eval(report, run, reference) {
   var churn = []
   let max_iterations = reference?.max_iterations_per_stage ?? 3
   for round in rounds {
-    if round?.iteration_count ?? 0 > max_iterations {
+    if (round?.iteration_count ?? 0) > max_iterations {
       churn = churn
         + [
         "${round?.node_id ?? "unknown"} exceeded the ideal stage iteration budget (${round?.iteration_count ?? 0} > ${max_iterations})",

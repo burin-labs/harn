@@ -235,7 +235,7 @@ fn __refine_prompt_dict(opts) {
   let provider = opts?.provider
   let {keep = [], strip = []} = opts ?? {}
   let est_before = estimate_text_tokens(user_prompt, model)
-  let target_size = if opts?.target_size ?? "auto" == "auto" {
+  let target_size = if (opts?.target_size ?? "auto") == "auto" {
     __auto_target_size(est_before)
   } else {
     to_string(opts.target_size)

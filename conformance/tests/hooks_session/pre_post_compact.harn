@@ -27,7 +27,7 @@ pipeline default() {
   register_session_hook(
     "post_compact",
     { event ->
-      if event?.archived_messages ?? 0 > 0 {
+      if (event?.archived_messages ?? 0) > 0 {
         atomic_add(post_seen, 1)
       }
       return nil

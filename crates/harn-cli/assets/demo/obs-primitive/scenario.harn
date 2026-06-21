@@ -75,7 +75,7 @@ fn count_by_kind(events) {
   return {span_end: span_end, metric: metric, log: log_count, other: other}
 }
 
-fn main(harness: Harness) {
+fn main(_harness: Harness) {
   // Route through the `test` backend so the scenario is fully offline
   // and the in-process buffer is the source of truth.
   reset()

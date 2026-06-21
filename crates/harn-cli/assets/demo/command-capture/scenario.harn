@@ -87,7 +87,7 @@ pipeline default(_task) {
   __io_println("  output_capture.producer: " + annotated.output_capture.producer)
   __io_println("  output_capture.hint: " + annotated.output_capture.hint)
   __io_println("")
-  let captured_lines = len(read_file(capture_path).trim().split("\n"))
+  let captured_lines = len(harness.fs.read_text(capture_path).trim().split("\n"))
   let filtered_lines = len(annotated.stdout.trim().split("\n"))
   harness.fs.delete(capture_path)
   let receipt = {

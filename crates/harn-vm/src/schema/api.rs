@@ -1,14 +1,16 @@
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::runtime_limits::RuntimeLimits;
 use crate::value::value_structural_hash_key;
-use crate::value::{VmError, VmValue};
+use crate::value::{VmDictExt, VmError, VmValue};
 
 use super::canonicalize::{canonical_to_json_schema, canonicalize_schema_value};
-use super::result::{result_err_value, result_ok_value};
+use super::result::{
+    issue_messages, issue_values, result_err_value, result_ok_value, ValidationIssue,
+};
 use super::transform::{
     merge_schema_dicts, schema_omit_dict, schema_partial_dict, schema_pick_dict,
 };
@@ -64,7 +66,7 @@ pub(crate) fn schema_result_value(
 ) -> VmValue {
     let normalized = match canonicalize_schema_value(schema) {
         Ok(schema) => schema,
-        Err(error) => return result_err_value(vec![error], None),
+        Err(error) => return result_err_value(vec![ValidationIssue::new("schema", error)], None),
     };
     let result = validate_schema_value(
         data,
@@ -79,6 +81,58 @@ pub(crate) fn schema_result_value(
     } else {
         result_err_value(result.errors, Some(result.value))
     }
+}
+
+pub(crate) fn schema_report_value(
+    data: &VmValue,
+    schema: &VmValue,
+    apply_defaults: bool,
+) -> VmValue {
+    let normalized = match canonicalize_schema_value(schema) {
+        Ok(schema) => schema,
+        Err(error) => {
+            return schema_report_from_issues(
+                false,
+                vec![ValidationIssue::new("schema", error)],
+                None,
+            )
+        }
+    };
+    let result = validate_schema_value(
+        data,
+        &normalized,
+        ValidationOptions {
+            apply_defaults,
+            numeric_compat: false,
+        },
+    );
+    let ok = result.errors.is_empty();
+    schema_report_from_issues(ok, result.errors, Some(result.value))
+}
+
+fn schema_report_from_issues(
+    ok: bool,
+    issues: Vec<ValidationIssue>,
+    value: Option<VmValue>,
+) -> VmValue {
+    let messages = issue_messages(&issues);
+    let mut payload = BTreeMap::new();
+    payload.put_bool("ok", ok);
+    payload.put_str("message", messages.first().cloned().unwrap_or_default());
+    payload.insert(
+        "errors".to_string(),
+        VmValue::List(std::sync::Arc::new(
+            messages
+                .into_iter()
+                .map(|error| VmValue::String(arcstr::ArcStr::from(error)))
+                .collect(),
+        )),
+    );
+    payload.insert("issues".to_string(), issue_values(&issues));
+    if let Some(value) = value {
+        payload.insert("value".to_string(), value);
+    }
+    VmValue::dict(payload)
 }
 
 pub(crate) fn schema_is_value(data: &VmValue, schema: &VmValue) -> Result<bool, VmError> {
@@ -115,7 +169,7 @@ pub(crate) fn schema_expect_value(
         Ok(result.value)
     } else {
         Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            result.errors.join("; "),
+            issue_messages(&result.errors).join("; "),
         ))))
     }
 }

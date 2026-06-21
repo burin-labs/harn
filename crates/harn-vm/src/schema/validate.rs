@@ -6,12 +6,12 @@ use crate::value::{values_equal, StructLayout, VmValue};
 
 use super::canonicalize::resolve_canonical_ref_with_path;
 use super::limits::SchemaTraversal;
-use super::result::ValidationResult;
+use super::result::{ValidationIssue, ValidationResult};
 use super::type_check::{
     actual_value_type, schema_expected_label, schema_is_object_like, schema_type_name,
     value_matches_type,
 };
-use super::{child_path, index_path, location_label, schema_bool, schema_i64, schema_number};
+use super::{child_path, index_path, schema_bool, schema_i64, schema_number};
 
 // Schema patterns are typically a small, recurring set (e.g. `"^[a-z]+$"`),
 // and recompiling them on every value validated showed up as a hot-path
@@ -134,10 +134,9 @@ fn validate_against_schema_inner(
             None => {
                 return ValidationResult {
                     value: value.clone(),
-                    errors: vec![format!(
-                        "at {}: unresolved schema reference '{}'",
-                        location_label(path),
-                        pointer
+                    errors: vec![ValidationIssue::schema(
+                        path,
+                        format!("unresolved schema reference '{pointer}'"),
                     )],
                 };
             }
@@ -155,11 +154,13 @@ fn validate_against_schema_inner(
         if !values_equal(value, const_value) {
             return ValidationResult {
                 value: value.clone(),
-                errors: vec![format!(
-                    "at {}: expected constant {}, got {}",
-                    location_label(path),
-                    const_value.display(),
-                    value.display()
+                errors: vec![ValidationIssue::schema(
+                    path,
+                    format!(
+                        "expected constant {}, got {}",
+                        const_value.display(),
+                        value.display()
+                    ),
                 )],
             };
         }
@@ -201,20 +202,22 @@ fn validate_against_schema_inner(
         if let Some(value) = matched {
             normalized = value;
         } else {
-            errors.push(format!(
-                "at {}: value did not match any union branch",
-                location_label(path)
+            errors.push(ValidationIssue::schema(
+                path,
+                "value did not match any union branch",
             ));
         }
     }
 
     if let Some(expected_type) = schema_type_name(schema) {
         if !value_matches_type(value, expected_type, options.numeric_compat) {
-            errors.push(format!(
-                "at {}: expected type '{}', got '{}'",
-                location_label(path),
-                expected_type,
-                actual_value_type(value)
+            errors.push(ValidationIssue::schema(
+                path,
+                format!(
+                    "expected type '{}', got '{}'",
+                    expected_type,
+                    actual_value_type(value)
+                ),
             ));
             return ValidationResult {
                 value: normalized,
@@ -251,21 +254,17 @@ fn validate_against_schema_inner(
             let items = collection_items(&normalized);
             if let Some(min_items) = schema_i64(schema, "min_items") {
                 if (items.len() as i64) < min_items {
-                    errors.push(format!(
-                        "at {}: expected at least {} items, got {}",
-                        location_label(path),
-                        min_items,
-                        items.len()
+                    errors.push(ValidationIssue::schema(
+                        path,
+                        format!("expected at least {min_items} items, got {}", items.len()),
                     ));
                 }
             }
             if let Some(max_items) = schema_i64(schema, "max_items") {
                 if (items.len() as i64) > max_items {
-                    errors.push(format!(
-                        "at {}: expected at most {} items, got {}",
-                        location_label(path),
-                        max_items,
-                        items.len()
+                    errors.push(ValidationIssue::schema(
+                        path,
+                        format!("expected at most {max_items} items, got {}", items.len()),
                     ));
                 }
             }
@@ -292,10 +291,7 @@ fn validate_against_schema_inner(
                 };
             }
             if schema_bool(schema, "unique_items") && !items_are_unique(&normalized) {
-                errors.push(format!(
-                    "at {}: expected items to be unique",
-                    location_label(path)
-                ));
+                errors.push(ValidationIssue::schema(path, "expected items to be unique"));
             }
             validate_enum_membership(&normalized, schema, path, &mut errors);
         }
@@ -303,21 +299,17 @@ fn validate_against_schema_inner(
             let length = text.chars().count() as i64;
             if let Some(min_length) = schema_i64(schema, "min_length") {
                 if length < min_length {
-                    errors.push(format!(
-                        "at {}: expected length >= {}, got {}",
-                        location_label(path),
-                        min_length,
-                        length
+                    errors.push(ValidationIssue::schema(
+                        path,
+                        format!("expected length >= {min_length}, got {length}"),
                     ));
                 }
             }
             if let Some(max_length) = schema_i64(schema, "max_length") {
                 if length > max_length {
-                    errors.push(format!(
-                        "at {}: expected length <= {}, got {}",
-                        location_label(path),
-                        max_length,
-                        length
+                    errors.push(ValidationIssue::schema(
+                        path,
+                        format!("expected length <= {max_length}, got {length}"),
                     ));
                 }
             }
@@ -325,18 +317,15 @@ fn validate_against_schema_inner(
                 match cached_pattern(pattern) {
                     PatternEntry::Compiled(re) => {
                         if !re.is_match(text) {
-                            errors.push(format!(
-                                "at {}: value does not match pattern '{}'",
-                                location_label(path),
-                                pattern
+                            errors.push(ValidationIssue::schema(
+                                path,
+                                format!("value does not match pattern '{pattern}'"),
                             ));
                         }
                     }
-                    PatternEntry::Invalid(error) => errors.push(format!(
-                        "at {}: invalid regex pattern '{}': {}",
-                        location_label(path),
-                        pattern,
-                        error
+                    PatternEntry::Invalid(error) => errors.push(ValidationIssue::schema(
+                        path,
+                        format!("invalid regex pattern '{pattern}': {error}"),
                     )),
                 }
             }
@@ -345,14 +334,16 @@ fn validate_against_schema_inner(
                     .iter()
                     .any(|candidate| values_equal(candidate, &normalized))
                 {
-                    errors.push(format!(
-                        "at {}: value must be one of [{}]",
-                        location_label(path),
-                        enum_values
-                            .iter()
-                            .map(VmValue::display)
-                            .collect::<Vec<_>>()
-                            .join(", ")
+                    errors.push(ValidationIssue::schema(
+                        path,
+                        format!(
+                            "value must be one of [{}]",
+                            enum_values
+                                .iter()
+                                .map(VmValue::display)
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        ),
                     ));
                 }
             }
@@ -380,7 +371,7 @@ fn validate_against_schema_inner(
 fn validation_limit_error(value: &VmValue, path: &str, error: String) -> ValidationResult {
     ValidationResult {
         value: value.clone(),
-        errors: vec![format!("at {}: {}", location_label(path), error)],
+        errors: vec![ValidationIssue::schema(path, error)],
     }
 }
 
@@ -392,7 +383,7 @@ fn validate_object_fields(
     path: &str,
     options: ValidationOptions,
     context: &mut ValidationContext,
-) -> (VmValue, Vec<String>) {
+) -> (VmValue, Vec<ValidationIssue>) {
     let mut errors = Vec::new();
     let mut merged = fields.clone();
     let mut known_keys = std::collections::BTreeSet::new();
@@ -410,10 +401,9 @@ fn validate_object_fields(
                 if options.apply_defaults && has_default {
                     continue;
                 }
-                errors.push(format!(
-                    "at {}: missing required key '{}'",
-                    location_label(path),
-                    key
+                errors.push(ValidationIssue::schema(
+                    path,
+                    format!("missing required key '{key}'"),
                 ));
             }
         }
@@ -468,10 +458,9 @@ fn validate_object_fields(
         Some(VmValue::Bool(false)) => {
             for key in fields.keys() {
                 if !known_keys.contains(key) {
-                    errors.push(format!(
-                        "at {}: unexpected key '{}'",
-                        location_label(path),
-                        key
+                    errors.push(ValidationIssue::schema(
+                        path,
+                        format!("unexpected key '{key}'"),
                     ));
                 }
             }
@@ -543,25 +532,21 @@ fn validate_numeric_constraints(
     value: f64,
     schema: &crate::value::DictMap,
     path: &str,
-    errors: &mut Vec<String>,
+    errors: &mut Vec<ValidationIssue>,
 ) {
     if let Some(min) = schema_number(schema, "min") {
         if value < min {
-            errors.push(format!(
-                "at {}: expected value >= {}, got {}",
-                location_label(path),
-                min,
-                value
+            errors.push(ValidationIssue::schema(
+                path,
+                format!("expected value >= {min}, got {value}"),
             ));
         }
     }
     if let Some(max) = schema_number(schema, "max") {
         if value > max {
-            errors.push(format!(
-                "at {}: expected value <= {}, got {}",
-                location_label(path),
-                max,
-                value
+            errors.push(ValidationIssue::schema(
+                path,
+                format!("expected value <= {max}, got {value}"),
             ));
         }
     }
@@ -571,21 +556,23 @@ fn validate_enum_membership(
     value: &VmValue,
     schema: &crate::value::DictMap,
     path: &str,
-    errors: &mut Vec<String>,
+    errors: &mut Vec<ValidationIssue>,
 ) {
     if let Some(VmValue::List(enum_values)) = schema.get("enum") {
         if !enum_values
             .iter()
             .any(|candidate| values_equal(candidate, value))
         {
-            errors.push(format!(
-                "at {}: value must be one of [{}]",
-                location_label(path),
-                enum_values
-                    .iter()
-                    .map(VmValue::display)
-                    .collect::<Vec<_>>()
-                    .join(", ")
+            errors.push(ValidationIssue::schema(
+                path,
+                format!(
+                    "value must be one of [{}]",
+                    enum_values
+                        .iter()
+                        .map(VmValue::display)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
             ));
         }
     }
@@ -752,10 +739,11 @@ fn first_param_validation_error_body(
             .errors
             .into_iter()
             .map(|error| {
-                if error.starts_with("at root: ") {
-                    error.replacen("at root: ", "", 1)
+                let rendered = error.render();
+                if rendered.starts_with("at root: ") {
+                    rendered.replacen("at root: ", "", 1)
                 } else {
-                    error
+                    rendered
                 }
             })
             .collect::<Vec<_>>()

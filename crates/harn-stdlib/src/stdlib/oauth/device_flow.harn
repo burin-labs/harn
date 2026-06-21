@@ -247,7 +247,7 @@ fn __request_device_code(harness: Harness, cfg) {
   let response = harness.net.post(cfg.device_code_url, __form_body(form), {headers: headers})
   if !(response?.ok ?? false) {
     let parsed = __safe_json_parse(response?.body ?? "")
-    let detail = parsed?.error_description ?? parsed?.error ?? "device authorization endpoint returned status "
+    let detail = (parsed?.error_description ?? parsed?.error ?? "device authorization endpoint returned status ")
       + to_string(response?.status ?? 0)
     throw "std/oauth/device_flow: device authorization request failed: " + to_string(detail)
   }
@@ -289,7 +289,7 @@ fn __poll_once(harness: Harness, cfg, device_code) {
   let response = harness.net.post(cfg.token_url, __form_body(form), {headers: headers})
   let status = to_int(response?.status ?? 0)
   let parsed = __safe_json_parse(response?.body ?? "") ?? {}
-  if response?.ok ?? false && parsed?.access_token != nil {
+  if (response?.ok ?? false) && parsed?.access_token != nil {
     return {kind: "ok", parsed: parsed}
   }
   let error_code = to_string(parsed?.error ?? "")
@@ -305,7 +305,7 @@ fn __poll_once(harness: Harness, cfg, device_code) {
   if error_code == __ERROR_ACCESS_DENIED {
     throw "std/oauth/device_flow: user denied the device authorization request"
   }
-  let detail = parsed?.error_description ?? error_code ?? "token endpoint returned status " + to_string(status)
+  let detail = (parsed?.error_description ?? error_code ?? "token endpoint returned status ") + to_string(status)
   let prefix = error_code == "" ? "token endpoint error: " : "token endpoint error `" + error_code + "`: "
   throw "std/oauth/device_flow: " + prefix + to_string(detail)
 }

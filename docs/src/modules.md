@@ -80,7 +80,7 @@ code or inside any pipeline.
 `import "std/..."` is only needed for the Harn-written helper modules
 described below (`std/text`, `std/json`, `std/math`, `std/collections`,
 `std/ansi`, `std/table`, `std/diff`, `std/path`, `std/fs`, `std/os`,
-`std/edit`, `std/disclosure`, `std/artifact/web`, `std/ui_resource`, `std/cache`,
+`std/slug`, `std/edit`, `std/disclosure`, `std/artifact/web`, `std/ui_resource`, `std/cache`,
 `std/llm/handlers`, `std/llm/budget`, `std/llm/prompts`, `std/vision`,
 `std/context`, `std/agent_state`, `std/agents`, `std/agent/user`,
 `std/agent/fact`, `std/agent/probe`, `std/agent/scratchpad`,
@@ -127,6 +127,7 @@ import "std/personas/bulletins"
 import "std/personas/prelude"
 import "std/prompt_library"
 import "std/review"
+import "std/slug"
 import "std/text"
 import "std/triage"
 import "std/tui"
@@ -458,6 +459,33 @@ log(moving_avg([1, 2, 3, 4, 5], 3)) // [2.0, 3.0, 4.0]
 
 let grouped = kmeans([[0, 0], [0, 1], [10, 10], [10, 11]], 2)
 log(grouped.centroids)          // [[0.0, 0.5], [10.0, 10.5]]
+```
+
+### std/slug
+
+Memorable, non-secret identifiers for runs, agents, incidents, fixtures, and
+other human-facing names:
+
+| Function | Description |
+|---|---|
+| `random_slug(options?)` | Random name from the built-in or caller-supplied dictionaries |
+| `slug_from(value, options?)` | Deterministic name for a value using `sha256` bucket selection |
+| `deterministic_slug(value, options?)` | Alias for `slug_from` |
+| `slug(value?, options?)` | Random when `value` is `nil`, deterministic otherwise |
+| `slugify(value, options?)` | Normalize text into a URL/file-friendly slug |
+| `slug_dictionary()` | Return the default adjective/noun/verb dictionaries |
+| `slug_adjectives()` / `slug_nouns()` / `slug_verbs()` | Return one default word list |
+
+Options include `segments` (default `2`, clamped to `1..8`), `separator`
+(default `"-"`), `pattern` (`"adjective"`, `"noun"`, `"verb"` entries),
+`prefix`, `suffix`, `salt`, `rng`, and `dictionary`.
+
+```harn
+import "std/slug"
+
+let run_name = random_slug({segments: 3})
+let stable = slug_from({repo: "harn", pr: 42}, {segments: 4, salt: "ci"})
+let id = slugify("Agent 007 / Fast Verify")
 ```
 
 ### std/eval/stats

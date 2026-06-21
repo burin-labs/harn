@@ -229,7 +229,7 @@ pub fn workflow_map_stage_plan(config = nil) {
   if !runs_stage {
     return {runs_stage: false, output_kind: output_kind, stage_node: nil}
   }
-  let output_contract = node?.output_contract ?? {} + {output_kinds: [output_kind]}
+  let output_contract = (node?.output_contract ?? {}) + {output_kinds: [output_kind]}
   return {
     runs_stage: true,
     output_kind: output_kind,

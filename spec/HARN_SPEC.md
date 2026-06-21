@@ -404,6 +404,8 @@ Imports starting with `std/` load embedded stdlib modules:
   terminal_width, rule, clear)
 - `import "std/collections"` — collection utilities (filter_nil, store_stale,
   store_refresh)
+- `import "std/slug"` — memorable non-secret names and slug helpers
+  (random_slug, slug_from, deterministic_slug, slug, slugify)
 - `import "std/fs"` — file-system convenience helpers built on host
   primitives (ensure_parent_dir, read_json, write_json, read_yaml,
   write_yaml, read_toml, write_toml, write_lines, append_line, touch,
@@ -1264,6 +1266,9 @@ Short-circuit: if left is not `nil`, returns left without evaluating right.
 `??` binds tighter than additive/comparison/logical operators but looser than
 multiplicative operators, so `xs?.count ?? 0 > 0` parses as
 `(xs?.count ?? 0) > 0`.
+`harn fmt` prints clarifying parentheses when `??` is nested inside looser
+binary expressions, so `classified == fixture?.expect_missing_dep ?? false`
+formats as `classified == (fixture?.expect_missing_dep ?? false)`.
 
 ### Pipe (`|>`)
 
@@ -4480,7 +4485,7 @@ applies when the alias identifier appears as:
 
 - The argument of `schema_of(T)`.
 - The schema argument of `schema_is`, `schema_expect`, `schema_parse`,
-  `schema_check`, `is_type`, `json_validate`.
+  `schema_check`, `schema_report`, `is_type`, `json_validate`.
 - The value of an `output_schema:` entry in an `llm_call` options dict.
 
 For aliases not known at compile time (e.g. `let T = schema_of(Foo)`

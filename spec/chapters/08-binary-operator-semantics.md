@@ -75,6 +75,9 @@ Short-circuit: if left is not `nil`, returns left without evaluating right.
 `??` binds tighter than additive/comparison/logical operators but looser than
 multiplicative operators, so `xs?.count ?? 0 > 0` parses as
 `(xs?.count ?? 0) > 0`.
+`harn fmt` prints clarifying parentheses when `??` is nested inside looser
+binary expressions, so `classified == fixture?.expect_missing_dep ?? false`
+formats as `classified == (fixture?.expect_missing_dep ?? false)`.
 
 ### Pipe (`|>`)
 
@@ -108,4 +111,3 @@ Add the trailing modifier `exclusive` to get the half-open form:
 
 If `b < a`, the result is the empty list. The `range(n)` / `range(a, b)` stdlib
 builtins always produce the half-open form, for Python-compatible indexing.
-

@@ -84,7 +84,7 @@ fn __group_by_provider(
     if provider_filter != "" && provider != provider_filter {
       continue
     }
-    let installed = provider == "ollama" && installed_ollama[id] ?? false
+    let installed = provider == "ollama" && (installed_ollama[id] ?? false)
     if installed_only && !installed {
       continue
     }

@@ -254,7 +254,7 @@ fn __unique_rows_by_case(rows: list) -> list {
   var out = []
   for row in rows {
     let name = __row_case_name(row)
-    if name == "" || seen[name] ?? false {
+    if name == "" || (seen[name] ?? false) {
       continue
     }
     seen = seen + {[name]: true}

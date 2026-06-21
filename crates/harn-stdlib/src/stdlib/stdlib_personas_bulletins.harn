@@ -617,7 +617,7 @@ pub fn bulletin_expire(bulletin: ProfileBulletin, options = nil) -> BulletinDeci
  * @errors: []
  */
 pub fn bulletin_supersede(bulletin: ProfileBulletin, supersedes: list<string>, options = nil) -> BulletinDecisionReceipt {
-  let merged = options ?? {} + {supersedes: supersedes}
+  let merged = (options ?? {}) + {supersedes: supersedes}
   return bulletin_emit_decision(bulletin_decide(bulletin, "supersede", merged), merged)
 }
 

@@ -36,7 +36,7 @@ fn __worktree_git_options(cwd, options) -> dict {
   let opts = options ?? {}
   // Caller `env` overrides individual guard keys; `env_mode` defaults to
   // "merge" so inherited PATH/HOME/credentials survive.
-  let env = git_noninteractive_env() + opts?.env ?? {}
+  let env = git_noninteractive_env() + (opts?.env ?? {})
   var out = {
     cwd: cwd,
     env: env,

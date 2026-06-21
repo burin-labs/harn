@@ -743,6 +743,11 @@ trailing `finally { ... }` runs once for effect only.
 let parsed = try { json_parse(raw) } catch (e) { default_config() }
 ```
 
+`??` binds tighter than comparisons/logical operators and looser than
+multiplication. Read `classified == maybe_flag ?? false` as
+`classified == (maybe_flag ?? false)`. `harn fmt` inserts those clarifying
+parentheses automatically.
+
 `try* EXPR` (prefix) evaluates `EXPR` and rethrows any throw so an
 enclosing `try { ... } catch (e) { ... }` sees it. Use it instead of
 the verbose `try { foo() } / guard is_ok else / unwrap` boilerplate:
@@ -787,6 +792,15 @@ let first_email = json_pointer(api, "/users/0/email")
 let active = jq(api, ".users[] | select(.active == true) | .email")
 let summary = jq_first(api, "{ count: .users | length, next: .meta.next }")
 ```
+
+For schema-first code, `schema_report(value, schema, apply_defaults?)` returns
+`{ok, message, errors, issues, value?}` without throwing. Import `std/schema`
+for builder/composition helpers such as `schema_object(...)`,
+`get_typed_report(...)`, and `get_typed_value(...)`.
+
+Import `std/slug` for human-readable non-secret identifiers:
+`random_slug({segments: 3})`, `slug_from(value, {salt: "ci"})`, and
+`slugify("Agent 007 / Fast Verify")`.
 
 ## Concurrency
 

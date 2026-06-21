@@ -95,7 +95,7 @@ fn __load_skill_for_session(session, opts, args) {
   let registry = __skills_registry(opts)
   let id = request?.name ?? ""
   let entry = __skill_find(registry, id)
-  let require_signature = request?.require_signature ?? false || entry?.require_signature ?? false
+  let require_signature = (request?.require_signature ?? false) || (entry?.require_signature ?? false)
   if entry == nil || require_signature {
     return load_skill(request + {session_id: session.session_id})
   }
@@ -283,7 +283,7 @@ fn __skill_catalog_prompt(registry, opts, active) {
 }
 
 fn __skill_model_invocation_disabled(entry) {
-  return entry["disable-model-invocation"] ?? false || entry?.disable_model_invocation ?? false
+  return (entry["disable-model-invocation"] ?? false) || (entry?.disable_model_invocation ?? false)
 }
 
 fn __matchable_skill_entries(registry) {

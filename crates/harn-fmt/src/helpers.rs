@@ -151,6 +151,13 @@ pub(crate) fn child_needs_parens(parent_op: &str, child: &Node, is_right: bool) 
             return true;
         }
 
+        // `??` intentionally binds tighter than comparisons, logical operators,
+        // and arithmetic fallbacks, but people often read it the other way.
+        // Keep the semantics unchanged while making mixed expressions obvious.
+        if child_op == "??" && parent_op != "??" && c > p {
+            return true;
+        }
+
         // `**` is right-associative: `(a ** b) ** c` must keep its left grouping.
         if parent_op == "**" && child_op == "**" {
             return !is_right;

@@ -352,7 +352,7 @@ fn __git_run_options(repo, options) -> dict {
     cwd: git_repo_path(opts?.repo ?? opts?.cwd ?? repo ?? "."),
     timeout_ms: opts?.timeout_ms ?? 120000,
     env_remove: opts?.env_remove ?? git_env_remove(),
-    env: git_noninteractive_env() + opts?.env ?? {},
+    env: git_noninteractive_env() + (opts?.env ?? {}),
     env_mode: opts?.env_mode ?? "merge",
   }
   for key in [
@@ -637,7 +637,7 @@ pub fn git_remote_list(repo = ".", options: GitRunOptions = {}) -> GitCommandRes
  */
 pub fn git_switch(branch: string, repo = ".", options: GitSwitchOptions = {}) -> GitCommandResult {
   let opts = options
-  if opts.create ?? false && opts.force_create ?? false {
+  if (opts.create ?? false) && (opts.force_create ?? false) {
     throw "std/git: git_switch accepts create or force_create, not both"
   }
   var args = ["switch"]

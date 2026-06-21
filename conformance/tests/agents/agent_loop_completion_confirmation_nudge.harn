@@ -28,7 +28,7 @@ fn evidence_tools() {
     "lookup",
     "Return canned evidence for a query.",
     {
-      handler: { args -> "evidence for " + args?.query ?? "" },
+      handler: { args -> "evidence for " + (args?.query ?? "") },
       parameters: {query: {type: "string", description: "Lookup query"}},
       returns: {type: "string"},
       annotations: {kind: "read"},

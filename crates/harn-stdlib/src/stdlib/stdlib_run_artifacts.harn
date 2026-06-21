@@ -283,7 +283,7 @@ pub fn run_artifacts_list(kind: string, options: RunArtifactsListOptions = {}) -
     let info = try {
       harness.fs.stat(dir)
     }
-    if is_ok(info) && unwrap(info)?.is_dir ?? false {
+    if is_ok(info) && (unwrap(info)?.is_dir ?? false) {
       let stat = unwrap(info)
       rows = rows.push(__run_artifacts_make_run(clean_kind, namespace, root, name, dir, stat?.modified))
     }

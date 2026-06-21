@@ -35,13 +35,13 @@ fn __cell_stats(cell_summaries) {
   var total_output_tokens = 0
   for entry in cell_summaries {
     let s = entry.summary
-    total_runs = total_runs + s?.total_runs ?? 0
-    passed_runs = passed_runs + s?.passed_runs ?? 0
-    total_cost = total_cost + s?.total_cost_usd ?? 0.0
+    total_runs = total_runs + (s?.total_runs ?? 0)
+    passed_runs = passed_runs + (s?.passed_runs ?? 0)
+    total_cost = total_cost + (s?.total_cost_usd ?? 0.0)
     let runs = s?.runs ?? []
     for run in runs {
-      total_input_tokens = total_input_tokens + run?.input_tokens ?? 0
-      total_output_tokens = total_output_tokens + run?.output_tokens ?? 0
+      total_input_tokens = total_input_tokens + (run?.input_tokens ?? 0)
+      total_output_tokens = total_output_tokens + (run?.output_tokens ?? 0)
     }
   }
   let pass_rate = if total_runs > 0 {

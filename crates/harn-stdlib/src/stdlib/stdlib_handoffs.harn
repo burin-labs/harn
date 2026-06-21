@@ -111,7 +111,7 @@ fn __handoff_decision(route, route_index, route_target, target_index, handoff, c
     selected_at: date_iso(),
     dispatch_kind: target.kind,
     dispatch_status: "selected",
-    metadata: route?.metadata ?? {} + route_target?.metadata ?? {},
+    metadata: (route?.metadata ?? {}) + (route_target?.metadata ?? {}),
   }
 }
 
@@ -160,9 +160,9 @@ pub fn handoff_routed(payload, routes = nil, context = nil) {
   if decision == nil {
     throw "handoff_routed: no matching handoff route"
   }
-  let metadata = payload?.metadata ?? {} + {route_decision: decision}
+  let metadata = (payload?.metadata ?? {}) + {route_decision: decision}
   return handoff(
-    payload ?? {}
+    (payload ?? {})
       + {
       target_persona_or_human: decision.target_persona_or_human,
       route_decision: decision,

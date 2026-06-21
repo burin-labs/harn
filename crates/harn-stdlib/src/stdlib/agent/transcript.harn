@@ -318,7 +318,7 @@ fn __legacy_request_tool_result_rows(record, index: int, previous_count: int) ->
         result?.tool_call_id ?? "",
         record,
         index,
-        max(0, to_int(record?.iteration) ?? 0 - 1),
+        max(0, (to_int(record?.iteration) ?? 0) - 1),
       ),
     ]
   }

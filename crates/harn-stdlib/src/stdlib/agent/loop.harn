@@ -2009,16 +2009,16 @@ fn __agent_loop_checkpoint(session_id, kind, opts = nil) {
   var delivered = 0
   if modes.immediate {
     let result = agent_session_drain_bridge_injections(session_id, "interrupt_immediate")
-    delivered = delivered + result?.delivered ?? 0
+    delivered = delivered + (result?.delivered ?? 0)
   }
   let immediate_count = delivered
   if modes.finish_step {
     let result = agent_session_drain_bridge_injections(session_id, "finish_step")
-    delivered = delivered + result?.delivered ?? 0
+    delivered = delivered + (result?.delivered ?? 0)
   }
   if modes.audit_only {
     let result = agent_session_drain_bridge_injections(session_id, "audit_only")
-    delivered = delivered + result?.delivered ?? 0
+    delivered = delivered + (result?.delivered ?? 0)
   }
   var inbox_delivered = 0
   if modes.inbox {
@@ -2273,7 +2273,7 @@ fn __scope_classifier_assistant_text(verdict) {
 }
 
 fn __scope_classifier_skip_main(verdict) {
-  return verdict != nil && verdict?.label == "out_of_scope" && verdict?.skip_main_turn ?? true
+  return verdict != nil && verdict?.label == "out_of_scope" && (verdict?.skip_main_turn ?? true)
 }
 
 fn __scope_classifier_record_skip_turn(session, verdict, iteration_index) {

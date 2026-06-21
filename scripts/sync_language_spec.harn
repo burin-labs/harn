@@ -49,16 +49,21 @@ let SUMMARY_END = "<!-- END generated: language-spec chapters -->"
 
 /**
  * Assemble the canonical single-file spec text by concatenating every chapter
- * in `NN-` order. The chapter files carry their own trailing newlines, so a
- * plain join reproduces the historical `HARN_SPEC.md` byte-for-byte.
+ * in `NN-` order. Chapter files should not need to preserve double-newline EOF
+ * separators, so the assembler owns the blank line between top-level sections.
  */
 pub fn assemble_spec() -> string {
   let chapters = harness.fs.glob(CHAPTERS_GLOB).sort()
   var out = ""
+  var index = 0
   for path in chapters {
-    out = out + harness.fs.read_text(path)
+    if index > 0 {
+      out = out + "\n\n"
+    }
+    out = out + harness.fs.read_text(path).trim_end()
+    index = index + 1
   }
-  return out
+  return out + "\n"
 }
 
 /** Render the "do not edit" header in front of generated chapter text. */

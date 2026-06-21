@@ -679,7 +679,9 @@ contexts, but they are not preserved in formatter output.
 - **Operator precedence parentheses** — the formatter inserts parentheses
   to preserve semantics when the AST drops them (e.g. `a * (b + c)` stays
   parenthesised) and for clarity when mixing `&&` / `||`
-  (e.g. `a && b || c` becomes `(a && b) || c`).
+  (e.g. `a && b || c` becomes `(a && b) || c`) or when `??` is nested inside
+  looser binary expressions (e.g. `x == y ?? false` becomes
+  `x == (y ?? false)`).
 
 ### Trailing comments and line width
 

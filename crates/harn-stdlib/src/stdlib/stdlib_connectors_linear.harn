@@ -105,7 +105,7 @@ pub fn search(query, options = nil) {
 }
 
 pub fn graphql(query, variables = nil, options = nil) {
-  return __call("graphql", filter_nil(options ?? {} + {query: query, variables: variables}))
+  return __call("graphql", filter_nil((options ?? {}) + {query: query, variables: variables}))
 }
 
 fn __linear_event(log_event) {

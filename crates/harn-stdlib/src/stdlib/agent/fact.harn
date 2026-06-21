@@ -303,7 +303,7 @@ pub fn fact(input, options = nil) -> Fact {
   let provenance = __fact_provenance(opts?.provenance ?? input?.provenance)
   let valid_until = __fact_valid_until(opts?.valid_until ?? input?.valid_until)
   let asserted_at = __fact_text(opts?.asserted_at ?? input?.asserted_at ?? opts?.now)
-  if opts?.require_asserted_at ?? false && asserted_at == "" {
+  if (opts?.require_asserted_at ?? false) && asserted_at == "" {
     __fact_error("HARN-FACT-009", "asserted_at is required")
   }
   let raw_id = __fact_text(opts?.id ?? input?.id)

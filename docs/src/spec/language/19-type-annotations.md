@@ -526,7 +526,7 @@ applies when the alias identifier appears as:
 
 - The argument of `schema_of(T)`.
 - The schema argument of `schema_is`, `schema_expect`, `schema_parse`,
-  `schema_check`, `is_type`, `json_validate`.
+  `schema_check`, `schema_report`, `is_type`, `json_validate`.
 - The value of an `output_schema:` entry in an `llm_call` options dict.
 
 For aliases not known at compile time (e.g. `let T = schema_of(Foo)`
@@ -1060,4 +1060,3 @@ process({name: "Alice", age: "old"})  // Error: parameter 'user': field 'age' ex
 Shape validation works with both plain dicts and struct instances. Extra
 fields are allowed (width subtyping). Optional fields (declared with `?`)
 are not required to be present.
-
