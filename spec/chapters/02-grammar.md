@@ -94,6 +94,8 @@ Imports starting with `std/` load embedded stdlib modules:
   terminal_width, rule, clear)
 - `import "std/collections"` — collection utilities (filter_nil, store_stale,
   store_refresh)
+- `import "std/slug"` — memorable non-secret names and slug helpers
+  (random_slug, slug_from, deterministic_slug, slug, slugify)
 - `import "std/fs"` — file-system convenience helpers built on host
   primitives (ensure_parent_dir, read_json, write_json, read_yaml,
   write_yaml, read_toml, write_toml, write_lines, append_line, touch,
@@ -390,4 +392,3 @@ Dict keys written as bare identifiers are converted to string literals
 dots or other non-identifier characters; the formatter keeps identifier string
 keys bare and keeps non-identifier string keys quoted (for example,
 `{"a.b.c": "x", k: "y"}`). Computed keys use bracket syntax: `{[expr]: value}`.
-

@@ -308,7 +308,7 @@ fn __post_token_request(
   let response = harness.net.post(token_url, body, {headers: headers})
   if !(response?.ok ?? false) {
     let parsed = __safe_json_parse(response?.body ?? "")
-    let detail = parsed?.error_description ?? parsed?.error ?? "token endpoint returned status "
+    let detail = (parsed?.error_description ?? parsed?.error ?? "token endpoint returned status ")
       + to_string(response?.status ?? 0)
     throw "std/oauth/client: token request failed: " + to_string(detail)
   }

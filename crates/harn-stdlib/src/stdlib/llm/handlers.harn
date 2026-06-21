@@ -476,7 +476,7 @@ pub fn with_shadow(primary, shadow, opts = nil) {
     let shadow_env = results[1]
     let primary_text = __envelope_text(primary_env)
     let shadow_text = __envelope_text(shadow_env)
-    let both_ok = primary_env?.ok ?? false && shadow_env?.ok ?? false
+    let both_ok = (primary_env?.ok ?? false) && (shadow_env?.ok ?? false)
     let differs = primary_text != shadow_text
     let should_compare = if diff_when == "ok_only" {
       both_ok && differs
@@ -698,7 +698,7 @@ pub fn with_budget(next, opts = nil) {
     }
     let envelope = __safe_invoke(next, call)
     let _ = atomic_add(total_calls, 1)
-    if envelope?.ok ?? false && type_of(envelope?.value) == "dict" {
+    if (envelope?.ok ?? false) && type_of(envelope?.value) == "dict" {
       let usage = __opts_dict(envelope.value?.usage)
       let in_tokens = to_int(usage?.input_tokens ?? envelope.value?.input_tokens ?? 0)
       let out_tokens = to_int(usage?.output_tokens ?? envelope.value?.output_tokens ?? 0)

@@ -1235,7 +1235,7 @@ pub fn agent_loop_options(options = nil) {
     && (opts?.tools == nil || __client_tool_search_requested(opts?.tool_search)) {
     opts = opts + {tool_format: __fallback_tool_format()}
   }
-  if opts?.loop_until_done ?? false && !__has_key(opts, "done_sentinel") {
+  if (opts?.loop_until_done ?? false) && !__has_key(opts, "done_sentinel") {
     opts = opts
       + {
       done_sentinel: if __native_tools_complete_naturally(opts) {

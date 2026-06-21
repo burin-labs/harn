@@ -96,7 +96,7 @@ fn __exploration(config) {
 }
 
 fn __judge_options(config) {
-  return config?.budget ?? {} + config?.judge ?? {}
+  return (config?.budget ?? {}) + (config?.judge ?? {})
 }
 
 fn __trial_limit(config, candidate_count) {

@@ -702,15 +702,16 @@ fn test_nested_list_in_dict_wrapping() {
 
 #[test]
 fn test_nil_coalescing_with_logical_ops() {
-    // `??` binds tighter than `||`/`&&`/comparisons/additive, so
-    // `a ?? b || c` parses naturally as `(a ?? b) || c` (no parens needed).
+    // `??` binds tighter than `||`/`&&`/comparisons/additive. The formatter
+    // prints that grouping explicitly because people regularly read it the
+    // other way around.
     let source = r"pipeline default(task) {
   let x = a ?? b || c
 }";
     let result = format_source(source).unwrap();
     assert!(
-        result.contains("a ?? b || c"),
-        "Expected no parens — natural precedence is (a ?? b) || c, got:\n{result}"
+        result.contains("(a ?? b) || c"),
+        "Expected clarifying parens for ?? mixed with ||, got:\n{result}"
     );
     assert_roundtrip(source);
     // The opposite shape `a ?? (b || c)` must keep its parens — stripping them
@@ -724,6 +725,24 @@ fn test_nil_coalescing_with_logical_ops() {
         "Expected parens preserved for (?? over || rhs), got:\n{result2}"
     );
     assert_roundtrip(source2);
+}
+
+#[test]
+fn test_nil_coalescing_with_comparison_gets_clarifying_parens() {
+    let source = r"pipeline default(task) {
+  let x = classified == fixture?.expect_missing_dep ?? false
+  let y = value ?? 0 > 0
+}";
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains("classified == (fixture?.expect_missing_dep ?? false)"),
+        "Expected comparison rhs nil-coalescing to be parenthesized, got:\n{result}"
+    );
+    assert!(
+        result.contains("(value ?? 0) > 0"),
+        "Expected comparison lhs nil-coalescing to be parenthesized, got:\n{result}"
+    );
+    assert_roundtrip(source);
 }
 
 #[test]

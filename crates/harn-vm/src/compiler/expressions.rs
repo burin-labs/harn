@@ -158,7 +158,7 @@ impl Compiler {
         }
         // `schema_is(x, T)` / `schema_expect(x, T[, defaults])` /
         // `schema_parse(x, T)` / `schema_check(x, T)` /
-        // `is_type(x, T)`: when the schema argument is a type-alias
+        // `schema_report(x, T)` / `is_type(x, T)`: when the schema argument is a type-alias
         // identifier, inline the alias's JSON-Schema dict as a
         // constant. This is the counterpart to the parser-side
         // narrowing in `schema_type_expr_from_node`.

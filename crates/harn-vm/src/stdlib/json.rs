@@ -210,6 +210,20 @@ fn schema_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     Ok(schema::schema_result_value(&args[0], &args[1], true))
 }
 
+#[harn_builtin(
+    sig = "schema_report(value: any, schema: any, apply_defaults?: bool) -> dict",
+    category = "json"
+)]
+fn schema_report_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    require_args(args, 2, "schema_report")?;
+    let apply_defaults = args.get(2).is_some_and(|value| value.is_truthy());
+    Ok(schema::schema_report_value(
+        &args[0],
+        &args[1],
+        apply_defaults,
+    ))
+}
+
 #[harn_builtin(sig = "schema_is(value: any, schema: any) -> bool", category = "json")]
 fn schema_is_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     require_args(args, 2, "schema_is")?;
@@ -423,6 +437,7 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &JSON_VALIDATE_IMPL_DEF,
     &SCHEMA_CHECK_IMPL_DEF,
     &SCHEMA_PARSE_IMPL_DEF,
+    &SCHEMA_REPORT_IMPL_DEF,
     &SCHEMA_IS_IMPL_DEF,
     &SCHEMA_OF_IMPL_DEF,
     &IS_TYPE_IMPL_DEF,

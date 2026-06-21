@@ -97,7 +97,7 @@ fn __env_with_auth_header(env: dict, config: dict, secret: dict) -> dict {
   let auth_header = config?.auth_header ?? "Authorization"
   let auth_prefix = config?.auth_prefix ?? "Bearer "
   let auth_value = auth_prefix + secret.value
-  let headers = base_headers + config?.extra_headers ?? {}
+  let headers = base_headers + (config?.extra_headers ?? {})
     + {Accept: "application/json", [auth_header]: auth_value}
   return env + {http_options: base_options + {headers: headers}}
 }

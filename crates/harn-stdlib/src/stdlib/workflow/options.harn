@@ -210,7 +210,7 @@ pub fn workflow_stage_agent_options(config: WorkflowStageOptionsConfig = {}) -> 
   let llm_options = __workflow_llm_options(config, model_policy, tool_format)
   let loop_options = __workflow_agent_loop_options(config, model_policy, tool_format)
   return {
-    run_agent_loop: config.mode == "agent" || config.has_tools ?? false,
+    run_agent_loop: config.mode == "agent" || (config.has_tools ?? false),
     tool_format: tool_format,
     llm_options: llm_options,
     agent_loop_options: llm_options + loop_options,

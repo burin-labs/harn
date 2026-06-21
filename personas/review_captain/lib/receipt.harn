@@ -121,7 +121,7 @@ fn _contains_string(haystack, needle) {
 
 fn _has_blocking(findings) {
   for finding in findings {
-    if finding.severity ?? "" == "blocking" {
+    if (finding.severity ?? "") == "blocking" {
       return true
     }
   }

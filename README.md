@@ -244,9 +244,13 @@ defaults, safe, prompts, catalog).
   (`inherit`, `fork`, `reset`, `compact`), artifact carryover, workflow resume
   control, and compact parent-facing `worker_result` artifacts.
 - Runtime schema helpers for structured LLM I/O: `schema_check(...)`,
-  `schema_parse(...)`, `schema_is(...)`, JSON Schema/OpenAPI conversion, and
+  `schema_parse(...)`, `schema_report(...)`, `schema_is(...)`,
+  JSON Schema/OpenAPI conversion, and
   schema composition helpers, plus a lazy `std/schema` builder module for
   ergonomic schema authoring when imported.
+- Memorable non-secret names via `import "std/slug"`:
+  `random_slug(...)`, `slug_from(...)`, deterministic aliases, and `slugify(...)`
+  for run names, agents, incidents, and fixtures.
 - Provider-neutral GraphQL connector helpers via `import "std/graphql"`:
   request/envelope normalization, introspection and SDL fixture parsing,
   persisted-query metadata, cursor pagination helpers, auth headers, and

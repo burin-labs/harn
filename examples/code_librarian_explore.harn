@@ -38,7 +38,7 @@ pipeline default() {
   __io_println("recorded changes: " + to_string(len(changes)))
   // 7. Activate a per-branch overlay, then deactivate.
   let on: LibrarianOverlay = code_librarian_branch_overlay("topic/explore")
-  __io_println("overlay active: " + on.active ?? "<base>")
+  __io_println("overlay active: " + (on.active ?? "<base>"))
   let off: LibrarianOverlay = code_librarian_branch_overlay(nil)
-  __io_println("overlay active: " + off.active ?? "<base>")
+  __io_println("overlay active: " + (off.active ?? "<base>"))
 }

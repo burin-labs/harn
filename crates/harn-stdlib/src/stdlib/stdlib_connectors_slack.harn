@@ -79,7 +79,7 @@ pub fn post_message(channel, text, blocks = nil, options = nil) {
 pub fn update_message(channel, ts, text, blocks = nil, options = nil) {
   return __call(
     "update_message",
-    filter_nil(options ?? {} + {channel: channel, ts: ts, text: text, blocks: blocks}),
+    filter_nil((options ?? {}) + {channel: channel, ts: ts, text: text, blocks: blocks}),
   )
 }
 
@@ -90,7 +90,7 @@ pub fn update_message(channel, ts, text, blocks = nil, options = nil) {
  * @errors: [ConnectorError]
  */
 pub fn add_reaction(channel, ts, name, options = nil) {
-  return __call("add_reaction", options ?? {} + {channel: channel, ts: ts, name: name})
+  return __call("add_reaction", (options ?? {}) + {channel: channel, ts: ts, name: name})
 }
 
 /**
@@ -100,7 +100,7 @@ pub fn add_reaction(channel, ts, name, options = nil) {
  * @errors: [ConnectorError]
  */
 pub fn open_view(trigger_id, view, options = nil) {
-  return __call("open_view", options ?? {} + {trigger_id: trigger_id, view: view})
+  return __call("open_view", (options ?? {}) + {trigger_id: trigger_id, view: view})
 }
 
 /**
@@ -110,7 +110,7 @@ pub fn open_view(trigger_id, view, options = nil) {
  * @errors: [ConnectorError]
  */
 pub fn user_info(user_id, options = nil) {
-  return __call("user_info", options ?? {} + {user_id: user_id})
+  return __call("user_info", (options ?? {}) + {user_id: user_id})
 }
 
 /**
@@ -120,7 +120,7 @@ pub fn user_info(user_id, options = nil) {
  * @errors: [ConnectorError]
  */
 pub fn api_call(method, args = nil, options = nil) {
-  return __call("api_call", filter_nil(options ?? {} + {method: method, args: args ?? {}}))
+  return __call("api_call", filter_nil((options ?? {}) + {method: method, args: args ?? {}}))
 }
 
 /**
@@ -130,7 +130,7 @@ pub fn api_call(method, args = nil, options = nil) {
  * @errors: [ConnectorError]
  */
 pub fn upload_file(filename, content, options = nil) {
-  return __call("upload_file", options ?? {} + {filename: filename, content: content})
+  return __call("upload_file", (options ?? {}) + {filename: filename, content: content})
 }
 
 fn __slack_event(log_event) {

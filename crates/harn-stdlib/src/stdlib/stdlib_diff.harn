@@ -260,8 +260,8 @@ pub fn structural_diff(path_a: string, path_b: string, options = nil) -> dict {
   return payload
     .merge(
     {
-      ok: payload?.result ?? "" == "ok" || payload?.result ?? "" == "fallback",
-      structural: payload?.mode ?? "" == "structural",
+      ok: (payload?.result ?? "") == "ok" || (payload?.result ?? "") == "fallback",
+      structural: (payload?.mode ?? "") == "structural",
       provenance: {module: "std/diff", helper: "structural_diff"},
     },
   )

@@ -48,7 +48,7 @@ pub fn ws_echo(msg: dict) -> string {
   return "echo:" + msg.data
 }
 
-fn main(harness: Harness) {
+fn main(_harness: Harness) {
   // Drive the handlers the way the site host would, then capture every
   // observable result in a receipt so the tape stays deterministic. Each
   // http_* envelope carries its HTTP status under the `status` key.

@@ -241,15 +241,16 @@ Ordered by precedence (lowest to highest):
 |---|---|---|
 | 1 | `\|>` | Pipe |
 | 2 | `? :` | Ternary conditional |
-| 3 | `??` | Nil coalescing |
-| 4 | `\|\|` | Logical OR (short-circuit) |
-| 5 | `&&` | Logical AND (short-circuit) |
-| 6 | `==` `!=` | Equality |
-| 7 | `<` `>` `<=` `>=` `in` `not in` | Comparison, membership |
-| 8 | `+` `-` | Add, subtract, string/list concat |
-| 9 | `*` `/` | Multiply, divide |
+| 3 | `\|\|` | Logical OR (short-circuit) |
+| 4 | `&&` | Logical AND (short-circuit) |
+| 5 | `==` `!=` | Equality |
+| 6 | `<` `>` `<=` `>=` `in` `not in` | Comparison, membership |
+| 7 | `+` `-` | Add, subtract, string/list concat |
+| 8 | `??` | Nil coalescing |
+| 9 | `*` `/` `%` | Multiply, divide, modulo |
 | 10 | `!` `-` | Unary not, negate |
-| 11 | `.` `?.` `[]` `[:]` `()` `?` | Member access, optional chaining, subscript, slice, call, try |
+| 11 | `**` | Exponentiation |
+| 12 | `.` `?.` `[]` `?[]` `[:]` `()` `?` | Member access, optional chaining, subscript, optional subscript, slice, call, try |
 
 Integer division truncates toward zero. Integer division (and any modulo) by
 zero raises a catchable runtime error, while float division by zero follows
@@ -257,6 +258,11 @@ IEEE-754 (`±inf`, or `NaN` for `0.0 / 0.0`).
 Arithmetic operators are strictly typed — mismatched operands (e.g.
 `"hello" + 5`) produce a `TypeError`. Use `to_string()` or string
 interpolation (`"value=${x}"`) for explicit conversion.
+
+`??` binds tighter than comparisons and logical operators but looser than
+multiplication, so `xs?.count ?? 0 > 0` means `(xs?.count ?? 0) > 0`.
+`harn fmt` adds clarifying parentheses when `??` is mixed with looser binary
+operators.
 
 ### Optional chaining (`?.`)
 

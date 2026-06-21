@@ -1,0 +1,25 @@
+import "std/slug"
+
+pipeline test(task) {
+  let random_name = random_slug({segments: 3, separator: "_"})
+  let random_parts = split(random_name, "_")
+  __io_println(len(random_parts) == 3)
+  __io_println(random_parts[0] != "" && random_parts[1] != "" && random_parts[2] != "")
+  let a = slug_from("agent", {segments: 4, separator: ".", pattern: ["adjective", "noun", "verb", "noun"]})
+  let b = slug_from("agent", {segments: 4, separator: ".", pattern: ["adjective", "noun", "verb", "noun"]})
+  __io_println(a == b)
+  __io_println(len(split(a, ".")) == 4)
+  let custom = slug_from(
+    "x",
+    {
+      segments: 3,
+      dictionary: {adjectives: ["red"], nouns: ["box"], verbs: ["runs"]},
+      pattern: ["adjective", "noun", "verb"],
+    },
+  )
+  __io_println(custom)
+  __io_println(slugify("Hello, Harn Agents!"))
+  __io_println(slugify("Hello, Harn Agents!", {separator: "_"}))
+  let prefixed = random_slug({segments: 2, prefix: "Agent 007"})
+  __io_println(substring(prefixed, 0, len("agent-007-")) == "agent-007-")
+}

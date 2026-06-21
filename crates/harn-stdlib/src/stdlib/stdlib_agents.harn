@@ -78,7 +78,7 @@ pub fn workflow_options(config) {
  * @errors: []
  */
 pub fn stage_config(flow, overrides, stage_name) {
-  let combined = flow ?? {} + overrides ?? {}
+  let combined = (flow ?? {}) + (overrides ?? {})
   let stage = combined[stage_name] ?? {}
   let merged = combined + stage
   return filter_nil(merged + {_stage: stage_name})
@@ -568,7 +568,7 @@ fn __action_graph_batch_prompt(batch) {
     let title = action?.title ?? action?.instruction ?? action?.id
     let exact_command = __action_graph_non_empty_string(action?.command ?? action?.metadata?.command)
     let detail = if exact_command != nil {
-      action?.instruction ?? title + " Run exactly `${exact_command}`."
+      (action?.instruction ?? title) + " Run exactly `${exact_command}`."
     } else {
       action?.instruction ?? title
     }
@@ -701,20 +701,20 @@ fn __action_graph_batch_node(batch, template) {
   let local_verification = __action_graph_batch_verification(batch)
   let model_policy = template?.model_policy ?? {}
   let output_kind = __action_graph_output_kind(template, __action_graph_batch_output_kind(batch.phase))
-  let output_contract = template?.output_contract ?? {} + {output_kinds: [output_kind]}
+  let output_contract = (template?.output_contract ?? {}) + {output_kinds: [output_kind]}
   let target_paths = __action_graph_batch_target_paths(batch)
-  let context_policy = template?.context_policy ?? {}
+  let context_policy = (template?.context_policy ?? {})
     + {include_kinds: __action_graph_batch_context_kinds(batch, template)}
   var metadata = template?.metadata ?? {}
   if local_verification != nil {
     metadata = metadata + {workflow_verification_scope: "local_only"}
   }
   let approval_policy = if len(target_paths) > 0 {
-    template?.approval_policy ?? {} + {write_path_allowlist: target_paths}
+    (template?.approval_policy ?? {}) + {write_path_allowlist: target_paths}
   } else {
     template?.approval_policy ?? {}
   }
-  return template ?? {}
+  return (template ?? {})
     + {
     kind: "stage",
     task_label: format("{} batch {}", uppercase(batch.phase), batch.id),
@@ -758,14 +758,14 @@ fn __action_graph_terminal_node(plan, phase, template) {
       },
     )
   }
-  let output_contract = template?.output_contract ?? {}
+  let output_contract = (template?.output_contract ?? {})
     + {output_kinds: [__action_graph_output_kind(template, default_output)]}
-  let context_policy = template?.context_policy ?? {}
+  let context_policy = (template?.context_policy ?? {})
     + {
     include_kinds: template?.context_policy?.include_kinds
       ?? ["plan", "summary", "artifact", "verification_result"],
   }
-  return template ?? {}
+  return (template ?? {})
     + filter_nil(
     {
       kind: node_kind,
@@ -1081,7 +1081,7 @@ pub fn action_graph_run(task, graph, config = nil, overrides = nil) {
   let plan = if graph?._type == "action_graph" {
     graph
   } else {
-    action_graph(graph, config ?? {} + {task: task})
+    action_graph(graph, (config ?? {}) + {task: task})
   }
   let flow = action_graph_flow(plan, config)
   let plan_artifact = artifact(
@@ -1095,7 +1095,7 @@ pub fn action_graph_run(task, graph, config = nil, overrides = nil) {
       relevance: 1.0,
     },
   )
-  let artifacts = overrides?.artifacts ?? [] + [plan_artifact]
+  let artifacts = (overrides?.artifacts ?? []) + [plan_artifact]
   let runtime = workflow_execute(task, flow, artifacts, overrides)
   return {
     _type: "action_graph_run",
@@ -1173,7 +1173,7 @@ pub fn task_run(task, flow, overrides) {
  */
 pub fn workflow_continue(prev, task, flow, overrides) {
   let transcript = prev?.transcript ?? prev
-  let merged = overrides ?? {} + {transcript: transcript}
+  let merged = (overrides ?? {}) + {transcript: transcript}
   return task_run(task, flow, merged)
 }
 

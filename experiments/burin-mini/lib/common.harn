@@ -432,7 +432,7 @@ fn ensure_terminal_verify_action(profile, actions) {
   }
   var depends_on = []
   for action in actions {
-    if action?.id ?? "" != "" {
+    if (action?.id ?? "") != "" {
       depends_on = depends_on + [action.id]
     }
   }
@@ -458,7 +458,7 @@ fn collect_normalized_questions(profile, src) {
   }
   for (index, item) in iter(raw_questions).enumerate() {
     let normalized = normalize_question_entry(profile, item, index + 1)
-    if normalized != nil && normalized.question ?? "" != "" {
+    if normalized != nil && (normalized.question ?? "") != "" {
       questions = questions + [normalized]
     }
   }
@@ -473,7 +473,7 @@ fn collect_normalized_actions(profile, src) {
   }
   for (index, item) in iter(raw_actions).enumerate() {
     let normalized = normalize_action_entry(profile, item, index + 1)
-    if normalized != nil && normalized.task ?? "" != "" {
+    if normalized != nil && (normalized.task ?? "") != "" {
       actions = actions + [normalized]
     }
   }
@@ -503,7 +503,7 @@ fn split_actions_for_stage(profile, actions, explicit_ready) {
 }
 
 fn actions_are_preparatory(profile, actions, explicit_ready) {
-  if len(actions) == 0 || explicit_ready ?? true {
+  if len(actions) == 0 || (explicit_ready ?? true) {
     return false
   }
   for action in actions {

@@ -843,7 +843,7 @@ fn __task_plan_compile_node(node_id, node, budget_policy) {
   let model_policy = __task_plan_model_policy(node, __task_plan_mode_budget_policy(mode, budget_policy))
   let capability_policy = __task_plan_capability_policy(node)
   let base_meta = {task_plan_kind: node?.kind, task_plan_purpose: node?.purpose ?? ""}
-    + node?.metadata ?? {}
+    + (node?.metadata ?? {})
     + __task_plan_kind_metadata(node)
   var workflow_node = {id: node_id, kind: __task_plan_workflow_kind(node?.kind), metadata: base_meta}
   if mode != nil {
@@ -865,7 +865,7 @@ fn __task_plan_compile_node(node_id, node, budget_policy) {
     workflow_node = workflow_node + {tools: node.tools}
   }
   workflow_node = workflow_node + __task_plan_kind_fields(node)
-  return workflow_node + node?.lowering_overrides ?? {}
+  return workflow_node + (node?.lowering_overrides ?? {})
 }
 
 fn __task_plan_compile_nodes(plan) {
@@ -924,7 +924,7 @@ fn __task_plan_metadata(plan, validation) {
       validation: {valid: validation?.valid, errors: validation?.errors ?? [], warnings: validation?.warnings ?? []},
     },
   }
-    + plan?.metadata ?? {}
+    + (plan?.metadata ?? {})
 }
 
 /**

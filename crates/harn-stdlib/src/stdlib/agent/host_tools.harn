@@ -397,7 +397,7 @@ fn __agent_host_command_request(args, options) {
     }
     return __agent_host_apply_command_policy(__agent_host_command_request_common(req, args, opts), args, opts)
   }
-  if opts?.allow_shell ?? false && type_of(args?.command) == "string" && trim(args.command) != "" {
+  if (opts?.allow_shell ?? false) && type_of(args?.command) == "string" && trim(args.command) != "" {
     var req = {mode: "shell", command: args.command}
     let shell_cwd = __agent_host_command_cwd(args, opts)
     if shell_cwd != nil && shell_cwd != "" {

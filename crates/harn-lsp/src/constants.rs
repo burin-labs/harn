@@ -18,6 +18,10 @@ pub(crate) const BUILTINS: &[(&str, &str)] = &[
     ("schema_check", "schema_check(data, schema) -> Result"),
     ("schema_parse", "schema_parse(data, schema) -> Result"),
     (
+        "schema_report",
+        "schema_report(data, schema, apply_defaults?) -> dict",
+    ),
+    (
         "schema_to_json_schema",
         "schema_to_json_schema(schema) -> dict",
     ),
@@ -1019,6 +1023,7 @@ pub(crate) fn builtin_doc(name: &str) -> Option<String> {
         "transcript_auto_compact" => "**transcript_auto_compact(messages, options?)** → list — Apply the agent-loop compaction pipeline to a message list",
         "schema_check" => "**schema_check(data, schema)** → Result — Validate data against an extended Harn schema and return `Result.Ok(data)` without applying defaults",
         "schema_parse" => "**schema_parse(data, schema)** → Result — Validate data against an extended Harn schema and return `Result.Ok(data)` with defaults applied",
+        "schema_report" => "**schema_report(data, schema, apply_defaults?)** → dict — Validate data and return `{ok, message, errors, issues, value?}` without throwing",
         "schema_to_json_schema" => "**schema_to_json_schema(schema)** → dict — Convert an extended Harn schema into JSON Schema",
         "schema_extend" => "**schema_extend(base, overrides)** → dict — Shallow-merge two schema dicts",
         "schema_partial" => "**schema_partial(schema)** → dict — Make schema properties optional by removing `required` recursively",

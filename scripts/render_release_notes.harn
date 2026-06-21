@@ -160,7 +160,7 @@ fn detect_repo(explicit: string?) -> string? {
     return explicit
   }
   let env_repo = harness.env.get("GITHUB_REPOSITORY")
-  if env_repo != nil && env_repo ?? "" != "" {
+  if env_repo != nil && (env_repo ?? "") != "" {
     return env_repo
   }
   let remote = harness.process.spawn_captured({cmd: "git", args: ["remote", "get-url", "origin"]})

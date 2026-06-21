@@ -45,10 +45,10 @@ pipeline main() {
       let suspended = wait_agent(handle)
       let trigger_handle = suspended?.suspension?.auto_resume_trigger
       __io_println("status=" + suspended.status)
-      __io_println("conditions_trigger_kind=" + suspended?.suspension?.conditions?.trigger?.kind ?? "")
+      __io_println("conditions_trigger_kind=" + (suspended?.suspension?.conditions?.trigger?.kind ?? ""))
       __io_println(
         "conditions_trigger_provider="
-          + suspended?.suspension?.conditions?.trigger?.provider ?? "",
+          + (suspended?.suspension?.conditions?.trigger?.provider ?? ""),
       )
       __io_println("has_trigger_handle=" + to_string(trigger_handle?.id != nil))
       let fired: DispatchHandle = trigger_fire(

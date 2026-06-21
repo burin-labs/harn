@@ -23,6 +23,6 @@ pub fn lint_run(params) -> dict {
   let payload = hostlib_lint_run(params ?? {}) ?? {}
   return payload
     .merge(
-    {ok: payload?.result ?? "" == "ok", provenance: {module: "std/lint", helper: "lint_run"}},
+    {ok: (payload?.result ?? "") == "ok", provenance: {module: "std/lint", helper: "lint_run"}},
   )
 }

@@ -134,6 +134,12 @@ pub fn from_openapi_schema(schema) {
   return schema_from_openapi_schema(schema)
 }
 
+/**
+ * Validate a value and return `Result.Ok(value)` or `Result.Err(...)`.
+ *
+ * @effects: []
+ * @errors: []
+ */
 pub fn get_typed_result(value, schema, apply_defaults = false) {
   if apply_defaults {
     return schema_parse(value, schema)
@@ -141,12 +147,58 @@ pub fn get_typed_result(value, schema, apply_defaults = false) {
   return schema_check(value, schema)
 }
 
+/**
+ * Validate a value and return `{ok, message, errors, issues, value?}`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn get_typed_report(value, schema, apply_defaults = false) {
+  return schema_report(value, schema, apply_defaults)
+}
+
+/**
+ * Return structured validation issues for a value/schema pair.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn get_typed_issues(value, schema, apply_defaults = false) {
+  return get_typed_report(value, schema, apply_defaults).issues
+}
+
+/**
+ * Return rendered validation error messages for a value/schema pair.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn get_typed_errors(value, schema, apply_defaults = false) {
+  return get_typed_report(value, schema, apply_defaults).errors
+}
+
+/**
+ * Validate a value and return the normalized/defaulted value, throwing on failure.
+ *
+ * @effects: []
+ * @errors: ["schema validation failure"]
+ */
 pub fn get_typed_value(value, schema, apply_defaults = false) {
-  let result = get_typed_result(value, schema, apply_defaults)
-  if is_ok(result) {
-    return unwrap(result)
+  let report = get_typed_report(value, schema, apply_defaults)
+  if report.ok {
+    return report.value
   }
-  throw_error(unwrap_err(result).message)
+  throw_error(report.message)
+}
+
+/**
+ * Alias for `get_typed_value` when the caller wants assertion-style wording.
+ *
+ * @effects: []
+ * @errors: ["schema validation failure"]
+ */
+pub fn expect_typed_value(value, schema, apply_defaults = false) {
+  return get_typed_value(value, schema, apply_defaults)
 }
 
 pub fn is_type(value, schema) {

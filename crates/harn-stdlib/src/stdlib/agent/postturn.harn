@@ -199,7 +199,7 @@ fn __native_tool_text_completion(opts, has_tool_calls, text) {
   if !__zero_tool_completion_context(opts, has_tool_calls, text) {
     return true
   }
-  return opts?._consecutive_text_only ?? 1 >= 2
+  return (opts?._consecutive_text_only ?? 1) >= 2
 }
 
 /**
@@ -212,7 +212,7 @@ fn __maybe_inject_completion_confirmation(session, opts, has_tool_calls, text, i
   if !__zero_tool_completion_context(opts, has_tool_calls, text) {
     return false
   }
-  if opts?._consecutive_text_only ?? 1 >= 2 {
+  if (opts?._consecutive_text_only ?? 1) >= 2 {
     return false
   }
   agent_session_inject_feedback(

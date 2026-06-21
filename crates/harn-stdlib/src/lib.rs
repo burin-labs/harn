@@ -82,6 +82,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/stdlib_math.harn"),
     },
     StdlibSource {
+        module: "slug",
+        source: include_str!("stdlib/stdlib_slug.harn"),
+    },
+    StdlibSource {
         module: "path",
         source: include_str!("stdlib/stdlib_path.harn"),
     },

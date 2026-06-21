@@ -525,7 +525,7 @@ pub fn ui_tool_call_envelope(name: string, params: dict? = nil, options: UiToolC
   if tool_name == "" {
     throw "std/ui_resource: tool name is required"
   }
-  let id = options?.id ?? "ui_call_" + substring(sha256(tool_name + json_stringify(params ?? {})), 0, 16)
+  let id = (options?.id ?? "ui_call_") + substring(sha256(tool_name + json_stringify(params ?? {})), 0, 16)
   return {
     schema: UI_TOOL_CALL_SCHEMA,
     jsonrpc: "2.0",
@@ -546,7 +546,7 @@ pub fn ui_context_update_envelope(key: string, value, options: UiContextUpdateOp
   if context_key == "" {
     throw "std/ui_resource: context update key is required"
   }
-  let id = options?.id ?? "ui_ctx_" + substring(sha256(context_key + json_stringify(value ?? nil)), 0, 16)
+  let id = (options?.id ?? "ui_ctx_") + substring(sha256(context_key + json_stringify(value ?? nil)), 0, 16)
   return {
     schema: UI_CONTEXT_UPDATE_SCHEMA,
     jsonrpc: "2.0",

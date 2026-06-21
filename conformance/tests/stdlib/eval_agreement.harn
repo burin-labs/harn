@@ -89,7 +89,7 @@ pipeline test(task) {
     [e1(verdict_fail()), e2(verdict_pass())],
   ]
   let kd = cohen_kappa(disagree)
-  assert(to_float(kd.kappa) ?? 1.0 < 0.0, "systematic disagreement yields negative kappa")
+  assert((to_float(kd.kappa) ?? 1.0) < 0.0, "systematic disagreement yields negative kappa")
   // --- fewer than 2 jointly-decided cases -> kappa undefined ---
   let one = cohen_kappa([[e1(verdict_pass()), e2(verdict_pass())]])
   assert(one.kappa == nil, "fewer than 2 jointly-decided cases -> kappa undefined")

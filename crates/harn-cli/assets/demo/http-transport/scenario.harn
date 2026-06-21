@@ -38,7 +38,7 @@ fn fake_request() {
   }
 }
 
-fn main(harness: Harness) {
+fn main(_harness: Harness) {
   let req = fake_request()
   // 1. Content negotiation against a simulated `Accept` header.
   let chosen = http_choose(req.headers.Accept, ["application/xml", "application/json", "text/plain"])

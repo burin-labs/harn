@@ -299,7 +299,7 @@ pub fn bounded_loop(state_init, step_fn, options = nil) {
     } else {
       next_digest != before_digest
     }
-    let done = is_envelope && step_value?.done ?? false
+    let done = is_envelope && (step_value?.done ?? false)
     history = history + [{iteration: iterations, progress: progressed, done: done}]
     state = next_state
     if done {
@@ -602,7 +602,7 @@ pub fn with_approval_gate(approval_kind, step_fn, options = nil) {
   return fn() {
     let started_at = opts?.started_at ?? date_iso()
     var approval = opts?.approval
-    if approval == nil && opts?.request_approval ?? false {
+    if approval == nil && (opts?.request_approval ?? false) {
       let requested = try {
         request_approval(to_string(approval_kind), opts?.approval_options ?? {})
       }

@@ -9,7 +9,7 @@ pipeline default() {
   store_set("probe_counter", 0)
   let value = poll_until(
     fn() {
-      let n = store_get("probe_counter") ?? 0 + 1
+      let n = (store_get("probe_counter") ?? 0) + 1
       store_set("probe_counter", n)
       if n < 3 {
         return nil
@@ -23,7 +23,7 @@ pipeline default() {
   store_set("status_counter", 0)
   let row = wait_for_status(
     fn() {
-      let n = store_get("status_counter") ?? 0 + 1
+      let n = (store_get("status_counter") ?? 0) + 1
       store_set("status_counter", n)
       if n == 1 {
         return {status: "queued"}
@@ -45,7 +45,7 @@ pipeline default() {
   store_set("retry_counter", 0)
   let retry_report = retry_with_result(
     fn(attempt) {
-      let n = store_get("retry_counter") ?? 0 + 1
+      let n = (store_get("retry_counter") ?? 0) + 1
       store_set("retry_counter", n)
       if n < 3 {
         return Err("transient")

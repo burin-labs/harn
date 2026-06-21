@@ -142,7 +142,7 @@ fn __consume_value(args: list, cursor: int, entry, errors_in) -> dict {
   let parsed = __parse_typed(raw, entry?.parse ?? "string", entry?.separator ?? ",")
   if parsed == nil && entry?.parse != "string" && entry?.parse != nil {
     errors = errors
-      + ["std/cli: '" + entry.name + "' could not parse '" + raw + "' as " + entry?.parse ?? "string"]
+      + ["std/cli: '" + entry.name + "' could not parse '" + raw + "' as " + (entry?.parse ?? "string")]
   }
   return {value: parsed, cursor: next, errors: errors}
 }
@@ -173,7 +173,7 @@ fn __apply_long_eq(arg: string, flag_index, current, errors_in) -> dict {
     errors = errors
       + [
       "std/cli: '" + entry.name + "' could not parse '" + raw_value + "' as "
-        + entry?.parse ?? "string",
+        + (entry?.parse ?? "string"),
     ]
   }
   if entry?.multi {

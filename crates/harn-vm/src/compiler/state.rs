@@ -194,6 +194,7 @@ impl Compiler {
                 | "schema_expect"
                 | "schema_parse"
                 | "schema_check"
+                | "schema_report"
                 | "is_type"
                 | "json_validate"
         )

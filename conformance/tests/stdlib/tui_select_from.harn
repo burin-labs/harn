@@ -57,7 +57,7 @@ pipeline default() {
   show(
     select_from(
       items,
-      {prefer_external: "none", display: { item -> "<" + item?.id ?? to_string(item) + ">" }},
+      {prefer_external: "none", display: { item -> "<" + (item?.id ?? to_string(item)) + ">" }},
     ),
   )
   unmock_stdin()

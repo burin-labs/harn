@@ -88,8 +88,9 @@ log(unwrap_err(bad))         // something went wrong
 | `toml_parse(str)` | str: string | value | Parse TOML string into Harn values. Throws on invalid TOML |
 | `toml_stringify(value)` | value: any | string | Serialize Harn value to TOML |
 | `json_validate(data, schema)` | data: any, schema: dict | bool | Validate data against a schema. Returns `true` if valid, throws with details if not |
-| `schema_check(data, schema)` | data: any, schema: dict | Result | Validate data against an extended schema and return `Result.Ok(data)` or `Result.Err({message, errors, value?})` |
-| `schema_parse(data, schema)` | data: any, schema: dict | Result | Validate data and return `Result.Ok(data)` with `default` values applied recursively, or `Result.Err({message, errors, value?})` |
+| `schema_check(data, schema)` | data: any, schema: dict | Result | Validate data against an extended schema and return `Result.Ok(data)` or `Result.Err({message, errors, issues, value?})` |
+| `schema_parse(data, schema)` | data: any, schema: dict | Result | Validate data and return `Result.Ok(data)` with `default` values applied recursively, or `Result.Err({message, errors, issues, value?})` |
+| `schema_report(data, schema, apply_defaults?)` | data: any, schema: dict, bool (optional) | dict | Validate data and return `{ok, message, errors, issues, value?}` without wrapping in `Result` or throwing |
 | `schema_is(data, schema)` | data: any, schema: dict | bool | Validate data against a schema and return `true`/`false` without throwing |
 | `schema_expect(data, schema, apply_defaults?)` | data: any, schema: dict, bool (optional) | any | Validate data and return the normalized value, throwing on failure |
 | `schema_from_json_schema(schema)` | schema: dict | dict | Convert a JSON Schema object into Harn's canonical schema dict |
@@ -200,7 +201,8 @@ literal schema).
 
 The lazy `std/schema` module provides ergonomic builders such as
 `schema_string()`, `schema_object(...)`, `schema_union(...)`,
-`get_typed_result(...)`, `get_typed_value(...)`, and `is_type(...)`.
+`get_typed_result(...)`, `get_typed_report(...)`, `get_typed_issues(...)`,
+`get_typed_value(...)`, and `is_type(...)`.
 
 Composition helpers:
 

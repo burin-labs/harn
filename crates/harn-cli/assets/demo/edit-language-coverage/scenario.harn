@@ -73,7 +73,7 @@ pipeline default(_task) {
   )
   __io_println(
     "dockerfile: " + dockerfile.result + " — fallback: "
-      + dockerfile.fallback_suggestion ?? "none",
+      + (dockerfile.fallback_suggestion ?? "none"),
   )
   __io_println(
     "json apply_node: " + json_edit.result + " — " + to_string(json_edit.match_count) + " edit(s)",

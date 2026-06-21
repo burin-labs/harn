@@ -270,7 +270,7 @@ fn __edit_splice_raw(text, start_line, end_line_exclusive, new_text) {
   if start_line > 0 {
     out = out + lines[:start_line]
   }
-  if new_text ?? "" != "" {
+  if (new_text ?? "") != "" {
     out = out + split(new_text ?? "", "\n")
   }
   if end_line_exclusive < len(lines) {
@@ -917,7 +917,7 @@ pub fn edit_apply_node(params) {
     caller: params?.provenance,
   }
   return {
-    ok: payload?.result ?? "" == "applied",
+    ok: (payload?.result ?? "") == "applied",
     applied: payload?.applied ?? false,
     result: payload?.result ?? "no_match",
     path: payload?.path,
@@ -990,7 +990,7 @@ pub fn edit_insert_at_anchor(params) {
     caller: params?.provenance,
   }
   return {
-    ok: payload?.result ?? "" == "applied",
+    ok: (payload?.result ?? "") == "applied",
     applied: payload?.applied ?? false,
     result: payload?.result ?? "no_match",
     path: payload?.path,
@@ -1058,7 +1058,7 @@ pub fn edit_batch_apply(params) {
   return payload
     .merge(
     {
-      ok: payload?.summary?.files_failed ?? 1 == 0,
+      ok: (payload?.summary?.files_failed ?? 1) == 0,
       provenance: {module: "std/edit", helper: "edit_batch_apply", caller: params?.provenance},
     },
   )
@@ -1402,7 +1402,7 @@ pub fn edit_dry_run(params) {
   let payload = raw ?? {}
   let summary = payload?.summary ?? {}
   return {
-    ok: payload?.result ?? "no_ops_applied" != "no_ops_applied",
+    ok: (payload?.result ?? "no_ops_applied") != "no_ops_applied",
     result: payload?.result ?? "no_ops_applied",
     per_file_unified_diff: payload?.per_file_unified_diff ?? [],
     summary: {
@@ -1841,7 +1841,7 @@ pub fn edit_capabilities(params = nil) {
   let raw = hostlib_ast_capabilities(params ?? {})
   let payload = raw ?? {}
   return {
-    ok: payload?.result ?? "" == "ok",
+    ok: (payload?.result ?? "") == "ok",
     result: payload?.result ?? "ok",
     fallback_suggestion: payload?.fallback_suggestion,
     languages: payload?.languages ?? [],
@@ -2933,7 +2933,7 @@ fn __refactor_undef_names(src, language) {
   }
   var names = []
   for d in r?.diagnostics ?? [] {
-    if d?.kind ?? "identifier" == "identifier" && !__refactor_member(names, d.name) {
+    if (d?.kind ?? "identifier") == "identifier" && !__refactor_member(names, d.name) {
       names = names + [d.name]
     }
   }

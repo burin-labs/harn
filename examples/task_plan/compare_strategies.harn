@@ -408,7 +408,7 @@ fn __has_verify_node(plan) {
 fn __deterministic_count(counts) {
   var total = 0
   for kind in __DETERMINISTIC_KINDS {
-    total = total + counts?[kind] ?? 0
+    total = total + (counts?[kind] ?? 0)
   }
   return total
 }
@@ -459,7 +459,7 @@ fn __score_typed(call) {
   let deterministic = __deterministic_count(kinds)
   let has_verify = __has_verify_node(plan)
   let has_caps = type_of(plan?.capabilities) == "dict"
-  let success = report.valid && compiled.ok && wf_report?.valid ?? false
+  let success = report.valid && compiled.ok && (wf_report?.valid ?? false)
   return {
     parse_ok: true,
     parse_error: nil,
@@ -666,7 +666,7 @@ fn __maybe_continue_length(call, model, prompt, system, max_tokens, retry_on_len
     call,
     continuation,
     call.text + continuation.text,
-    call?.retry_history ?? [] + ["length_continuation"],
+    (call?.retry_history ?? []) + ["length_continuation"],
   )
 }
 
@@ -765,7 +765,7 @@ fn __maybe_repair_schema(strategy, task, model, max_tokens, opts, call, score) {
     schema,
     use_structured,
   )
-  let repaired = __merge_calls(call, repair, repair.text, call?.retry_history ?? [] + ["schema_repair"])
+  let repaired = __merge_calls(call, repair, repair.text, (call?.retry_history ?? []) + ["schema_repair"])
   return {call: repaired, score: __strategy_score(strategy, repaired)}
 }
 

@@ -27,7 +27,7 @@ fn edit_tools() {
     "edit",
     "Edit a file.",
     {
-      handler: { args -> "edited " + args?.path ?? "" },
+      handler: { args -> "edited " + (args?.path ?? "") },
       parameters: {path: {type: "string", description: "Path to edit"}},
       returns: {type: "string"},
       annotations: {kind: "edit", side_effect_level: "workspace_write"},

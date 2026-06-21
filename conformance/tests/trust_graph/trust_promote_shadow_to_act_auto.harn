@@ -2,7 +2,7 @@ import "std/triggers"
 
 fn gated_handler(event: TriggerEvent) -> dict {
   let context = handler_context()
-  let file_path = path_join(".harn", "trust_graph_shadow_" + context?.agent ?? "unknown" + ".txt")
+  let file_path = path_join(".harn", "trust_graph_shadow_" + (context?.agent ?? "unknown") + ".txt")
   harness.fs.write_text(file_path, "approved:" + event.kind)
   return {autonomy_tier: context?.autonomy_tier, file_path: file_path}
 }

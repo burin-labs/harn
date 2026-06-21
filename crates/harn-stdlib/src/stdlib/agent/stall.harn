@@ -1069,7 +1069,7 @@ fn __agent_stall_observe_core(
       if emitted_warning == nil {
         emitted_warning = warning
       }
-      feedback_deferred = feedback_deferred || emitted.feedback_deferred ?? false
+      feedback_deferred = feedback_deferred || (emitted.feedback_deferred ?? false)
       next_state = next_state + {warnings: next_state.warnings.push(warning)}
     } else {
       next_state = __agent_stall_register_recovery(next_state)

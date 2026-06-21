@@ -22,7 +22,7 @@ fn _bundle(overrides) {
     allowed_write_scope: ["src/**", "tests/**"],
     required_verification: [{name: "tests", command: "make test"}],
   }
-  return build(base + overrides ?? {})
+  return build(base + (overrides ?? {}))
 }
 
 fn _good_output() {

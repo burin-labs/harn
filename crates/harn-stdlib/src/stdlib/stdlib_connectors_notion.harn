@@ -17,29 +17,29 @@ fn __call(method, params = {}) {
 }
 
 pub fn get_page(id, options = nil) {
-  return __call("get_page", options ?? {} + {id: id})
+  return __call("get_page", (options ?? {}) + {id: id})
 }
 
 pub fn update_page(id, properties, options = nil) {
-  return __call("update_page", options ?? {} + {id: id, properties: properties})
+  return __call("update_page", (options ?? {}) + {id: id, properties: properties})
 }
 
 pub fn append_blocks(page_id, blocks, options = nil) {
-  return __call("append_blocks", options ?? {} + {page_id: page_id, blocks: blocks})
+  return __call("append_blocks", (options ?? {}) + {page_id: page_id, blocks: blocks})
 }
 
 pub fn query_database(id, filter = nil, sorts = nil, options = nil) {
-  return __call("query_database", filter_nil(options ?? {} + {id: id, filter: filter, sorts: sorts}))
+  return __call("query_database", filter_nil((options ?? {}) + {id: id, filter: filter, sorts: sorts}))
 }
 
 pub fn search(query, options = nil) {
-  return __call("search", options ?? {} + {query: query})
+  return __call("search", (options ?? {}) + {query: query})
 }
 
 pub fn create_comment(page_id, rich_text, options = nil) {
-  return __call("create_comment", options ?? {} + {page_id: page_id, rich_text: rich_text})
+  return __call("create_comment", (options ?? {}) + {page_id: page_id, rich_text: rich_text})
 }
 
 pub fn api_call(path, method, body = nil, options = nil) {
-  return __call("api_call", filter_nil(options ?? {} + {path: path, method: method, body: body}))
+  return __call("api_call", filter_nil((options ?? {}) + {path: path, method: method, body: body}))
 }

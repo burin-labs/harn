@@ -7,8 +7,8 @@ use super::limits::{DEFAULT_SCHEMA_MAX_DEPTH, DEFAULT_SCHEMA_MAX_REF_EXPANSIONS}
 use super::transform::{merge_schema_dicts, schema_partial_dict};
 use super::validate::{validate_schema_value, ValidationOptions};
 use super::{
-    schema_assert_param, schema_is_value, schema_result_value, schema_to_json_schema_value,
-    schema_to_openapi_schema_value,
+    schema_assert_param, schema_is_value, schema_report_value, schema_result_value,
+    schema_to_json_schema_value, schema_to_openapi_schema_value,
 };
 
 fn s(v: &str) -> VmValue {
@@ -203,7 +203,7 @@ fn validation_depth_limit_returns_error_without_panicking() {
         result
             .errors
             .iter()
-            .any(|error| error.contains("schema depth exceeded (128)")),
+            .any(|error| error.message.contains("schema depth exceeded (128)")),
         "expected depth-limit error, got {:?}",
         result.errors
     );
@@ -225,7 +225,7 @@ fn validation_ref_cycle_returns_error_without_panicking() {
         result
             .errors
             .iter()
-            .any(|error| error.contains("cyclic schema reference: # -> #")),
+            .any(|error| error.message.contains("cyclic schema reference: # -> #")),
         "expected cyclic-ref error, got {:?}",
         result.errors
     );
@@ -264,6 +264,61 @@ fn validate_additional_properties_false() {
         result,
         VmValue::EnumVariant(enum_variant) if enum_variant.is_variant("Result", "Err")
     ));
+}
+
+#[test]
+fn schema_report_includes_structured_issues() {
+    let schema = make_vm_dict(vec![
+        ("type", s("dict")),
+        (
+            "properties",
+            make_vm_dict(vec![
+                (
+                    "age",
+                    make_vm_dict(vec![("type", s("int")), ("min", VmValue::Int(0))]),
+                ),
+                (
+                    "name",
+                    make_vm_dict(vec![("type", s("string")), ("min_length", VmValue::Int(2))]),
+                ),
+            ]),
+        ),
+    ]);
+    let report = schema_report_value(
+        &make_vm_dict(vec![("age", VmValue::Int(-1)), ("name", s("A"))]),
+        &schema,
+        false,
+    );
+    let payload = report.as_dict().expect("schema_report returns a dict");
+    assert!(matches!(payload.get("ok"), Some(VmValue::Bool(false))));
+    assert!(
+        payload.contains_key("value"),
+        "failed validation still reports the normalized value"
+    );
+
+    let errors = match payload.get("errors") {
+        Some(VmValue::List(items)) => items.clone(),
+        other => panic!("expected errors list, got {other:?}"),
+    };
+    assert_eq!(errors.len(), 2);
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.display().contains("at age: expected value >= 0")),
+        "expected path-aware age error, got: {errors:?}"
+    );
+
+    let issues = match payload.get("issues") {
+        Some(VmValue::List(items)) => items.clone(),
+        other => panic!("expected issues list, got {other:?}"),
+    };
+    assert_eq!(issues.len(), 2);
+    assert!(issues.iter().any(|issue| {
+        issue
+            .as_dict()
+            .and_then(|dict| dict.get("path"))
+            .is_some_and(|path| path.display() == "age")
+    }));
 }
 
 #[test]

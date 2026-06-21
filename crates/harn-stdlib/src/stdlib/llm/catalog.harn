@@ -284,7 +284,7 @@ fn __model_matches_identity_filters(model, opts) {
 
 fn __model_matches_catalog_constraints(model, opts, available) {
   let want_open_weight = opts?.open_weight
-  if want_open_weight != nil && model?.open_weight ?? nil != want_open_weight {
+  if want_open_weight != nil && (model?.open_weight ?? nil) != want_open_weight {
     return false
   }
   let min_tpm = opts?.min_tpm
@@ -294,7 +294,7 @@ fn __model_matches_catalog_constraints(model, opts, available) {
       return false
     }
   }
-  if opts?.exclude_deprecated ?? true && model?.deprecated ?? false {
+  if (opts?.exclude_deprecated ?? true) && (model?.deprecated ?? false) {
     return false
   }
   let max_input = opts?.max_input_per_mtok

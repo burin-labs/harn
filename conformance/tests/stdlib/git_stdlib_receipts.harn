@@ -4,7 +4,7 @@ import "std/triggers"
 fn run_git(cwd, argv) {
   let result = host_call("process.exec", {mode: "argv", argv: argv, cwd: cwd})
   if !result?.success {
-    throw "git command failed: " + result?.stderr ?? result?.stdout ?? ""
+    throw "git command failed: " + (result?.stderr ?? result?.stdout ?? "")
   }
   return result
 }
