@@ -69,6 +69,33 @@ impl Compiler {
                         }
                     }
                 }
+                // `x = x.push(v)` is the method spelling of the same list
+                // accumulator append. When the receiver is statically known to
+                // be a list and the target is a local slot, lower it through
+                // the same fused concat opcode as `x = x + [v]`.
+                if let Node::MethodCall {
+                    object,
+                    method,
+                    args,
+                } = &value.node
+                {
+                    if method == "push" && args.len() == 1 {
+                        if let Node::Identifier(oname) = &object.node {
+                            if oname == name {
+                                let left_type = self.infer_expr_type(target);
+                                let value_type = self.infer_expr_type(value);
+                                if self.try_emit_list_push_assign(
+                                    name,
+                                    &args[0],
+                                    left_type.as_ref(),
+                                )? {
+                                    self.assign_type_fact(name, value_type);
+                                    return Ok(());
+                                }
+                            }
+                        }
+                    }
+                }
                 let value_type = self.infer_expr_type(value);
                 self.compile_node(value)?;
                 self.emit_set_binding(name);
@@ -377,6 +404,40 @@ impl Compiler {
         self.emit_set_binding(name); // [x, e]  binding <- nil; x uniquely held if unaliased
         self.chunk.emit(Op::Add, self.line); // [x + e]  in-place extend when unique
         self.emit_set_binding(name); // []
+        Ok(true)
+    }
+
+    /// Emit the fused local concat form for `x = x.push(item)`.
+    ///
+    /// This deliberately stays narrower than the runtime method: it only fires
+    /// for a local receiver that is statically list-like and for exactly one
+    /// non-spread argument. The optimized bytecode evaluates `item` while the
+    /// original slot is still live, builds `[item]`, then lets
+    /// `ConcatAssignLocal` perform the same immutable list append as
+    /// `x = x + [item]`, including alias-safe fallback cloning.
+    fn try_emit_list_push_assign(
+        &mut self,
+        name: &str,
+        item: &SNode,
+        left_type: Option<&TypeExpr>,
+    ) -> Result<bool, CompileError> {
+        fn is_list(t: Option<&TypeExpr>) -> bool {
+            matches!(t, Some(TypeExpr::List(_)))
+                || matches!(t, Some(TypeExpr::Named(n)) if n == "list")
+        }
+        if !self.options.optimizations_enabled() || !is_list(left_type) {
+            return Ok(false);
+        }
+        if matches!(item.node, Node::Spread(_)) {
+            return Ok(false);
+        }
+        let Some(binding) = self.resolve_local_slot(name) else {
+            return Ok(false);
+        };
+        self.compile_node(item)?;
+        self.chunk.emit_u16(Op::BuildList, 1, self.line);
+        self.chunk
+            .emit_u16(Op::ConcatAssignLocal, binding.slot, self.line);
         Ok(true)
     }
 

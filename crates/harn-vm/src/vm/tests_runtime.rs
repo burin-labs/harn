@@ -2900,6 +2900,22 @@ pipeline t(task) {
 }
 
 #[test]
+fn list_push_assign_preserves_alias_immutability() {
+    // The compiler lowers `x = x.push(v)` through the same fused concat opcode
+    // as `x = x + [v]`. Rebinding `x` must still leave an existing alias `y`
+    // pointing at the original immutable list.
+    let source = r#"
+pipeline t(task) {
+  var x = []
+  x = x.push(1)
+  let y = x
+  x = x.push(2)
+  log("${x} ${y}")
+}"#;
+    assert_eq!(run_output(source), "[harn] [1, 2] [1]");
+}
+
+#[test]
 fn inplace_concat_preserves_binding_when_add_throws() {
     // The fused opcode only takes the slot in place for List/Dict values. A
     // scalar accumulator hit with an incompatible `+=` throws, and the binding
