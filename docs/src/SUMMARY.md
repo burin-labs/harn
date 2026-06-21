@@ -133,6 +133,7 @@
 - [Diff stdlib](./stdlib/diff.md)
 - [OAuth storage stdlib](./stdlib/oauth-storage.md)
 - [Prompt library stdlib](./stdlib/prompt-library.md)
+- [Identity stdlib](./stdlib/identity.md)
 - [Disclosure stdlib](./stdlib/disclosure.md)
 - [Human in the loop](./hitl.md)
 - [Trust graph](./trust-graph.md)

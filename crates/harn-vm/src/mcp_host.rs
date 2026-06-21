@@ -241,6 +241,8 @@ pub type AllowlistGuard = Arc<dyn Fn(&str, Option<&str>) -> AllowlistDecision + 
 #[derive(Clone, Debug, Serialize)]
 pub struct McpHostStatus {
     pub name: String,
+    pub transport: String,
+    pub url: Option<String>,
     pub active: bool,
     pub lazy: bool,
     pub ref_count: usize,
@@ -251,6 +253,10 @@ pub struct McpHostStatus {
     /// Number of cached response entries for this server (across all
     /// tools).
     pub cache_entries: usize,
+    /// Human-readable authenticated identity for connected OAuth-backed HTTP
+    /// servers when a vetted identity descriptor can render from the stored
+    /// token response.
+    pub display_identity: Option<String>,
 }
 
 /// Options accepted by [`spawn`]. Mirrors the dict surface in
@@ -635,12 +641,12 @@ pub async fn discover() -> Result<Vec<JsonValue>, VmError> {
 }
 
 /// Diagnostic snapshot across all hosted servers.
-pub fn status() -> Vec<McpHostStatus> {
+pub async fn status() -> Vec<McpHostStatus> {
     let registry: BTreeMap<String, mcp_registry::RegistryStatus> = mcp_registry::snapshot_status()
         .into_iter()
         .map(|s| (s.name.clone(), s))
         .collect();
-    with_inner(|inner| {
+    let mut statuses = with_inner(|inner| {
         let mut out = Vec::new();
         let now = Instant::now();
         for (name, reg) in &registry {
@@ -664,6 +670,8 @@ pub fn status() -> Vec<McpHostStatus> {
                 .sum();
             out.push(McpHostStatus {
                 name: name.clone(),
+                transport: reg.transport.clone(),
+                url: reg.url.clone(),
                 active: reg.active,
                 lazy: reg.lazy,
                 ref_count: reg.ref_count,
@@ -672,10 +680,21 @@ pub fn status() -> Vec<McpHostStatus> {
                 circuit,
                 ejected,
                 cache_entries,
+                display_identity: None,
             });
         }
         out
-    })
+    });
+    for status in &mut statuses {
+        if !status.active || status.transport != "http" {
+            continue;
+        }
+        let Some(url) = status.url.as_deref() else {
+            continue;
+        };
+        status.display_identity = crate::mcp_identity::display_identity_from_store(url, None).await;
+    }
+    statuses
 }
 
 fn current_allowlist() -> Option<AllowlistGuard> {

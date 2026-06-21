@@ -7,7 +7,9 @@
  *     no eager connect, so we don't need a live MCP server bundled).
  *   - Snapshot `harn.mcp.status()` and emit a receipt that proves the
  *     registry view, supervision counters, circuit-breaker state, and
- *     cache slot all line up with a freshly-registered lazy server.
+ *     cache slot all line up with a freshly-registered lazy server. Status
+ *     entries also include transport, URL, and display_identity fields so
+ *     script-side dashboards match CLI status output.
  *   - Issue a graceful `harn.mcp.stop` against one of the registrations
  *     and re-snapshot to show the deregistration path.
  *
@@ -38,7 +40,8 @@ pipeline default(_task) {
   }
   // 2. Snapshot the host's view of every registered server. Each entry
   //    carries supervision counters (restart_count, consecutive_failures,
-  //    circuit) plus the lazy/active/ref_count registry triple.
+  //    circuit), transport/URL/identity metadata, plus the lazy/active/ref_count
+  //    registry triple.
   let after_spawn = harn.mcp.status()
   __io_println("=== status after spawn ===")
   for entry in after_spawn {

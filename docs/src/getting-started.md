@@ -267,7 +267,10 @@ harn mcp status notion
 stores the token in the local OS keychain. `harn mcp redirect-uri` just prints
 the default callback URI (`http://127.0.0.1:9783/oauth/callback`) for servers
 that ask you to pre-register one; you usually do not need it for built-in
-presets such as Notion.
+presets such as Notion. `harn mcp status notion` shows the connection state and,
+when the server exposes identity metadata in its OAuth token response, the
+connected account/workspace. Scripts can read the same value from
+`harn.mcp.status()[i].display_identity`.
 
 Then declare the server in `harn.toml`:
 

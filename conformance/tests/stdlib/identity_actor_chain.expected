@@ -1,0 +1,22 @@
+true
+3
+true
+agent:reviewer
+current
+repo:read
+agent:planner
+repo:read
+user:owner
+agent:delegate
+agent:reviewer for user:owner via agent:planner
+agent:reviewer -> agent:planner -> user:owner
+agent/reviewer
+principal/root
+false
+user:solo
+false
+actor_chain.sub_type
+act.sub
+false
+actor_chain.scope_type
+$.scopes[0]

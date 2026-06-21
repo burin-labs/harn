@@ -272,6 +272,12 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         for entry in crate::mcp_registry::snapshot_status() {
             let mut dict = BTreeMap::new();
             dict.put_str("name", entry.name.as_str());
+            dict.put_str("transport", entry.transport.as_str());
+            if let Some(url) = entry.url {
+                dict.put_str("url", url.as_str());
+            } else {
+                dict.insert("url".to_string(), VmValue::Nil);
+            }
             dict.insert("lazy".to_string(), VmValue::Bool(entry.lazy));
             dict.insert("active".to_string(), VmValue::Bool(entry.active));
             dict.insert(
@@ -845,13 +851,19 @@ pub(crate) fn register_supervised_mcp_host_builtins(vm: &mut Vm) {
         )))
     });
 
-    vm.register_builtin("harn.mcp.status", |_args, _out| {
-        let entries = crate::mcp_host::status();
+    vm.register_async_builtin("harn.mcp.status", |_ctx, _args| async move {
+        let entries = crate::mcp_host::status().await;
         let list: Vec<VmValue> = entries
             .into_iter()
             .map(|s| {
                 let mut dict = BTreeMap::new();
                 dict.put_str("name", s.name);
+                dict.put_str("transport", s.transport);
+                if let Some(url) = s.url {
+                    dict.put_str("url", url);
+                } else {
+                    dict.insert("url".to_string(), VmValue::Nil);
+                }
                 dict.insert("active".to_string(), VmValue::Bool(s.active));
                 dict.insert("lazy".to_string(), VmValue::Bool(s.lazy));
                 dict.insert("ref_count".to_string(), VmValue::Int(s.ref_count as i64));
@@ -869,6 +881,11 @@ pub(crate) fn register_supervised_mcp_host_builtins(vm: &mut Vm) {
                     "cache_entries".to_string(),
                     VmValue::Int(s.cache_entries as i64),
                 );
+                if let Some(display_identity) = s.display_identity {
+                    dict.put_str("display_identity", display_identity);
+                } else {
+                    dict.insert("display_identity".to_string(), VmValue::Nil);
+                }
                 VmValue::dict(dict)
             })
             .collect();

@@ -2142,6 +2142,12 @@ an MCP server name, or uses the explicit URL when you pass `--url` or a raw
 - falls back to dynamic client registration when supported by the server
 - stores tokens in the local OS keychain and refreshes them automatically
 
+`harn mcp status` prints the configured server state. For OAuth-backed HTTP
+servers with a vetted identity descriptor and captured token-response metadata,
+human output includes the connected account/workspace and `--json` includes
+`display_identity`. Harn scripts see the same field through `harn.mcp.status()`,
+alongside the server `transport` and `url`.
+
 Relevant flags:
 
 | Flag | Description |

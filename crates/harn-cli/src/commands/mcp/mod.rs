@@ -370,14 +370,7 @@ async fn derive_server_status(server: &McpServerConfig) -> McpServerStatus {
 /// token-response payload. Returns `None` (never errors) so status reporting
 /// degrades gracefully.
 async fn server_display_identity(server: &McpServerConfig) -> Option<String> {
-    // Only descriptor-bearing servers pay for a token load.
-    harn_vm::mcp_identity::descriptor_for(&server.url)?;
-    let discovery = mcp_oauth::discover(&server.url).await.ok()?;
-    let resource = canonical_server_resource(&server.url).ok()?;
-    let token = mcp_oauth::load_token(&resource, &discovery.authorization_server_issuer, None)
-        .await
-        .ok()??;
-    harn_vm::mcp_identity::display_identity(&server.url, &token)
+    harn_vm::mcp_identity::display_identity_from_store(&server.url, None).await
 }
 
 fn print_focused_status_report(
