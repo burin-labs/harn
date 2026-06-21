@@ -32,6 +32,7 @@ const HOST_SESSION_RECORD_USAGE: &str = "__host_agent_session_record_usage";
 const HOST_SESSION_DRAIN_FEEDBACK: &str = "__host_agent_session_drain_feedback";
 const HOST_SESSION_DRAIN_BRIDGE_INJECTIONS: &str = "__host_agent_session_drain_bridge_injections";
 const HOST_SESSION_PUSH_BRIDGE_INJECTION: &str = "__host_agent_session_push_bridge_injection";
+const HOST_SESSION_PUSH_USER_MESSAGE: &str = "__host_agent_session_push_user_message";
 const HOST_SESSION_PENDING_INJECTIONS: &str = "__host_agent_session_pending_injections";
 const HOST_SESSION_REVOKE_REMINDER: &str = "__host_agent_session_revoke_reminder";
 const HOST_SESSION_TOTALS: &str = "__host_agent_session_totals";
@@ -2910,6 +2911,68 @@ async fn host_agent_session_push_bridge_injection(
     Ok(VmValue::String(arcstr::ArcStr::from(reminder_id)))
 }
 
+/// Push a user-role message onto the session's host bridge queue. The
+/// in-VM equivalent of the ACP `session/inject` JSON-RPC method (the
+/// user-message sibling of `__host_agent_session_push_bridge_injection`,
+/// which is the in-VM equivalent of `session/remind`). Exposed so a Harn
+/// script driving the loop (custom CLI host, conformance test, etc.) can
+/// enqueue a steer mid-turn without going through ACP.
+///
+/// Expects `options.content` (string, required, non-empty) and an
+/// optional `options.mode` (string, default `"finish_step"`). The mode
+/// follows `QueuedUserMessageMode::from_str`: `"finish_step"` /
+/// `"after_current_operation"` / `"steer"` deliver at the next loop
+/// checkpoint (tool boundary / iteration boundary); `"interrupt_immediate"`
+/// / `"interrupt"` preempt the next tool batch; `"audit_only"` / `"queue"`
+/// land in the transcript at `loop_exit` only. Returns the message id so
+/// callers can correlate with later events / revoke the message.
+#[harn_builtin(
+    sig = "__host_agent_session_push_user_message(session_id: string, options: dict) -> string",
+    kind = "async",
+    category = "agent.host",
+    runtime_only = true
+)]
+async fn host_agent_session_push_user_message(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let session_id = args.first().map(|v| v.display()).unwrap_or_default();
+    if session_id.trim().is_empty() {
+        return Err(VmError::Runtime(format!(
+            "{HOST_SESSION_PUSH_USER_MESSAGE}: session_id must be a non-empty string"
+        )));
+    }
+    let options = args.get(1).cloned().unwrap_or(VmValue::Nil);
+    let params = vm_to_json(&options);
+    if !params.is_object() {
+        return Err(VmError::Runtime(format!(
+            "{HOST_SESSION_PUSH_USER_MESSAGE}: options must be a dict"
+        )));
+    }
+    let content = params
+        .get("content")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default()
+        .to_string();
+    if content.trim().is_empty() {
+        return Err(VmError::Runtime(format!(
+            "{HOST_SESSION_PUSH_USER_MESSAGE}: options.content must be a non-empty string"
+        )));
+    }
+    let mode = params
+        .get("mode")
+        .and_then(|value| value.as_str())
+        .unwrap_or("finish_step")
+        .to_string();
+    let Some(bridge) = host_bridge_for_session(&session_id, HOST_SESSION_PUSH_USER_MESSAGE) else {
+        return Err(VmError::Runtime(format!(
+            "{HOST_SESSION_PUSH_USER_MESSAGE}: no host bridge attached to session `{session_id}`"
+        )));
+    };
+    let message_id = bridge.push_queued_user_message(content, &mode).await;
+    Ok(VmValue::String(arcstr::ArcStr::from(message_id)))
+}
+
 /// Return a FIFO snapshot of pending bridge user-message and reminder injections.
 #[harn_builtin(
     sig = "__host_agent_session_pending_injections(session_id: string) -> list",
@@ -3329,6 +3392,7 @@ const HOST_SESSION_BUILTINS: &[&VmBuiltinDef] = &[
     &HOST_AUTONOMY_BUDGET_CHECK_DEF,
     &HOST_AGENT_SESSION_DRAIN_BRIDGE_INJECTIONS_DEF,
     &HOST_AGENT_SESSION_PUSH_BRIDGE_INJECTION_DEF,
+    &HOST_AGENT_SESSION_PUSH_USER_MESSAGE_DEF,
     &HOST_AGENT_SESSION_PENDING_INJECTIONS_DEF,
     &HOST_AGENT_SESSION_REVOKE_REMINDER_DEF,
     &HOST_AGENT_DAEMON_WAIT_DEF,

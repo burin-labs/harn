@@ -18,6 +18,22 @@
 //! transcript records the reminder, the loop's LLM call count is
 //! unchanged versus a control run, and the `loop_exit` checkpoint
 //! reports the delivery.
+//!
+//! Steer coverage (rfd/session-inject) — `mode: "steer"` (an alias for
+//! `finish_step`) queues a USER-role message via the in-VM
+//! `agent_session_push_user_message` primitive (the loop-driver
+//! equivalent of the ACP `session/inject` method). Unlike `audit_only`,
+//! the steer message is delivered MID-TURN at the next loop checkpoint
+//! (a tool boundary / iteration boundary), NOT at `loop_exit`, so the
+//! model sees it before its next call. The `steer_*` tests below prove
+//! three claims: (a) mid-turn pickup at a tool boundary — a
+//! non-`loop_exit` checkpoint reports `delivered >= 1` and NO `loop_exit`
+//! checkpoint delivers it; (b) chronological order — the steer user
+//! message is spliced AFTER the tool_result and BEFORE the final
+//! assistant message in transcript message order; (c) eval-safety — a
+//! control variant that does not push the steer produces an identical
+//! LLM-call count and tool_result count and no extra user message and no
+//! mid-turn delivery.
 
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
@@ -302,5 +318,234 @@ fn audit_only_control_run_records_no_audit_reminder() {
     assert_eq!(
         lines[3], "0",
         "control run should report zero loop_exit deliveries; lines: {lines:?}"
+    );
+}
+
+/// Harn pipeline that exercises the steer path (rfd/session-inject). On
+/// iteration 0 the stub LLM caller — BEFORE returning a `would_force_push`
+/// tool call — queues a USER-role steer via the in-VM
+/// `agent_session_push_user_message` primitive with `mode: "steer"` (the
+/// loop-driver equivalent of the ACP `session/inject` method). On
+/// iteration 1 the model returns `##DONE##`. The `mode: "steer"` string is
+/// passed verbatim through the builtin, which maps `steer` ->
+/// `finish_step` (delivered at the next loop checkpoint, i.e. the tool
+/// boundary), NOT `loop_exit`.
+///
+/// The script logs seven fields, identical between the steer and control
+/// variants so the no-inject control is directly comparable:
+///
+///   0. final status
+///   1. LLM call count observed by the caller stub
+///   2. tool_result message count
+///   3. mid-turn deliveries: count of `loop_checkpoint` events whose
+///      `kind` is NOT `loop_exit` and whose `delivered` is `>= 1`
+///   4. loop_exit deliveries: count of `loop_checkpoint` events whose
+///      `kind` IS `loop_exit` and whose `delivered` is `>= 1`
+///   5. count of `user`-role transcript messages whose content equals the
+///      steer text
+///   6. chronological-order verdict — `"ok"` iff the steer user message
+///      sits strictly after the tool_result and strictly before the final
+///      assistant message in transcript message order; otherwise a
+///      diagnostic string `"<toolIdx>/<steerIdx>/<asstIdx>"`.
+fn steer_pipeline(session_id: &str, push_steer_mid_turn: bool) -> String {
+    let push_line = if push_steer_mid_turn {
+        format!(
+            r#"      agent_session_push_user_message(
+        "{session_id}",
+        {{content: "actually use auth_v2.go", mode: "steer"}},
+      )"#
+        )
+    } else {
+        String::new()
+    };
+    format!(
+        r#"
+import {{ agent_session_push_user_message }} from "std/agent/state"
+
+pipeline main(task) {{
+  clear_tool_hooks()
+  let registry = tool_registry()
+  let tools = tool_define(
+    registry,
+    "would_force_push",
+    "Test stand-in for an irreversible side-effect tool.",
+    {{parameters: {{}}, handler: {{ _args -> return "would have force-pushed" }}}},
+  )
+  let iteration_state = shared_cell({{scope: "task_group", key: "steer-iter-{session_id}", initial: 0}})
+  let call_counter = shared_cell({{scope: "task_group", key: "steer-calls-{session_id}", initial: 0}})
+  let mock_llm = {{ _call ->
+    let csnap = shared_snapshot(call_counter)
+    shared_cas(call_counter, csnap, csnap.value + 1)
+    let snap = shared_snapshot(iteration_state)
+    let n = snap.value
+    shared_cas(iteration_state, snap, n + 1)
+    if n == 0 {{
+{push_line}
+      return {{
+        ok: true,
+        value: {{
+          text: "",
+          tool_calls: [{{id: "call_1", name: "would_force_push", arguments: {{}}}}],
+          provider: "mock",
+          model: "mock",
+        }},
+      }}
+    }}
+    return {{
+      ok: true,
+      value: {{text: "acknowledged ##DONE##", tool_calls: [], provider: "mock", model: "mock"}},
+    }}
+  }}
+  let result = agent_loop(
+    "do the push",
+    nil,
+    {{
+      provider: "mock",
+      tools: tools,
+      tool_format: "native",
+      max_iterations: 4,
+      loop_until_done: true,
+      session_id: "{session_id}",
+      llm_caller: mock_llm,
+    }},
+  )
+  log(result.status)
+  log(shared_get(call_counter))
+  let stats = transcript_stats(result.transcript)
+  log(stats.tool_result_message_count)
+
+  let checkpoints = transcript_events_by_kind(result.transcript, "loop_checkpoint")
+  var mid_turn_deliveries = 0
+  var loop_exit_deliveries = 0
+  for event in checkpoints {{
+    let delivered = event?.metadata?.delivered ?? 0
+    if delivered >= 1 {{
+      if event?.metadata?.kind == "loop_exit" {{
+        loop_exit_deliveries = loop_exit_deliveries + 1
+      }} else {{
+        mid_turn_deliveries = mid_turn_deliveries + 1
+      }}
+    }}
+  }}
+  log(mid_turn_deliveries)
+  log(loop_exit_deliveries)
+
+  // Walk the transcript messages IN ORDER to prove chronological splice:
+  // the steer user message must land after the tool_result and before the
+  // final assistant message.
+  let messages = transcript_messages(result.transcript)
+  var steer_user_count = 0
+  var tool_result_idx = -1
+  var steer_idx = -1
+  var last_assistant_idx = -1
+  var idx = 0
+  for message in messages {{
+    let role = message?.role ?? ""
+    let content = message?.content ?? ""
+    if (role == "tool_result" || role == "tool") && tool_result_idx == -1 {{
+      tool_result_idx = idx
+    }}
+    if role == "user" && content == "actually use auth_v2.go" {{
+      steer_user_count = steer_user_count + 1
+      if steer_idx == -1 {{
+        steer_idx = idx
+      }}
+    }}
+    if role == "assistant" {{
+      last_assistant_idx = idx
+    }}
+    idx = idx + 1
+  }}
+  log(steer_user_count)
+  if tool_result_idx >= 0 && steer_idx > tool_result_idx && last_assistant_idx > steer_idx {{
+    log("ok")
+  }} else {{
+    log("${{tool_result_idx}}/${{steer_idx}}/${{last_assistant_idx}}")
+  }}
+}}
+"#
+    )
+}
+
+#[test]
+fn steer_user_message_delivered_mid_turn_at_tool_boundary() {
+    let raw = run_with_bridge(&steer_pipeline("steer-mid-turn", true)).expect("script must run");
+    let lines = out_lines(&raw);
+    // Status: done (model returned `##DONE##` on the second iteration).
+    assert_eq!(lines[0], "done", "lines: {lines:?}");
+    // Two LLM calls: iteration 0 emits the tool call (after queuing the
+    // steer), iteration 1 sees the spliced steer + tool_result and
+    // returns ##DONE##.
+    assert_eq!(lines[1], "2", "expected two LLM calls; lines: {lines:?}");
+    // The tool dispatched once.
+    assert_eq!(
+        lines[2], "1",
+        "expected one tool dispatch; lines: {lines:?}"
+    );
+    // (a) MID-TURN PICKUP AT TOOL BOUNDARY: a non-`loop_exit` checkpoint
+    // (post_tool_dispatch / iteration_start of iteration 1) reported the
+    // steer delivery during the running turn.
+    assert!(
+        lines[3].parse::<i64>().unwrap_or(0) >= 1,
+        "expected >= 1 mid-turn delivery at a tool boundary; lines: {lines:?}"
+    );
+    // NO `loop_exit` checkpoint delivered the steer — this distinguishes
+    // steer (finish_step) from audit_only/queue.
+    assert_eq!(
+        lines[4], "0",
+        "steer must NOT be delivered at loop_exit; lines: {lines:?}"
+    );
+    // The steer user message landed in the transcript exactly once.
+    assert_eq!(
+        lines[5], "1",
+        "expected exactly one steer user message in the transcript; lines: {lines:?}"
+    );
+    // (b) CHRONOLOGICAL ORDER: tool_result_idx < steer_idx <
+    // last_assistant_idx, proven by walking transcript_messages in order.
+    assert_eq!(
+        lines[6], "ok",
+        "steer user message must sit chronologically after the tool_result \
+         and before the final assistant message (verdict is \
+         tool_result_idx/steer_idx/last_assistant_idx on failure); lines: {lines:?}"
+    );
+}
+
+#[test]
+fn steer_control_run_without_inject_is_eval_safe() {
+    let raw = run_with_bridge(&steer_pipeline("steer-control", false)).expect("script must run");
+    let lines = out_lines(&raw);
+    // (c) NO-INJECT PATH UNCHANGED: same status, same LLM-call count, and
+    // same tool_result count as the steer variant — the no-inject path is
+    // byte-identical from the loop's perspective (eval-safe).
+    assert_eq!(lines[0], "done", "lines: {lines:?}");
+    assert_eq!(
+        lines[1], "2",
+        "control must make the same two LLM calls as the steer variant; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[2], "1",
+        "control must dispatch the tool exactly once, same as the steer variant; lines: {lines:?}"
+    );
+    // No mid-turn deliveries and no loop_exit deliveries — nothing was
+    // queued.
+    assert_eq!(
+        lines[3], "0",
+        "control run should report zero mid-turn deliveries; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[4], "0",
+        "control run should report zero loop_exit deliveries; lines: {lines:?}"
+    );
+    // No steer user message in the transcript.
+    assert_eq!(
+        lines[5], "0",
+        "control run should not record a steer user message; lines: {lines:?}"
+    );
+    // No steer message exists, so the ordering verdict is the diagnostic
+    // form (steer_idx stays -1) — confirming the control differs from the
+    // steer variant only by the absence of the steer message.
+    assert_ne!(
+        lines[6], "ok",
+        "control run has no steer message to order; lines: {lines:?}"
     );
 }

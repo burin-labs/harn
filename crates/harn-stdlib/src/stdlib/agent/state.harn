@@ -164,6 +164,39 @@ pub fn agent_session_push_bridge_injection(session_id, options) {
 }
 
 /**
+ * agent_session_push_user_message.
+ *
+ * Queue a user-role message onto the session's host bridge. The in-VM
+ * equivalent of the ACP `session/inject` method (the user-message
+ * sibling of `agent_session_push_bridge_injection`, which mirrors
+ * `session/remind`). The message is spliced into the transcript
+ * CHRONOLOGICALLY — after the in-flight tool_result and before the next
+ * model call — at the loop checkpoint selected by `options.mode`.
+ *
+ * `options` is `{content, mode?}`. `content` is required and non-empty.
+ * `mode` defaults to `"finish_step"`:
+ *
+ *   - `"finish_step"` / `"steer"` — STEER: delivered at the next loop
+ *     checkpoint (tool boundary / iteration boundary). The model sees
+ *     the message before its next call, mid-turn. This is the default
+ *     and the canonical steer path.
+ *   - `"interrupt_immediate"` — preempt the next pending tool batch at
+ *     the `pre_tool_dispatch` checkpoint.
+ *   - `"audit_only"` / `"queue"` — drained only at `loop_exit`; lands in
+ *     the transcript audit but is never rendered into a model prompt.
+ *
+ * Returns the message id so callers can correlate later events.
+ *
+ * @effects: [host]
+ * @errors: [runtime]
+ * @api_stability: experimental
+ * @example: agent_session_push_user_message(session_id, {content: "use auth_v2.go", mode: "steer"})
+ */
+pub fn agent_session_push_user_message(session_id, options) {
+  return __host_agent_session_push_user_message(session_id, options)
+}
+
+/**
  * agent_session_pending_injections.
  *
  * Return a FIFO snapshot of queued bridge injections for `session_id`.
