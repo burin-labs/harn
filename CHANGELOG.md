@@ -8,6 +8,50 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.131
+
+### Added
+
+Added an `embed` hostlib capability: a cross-platform, fully-offline
+text-similarity / embedding core exposing `hostlib_embed_similarity`,
+`hostlib_embed_top_k`, `hostlib_embed_vector`, and `hostlib_embed_info`.
+The default backend is an always-available, zero-asset lexical hashing
+embedder (deterministic across macOS/Linux/Windows, microsecond latency); a
+Model2Vec/"potion"-style static token-pooled backend is selected
+automatically when a vendored asset is resolvable (sandbox/settings-aware,
+no network), degrading cleanly to lexical when absent. A higher-accuracy
+candle/ONNX transformer tier can slot in behind a future Cargo feature
+without changing the surface.
+
+- `agent_session_push_user_message(session_id, options)` (Harn stdlib
+  `std/agent/state`): the in-VM, loop-driver equivalent of the ACP
+  `session/inject` method. Pushes a user-role message onto the running
+  session; `options.mode: "steer"` delivers it at the next tool/iteration
+  break-point (after the in-flight tool result, before the next model call),
+  `options.mode: "queue"` defers it to loop exit. Lets in-process hosts (e.g.
+  the Burin TUI) steer a turn without the ACP wire. Refs: rfd/session-inject.
+
+### Fixed
+
+A structured/`llm_call`-with-schema retry that failed because the response was
+truncated by `max_tokens` mid-JSON now doubles the output-token budget (capped
+at 32,768) before the retry instead of replaying the same under-budget call.
+Reasoning models (gpt-oss/Harmony, DeepSeek-R, o-series) bill their analysis
+channel against the same output budget while it stays invisible in the parsed
+text, so a budget that comfortably fits a non-reasoning model's JSON gets
+consumed entirely by reasoning — truncating the visible JSON to empty and, once
+schema-retry slots are exhausted, returning a DEAD `length_truncation` envelope
+(an empty judge verdict that silently falls through to the deterministic
+grader). The escalation is provider-agnostic, keyed off the existing
+`is_length_truncation` truncation marker.
+
+Fixed SSE and websocket receive limits so timeout, EOF, and open-control polls
+no longer consume the configured event/message budget.
+
+- **VM compiler list append optimization.** `x = x.push(item)` on local list
+  accumulators now uses the same fused append bytecode as `x = x + [item]`,
+  avoiding accidental quadratic cloning while preserving immutable aliasing.
+
 ## v0.8.130
 
 ### Changed
