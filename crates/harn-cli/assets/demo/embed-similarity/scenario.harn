@@ -1,0 +1,47 @@
+/**
+ * embed-similarity demo: drive the hostlib embedding surface that Burin can
+ * share for push-context retrieval and symbol relevance ranking.
+ *
+ * The scenario stays fully offline. The default lexical-hash backend needs no
+ * model asset, no network, and no provider config; it still gives the rest of
+ * the stack one cross-platform `similarity` / `top_k` contract to call.
+ */
+pipeline default(_task) {
+  let info = hostlib_embed_info({})
+  let query = "authentication token validation"
+  let corpus = [
+    "markdown table of contents renderer",
+    "validate the auth token on each request",
+    "JSON parser for config files",
+    "auth token refresh and validation flow",
+    "SwiftUI sidebar selection state",
+  ]
+  let ranked = hostlib_embed_top_k({query: query, corpus: corpus, k: 3, min_score: 0.0})
+  let related = hostlib_embed_similarity({a: query, b: corpus[1]})
+  let unrelated = hostlib_embed_similarity({a: query, b: corpus[0]})
+  let vector = hostlib_embed_vector({text: "SymbolRelevance token validator"})
+  var top_indices = []
+  var top_texts = []
+  for result in ranked.results {
+    top_indices = top_indices + [result.index]
+    top_texts = top_texts + [result.text]
+  }
+  let receipt = {
+    receipt_kind: "embed_similarity_receipt",
+    backend: info.backend,
+    dim: info.dim,
+    vector_dim: vector.dim,
+    top_k_count: len(ranked.results),
+    top_indices: top_indices,
+    top_texts: top_texts,
+    related_beats_unrelated: related.relatedness > unrelated.relatedness,
+    relatedness: related.relatedness,
+    unrelatedness: unrelated.relatedness,
+  }
+  __io_println("=== embed-similarity demo ===")
+  __io_println("backend=" + to_string(info.backend) + " dim=" + to_string(info.dim))
+  __io_println("query=" + query)
+  __io_println("top_k=" + json_stringify(top_texts))
+  __io_println(json_stringify(receipt))
+  return receipt
+}

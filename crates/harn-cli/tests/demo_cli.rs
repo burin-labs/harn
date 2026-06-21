@@ -201,6 +201,47 @@ fn stdlib_toolkit_demo_runs_end_to_end_against_bundled_tape() {
 }
 
 #[test]
+fn embed_similarity_demo_runs_end_to_end_against_bundled_tape() {
+    let outcome = run_demo_scenario("embed-similarity");
+    assert_eq!(
+        outcome.exit_code, 0,
+        "embed-similarity demo failed (exit {}):\nstderr:\n{}\nstdout:\n{}",
+        outcome.exit_code, outcome.stderr, outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("embed_similarity_receipt"),
+        "embed-similarity demo should emit the receipt envelope:\n{}",
+        outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("\"backend\":\"lexical-hash\""),
+        "asset-free demo path should use the lexical backend:\n{}",
+        outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("\"dim\":256") && outcome.stdout.contains("\"vector_dim\":256"),
+        "info and vector dimensions should agree on the default backend:\n{}",
+        outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("\"related_beats_unrelated\":true"),
+        "related text must outrank unrelated text:\n{}",
+        outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("\"top_k_count\":3")
+            && outcome
+                .stdout
+                .contains("validate the auth token on each request")
+            && outcome
+                .stdout
+                .contains("auth token refresh and validation flow"),
+        "top-k should return the two auth-token corpus entries:\n{}",
+        outcome.stdout
+    );
+}
+
+#[test]
 fn compaction_policy_demo_runs_end_to_end_against_bundled_tape() {
     let outcome = run_demo_scenario("compaction-policy");
     assert_eq!(
@@ -496,6 +537,7 @@ fn every_scenario_listed_has_a_passing_smoke_run() {
         "provider-race",
         "routing-policy",
         "stdlib-toolkit",
+        "embed-similarity",
         "compaction-policy",
         "edit-rename-symbol",
         "edit-language-coverage",
