@@ -137,6 +137,70 @@ fn rebuild_then_query_returns_hits_for_indexed_substring() {
 }
 
 #[test]
+fn rebuild_prunes_managed_runtime_artifact_roots() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    fs::create_dir_all(root.join("src")).unwrap();
+    fs::write(
+        root.join("src/main.rs"),
+        "pub fn live_workspace_symbol() -> &'static str { \"ok\" }\n",
+    )
+    .unwrap();
+
+    for (artifact_dir, file_name) in [
+        (".burin-evals/run", "transcript.jsonl"),
+        (".burin-live-evals/run", "live.jsonl"),
+        (".harn/state", "session.json"),
+        (".harn-runs/session", "trace.harn"),
+    ] {
+        let artifact_dir = root.join(artifact_dir);
+        fs::create_dir_all(&artifact_dir).unwrap();
+        fs::write(
+            artifact_dir.join(file_name),
+            "pub fn artifact_only_symbol() -> &'static str { \"noise\" }\n",
+        )
+        .unwrap();
+    }
+
+    let (registry, _cap) = build_registry();
+    let rebuild = extract_dict(&call(
+        &registry,
+        "hostlib_code_index_rebuild",
+        dict(&[(
+            "root",
+            VmValue::String(arcstr::ArcStr::from(root.to_string_lossy().to_string())),
+        )]),
+    ));
+    assert_eq!(extract_int(rebuild.get("files_indexed").unwrap()), 1);
+
+    let stats = extract_dict(&call(&registry, "hostlib_code_index_stats", dict(&[])));
+    assert_eq!(extract_int(stats.get("indexed_files").unwrap()), 1);
+
+    let noise = extract_dict(&call(
+        &registry,
+        "hostlib_code_index_query",
+        dict(&[(
+            "needle",
+            VmValue::String(arcstr::ArcStr::from("artifact_only_symbol")),
+        )]),
+    ));
+    assert!(extract_list(noise.get("results").unwrap()).is_empty());
+
+    let live = extract_dict(&call(
+        &registry,
+        "hostlib_code_index_query",
+        dict(&[(
+            "needle",
+            VmValue::String(arcstr::ArcStr::from("live_workspace_symbol")),
+        )]),
+    ));
+    let live_results = extract_list(live.get("results").unwrap());
+    assert_eq!(live_results.len(), 1);
+    let hit = extract_dict(&live_results[0]);
+    assert_eq!(extract_str(hit.get("path").unwrap()), "src/main.rs");
+}
+
+#[test]
 fn query_respects_case_sensitive_flag() {
     let dir = write_workspace();
     let (registry, _) = build_registry();
