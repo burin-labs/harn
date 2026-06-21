@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/embed/info.response.json",
+  "title": "embed.info response",
+  "description": "Active backend identifier and output dimensionality.",
+  "type": "object",
+  "properties": {
+    "backend": { "type": "string" },
+    "dim": { "type": "integer", "minimum": 1 }
+  },
+  "required": ["backend", "dim"],
+  "additionalProperties": false
+}

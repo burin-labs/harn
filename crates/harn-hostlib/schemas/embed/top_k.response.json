@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/embed/top_k.response.json",
+  "title": "embed.top_k response",
+  "description": "Top-k corpus matches, each with its original index, text, and scores.",
+  "type": "object",
+  "properties": {
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "index": { "type": "integer", "minimum": 0 },
+          "text": { "type": "string" },
+          "score": { "type": "number", "minimum": -1, "maximum": 1 },
+          "relatedness": { "type": "number", "minimum": 0, "maximum": 1 }
+        },
+        "required": ["index", "text", "score", "relatedness"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["results"],
+  "additionalProperties": false
+}

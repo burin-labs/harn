@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/embed/top_k.request.json",
+  "title": "embed.top_k request",
+  "description": "Rank a corpus of strings against a query by cosine similarity, highest first.",
+  "type": "object",
+  "properties": {
+    "query": { "type": "string" },
+    "corpus": { "type": "array", "items": { "type": "string" } },
+    "k": { "type": "integer", "minimum": 0, "default": 10 },
+    "min_score": {
+      "type": "number",
+      "description": "Drop results whose cosine score is below this threshold."
+    }
+  },
+  "required": ["query", "corpus"],
+  "additionalProperties": false
+}

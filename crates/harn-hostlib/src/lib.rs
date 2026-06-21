@@ -31,6 +31,7 @@
 pub mod ast;
 #[cfg(feature = "ast")]
 pub mod code_index;
+pub mod embed;
 pub mod error;
 pub mod fs;
 pub mod fs_snapshot;
@@ -70,6 +71,7 @@ pub fn install_default(vm: &mut harn_vm::Vm) -> HostlibRegistry {
     }
     registry = registry
         .with(scanner::ScannerCapability)
+        .with(embed::EmbedCapability::default())
         .with(fs::FsCapability)
         .with(fs_snapshot::FsSnapshotCapability)
         .with(fs_watch::FsWatchCapability)

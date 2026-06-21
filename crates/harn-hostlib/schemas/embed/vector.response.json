@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/embed/vector.response.json",
+  "title": "embed.vector response",
+  "description": "The embedding vector and its dimensionality.",
+  "type": "object",
+  "properties": {
+    "dim": { "type": "integer", "minimum": 1 },
+    "vector": { "type": "array", "items": { "type": "number" } }
+  },
+  "required": ["dim", "vector"],
+  "additionalProperties": false
+}
