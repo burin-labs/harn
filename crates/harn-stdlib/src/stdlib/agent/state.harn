@@ -188,6 +188,7 @@ pub fn agent_session_push_bridge_injection(session_id, options) {
  * Returns the message id so callers can correlate later events.
  *
  * @effects: [host]
+ * @errors: [runtime]
  * @api_stability: experimental
  * @example: agent_session_push_user_message(session_id, {content: "use auth_v2.go", mode: "steer"})
  */
