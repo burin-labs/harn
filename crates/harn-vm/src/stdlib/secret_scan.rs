@@ -359,6 +359,31 @@ config = { client_secret: "QWxhZGRpbjpPcGVuU2VzYW1lQWNjZXNzVG9rZW4=" }
         assert!(detectors.contains("jwt-token"));
     }
 
+    #[test]
+    fn scan_content_covers_ai_provider_token_shapes() {
+        let huggingface = format!("hf_{}", "a".repeat(24));
+        let cerebras = format!("csk-{}", "b".repeat(48));
+        let together = format!("tgp_v1_{}", "c".repeat(32));
+        let google = format!("AIza{}", "D".repeat(35));
+        let content = format!("{huggingface}\n{cerebras}\n{together}\n{google}\n");
+
+        let findings = scan_content(&content);
+        let detectors = findings
+            .iter()
+            .map(|finding| (finding.detector.as_str(), finding.source.as_str()))
+            .collect::<BTreeSet<_>>();
+
+        assert!(detectors.contains(&("huggingface-token", "huggingface-docs")));
+        assert!(detectors.contains(&("cerebras-api-key", "cerebras-docs")));
+        assert!(detectors.contains(&("together-api-key", "together-bug-report")));
+        assert!(detectors.contains(&("google-api-key", "microsoft-purview")));
+        for secret in [&huggingface, &cerebras, &together, &google] {
+            assert!(!findings
+                .iter()
+                .any(|finding| finding.redacted.contains(secret)));
+        }
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn append_secret_scan_audit_writes_redacted_event() {
         let log = MemoryEventLog::new(32);
