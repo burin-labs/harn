@@ -999,7 +999,6 @@ pub(super) async fn vm_websocket_receive(
                 "websocket_receive: socket '{socket_id}' exceeded max_messages"
             ))));
         }
-        handle.received += 1;
         let max_message_bytes = handle.max_message_bytes;
         let kind = match &handle.kind {
             WebSocketHandleKind::Real(socket) => WebSocketHandleKind::Real(socket.clone()),
@@ -1032,6 +1031,7 @@ pub(super) async fn vm_websocket_receive(
             if message.message_type == "close" {
                 socket.closed = true;
             }
+            record_websocket_message_received(socket_id)?;
             Ok(ws_event_value(message))
         }
         WebSocketHandleKind::Real(socket) => {
@@ -1061,6 +1061,7 @@ pub(super) async fn vm_websocket_receive(
                 }
                 _ => {}
             }
+            record_websocket_message_received(socket_id)?;
             Ok(real_ws_event_value(message))
         }
         WebSocketHandleKind::Server(socket) => {
@@ -1092,6 +1093,7 @@ pub(super) async fn vm_websocket_receive(
                         let mut socket = socket.lock().await;
                         socket.closed = true;
                     }
+                    record_websocket_message_received(socket_id)?;
                     return Ok(ws_event_value(message));
                 }
                 if timeout_ms == 0 || started.elapsed() >= Duration::from_millis(timeout_ms) {
@@ -1101,6 +1103,24 @@ pub(super) async fn vm_websocket_receive(
             }
         }
     }
+}
+
+fn record_websocket_message_received(socket_id: &str) -> Result<(), VmError> {
+    WEBSOCKET_HANDLES.with(|handles| {
+        let mut handles = handles.borrow_mut();
+        let Some(handle) = handles.get_mut(socket_id) else {
+            return Err(vm_error(format!(
+                "websocket_receive: unknown socket '{socket_id}'"
+            )));
+        };
+        if handle.received >= handle.max_messages {
+            return Err(vm_error(format!(
+                "websocket_receive: socket '{socket_id}' exceeded max_messages"
+            )));
+        }
+        handle.received += 1;
+        Ok(())
+    })
 }
 
 pub(super) async fn vm_websocket_close(socket_id: &str) -> Result<VmValue, VmError> {
@@ -1235,4 +1255,64 @@ pub(super) fn register_websocket_builtins(vm: &mut Vm) {
         let server_id = handle_from_value(handle, "websocket_server_close")?;
         vm_websocket_server_close(&server_id)
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn field(value: &VmValue, key: &str) -> String {
+        value
+            .as_dict()
+            .and_then(|dict| dict.get(key))
+            .map(VmValue::display)
+            .unwrap_or_default()
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn websocket_receive_timeout_does_not_count_toward_max_messages() {
+        super::super::reset_streaming_state();
+        let url = "ws://mock.example.test/socket";
+        WEBSOCKET_MOCKS.with(|mocks| {
+            mocks.borrow_mut().push(WebSocketMock {
+                url_pattern: url.to_string(),
+                messages: Vec::new(),
+                echo: true,
+            });
+        });
+
+        let socket = vm_websocket_connect(
+            url,
+            &crate::value::DictMap::from_iter([("max_messages".to_string(), VmValue::Int(1))]),
+        )
+        .await
+        .expect("mock websocket");
+        let socket_id = handle_from_value(&socket, "test").expect("socket id");
+
+        for _ in 0..2 {
+            let event = vm_websocket_receive(&socket_id, 0)
+                .await
+                .expect("timeout event");
+            assert_eq!(field(&event, "type"), "timeout");
+        }
+
+        vm_websocket_send(
+            &socket_id,
+            VmValue::String(arcstr::ArcStr::from("hello")),
+            &crate::value::DictMap::new(),
+        )
+        .await
+        .expect("echo message");
+        let event = vm_websocket_receive(&socket_id, 0)
+            .await
+            .expect("first message");
+        assert_eq!(field(&event, "type"), "text");
+        assert_eq!(field(&event, "data"), "hello");
+
+        let err = vm_websocket_receive(&socket_id, 0)
+            .await
+            .expect_err("one message should consume max_messages=1");
+        assert!(err.to_string().contains("exceeded max_messages"), "{err}");
+        super::super::reset_streaming_state();
+    }
 }
