@@ -11,6 +11,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use serde_json::{Map as JsonMap, Value as JsonValue};
 use sha2::{Digest, Sha256};
 
@@ -836,7 +837,7 @@ pub fn command_risk_scan_json(ctx: &JsonValue, policy: Option<&CommandPolicy>) -
     let mut labels = BTreeSet::new();
     let mut rationale = Vec::new();
 
-    if has_destructive_tokens(&lower) {
+    if has_destructive_tokens(&command_text) {
         labels.insert("destructive".to_string());
         rationale.push("destructive shell token or command detected");
     }
@@ -950,7 +951,8 @@ fn risk_labels_from_scan(scan: &JsonValue) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn has_destructive_tokens(lower: &str) -> bool {
+fn has_destructive_tokens(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
     lower.contains("rm -rf /")
         || lower.contains("rm -fr /")
         || lower.contains("mkfs")
@@ -958,7 +960,7 @@ fn has_destructive_tokens(lower: &str) -> bool {
         || lower.contains(":(){")
         || lower.contains("chmod -r 777 /")
         || lower.contains("chown -r ")
-        || has_cwd_wipe_tokens(lower)
+        || has_cwd_wipe_tokens(text)
 }
 
 /// Detects recursive deletes that destroy the current workspace itself —
@@ -974,11 +976,10 @@ fn has_destructive_tokens(lower: &str) -> bool {
 /// targets that resolve to the whole working tree: `.`, `./`, `./*`, `*`, and
 /// bare `find .` deletes. Flag order (`-rf` / `-fr` / `-r -f`), an optional
 /// `--` end-of-options marker, and surrounding whitespace are all normalized.
-fn has_cwd_wipe_tokens(lower: &str) -> bool {
+fn has_cwd_wipe_tokens(text: &str) -> bool {
     // Split on shell statement separators so a benign prefix
     // (`cd foo && rm -rf .`) does not hide a wipe in a later clause.
-    lower
-        .split(['\n', ';', '|', '&'])
+    text.split(['\n', ';', '|', '&'])
         .any(segment_is_workspace_wipe)
 }
 
@@ -996,9 +997,15 @@ fn segment_is_workspace_wipe(segment: &str) -> bool {
     // trigger with the cwd/glob/drive-root target set. `del`/`rmdir`/`rd` route
     // through BOTH the PowerShell-alias path and the cmd.exe path so a `del /s
     // /q .` (cmd) and `del -recurse .` (ps alias) are each caught.
-    tokens.iter().enumerate().any(|(idx, token)| {
+    tokens.iter().enumerate().any(|(idx, raw_token)| {
+        let token = command_arg_text(raw_token);
         let rest = &tokens[idx + 1..];
-        match *token {
+        match token.as_str() {
+            "sh" | "bash" | "zsh" => shell_c_payload_is_workspace_wipe(rest),
+            "cmd" | "cmd.exe" => cmd_c_payload_is_workspace_wipe(rest),
+            "powershell" | "powershell.exe" | "pwsh" | "pwsh.exe" => {
+                powershell_c_payload_is_workspace_wipe(rest)
+            }
             // UNIX rm + PowerShell `Remove-Item` and its `rm`/`ri` aliases.
             "rm" | "remove-item" | "ri" => rm_targets_workspace(rest),
             "find" => find_deletes_workspace(rest),
@@ -1026,7 +1033,8 @@ fn cmd_delete_targets_workspace(args: &[&str]) -> bool {
     let mut recursive = false;
     let mut cwd_target = false;
     let mut drive_target = false;
-    for arg in args {
+    for raw_arg in args {
+        let arg = command_arg_text(raw_arg);
         if let Some(flag) = arg.strip_prefix('/') {
             // `/s`, `/q`, `/f`, and combined forms like `/s/q` (no space).
             if flag.split('/').any(|f| f.starts_with('s')) {
@@ -1034,11 +1042,11 @@ fn cmd_delete_targets_workspace(args: &[&str]) -> bool {
             }
             continue;
         }
-        if is_drive_root(arg) {
+        if is_drive_root(&arg) {
             // A whole-volume target (`c:\`, `c:\*.*`, `\`) is destructive on its
             // own — `del c:\*.*` clears the drive root without any `/s`.
             drive_target = true;
-        } else if is_workspace_wipe_target(arg) {
+        } else if is_workspace_wipe_target(raw_arg) {
             cwd_target = true;
         }
     }
@@ -1052,7 +1060,8 @@ fn cmd_delete_targets_workspace(args: &[&str]) -> bool {
 /// a bare `format` with no volume is not.
 fn format_targets_drive(args: &[&str]) -> bool {
     args.iter()
-        .any(|arg| !arg.starts_with('/') && (is_drive_root(arg) || arg.starts_with("\\\\.\\")))
+        .map(|arg| command_arg_text(arg))
+        .any(|arg| !arg.starts_with('/') && (is_drive_root(&arg) || arg.starts_with("\\\\.\\")))
 }
 
 /// True when an `rm` invocation is both recursive *and* targets the whole
@@ -1062,8 +1071,9 @@ fn rm_targets_workspace(args: &[&str]) -> bool {
     let mut wipe_target = false;
     let mut end_of_options = false;
 
-    for arg in args {
-        if !end_of_options && *arg == "--" {
+    for raw_arg in args {
+        let arg = command_arg_text(raw_arg);
+        if !end_of_options && arg == "--" {
             end_of_options = true;
             continue;
         }
@@ -1101,7 +1111,7 @@ fn rm_targets_workspace(args: &[&str]) -> bool {
             }
             continue;
         }
-        if is_workspace_wipe_target(arg) {
+        if is_workspace_wipe_target(raw_arg) {
             wipe_target = true;
         }
     }
@@ -1127,14 +1137,177 @@ fn is_powershell_long_option(opt: &str) -> bool {
     PS_LONG.iter().any(|long| long.starts_with(opt))
 }
 
+fn shell_c_payload_is_workspace_wipe(args: &[&str]) -> bool {
+    shell_payload_after_flag(args, |arg| {
+        arg == "-c" || (arg.starts_with('-') && !arg.starts_with("--") && arg.contains('c'))
+    })
+}
+
+fn cmd_c_payload_is_workspace_wipe(args: &[&str]) -> bool {
+    shell_payload_after_flag(args, |arg| arg == "/c")
+}
+
+fn powershell_c_payload_is_workspace_wipe(args: &[&str]) -> bool {
+    if shell_payload_after_flag(args, is_powershell_command_flag) {
+        return true;
+    }
+    for (idx, raw_arg) in args.iter().enumerate() {
+        let arg = command_arg_text(raw_arg);
+        if is_powershell_encoded_command_flag(&arg) && idx + 1 < args.len() {
+            if let Some(decoded) = decode_powershell_encoded_command(args[idx + 1]) {
+                if has_cwd_wipe_tokens(&decoded) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+fn shell_payload_after_flag(args: &[&str], is_command_flag: impl Fn(&str) -> bool) -> bool {
+    for (idx, raw_arg) in args.iter().enumerate() {
+        let arg = command_arg_text(raw_arg);
+        if is_command_flag(&arg) && idx + 1 < args.len() {
+            let payload = args[idx + 1..].join(" ");
+            let unquoted = strip_outer_shell_quotes(&payload);
+            if segment_is_workspace_wipe(&unquoted) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn is_powershell_command_flag(arg: &str) -> bool {
+    matches!(arg, "/c" | "/command") || (arg.starts_with('-') && "-command".starts_with(arg))
+}
+
+fn is_powershell_encoded_command_flag(arg: &str) -> bool {
+    matches!(arg, "/encodedcommand") || (arg.starts_with('-') && "-encodedcommand".starts_with(arg))
+}
+
+fn decode_powershell_encoded_command(raw_arg: &str) -> Option<String> {
+    let encoded = shell_token(raw_arg).text;
+    let bytes = BASE64_STANDARD.decode(encoded.trim()).ok()?;
+    if bytes.len() % 2 != 0 {
+        return None;
+    }
+    let utf16 = bytes
+        .chunks_exact(2)
+        .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+        .collect::<Vec<_>>();
+    String::from_utf16(&utf16)
+        .ok()
+        .map(|text| text.trim_start_matches('\u{feff}').to_string())
+}
+
+fn command_arg_text(token: &str) -> String {
+    shell_token(token).text.to_ascii_lowercase()
+}
+
+#[derive(Debug)]
+struct ShellToken {
+    text: String,
+    single_quoted: Vec<bool>,
+}
+
+fn shell_token(token: &str) -> ShellToken {
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum QuoteMode {
+        None,
+        Single,
+        Double,
+    }
+
+    let mut mode = QuoteMode::None;
+    let mut text = String::new();
+    let mut single_quoted = Vec::new();
+    let mut chars = token.trim().chars().peekable();
+    while let Some(ch) = chars.next() {
+        match (mode, ch) {
+            (QuoteMode::None, '\'') => mode = QuoteMode::Single,
+            (QuoteMode::Single, '\'') => mode = QuoteMode::None,
+            (QuoteMode::None, '"') => mode = QuoteMode::Double,
+            (QuoteMode::Double, '"') => mode = QuoteMode::None,
+            _ => {
+                text.push(ch);
+                single_quoted.push(mode == QuoteMode::Single);
+            }
+        }
+    }
+    ShellToken {
+        text,
+        single_quoted,
+    }
+}
+
+fn strip_outer_shell_quotes(payload: &str) -> String {
+    let trimmed = payload.trim();
+    let Some(first) = trimmed.chars().next() else {
+        return String::new();
+    };
+    if !matches!(first, '\'' | '"') || !trimmed.ends_with(first) || trimmed.len() < 2 {
+        return trimmed.to_string();
+    }
+    trimmed[first.len_utf8()..trimmed.len() - first.len_utf8()].to_string()
+}
+
 /// A target string that resolves to the entire working directory or a drive
 /// root. Covers UNIX cwd/glob shapes, the PowerShell `$pwd`/`.\*` forms, and
 /// Windows drive roots (`c:\`, `c:`, `\`, `*.*`).
 fn is_workspace_wipe_target(arg: &str) -> bool {
+    let token = shell_token(arg);
+    let arg = token.text.to_ascii_lowercase();
     matches!(
-        arg,
-        "." | "./" | "./*" | "*" | ".*" | "./." | ".\\" | ".\\*" | "*.*" | "$pwd" | "${pwd}" | "\\"
-    ) || is_drive_root(arg)
+        arg.as_str(),
+        "." | "./" | "./*" | "*" | ".*" | "./." | ".\\" | ".\\*" | "*.*" | "\\"
+    ) || is_pwd_workspace_target(&token, &arg)
+        || is_drive_root(&arg)
+}
+
+fn is_pwd_workspace_target(token: &ShellToken, arg: &str) -> bool {
+    if starts_with_unquoted(token, arg, "$pwd") {
+        let rest = &arg["$pwd".len()..];
+        return pwd_suffix_wipes_workspace(rest);
+    }
+    if starts_with_unquoted(token, arg, "$(pwd)") {
+        let rest = &arg["$(pwd)".len()..];
+        return pwd_suffix_wipes_workspace(rest);
+    }
+    if starts_with_unquoted(token, arg, "`pwd`") {
+        let rest = &arg["`pwd`".len()..];
+        return pwd_suffix_wipes_workspace(rest);
+    }
+    if starts_with_unquoted(token, arg, "${pwd") {
+        let rest = &arg["${pwd".len()..];
+        if let Some((parameter, suffix)) = rest.split_once('}') {
+            if unquoted_prefix(token, "${pwd".len() + parameter.len() + 1) {
+                if parameter.is_empty() || parameter.starts_with(':') {
+                    return pwd_suffix_wipes_workspace(suffix);
+                }
+            }
+        }
+    }
+    false
+}
+
+fn starts_with_unquoted(token: &ShellToken, arg: &str, prefix: &str) -> bool {
+    arg.starts_with(prefix) && unquoted_prefix(token, prefix.len())
+}
+
+fn unquoted_prefix(token: &ShellToken, len: usize) -> bool {
+    token
+        .single_quoted
+        .iter()
+        .take(len)
+        .all(|single_quoted| !*single_quoted)
+}
+
+fn pwd_suffix_wipes_workspace(suffix: &str) -> bool {
+    matches!(
+        suffix,
+        "" | "/" | "/." | "/*" | "/./" | "/./*" | "\\" | "\\." | "\\*" | "\\.\\" | "\\.\\*"
+    )
 }
 
 /// Windows drive-root target: `c:`, `c:\`, `c:/`, or `c:\*`. A drive letter
@@ -1153,17 +1326,21 @@ fn is_drive_root(arg: &str) -> bool {
 fn find_deletes_workspace(args: &[&str]) -> bool {
     // The first non-option token is the search root; a cwd root is the
     // dangerous case. `find -delete` (no explicit root) also defaults to cwd.
-    let roots_at_cwd = match args.iter().find(|arg| !arg.starts_with('-')) {
-        Some(&root) => matches!(root, "." | "./"),
+    let roots_at_cwd = match args
+        .iter()
+        .find(|arg| !command_arg_text(arg).starts_with('-'))
+    {
+        Some(&root) => is_workspace_wipe_target(root),
         None => true,
     };
     if !roots_at_cwd {
         return false;
     }
-    let has_delete = args.contains(&"-delete");
-    let has_exec_rm = args
-        .windows(2)
-        .any(|pair| matches!(pair[0], "-exec" | "-execdir") && pair[1] == "rm");
+    let has_delete = args.iter().any(|arg| command_arg_text(arg) == "-delete");
+    let has_exec_rm = args.windows(2).any(|pair| {
+        matches!(command_arg_text(pair[0]).as_str(), "-exec" | "-execdir")
+            && command_arg_text(pair[1]) == "rm"
+    });
     has_delete || has_exec_rm
 }
 
@@ -1540,6 +1717,14 @@ mod tests {
         labels(&scan).contains(&"destructive".to_string())
     }
 
+    fn powershell_encoded(command: &str) -> String {
+        let bytes = command
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect::<Vec<_>>();
+        BASE64_STANDARD.encode(bytes)
+    }
+
     #[test]
     fn cwd_wipe_deletes_are_flagged_destructive() {
         // SB-3: cwd/workspace-relative recursive wipes a prompt injection can use
@@ -1555,12 +1740,27 @@ mod tests {
             "rm -rf -- .",
             "rm --recursive --force .",
             "rm    -rf     .",
+            "rm -rf \".\"",
+            "rm -rf '.'",
+            "rm -rf \"./*\"",
+            "rm -rf \"$PWD\"",
+            "rm -rf \"$PWD\"/*",
+            "rm -rf ${PWD}/*",
+            "rm -rf ${PWD:?}/*",
+            "rm -rf \"$(pwd)\"/*",
+            "rm -rf `pwd`/*",
+            "sh -c 'rm -rf .'",
+            "bash -lc \"rm -rf .\"",
+            "bash --noprofile -c \"rm -rf .\"",
             "cd src && rm -rf .",
             "echo hi; rm -rf .",
             "find . -delete",
+            "find \".\" -delete",
+            "find \"$PWD\" -delete",
             "find ./ -delete",
             "find . -type f -delete",
             "find . -exec rm {} +",
+            "find . -exec 'rm' {} +",
             "find . -execdir rm {} +",
             "find -delete",
         ] {
@@ -1575,16 +1775,30 @@ mod tests {
     fn scoped_and_named_deletes_are_not_over_flagged() {
         // Deliberate boundary: a recursive delete of a *named* subdirectory is a
         // normal clean, not a workspace wipe. These must NOT be flagged.
+        assert!(
+            !shell_c_payload_is_workspace_wipe(&["--norc", "script.sh"]),
+            "bash --norc is not a shell -c payload"
+        );
         for cmd in [
             "rm -rf build/",
             "rm -rf node_modules",
             "rm -rf ./src",
             "rm -rf target",
             "rm -rf dist build",
+            "rm -rf \"build/\"",
+            "rm -rf \"./src\"",
+            "rm -rf \"$PWD/build\"",
+            "rm -rf '$PWD'",
+            "rm -rf '${PWD}'/*",
+            "rm -rf '`pwd`'/*",
+            "rm -rf \"$(pwd)/build\"",
+            "bash -lc \"rm -rf '$PWD'\"",
             "rm file.txt",
             "rm -f stale.log",
             "rm -rf .cache", // named hidden dir, not the cwd
             "find . -type f -name '*.tmp' -print",
+            "find '$PWD' -delete",
+            "find \"./build\" -delete",
             "find ./build -delete",
             "find src -delete",
         ] {
@@ -1613,6 +1827,7 @@ mod tests {
             "format.com d:",
             // Wrapped forms — the dangerous verb is not token 0.
             "cmd /c rd /s /q .",
+            "cmd /c \"rd /s /q .\"",
             "cd build & del /s /q .",
         ] {
             assert!(is_destructive(cmd), "expected destructive (cmd): {cmd}");
@@ -1625,6 +1840,10 @@ mod tests {
     fn windows_powershell_wipe_deletes_are_flagged_destructive() {
         // SB-3 (PowerShell): Remove-Item + aliases, recurse alone wipes (force is
         // irrelevant), abbreviated/explicit flags, -Path/-LiteralPath, $pwd.
+        let encoded = powershell_encoded("Remove-Item -Recurse -Force .");
+        let encoded_alias = powershell_encoded("rm -r -fo \"$PWD\"");
+        let encoded_cmd = format!("powershell -EncodedCommand {encoded}");
+        let encoded_alias_cmd = format!("pwsh -enc {encoded_alias}");
         for cmd in [
             "remove-item -recurse -force .",
             "remove-item -recurse .",
@@ -1637,10 +1856,16 @@ mod tests {
             "remove-item -recurse $pwd",
             "remove-item -force -recurse -literalpath .",
             "remove-item -path . -recurse",
+            "remove-item -recurse \"$PWD\"",
+            "remove-item -recurse \"${PWD}/*\"",
+            "remove-item -recurse \"$PWD\\*\"",
             "del -recurse -force .",
             "rmdir -recurse .",
             // Wrapped form.
             "powershell -c rm -r -fo .",
+            "powershell -c \"rm -r -fo .\"",
+            encoded_cmd.as_str(),
+            encoded_alias_cmd.as_str(),
         ] {
             assert!(is_destructive(cmd), "expected destructive (ps): {cmd}");
             let scan = command_risk_scan_json(&ctx(&["sh", "-c", cmd]), None);
@@ -1665,6 +1890,8 @@ mod tests {
             // PowerShell named-target / force-without-recurse / non-wipe.
             "remove-item -recurse build\\",
             "remove-item -recurse .\\src",
+            "remove-item -recurse \"$PWD\\build\"",
+            "remove-item -recurse '$PWD'",
             "remove-item -force .", // force alone, no recurse
             "remove-item -recurse node_modules",
             "remove-item stale.log",
