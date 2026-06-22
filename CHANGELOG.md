@@ -8,6 +8,13 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.137
+
+### Security
+
+- Redact run records, action-graph updates, and agent-event durable sinks with
+  the shared redaction policy before writing operational artifacts.
+
 ## v0.8.136
 
 ### Fixed
