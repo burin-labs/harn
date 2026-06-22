@@ -468,7 +468,7 @@ open_bump_pr() {
   fi
 
   log_step "Commit version bump"
-  git add Cargo.toml Cargo.lock crates/*/Cargo.toml
+  git add Cargo.toml Cargo.lock crates/*/Cargo.toml spec/acp-registry/harn/agent.json
   git commit -m "Bump version to $next"
 
   log_step "Push bump branch"

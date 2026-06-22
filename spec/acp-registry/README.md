@@ -17,68 +17,41 @@ ACP-speaking clients.
 ## What's here
 
 - [`harn/agent.json`](harn/agent.json) — the registry manifest entry, pinned to
-  the binary distribution (GitHub release tarballs for the five published
-  targets), launching `harn serve acp`.
+  the v0.8.133 binary distribution (GitHub release tarballs for the five
+  published targets), launching `harn serve acp`.
 - [`harn/icon.svg`](harn/icon.svg) — 16×16 `currentColor` icon.
 
 This is the agent's free editor discoverability listing. It is **not** the
 signed skills/connectors marketplace (harn-cloud#24).
 
-## Validation status
+## Validation
 
-The manifest passes the registry's structural CI gates today. Run from a clone
-of `agentclientprotocol/registry` with `harn/` copied in:
+The manifest is ready for an upstream registry PR. Run from a clone of
+`agentclientprotocol/registry` with `harn/` copied in:
 
 ```bash
-# Schema + ID + version + distribution + icon + URL accessibility — PASSES
 uv run --with jsonschema .github/workflows/build_registry.py
-# => "Added agent: harn v0.8.51", exit 0
-```
-
-All five release archive URLs return HTTP 200.
-
-## Blocker: submission is gated on ACP runtime work (do not open the PR yet)
-
-The registry's **auth gate** is the one check Harn does not yet pass. CI runs:
-
-```bash
 python3 .github/workflows/verify_agents.py --auth-check --agent harn
 ```
 
-The validator launches the binary with exactly the manifest's `cmd` + `args`
-(`./harn serve acp`, no extra arguments), sends an ACP `initialize`, and
-requires the result's `authMethods` array to contain at least one method whose
-type resolves to `agent` or `terminal` (a method with no explicit `type`
-defaults to `agent`; see [`AUTHENTICATION.md`][auth]).
+The checked-in Harn test suite also guards the local copy:
 
-Two concrete gaps block this — both reproduced against the registry's own
-tooling:
+- `crates/harn-cli/src/cli/tests/parse_serve.rs` proves the registry launch
+  form (`harn serve acp`, no positional file) parses as the file-less attach
+  server.
+- `crates/harn-serve/src/auth.rs` proves an empty local auth policy advertises
+  a non-empty ACP `authMethods` array with `type: "agent"`.
+- `crates/harn-cli/tests/acp_registry_manifest.rs` keeps this manifest pinned
+  to the current Harn version, five published binary targets, and the
+  `["serve", "acp"]` launch arguments.
 
-1. **Bare launch fails.** `harn serve acp` requires a positional `<FILE>`
-   (the `.harn` agent to serve). The registry invokes the binary with no file,
-   so the process exits with code 2 (`required arguments were not provided:
-   <FILE>`) and never reaches the ACP loop. A stable, file-less ACP entrypoint
-   is the scope of [#2664](https://github.com/burin-labs/harn/issues/2664).
+These guards correspond to the registry's auth check. The upstream validator
+launches the binary with the manifest `cmd` + `args` (`./harn serve acp`),
+sends ACP `initialize`, and requires at least one auth method whose type
+resolves to `agent` or `terminal`; Harn's no-credential local attach flow now
+advertises the `none` method as `type: "agent"`.
 
-2. **Empty `authMethods`.** With no `--api-key` / `--hmac-secret` flags (the
-   bare launch), `build_auth_policy` produces an empty policy, so the
-   `initialize` response carries `"authMethods": []` and fails the gate even if
-   the process started. Harn's ACP auth methods also emit kind metadata under
-   `_meta.harn` with ids `apiKey` / `hmac` / `oauth2`, not the registry's
-   `agent` / `terminal` shape; the OAuth flow from
-   [#2645](https://github.com/burin-labs/harn/issues/2645) /
-   [#2639](https://github.com/burin-labs/harn/issues/2639) needs to surface a
-   registry-recognized auth method.
-
-Both are the explicit dependencies the issue sequences ahead of submission
-(#2664 + #2639/#2645). Per that sequencing, this change lands the
-ready-to-submit manifest and tracks the gate; it does **not** modify the
-VM/runtime.
-
-## Submitting (once #2664 + #2639/#2645 land)
-
-After Harn returns a non-empty, registry-recognized `authMethods` from a
-file-less `harn serve acp`:
+## Submitting
 
 1. Re-verify locally against a fresh clone of `agentclientprotocol/registry`:
 
@@ -90,10 +63,10 @@ file-less `harn serve acp`:
    python3 .github/workflows/verify_agents.py --auth-check --agent harn
    ```
 
-2. Bump `version` (and the five `archive` URLs) in `harn/agent.json` to the
-   release that ships the auth fix. The registry auto-updates versions hourly
-   from GitHub Releases once listed, but the first submission must match a live
-   release.
+2. Confirm `harn/agent.json` points at the latest release that includes the
+   file-less ACP attach server and registry-recognized auth method. The first
+   submission must match a live release; after listing, the registry
+   auto-updates versions hourly from GitHub Releases.
 
 3. Fork `agentclientprotocol/registry`, copy `harn/` to the repo root, and open
    a PR per [`CONTRIBUTING.md`][contrib]. Once merged, Harn is one-click
@@ -104,4 +77,3 @@ file-less `harn serve acp`:
 [jb]: https://blog.jetbrains.com/ai/2026/01/acp-agent-registry/
 [schema]: https://github.com/agentclientprotocol/registry/blob/main/agent.schema.json
 [contrib]: https://github.com/agentclientprotocol/registry/blob/main/CONTRIBUTING.md
-[auth]: https://github.com/agentclientprotocol/registry/blob/main/AUTHENTICATION.md
