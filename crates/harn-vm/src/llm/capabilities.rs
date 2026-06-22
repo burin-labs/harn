@@ -2550,9 +2550,15 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
         // reasoning-off breaks tool calling. Provider catch-all rules carry no
         // reasoning fields, so without a dedicated `*gpt-oss*` row gpt-oss
         // would fall through to reasoning-OFF and the eval loop would bill a
-        // noncommittal. Tool wire support is provider-specific: OpenRouter and
-        // Fireworks use Harn's JSON text-channel tools, while the direct
-        // Cerebras/DeepInfra/Groq routes still use provider-native tools.
+        // noncommittal. Tool wire support is provider-specific: OpenRouter uses
+        // Harn's JSON text-channel tools and Fireworks uses Harn's heredoc
+        // (`text`) text-channel tools, while the direct Cerebras/DeepInfra/Groq
+        // routes still use provider-native tools. Fireworks gpt-oss is pinned to
+        // `text` (not `json`) because a JSON string arg forces the model to
+        // escape backslashes the source code already needs and gpt-oss
+        // double-escapes them — empirically corrupting `\\`-heavy bodies
+        // (e.g. Zig multiline string literals) in every json-channel sample
+        // while the escape-free heredoc body stays byte-clean (2026-06-21 A/B).
         reset();
         for (provider, model, native_tools, preferred_tool_format) in [
             ("openrouter", "openai/gpt-oss-120b", false, "json"),
@@ -2560,7 +2566,7 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
                 "fireworks",
                 "accounts/fireworks/models/gpt-oss-120b",
                 false,
-                "json",
+                "text",
             ),
             ("cerebras", "gpt-oss-120b", true, "native"),
             ("deepinfra", "openai/gpt-oss-120b", true, "native"),
