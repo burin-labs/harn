@@ -362,6 +362,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/llm/structural_validator.harn"),
     },
     StdlibSource {
+        module: "llm/missing_tool_call",
+        source: include_str!("stdlib/llm/missing_tool_call.harn"),
+    },
+    StdlibSource {
         module: "llm/scope_classifier",
         source: include_str!("stdlib/llm/scope_classifier.harn"),
     },
@@ -1351,6 +1355,7 @@ mod tests {
             "llm/handlers",
             "llm/tool_middleware",
             "llm/tool_binder",
+            "llm/missing_tool_call",
             "llm/ensemble",
             "llm/rerank",
             "personas/prelude",

@@ -1,3 +1,5 @@
+import { agent_loop_options } from "std/agent/options"
+import { missing_tool_call_classifier } from "std/llm/missing_tool_call"
 import { llm_text, with_llm_script } from "std/testing"
 
 /**
@@ -10,8 +12,8 @@ import { llm_text, with_llm_script } from "std/testing"
  *  1. Fenced-call attempt: the model wraps a (Python-kwarg-style) call in a
  *     ```tool_code fence that the parser does NOT lift, so the turn is
  *     toolless → `fenced_call_attempt` nudge fires.
- *  2. Named-but-not-called: the model narrates "I'll use edit(...)" naming a
- *     bound tool but emits no call syntax → `named_tool_not_called` nudge.
+ *  2. Classifier-backed tool intent: the model expresses intent to use a
+ *     bound tool but emits no call syntax → `missing_tool_call` nudge.
  *  3. Real call (bare `edit({...})` and braceless `edit(path=...)`) does NOT
  *     false-fire either content nudge — the call dispatches and the loop
  *     proceeds normally.
@@ -43,6 +45,18 @@ fn injected_kind_in(calls, idx, marker) {
   return contains(json_stringify(calls[idx].messages), marker)
 }
 
+fn edit_missing_tool_call_recovery() {
+  return {
+    classifier: { _payload -> return {
+      action: "tool_call_intended",
+      tool_name: "edit",
+      confidence: 0.96,
+      evidence: "fixture classifier found a tool action",
+      language: "fixture",
+    } },
+  }
+}
+
 pipeline default() {
   // 1. Fenced-call attempt → fenced_call_attempt nudge on the next turn.
   //    The fenced body uses the Python-kwarg shape `edit(path=...)`, which the
@@ -70,13 +84,13 @@ pipeline default() {
       let calls = llm_mock_calls()
       __io_println("fenced.status=" + r.status)
       __io_println("fenced.nudge=" + to_string(injected_kind_in(calls, 1, "fenced_call_attempt")))
-      __io_println("fenced.not_named=" + to_string(!injected_kind_in(calls, 1, "named_tool_not_called")))
+      __io_println("fenced.no_missing=" + to_string(!injected_kind_in(calls, 1, "missing_tool_call")))
     },
   )
-  // 2. Named-but-not-called → named_tool_not_called nudge on the next turn.
+  // 2. Missing tool call → missing_tool_call nudge on the next turn.
   with_llm_script(
     [
-      llm_text("I'll use edit to update the file now."),
+      llm_text("Voy a edittar el archivo ahora, un momento."),
       llm_text("<tool_call>\nedit({ path: \"b.txt\" })\n</tool_call>"),
       llm_text("Done."),
     ],
@@ -91,12 +105,43 @@ pipeline default() {
           max_iterations: 4,
           max_nudges: 4,
           tools: edit_tools(),
+          missing_tool_call_recovery: edit_missing_tool_call_recovery(),
         },
       )
       let calls = llm_mock_calls()
-      __io_println("named.status=" + r.status)
-      __io_println("named.nudge=" + to_string(injected_kind_in(calls, 1, "named_tool_not_called")))
-      __io_println("named.not_fenced=" + to_string(!injected_kind_in(calls, 1, "fenced_call_attempt")))
+      __io_println("missing.status=" + r.status)
+      __io_println("missing.nudge=" + to_string(injected_kind_in(calls, 1, "missing_tool_call")))
+      __io_println("missing.not_fenced=" + to_string(!injected_kind_in(calls, 1, "fenced_call_attempt")))
+    },
+  )
+  // 2b. Another typoed/non-English phrase depends on the classifier, not exact
+  //     tool-name substrings in the assistant text.
+  with_llm_script(
+    [
+      llm_text("Je vais corriger le fichier maintenant."),
+      llm_text("<tool_call>\nedit({ path: \"b2.txt\" })\n</tool_call>"),
+      llm_text("Listo."),
+    ],
+    { ->
+      let r = agent_loop(
+        "Edit b2.txt.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "text",
+          loop_until_done: true,
+          max_iterations: 4,
+          max_nudges: 4,
+          tools: edit_tools(),
+          missing_tool_call_recovery: edit_missing_tool_call_recovery(),
+        },
+      )
+      let calls = llm_mock_calls()
+      __io_println("multilingual.status=" + r.status)
+      __io_println("multilingual.nudge=" + to_string(injected_kind_in(calls, 1, "missing_tool_call")))
+      __io_println(
+        "multilingual.not_fenced=" + to_string(!injected_kind_in(calls, 1, "fenced_call_attempt")),
+      )
     },
   )
   // 3a. A real bare object-literal call does NOT trip either content nudge.
@@ -118,14 +163,14 @@ pipeline default() {
       let calls = llm_mock_calls()
       __io_println("realcall.successful=" + json_stringify(r.tools.successful))
       __io_println("realcall.no_fenced=" + to_string(!injected_kind_in(calls, 1, "fenced_call_attempt")))
-      __io_println("realcall.no_named=" + to_string(!injected_kind_in(calls, 1, "named_tool_not_called")))
+      __io_println("realcall.no_missing=" + to_string(!injected_kind_in(calls, 1, "missing_tool_call")))
     },
   )
   // 3b. A braceless `name(key=...)` call shape also does NOT false-fire the
-  //     named-but-not-called detector (it carries real call shape).
+  //     missing-tool-call recovery path (it carries real call shape).
   with_llm_script(
     [
-      llm_text("I'll use edit(path=\"d.txt\") to do it."),
+      llm_text("edit(path=\"d.txt\")"),
       llm_text("<tool_call>\nedit({ path: \"d.txt\" })\n</tool_call>"),
       llm_text("Done."),
     ],
@@ -144,9 +189,7 @@ pipeline default() {
       )
       let calls = llm_mock_calls()
       __io_println("kwargshape.status=" + r.status)
-      __io_println(
-        "kwargshape.no_named=" + to_string(!injected_kind_in(calls, 1, "named_tool_not_called")),
-      )
+      __io_println("kwargshape.no_missing=" + to_string(!injected_kind_in(calls, 1, "missing_tool_call")))
     },
   )
   // 4. No-progress streak in the DEFAULT loop (loop_until_done so the toolless
@@ -188,6 +231,26 @@ pipeline default() {
       __io_println("streak.escalates=" + to_string(streak_fired))
     },
   )
+  let invalid_classifier = try {
+    agent_loop_options({missing_tool_call_recovery: {classifier: "yes"}})
+  }
+  __io_println("invalid_classifier=" + to_string(is_err(invalid_classifier)))
+  __io_println(contains(to_string(unwrap_err(invalid_classifier)), "missing_tool_call_recovery"))
+  let invalid_enabled = try {
+    agent_loop_options({missing_tool_call_recovery: {enabled: "yes"}})
+  }
+  __io_println("invalid_enabled=" + to_string(is_err(invalid_enabled)))
+  __io_println(contains(to_string(unwrap_err(invalid_enabled)), "missing_tool_call_recovery.enabled"))
+  let invalid_options = try {
+    agent_loop_options({missing_tool_call_recovery: "yes"})
+  }
+  __io_println("invalid_options=" + to_string(is_err(invalid_options)))
+  __io_println(contains(to_string(unwrap_err(invalid_options)), "missing_tool_call_recovery"))
+  let invalid_threshold = try {
+    missing_tool_call_classifier({confidence_threshold: 2.0})
+  }
+  __io_println("invalid_threshold=" + to_string(is_err(invalid_threshold)))
+  __io_println(contains(to_string(unwrap_err(invalid_threshold)), "confidence_threshold"))
 }
 // Successful tool on turn 1 → no streak nudge on turn 2.
 // By a later turn (>= 2 consecutive toolless turns) the streak nudge fired.

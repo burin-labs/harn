@@ -1,0 +1,309 @@
+import { agent_typed_output_checkpoint } from "std/agent/primitives"
+
+type MissingToolCallAction = "tool_call_intended" | "no_tool_call_intended" | "ambiguous"
+
+type MissingToolCallTool = {name: string, description?: string}
+
+type MissingToolCallOptions = {
+  enabled?: bool,
+  provider?: string,
+  model?: string,
+  confidence_threshold?: float,
+  max_tokens?: int,
+  temperature?: float,
+  classifier?: any,
+  top_p?: float,
+  seed?: int,
+  reasoning_effort?: string,
+  timeout?: any,
+}
+
+type MissingToolCallVerdict = {
+  action: MissingToolCallAction,
+  original_action?: string,
+  tool_name: string,
+  confidence: float,
+  confidence_threshold?: float,
+  evidence: string,
+  language?: string,
+  classifier_kind?: string,
+  model?: string,
+  typed_checkpoint?: any,
+  error?: string,
+}
+
+fn __missing_tool_call_string(value) -> string {
+  if value == nil {
+    return ""
+  }
+  return trim(to_string(value))
+}
+
+fn __missing_tool_call_float(value, fallback) {
+  let parsed = to_float(value ?? fallback)
+  if parsed == nil {
+    return fallback
+  }
+  if parsed < 0.0 {
+    return 0.0
+  }
+  if parsed > 1.0 {
+    return 1.0
+  }
+  return parsed
+}
+
+fn __missing_tool_call_threshold(value) -> float {
+  let threshold = to_float(value ?? 0.65)
+  if threshold == nil || threshold < 0.0 || threshold > 1.0 {
+    throw "missing_tool_call_classifier: confidence_threshold must be between 0.0 and 1.0"
+  }
+  return threshold
+}
+
+fn __missing_tool_call_candidate_tool_entries(payload) {
+  let registry = payload?.tools
+  if type_of(registry) == "dict" {
+    return registry?.tools ?? []
+  }
+  if type_of(registry) == "list" {
+    return registry
+  }
+  return payload?.candidate_tools ?? []
+}
+
+fn __missing_tool_call_candidate_tools(payload) -> list<MissingToolCallTool> {
+  var out = []
+  var names = []
+  for entry in __missing_tool_call_candidate_tool_entries(payload) {
+    let name = __missing_tool_call_string(entry?.name ?? entry?.function?.name)
+    if name == "" || contains(names, name) {
+      continue
+    }
+    names = names.push(name)
+    out = out
+      .push(
+      {
+        name: name,
+        description: __missing_tool_call_string(entry?.description ?? entry?.function?.description),
+      },
+    )
+  }
+  for name in payload?.tool_names ?? [] {
+    let text = __missing_tool_call_string(name)
+    if text != "" && !contains(names, text) {
+      names = names.push(text)
+      out = out.push({name: text, description: ""})
+    }
+  }
+  return out
+}
+
+fn __missing_tool_call_tool_names(candidate_tools: list<MissingToolCallTool>) -> list<string> {
+  var names = []
+  for entry in candidate_tools {
+    let name = __missing_tool_call_string(entry.name)
+    if name != "" && !contains(names, name) {
+      names = names.push(name)
+    }
+  }
+  return names
+}
+
+fn __missing_tool_call_tool_name(value, candidate_tools: list<MissingToolCallTool>) -> string {
+  let requested = __missing_tool_call_string(value)
+  if requested == "" {
+    return ""
+  }
+  for name in __missing_tool_call_tool_names(candidate_tools) {
+    if requested == name || lowercase(requested) == lowercase(name) {
+      return name
+    }
+  }
+  return ""
+}
+
+fn __missing_tool_call_schema() {
+  return {
+    type: "object",
+    properties: {
+      action: {type: "string", description: "One of: tool_call_intended, no_tool_call_intended, ambiguous."},
+      tool_name: {
+        type: "string",
+        description: "Exact candidate tool name when action is tool_call_intended; otherwise empty.",
+      },
+      confidence: {type: "number", description: "Confidence from 0.0 to 1.0."},
+      evidence: {type: "string", description: "Brief reason grounded in the assistant text."},
+      language: {type: "string", description: "Detected language or mixed/unknown."},
+    },
+    required: ["action", "tool_name", "confidence", "evidence"],
+  }
+}
+
+fn __missing_tool_call_prompt(payload, candidate_tools) {
+  return "You classify assistant text before a tool-dispatch step.\n\n"
+    + "The parser already found ZERO valid tool calls in this turn. Decide whether the assistant text "
+    + "is nevertheless expressing an intent to invoke one of the candidate tools.\n\n"
+    + "Assistant text:\n"
+    + __missing_tool_call_string(payload?.text ?? payload?.visible_text)
+    + "\n\nCandidate tools JSON:\n"
+    + json_stringify(candidate_tools)
+    + "\n\nReturn JSON exactly matching this shape: "
+    + "{\"action\":\"tool_call_intended|no_tool_call_intended|ambiguous\",\"tool_name\":\"\",\"confidence\":0.0,\"evidence\":\"...\",\"language\":\"...\"}\n\n"
+    + "Rules:\n"
+    + "- Use tool_call_intended only when the assistant text says it is about to, trying to, or intending to use a candidate tool, even if the text has typos or is not in English.\n"
+    + "- Choose tool_name from Candidate tools exactly; leave it empty if no single candidate is clear.\n"
+    + "- Use no_tool_call_intended for final answers, status summaries, questions, or ordinary explanation.\n"
+    + "- Use ambiguous when the intent or target tool is unclear. Do not infer intent from the original user task alone.\n"
+}
+
+fn __missing_tool_call_action(value) -> MissingToolCallAction {
+  let action = __missing_tool_call_string(value)
+  if action == "tool_call_intended" || action == "no_tool_call_intended" || action == "ambiguous" {
+    return action
+  }
+  return "ambiguous"
+}
+
+fn __missing_tool_call_normalize(raw, candidate_tools: list<MissingToolCallTool>, threshold: float) -> MissingToolCallVerdict {
+  if type_of(raw) != "dict" {
+    return {
+      action: "ambiguous",
+      original_action: "invalid",
+      tool_name: "",
+      confidence: 0.0,
+      confidence_threshold: threshold,
+      evidence: "classifier returned " + type_of(raw) + ", not a dict",
+    }
+  }
+  let original_action = __missing_tool_call_action(raw?.action)
+  let confidence = __missing_tool_call_float(raw?.confidence, 0.0)
+  let tool_name = __missing_tool_call_tool_name(raw?.tool_name ?? raw?.tool, candidate_tools)
+  let action = if original_action == "tool_call_intended" && confidence >= threshold && tool_name != "" {
+    "tool_call_intended"
+  } else if original_action == "no_tool_call_intended" && confidence >= threshold {
+    "no_tool_call_intended"
+  } else {
+    "ambiguous"
+  }
+  let evidence = __missing_tool_call_string(raw?.evidence ?? raw?.reason ?? raw?.reasoning)
+  return raw
+    + {
+    action: action,
+    original_action: original_action,
+    tool_name: tool_name,
+    confidence: confidence,
+    confidence_threshold: threshold,
+    evidence: if evidence == "" {
+      "no evidence provided"
+    } else {
+      evidence
+    },
+  }
+}
+
+fn __missing_tool_call_fail_open(error, threshold: float) -> MissingToolCallVerdict {
+  return {
+    action: "ambiguous",
+    original_action: "error",
+    tool_name: "",
+    confidence: 0.0,
+    confidence_threshold: threshold,
+    evidence: "missing tool call classifier failed: " + to_string(error),
+    error: to_string(error),
+  }
+}
+
+/**
+ * missing_tool_call_classifier returns the post-turn classifier used by
+ * agent_loop text-mode recovery. It decides whether a turn with no parsed tool
+ * calls was probably meant to call one, without language-specific substring
+ * lists.
+ *
+ * The agent loop constructs this classifier by default for real provider-backed
+ * text-mode loops and passes through the active loop provider/model unless this
+ * config overrides them. Pass `missing_tool_call_recovery: false` to disable it
+ * or `missing_tool_call_recovery: { ... }` to configure classifier-specific
+ * settings. Mock/custom-caller tests can pass `classifier` inside that config
+ * for deterministic behavior; the live path uses a schema-bound typed-output
+ * checkpoint and fails open to `ambiguous`.
+ *
+ * @effects: [llm.call]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn missing_tool_call_classifier(opts: MissingToolCallOptions = {}) {
+  let cfg = opts ?? {}
+  if type_of(cfg) != "dict" {
+    throw "missing_tool_call_classifier: opts must be a dict or nil; got " + type_of(cfg)
+  }
+  let enabled = cfg.enabled ?? true
+  if type_of(enabled) != "bool" {
+    throw "missing_tool_call_classifier: enabled must be a bool"
+  }
+  let model = __missing_tool_call_string(cfg.model)
+  let threshold = __missing_tool_call_threshold(cfg.confidence_threshold)
+  let classifier = cfg.classifier
+  if classifier != nil && type_of(classifier) != "closure" {
+    throw "missing_tool_call_classifier: classifier must be a closure or nil; got " + type_of(classifier)
+  }
+  return { payload ->
+    if !enabled {
+      return nil
+    }
+    let candidate_tools = __missing_tool_call_candidate_tools(payload)
+    if len(candidate_tools) == 0 {
+      return nil
+    }
+    let classifier_payload = payload
+      + {
+      candidate_tools: candidate_tools,
+      tool_names: __missing_tool_call_tool_names(candidate_tools),
+      confidence_threshold: threshold,
+    }
+    if classifier != nil {
+      let custom = try {
+        classifier(classifier_payload)
+      }
+      if is_err(custom) {
+        let err = unwrap_err(custom)
+        if error_category(err) == "cancelled" {
+          throw err
+        }
+        return __missing_tool_call_fail_open(err, threshold) + {classifier_kind: "custom"}
+      }
+      return __missing_tool_call_normalize(unwrap(custom), candidate_tools, threshold)
+        + {classifier_kind: "custom"}
+    }
+    let schema = __missing_tool_call_schema()
+    var llm_opts = {
+      output_schema: schema,
+      max_tokens: cfg.max_tokens ?? 192,
+      temperature: cfg.temperature ?? 0.0,
+      session_id: payload?.session_id ?? "",
+    }
+    if model != "" {
+      llm_opts = llm_opts + {model: model}
+    }
+    if cfg.provider != nil {
+      llm_opts = llm_opts + {provider: cfg.provider}
+    }
+    for key in ["top_p", "seed", "reasoning_effort", "timeout"] {
+      if cfg[key] != nil {
+        llm_opts[key] = cfg[key]
+      }
+    }
+    let checkpoint = agent_typed_output_checkpoint(
+      "agent.missing_tool_call",
+      __missing_tool_call_prompt(classifier_payload, candidate_tools),
+      schema,
+      llm_opts,
+    )
+    if !checkpoint.ok {
+      return __missing_tool_call_fail_open(checkpoint.error, threshold)
+        + {classifier_kind: "llm", model: model, typed_checkpoint: checkpoint}
+    }
+    return __missing_tool_call_normalize(checkpoint.data, candidate_tools, threshold)
+      + {classifier_kind: "llm", model: model, typed_checkpoint: checkpoint}
+  }
+}

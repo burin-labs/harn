@@ -5,6 +5,7 @@ import {
   agent_session_inject_feedback,
   agent_session_record_skill_event,
 } from "std/agent/state"
+import { missing_tool_call_classifier } from "std/llm/missing_tool_call"
 
 fn __default_done_sentinel(opts) {
   return opts?.done_sentinel
@@ -154,7 +155,7 @@ fn __native_completion_context(opts, has_tool_calls, text) {
  * session (successful OR rejected — a failed tool call still shows
  * the model engaged the tool channel). This is the documented Qwen3
  * thinking + native tools failure signature:
- * reasoning trace narrates tool intent ("let me run git..."), but
+ * reasoning trace narrates a tool action, but
  * the structured tool_calls channel emits nothing at all. Once the
  * model has used the tool channel even once (even unsuccessfully),
  * subsequent prose-only turns are legitimate final-answer signals
@@ -241,7 +242,7 @@ fn __required_tools_text_completion(opts, has_tool_calls, text) {
  * this turn, the loop is in text tool-format, and there is visible prose
  * to inspect. Unlike `__native_completion_context`, this fires for the
  * ~95% text-mode case the native gate excludes. Used to power the
- * fenced-call and named-but-not-called corrective nudges below.
+ * fenced-call and missing-tool-call recovery below.
  */
 fn __text_mode_toolless_turn(opts, has_tool_calls, text) {
   if opts?.daemon {
@@ -292,11 +293,10 @@ fn __agent_bound_tool_names(tools) {
 }
 
 /**
- * Does the text already carry a real tool-call shape? Accepts BOTH the
- * brace object-literal form `name({ ... })` and the braceless
- * `name(key=...)` / `name(key: ...)` form so the named-but-not-called
- * detector does not false-fire on a turn that DID emit a call (e.g. a
- * recovered bare call or a Python-kwarg call the parser may still lift).
+ * Does the text already carry a real tool-call shape? Accepts BOTH the brace
+ * object-literal form `name({ ... })` and the braceless `name(key=...)` /
+ * `name(key: ...)` form so missing-call recovery does not run on a turn that
+ * already contains call syntax.
  */
 fn __text_has_call_shape(text) {
   let body = to_string(text ?? "")
@@ -309,13 +309,63 @@ fn __text_has_call_shape(text) {
   return false
 }
 
+fn __missing_tool_call_recovery_config(opts) {
+  let raw = opts?.missing_tool_call_recovery
+  if type_of(raw) == "bool" && !raw {
+    return {enabled: false, options: {}}
+  }
+  var options = if type_of(raw) == "dict" {
+    raw
+  } else {
+    {}
+  }
+  if options?.provider == nil && opts?.provider != nil {
+    options = options + {provider: opts.provider}
+  }
+  if options?.model == nil && opts?.model != nil {
+    options = options + {model: opts.model}
+  }
+  if type_of(raw) == "dict" {
+    return {enabled: raw?.enabled ?? true, options: options}
+  }
+  return {enabled: true, options: options}
+}
+
+fn __missing_tool_call_recovery_classifier(opts) {
+  let recovery = __missing_tool_call_recovery_config(opts)
+  if !recovery.enabled {
+    return nil
+  }
+  let options = recovery.options
+  let has_test_classifier = type_of(options?.classifier) == "closure"
+  if lowercase(to_string(opts?.provider ?? "")) == "mock" && !has_test_classifier {
+    return nil
+  }
+  if opts?._llm_caller != nil && !has_test_classifier {
+    return nil
+  }
+  return missing_tool_call_classifier(options)
+}
+
+fn __tool_name_in_list(name: string, names: list<string>) -> bool {
+  for candidate in names {
+    if name == candidate {
+      return true
+    }
+  }
+  return false
+}
+
 /**
- * Detect "named-but-not-called": the prose announces a tool action
- * ("I'll use edit...", "Let me run...") naming a bound tool, but the turn
- * emitted no call syntax at all. Returns the named tool or nil.
+ * Classify "intended tool action, no parsed call" through the default typed
+ * recovery path. Classifier failures fail open to no nudge.
  */
-fn __detect_named_not_called(text, opts) {
+fn __classify_missing_tool_call(session, text, opts, iteration) {
   if __text_has_call_shape(text) {
+    return nil
+  }
+  let classifier = __missing_tool_call_recovery_classifier(opts)
+  if classifier == nil {
     return nil
   }
   let tools = opts?.tools
@@ -326,36 +376,39 @@ fn __detect_named_not_called(text, opts) {
   if len(names) == 0 {
     return nil
   }
-  let lowered = lowercase(to_string(text ?? ""))
-  let intent = [
-    "i'll ",
-    "i will ",
-    "let me ",
-    "let's ",
-    "lets ",
-    "i'm going to ",
-    "going to ",
-    "i am going to ",
-    "next i",
-    "now i",
-  ]
-  var has_intent = false
-  for phrase in intent {
-    if contains(lowered, phrase) {
-      has_intent = true
-    }
+  let verdict = try {
+    classifier(
+      {
+        session_id: session.session_id,
+        iteration: iteration,
+        text: text,
+        visible_text: text,
+        tools: tools,
+        tool_names: names,
+        tool_format: opts?.tool_format,
+      },
+    )
   }
-  if !has_intent {
+  if is_err(verdict) {
+    let err = unwrap_err(verdict)
+    if error_category(err) == "cancelled" {
+      throw err
+    }
     return nil
   }
-  for name in names {
-    let n = lowercase(to_string(name))
-    if n == "" {
-      continue
-    }
-    if contains(lowered, n) {
-      return name
-    }
+  let result = unwrap(verdict)
+  if type_of(result) != "dict" {
+    return nil
+  }
+  agent_emit_event(
+    session.session_id,
+    "missing_tool_call_verdict",
+    result
+      + {iteration: iteration, visible_text_prefix: visible_text_excerpt(text)},
+  )
+  let tool_name = result?.tool_name ?? ""
+  if result?.action == "tool_call_intended" && tool_name != "" && __tool_name_in_list(tool_name, names) {
+    return result
   }
   return nil
 }
@@ -364,7 +417,7 @@ fn __detect_named_not_called(text, opts) {
  * TEXT-mode corrective nudges that the native-gated completion
  * confirmation never reaches. Two cases, in priority order:
  *   1. fenced-call attempt → tell the model to emit the call bare.
- *   2. named-but-not-called → tell the model to emit the call it described.
+ *   2. missing-tool-call recovery → tell the model to emit the intended call.
  * One nudge per turn; both are bounded by the loop's `max_nudges` budget.
  * Returns `true` if a content-specific nudge was injected this turn, so the
  * loop can suppress the fallback progress-streak nudge and avoid
@@ -390,21 +443,29 @@ fn __maybe_inject_text_mode_action_nudge(session, opts, has_tool_calls, text, it
     )
     return true
   }
-  let named = __detect_named_not_called(text, opts)
-  if named != nil {
+  let missing = __classify_missing_tool_call(session, text, opts, iteration)
+  if missing != nil {
+    let tool_name = missing.tool_name
     agent_session_inject_feedback(
       session.session_id,
-      "named_tool_not_called",
-      "You named `"
-        + to_string(named)
+      "missing_tool_call",
+      "You appeared to intend a call to `"
+        + to_string(tool_name)
         + "` but did not call it. Emit the call now: <tool_call>\n"
-        + to_string(named)
+        + to_string(tool_name)
         + "({ ... })\n</tool_call>. Do not describe the action again.",
     )
     agent_emit_event(
       session.session_id,
-      "named_tool_not_called_nudge",
-      {iteration: iteration, tool: named, visible_text_prefix: visible_text_excerpt(text)},
+      "missing_tool_call_nudge",
+      {
+        iteration: iteration,
+        tool: tool_name,
+        classifier_action: missing?.action,
+        classifier_confidence: missing?.confidence,
+        classifier_kind: missing?.classifier_kind,
+        visible_text_prefix: visible_text_excerpt(text),
+      },
     )
     return true
   }

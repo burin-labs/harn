@@ -1189,6 +1189,38 @@ impl AgentEventSink for AcpAgentEventSink {
                     }),
                 );
             }
+            AgentEvent::MissingToolCallVerdict {
+                session_id,
+                iteration,
+                action,
+                original_action,
+                tool_name,
+                confidence,
+                confidence_threshold,
+                evidence,
+                language,
+                classifier_kind,
+                model,
+                error,
+            } => {
+                self.emit_agent_event_ext(
+                    "missing_tool_call_verdict",
+                    session_id,
+                    serde_json::json!({
+                        "iteration": iteration,
+                        "action": action,
+                        "originalAction": original_action,
+                        "toolName": tool_name,
+                        "confidence": confidence,
+                        "confidenceThreshold": confidence_threshold,
+                        "evidence": evidence,
+                        "language": language,
+                        "classifierKind": classifier_kind,
+                        "model": model,
+                        "error": error,
+                    }),
+                );
+            }
             AgentEvent::TypedCheckpoint {
                 session_id,
                 checkpoint,

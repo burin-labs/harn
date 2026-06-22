@@ -1819,9 +1819,9 @@ fn __next_progress_count(made_progress, turns_since_progress) {
  * Escalating, depth-keyed copy for the toolless/no-progress churn nudge
  * (M1-1). Bounded: `__agent_loop_run` only invokes this below the hard
  * `max_nudges` stop, so it never nudges forever, and only when the
- * content-specific text-mode nudge (fence / named-but-not-called) did NOT
- * fire this turn — the content nudge takes precedence so a turn is never
- * double-injected; this streak nudge is the fallback for pure-prose churn.
+ * content-specific text-mode nudge (fence / missing-call recovery) did NOT fire
+ * this turn — the content nudge takes precedence so a turn is never
+ * double-injected; this streak nudge is the fallback for toolless churn.
  * Depth is `turns_since_progress`.
  */
 fn __progress_nudge_text(depth, has_tools, tool_mode = "text") {

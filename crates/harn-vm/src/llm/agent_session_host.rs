@@ -2120,6 +2120,26 @@ fn build_agent_event(
             model: get_opt_string("model"),
             error: get_opt_string("error"),
         }),
+        "missing_tool_call_verdict" => Ok(AgentEvent::MissingToolCallVerdict {
+            session_id: session_id.to_string(),
+            iteration: get_usize("iteration"),
+            action: get_string("action"),
+            original_action: get_string("original_action"),
+            tool_name: get_string("tool_name"),
+            confidence: payload_obj
+                .and_then(|m| m.get("confidence"))
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0),
+            confidence_threshold: payload_obj
+                .and_then(|m| m.get("confidence_threshold"))
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.65),
+            evidence: get_string("evidence"),
+            language: get_opt_string("language"),
+            classifier_kind: get_opt_string("classifier_kind"),
+            model: get_opt_string("model"),
+            error: get_opt_string("error"),
+        }),
         "typed_checkpoint" => Ok(AgentEvent::TypedCheckpoint {
             session_id: session_id.to_string(),
             checkpoint: payload.clone(),
@@ -2322,8 +2342,8 @@ fn build_agent_event(
         // Text-mode corrective nudges (cheap/local-model behavioral tips).
         // `fenced_call_attempt_nudge` fires when the model wrapped a tool
         // call in a Markdown fence (```tool_code/call/edit/python/…) that the
-        // parser ignores; `named_tool_not_called_nudge` fires when the model
-        // narrated a bound tool ("I'll use edit…") without emitting any call.
+        // parser ignores; `missing_tool_call_nudge` fires when the model
+        // likely meant to call a bound tool without emitting any call.
         // `no_progress_streak_nudge` is the escalating fallback for pure-prose
         // churn turns that made no successful tool progress for >= 2 turns.
         // All three surface to operators on the FeedbackInjected stream.
@@ -2332,9 +2352,9 @@ fn build_agent_event(
             kind: "fenced_call_attempt_nudge".to_string(),
             content: get_string("fence"),
         }),
-        "named_tool_not_called_nudge" => Ok(AgentEvent::FeedbackInjected {
+        "missing_tool_call_nudge" => Ok(AgentEvent::FeedbackInjected {
             session_id: session_id.to_string(),
-            kind: "named_tool_not_called_nudge".to_string(),
+            kind: "missing_tool_call_nudge".to_string(),
             content: get_string("tool"),
         }),
         "no_progress_streak_nudge" => Ok(AgentEvent::FeedbackInjected {
