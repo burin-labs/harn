@@ -58,7 +58,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `deepseek` | `deepseek-v4-flash*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `deepseek` | `deepseek-chat*` | `any` | no | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | yes |
 | `deepseek` | `deepseek-reasoner*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
-| `fireworks` | `accounts/fireworks/models/gpt-oss-*` | `any` | `effort` | no | no | no | no | yes | no | no | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `json` | no | yes | `text_only` | yes | no |
+| `fireworks` | `accounts/fireworks/models/gpt-oss-*` | `any` | `effort` | no | no | no | no | yes | no | no | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `text` | no | yes | `text_only` | yes | no |
 | `fireworks` | `accounts/fireworks/models/glm-5p*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `json` | yes | yes | `native_unreliable` | yes | yes |
 | `fireworks` | `accounts/fireworks/models/deepseek-v4*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `fireworks` | `accounts/fireworks/models/kimi-k2p*` | `any` | `enabled` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
@@ -247,7 +247,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `deepseek` | `deepseek-v4-pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `fireworks` | `accounts/fireworks/models/deepseek-v4-pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `fireworks` | `accounts/fireworks/models/glm-5p2` | `json` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
-| `fireworks` | `accounts/fireworks/models/gpt-oss-120b` | `json` | `text_only` | - | - | - | - | - | `data not yet collected` |
+| `fireworks` | `accounts/fireworks/models/gpt-oss-120b` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
 | `fireworks` | `accounts/fireworks/models/kimi-k2p6` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `gemini` | `gemini-2.5-flash` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `gemini` | `gemini-2.5-pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |

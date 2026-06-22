@@ -1566,7 +1566,7 @@ thinking_block_style = "inline"
 # multiline-string literals) showed `json` corrupts the file body in 3/3 runs
 # (doubled `\\` -> `\\\\` multiline prefixes, escaped quotes `\"name\"`, and one
 # run leaked literal `\n`/`\"` for the whole file) while `text`/heredoc emitted
-# byte-clean Zig in 3/3 — because a JSON string arg forces the model to escape
+# byte-clean Zig in 3/3 because a JSON string arg forces the model to escape
 # the backslashes the Zig source already needs, and gpt-oss double-escapes them.
 # Tool-call dispatch was 3/3 on BOTH channels (no heredoc-wrapper regression).
 # Pin to `text` so escape-free heredoc bodies carry source verbatim.

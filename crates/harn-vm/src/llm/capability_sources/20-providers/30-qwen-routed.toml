@@ -47,14 +47,22 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "inline"
 
-# Fireworks-hosted GPT-OSS (`accounts/fireworks/models/gpt-oss-120b`) currently
-# bills empty native completions with no dispatchable tool calls in eval JSONL.
-# Keep this route on Harn's fenced-JSON text channel until Fireworks' native
-# tool-call path is proven clean.
+# Fireworks-hosted GPT-OSS (`accounts/fireworks/models/gpt-oss-120b`) bills
+# empty native completions with no dispatchable tool calls in eval JSONL, so it
+# stays off the provider-native channel. Between the two TEXT-channel grammars
+# (`json` fenced-block vs `text` heredoc), an empirical A/B (2026-06-21, real
+# Fireworks calls, 3 samples per arm, task = author a Zig file heavy in `\\`
+# multiline-string literals) showed `json` corrupts the file body in 3/3 runs
+# (doubled `\\` -> `\\\\` multiline prefixes, escaped quotes `\"name\"`, and one
+# run leaked literal `\n`/`\"` for the whole file) while `text`/heredoc emitted
+# byte-clean Zig in 3/3 because a JSON string arg forces the model to escape
+# the backslashes the Zig source already needs, and gpt-oss double-escapes them.
+# Tool-call dispatch was 3/3 on BOTH channels (no heredoc-wrapper regression).
+# Pin to `text` so escape-free heredoc bodies carry source verbatim.
 [[provider.fireworks]]
 model_match = "accounts/fireworks/models/gpt-oss-*"
 native_tools = false
-preferred_tool_format = "json"
+preferred_tool_format = "text"
 text_tool_wire_format_supported = true
 thinking_modes = ["effort"]
 reasoning_effort_supported = true
