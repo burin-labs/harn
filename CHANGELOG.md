@@ -8,6 +8,98 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.133
+
+### Added
+
+- Added the ACP `mcp/status` request so clients can read active MCP host
+  status, including authenticated display identity, through the same Harn-owned
+  status source as `harn.mcp.status()`.
+- Added `std/identity` for Harn-native ActorChain validation, summaries, compact
+  formatting, and structured provenance reports. `std/disclosure` now reuses
+  those helpers for traversal and subject parsing.
+- Extended `harn.mcp.status()` and `mcp_registry_status()` entries with server
+  `transport`/`url` metadata, and added `display_identity` to
+  `harn.mcp.status()` for connected OAuth-backed MCP servers with vetted
+  identity descriptors.
+- **Stdlib slug names, structured schema reports, and clearer `??` formatting.**
+  `std/slug` now provides Harn-written random and deterministic memorable name
+  helpers, `schema_report(...)` exposes non-throwing path-aware validation
+  issues, `std/schema` wraps those reports ergonomically, and `harn fmt`
+  parenthesizes mixed `??`/comparison or logical expressions so the parser's
+  grouping is visible.
+- **Runtime tool_format fallback and equivalence-group catalog guards.** A
+  native-tool-format request whose failure fingerprint says the provider's
+  server-side tool-call parser choked (the Ollama 500 / EOF leak, or any serving
+  stack that 500s/EOFs on the native assumption) now degrades once to the text
+  channel and retries there instead of parse-looping or hard-failing — keyed on
+  the failure signature, never a model name. The provider catalog also gains two
+  build-time invariants: every active row in an `equivalence_group` must declare
+  the same `tier` (a capability of the logical model, not of who hosts it), and a
+  local-runtime row may not carry `strengths` beyond its group's conservative
+  baseline (so a local route cannot inherit a cloud peer's decoration and read as
+  already-capable). Both invariants pass on the shipping catalog and only fail the
+  build if a future change reintroduces the divergence.
+
+### Fixed
+
+- **Release Harn-format gates now skip materialized package dependencies (#3502).**
+  The `fmt-harn` target still checks repo-owned Harn fixtures, but no longer
+  recurses into ignored `.harn/packages` dependency installs under examples.
+- Pin Fireworks-hosted `gpt-oss-*` to the `text` (heredoc) tool channel instead
+  of `json`. An empirical A/B (real Fireworks calls, 3 samples per arm, task =
+  author a backslash-heavy Zig file) showed the `json` channel corrupts source
+  bodies in every sample — gpt-oss double-escapes the backslashes a JSON string
+  arg requires (`\\` becomes `\\\\` Zig multiline prefixes, escaped quotes, and
+  one run leaked literal `\n`/`\"` for the whole file) — while the escape-free
+  heredoc body stayed byte-clean in every sample. Tool-call dispatch succeeded on
+  both channels (no heredoc-wrapper regression).
+- Agent loops now emit a typed `llm_call_start` checkpoint before each
+  blocking model call so thin hosts can keep liveness timers and run monitors
+  honest during long prompt/model phases.
+- Fix the Apple-Silicon MLX local route so `auto`/presets land on real weights.
+  The MLX aliases (`mlx-qwen3.6-27b`, `mlx-qwen36-27b`, …) still pointed at
+  `unsloth/Qwen3.6-27B-UD-MLX-4bit` — the dense vision model that never finished
+  downloading (HF cache held only zero-byte `.incomplete` blobs) — even though
+  burin #2717 switched the launcher to the coding-tuned Qwen3.6-35B-A3B MoE served
+  via `mlx_lm.server`. Repoint every MLX alias (plus the `MLX_MODEL_ID` defaults
+  and the install guidance) to `unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit` (q4) /
+  `-8bit` (q8), add the model rows with the shared `qwen3.6-35b-a3b`
+  logical_model / equivalence_group so eval aggregation compares the MLX and
+  llama.cpp runtimes directly, drop the stale `vision` capability (the MoE is
+  text-only), and carry `reserved_tool_call_token = true` on the MLX `*qwen3.6*`
+  capability row to match the Qwen3.6 tokenizer's reserved `<tool_call>` tokens.
+  The MLX runtime profile still requires a `tool_probe` before native is trusted;
+  if `mlx_lm.server` returns empty OpenAI tool_calls the safe pin is fenced-json.
+- Pin OpenRouter-hosted `openai/gpt-oss-*` to the `text` (heredoc) tool channel
+  instead of `json`. The provider-native channel bills noncommittal on this
+  aggregate route, so it already rode a TEXT channel; between the two text
+  grammars, an empirical A/B (real OpenRouter calls, task = author a
+  backslash-heavy Zig file) showed `text` beats `json` on both dispatch (3/3 vs
+  2/3) and byte-fidelity (3/3 clean vs 0/3) — gpt-oss double-escapes the
+  backslashes a JSON string arg requires and corrupts `\\`-heavy source bodies,
+  while the escape-free heredoc carries them verbatim. Same class as the Fireworks
+  GPT-OSS flip; direct Cerebras/Groq/DeepInfra GPT-OSS rows keep `native`.
+
+### Security
+
+- **Command-risk scanner quoted workspace wipes.** Recursive workspace-wipe
+  detection now treats shell quotes and `$PWD`/`$(pwd)` workspace-root targets
+  the way the shell does, so quoted forms such as `rm -rf "."`,
+  `rm -rf "$PWD"/*`, `find "." -delete`, and quoted `sh -c`/PowerShell/cmd
+  payloads are denied without blocking scoped cleanup like `rm -rf "build/"`.
+  PowerShell `-EncodedCommand` payloads are decoded as UTF-16LE before the same
+  destructive-command policy is applied.
+- **Token redaction covers additional AI-provider key shapes.** Harn's shared
+  redaction and `secret_scan` catalog now covers Hugging Face `hf_...`,
+  Cerebras `csk-...`, Together `tgp_v1_...`, and Google `AIza...` keys across
+  transcripts, receipts, event logs, and stdlib token-redaction calls.
+- **Redaction-sensitive orchestration surfaces now share Harn's provider-aware
+  secret policy.** Crystallization bundles and friction/context-pack records
+  reuse the central redaction catalog for provider tokens, JWTs, private keys,
+  and sensitive key/value assignments while still preserving logical secret
+  references such as `github/webhook-secret`.
+
 ## v0.8.132
 
 ### Added
