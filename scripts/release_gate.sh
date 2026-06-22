@@ -67,7 +67,7 @@ bump_version() {
   local next="$1"
   python3 - "$next" <<'PY'
 from pathlib import Path
-import re, sys
+import json, re, sys
 
 next_version = sys.argv[1]
 major_minor = ".".join(next_version.split(".")[:2])

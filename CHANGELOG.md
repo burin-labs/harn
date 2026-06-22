@@ -8,6 +8,50 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.134
+
+### Added
+
+- **Connector operator runbook.** Added a repo-local first-slice runbook for
+  connector administrators covering credential inventory, dogfood checks,
+  status commands, and placeholder policy for GitHub, Slack, CircleCI,
+  Buildkite, Actions runners, and Harn Cloud gates (#2952).
+
+### Changed
+
+- Updated the ACP Agent Registry submission manifest to the current release,
+  added a drift test for the published binary launch targets, and taught release
+  preparation to keep the manifest version aligned.
+
+### Fixed
+
+- **Command policy write-intent scanning now recognizes compact shell output
+  redirects (#3513).** The deterministic scanner now catches file writes such
+  as `cmd>out`, `1>out`, and `2>err` while leaving descriptor duplication and
+  output sinks such as `2>&1`, `>/dev/null`, and `>NUL` unflagged.
+- **Grounded-review reminders no longer mint phantom `[verified:parse_errors]`
+  signals from innocent substrings in correct code.** A `look`/`read`/`search`/
+  `glob` of a file whose bytes merely contain `"Parse error"` (a string literal
+  or `///` doc comment) is no longer admitted as verifier output — file-display
+  tools render bytes, they do not run a build/test/compiler, so they can never
+  contribute a grounded review finding on a substring match alone. A passing
+  test line whose descriptive name embeds an error phrase (e.g.
+  `parser.test.parse error: unclosed section...OK`) is now skipped because it
+  carries a trailing pass marker. Genuine verifier output — a real compiler
+  `error:` parse-error line or a structured `parse_errors` array — still
+  produces the grounded signal.
+- Hostlib scanner now pairs source files with common prefix/suffix test naming
+  conventions such as `foo_test.go`, `test_foo.py`, `FooTest.java`, and
+  `FooSpec.scala`.
+- **Release bump PRs now satisfy the changelog-fragment gate automatically.**
+  The legacy `release_ship.sh --bump` recovery path labels pure version-bump
+  PRs with `no-changelog-needed` before enabling auto-merge, matching the
+  gate's documented bypass for version-only release paperwork.
+- Made `release_ship.sh --finalize` create release tags with an explicit message
+  so signed-tag Git configurations cannot block on an interactive editor.
+- Fixed release preparation's ACP Agent Registry manifest bump by importing the
+  JSON module used to rewrite the checked-in manifest.
+
 ## v0.8.133
 
 ### Added
