@@ -6,6 +6,8 @@
 
 use crate::scanner::result::FileRecord;
 
+type PairingKey = (String, String);
+
 /// Substrings / suffixes that mark a file as a test for at least one
 /// language.
 const TEST_PATTERNS: &[&str] = &[
@@ -94,19 +96,22 @@ pub fn is_test_file(relative_path: &str) -> bool {
 /// that has a recognizable test-file partner. Mutates `files` in place.
 ///
 /// Heuristic:
-/// 1. Index test files by their leading basename token
-///    (`accounts.integration.test.ts` → `accounts`).
-/// 2. For each non-test file, look up by its leading basename token.
+/// 1. Index test files by a normalized source basename scoped to the final
+///    extension (`accounts.integration.test.ts`, `accounts_test.go`,
+///    `test_accounts.py`, and `AccountsTest.java` all normalize their
+///    basename while staying in their own language extension bucket).
+/// 2. For each non-test file, look up by its normalized basename plus
+///    extension.
 /// 3. Among candidates, pick the one with the largest shared directory
 ///    prefix.
 pub fn map_test_files(files: &mut [FileRecord]) {
-    let mut by_base: std::collections::BTreeMap<String, Vec<String>> =
+    let mut by_base: std::collections::BTreeMap<PairingKey, Vec<String>> =
         std::collections::BTreeMap::new();
     for file in files.iter() {
         if !is_test_file(&file.relative_path) {
             continue;
         }
-        let base = leading_token(&file.file_name);
+        let base = pairing_key(&file.file_name, true);
         by_base
             .entry(base)
             .or_default()
@@ -117,7 +122,7 @@ pub fn map_test_files(files: &mut [FileRecord]) {
         if is_test_file(&file.relative_path) {
             continue;
         }
-        let base = leading_token(&file.file_name);
+        let base = pairing_key(&file.file_name, false);
         let candidates = match by_base.get(&base) {
             Some(c) if !c.is_empty() => c,
             _ => continue,
@@ -131,12 +136,46 @@ pub fn map_test_files(files: &mut [FileRecord]) {
     }
 }
 
-fn leading_token(file_name: &str) -> String {
+fn pairing_key(file_name: &str, is_test: bool) -> PairingKey {
+    let token = file_name.split('.').next().unwrap_or(file_name).to_string();
+    let base = if is_test {
+        normalize_test_token(&token).to_ascii_lowercase()
+    } else {
+        token.to_ascii_lowercase()
+    };
+    (base, file_extension(file_name).to_ascii_lowercase())
+}
+
+fn file_extension(file_name: &str) -> &str {
     file_name
-        .split('.')
-        .next()
-        .unwrap_or(file_name)
-        .to_ascii_lowercase()
+        .rsplit_once('.')
+        .map(|(_, extension)| extension)
+        .unwrap_or("")
+}
+
+fn normalize_test_token(token: &str) -> &str {
+    let without_prefix = token
+        .strip_prefix("test_")
+        .or_else(|| token.strip_prefix("test-"))
+        .unwrap_or(token);
+    strip_first_suffix(
+        without_prefix,
+        &[
+            "_test", "_tests", "_spec", "-test", "-tests", "-spec", "Tests", "Test", "Spec",
+            "Suite", "IT",
+        ],
+    )
+}
+
+fn strip_first_suffix<'a>(value: &'a str, suffixes: &[&str]) -> &'a str {
+    for suffix in suffixes {
+        if let Some(stripped) = value.strip_suffix(suffix) {
+            if !stripped.is_empty() {
+                return stripped;
+            }
+        }
+    }
+    value
 }
 
 fn parent_dir_owned(path: &str) -> String {
@@ -191,8 +230,7 @@ mod tests {
 
     #[test]
     fn pairs_swift_source_with_swift_tests() {
-        // Both files share the leading filename token "Foo" (split on `.`),
-        // so the pairing algorithm matches them.
+        // Dotted test-name variants keep their first basename token.
         let mut files = vec![record("Sources/Foo.swift"), record("Tests/Foo.Tests.swift")];
         map_test_files(&mut files);
         let src = files
@@ -206,14 +244,35 @@ mod tests {
     }
 
     #[test]
-    fn skips_when_leading_token_differs() {
-        // The algorithm only pairs files that share their first dotted
-        // token. `test_foo.py` has token `test_foo`; `foo.py` has `foo` —
-        // they don't pair. Recorded as a known limitation; a future
-        // B-series ticket can layer prefix-stripping on top.
-        let mut files = vec![record("foo.py"), record("test_foo.py")];
+    fn pairs_common_test_affix_conventions() {
+        let mut files = vec![
+            record("src/foo.go"),
+            record("src/foo_test.go"),
+            record("src/user.py"),
+            record("tests/test_user.py"),
+            record("src/account.rb"),
+            record("spec/account_spec.rb"),
+            record("src/Foo.java"),
+            record("test/FooTest.java"),
+            record("src/Widget.scala"),
+            record("test/WidgetSpec.scala"),
+            record("Sources/App.swift"),
+            record("Tests/AppTests.swift"),
+        ];
         map_test_files(&mut files);
-        let src = files.iter().find(|f| f.relative_path == "foo.py").unwrap();
-        assert!(src.corresponding_test_file.is_none());
+        for (source, test) in [
+            ("src/foo.go", "src/foo_test.go"),
+            ("src/user.py", "tests/test_user.py"),
+            ("src/account.rb", "spec/account_spec.rb"),
+            ("src/Foo.java", "test/FooTest.java"),
+            ("src/Widget.scala", "test/WidgetSpec.scala"),
+            ("Sources/App.swift", "Tests/AppTests.swift"),
+        ] {
+            let src = files
+                .iter()
+                .find(|f| f.relative_path == source)
+                .unwrap_or_else(|| panic!("missing source record {source}"));
+            assert_eq!(src.corresponding_test_file.as_deref(), Some(test));
+        }
     }
 }
