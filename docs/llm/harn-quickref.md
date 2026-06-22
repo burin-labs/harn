@@ -1077,7 +1077,7 @@ log(response.logprobs)       // present when requested and returned
 | Option | Type | Default | Notes |
 |---|---|---|---|
 | `provider` | string | `"auto"` | Explicit provider wins. `"auto"` infers from `model`; see the resolution table below. |
-| `model` | string | (inferred) | `local:gemma-4-e4b-it` strips the `local:` transport prefix and routes through Ollama. |
+| `model` | string | (inferred) | Use catalog aliases such as `local-gemma4-e4b` for OpenAI-compatible local servers; use `ollama:gemma4:e4b` for Ollama. |
 | `model_role` | string | nil | Fill missing call options from `[model_roles.<role>]` before normal routing. Explicit options win. `model_role: "merge"` / `"fast_apply"` also reads `HARN_LLM_MERGE_*` and `HARN_LLM_FAST_APPLY_*` provider/model/route-policy overrides. |
 | `max_tokens` | int | 16384 | |
 | `temperature` | float | provider default | |
@@ -1528,7 +1528,7 @@ let schema = {
 }
 let verdict = llm_call_structured(prompt, schema, {
   provider: "auto",
-  model: "local:gemma-4-e4b-it",
+  model: "local-gemma4-e4b",
   system: "You are a strict grader.",
 })
 log(verdict.verdict)
@@ -1639,7 +1639,7 @@ trace) alongside the parsed data, call `llm_call` directly:
 ```harn
 let r = llm_call(prompt, sys, {
   provider: "auto",
-  model: "local:gemma-4-e4b-it",
+  model: "local-gemma4-e4b",
   output_schema: schema,
   output_validation: "error",
   schema_retries: 2,
@@ -1685,7 +1685,7 @@ Batch grading at bounded concurrency:
 let outcome = parallel settle paths with { max_concurrent: 4 } { path ->
   llm_call(read_file(path), GRADER_SYSTEM, {
     provider: "auto",
-    model: "local:gemma-4-e4b-it",
+    model: "local-gemma4-e4b",
     output_schema: grader_schema,
     output_validation: "error",
     schema_retries: 2,

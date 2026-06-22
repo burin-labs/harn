@@ -158,7 +158,7 @@ You are a strict grader...
 pub fn grade(path) {
   return llm_call(read_file(path), GRADER_SYSTEM, {
     provider: "auto",
-    model: "local:gemma-4-e4b-it",
+    model: "local-gemma4-e4b",
   })
 }
 ```
@@ -266,7 +266,7 @@ both support `$1`, `$2`, `${name}` backrefs from the `regex` crate.
 ```harn
 let r = llm_call(prompt, system, {
   provider: "auto",        // infers from model prefix
-  model: "local:gemma-4-e4b-it",
+  model: "local-gemma4-e4b",
   output_schema: schema,
   output_validation: "error",
   schema_retries: 2,       // retry with corrective nudge on schema mismatch
