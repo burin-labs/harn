@@ -501,6 +501,9 @@ EOF
       --body-file "$body_file")"
     echo "$pr_url"
 
+    log_step "Label bump PR"
+    gh pr edit "$pr_url" --add-label "no-changelog-needed"
+
     log_step "Enable bump PR auto-merge"
     gh pr merge "$pr_url" --auto --squash
   else
