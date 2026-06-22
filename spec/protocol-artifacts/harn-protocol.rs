@@ -108,6 +108,8 @@ pub const ACP_DISPATCHED_METHOD_WORKFLOW_RESUME: &str = "workflow/resume";
 pub const ACP_DISPATCHED_METHOD_HARN_WORKFLOW_RESUME: &str = "harn.workflow.resume";
 pub const ACP_DISPATCHED_METHOD_MCP_CATALOG: &str = "mcp/catalog";
 pub const ACP_DISPATCHED_METHOD_HARN_MCP_CATALOG: &str = "harn.mcp.catalog";
+pub const ACP_DISPATCHED_METHOD_MCP_STATUS: &str = "mcp/status";
+pub const ACP_DISPATCHED_METHOD_HARN_MCP_STATUS: &str = "harn.mcp.status";
 pub const ACP_DISPATCHED_METHOD_MCP_AUTHORIZE: &str = "mcp/authorize";
 pub const ACP_DISPATCHED_METHOD_HARN_MCP_AUTHORIZE: &str = "harn.mcp.authorize";
 pub const ACP_DISPATCHED_METHOD_MCP_AUTHORIZE_BATCH: &str = "mcp/authorize_batch";
@@ -166,6 +168,8 @@ pub const ACP_DISPATCHED_METHODS: &[&str] = &[
     "harn.workflow.resume",
     "mcp/catalog",
     "harn.mcp.catalog",
+    "mcp/status",
+    "harn.mcp.status",
     "mcp/authorize",
     "harn.mcp.authorize",
     "mcp/authorize_batch",

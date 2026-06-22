@@ -1,5 +1,7 @@
 use super::*;
 
+const ACP_MCP_STATUS_SCHEMA_VERSION: u32 = 1;
+
 impl AcpServer {
     pub(super) fn handle_agent_resume(&self, params: &serde_json::Value) {
         let session_id = params
@@ -51,6 +53,15 @@ impl AcpServer {
                 &format!("failed to encode mcp catalog: {error}"),
             ),
         }
+    }
+
+    /// `mcp/status`: expose the active Harn MCP host status to thin clients.
+    /// Harn owns the supervision and identity resolution; ACP only projects the
+    /// reusable VM status into the camelCase wire shape used by integration
+    /// requests.
+    pub(super) async fn handle_mcp_status(&self, id: &serde_json::Value) {
+        let report = mcp_status_report(harn_vm::mcp_host::status().await);
+        self.send_response(id, report);
     }
 
     /// `mcp/authorize`: begin an interactive OAuth authorization for an MCP
@@ -598,6 +609,34 @@ fn authorize_batch_response(
     serde_json::json!({ "flows": flows, "skipped": skipped, "failed": failed })
 }
 
+fn mcp_status_report(statuses: Vec<harn_vm::mcp_host::McpHostStatus>) -> serde_json::Value {
+    let servers = statuses
+        .into_iter()
+        .map(mcp_status_server)
+        .collect::<Vec<_>>();
+    serde_json::json!({
+        "schemaVersion": ACP_MCP_STATUS_SCHEMA_VERSION,
+        "servers": servers,
+    })
+}
+
+fn mcp_status_server(status: harn_vm::mcp_host::McpHostStatus) -> serde_json::Value {
+    serde_json::json!({
+        "name": status.name,
+        "transport": status.transport,
+        "url": status.url,
+        "active": status.active,
+        "lazy": status.lazy,
+        "refCount": status.ref_count,
+        "restartCount": status.restart_count,
+        "consecutiveFailures": status.consecutive_failures,
+        "circuit": status.circuit.as_str(),
+        "ejected": status.ejected,
+        "cacheEntries": status.cache_entries,
+        "displayIdentity": status.display_identity,
+    })
+}
+
 /// Project a driver status event into the camelCase params of an
 /// `mcp/authorize_status` notification (kept camelCase for ACP wire consistency
 /// even though the shared type serializes snake_case for the CLI `--json`).
@@ -619,6 +658,7 @@ mod authorize_batch_tests {
     use harn_vm::mcp_bulk_auth::{
         BulkAuthMode, McpAuthPhase, McpAuthStatus, PrepareOutcome, PreparedFlow,
     };
+    use harn_vm::mcp_host::{BreakerState, McpHostStatus};
     use tokio::sync::mpsc;
 
     #[test]
@@ -740,6 +780,36 @@ mod authorize_batch_tests {
         assert_eq!(with_detail["detail"], "discovery failed");
     }
 
+    #[test]
+    fn mcp_status_report_projects_camelcase_identity_fields() {
+        let report = mcp_status_report(vec![McpHostStatus {
+            name: "Notion".to_string(),
+            transport: "http".to_string(),
+            url: Some("https://mcp.notion.com/mcp".to_string()),
+            active: true,
+            lazy: false,
+            ref_count: 2,
+            restart_count: 1,
+            consecutive_failures: 0,
+            circuit: BreakerState::Closed,
+            ejected: false,
+            cache_entries: 3,
+            display_identity: Some("Jane Doe <jane@acme.com> - Acme".to_string()),
+        }]);
+        assert_eq!(report["schemaVersion"], 1);
+        let server = &report["servers"][0];
+        assert_eq!(server["name"], "Notion");
+        assert_eq!(server["transport"], "http");
+        assert_eq!(server["url"], "https://mcp.notion.com/mcp");
+        assert_eq!(server["refCount"], 2);
+        assert_eq!(server["restartCount"], 1);
+        assert_eq!(server["consecutiveFailures"], 0);
+        assert_eq!(server["circuit"], "closed");
+        assert_eq!(server["cacheEntries"], 3);
+        assert_eq!(server["displayIdentity"], "Jane Doe <jane@acme.com> - Acme");
+        assert!(server.get("display_identity").is_none());
+    }
+
     async fn recv_value(rx: &mut mpsc::UnboundedReceiver<String>) -> serde_json::Value {
         let line = rx.recv().await.expect("a frame");
         serde_json::from_str(&line).expect("valid json frame")
@@ -763,6 +833,25 @@ mod authorize_batch_tests {
         assert_eq!(frame["result"]["flows"].as_array().unwrap().len(), 0);
         assert_eq!(frame["result"]["skipped"].as_array().unwrap().len(), 0);
         assert_eq!(frame["result"]["failed"].as_array().unwrap().len(), 0);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn mcp_status_method_returns_versioned_report() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut server =
+            AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
+        server
+            .handle_incoming_message(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 5,
+                "method": "mcp/status",
+                "params": {}
+            }))
+            .await;
+        let frame = recv_value(&mut rx).await;
+        assert_eq!(frame["id"], 5);
+        assert_eq!(frame["result"]["schemaVersion"], 1);
+        assert!(frame["result"]["servers"].is_array());
     }
 
     #[tokio::test(flavor = "current_thread")]
