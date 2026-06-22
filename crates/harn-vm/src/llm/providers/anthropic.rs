@@ -46,6 +46,16 @@ pub(crate) fn claude_generation(model: &str) -> Option<(u32, u32)> {
     None
 }
 
+/// Canonical message-level keys the Anthropic Messages API accepts on an
+/// entry of `messages[]`. Any other key (e.g. the storage-only `reasoning`
+/// metadata that `build_assistant_response_message` stamps onto durable
+/// assistant turns, or OpenAI-shape `tool_calls`) triggers a non-retryable
+/// HTTP 400: `messages.N.<key>: Extra inputs are not permitted`. Anthropic
+/// tool turns are projected as `tool_use` content blocks, not a top-level
+/// `tool_calls` array, so this set is intentionally minimal. `cache_control`
+/// is permitted at the message level for prompt caching.
+const ANTHROPIC_MESSAGE_KEYS: &[&str] = &["role", "content", "cache_control"];
+
 /// True for Claude 4.6 and later — the generation where Anthropic
 /// deprecated the assistant-prefill feature. Opus 4.7, Sonnet 4.6/4.7,
 /// any future -4.8+ model all return 400 when the last message has
@@ -213,6 +223,18 @@ impl AnthropicProvider {
                             crate::llm::content::anthropic_content(&content),
                         );
                     }
+                    // Durable transcript turns carry storage-only metadata
+                    // keys (e.g. `reasoning` from
+                    // `build_assistant_response_message`, OpenAI-shape
+                    // `tool_calls`, `private_reasoning`). The Anthropic
+                    // Messages API rejects ANY non-canonical message key with
+                    // a non-retryable HTTP 400 (`messages.N.reasoning: Extra
+                    // inputs are not permitted`). Strip everything except the
+                    // canonical message-level fields at this egress boundary
+                    // ONLY — the persisted transcript shape is unchanged, so
+                    // replay and other providers' adapters still see
+                    // `message.reasoning`.
+                    object.retain(|key, _| ANTHROPIC_MESSAGE_KEYS.contains(&key.as_str()));
                 }
                 message
             })
@@ -547,6 +569,83 @@ mod tests {
             prefill: None,
             reminder_lifecycle: Vec::new(),
         }
+    }
+
+    #[test]
+    fn stored_reasoning_key_stripped_from_outgoing_messages() {
+        // Reproduces the eval-traced HTTP 400: a persisted assistant turn
+        // carries a top-level `reasoning` key (stamped by
+        // build_assistant_response_message) which, if echoed into the
+        // Anthropic request, returns
+        // `messages.1.reasoning: Extra inputs are not permitted`.
+        let mut opts = base_payload();
+        opts.messages = vec![
+            serde_json::json!({"role": "user", "content": "do the task"}),
+            serde_json::json!({
+                "role": "assistant",
+                "content": [{"type": "text", "text": "Let me start by understanding..."}],
+                "reasoning": "Let me start by understanding the task.",
+                // OpenAI-shape leakage and other storage-only metadata must also
+                // be stripped at the Anthropic egress boundary.
+                "tool_calls": [{"id": "x", "type": "function"}],
+                "private_reasoning": "hidden",
+            }),
+            serde_json::json!({"role": "user", "content": "continue"}),
+        ];
+
+        let body = AnthropicProvider::build_request_body(&opts);
+        let messages = body["messages"].as_array().expect("messages array");
+
+        // The persisted assistant turn (messages[1]) must carry ONLY
+        // canonical Anthropic message keys after projection.
+        let assistant = messages[1].as_object().expect("assistant object");
+        assert!(
+            assistant.get("reasoning").is_none(),
+            "non-canonical `reasoning` key rode into the Anthropic request: {assistant:?}"
+        );
+        assert!(assistant.get("tool_calls").is_none());
+        assert!(assistant.get("private_reasoning").is_none());
+        assert_eq!(
+            assistant.get("role").and_then(|v| v.as_str()),
+            Some("assistant")
+        );
+        assert!(
+            assistant.get("content").is_some(),
+            "content must be preserved (replay/answer continuity)"
+        );
+
+        // Replay-preservation: the SOURCE transcript shape is untouched —
+        // build_request_body must not mutate opts.messages in place.
+        assert_eq!(
+            opts.messages[1].get("reasoning").and_then(|v| v.as_str()),
+            Some("Let me start by understanding the task."),
+            "persisted transcript shape must be unchanged at the storage layer"
+        );
+
+        // Canonical round-trip: plain user/assistant turns with no stored
+        // metadata still serialize their content unchanged.
+        assert_eq!(
+            messages[0].get("content").and_then(|v| v.as_str()),
+            Some("do the task")
+        );
+    }
+
+    #[test]
+    fn cache_control_message_key_survives_anthropic_egress() {
+        // `cache_control` is a canonical message-level field for prompt
+        // caching and must NOT be stripped by the egress sanitizer.
+        let mut opts = base_payload();
+        opts.messages = vec![serde_json::json!({
+            "role": "user",
+            "content": "hello",
+            "cache_control": {"type": "ephemeral"},
+        })];
+        let body = AnthropicProvider::build_request_body(&opts);
+        let msg = body["messages"][0].as_object().expect("message object");
+        assert_eq!(
+            msg.get("cache_control"),
+            Some(&serde_json::json!({"type": "ephemeral"}))
+        );
     }
 
     #[test]
