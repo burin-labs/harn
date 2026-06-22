@@ -158,11 +158,11 @@ fn llamacpp_setup_plan(selector: &str, model_id: &str) -> SetupPlan {
 
 fn mlx_setup_plan(selector: &str, _model_id: &str) -> SetupPlan {
     SetupPlan {
-        title: "MLX vision-language setup",
+        title: "MLX local coding setup (Qwen3.6-35B-A3B MoE)",
         steps: vec![
             "Create runtime: `python3 -m venv ~/.harn/mlx-lm && ~/.harn/mlx-lm/bin/pip install -U pip mlx-lm huggingface_hub`".to_string(),
-            "Download Qwen3.6 MLX: `~/.harn/mlx-lm/bin/hf download unsloth/Qwen3.6-27B-UD-MLX-4bit --local-dir ~/models/qwen3.6-27b/Qwen3.6-27B-UD-MLX-4bit`".to_string(),
-            "Launch through Harn: `harn local launch mlx-qwen36-27b --provider mlx --server-command ~/.harn/mlx-lm/bin/mlx_lm.server --model-source ~/models/qwen3.6-27b/Qwen3.6-27B-UD-MLX-4bit`".to_string(),
+            "Download Qwen3.6 MLX: `~/.harn/mlx-lm/bin/hf download unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit --local-dir ~/models/qwen3.6-35b-a3b-mlx/Qwen3.6-35B-A3B-UD-MLX-4bit`".to_string(),
+            "Launch through Harn: `harn local launch mlx-qwen3.6 --provider mlx --server-command ~/.harn/mlx-lm/bin/mlx_lm.server --model-source ~/models/qwen3.6-35b-a3b-mlx/Qwen3.6-35B-A3B-UD-MLX-4bit`".to_string(),
             "If `mlx_lm.server` is on PATH, omit `--server-command`; the provider catalog supplies that default.".to_string(),
             "Export endpoint: `export MLX_BASE_URL=http://127.0.0.1:8002`".to_string(),
             format!("Verify: `harn provider-ready mlx --model {selector}`"),

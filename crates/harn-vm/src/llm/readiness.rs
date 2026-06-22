@@ -499,17 +499,20 @@ mod tests {
 
     #[test]
     fn model_is_served_accepts_exact_or_prefix() {
-        let models = vec!["unsloth/Qwen3.6-27B-UD-MLX-4bit".to_string()];
-        assert!(model_is_served("unsloth/Qwen3.6-27B-UD-MLX-4bit", &models));
+        let models = vec!["unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit".to_string()];
+        assert!(model_is_served(
+            "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit",
+            &models
+        ));
         assert!(model_is_served("unsloth/Qwen3.6", &models));
-        assert!(!model_is_served("Qwen/Qwen3.6-27B", &models));
+        assert!(!model_is_served("Qwen/Qwen3.6-35B", &models));
     }
 
     #[tokio::test]
     async fn probe_provider_readiness_verifies_served_model() {
         let (base_url, handle) = spawn_models_stub(
             200,
-            r#"{"data":[{"id":"unsloth/Qwen3.6-27B-UD-MLX-4bit"}]}"#,
+            r#"{"data":[{"id":"unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit"}]}"#,
         );
         let result = probe_provider_readiness("mlx", Some("mlx-qwen36-27b"), Some(&base_url)).await;
         handle.join().expect("stub joins");
@@ -517,7 +520,7 @@ mod tests {
         assert_eq!(result.status, ReadinessStatus::Ok);
         assert_eq!(
             result.model.as_deref(),
-            Some("unsloth/Qwen3.6-27B-UD-MLX-4bit")
+            Some("unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit")
         );
     }
 

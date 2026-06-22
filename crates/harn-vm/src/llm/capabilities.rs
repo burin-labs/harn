@@ -2678,8 +2678,8 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
             ("fireworks", "accounts/fireworks/models/qwen3p6-plus"),
             ("dashscope", "qwen3.6-plus"),
             ("local", "Qwen3.6-35B-A3B"),
-            ("mlx", "unsloth/Qwen3.6-27B-UD-MLX-4bit"),
-            ("mlx", "Qwen/Qwen3.6-27B"),
+            ("mlx", "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit"),
+            ("mlx", "Qwen/Qwen3.6-35B-A3B"),
         ] {
             let caps = lookup(provider, model);
             assert!(

@@ -1462,14 +1462,26 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "inline"
 
-# Apple Silicon MLX server (mlx-vlm). OpenAI-compat with vision; honors
-# the same `chat_template_kwargs.preserve_thinking` knob as vLLM, since
-# mlx-vlm reuses HF tokenizers / chat templates.
+# Apple Silicon MLX server. Burin's local MLX route is the coding-tuned
+# Qwen3.6-35B-A3B MoE served via `mlx_lm.server` (text MoE, NOT mlx_vlm) — see
+# burin #2717, which retired the never-downloaded dense vision model
+# `unsloth/Qwen3.6-27B-UD-MLX-4bit`. OpenAI-compat; honors the same
+# `chat_template_kwargs.preserve_thinking` knob as vLLM via the HF chat template.
+# These are the SAME weights as the llama.cpp `qwen3.6-35b-a3b` route
+# (shared equivalence_group), so the same tokenizer caveat applies:
+# `reserved_tool_call_token = true` because Qwen3.6 reserves
+# `<tool_call>`/`</tool_call>` as single special tokens — reusing them as
+# heredoc-text delimiters collapses the loop into opener repetition. native is
+# kept to mirror the probe-validated llama.cpp sibling
+# (`qwen3.6-35b-a3b-ud-q4-k-xl`, validated native on 2026-06-05); the MLX
+# runtime profile still requires a `tool_probe` before native is trusted, and if
+# mlx_lm.server's OpenAI tool_calls come back empty the safe pin is fenced-json
+# (`preferred_tool_format = "json"`), matching the generic `*qwen3.6*` routes.
 [[provider.mlx]]
 model_match = "*qwen3.6*"
 native_tools = true
 preferred_tool_format = "native"
-vision = true
+reserved_tool_call_token = true
 structured_output = "native"
 thinking_modes = ["enabled"]
 auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
