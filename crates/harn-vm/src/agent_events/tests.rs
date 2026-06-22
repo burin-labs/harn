@@ -215,6 +215,98 @@ fn jsonl_sink_lines_are_durable_without_drop_or_explicit_flush() {
 }
 
 #[test]
+fn jsonl_sink_redacts_tool_payloads_before_write() {
+    let dir =
+        std::env::temp_dir().join(format!("harn-redacted-event-log-{}", uuid::Uuid::now_v7()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("event_log.jsonl");
+    let sink = JsonlEventSink::open(&path).unwrap();
+
+    sink.handle_event(&AgentEvent::ToolCall {
+        session_id: "s".into(),
+        tool_call_id: "tc-1".into(),
+        tool_name: "http".into(),
+        kind: None,
+        status: ToolCallStatus::Pending,
+        raw_input: serde_json::json!({
+            "api_key": "raw-api-key-value",
+            "url": "https://user:password@example.com/items?client_secret=raw-client-secret&ok=1"
+        }),
+        parsing: None,
+        audit: None,
+    });
+    sink.handle_event(&AgentEvent::ToolCallUpdate {
+        session_id: "s".into(),
+        tool_call_id: "tc-1".into(),
+        tool_name: "http".into(),
+        status: ToolCallStatus::Completed,
+        raw_output: Some(serde_json::json!({
+            "callback": "https://api.example.com/cb?access_token=raw-access-token&ok=1"
+        })),
+        error: None,
+        duration_ms: None,
+        execution_duration_ms: None,
+        error_category: None,
+        executor: None,
+        parsing: None,
+        raw_input: None,
+        raw_input_partial: None,
+        audit: None,
+    });
+    sink.flush().unwrap();
+
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains("[redacted]") || text.contains("%5Bredacted%5D"));
+    for secret in [
+        "raw-api-key-value",
+        "user:password",
+        "raw-client-secret",
+        "raw-access-token",
+    ] {
+        assert!(
+            !text.contains(secret),
+            "JSONL event sink persisted secret {secret}: {text}"
+        );
+    }
+
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_dir(&dir);
+}
+
+#[test]
+fn event_log_sink_redacts_tool_payloads_before_append() {
+    use crate::event_log::{AnyEventLog, EventLog, MemoryEventLog, Topic};
+
+    let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(8)));
+    let sink = EventLogSink::new(log.clone(), "s");
+    sink.handle_event(&AgentEvent::ToolCall {
+        session_id: "s".into(),
+        tool_call_id: "tc-1".into(),
+        tool_name: "http".into(),
+        kind: None,
+        status: ToolCallStatus::Pending,
+        raw_input: serde_json::json!({
+            "authorization": "Bearer raw-bearer-value",
+            "url": "https://user:password@example.com/items?sig=raw-signature&ok=1"
+        }),
+        parsing: None,
+        audit: None,
+    });
+
+    let topic = Topic::new("observability.agent_events.s").unwrap();
+    let events = futures::executor::block_on(log.read_range(&topic, None, 8)).unwrap();
+    assert_eq!(events.len(), 1);
+    let persisted = serde_json::to_string(&events[0].1).unwrap();
+    assert!(persisted.contains("[redacted]") || persisted.contains("%5Bredacted%5D"));
+    for secret in ["raw-bearer-value", "user:password", "raw-signature"] {
+        assert!(
+            !persisted.contains(secret),
+            "event-log sink appended secret {secret}: {persisted}"
+        );
+    }
+}
+
+#[test]
 fn structural_validator_decision_round_trips_through_jsonl_sink() {
     use std::io::{BufRead, BufReader};
     let dir = std::env::temp_dir().join(format!(

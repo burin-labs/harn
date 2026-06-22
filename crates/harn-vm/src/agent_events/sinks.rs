@@ -174,7 +174,11 @@ impl AgentEventSink for JsonlEventSink {
             frame_depth: None,
             event: event.clone(),
         };
-        if let Ok(line) = serde_json::to_string(&envelope) {
+        let Ok(mut envelope_json) = serde_json::to_value(&envelope) else {
+            return;
+        };
+        crate::redact::current_policy().redact_json_in_place(&mut envelope_json);
+        if let Ok(line) = serde_json::to_string(&envelope_json) {
             // One line, newline-terminated — JSON Lines spec.
             // Errors here are swallowed on purpose; a failing write
             // must never crash the agent loop, and the run record
@@ -213,7 +217,8 @@ impl AgentEventSink for EventLogSink {
         headers.insert("session_id".to_string(), self.session_id.clone());
         let log = self.log.clone();
         let topic = self.topic.clone();
-        let record = EventLogRecord::new(event_kind, payload).with_headers(headers);
+        let mut record = EventLogRecord::new(event_kind, payload).with_headers(headers);
+        record.redact_in_place(&crate::redact::current_policy());
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
                 let _ = log.append(&topic, record).await;
