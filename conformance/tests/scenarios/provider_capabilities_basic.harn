@@ -99,8 +99,8 @@ pipeline test(task) {
   let fireworks_gpt_oss = provider_capabilities("fireworks", "accounts/fireworks/models/gpt-oss-120b")
   assert(!fireworks_gpt_oss.native_tools, "Fireworks GPT-OSS disables native tools")
   assert(
-    fireworks_gpt_oss.preferred_tool_format == "json",
-    "Fireworks GPT-OSS defaults to JSON text tools",
+    fireworks_gpt_oss.preferred_tool_format == "text",
+    "Fireworks GPT-OSS defaults to heredoc text tools",
   )
   assert(
     fireworks_gpt_oss.text_tool_wire_format_supported,
