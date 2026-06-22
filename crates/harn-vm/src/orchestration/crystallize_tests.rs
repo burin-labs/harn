@@ -604,6 +604,24 @@ fn validate_rejects_unsupported_schema_version() {
 }
 
 #[test]
+fn validate_rejects_raw_required_secret_values() {
+    let traces = version_traces(3);
+    let artifacts = crystallize_traces(traces.clone(), CrystallizeOptions::default()).unwrap();
+    let mut bundle =
+        build_crystallization_bundle(artifacts, &traces, BundleOptions::default()).unwrap();
+    bundle.manifest.required_secrets = vec!["sk-live-secret".to_string()];
+    let dir = tempfile::tempdir().unwrap();
+    write_crystallization_bundle(&bundle, dir.path()).unwrap();
+
+    let validation = validate_crystallization_bundle(dir.path()).unwrap();
+    assert!(!validation.is_ok());
+    assert!(validation
+        .problems
+        .iter()
+        .any(|problem| problem.contains("required_secrets")));
+}
+
+#[test]
 fn redacts_secret_like_values_in_fixtures() {
     // Build secret-shaped strings at runtime so we exercise the
     // redaction prefixes (`xoxb-`, `ghp_`, `sk-`) without checking in
@@ -615,6 +633,7 @@ fn redacts_secret_like_values_in_fixtures() {
     let slack_secret = format!("{slack_prefix}1234567890-{pad}");
     let github_secret = format!("{github_prefix}{pad}");
     let openai_secret = format!("{openai_prefix}{pad}");
+    let huggingface_secret = format!("hf_{}", "B".repeat(24));
 
     let mut secret_action = CrystallizationAction {
         id: "secret".to_string(),
@@ -633,6 +652,10 @@ fn redacts_secret_like_values_in_fixtures() {
     secret_action
         .metadata
         .insert("api_key".to_string(), json!(openai_secret));
+    secret_action.metadata.insert(
+        "freeform_note".to_string(),
+        json!(format!("fallback model token {huggingface_secret}")),
+    );
 
     let mut trace = CrystallizationTrace {
         id: "trace_secret".to_string(),
@@ -650,6 +673,13 @@ fn redacts_secret_like_values_in_fixtures() {
     assert_eq!(inputs.get("authorization"), Some(&json!("[redacted]")));
     assert_eq!(inputs.get("version"), Some(&json!("0.7.1")));
     assert_eq!(action.metadata.get("api_key"), Some(&json!("[redacted]")));
+    let note = action
+        .metadata
+        .get("freeform_note")
+        .and_then(|value| value.as_str())
+        .unwrap();
+    assert!(note.contains("<redacted:huggingface_token:"));
+    assert!(!note.contains(&huggingface_secret));
 }
 
 #[test]

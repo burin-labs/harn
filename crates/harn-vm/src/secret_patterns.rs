@@ -115,4 +115,11 @@ pub(crate) const DEFAULT_SECRET_PATTERN_SPECS: &[SecretPatternSpec] = &[
         title: "Bearer token",
         regex: r"(?i)\bBearer\s+[A-Za-z0-9._\-+/=]{12,}",
     },
+    SecretPatternSpec {
+        redaction_name: "sensitive_assignment",
+        detector: "sensitive-assignment",
+        source: "detect-secrets-keyword-detector",
+        title: "Sensitive key/value assignment",
+        regex: r#"(?i)\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|password|passwd|secret|token)\s*[:=]\s*["']?[A-Za-z0-9._\-+/=]{6,}["']?"#,
+    },
 ];

@@ -347,6 +347,16 @@ mod tests {
     }
 
     #[test]
+    fn replaces_sensitive_assignments_inside_text() {
+        run_clean();
+        let input = "retry with token=abc123 and max_tokens=200";
+        let out = scan_secret_patterns(input, crate::redact::REDACTED_PLACEHOLDER);
+        assert!(out.contains("<redacted:sensitive_assignment:"));
+        assert!(!out.contains("token=abc123"));
+        assert!(out.contains("max_tokens=200"));
+    }
+
+    #[test]
     fn replaces_jwt_tokens() {
         run_clean();
         let input = "token=eyJabcd.eyJefgh.signature_pad here";
@@ -468,5 +478,6 @@ mod tests {
         assert!(names.contains(&"google_api_key"));
         assert!(names.contains(&"private_key_block"));
         assert!(names.contains(&"bearer_token"));
+        assert!(names.contains(&"sensitive_assignment"));
     }
 }

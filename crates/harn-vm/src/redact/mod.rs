@@ -279,6 +279,22 @@ impl RedactionPolicy {
         }
     }
 
+    /// Conservative predicate for fields that must contain logical
+    /// secret references rather than raw credential material.
+    ///
+    /// This is intentionally broader than [`redact_string`]: short
+    /// fake-looking values such as `sk-live-secret` are useful test
+    /// sentinels and should be rejected from `required_secrets` /
+    /// context-pack manifests even though the free-form string
+    /// redactor avoids replacing such short text globally.
+    pub fn looks_like_secret_value(&self, value: &str) -> bool {
+        let trimmed = value.trim();
+        !trimmed.is_empty()
+            && (self.redact_string(trimmed).as_ref() != trimmed
+                || has_secret_prefix(trimmed)
+                || is_long_bare_secret_candidate(trimmed))
+    }
+
     /// If `value` is a single URL with credentials or sensitive query
     /// params, return the redacted form. Standalone URLs are common in
     /// logged request envelopes; we don't try to walk arbitrary text
@@ -425,6 +441,22 @@ fn compact_secret_name(lower: &str) -> String {
         .chars()
         .filter(|ch| *ch != '_' && *ch != '-')
         .collect()
+}
+
+fn has_secret_prefix(trimmed: &str) -> bool {
+    trimmed.starts_with("sk-")
+        || trimmed.starts_with("ghp_")
+        || trimmed.starts_with("ghs_")
+        || trimmed.starts_with("xoxb-")
+        || trimmed.starts_with("xoxp-")
+        || trimmed.starts_with("AKIA")
+}
+
+fn is_long_bare_secret_candidate(trimmed: &str) -> bool {
+    trimmed.len() > 48
+        && trimmed
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
 }
 
 thread_local! {
@@ -635,5 +667,14 @@ mod tests {
         assert!(out.contains("<redacted:aws_access_key:"));
         assert!(!out.contains("AKIAABCDEFGHIJKLMNOP"));
         assert!(!out.contains("sk-proj-abcdefghijklmnopqrstuvwxyz0123456789ABCD"));
+    }
+
+    #[test]
+    fn looks_like_secret_value_accepts_logical_secret_references() {
+        let policy = RedactionPolicy::default();
+        assert!(policy.looks_like_secret_value("sk-live-secret"));
+        assert!(policy.looks_like_secret_value("AKIAABCDEFGHIJKLMNOP"));
+        assert!(!policy.looks_like_secret_value("github/webhook-secret"));
+        assert!(!policy.looks_like_secret_value("SPLUNK_READ_TOKEN"));
     }
 }

@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
 use regex::Regex;
@@ -95,14 +95,24 @@ pub fn scan_content(content: &str) -> Vec<SecretFinding> {
             .then(left.end_offset.cmp(&right.end_offset))
             .then(left.detector.cmp(&right.detector))
     });
-    let specific_spans: BTreeSet<(usize, usize)> = findings
+    let higher_specificity_spans = findings
         .iter()
-        .filter(|finding| finding.detector != "high-entropy-credential-assignment")
-        .map(|finding| (finding.start_offset, finding.end_offset))
-        .collect();
+        .map(|finding| {
+            (
+                finding.start_offset,
+                finding.end_offset,
+                detector_specificity(&finding.detector),
+            )
+        })
+        .collect::<Vec<_>>();
     findings.retain(|finding| {
-        finding.detector != "high-entropy-credential-assignment"
-            || !specific_spans.contains(&(finding.start_offset, finding.end_offset))
+        let specificity = detector_specificity(&finding.detector);
+        !higher_specificity_spans
+            .iter()
+            .any(|(start, end, other_specificity)| {
+                *other_specificity > specificity
+                    && spans_overlap((finding.start_offset, finding.end_offset), (*start, *end))
+            })
     });
     findings.dedup_by(|left, right| {
         left.detector == right.detector
@@ -110,6 +120,18 @@ pub fn scan_content(content: &str) -> Vec<SecretFinding> {
             && left.end_offset == right.end_offset
     });
     findings
+}
+
+fn detector_specificity(detector: &str) -> u8 {
+    match detector {
+        "sensitive-assignment" => 0,
+        "high-entropy-credential-assignment" => 1,
+        _ => 2,
+    }
+}
+
+fn spans_overlap(left: (usize, usize), right: (usize, usize)) -> bool {
+    left.0 < right.1 && right.0 < left.1
 }
 
 pub async fn append_secret_scan_audit<L: EventLog + ?Sized>(
@@ -310,6 +332,7 @@ mod tests {
     use super::*;
 
     use crate::event_log::{EventLog, MemoryEventLog};
+    use std::collections::BTreeSet;
 
     #[test]
     fn scan_content_detects_specific_rules_and_entropy_rule() {
@@ -326,6 +349,23 @@ config = { client_secret: "QWxhZGRpbjpPcGVuU2VzYW1lQWNjZXNzVG9rZW4=" }
         assert!(findings
             .iter()
             .any(|finding| finding.detector == "high-entropy-credential-assignment"));
+        assert!(!findings
+            .iter()
+            .any(|finding| finding.detector == "sensitive-assignment"));
+    }
+
+    #[test]
+    fn scan_content_deduplicates_generic_assignment_overlaps() {
+        let findings = scan_content(r#"token = "ghp_1234567890abcdefghijklmnopqrstuvwxyzAB""#);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].detector, "github-token");
+    }
+
+    #[test]
+    fn scan_content_keeps_generic_assignment_without_specific_detector() {
+        let findings = scan_content(r#"token = "secret123""#);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].detector, "sensitive-assignment");
     }
 
     #[test]
