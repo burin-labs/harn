@@ -3460,15 +3460,16 @@ mod tests {
             "text"
         );
         // GPT-OSS tool defaults are provider-specific: aggregate OpenRouter
-        // and Fireworks routes use Harn's JSON text-channel tools, while direct
-        // native-capable hosts stay on provider-native tool calls.
+        // uses Harn's JSON text-channel tools, Fireworks uses Harn's heredoc
+        // text-channel tools, and direct native-capable hosts stay on
+        // provider-native tool calls.
         assert_eq!(
             default_tool_format("openai/gpt-oss-120b", "openrouter"),
             "json"
         );
         assert_eq!(
             default_tool_format("accounts/fireworks/models/gpt-oss-120b", "fireworks"),
-            "json"
+            "text"
         );
         assert_eq!(default_tool_format("gpt-oss-120b", "cerebras"), "native");
         assert_eq!(

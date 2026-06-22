@@ -3787,7 +3787,7 @@
       "tool_support": {
         "native": false,
         "text": true,
-        "preferred_format": "json",
+        "preferred_format": "text",
         "parity": "text_only",
         "tool_search": []
       },
