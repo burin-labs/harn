@@ -218,6 +218,7 @@
 - [Connector architecture status](./connectors/architecture.md)
 - [Connector parity matrix](./connectors/parity-matrix.md)
 - [Connector catalog](./connectors/catalog.md)
+- [Connector operator runbook](./connectors/operator-runbook.md)
 - [Connector testkit](./connectors/testkit.md)
 - [Triage inbox envelopes](./connectors/triage-inbox.md)
 - [Cron connector](./connectors/cron.md)
