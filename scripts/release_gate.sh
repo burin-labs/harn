@@ -44,7 +44,7 @@ next_version() {
   local bump="$1"
   python3 - "$bump" <<'PY'
 from pathlib import Path
-import re, sys
+import json, re, sys
 bump = sys.argv[1]
 text = Path("Cargo.toml").read_text()
 m = re.search(r'^version = "([^"]+)"', text, re.M)
@@ -106,6 +106,29 @@ for crate_dir in crate_dirs:
     new_text = pattern.sub(rewrite, original)
     if new_text != original:
         manifest.write_text(new_text)
+
+# Keep the checked-in ACP Agent Registry submission aligned with the
+# release being prepared. The registry requires concrete archive URLs
+# for the first submission; after listing, its own updater follows
+# GitHub Releases, but this local artifact should not drift again.
+agent_manifest = Path("spec/acp-registry/harn/agent.json")
+if agent_manifest.exists():
+    data = json.loads(agent_manifest.read_text())
+    data["version"] = next_version
+    binary = data.get("distribution", {}).get("binary", {})
+    if isinstance(binary, dict):
+        for entry in binary.values():
+            if not isinstance(entry, dict):
+                continue
+            archive = entry.get("archive")
+            if not isinstance(archive, str) or "/" not in archive:
+                continue
+            filename = archive.rsplit("/", 1)[-1]
+            entry["archive"] = (
+                f"https://github.com/burin-labs/harn/releases/download/"
+                f"v{next_version}/{filename}"
+            )
+    agent_manifest.write_text(json.dumps(data, indent=2) + "\n")
 PY
 }
 
