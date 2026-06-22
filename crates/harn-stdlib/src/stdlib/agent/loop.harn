@@ -149,6 +149,26 @@ fn __llm_provider_error(err, llm_opts) {
   }
 }
 
+fn __agent_loop_emit_llm_call_start(llm_opts) {
+  let session_id = to_string(llm_opts?.session_id ?? "")
+  if session_id == "" {
+    return nil
+  }
+  let checkpoint = {
+    kind: "llm_call_start",
+    phase: "llm_call",
+    iteration: to_int(llm_opts?._iteration ?? 0),
+    attempt: to_int(llm_opts?._truncation_auto_continue_attempt ?? 0) + 1,
+    context_overflow_recovery_attempt: to_int(llm_opts?._context_overflow_recovery_attempt ?? 0),
+    provider: to_string(llm_opts?.provider ?? ""),
+    model: to_string(llm_opts?.model ?? ""),
+    tool_format: to_string(llm_opts?.tool_format ?? ""),
+    final_wrapup: llm_opts?._final_wrapup ?? false,
+  }
+  agent_emit_event(session_id, "typed_checkpoint", checkpoint)
+  return nil
+}
+
 fn __validate_caller_result(r) {
   if type_of(r) != "dict" {
     throw "agent_loop: llm_caller must return a dict; got " + type_of(r)
@@ -165,6 +185,7 @@ fn __validate_caller_result(r) {
 }
 
 fn __invoke_llm(message, turn_system, llm_opts) {
+  __agent_loop_emit_llm_call_start(llm_opts)
   let caller = llm_opts?._llm_caller
   if caller == nil {
     return __default_invoke_llm(message, turn_system, llm_opts)

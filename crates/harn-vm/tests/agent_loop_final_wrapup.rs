@@ -59,6 +59,72 @@ fn out_lines(raw: &str) -> Vec<String> {
         .collect()
 }
 
+#[test]
+fn agent_loop_emits_llm_call_start_checkpoint_for_main_call() {
+    let raw = run_with_bridge(
+        r#"
+import { agent_capture_events } from "std/agent/events"
+
+fn llm_call_start_events(events) {
+  return events.filter({ event -> event.type == "typed_checkpoint" && event.checkpoint?.kind == "llm_call_start" })
+}
+
+pipeline main(task) {
+  let session = "agent-loop-llm-call-start-" + uuid()
+  let caller = { call -> return {
+    ok: true,
+    value: {
+      text: "<user_response>done</user_response>\n<done>##DONE##</done>",
+      provider: call?.opts?.provider ?? "",
+      model: call?.opts?.model ?? "",
+      input_tokens: 0,
+      output_tokens: 0,
+    },
+  } }
+  let captured = agent_capture_events(
+    session,
+    fn() { return agent_loop(
+      "finish",
+      nil,
+      {
+        provider: "mock",
+        model: "checkpoint-model",
+        session_id: session,
+        llm_caller: caller,
+        loop_until_done: true,
+        done_judge: false,
+        max_iterations: 1,
+        tool_format: "text",
+      },
+    ) },
+  )
+  let starts = llm_call_start_events(captured.events)
+  let checkpoint = starts[0].checkpoint
+  log(captured.result.status)
+  log(len(starts))
+  log(checkpoint.kind)
+  log(checkpoint.iteration)
+  log(checkpoint.attempt)
+  log(checkpoint.provider)
+  log(checkpoint.model)
+  log(checkpoint.tool_format)
+  log(checkpoint.final_wrapup)
+}
+"#,
+    )
+    .expect("script must run");
+    let lines = out_lines(&raw);
+    assert_eq!(lines[0], "done", "lines: {lines:?}");
+    assert_eq!(lines[1], "1", "expected one checkpoint; lines: {lines:?}");
+    assert_eq!(lines[2], "llm_call_start", "lines: {lines:?}");
+    assert_eq!(lines[3], "1", "lines: {lines:?}");
+    assert_eq!(lines[4], "1", "lines: {lines:?}");
+    assert_eq!(lines[5], "mock", "lines: {lines:?}");
+    assert_eq!(lines[6], "checkpoint-model", "lines: {lines:?}");
+    assert_eq!(lines[7], "text", "lines: {lines:?}");
+    assert_eq!(lines[8], "false", "lines: {lines:?}");
+}
+
 /// Pipeline whose stub LLM always emits a tool call until `max_iterations`
 /// runs out. The stub distinguishes the wrap-up call via the `_final_wrapup`
 /// flag the loop sets on `llm_opts`; on that call it returns a clean
