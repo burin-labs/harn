@@ -599,7 +599,11 @@ ensure_tag_at_head() {
     fi
     echo "Tag already exists at HEAD: $tag"
   else
-    git tag "$tag"
+    # Some developer machines set tag.gpgSign/tag.forceSignAnnotated. In that
+    # configuration even plain `git tag <name>` can become an annotated signed
+    # tag and open $EDITOR for the message. Finalization must be noninteractive,
+    # so provide the stable release message explicitly.
+    git tag -m "Release $tag" "$tag"
   fi
 }
 
