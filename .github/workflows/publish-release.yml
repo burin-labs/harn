@@ -382,7 +382,7 @@ jobs:
           cache-bin: false
 
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@0631aa6515c7d545823c67cfae7ef4fc7f490154 # v2.81.8
+        uses: taiki-e/install-action@15449e3094499af05d8d964a1c884208e4b8b595 # v2.81.11
         continue-on-error: true
         with:
           tool: nextest@0.9.133
