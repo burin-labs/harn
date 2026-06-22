@@ -27,7 +27,7 @@ No benchmark summary is baked into this checked-in page. To layer local empirica
 | `OpenAI-compatible local server` | OpenAI-compatible chat completions | `local-gemma4` | `text` | yes | yes | `native` / `delimited` | `enabled` | no | `low` | `not_recorded` |
 | `Minimax` | OpenAI-compatible chat completions | `minimax:MiniMax-M2.5-highspeed` | `native` | yes | yes | `delimited` / `delimited` | `enabled` | yes | `high` | `not_recorded` |
 | `Mistral via OpenRouter` | OpenAI-compatible chat completions through OpenRouter | `openrouter:mistralai/mistral-small-2603` | `native` | yes | yes | `native` / `native_json` | none | yes | `medium` | `not_recorded` |
-| `MLX OpenAI-compatible server` | OpenAI-compatible MLX server | `mlx-qwen3.6-27b` | `native` | yes | yes | `native` / `delimited` | `disable_directive:/no_think,enabled` | no | `medium` | `not_recorded` |
+| `MLX OpenAI-compatible server` | OpenAI-compatible MLX server | `mlx-qwen3.6` | `native` | yes | yes | `native` / `delimited` | `disable_directive:/no_think,enabled` | no | `medium` | `not_recorded` |
 | `Moonshot` | OpenAI-compatible chat completions | `moonshot:moonshot/kimi-k2.6` | `native` | yes | yes | `native` / `native_json` | `enabled` | yes | `high` | `not_recorded` |
 | `Nvidia` | OpenAI-compatible chat completions | `nvidia:nvidia/minimax-m2.7` | `native` | yes | yes | `delimited` / `delimited` | `enabled` | yes | `high` | `not_recorded` |
 | `Ollama` | Ollama native chat API | `devstral-small-2` | `text` | no | yes | `format_kw` / `delimited` | none | no | `high` | `not_recorded` |
@@ -209,13 +209,13 @@ MCP notes:
 ### MLX OpenAI-compatible server
 
 - catalog provider: `mlx`
-- recommended route: `mlx-qwen3.6-27b` (`unsloth/Qwen3.6-27B-UD-MLX-4bit`)
+- recommended route: `mlx-qwen3.6` (`unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit`)
 - endpoint style: OpenAI-compatible MLX server
 - recommended Harn options:
 
 ```toml
 provider = "mlx"
-model = "mlx-qwen3.6-27b"
+model = "mlx-qwen3.6"
 tool_format = "native"
 ```
 
@@ -225,11 +225,11 @@ Notes:
 
 Caveats:
 
-- `mlx-vlm` server flags vary by release; launch first, then verify with `harn provider-ready mlx`.
+- `mlx_lm.server` flags vary by release; launch first, then verify with `harn provider-ready mlx`.
 
 Local setup:
 
-- Run `harn models install local-qwen3.6-27b` for the venv, download, launch, and verification commands.
+- Run `harn models install mlx-qwen3.6` for the venv, download, launch, and verification commands.
 
 ### Ollama
 

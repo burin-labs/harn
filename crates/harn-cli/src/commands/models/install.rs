@@ -230,10 +230,10 @@ mod tests {
 
     #[test]
     fn setup_plan_exists_for_mlx_qwen_alias() {
-        let resolved = harn_vm::llm_config::resolve_model_info("local-qwen3.6-27b");
-        let plan = setup_plan_for("local-qwen3.6-27b", &resolved.provider, &resolved.id)
+        let resolved = harn_vm::llm_config::resolve_model_info("mlx-qwen3.6");
+        let plan = setup_plan_for("mlx-qwen3.6", &resolved.provider, &resolved.id)
             .expect("MLX setup plan");
-        assert_eq!(plan.title, "MLX vision-language setup");
+        assert_eq!(plan.title, "MLX local coding setup (Qwen3.6-35B-A3B MoE)");
         assert!(plan.steps.iter().any(|step| step.contains("mlx_lm.server")));
     }
 }

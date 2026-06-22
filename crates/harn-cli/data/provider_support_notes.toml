@@ -216,21 +216,21 @@ id = "mlx"
 catalog_provider = "mlx"
 display_name = "MLX OpenAI-compatible server"
 endpoint_style = "OpenAI-compatible MLX server"
-recommended_model = "unsloth/Qwen3.6-27B-UD-MLX-4bit"
-recommended_selector = "mlx-qwen3.6-27b"
+recommended_model = "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit"
+recommended_selector = "mlx-qwen3.6"
 recommended_tool_format = "native"
 usage_confidence = "medium"
 recommended_options = [
   'provider = "mlx"',
-  'model = "mlx-qwen3.6-27b"',
+  'model = "mlx-qwen3.6"',
   'tool_format = "native"',
 ]
 notes = [
   "MLX routes use native tools only after the served identity and tool probe match the cataloged model.",
 ]
 caveats = [
-  "`mlx-vlm` server flags vary by release; launch first, then verify with `harn provider-ready mlx`.",
+  "`mlx_lm.server` flags vary by release; launch first, then verify with `harn provider-ready mlx`.",
 ]
 local_setup_notes = [
-  "Run `harn models install local-qwen3.6-27b` for the venv, download, launch, and verification commands.",
+  "Run `harn models install mlx-qwen3.6` for the venv, download, launch, and verification commands.",
 ]

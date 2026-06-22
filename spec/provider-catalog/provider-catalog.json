@@ -5953,21 +5953,25 @@
       ]
     },
     {
-      "id": "unsloth/Qwen3.6-27B-UD-MLX-4bit",
-      "name": "Qwen3.6 27B (MLX 4-bit)",
+      "id": "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit",
+      "name": "Qwen3.6 35B-A3B (MLX 4-bit)",
       "provider": "mlx",
       "aliases": [
         "local-qwen3.6-27b",
+        "mlx-qwen3.6",
         "mlx-qwen3.6-27b",
         "mlx-qwen3.6-27b-q4",
+        "mlx-qwen3.6-q4",
         "mlx-qwen36-27b"
       ],
       "context_window": 262144,
+      "logical_model": "qwen3.6-35b-a3b",
+      "equivalence_group": "qwen3.6-35b-a3b",
+      "runtime_context_window": 65536,
       "stream_timeout": 900.0,
       "modalities": {
         "input": [
-          "text",
-          "image"
+          "text"
         ],
         "output": [
           "text"
@@ -6010,7 +6014,6 @@
       "capability_tags": [
         "streaming",
         "tools",
-        "vision",
         "thinking",
         "structured_output"
       ],
@@ -6019,8 +6022,75 @@
       "tier": "mid",
       "open_weight": true,
       "strengths": [
-        "coding",
-        "vision"
+        "coding"
+      ]
+    },
+    {
+      "id": "unsloth/Qwen3.6-35B-A3B-UD-MLX-8bit",
+      "name": "Qwen3.6 35B-A3B (MLX 8-bit)",
+      "provider": "mlx",
+      "aliases": [
+        "mlx-qwen3.6-q8"
+      ],
+      "context_window": 262144,
+      "logical_model": "qwen3.6-35b-a3b",
+      "equivalence_group": "qwen3.6-35b-a3b",
+      "runtime_context_window": 65536,
+      "stream_timeout": 900.0,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "delimited",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": true
+      },
+      "prompt_cache": false,
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [
+        "local"
+      ],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "qwen",
+      "lineage": "qwen3",
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "coding"
       ]
     },
     {
@@ -12541,9 +12611,8 @@
     },
     {
       "name": "local-qwen3.6-27b",
-      "model_id": "unsloth/Qwen3.6-27B-UD-MLX-4bit",
-      "provider": "mlx",
-      "tool_format": "native"
+      "model_id": "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit",
+      "provider": "mlx"
     },
     {
       "name": "local-qwen3.6-gguf",
@@ -12589,10 +12658,21 @@
       "provider": "minimax"
     },
     {
-      "name": "mlx-qwen3.6-27b",
-      "model_id": "unsloth/Qwen3.6-27B-UD-MLX-4bit",
+      "name": "mlx-qwen3.6",
+      "model_id": "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit",
       "provider": "mlx",
-      "tool_format": "native",
+      "tool_calling": {
+        "native": "unknown",
+        "text": "unknown",
+        "streaming_native": "unknown",
+        "fallback_mode": "native",
+        "failure_reason": "requires_served_identity_and_tool_probe"
+      }
+    },
+    {
+      "name": "mlx-qwen3.6-27b",
+      "model_id": "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit",
+      "provider": "mlx",
       "tool_calling": {
         "native": "unknown",
         "text": "unknown",
@@ -12603,13 +12683,22 @@
     },
     {
       "name": "mlx-qwen3.6-27b-q4",
-      "model_id": "unsloth/Qwen3.6-27B-UD-MLX-4bit",
-      "provider": "mlx",
-      "tool_format": "native"
+      "model_id": "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit",
+      "provider": "mlx"
+    },
+    {
+      "name": "mlx-qwen3.6-q4",
+      "model_id": "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit",
+      "provider": "mlx"
+    },
+    {
+      "name": "mlx-qwen3.6-q8",
+      "model_id": "unsloth/Qwen3.6-35B-A3B-UD-MLX-8bit",
+      "provider": "mlx"
     },
     {
       "name": "mlx-qwen36-27b",
-      "model_id": "unsloth/Qwen3.6-27B-UD-MLX-4bit",
+      "model_id": "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit",
       "provider": "mlx"
     },
     {

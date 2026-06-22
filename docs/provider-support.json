@@ -883,14 +883,14 @@
       "classification": "local",
       "auth_env": [],
       "recommended": {
-        "selector": "mlx-qwen3.6-27b",
+        "selector": "mlx-qwen3.6",
         "provider": "mlx",
-        "model": "unsloth/Qwen3.6-27B-UD-MLX-4bit",
-        "display_name": null,
+        "model": "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit",
+        "display_name": "Qwen3.6 35B-A3B (MLX 4-bit)",
         "tool_format": "native",
         "harn_options": [
           "provider = \"mlx\"",
-          "model = \"mlx-qwen3.6-27b\"",
+          "model = \"mlx-qwen3.6\"",
           "tool_format = \"native\""
         ]
       },
@@ -924,11 +924,11 @@
         "MLX routes use native tools only after the served identity and tool probe match the cataloged model."
       ],
       "caveats": [
-        "`mlx-vlm` server flags vary by release; launch first, then verify with `harn provider-ready mlx`."
+        "`mlx_lm.server` flags vary by release; launch first, then verify with `harn provider-ready mlx`."
       ],
       "mcp_notes": [],
       "local_setup_notes": [
-        "Run `harn models install local-qwen3.6-27b` for the venv, download, launch, and verification commands."
+        "Run `harn models install mlx-qwen3.6` for the venv, download, launch, and verification commands."
       ]
     },
     {

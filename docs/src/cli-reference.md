@@ -1185,7 +1185,7 @@ Probe a configured provider's `/models` endpoint and optionally require a
 specific model alias or provider-native model id.
 
 ```bash
-harn provider-ready mlx --model mlx-qwen36-27b
+harn provider-ready mlx --model mlx-qwen3.6
 harn provider-ready mlx --base-url http://127.0.0.1:8002 --json
 ```
 
@@ -1221,7 +1221,7 @@ pipelines.
 
 ```bash
 harn provider-probe ollama --model devstral-small-2
-harn provider-probe mlx --model mlx-qwen36-27b --base-url http://127.0.0.1:8002
+harn provider-probe mlx --model mlx-qwen3.6 --base-url http://127.0.0.1:8002
 ```
 
 ## harn provider-tool-probe
@@ -1245,7 +1245,7 @@ Bring a local model up through Harn's provider catalog:
 ```bash
 harn local launch devstral-small-2:24b --provider ollama --json
 harn local launch local-qwen3.6 --provider llamacpp --model-source ~/models/qwen3.6/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf --ctx 8192
-harn local launch mlx-qwen36-27b --provider mlx --model-source unsloth/Qwen3.6-27B-UD-MLX-4bit
+harn local launch mlx-qwen3.6 --provider mlx --model-source unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit
 ```
 
 Ollama launch warms the daemon and persists the active selection. llama.cpp

@@ -41,16 +41,18 @@ context_window = 262144
 runtime_context_window = 65536
 stream_timeout = 900.0
 capabilities = ["tools", "streaming", "thinking"]
+tier = "mid"
+open_weight = true
+strengths = ["coding"]
 
 # Apple Silicon MLX. Burin #2717 switched the local MLX route from the
 # never-downloaded dense vision model `unsloth/Qwen3.6-27B-UD-MLX-4bit` to the
 # coding-tuned Qwen3.6-35B-A3B MoE served via `mlx_lm.server` (text MoE, no
 # vision). Shares the `qwen3.6-35b-a3b` logical_model / equivalence_group with
 # the llama.cpp GGUF route so eval aggregation treats the two runtimes as the
-# same model and compares them directly.
-tier = "mid"
-open_weight = true
-strengths = ["coding", "agentic"]
+# same model and compares them directly. Keep strengths conservative until
+# `mlx_lm.server` has its own tool/agentic probe evidence; equivalence groups
+# use the least-decorated host baseline for escalation decisions.
 [models."unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit"]
 name = "Qwen3.6 35B-A3B (MLX 4-bit)"
 provider = "mlx"
@@ -60,10 +62,10 @@ context_window = 262144
 runtime_context_window = 65536
 stream_timeout = 900.0
 capabilities = ["tools", "streaming", "thinking"]
-
 tier = "mid"
 open_weight = true
-strengths = ["coding", "agentic"]
+strengths = ["coding"]
+
 [models."unsloth/Qwen3.6-35B-A3B-UD-MLX-8bit"]
 name = "Qwen3.6 35B-A3B (MLX 8-bit)"
 provider = "mlx"
@@ -73,11 +75,11 @@ context_window = 262144
 runtime_context_window = 65536
 stream_timeout = 900.0
 capabilities = ["tools", "streaming", "thinking"]
-
-# Local OpenAI-compatible servers (vLLM / bring-your-own).
 tier = "mid"
 open_weight = true
-strengths = ["coding", "vision"]
+strengths = ["coding"]
+
+# Local OpenAI-compatible servers (vLLM / bring-your-own).
 [models."gemma-4-e2b-it"]
 name = "Gemma 4 E2B (local)"
 provider = "local"

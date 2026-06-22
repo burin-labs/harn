@@ -553,7 +553,7 @@ fn test_parses_provider_ready_args() {
         "provider-ready",
         "mlx",
         "--model",
-        "mlx-qwen36-27b",
+        "mlx-qwen3.6",
         "--base-url",
         "http://127.0.0.1:8002",
         "--json",
@@ -563,7 +563,7 @@ fn test_parses_provider_ready_args() {
         panic!("expected provider-ready command");
     };
     assert_eq!(args.provider, "mlx");
-    assert_eq!(args.model.as_deref(), Some("mlx-qwen36-27b"));
+    assert_eq!(args.model.as_deref(), Some("mlx-qwen3.6"));
     assert_eq!(args.base_url.as_deref(), Some("http://127.0.0.1:8002"));
     assert!(args.json);
 }
