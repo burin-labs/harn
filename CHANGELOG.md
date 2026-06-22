@@ -8,6 +8,21 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.135
+
+### Fixed
+
+- Parser: recover an unclosed `<tool_call>` wrapper around a structurally
+  complete bare `name({ ... <<EOF ... EOF })` call (heredoc sentinel-closed,
+  `})` present, `stop_reason: stop`). It was discarded with a false "TOOL CALL
+  TRUNCATED" diagnostic; a genuinely cut-off body still reports truncation.
+- Agent loop: add `intra_turn_failure_fanout_cap` (default OFF). When one model
+  response fans out a batch of byte-identical *failing* tool calls, collapse the
+  tail after the Kth identical failure into a single synthetic result instead of
+  dispatching every call — the intra-turn analog of the no-progress terminator.
+- Replaced the agent-loop text-mode named-tool heuristic with default `missing_tool_call_recovery`.
+  Missing tool calls can now be classified across languages and typos without English substring lists.
+
 ## v0.8.134
 
 ### Added
