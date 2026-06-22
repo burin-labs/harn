@@ -73,6 +73,16 @@ if [ -z "$nontrivial" ]; then
   exit 0
 fi
 
+# Dependency manager manifests and lockfiles are not Harn release notes. A
+# source/runtime edit in the same PR still fails below; this branch only covers
+# diffs whose non-ignored files are dependency metadata.
+dependency_metadata_pattern='(^|.*/)(Cargo\.toml|Cargo\.lock|package\.json|package-lock\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb|bun\.lock|go\.mod|go\.sum|requirements.*\.txt|constraints.*\.txt|pyproject\.toml|poetry\.lock|uv\.lock|Pipfile|Pipfile\.lock|Gemfile|Gemfile\.lock|composer\.json|composer\.lock|pom\.xml|build\.gradle(\.kts)?|settings\.gradle(\.kts)?|gradle\.lockfile|mix\.exs|mix\.lock|rebar\.config|rebar\.lock|Package\.swift|Package\.resolved|pubspec\.yaml|pubspec\.lock|[^/]+\.csproj|packages\.lock\.json|Directory\.Packages\.props)$'
+non_dependency=$(printf '%s\n' "$nontrivial" | grep -Ev "$dependency_metadata_pattern" || true)
+if [ -z "$non_dependency" ]; then
+  echo "::notice title=Changelog fragment gate::only dependency manifest/lockfile paths touched; pass."
+  exit 0
+fi
+
 # Failed gate. Print actionable guidance and the first few files that
 # pushed the gate over the line.
 {
