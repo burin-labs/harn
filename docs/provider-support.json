@@ -886,7 +886,7 @@
         "selector": "mlx-qwen3.6-27b",
         "provider": "mlx",
         "model": "unsloth/Qwen3.6-27B-UD-MLX-4bit",
-        "display_name": "Qwen3.6 27B (MLX 4-bit)",
+        "display_name": null,
         "tool_format": "native",
         "harn_options": [
           "provider = \"mlx\"",
