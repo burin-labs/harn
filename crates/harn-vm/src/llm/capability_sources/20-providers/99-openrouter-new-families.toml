@@ -91,13 +91,19 @@ thinking_block_style = "none"
 # Must NOT carry a Qwen-style `auto_reasoning_overrides = "off"`.
 #
 # OpenRouter's provider-native tool surface is not stable enough to expose as
-# the default abstraction for this aggregate route. Burin's committed-tree smoke
-# (2026-06-19, openrouter/openai/gpt-oss-120b) passes when it selects Harn's
-# JSON text-channel tools, while the old Harn row still recommended native and
-# produced misleading `recommended_format=native requested_format=json`
-# observability. Keep the quirk in the provider matrix: text tools are the
-# recommended route for OpenRouter GPT-OSS, while direct Cerebras/Groq/DeepInfra
-# GPT-OSS rows remain native.
+# the default abstraction for this aggregate route: forced native finishes
+# billed-noncommittal (0 dispatchable tool_calls). Between the two TEXT-channel
+# grammars, an empirical A/B (2026-06-21, real OpenRouter calls, task = author a
+# Zig file heavy in `\\` multiline-string literals) showed `text`/heredoc beats
+# `json` on BOTH axes: dispatch 3/3 vs 2/3, and byte-fidelity 3/3 clean vs 0/3
+# clean. The `json` arm corrupted source bodies the same way every GPT-OSS
+# serving stack does — a JSON string arg forces the model to escape the
+# backslashes the Zig source already needs, and gpt-oss double-escapes them
+# (`\\` -> `\\\\` prefixes, escaped quotes, and a run that collapsed into invalid
+# Zig) — while the escape-free heredoc body carried the source verbatim. Pin to
+# `text`. (Same class as the Fireworks GPT-OSS json->text flip; direct
+# Cerebras/Groq/DeepInfra GPT-OSS rows keep `native`, whose provider-native
+# channel does dispatch cleanly on those stacks.)
 #
 # The OpenRouter sub-provider lottery still matters. `openai/gpt-oss-120b` fans
 # out across many upstreams; even with reasoning ON, some mis-serialize Harmony
@@ -107,7 +113,7 @@ thinking_block_style = "none"
 [[provider.openrouter]]
 model_match = "openai/gpt-oss-*"
 native_tools = false
-preferred_tool_format = "json"
+preferred_tool_format = "text"
 structured_output = "native"
 thinking_modes = ["effort"]
 reasoning_effort_supported = true
