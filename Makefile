@@ -256,6 +256,7 @@ STDLIB_HARN_DIR := crates/harn-stdlib/src/stdlib
 # gate avoids the "I edited persona X and pre-commit reformatted three
 # unrelated files" surprise from accumulated drift.
 EXTRA_HARN_DIRS := personas tests examples evals
+EXTRA_HARN_FIND := find $(EXTRA_HARN_DIRS) -type d -name .harn -prune -o -type f -name '*.harn' -print0 2>/dev/null
 
 fmt-harn-fix:
 	@echo "=== Formatting Harn files ==="
@@ -267,7 +268,7 @@ fmt-harn-fix:
 		| xargs -0 cargo run --quiet --bin harn -- fmt
 	@find scripts -name '*.harn' -print0 \
 		| xargs -0 cargo run --quiet --bin harn -- fmt
-	@find $(EXTRA_HARN_DIRS) -type f -name '*.harn' -print0 2>/dev/null \
+	@$(EXTRA_HARN_FIND) \
 		| xargs -0 -r cargo run --quiet --bin harn -- fmt
 	@echo "    Harn formatting OK."
 
@@ -283,7 +284,7 @@ fmt-harn:
 		| xargs -0 cargo run --quiet --bin harn -- fmt --check
 	@find crates/harn-cli/assets/demo -name '*.harn' -print0 \
 		| xargs -0 cargo run --quiet --bin harn -- fmt --check
-	@find $(EXTRA_HARN_DIRS) -type f -name '*.harn' -print0 2>/dev/null \
+	@$(EXTRA_HARN_FIND) \
 		| xargs -0 -r cargo run --quiet --bin harn -- fmt --check
 	@echo "    Harn formatting OK."
 
