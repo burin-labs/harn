@@ -95,6 +95,8 @@ pub(super) const ACP_DISPATCHED_METHODS: &[&str] = &[
     "harn.workflow.resume",
     "mcp/catalog",
     "harn.mcp.catalog",
+    "mcp/status",
+    "harn.mcp.status",
     "mcp/authorize",
     "harn.mcp.authorize",
     "mcp/authorize_batch",

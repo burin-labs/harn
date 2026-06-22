@@ -98,9 +98,7 @@ jobs:
         # events with "Bad credentials" when api.github.com gates the release
         # lookup; a cold build is a fine fallback, but the job shouldn't fail.
         continue-on-error: true
-      - name: Configure Cargo to use sccache
-        if: env.SCCACHE_PATH != ''
-        run: echo "RUSTC_WRAPPER=${SCCACHE_PATH}" >> "$GITHUB_ENV"
+      - uses: ./.github/actions/configure-cargo-sccache
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         continue-on-error: true
         with:
@@ -234,9 +232,7 @@ jobs:
         # cold compile is a valid fallback; the audit result should not hinge
         # on cache-service availability.
         continue-on-error: true
-      - name: Configure Cargo to use sccache
-        if: env.SCCACHE_PATH != ''
-        run: echo "RUSTC_WRAPPER=${SCCACHE_PATH}" >> "$GITHUB_ENV"
+      - uses: ./.github/actions/configure-cargo-sccache
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         continue-on-error: true
         with:
@@ -481,10 +477,7 @@ jobs:
           components: clippy
       - uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
         continue-on-error: true
-      - name: Configure Cargo to use sccache
-        if: env.SCCACHE_PATH != ''
-        shell: bash
-        run: echo "RUSTC_WRAPPER=${SCCACHE_PATH}" >> "$GITHUB_ENV"
+      - uses: ./.github/actions/configure-cargo-sccache
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         continue-on-error: true
         with:
@@ -595,9 +588,7 @@ jobs:
         # events with "Bad credentials" when api.github.com gates the release
         # lookup; a cold build is a fine fallback, but the job shouldn't fail.
         continue-on-error: true
-      - name: Configure Cargo to use sccache
-        if: env.SCCACHE_PATH != ''
-        run: echo "RUSTC_WRAPPER=${SCCACHE_PATH}" >> "$GITHUB_ENV"
+      - uses: ./.github/actions/configure-cargo-sccache
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         continue-on-error: true
         with:

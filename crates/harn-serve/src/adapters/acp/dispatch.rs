@@ -284,6 +284,12 @@ impl AcpServer {
                 }
                 self.handle_mcp_catalog(&id, &params);
             }
+            "mcp/status" | "harn.mcp.status" => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
+                self.handle_mcp_status(&id).await;
+            }
             "mcp/authorize" | "harn.mcp.authorize" => {
                 if self.reject_unauthenticated(&id) {
                     return;
