@@ -525,7 +525,7 @@ fn collect_workflow_evidence(
         };
         let workflow_name = parsed
             .as_mapping()
-            .and_then(|mapping| mapping.get(YamlValue::String("name".to_string())))
+            .and_then(|mapping| mapping.get("name"))
             .and_then(YamlValue::as_str)
             .map(ToString::to_string)
             .unwrap_or_else(|| {
@@ -536,7 +536,7 @@ fn collect_workflow_evidence(
             });
         let jobs = parsed
             .as_mapping()
-            .and_then(|mapping| mapping.get(YamlValue::String("jobs".to_string())))
+            .and_then(|mapping| mapping.get("jobs"))
             .and_then(YamlValue::as_mapping)
             .map(|jobs| collect_workflow_jobs(jobs, &workflow_name, required_checks))
             .unwrap_or_default();
@@ -555,37 +555,28 @@ fn collect_workflow_jobs(
     required_checks: Option<&BTreeSet<String>>,
 ) -> Vec<WorkflowJobEvidence> {
     let mut entries = jobs.iter().collect::<Vec<_>>();
-    entries.sort_by_key(|(key, _)| key.as_str().unwrap_or_default().to_string());
+    entries.sort_by_key(|(key, _)| *key);
     entries
         .into_iter()
         .filter_map(|(job_id, job_value)| {
-            let job_id = job_id.as_str()?.to_string();
+            let job_id = job_id.clone();
             let job_map = job_value.as_mapping()?;
             let name = job_map
-                .get(YamlValue::String("name".to_string()))
+                .get("name")
                 .and_then(YamlValue::as_str)
                 .map(ToString::to_string)
                 .unwrap_or_else(|| job_id.clone());
             let mut commands = Vec::new();
             let mut actions = Vec::new();
-            if let Some(steps) = job_map
-                .get(YamlValue::String("steps".to_string()))
-                .and_then(YamlValue::as_sequence)
-            {
+            if let Some(steps) = job_map.get("steps").and_then(YamlValue::as_sequence) {
                 for step in steps {
                     let Some(step_map) = step.as_mapping() else {
                         continue;
                     };
-                    if let Some(run) = step_map
-                        .get(YamlValue::String("run".to_string()))
-                        .and_then(YamlValue::as_str)
-                    {
+                    if let Some(run) = step_map.get("run").and_then(YamlValue::as_str) {
                         commands.extend(shell_commands(run));
                     }
-                    if let Some(action) = step_map
-                        .get(YamlValue::String("uses".to_string()))
-                        .and_then(YamlValue::as_str)
-                    {
+                    if let Some(action) = step_map.get("uses").and_then(YamlValue::as_str) {
                         push_unique_string(&mut actions, action.to_string());
                     }
                 }
@@ -802,11 +793,11 @@ fn collect_pre_commit_hooks(content: &str, stages: &mut BTreeMap<String, Vec<Str
     };
     let default_stages = parsed
         .as_mapping()
-        .and_then(|mapping| mapping.get(YamlValue::String("default_stages".to_string())))
+        .and_then(|mapping| mapping.get("default_stages"))
         .and_then(yaml_string_list);
     let repos = parsed
         .as_mapping()
-        .and_then(|mapping| mapping.get(YamlValue::String("repos".to_string())))
+        .and_then(|mapping| mapping.get("repos"))
         .and_then(YamlValue::as_sequence);
     let Some(repos) = repos else {
         return;
@@ -815,9 +806,7 @@ fn collect_pre_commit_hooks(content: &str, stages: &mut BTreeMap<String, Vec<Str
         let Some(repo_map) = repo.as_mapping() else {
             continue;
         };
-        let hooks = repo_map
-            .get(YamlValue::String("hooks".to_string()))
-            .and_then(YamlValue::as_sequence);
+        let hooks = repo_map.get("hooks").and_then(YamlValue::as_sequence);
         let Some(hooks) = hooks else {
             continue;
         };
@@ -826,31 +815,31 @@ fn collect_pre_commit_hooks(content: &str, stages: &mut BTreeMap<String, Vec<Str
                 continue;
             };
             let mut command = hook_map
-                .get(YamlValue::String("entry".to_string()))
+                .get("entry")
                 .and_then(YamlValue::as_str)
                 .map(ToString::to_string)
                 .or_else(|| {
                     hook_map
-                        .get(YamlValue::String("name".to_string()))
+                        .get("name")
                         .and_then(YamlValue::as_str)
                         .map(ToString::to_string)
                 })
                 .or_else(|| {
                     hook_map
-                        .get(YamlValue::String("id".to_string()))
+                        .get("id")
                         .and_then(YamlValue::as_str)
                         .map(ToString::to_string)
                 })
                 .unwrap_or_else(|| "hook".to_string());
             if let Some(args) = hook_map
-                .get(YamlValue::String("args".to_string()))
+                .get("args")
                 .and_then(yaml_string_list)
                 .filter(|args| !args.is_empty())
             {
                 command = format!("{command} {}", args.join(" "));
             }
             let hook_stages = hook_map
-                .get(YamlValue::String("stages".to_string()))
+                .get("stages")
                 .and_then(yaml_string_list)
                 .or_else(|| default_stages.clone())
                 .unwrap_or_else(|| vec!["pre-commit".to_string()]);
@@ -872,9 +861,7 @@ fn collect_lefthook_hooks(
         return Ok(());
     };
     for (stage, value) in root {
-        let Some(stage_name) = stage.as_str() else {
-            continue;
-        };
+        let stage_name = stage.as_str();
         if !stage_name.contains('-') {
             continue;
         }
@@ -899,24 +886,14 @@ fn collect_nested_run_commands(
 
         match value {
             YamlValue::Mapping(mapping) => {
-                if let Some(run) = mapping
-                    .get(YamlValue::String("run".to_string()))
-                    .and_then(YamlValue::as_str)
-                {
+                if let Some(run) = mapping.get("run").and_then(YamlValue::as_str) {
                     for command in shell_commands(run) {
                         sink(command);
                     }
                 }
                 let mut entries = mapping.iter().collect::<Vec<_>>();
-                entries.sort_by(|(left, _), (right, _)| {
-                    left.as_str()
-                        .unwrap_or_default()
-                        .cmp(right.as_str().unwrap_or_default())
-                });
+                entries.sort_by_key(|(left, _)| *left);
                 for (key, child) in entries.into_iter().rev() {
-                    let Some(key) = key.as_str() else {
-                        continue;
-                    };
                     if key == "run" {
                         continue;
                     }
@@ -1890,10 +1867,7 @@ commands:
     #[test]
     fn lefthook_run_collection_reports_yaml_depth_limit() {
         let mut run = serde_yml::Mapping::new();
-        run.insert(
-            YamlValue::String("run".to_string()),
-            YamlValue::String("echo too-deep".to_string()),
-        );
+        run.insert("run", YamlValue::String("echo too-deep".to_string()));
         let mut value = YamlValue::Mapping(run);
         for _ in 0..=PROJECT_ENRICH_YAML_MAX_DEPTH {
             value = YamlValue::Sequence(vec![value]);

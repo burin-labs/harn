@@ -188,22 +188,13 @@ pub fn parse_frontmatter(yaml: &str) -> Result<ParsedFrontmatter, String> {
     // Normalize keys: hyphens -> underscores, strip surrounding whitespace.
     let mut normalized = serde_yml::Mapping::new();
     let mut unknown_fields = Vec::new();
-    for (k, v) in map {
-        let key_str = match k {
-            YamlValue::String(s) => s,
-            other => {
-                return Err(format!(
-                    "SKILL.md frontmatter keys must be strings, got {:?}",
-                    discriminant(&other)
-                ));
-            }
-        };
+    for (key_str, v) in map {
         let canonical = key_str.trim().replace('-', "_");
         if !KNOWN_CANONICAL_KEYS.contains(&canonical.as_str()) {
             unknown_fields.push(key_str);
             continue;
         }
-        normalized.insert(YamlValue::String(canonical), v);
+        normalized.insert(canonical, v);
     }
 
     // Hooks sometimes arrive as a list of `{event: "...", command: "..."}`
@@ -213,21 +204,21 @@ pub fn parse_frontmatter(yaml: &str) -> Result<ParsedFrontmatter, String> {
         for item in seq {
             if let YamlValue::Mapping(entry) = item {
                 let event = entry
-                    .get(YamlValue::String("event".into()))
-                    .or_else(|| entry.get(YamlValue::String("name".into())))
+                    .get("event")
+                    .or_else(|| entry.get("name"))
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string());
                 let cmd = entry
-                    .get(YamlValue::String("command".into()))
-                    .or_else(|| entry.get(YamlValue::String("run".into())))
+                    .get("command")
+                    .or_else(|| entry.get("run"))
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string());
                 if let (Some(event), Some(cmd)) = (event, cmd) {
-                    flat.insert(YamlValue::String(event), YamlValue::String(cmd));
+                    flat.insert(event, YamlValue::String(cmd));
                 }
             }
         }
-        normalized.insert(YamlValue::String("hooks".into()), YamlValue::Mapping(flat));
+        normalized.insert("hooks", YamlValue::Mapping(flat));
     }
 
     let manifest: SkillManifest =
