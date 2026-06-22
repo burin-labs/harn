@@ -338,6 +338,64 @@ fn scope_classifier_verdict_round_trips_through_jsonl_sink() {
 }
 
 #[test]
+fn missing_tool_call_verdict_round_trips_through_jsonl_sink() {
+    use std::io::{BufRead, BufReader};
+    let dir = std::env::temp_dir().join(format!(
+        "harn-missing-tool-call-event-log-{}",
+        uuid::Uuid::now_v7()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("event_log.jsonl");
+    let sink = JsonlEventSink::open(&path).unwrap();
+    sink.handle_event(&AgentEvent::MissingToolCallVerdict {
+        session_id: "s".into(),
+        iteration: 2,
+        action: "tool_call_intended".into(),
+        original_action: "tool_call_intended".into(),
+        tool_name: "edit".into(),
+        confidence: 0.96,
+        confidence_threshold: 0.65,
+        evidence: "assistant described editing without a call".into(),
+        language: Some("es".into()),
+        classifier_kind: Some("custom".into()),
+        model: None,
+        error: None,
+    });
+    sink.flush().unwrap();
+
+    let file = std::fs::File::open(&path).unwrap();
+    let line = BufReader::new(file).lines().next().unwrap().unwrap();
+    let recovered: PersistedAgentEvent = serde_json::from_str(&line).unwrap();
+    match recovered.event {
+        AgentEvent::MissingToolCallVerdict {
+            session_id,
+            iteration,
+            action,
+            tool_name,
+            confidence,
+            evidence,
+            language,
+            classifier_kind,
+            ..
+        } => {
+            assert_eq!(session_id, "s");
+            assert_eq!(iteration, 2);
+            assert_eq!(action, "tool_call_intended");
+            assert_eq!(tool_name, "edit");
+            assert_eq!(confidence, 0.96);
+            assert_eq!(evidence, "assistant described editing without a call");
+            assert_eq!(language.as_deref(), Some("es"));
+            assert_eq!(classifier_kind.as_deref(), Some("custom"));
+        }
+        other => panic!("expected MissingToolCallVerdict, got {other:?}"),
+    }
+    let value: serde_json::Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(value["type"], "missing_tool_call_verdict");
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_dir(&dir);
+}
+
+#[test]
 fn tool_call_update_durations_serialize_when_present_and_skip_when_absent() {
     // Terminal update with both durations populated — both fields
     // appear in the JSON. Snake_case keys here because this is the

@@ -793,6 +793,27 @@ fn __validate_pre_turn_scope_classifier(value) {
   }
 }
 
+fn __validate_missing_tool_call_recovery(value) {
+  if value == nil {
+    return
+  }
+  if type_of(value) == "bool" {
+    return
+  }
+  if type_of(value) != "dict" {
+    throw "agent_loop: `missing_tool_call_recovery` must be a bool, dict, or nil; got " + type_of(value)
+  }
+  if value?.enabled != nil && type_of(value.enabled) != "bool" {
+    throw "agent_loop: `missing_tool_call_recovery.enabled` must be a bool or nil; got "
+      + type_of(value.enabled)
+  }
+  let classifier = value?.classifier
+  if classifier != nil && type_of(classifier) != "closure" {
+    throw "agent_loop: `missing_tool_call_recovery.classifier` must be a closure or nil; got "
+      + type_of(classifier)
+  }
+}
+
 fn __validate_max_concurrent_tools(value) {
   if value == nil {
     return
@@ -1040,6 +1061,9 @@ fn __validate_agent_loop_callback_options(opts) {
   }
   if __has_key(opts, "pre_turn_scope_classifier") {
     __validate_pre_turn_scope_classifier(opts.pre_turn_scope_classifier)
+  }
+  if __has_key(opts, "missing_tool_call_recovery") {
+    __validate_missing_tool_call_recovery(opts.missing_tool_call_recovery)
   }
   if __has_key(opts, "max_concurrent_tools") {
     __validate_max_concurrent_tools(opts.max_concurrent_tools)

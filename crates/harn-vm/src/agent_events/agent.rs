@@ -297,6 +297,24 @@ pub enum AgentEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },
+    MissingToolCallVerdict {
+        session_id: String,
+        iteration: usize,
+        action: String,
+        original_action: String,
+        tool_name: String,
+        confidence: f64,
+        confidence_threshold: f64,
+        evidence: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        language: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        classifier_kind: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        model: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
     TypedCheckpoint {
         session_id: String,
         checkpoint: serde_json::Value,
@@ -791,6 +809,7 @@ impl AgentEvent {
             | Self::StepJudgeDecision { session_id, .. }
             | Self::StructuralValidatorDecision { session_id, .. }
             | Self::ScopeClassifierVerdict { session_id, .. }
+            | Self::MissingToolCallVerdict { session_id, .. }
             | Self::TypedCheckpoint { session_id, .. }
             | Self::FeedbackInjected { session_id, .. }
             | Self::BudgetExhausted { session_id, .. }
