@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{new_id, now_rfc3339, parse_json_payload};
 use crate::llm::vm_value_to_json;
+use crate::redact::{RedactionPolicy, REDACTED_PLACEHOLDER};
 use crate::value::{VmError, VmValue};
 
 pub const FRICTION_SCHEMA_VERSION: u32 = 1;
@@ -298,9 +299,7 @@ pub fn normalize_friction_event_json(json: serde_json::Value) -> Result<Friction
             "friction_event: missing redacted_summary".to_string(),
         ));
     }
-    for value in event.metadata.values_mut() {
-        redact_json_value(value);
-    }
+    redact_metadata_map(&mut event.metadata);
     Ok(event)
 }
 
@@ -418,8 +417,8 @@ fn normalize_context_pack_manifest_record(
         ));
     }
     for secret in &manifest.secrets {
-        if looks_like_secret_value(&secret.name)
-            || looks_like_secret_value(secret.capability.as_deref().unwrap_or(""))
+        if value_looks_secret(&secret.name)
+            || value_looks_secret(secret.capability.as_deref().unwrap_or(""))
         {
             return Err(VmError::Runtime(
                 "context_pack_manifest: secrets must be capability references, not raw secret values"
@@ -787,65 +786,27 @@ fn metadata_string_map(event: &FrictionEvent, key: &str) -> BTreeMap<String, Str
 }
 
 fn redact_json_value(value: &mut serde_json::Value) {
-    match value {
-        serde_json::Value::String(text) => *text = redact_text(text),
-        serde_json::Value::Array(items) => {
-            for item in items {
-                redact_json_value(item);
-            }
+    RedactionPolicy::default().redact_json_in_place(value);
+}
+
+fn redact_metadata_map(map: &mut BTreeMap<String, serde_json::Value>) {
+    let policy = RedactionPolicy::default();
+    for (key, value) in map {
+        if policy.field_is_sensitive(key) {
+            *value = serde_json::Value::String(REDACTED_PLACEHOLDER.to_string());
+        } else {
+            policy.redact_json_in_place(value);
         }
-        serde_json::Value::Object(map) => {
-            for (key, value) in map.iter_mut() {
-                if is_sensitive_key(key) {
-                    *value = serde_json::Value::String("[redacted]".to_string());
-                } else {
-                    redact_json_value(value);
-                }
-            }
-        }
-        _ => {}
     }
 }
 
 fn redact_text(text: &str) -> String {
-    text.split_whitespace()
-        .map(|word| {
-            let lower = word.to_ascii_lowercase();
-            if looks_like_secret_value(word)
-                || lower.contains("token=")
-                || lower.contains("password=")
-                || lower.contains("api_key=")
-                || lower.contains("apikey=")
-            {
-                "[redacted]".to_string()
-            } else {
-                word.to_string()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
+    RedactionPolicy::default().redact_string(text).into_owned()
 }
 
-fn is_sensitive_key(key: &str) -> bool {
-    let lower = key.to_ascii_lowercase();
-    lower.contains("secret")
-        || lower.contains("token")
-        || lower.contains("password")
-        || lower.contains("api_key")
-        || lower.contains("apikey")
-        || lower == "authorization"
-}
-
-fn looks_like_secret_value(value: &str) -> bool {
+fn value_looks_secret(value: &str) -> bool {
     let trimmed = value.trim();
-    trimmed.starts_with("sk-")
-        || trimmed.starts_with("ghp_")
-        || trimmed.starts_with("xoxb-")
-        || trimmed.starts_with("AKIA")
-        || trimmed.len() > 48
-            && trimmed
-                .chars()
-                .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+    !trimmed.is_empty() && RedactionPolicy::default().looks_like_secret_value(trimmed)
 }
 
 fn normalize_words(text: &str) -> String {
@@ -896,7 +857,8 @@ mod tests {
 
         assert_eq!(event.schema_version, FRICTION_SCHEMA_VERSION);
         assert!(event.id.starts_with("friction_"));
-        assert!(event.redacted_summary.contains("[redacted]"));
+        assert!(event.redacted_summary.contains("<redacted:"));
+        assert!(!event.redacted_summary.contains("token=abc123"));
         assert_eq!(event.metadata["api_key"], json!("[redacted]"));
     }
 

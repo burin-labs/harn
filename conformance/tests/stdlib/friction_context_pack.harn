@@ -82,7 +82,11 @@ pipeline main() {
     },
   )
   __io_println(first.recorded && first.sink == "memory")
-  __io_println(len(events) == 2 && contains(events[0].redacted_summary, "[redacted]"))
+  __io_println(
+    len(events) == 2
+      && contains(events[0].redacted_summary, "redacted")
+      && !contains(events[0].redacted_summary, "token=secret"),
+  )
   __io_println(events[0].metadata.api_key == "[redacted]")
   __io_println(len(suggestions) == 1 && suggestions[0].recommended_artifact == "context_pack")
   __io_println(suggestions[0].candidate_manifest.capabilities[0] == "splunk.search")

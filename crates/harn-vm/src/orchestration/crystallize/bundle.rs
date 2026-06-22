@@ -1,6 +1,6 @@
 //! Crystallization bundle: types, build/write/load/validate, shadow replay, and redaction helpers.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -18,6 +18,7 @@ use super::types::{
     BUNDLE_SCHEMA_VERSION, BUNDLE_SKILL_DIR, BUNDLE_SKILL_FILE, BUNDLE_SKILL_GATE_FILE,
     BUNDLE_WORKFLOW_FILE, DEFAULT_ROLLOUT_POLICY, SKILL_GATE_RECEIPT_SCHEMA,
 };
+use crate::redact::{RedactionPolicy, REDACTED_PLACEHOLDER};
 use crate::skills::{parse_frontmatter, split_frontmatter};
 use crate::value::VmError;
 
@@ -1142,30 +1143,35 @@ fn candidate_is_plan_only(candidate: &WorkflowCandidate) -> bool {
 }
 
 pub(super) fn redact_trace_for_bundle(trace: &mut CrystallizationTrace) {
+    let policy = RedactionPolicy::default();
     for action in &mut trace.actions {
-        redact_bundle_value(&mut action.inputs);
+        policy.redact_json_in_place(&mut action.inputs);
         if let Some(output) = action.output.as_mut() {
-            redact_bundle_value(output);
+            policy.redact_json_in_place(output);
         }
         if let Some(observed) = action.observed_output.as_mut() {
-            redact_bundle_value(observed);
+            policy.redact_json_in_place(observed);
         }
-        for value in action.parameters.values_mut() {
-            redact_bundle_value(value);
-        }
-        for (_, value) in action.metadata.iter_mut() {
-            redact_bundle_value(value);
-        }
+        redact_bundle_map(&mut action.parameters, &policy);
+        redact_bundle_map(&mut action.metadata, &policy);
     }
-    for (_, value) in trace.metadata.iter_mut() {
-        redact_bundle_value(value);
-    }
+    redact_bundle_map(&mut trace.metadata, &policy);
     if let Some(run) = trace.replay_run.as_mut() {
-        redact_replay_run_for_bundle(run);
+        redact_replay_run_for_bundle(run, &policy);
     }
 }
 
-fn redact_replay_run_for_bundle(run: &mut ReplayTraceRun) {
+fn redact_bundle_map(map: &mut BTreeMap<String, JsonValue>, policy: &RedactionPolicy) {
+    for (key, value) in map {
+        if policy.field_is_sensitive(key) {
+            *value = JsonValue::String(REDACTED_PLACEHOLDER.to_string());
+        } else {
+            policy.redact_json_in_place(value);
+        }
+    }
+}
+
+fn redact_replay_run_for_bundle(run: &mut ReplayTraceRun, policy: &RedactionPolicy) {
     for value in run
         .event_log_entries
         .iter_mut()
@@ -1178,59 +1184,11 @@ fn redact_replay_run_for_bundle(run: &mut ReplayTraceRun) {
         .chain(run.final_artifacts.iter_mut())
         .chain(run.policy_decisions.iter_mut())
     {
-        redact_bundle_value(value);
+        policy.redact_json_in_place(value);
     }
-}
-
-fn redact_bundle_value(value: &mut JsonValue) {
-    match value {
-        JsonValue::String(text) if looks_like_secret_value(text) => {
-            *text = "[redacted]".to_string();
-        }
-        JsonValue::Array(items) => {
-            for item in items {
-                redact_bundle_value(item);
-            }
-        }
-        JsonValue::Object(map) => {
-            for (key, child) in map.iter_mut() {
-                if is_sensitive_bundle_key(key) {
-                    *child = JsonValue::String("[redacted]".to_string());
-                } else {
-                    redact_bundle_value(child);
-                }
-            }
-        }
-        _ => {}
-    }
-}
-
-fn is_sensitive_bundle_key(key: &str) -> bool {
-    let lower = key.to_ascii_lowercase();
-    lower.contains("secret")
-        || lower.contains("token")
-        || lower.contains("password")
-        || lower.contains("api_key")
-        || lower.contains("apikey")
-        || lower == "authorization"
-        || lower == "cookie"
-        || lower == "set-cookie"
-}
-
-fn looks_like_secret_value(value: &str) -> bool {
-    let trimmed = value.trim();
-    trimmed.starts_with("sk-")
-        || trimmed.starts_with("ghp_")
-        || trimmed.starts_with("ghs_")
-        || trimmed.starts_with("xoxb-")
-        || trimmed.starts_with("xoxp-")
-        || trimmed.starts_with("AKIA")
-        || (trimmed.len() > 48
-            && trimmed
-                .chars()
-                .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-'))
 }
 
 fn secret_id_looks_logical(value: &str) -> bool {
-    !looks_like_secret_value(value) && !value.trim().is_empty()
+    let trimmed = value.trim();
+    !trimmed.is_empty() && !RedactionPolicy::default().looks_like_secret_value(trimmed)
 }
