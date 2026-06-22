@@ -1938,7 +1938,7 @@ pub fn default_model_for_provider(provider: &str) -> String {
             .or_else(|_| std::env::var("HARN_LLM_MODEL"))
             .unwrap_or_else(|_| "gemma-4-26b-a4b-it".to_string()),
         "mlx" => std::env::var("MLX_MODEL_ID")
-            .unwrap_or_else(|_| "unsloth/Qwen3.6-27B-UD-MLX-4bit".to_string()),
+            .unwrap_or_else(|_| "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit".to_string()),
         "openai" => "gpt-4o-mini".to_string(),
         "ollama" => "llama3.2".to_string(),
         "openrouter" => "anthropic/claude-sonnet-4.6".to_string(),
@@ -3242,7 +3242,7 @@ mod tests {
         );
 
         let (model, provider) = resolve_model("mlx-qwen36-27b");
-        assert_eq!(model, "unsloth/Qwen3.6-27B-UD-MLX-4bit");
+        assert_eq!(model, "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit");
         assert_eq!(provider.as_deref(), Some("mlx"));
     }
 

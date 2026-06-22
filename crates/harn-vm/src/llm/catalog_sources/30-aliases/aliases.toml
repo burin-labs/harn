@@ -315,25 +315,42 @@ id = "qwen3.6-35b-a3b-ud-q4-k-xl"
 provider = "llamacpp"
 tool_format = "native"
 
-# MLX (Apple Silicon).
+# MLX (Apple Silicon). Burin #2717 retired the never-downloaded dense vision
+# model `unsloth/Qwen3.6-27B-UD-MLX-4bit` (HF cache held only zero-byte
+# `.incomplete` blobs) and switched the local MLX route to the coding-tuned
+# Qwen3.6-35B-A3B MoE served via `mlx_lm.server`. Point every MLX alias at the
+# live MoE so `auto`/preset selection lands on real weights. These share the
+# `qwen3.6-35b-a3b` equivalence_group with the llama.cpp GGUF route, so eval
+# aggregation compares the two runtimes directly.
+[aliases."mlx-qwen3.6"]
+id = "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit"
+provider = "mlx"
+
+[aliases."mlx-qwen3.6-q4"]
+id = "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit"
+provider = "mlx"
+
+[aliases."mlx-qwen3.6-q8"]
+id = "unsloth/Qwen3.6-35B-A3B-UD-MLX-8bit"
+provider = "mlx"
+
+# Back-compat: the old 27B alias names now resolve to the live 35B-A3B MoE so
+# any pinned config keeps working instead of pointing at non-existent weights.
 [aliases.mlx-qwen36-27b]
-id = "unsloth/Qwen3.6-27B-UD-MLX-4bit"
+id = "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit"
 provider = "mlx"
 
 [aliases."mlx-qwen3.6-27b"]
-id = "unsloth/Qwen3.6-27B-UD-MLX-4bit"
+id = "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit"
 provider = "mlx"
-tool_format = "native"
 
 [aliases."mlx-qwen3.6-27b-q4"]
-id = "unsloth/Qwen3.6-27B-UD-MLX-4bit"
+id = "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit"
 provider = "mlx"
-tool_format = "native"
 
 [aliases."local-qwen3.6-27b"]
-id = "unsloth/Qwen3.6-27B-UD-MLX-4bit"
+id = "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit"
 provider = "mlx"
-tool_format = "native"
 
 # MiniMax direct API aliases.
 [aliases.minimax]

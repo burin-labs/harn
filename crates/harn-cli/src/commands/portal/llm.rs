@@ -131,7 +131,7 @@ fn default_model_for_provider(provider: &str) -> Option<String> {
         "mlx" => std::env::var("MLX_MODEL_ID")
             .ok()
             .filter(|value| !value.is_empty())
-            .or_else(|| Some("unsloth/Qwen3.6-27B-UD-MLX-4bit".to_string())),
+            .or_else(|| Some("unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit".to_string())),
         "openai" => Some("gpt-4o".to_string()),
         "ollama" => Some("llama3.2".to_string()),
         "openrouter" => Some("Qwen/Qwen3.5-9B".to_string()),

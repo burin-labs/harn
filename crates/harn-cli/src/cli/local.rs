@@ -135,7 +135,7 @@ pub(crate) struct LocalStatusArgs {
 #[derive(Debug, Args)]
 pub(crate) struct LocalSwitchArgs {
     /// Model alias or provider-native model id (e.g. `qwen36-coder`,
-    /// `ollama:llama3.2`, `mlx-qwen36-27b`).
+    /// `ollama:llama3.2`, `mlx-qwen3.6`).
     #[arg(
         value_parser = llm_model_completion_parser(),
         hide_possible_values = true

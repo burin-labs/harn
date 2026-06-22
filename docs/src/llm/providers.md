@@ -22,7 +22,7 @@ ollama-gemma4` to resolve Harn aliases and pull the matching Ollama model.
 Ollama has no working qwen3.x route — its qwen3.5-family server-side tool-call
 parser 500s on Harn's text-tool output — so use the llamacpp provider for local
 qwen3.x. For non-Ollama local runtimes, `harn models install
-local-qwen3.6-gguf` and `harn models install local-qwen3.6-27b` print concrete
+local-qwen3.6-gguf` and `harn models install mlx-qwen3.6` print concrete
 llama.cpp / MLX download, launch, context-window, endpoint, and
 `provider-ready` verification commands.
 
@@ -44,7 +44,7 @@ family-level guidance, endpoint notes, and downstream JSON support data.
 | Ollama | `OLLAMA_HOST` (optional) | `devstral-small-2` when installed, otherwise `llama3.2` |
 | Local server | `LOCAL_LLM_BASE_URL` | `LOCAL_LLM_MODEL` or explicit `model` |
 | llama.cpp server | `LLAMACPP_BASE_URL` | explicit `model` from `/v1/models` |
-| MLX OpenAI-compatible server | `MLX_BASE_URL` | `MLX_MODEL_ID` or `mlx-qwen36-27b` |
+| MLX OpenAI-compatible server | `MLX_BASE_URL` | `MLX_MODEL_ID` or `mlx-qwen3.6` |
 
 Ollama runs locally and doesn't require an API key. The default host is
 `http://localhost:11434`.
@@ -73,9 +73,9 @@ responsible for cleanup.
 
 For an Apple Silicon MLX OpenAI-compatible server, Harn uses
 `MLX_BASE_URL` with a default of `http://127.0.0.1:8002`. Run
-`harn provider-ready mlx --model mlx-qwen36-27b` to probe `/v1/models`
+`harn provider-ready mlx --model mlx-qwen3.6` to probe `/v1/models`
 and verify that the configured model or alias is currently served. `harn local
-launch mlx-qwen36-27b --provider mlx --model-source <mlx-path-or-hf-repo>`
+launch mlx-qwen3.6 --provider mlx --model-source <mlx-path-or-hf-repo>`
 uses the catalog's MLX launch shape (`mlx_lm.server`, host, port, readiness)
 and stores a tracked PID for `harn local stop`.
 
@@ -96,7 +96,7 @@ harn local status
 # Ollama warms the daemon; llama.cpp/MLX launch a tracked process.
 harn local launch devstral-small-2:24b --provider ollama
 harn local launch local-qwen3.6 --provider llamacpp --model-source ~/models/qwen3.6/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf --ctx 8192
-harn local launch mlx-qwen36-27b --provider mlx --model-source unsloth/Qwen3.6-27B-UD-MLX-4bit
+harn local launch mlx-qwen3.6 --provider mlx --model-source unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit
 
 # Warm a model on its provider, evict conflicting local runtimes
 # (drains Ollama's loaded set, stops tracked llama.cpp/MLX PIDs), and
@@ -563,7 +563,7 @@ respects `HARN_OLLAMA_NUM_CTX` (or the catalog's
 - Endpoint: `<MLX_BASE_URL>/v1/chat/completions`
 - Readiness probe: `<MLX_BASE_URL>/v1/models`
 - Default host: `http://127.0.0.1:8002`
-- Default alias: `mlx-qwen36-27b`
+- Default alias: `mlx-qwen3.6`
 - No authentication required
 
 ## Provider resolution order

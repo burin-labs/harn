@@ -998,25 +998,42 @@ id = "qwen3.6-35b-a3b-ud-q4-k-xl"
 provider = "llamacpp"
 tool_format = "native"
 
-# MLX (Apple Silicon).
+# MLX (Apple Silicon). Burin #2717 retired the never-downloaded dense vision
+# model `unsloth/Qwen3.6-27B-UD-MLX-4bit` (HF cache held only zero-byte
+# `.incomplete` blobs) and switched the local MLX route to the coding-tuned
+# Qwen3.6-35B-A3B MoE served via `mlx_lm.server`. Point every MLX alias at the
+# live MoE so `auto`/preset selection lands on real weights. These share the
+# `qwen3.6-35b-a3b` equivalence_group with the llama.cpp GGUF route, so eval
+# aggregation compares the two runtimes directly.
+[aliases."mlx-qwen3.6"]
+id = "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit"
+provider = "mlx"
+
+[aliases."mlx-qwen3.6-q4"]
+id = "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit"
+provider = "mlx"
+
+[aliases."mlx-qwen3.6-q8"]
+id = "unsloth/Qwen3.6-35B-A3B-UD-MLX-8bit"
+provider = "mlx"
+
+# Back-compat: the old 27B alias names now resolve to the live 35B-A3B MoE so
+# any pinned config keeps working instead of pointing at non-existent weights.
 [aliases.mlx-qwen36-27b]
-id = "unsloth/Qwen3.6-27B-UD-MLX-4bit"
+id = "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit"
 provider = "mlx"
 
 [aliases."mlx-qwen3.6-27b"]
-id = "unsloth/Qwen3.6-27B-UD-MLX-4bit"
+id = "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit"
 provider = "mlx"
-tool_format = "native"
 
 [aliases."mlx-qwen3.6-27b-q4"]
-id = "unsloth/Qwen3.6-27B-UD-MLX-4bit"
+id = "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit"
 provider = "mlx"
-tool_format = "native"
 
 [aliases."local-qwen3.6-27b"]
-id = "unsloth/Qwen3.6-27B-UD-MLX-4bit"
+id = "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit"
 provider = "mlx"
-tool_format = "native"
 
 # MiniMax direct API aliases.
 [aliases.minimax]
@@ -1171,6 +1188,18 @@ text = "unknown"
 streaming_native = "pass"
 fallback_mode = "native"
 last_probe_at = "2026-06-05"
+
+# MLX route now serves the Qwen3.6-35B-A3B MoE via mlx_lm.server (burin #2717).
+# native is UNPROVEN on mlx_lm.server (the runtime profile requires a tool_probe
+# before native is trusted; the validated `native` precedent is the llama.cpp
+# sibling, a different server). Keep native = "unknown" so the readiness/probe
+# path verifies served identity + a one-tool probe before selecting native.
+[alias_tool_calling."mlx-qwen3.6"]
+native = "unknown"
+text = "unknown"
+streaming_native = "unknown"
+fallback_mode = "native"
+failure_reason = "requires_served_identity_and_tool_probe"
 
 [alias_tool_calling."mlx-qwen3.6-27b"]
 native = "unknown"
@@ -2383,22 +2412,45 @@ context_window = 262144
 runtime_context_window = 65536
 stream_timeout = 900.0
 capabilities = ["tools", "streaming", "thinking"]
-
-# Apple Silicon MLX.
 tier = "mid"
 open_weight = true
 strengths = ["coding"]
-[models."unsloth/Qwen3.6-27B-UD-MLX-4bit"]
-name = "Qwen3.6 27B (MLX 4-bit)"
-provider = "mlx"
-context_window = 262144
-stream_timeout = 900.0
-capabilities = ["tools", "vision", "streaming", "thinking"]
 
-# Local OpenAI-compatible servers (vLLM / bring-your-own).
+# Apple Silicon MLX. Burin #2717 switched the local MLX route from the
+# never-downloaded dense vision model `unsloth/Qwen3.6-27B-UD-MLX-4bit` to the
+# coding-tuned Qwen3.6-35B-A3B MoE served via `mlx_lm.server` (text MoE, no
+# vision). Shares the `qwen3.6-35b-a3b` logical_model / equivalence_group with
+# the llama.cpp GGUF route so eval aggregation treats the two runtimes as the
+# same model and compares them directly. Keep strengths conservative until
+# `mlx_lm.server` has its own tool/agentic probe evidence; equivalence groups
+# use the least-decorated host baseline for escalation decisions.
+[models."unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit"]
+name = "Qwen3.6 35B-A3B (MLX 4-bit)"
+provider = "mlx"
+logical_model = "qwen3.6-35b-a3b"
+equivalence_group = "qwen3.6-35b-a3b"
+context_window = 262144
+runtime_context_window = 65536
+stream_timeout = 900.0
+capabilities = ["tools", "streaming", "thinking"]
 tier = "mid"
 open_weight = true
-strengths = ["coding", "vision"]
+strengths = ["coding"]
+
+[models."unsloth/Qwen3.6-35B-A3B-UD-MLX-8bit"]
+name = "Qwen3.6 35B-A3B (MLX 8-bit)"
+provider = "mlx"
+logical_model = "qwen3.6-35b-a3b"
+equivalence_group = "qwen3.6-35b-a3b"
+context_window = 262144
+runtime_context_window = 65536
+stream_timeout = 900.0
+capabilities = ["tools", "streaming", "thinking"]
+tier = "mid"
+open_weight = true
+strengths = ["coding"]
+
+# Local OpenAI-compatible servers (vLLM / bring-your-own).
 [models."gemma-4-e2b-it"]
 name = "Gemma 4 E2B (local)"
 provider = "local"
