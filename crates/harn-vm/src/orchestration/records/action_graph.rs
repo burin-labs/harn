@@ -82,12 +82,21 @@ pub async fn append_action_graph_update(
     headers: BTreeMap<String, String>,
     payload: serde_json::Value,
 ) -> Result<(), crate::event_log::LogError> {
+    append_action_graph_update_with_policy(headers, payload, crate::redact::current_policy()).await
+}
+
+async fn append_action_graph_update_with_policy(
+    headers: BTreeMap<String, String>,
+    payload: serde_json::Value,
+    policy: crate::redact::RedactionPolicy,
+) -> Result<(), crate::event_log::LogError> {
     let Some(log) = active_event_log() else {
         return Ok(());
     };
     let topic = Topic::new("observability.action_graph")
         .expect("static observability.action_graph topic should always be valid");
-    let record = EventLogRecord::new("action_graph_update", payload).with_headers(headers);
+    let mut record = EventLogRecord::new("action_graph_update", payload).with_headers(headers);
+    record.redact_in_place(&policy);
     log.append(&topic, record).await.map(|_| ())
 }
 
@@ -110,12 +119,15 @@ pub(super) fn publish_action_graph_event(
         "status": run.status,
         "observability": observability,
     });
+    let policy = crate::redact::current_policy();
     if let Ok(handle) = tokio::runtime::Handle::try_current() {
         handle.spawn(async move {
-            let _ = append_action_graph_update(headers, payload).await;
+            let _ = append_action_graph_update_with_policy(headers, payload, policy).await;
         });
     } else {
-        let _ = futures::executor::block_on(append_action_graph_update(headers, payload));
+        let _ = futures::executor::block_on(append_action_graph_update_with_policy(
+            headers, payload, policy,
+        ));
     }
 }
 

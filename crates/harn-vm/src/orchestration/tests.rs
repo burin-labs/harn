@@ -488,6 +488,66 @@ fn save_run_record_materializes_hitl_questions_from_active_event_log() {
 }
 
 #[test]
+fn save_run_record_redacts_secrets_before_persisting() {
+    crate::reset_thread_local_state();
+    let temp_dir = tempfile::tempdir().unwrap();
+    let path = temp_dir.path().join("run.json");
+    let run = RunRecord {
+        id: "run_redaction".to_string(),
+        workflow_id: "wf".to_string(),
+        status: "completed".to_string(),
+        stages: vec![RunStageRecord {
+            id: "stage_secret".to_string(),
+            node_id: "stage".to_string(),
+            kind: "tool".to_string(),
+            status: "completed".to_string(),
+            outcome: "ok".to_string(),
+            visible_text: Some(
+                "https://user:password@example.com/cb?access_token=raw-stage-token".to_string(),
+            ),
+            metadata: BTreeMap::from([(
+                "api_key".to_string(),
+                serde_json::json!("raw-stage-api-key"),
+            )]),
+            ..Default::default()
+        }],
+        metadata: BTreeMap::from([
+            ("api_key".to_string(), serde_json::json!("raw-run-api-key")),
+            (
+                "callback_url".to_string(),
+                serde_json::json!(
+                    "https://user:password@example.com/items?client_secret=raw-client-secret&ok=1"
+                ),
+            ),
+        ]),
+        ..Default::default()
+    };
+
+    save_run_record(&run, Some(path.to_str().unwrap())).unwrap();
+
+    let raw = std::fs::read_to_string(&path).unwrap();
+    assert!(raw.contains("[redacted]") || raw.contains("%5Bredacted%5D"));
+    for secret in [
+        "raw-run-api-key",
+        "raw-stage-api-key",
+        "user:password",
+        "raw-stage-token",
+        "raw-client-secret",
+    ] {
+        assert!(
+            !raw.contains(secret),
+            "run record persisted secret {secret}: {raw}"
+        );
+    }
+
+    let loaded = load_run_record(&path).unwrap();
+    assert_eq!(
+        loaded.metadata.get("api_key"),
+        Some(&serde_json::json!("[redacted]"))
+    );
+}
+
+#[test]
 fn normalize_run_record_materializes_typed_handoffs_from_artifacts() {
     let value = crate::stdlib::json_to_vm_value(&serde_json::json!({
         "_type": "run_record",
@@ -917,6 +977,9 @@ async fn save_run_record_publishes_action_graph_updates_to_event_log() {
         ..Default::default()
     };
 
+    let _policy_guard = crate::redact::PolicyGuard::new(
+        crate::redact::RedactionPolicy::default().with_extra_field("workflow_id"),
+    );
     save_run_record(&run, Some(run_path.to_str().unwrap())).unwrap();
     run.status = "completed".to_string();
     save_run_record(&run, Some(run_path.to_str().unwrap())).unwrap();
@@ -931,6 +994,9 @@ async fn save_run_record_publishes_action_graph_updates_to_event_log() {
     assert!(events.iter().all(|(_, event)| {
         event.headers.get("trace_id").map(String::as_str) == Some("trace_stream")
     }));
+    assert!(events
+        .iter()
+        .all(|(_, event)| event.payload["workflow_id"] == serde_json::json!("[redacted]")));
     assert!(events.iter().any(|(_, event)| {
         event.payload["observability"]["action_graph_nodes"]
             .as_array()
@@ -940,6 +1006,48 @@ async fn save_run_record_publishes_action_graph_updates_to_event_log() {
                 })
             })
     }));
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn action_graph_update_redacts_payload_before_append() {
+    crate::reset_thread_local_state();
+    let temp_dir = tempfile::tempdir().unwrap();
+    crate::event_log::install_default_for_base_dir(temp_dir.path()).expect("install event log");
+    let log = crate::event_log::active_event_log().expect("active event log");
+    let topic = crate::event_log::Topic::new("observability.action_graph").unwrap();
+
+    append_action_graph_update(
+        BTreeMap::from([(
+            "Authorization".to_string(),
+            "Bearer raw-action-header".to_string(),
+        )]),
+        serde_json::json!({
+            "run_id": "run_action",
+            "provider_payload": {
+                "api_key": "raw-action-api-key",
+                "callback": "https://user:password@example.com/cb?access_token=raw-action-token"
+            }
+        }),
+    )
+    .await
+    .unwrap();
+
+    let events = log.read_range(&topic, None, 8).await.unwrap();
+    assert_eq!(events.len(), 1);
+    let persisted = serde_json::to_string(&events[0].1).unwrap();
+    assert!(persisted.contains("[redacted]") || persisted.contains("%5Bredacted%5D"));
+    for secret in [
+        "raw-action-header",
+        "raw-action-api-key",
+        "user:password",
+        "raw-action-token",
+    ] {
+        assert!(
+            !persisted.contains(secret),
+            "action-graph event persisted secret {secret}: {persisted}"
+        );
+    }
+    crate::event_log::reset_active_event_log();
 }
 
 #[test]

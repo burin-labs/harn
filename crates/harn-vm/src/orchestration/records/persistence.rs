@@ -457,7 +457,10 @@ pub fn save_run_record(run: &RunRecord, path: Option<&str>) -> Result<String, Vm
         std::fs::create_dir_all(parent)
             .map_err(|e| VmError::Runtime(format!("failed to create run directory: {e}")))?;
     }
-    let json = serde_json::to_string_pretty(&materialized)
+    let mut json_value = serde_json::to_value(&materialized)
+        .map_err(|e| VmError::Runtime(format!("failed to encode run record: {e}")))?;
+    crate::redact::current_policy().redact_json_in_place(&mut json_value);
+    let json = serde_json::to_string_pretty(&json_value)
         .map_err(|e| VmError::Runtime(format!("failed to encode run record: {e}")))?;
     crate::atomic_io::atomic_write(&path, json.as_bytes())
         .map_err(|e| VmError::Runtime(format!("failed to persist run record: {e}")))?;
