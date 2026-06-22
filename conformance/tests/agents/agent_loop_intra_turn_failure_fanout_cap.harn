@@ -1,0 +1,154 @@
+/**
+ * FIX A4: intra-turn failing-fan-out cap.
+ *
+ * When ONE model response fans out a batch of byte-identical FAILING tool
+ * calls, harn dispatches them all synchronously with no LLM call / progress
+ * check between, so the cross-turn no-progress terminator fires a whole turn
+ * too late. The `intra_turn_failure_fanout_cap` flag collapses the tail of an
+ * identical-failure fan-out into a single synthetic result.
+ *
+ * This test is also the flag's reachability probe: it proves that flipping the
+ * flag changes dispatch behavior end-to-end (capped vs not), and that distinct
+ * / non-failing batches are never falsely capped.
+ */
+import { llm_text, with_llm_script } from "std/testing"
+
+// `edit` always rejects with a byte-identical error, modelling the live
+// 127×`Error: missing action` fan-out.
+fn rejecting_edit_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "edit",
+    "Edit a file (always rejects in this test).",
+    {
+      handler: { _args ->
+        throw "missing action, expected one of create/patch/replace_body"
+      },
+      parameters: {action: {type: "string", description: "Edit kind"}, path: {type: "string", description: "Path"}},
+      returns: {type: "string"},
+      annotations: {kind: "edit", side_effect_level: "workspace_write"},
+    },
+  )
+  return tools
+}
+
+// A read tool that always SUCCEEDS — distinct successful calls must never trip
+// the failing-fan-out cap.
+fn reading_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "look",
+    "Read a path.",
+    {
+      handler: { args -> "contents of " + (args?.path ?? "") },
+      parameters: {path: {type: "string", description: "Path"}},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  return tools
+}
+
+fn identical_edit_batch(n) {
+  var calls = []
+  var i = 0
+  while i < n {
+    calls = calls.push({id: "e" + to_string(i), name: "edit", arguments: {path: "a.swift"}})
+    i = i + 1
+  }
+  return calls
+}
+
+fn distinct_look_batch(n) {
+  var calls = []
+  var i = 0
+  while i < n {
+    calls = calls.push({id: "l" + to_string(i), name: "look", arguments: {path: "f" + to_string(i) + ".swift"}})
+    i = i + 1
+  }
+  return calls
+}
+
+pipeline main() {
+  // Scenario 1: 10 byte-identical failing `edit` calls in ONE response, cap=3.
+  // The first 3 dispatch (the streak that trips the cap), the remaining 7 are
+  // collapsed into one synthetic "collapsed remaining identical failing"
+  // result, so history carries the collapse marker.
+  with_llm_script(
+    [{text: "", tool_calls: identical_edit_batch(10)}, llm_text("I see the edits were rejected.")],
+    { ->
+      let result = agent_loop(
+        "Fan out identical failing edits.",
+        nil,
+        {
+          provider: "mock",
+          tools: rejecting_edit_tools(),
+          tool_format: "native",
+          loop_until_done: true,
+          max_iterations: 3,
+          done_judge: nil,
+          intra_turn_failure_fanout_cap: 3,
+        },
+      )
+      let calls = llm_mock_calls()
+      let second_turn = json_stringify(calls[1].messages)
+      __io_println(result.status)
+      __io_println(contains(result.tools.rejected, "edit"))
+      __io_println(contains(second_turn, "missing required parameter(s): action"))
+      __io_println(contains(second_turn, "collapsed remaining identical failing"))
+    },
+  )
+  // Scenario 2: same 10 identical failing edits, but flag OFF (default). No
+  // collapse marker — every call dispatched, legacy behavior preserved.
+  with_llm_script(
+    [{text: "", tool_calls: identical_edit_batch(10)}, llm_text("I see the edits were rejected.")],
+    { ->
+      let result = agent_loop(
+        "Fan out identical failing edits, flag off.",
+        nil,
+        {
+          provider: "mock",
+          tools: rejecting_edit_tools(),
+          tool_format: "native",
+          loop_until_done: true,
+          max_iterations: 3,
+          done_judge: nil,
+        },
+      )
+      let calls = llm_mock_calls()
+      let second_turn = json_stringify(calls[1].messages)
+      __io_println(result.status)
+      __io_println(contains(result.tools.rejected, "edit"))
+      __io_println(!contains(second_turn, "collapsed remaining identical failing"))
+    },
+  )
+  // Scenario 3: 6 DISTINCT successful `look` calls in ONE response with the cap
+  // flag ON. None fail, so the cap never trips — all 6 results reach history
+  // and no collapse marker appears.
+  with_llm_script(
+    [{text: "", tool_calls: distinct_look_batch(6)}, llm_text("Read them all.")],
+    { ->
+      let result = agent_loop(
+        "Fan out distinct successful reads.",
+        nil,
+        {
+          provider: "mock",
+          tools: reading_tools(),
+          tool_format: "native",
+          loop_until_done: true,
+          max_iterations: 3,
+          done_judge: nil,
+          intra_turn_failure_fanout_cap: 3,
+        },
+      )
+      let calls = llm_mock_calls()
+      let second_turn = json_stringify(calls[1].messages)
+      __io_println(result.status)
+      __io_println(contains(second_turn, "contents of f0.swift"))
+      __io_println(contains(second_turn, "contents of f5.swift"))
+      __io_println(!contains(second_turn, "collapsed remaining identical failing"))
+    },
+  )
+}

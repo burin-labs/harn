@@ -609,3 +609,62 @@ fn ignores_non_tool_function_calls_inside_code_examples() {
         result.errors
     );
 }
+
+// FIX A2a: an unclosed `<tool_call>` wrapper around a structurally COMPLETE
+// bare `name({ ... <<EOF ... EOF })` call (the model omitted the redundant
+// `</tool_call>` close tag, `stop_reason: stop`) must be recovered and
+// dispatched — not discarded with a false "TOOL CALL TRUNCATED" diagnostic.
+#[test]
+fn unclosed_wrapper_complete_bare_heredoc_call_recovers() {
+    let tools = sample_tool_registry();
+    // No `</tool_call>` close tag. Heredoc sentinel `EOF` present; the call's
+    // `})` is present. This is a complete call, just missing the close tag.
+    let text = "<tool_call>\nedit({ \"action\": \"create\", \"path\": \"src/main.swift\", \"content\": <<EOF\nimport Foundation\n\nstruct App {\n    static func main() {\n        print(\"hello\")\n    }\n}\nEOF\n})";
+    let parsed = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert_eq!(
+        parsed.errors,
+        Vec::<String>::new(),
+        "complete bare call should not be reported as truncated: {:?}",
+        parsed.errors
+    );
+    assert_eq!(parsed.calls.len(), 1, "calls: {:?}", parsed.calls);
+    assert_eq!(parsed.calls[0]["name"], json!("edit"));
+    assert_eq!(parsed.calls[0]["arguments"]["action"], json!("create"));
+    assert_eq!(
+        parsed.calls[0]["arguments"]["path"],
+        json!("src/main.swift")
+    );
+    let content = parsed.calls[0]["arguments"]["content"].as_str().unwrap();
+    assert!(
+        content.contains("import Foundation"),
+        "content: {content:?}"
+    );
+    assert!(content.contains("print(\"hello\")"), "content: {content:?}");
+    // The recovered call must be re-emitted in canonical tagged form so the
+    // assistant-history replay is well-formed.
+    assert!(
+        parsed.canonical.contains("edit"),
+        "canonical: {:?}",
+        parsed.canonical
+    );
+}
+
+// FIX A2a non-regression: an unclosed `<tool_call>` wrapper whose heredoc body
+// is genuinely cut off mid-argument (no closing `EOF` sentinel, no `})`) is a
+// real truncation and must STILL surface the "TOOL CALL TRUNCATED" diagnostic
+// and dispatch zero calls — never a half-written file.
+#[test]
+fn unclosed_wrapper_truncated_heredoc_still_reports_truncated() {
+    let tools = sample_tool_registry();
+    // Heredoc opened with `<<EOF` but never closed; the call's `})` never
+    // arrives. The output was cut off mid-content.
+    let text = "<tool_call>\nedit({ \"action\": \"create\", \"path\": \"src/main.swift\", \"content\": <<EOF\nimport Foundation\n\nstruct App {\n    static func ";
+    let parsed = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert_eq!(parsed.calls.len(), 0, "calls: {:?}", parsed.calls);
+    assert_eq!(parsed.errors.len(), 1, "errors: {:?}", parsed.errors);
+    assert!(
+        parsed.errors[0].contains("TRUNCATED"),
+        "truncated body should report truncation: {:?}",
+        parsed.errors
+    );
+}

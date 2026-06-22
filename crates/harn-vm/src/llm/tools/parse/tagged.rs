@@ -235,6 +235,29 @@ pub(crate) fn parse_text_tool_calls_with_tools(
                 }
                 Ok(None) => {}
             }
+            // Canonical bare-call body with an unclosed wrapper (#A2a): the model
+            // emitted a structurally COMPLETE `name({ ... <<EOF ... EOF })` but
+            // omitted the redundant `</tool_call>` close tag. `stop_reason` is
+            // `stop`, not `length` — nothing was truncated, the close tag is just
+            // absent. The bare-call parser is heredoc-aware, so it only yields a
+            // call when the body is genuinely complete (heredoc sentinel-closed,
+            // the call's `)` balanced); a body cut off mid-argument yields no call
+            // (or a parse error) and falls through to the TRUNCATED diagnostic.
+            if let Some(call) = recover_complete_bare_call_body(body, tools_val) {
+                let name = call
+                    .get("name")
+                    .and_then(|name| name.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let args = call
+                    .get("arguments")
+                    .cloned()
+                    .unwrap_or(serde_json::json!({}));
+                canonical_parts.push(text_tool_call_block(&render_canonical_call(&name, &args)));
+                calls.push(call);
+                cursor = bytes.len();
+                continue;
+            }
             let recovered_name = leading_call_name(body, tools_val);
             match recovered_name {
                 Some(name) => errors.push(format!(
@@ -878,6 +901,35 @@ fn stray_tool_call_close_len(src: &str, cursor: usize) -> Option<usize> {
         }
     }
     None
+}
+
+/// Recover a single COMPLETE bare `name({ ... })` call from the body of an
+/// unclosed `<tool_call>` wrapper (#A2a). Value models emit a structurally
+/// complete call — heredoc sentinel-closed, the call's `)` balanced — and
+/// simply omit the redundant `</tool_call>` close tag (observed live across
+/// swift/zig/scala on fw-gpt-oss-120b with `stop_reason: stop`, i.e. the model
+/// finished its turn rather than hitting the output cap). Without this the body
+/// falls through to the "TOOL CALL TRUNCATED" diagnostic and the generated file
+/// is discarded.
+///
+/// `parse_bare_calls_in_body` is heredoc-aware, so it yields a call ONLY when
+/// the body is genuinely complete: a body cut off mid-heredoc or before the
+/// call's closing `)` parses to zero calls (or a parse error), so the caller
+/// correctly falls through to the truncation diagnostic in that case.
+///
+/// Returns `Some(call)` only when EXACTLY ONE well-formed call is present and
+/// no parse error was raised — so a malformed-but-recognizable body still
+/// surfaces its real diagnostic via the existing fall-through path, and a body
+/// carrying multiple bare calls is not silently collapsed to one.
+fn recover_complete_bare_call_body(
+    body: &str,
+    tools_val: Option<&VmValue>,
+) -> Option<serde_json::Value> {
+    let inner = parse_bare_calls_in_body(body, tools_val);
+    if !inner.errors.is_empty() || inner.calls.len() != 1 {
+        return None;
+    }
+    inner.calls.into_iter().next()
 }
 
 /// Best-effort recovery of the tool name from a truncated `<tool_call>` body:

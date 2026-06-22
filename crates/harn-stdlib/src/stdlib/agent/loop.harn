@@ -1286,6 +1286,99 @@ fn __resolve_max_concurrent_tools(turn_opts) {
   return 1
 }
 
+/**
+ * Resolve the intra-turn failing-fan-out cap K (#A4). When a single model
+ * response fans out a large batch of byte-identical FAILING tool calls, every
+ * call is dispatched synchronously with no LLM call or progress check between
+ * them, so the cross-turn loop-detector / no-progress terminator fire a whole
+ * turn too late — after all N drain, having burned turn/wall budget and flooded
+ * context with N identical errors (observed: 127 identical `edit` rejections in
+ * ~2.7s on swift-feat). This cap is the intra-turn analog of the cross-turn
+ * no-progress terminator: after the Kth consecutive byte-identical failing
+ * result within ONE batch, the remaining identical calls are skipped and
+ * collapsed into a single synthetic result.
+ *
+ * Default OFF: returns `0` (no cap) unless `intra_turn_failure_fanout_cap` is
+ * set to a positive int. A value of e.g. `3` collapses after 3 identical
+ * failures. Reachability is exercised by the `agent_loop_intra_turn_*`
+ * conformance tests, which prove that flipping the flag changes dispatch
+ * behavior end-to-end.
+ */
+fn __resolve_intra_turn_failure_fanout_cap(turn_opts) {
+  let raw = turn_opts?.intra_turn_failure_fanout_cap
+  if type_of(raw) == "int" && raw > 0 {
+    return raw
+  }
+  return 0
+}
+
+/**
+ * Stable signature of a FAILING dispatch result, used to detect a fan-out of
+ * byte-identical failing calls within one batch. Keyed on (tool_name,
+ * args_hash, normalized failure text) so it is polyglot — it never inspects
+ * language-specific content, only the tool identity, the exact arguments, and
+ * the exact error/observation the tool returned. Returns `nil` for a successful
+ * (or non-result) entry so successes never count toward the cap.
+ */
+fn __intra_turn_failure_signature(result) {
+  if type_of(result) != "dict" {
+    return nil
+  }
+  if __tool_result_ok(result) {
+    return nil
+  }
+  let name = to_string(result?.tool_name ?? result?.name ?? "")
+  let args = result?.arguments ?? {}
+  let failure_text = to_string(result?.error ?? result?.observation ?? result?.rendered_result ?? result?.result ?? "")
+  return sha256(json_stringify({name: name, args: args, failure: failure_text}))
+}
+
+/**
+ * Stable signature of a tool CALL (before dispatch), keyed on (tool_name,
+ * args). Used to skip the tail of a fan-out: once a streak of byte-identical
+ * failing results trips the cap, every remaining call with this same call
+ * signature is collapsed rather than executed. Polyglot — never inspects
+ * language-specific content, only tool identity and exact arguments.
+ */
+fn __intra_turn_call_signature(call) {
+  if type_of(call) != "dict" {
+    return nil
+  }
+  let name = to_string(call?.name ?? call?.tool_name ?? "")
+  let args = call?.arguments ?? {}
+  return sha256(json_stringify({name: name, args: args}))
+}
+
+/**
+ * Synthetic collapsed result that stands in for the identical failing calls
+ * skipped after the fan-out cap tripped. Mirrors the failing-result shape so
+ * downstream rollups (rejected-tool tracking, history) treat it as one failed
+ * call rather than executing N more.
+ */
+fn __intra_turn_collapsed_result(call, sample_result) {
+  let name = to_string(call?.name ?? sample_result?.tool_name ?? "")
+  let observation = "[collapsed remaining identical failing `" + name + "` call(s) "
+    + "from this turn]\n"
+    + "These calls had byte-identical arguments and produced the byte-identical "
+    + "error already shown above, so they were NOT executed. Repeating the same "
+    + "failing call cannot make progress — issue edits one at a time and inspect "
+    + "each result, or change your approach (re-read the file / fix the argument "
+    + "that was rejected) before retrying."
+  return {
+    ok: false,
+    status: "collapsed_identical_failure",
+    tool_name: name,
+    tool_call_id: to_string(call?.id ?? call?.tool_call_id ?? ""),
+    arguments: call?.arguments ?? {},
+    result: nil,
+    rendered_result: observation,
+    observation: observation,
+    error: observation,
+    error_category: "intra_turn_failure_fanout_collapsed",
+    executor: nil,
+  }
+}
+
 fn __callable(value) {
   let kind = type_of(value)
   return kind == "closure" || kind == "function" || kind == "fn"
@@ -1404,6 +1497,7 @@ fn __dispatch_tool_calls(session_id, tool_calls, turn_opts) {
     _max_concurrent_tools: cap,
     _prefetch_next_turn: turn_opts?.prefetch_next_turn ?? false,
     _stop_reason: turn_opts?._stop_reason ?? "",
+    _intra_turn_failure_fanout_cap: __resolve_intra_turn_failure_fanout_cap(turn_opts),
   }
   let caller = turn_opts?._tool_caller
   let raw_dispatch = __dispatch_tool_calls_with_middleware(tool_calls, tools, dispatch_options, cap)
@@ -1430,9 +1524,51 @@ fn __dispatch_tool_calls_with_middleware(tool_calls, tools, options, cap) {
   // completion order so text tool-call parsers that key on
   // declaration order still match.
   if cap <= 1 || len(tool_calls) <= 1 {
+    // Intra-turn failing-fan-out cap (#A4). Dispatch serially; track the count
+    // of consecutive byte-identical FAILING results. Once that streak reaches
+    // the configured cap K, skip the remaining calls whose (tool_name, args)
+    // signature matches the capped one — they would produce the same failure —
+    // and substitute a single synthetic "collapsed" result. This is the
+    // intra-turn analog of the cross-turn no-progress terminator. Default OFF
+    // (`fanout_cap == 0`): the legacy "dispatch every call" behavior is
+    // unchanged unless the flag is set. A success, or any failure/call with a
+    // DIFFERENT signature, resets the streak, so a batch of distinct or
+    // non-failing calls is never capped.
+    let fanout_cap = options?._intra_turn_failure_fanout_cap ?? 0
     var results = []
+    var streak_signature = nil
+    var streak_count = 0
+    var capped_call_signature = nil
+    var capped_sample = nil
+    var collapsed_emitted = false
     for (index, call) in iter(tool_calls).enumerate() {
-      results = results.push(__invoke_tool_with_index(call, index, tools, options))
+      if fanout_cap > 0 && capped_call_signature != nil
+        && __intra_turn_call_signature(call) == capped_call_signature {
+        // Same failing call as the one that tripped the cap — skip dispatch.
+        if !collapsed_emitted {
+          results = results.push(__intra_turn_collapsed_result(call, capped_sample))
+          collapsed_emitted = true
+        }
+        continue
+      }
+      let result = __invoke_tool_with_index(call, index, tools, options)
+      results = results.push(result)
+      if fanout_cap > 0 {
+        let signature = __intra_turn_failure_signature(result)
+        if signature == nil {
+          streak_signature = nil
+          streak_count = 0
+        } else if signature == streak_signature {
+          streak_count = streak_count + 1
+          if streak_count >= fanout_cap {
+            capped_call_signature = __intra_turn_call_signature(call)
+            capped_sample = result
+          }
+        } else {
+          streak_signature = signature
+          streak_count = 1
+        }
+      }
     }
     return results
   }
