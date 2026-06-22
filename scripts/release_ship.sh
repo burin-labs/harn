@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="${HARN_RELEASE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 cd "$ROOT_DIR"
+RELEASE_GATE_SCRIPT="${HARN_RELEASE_GATE_SCRIPT:-./scripts/release_gate.sh}"
 
 # ── Timing instrumentation ──────────────────────────────────────────────
 # Every `=== step ===` banner goes through `log_step`, which stamps the
@@ -423,14 +424,14 @@ run_common_gates() {
 
   if [[ "$SKIP_AUDIT" -eq 0 ]]; then
     log_step "Release audit"
-    ./scripts/release_gate.sh audit
+    "$RELEASE_GATE_SCRIPT" audit
   else
     log_step "Skipping release audit (already proved by merge-queue CI)"
   fi
 
   if [[ "$SKIP_DRY_RUN" -eq 0 ]]; then
     log_step "Publish dry run"
-    ./scripts/release_gate.sh publish --dry-run
+    "$RELEASE_GATE_SCRIPT" publish --dry-run
   fi
 }
 
@@ -459,7 +460,7 @@ open_bump_pr() {
   git switch -c "$branch"
 
   log_step "Version bump"
-  ./scripts/release_gate.sh prepare --bump "$BUMP"
+  "$RELEASE_GATE_SCRIPT" prepare --bump "$BUMP"
   local actual_next
   actual_next="$(current_version)"
   if [[ "$actual_next" != "$next" ]]; then
@@ -539,7 +540,7 @@ prepare_here() {
   run_common_gates
 
   log_step "Version bump (in place)"
-  ./scripts/release_gate.sh prepare --bump "$BUMP" --allow-dirty
+  "$RELEASE_GATE_SCRIPT" prepare --bump "$BUMP" --allow-dirty
   local actual_next
   actual_next="$(current_version)"
   if [[ "$actual_next" != "$next" ]]; then
@@ -749,7 +750,7 @@ log_step "Push tag"
 git push origin "$TAG"
 
 log_step "Publish"
-./scripts/release_gate.sh publish
+"$RELEASE_GATE_SCRIPT" publish
 
 if [[ -z "$NOTES_OUTPUT" ]]; then
   NOTES_DIR="$ROOT_DIR/.harn/release-notes"
@@ -761,7 +762,7 @@ else
 fi
 
 log_step "Release notes"
-./scripts/release_gate.sh notes --version "$TAG" --output "$NOTES_OUTPUT"
+"$RELEASE_GATE_SCRIPT" notes --version "$TAG" --output "$NOTES_OUTPUT"
 cat "$NOTES_OUTPUT"
 
 GH_RELEASE_URL=""

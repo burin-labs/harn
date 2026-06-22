@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="${HARN_RELEASE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 cd "$ROOT_DIR"
+PUBLISH_SCRIPT="${HARN_PUBLISH_SCRIPT:-./scripts/publish.sh}"
 
 usage() {
   cat <<'EOF'
@@ -433,7 +434,7 @@ cmd_publish() {
   if [[ -z "$dry_run" ]]; then
     require_clean_tree
   fi
-  ./scripts/publish.sh ${dry_run}
+  "$PUBLISH_SCRIPT" ${dry_run}
   local version
   version="$(current_version)"
   if [[ -n "$dry_run" ]]; then

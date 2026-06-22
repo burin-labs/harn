@@ -66,27 +66,6 @@ RETRY_DELAY=120  # seconds to wait on rate limit
 INDEX_SETTLE_DELAY=30  # seconds to wait for index propagation between retries
 MAX_ATTEMPTS=3
 
-# Crates to publish, in dependency order. Used by the per-crate fallback
-# when `cargo publish --workspace` bails out partway through.
-WORKSPACE_CRATES=(
-  harn-glob
-  harn-lexer
-  harn-parser
-  harn-ir
-  harn-stdlib
-  harn-fmt
-  harn-modules
-  harn-vm
-  harn-lint
-  harn-dap
-  harn-serve
-  harn-lsp
-  harn-hostlib
-  harn-rules
-  harn-rules-hostlib
-  harn-cli
-)
-
 # Cargo classifies several non-fatal conditions as fatal exits, so the
 # bare `cargo publish --workspace` can fail mid-stream without actually
 # being broken. We retry on:
@@ -94,7 +73,9 @@ WORKSPACE_CRATES=(
 #   - "unexpected cargo internal error"    — known cargo bug where it gives
 #   - "packages remain in plan"              up waiting on index propagation
 #                                            after a successful upload
-#   - "already exists on crates.io index"  — crate succeeded on an earlier
+#   - "already exists on crates.io index" /
+#     "crate version ... is already uploaded"
+#                                          — crate succeeded on an earlier
 #                                            attempt; nothing to do
 #   - "timeout while waiting for published  — a dependency was uploaded but the
 #      dependencies" / "timed out waiting     index hadn't propagated before
@@ -103,7 +84,82 @@ WORKSPACE_CRATES=(
 #                                            Pure propagation lag: retrying or the
 #                                            per-crate fallback (which skips the
 #                                            already-uploaded crates) completes it.
-RETRYABLE_PATTERN='429|Too Many Requests|unexpected cargo internal error|packages remain in plan|already exists on crates.io index|timeout while waiting for published dependencies|timed out waiting for'
+ALREADY_PUBLISHED_PATTERN='already exists on crates\.io index|crate version .* is already uploaded'
+RETRYABLE_PATTERN="429|Too Many Requests|unexpected cargo internal error|packages remain in plan|${ALREADY_PUBLISHED_PATTERN}|timeout while waiting for published dependencies|timed out waiting for"
+
+workspace_publish_crates() {
+  cargo metadata --format-version 1 --no-deps | python3 -c '
+import json
+import sys
+
+meta = json.load(sys.stdin)
+workspace = set(meta.get("workspace_members", []))
+packages = [
+    pkg
+    for pkg in meta.get("packages", [])
+    if pkg.get("id") in workspace
+    and (pkg.get("publish") is None or "crates-io" in pkg.get("publish", []))
+]
+by_name = {pkg["name"]: pkg for pkg in packages}
+deps = {
+    pkg["name"]: sorted(
+        {
+            dep["name"]
+            for dep in pkg.get("dependencies", [])
+            if dep.get("source") is None and dep.get("name") in by_name
+        }
+    )
+    for pkg in packages
+}
+
+visiting = set()
+visited = set()
+ordered = []
+
+
+def visit(name):
+    if name in visited:
+        return
+    if name in visiting:
+        cycle = " -> ".join(sorted(visiting | {name}))
+        raise SystemExit(f"workspace publish dependency cycle: {cycle}")
+    visiting.add(name)
+    for dep in deps[name]:
+        visit(dep)
+    visiting.remove(name)
+    visited.add(name)
+    ordered.append(name)
+
+
+for name in sorted(by_name):
+    visit(name)
+
+print("\n".join(ordered))
+'
+}
+
+publish_output_means_already_published() {
+  local output="$1"
+  grep -Eiq "$ALREADY_PUBLISHED_PATTERN" <<<"$output"
+}
+
+crate_version_exists() {
+  local crate="$1"
+  if ! command -v curl &>/dev/null; then
+    return 1
+  fi
+  curl \
+    --fail \
+    --silent \
+    --show-error \
+    --location \
+    --retry 3 \
+    --retry-delay 2 \
+    --header "User-Agent: harn-release-publish" \
+    --output /dev/null \
+    "https://crates.io/api/v1/crates/${crate}/${CURRENT_VERSION}" \
+    >/dev/null 2>&1
+}
 
 attempt_workspace_publish() {
   local attempt=1
@@ -142,21 +198,27 @@ attempt_workspace_publish() {
 }
 
 # Per-crate fallback for the case where `cargo publish --workspace` keeps
-# bailing on the cargo internal error. Walks crates in dependency order
-# and treats "already exists on crates.io index" as success.
+# bailing on the cargo internal error. Walks publishable workspace crates in
+# dependency order and treats any crate/version already visible on crates.io as
+# success, regardless of Cargo's exact wording.
 attempt_per_crate_publish() {
   echo ""
   echo "=== Per-crate publish fallback ==="
   local crate
   local output
-  for crate in "${WORKSPACE_CRATES[@]}"; do
+  while IFS= read -r crate; do
+    [[ -n "$crate" ]] || continue
     echo ""
     echo "--- Publishing $crate ---"
+    if crate_version_exists "$crate"; then
+      echo "  $crate already published at version $CURRENT_VERSION — skipping"
+      continue
+    fi
     if output=$(cargo publish -p "$crate" $DRY_RUN $VERIFY_FLAGS $ALLOW_DIRTY 2>&1); then
       echo "$output"
       continue
     fi
-    if echo "$output" | grep -q "already exists on crates.io index"; then
+    if publish_output_means_already_published "$output" || crate_version_exists "$crate"; then
       echo "  $crate already published at this version — skipping"
       continue
     fi
@@ -168,7 +230,7 @@ attempt_per_crate_publish() {
         echo "$output"
         continue
       fi
-      if echo "$output" | grep -q "already exists on crates.io index"; then
+      if publish_output_means_already_published "$output" || crate_version_exists "$crate"; then
         echo "  $crate already published at this version — skipping"
         continue
       fi
@@ -176,7 +238,7 @@ attempt_per_crate_publish() {
     echo "$output"
     echo "  FAILED to publish $crate"
     return 1
-  done
+  done < <(workspace_publish_crates)
   return 0
 }
 
