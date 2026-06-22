@@ -878,7 +878,46 @@ fn collect_text_field(payload: &JsonValue, path: &[&str], out: &mut Vec<String>)
     }
 }
 
+/// File-display tools merely render file contents (or search hits over file
+/// contents); they never RUN a build/test/compiler. A `[verified:*]` grounded
+/// signal must come from executed verifier output, not from a file that happens
+/// to contain a phrase like `"Parse error"` in a string literal or `///` doc
+/// comment. Reading such a file is not a verifier reporting a defect, so these
+/// tools are barred from contributing grounded review findings on a substring
+/// match alone — regardless of what the displayed bytes say.
+fn is_file_display_tool(tool_name: &str) -> bool {
+    matches!(
+        tool_name.trim().to_ascii_lowercase().as_str(),
+        "look"
+            | "read"
+            | "read_file"
+            | "view"
+            | "cat"
+            | "open"
+            | "search"
+            | "grep"
+            | "ripgrep"
+            | "rg"
+            | "find"
+            | "glob"
+            | "ls"
+            | "list"
+            | "list_dir"
+            | "list_files"
+            | "tree"
+    )
+}
+
 fn looks_like_verifier_output(tool_name: &str, command: &str, text: &str) -> bool {
+    // A file-display tool (look/read/search/glob/...) cannot be a verifier:
+    // it shows file bytes, it does not execute a build or test. Admitting its
+    // output as "verifier output" because the displayed file contains
+    // "parse error" mints a phantom grounded signal from innocent source/doc
+    // text. Bar it outright so forms (1) source string literals and (2) `///`
+    // doc comments can never become `[verified:parse_errors]`.
+    if is_file_display_tool(tool_name) {
+        return false;
+    }
     let probe = format!("{tool_name} {command}").to_ascii_lowercase();
     const COMMAND_MARKERS: &[&str] = &[
         "cargo check",
@@ -964,6 +1003,15 @@ fn review_failure_line(line: &str) -> Option<String> {
     {
         return None;
     }
+    // A passing test whose descriptive NAME contains an error phrase
+    // (e.g. `parser.test.parse error: unclosed section ... OK`) is not a
+    // failure. Lines carrying a pass marker are reporting success, so they must
+    // never become a grounded `[verified:parse_errors]` signal even though the
+    // name embeds "parse error". This is the polyglot discriminator: did the
+    // verifier report this line as passing? If so, it is not a defect.
+    if line_has_pass_marker(&lower) {
+        return None;
+    }
     let matched = lower.starts_with("error:")
         || lower.contains(" error:")
         || lower.contains("error[")
@@ -988,6 +1036,54 @@ fn review_failure_line(line: &str) -> Option<String> {
         || lower.contains("build failed")
         || (lower.contains("harn-") && lower.contains(" error "));
     matched.then(|| truncate_review_summary(&cleaned))
+}
+
+/// Detect a per-line pass marker emitted by common test runners so a passing
+/// line whose name embeds an error phrase is not mistaken for a failure. We
+/// look for the marker as a trailing/standalone token, not a bare substring, so
+/// the word "ok" inside an identifier (e.g. `tokenize`) does not suppress a real
+/// failure. Trailing `... OK` (zig/ctest-style), `[ ok ]`, `pass`/`passed`/
+/// `passing`/`success`, the leading-tap `ok ` prefix, and Go's `--- PASS:`/
+/// `ok  ` are all treated as success markers.
+fn line_has_pass_marker(lower: &str) -> bool {
+    let trimmed = lower.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    // STRONG, position-anchored pass markers win even when the test NAME embeds
+    // an error phrase (e.g. `parser.test.parse error: unclosed section...OK`):
+    // a runner that printed a trailing `OK`/`PASS`/`✓` for the line is
+    // reporting success. The marker must be a trailing/standalone token, not a
+    // bare substring, so the word "ok" inside an identifier never matches.
+    let last_token = trimmed
+        .rsplit(|c: char| c.is_whitespace() || matches!(c, '.' | ']' | ')' | ':' | ';'))
+        .find(|tok| !tok.is_empty());
+    let trailing_ok = matches!(last_token, Some("ok" | "pass" | "passed" | "passing"));
+    if trailing_ok
+        || trimmed.contains("[ ok ]")
+        || trimmed.contains("[ok]")
+        || trimmed.contains("--- pass")
+        || trimmed.contains("✓")
+        || trimmed.starts_with("ok ")
+    {
+        return true;
+    }
+    // WEAKER pass phrases (a free-text `... passed`/`succeeded` summary) only
+    // suppress when the line carries NO failure verdict — otherwise a real
+    // summary like `test result: FAILED. 0 passed; 1 failed` (which contains
+    // " passed") would be silenced. The strong markers above are exempt from
+    // this guard because a trailing per-line `OK` is itself the verdict.
+    let has_failure_verdict = trimmed.contains("fail")
+        || trimmed.contains("error[")
+        || trimmed.contains("panicked")
+        || trimmed.contains("not ok");
+    if has_failure_verdict {
+        return false;
+    }
+    trimmed.contains(" passed")
+        || trimmed.contains(" passing")
+        || trimmed.contains("test passed")
+        || trimmed.contains("succeeded")
 }
 
 fn is_strong_review_signal(value: &str) -> bool {
@@ -2219,5 +2315,146 @@ mod tests {
         let regression_rate = false_positives as f64 / (false_positives + non_defect_cases) as f64;
         assert_eq!(precision, 1.0);
         assert_eq!(regression_rate, 0.0);
+    }
+
+    // Form (1) + (2): a `look`/`read` of correct code whose bytes contain a
+    // `"Parse error"` string literal or a `///` doc comment must NOT mint a
+    // grounded `[verified:parse_errors]` signal. File-display tools render
+    // bytes; they do not run a verifier.
+    #[test]
+    fn grounded_review_ignores_parse_error_in_displayed_source_and_docs() {
+        // Form 1: a correct CLI error-message string literal (zig-feat 094143).
+        let source_literal = json!({
+            "tool_name": "look",
+            "tool": {"name": "look", "args": {"path": "src/main.zig"}},
+            "result": {
+                "text": "120 const e = parseFile(path) catch |err| {\n\
+                         122 try stderr.print(\"Parse error: {}\\n\", .{e});\n\
+                         123 };\n"
+            },
+        });
+        assert!(
+            GroundedReviewProvider
+                .evaluate(&ctx(
+                    HookEvent::PostToolUse,
+                    source_literal,
+                    JsonValue::Null
+                ))
+                .is_none(),
+            "a `look` showing a `\"Parse error\"` string literal must not fire"
+        );
+
+        // Form 2: pure `///` documentation comment (same run).
+        let doc_comment = json!({
+            "tool_name": "read",
+            "tool": {"name": "read", "args": {"path": "src/parser.zig"}},
+            "result": {
+                "text": "19 /// Parses one section of the document.\n\
+                         20 /// Detailed parse error with location information.\n\
+                         21 pub fn parseSection(self: *Parser) !Section {\n"
+            },
+        });
+        assert!(
+            GroundedReviewProvider
+                .evaluate(&ctx(HookEvent::PostToolUse, doc_comment, JsonValue::Null))
+                .is_none(),
+            "a `read` showing a `///` doc comment naming a parse error must not fire"
+        );
+
+        // The discriminator is the tool, not the bytes: identical text emitted
+        // by `search`/`glob` is equally barred.
+        for tool in ["search", "glob", "grep", "view"] {
+            let display = json!({
+                "tool_name": tool,
+                "tool": {"name": tool},
+                "result": {"text": "src/main.zig:122: try stderr.print(\"Parse error: {}\", .{e});\n"},
+            });
+            assert!(
+                !looks_like_verifier_output(
+                    tool,
+                    "",
+                    "src/main.zig:122: try stderr.print(\"Parse error: {}\", .{e});"
+                ),
+                "file-display tool `{tool}` must not be treated as verifier output"
+            );
+            assert!(
+                GroundedReviewProvider
+                    .evaluate(&ctx(HookEvent::PostToolUse, display, JsonValue::Null))
+                    .is_none(),
+                "file-display tool `{tool}` must not mint a grounded signal from a substring"
+            );
+        }
+    }
+
+    // Form (3): a PASSING test whose descriptive name embeds "parse error"
+    // (zig-test 090714, `tool=verify`) ends in a pass marker (`...OK`) and must
+    // NOT be reported as a failure.
+    #[test]
+    fn grounded_review_skips_passing_test_named_after_parse_error() {
+        // Unit-level: the failure-line discriminator drops a passing line.
+        assert_eq!(
+            review_failure_line("28/59 parser.test.parse error: unclosed section...OK"),
+            None,
+            "a passing `...OK` test line must not be a failure even when named after a parse error"
+        );
+        assert!(line_has_pass_marker(
+            "28/59 parser.test.parse error: unclosed section...ok"
+        ));
+        assert!(line_has_pass_marker("test parse error handling ... ok"));
+        assert!(line_has_pass_marker("[ ok ] parse error recovery"));
+
+        // Provider-level: a verifier run whose only "parse error" line is a
+        // passing test must not fire.
+        let payload = json!({
+            "tool_name": "verify",
+            "tool": {"name": "verify", "args": {"cmd": "zig build test"}},
+            "result": {
+                "text": "1/59 tokenizer.test.basic...OK\n\
+                         28/59 parser.test.parse error: unclosed section...OK\n\
+                         59/59 all tests passed\n"
+            },
+        });
+        assert!(
+            GroundedReviewProvider
+                .evaluate(&ctx(HookEvent::PostToolUse, payload, JsonValue::Null))
+                .is_none(),
+            "an all-passing verify run must not fire on a test named after a parse error"
+        );
+    }
+
+    // Verifier-PRESERVING: a GENUINE compiler/`zig test` parse error on a
+    // FAILING line must STILL produce the grounded signal — no regression.
+    #[test]
+    fn grounded_review_still_fires_on_genuine_verifier_parse_error() {
+        // Real `zig build test` output: a compiler `error:` on a failing line.
+        let zig = json!({
+            "tool_name": "exec_command",
+            "tool": {"name": "exec_command", "args": {"cmd": "zig build test"}},
+            "result": {
+                "text": "src/parser.zig:42:9: error: expected ';', found '}'\n\
+                         28/59 parser.test.parse error: unclosed section...FAIL\n"
+            },
+        });
+        let reminder = GroundedReviewProvider
+            .evaluate(&ctx(HookEvent::PostToolUse, zig, JsonValue::Null))
+            .expect("a genuine verifier parse error must still fire");
+        assert!(reminder.body.contains("verified:"));
+        assert!(reminder.body.contains("error: expected ';'"));
+
+        // The pass-marker exemption is line-scoped: a real `parse error:` line
+        // with NO pass marker still surfaces.
+        assert!(review_failure_line("error: parse error: unexpected token at line 3").is_some());
+        // And a structured verifier `parse_errors` array is untouched.
+        let structured = json!({
+            "result": {
+                "parse_errors": [{"message": "syntax error: expected expression", "line": 3}],
+            },
+        });
+        assert!(
+            GroundedReviewProvider
+                .evaluate(&ctx(HookEvent::PostToolUse, structured, JsonValue::Null))
+                .is_some(),
+            "a structured verifier parse_errors array must still fire"
+        );
     }
 }
