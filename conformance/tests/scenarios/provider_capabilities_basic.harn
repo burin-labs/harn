@@ -89,8 +89,8 @@ pipeline test(task) {
   let openrouter_gpt_oss = provider_capabilities("openrouter", "openai/gpt-oss-120b")
   assert(!openrouter_gpt_oss.native_tools, "OpenRouter GPT-OSS disables native tools")
   assert(
-    openrouter_gpt_oss.preferred_tool_format == "json",
-    "OpenRouter GPT-OSS defaults to JSON text tools",
+    openrouter_gpt_oss.preferred_tool_format == "text",
+    "OpenRouter GPT-OSS defaults to heredoc text tools",
   )
   assert(
     openrouter_gpt_oss.text_tool_wire_format_supported,
