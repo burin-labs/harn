@@ -353,7 +353,10 @@ jobs:
       - name: Select publish ref
         run: |
           set -euo pipefail
-          cp scripts/release_ship.sh "$RUNNER_TEMP/release_ship.sh"
+          mkdir -p "$RUNNER_TEMP/release-tools"
+          cp scripts/release_ship.sh "$RUNNER_TEMP/release-tools/release_ship.sh"
+          cp scripts/release_gate.sh "$RUNNER_TEMP/release-tools/release_gate.sh"
+          cp scripts/publish.sh "$RUNNER_TEMP/release-tools/publish.sh"
           publish_ref="${{ needs.detect-drift.outputs.publish_ref }}"
           if [[ "$publish_ref" != "main" ]]; then
             git fetch --force --tags origin
@@ -443,4 +446,7 @@ jobs:
           if [[ "${{ inputs.skip_dry_run }}" == "true" ]]; then
             args+=(--skip-dry-run)
           fi
-          HARN_RELEASE_ROOT="$PWD" bash "$RUNNER_TEMP/release_ship.sh" "${args[@]}"
+          HARN_RELEASE_ROOT="$PWD" \
+            HARN_RELEASE_GATE_SCRIPT="$RUNNER_TEMP/release-tools/release_gate.sh" \
+            HARN_PUBLISH_SCRIPT="$RUNNER_TEMP/release-tools/publish.sh" \
+            bash "$RUNNER_TEMP/release-tools/release_ship.sh" "${args[@]}"
