@@ -14,6 +14,13 @@
 //! has rate limits. `HARN_LLM_RATE_LIMIT_STATE_PATH` overrides the shared DB
 //! path and `HARN_LLM_RATE_LIMIT_DURABLE=0` disables the durable layer for
 //! debugging or constrained embeddings.
+//!
+//! Each durable acquire's backoff is bounded (default-ON) by
+//! `HARN_LLM_RATE_LIMIT_MAX_WAIT_MS` (default 30000) so a single sustained-quota
+//! provider cannot make every call sleep out a full window and dominate the
+//! wall clock; on hitting the cap the call proceeds and a real 429 drives the
+//! Retry-After / retry / escalation path. Set it to `0` to restore the old
+//! unbounded wait.
 
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
@@ -24,6 +31,23 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 const DURABLE_RATE_LIMIT_ENABLED_ENV: &str = "HARN_LLM_RATE_LIMIT_DURABLE";
 const DURABLE_RATE_LIMIT_STATE_PATH_ENV: &str = "HARN_LLM_RATE_LIMIT_STATE_PATH";
+/// Per-acquire ceiling on durable rate-limit backoff. Without it, a single
+/// rate-limited provider (e.g. Cerebras returning a sustained per-minute quota
+/// wait) can make EVERY call in a trial sleep out a full ~60s window, so the
+/// durable backoff balloons to dominate the wall clock. Measured 2026-06-21 on a
+/// `cerebras:gpt-oss-120b` zig-feat trial: 75 durable waits summing to 1622s =
+/// ~89% of the 1812s trial wall. Capping each acquire lets the call attempt the
+/// provider anyway after the cap; a genuine 429 then feeds the normal
+/// Retry-After / retry / escalation path instead of being absorbed as a silent
+/// unbounded sleep. The clamp is on the WAIT, not the limit: we never exceed the
+/// provider's quota, we just refuse to block forever on one route.
+const DURABLE_RATE_LIMIT_MAX_WAIT_MS_ENV: &str = "HARN_LLM_RATE_LIMIT_MAX_WAIT_MS";
+/// Default per-acquire durable backoff ceiling (ms). Default-ON correctness fix.
+/// 30s is below a single 60s sliding window: long enough to ride out an ordinary
+/// in-window burst, short enough that a sustained-quota route cannot serialize
+/// the whole trial behind it. Set the env to `0` to restore the old unbounded
+/// behavior (debugging only).
+const DURABLE_RATE_LIMIT_MAX_WAIT_MS_DEFAULT: u64 = 30_000;
 const WINDOW_SECS: u64 = 60;
 const RATE_LIMIT_ENV_FIELD_SUFFIXES: [&str; 5] =
     ["_RPM", "_TPM", "_INPUT_TPM", "_OUTPUT_TPM", "_CONCURRENCY"];
@@ -692,6 +716,25 @@ fn durable_rate_limit_disabled() -> bool {
     )
 }
 
+/// Per-acquire ceiling (ms) on how long durable backoff may block one LLM call.
+/// `None` means unbounded (env explicitly set to `0`); `Some(ms)` clamps the
+/// wait. Generalizes across every provider and model — it is keyed on the wait,
+/// not on any specific route.
+fn durable_max_wait_ms() -> Option<u64> {
+    let configured = match std::env::var(DURABLE_RATE_LIMIT_MAX_WAIT_MS_ENV) {
+        Ok(raw) => match raw.trim().parse::<u64>() {
+            Ok(value) => value,
+            Err(_) => DURABLE_RATE_LIMIT_MAX_WAIT_MS_DEFAULT,
+        },
+        Err(_) => DURABLE_RATE_LIMIT_MAX_WAIT_MS_DEFAULT,
+    };
+    if configured == 0 {
+        None
+    } else {
+        Some(configured)
+    }
+}
+
 fn durable_state_path() -> Option<PathBuf> {
     if durable_rate_limit_disabled() {
         return None;
@@ -777,9 +820,13 @@ async fn acquire_durable_for_keys(
     if buckets.is_empty() {
         return Ok(());
     }
-    let outcome =
-        crate::durable_rate_limit::acquire_durable_rate_limit(state_path, buckets, None, || false)
-            .await?;
+    let outcome = crate::durable_rate_limit::acquire_durable_rate_limit(
+        state_path,
+        buckets,
+        durable_max_wait_ms(),
+        || false,
+    )
+    .await?;
     if outcome.waited_ms > 0 {
         let route = if model.trim().is_empty() {
             provider.to_string()
@@ -796,6 +843,21 @@ async fn acquire_durable_for_keys(
                 route, outcome.waited_ms
             ),
         );
+        // The wait was clamped before the quota cleared: proceed to attempt the
+        // provider anyway rather than block longer. A genuine over-quota route
+        // returns a 429 here, which feeds the Retry-After / retry / escalation
+        // path. This is what stops one rate-limited provider from eating the
+        // whole trial wall.
+        if outcome.timed_out {
+            crate::events::log_debug(
+                "llm.rate_limit",
+                &format!(
+                    "Durable rate limit for '{}': wait clamped at {}ms (cap reached); \
+                     proceeding to attempt the provider",
+                    route, outcome.waited_ms
+                ),
+            );
+        }
     }
     Ok(())
 }
@@ -1358,6 +1420,10 @@ mod tests {
             DURABLE_RATE_LIMIT_STATE_PATH_ENV,
             &temp.path().join("llm-rate-limits.sqlite"),
         );
+        // This test asserts the UNCAPPED full-window coordination wait, so it
+        // explicitly disables the per-acquire backoff clamp (default-ON, see
+        // durable_backoff_is_clamped_per_acquire_so_one_route_cannot_eat_the_wall).
+        let _cap = EnvVarGuard::set_value(DURABLE_RATE_LIMIT_MAX_WAIT_MS_ENV, "0");
         let _clock =
             crate::clock_mock::install_override(crate::clock_mock::MockClock::at_wall_ms(1_000));
         init_from_config();
@@ -1382,6 +1448,72 @@ mod tests {
             assert!(
                 after.saturating_sub(before) >= 60_000,
                 "second process-local registry should wait on durable SQLite state"
+            );
+        });
+
+        reset_test_rate_limit_state();
+    }
+
+    // ---------------------------------------------------------------------
+    // Mechanism-fitness: durable rate-limit backoff is BOUNDED per acquire.
+    //
+    // A sustained-quota provider (the field case: cerebras:gpt-oss-120b
+    // returning a full per-minute window wait on nearly every call) must NOT be
+    // able to make one LLM call block out the whole sliding window. Without the
+    // clamp the durable acquire waits the full ~60s; with the default-ON cap it
+    // returns after the ceiling so the call can attempt the provider and let a
+    // real 429 drive the retry/escalation path. This pins that the wait cannot
+    // dominate: a saturated bucket waits ~cap, never the full window.
+    //
+    // Sibling `durable_state_path_coordinates_after_process_local_reset` pins
+    // the UNCAPPED >= 60_000 wait (it sets the cap env to 0); the two together
+    // bracket the mechanism so a refactor cannot silently drop the clamp.
+    // ---------------------------------------------------------------------
+    #[test]
+    fn durable_backoff_is_clamped_per_acquire_so_one_route_cannot_eat_the_wall() {
+        let _guard = crate::llm::env_guard();
+        reset_test_rate_limit_state();
+        install_durable_overlay();
+        let temp = tempfile::tempdir().expect("tempdir");
+        let _env = EnvVarGuard::set_path(
+            DURABLE_RATE_LIMIT_STATE_PATH_ENV,
+            &temp.path().join("llm-rate-limits.sqlite"),
+        );
+        // Bound any one acquire's durable backoff to 5s, well under the 60s
+        // sliding window the rpm=1 overlay would otherwise force a second call
+        // to wait out.
+        let cap_ms: u64 = 5_000;
+        let _cap = EnvVarGuard::set_value(DURABLE_RATE_LIMIT_MAX_WAIT_MS_ENV, cap_ms.to_string());
+        let _clock =
+            crate::clock_mock::install_override(crate::clock_mock::MockClock::at_wall_ms(1_000));
+        init_from_config();
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .expect("current-thread runtime");
+
+        runtime.block_on(async {
+            // First acquire consumes the single rpm slot for the window.
+            let first = acquire_permit("durable").await.expect("first permit");
+            drop(first);
+
+            // The second acquire saturates the durable rpm bucket and would, with
+            // an unbounded wait, sleep the full 60s window. The clamp must cap it.
+            let before = crate::clock_mock::now_ms();
+            let second = acquire_permit("durable").await.expect("second permit");
+            let after = crate::clock_mock::now_ms();
+            drop(second);
+
+            let waited = after.saturating_sub(before).max(0) as u64;
+            assert!(
+                waited <= cap_ms.saturating_add(1_000),
+                "durable backoff must be clamped to ~{cap_ms}ms, but one acquire waited {waited}ms \
+                 — a sustained-quota route would otherwise dominate the trial wall"
+            );
+            assert!(
+                waited < 60_000,
+                "durable backoff must NOT wait the full {WINDOW_SECS}s window (waited {waited}ms)"
             );
         });
 
