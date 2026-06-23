@@ -1,5 +1,10 @@
 .PHONY: setup clean-stale-targets install-hooks configure-merge-drivers build build-release sign-local check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-e2e test-cargo test-fast test-harn-scripts test-agent-scripts test-pr-gate-scripts conformance mechanism-contracts protocol-conformance mcp-rc-conformance replay-oracle replay-bench eval-tool-calls bench-vm bench-vm-micro bench-vm-clone check-vm-rss-soak bench-llm bench-orchestration bench-cli-cold-start loadgen-postgres all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-highlight check-highlight gen-protocol-artifacts check-protocol-artifacts gen-connector-schemas check-connector-schemas check-burin-protocol-artifacts check-bindings gen-session-bundle-schema check-session-bundle-schema gen-run-view-fixtures check-run-view-fixtures gen-trigger-quickref check-trigger-quickref gen-provider-capabilities check-provider-capabilities gen-provider-matrix check-provider-matrix check-provider-support gen-provider-config check-provider-config check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-cli-flags check-docs-links check-site-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec sync-diagnostics-catalog check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-receipt-structs lint-no-rust-prompt-prose lint-no-xfail-regression check-provider-catalog-drift check-ported-handler-loc gen-tree-sitter-keywords check-tree-sitter-keywords check-grammar-keywords check-generated-registry
 
+HARN_BIN ?=
+HARN_CMD = $(if $(strip $(HARN_BIN)),"$(HARN_BIN)",cargo run --quiet --bin harn --)
+HARN_CMD_VERBOSE = $(if $(strip $(HARN_BIN)),"$(HARN_BIN)",cargo run --bin harn --)
+HARN_CLI_CMD = $(if $(strip $(HARN_BIN)),"$(HARN_BIN)",cargo run --quiet -p harn-cli --)
+
 # Full quality check: format first, then lint/test in parallel.
 # Usage: make all -j       (parallel checks after formatting)
 #        make all           (sequential, also works)
@@ -119,7 +124,7 @@ test-fast:
 
 # Run Harn conformance test suite
 conformance:
-	HARN_LLM_CALLS_DISABLED=1 cargo run --bin harn -- test conformance
+	HARN_LLM_CALLS_DISABLED=1 $(HARN_CMD_VERBOSE) test conformance
 
 # Mechanism-contract onramp tier: the manufactured mini-evals that prove a new
 # termination/escalation/judge/guard/routing mechanism ENGAGES correctly (fires
@@ -129,10 +134,10 @@ conformance:
 # `make conformance`, broken out here for authoring and as the documented gate.
 # See conformance/tests/mechanisms/README.md.
 mechanism-contracts:
-	HARN_LLM_CALLS_DISABLED=1 cargo run --bin harn -- test conformance --filter '.contract'
+	HARN_LLM_CALLS_DISABLED=1 $(HARN_CMD_VERBOSE) test conformance --filter '.contract'
 
 protocol-conformance:
-	HARN_LLM_CALLS_DISABLED=1 cargo run --bin harn -- test protocols
+	HARN_LLM_CALLS_DISABLED=1 $(HARN_CMD_VERBOSE) test protocols
 
 # MCP RC compatibility harness: exercises Harn's MCP client against fake
 # RC servers, fake RC clients against the generic and orchestrator
@@ -161,13 +166,13 @@ mcp-rc-conformance:
 	HARN_LLM_CALLS_DISABLED=1 cargo test -p harn-cli --lib mcp_rc_compat_tests
 
 replay-oracle:
-	HARN_LLM_CALLS_DISABLED=1 cargo run --bin harn -- orchestrator replay-oracle
+	HARN_LLM_CALLS_DISABLED=1 $(HARN_CMD_VERBOSE) orchestrator replay-oracle
 
 replay-bench:
-	HARN_LLM_CALLS_DISABLED=1 cargo run --bin harn -- bench replay --json >/dev/null
+	HARN_LLM_CALLS_DISABLED=1 $(HARN_CMD_VERBOSE) bench replay --json >/dev/null
 
 eval-tool-calls:
-	cargo run --bin harn -- eval tool-calls --dataset conformance/tool-call-eval --planner mock:mock --output .harn-runs/tool-call-eval/latest
+	$(HARN_CMD_VERBOSE) eval tool-calls --dataset conformance/tool-call-eval --planner mock:mock --output .harn-runs/tool-call-eval/latest
 
 bench-vm:
 	./scripts/bench_vm.sh
@@ -179,7 +184,7 @@ bench-vm-clone:
 	cargo bench -p harn-vm-perf --bench bench_vmenv_clone -- --output-format bencher
 
 check-vm-rss-soak:
-	cargo run --quiet --bin harn -- run scripts/check_vm_rss_soak.harn
+	$(HARN_CMD) run scripts/check_vm_rss_soak.harn
 
 bench-llm:
 	cargo bench -p harn-llm-perf --bench bench_llm_options_roundtrip -- --output-format bencher
@@ -202,7 +207,7 @@ lint-md:
 # Validate the Harn Agents Protocol OpenAPI artifact and its public path/schema snapshot.
 spec-lint:
 	npx redocly lint spec/openapi.yaml
-	cargo run --quiet --bin harn -- run scripts/check_openapi_snapshot.harn
+	$(HARN_CMD) run scripts/check_openapi_snapshot.harn
 
 # Lint GitHub Actions workflows.
 lint-actions:
@@ -218,8 +223,11 @@ lint-actions:
 # error tests whose diagnostics are validated by the conformance runner.
 lint-harn:
 	@echo "=== Linting Harn conformance tests ==="
-	@cargo build --quiet --bin harn
-	@harn_bin=$$(cargo metadata --format-version=1 --no-deps | python3 -c 'import json,sys; meta=json.load(sys.stdin); suffix=".exe" if sys.platform == "win32" else ""; print(meta["target_directory"] + "/debug/harn" + suffix)'); \
+	@if [ -z "$(strip $(HARN_BIN))" ]; then cargo build --quiet --bin harn; fi
+	@harn_bin="$(HARN_BIN)"; \
+	if [ -z "$$harn_bin" ]; then \
+		harn_bin=$$(cargo metadata --format-version=1 --no-deps | python3 -c 'import json,sys; meta=json.load(sys.stdin); suffix=".exe" if sys.platform == "win32" else ""; print(meta["target_directory"] + "/debug/harn" + suffix)'); \
+	fi; \
 	workers=$$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 8); \
 	tmp=$$(mktemp -d); \
 	status=0; \
@@ -238,13 +246,16 @@ lint-harn:
 	rm -rf "$$tmp"; \
 	if [ "$$status" -ne 0 ]; then echo "Lint issues found in conformance tests"; exit 1; fi
 	@echo "=== Checking Harn experiment support modules ==="
-	@cargo run --quiet --bin harn -- check $(EXPERIMENT_HARN_CHECK)
+	@$(HARN_CMD) check $(EXPERIMENT_HARN_CHECK)
 	@echo "=== Linting Harn-authored scripts ==="
-	@cargo run --quiet --bin harn -- lint scripts/*.harn scripts/tests/*.harn
+	@$(HARN_CMD) lint scripts/*.harn scripts/tests/*.harn
 	@echo "=== Linting bundled demo scenarios ==="
-	@cargo run --quiet --bin harn -- lint crates/harn-cli/assets/demo
+	@$(HARN_CMD) lint crates/harn-cli/assets/demo
 	@echo "=== Checking stdlib metadata contract (HARN-STD-101) ==="
-	@harn_bin=$$(cargo metadata --format-version=1 --no-deps | python3 -c 'import json,sys; meta=json.load(sys.stdin); suffix=".exe" if sys.platform == "win32" else ""; print(meta["target_directory"] + "/debug/harn" + suffix)'); \
+	@harn_bin="$(HARN_BIN)"; \
+	if [ -z "$$harn_bin" ]; then \
+		harn_bin=$$(cargo metadata --format-version=1 --no-deps | python3 -c 'import json,sys; meta=json.load(sys.stdin); suffix=".exe" if sys.platform == "win32" else ""; print(meta["target_directory"] + "/debug/harn" + suffix)'); \
+	fi; \
 	tmp=$$(mktemp); \
 	find crates/harn-stdlib/src/stdlib -name '*.harn' -print0 | xargs -0 "$$harn_bin" lint > "$$tmp" 2>&1 || true; \
 	if grep -q 'HARN-STD-101' "$$tmp"; then \
@@ -271,31 +282,31 @@ EXTRA_HARN_FIND := find $(EXTRA_HARN_DIRS) -type d -name .harn -prune -o -type f
 fmt-harn-fix:
 	@echo "=== Formatting Harn files ==="
 	@find $(STDLIB_HARN_DIR) -name '*.harn' -print0 \
-		| xargs -0 cargo run --quiet --bin harn -- fmt
+		| xargs -0 $(HARN_CMD) fmt
 	@find conformance/tests -name '*.harn' $(foreach s,$(FMT_HARN_SKIP),-not -name $(s)) -print0 \
-		| xargs -0 cargo run --quiet --bin harn -- fmt
+		| xargs -0 $(HARN_CMD) fmt
 	@find experiments -name '*.harn' -print0 \
-		| xargs -0 cargo run --quiet --bin harn -- fmt
+		| xargs -0 $(HARN_CMD) fmt
 	@find scripts -name '*.harn' -print0 \
-		| xargs -0 cargo run --quiet --bin harn -- fmt
+		| xargs -0 $(HARN_CMD) fmt
 	@$(EXTRA_HARN_FIND) \
-		| xargs -0 -r cargo run --quiet --bin harn -- fmt
+		| xargs -0 -r $(HARN_CMD) fmt
 	@echo "    Harn formatting OK."
 
 fmt-harn:
 	@echo "=== Checking Harn formatting ==="
 	@find $(STDLIB_HARN_DIR) -name '*.harn' -print0 \
-		| xargs -0 cargo run --quiet --bin harn -- fmt --check
+		| xargs -0 $(HARN_CMD) fmt --check
 	@find conformance/tests -name '*.harn' $(foreach s,$(FMT_HARN_SKIP),-not -name $(s)) -print0 \
-		| xargs -0 cargo run --quiet --bin harn -- fmt --check
+		| xargs -0 $(HARN_CMD) fmt --check
 	@find experiments -name '*.harn' -print0 \
-		| xargs -0 cargo run --quiet --bin harn -- fmt --check
+		| xargs -0 $(HARN_CMD) fmt --check
 	@find scripts -name '*.harn' -print0 \
-		| xargs -0 cargo run --quiet --bin harn -- fmt --check
+		| xargs -0 $(HARN_CMD) fmt --check
 	@find crates/harn-cli/assets/demo -name '*.harn' -print0 \
-		| xargs -0 cargo run --quiet --bin harn -- fmt --check
+		| xargs -0 $(HARN_CMD) fmt --check
 	@$(EXTRA_HARN_FIND) \
-		| xargs -0 -r cargo run --quiet --bin harn -- fmt --check
+		| xargs -0 -r $(HARN_CMD) fmt --check
 	@echo "    Harn formatting OK."
 
 # Run the @test pipelines that cover scripts/*.harn against pure-logic
@@ -303,7 +314,7 @@ fmt-harn:
 # check). Wired into `make all` and exercised by CI.
 test-harn-scripts:
 	@echo "=== Running Harn script test suite ==="
-	@cargo run --quiet --bin harn -- test scripts/tests/
+	@$(HARN_CMD) test scripts/tests/
 	@echo "    Harn script tests OK."
 
 # Agent-loop Harn unit tests (stall detector, loop control, judge verdict,
@@ -311,11 +322,12 @@ test-harn-scripts:
 # by `make conformance`; this target wires them into CI so they cannot rot.
 test-agent-scripts:
 	@echo "=== Running Harn agent-loop test suite ==="
-	@HARN_LLM_CALLS_DISABLED=1 cargo run --quiet --bin harn -- test tests/agent/
+	@HARN_LLM_CALLS_DISABLED=1 $(HARN_CMD) test tests/agent/
 	@echo "    Harn agent-loop tests OK."
 
 test-pr-gate-scripts:
 	./scripts/tests/changelog_fragment_check_test.sh
+	./scripts/tests/release_gate_harn_bin_test.sh
 	./scripts/tests/publish_script_test.sh
 
 # Format check (no changes, for CI)
@@ -339,9 +351,16 @@ release-smoke:
 # prebuild already populated Cargo's active target dir; rebuilding release would
 # fight the cargo lock with rust-audit's clippy + nextest.
 smoke-audit:
-	@target_dir="$$(cargo metadata --format-version=1 --no-deps | python3 -c 'import json, sys; print(json.load(sys.stdin)["target_directory"])')" && \
-	harn_binary="$$target_dir/debug/harn$(if $(filter Windows_NT,$(OS)),.exe,)" && \
+	@harn_binary="$(HARN_BIN)" && \
+	if [ -z "$$harn_binary" ]; then \
+		target_dir="$$(cargo metadata --format-version=1 --no-deps | python3 -c 'import json, sys; print(json.load(sys.stdin)["target_directory"])')" && \
+		harn_binary="$$target_dir/debug/harn$(if $(filter Windows_NT,$(OS)),.exe,)"; \
+	fi && \
 	if [ ! -x "$$harn_binary" ]; then \
+		if [ -n "$(strip $(HARN_BIN))" ]; then \
+			echo "HARN_BIN is not executable: $$harn_binary" >&2; \
+			exit 1; \
+		fi; \
 		CARGO_PROFILE_DEV_DEBUG=0 cargo build -p harn-cli --bin harn; \
 	fi && \
 	HARN_BINARY="$$harn_binary" ./scripts/release_smoke.sh
@@ -357,7 +376,7 @@ portal-check:
 	@echo "    Portal build OK."
 
 portal:
-	cargo run --bin harn -- portal
+	$(HARN_CMD_VERBOSE) portal
 
 portal-demo:
 	./scripts/portal_demo.sh
@@ -365,29 +384,29 @@ portal-demo:
 # Regenerate docs/theme/harn-keywords.js from the live lexer + stdlib.
 # Run this whenever keywords or globally-available builtins change.
 gen-highlight:
-	cargo run --quiet -p harn-cli -- dump-highlight-keywords
+	$(HARN_CLI_CMD) dump-highlight-keywords
 
 # CI guard: fail if docs/theme/harn-keywords.js is stale relative to
 # the lexer/stdlib. `make gen-highlight` fixes it.
 check-highlight:
 	@echo "=== Checking docs/theme/harn-keywords.js is up to date ==="
-	@cargo run --quiet -p harn-cli -- dump-highlight-keywords --check
+	@$(HARN_CLI_CMD) dump-highlight-keywords --check
 	@echo "    Harn keyword file OK."
 
 gen-protocol-artifacts:
-	cargo run --quiet -p harn-cli -- dump-protocol-artifacts
+	$(HARN_CLI_CMD) dump-protocol-artifacts
 
 check-protocol-artifacts:
 	@echo "=== Checking Harn protocol artifacts are up to date ==="
-	@cargo run --quiet -p harn-cli -- dump-protocol-artifacts --check
+	@$(HARN_CLI_CMD) dump-protocol-artifacts --check
 	@echo "    Harn protocol artifacts OK."
 
 gen-connector-schemas:
-	cargo run --quiet -p harn-cli -- connector-schema-codegen
+	$(HARN_CLI_CMD) connector-schema-codegen
 
 check-connector-schemas:
 	@echo "=== Checking generated connector event schemas are up to date ==="
-	@cargo run --quiet -p harn-cli -- connector-schema-codegen --check
+	@$(HARN_CLI_CMD) connector-schema-codegen --check
 	@echo "    Connector event schemas OK."
 
 check-burin-protocol-artifacts:
@@ -415,11 +434,11 @@ check-bindings:
 	@echo "    Harn protocol bindings OK."
 
 gen-session-bundle-schema:
-	cargo run --quiet -p harn-cli -- session schema --out spec/schemas/session-bundle.v1.schema.json
+	$(HARN_CLI_CMD) session schema --out spec/schemas/session-bundle.v1.schema.json
 
 check-session-bundle-schema:
 	@echo "=== Checking session bundle schema is up to date ==="
-	@cargo run --quiet -p harn-cli -- session schema --check
+	@$(HARN_CLI_CMD) session schema --check
 	@echo "    Session bundle schema OK."
 
 gen-run-view-fixtures:
@@ -434,100 +453,100 @@ check-run-view-fixtures:
 # canonical authoring source). Mirrors what release_gate.sh audit's
 # sync_language_spec.harn step does.
 sync-language-spec:
-	cargo run --quiet --bin harn -- run scripts/sync_language_spec.harn
+	$(HARN_CMD) run scripts/sync_language_spec.harn
 
 # CI guard: fail if docs/src/language-spec.md is stale relative to
 # spec/HARN_SPEC.md. `make sync-language-spec` fixes it.
 check-language-spec:
 	@echo "=== Checking docs/src/language-spec.md is up to date ==="
-	@cargo run --quiet --bin harn -- run scripts/sync_language_spec.harn -- --check
+	@$(HARN_CMD) run scripts/sync_language_spec.harn -- --check
 	@echo "    Language spec mirror OK."
 
 # Regenerate the LLM trigger quickref from the live ProviderCatalog metadata.
 gen-trigger-quickref:
-	cargo run --quiet -p harn-cli -- dump-trigger-quickref
+	$(HARN_CLI_CMD) dump-trigger-quickref
 
 # CI guard: fail if the trigger quickref is stale relative to ProviderCatalog.
 check-trigger-quickref:
 	@echo "=== Checking docs/llm/harn-triggers-quickref.md is up to date ==="
-	@cargo run --quiet -p harn-cli -- dump-trigger-quickref --check
+	@$(HARN_CLI_CMD) dump-trigger-quickref --check
 	@echo "    Harn trigger quickref OK."
 
 # Regenerate the provider/model capability matrix from capabilities.toml.
 gen-provider-matrix:
 	$(MAKE) gen-provider-capabilities
-	cargo run --quiet --bin harn -- providers matrix
+	$(HARN_CMD) providers matrix
 
 # CI guard: fail if the provider matrix docs drift from capabilities.toml.
 check-provider-matrix:
 	@echo "=== Checking docs/src/provider-matrix.md is up to date ==="
-	@cargo run --quiet --bin harn -- providers build-capabilities --check
-	@cargo run --quiet --bin harn -- providers matrix --check
+	@$(HARN_CMD) providers build-capabilities --check
+	@$(HARN_CMD) providers matrix --check
 	@echo "    Harn provider matrix OK."
 
 # Regenerate provider support recommendations from catalog/capabilities/notes.
 gen-provider-support:
 	$(MAKE) gen-provider-capabilities
-	cargo run --quiet --bin harn -- providers support
+	$(HARN_CMD) providers support
 
 # CI guard: fail if provider support markdown or JSON drift.
 check-provider-support:
 	@echo "=== Checking provider support artifacts are up to date ==="
-	@cargo run --quiet --bin harn -- providers build-capabilities --check
-	@cargo run --quiet --bin harn -- providers support --check
+	@$(HARN_CMD) providers build-capabilities --check
+	@$(HARN_CMD) providers support --check
 	@echo "    Harn provider support OK."
 
 # Regenerate the embedded provider capability TOML snapshot from source fragments.
 gen-provider-capabilities:
-	cargo run --quiet --bin harn -- providers build-capabilities
+	$(HARN_CMD) providers build-capabilities
 
 # CI guard: fail if the embedded provider capability snapshot drifted from fragments.
 check-provider-capabilities:
 	@echo "=== Checking provider capability snapshot ==="
-	@cargo run --quiet --bin harn -- providers build-capabilities --check
+	@$(HARN_CMD) providers build-capabilities --check
 	@echo "    Harn provider capability snapshot OK."
 
 # Regenerate the embedded provider/model TOML snapshot from source fragments.
 gen-provider-config:
-	cargo run --quiet --bin harn -- providers build-config
+	$(HARN_CMD) providers build-config
 
 # CI guard: fail if the embedded provider/model TOML snapshot drifted from fragments.
 check-provider-config:
 	@echo "=== Checking provider config snapshot ==="
-	@cargo run --quiet --bin harn -- providers build-config --check
+	@$(HARN_CMD) providers build-config --check
 	@echo "    Harn provider config snapshot OK."
 
 # Regenerate the checked-in provider/model catalog JSON, schema, and downstream bindings.
 gen-provider-catalog:
 	$(MAKE) gen-provider-config
-	cargo run --quiet --bin harn -- providers export
+	$(HARN_CMD) providers export
 
 # CI guard: fail if checked-in provider/model catalog artifacts drift.
 check-provider-catalog:
 	@echo "=== Checking provider catalog artifacts ==="
-	@cargo run --quiet --bin harn -- providers build-config --check
-	@cargo run --quiet --bin harn -- providers validate --check-artifacts
+	@$(HARN_CMD) providers build-config --check
+	@$(HARN_CMD) providers validate --check-artifacts
 	@echo "    Harn provider catalog artifacts OK."
 
 # Regenerate the connector capability parity matrix from package manifests.
 gen-connector-matrix:
-	cargo run --quiet -p harn-cli -- dump-connector-matrix
+	$(HARN_CLI_CMD) dump-connector-matrix
 
 # CI guard: fail if the connector parity docs drift from package manifests.
 check-connector-matrix:
 	@echo "=== Checking docs/src/connectors/parity-matrix.md is up to date ==="
-	@cargo run --quiet -p harn-cli -- dump-connector-matrix --check
+	@$(HARN_CLI_CMD) dump-connector-matrix --check
 	@echo "    Harn connector matrix OK."
 
 # CI guard: replay the provider catalog refresh workflow against bundled
 # HTTP fixtures and verify the rendered drift report + candidate TOML
 # match the committed goldens. After intentional adapter or fixture
 # changes, run
-#   cargo run --quiet --bin harn -- run scripts/update_provider_catalog.harn -- --check --update
+#   $(HARN_CMD) run scripts/update_provider_catalog.harn -- --check --update
 # and commit the regenerated files under scripts/provider_catalog_fixtures/.
 check-provider-catalog-drift:
 	@echo "=== Checking provider catalog refresh workflow ==="
-	@cargo run --quiet --bin harn -- run scripts/update_provider_catalog.harn -- --check
+	@$(HARN_CMD) run scripts/update_provider_catalog.harn -- --check
 	@echo "    Provider catalog refresh OK."
 
 # Validate the ready-to-customize trigger example library.
@@ -538,7 +557,7 @@ check-trigger-examples:
 		test -f "$$dir/lib.harn"; \
 		test -f "$$dir/README.md"; \
 		test -f "$$dir/SKILL.md"; \
-		cargo run --quiet --bin harn -- check "$$dir/lib.harn"; \
+		$(HARN_CMD) check "$$dir/lib.harn"; \
 	done
 	@echo "    Trigger examples OK."
 
@@ -551,8 +570,8 @@ check-docs-model-refs:
 # Run this whenever you add, rename, retire, or rewire a HARN-<CAT>-<NNN>
 # code or its repair template.
 sync-diagnostics-catalog:
-	cargo run --quiet --bin harn -- explain --catalog --format markdown > docs/src/diagnostics.md
-	cargo run --quiet --bin harn -- explain --catalog --format json > docs/diagnostics-catalog.json
+	$(HARN_CMD) explain --catalog --format markdown > docs/src/diagnostics.md
+	$(HARN_CMD) explain --catalog --format json > docs/diagnostics-catalog.json
 
 # CI guard: fail if docs/src/diagnostics.md or docs/diagnostics-catalog.json
 # drift from the in-binary registry. `make sync-diagnostics-catalog` fixes it.
@@ -562,8 +581,8 @@ check-diagnostics-catalog:
 	tmp_md=$$(mktemp); \
 	tmp_json=$$(mktemp); \
 	trap 'rm -f "$$tmp_md" "$$tmp_json"' EXIT; \
-	cargo run --quiet --bin harn -- explain --catalog --format markdown > "$$tmp_md"; \
-	cargo run --quiet --bin harn -- explain --catalog --format json > "$$tmp_json"; \
+	$(HARN_CMD) explain --catalog --format markdown > "$$tmp_md"; \
+	$(HARN_CMD) explain --catalog --format json > "$$tmp_json"; \
 	if ! diff -u docs/src/diagnostics.md "$$tmp_md" >/dev/null; then \
 		echo "error: docs/src/diagnostics.md is stale relative to the diagnostic-code registry." >&2; \
 		echo "hint: run 'make sync-diagnostics-catalog' and commit the result." >&2; \
@@ -595,7 +614,7 @@ check-docs-cli-flags:
 # file paths.
 check-docs-links:
 	@echo "=== Checking docs internal links ==="
-	@cargo run --quiet --bin harn -- run scripts/check_docs_links.harn
+	@$(HARN_CMD) run scripts/check_docs_links.harn
 
 # CI guard: every checked-in Harn snippet used by website/src parses under
 # `harn check`.
@@ -615,43 +634,43 @@ lint-test-patterns:
 	@./scripts/lint_test_patterns.sh
 
 lint-diagnostic-codes:
-	@cargo run --quiet --bin harn -- run scripts/check_diagnostic_codes.harn
+	@$(HARN_CMD) run scripts/check_diagnostic_codes.harn
 
 check-receipt-structs:
-	@cargo run --quiet --bin harn -- run scripts/check_receipt_struct_duplication.harn
+	@$(HARN_CMD) run scripts/check_receipt_struct_duplication.harn
 
 lint-no-rust-prompt-prose:
 	@./scripts/check_no_rust_prompt_prose.sh
 
 lint-no-xfail-regression:
-	@cargo run --quiet --bin harn -- run scripts/check_xfail_count.harn
+	@$(HARN_CMD) run scripts/check_xfail_count.harn
 
 # CI ratchet: fail if any Rust CLI handler listed in
 # scripts/ported_handlers.toml grows past its budgeted LOC. Tracks
 # epic #2293 (subticket #2314 = C1). See the script header for how to
 # add new entries / adjust budgets.
 check-ported-handler-loc:
-	@cargo run --quiet --bin harn -- run scripts/check_ported_handler_loc.harn
+	@$(HARN_CMD) run scripts/check_ported_handler_loc.harn
 
 # Regenerate tree-sitter-harn/grammar/keywords.js from the lexer's
 # KEYWORDS const (the source of truth for reserved words). Run this
 # whenever a keyword is added, renamed, or retired.
 gen-tree-sitter-keywords:
-	@cargo run --quiet --bin harn -- run scripts/sync_tree_sitter_keywords.harn -- --write
+	@$(HARN_CMD) run scripts/sync_tree_sitter_keywords.harn -- --write
 
 # CI guard: fail if the tree-sitter keyword list drifts from the lexer's
 # KEYWORDS const, so the editor grammar and the runtime parser agree on
 # the reserved-word set. `make gen-tree-sitter-keywords` fixes it.
 check-tree-sitter-keywords:
 	@echo "=== Checking tree-sitter keyword list matches the lexer ==="
-	@cargo run --quiet --bin harn -- run scripts/sync_tree_sitter_keywords.harn
+	@$(HARN_CMD) run scripts/sync_tree_sitter_keywords.harn
 
 # CI guard: fail if the spec grammar's keyword literals drift from the lexer's
 # KEYWORDS const (a keyword renamed/removed in the lexer but left stale in the
 # `## Grammar` section). Contextual keywords are allowlisted in the script.
 check-grammar-keywords:
 	@echo "=== Checking spec grammar keyword literals match the lexer ==="
-	@cargo run --quiet --bin harn -- run scripts/check_grammar_keywords.harn
+	@$(HARN_CMD) run scripts/check_grammar_keywords.harn
 
 # Meta-guard: fail if scripts/generated_artifacts.toml (the single source
 # of truth for every gen/check drift pair) has drifted from its consumers
@@ -660,4 +679,4 @@ check-grammar-keywords:
 # the add-a-new-artifact checklist.
 check-generated-registry:
 	@echo "=== Checking generated-artifact registry is in sync ==="
-	@cargo run --quiet --bin harn -- run scripts/check_generated_registry.harn
+	@$(HARN_CMD) run scripts/check_generated_registry.harn
