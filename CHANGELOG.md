@@ -8,6 +8,69 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.139
+
+### Added
+
+- **Provider catalog and Baseten Model APIs.** Added Baseten as a first-class
+  OpenAI-compatible provider with current GLM/Kimi/DeepSeek/GPT-OSS/Nemotron
+  routes, rate-limit and serving-performance metadata in the exported catalog
+  contract, live catalog refresh hooks for additional SOTA OpenAI-compatible
+  providers, cross-platform llama.cpp setup guidance, and provider-tool-probe
+  alias handling for catalog rows that need provider-native `wire_model` IDs.
+- **Agent and workflow stdlib now include reusable harness-building blocks.**
+  `std/agent/stack` centralizes provider/model option resolution, capability
+  cleanup, healthcheck-safe option stripping, LLM caller middleware, and tool
+  middleware; `std/agent/stream` adds split-safe private-span filtering for
+  streaming chat UIs; `std/workflow/patterns` adds common graph builders and
+  typed route failover helpers.
+
+- **Workflow retry policies now execute explicit stage attempts.**
+  `retry_policy.max_attempts` now retries VM-executed workflow stage paths,
+  including deterministic command verifiers, records every attempt, and stops on
+  first success.
+
+### Changed
+
+- **Release gate audit reuses the warm Harn binary (#3540).** Make targets now
+  honor `HARN_BIN`, and `release_gate.sh audit` exports the debug binary built
+  during warm prebuild so Harn script/conformance/lint lanes avoid repeated
+  `cargo run` entrypoints while Cargo-heavy package and Rust lanes keep their
+  existing coverage.
+- **VM inline-cache dispatch now avoids per-op hash lookups.** Call frames cache
+  the VM-local inline-cache set for their chunk once at entry, so adaptive
+  binary, property, method, and direct-call cache reads/writes index directly
+  into VM-local feedback during hot dispatch.
+
+### Fixed
+
+- Split trigger inbox observability from raw dispatch storage so MCP-facing
+  inbox records no longer expose raw webhook payloads.
+- `harn serve mcp` exported-function tools can now use deterministic hostlib
+  helpers such as `std/command` when the hostlib feature is enabled (#3550).
+- Workflow crystallization now rejects traces whose actions are explicitly
+  marked non-deterministic (e.g. rejected tool calls, human-approval steps)
+  even when they are not flagged `fuzzy`, closing a hole where such actions
+  carrying a side effect could be mined into a "deterministic" workflow.
+- **Release metadata now verifies the ACP registry manifest.** The release
+  audit fails when `spec/acp-registry/harn/agent.json` or any binary archive URL
+  drifts from the Cargo package version, preventing stale editor-install
+  entries after release bumps.
+- Agent loop: `intra_turn_failure_fanout_cap` now collapses EVERY distinct
+  identical-failure group in one response, not just the first. A single
+  `collapsed_emitted` latch let the first capped fan-out group suppress the
+  collapse marker for every later group in the same batch, silently dropping
+  those groups' tail calls from the result set with no entry at all. The latch
+  now resets whenever a new call signature trips the cap, so each group emits
+  exactly one synthetic collapsed result (regression-guarded by a two-group
+  scenario in `agent_loop_intra_turn_failure_fanout_cap`).
+- Avoid noisy SQLite event-log startup failures when concurrent processes open
+  an already-WAL database.
+- **Streaming text tool-call promotion now reports parsed arguments as raw
+  input.** Promoted candidate events populate `rawInput` instead of mislabeling
+  arguments as `rawOutput`, preserving event-log provenance for tool-call
+  forensics.
+
 ## v0.8.138
 
 ### Fixed
