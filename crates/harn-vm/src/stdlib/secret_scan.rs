@@ -369,6 +369,12 @@ config = { client_secret: "QWxhZGRpbjpPcGVuU2VzYW1lQWNjZXNzVG9rZW4=" }
     }
 
     #[test]
+    fn scan_content_preserves_source_declarations_with_secretish_identifiers() {
+        let findings = scan_content("pub const Token = struct { kind: u8 };\n");
+        assert!(findings.is_empty());
+    }
+
+    #[test]
     fn scan_content_redacts_private_key_blocks() {
         let findings = scan_content(
             "-----BEGIN OPENSSH PRIVATE KEY-----\nZXhhbXBsZQ==\n-----END OPENSSH PRIVATE KEY-----\n",
