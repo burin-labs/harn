@@ -135,6 +135,40 @@ let result = agent_loop(task, system, {
 })
 ```
 
+### Canonical agent stack
+
+For the common case where a script needs model defaults, role/env overrides,
+retry/logging/budget middleware, and tool middleware, use `std/agent/stack`
+instead of rebuilding the same options dict in each app:
+
+```harn,ignore
+import {agent_stack, agent_stack_audit_line} from "std/agent/stack"
+
+let stack = agent_stack({
+  role: "planner",
+  defaults: {provider: "anthropic", model: "claude-sonnet-4-6", task: "agent"},
+  retry: {max_attempts: 3},
+  logging: true,
+  budget: {max_calls: 40},
+  required_reason: true,
+})
+
+log(agent_stack_audit_line(stack))
+let result = agent_loop(task, system, stack.options + {loop_until_done: true})
+```
+
+`agent_model_options(config?)` resolves explicit options first, then role
+environment prefixes (`HARN_AGENT_PLANNER_*`, `HARN_LLM_PLANNER_*`,
+`HARN_PLANNER_*`), then shared `HARN_AGENT_*` / `HARN_LLM_*`, then defaults. If
+a model is present it calls `pack_for(...)`, resolves `tool_format: "auto"`,
+and strips unsupported provider-specific keys such as `reasoning_effort` or
+prompt-cache hints before the call reaches a provider.
+
+`agent_llm_caller(config?)` composes `default_llm_caller` with retry by default
+and optional logging/cache/budget wrappers. `agent_tool_stack(tools?, config?)`
+centralizes required-reason and natural-language binder middleware, including
+`HARN_BINDER_*` env overrides.
+
 ### Persona-shaped example: cost moat substrate
 
 The full handler stack is the **cost moat substrate** for the

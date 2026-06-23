@@ -507,6 +507,26 @@ transport toggle. Use `visible_delta` for UI rendering because it hides open
 internal `<think>` blocks. Breaking out of consumption drops the stream and
 cancels the background request.
 
+For app-facing chat UIs with private model scratchpads, use
+`std/agent/stream` instead of hand-rolled pending-buffer logic:
+
+```harn,ignore
+import {agent_stream_call} from "std/agent/stream"
+
+let result = agent_stream_call(prompt, system, {
+  provider: "openai",
+  model: "gpt-5-mini",
+  private: {open_tag: "<secret>", close_tag: "</secret>"},
+  on_delta: { delta, _event, _state -> print(delta) },
+})
+```
+
+`agent_private_stream_delta` holds back split private tags such as
+`"<sec" + "ret>"`, `agent_private_stream_finish` emits a terminal envelope,
+and `agent_stream_call` always returns either `status: "done"` or
+`status: "stream_interrupt"` so host loops do not hang without a completion
+event.
+
 ## Module scope
 
 Top-level `let` / `var` and `fn` declarations are visible inside
@@ -3729,6 +3749,30 @@ where `call = {prompt, system, opts, turn: {iteration, session_id, attempt}}`.
 **Off-by-one in retry semantics:** `llm_retries: 3` historically meant
 4 total attempts; `with_retry`'s `max_attempts: N` means N total
 attempts. To migrate `llm_retries: K`, pass `max_attempts: K + 1`.
+
+For the common "agent runtime cell" shape, prefer `std/agent/stack`
+over per-script provider/model/binder glue:
+
+```harn,ignore
+import {agent_stack, agent_stack_audit_line} from "std/agent/stack"
+
+let stack = agent_stack({
+  role: "planner",
+  defaults: {provider: "anthropic", model: "claude-sonnet-4-6", task: "agent"},
+  retry: {max_attempts: 3},
+  logging: true,
+  budget: {max_calls: 40},
+  required_reason: true,
+})
+
+log(agent_stack_audit_line(stack))
+agent_loop(task, system, stack.options + {loop_until_done: true})
+```
+
+`agent_model_options` resolves explicit options, role env overrides such as
+`HARN_AGENT_PLANNER_MODEL`, shared `HARN_AGENT_*` / `HARN_LLM_*` settings, and
+defaults; it then applies model-aware packs and strips unsupported
+provider-specific knobs before the request reaches the wire.
 
 **Persona-shaped chain (cost moat substrate):** the canonical compose
 for a durable persona is cheap-by-default with frontier escalation,

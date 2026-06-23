@@ -662,6 +662,18 @@ fn stage_metadata(
     metadata
 }
 
+fn is_deterministic_verify_command(node: &crate::orchestration::WorkflowNode) -> bool {
+    node.kind == "verify"
+        && node
+            .verify
+            .as_ref()
+            .and_then(|verify| verify.as_object())
+            .and_then(|verify| verify.get("command"))
+            .and_then(|command| command.as_str())
+            .map(str::trim)
+            .is_some_and(|command| !command.is_empty())
+}
+
 fn workflow_stage_plan_to_vm(scope: &StageExecutionScope) -> Result<VmValue, VmError> {
     let mut dict = crate::value::DictMap::new();
     dict.put_str("kind", scope.node.kind.as_str());
@@ -1070,7 +1082,8 @@ pub(super) async fn prepare_workflow_stage_state(
     } else if matches!(
         node.kind.as_str(),
         "subagent" | "fork" | "join" | "condition" | "reduce" | "escalation"
-    ) || matches!(node.mode.as_deref(), Some("command" | "compact"))
+    ) || is_deterministic_verify_command(&node)
+        || matches!(node.mode.as_deref(), Some("command" | "compact"))
         || (node.mode.as_deref() == Some("manual")
             && node
                 .metadata

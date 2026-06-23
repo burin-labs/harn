@@ -1,0 +1,46 @@
+import { workflow_failover } from "std/workflow/patterns"
+
+pipeline default() {
+  let result = workflow_failover(
+    {
+      routes: [{id: "cap-miss"}, {id: "retryable"}, {id: "winner"}],
+      max_attempts: 2,
+      evaluate: { route, _ctx ->
+        if route.id == "cap-miss" {
+          return {action: "skip", reason: "missing_capability"}
+        }
+        return {action: "call"}
+      },
+      call: { route, _ctx ->
+        if route.id == "retryable" {
+          return {ok: false, status: 503}
+        }
+        return {ok: true, text: "done"}
+      },
+      classify: { _route, response, _ctx ->
+        if response.ok {
+          return {action: "success"}
+        }
+        return {action: "continue", reason: "retryable"}
+      },
+    },
+  )
+  __io_println(result.ok)
+  __io_println(result.status)
+  __io_println(result.selected_route_id)
+  __io_println(result.call_attempts)
+  __io_println(len(result.attempts))
+  __io_println(result.attempts[0].status)
+  __io_println(result.attempts[0].reason)
+  __io_println(result.attempts[1].decision)
+  __io_println(result.attempts[2].decision)
+  let terminal = workflow_failover(
+    {
+      routes: [{id: "blocked"}],
+      call: { _route, _ctx -> return {ok: false, status: 400} },
+      classify: { _route, _response, _ctx -> return {action: "terminal", reason: "content_policy"} },
+    },
+  )
+  __io_println(terminal.ok)
+  __io_println(terminal.status)
+}

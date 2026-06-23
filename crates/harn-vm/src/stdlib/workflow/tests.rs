@@ -202,6 +202,52 @@ async fn verify_stage_reads_transcript_from_session_store() {
     assert_eq!(msg_list.len(), 3);
 }
 
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn command_verify_retry_policy_records_each_attempt() {
+    crate::reset_thread_local_state();
+    let node = crate::orchestration::WorkflowNode {
+        id: Some("verify".to_string()),
+        kind: "verify".to_string(),
+        retry_policy: crate::orchestration::RetryPolicy {
+            max_attempts: 3,
+            ..Default::default()
+        },
+        verify: Some(serde_json::json!({
+            "command": "echo nope && exit 7",
+            "expect_status": 0,
+        })),
+        output_contract: crate::orchestration::StageContract {
+            output_kinds: vec!["verification_result".to_string()],
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let mut vm = crate::Vm::new();
+    crate::register_vm_stdlib(&mut vm);
+    let ctx = crate::vm::AsyncBuiltinCtx::for_test(vm);
+    let executed = execute_stage_attempts(&ctx, "run tests", "verify", &node, &[], None)
+        .await
+        .expect("stage executes");
+
+    assert_eq!(executed.status, "failed");
+    assert_eq!(executed.outcome, "verification_failed");
+    assert_eq!(executed.branch.as_deref(), Some("failed"));
+    assert_eq!(executed.attempts.len(), 3);
+    assert!(executed
+        .attempts
+        .iter()
+        .all(|attempt| attempt.status == "failed"));
+    assert_eq!(
+        executed
+            .verification
+            .as_ref()
+            .and_then(|value| value.get("ok"))
+            .and_then(serde_json::Value::as_bool),
+        Some(false),
+    );
+}
+
 #[test]
 fn workflow_verification_contracts_collect_exact_requirements() {
     let graph = WorkflowGraph {
