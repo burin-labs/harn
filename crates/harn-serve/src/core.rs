@@ -43,6 +43,26 @@ fn install_scoped_event_log(log: Arc<AnyEventLog>) -> ActiveEventLogGuard {
     ActiveEventLogGuard { previous }
 }
 
+fn install_dispatch_vm_runtime(
+    vm: &mut Vm,
+    script_path: &Path,
+    source: &str,
+    cancel_token: Arc<AtomicBool>,
+) {
+    harn_vm::register_vm_stdlib(vm);
+    #[cfg(feature = "hostlib")]
+    {
+        let _ = harn_hostlib::install_default(vm);
+    }
+    let store_base = script_path.parent().unwrap_or(Path::new("."));
+    harn_vm::register_store_builtins(vm, store_base);
+    harn_vm::register_metadata_builtins(vm, store_base);
+    vm.set_source_info(&script_path.display().to_string(), source);
+    vm.set_source_dir(store_base);
+    vm.install_cancel_token(cancel_token);
+    vm.set_harness(harn_vm::Harness::real());
+}
+
 /// Translate a VM-level error into the dispatcher's typed error.
 ///
 /// Three signals get hoisted out of `Generic` so adapters can render
@@ -576,14 +596,7 @@ impl DispatchCore {
                 let _auth_principal_guard = auth_principal.map(harn_vm::enter_auth_principal);
 
                 let mut vm = Vm::new();
-                harn_vm::register_vm_stdlib(&mut vm);
-                let store_base = script_path.parent().unwrap_or(Path::new("."));
-                harn_vm::register_store_builtins(&mut vm, store_base);
-                harn_vm::register_metadata_builtins(&mut vm, store_base);
-                vm.set_source_info(&script_path.display().to_string(), &source);
-                vm.set_source_dir(store_base);
-                vm.install_cancel_token(cancel_token);
-                vm.set_harness(harn_vm::Harness::real());
+                install_dispatch_vm_runtime(&mut vm, &script_path, &source, cancel_token);
                 self.config.vm_configurator.configure(&mut vm)?;
 
                 let exports = vm
@@ -665,14 +678,7 @@ impl DispatchCore {
                 let _auth_principal_guard = auth_principal.map(harn_vm::enter_auth_principal);
 
                 let mut vm = Vm::new();
-                harn_vm::register_vm_stdlib(&mut vm);
-                let store_base = script_path.parent().unwrap_or(Path::new("."));
-                harn_vm::register_store_builtins(&mut vm, store_base);
-                harn_vm::register_metadata_builtins(&mut vm, store_base);
-                vm.set_source_info(&script_path.display().to_string(), &source);
-                vm.set_source_dir(store_base);
-                vm.install_cancel_token(cancel_token);
-                vm.set_harness(harn_vm::Harness::real());
+                install_dispatch_vm_runtime(&mut vm, &script_path, &source, cancel_token);
                 self.config.vm_configurator.configure(&mut vm)?;
                 for (name, value) in globals {
                     vm.set_global(&name, value);
@@ -941,6 +947,60 @@ pub fn greet(name: string) -> string {
 
         assert_eq!(response.value, serde_json::json!("alice"));
         assert!(!response.cached);
+    }
+
+    #[cfg(feature = "hostlib")]
+    #[tokio::test]
+    async fn dispatch_exported_function_can_use_deterministic_tools_hostlib() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let script = dir.path().join("server.harn");
+        std::fs::write(
+            &script,
+            r#"
+import { command_run } from "std/command"
+
+pub fn run_help(binary: string) -> int {
+  let result = command_run(
+    {argv: [binary, "--help"]},
+    {capture: {max_inline_bytes: 256}, timeout_ms: 5000},
+  )
+  return result.exit_code
+}
+"#,
+        )
+        .expect("write script");
+
+        let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
+        let response = core
+            .dispatch(CallRequest {
+                adapter: "mcp".to_string(),
+                function: "run_help".to_string(),
+                arguments: CallArguments::Named(BTreeMap::from([(
+                    "binary".to_string(),
+                    serde_json::json!(std::env::current_exe()
+                        .expect("current executable")
+                        .to_string_lossy()),
+                )])),
+                auth: AuthRequest::default(),
+                caller: "tester".to_string(),
+                replay_key: None,
+                trace_id: None,
+                parent_span_id: None,
+                metadata: BTreeMap::new(),
+                cancel_token: None,
+                agent_session_id: None,
+                actor_chain: None,
+                actor_chain_hop: None,
+                progress: None,
+                tenant_id: None,
+                request_id: None,
+                auth_context: None,
+                auth_principal: None,
+            })
+            .await
+            .expect("dispatch");
+
+        assert_eq!(response.value, serde_json::json!(0));
     }
 
     #[tokio::test]
