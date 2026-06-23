@@ -1,0 +1,112 @@
+// -------------------------------------------------------------------------------------------------
+
+// mechanism_contract — the onramp tier scaffold (manufactured mini-eval helper).
+//
+// PURPOSE. The first REQUIRED rung below the N>=5 convergence gauntlet. Every new
+// termination / escalation / judge / guard / routing mechanism declares a
+// MECHANISM CONTRACT = {trigger, effect, negative}:
+//
+//   trigger  — the condition the feature claims to handle, MANUFACTURED here by a
+//              mock provider scripted to emit an exact event sequence;
+//   effect   — the observable AgentEvent / status the feature must produce;
+//   negative — the case where the feature must NOT fire.
+//
+// A deterministic fixture drives `agent_loop` through the mock and asserts the
+// effect fires and the negative does not. No real model, no cloud, ~milliseconds,
+// exact-input -> exact-output. This is PURELY fitness-for-purpose: it proves the
+// mechanism ENGAGES in isolation. It does NOT attempt to prove the feature
+// improves convergence or doesn't regress other qualities — that remains the
+// gauntlet's job, and a GREEN contract is a PRECONDITION to starting a meter run,
+// never a replacement for it (see docs/eval/meter-stick.md).
+//
+// REUSE. This is a thin veneer over the established conformance seam:
+//   * `agent_capture_events(session, fn() { agent_loop(...) })` — drive + capture
+//     typed AgentEvents (the `agent_loop_budget_rails.harn` pattern);
+//   * a scripted `llm_caller` closure — manufacture the trigger;
+//   * `first_contract_event` / `count_contract_events` below — observe the effect.
+//
+
+// -------------------------------------------------------------------------------------------------
+// FIXTURE-AUTHORING RULE (READ THIS — silently-broken mocks come from ignoring it)
+// -------------------------------------------------------------------------------------------------
+
+//
+// A multi-turn mock MUST NOT hold per-turn state in a closure `var` counter. The
+// agent loop runs the `llm_caller` inside a NESTED EXECUTION DESCENT with an
+// isolated environment, so outer-scope `var` mutations DO NOT persist across
+// turns: a `var turn = 0; turn = turn + 1` counter silently replays turn 0
+// forever, the mock never advances, and the run hits its budget instead of the
+// behavior you scripted — a GREEN-looking but meaningless test.
+//
+// Use ONE of these instead to script a turn sequence deterministically:
+//   (A) `shared_cell` / `shared_snapshot` / `shared_set` (scope: "task_group") —
+//       the canonical cross-descent state primitive (see
+//       agent_loop_escalation_provider_error.harn);
+//   (B) the harness-supplied iteration index `call.turn.iteration` — a stateless
+//       key the loop passes to the caller each turn (no shared state needed).
+//
+
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * The first AgentEvent of `event_type` in capture order, or nil.
+ *
+ * @effects: []
+ * @errors: []
+ * @example: first_contract_event(captured.events, "budget_circuit_breaker")
+ */
+pub fn first_contract_event(events, event_type: string) {
+  for event in events {
+    if to_string(event?.type ?? "") == event_type {
+      return event
+    }
+  }
+  return nil
+}
+
+/**
+ * Count AgentEvents of `event_type` — for negative clauses that assert a
+ * mechanism fired ZERO times.
+ *
+ * @effects: []
+ * @errors: []
+ * @example: count_contract_events(captured.events, "loop_stuck")
+ */
+pub fn count_contract_events(events, event_type: string) -> int {
+  var n = 0
+  for event in events {
+    if to_string(event?.type ?? "") == event_type {
+      n = n + 1
+    }
+  }
+  return n
+}
+
+/**
+ * Print one deterministic golden line for a contract EFFECT clause:
+ *   "<name>: <bool>"
+ * The sibling `.expected` golden pins the booleans, so a regression that stops
+ * the mechanism from firing flips the line and RED-flags the PR. Returns `ok`.
+ *
+ * @effects: []
+ * @errors: []
+ * @example: contract_effect("trips_on_failure", breaker != nil)
+ */
+pub fn contract_effect(name: string, ok: bool) -> bool {
+  __io_println(name + "=" + to_string(ok))
+  return ok
+}
+
+/**
+ * Print one deterministic golden line for a NEGATIVE clause: asserts the
+ * mechanism did NOT fire. Prints "<name>=true" when `fired` is false (the
+ * contract holds). Returns `!fired`.
+ *
+ * @effects: []
+ * @errors: []
+ * @example: contract_negative("no_premature_stop", breaker_count > 0)
+ */
+pub fn contract_negative(name: string, fired: bool) -> bool {
+  __io_println(name + "=" + to_string(!fired))
+  return !fired
+}

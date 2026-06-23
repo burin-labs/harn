@@ -1,4 +1,4 @@
-.PHONY: setup clean-stale-targets install-hooks configure-merge-drivers build build-release sign-local check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-e2e test-cargo test-fast test-harn-scripts test-agent-scripts test-pr-gate-scripts conformance protocol-conformance mcp-rc-conformance replay-oracle replay-bench eval-tool-calls bench-vm bench-vm-micro bench-vm-clone check-vm-rss-soak bench-llm bench-orchestration bench-cli-cold-start loadgen-postgres all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-highlight check-highlight gen-protocol-artifacts check-protocol-artifacts gen-connector-schemas check-connector-schemas check-burin-protocol-artifacts check-bindings gen-session-bundle-schema check-session-bundle-schema gen-run-view-fixtures check-run-view-fixtures gen-trigger-quickref check-trigger-quickref gen-provider-capabilities check-provider-capabilities gen-provider-matrix check-provider-matrix check-provider-support gen-provider-config check-provider-config check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-cli-flags check-docs-links check-site-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec sync-diagnostics-catalog check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-receipt-structs lint-no-rust-prompt-prose lint-no-xfail-regression check-provider-catalog-drift check-ported-handler-loc gen-tree-sitter-keywords check-tree-sitter-keywords check-grammar-keywords check-generated-registry
+.PHONY: setup clean-stale-targets install-hooks configure-merge-drivers build build-release sign-local check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-e2e test-cargo test-fast test-harn-scripts test-agent-scripts test-pr-gate-scripts conformance mechanism-contracts protocol-conformance mcp-rc-conformance replay-oracle replay-bench eval-tool-calls bench-vm bench-vm-micro bench-vm-clone check-vm-rss-soak bench-llm bench-orchestration bench-cli-cold-start loadgen-postgres all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-highlight check-highlight gen-protocol-artifacts check-protocol-artifacts gen-connector-schemas check-connector-schemas check-burin-protocol-artifacts check-bindings gen-session-bundle-schema check-session-bundle-schema gen-run-view-fixtures check-run-view-fixtures gen-trigger-quickref check-trigger-quickref gen-provider-capabilities check-provider-capabilities gen-provider-matrix check-provider-matrix check-provider-support gen-provider-config check-provider-config check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-cli-flags check-docs-links check-site-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec sync-diagnostics-catalog check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-receipt-structs lint-no-rust-prompt-prose lint-no-xfail-regression check-provider-catalog-drift check-ported-handler-loc gen-tree-sitter-keywords check-tree-sitter-keywords check-grammar-keywords check-generated-registry
 
 # Full quality check: format first, then lint/test in parallel.
 # Usage: make all -j       (parallel checks after formatting)
@@ -120,6 +120,16 @@ test-fast:
 # Run Harn conformance test suite
 conformance:
 	HARN_LLM_CALLS_DISABLED=1 cargo run --bin harn -- test conformance
+
+# Mechanism-contract onramp tier: the manufactured mini-evals that prove a new
+# termination/escalation/judge/guard/routing mechanism ENGAGES correctly (fires
+# on its trigger, emits its effect, does NOT fire on the negative case) before
+# any N>=5 convergence gauntlet. A focused, fast filter over the
+# conformance/tests/mechanisms/*.contract.harn suite — already covered by
+# `make conformance`, broken out here for authoring and as the documented gate.
+# See conformance/tests/mechanisms/README.md.
+mechanism-contracts:
+	HARN_LLM_CALLS_DISABLED=1 cargo run --bin harn -- test conformance --filter '.contract'
 
 protocol-conformance:
 	HARN_LLM_CALLS_DISABLED=1 cargo run --bin harn -- test protocols
