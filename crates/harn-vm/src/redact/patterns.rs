@@ -357,6 +357,23 @@ mod tests {
     }
 
     #[test]
+    fn sensitive_assignment_preserves_source_declarations() {
+        run_clean();
+        let input = "pub const Token = struct { kind: u8 };\nconst Secret = enum { a, b };";
+        let out = scan_secret_patterns(input, crate::redact::REDACTED_PLACEHOLDER);
+        assert!(matches!(out, Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn sensitive_assignment_redacts_placeholder_secret_words() {
+        run_clean();
+        let input = "Checkout incident needed the same query token=secret";
+        let out = scan_secret_patterns(input, crate::redact::REDACTED_PLACEHOLDER);
+        assert!(out.contains("<redacted:sensitive_assignment:"));
+        assert!(!out.contains("token=secret"));
+    }
+
+    #[test]
     fn replaces_jwt_tokens() {
         run_clean();
         let input = "token=eyJabcd.eyJefgh.signature_pad here";

@@ -120,6 +120,6 @@ pub(crate) const DEFAULT_SECRET_PATTERN_SPECS: &[SecretPatternSpec] = &[
         detector: "sensitive-assignment",
         source: "detect-secrets-keyword-detector",
         title: "Sensitive key/value assignment",
-        regex: r#"(?i)\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|password|passwd|secret|token)\s*[:=]\s*["']?[A-Za-z0-9._\-+/=]{6,}["']?"#,
+        regex: r#"(?i)\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|password|passwd|secret|token)\s*[:=]\s*(?:"[A-Za-z0-9._\-+/=]{6,}"|'[A-Za-z0-9._\-+/=]{6,}'|[A-Za-z0-9._\-+/=]*[0-9._\-+/=][A-Za-z0-9._\-+/=]*|secret|hidden|hideme|password|passwd|token)"#,
     },
 ];
