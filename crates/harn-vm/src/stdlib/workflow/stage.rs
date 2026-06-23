@@ -197,148 +197,151 @@ pub(super) async fn execute_stage_attempts(
         .iter()
         .map(|artifact| artifact.id.clone())
         .collect::<Vec<_>>();
-    // A stage runs once. Iteration is expressed at two levels: loop-back
-    // edges in the workflow graph (for cross-stage retry) and
-    // `exit_when_verified` + tool feedback inside the agent loop (for
-    // intra-stage iteration). `RetryPolicy` fields remain for serde
-    // compatibility but are no-ops.
     let mut attempts = Vec::new();
-    let started_at = uuid::Uuid::now_v7().to_string();
     let usage_before = llm_usage_snapshot();
-    let attempt = 1usize;
-    let attempt_task = task.to_string();
-    let execution_future = async {
-        if let Some((result, produced, _, outcome, branch, verification)) =
-            prepare_static_stage(ctx, node_id, node, &selected_stage_artifacts).await?
-        {
-            return Ok((
-                result,
-                produced,
-                transcript.clone(),
-                outcome,
-                branch,
-                verification,
-            ));
-        }
-        let r: Result<StageAttemptResult, VmError> = match node.kind.as_str() {
-            "subagent" => {
-                let (result, produced, next_transcript) =
-                    super::super::agents_workers::execute_delegated_stage(
+    let max_attempts = node.retry_policy.max_attempts.max(1);
+    for attempt in 1..=max_attempts {
+        let started_at = uuid::Uuid::now_v7().to_string();
+        let attempt_task = task.to_string();
+        let execution_future = async {
+            if let Some((result, produced, _, outcome, branch, verification)) =
+                prepare_static_stage(ctx, node_id, node, &selected_stage_artifacts).await?
+            {
+                return Ok((
+                    result,
+                    produced,
+                    transcript.clone(),
+                    outcome,
+                    branch,
+                    verification,
+                ));
+            }
+            let r: Result<StageAttemptResult, VmError> = match node.kind.as_str() {
+                "subagent" => {
+                    let (result, produced, next_transcript) =
+                        super::super::agents_workers::execute_delegated_stage(
+                            ctx,
+                            node_id,
+                            node,
+                            &attempt_task,
+                            artifacts,
+                            transcript.clone(),
+                        )
+                        .await?;
+                    let (outcome, branch, verification) = stage_attempt_outcome(
                         ctx,
-                        node_id,
                         node,
-                        &attempt_task,
-                        artifacts,
-                        transcript.clone(),
+                        &result,
+                        Some(serde_json::json!({"kind": "none", "ok": true})),
                     )
                     .await?;
-                let (outcome, branch, verification) = stage_attempt_outcome(
-                    ctx,
-                    node,
-                    &result,
-                    Some(serde_json::json!({"kind": "none", "ok": true})),
-                )
-                .await?;
-                Ok((
-                    result,
-                    produced,
-                    next_transcript,
-                    outcome,
-                    branch,
-                    Some(verification),
-                ))
-            }
-            _ => {
-                let (result, produced, next_transcript) = crate::orchestration::execute_stage_node(
-                    ctx,
-                    node_id,
-                    node,
-                    &attempt_task,
-                    artifacts,
-                )
-                .await?;
-                let (outcome, branch, verification) =
-                    stage_attempt_outcome(ctx, node, &result, None).await?;
-                Ok((
-                    result,
-                    produced,
-                    next_transcript,
-                    outcome,
-                    branch,
-                    Some(verification),
-                ))
-            }
+                    Ok((
+                        result,
+                        produced,
+                        next_transcript,
+                        outcome,
+                        branch,
+                        Some(verification),
+                    ))
+                }
+                _ => {
+                    let (result, produced, next_transcript) =
+                        crate::orchestration::execute_stage_node(
+                            ctx,
+                            node_id,
+                            node,
+                            &attempt_task,
+                            artifacts,
+                        )
+                        .await?;
+                    let (outcome, branch, verification) =
+                        stage_attempt_outcome(ctx, node, &result, None).await?;
+                    Ok((
+                        result,
+                        produced,
+                        next_transcript,
+                        outcome,
+                        branch,
+                        Some(verification),
+                    ))
+                }
+            };
+            r
         };
-        r
-    };
-    let execution: Result<StageAttemptResult, VmError> = execution_future.await;
+        let execution: Result<StageAttemptResult, VmError> = execution_future.await;
 
-    match execution {
-        Ok((result, produced, next_transcript, outcome, branch, verification)) => {
-            let usage = llm_usage_delta(&usage_before, &llm_usage_snapshot());
-            let success = !matches!(branch.as_deref(), Some("failed"));
-            attempts.push(RunStageAttemptRecord {
-                attempt,
-                status: if success {
-                    "completed".to_string()
-                } else {
-                    "failed".to_string()
-                },
-                outcome: outcome.clone(),
-                branch: branch.clone(),
-                error: None,
-                verification: verification.clone(),
-                started_at,
-                finished_at: Some(uuid::Uuid::now_v7().to_string()),
-            });
-            Ok(ExecutedStage {
-                status: if success {
-                    "completed".to_string()
-                } else {
-                    "failed".to_string()
-                },
-                outcome,
-                branch,
-                result,
-                artifacts: produced,
-                transcript: next_transcript,
-                verification,
-                usage,
-                error: if success {
-                    None
-                } else {
-                    Some("verification failed".to_string())
-                },
-                attempts,
-                consumed_artifact_ids,
-            })
-        }
-        Err(error) => {
-            let usage = llm_usage_delta(&usage_before, &llm_usage_snapshot());
-            let error_message = error.to_string();
-            attempts.push(RunStageAttemptRecord {
-                attempt,
-                status: "failed".to_string(),
-                outcome: "error".to_string(),
-                branch: Some("error".to_string()),
-                error: Some(error_message.clone()),
-                verification: None,
-                started_at,
-                finished_at: Some(uuid::Uuid::now_v7().to_string()),
-            });
-            Ok(ExecutedStage {
-                status: "failed".to_string(),
-                outcome: "error".to_string(),
-                branch: Some("error".to_string()),
-                result: serde_json::json!({"status": "failed", "text": ""}),
-                artifacts: Vec::new(),
-                transcript: transcript.clone(),
-                verification: None,
-                usage,
-                error: Some(error_message),
-                attempts,
-                consumed_artifact_ids,
-            })
+        match execution {
+            Ok((result, produced, next_transcript, outcome, branch, verification)) => {
+                let success = !matches!(branch.as_deref(), Some("failed"));
+                attempts.push(RunStageAttemptRecord {
+                    attempt,
+                    status: if success {
+                        "completed".to_string()
+                    } else {
+                        "failed".to_string()
+                    },
+                    outcome: outcome.clone(),
+                    branch: branch.clone(),
+                    error: None,
+                    verification: verification.clone(),
+                    started_at,
+                    finished_at: Some(uuid::Uuid::now_v7().to_string()),
+                });
+                if success || attempt == max_attempts {
+                    let usage = llm_usage_delta(&usage_before, &llm_usage_snapshot());
+                    return Ok(ExecutedStage {
+                        status: if success {
+                            "completed".to_string()
+                        } else {
+                            "failed".to_string()
+                        },
+                        outcome,
+                        branch,
+                        result,
+                        artifacts: produced,
+                        transcript: next_transcript,
+                        verification,
+                        usage,
+                        error: if success {
+                            None
+                        } else {
+                            Some("verification failed".to_string())
+                        },
+                        attempts,
+                        consumed_artifact_ids,
+                    });
+                }
+            }
+            Err(error) => {
+                let error_message = error.to_string();
+                attempts.push(RunStageAttemptRecord {
+                    attempt,
+                    status: "failed".to_string(),
+                    outcome: "error".to_string(),
+                    branch: Some("error".to_string()),
+                    error: Some(error_message.clone()),
+                    verification: None,
+                    started_at,
+                    finished_at: Some(uuid::Uuid::now_v7().to_string()),
+                });
+                if attempt == max_attempts {
+                    let usage = llm_usage_delta(&usage_before, &llm_usage_snapshot());
+                    return Ok(ExecutedStage {
+                        status: "failed".to_string(),
+                        outcome: "error".to_string(),
+                        branch: Some("error".to_string()),
+                        result: serde_json::json!({"status": "failed", "text": ""}),
+                        artifacts: Vec::new(),
+                        transcript: transcript.clone(),
+                        verification: None,
+                        usage,
+                        error: Some(error_message),
+                        attempts,
+                        consumed_artifact_ids,
+                    });
+                }
+            }
         }
     }
+    unreachable!("workflow stage retry loop always returns after at least one attempt")
 }

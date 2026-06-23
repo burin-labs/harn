@@ -1423,6 +1423,43 @@ For background or delegated execution, use the worker lifecycle builtins
 directly from the runtime, or the `worker_*` helpers above when you need the
 normalized request/provenance views.
 
+### std/workflow/patterns
+
+Small deterministic workflow recipes:
+
+| Function | Description |
+|---|---|
+| `workflow_self_verifying_graph(config?)` | Build an `act -> verify` graph |
+| `workflow_command_verify_graph(config?)` | Build an `implement -> verify -> repair -> verify` graph |
+| `workflow_verification_only_graph(config?)` | Build a graph with only a verifier node |
+| `workflow_failover(config)` | Run typed failover over opaque route handles with caller-owned evaluation/classification callbacks |
+
+### std/agent/stack
+
+Canonical composition helpers for the common agent runtime cell:
+
+| Function | Description |
+|---|---|
+| `agent_model_options(config?)` | Resolve explicit options, role/env provider-model overrides, model-aware option packs, tool format, and capability cleanup |
+| `agent_sanitize_model_options(options?)` | Strip unsupported provider-specific keys such as `reasoning_effort` and prompt-cache hints |
+| `agent_llm_caller(config?)` | Compose `default_llm_caller` with retry by default and optional logging/cache/budget wrappers |
+| `agent_tool_stack(tools?, config?)` | Compose required-reason, binder, and custom tool middleware |
+| `agent_stack(config?)` | Return a complete `agent_loop` options bundle with model options, callers, tools, and audit metadata |
+| `agent_stack_audit_line(stack)` | Render a stable one-line provider/model/tooling summary |
+| `agent_stack_model_policy(stack)` | Project provider/model/task fields into a workflow `model_policy` dict |
+
+### std/agent/stream
+
+Private-span filtering and terminal envelopes for streaming chat UIs:
+
+| Function | Description |
+|---|---|
+| `agent_private_text_filter(text, config?)` | Strip complete or unterminated private tagged spans from a full text value |
+| `agent_private_stream_state(config?)` | Create state for split-safe streaming private-span filtering |
+| `agent_private_stream_delta(state?, delta?, config?)` | Fold one provider delta and return a safe `visible_delta` |
+| `agent_private_stream_finish(state?, config?)` | Flush the final safe suffix and report withheld/unterminated private state |
+| `agent_stream_call(prompt, system?, options?)` | Wrap `llm_stream_call` with private filtering, callbacks, and terminal status envelopes |
+
 ### std/agent/progress
 
 Agent progress events for hosts that render live agent status:

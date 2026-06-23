@@ -534,6 +534,14 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/agent/probe.harn"),
     },
     StdlibSource {
+        module: "agent/stack",
+        source: include_str!("stdlib/agent/stack.harn"),
+    },
+    StdlibSource {
+        module: "agent/stream",
+        source: include_str!("stdlib/agent/stream.harn"),
+    },
+    StdlibSource {
         module: "agent/presets",
         source: include_str!("stdlib/agent/presets.harn"),
     },
@@ -724,6 +732,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
     StdlibSource {
         module: "workflow/checkpoints",
         source: include_str!("stdlib/workflow/checkpoints.harn"),
+    },
+    StdlibSource {
+        module: "workflow/patterns",
+        source: include_str!("stdlib/workflow/patterns.harn"),
     },
     StdlibSource {
         module: "workflow/stage",

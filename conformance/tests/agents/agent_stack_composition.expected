@@ -1,0 +1,12 @@
+required_reason
+true
+string
+retry,logging,cache,budget
+true
+mock
+0
+required_reason
+true
+true
+true
+reasoning_effort,prompt_cache

@@ -1,0 +1,30 @@
+import {
+  agent_private_stream_delta,
+  agent_private_stream_finish,
+  agent_private_stream_state,
+  agent_private_text_filter,
+} from "std/agent/stream"
+
+pipeline default() {
+  __io_println(agent_private_text_filter("hello <secret>hide me</secret> world"))
+  __io_println("[" + agent_private_text_filter("hello <secret>hide me") + "]")
+  var state = agent_private_stream_state()
+  var visible = []
+  for delta in ["he", "llo <se", "cret>hide", "</secret> world"] {
+    let event = agent_private_stream_delta(state, delta)
+    state = event.state
+    visible = visible + [event.visible_delta]
+  }
+  let done = agent_private_stream_finish(state)
+  visible = visible + [done.visible_delta]
+  __io_println(join(visible, "|"))
+  __io_println(done.visible_text)
+  __io_println(done.unterminated_private)
+  var split = agent_private_stream_state()
+  let a = agent_private_stream_delta(split, "visible <sec")
+  split = a.state
+  let b = agent_private_stream_finish(split)
+  __io_println("[" + a.visible_delta + "]")
+  __io_println("[" + b.visible_text + "]")
+  __io_println(b.withheld_suffix)
+}

@@ -2718,6 +2718,14 @@ These builtins expose Harn's typed orchestration runtime.
 - `assert_text` to require visible output to contain a substring
 - `expect_status` to require a specific exit status
 
+Workflow node `retry_policy.max_attempts` counts total attempts for VM-executed
+stage paths such as command/compact/manual stages, subagent, fork/join,
+condition, reduce, escalation, map branches, and deterministic command
+verification. Attempts stop on first success, record every attempt, and return
+the final failed/error attempt when exhausted. Agent-backed stages still rely on
+their `agent_loop`/LLM retry and iteration policies. Backoff fields are
+normalized but are not yet used to sleep between attempts.
+
 ### Workflow messaging and lifecycle
 
 | Function | Parameters | Returns | Description |

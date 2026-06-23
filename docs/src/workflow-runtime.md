@@ -223,6 +223,16 @@ Command-based verification records `stdout`, `stderr`, `exit_status`, and a
 derived success flag on the stage result while still flowing through the same
 workflow branch/outcome machinery as LLM-backed verification.
 
+`node.retry_policy.max_attempts` uses total-attempt semantics for VM-executed
+stage paths: command/compact/manual stages, subagent, fork/join, condition,
+reduce, escalation, map branches, and deterministic command `verify` nodes.
+Attempts stop on the first success and every attempt is recorded under the
+stage's `attempts` array. Agent-backed stages still rely on their
+`agent_loop`/LLM retry and iteration policies. Backoff fields are accepted in
+the normalized policy shape but deterministic workflow execution does not sleep
+between attempts yet; use host/orchestrator retry policy for scheduled delivery
+retries and provider failover rather than relying on workflow backoff fields.
+
 Verifier requirements can also be published as structured contract inputs for
 earlier planning and execution stages. Harn injects these contracts into the
 stage prompt automatically so the model sees exact verifier-owned identifiers,
@@ -431,6 +441,18 @@ audited and validated against the workflow IR:
 - `workflow_commit(...)`
 
 These mutate structured workflow graphs, not free-form prompt text.
+
+For common graph shapes, prefer `std/workflow/patterns` over ad hoc graph
+assembly:
+
+- `workflow_self_verifying_graph(config?)` builds `act -> verify`.
+- `workflow_command_verify_graph(config?)` builds
+  `implement -> verify -> repair -> verify`.
+- `workflow_verification_only_graph(config?)` runs only a deterministic
+  verifier.
+- `workflow_failover(config)` runs a typed failover loop over opaque route
+  handles while the caller/host owns provider HTTP, credentials, endpoint
+  policy, and billing.
 
 ## Capability ceilings
 

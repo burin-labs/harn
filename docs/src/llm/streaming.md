@@ -38,6 +38,26 @@ aborts the background LLM request. The existing `stream` option on
 `llm_call` and `llm_stream_call` still only controls provider transport
 selection; it does not change `llm_call`'s return type.
 
+When an app-level persona asks the model to keep a private notebook in tagged
+text, use `std/agent/stream` instead of filtering chunks inline:
+
+```harn,ignore
+import {agent_stream_call} from "std/agent/stream"
+
+let result = agent_stream_call(prompt, system, {
+  provider: "openai",
+  model: "gpt-5-mini",
+  private: {open_tag: "<secret>", close_tag: "</secret>"},
+  on_delta: { delta, _event, _state -> print(delta) },
+})
+```
+
+`agent_private_stream_delta(...)` holds back enough suffix text to detect
+opening private tags split across chunks, `agent_private_stream_finish(...)`
+flushes only safe visible suffixes, and `agent_stream_call(...)` returns a
+terminal `{ok, status, text, visible_text}` envelope on both success and stream
+interruption.
+
 ## Partial deltas and usage
 
 Streaming transports emit text deltas as soon as the provider sends them. Native

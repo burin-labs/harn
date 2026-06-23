@@ -1,0 +1,51 @@
+import {
+  agent_model_options,
+  agent_sanitize_model_options,
+  agent_stack_model_policy,
+} from "std/agent/stack"
+
+pipeline default() {
+  let env_route = agent_model_options(
+    {
+      role: "release",
+      env_prefixes: ["HARN_RELEASE", "HARN_PLANNER"],
+      defaults: {provider: "mock", model: "gpt-5.4-preview"},
+      options: {reasoning_effort: "high", prompt_cache: true, tool_format: "auto"},
+    },
+  )
+  __io_println(env_route.provider)
+  __io_println(env_route.model)
+  __io_println(env_route.tool_format)
+  __io_println(env_route.options.reasoning_effort == nil)
+  __io_println(env_route.options.prompt_cache == nil)
+  __io_println(join(env_route.stripped, ","))
+  let explicit = agent_model_options(
+    {
+      role: "release",
+      env_prefixes: ["HARN_RELEASE"],
+      provider: "mock",
+      model: "gpt-5.4-preview",
+      options: {reasoning_effort: "high", tool_format: "auto"},
+    },
+  )
+  __io_println(explicit.model)
+  __io_println(explicit.options.reasoning_effort)
+  let sanitized = agent_sanitize_model_options(
+    {provider: "mock", model: "gpt-4o", reasoning_effort: "high", cache_control: {type: "ephemeral"}},
+  )
+  __io_println(sanitized.reasoning_effort == nil)
+  __io_println(sanitized.cache_control == nil)
+  let policy = agent_stack_model_policy(
+    {
+      options: {
+        provider: "mock",
+        model: "gpt-5.4-preview",
+        iteration_budget: {mode: "adaptive", initial: 1, max: 5},
+        unknown: "drop-me",
+      },
+    },
+  )
+  __io_println(policy.provider)
+  __io_println(policy.iteration_budget.max)
+  __io_println(policy.unknown == nil)
+}
