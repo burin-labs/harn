@@ -22,6 +22,10 @@ let CHANGELOG_PATH = "CHANGELOG.md"
 
 let MANIFEST_PATH = "spec/protocol-artifacts/manifest.json"
 
+let ACP_AGENT_MANIFEST_PATH = "spec/acp-registry/harn/agent.json"
+
+type AcpArchiveVersion = {archive: string, version: string}
+
 /**
  * Pull the workspace `version = "X.Y.Z"` literal from Cargo.toml text.
  * Throws the canonical error when the line is missing.
@@ -46,6 +50,65 @@ pub fn protocol_artifact_version(manifest_text: string) -> string {
     throw "error: missing artifactVersion in " + MANIFEST_PATH
   }
   return caps[0].groups[0]
+}
+
+/**
+ * Pull the top-level ACP Agent Registry manifest version from JSON text.
+ * The manifest is the editor-installable binary distribution entry, so it
+ * must track the Cargo package version that produced the release assets.
+ */
+pub fn acp_agent_manifest_version(manifest_text: string) -> string {
+  let manifest = json_parse(manifest_text)
+  let version = json_pointer(manifest, "/version")
+  if type_of(version) != "string" {
+    throw "error: missing version in " + ACP_AGENT_MANIFEST_PATH
+  }
+  return version
+}
+
+/**
+ * Return every release version embedded in the ACP manifest's binary archive
+ * URLs, paired with the source URL for precise failure messages.
+ */
+pub fn acp_agent_manifest_archive_versions(manifest_text: string) -> list<AcpArchiveVersion> {
+  let manifest = json_parse(manifest_text)
+  let archives = jq(manifest, ".distribution.binary[] | .archive")
+  if archives.count == 0 {
+    throw "error: missing binary archive URLs in " + ACP_AGENT_MANIFEST_PATH
+  }
+  var versions = []
+  for archive in archives {
+    if type_of(archive) != "string" {
+      throw "error: non-string binary archive URL in " + ACP_AGENT_MANIFEST_PATH
+    }
+    let caps = regex_captures(r"/releases/download/v([^/]+)/", archive)
+    if caps.count == 0 {
+      throw "error: binary archive URL in " + ACP_AGENT_MANIFEST_PATH
+        + " does not include a GitHub release version: "
+        + archive
+    }
+    versions = versions + [{archive: archive, version: caps[0].groups[0]}]
+  }
+  return versions
+}
+
+/** Ensure the ACP Agent Registry manifest points at the current release. */
+pub fn check_acp_agent_manifest(manifest_text: string, version: string) {
+  let manifest_version = acp_agent_manifest_version(manifest_text)
+  if manifest_version != version {
+    throw "error: " + ACP_AGENT_MANIFEST_PATH + " version " + manifest_version
+      + " does not match Cargo.toml version "
+      + version
+  }
+  for item in acp_agent_manifest_archive_versions(manifest_text) {
+    if item.version != version {
+      throw "error: " + ACP_AGENT_MANIFEST_PATH + " archive " + item.archive
+        + " points at v"
+        + item.version
+        + " instead of Cargo.toml version v"
+        + version
+    }
+  }
 }
 
 /** Return every `## vX.Y.Z` heading version, in file order. */
@@ -320,6 +383,8 @@ pipeline main(task) {
         + "; run `make gen-protocol-artifacts` (and "
         + "scripts/sync_protocol_fixture_runtime_versions.harn) after bumping the version"
     }
+    let acp_manifest_text = harness.fs.read_text(ACP_AGENT_MANIFEST_PATH)
+    check_acp_agent_manifest(acp_manifest_text, version)
     verify_release_notes(effective_version)
     verify_tag_state(effective_version)
     __io_println(success_message(version, effective_version))

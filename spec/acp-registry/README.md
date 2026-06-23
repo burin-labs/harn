@@ -17,8 +17,8 @@ ACP-speaking clients.
 ## What's here
 
 - [`harn/agent.json`](harn/agent.json) — the registry manifest entry, pinned to
-  the v0.8.133 binary distribution (GitHub release tarballs for the five
-  published targets), launching `harn serve acp`.
+  the current Cargo package version's binary distribution (GitHub release
+  tarballs for the five published targets), launching `harn serve acp`.
 - [`harn/icon.svg`](harn/icon.svg) — 16×16 `currentColor` icon.
 
 This is the agent's free editor discoverability listing. It is **not** the

@@ -2,8 +2,11 @@
 // content checks against synthetic Cargo.toml / CHANGELOG.md text without
 // touching the filesystem, subprocesses, or git.
 import {
+  acp_agent_manifest_archive_versions,
+  acp_agent_manifest_version,
   changelog_section_body,
   changelog_versions,
+  check_acp_agent_manifest,
   check_metadata,
   current_version,
   detect_misformatted_headings,
@@ -17,6 +20,21 @@ import {
 let CARGO = "[workspace]\nresolver = \"2\"\n\n[workspace.package]\nversion = \"0.8.71\"\nedition = \"2021\"\n"
 
 let CHANGELOG = "# Changelog\n\nintro text\n\n## v0.8.71\n\n- Added a thing.\n\n## v0.8.70\n\n- Fixed a thing.\n"
+
+let ACP_MANIFEST = "{\n"
+  + "  \"id\": \"harn\",\n"
+  + "  \"version\": \"0.8.71\",\n"
+  + "  \"distribution\": {\n"
+  + "    \"binary\": {\n"
+  + "      \"linux-x86_64\": {\n"
+  + "        \"archive\": \"https://github.com/burin-labs/harn/releases/download/v0.8.71/harn-x86_64-unknown-linux-gnu.tar.gz\"\n"
+  + "      },\n"
+  + "      \"windows-x86_64\": {\n"
+  + "        \"archive\": \"https://github.com/burin-labs/harn/releases/download/v0.8.71/harn-x86_64-pc-windows-msvc.zip\"\n"
+  + "      }\n"
+  + "    }\n"
+  + "  }\n"
+  + "}\n"
 
 @test
 pipeline test_current_version(task) {
@@ -37,6 +55,60 @@ pipeline test_protocol_artifact_version_missing(task) {
     e
   }
   assert_eq(r, "error: missing artifactVersion in spec/protocol-artifacts/manifest.json")
+}
+
+@test
+pipeline test_acp_agent_manifest_version(task) {
+  assert_eq(acp_agent_manifest_version(ACP_MANIFEST), "0.8.71")
+}
+
+@test
+pipeline test_acp_agent_manifest_archive_versions(task) {
+  let versions = acp_agent_manifest_archive_versions(ACP_MANIFEST)
+  assert_eq(versions[0].version, "0.8.71")
+  assert_eq(
+    versions[0].archive,
+    "https://github.com/burin-labs/harn/releases/download/v0.8.71/harn-x86_64-unknown-linux-gnu.tar.gz",
+  )
+}
+
+@test
+pipeline test_check_acp_agent_manifest_ok(task) {
+  check_acp_agent_manifest(ACP_MANIFEST, "0.8.71")
+}
+
+@test
+pipeline test_check_acp_agent_manifest_rejects_stale_version(task) {
+  let manifest = regex_replace(r#""version": "0\.8\.71""#, "\"version\": \"0.8.70\"", ACP_MANIFEST)
+  let r = try {
+    check_acp_agent_manifest(manifest, "0.8.71")
+  } catch (e) {
+    e
+  }
+  assert_eq(
+    r,
+    "error: spec/acp-registry/harn/agent.json version 0.8.70 does not match Cargo.toml version 0.8.71",
+  )
+}
+
+@test
+pipeline test_check_acp_agent_manifest_rejects_stale_archive(task) {
+  let manifest = regex_replace(
+    "releases/download/v0\\.8\\.71/harn-x86_64-unknown-linux-gnu",
+    "releases/download/v0.8.70/harn-x86_64-unknown-linux-gnu",
+    ACP_MANIFEST,
+  )
+  let r = try {
+    check_acp_agent_manifest(manifest, "0.8.71")
+  } catch (e) {
+    e
+  }
+  assert_eq(
+    r,
+    "error: spec/acp-registry/harn/agent.json archive "
+      + "https://github.com/burin-labs/harn/releases/download/v0.8.70/harn-x86_64-unknown-linux-gnu.tar.gz "
+      + "points at v0.8.70 instead of Cargo.toml version v0.8.71",
+  )
 }
 
 @test
