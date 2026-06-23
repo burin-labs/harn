@@ -1,0 +1,188 @@
+# Baseten Model APIs. Live /v1/models verified 2026-06-23 with
+# BASETEN_API_KEY: ids, served context windows, pricing, features, modalities,
+# and route quantization come from the provider-owned endpoint. Rows are keyed
+# with `baseten/<wire-id>` so failover/eval tooling can compare the same
+# weights across Baseten, Z.AI, Together, DeepInfra, OpenRouter, and NVIDIA.
+
+[models."baseten/zai-org/GLM-5.2"]
+name = "GLM 5.2 (Baseten)"
+provider = "baseten"
+wire_model = "zai-org/GLM-5.2"
+logical_model = "glm-5.2"
+equivalence_group = "glm-5.2"
+served_variant = "baseten-model-api"
+api_dialect = "openai_chat"
+context_window = 262144
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 1.40, output_per_mtok = 4.40, cache_read_per_mtok = 0.26 }
+architecture = { parameter_count_b = 744.0, active_parameter_count_b = 40.0, moe = true, quantization = "fp8", license = "MIT", source_url = "https://www.baseten.co/blog/how-we-built-the-worlds-fastest-api-for-glm-52/", last_verified = "2026-06-23" }
+performance = { output_tokens_per_sec = 281.2, time_to_answer_s = 7.95, source = "artificial_analysis", source_url = "https://artificialanalysis.ai/models/glm-5-2/providers", last_verified = "2026-06-23", notes = "Artificial Analysis GLM-5.2 provider benchmark; Harn 2026-06-23 smoke probes confirmed non-thinking and thinking Baseten calls plus native-tool unreliability." }
+tier = "frontier"
+open_weight = true
+strengths = ["speed", "coding", "agentic", "tool_use", "reasoning", "long_context"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "kimi", "deepseek"]
+
+[models."baseten/moonshotai/Kimi-K2.7-Code"]
+name = "Kimi K2.7 Code (Baseten)"
+provider = "baseten"
+wire_model = "moonshotai/Kimi-K2.7-Code"
+logical_model = "moonshot-kimi-k2.7-code"
+equivalence_group = "moonshot-kimi-k2.7-code"
+served_variant = "baseten-model-api"
+api_dialect = "openai_chat"
+context_window = 262000
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.95, output_per_mtok = 4.00, cache_read_per_mtok = 0.16 }
+architecture = { quantization = "fp4", source_url = "https://www.baseten.co/library/kimi-k27-code/", last_verified = "2026-06-23" }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context", "vision"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
+
+[models."baseten/deepseek-ai/DeepSeek-V4-Pro"]
+name = "DeepSeek V4 Pro (Baseten)"
+provider = "baseten"
+wire_model = "deepseek-ai/DeepSeek-V4-Pro"
+logical_model = "deepseek-v4-pro"
+equivalence_group = "deepseek-v4-pro"
+served_variant = "baseten-model-api"
+api_dialect = "openai_chat"
+context_window = 131000
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 1.74, output_per_mtok = 3.48, cache_read_per_mtok = 0.145 }
+architecture = { parameter_count_b = 1600.0, active_parameter_count_b = 49.0, moe = true, quantization = "fp4", source_url = "https://www.baseten.co/library/deepseek-v4/", last_verified = "2026-06-23" }
+tier = "frontier"
+open_weight = true
+strengths = ["reasoning", "coding", "agentic", "tool_use", "long_context"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "kimi"]
+
+[models."baseten/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B"]
+name = "Nemotron 3 Ultra 550B A55B (Baseten)"
+provider = "baseten"
+wire_model = "nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B"
+logical_model = "nemotron-3-ultra-550b-a55b"
+equivalence_group = "nemotron-3-ultra-550b-a55b"
+served_variant = "baseten-model-api"
+api_dialect = "openai_chat"
+context_window = 202800
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.60, output_per_mtok = 2.40, cache_read_per_mtok = 0.12 }
+architecture = { parameter_count_b = 550.0, active_parameter_count_b = 55.0, moe = true, quantization = "fp4", source_url = "https://www.baseten.co/library/nemotron-3-ultra/", last_verified = "2026-06-23" }
+tier = "frontier"
+open_weight = true
+strengths = ["reasoning", "coding", "agentic", "tool_use", "long_context"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
+
+[models."baseten/nvidia/Nemotron-120B-A12B"]
+name = "Nemotron 3 Super 120B A12B (Baseten)"
+provider = "baseten"
+wire_model = "nvidia/Nemotron-120B-A12B"
+logical_model = "nemotron-3-super-120b-a12b"
+equivalence_group = "nemotron-3-super-120b-a12b"
+served_variant = "baseten-model-api"
+api_dialect = "openai_chat"
+context_window = 202800
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.30, output_per_mtok = 0.75, cache_read_per_mtok = 0.06 }
+architecture = { parameter_count_b = 120.0, active_parameter_count_b = 12.0, moe = true, quantization = "fp4", source_url = "https://www.baseten.co/library/nemotron-3-super/", last_verified = "2026-06-23" }
+tier = "frontier"
+open_weight = true
+strengths = ["speed", "cheap", "reasoning", "coding", "agentic", "tool_use", "long_context"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
+
+[models."baseten/openai/gpt-oss-120b"]
+name = "GPT-OSS 120B (Baseten)"
+provider = "baseten"
+wire_model = "openai/gpt-oss-120b"
+logical_model = "openai-gpt-oss-120b"
+equivalence_group = "openai-gpt-oss-120b"
+served_variant = "baseten-model-api"
+api_dialect = "openai_chat"
+context_window = 128072
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.10, output_per_mtok = 0.50, cache_read_per_mtok = 0.10 }
+architecture = { parameter_count_b = 117.0, active_parameter_count_b = 5.1, moe = true, quantization = "fp4", license = "Apache-2.0", source_url = "https://www.baseten.co/library/gpt-oss-120b/", last_verified = "2026-06-23" }
+tier = "frontier"
+open_weight = true
+strengths = ["cheap", "tool_use", "reasoning", "coding"]
+complementary_with = ["anthropic-claude", "google-gemini", "qwen", "deepseek", "kimi"]
+
+[models."baseten/zai-org/GLM-5.1"]
+name = "GLM 5.1 (Baseten)"
+provider = "baseten"
+wire_model = "zai-org/GLM-5.1"
+logical_model = "glm-5.1"
+equivalence_group = "glm-5.1"
+served_variant = "baseten-model-api"
+api_dialect = "openai_chat"
+context_window = 202800
+capabilities = ["tools", "streaming", "prompt_caching"]
+pricing = { input_per_mtok = 1.30, output_per_mtok = 4.30, cache_read_per_mtok = 0.26 }
+architecture = { quantization = "fp4", source_url = "https://www.baseten.co/pricing/", last_verified = "2026-06-23" }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "long_context"]
+
+[models."baseten/zai-org/GLM-5"]
+name = "GLM 5 (Baseten)"
+provider = "baseten"
+wire_model = "zai-org/GLM-5"
+logical_model = "glm-5"
+equivalence_group = "glm-5"
+served_variant = "baseten-model-api"
+api_dialect = "openai_chat"
+context_window = 202800
+capabilities = ["tools", "streaming", "prompt_caching"]
+pricing = { input_per_mtok = 0.95, output_per_mtok = 3.15, cache_read_per_mtok = 0.20 }
+architecture = { quantization = "fp4", source_url = "https://www.baseten.co/pricing/", last_verified = "2026-06-23" }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "long_context"]
+
+[models."baseten/zai-org/GLM-4.7"]
+name = "GLM 4.7 (Baseten)"
+provider = "baseten"
+wire_model = "zai-org/GLM-4.7"
+logical_model = "glm-4.7"
+equivalence_group = "glm-4.7"
+served_variant = "baseten-model-api"
+api_dialect = "openai_chat"
+context_window = 200000
+capabilities = ["tools", "streaming", "prompt_caching"]
+pricing = { input_per_mtok = 0.60, output_per_mtok = 2.20, cache_read_per_mtok = 0.12 }
+architecture = { quantization = "fp4", source_url = "https://www.baseten.co/pricing/", last_verified = "2026-06-23" }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "long_context"]
+
+[models."baseten/moonshotai/Kimi-K2.6"]
+name = "Kimi K2.6 (Baseten)"
+provider = "baseten"
+wire_model = "moonshotai/Kimi-K2.6"
+logical_model = "moonshot-kimi-k2.6"
+equivalence_group = "moonshot-kimi-k2.6"
+served_variant = "baseten-model-api"
+api_dialect = "openai_chat"
+context_window = 262000
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.95, output_per_mtok = 4.00, cache_read_per_mtok = 0.16 }
+architecture = { quantization = "fp4", source_url = "https://www.baseten.co/pricing/", last_verified = "2026-06-23" }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context", "vision"]
+
+[models."baseten/moonshotai/Kimi-K2.5"]
+name = "Kimi K2.5 (Baseten)"
+provider = "baseten"
+wire_model = "moonshotai/Kimi-K2.5"
+logical_model = "moonshot-kimi-k2.5"
+equivalence_group = "moonshot-kimi-k2.5"
+served_variant = "baseten-model-api"
+api_dialect = "openai_chat"
+context_window = 262000
+capabilities = ["tools", "vision", "streaming", "prompt_caching"]
+pricing = { input_per_mtok = 0.60, output_per_mtok = 3.00, cache_read_per_mtok = 0.12 }
+architecture = { quantization = "fp4", source_url = "https://www.baseten.co/pricing/", last_verified = "2026-06-23" }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "long_context", "vision"]

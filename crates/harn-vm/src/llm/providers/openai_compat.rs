@@ -78,9 +78,16 @@ impl LlmProvider for OpenAiCompatibleProvider {
             .and_then(|value| value.as_str())
             .unwrap_or("");
         let caps = crate::llm::capabilities::lookup(&self.provider_name, model);
-        if !caps.honors_chat_template_kwargs {
-            if let Some(object) = body.as_object_mut() {
-                object.remove("chat_template_kwargs");
+        if let Some(object) = body.as_object_mut() {
+            let allowed_field = if caps.honors_chat_template_kwargs {
+                Some(chat_template_options_field(&caps))
+            } else {
+                None
+            };
+            for field in ["chat_template_kwargs", "chat_template_args"] {
+                if allowed_field != Some(field) {
+                    object.remove(field);
+                }
             }
         }
     }
@@ -331,7 +338,8 @@ impl OpenAiCompatibleProvider {
             if caps.preserve_thinking {
                 chat_template_kwargs["preserve_thinking"] = serde_json::json!(true);
             }
-            body["chat_template_kwargs"] = chat_template_kwargs;
+            let field = chat_template_options_field(&caps);
+            body[field] = chat_template_kwargs;
         }
         apply_prompt_cache_breakpoint(&mut body, opts.cache, &caps);
         crate::llm::fast_mode::apply_request_knob(&mut body, &opts.model, opts.fast);
@@ -479,6 +487,12 @@ fn canonicalizing_delta_tx(orig: DeltaSender) -> DeltaSender {
         }
     });
     tx
+}
+
+fn chat_template_options_field(caps: &crate::llm::capabilities::Capabilities) -> &str {
+    caps.chat_template_options_field
+        .as_deref()
+        .unwrap_or("chat_template_kwargs")
 }
 
 pub(crate) fn ensure_openrouter_require_parameters(body: &mut serde_json::Value) {
@@ -1258,16 +1272,50 @@ thinking_modes = ["enabled"]
     }
 
     #[test]
+    fn build_request_body_uses_configured_chat_template_field() {
+        crate::llm::capabilities::set_user_overrides_toml(
+            r#"
+[[provider.baseten]]
+model_match = "zai-org/glm-5.2"
+honors_chat_template_kwargs = true
+chat_template_options_field = "chat_template_args"
+thinking_modes = ["enabled"]
+"#,
+        )
+        .expect("capability override");
+        let provider = OpenAiCompatibleProvider::new("baseten".to_string());
+        let mut payload = base_request_payload();
+        payload.provider = "baseten".to_string();
+        payload.model = "zai-org/GLM-5.2".to_string();
+        payload.thinking = ThinkingConfig::Enabled {
+            budget_tokens: None,
+        };
+
+        let mut body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+        assert!(body.get("chat_template_args").is_some());
+        assert!(body.get("chat_template_kwargs").is_none());
+        body["chat_template_kwargs"] = json!({"enable_thinking": false});
+
+        provider.transform_request(&mut body);
+
+        assert!(body.get("chat_template_args").is_some());
+        assert!(body.get("chat_template_kwargs").is_none());
+        crate::llm::capabilities::clear_user_overrides();
+    }
+
+    #[test]
     fn transform_request_strips_chat_template_kwargs_when_capability_denies() {
         let provider = OpenAiCompatibleProvider::new("acme".to_string());
         let mut body = json!({
             "model": "custom-qwen",
             "chat_template_kwargs": {"enable_thinking": true},
+            "chat_template_args": {"enable_thinking": true},
         });
 
         provider.transform_request(&mut body);
 
         assert!(body.get("chat_template_kwargs").is_none());
+        assert!(body.get("chat_template_args").is_none());
     }
 
     #[test]

@@ -209,8 +209,15 @@ pub(crate) fn register_default_providers() {
             "minimax",
             "zai",
             "moonshot",
+            "baseten",
             "deepinfra",
             "sambanova",
+            "nebius",
+            "flexai",
+            "hyperbolic",
+            "siliconflow",
+            "parasail",
+            "atlas",
         ] {
             names.insert(name.to_string());
         }

@@ -111,9 +111,17 @@ fn __install_live_egress_policy() {
         "api.minimax.io",
         "api.z.ai",
         "api.moonshot.ai",
+        "inference.baseten.co",
         "api.deepinfra.com",
         "api.sambanova.ai",
         "integrate.api.nvidia.com",
+        "api.tokenfactory.nebius.com",
+        "tokens.flex.ai",
+        "api.hyperbolic.xyz",
+        "api.siliconflow.com",
+        "api.siliconflow.cn",
+        "api.parasail.io",
+        "api.atlascloud.ai",
       ],
       default: "deny",
     },
@@ -187,10 +195,38 @@ fn __pricing_from_per_token_record(pricing) {
   return pricing_dict
 }
 
+fn __pricing_from_mtok_record(record) {
+  if record == nil {
+    return nil
+  }
+  var pricing_dict = {}
+  let input_rate = record?.input_per_mtok ?? record?.input_per_million_tokens
+  let output_rate = record?.output_per_mtok ?? record?.output_per_million_tokens
+  let cache_read = record?.cache_read_per_mtok ?? record?.cached_input_per_mtok
+  if input_rate != nil {
+    pricing_dict = pricing_dict + {input_per_mtok: to_float(input_rate)}
+  }
+  if output_rate != nil {
+    pricing_dict = pricing_dict + {output_per_mtok: to_float(output_rate)}
+  }
+  if cache_read != nil {
+    pricing_dict = pricing_dict + {cache_read_per_mtok: to_float(cache_read)}
+  }
+  if len(pricing_dict) == 0 {
+    return nil
+  }
+  return pricing_dict
+}
+
 fn __generic_models_mapper(payload) {
   var entries = []
-  for record in payload?.data ?? payload?.models ?? [] {
-    let id = record?.id ?? record?.name
+  let records = if type_of(payload) == "list" {
+    payload
+  } else {
+    payload?.data ?? payload?.models ?? []
+  }
+  for record in records {
+    let id = record?.id ?? record?.slug ?? record?.model_name ?? record?.name
     if id == nil || id == "" {
       continue
     }
@@ -199,11 +235,15 @@ fn __generic_models_mapper(payload) {
       ?? record?.max_context_length
       ?? record?.max_model_len
       ?? record?.max_input_tokens
+    var pricing_value = __pricing_from_per_token_record(record?.pricing)
+    if pricing_value == nil {
+      pricing_value = __pricing_from_mtok_record(record)
+    }
     let entry = {
       model_id: id,
       name: record?.display_name ?? record?.name ?? record?.id,
       context_window: context,
-      pricing: __pricing_from_per_token_record(record?.pricing),
+      pricing: pricing_value,
     }
     entries = entries + [entry]
   }
@@ -478,6 +518,59 @@ fn __live_adapter_specs() {
       "https://integrate.api.nvidia.com/v1/models",
       ["NVIDIA_API_KEY", "NIM_API_KEY"],
       {terms_notes: "NVIDIA NIM API Catalog OpenAI-compatible /models endpoint."},
+    ),
+    __keyed_models_spec(
+      "baseten-models-api",
+      "baseten",
+      "https://inference.baseten.co/v1/models",
+      ["BASETEN_API_KEY"],
+      {terms_notes: "Baseten Model APIs OpenAI-compatible /models endpoint."},
+    ),
+    __keyed_models_spec(
+      "nebius-token-factory-models-api",
+      "nebius",
+      "https://api.tokenfactory.nebius.com/v1/models",
+      ["NEBIUS_API_KEY"],
+      {terms_notes: "Nebius Token Factory OpenAI-compatible /models endpoint."},
+    ),
+    __keyed_models_spec(
+      "flexai-model-discovery-api",
+      "flexai",
+      "https://tokens.flex.ai/api/models",
+      ["FLEXAI_API_KEY"],
+      {
+        terms_notes: "FlexAI detailed model-discovery endpoint with context, pricing, support, and health metadata.",
+      },
+    ),
+    __keyed_models_spec(
+      "hyperbolic-models-api",
+      "hyperbolic",
+      "https://api.hyperbolic.xyz/v1/models",
+      ["HYPERBOLIC_API_KEY"],
+      {terms_notes: "Hyperbolic OpenAI-compatible /models endpoint."},
+    ),
+    __keyed_models_spec(
+      "siliconflow-models-api",
+      "siliconflow",
+      "https://api.siliconflow.com/v1/models",
+      ["SILICONFLOW_API_KEY"],
+      {
+        terms_notes: "SiliconFlow OpenAI-compatible /models endpoint; override SILICONFLOW_BASE_URL for regional endpoints.",
+      },
+    ),
+    __keyed_models_spec(
+      "parasail-models-api",
+      "parasail",
+      "https://api.parasail.io/v1/models",
+      ["PARASAIL_API_KEY"],
+      {terms_notes: "Parasail OpenAI-compatible /models endpoint."},
+    ),
+    __keyed_models_spec(
+      "atlas-models-api",
+      "atlas",
+      "https://api.atlascloud.ai/v1/models",
+      ["ATLAS_API_KEY", "ATLASCLOUD_API_KEY"],
+      {terms_notes: "Atlas Cloud OpenAI-compatible /models endpoint."},
     ),
   ]
 }

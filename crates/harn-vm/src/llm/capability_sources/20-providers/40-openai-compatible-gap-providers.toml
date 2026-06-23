@@ -1,0 +1,64 @@
+# OpenAI-compatible providers whose per-model catalogs are refreshed live when
+# callers provide API keys. These wildcard rules are conservative transport
+# defaults: model-family overrides can still be added as empirical probes find
+# provider-specific reasoning/tool quirks.
+
+[[provider.nebius]]
+model_match = "*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+text_tool_wire_format_supported = true
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "Nebius documents function calling and structured JSON output; Harn has not yet run model-family probes for every Token Factory route."
+
+[[provider.flexai]]
+model_match = "*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+text_tool_wire_format_supported = true
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "FlexAI exposes model-level support flags through discovery; use live refresh/probes to tighten route-specific tool preferences."
+
+[[provider.hyperbolic]]
+model_match = "*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+text_tool_wire_format_supported = true
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "Hyperbolic documents tool calling for selected Qwen/Llama routes; model-specific probes should override this wildcard if needed."
+
+[[provider.siliconflow]]
+model_match = "*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+text_tool_wire_format_supported = true
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "SiliconFlow is OpenAI-compatible, but thinking controls are provider-specific on some model families; prefer live model probes before pinning reasoning-heavy agents."
+
+[[provider.parasail]]
+model_match = "*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+text_tool_wire_format_supported = true
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "Parasail exposes an OpenAI-compatible serverless/batch API; use model-specific probes before relying on native tools for long agent loops."
+
+[[provider.atlas]]
+model_match = "*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+text_tool_wire_format_supported = true
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "Atlas is a coding-plan OpenAI-compatible route; Harn has no route-specific tool parity probes yet."

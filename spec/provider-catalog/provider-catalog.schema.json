@@ -538,6 +538,9 @@
         "open_weight": {
           "type": "boolean"
         },
+        "performance": {
+          "$ref": "#/$defs/performance"
+        },
         "pricing": {
           "$ref": "#/$defs/pricing"
         },
@@ -617,6 +620,44 @@
         "lineage",
         "tier"
       ],
+      "type": "object"
+    },
+    "performance": {
+      "additionalProperties": false,
+      "properties": {
+        "last_verified": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "notes": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "observed_ttft_ms": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "output_tokens_per_sec": {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "sample_size": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "source": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "source_url": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "time_to_answer_s": {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        }
+      },
       "type": "object"
     },
     "pricing": {
@@ -704,6 +745,9 @@
         },
         "local_runtime": {
           "$ref": "#/$defs/local_runtime"
+        },
+        "performance": {
+          "$ref": "#/$defs/performance"
         },
         "protocols": {
           "items": {

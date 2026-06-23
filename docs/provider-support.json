@@ -68,6 +68,54 @@
       "local_setup_notes": []
     },
     {
+      "id": "atlas",
+      "display_name": "Atlas",
+      "catalog_provider": "atlas",
+      "endpoint_style": "OpenAI-compatible chat completions",
+      "classification": "hosted",
+      "auth_env": [
+        "ATLAS_API_KEY",
+        "ATLASCLOUD_API_KEY"
+      ],
+      "recommended": {
+        "selector": "atlas",
+        "provider": "atlas",
+        "model": "*",
+        "display_name": null,
+        "tool_format": "text",
+        "harn_options": [
+          "provider = \"atlas\""
+        ]
+      },
+      "capabilities": {
+        "native_tools": false,
+        "text_tools": true,
+        "preferred_tool_format": "auto",
+        "tool_mode_parity": "unknown",
+        "structured_output_transport": "none",
+        "structured_output_mode": "none",
+        "streaming": true,
+        "reasoning_knobs": [],
+        "prompt_or_context_cache": false,
+        "usage_accounting_confidence": "provider_default"
+      },
+      "empirical": {
+        "status": "not_recorded",
+        "sources": [],
+        "total_runs": 0,
+        "passed_runs": 0,
+        "failed_runs": 0,
+        "skipped_runs": 0,
+        "best_tool_format": null,
+        "native_text_parity": null,
+        "evidence": []
+      },
+      "notes": [],
+      "caveats": [],
+      "mcp_notes": [],
+      "local_setup_notes": []
+    },
+    {
       "id": "azure_openai",
       "display_name": "Azure Openai",
       "catalog_provider": "azure_openai",
@@ -101,6 +149,59 @@
         "reasoning_knobs": [],
         "prompt_or_context_cache": false,
         "usage_accounting_confidence": "provider_default"
+      },
+      "empirical": {
+        "status": "not_recorded",
+        "sources": [],
+        "total_runs": 0,
+        "passed_runs": 0,
+        "failed_runs": 0,
+        "skipped_runs": 0,
+        "best_tool_format": null,
+        "native_text_parity": null,
+        "evidence": []
+      },
+      "notes": [],
+      "caveats": [],
+      "mcp_notes": [],
+      "local_setup_notes": []
+    },
+    {
+      "id": "baseten",
+      "display_name": "Baseten",
+      "catalog_provider": "baseten",
+      "endpoint_style": "OpenAI-compatible chat completions",
+      "classification": "hosted",
+      "auth_env": [
+        "BASETEN_API_KEY"
+      ],
+      "recommended": {
+        "selector": "baseten:baseten/openai/gpt-oss-120b",
+        "provider": "baseten",
+        "model": "baseten/openai/gpt-oss-120b",
+        "display_name": "GPT-OSS 120B (Baseten)",
+        "tool_format": "native",
+        "harn_options": [
+          "provider = \"baseten\"",
+          "model = \"baseten/openai/gpt-oss-120b\"",
+          "tool_format = \"native\"",
+          "structured_output_mode = \"native_json\""
+        ]
+      },
+      "capabilities": {
+        "native_tools": true,
+        "text_tools": true,
+        "preferred_tool_format": "native",
+        "tool_mode_parity": "unknown",
+        "structured_output_transport": "native",
+        "structured_output_mode": "native_json",
+        "streaming": true,
+        "reasoning_knobs": [
+          "effort",
+          "reasoning_effort"
+        ],
+        "prompt_or_context_cache": true,
+        "usage_accounting_confidence": "high"
       },
       "empirical": {
         "status": "not_recorded",
@@ -488,6 +589,53 @@
       "local_setup_notes": []
     },
     {
+      "id": "flexai",
+      "display_name": "Flexai",
+      "catalog_provider": "flexai",
+      "endpoint_style": "OpenAI-compatible chat completions",
+      "classification": "hosted",
+      "auth_env": [
+        "FLEXAI_API_KEY"
+      ],
+      "recommended": {
+        "selector": "flexai",
+        "provider": "flexai",
+        "model": "*",
+        "display_name": null,
+        "tool_format": "text",
+        "harn_options": [
+          "provider = \"flexai\""
+        ]
+      },
+      "capabilities": {
+        "native_tools": false,
+        "text_tools": true,
+        "preferred_tool_format": "auto",
+        "tool_mode_parity": "unknown",
+        "structured_output_transport": "none",
+        "structured_output_mode": "none",
+        "streaming": true,
+        "reasoning_knobs": [],
+        "prompt_or_context_cache": false,
+        "usage_accounting_confidence": "provider_default"
+      },
+      "empirical": {
+        "status": "not_recorded",
+        "sources": [],
+        "total_runs": 0,
+        "passed_runs": 0,
+        "failed_runs": 0,
+        "skipped_runs": 0,
+        "best_tool_format": null,
+        "native_text_parity": null,
+        "evidence": []
+      },
+      "notes": [],
+      "caveats": [],
+      "mcp_notes": [],
+      "local_setup_notes": []
+    },
+    {
       "id": "gemini",
       "display_name": "Gemini API",
       "catalog_provider": "gemini",
@@ -633,6 +781,53 @@
           "disable_directive:/no_think",
           "enabled"
         ],
+        "prompt_or_context_cache": false,
+        "usage_accounting_confidence": "provider_default"
+      },
+      "empirical": {
+        "status": "not_recorded",
+        "sources": [],
+        "total_runs": 0,
+        "passed_runs": 0,
+        "failed_runs": 0,
+        "skipped_runs": 0,
+        "best_tool_format": null,
+        "native_text_parity": null,
+        "evidence": []
+      },
+      "notes": [],
+      "caveats": [],
+      "mcp_notes": [],
+      "local_setup_notes": []
+    },
+    {
+      "id": "hyperbolic",
+      "display_name": "Hyperbolic",
+      "catalog_provider": "hyperbolic",
+      "endpoint_style": "OpenAI-compatible chat completions",
+      "classification": "hosted",
+      "auth_env": [
+        "HYPERBOLIC_API_KEY"
+      ],
+      "recommended": {
+        "selector": "hyperbolic",
+        "provider": "hyperbolic",
+        "model": "*",
+        "display_name": null,
+        "tool_format": "text",
+        "harn_options": [
+          "provider = \"hyperbolic\""
+        ]
+      },
+      "capabilities": {
+        "native_tools": false,
+        "text_tools": true,
+        "preferred_tool_format": "auto",
+        "tool_mode_parity": "unknown",
+        "structured_output_transport": "none",
+        "structured_output_mode": "none",
+        "streaming": true,
+        "reasoning_knobs": [],
         "prompt_or_context_cache": false,
         "usage_accounting_confidence": "provider_default"
       },
@@ -986,6 +1181,53 @@
       "local_setup_notes": []
     },
     {
+      "id": "nebius",
+      "display_name": "Nebius",
+      "catalog_provider": "nebius",
+      "endpoint_style": "OpenAI-compatible chat completions",
+      "classification": "hosted",
+      "auth_env": [
+        "NEBIUS_API_KEY"
+      ],
+      "recommended": {
+        "selector": "nebius",
+        "provider": "nebius",
+        "model": "*",
+        "display_name": null,
+        "tool_format": "text",
+        "harn_options": [
+          "provider = \"nebius\""
+        ]
+      },
+      "capabilities": {
+        "native_tools": false,
+        "text_tools": true,
+        "preferred_tool_format": "auto",
+        "tool_mode_parity": "unknown",
+        "structured_output_transport": "none",
+        "structured_output_mode": "none",
+        "streaming": true,
+        "reasoning_knobs": [],
+        "prompt_or_context_cache": false,
+        "usage_accounting_confidence": "provider_default"
+      },
+      "empirical": {
+        "status": "not_recorded",
+        "sources": [],
+        "total_runs": 0,
+        "passed_runs": 0,
+        "failed_runs": 0,
+        "skipped_runs": 0,
+        "best_tool_format": null,
+        "native_text_parity": null,
+        "evidence": []
+      },
+      "notes": [],
+      "caveats": [],
+      "mcp_notes": [],
+      "local_setup_notes": []
+    },
+    {
       "id": "nvidia",
       "display_name": "Nvidia",
       "catalog_provider": "nvidia",
@@ -1206,6 +1448,53 @@
       "local_setup_notes": []
     },
     {
+      "id": "parasail",
+      "display_name": "Parasail",
+      "catalog_provider": "parasail",
+      "endpoint_style": "OpenAI-compatible chat completions",
+      "classification": "hosted",
+      "auth_env": [
+        "PARASAIL_API_KEY"
+      ],
+      "recommended": {
+        "selector": "parasail",
+        "provider": "parasail",
+        "model": "*",
+        "display_name": null,
+        "tool_format": "text",
+        "harn_options": [
+          "provider = \"parasail\""
+        ]
+      },
+      "capabilities": {
+        "native_tools": false,
+        "text_tools": true,
+        "preferred_tool_format": "auto",
+        "tool_mode_parity": "unknown",
+        "structured_output_transport": "none",
+        "structured_output_mode": "none",
+        "streaming": true,
+        "reasoning_knobs": [],
+        "prompt_or_context_cache": false,
+        "usage_accounting_confidence": "provider_default"
+      },
+      "empirical": {
+        "status": "not_recorded",
+        "sources": [],
+        "total_runs": 0,
+        "passed_runs": 0,
+        "failed_runs": 0,
+        "skipped_runs": 0,
+        "best_tool_format": null,
+        "native_text_parity": null,
+        "evidence": []
+      },
+      "notes": [],
+      "caveats": [],
+      "mcp_notes": [],
+      "local_setup_notes": []
+    },
+    {
       "id": "sambanova",
       "display_name": "Sambanova",
       "catalog_provider": "sambanova",
@@ -1241,6 +1530,53 @@
         ],
         "prompt_or_context_cache": false,
         "usage_accounting_confidence": "high"
+      },
+      "empirical": {
+        "status": "not_recorded",
+        "sources": [],
+        "total_runs": 0,
+        "passed_runs": 0,
+        "failed_runs": 0,
+        "skipped_runs": 0,
+        "best_tool_format": null,
+        "native_text_parity": null,
+        "evidence": []
+      },
+      "notes": [],
+      "caveats": [],
+      "mcp_notes": [],
+      "local_setup_notes": []
+    },
+    {
+      "id": "siliconflow",
+      "display_name": "Siliconflow",
+      "catalog_provider": "siliconflow",
+      "endpoint_style": "OpenAI-compatible chat completions",
+      "classification": "hosted",
+      "auth_env": [
+        "SILICONFLOW_API_KEY"
+      ],
+      "recommended": {
+        "selector": "siliconflow",
+        "provider": "siliconflow",
+        "model": "*",
+        "display_name": null,
+        "tool_format": "text",
+        "harn_options": [
+          "provider = \"siliconflow\""
+        ]
+      },
+      "capabilities": {
+        "native_tools": false,
+        "text_tools": true,
+        "preferred_tool_format": "auto",
+        "tool_mode_parity": "unknown",
+        "structured_output_transport": "none",
+        "structured_output_mode": "none",
+        "streaming": true,
+        "reasoning_knobs": [],
+        "prompt_or_context_cache": false,
+        "usage_accounting_confidence": "provider_default"
       },
       "empirical": {
         "status": "not_recorded",

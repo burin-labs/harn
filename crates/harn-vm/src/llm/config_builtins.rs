@@ -1006,6 +1006,16 @@ fn provider_def_to_vm_value(
             VmValue::Int(latency as i64),
         );
     }
+    if let Some(performance) = pdef
+        .performance
+        .as_ref()
+        .filter(|performance| !performance.is_empty())
+    {
+        dict.insert(
+            crate::value::intern_key("performance"),
+            performance_to_vm_value(performance),
+        );
+    }
     VmValue::dict(dict)
 }
 
@@ -1453,6 +1463,15 @@ fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> VmValue {
             .unwrap_or(VmValue::Nil),
     );
     dict.insert(
+        crate::value::intern_key("performance"),
+        model
+            .performance
+            .as_ref()
+            .filter(|performance| !performance.is_empty())
+            .map(performance_to_vm_value)
+            .unwrap_or(VmValue::Nil),
+    );
+    dict.insert(
         crate::value::intern_key("architecture"),
         model
             .architecture
@@ -1553,6 +1572,10 @@ fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> VmValue {
 
 fn rate_limits_to_vm_value(rate_limits: &llm_config::RateLimitsDef) -> VmValue {
     json_to_vm_value(&serde_json::to_value(rate_limits).unwrap_or_else(|_| serde_json::json!({})))
+}
+
+fn performance_to_vm_value(performance: &llm_config::ServingPerformanceDef) -> VmValue {
+    json_to_vm_value(&serde_json::to_value(performance).unwrap_or_else(|_| serde_json::json!({})))
 }
 
 fn architecture_to_vm_value(architecture: &llm_config::ModelArchitectureDef) -> VmValue {

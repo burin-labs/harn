@@ -58,6 +58,7 @@ export interface HarnCatalogProvider {
   rate_limits?: HarnRateLimits
   local_runtime?: HarnLocalRuntime
   latency_p50_ms?: number
+  performance?: HarnServingPerformance
 }
 
 export interface HarnLocalRuntime {
@@ -133,6 +134,7 @@ export interface HarnCatalogModel {
   wire_model?: string
   api_dialect?: string
   rate_limits?: HarnRateLimits
+  performance?: HarnServingPerformance
   architecture?: HarnModelArchitecture
   local_memory?: HarnLocalMemory
   runtime_context_window?: number
@@ -213,6 +215,17 @@ export interface HarnRateLimits {
   tier?: string
   source_url?: string
   last_verified?: string
+  notes?: string
+}
+
+export interface HarnServingPerformance {
+  observed_ttft_ms?: number
+  output_tokens_per_sec?: number
+  time_to_answer_s?: number
+  source?: string
+  source_url?: string
+  last_verified?: string
+  sample_size?: number
   notes?: string
 }
 
@@ -303,6 +316,7 @@ public struct HarnCatalogProvider: Codable, Sendable, Equatable {
     public let rateLimits: HarnRateLimits?
     public let localRuntime: HarnLocalRuntime?
     public let latencyP50Ms: Int?
+    public let performance: HarnServingPerformance?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -320,6 +334,7 @@ public struct HarnCatalogProvider: Codable, Sendable, Equatable {
         case rateLimits = "rate_limits"
         case localRuntime = "local_runtime"
         case latencyP50Ms = "latency_p50_ms"
+        case performance
     }
 }
 
@@ -443,6 +458,7 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
     public let wireModel: String?
     public let apiDialect: String?
     public let rateLimits: HarnRateLimits?
+    public let performance: HarnServingPerformance?
     public let architecture: HarnModelArchitecture?
     public let localMemory: HarnLocalMemory?
     public let runtimeContextWindow: Int?
@@ -486,6 +502,7 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
         case wireModel = "wire_model"
         case apiDialect = "api_dialect"
         case rateLimits = "rate_limits"
+        case performance
         case architecture
         case localMemory = "local_memory"
         case runtimeContextWindow = "runtime_context_window"
@@ -525,6 +542,7 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
         wireModel = try container.decodeIfPresent(String.self, forKey: .wireModel)
         apiDialect = try container.decodeIfPresent(String.self, forKey: .apiDialect)
         rateLimits = try container.decodeIfPresent(HarnRateLimits.self, forKey: .rateLimits)
+        performance = try container.decodeIfPresent(HarnServingPerformance.self, forKey: .performance)
         architecture = try container.decodeIfPresent(HarnModelArchitecture.self, forKey: .architecture)
         localMemory = try container.decodeIfPresent(HarnLocalMemory.self, forKey: .localMemory)
         runtimeContextWindow = try container.decodeIfPresent(Int.self, forKey: .runtimeContextWindow)
@@ -679,6 +697,28 @@ public struct HarnRateLimits: Codable, Sendable, Equatable {
         case tier
         case sourceURL = "source_url"
         case lastVerified = "last_verified"
+        case notes
+    }
+}
+
+public struct HarnServingPerformance: Codable, Sendable, Equatable {
+    public let observedTtftMs: Int?
+    public let outputTokensPerSec: Double?
+    public let timeToAnswerS: Double?
+    public let source: String?
+    public let sourceURL: String?
+    public let lastVerified: String?
+    public let sampleSize: Int?
+    public let notes: String?
+
+    enum CodingKeys: String, CodingKey {
+        case observedTtftMs = "observed_ttft_ms"
+        case outputTokensPerSec = "output_tokens_per_sec"
+        case timeToAnswerS = "time_to_answer_s"
+        case source
+        case sourceURL = "source_url"
+        case lastVerified = "last_verified"
+        case sampleSize = "sample_size"
         case notes
     }
 }

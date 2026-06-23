@@ -52,6 +52,13 @@ pub fn validate_artifact(artifact: &ProviderCatalogArtifact) -> ProviderCatalogV
                 &mut result,
             );
         }
+        if let Some(performance) = &provider.performance {
+            validate_performance(
+                &format!("provider {}", provider.id),
+                performance,
+                &mut result,
+            );
+        }
         validate_extra_headers(provider, &mut result);
         if let Some(healthcheck) = &provider.healthcheck {
             validate_provider_healthcheck(provider, healthcheck, &mut result);
@@ -118,6 +125,9 @@ pub fn validate_artifact(artifact: &ProviderCatalogArtifact) -> ProviderCatalogV
         }
         if let Some(rate_limits) = &model.rate_limits {
             validate_rate_limits(&format!("model {}", model.id), rate_limits, &mut result);
+        }
+        if let Some(performance) = &model.performance {
+            validate_performance(&format!("model {}", model.id), performance, &mut result);
         }
         if let Some(architecture) = &model.architecture {
             validate_architecture(model, architecture, &mut result);

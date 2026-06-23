@@ -2,10 +2,10 @@
 
 ## Built-in providers
 
-Harn ships with built-in configs for Anthropic, OpenAI, OpenRouter, Ollama,
-HuggingFace, Bedrock, Azure OpenAI, Vertex AI, and local OpenAI-compatible
-servers. Set the appropriate environment variable to authenticate or point
-Harn at an endpoint:
+Harn ships with built-in configs for Anthropic, OpenAI, OpenRouter, Baseten,
+HuggingFace, Together, DeepInfra, NVIDIA NIM, Bedrock, Azure OpenAI, Vertex AI,
+and local OpenAI-compatible servers. Set the appropriate environment variable
+to authenticate or point Harn at an endpoint:
 
 Run `harn quickstart` to detect existing credentials, local Ollama, free disk
 space, and GPU availability, then write starter `providers.toml`, `harn.toml`,
@@ -36,6 +36,16 @@ family-level guidance, endpoint notes, and downstream JSON support data.
 | Anthropic (default) | `ANTHROPIC_API_KEY` | `claude-sonnet-4-6` |
 | OpenAI | `OPENAI_API_KEY` | `gpt-4o` |
 | OpenRouter | `OPENROUTER_API_KEY` | `anthropic/claude-sonnet-4.6` |
+| Baseten Model APIs | `BASETEN_API_KEY` | `baseten-glm-5.2` or explicit `baseten/<wire-id>` |
+| Together AI | `TOGETHER_AI_API_KEY` | explicit Together model ID |
+| DeepInfra | `DEEPINFRA_API_KEY` or `DEEPINFRA_TOKEN` | explicit `deepinfra/<wire-id>` |
+| NVIDIA NIM | `NVIDIA_API_KEY` or `NIM_API_KEY` | explicit `nvidia/<wire-id>` |
+| Nebius Token Factory | `NEBIUS_API_KEY` | explicit model ID from `/v1/models` |
+| FlexAI Token Factory | `FLEXAI_API_KEY` | explicit model ID from model discovery |
+| Hyperbolic | `HYPERBOLIC_API_KEY` | explicit model ID from `/v1/models` |
+| SiliconFlow | `SILICONFLOW_API_KEY` | explicit model ID from `/v1/models` |
+| Parasail | `PARASAIL_API_KEY` | explicit model ID from `/v1/models` |
+| Atlas Cloud | `ATLAS_API_KEY` or `ATLASCLOUD_API_KEY` | explicit model ID from `/v1/models` |
 | HuggingFace | `HF_TOKEN` or `HUGGINGFACE_API_KEY` | explicit `model` |
 | Bedrock | AWS env/profile/instance role | explicit Bedrock `model` |
 | Azure OpenAI | `AZURE_OPENAI_API_KEY` or `AZURE_OPENAI_AD_TOKEN` | deployment name in `model` |
@@ -45,6 +55,15 @@ family-level guidance, endpoint notes, and downstream JSON support data.
 | Local server | `LOCAL_LLM_BASE_URL` | `LOCAL_LLM_MODEL` or explicit `model` |
 | llama.cpp server | `LLAMACPP_BASE_URL` | explicit `model` from `/v1/models` |
 | MLX OpenAI-compatible server | `MLX_BASE_URL` | `MLX_MODEL_ID` or `mlx-qwen3.6` |
+
+Baseten Model APIs use `https://inference.baseten.co/v1`. The built-in catalog
+includes current Baseten rows for GLM 5.2, Kimi K2.7 Code, DeepSeek V4 Pro,
+GPT-OSS 120B, Nemotron, and prior GLM/Kimi routes, keyed as
+`baseten/<provider>/<model>` so they can be compared with the same weights on
+other hosts. Harn pins `baseten-glm-5.2` to text-format tools because live
+native-tool probes returned GLM XML in assistant content instead of an OpenAI
+`tool_calls` array; the Kimi, DeepSeek, GPT-OSS, and Nemotron Baseten aliases
+pin native tools.
 
 Ollama runs locally and doesn't require an API key. The default host is
 `http://localhost:11434`.

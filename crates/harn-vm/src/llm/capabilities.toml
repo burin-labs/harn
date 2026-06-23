@@ -94,7 +94,11 @@
 #                     whether image content blocks may reference remote URLs.
 #   preserve_thinking: whether prior <think> blocks should be carried forward.
 #   server_parser   : server-side response parser that transforms model output.
-#   honors_chat_template_kwargs: whether chat_template_kwargs are honored.
+#   honors_chat_template_kwargs:
+#                     whether provider-specific chat-template options are honored.
+#   chat_template_options_field:
+#                     request field for those options; defaults to
+#                     chat_template_kwargs, Baseten uses chat_template_args.
 #   requires_completion_tokens: whether to send max_completion_tokens instead of max_tokens.
 #   reasoning_effort_supported: whether reasoning_effort is accepted.
 #   reasoning_effort_levels:
@@ -247,6 +251,10 @@ top_k_supported = false
 [provider_defaults.moonshot]
 top_k_supported = false
 
+[provider_defaults.baseten]
+top_k_supported = false
+top_p_supported = false
+
 [provider_defaults.deepinfra]
 top_k_supported = false
 
@@ -254,6 +262,24 @@ top_k_supported = false
 top_k_supported = false
 
 [provider_defaults.nvidia]
+top_k_supported = false
+
+[provider_defaults.nebius]
+top_k_supported = false
+
+[provider_defaults.flexai]
+top_k_supported = false
+
+[provider_defaults.hyperbolic]
+top_k_supported = false
+
+[provider_defaults.siliconflow]
+top_k_supported = false
+
+[provider_defaults.parasail]
+top_k_supported = false
+
+[provider_defaults.atlas]
 top_k_supported = false
 
 # --- source: 20-providers/00-anthropic.toml ---
@@ -2832,6 +2858,133 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "none"
 
+# --- source: 20-providers/39-baseten.toml ---
+# ---------- Baseten Model APIs -----------------------------------------------
+#
+# Baseten serves current open-weight frontier models through an
+# OpenAI-compatible /v1/chat/completions surface. The endpoint advertises
+# tools/JSON/structured-output broadly, but live Harn probes on 2026-06-23
+# found GLM-5.2 returns visible `<tool_call><arg_key>...` content instead of
+# OpenAI `message.tool_calls` on the native channel. Harn's text-tool grammar
+# did produce parseable calls, so pin GLM to text while keeping native tools for
+# the Kimi, DeepSeek, GPT-OSS, and Nemotron routes that returned clean native
+# calls in the same probe set.
+
+[[provider.baseten]]
+model_match = "*glm-5*"
+native_tools = true
+preferred_tool_format = "text"
+tool_mode_parity = "native_unreliable"
+tool_mode_parity_notes = "2026-06-23 live Baseten probe: forced native/off emitted visible `<tool_call><arg_key>...` content with no provider-native tool_calls; Harn heredoc text tools emitted parseable `<tool_call>\\nadd({ ... })\\n</tool_call>`."
+structured_output = "native"
+thinking_modes = ["enabled"]
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
+prompt_caching = true
+honors_chat_template_kwargs = true
+chat_template_options_field = "chat_template_args"
+reasoning_text_promotable = false
+top_p_supported = true
+top_k_supported = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.baseten]]
+model_match = "*kimi-k2*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+prompt_caching = true
+honors_chat_template_kwargs = true
+chat_template_options_field = "chat_template_args"
+vision = true
+vision_supported = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.baseten]]
+model_match = "*deepseek-v4*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high"]
+prompt_caching = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
+
+[[provider.baseten]]
+model_match = "*gpt-oss*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high"]
+reasoning_required_for_tools = true
+prompt_caching = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
+
+[[provider.baseten]]
+model_match = "*nemotron*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+prompt_caching = true
+honors_chat_template_kwargs = true
+chat_template_options_field = "chat_template_args"
+top_p_supported = true
+top_k_supported = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.baseten]]
+model_match = "*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
+
 # --- source: 20-providers/40-deepseek-reasoning.toml ---
 # ---------- DeepSeek reasoning (across host providers) -----------------------
 #
@@ -3093,6 +3246,72 @@ supports_assistant_prefill = false
 prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "inline"
+
+# --- source: 20-providers/40-openai-compatible-gap-providers.toml ---
+# OpenAI-compatible providers whose per-model catalogs are refreshed live when
+# callers provide API keys. These wildcard rules are conservative transport
+# defaults: model-family overrides can still be added as empirical probes find
+# provider-specific reasoning/tool quirks.
+
+[[provider.nebius]]
+model_match = "*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+text_tool_wire_format_supported = true
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "Nebius documents function calling and structured JSON output; Harn has not yet run model-family probes for every Token Factory route."
+
+[[provider.flexai]]
+model_match = "*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+text_tool_wire_format_supported = true
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "FlexAI exposes model-level support flags through discovery; use live refresh/probes to tighten route-specific tool preferences."
+
+[[provider.hyperbolic]]
+model_match = "*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+text_tool_wire_format_supported = true
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "Hyperbolic documents tool calling for selected Qwen/Llama routes; model-specific probes should override this wildcard if needed."
+
+[[provider.siliconflow]]
+model_match = "*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+text_tool_wire_format_supported = true
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "SiliconFlow is OpenAI-compatible, but thinking controls are provider-specific on some model families; prefer live model probes before pinning reasoning-heavy agents."
+
+[[provider.parasail]]
+model_match = "*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+text_tool_wire_format_supported = true
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "Parasail exposes an OpenAI-compatible serverless/batch API; use model-specific probes before relying on native tools for long agent loops."
+
+[[provider.atlas]]
+model_match = "*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+text_tool_wire_format_supported = true
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "Atlas is a coding-plan OpenAI-compatible route; Harn has no route-specific tool parity probes yet."
 
 # --- source: 20-providers/50-gemini-gemma.toml ---
 # ---------- Google Gemini + Gemma 4 (via OpenRouter) -------------------------
@@ -4319,3 +4538,9 @@ mlx = "openai"
 minimax = "openai"
 zai = "openai"
 nvidia = "openai"
+nebius = "openai"
+flexai = "openai"
+hyperbolic = "openai"
+siliconflow = "openai"
+parasail = "openai"
+atlas = "openai"
