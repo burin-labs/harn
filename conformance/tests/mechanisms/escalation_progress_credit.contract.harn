@@ -1,0 +1,78 @@
+// MECHANISM CONTRACT (onramp tier): escalation/termination PROGRESS CREDIT.
+//
+// This is the FIRST committed example of the mechanism-contract tier (the
+// required rung below the N>=5 gauntlet). It pins the NEGATIVE clause of the
+// escalation/termination contract — the half NOT covered by the merged
+// `agent_loop_escalation_provider_error.harn` (which owns the positive
+// escalate-on-failure + emit-not-silent + degrade-to-primary clauses for the
+// #3543 fix). Together the two tests state the full {trigger, effect, negative}.
+//
+//   CONTRACT (negative): the no-progress / circuit-breaker terminator must NOT
+//   fire while the agent is genuinely CONVERGING — i.e. while the set of failing
+//   errors strictly SHRINKS turn over turn and budget remains. This is the
+//   swift-feat regression: a converging run was cut at 3 strikes with ~85% of
+//   the budget unused because distinct/shrinking failures were miscounted as
+//   "no progress". The terminator keys on BYTE-IDENTICAL failing signatures, so
+//   a shrinking error set is progress and must not terminate.
+//
+// Manufactured deterministically: the mock keys its response on the
+// harness-supplied `call.turn.iteration` (see the fixture-authoring rule in
+// lib/mechanism_contract.harn) and shrinks the error set 9 -> 4 -> 1 -> DONE.
+//
+// POSITIVE clauses (escalate on genuine failure; EMIT provider_error not silent;
+// degrade to primary) are deliberately NOT duplicated here — see
+// conformance/tests/agents/agent_loop_escalation_provider_error.harn.
+import { agent_capture_events } from "std/agent/events"
+import { contract_effect, contract_negative, count_contract_events } from "./lib/mechanism_contract"
+
+fn shrinking_error_set_case() {
+  // Strictly shrinking, NON-identical failing error sets, then completion.
+  // Each turn is a real model result (ok:true) — genuine progress, not an
+  // outage — so the no-progress terminator must credit it and keep going.
+  let errs = [
+    "errors remaining: e1 e2 e3 e4 e5 e6 e7 e8 e9",
+    "errors remaining: e1 e2 e3 e4",
+    "errors remaining: e1",
+    "all clear DONE",
+  ]
+  let caller = { call ->
+    let i = call?.turn?.iteration ?? 0
+    let text = if i < len(errs) {
+      errs[i]
+    } else {
+      "all clear DONE"
+    }
+    return {
+      ok: true,
+      value: {text: text, tool_calls: [], provider: "mock", model: "cheap", input_tokens: 1, output_tokens: 1},
+    }
+  }
+  let session = "contract-shrink-" + uuid()
+  let captured = agent_capture_events(
+    session,
+    fn() { return agent_loop(
+      "fix the build",
+      nil,
+      {
+        session_id: session,
+        provider: "mock",
+        model: "cheap",
+        llm_caller: caller,
+        loop_until_done: true,
+        done_sentinel: "DONE",
+        max_nudges: 8,
+        max_iterations: 8,
+      },
+    ) },
+  )
+  let breaker_count = count_contract_events(captured.events, "budget_circuit_breaker")
+  let stuck_count = count_contract_events(captured.events, "loop_stuck")
+  // NEGATIVE: no premature circuit-break / no-progress stop while shrinking.
+  contract_negative("no_premature_stop_while_shrinking", breaker_count > 0 || stuck_count > 0)
+  // EFFECT: the run reached DONE rather than being cut at budget.
+  contract_effect("ran_to_completion_not_budget_cut", to_string(captured.result.status) == "done")
+}
+
+pipeline default() {
+  shrinking_error_set_case()
+}
