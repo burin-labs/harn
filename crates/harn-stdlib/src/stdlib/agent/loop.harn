@@ -1561,7 +1561,17 @@ fn __dispatch_tool_calls_with_middleware(tool_calls, tools, options, cap) {
         } else if signature == streak_signature {
           streak_count = streak_count + 1
           if streak_count >= fanout_cap {
-            capped_call_signature = __intra_turn_call_signature(call)
+            let new_capped = __intra_turn_call_signature(call)
+            // A DISTINCT fan-out group tripped the cap: reset the
+            // collapse-emitted latch so this group gets its OWN single
+            // synthetic "collapsed" result. Without this reset the latch
+            // (set by an earlier group) suppresses every collapse marker
+            // after the first, silently dropping the tail of later groups
+            // from `results` with no entry at all.
+            if new_capped != capped_call_signature {
+              collapsed_emitted = false
+            }
+            capped_call_signature = new_capped
             capped_sample = result
           }
         } else {

@@ -61,6 +61,21 @@ fn identical_edit_batch(n) {
   return calls
 }
 
+fn two_group_edit_batch(n) {
+  var calls = []
+  var i = 0
+  while i < n {
+    calls = calls.push({id: "a" + to_string(i), name: "edit", arguments: {path: "a.swift"}})
+    i = i + 1
+  }
+  i = 0
+  while i < n {
+    calls = calls.push({id: "b" + to_string(i), name: "edit", arguments: {path: "b.swift"}})
+    i = i + 1
+  }
+  return calls
+}
+
 fn distinct_look_batch(n) {
   var calls = []
   var i = 0
@@ -149,6 +164,37 @@ pipeline main() {
       __io_println(contains(second_turn, "contents of f0.swift"))
       __io_println(contains(second_turn, "contents of f5.swift"))
       __io_println(!contains(second_turn, "collapsed remaining identical failing"))
+    },
+  )
+  // Scenario 4: TWO distinct identical-failure fan-out groups in ONE response
+  // (6×edit a.swift then 6×edit b.swift), cap=3. Each group must trip the cap
+  // and emit its OWN single collapse marker -> exactly 2 markers. Regression
+  // guard for the single-boolean `collapsed_emitted` latch that previously let
+  // group A's collapse suppress group B's, silently dropping group B's tail
+  // calls from the result set with no entry at all.
+  with_llm_script(
+    [{text: "", tool_calls: two_group_edit_batch(6)}, llm_text("I see the edits were rejected.")],
+    { ->
+      let result = agent_loop(
+        "Fan out two distinct identical failing edit groups.",
+        nil,
+        {
+          provider: "mock",
+          tools: rejecting_edit_tools(),
+          tool_format: "native",
+          loop_until_done: true,
+          max_iterations: 3,
+          done_judge: nil,
+          intra_turn_failure_fanout_cap: 3,
+        },
+      )
+      let calls = llm_mock_calls()
+      let second_turn = json_stringify(calls[1].messages)
+      let marker = "collapsed remaining identical failing"
+      __io_println(result.status)
+      __io_println(to_string(second_turn.split(marker).count() - 1))
+      __io_println(contains(second_turn, "a.swift"))
+      __io_println(contains(second_turn, "b.swift"))
     },
   )
 }
