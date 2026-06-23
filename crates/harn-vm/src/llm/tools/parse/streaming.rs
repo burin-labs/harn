@@ -15,7 +15,7 @@
 //!   arrive in a later delta.
 //! - **Candidate promoted.** Args parsed cleanly. Emits
 //!   `AgentEvent::ToolCallUpdate { status: Pending, parsing:
-//!   Some(false), raw_output: Some(<args>), .. }`. The dispatch path
+//!   Some(false), raw_input: Some(<args>), .. }`. The dispatch path
 //!   (`__tool_envelope` in `stdlib/agent/loop.harn`) picks up its own
 //!   `tool_call_id` for the subsequent `Pending → InProgress →
 //!   Completed/Failed` flow; the candidate id (`text-cand-{n}`, a
@@ -436,16 +436,14 @@ fn promote_event(
         tool_call_id,
         tool_name: name,
         status: ToolCallStatus::Pending,
-        raw_output: Some(args),
+        raw_output: None,
         error: None,
         duration_ms: None,
         execution_duration_ms: None,
         error_category: None,
         executor: None,
         parsing: Some(false),
-
-        raw_input: None,
-
+        raw_input: Some(args),
         raw_input_partial: None,
         audit: None,
     }
@@ -540,6 +538,23 @@ mod tests {
         }
     }
 
+    fn assert_promoted_raw_input(event: &AgentEvent, expected: serde_json::Value) {
+        match event {
+            AgentEvent::ToolCallUpdate {
+                raw_input,
+                raw_output,
+                ..
+            } => {
+                assert_eq!(raw_input.as_ref(), Some(&expected));
+                assert!(
+                    raw_output.is_none(),
+                    "promoted args belong in raw_input, not raw_output"
+                );
+            }
+            other => panic!("expected ToolCallUpdate, got {other:?}"),
+        }
+    }
+
     #[test]
     fn bare_candidate_promotes_on_balanced_close() {
         let mut det = detector(&["read"]);
@@ -554,6 +569,7 @@ mod tests {
         assert_eq!(status, ToolCallStatus::Pending);
         assert_eq!(parsing, Some(false));
         assert!(cat.is_none(), "promote has no error_category");
+        assert_promoted_raw_input(&events[1], serde_json::json!({"path": "a.md"}));
     }
 
     #[test]
@@ -595,6 +611,7 @@ mod tests {
         assert_eq!(status, ToolCallStatus::Pending);
         assert_eq!(parsing, Some(false));
         assert!(cat.is_none());
+        assert_promoted_raw_input(&events[1], serde_json::json!({"command": "ls"}));
     }
 
     #[test]
@@ -618,6 +635,7 @@ mod tests {
         assert_eq!(status, ToolCallStatus::Pending);
         assert_eq!(parsing, Some(false));
         assert!(cat.is_none());
+        assert_promoted_raw_input(&events[1], serde_json::json!({"command": "git status"}));
     }
 
     #[test]
@@ -660,6 +678,13 @@ mod tests {
         assert!(
             cat.is_none(),
             "must not abort on the in-heredoc </tool_call>: events={events:#?}"
+        );
+        assert_promoted_raw_input(
+            terminal,
+            serde_json::json!({
+                "path": "d.md",
+                "content": "line one\nmore </tool_call> text",
+            }),
         );
     }
 
