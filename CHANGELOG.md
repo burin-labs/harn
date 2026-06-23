@@ -8,6 +8,37 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.138
+
+### Fixed
+
+- **Surface escalation `provider_error` instead of masquerading it as success
+  (#3543).** When smart-escalation switched to the frontier provider mid-trial
+  and that escalated `llm_call` failed fast pre-dispatch, the agent loop broke
+  silently and ACP replayed the prior cheap-model text as a completed turn — an
+  escalation failure looked like success. The non-tracked-failure branch now
+  emits the `iteration_end`/`provider_error` event and a primary-retry fallback
+  so an inert escalation is observable.
+- **Collapse every distinct intra-turn fan-out group, not just the first
+  (#3544).** The `intra_turn_failure_fanout_cap` lever tracked emission with a
+  single boolean, so only the first identical-failure fan-out group was
+  collapsed and later groups leaked through uncapped. Emission is now tracked
+  per group.
+- **Clamp durable rate-limit backoff so one rate-limited provider can't eat the
+  trial wall (#3546).** A single sustained-quota route (e.g.
+  `cerebras/gpt-oss-120b`) accumulated ~50s durable rate-limit waits that summed
+  to ~89% of a trial's wall budget. The backoff is now clamped so one
+  rate-limited provider cannot consume the trial wall.
+
+### Testing
+
+- **Mechanism-contract onramp tier (#3545).** Adds the first required rung below
+  the N≥5 convergence gauntlet: a deterministic, mock-provider mini-eval that
+  proves a new termination / escalation / judge / guard / routing mechanism
+  engages in isolation (fires on its trigger, emits its effect, stays quiet on
+  the negative case) before any convergence measurement. A green contract is a
+  precondition to a meter run, never a replacement for it.
+
 ## v0.8.137
 
 ### Security
