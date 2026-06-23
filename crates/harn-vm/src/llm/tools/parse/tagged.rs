@@ -385,7 +385,12 @@ pub(crate) fn parse_text_tool_calls_with_tools(
                 end += 1;
             }
             let fragment = &src[start..end];
-            if fragment.starts_with('<') && !fragment.contains('>') {
+            if let Some(tag) = known_top_level_open_tag(fragment) {
+                violations.push(format!(
+                    "Unclosed <{tag}> block. Close it with </{tag}> or remove it; only \
+                     <tool_call>, <assistant_prose>, <user_response>, and <done> are accepted.",
+                ));
+            } else if fragment.starts_with('<') && !fragment.contains('>') {
                 violations.push(format!(
                     "Unclosed tag starting at {:?}. Close it or remove it; only \
                      <tool_call>, <assistant_prose>, <user_response>, and <done> are accepted.",
@@ -432,6 +437,23 @@ pub(crate) fn parse_text_tool_calls_with_tools(
         violations,
         done_marker,
         canonical: canonical_parts.join("\n\n"),
+    }
+}
+
+fn known_top_level_open_tag(fragment: &str) -> Option<&'static str> {
+    let name = fragment
+        .trim()
+        .strip_prefix('<')?
+        .strip_suffix('>')?
+        .split_whitespace()
+        .next()
+        .unwrap_or("");
+    match name {
+        "tool_call" | "toolcall" => Some("tool_call"),
+        "assistant_prose" | "assistantprose" => Some("assistant_prose"),
+        "user_response" | "userresponse" => Some("user_response"),
+        "done" => Some("done"),
+        _ => None,
     }
 }
 

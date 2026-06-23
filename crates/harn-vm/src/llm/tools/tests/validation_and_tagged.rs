@@ -690,6 +690,29 @@ fn tagged_parser_accepts_user_response_tag() {
 }
 
 #[test]
+fn tagged_parser_reports_unclosed_user_response_as_unclosed_not_unknown() {
+    let tools = sample_tool_registry();
+    let text = "<user_response>Visible answer without a close tag.";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert!(
+        result
+            .violations
+            .iter()
+            .any(|violation| violation.contains("Unclosed <user_response> block")),
+        "unclosed user_response should get a precise close-tag diagnostic: {:?}",
+        result.violations
+    );
+    assert!(
+        !result
+            .violations
+            .iter()
+            .any(|violation| violation.contains("Unknown top-level tag")),
+        "unclosed accepted tags must not be misreported as unknown: {:?}",
+        result.violations
+    );
+}
+
+#[test]
 fn tagged_parser_ignores_inline_user_response_placeholder() {
     let tools = sample_tool_registry();
     let text =
