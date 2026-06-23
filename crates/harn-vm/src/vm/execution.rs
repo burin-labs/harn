@@ -275,8 +275,10 @@ impl Vm {
         } else {
             None
         };
+        let inline_cache_set = self.inline_cache_set_index_for_chunk(&chunk);
         self.frames.push(CallFrame {
             chunk,
+            inline_cache_set,
             ip: 0,
             stack_base: self.stack.len(),
             saved_env: self.env.clone(),

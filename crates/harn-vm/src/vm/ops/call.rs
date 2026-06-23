@@ -849,15 +849,14 @@ impl super::super::Vm {
     /// leaves `ip` untouched so [`execute_call_async`] can read the operand
     /// exactly once.
     pub(super) fn execute_call_sync(&mut self) -> Option<Result<(), VmError>> {
-        let (chunk, argc, cache_slot) = {
+        let (cache_site, argc) = {
             let frame = self.frames.last().unwrap();
-            let op_offset = frame.ip.saturating_sub(1);
-            let chunk = Arc::clone(&frame.chunk);
             let argc = frame.chunk.code[frame.ip] as usize;
-            let cache_slot = frame.chunk.inline_cache_slot(op_offset);
-            (chunk, argc, cache_slot)
+            (frame.inline_cache_site_for_previous_op(), argc)
         };
-        let cached_state = cache_slot.and_then(|slot| self.peek_direct_call_state(&chunk, slot));
+        let cached_state = cache_site
+            .slot
+            .and_then(|slot| self.peek_direct_call_state_by_index(cache_site.cache_set, slot));
         let callee_idx = self.stack.len().checked_sub(argc + 1)?;
         let closure = match self.try_cached_direct_call(cached_state.as_ref(), argc, callee_idx) {
             Some(closure) => closure,
@@ -870,13 +869,18 @@ impl super::super::Vm {
             return None;
         }
 
-        if let Some(slot) = cache_slot {
+        if let Some(slot) = cache_site.slot {
             let next_entry = Self::next_direct_call_entry(
                 cached_state,
                 argc,
                 DirectCallTarget::Closure(Arc::clone(&closure)),
             );
-            self.set_inline_cache_entry(&chunk, slot, next_entry);
+            self.set_inline_cache_entry_by_index(
+                cache_site.cache_set,
+                cache_site.slot_count,
+                slot,
+                next_entry,
+            );
         }
 
         let frame = self.frames.last_mut().unwrap();
@@ -1072,16 +1076,17 @@ impl super::super::Vm {
     /// resolves synchronously in the hot case but still pays the
     /// future-state-machine tax.
     pub(super) fn execute_call_builtin_sync(&mut self) -> Option<Result<(), VmError>> {
-        let (chunk, name_idx, argc, cache_slot) = {
+        let (chunk, cache_site, name_idx, argc) = {
             let frame = self.frames.last().unwrap();
-            let op_offset = frame.ip.saturating_sub(1);
             let chunk = Arc::clone(&frame.chunk);
+            let cache_site = frame.inline_cache_site_for_previous_op();
             let name_idx = frame.chunk.read_u16(frame.ip + 8) as usize;
             let argc = frame.chunk.code[frame.ip + 10] as usize;
-            let cache_slot = frame.chunk.inline_cache_slot(op_offset);
-            (chunk, name_idx, argc, cache_slot)
+            (chunk, cache_site, name_idx, argc)
         };
-        let cached_state = cache_slot.and_then(|slot| self.peek_direct_call_state(&chunk, slot));
+        let cached_state = cache_site
+            .slot
+            .and_then(|slot| self.peek_direct_call_state_by_index(cache_site.cache_set, slot));
         let name = Self::const_str(&chunk.constants[name_idx]).ok()?;
 
         // Names handled by `try_call_special_name` are runtime constructs
@@ -1113,13 +1118,18 @@ impl super::super::Vm {
             return None;
         }
 
-        if let Some(slot) = cache_slot {
+        if let Some(slot) = cache_site.slot {
             let next_entry = Self::next_direct_call_entry(
                 cached_state,
                 argc,
                 DirectCallTarget::Closure(Arc::clone(&closure)),
             );
-            self.set_inline_cache_entry(&chunk, slot, next_entry);
+            self.set_inline_cache_entry_by_index(
+                cache_site.cache_set,
+                cache_site.slot_count,
+                slot,
+                next_entry,
+            );
         }
 
         let frame = self.frames.last_mut().unwrap();
@@ -1309,8 +1319,11 @@ impl super::super::Vm {
         let saved_iterator_depth = popped.saved_iterator_depth;
         self.iterators.truncate(saved_iterator_depth);
         self.stack.truncate(stack_base);
+        let chunk = Arc::clone(&closure.func.chunk);
+        let inline_cache_set = self.inline_cache_set_index_for_chunk(&chunk);
         self.frames.push(CallFrame {
-            chunk: Arc::clone(&closure.func.chunk),
+            chunk,
+            inline_cache_set,
             ip: 0,
             stack_base,
             saved_env: parent_env,
@@ -1480,18 +1493,19 @@ impl super::super::Vm {
     }
 
     pub(super) async fn execute_method_call(&mut self, optional: bool) -> Result<(), VmError> {
-        let (chunk, name_idx, argc, cache_slot) = {
+        let (chunk, cache_site, name_idx, argc) = {
             let frame = self.frames.last_mut().unwrap();
-            let op_offset = frame.ip.saturating_sub(1);
             let chunk = Arc::clone(&frame.chunk);
+            let cache_site = frame.inline_cache_site_for_previous_op();
             let name_idx = frame.chunk.read_u16(frame.ip);
             frame.ip += 2;
             let argc = frame.chunk.code[frame.ip] as usize;
             frame.ip += 1;
-            let cache_slot = frame.chunk.inline_cache_slot(op_offset);
-            (chunk, name_idx, argc, cache_slot)
+            (chunk, cache_site, name_idx, argc)
         };
-        let cached_method = cache_slot.and_then(|slot| self.peek_method_cache(&chunk, slot));
+        let cached_method = cache_site
+            .slot
+            .and_then(|slot| self.peek_method_cache_by_index(cache_site.cache_set, slot));
         let args_start = self.stack_arg_start(argc)?;
         let obj_idx = args_start
             .checked_sub(1)
@@ -1544,9 +1558,10 @@ impl super::super::Vm {
                 self.stack.truncate(obj_idx);
                 self.call_method_async(obj, method, &args).await?
             };
-            if let (Some(slot), Some(target)) = (cache_slot, cache_target) {
-                self.set_inline_cache_entry(
-                    &chunk,
+            if let (Some(slot), Some(target)) = (cache_site.slot, cache_target) {
+                self.set_inline_cache_entry_by_index(
+                    cache_site.cache_set,
+                    cache_site.slot_count,
                     slot,
                     InlineCacheEntry::Method {
                         name_idx,
@@ -1566,16 +1581,17 @@ impl super::super::Vm {
         &mut self,
         optional: bool,
     ) -> Option<Result<(), VmError>> {
-        let (chunk, name_idx, argc, cache_slot) = {
+        let (chunk, cache_site, name_idx, argc) = {
             let frame = self.frames.last().unwrap();
-            let op_offset = frame.ip.saturating_sub(1);
             let chunk = Arc::clone(&frame.chunk);
+            let cache_site = frame.inline_cache_site_for_previous_op();
             let name_idx = frame.chunk.read_u16(frame.ip);
             let argc = frame.chunk.code[frame.ip + 2] as usize;
-            let cache_slot = frame.chunk.inline_cache_slot(op_offset);
-            (chunk, name_idx, argc, cache_slot)
+            (chunk, cache_site, name_idx, argc)
         };
-        let cached_method = cache_slot.and_then(|slot| self.peek_method_cache(&chunk, slot));
+        let cached_method = cache_site
+            .slot
+            .and_then(|slot| self.peek_method_cache_by_index(cache_site.cache_set, slot));
 
         let args_start = match self.stack.len().checked_sub(argc) {
             Some(args_start) => args_start,
@@ -1589,7 +1605,8 @@ impl super::super::Vm {
 
         if optional && matches!(obj, VmValue::Nil) {
             return Some(self.finish_method_call_sync(
-                &chunk,
+                cache_site.cache_set,
+                cache_site.slot_count,
                 argc,
                 Ok(VmValue::Nil),
                 name_idx,
@@ -1606,7 +1623,8 @@ impl super::super::Vm {
             &self.stack[args_start..],
         ) {
             return Some(self.finish_method_call_sync(
-                &chunk,
+                cache_site.cache_set,
+                cache_site.slot_count,
                 argc,
                 Ok(result),
                 name_idx,
@@ -1620,7 +1638,8 @@ impl super::super::Vm {
                 Ok(method) => method,
                 Err(err) => {
                     return Some(self.finish_method_call_sync(
-                        &chunk,
+                        cache_site.cache_set,
+                        cache_site.slot_count,
                         argc,
                         Err(err),
                         name_idx,
@@ -1635,9 +1654,15 @@ impl super::super::Vm {
                 method,
                 &self.stack[args_start..],
             ) {
-                return Some(
-                    self.finish_method_call_sync(&chunk, argc, result, name_idx, None, None),
-                );
+                return Some(self.finish_method_call_sync(
+                    cache_site.cache_set,
+                    cache_site.slot_count,
+                    argc,
+                    result,
+                    name_idx,
+                    None,
+                    None,
+                ));
             }
         }
 
@@ -1646,7 +1671,8 @@ impl super::super::Vm {
                 Ok(method) => method,
                 Err(err) => {
                     return Some(self.finish_method_call_sync(
-                        &chunk,
+                        cache_site.cache_set,
+                        cache_site.slot_count,
                         argc,
                         Err(err),
                         name_idx,
@@ -1667,12 +1693,21 @@ impl super::super::Vm {
             (result, cache_target)
         };
 
-        Some(self.finish_method_call_sync(&chunk, argc, result, name_idx, cache_slot, cache_target))
+        Some(self.finish_method_call_sync(
+            cache_site.cache_set,
+            cache_site.slot_count,
+            argc,
+            result,
+            name_idx,
+            cache_site.slot,
+            cache_target,
+        ))
     }
 
     fn finish_method_call_sync(
         &mut self,
-        chunk: &crate::chunk::ChunkRef,
+        cache_set: usize,
+        slot_count: usize,
         argc: usize,
         result: Result<VmValue, VmError>,
         name_idx: u16,
@@ -1691,8 +1726,9 @@ impl super::super::Vm {
 
         let result = result?;
         if let (Some(slot), Some(target)) = (cache_slot, cache_target) {
-            self.set_inline_cache_entry(
-                chunk,
+            self.set_inline_cache_entry_by_index(
+                cache_set,
+                slot_count,
                 slot,
                 InlineCacheEntry::Method {
                     name_idx,
@@ -1706,16 +1742,17 @@ impl super::super::Vm {
     }
 
     pub(super) async fn execute_method_call_spread(&mut self) -> Result<(), VmError> {
-        let (chunk, name_idx, cache_slot) = {
+        let (chunk, cache_site, name_idx) = {
             let frame = self.frames.last_mut().unwrap();
-            let op_offset = frame.ip.saturating_sub(1);
             let chunk = Arc::clone(&frame.chunk);
+            let cache_site = frame.inline_cache_site_for_previous_op();
             let name_idx = frame.chunk.read_u16(frame.ip);
             frame.ip += 2;
-            let cache_slot = frame.chunk.inline_cache_slot(op_offset);
-            (chunk, name_idx, cache_slot)
+            (chunk, cache_site, name_idx)
         };
-        let cached_method = cache_slot.and_then(|slot| self.peek_method_cache(&chunk, slot));
+        let cached_method = cache_site
+            .slot
+            .and_then(|slot| self.peek_method_cache_by_index(cache_site.cache_set, slot));
         let args_val = self.pop()?;
         let obj = self.pop()?;
         let args = match args_val {
@@ -1754,9 +1791,10 @@ impl super::super::Vm {
             } else {
                 self.call_method_async(obj, method, &args).await?
             };
-            if let (Some(slot), Some(target)) = (cache_slot, cache_target) {
-                self.set_inline_cache_entry(
-                    &chunk,
+            if let (Some(slot), Some(target)) = (cache_site.slot, cache_target) {
+                self.set_inline_cache_entry_by_index(
+                    cache_site.cache_set,
+                    cache_site.slot_count,
                     slot,
                     InlineCacheEntry::Method {
                         name_idx,

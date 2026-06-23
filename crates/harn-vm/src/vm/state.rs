@@ -62,6 +62,10 @@ pub(crate) struct InterruptHandler {
 /// Call frame for function execution.
 pub(crate) struct CallFrame {
     pub(crate) chunk: ChunkRef,
+    /// VM-local inline-cache set for this frame's chunk. Computed once at
+    /// frame entry so hot opcode dispatch can index cache feedback directly
+    /// instead of hashing the chunk id on every cached opcode.
+    pub(crate) inline_cache_set: usize,
     pub(crate) ip: usize,
     pub(crate) stack_base: usize,
     pub(crate) saved_env: VmEnv,
@@ -97,6 +101,24 @@ pub(crate) struct CallFrame {
     pub(crate) local_scope_base: usize,
     /// Current compiler local scope depth, updated by PushScope/PopScope.
     pub(crate) local_scope_depth: usize,
+}
+
+pub(crate) struct InlineCacheSite {
+    pub(crate) cache_set: usize,
+    pub(crate) slot_count: usize,
+    pub(crate) slot: Option<usize>,
+}
+
+impl CallFrame {
+    #[inline]
+    pub(crate) fn inline_cache_site_for_previous_op(&self) -> InlineCacheSite {
+        let op_offset = self.ip.saturating_sub(1);
+        InlineCacheSite {
+            cache_set: self.inline_cache_set,
+            slot_count: self.chunk.inline_cache_slot_count(),
+            slot: self.chunk.inline_cache_slot(op_offset),
+        }
+    }
 }
 
 /// Exception handler for try/catch.
@@ -194,8 +216,11 @@ pub struct Vm {
     pub(crate) sync_runtime: Arc<crate::synchronization::VmSyncRuntime>,
     /// Shared process-local cells, maps, and mailboxes inherited by child VMs.
     pub(crate) shared_state_runtime: Arc<crate::shared_state::VmSharedStateRuntime>,
-    /// Per-isolate inline cache entries keyed by compiled chunk identity.
-    pub(crate) inline_caches: HashMap<u64, Vec<crate::chunk::InlineCacheEntry>>,
+    /// Per-isolate inline cache entries. `inline_cache_set_by_chunk` maps a
+    /// compiled chunk identity to an index in this vector at frame entry; the
+    /// dispatch loop uses the frame-local index for per-op reads/writes.
+    pub(crate) inline_cache_sets: Vec<Vec<crate::chunk::InlineCacheEntry>>,
+    pub(crate) inline_cache_set_by_chunk: HashMap<u64, usize>,
     /// VM-scoped pool registry inherited by child VMs and scoped into Tokio tasks.
     pub(crate) pool_registry: Arc<crate::stdlib::pool::PoolRegistry>,
     /// Shared task/channel wait graph for this VM execution tree.
@@ -365,7 +390,8 @@ impl VmBaseline {
             spawned_tasks: BTreeMap::new(),
             sync_runtime: Arc::new(crate::synchronization::VmSyncRuntime::new()),
             shared_state_runtime: Arc::new(crate::shared_state::VmSharedStateRuntime::new()),
-            inline_caches: HashMap::new(),
+            inline_cache_sets: Vec::new(),
+            inline_cache_set_by_chunk: HashMap::new(),
             pool_registry: crate::stdlib::pool::new_pool_registry(),
             wait_for_graph: Arc::new(crate::wait_for_graph::VmWaitForGraph::new()),
             held_sync_guards: Vec::new(),
@@ -594,7 +620,8 @@ impl Vm {
             spawned_tasks: BTreeMap::new(),
             sync_runtime: Arc::new(crate::synchronization::VmSyncRuntime::new()),
             shared_state_runtime: Arc::new(crate::shared_state::VmSharedStateRuntime::new()),
-            inline_caches: HashMap::new(),
+            inline_cache_sets: Vec::new(),
+            inline_cache_set_by_chunk: HashMap::new(),
             pool_registry: crate::stdlib::pool::new_pool_registry(),
             wait_for_graph: Arc::new(crate::wait_for_graph::VmWaitForGraph::new()),
             held_sync_guards: Vec::new(),
@@ -710,8 +737,12 @@ impl Vm {
         } else {
             None
         };
+        let chunk = Arc::new(chunk.clone());
+        let local_slots = Self::fresh_local_slots(&chunk);
+        let inline_cache_set = self.inline_cache_set_index_for_chunk(&chunk);
         self.frames.push(CallFrame {
-            chunk: Arc::new(chunk.clone()),
+            chunk,
+            inline_cache_set,
             ip: 0,
             stack_base: self.stack.len(),
             saved_env: self.env.clone(),
@@ -723,7 +754,7 @@ impl Vm {
             saved_source_dir: None,
             module_functions: None,
             module_state: None,
-            local_slots: Self::fresh_local_slots(chunk),
+            local_slots,
             local_scope_base: self.env.scope_depth().saturating_sub(1),
             local_scope_depth: 0,
         });
@@ -747,7 +778,8 @@ impl Vm {
             spawned_tasks: BTreeMap::new(),
             sync_runtime: self.sync_runtime.clone(),
             shared_state_runtime: self.shared_state_runtime.clone(),
-            inline_caches: HashMap::new(),
+            inline_cache_sets: Vec::new(),
+            inline_cache_set_by_chunk: HashMap::new(),
             pool_registry: self.pool_registry.clone(),
             wait_for_graph: self.wait_for_graph.clone(),
             held_sync_guards: Vec::new(),

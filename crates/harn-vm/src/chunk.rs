@@ -1046,28 +1046,10 @@ impl Chunk {
         Some(materialized)
     }
 
-    #[cfg(feature = "vm-bench-internals")]
-    pub(crate) fn inline_cache_entry(&self, slot: usize) -> InlineCacheEntry {
-        self.inline_caches
-            .lock()
-            .get(slot)
-            .cloned()
-            .unwrap_or(InlineCacheEntry::Empty)
-    }
-
-    /// Adaptive-binary fast path read. Returns the cached
-    /// `(op, state)` pair by value (both `Copy`) when slot holds an
-    /// `AdaptiveBinary` entry, else `None`. Skips the
-    /// `InlineCacheEntry::clone` that `inline_cache_entry` performs:
-    /// since `AdaptiveBinaryState: Copy`, the read does a single
-    /// scalar move out of the cache instead of a 24-32B memcpy of the
-    /// wrapping enum (which the variant-checking match destructures
-    /// and throws away anyway). Fires on every Add/Sub/Mul/Div/Mod/Eq/
-    /// Neq/Less/Greater/LessEq/GreaterEq dispatch, so the per-op
-    /// savings compound across the millions of dispatches a typical
-    /// loop body issues.
+    /// Test helper for the chunk-local scratch inline cache. Production
+    /// dispatch reads VM-local cache sets through `Vm`.
     #[inline]
-    #[cfg(any(test, feature = "vm-bench-internals"))]
+    #[cfg(test)]
     pub(crate) fn peek_adaptive_binary_cache(
         &self,
         slot: usize,
@@ -1078,19 +1060,10 @@ impl Chunk {
         }
     }
 
-    /// Method-cache fast path read. Returns the cached `(name_idx, argc,
-    /// target)` triple by value (all three are `Copy`) when `slot` holds a
-    /// `Method` entry, else `None`. Skips the full `InlineCacheEntry::clone`
-    /// that `inline_cache_entry` performs on every `Op::MethodCall`,
-    /// `Op::MethodCallOpt`, and `Op::MethodCallSpread` dispatch: the
-    /// variant-checking `let-else` in `try_cached_method` destructures and
-    /// throws the wrapping enum away anyway, so reading the payload by `Copy`
-    /// avoids the 32-48B enum memcpy. Method-call dispatch is the second-
-    /// hottest IC-keyed opcode class after the adaptive binary ops, so the
-    /// per-dispatch savings compound across the millions of method calls a
-    /// typical pipeline (`xs.filter(...).map(...).count()`) issues.
+    /// Test helper for the chunk-local scratch inline cache. Production
+    /// dispatch reads VM-local cache sets through `Vm`.
     #[inline]
-    #[cfg(any(test, feature = "vm-bench-internals"))]
+    #[cfg(test)]
     pub(crate) fn peek_method_cache(&self, slot: usize) -> Option<(u16, usize, MethodCacheTarget)> {
         match self.inline_caches.lock().get(slot)? {
             &InlineCacheEntry::Method {
@@ -1102,17 +1075,10 @@ impl Chunk {
         }
     }
 
-    /// Property-cache fast path read. Returns the cached `(name_idx, target)`
-    /// pair by value when `slot` holds a `Property` entry, else `None`. The
-    /// outer `InlineCacheEntry` is the worst-case-sized variant (DirectCall
-    /// at ~48 bytes including padding); cloning it just to discard four other
-    /// variants in `try_cached_property`'s variant-check is wasted work. The
-    /// peek returns just the `Property` payload (`u16` + `PropertyCacheTarget`),
-    /// skipping the outer enum tag init and the padding-to-largest-variant
-    /// memcpy. Fires on every `Op::GetProperty` / `Op::GetPropertyOpt`
-    /// dispatch, which is the dominant opcode for any field-read-heavy code.
+    /// Test helper for the chunk-local scratch inline cache. Production
+    /// dispatch reads VM-local cache sets through `Vm`.
     #[inline]
-    #[cfg(any(test, feature = "vm-bench-internals"))]
+    #[cfg(test)]
     pub(crate) fn peek_property_cache(&self, slot: usize) -> Option<(u16, PropertyCacheTarget)> {
         match self.inline_caches.lock().get(slot)? {
             InlineCacheEntry::Property { name_idx, target } => Some((*name_idx, target.clone())),
@@ -1120,17 +1086,10 @@ impl Chunk {
         }
     }
 
-    /// Direct-call cache state read. Returns just the inner `DirectCallState`
-    /// by value when `slot` holds a `DirectCall` entry, else `None`. Used by
-    /// both `try_cached_direct_call(_)` (steady-state Specialized hit check)
-    /// and `next_direct_call_entry` (Warmup → Specialized state-machine
-    /// transition). Peeking the inner state directly skips the outer
-    /// `InlineCacheEntry` discriminant check and tag init that the dispatcher
-    /// otherwise pays on every `Op::Call` (closure callee) and the named-fn
-    /// fast path inside `Op::CallBuiltin`. Single peek per dispatch covers
-    /// both the read check and the write-back computation.
+    /// Test helper for the chunk-local scratch inline cache. Production
+    /// dispatch reads VM-local cache sets through `Vm`.
     #[inline]
-    #[cfg(any(test, feature = "vm-bench-internals"))]
+    #[cfg(test)]
     pub(crate) fn peek_direct_call_state(&self, slot: usize) -> Option<DirectCallState> {
         match self.inline_caches.lock().get(slot)? {
             InlineCacheEntry::DirectCall { state } => Some(state.clone()),
@@ -1138,7 +1097,7 @@ impl Chunk {
         }
     }
 
-    #[cfg(any(test, feature = "vm-bench-internals"))]
+    #[cfg(test)]
     pub(crate) fn set_inline_cache_entry(&self, slot: usize, entry: InlineCacheEntry) {
         if let Some(existing) = self.inline_caches.lock().get_mut(slot) {
             *existing = entry;
