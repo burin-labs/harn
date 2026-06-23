@@ -1,10 +1,11 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use futures::StreamExt;
 use rand::{rngs::StdRng, RngExt, SeedableRng};
-use rusqlite::params;
+use rusqlite::{params, Connection};
 use tokio::sync::broadcast;
 
 use super::util::{file_size, stream_from_broadcast};
@@ -284,6 +285,26 @@ async fn sqlite_backend_persists_and_checkpoints_after_compact() {
     assert!(compact.checkpointed);
     let wal = PathBuf::from(format!("{}-wal", path.display()));
     assert!(file_size(&wal) == 0 || !wal.exists());
+}
+
+#[test]
+fn sqlite_open_skips_wal_promotion_when_existing_wal_database_is_busy() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("events.sqlite");
+    drop(SqliteEventLog::open(path.clone(), 8).unwrap());
+
+    let writer = Connection::open(&path).unwrap();
+    writer.busy_timeout(Duration::from_millis(0)).unwrap();
+    writer
+        .execute_batch(
+            "BEGIN IMMEDIATE;
+             INSERT OR IGNORE INTO topic_heads(topic, last_id) VALUES ('held.open', 0);",
+        )
+        .unwrap();
+
+    let opened = SqliteEventLog::open_with_timeout(path, 8, Duration::from_millis(25)).unwrap();
+    drop(opened);
+    writer.execute_batch("ROLLBACK").unwrap();
 }
 
 #[tokio::test(flavor = "current_thread")]

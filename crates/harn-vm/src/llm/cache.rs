@@ -4,13 +4,13 @@ use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, VecDeque};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::runtime_limits::RuntimeLimits;
+use crate::runtime_sqlite::{configure_runtime_sqlite, DEFAULT_BUSY_TIMEOUT};
 use crate::stdlib::clock::now_wall_ms;
 use crate::stdlib::macros::{harn_builtin, register_builtin_defs, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
@@ -555,19 +555,8 @@ fn sqlite_connection(path: &Path) -> Result<Connection, VmError> {
         })?;
     }
     let conn = Connection::open(path).map_err(sqlite_error)?;
-    // Set busy_timeout BEFORE the WAL pragma so SQLite waits out a transient
-    // SQLITE_BUSY while another process/connection is mid-write rather than
-    // failing the WAL-mode promotion fast. WAL then lets one writer and many
-    // readers proceed concurrently, which is what makes the cache safe when
-    // two sessions in the same project run read-heavy roles (evaluator,
-    // enrichment, QC) at once. Matches the proven event-log setup
-    // (crates/harn-vm/src/event_log/sqlite.rs).
-    conn.busy_timeout(Duration::from_secs(5))
-        .map_err(sqlite_error)?;
-    conn.pragma_update(None, "journal_mode", "WAL")
-        .map_err(sqlite_error)?;
-    conn.pragma_update(None, "synchronous", "NORMAL")
-        .map_err(sqlite_error)?;
+    configure_runtime_sqlite(&conn, DEFAULT_BUSY_TIMEOUT)
+        .map_err(|error| VmError::Runtime(format!("cache sqlite setup error: {error}")))?;
     conn.execute_batch(SQLITE_CREATE_TABLE)
         .map_err(sqlite_error)?;
     conn.execute_batch(SQLITE_CREATE_LRU_INDEX)

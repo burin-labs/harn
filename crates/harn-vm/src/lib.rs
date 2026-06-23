@@ -77,6 +77,7 @@ pub mod runtime_context;
 pub(crate) mod runtime_guards;
 pub mod runtime_limits;
 pub mod runtime_paths;
+pub(crate) mod runtime_sqlite;
 pub mod schema;
 pub(crate) mod secret_patterns;
 pub mod secrets;
