@@ -3028,11 +3028,18 @@ mod streaming_detector_tests {
                 parsing,
                 status,
                 error_category,
+                raw_input,
+                raw_output,
                 ..
             } => {
                 assert_eq!(*parsing, Some(false));
                 assert_eq!(*status, ToolCallStatus::Pending);
                 assert!(error_category.is_none());
+                assert_eq!(
+                    raw_input.as_ref(),
+                    Some(&serde_json::json!({"path": "a.md"}))
+                );
+                assert!(raw_output.is_none(), "promoted args belong in raw_input");
             }
             other => panic!("expected ToolCallUpdate, got {other:?}"),
         }
