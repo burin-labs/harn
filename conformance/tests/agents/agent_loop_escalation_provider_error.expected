@@ -1,0 +1,13 @@
+esc_event_present=true
+esc_event_skip_reason=escalation_provider_failure
+esc_event_provider=escalated
+esc_event_model=frontier
+esc_event_status=provider_error
+esc_event_fallback=true
+esc_providers=mock,escalated,mock,mock,
+esc_status=done
+primary_event_present=true
+primary_event_skip_reason=provider_failure
+primary_event_fallback=false
+primary_event_count=1
+primary_status=provider_error

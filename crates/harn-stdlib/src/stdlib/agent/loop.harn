@@ -2030,6 +2030,48 @@ fn __agent_loop_tracks_failure(error, config) {
   return false
 }
 
+/**
+ * Surface a NON-tracked provider failure as an observable event instead of a
+ * silent `break`. Mirrors the tracked-failure branch's `iteration_end` event
+ * so any provider_error (including a fast pre-dispatch escalation failure) is
+ * always visible in the transcript, carrying the provider/model/status/error
+ * that caused it. The dispatch_skipped/skip_reason shape matches the tracked
+ * branch so existing consumers parse it uniformly.
+ */
+fn __agent_loop_emit_provider_error(
+  session_id,
+  iteration_index,
+  call,
+  llm_opts,
+  loop_start_ms,
+  escalation_fallback,
+) {
+  let aggregates = __agent_loop_budget_aggregates(session_id, nil, loop_start_ms)
+  agent_emit_event(
+    session_id,
+    "iteration_end",
+    {
+      iteration: iteration_index + 1,
+      iteration_info: aggregates
+        + {
+        dispatch_skipped: true,
+        skip_reason: if escalation_fallback {
+          "escalation_provider_failure"
+        } else {
+          "provider_failure"
+        },
+        provider_error: call?.error ?? {},
+        provider: to_string(llm_opts?.provider ?? ""),
+        model: to_string(llm_opts?.model ?? ""),
+        provider_status: to_string(call?.status ?? ""),
+        provider_error_message: to_string(call?.error?.message ?? call?.error ?? ""),
+        consecutive_failures: 0,
+        escalation_fallback: escalation_fallback,
+      },
+    },
+  )
+}
+
 fn __agent_loop_finalize_failed(session, iteration) {
   try {
     agent_session_finalize(
@@ -2607,6 +2649,10 @@ fn __agent_loop_run(message, session, initial_opts) {
   var audit_background_tasks = []
   let run = try {
     opts = agent_mcp_bootstrap_if_needed(session, opts)
+    let primary_llm_opts = __agent_loop_effective_llm_options(opts)
+    let primary_provider = to_string(primary_llm_opts?.provider ?? "")
+    let primary_model = to_string(primary_llm_opts?.model ?? "")
+    var escalation_retry_pending = false
     var stop_reason = nil
     var final_status = ""
     var terminal_error = nil
@@ -2791,11 +2837,37 @@ fn __agent_loop_run(message, session, initial_opts) {
           }
           continue
         }
+        let failed_provider = to_string(turn_llm_opts?.provider ?? "")
+        let failed_model = to_string(turn_llm_opts?.model ?? "")
+        let was_escalated = (primary_provider != "" || primary_model != "")
+          && (failed_provider != primary_provider || failed_model != primary_model)
+        let can_retry_primary = was_escalated && !escalation_retry_pending
+        __agent_loop_emit_provider_error(
+          session.session_id,
+          iteration_index,
+          call,
+          turn_llm_opts,
+          loop_start_ms,
+          can_retry_primary,
+        )
+        if can_retry_primary {
+          opts = opts
+            + {
+            provider: primary_provider,
+            model: primary_model,
+            llm_options: (opts?.llm_options ?? {})
+              + {provider: primary_provider, model: primary_model},
+          }
+          escalation_retry_pending = true
+          iteration = iteration + 1
+          continue
+        }
         final_status = call.status
         stop_reason = call?.stop_reason ?? call.status
         terminal_error = call?.error
         break
       }
+      escalation_retry_pending = false
       let llm_result = call.value
       consecutive_failure_count = 0
       iteration = iteration + 1
@@ -3596,6 +3668,19 @@ fn __agent_loop_run(message, session, initial_opts) {
   return unwrap(run)
 }
 
+// Capture the PRIMARY provider/model once, before any post-turn escalation
+// can rebind `opts`. A failed escalated turn falls back to this for one
+// retry instead of unwinding the whole loop into a fake success.
+// NON-tracked provider failure. Previously this branch broke SILENTLY
+// (no event), so a fast pre-dispatch escalation failure unwound the
+// loop while ACP still returned the prior cheap-model text as a fake
+// success. Two fixes, always-correct:
+//   1. Always emit an observable provider_error `iteration_end` event.
+//   2. If this was an ESCALATED turn (current provider/model differs
+//      from the captured primary) and we have not already retried the
+//      primary for this failure, degrade to the PRIMARY provider for
+//      one more turn instead of unwinding into a fake success.
+// Rebind opts back to the primary provider/model and retry one turn.
 // Recoverable: emergency-compact the transcript and retry the turn
 // before treating overflow as a failure. The agent must keep working
 // on a large repo, not die when the prompt outgrows the window.
