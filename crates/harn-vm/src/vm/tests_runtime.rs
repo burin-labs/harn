@@ -93,12 +93,11 @@ fn run_harn_with_inline_cache_entries(source: &str) -> (Vec<InlineCacheEntry>, S
                 register_vm_stdlib(&mut vm);
                 vm.set_harness(crate::Harness::real());
                 let result = vm.execute(&chunk).await.unwrap();
-                let mut inline_cache_entries = vm.inline_cache_entries_for_chunk(&chunk);
-                for (cache_id, entries) in &vm.inline_caches {
-                    if *cache_id != chunk.cache_id() {
-                        inline_cache_entries.extend(entries.clone());
-                    }
-                }
+                let inline_cache_entries = vm
+                    .inline_cache_sets
+                    .iter()
+                    .flat_map(|entries| entries.iter().cloned())
+                    .collect();
                 (inline_cache_entries, vm.output().to_string(), result)
             })
             .await

@@ -439,16 +439,17 @@ impl super::super::Vm {
     }
 
     pub(super) fn execute_get_property(&mut self, optional: bool) -> Result<(), VmError> {
-        let (chunk, name_idx, cache_slot) = {
+        let (chunk, cache_site, name_idx) = {
             let frame = self.frames.last_mut().unwrap();
-            let op_offset = frame.ip.saturating_sub(1);
             let chunk = Arc::clone(&frame.chunk);
+            let cache_site = frame.inline_cache_site_for_previous_op();
             let name_idx = frame.chunk.read_u16(frame.ip);
             frame.ip += 2;
-            let cache_slot = frame.chunk.inline_cache_slot(op_offset);
-            (chunk, name_idx, cache_slot)
+            (chunk, cache_site, name_idx)
         };
-        let cached_property = cache_slot.and_then(|slot| self.peek_property_cache(&chunk, slot));
+        let cached_property = cache_site
+            .slot
+            .and_then(|slot| self.peek_property_cache_by_index(cache_site.cache_set, slot));
 
         let obj = self.pop()?;
         if optional && matches!(obj, VmValue::Nil) {
@@ -466,9 +467,10 @@ impl super::super::Vm {
                 )
             };
 
-            if let (Some(slot), Some(target)) = (cache_slot, target) {
-                self.set_inline_cache_entry(
-                    &chunk,
+            if let (Some(slot), Some(target)) = (cache_site.slot, target) {
+                self.set_inline_cache_entry_by_index(
+                    cache_site.cache_set,
+                    cache_site.slot_count,
                     slot,
                     InlineCacheEntry::Property { name_idx, target },
                 );

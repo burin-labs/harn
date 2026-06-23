@@ -8,12 +8,10 @@ use harn_vm::bench_internals::{AdaptiveBinaryCacheReadFixture, ADAPTIVE_BINARY_C
 /// Mul / Div / Mod / Eq / Neq / Less / Greater / LessEq / GreaterEq) —
 /// the hottest opcode class in the VM dispatch loop.
 ///
-/// `inline_cache_slot/copy_peek` exercises `peek_adaptive_binary_cache`,
-/// which returns the cached `(op, state)` pair by value (both `Copy`).
-/// `inline_cache_slot/clone_control` exercises the pre-optimization
-/// `inline_cache_entry` path that cloned the wrapping `InlineCacheEntry`
-/// enum on every dispatch — a 24-32B memcpy that the variant-checking
-/// match destructures and throws away.
+/// `adaptive_binary_cache_read/frame_index_peek` exercises the production
+/// frame-local cache-set lookup and `peek_adaptive_binary_cache_by_index`.
+/// `adaptive_binary_cache_read/hash_lookup_clone_control` exercises the old
+/// per-dispatch hash lookup plus full `InlineCacheEntry` clone.
 ///
 /// The N axis (8/32/128/512) approximates a small predicate, a loop
 /// body, and a deep stdlib fn body. Per-op savings compound across
@@ -24,7 +22,7 @@ fn bench_adaptive_binary_cache_read(c: &mut Criterion) {
         .map(AdaptiveBinaryCacheReadFixture::new)
         .collect::<Vec<_>>();
 
-    let mut optimized = c.benchmark_group("adaptive_binary_cache_read/copy_peek");
+    let mut optimized = c.benchmark_group("adaptive_binary_cache_read/frame_index_peek");
     for fixture in &fixtures {
         let benchmark = format!("ops_{:03}", fixture.op_count());
         optimized.bench_with_input(
@@ -37,7 +35,7 @@ fn bench_adaptive_binary_cache_read(c: &mut Criterion) {
     }
     optimized.finish();
 
-    let mut baseline = c.benchmark_group("adaptive_binary_cache_read/clone_control");
+    let mut baseline = c.benchmark_group("adaptive_binary_cache_read/hash_lookup_clone_control");
     for fixture in &fixtures {
         let benchmark = format!("ops_{:03}", fixture.op_count());
         baseline.bench_with_input(

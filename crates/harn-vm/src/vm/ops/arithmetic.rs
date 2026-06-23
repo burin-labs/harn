@@ -105,20 +105,21 @@ impl super::super::Vm {
 
     pub(super) fn execute_adaptive_binary(&mut self, op: AdaptiveBinaryOp) -> Result<(), VmError> {
         // Read the cache slot from the chunk side table, then access the
-        // VM-local cache by scalar chunk metadata. Avoiding a shared Chunk
-        // clone here keeps parallel workers from contending on the same
-        // compiled closure refcount in arithmetic-heavy pool tasks.
-        let (cache_id, slot_count, cache_slot) = {
+        // VM-local cache through the frame-local cache-set index.
+        let cache_site = {
             let frame = self.frames.last().unwrap();
-            let op_offset = frame.ip.saturating_sub(1);
-            let cache_id = frame.chunk.cache_id();
-            let slot_count = frame.chunk.inline_cache_slot_count();
-            let cache_slot = frame.chunk.inline_cache_slot(op_offset);
-            (cache_id, slot_count, cache_slot)
+            frame.inline_cache_site_for_previous_op()
         };
         let b = self.pop()?;
         let a = self.pop()?;
-        let result = self.adaptive_binary_compute(op, a, b, cache_id, slot_count, cache_slot)?;
+        let result = self.adaptive_binary_compute(
+            op,
+            a,
+            b,
+            cache_site.cache_set,
+            cache_site.slot_count,
+            cache_site.slot,
+        )?;
         self.stack.push(result);
         Ok(())
     }
@@ -134,12 +135,12 @@ impl super::super::Vm {
         op: AdaptiveBinaryOp,
         a: VmValue,
         b: VmValue,
-        cache_id: u64,
+        cache_set: usize,
         slot_count: usize,
         cache_slot: Option<usize>,
     ) -> Result<VmValue, VmError> {
         let cached_state = cache_slot
-            .and_then(|slot| self.peek_adaptive_binary_cache_by_key(cache_id, slot_count, slot))
+            .and_then(|slot| self.peek_adaptive_binary_cache_by_index(cache_set, slot))
             .filter(|(cached_op, _)| *cached_op == op)
             .map(|(_, state)| state);
 
@@ -147,8 +148,8 @@ impl super::super::Vm {
 
         if let Some((result, next_state)) = Self::try_specialized_binary(op, cached_state, &a, &b) {
             if let Some(slot) = cache_slot {
-                self.set_inline_cache_entry_by_key(
-                    cache_id,
+                self.set_inline_cache_entry_by_index(
+                    cache_set,
                     slot_count,
                     slot,
                     InlineCacheEntry::AdaptiveBinary {
@@ -162,8 +163,8 @@ impl super::super::Vm {
             let result = Self::generic_binary_result(self, op, a, b)?;
             if let (Some(slot), Some(shape)) = (cache_slot, shape) {
                 let next_state = Self::next_adaptive_binary_state(cached_state, shape);
-                self.set_inline_cache_entry_by_key(
-                    cache_id,
+                self.set_inline_cache_entry_by_index(
+                    cache_set,
                     slot_count,
                     slot,
                     InlineCacheEntry::AdaptiveBinary {

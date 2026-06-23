@@ -8,19 +8,17 @@ use harn_vm::bench_internals::{PropertyCacheReadFixture, PROPERTY_CACHE_READ_COU
 /// dominant opcode for any field-read-heavy code (`obj.field`,
 /// `xs.count`, `pair.0`, etc.).
 ///
-/// `property_cache_read/copy_peek` exercises `peek_property_cache`,
-/// returning just the `Property` payload (`u16 + PropertyCacheTarget`).
-/// `property_cache_read/clone_control` exercises the pre-optimization
-/// `inline_cache_entry` path that cloned the wrapping `InlineCacheEntry`
-/// enum — a 32-48B memcpy (padded to the largest variant, `DirectCall`)
-/// that `try_cached_property`'s `let-else` destructures and throws away.
+/// `property_cache_read/frame_index_peek` exercises the production
+/// frame-local cache-set lookup and `peek_property_cache_by_index`.
+/// `property_cache_read/hash_lookup_clone_control` exercises the old
+/// per-dispatch hash lookup plus full `InlineCacheEntry` clone.
 fn bench_property_cache_read(c: &mut Criterion) {
     let fixtures = PROPERTY_CACHE_READ_COUNTS
         .into_iter()
         .map(PropertyCacheReadFixture::new)
         .collect::<Vec<_>>();
 
-    let mut optimized = c.benchmark_group("property_cache_read/copy_peek");
+    let mut optimized = c.benchmark_group("property_cache_read/frame_index_peek");
     for fixture in &fixtures {
         let benchmark = format!("ops_{:03}", fixture.op_count());
         optimized.bench_with_input(
@@ -33,7 +31,7 @@ fn bench_property_cache_read(c: &mut Criterion) {
     }
     optimized.finish();
 
-    let mut baseline = c.benchmark_group("property_cache_read/clone_control");
+    let mut baseline = c.benchmark_group("property_cache_read/hash_lookup_clone_control");
     for fixture in &fixtures {
         let benchmark = format!("ops_{:03}", fixture.op_count());
         baseline.bench_with_input(

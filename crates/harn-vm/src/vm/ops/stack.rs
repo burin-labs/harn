@@ -245,15 +245,12 @@ impl super::super::Vm {
     /// value rather than a placeholder — the take only happens for adds proven
     /// to succeed.
     pub(super) fn execute_concat_assign_local(&mut self) -> Result<(), VmError> {
-        let (slot_idx, cache_id, slot_count, cache_slot) = {
+        let (slot_idx, cache_site) = {
             let frame = self.frames.last_mut().unwrap();
-            let op_offset = frame.ip.saturating_sub(1);
+            let cache_site = frame.inline_cache_site_for_previous_op();
             let slot_idx = frame.chunk.read_u16(frame.ip) as usize;
             frame.ip += 2;
-            let cache_id = frame.chunk.cache_id();
-            let slot_count = frame.chunk.inline_cache_slot_count();
-            let cache_slot = frame.chunk.inline_cache_slot(op_offset);
-            (slot_idx, cache_id, slot_count, cache_slot)
+            (slot_idx, cache_site)
         };
         let rhs = self.pop()?;
         let frame = self.frames.last_mut().unwrap();
@@ -291,9 +288,9 @@ impl super::super::Vm {
             AdaptiveBinaryOp::Add,
             lhs,
             rhs,
-            cache_id,
-            slot_count,
-            cache_slot,
+            cache_site.cache_set,
+            cache_site.slot_count,
+            cache_site.slot,
         )?;
         let frame = self.frames.last_mut().unwrap();
         let slot = frame

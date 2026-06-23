@@ -617,8 +617,11 @@ impl Vm {
         self.stopped = false;
 
         let local_slots = Self::fresh_local_slots(&chunk);
+        let chunk = Arc::new(chunk);
+        let inline_cache_set = self.inline_cache_set_index_for_chunk(&chunk);
         self.frames.push(CallFrame {
-            chunk: Arc::new(chunk),
+            chunk,
+            inline_cache_set,
             ip: 0,
             stack_base: saved_stack_len,
             saved_env,

@@ -162,8 +162,11 @@ impl Vm {
             self.pending_function_bp = Some(closure.func.name.clone());
         }
 
+        let chunk = Arc::clone(&closure.func.chunk);
+        let inline_cache_set = self.inline_cache_set_index_for_chunk(&chunk);
         self.frames.push(CallFrame {
-            chunk: Arc::clone(&closure.func.chunk),
+            chunk,
+            inline_cache_set,
             ip: 0,
             stack_base: self.stack.len(),
             saved_env,

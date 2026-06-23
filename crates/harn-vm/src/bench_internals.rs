@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::chunk::Op;
@@ -74,6 +75,53 @@ impl InlineCacheSlotLookupFixture {
     }
 }
 
+struct VmInlineCacheReadFixture {
+    vm: Vm,
+    cache_set: usize,
+    cache_id: u64,
+    hash_control: HashMap<u64, Vec<crate::chunk::InlineCacheEntry>>,
+    slots: Vec<usize>,
+}
+
+impl VmInlineCacheReadFixture {
+    fn new(
+        chunk: &Chunk,
+        slots: Vec<usize>,
+        mut entry_for_slot: impl FnMut(usize) -> crate::chunk::InlineCacheEntry,
+    ) -> Self {
+        let slot_count = chunk.inline_cache_slot_count();
+        let cache_id = chunk.cache_id();
+        let mut vm = Vm::new();
+        let cache_set = vm.inline_cache_set_index_for_chunk(chunk);
+        let mut hash_entries = vec![crate::chunk::InlineCacheEntry::Empty; slot_count];
+        for &slot in &slots {
+            let entry = entry_for_slot(slot);
+            vm.set_inline_cache_entry_by_index(cache_set, slot_count, slot, entry.clone());
+            hash_entries[slot] = entry;
+        }
+
+        Self {
+            vm,
+            cache_set,
+            cache_id,
+            hash_control: HashMap::from([(cache_id, hash_entries)]),
+            slots,
+        }
+    }
+
+    fn op_count(&self) -> usize {
+        self.slots.len()
+    }
+
+    #[inline]
+    fn hash_entry(&self, slot: usize) -> Option<crate::chunk::InlineCacheEntry> {
+        self.hash_control
+            .get(&self.cache_id)
+            .and_then(|entries| entries.get(slot))
+            .cloned()
+    }
+}
+
 /// Bytecode-length presets for the adaptive-binary-cache read microbench.
 /// The fixture walks N adjacent `Op::Add` slots, exercising the same
 /// cache-read shape that `execute_adaptive_binary` issues on every
@@ -84,22 +132,18 @@ pub const ADAPTIVE_BINARY_CACHE_READ_COUNTS: [usize; 4] = [8, 32, 128, 512];
 
 /// Microbench fixture for the adaptive-binary inline-cache read path.
 ///
-/// `Chunk::inline_cache_entry` (the pre-optimization path) clones the
-/// wrapping `InlineCacheEntry` enum on every dispatch — a 24-32B memcpy
-/// that the variant-checking match in `try_specialized_binary`
-/// destructures and throws away. `Chunk::peek_adaptive_binary_cache`
-/// (the new path) returns just the `(AdaptiveBinaryOp,
-/// AdaptiveBinaryState)` pair by value (both `Copy`), so the read is a
-/// single scalar move instead of a clone.
+/// The control path performs the old per-dispatch hash lookup and clones the
+/// wrapping `InlineCacheEntry` enum — a 24-32B memcpy that the variant-checking
+/// match in `try_specialized_binary` destructures and throws away. The
+/// production path uses the frame-local cache-set index and returns just the
+/// `(AdaptiveBinaryOp, AdaptiveBinaryState)` pair by value (both `Copy`).
 ///
 /// The fixture pre-warms every slot to the Specialized state (the steady
 /// state of a hot loop) so the bench measures the read overhead with no
 /// per-iteration state transitions. The accumulator sums the cached
 /// `hits` counter so the optimizer cannot dead-code the loop.
 pub struct AdaptiveBinaryCacheReadFixture {
-    chunk: Chunk,
-    offsets: Vec<usize>,
-    slots: Vec<usize>,
+    cache: VmInlineCacheReadFixture,
 }
 
 impl AdaptiveBinaryCacheReadFixture {
@@ -116,41 +160,39 @@ impl AdaptiveBinaryCacheReadFixture {
             let slot = chunk
                 .inline_cache_slot(offset)
                 .expect("Op::Add registers an inline-cache slot at emit time");
-            // Pre-warm to Specialized{Int}, which is the steady state of a
-            // hot loop after `ADAPTIVE_QUICKEN_THRESHOLD` Int-Int Adds.
-            // That's the case that exercises the IC read on every dispatch.
-            chunk.set_inline_cache_entry(
-                slot,
-                InlineCacheEntry::AdaptiveBinary {
-                    op: AdaptiveBinaryOp::Add,
-                    state: AdaptiveBinaryState::Specialized {
-                        shape: BinaryShape::Int,
-                        hits: 1_000,
-                        misses: 0,
-                    },
-                },
-            );
             slots.push(slot);
         }
-        Self {
-            chunk,
-            offsets,
-            slots,
-        }
+        let cache = VmInlineCacheReadFixture::new(&chunk, slots, |_slot| {
+            // Pre-warm to Specialized{Int}, which is the steady state of a hot
+            // loop after `ADAPTIVE_QUICKEN_THRESHOLD` Int-Int Adds.
+            InlineCacheEntry::AdaptiveBinary {
+                op: AdaptiveBinaryOp::Add,
+                state: AdaptiveBinaryState::Specialized {
+                    shape: BinaryShape::Int,
+                    hits: 1_000,
+                    misses: 0,
+                },
+            }
+        });
+        Self { cache }
     }
 
     pub fn op_count(&self) -> usize {
-        self.offsets.len()
+        self.cache.op_count()
     }
 
-    /// Sweep all slots via the new Copy peek path. Returns the sum of
-    /// observed `hits` counters so the optimizer cannot dead-code the
-    /// loop.
+    /// Sweep all slots via the production frame-indexed peek path. Returns
+    /// the sum of observed `hits` counters so the optimizer cannot dead-code
+    /// the loop.
     pub fn invoke_peek(&self) -> u64 {
         use crate::chunk::AdaptiveBinaryState;
         let mut acc = 0u64;
-        for &slot in &self.slots {
-            if let Some((_op, state)) = self.chunk.peek_adaptive_binary_cache(slot) {
+        for &slot in &self.cache.slots {
+            if let Some((_op, state)) = self
+                .cache
+                .vm
+                .peek_adaptive_binary_cache_by_index(self.cache.cache_set, slot)
+            {
                 let hits = match state {
                     AdaptiveBinaryState::Specialized { hits, .. } => hits,
                     AdaptiveBinaryState::Warmup { hits, .. } => hits as u64,
@@ -161,15 +203,15 @@ impl AdaptiveBinaryCacheReadFixture {
         acc
     }
 
-    /// Control sweep using the pre-optimization `inline_cache_entry`
-    /// clone path. Same accumulator shape so the criterion bench can
+    /// Control sweep using the pre-optimization per-dispatch hash lookup plus
+    /// full `InlineCacheEntry` clone. Same accumulator shape so Criterion can
     /// A/B the two paths inside a single binary.
     pub fn invoke_clone_control(&self) -> u64 {
         use crate::chunk::{AdaptiveBinaryState, InlineCacheEntry};
         let mut acc = 0u64;
-        for &slot in &self.slots {
-            let entry = self.chunk.inline_cache_entry(slot);
-            if let InlineCacheEntry::AdaptiveBinary { state, .. } = entry {
+        for &slot in &self.cache.slots {
+            let entry = self.cache.hash_entry(slot);
+            if let Some(InlineCacheEntry::AdaptiveBinary { state, .. }) = entry {
                 let hits = match state {
                     AdaptiveBinaryState::Specialized { hits, .. } => hits,
                     AdaptiveBinaryState::Warmup { hits, .. } => hits as u64,
@@ -190,13 +232,11 @@ pub const METHOD_CACHE_READ_COUNTS: [usize; 4] = [8, 32, 128, 512];
 
 /// Microbench fixture for the method inline-cache read path.
 ///
-/// `Chunk::inline_cache_entry` (the pre-optimization path) clones the
-/// wrapping `InlineCacheEntry` enum on every dispatch — a 32-48B memcpy
-/// that the variant-checking `let-else` in `try_cached_method`
-/// destructures and throws away. `Chunk::peek_method_cache` (the new
-/// path) returns just the `(name_idx, argc, target)` triple by value
-/// (all three are `Copy` — `u16`, `usize`, `MethodCacheTarget`), so the
-/// read is a single scalar move out of the cache instead of a clone.
+/// The control path performs the old per-dispatch hash lookup and clones the
+/// wrapping `InlineCacheEntry` enum — a 32-48B memcpy that the variant-checking
+/// `let-else` in `try_cached_method` destructures and throws away. The
+/// production path uses the frame-local cache-set index and returns just the
+/// `(name_idx, argc, target)` triple by value (all three are `Copy`).
 ///
 /// The fixture pre-warms every slot to a `Method` entry (the steady
 /// state of a hot pipeline like `xs.contains(...).filter(...).count()`)
@@ -204,9 +244,7 @@ pub const METHOD_CACHE_READ_COUNTS: [usize; 4] = [8, 32, 128, 512];
 /// transitions. The accumulator sums the cached `argc` so the optimizer
 /// cannot dead-code the loop.
 pub struct MethodCacheReadFixture {
-    chunk: Chunk,
-    offsets: Vec<usize>,
-    slots: Vec<usize>,
+    cache: VmInlineCacheReadFixture,
 }
 
 impl MethodCacheReadFixture {
@@ -223,53 +261,52 @@ impl MethodCacheReadFixture {
             let slot = chunk
                 .inline_cache_slot(offset)
                 .expect("Op::MethodCall registers an inline-cache slot at emit time");
+            slots.push(slot);
+        }
+        let cache = VmInlineCacheReadFixture::new(&chunk, slots, |_slot| {
             // Pre-warm to a Method entry with `ListContains` — a 1-arg
             // method-call shape that flows through every method-call
             // dispatcher (`execute_method_call`, `execute_method_call_sync`,
             // `execute_method_call_spread`).
-            chunk.set_inline_cache_entry(
-                slot,
-                InlineCacheEntry::Method {
-                    name_idx: 0,
-                    argc: 1,
-                    target: MethodCacheTarget::ListContains,
-                },
-            );
-            slots.push(slot);
-        }
-        Self {
-            chunk,
-            offsets,
-            slots,
-        }
+            InlineCacheEntry::Method {
+                name_idx: 0,
+                argc: 1,
+                target: MethodCacheTarget::ListContains,
+            }
+        });
+        Self { cache }
     }
 
     pub fn op_count(&self) -> usize {
-        self.offsets.len()
+        self.cache.op_count()
     }
 
-    /// Sweep all slots via the new Copy peek path. Returns the sum of
-    /// observed `argc` values so the optimizer cannot dead-code the
-    /// loop.
+    /// Sweep all slots via the production frame-indexed peek path. Returns
+    /// the sum of observed `argc` values so the optimizer cannot dead-code
+    /// the loop.
     pub fn invoke_peek(&self) -> usize {
         let mut acc = 0usize;
-        for &slot in &self.slots {
-            if let Some((_name_idx, argc, _target)) = self.chunk.peek_method_cache(slot) {
+        for &slot in &self.cache.slots {
+            if let Some((_name_idx, argc, _target)) = self
+                .cache
+                .vm
+                .peek_method_cache_by_index(self.cache.cache_set, slot)
+            {
                 acc = acc.wrapping_add(argc);
             }
         }
         acc
     }
 
-    /// Control sweep using the pre-optimization `inline_cache_entry`
-    /// clone path. Same accumulator shape so the criterion bench can
+    /// Control sweep using the pre-optimization per-dispatch hash lookup plus
+    /// full `InlineCacheEntry` clone. Same accumulator shape so Criterion can
     /// A/B the two paths inside a single binary.
     pub fn invoke_clone_control(&self) -> usize {
         use crate::chunk::InlineCacheEntry;
         let mut acc = 0usize;
-        for &slot in &self.slots {
-            let entry = self.chunk.inline_cache_entry(slot);
-            if let InlineCacheEntry::Method { argc, .. } = entry {
+        for &slot in &self.cache.slots {
+            let entry = self.cache.hash_entry(slot);
+            if let Some(InlineCacheEntry::Method { argc, .. }) = entry {
                 acc = acc.wrapping_add(argc);
             }
         }
@@ -284,23 +321,18 @@ pub const PROPERTY_CACHE_READ_COUNTS: [usize; 4] = [8, 32, 128, 512];
 
 /// Microbench fixture for the property inline-cache read path.
 ///
-/// `Chunk::inline_cache_entry` (the pre-optimization path) clones the
-/// wrapping `InlineCacheEntry` enum on every dispatch — a 32-48B memcpy
-/// (the wrapping enum is padded to the largest variant, `DirectCall`)
-/// that the variant-checking `let-else` in `try_cached_property`
-/// destructures and throws away. `Chunk::peek_property_cache` (the new
-/// path) returns just the `Property` payload (`u16 + PropertyCacheTarget`),
-/// skipping the outer enum tag init and the padding-to-largest-variant
-/// memcpy. The accumulator sums the cached `name_idx` so the optimizer
-/// cannot dead-code the loop.
+/// The control path performs the old per-dispatch hash lookup and clones the
+/// wrapping `InlineCacheEntry` enum — a 32-48B memcpy (the wrapping enum is
+/// padded to the largest variant, `DirectCall`) that the variant-checking
+/// `let-else` in `try_cached_property` destructures and throws away. The
+/// production path uses the frame-local cache-set index and returns just the
+/// `Property` payload (`u16 + PropertyCacheTarget`).
 ///
 /// The fixture pre-warms every slot to a unit `PropertyCacheTarget`
 /// (`ListCount`) — the hottest steady state for any property-access
 /// pipeline (`.count` on collections, `.first` / `.last`, etc.).
 pub struct PropertyCacheReadFixture {
-    chunk: Chunk,
-    offsets: Vec<usize>,
-    slots: Vec<usize>,
+    cache: VmInlineCacheReadFixture,
 }
 
 impl PropertyCacheReadFixture {
@@ -317,48 +349,46 @@ impl PropertyCacheReadFixture {
             let slot = chunk
                 .inline_cache_slot(offset)
                 .expect("Op::GetProperty registers an inline-cache slot at emit time");
-            chunk.set_inline_cache_entry(
-                slot,
-                InlineCacheEntry::Property {
-                    name_idx: 7,
-                    target: PropertyCacheTarget::ListCount,
-                },
-            );
             slots.push(slot);
         }
-        Self {
-            chunk,
-            offsets,
-            slots,
-        }
+        let cache =
+            VmInlineCacheReadFixture::new(&chunk, slots, |_slot| InlineCacheEntry::Property {
+                name_idx: 7,
+                target: PropertyCacheTarget::ListCount,
+            });
+        Self { cache }
     }
 
     pub fn op_count(&self) -> usize {
-        self.offsets.len()
+        self.cache.op_count()
     }
 
-    /// Sweep all slots via the new peek path. Returns the sum of
-    /// observed `name_idx` values so the optimizer cannot dead-code
+    /// Sweep all slots via the production frame-indexed peek path. Returns
+    /// the sum of observed `name_idx` values so the optimizer cannot dead-code
     /// the loop.
     pub fn invoke_peek(&self) -> usize {
         let mut acc = 0usize;
-        for &slot in &self.slots {
-            if let Some((name_idx, _target)) = self.chunk.peek_property_cache(slot) {
+        for &slot in &self.cache.slots {
+            if let Some((name_idx, _target)) = self
+                .cache
+                .vm
+                .peek_property_cache_by_index(self.cache.cache_set, slot)
+            {
                 acc = acc.wrapping_add(name_idx as usize);
             }
         }
         acc
     }
 
-    /// Control sweep using the pre-optimization `inline_cache_entry`
-    /// clone path. Same accumulator shape so the criterion bench can
+    /// Control sweep using the pre-optimization per-dispatch hash lookup plus
+    /// full `InlineCacheEntry` clone. Same accumulator shape so Criterion can
     /// A/B the two paths inside a single binary.
     pub fn invoke_clone_control(&self) -> usize {
         use crate::chunk::InlineCacheEntry;
         let mut acc = 0usize;
-        for &slot in &self.slots {
-            let entry = self.chunk.inline_cache_entry(slot);
-            if let InlineCacheEntry::Property { name_idx, .. } = entry {
+        for &slot in &self.cache.slots {
+            let entry = self.cache.hash_entry(slot);
+            if let Some(InlineCacheEntry::Property { name_idx, .. }) = entry {
                 acc = acc.wrapping_add(name_idx as usize);
             }
         }
@@ -374,19 +404,17 @@ pub const DIRECT_CALL_STATE_READ_COUNTS: [usize; 4] = [8, 32, 128, 512];
 
 /// Microbench fixture for the direct-call inline-cache read path.
 ///
-/// `Chunk::inline_cache_entry` clones the wrapping
-/// `InlineCacheEntry::DirectCall { state: DirectCallState }` on every
-/// dispatch. `Chunk::peek_direct_call_state` returns just the inner
-/// `DirectCallState`, avoiding the outer enum copy and variant check in
+/// The control path performs the old per-dispatch hash lookup and clones the
+/// wrapping `InlineCacheEntry::DirectCall { state: DirectCallState }`. The
+/// production path uses the frame-local cache-set index and returns just the
+/// inner `DirectCallState`, avoiding the outer enum copy and variant check in
 /// `try_cached_direct_call`.
 ///
 /// Pre-warms every slot to `Specialized { argc: 1, hits: 1000, misses: 0,
 /// target: Arc<VmClosure> }`, the steady state of any hot
 /// `x.map(predicate)`-style direct-call call site.
 pub struct DirectCallStateReadFixture {
-    chunk: Chunk,
-    offsets: Vec<usize>,
-    slots: Vec<usize>,
+    cache: VmInlineCacheReadFixture,
 }
 
 impl DirectCallStateReadFixture {
@@ -404,39 +432,35 @@ impl DirectCallStateReadFixture {
             let slot = chunk
                 .inline_cache_slot(offset)
                 .expect("Op::Call registers an inline-cache slot at emit time");
-            chunk.set_inline_cache_entry(
-                slot,
-                InlineCacheEntry::DirectCall {
-                    state: DirectCallState::Specialized {
-                        argc: 1,
-                        target: DirectCallTarget::Closure(Arc::clone(&target_closure)),
-                        hits: 1_000,
-                        misses: 0,
-                    },
-                },
-            );
             slots.push(slot);
         }
-        Self {
-            chunk,
-            offsets,
-            slots,
-        }
+        let cache =
+            VmInlineCacheReadFixture::new(&chunk, slots, |_slot| InlineCacheEntry::DirectCall {
+                state: DirectCallState::Specialized {
+                    argc: 1,
+                    target: DirectCallTarget::Closure(Arc::clone(&target_closure)),
+                    hits: 1_000,
+                    misses: 0,
+                },
+            });
+        Self { cache }
     }
 
     pub fn op_count(&self) -> usize {
-        self.offsets.len()
+        self.cache.op_count()
     }
 
-    /// Sweep all slots via the new peek path. Returns the sum of
-    /// observed `argc` values so the optimizer cannot dead-code the
-    /// loop.
+    /// Sweep all slots via the production frame-indexed peek path. Returns
+    /// the sum of observed `argc` values so the optimizer cannot dead-code
+    /// the loop.
     pub fn invoke_peek(&self) -> usize {
         use crate::chunk::DirectCallState;
         let mut acc = 0usize;
-        for &slot in &self.slots {
-            if let Some(DirectCallState::Specialized { argc, .. }) =
-                self.chunk.peek_direct_call_state(slot)
+        for &slot in &self.cache.slots {
+            if let Some(DirectCallState::Specialized { argc, .. }) = self
+                .cache
+                .vm
+                .peek_direct_call_state_by_index(self.cache.cache_set, slot)
             {
                 acc = acc.wrapping_add(argc);
             }
@@ -444,16 +468,16 @@ impl DirectCallStateReadFixture {
         acc
     }
 
-    /// Control sweep using the full `inline_cache_entry` clone path. Same
-    /// accumulator shape.
+    /// Control sweep using the pre-optimization per-dispatch hash lookup plus
+    /// full `InlineCacheEntry` clone. Same accumulator shape.
     pub fn invoke_clone_control(&self) -> usize {
         use crate::chunk::{DirectCallState, InlineCacheEntry};
         let mut acc = 0usize;
-        for &slot in &self.slots {
-            let entry = self.chunk.inline_cache_entry(slot);
-            if let InlineCacheEntry::DirectCall {
+        for &slot in &self.cache.slots {
+            let entry = self.cache.hash_entry(slot);
+            if let Some(InlineCacheEntry::DirectCall {
                 state: DirectCallState::Specialized { argc, .. },
-            } = entry
+            }) = entry
             {
                 acc = acc.wrapping_add(argc);
             }
