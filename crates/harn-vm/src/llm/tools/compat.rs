@@ -82,7 +82,7 @@ pub(crate) fn normalize_tool_call_shape(
         return resolve_semantic_alias(recovered, inner_arguments);
     }
 
-    if is_marker_wrapper {
+    if is_marker_wrapper || is_generic_wrapper_name(&normalized_name) {
         if let Some(inferred_name) = infer_tool_name_from_arguments(&arguments) {
             return (inferred_name, arguments);
         }
@@ -234,7 +234,7 @@ fn remap_edit_action_args(verb: &str, arguments: serde_json::Value) -> serde_jso
 fn is_generic_wrapper_name(name: &str) -> bool {
     matches!(
         name,
-        "tool" | "tool.call" | "tool.exec" | "function" | "function.call" | "call"
+        "tool" | "tool.call" | "tool.exec" | "tool_call" | "function" | "function.call" | "call"
     )
 }
 
@@ -245,6 +245,19 @@ fn is_harmony_marker_wrapper_name(name: &str) -> bool {
 
 fn infer_tool_name_from_arguments(arguments: &serde_json::Value) -> Option<String> {
     let object = arguments.as_object()?;
+    let intent = object
+        .get("intent")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .map(str::to_ascii_lowercase);
+    match intent.as_deref() {
+        Some("read" | "open" | "look" | "view" | "list" | "ls") => {
+            return Some("look".to_string());
+        }
+        Some("search" | "grep" | "find") => return Some("search".to_string()),
+        _ => {}
+    }
+
     let has_command_shape = object
         .get("command")
         .or_else(|| object.get("commands"))
@@ -320,8 +333,28 @@ mod tests {
     }
 
     #[test]
-    fn preserves_unrecognized_harmony_marker_wrapper_shape() {
+    fn infers_look_from_harmony_marker_wrapper_read_intent() {
         let arguments = serde_json::json!({"intent": "read", "file": "src/lib.rs"});
+        let (name, normalized_arguments) =
+            normalize_tool_call_shape("<|constrain|>json", arguments.clone());
+
+        assert_eq!(name, "look");
+        assert_eq!(normalized_arguments, arguments);
+    }
+
+    #[test]
+    fn infers_search_from_tool_call_wrapper_search_intent() {
+        let arguments = serde_json::json!({"intent": "search", "path": "src", "query": "fn parse"});
+        let (name, normalized_arguments) =
+            normalize_tool_call_shape("tool_call", arguments.clone());
+
+        assert_eq!(name, "search");
+        assert_eq!(normalized_arguments, arguments);
+    }
+
+    #[test]
+    fn preserves_unrecognized_harmony_marker_wrapper_shape() {
+        let arguments = serde_json::json!({"intent": "summarize", "file": "src/lib.rs"});
         let (name, normalized_arguments) =
             normalize_tool_call_shape("<|constrain|>json", arguments.clone());
 
