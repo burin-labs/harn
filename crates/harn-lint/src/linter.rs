@@ -1536,20 +1536,7 @@ impl<'a> Linter<'a> {
             }
         }
 
-        if self.scopes.len() > 1 {
-            let outer = &self.scopes[..self.scopes.len() - 1];
-            if outer.iter().any(|s| s.contains(name)) {
-                self.diagnostics.push(LintDiagnostic {
-                    code: Code::LintShadowVariable,
-                    rule: "shadow-variable".into(),
-                    message: format!("variable `{name}` shadows a variable in an outer scope"),
-                    span,
-                    severity: LintSeverity::Warning,
-                    suggestion: Some(format!("consider renaming to avoid shadowing `{name}`")),
-                    fix: None,
-                });
-            }
-        }
+        self.warn_if_shadows_outer_scope(name, span);
 
         if let Some(scope) = self.scopes.last_mut() {
             scope.insert(name.to_string());
@@ -1570,20 +1557,7 @@ impl<'a> Linter<'a> {
             return;
         }
 
-        if self.scopes.len() > 1 {
-            let outer = &self.scopes[..self.scopes.len() - 1];
-            if outer.iter().any(|s| s.contains(name)) {
-                self.diagnostics.push(LintDiagnostic {
-                    code: Code::LintShadowVariable,
-                    rule: "shadow-variable".into(),
-                    message: format!("variable `{name}` shadows a variable in an outer scope"),
-                    span,
-                    severity: LintSeverity::Warning,
-                    suggestion: Some(format!("consider renaming to avoid shadowing `{name}`")),
-                    fix: None,
-                });
-            }
-        }
+        self.warn_if_shadows_outer_scope(name, span);
 
         if let Some(scope) = self.scopes.last_mut() {
             scope.insert(name.to_string());
@@ -1593,6 +1567,27 @@ impl<'a> Linter<'a> {
             name: name.to_string(),
             span,
         });
+    }
+
+    /// Emit a `shadow-variable` warning when `name` is already bound in any
+    /// enclosing (non-current) scope. Shared by variable and parameter
+    /// declaration so the two stay in lockstep.
+    fn warn_if_shadows_outer_scope(&mut self, name: &str, span: Span) {
+        if self.scopes.len() <= 1 {
+            return;
+        }
+        let outer = &self.scopes[..self.scopes.len() - 1];
+        if outer.iter().any(|s| s.contains(name)) {
+            self.diagnostics.push(LintDiagnostic {
+                code: Code::LintShadowVariable,
+                rule: "shadow-variable".into(),
+                message: format!("variable `{name}` shadows a variable in an outer scope"),
+                span,
+                severity: LintSeverity::Warning,
+                suggestion: Some(format!("consider renaming to avoid shadowing `{name}`")),
+                fix: None,
+            });
+        }
     }
 
     pub(crate) fn lint_program(&mut self, nodes: &[SNode]) {

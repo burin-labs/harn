@@ -133,7 +133,7 @@ fn action_has_nondeterministic_side_effect(action: &CrystallizationAction) -> bo
     {
         return true;
     }
-    if action.deterministic == Some(false) && action.fuzzy.unwrap_or(false) {
+    if action.deterministic == Some(false) || action.fuzzy.unwrap_or(false) {
         return true;
     }
     action.side_effects.iter().any(|effect| {
@@ -620,5 +620,49 @@ fn artifact_type_for_side_effect(effect: &CrystallizationSideEffect) -> String {
         lower_kind
     } else {
         "unknown".to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn action_with_side_effect(
+        deterministic: Option<bool>,
+        fuzzy: Option<bool>,
+    ) -> CrystallizationAction {
+        CrystallizationAction {
+            id: "a1".to_string(),
+            kind: "tool_call".to_string(),
+            side_effects: vec![CrystallizationSideEffect {
+                kind: "fs_write".to_string(),
+                target: "/tmp/out".to_string(),
+                ..CrystallizationSideEffect::default()
+            }],
+            deterministic,
+            fuzzy,
+            ..CrystallizationAction::default()
+        }
+    }
+
+    #[test]
+    fn explicitly_nondeterministic_action_is_flagged_even_when_not_fuzzy() {
+        // Rejected tool calls and human-approval steps are emitted with
+        // `deterministic: Some(false), fuzzy: Some(false)`; carrying a side
+        // effect they must still be treated as nondeterministic.
+        let action = action_with_side_effect(Some(false), Some(false));
+        assert!(action_has_nondeterministic_side_effect(&action));
+    }
+
+    #[test]
+    fn fuzzy_action_is_flagged_even_when_determinism_unset() {
+        let action = action_with_side_effect(None, Some(true));
+        assert!(action_has_nondeterministic_side_effect(&action));
+    }
+
+    #[test]
+    fn deterministic_non_fuzzy_action_is_not_flagged() {
+        let action = action_with_side_effect(Some(true), Some(false));
+        assert!(!action_has_nondeterministic_side_effect(&action));
     }
 }

@@ -330,7 +330,7 @@ pub(crate) fn compile_or_load_chunk_with_timing(
     // single-line warning when explicitly requested via the audit hook;
     // otherwise stay quiet to avoid bloating happy-path output.
     if let Err(err) = harn_vm::bytecode_cache::store(&lookup.key, &chunk) {
-        if std::env::var_os("HARN_BYTECODE_CACHE_DEBUG").is_some() {
+        if std::env::var_os(crate::dispatch::CACHE_DEBUG_ENV).is_some() {
             eprintln!("[harn] bytecode cache write skipped: {err}");
         }
     }

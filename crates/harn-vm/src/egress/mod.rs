@@ -1145,13 +1145,7 @@ impl EgressRule {
         match &self.matcher {
             EgressMatcher::Host(host) => target.host == *host,
             EgressMatcher::Suffix(suffix) => {
-                target.host.len() > suffix.len()
-                    && target.host.ends_with(suffix)
-                    && target
-                        .host
-                        .as_bytes()
-                        .get(target.host.len() - suffix.len() - 1)
-                        == Some(&b'.')
+                crate::harness_net::host_has_dns_suffix(&target.host, suffix)
             }
             EgressMatcher::Ip(ip) => target.ip == Some(*ip),
             EgressMatcher::Cidr(net) => target.ip.is_some_and(|ip| net.contains(&ip)),
