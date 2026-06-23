@@ -885,14 +885,9 @@ fn latency_stats(values: impl IntoIterator<Item = u64>) -> LatencyStats {
     }
     values.sort_unstable();
     LatencyStats {
-        p50_ms: percentile(&values, 0.50),
-        p99_ms: percentile(&values, 0.99),
+        p50_ms: super::nearest_rank_percentile(&values, 0.50).unwrap_or(0),
+        p99_ms: super::nearest_rank_percentile(&values, 0.99).unwrap_or(0),
     }
-}
-
-fn percentile(sorted: &[u64], percentile: f64) -> u64 {
-    let rank = ((sorted.len() as f64 * percentile).ceil() as usize).saturating_sub(1);
-    sorted[rank.min(sorted.len() - 1)]
 }
 
 fn write_outputs(

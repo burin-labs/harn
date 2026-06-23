@@ -597,8 +597,14 @@ fn build_trigger_stats(trigger_id: String, mut acc: TriggerAccumulator) -> Trigg
                 dispatch_failures: handler_acc.dispatch_failures,
                 dlq_count: handler_acc.dlq_count,
                 dlq_rate: ratio(handler_acc.dlq_count, handler_acc.attempts),
-                median_duration_ms: percentile(&handler_acc.durations_ms, 0.50),
-                p99_duration_ms: percentile(&handler_acc.durations_ms, 0.99),
+                median_duration_ms: crate::commands::nearest_rank_percentile(
+                    &handler_acc.durations_ms,
+                    0.50,
+                ),
+                p99_duration_ms: crate::commands::nearest_rank_percentile(
+                    &handler_acc.durations_ms,
+                    0.99,
+                ),
             }
         })
         .collect();
@@ -616,8 +622,14 @@ fn build_trigger_stats(trigger_id: String, mut acc: TriggerAccumulator) -> Trigg
         predicate_misses: acc.predicate_misses,
         predicate_miss_rate: ratio(acc.predicate_misses, acc.predicate_evaluations),
         handler_attempts: acc.handler_attempts,
-        median_handler_duration_ms: percentile(&acc.handler_durations_ms, 0.50),
-        p99_handler_duration_ms: percentile(&acc.handler_durations_ms, 0.99),
+        median_handler_duration_ms: crate::commands::nearest_rank_percentile(
+            &acc.handler_durations_ms,
+            0.50,
+        ),
+        p99_handler_duration_ms: crate::commands::nearest_rank_percentile(
+            &acc.handler_durations_ms,
+            0.99,
+        ),
         llm_call_count: acc.llm_call_count,
         input_tokens: acc.input_tokens,
         output_tokens: acc.output_tokens,
@@ -697,16 +709,6 @@ fn attempt_duration_ms(
     let completed = OffsetDateTime::parse(&attempt.completed_at, &Rfc3339).ok()?;
     let delta = completed - started;
     u64::try_from(delta.whole_milliseconds()).ok()
-}
-
-fn percentile(sorted: &[u64], percentile: f64) -> Option<u64> {
-    if sorted.is_empty() {
-        return None;
-    }
-    let rank = ((sorted.len() as f64 * percentile).ceil() as usize)
-        .saturating_sub(1)
-        .min(sorted.len() - 1);
-    sorted.get(rank).copied()
 }
 
 fn ratio(numerator: u64, denominator: u64) -> f64 {

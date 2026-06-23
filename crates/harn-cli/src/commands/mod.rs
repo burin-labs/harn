@@ -87,6 +87,19 @@ use std::path::{Path, PathBuf};
 
 use ignore::WalkBuilder;
 
+/// Nearest-rank percentile over a pre-sorted slice. `quantile` is clamped to
+/// `[0, 1]`; returns `None` for an empty slice. Shared by the latency
+/// summaries in the eval and orchestrator stats commands.
+pub(crate) fn nearest_rank_percentile(sorted: &[u64], quantile: f64) -> Option<u64> {
+    if sorted.is_empty() {
+        return None;
+    }
+    let rank = ((sorted.len() as f64 * quantile.clamp(0.0, 1.0)).ceil() as usize)
+        .saturating_sub(1)
+        .min(sorted.len() - 1);
+    sorted.get(rank).copied()
+}
+
 const GENERATED_SOURCE_WALK_DIRS: &[&str] = &[
     ".burin",
     ".build",
@@ -252,5 +265,22 @@ pub(crate) fn collect_harn_files(dir: &Path, out: &mut Vec<PathBuf>) {
                 out.push(path);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::nearest_rank_percentile;
+
+    #[test]
+    fn percentile_handles_empty_and_bounds() {
+        assert_eq!(nearest_rank_percentile(&[], 0.5), None);
+        let data = [10u64, 20, 30, 40, 50];
+        assert_eq!(nearest_rank_percentile(&data, 0.0), Some(10));
+        assert_eq!(nearest_rank_percentile(&data, 0.5), Some(30));
+        assert_eq!(nearest_rank_percentile(&data, 1.0), Some(50));
+        // Out-of-range quantiles clamp instead of panicking.
+        assert_eq!(nearest_rank_percentile(&data, 2.0), Some(50));
+        assert_eq!(nearest_rank_percentile(&[7u64], 0.99), Some(7));
     }
 }

@@ -256,19 +256,21 @@ impl NetPolicyRule {
         }
         match &self.matcher {
             NetMatcher::Host(host) => target.host == *host,
-            NetMatcher::Suffix(suffix) => {
-                target.host.len() > suffix.len()
-                    && target.host.ends_with(suffix)
-                    && target
-                        .host
-                        .as_bytes()
-                        .get(target.host.len() - suffix.len() - 1)
-                        == Some(&b'.')
-            }
+            NetMatcher::Suffix(suffix) => host_has_dns_suffix(&target.host, suffix),
             NetMatcher::Ip(ip) => target.ip == Some(*ip),
             NetMatcher::Cidr(net) => target.ip.is_some_and(|ip| net.contains(&ip)),
         }
     }
+}
+
+/// True when `host` is a strict dot-delimited subdomain of `suffix`
+/// (e.g. `api.example.com` matches suffix `example.com`, but `notexample.com`
+/// and a bare `example.com` do not). Shared by the harness and egress
+/// suffix matchers so the boundary rule stays identical.
+pub(crate) fn host_has_dns_suffix(host: &str, suffix: &str) -> bool {
+    host.len() > suffix.len()
+        && host.ends_with(suffix)
+        && host.as_bytes().get(host.len() - suffix.len() - 1) == Some(&b'.')
 }
 
 impl NetPolicy {
