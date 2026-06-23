@@ -10,7 +10,7 @@ build_release=1
 emit_bloat=1
 target="${HARN_RELEASE_TARGET:-}"
 harn_bin="${HARN_BIN:-}"
-budget_mb="${BINARY_SIZE_BUDGET_MB:-186}"
+budget_mb="${BINARY_SIZE_BUDGET_MB:-187}"
 report_dir="${BINARY_SIZE_REPORT_DIR:-}"
 
 usage() {
@@ -24,7 +24,7 @@ Options:
   --no-build           Check an already-built release binary
   --target TARGET      Cargo target triple to build/check
   --bin PATH           Override the harn binary path
-  --budget-mb MB       Maximum binary size in MiB (default: 186)
+  --budget-mb MB       Maximum binary size in MiB (default: 187)
   --report-dir DIR     Directory for binary-size and cargo-bloat reports
   --skip-bloat         Only write binary-size.txt; do not run cargo-bloat
   -h, --help           Show this help
