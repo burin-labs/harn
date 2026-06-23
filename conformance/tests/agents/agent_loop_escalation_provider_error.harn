@@ -1,0 +1,158 @@
+// C13: a smart-escalation turn whose escalated provider fails fast
+// (pre-dispatch `provider_error`) must NOT silently break the loop and let a
+// stale cheap-model turn masquerade as success. The non-tracked provider-error
+// branch (no `consecutive_failures` budget configured) must:
+//   (a) EMIT an observable `iteration_end` provider_error event carrying the
+//       failed provider/model/status — never an invisible `break`;
+//   (b) NOT terminate as a fake success;
+//   (c) DEGRADE the failed escalation back to the PRIMARY provider for one more
+//       turn (primary-retry fallback) so the run continues with the cheap model
+//       instead of dying.
+//
+// A second case pins the regression guard: a plain primary provider_error with
+// NO escalation in effect still surfaces an event and stops with provider_error
+// (no spurious retry), so normal handling is preserved.
+import { agent_capture_events } from "std/agent/events"
+
+fn first_event(events, event_type) {
+  for event in events {
+    if event.type == event_type {
+      return event
+    }
+  }
+  return nil
+}
+
+fn count_events(events, event_type) {
+  var n = 0
+  for event in events {
+    if event.type == event_type {
+      n = n + 1
+    }
+  }
+  return n
+}
+
+// ---------------------------------------------------------------------------
+// Case 1: failed escalation degrades to the primary provider.
+// ---------------------------------------------------------------------------
+fn escalation_fallback_case() {
+  // Records the provider seen on every LLM call, in order, so we can prove the
+  // escalated call fired then the loop retried the PRIMARY provider.
+  let seen = shared_cell({scope: "task_group", key: "esc-providers", initial: ""})
+  let turn = shared_cell({scope: "task_group", key: "esc-turn", initial: 0})
+
+  let caller = { call ->
+    let provider = to_string(call?.opts?.provider ?? "")
+    let snap = shared_snapshot(seen)
+    shared_set(seen, snap.value + provider + ",")
+    if provider == "escalated" {
+      // Fast pre-dispatch escalation failure — the C13 trigger.
+      return {
+        ok: false,
+        status: "provider_error",
+        stop_reason: "provider_error",
+        error: {status: 503, message: "escalated provider unavailable", provider: "escalated", model: "frontier"},
+      }
+    }
+    // Primary (cheap) provider. The first primary turn produces ordinary text
+    // (no completion). After the escalation has failed and we have retried the
+    // primary, complete the run so the loop terminates deterministically.
+    let count = shared_snapshot(turn)
+    if count.value >= 2 {
+      return {ok: true, value: {text: "wrapping up DONE", tool_calls: [], provider: "mock", model: "cheap"}}
+    }
+    return {ok: true, value: {text: "still working on it", tool_calls: [], provider: "mock", model: "cheap"}}
+  }
+
+  // Escalate exactly once: after the FIRST turn, switch the provider to the
+  // escalation target. Subsequent turns leave the provider as-is, so the
+  // primary-retry fallback is not re-escalated.
+  let post_turn = { _payload ->
+    let count = shared_snapshot(turn)
+    shared_set(turn, count.value + 1)
+    if count.value == 0 {
+      return {next_options: {provider: "escalated", model: "frontier"}}
+    }
+    return nil
+  }
+
+  let session = "esc-fallback-" + uuid()
+  let captured = agent_capture_events(
+    session,
+    fn() { return agent_loop(
+      "do the task",
+      nil,
+      {
+        session_id: session,
+        provider: "mock",
+        model: "cheap",
+        llm_caller: caller,
+        post_turn_callback: post_turn,
+        loop_until_done: true,
+        done_sentinel: "DONE",
+        max_iterations: 6,
+      },
+    ) },
+  )
+
+  // (a) An observable provider_error iteration_end event was emitted carrying
+  //     the failed escalated provider/model/status — not a silent break.
+  let perr = first_event(captured.events, "iteration_end")
+  __io_println("esc_event_present=" + to_string(perr != nil))
+  __io_println("esc_event_skip_reason=" + to_string(perr?.iteration_info?.skip_reason ?? ""))
+  __io_println("esc_event_provider=" + to_string(perr?.iteration_info?.provider ?? ""))
+  __io_println("esc_event_model=" + to_string(perr?.iteration_info?.model ?? ""))
+  __io_println("esc_event_status=" + to_string(perr?.iteration_info?.provider_status ?? ""))
+  __io_println("esc_event_fallback=" + to_string(perr?.iteration_info?.escalation_fallback ?? false))
+
+  // (c) The provider call sequence proves: primary -> escalated (failed) ->
+  //     primary again (the fallback retry) -> primary (completion).
+  __io_println("esc_providers=" + shared_get(seen))
+
+  // (b) The run did NOT terminate as a fake success on the failed escalation:
+  //     it converged via the primary fallback to a real "done".
+  __io_println("esc_status=" + captured.result.status)
+}
+
+// ---------------------------------------------------------------------------
+// Case 2: regression guard — a plain primary provider_error (no escalation)
+// still surfaces an event and stops, with no spurious primary-retry.
+// ---------------------------------------------------------------------------
+fn primary_provider_error_case() {
+  let caller = { _call -> return {
+    ok: false,
+    status: "provider_error",
+    stop_reason: "provider_error",
+    error: {status: 500, message: "primary down", provider: "mock", model: "cheap"},
+  } }
+  let session = "esc-primary-err-" + uuid()
+  let captured = agent_capture_events(
+    session,
+    fn() { return agent_loop(
+      "do the task",
+      nil,
+      {
+        session_id: session,
+        provider: "mock",
+        model: "cheap",
+        llm_caller: caller,
+        loop_until_done: true,
+        done_sentinel: "DONE",
+        max_iterations: 6,
+      },
+    ) },
+  )
+  let perr = first_event(captured.events, "iteration_end")
+  __io_println("primary_event_present=" + to_string(perr != nil))
+  __io_println("primary_event_skip_reason=" + to_string(perr?.iteration_info?.skip_reason ?? ""))
+  __io_println("primary_event_fallback=" + to_string(perr?.iteration_info?.escalation_fallback ?? false))
+  // Exactly one failing turn — no escalation fallback means no spurious retry.
+  __io_println("primary_event_count=" + to_string(count_events(captured.events, "iteration_end")))
+  __io_println("primary_status=" + captured.result.status)
+}
+
+pipeline default() {
+  escalation_fallback_case()
+  primary_provider_error_case()
+}
