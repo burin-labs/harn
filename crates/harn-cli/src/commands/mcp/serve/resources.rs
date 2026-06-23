@@ -7,7 +7,7 @@ use harn_vm::event_log::{EventLog, LogEvent, Topic};
 
 use crate::commands::orchestrator::common::{
     load_local_runtime, read_topic, trigger_inspect_dlq, TRIGGER_ATTEMPTS_TOPIC, TRIGGER_DLQ_TOPIC,
-    TRIGGER_INBOX_ENVELOPES_TOPIC, TRIGGER_OUTBOX_TOPIC,
+    TRIGGER_INBOX_OBSERVABILITY_TOPIC, TRIGGER_OUTBOX_TOPIC,
 };
 
 use super::types::{
@@ -510,7 +510,7 @@ pub(super) fn topic_resource_uri(topic_name: &str) -> String {
 pub(super) fn topic_name_for_resource_uri(uri: &str) -> Option<&str> {
     let topic_name = uri.strip_prefix("harn://topic/")?;
     match topic_name {
-        "trigger.inbox" => Some(TRIGGER_INBOX_ENVELOPES_TOPIC),
+        "trigger.inbox" => Some(TRIGGER_INBOX_OBSERVABILITY_TOPIC),
         TRIGGER_OUTBOX_TOPIC => Some(TRIGGER_OUTBOX_TOPIC),
         value if is_agent_transcript_topic(value) => Some(value),
         _ => None,
@@ -519,7 +519,7 @@ pub(super) fn topic_name_for_resource_uri(uri: &str) -> Option<&str> {
 
 pub(super) fn resource_uris_for_topic(topic_name: &str) -> Vec<String> {
     match topic_name {
-        TRIGGER_INBOX_ENVELOPES_TOPIC => vec![topic_resource_uri("trigger.inbox")],
+        TRIGGER_INBOX_OBSERVABILITY_TOPIC => vec![topic_resource_uri("trigger.inbox")],
         TRIGGER_OUTBOX_TOPIC => vec![topic_resource_uri(TRIGGER_OUTBOX_TOPIC)],
         value if is_agent_transcript_topic(value) => vec![topic_resource_uri(value)],
         _ => Vec::new(),
@@ -529,7 +529,7 @@ pub(super) fn resource_uris_for_topic(topic_name: &str) -> Vec<String> {
 pub(super) fn is_static_subscribable_topic(topic_name: &str) -> bool {
     matches!(
         topic_name,
-        TRIGGER_INBOX_ENVELOPES_TOPIC | TRIGGER_OUTBOX_TOPIC
+        TRIGGER_INBOX_OBSERVABILITY_TOPIC | TRIGGER_OUTBOX_TOPIC
     )
 }
 
@@ -543,4 +543,28 @@ pub(super) fn resource_updated_notification(uri: &str) -> JsonValue {
         "method": "notifications/resources/updated",
         "params": { "uri": uri },
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trigger_inbox_resource_uses_redacted_observability_topic() {
+        assert_eq!(
+            topic_name_for_resource_uri("harn://topic/trigger.inbox"),
+            Some(TRIGGER_INBOX_OBSERVABILITY_TOPIC)
+        );
+        assert_eq!(
+            resource_uris_for_topic(TRIGGER_INBOX_OBSERVABILITY_TOPIC),
+            vec!["harn://topic/trigger.inbox".to_string()]
+        );
+        assert!(resource_uris_for_topic(harn_vm::TRIGGER_INBOX_ENVELOPES_TOPIC).is_empty());
+        assert!(is_static_subscribable_topic(
+            TRIGGER_INBOX_OBSERVABILITY_TOPIC
+        ));
+        assert!(!is_static_subscribable_topic(
+            harn_vm::TRIGGER_INBOX_ENVELOPES_TOPIC
+        ));
+    }
 }

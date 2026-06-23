@@ -19,6 +19,7 @@ use crate::event_log::{EventLog, LogEvent, Topic};
 use crate::llm::vm_value_to_json;
 use crate::orchestration::CapabilityPolicy;
 use crate::stdlib::register_vm_stdlib;
+#[cfg(test)]
 use crate::triggers::dispatcher::InboxEnvelope;
 use crate::triggers::test_util::clock;
 use crate::value::{ErrorCategory, VmClosure, VmError, VmValue};
@@ -1416,14 +1417,6 @@ async fn enqueue_poll_event(
     binding_id: &str,
     event: TriggerEvent,
 ) -> Result<(), ConnectorError> {
-    let topic = Topic::new(crate::triggers::TRIGGER_INBOX_ENVELOPES_TOPIC)
-        .expect("trigger inbox envelopes topic must be valid");
-    let payload = serde_json::to_value(InboxEnvelope {
-        trigger_id: Some(binding_id.to_string()),
-        binding_version: None,
-        event: event.clone(),
-    })
-    .map_err(ConnectorError::from)?;
     let headers = BTreeMap::from([
         ("event_id".to_string(), event.id.0.clone()),
         ("trace_id".to_string(), event.trace_id.0.clone()),
@@ -1431,14 +1424,17 @@ async fn enqueue_poll_event(
         ("kind".to_string(), event.kind.clone()),
         ("trigger_id".to_string(), binding_id.to_string()),
     ]);
-    ctx.event_log
-        .append(
-            &topic,
-            LogEvent::new("event_ingested", payload).with_headers(headers),
-        )
-        .await
-        .map(|_| ())
-        .map_err(ConnectorError::from)
+    crate::triggers::dispatcher::append_trigger_inbox_envelope(
+        ctx.event_log.as_ref(),
+        Some(binding_id.to_string()),
+        None,
+        &event,
+        headers,
+        crate::triggers::dispatcher::TriggerInboxTopicScope::Shared,
+    )
+    .await
+    .map(|_| ())
+    .map_err(|error| ConnectorError::HarnRuntime(error.to_string()))
 }
 
 async fn load_poll_state(
@@ -2292,6 +2288,20 @@ pub fn poll_tick(ctx) {
             }
             other => panic!("unexpected provider payload: {other:?}"),
         }
+
+        let observed = read_topic(&log, crate::triggers::TRIGGER_INBOX_OBSERVABILITY_TOPIC).await;
+        assert_eq!(observed.len(), 2);
+        assert_eq!(
+            observed[0].1.payload["trigger_id"],
+            serde_json::json!("poll-source")
+        );
+        assert_eq!(
+            observed[1].1.payload["event"]["tenant_id"],
+            serde_json::json!("tenant-a")
+        );
+        assert!(observed[1].1.payload["event"]
+            .get("provider_payload")
+            .is_none());
 
         let states = read_topic(&log, HARN_CONNECTOR_POLL_STATE_TOPIC).await;
         assert_eq!(states.len(), 2);
