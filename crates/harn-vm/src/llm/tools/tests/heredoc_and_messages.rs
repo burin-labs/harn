@@ -660,6 +660,44 @@ fn native_json_fallback_infers_run_from_harmony_marker_wrapper() {
 }
 
 #[test]
+fn native_json_fallback_infers_look_from_harmony_marker_wrapper_read_intent() {
+    let known: std::collections::BTreeSet<String> = ["look", "run", "search"]
+        .into_iter()
+        .map(String::from)
+        .collect();
+    let text =
+        r#"{"name":"<|constrain|>json","arguments":{"intent":"read","path":"src/main.zig"}}"#;
+    let (calls, errors) = parse_native_json_tool_calls(text, &known);
+    assert!(errors.is_empty(), "no errors expected: {errors:?}");
+    assert_eq!(
+        calls.len(),
+        1,
+        "marker wrapper read intent should parse: {calls:?}"
+    );
+    assert_eq!(calls[0]["name"], json!("look"));
+    assert_eq!(calls[0]["arguments"]["path"], json!("src/main.zig"));
+}
+
+#[test]
+fn native_json_fallback_infers_search_from_tool_call_wrapper_search_intent() {
+    let known: std::collections::BTreeSet<String> = ["look", "run", "search"]
+        .into_iter()
+        .map(String::from)
+        .collect();
+    let text =
+        r#"{"name":"tool_call","arguments":{"intent":"search","path":"src","query":"fn parse"}}"#;
+    let (calls, errors) = parse_native_json_tool_calls(text, &known);
+    assert!(errors.is_empty(), "no errors expected: {errors:?}");
+    assert_eq!(
+        calls.len(),
+        1,
+        "tool_call wrapper search intent should parse: {calls:?}"
+    );
+    assert_eq!(calls[0]["name"], json!("search"));
+    assert_eq!(calls[0]["arguments"]["query"], json!("fn parse"));
+}
+
+#[test]
 fn native_json_fallback_parses_flat_envelope_with_string_encoded_arguments() {
     // Regression: OpenAI's on-the-wire flat shape encodes `arguments` as a JSON
     // STRING (`{"name":"read","arguments":"{\"path\":\"a\"}"}`), which local
