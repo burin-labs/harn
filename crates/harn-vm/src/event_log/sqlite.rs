@@ -1,9 +1,12 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use bytes::Bytes;
 use futures::stream::BoxStream;
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
+
+use crate::runtime_sqlite::{configure_runtime_sqlite, DEFAULT_BUSY_TIMEOUT};
 
 use super::util::{
     event_id_to_sqlite_i64, now_ms, prepare_event_after, sqlite_i64_to_event_id,
@@ -24,27 +27,31 @@ pub struct SqliteEventLog {
 
 impl SqliteEventLog {
     pub fn open(path: PathBuf, queue_depth: usize) -> Result<Self, LogError> {
+        Self::open_inner(path, queue_depth, DEFAULT_BUSY_TIMEOUT)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn open_with_timeout(
+        path: PathBuf,
+        queue_depth: usize,
+        busy_timeout: Duration,
+    ) -> Result<Self, LogError> {
+        Self::open_inner(path, queue_depth, busy_timeout)
+    }
+
+    fn open_inner(
+        path: PathBuf,
+        queue_depth: usize,
+        busy_timeout: Duration,
+    ) -> Result<Self, LogError> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|error| LogError::Io(format!("event log mkdir error: {error}")))?;
         }
         let connection = Connection::open(&path)
             .map_err(|error| LogError::Sqlite(format!("event log open error: {error}")))?;
-        // Set busy_timeout BEFORE the WAL pragma so SQLite waits out transient
-        // SQLITE_BUSY from a previous test's connection that hasn't finished
-        // dropping yet (parallel `cargo test` on the same process, distinct
-        // paths, still contends on SQLite's own global mutex under WAL-mode
-        // promotion). Without this, `journal_mode = WAL` fails fast with
-        // "database is locked" instead of retrying.
-        connection
-            .busy_timeout(std::time::Duration::from_secs(5))
-            .map_err(|error| LogError::Sqlite(format!("event log busy-timeout error: {error}")))?;
-        connection
-            .pragma_update(None, "journal_mode", "WAL")
-            .map_err(|error| LogError::Sqlite(format!("event log WAL pragma error: {error}")))?;
-        connection
-            .pragma_update(None, "synchronous", "NORMAL")
-            .map_err(|error| LogError::Sqlite(format!("event log sync pragma error: {error}")))?;
+        configure_runtime_sqlite(&connection, busy_timeout)
+            .map_err(|error| LogError::Sqlite(format!("event log sqlite setup error: {error}")))?;
         connection
             .execute_batch(
                 "CREATE TABLE IF NOT EXISTS topic_heads (

@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 
 use rusqlite::{params, Connection, ErrorCode, TransactionBehavior};
 
+use crate::runtime_sqlite::{configure_runtime_sqlite, RuntimeSqliteError};
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::stdlib::options::{non_negative_millis_from_value, ErrorKind};
 use crate::stdlib::sandbox::{self, FsAccess};
@@ -287,23 +288,30 @@ where
 enum ReserveOnceError {
     Vm(VmError),
     Sqlite(rusqlite::Error),
+    RuntimeSqlite(RuntimeSqliteError),
 }
 
 impl ReserveOnceError {
     fn is_sqlite_busy_or_locked(&self) -> bool {
-        let Self::Sqlite(rusqlite::Error::SqliteFailure(error, _)) = self else {
-            return false;
-        };
-        matches!(
-            error.code,
-            ErrorCode::DatabaseBusy | ErrorCode::DatabaseLocked
-        )
+        match self {
+            Self::Sqlite(rusqlite::Error::SqliteFailure(error, _)) => {
+                matches!(
+                    error.code,
+                    ErrorCode::DatabaseBusy | ErrorCode::DatabaseLocked
+                )
+            }
+            Self::RuntimeSqlite(error) => error.is_busy_or_locked(),
+            Self::Vm(_) | Self::Sqlite(_) => false,
+        }
     }
 
     fn into_vm_error(self) -> VmError {
         match self {
             Self::Vm(error) => error,
             Self::Sqlite(error) => sql_error(error),
+            Self::RuntimeSqlite(error) => VmError::Runtime(format!(
+                "durable_rate_limit_acquire: sqlite setup error: {error}"
+            )),
         }
     }
 }
@@ -339,16 +347,8 @@ fn try_reserve_once_inner(
     }
 
     let mut conn = Connection::open(path)?;
-    // Set busy_timeout BEFORE the WAL pragma so the WAL-mode promotion waits
-    // out a transient SQLITE_BUSY from another session's writer instead of
-    // failing fast. WAL lets concurrent sessions sharing this project's
-    // rate-limit DB serialize on the write lock for at most busy_timeout
-    // rather than throwing "database is locked" up into the agent loop.
-    // Matches the proven event-log setup (crates/harn-vm/src/event_log/sqlite.rs).
-    conn.busy_timeout(Duration::from_millis(sqlite_busy_timeout_ms))
-        .map_err(ReserveOnceError::Sqlite)?;
-    conn.pragma_update(None, "journal_mode", "WAL")?;
-    conn.pragma_update(None, "synchronous", "NORMAL")?;
+    configure_runtime_sqlite(&conn, Duration::from_millis(sqlite_busy_timeout_ms))
+        .map_err(ReserveOnceError::RuntimeSqlite)?;
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS durable_rate_limit_entries (
             bucket_key TEXT NOT NULL,
