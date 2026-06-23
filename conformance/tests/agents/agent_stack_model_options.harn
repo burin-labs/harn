@@ -35,6 +35,19 @@ pipeline default() {
   )
   __io_println(sanitized.reasoning_effort == nil)
   __io_println(sanitized.cache_control == nil)
+  let healthcheck = agent_sanitize_model_options(
+    {
+      provider: "cerebras",
+      model: "gpt-oss-120b",
+      reasoning_effort: "low",
+      thinking: {type: "enabled"},
+      prompt_cache: true,
+    },
+    {mode: "healthcheck"},
+  )
+  __io_println(healthcheck.reasoning_effort == nil)
+  __io_println(healthcheck.thinking == nil)
+  __io_println(healthcheck.prompt_cache == nil)
   let policy = agent_stack_model_policy(
     {
       options: {

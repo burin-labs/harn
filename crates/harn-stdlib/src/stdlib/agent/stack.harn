@@ -191,9 +191,35 @@ fn __stack_capabilities(opts) {
   return unwrap(caps)
 }
 
-fn __stack_sanitize_result(options) {
+fn __stack_sanitize_mode(policy) {
+  let raw = __stack_non_empty_string(__stack_dict(policy)?.mode)
+  if raw == nil {
+    return "request"
+  }
+  return lowercase(raw)
+}
+
+fn __stack_strip_option_keys(options, stripped, keys) {
+  var out = options
+  var removed = stripped
+  for key in keys {
+    if __stack_has_key(out, key) {
+      out = out.remove(key)
+      removed = removed + [key]
+    }
+  }
+  return {options: out, stripped: removed}
+}
+
+fn __stack_sanitize_result(options, policy = nil) {
   var out = __stack_dict(options)
   var stripped = []
+  let mode = __stack_sanitize_mode(policy)
+  if mode == "healthcheck" || mode == "preflight" || mode == "probe" {
+    let deliberation = __stack_strip_option_keys(out, stripped, ["reasoning_effort", "thinking", "effort"])
+    out = deliberation.options
+    stripped = deliberation.stripped
+  }
   let caps = __stack_capabilities(out)
   if caps == nil {
     return {options: out, stripped: stripped}
@@ -203,12 +229,9 @@ fn __stack_sanitize_result(options) {
     stripped = stripped + ["reasoning_effort"]
   }
   if !(caps?.prompt_caching ?? false) {
-    for key in ["prompt_cache", "prompt_caching", "cache_control"] {
-      if __stack_has_key(out, key) {
-        out = out.remove(key)
-        stripped = stripped + [key]
-      }
-    }
+    let cache = __stack_strip_option_keys(out, stripped, ["prompt_cache", "prompt_caching", "cache_control"])
+    out = cache.options
+    stripped = cache.stripped
   }
   return {options: out, stripped: stripped}
 }
@@ -279,14 +302,16 @@ fn __stack_configured_model_options(cfg, prefixes) {
  * Return a capability-sanitized options dict for a provider/model route.
  * Unsupported provider-specific knobs are dropped instead of leaking to the
  * wire. Currently strips unsupported `reasoning_effort` and prompt-cache
- * request keys.
+ * request keys. Pass `{mode: "healthcheck"}` (or `"preflight"` / `"probe"`)
+ * to also drop deliberate-reasoning knobs for cheap readiness probes even
+ * when the full route supports them.
  *
  * @effects: []
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_sanitize_model_options(options = nil) {
-  return __stack_sanitize_result(options).options
+pub fn agent_sanitize_model_options(options = nil, policy = nil) {
+  return __stack_sanitize_result(options, policy).options
 }
 
 /**
