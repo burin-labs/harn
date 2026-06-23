@@ -114,6 +114,86 @@ pub fn local_fn(event: TriggerEvent) -> dict {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn enqueue_writes_raw_dispatch_and_redacted_observability_records() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (_dir, log, dispatcher) = dispatcher_fixture(
+                r#"
+import "std/triggers"
+
+pub fn local_fn(event: TriggerEvent) -> string {
+  return event.kind
+}
+"#,
+                "local_fn",
+                None,
+                TriggerRetryConfig::default(),
+            )
+            .await;
+
+            let mut event = trigger_event("issues.opened", "delivery-observed");
+            event.headers.insert(
+                "authorization".to_string(),
+                "Bearer raw-header-secret".to_string(),
+            );
+            event.raw_body = Some(br#"{"note":"raw-body-secret"}"#.to_vec());
+            if let ProviderPayload::Known(KnownProviderPayload::GitHub(
+                GitHubEventPayload::Issues(payload),
+            )) = &mut event.provider_payload
+            {
+                payload.common.raw = serde_json::json!({"neutral": "raw-provider-secret"});
+                payload.issue = serde_json::json!({"title": "raw-provider-secret"});
+            }
+
+            dispatcher
+                .enqueue_targeted(Some("github-new-issue".to_string()), Some(1), event)
+                .await
+                .expect("enqueue succeeds");
+
+            let raw = read_topic(log.clone(), crate::TRIGGER_INBOX_ENVELOPES_TOPIC).await;
+            let observed = read_topic(log.clone(), crate::TRIGGER_INBOX_OBSERVABILITY_TOPIC).await;
+            assert_eq!(raw.len(), 1);
+            assert_eq!(observed.len(), 1);
+
+            let raw_text = serde_json::to_string(&raw[0].1).unwrap();
+            assert!(raw_text.contains("raw-header-secret"));
+            assert!(raw_text.contains("raw-provider-secret"));
+
+            let observed_event = &observed[0].1;
+            assert_eq!(observed_event.kind, "event_ingested");
+            assert_eq!(
+                observed_event.payload["schema_version"],
+                serde_json::json!(1)
+            );
+            assert_eq!(
+                observed_event.payload["event"]["raw_body"]["byte_len"],
+                serde_json::json!(26)
+            );
+            assert!(observed_event.payload["event"]["raw_body"]["sha256"]
+                .as_str()
+                .is_some_and(|digest| digest.len() == 64));
+            assert!(observed_event.payload["event"]
+                .get("provider_payload")
+                .is_none());
+
+            let observed_text = serde_json::to_string(observed_event).unwrap();
+            assert!(observed_text.contains("[redacted]"));
+            for secret in [
+                "raw-header-secret",
+                "raw-body-secret",
+                "raw-provider-secret",
+            ] {
+                assert!(
+                    !observed_text.contains(secret),
+                    "observability event leaked {secret}: {observed_text}"
+                );
+            }
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn eval_pack_handler_runs_from_cron_tick_and_sheds_after_budget() {
     let local = tokio::task::LocalSet::new();
     local

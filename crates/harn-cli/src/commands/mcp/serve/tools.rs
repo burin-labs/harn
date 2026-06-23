@@ -13,7 +13,7 @@ use crate::commands::orchestrator::common::{
     load_local_runtime, read_topic, synthetic_event_for_binding, trigger_fire, trigger_inspect_dlq,
     trigger_list, trigger_replay, TRIGGER_ATTEMPTS_TOPIC, TRIGGER_DLQ_TOPIC,
     TRIGGER_INBOX_CLAIMS_TOPIC, TRIGGER_INBOX_ENVELOPES_TOPIC, TRIGGER_INBOX_LEGACY_TOPIC,
-    TRIGGER_OUTBOX_TOPIC,
+    TRIGGER_INBOX_OBSERVABILITY_TOPIC, TRIGGER_OUTBOX_TOPIC,
 };
 use crate::commands::orchestrator::inspect_data::collect_orchestrator_inspect_data;
 
@@ -728,6 +728,8 @@ impl McpOrchestratorService {
         let dispatcher = harn_vm::snapshot_dispatcher_stats();
         let inbox_claims = read_topic(&ctx.event_log, TRIGGER_INBOX_CLAIMS_TOPIC).await?;
         let inbox_envelopes = read_topic(&ctx.event_log, TRIGGER_INBOX_ENVELOPES_TOPIC).await?;
+        let inbox_observability =
+            read_topic(&ctx.event_log, TRIGGER_INBOX_OBSERVABILITY_TOPIC).await?;
         let inbox_legacy = read_topic(&ctx.event_log, TRIGGER_INBOX_LEGACY_TOPIC).await?;
         let outbox = read_topic(&ctx.event_log, TRIGGER_OUTBOX_TOPIC).await?;
         let attempts = read_topic(&ctx.event_log, TRIGGER_ATTEMPTS_TOPIC).await?;
@@ -740,8 +742,7 @@ impl McpOrchestratorService {
                 head: preview_events(
                     inbox_claims
                         .into_iter()
-                        .chain(inbox_envelopes)
-                        .chain(inbox_legacy)
+                        .chain(inbox_observability)
                         .collect(),
                 ),
             },

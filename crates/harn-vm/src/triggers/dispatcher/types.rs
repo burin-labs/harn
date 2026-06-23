@@ -10,9 +10,9 @@ use crate::event_log::{AnyEventLog, LogError};
 use crate::trust_graph::AutonomyTier;
 use crate::vm::Vm;
 
+use super::super::{ProviderId, SignatureStatus, TenantId, TraceId, TriggerEvent, TriggerEventId};
 use super::circuits::DestinationCircuitRegistry;
 use super::flow_control::{ConcurrencyPermit, FlowControlManager};
-use super::TriggerEvent;
 
 pub(super) const DEFAULT_AUTONOMY_BUDGET_REVIEWER: &str = "operator";
 
@@ -124,6 +124,61 @@ pub struct InboxEnvelope {
     pub trigger_id: Option<String>,
     pub binding_version: Option<u32>,
     pub event: TriggerEvent,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TriggerInboxTopicScope {
+    Shared,
+    Tenant,
+}
+
+pub const INBOX_OBSERVATION_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InboxObservationRecord {
+    pub schema_version: u32,
+    pub trigger_id: Option<String>,
+    pub binding_version: Option<u32>,
+    pub event: TriggerEventObservation,
+}
+
+impl InboxObservationRecord {
+    pub fn new(
+        trigger_id: Option<String>,
+        binding_version: Option<u32>,
+        event: TriggerEventObservation,
+    ) -> Self {
+        Self {
+            schema_version: INBOX_OBSERVATION_SCHEMA_VERSION,
+            trigger_id,
+            binding_version,
+            event,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TriggerEventObservation {
+    pub id: TriggerEventId,
+    pub provider: ProviderId,
+    pub payload_provider: String,
+    pub kind: String,
+    #[serde(with = "time::serde::rfc3339")]
+    pub received_at: time::OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub occurred_at: Option<time::OffsetDateTime>,
+    pub dedupe_key: String,
+    pub trace_id: TraceId,
+    pub tenant_id: Option<TenantId>,
+    pub headers: BTreeMap<String, String>,
+    pub raw_body: Option<RawBodyObservation>,
+    pub signature_status: SignatureStatus,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RawBodyObservation {
+    pub byte_len: usize,
+    pub sha256: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

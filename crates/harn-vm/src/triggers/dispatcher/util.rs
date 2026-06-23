@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::pin_mut;
+use sha2::{Digest, Sha256};
 use tokio::sync::broadcast;
 
 use crate::event_log::{AnyEventLog, EventLog, LogEvent, Topic};
@@ -13,13 +14,14 @@ use crate::value::{error_to_category, ErrorCategory, VmError, VmValue};
 use super::state::{ACTIVE_DISPATCHER_STATE, ACTIVE_DISPATCH_WAIT_LEASE};
 use super::types::{
     DispatchCancelRequest, DispatchError, DispatchOutcome, DispatchStatus, DispatcherRuntimeState,
-    DispatcherStatsSnapshot,
+    DispatcherStatsSnapshot, InboxEnvelope, InboxObservationRecord, RawBodyObservation,
+    TriggerEventObservation, TriggerInboxTopicScope,
 };
 use super::uri::DispatchUri;
 use super::TriggerEvent;
 use super::{
     TRIGGER_ACCEPTED_AT_MS_HEADER, TRIGGER_CANCEL_REQUESTS_TOPIC, TRIGGER_INBOX_ENVELOPES_TOPIC,
-    TRIGGER_QUEUE_APPENDED_AT_MS_HEADER,
+    TRIGGER_INBOX_OBSERVABILITY_TOPIC, TRIGGER_QUEUE_APPENDED_AT_MS_HEADER,
 };
 use crate::triggers::registry::TriggerBinding;
 
@@ -145,17 +147,117 @@ pub async fn enqueue_trigger_event<L: EventLog + ?Sized>(
     event_log: &L,
     event: &TriggerEvent,
 ) -> Result<u64, DispatchError> {
-    let topic = topic_for_event(event, TRIGGER_INBOX_ENVELOPES_TOPIC)?;
     let headers = event_headers(event, None, None, None);
     let payload =
         serde_json::to_value(event).map_err(|error| DispatchError::Serde(error.to_string()))?;
-    event_log
-        .append(
-            &topic,
-            LogEvent::new("event_ingested", payload).with_headers(headers),
-        )
+    append_trigger_inbox_record(
+        event_log,
+        event,
+        None,
+        None,
+        payload,
+        headers,
+        TriggerInboxTopicScope::Tenant,
+    )
+    .await
+}
+
+pub(crate) async fn append_trigger_inbox_envelope<L: EventLog + ?Sized>(
+    event_log: &L,
+    trigger_id: Option<String>,
+    binding_version: Option<u32>,
+    event: &TriggerEvent,
+    headers: BTreeMap<String, String>,
+    topic_scope: TriggerInboxTopicScope,
+) -> Result<u64, DispatchError> {
+    let payload = serde_json::to_value(InboxEnvelope {
+        trigger_id: trigger_id.clone(),
+        binding_version,
+        event: event.clone(),
+    })
+    .map_err(|error| DispatchError::Serde(error.to_string()))?;
+    append_trigger_inbox_record(
+        event_log,
+        event,
+        trigger_id,
+        binding_version,
+        payload,
+        headers,
+        topic_scope,
+    )
+    .await
+}
+
+async fn append_trigger_inbox_record<L: EventLog + ?Sized>(
+    event_log: &L,
+    event: &TriggerEvent,
+    trigger_id: Option<String>,
+    binding_version: Option<u32>,
+    payload: serde_json::Value,
+    headers: BTreeMap<String, String>,
+    topic_scope: TriggerInboxTopicScope,
+) -> Result<u64, DispatchError> {
+    let topic = inbox_topic(event, TRIGGER_INBOX_ENVELOPES_TOPIC, topic_scope)?;
+    let mut raw_event = LogEvent::new("event_ingested", payload).with_headers(headers.clone());
+    if let Some(queue_appended_at_ms) =
+        lifecycle_header_ms(Some(&headers), TRIGGER_QUEUE_APPENDED_AT_MS_HEADER)
+    {
+        raw_event.occurred_at_ms = queue_appended_at_ms;
+    }
+    let occurred_at_ms = raw_event.occurred_at_ms;
+    let offset = event_log
+        .append(&topic, raw_event)
         .await
-        .map_err(DispatchError::from)
+        .map_err(DispatchError::from)?;
+
+    let observation_topic = inbox_topic(event, TRIGGER_INBOX_OBSERVABILITY_TOPIC, topic_scope)?;
+    let policy = crate::redact::current_policy();
+    let observation = InboxObservationRecord::new(
+        trigger_id,
+        binding_version,
+        TriggerEventObservation {
+            id: event.id.clone(),
+            provider: event.provider.clone(),
+            payload_provider: event.provider_payload.provider().to_string(),
+            kind: event.kind.clone(),
+            received_at: event.received_at,
+            occurred_at: event.occurred_at,
+            dedupe_key: policy.redact_string(event.dedupe_key.as_str()).into_owned(),
+            trace_id: event.trace_id.clone(),
+            tenant_id: event.tenant_id.clone(),
+            headers: policy.redact_headers(&event.headers),
+            raw_body: event.raw_body.as_ref().map(|bytes| RawBodyObservation {
+                byte_len: bytes.len(),
+                sha256: hex_sha256(bytes),
+            }),
+            signature_status: event.signature_status.clone(),
+        },
+    );
+    let observation_payload = serde_json::to_value(observation)
+        .map_err(|error| DispatchError::Serde(error.to_string()))?;
+    let mut observation_event = LogEvent::new("event_ingested", observation_payload)
+        .with_headers(policy.redact_headers(&headers));
+    observation_event.occurred_at_ms = occurred_at_ms;
+    event_log
+        .append(&observation_topic, observation_event)
+        .await
+        .map_err(DispatchError::from)?;
+    Ok(offset)
+}
+
+fn hex_sha256(bytes: &[u8]) -> String {
+    hex::encode(Sha256::digest(bytes))
+}
+
+fn inbox_topic(
+    event: &TriggerEvent,
+    topic_name: &str,
+    scope: TriggerInboxTopicScope,
+) -> Result<Topic, DispatchError> {
+    match scope {
+        TriggerInboxTopicScope::Shared => Topic::new(topic_name).map_err(DispatchError::from),
+        TriggerInboxTopicScope::Tenant => topic_for_event(event, topic_name),
+    }
 }
 
 pub fn snapshot_dispatcher_stats() -> DispatcherStatsSnapshot {

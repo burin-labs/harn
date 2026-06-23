@@ -38,7 +38,8 @@ use super::registry::{
 use super::{
     begin_in_flight, finish_in_flight, TriggerDispatchOutcome, TriggerEvent,
     TRIGGERS_LIFECYCLE_TOPIC, TRIGGER_ATTEMPTS_TOPIC, TRIGGER_CANCEL_REQUESTS_TOPIC,
-    TRIGGER_DLQ_TOPIC, TRIGGER_INBOX_ENVELOPES_TOPIC, TRIGGER_OUTBOX_TOPIC,
+    TRIGGER_DLQ_TOPIC, TRIGGER_INBOX_ENVELOPES_TOPIC, TRIGGER_INBOX_OBSERVABILITY_TOPIC,
+    TRIGGER_OUTBOX_TOPIC,
 };
 use circuits::{
     destination_circuit_key, dlq_node_metadata, DestinationCircuitProbe,
@@ -64,6 +65,7 @@ pub use types::{
     DispatchAttemptRecord, DispatchCancelRequest, DispatchError, DispatchOutcome, DispatchStatus,
     Dispatcher, DispatcherDrainReport, DispatcherStatsSnapshot, DlqEntry, InboxEnvelope,
 };
+pub(crate) use util::append_trigger_inbox_envelope;
 pub use util::{
     append_dispatch_cancel_request, clear_dispatcher_state, enqueue_trigger_event,
     snapshot_dispatcher_stats,
@@ -81,7 +83,7 @@ pub fn build_batched_event_public(
 pub(crate) use state::{
     current_dispatch_context, current_dispatch_is_replay, current_dispatch_wait_lease,
 };
-pub(crate) use types::{DispatchContext, DispatchWaitLease};
+pub(crate) use types::{DispatchContext, DispatchWaitLease, TriggerInboxTopicScope};
 
 use action_graph::{
     dispatch_entry_edge_kind, dispatch_error_label, dispatch_error_metadata, dispatch_node_id,
@@ -102,7 +104,7 @@ use util::{
     dispatch_result_status, duration_between_ms, event_headers, extract_event_path,
     extracted_key_value, extracted_priority_value, json_value_to_gate, maybe_fail_before_outbox,
     now_rfc3339, now_unix_ms, queue_appended_at_ms, recv_cancel, sleep_or_cancel_or_request,
-    tenant_id, topic_for_event, unix_ms, worker_queue_priority,
+    tenant_id, unix_ms, worker_queue_priority,
 };
 
 pub const TRIGGER_ACCEPTED_AT_MS_HEADER: &str = "harn_trigger_accepted_at_ms";
@@ -207,7 +209,6 @@ impl Dispatcher {
         event: TriggerEvent,
         parent_headers: Option<&BTreeMap<String, String>>,
     ) -> Result<u64, DispatchError> {
-        let topic = topic_for_event(&event, TRIGGER_INBOX_ENVELOPES_TOPIC)?;
         let trigger_id_for_metrics = trigger_id.clone();
         let mut headers = parent_headers.cloned().unwrap_or_default();
         headers.extend(event_headers(&event, None, None, None));
@@ -221,13 +222,7 @@ impl Dispatcher {
         headers
             .entry(TRIGGER_ACCEPTED_AT_MS_HEADER.to_string())
             .or_insert_with(|| unix_ms(event.received_at).to_string());
-        let payload = serde_json::to_value(InboxEnvelope {
-            trigger_id,
-            binding_version,
-            event: event.clone(),
-        })
-        .map_err(|error| DispatchError::Serde(error.to_string()))?;
-        let mut log_event = LogEvent::new("event_ingested", payload);
+        let log_event = LogEvent::new("event_ingested", serde_json::Value::Null);
         let had_queue_appended_at = headers.contains_key(TRIGGER_QUEUE_APPENDED_AT_MS_HEADER);
         let queue_appended_at_ms = headers
             .get(TRIGGER_QUEUE_APPENDED_AT_MS_HEADER)
@@ -261,11 +256,15 @@ impl Dispatcher {
                 queue_appended_at_ms,
             );
         }
-        log_event.headers = headers;
-        self.event_log
-            .append(&topic, log_event)
-            .await
-            .map_err(DispatchError::from)
+        append_trigger_inbox_envelope(
+            self.event_log.as_ref(),
+            trigger_id,
+            binding_version,
+            &event,
+            headers,
+            TriggerInboxTopicScope::Tenant,
+        )
+        .await
     }
 
     pub async fn run(&self) -> Result<(), DispatchError> {
