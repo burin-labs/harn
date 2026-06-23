@@ -148,8 +148,29 @@ time_phase() {
   return "$rc"
 }
 
+debug_harn_binary() {
+  local target_dir="${CARGO_TARGET_DIR:-}"
+  if [[ -z "$target_dir" ]]; then
+    target_dir="$(cargo metadata --format-version=1 --no-deps \
+      | python3 -c 'import json, sys; print(json.load(sys.stdin)["target_directory"])')"
+  fi
+  local suffix=""
+  case "${OS:-$(uname -s)}" in
+    Windows_NT|MINGW*|MSYS*|CYGWIN*) suffix=".exe" ;;
+  esac
+  printf '%s/debug/harn%s\n' "$target_dir" "$suffix"
+}
+
+harn_cmd() {
+  if [[ -n "${HARN_BIN:-}" ]]; then
+    "$HARN_BIN" "$@"
+  else
+    cargo run --quiet --bin harn -- "$@"
+  fi
+}
+
 run_docs_audit() {
-  time_phase "sync_language_spec" cargo run --quiet --bin harn -- run scripts/sync_language_spec.harn
+  time_phase "sync_language_spec" harn_cmd run scripts/sync_language_spec.harn
   time_phase "markdownlint" npx markdownlint-cli2 "**/*.md"
   if command -v npm >/dev/null 2>&1; then
     time_phase "docs site build" ./scripts/build_docs_site.sh
@@ -165,7 +186,7 @@ run_grammar_audit() {
     echo "error: missing spec/HARN_SPEC.md"
     return 1
   fi
-  time_phase "verify_release_metadata" cargo run --quiet --bin harn -- run scripts/verify_release_metadata.harn
+  time_phase "verify_release_metadata" harn_cmd run scripts/verify_release_metadata.harn
   # NOTE: `sync_language_spec` is intentionally NOT run here. It is the docs
   # mirror writer (spec/HARN_SPEC.md -> docs/src/language-spec.md) and already
   # runs in `run_docs_audit`, which executes in a sibling parallel lane. Running
@@ -173,7 +194,7 @@ run_grammar_audit() {
   # same `docs/src/language-spec.md` output. `verify_language_spec` below reads
   # the canonical spec source directly (SPEC_PATH = spec/HARN_SPEC.md), not the
   # mirror, so it does not depend on the sync having run in this lane.
-  time_phase "verify_language_spec" cargo run --quiet --bin harn -- run scripts/verify_language_spec.harn
+  time_phase "verify_language_spec" harn_cmd run scripts/verify_language_spec.harn
   if [[ ! -d tree-sitter-harn ]]; then
     echo "warning: tree-sitter-harn not present; skipping tree-sitter grammar audit"
     return 0
@@ -223,15 +244,14 @@ cmd_audit() {
 
   # Serial warm prebuild before spawning the parallel lanes. The 3
   # cargo-using lanes (rust-audit runs clippy + nextest; harn-audit
-  # runs `cargo build --bin harn` via `make lint-harn` and `cargo run`
-  # via conformance/fmt-harn; grammar-audit shells the active Cargo
-  # target-dir harn binary via verify_language_spec.py) otherwise race for the same
-  # `.cargo-lock` and repeatedly invalidate each other's incremental
-  # artifacts. Historically the harn lint phase alone stretched to
-  # ~12 min cold because it was waiting on the shared target dir
-  # while rust-audit's nextest held the lock; warm-state it runs in
-  # ~1.5 s. One serial build up front lets every downstream lane hit
-  # a populated target/debug.
+  # runs clippy + nextest; package-audit runs cargo package/check; the
+  # Harn/script lanes use the exported HARN_BIN below) otherwise race for the
+  # same `.cargo-lock` and repeatedly invalidate each other's incremental
+  # artifacts. Historically the harn lint phase alone stretched to ~12 min cold
+  # because it was waiting on the shared target dir while rust-audit's nextest
+  # held the lock; warm-state it runs in ~1.5 s. One serial build up front lets
+  # every downstream lane hit a populated target/debug without re-entering
+  # Cargo for plain Harn CLI invocations.
   local prebuild_started prebuild_elapsed
   prebuild_started="$(date +%s)"
   echo ">>> warm-prebuild (cargo build --workspace --all-targets)"
@@ -241,6 +261,15 @@ cmd_audit() {
   fi
   prebuild_elapsed=$(( $(date +%s) - prebuild_started ))
   printf 'ok: %-15s (%ss)\n' "warm-prebuild" "$prebuild_elapsed"
+  if [[ -z "${HARN_BIN:-}" ]]; then
+    HARN_BIN="$(debug_harn_binary)"
+  fi
+  if [[ ! -x "$HARN_BIN" ]]; then
+    echo "error: warm prebuild completed but HARN_BIN is not executable: $HARN_BIN"
+    exit 1
+  fi
+  export HARN_BIN
+  printf 'ok: %-15s (%s)\n' "harn-bin" "$HARN_BIN"
 
   local tmp
   tmp="$(mktemp -d)"
@@ -380,7 +409,7 @@ cmd_prepare() {
   current="$(current_version)"
   next="$(next_version "$bump")"
   bump_version "$next"
-  cargo run --quiet --bin harn -- run scripts/sync_protocol_fixture_runtime_versions.harn -- --from "$current" --to "$next"
+  harn_cmd run scripts/sync_protocol_fixture_runtime_versions.harn -- --from "$current" --to "$next"
   # Keep the embedding guide's `tag = "vX.Y.Z"` pins on the released version
   # line. Nothing owned these before and they silently drifted ~46 versions
   # behind; match any prior version rather than `$current` so a stale doc
@@ -471,10 +500,10 @@ cmd_notes() {
     version="$(current_version)"
   fi
   if [[ -n "$output" ]]; then
-    cargo run --quiet --bin harn -- run scripts/render_release_notes.harn -- --version "$version" --output "$output"
+    harn_cmd run scripts/render_release_notes.harn -- --version "$version" --output "$output"
     echo "Rendered release notes for ${version#v} -> $output"
   else
-    cargo run --quiet --bin harn -- run scripts/render_release_notes.harn -- --version "$version"
+    harn_cmd run scripts/render_release_notes.harn -- --version "$version"
   fi
 }
 
