@@ -313,8 +313,14 @@ impl OpenAiCompatibleProvider {
                 ));
             }
         }
+        let has_native_tools = opts
+            .native_tools
+            .as_ref()
+            .is_some_and(|tools| !tools.is_empty());
         if let Some(ref tc) = opts.tool_choice {
-            if let Some(tool_choice) = normalize_tool_choice_for_capabilities(tc, &caps) {
+            if let Some(tool_choice) =
+                normalize_tool_choice_for_capabilities(tc, &caps, has_native_tools)
+            {
                 body["tool_choice"] = tool_choice;
             }
         }
@@ -594,18 +600,20 @@ pub(crate) fn apply_openrouter_provider_order(body: &mut serde_json::Value, orde
 fn normalize_tool_choice_for_capabilities(
     tool_choice: &serde_json::Value,
     caps: &crate::llm::capabilities::Capabilities,
+    has_native_tools: bool,
 ) -> Option<serde_json::Value> {
+    let tool_choice = normalize_openai_compat_tool_choice(tool_choice, has_native_tools)?;
     if caps.allowed_tool_choice_modes.is_empty() {
-        return Some(tool_choice.clone());
+        return Some(tool_choice);
     }
 
-    let mode = tool_choice_mode(tool_choice);
+    let mode = tool_choice_mode(&tool_choice);
     if mode.as_deref().is_some_and(|mode| {
         caps.allowed_tool_choice_modes
             .iter()
             .any(|allowed| allowed == mode)
     }) {
-        return Some(tool_choice.clone());
+        return Some(tool_choice);
     }
 
     if caps
@@ -623,6 +631,45 @@ fn normalize_tool_choice_for_capabilities(
         return Some(serde_json::Value::String("none".to_string()));
     }
     None
+}
+
+fn normalize_openai_compat_tool_choice(
+    tool_choice: &serde_json::Value,
+    has_native_tools: bool,
+) -> Option<serde_json::Value> {
+    match tool_choice {
+        serde_json::Value::String(raw) => {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+            let mode = trimmed.to_ascii_lowercase();
+            if matches!(mode.as_str(), "auto" | "none" | "any" | "required") {
+                return Some(serde_json::Value::String(mode));
+            }
+            if !has_native_tools {
+                return Some(serde_json::Value::String("required".to_string()));
+            }
+            Some(serde_json::json!({
+                "type": "function",
+                "function": {"name": trimmed},
+            }))
+        }
+        serde_json::Value::Object(object) => {
+            if !has_native_tools {
+                let is_specific_tool = matches!(
+                    object.get("type").and_then(|value| value.as_str()),
+                    Some("function" | "tool")
+                );
+                if is_specific_tool {
+                    return Some(serde_json::Value::String("required".to_string()));
+                }
+            }
+            Some(tool_choice.clone())
+        }
+        serde_json::Value::Null => None,
+        _ => Some(tool_choice.clone()),
+    }
 }
 
 fn tool_choice_mode(tool_choice: &serde_json::Value) -> Option<String> {
@@ -1198,6 +1245,50 @@ mod tests {
         let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
 
         assert_eq!(body["tool_choice"], "none");
+    }
+
+    #[test]
+    fn openai_compat_bare_tool_choice_string_becomes_function_selection() {
+        let mut payload = base_request_payload();
+        payload.provider = "fireworks".to_string();
+        payload.model = "accounts/fireworks/models/deepseek-v4-pro".to_string();
+        payload.native_tools = Some(vec![json!({
+            "type": "function",
+            "function": {
+                "name": "edit",
+                "description": "Edit a file.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string"},
+                        "content": {"type": "string"}
+                    },
+                    "required": ["path", "content"]
+                }
+            }
+        })]);
+        payload.tool_choice = Some(json!("edit"));
+
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+
+        assert_eq!(
+            body["tool_choice"],
+            json!({"type": "function", "function": {"name": "edit"}})
+        );
+        assert_eq!(body["tools"][0]["function"]["name"], "edit");
+    }
+
+    #[test]
+    fn openai_compat_specific_tool_choice_degrades_for_text_tool_routes() {
+        let mut payload = base_request_payload();
+        payload.provider = "fireworks".to_string();
+        payload.model = "accounts/fireworks/models/gpt-oss-120b".to_string();
+        payload.tool_choice = Some(json!("edit"));
+
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+
+        assert_eq!(body["tool_choice"], "required");
+        assert!(body.get("tools").is_none());
     }
 
     #[test]
