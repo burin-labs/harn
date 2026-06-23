@@ -181,6 +181,11 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_DICT,
     ),
     BuiltinSignature::simple(
+        "agent_llm_caller",
+        &[Param::optional("config", TY_DICT_OR_NIL)],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
         "agent_parse_tool_calls",
         &[
             Param::new("text", TY_STRING),
@@ -210,6 +215,39 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         &[
             Param::new("kind", TY_STRING),
             Param::optional("options", TY_DICT),
+        ],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "agent_model_options",
+        &[Param::optional("config", TY_DICT_OR_NIL)],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "agent_sanitize_model_options",
+        &[Param::optional("options", TY_DICT_OR_NIL)],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "agent_stack",
+        &[Param::optional("config", TY_DICT_OR_NIL)],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "agent_stack_audit_line",
+        &[Param::new("stack", TY_ANY)],
+        TY_STRING,
+    ),
+    BuiltinSignature::simple(
+        "agent_stack_model_policy",
+        &[Param::new("stack", TY_ANY)],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "agent_tool_stack",
+        &[
+            Param::optional("tools", TY_ANY),
+            Param::optional("config", TY_DICT_OR_NIL),
         ],
         TY_DICT,
     ),
