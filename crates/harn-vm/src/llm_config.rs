@@ -183,6 +183,8 @@ pub struct ProviderDef {
     pub cost_per_1k_out: Option<f64>,
     /// Observed or configured p50 latency in milliseconds.
     pub latency_p50_ms: Option<u64>,
+    /// Optional provider-level serving performance observations.
+    pub performance: Option<ServingPerformanceDef>,
     #[doc(hidden)]
     pub auth_style_explicit: bool,
 }
@@ -243,6 +245,8 @@ struct ProviderDefWire {
     cost_per_1k_out: Option<f64>,
     #[serde(default)]
     latency_p50_ms: Option<u64>,
+    #[serde(default)]
+    performance: Option<ServingPerformanceDef>,
 }
 
 impl<'de> Deserialize<'de> for ProviderDef {
@@ -280,6 +284,7 @@ impl<'de> Deserialize<'de> for ProviderDef {
             cost_per_1k_in: wire.cost_per_1k_in,
             cost_per_1k_out: wire.cost_per_1k_out,
             latency_p50_ms: wire.latency_p50_ms,
+            performance: wire.performance,
             auth_style_explicit,
         })
     }
@@ -315,6 +320,7 @@ impl Default for ProviderDef {
             cost_per_1k_in: None,
             cost_per_1k_out: None,
             latency_p50_ms: None,
+            performance: None,
             auth_style_explicit: false,
         }
     }
@@ -359,6 +365,7 @@ impl ProviderDef {
         merge_option(&mut self.cost_per_1k_in, &overlay.cost_per_1k_in);
         merge_option(&mut self.cost_per_1k_out, &overlay.cost_per_1k_out);
         merge_option(&mut self.latency_p50_ms, &overlay.latency_p50_ms);
+        merge_option(&mut self.performance, &overlay.performance);
     }
 }
 
@@ -641,6 +648,52 @@ impl RateLimitsDef {
     }
 }
 
+/// Optional provider/model serving-performance observation. This records
+/// benchmark or live-probe facts, not a hard runtime contract; callers should
+/// treat missing fields as unknown and stale dates as advisory.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+pub struct ServingPerformanceDef {
+    /// Observed time-to-first-token in milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observed_ttft_ms: Option<u64>,
+    /// Observed output generation rate in tokens per second.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_tokens_per_sec: Option<f64>,
+    /// End-to-end time-to-answer in seconds for the cited benchmark, when
+    /// reported separately from TTFT/generation rate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time_to_answer_s: Option<f64>,
+    /// Source label, e.g. `artificial_analysis`, `harn_probe`, or
+    /// `provider_blog`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    /// Source URL for the observation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_url: Option<String>,
+    /// YYYY-MM-DD date when the observation was last verified.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_verified: Option<String>,
+    /// Number of requests or benchmark samples behind this row, if known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sample_size: Option<u32>,
+    /// Short caveat such as streaming mode, warm/cold route, or prompt shape.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+}
+
+impl ServingPerformanceDef {
+    pub fn is_empty(&self) -> bool {
+        self.observed_ttft_ms.is_none()
+            && self.output_tokens_per_sec.is_none()
+            && self.time_to_answer_s.is_none()
+            && self.source.is_none()
+            && self.source_url.is_none()
+            && self.last_verified.is_none()
+            && self.sample_size.is_none()
+            && self.notes.is_none()
+    }
+}
+
 /// Logical-model facts separated from provider serving routes. These fields
 /// describe the underlying weights or public model family, not Harn's alias or
 /// provider/model selector.
@@ -760,6 +813,9 @@ pub struct ModelDef {
     /// Route-specific token/request quota metadata.
     #[serde(default)]
     pub rate_limits: Option<RateLimitsDef>,
+    /// Optional route-level serving performance observations.
+    #[serde(default)]
+    pub performance: Option<ServingPerformanceDef>,
     /// Underlying model architecture facts separated from the provider id.
     #[serde(default)]
     pub architecture: Option<ModelArchitectureDef>,
@@ -2911,6 +2967,7 @@ mod tests {
                 wire_model: None,
                 api_dialect: None,
                 rate_limits: None,
+                performance: None,
                 architecture: None,
                 local_memory: None,
                 runtime_context_window: None,
@@ -3506,6 +3563,7 @@ mod tests {
                 wire_model: None,
                 api_dialect: None,
                 rate_limits: None,
+                performance: None,
                 architecture: None,
                 local_memory: None,
                 runtime_context_window: None,

@@ -31,13 +31,19 @@
 //! Either way the divergence is read off the same `per_file_unified_diff` /
 //! `summary` shape, so the CLI never reimplements diffing.
 
-use std::path::{Path, PathBuf};
+#[cfg(any(feature = "hostlib", test))]
+use std::path::Path;
+use std::path::PathBuf;
+#[cfg(feature = "hostlib")]
 use std::sync::Arc;
 
 use serde::Serialize;
+#[cfg(any(feature = "hostlib", test))]
 use serde_json::Value as JsonValue;
 
+#[cfg(feature = "hostlib")]
 use harn_lexer::Lexer;
+#[cfg(feature = "hostlib")]
 use harn_parser::{DiagnosticSeverity, Parser, TypeChecker};
 
 /// One file the counterfactual plan would touch — the unit of divergence.
@@ -73,17 +79,20 @@ pub(crate) struct CounterfactualReport {
     pub ops_rejected: u64,
 }
 
+#[cfg(any(feature = "hostlib", test))]
 #[derive(Debug)]
 enum CounterfactualPlan {
     EditOps(JsonValue),
     DryRun(JsonValue),
 }
 
+#[cfg(feature = "hostlib")]
 struct CounterfactualSandbox {
     session_id: String,
     root: PathBuf,
 }
 
+#[cfg(feature = "hostlib")]
 impl CounterfactualSandbox {
     fn enter(root: &Path) -> Result<Self, String> {
         let session_id = format!("harn-counterfactual-{}", uuid::Uuid::now_v7());
@@ -97,6 +106,7 @@ impl CounterfactualSandbox {
     }
 }
 
+#[cfg(feature = "hostlib")]
 impl Drop for CounterfactualSandbox {
     fn drop(&mut self) {
         let _ = harn_hostlib::fs::discard_staged(&self.session_id, &[]);
@@ -107,6 +117,7 @@ impl Drop for CounterfactualSandbox {
 /// Evaluate `plan_paths` and return their cumulative divergence. `Err` carries a
 /// human-readable message suitable for both the `error.message` JSON field
 /// and the human `error:` line.
+#[cfg(feature = "hostlib")]
 pub(crate) fn evaluate(plan_paths: &[PathBuf]) -> Result<CounterfactualReport, String> {
     if plan_paths.is_empty() {
         return Err("at least one --counterfactual plan is required".to_string());
@@ -150,9 +161,15 @@ pub(crate) fn evaluate(plan_paths: &[PathBuf]) -> Result<CounterfactualReport, S
     project_divergence(&dry_run, plan_paths)
 }
 
+#[cfg(not(feature = "hostlib"))]
+pub(crate) fn evaluate(_plan_paths: &[PathBuf]) -> Result<CounterfactualReport, String> {
+    Err("`harn replay --counterfactual` requires the `hostlib` feature (default-on); it is unavailable in this build".to_string())
+}
+
 /// Compile and execute `plan.harn`, returning its final value as JSON. The
 /// VM is wired exactly like `harn run`'s — stdlib plus the default hostlib —
 /// so `edit_dry_run` and the staged-fs overlay it relies on are available.
+#[cfg(feature = "hostlib")]
 fn run_plan_source(source: &str, plan_path: &Path) -> Result<JsonValue, String> {
     let source = source.to_string();
     let plan_path = plan_path.to_path_buf();
@@ -164,6 +181,7 @@ fn run_plan_source(source: &str, plan_path: &Path) -> Result<JsonValue, String> 
         .map_err(|_| "counterfactual plan runner panicked".to_string())?
 }
 
+#[cfg(feature = "hostlib")]
 fn run_plan_source_inner(source: &str, plan_path: &Path) -> Result<JsonValue, String> {
     let mut lexer = Lexer::new(source);
     let tokens = lexer
@@ -231,6 +249,7 @@ fn run_plan_source_inner(source: &str, plan_path: &Path) -> Result<JsonValue, St
 
 /// Normalize the plan program's final value into either raw edit ops or an
 /// already-rendered `edit_dry_run` result.
+#[cfg(any(feature = "hostlib", test))]
 fn normalize_plan_value(value: JsonValue, plan_path: &Path) -> Result<CounterfactualPlan, String> {
     match value {
         JsonValue::Array(_) => Ok(CounterfactualPlan::EditOps(value)),
@@ -262,6 +281,7 @@ fn normalize_plan_value(value: JsonValue, plan_path: &Path) -> Result<Counterfac
 /// The driver is written to a temp `.harn` file beside the plan so the
 /// cross-module typechecker resolves the `std/edit` import the same way it
 /// does for an on-disk plan (the import graph is keyed by file path).
+#[cfg(feature = "hostlib")]
 fn run_edit_dry_run(plan: JsonValue, plan_path: &Path) -> Result<JsonValue, String> {
     let plan_literal = serde_json::to_string(&plan)
         .map_err(|error| format!("failed to serialize counterfactual plan: {error}"))?;
@@ -289,6 +309,7 @@ fn run_edit_dry_run(plan: JsonValue, plan_path: &Path) -> Result<JsonValue, Stri
 /// each file is classified from its line deltas exactly the way
 /// `edit.dry_run` itself does (pure additions → `created`, pure removals →
 /// `deleted`, both → `modified`).
+#[cfg(any(feature = "hostlib", test))]
 fn project_divergence(
     dry_run: &JsonValue,
     plan_paths: &[PathBuf],
@@ -366,6 +387,7 @@ fn project_divergence(
     })
 }
 
+#[cfg(any(feature = "hostlib", test))]
 fn json_type_name(value: &JsonValue) -> &'static str {
     match value {
         JsonValue::Null => "nil",

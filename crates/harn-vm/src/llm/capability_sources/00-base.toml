@@ -90,7 +90,11 @@
 #                     whether image content blocks may reference remote URLs.
 #   preserve_thinking: whether prior <think> blocks should be carried forward.
 #   server_parser   : server-side response parser that transforms model output.
-#   honors_chat_template_kwargs: whether chat_template_kwargs are honored.
+#   honors_chat_template_kwargs:
+#                     whether provider-specific chat-template options are honored.
+#   chat_template_options_field:
+#                     request field for those options; defaults to
+#                     chat_template_kwargs, Baseten uses chat_template_args.
 #   requires_completion_tokens: whether to send max_completion_tokens instead of max_tokens.
 #   reasoning_effort_supported: whether reasoning_effort is accepted.
 #   reasoning_effort_levels:

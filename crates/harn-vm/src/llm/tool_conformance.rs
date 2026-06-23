@@ -200,7 +200,7 @@ pub async fn run_tool_conformance_probe(
     } else {
         options.provider.clone()
     };
-    let model_id = model.id;
+    let model_id = resolved_probe_model_id(&model.id);
     let base_url = options.base_url.clone().or_else(|| {
         llm_config::provider_config(&provider).map(|def| llm_config::resolve_base_url(&def))
     });
@@ -219,6 +219,10 @@ pub async fn run_tool_conformance_probe(
         );
     }
     report_from_cases(provider, model_id, base_url, options.marker, cases)
+}
+
+fn resolved_probe_model_id(selector: &str) -> String {
+    llm_config::wire_model_id(selector)
 }
 
 pub fn classify_tool_conformance_fixture(
@@ -880,6 +884,12 @@ fn elapsed_ms(clock: &dyn harn_clock::Clock, started_ms: i64) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn probe_resolves_catalog_key_to_provider_wire_model() {
+        let resolved = llm_config::resolve_model_info("baseten-glm-5.2");
+        assert_eq!(resolved_probe_model_id(&resolved.id), "zai-org/GLM-5.2");
+    }
 
     #[test]
     fn classify_openai_native_tool_call_as_pass() {

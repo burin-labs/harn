@@ -90,6 +90,7 @@ fn test_equivalent_model(provider: &str, group: &str) -> ModelDef {
         wire_model: None,
         api_dialect: None,
         rate_limits: None,
+        performance: None,
         architecture: None,
         local_memory: None,
         runtime_context_window: None,

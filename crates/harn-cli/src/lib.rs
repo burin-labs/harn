@@ -1640,6 +1640,7 @@ fn build_provider_catalog_payload(available_only: bool) -> serde_json::Value {
                     "cost_per_1k_in": def.cost_per_1k_in,
                     "cost_per_1k_out": def.cost_per_1k_out,
                     "latency_p50_ms": def.latency_p50_ms,
+                    "performance": def.performance,
                 })
             })
         })
@@ -1656,6 +1657,7 @@ fn build_provider_catalog_payload(available_only: bool) -> serde_json::Value {
                 "stream_timeout": model.stream_timeout,
                 "capabilities": model.capabilities,
                 "pricing": model.pricing,
+                "performance": model.performance,
             })
         })
         .collect();

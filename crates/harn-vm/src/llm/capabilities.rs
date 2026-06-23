@@ -323,10 +323,15 @@ pub struct ProviderRule {
     /// model text/tool channel without an implicit parser.
     #[serde(default)]
     pub server_parser: Option<String>,
-    /// Whether provider-specific `chat_template_kwargs` are honored.
-    /// Some OpenAI-compatible servers silently drop unknown kwargs.
+    /// Whether provider-specific chat-template options are honored. Most
+    /// OpenAI-compatible servers call this `chat_template_kwargs`; Baseten's
+    /// Model APIs spell the same concept `chat_template_args`.
     #[serde(default)]
     pub honors_chat_template_kwargs: Option<bool>,
+    /// Request body field for provider-specific chat-template options when it
+    /// differs from the default `chat_template_kwargs`.
+    #[serde(default)]
+    pub chat_template_options_field: Option<String>,
     /// Whether this route requires OpenAI's `max_completion_tokens`
     /// request field instead of legacy `max_tokens`.
     #[serde(default)]
@@ -542,6 +547,7 @@ pub struct Capabilities {
     pub preserve_thinking: bool,
     pub server_parser: String,
     pub honors_chat_template_kwargs: bool,
+    pub chat_template_options_field: Option<String>,
     pub requires_completion_tokens: bool,
     pub requires_streaming: bool,
     pub reasoning_effort_supported: bool,
@@ -626,6 +632,7 @@ impl Default for Capabilities {
             preserve_thinking: false,
             server_parser: "none".to_string(),
             honors_chat_template_kwargs: false,
+            chat_template_options_field: None,
             requires_completion_tokens: false,
             requires_streaming: false,
             reasoning_effort_supported: false,
@@ -1470,6 +1477,7 @@ fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
         preserve_thinking: None,
         server_parser: None,
         honors_chat_template_kwargs: None,
+        chat_template_options_field: None,
         requires_completion_tokens: None,
         requires_streaming: None,
         reasoning_effort_supported: None,
@@ -1569,6 +1577,7 @@ fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilitie
             .clone()
             .unwrap_or_else(|| "none".to_string()),
         honors_chat_template_kwargs: rule.honors_chat_template_kwargs.unwrap_or(false),
+        chat_template_options_field: rule.chat_template_options_field.clone(),
         requires_completion_tokens: rule.requires_completion_tokens.unwrap_or(false),
         requires_streaming: rule.requires_streaming.unwrap_or(false),
         reasoning_effort_supported: rule.reasoning_effort_supported.unwrap_or(false),
@@ -1873,6 +1882,7 @@ preferred_tool_format = "native"
                     wire_model: None,
                     api_dialect: None,
                     rate_limits: None,
+                    performance: None,
                     architecture: None,
                     local_memory: None,
                     runtime_context_window: None,

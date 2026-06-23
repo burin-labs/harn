@@ -46,7 +46,8 @@ pub fn schema_value() -> Value {
                     "rpm": {"type": "integer", "minimum": 1},
                     "rate_limits": {"$ref": "#/$defs/rate_limits"},
                     "local_runtime": {"$ref": "#/$defs/local_runtime"},
-                    "latency_p50_ms": {"type": "integer", "minimum": 0}
+                    "latency_p50_ms": {"type": "integer", "minimum": 0},
+                    "performance": {"$ref": "#/$defs/performance"}
                 },
                 "additionalProperties": false
             },
@@ -189,6 +190,7 @@ pub fn schema_value() -> Value {
                     "wire_model": {"type": "string", "minLength": 1},
                     "api_dialect": {"type": "string", "minLength": 1},
                     "rate_limits": {"$ref": "#/$defs/rate_limits"},
+                    "performance": {"$ref": "#/$defs/performance"},
                     "architecture": {"$ref": "#/$defs/architecture"},
                     "local_memory": {"$ref": "#/$defs/local_memory"},
                     "runtime_context_window": {"type": "integer", "minimum": 1},
@@ -324,6 +326,20 @@ pub fn schema_value() -> Value {
                     "tier": {"type": "string", "minLength": 1},
                     "source_url": {"type": "string", "minLength": 1},
                     "last_verified": {"type": "string", "minLength": 1},
+                    "notes": {"type": "string", "minLength": 1}
+                },
+                "additionalProperties": false
+            },
+            "performance": {
+                "type": "object",
+                "properties": {
+                    "observed_ttft_ms": {"type": "integer", "minimum": 0},
+                    "output_tokens_per_sec": {"type": "number", "exclusiveMinimum": 0},
+                    "time_to_answer_s": {"type": "number", "exclusiveMinimum": 0},
+                    "source": {"type": "string", "minLength": 1},
+                    "source_url": {"type": "string", "minLength": 1},
+                    "last_verified": {"type": "string", "minLength": 1},
+                    "sample_size": {"type": "integer", "minimum": 1},
                     "notes": {"type": "string", "minLength": 1}
                 },
                 "additionalProperties": false

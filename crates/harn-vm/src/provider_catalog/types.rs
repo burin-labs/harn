@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::llm_config::{
     self, AliasToolCallingDef, LocalMemoryDef, ModelArchitectureDef, ModelAvailability,
-    ModelPricing, RateLimitsDef,
+    ModelPricing, RateLimitsDef, ServingPerformanceDef,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -43,6 +43,8 @@ pub struct CatalogProvider {
     pub local_runtime: Option<llm_config::LocalRuntimeDef>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub latency_p50_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub performance: Option<ServingPerformanceDef>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -112,6 +114,8 @@ pub struct CatalogModel {
     pub api_dialect: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rate_limits: Option<RateLimitsDef>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub performance: Option<ServingPerformanceDef>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub architecture: Option<ModelArchitectureDef>,
     #[serde(skip_serializing_if = "Option::is_none")]

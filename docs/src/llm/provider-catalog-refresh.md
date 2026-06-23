@@ -49,10 +49,11 @@ Fixture mode intentionally covers only deterministic public sources.
 Live mode adds provider-owned `/models` sources across the hosted
 provider set: Anthropic, OpenAI, Hugging Face Router, Gemini, Mistral,
 Cohere, xAI, Together, Groq, Cerebras, DeepSeek, Fireworks, DashScope,
-MiniMax, Z.AI, Moonshot, DeepInfra, SambaNova, and NVIDIA NIM. For
-NVIDIA, set `NVIDIA_API_KEY`; set `NVIDIA_NIM_BASE_URL` only when you
-need a self-hosted NIM or gateway URL. The built-in NVIDIA default is
-`https://integrate.api.nvidia.com/v1`.
+MiniMax, Z.AI, Moonshot, Baseten, DeepInfra, SambaNova, NVIDIA NIM,
+Nebius Token Factory, FlexAI, Hyperbolic, SiliconFlow, Parasail, and
+Atlas Cloud. For NVIDIA, set `NVIDIA_API_KEY`; set `NVIDIA_NIM_BASE_URL`
+only when you need a self-hosted NIM or gateway URL. The built-in NVIDIA
+default is `https://integrate.api.nvidia.com/v1`.
 
 ## Catalog source and generated artifacts
 
@@ -89,8 +90,10 @@ so downstream hosts do not need to parse Harn internals:
   metadata, reviewer-diversity hints, deprecation metadata (including
   the structured `superseded_by` migration pointer), fast-mode tier
   metadata (the accelerated-serving opt-in knob, its premium pricing,
-  and lifecycle — described but off by default), serverless-vs-dedicated
-  availability, endpoint/auth/extra-header metadata, provider
+  and lifecycle — described but off by default), serving performance
+  observations such as TTFT/output rate/time-to-answer with source and
+  verification date, serverless-vs-dedicated availability,
+  endpoint/auth/extra-header metadata, provider
   healthcheck probes, and provider caveats;
 - `provider-catalog.schema.json` — JSON Schema for the catalog
   contract;

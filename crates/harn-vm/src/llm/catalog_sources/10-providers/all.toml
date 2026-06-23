@@ -308,6 +308,28 @@ features = ["native_tools", "reasoning", "prompt_caching"]
 method = "GET"
 path = "/models"
 
+# Baseten Model APIs — OpenAI-compatible serverless inference for current
+# open-weight frontier models. Baseten's GLM-5.2 route is optimized with
+# Blackwell, KV-aware routing, prefill/decode disaggregation, and speculative
+# decoding; catalog rows use a `baseten/<wire-id>` prefix so the same weights
+# can be compared against Z.AI, Together, DeepInfra, OpenRouter, and NVIDIA.
+[providers.baseten]
+base_url = "https://inference.baseten.co/v1"
+base_url_env = "BASETEN_BASE_URL"
+auth_style = "bearer"
+auth_env = "BASETEN_API_KEY"
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+cost_per_1k_in = 0.0014
+cost_per_1k_out = 0.0044
+latency_p50_ms = 800
+features = ["native_tools", "reasoning", "prompt_caching"]
+rate_limits = { rpm = 15, tpm = 100000, tier = "basic_unverified", source_url = "https://docs.baseten.co/inference/model-apis/rate-limits-and-budgets", last_verified = "2026-06-23", notes = "Conservative default. Baseten also publishes Basic verified at 120 RPM / 500k TPM, Pro at 120 RPM / 1M TPM, and custom Enterprise limits." }
+
+[providers.baseten.healthcheck]
+method = "GET"
+path = "/models"
+
 # DeepInfra — OpenAI-compatible host for open-weight models (DeepSeek,
 # Qwen, Llama, Kimi, GPT-OSS, Gemma). The compat surface lives under the
 # `/v1/openai` path prefix, so the base_url carries it and chat_endpoint
@@ -367,6 +389,100 @@ latency_p50_ms = 1400
 features = ["native_tools"]
 
 [providers.nvidia.healthcheck]
+method = "GET"
+path = "/models"
+
+# Nebius Token Factory — OpenAI-compatible hosted inference for agentic
+# open-weight models. Public docs advertise native function calling and JSON
+# structured output; live per-model facts should come from /models/model cards.
+[providers.nebius]
+base_url = "https://api.tokenfactory.nebius.com/v1"
+base_url_env = "NEBIUS_BASE_URL"
+auth_style = "bearer"
+auth_env = "NEBIUS_API_KEY"
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+features = ["native_tools", "reasoning"]
+
+[providers.nebius.healthcheck]
+method = "GET"
+path = "/models"
+
+# FlexAI Token Factory — OpenAI-compatible API with model-discovery metadata
+# for context windows, pricing, health, and support flags.
+[providers.flexai]
+base_url = "https://tokens.flex.ai/v1"
+base_url_env = "FLEXAI_BASE_URL"
+auth_style = "bearer"
+auth_env = "FLEXAI_API_KEY"
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+features = ["native_tools", "reasoning", "vision"]
+
+[providers.flexai.healthcheck]
+method = "GET"
+path = "/models"
+
+# Hyperbolic — OpenAI-compatible inference with documented function calling
+# on current Qwen/Llama coding-agent routes.
+[providers.hyperbolic]
+base_url = "https://api.hyperbolic.xyz/v1"
+base_url_env = "HYPERBOLIC_BASE_URL"
+auth_style = "bearer"
+auth_env = "HYPERBOLIC_API_KEY"
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+features = ["native_tools"]
+rate_limits = { rpm = 60, tier = "basic", source_url = "https://www.hyperbolic.ai/docs/inference/text-apis", last_verified = "2026-06-23", notes = "Docs also publish a 600 RPM Pro tier after account upgrade/deposit; this row records the conservative default tier." }
+
+[providers.hyperbolic.healthcheck]
+method = "GET"
+path = "/models"
+
+# SiliconFlow — OpenAI-compatible hosted inference for inexpensive DeepSeek,
+# Qwen, GLM, and other open-weight routes. Set SILICONFLOW_BASE_URL to the
+# regional `.cn` endpoint when needed.
+[providers.siliconflow]
+base_url = "https://api.siliconflow.com/v1"
+base_url_env = "SILICONFLOW_BASE_URL"
+auth_style = "bearer"
+auth_env = "SILICONFLOW_API_KEY"
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+features = ["native_tools", "reasoning"]
+
+[providers.siliconflow.healthcheck]
+method = "GET"
+path = "/models"
+
+# Parasail — OpenAI-compatible serverless and batch API. Batch jobs are
+# particularly useful for offline eval/replay workloads where latency is not
+# on the critical path.
+[providers.parasail]
+base_url = "https://api.parasail.io/v1"
+base_url_env = "PARASAIL_BASE_URL"
+auth_style = "bearer"
+auth_env = "PARASAIL_API_KEY"
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+features = ["native_tools", "batch"]
+
+[providers.parasail.healthcheck]
+method = "GET"
+path = "/models"
+
+# Atlas Cloud — OpenAI-compatible coding-plan/provider surface that overlaps
+# GLM, Kimi, DeepSeek, Qwen, and MiniMax families.
+[providers.atlas]
+base_url = "https://api.atlascloud.ai/v1"
+base_url_env = "ATLAS_BASE_URL"
+auth_style = "bearer"
+auth_env = ["ATLAS_API_KEY", "ATLASCLOUD_API_KEY"]
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+features = ["native_tools", "reasoning"]
+
+[providers.atlas.healthcheck]
 method = "GET"
 path = "/models"
 

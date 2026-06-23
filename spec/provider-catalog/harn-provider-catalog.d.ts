@@ -29,6 +29,7 @@ export interface HarnCatalogProvider {
   rate_limits?: HarnRateLimits
   local_runtime?: HarnLocalRuntime
   latency_p50_ms?: number
+  performance?: HarnServingPerformance
 }
 
 export interface HarnLocalRuntime {
@@ -104,6 +105,7 @@ export interface HarnCatalogModel {
   wire_model?: string
   api_dialect?: string
   rate_limits?: HarnRateLimits
+  performance?: HarnServingPerformance
   architecture?: HarnModelArchitecture
   local_memory?: HarnLocalMemory
   runtime_context_window?: number
@@ -184,6 +186,17 @@ export interface HarnRateLimits {
   tier?: string
   source_url?: string
   last_verified?: string
+  notes?: string
+}
+
+export interface HarnServingPerformance {
+  observed_ttft_ms?: number
+  output_tokens_per_sec?: number
+  time_to_answer_s?: number
+  source?: string
+  source_url?: string
+  last_verified?: string
+  sample_size?: number
   notes?: string
 }
 

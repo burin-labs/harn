@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::llm;
 use crate::llm_config::{
     self, AliasDef, AliasToolCallingDef, HealthcheckDef, LocalMemoryDef, ModelArchitectureDef,
-    ModelDef, ModelPricing, ProviderDef, RateLimitsDef,
+    ModelDef, ModelPricing, ProviderDef, RateLimitsDef, ServingPerformanceDef,
 };
 use chrono::{NaiveDate, Utc};
 
@@ -112,6 +112,7 @@ fn provider_def_from_catalog(provider: &CatalogProvider) -> llm_config::Provider
         rate_limits: provider.rate_limits.clone(),
         local_runtime: provider.local_runtime.clone(),
         latency_p50_ms: provider.latency_p50_ms,
+        performance: provider.performance.clone(),
         ..llm_config::ProviderDef::default()
     }
 }
@@ -127,6 +128,7 @@ fn model_def_from_catalog(model: &CatalogModel) -> llm_config::ModelDef {
         wire_model: model.wire_model.clone(),
         api_dialect: model.api_dialect.clone(),
         rate_limits: model.rate_limits.clone(),
+        performance: model.performance.clone(),
         architecture: model.architecture.clone(),
         local_memory: model.local_memory.clone(),
         runtime_context_window: model.runtime_context_window,
@@ -350,6 +352,10 @@ fn catalog_provider(id: String, provider: ProviderDef) -> CatalogProvider {
             .with_rpm_fallback(provider.rpm),
         local_runtime: provider.local_runtime.clone(),
         latency_p50_ms: provider.latency_p50_ms,
+        performance: provider
+            .performance
+            .clone()
+            .filter(|performance| !performance.is_empty()),
         id,
     }
 }
@@ -423,6 +429,10 @@ fn catalog_model(
             .rate_limits
             .clone()
             .filter(|limits| !limits.is_empty()),
+        performance: model
+            .performance
+            .clone()
+            .filter(|performance| !performance.is_empty()),
         architecture: model
             .architecture
             .clone()
@@ -707,6 +717,53 @@ fn validate_rate_limits(
         owner,
         "rate_limits.last_verified",
         rate_limits.last_verified.as_deref(),
+        result,
+    );
+}
+
+fn validate_performance(
+    owner: &str,
+    performance: &ServingPerformanceDef,
+    result: &mut ProviderCatalogValidation,
+) {
+    for (field, value) in [
+        ("output_tokens_per_sec", performance.output_tokens_per_sec),
+        ("time_to_answer_s", performance.time_to_answer_s),
+    ] {
+        if value.is_some_and(|value| !value.is_finite() || value <= 0.0) {
+            result
+                .errors
+                .push(format!("{owner} performance.{field} must be positive"));
+        }
+    }
+    if performance.sample_size.is_some_and(|value| value == 0) {
+        result
+            .errors
+            .push(format!("{owner} performance.sample_size must be positive"));
+    }
+    for (field, value) in [
+        ("source", performance.source.as_deref()),
+        ("source_url", performance.source_url.as_deref()),
+        ("last_verified", performance.last_verified.as_deref()),
+        ("notes", performance.notes.as_deref()),
+    ] {
+        if value.is_some_and(|value| value.trim().is_empty()) {
+            result
+                .errors
+                .push(format!("{owner} performance.{field} cannot be empty"));
+        }
+    }
+    if let Some(source_url) = performance.source_url.as_deref() {
+        if !(source_url.starts_with("https://") || source_url.starts_with("http://")) {
+            result.warnings.push(format!(
+                "{owner} performance.source_url should be an absolute URL"
+            ));
+        }
+    }
+    validate_last_verified(
+        owner,
+        "performance.last_verified",
+        performance.last_verified.as_deref(),
         result,
     );
 }
