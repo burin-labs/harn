@@ -13663,7 +13663,7 @@
       "name": "deepinfra-glm-5.2",
       "model_id": "deepinfra/zai-org/GLM-5.2",
       "provider": "deepinfra",
-      "tool_format": "native"
+      "tool_format": "json"
     },
     {
       "name": "deepinfra-kimi-k2.7-code",
@@ -13955,13 +13955,13 @@
       "name": "moonshot-kimi-k2.7-code",
       "model_id": "moonshot/kimi-k2.7-code",
       "provider": "moonshot",
-      "tool_format": "native"
+      "tool_format": "json"
     },
     {
       "name": "moonshot-kimi-k2.7-code-highspeed",
       "model_id": "moonshot/kimi-k2.7-code-highspeed",
       "provider": "moonshot",
-      "tool_format": "native"
+      "tool_format": "json"
     },
     {
       "name": "nvidia-deepseek-v4-pro",
@@ -14056,7 +14056,7 @@
       "name": "openrouter-glm-5.2",
       "model_id": "z-ai/glm-5.2",
       "provider": "openrouter",
-      "tool_format": "native"
+      "tool_format": "text"
     },
     {
       "name": "openrouter-kat-coder-pro-v2",
