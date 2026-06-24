@@ -110,8 +110,18 @@ pipeline test(task) {
   assert(cerebras_gpt_oss.native_tools, "Cerebras GPT-OSS keeps native tools")
   assert(cerebras_gpt_oss.preferred_tool_format == "native", "Cerebras GPT-OSS defaults native")
   let deepinfra_gpt_oss = provider_capabilities("deepinfra", "openai/gpt-oss-120b")
-  assert(deepinfra_gpt_oss.native_tools, "DeepInfra GPT-OSS keeps native tools")
-  assert(deepinfra_gpt_oss.preferred_tool_format == "native", "DeepInfra GPT-OSS defaults native")
+  // DeepInfra's gpt-oss native (Harmony) channel drops tool calls into the
+  // private reasoning channel — pinned to the TEXT channel as a footgun fix
+  // (mirrors the Fireworks/OpenRouter gpt-oss rows above).
+  assert(!deepinfra_gpt_oss.native_tools, "DeepInfra GPT-OSS disables native tools")
+  assert(
+    deepinfra_gpt_oss.preferred_tool_format == "text",
+    "DeepInfra GPT-OSS defaults to heredoc text tools",
+  )
+  assert(
+    deepinfra_gpt_oss.text_tool_wire_format_supported,
+    "DeepInfra GPT-OSS supports text tool formatting",
+  )
   let groq_gpt_oss = provider_capabilities("groq", "openai/gpt-oss-120b")
   assert(groq_gpt_oss.native_tools, "Groq GPT-OSS keeps native tools")
   assert(groq_gpt_oss.preferred_tool_format == "native", "Groq GPT-OSS defaults native")
