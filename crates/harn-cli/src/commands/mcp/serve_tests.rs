@@ -1223,6 +1223,14 @@ async fn eval_inspect_run_reports_artifacts_and_event_chain() {
     assert_eq!(agent_events["record_count"], 2);
     assert_eq!(agent_events["sampled_event_count"], 1);
     assert_eq!(agent_events["counts_complete"], true);
+    // Full-scan ids span both records; the sample-scoped ids cover only the
+    // first record (limit=1), so `last_sampled_id` must not leak the tail.
+    assert_eq!(agent_events["first_event_id"], 1);
+    assert_eq!(agent_events["last_event_id"], 2);
+    assert_eq!(agent_events["first_sampled_id"], 1);
+    assert_eq!(agent_events["last_sampled_id"], 1);
+    assert_eq!(agent_events["provenance"]["chain_breaks_in_sample"], 0);
+    assert_eq!(agent_events["provenance"]["sample_chain_ok"], true);
     assert!(dossier["gaps"]
         .as_array()
         .unwrap()

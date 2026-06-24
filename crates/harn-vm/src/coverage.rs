@@ -386,6 +386,16 @@ mod tests {
     }
 
     #[test]
+    fn empty_report_renders_a_valid_empty_lcov() {
+        // An empty report has no on-disk records, so the tracefile is empty —
+        // still a valid LCOV file, which `--coverage-out` writes rather than
+        // skipping (a missing artifact would break a CI consumer).
+        let cov = Coverage::new();
+        assert!(cov.is_empty());
+        assert_eq!(cov.render_lcov(), "");
+    }
+
+    #[test]
     fn lcov_shapes_da_lines() {
         // Use a real on-disk path so the render filter keeps it.
         let path = std::env::current_exe().unwrap();
