@@ -1210,8 +1210,11 @@ struct EventTopicStats {
     roles: BTreeMap<String, u64>,
     first_id: Option<u64>,
     last_id: Option<u64>,
+    first_sampled_id: Option<u64>,
+    last_sampled_id: Option<u64>,
     previous_record_hash: Option<String>,
     provenance_breaks: u64,
+    sample_provenance_breaks: u64,
     provenance_records: u64,
     samples: Vec<JsonValue>,
 }
@@ -1219,16 +1222,24 @@ struct EventTopicStats {
 impl EventTopicStats {
     fn observe(&mut self, value: &JsonValue, sample_limit: usize, include_payloads: bool) {
         self.records_scanned += 1;
-        if self.sampled_event_count < sample_limit as u64 {
+        let id = value.get("id").and_then(JsonValue::as_u64);
+        self.first_id = self.first_id.or(id);
+        self.last_id = id.or(self.last_id);
+
+        // The sample is the first `sample_limit` records, so the sample-scoped
+        // fields describe exactly that prefix window — distinct from the
+        // full-scan `first_id`/`last_id` whenever a backend scans past the
+        // limit (the JSONL reader walks every line; sqlite is already bounded).
+        let is_sampled = self.sampled_event_count < sample_limit as u64;
+        if is_sampled {
             self.sampled_event_count += 1;
+            self.first_sampled_id = self.first_sampled_id.or(id);
+            self.last_sampled_id = id.or(self.last_sampled_id);
             if include_payloads && self.samples.len() < 5 {
                 self.samples.push(value.clone());
             }
         }
 
-        let id = value.get("id").and_then(JsonValue::as_u64);
-        self.first_id = self.first_id.or(id);
-        self.last_id = id.or(self.last_id);
         let event = value.get("event").unwrap_or(value);
         if let Some(kind) = event.get("kind").and_then(JsonValue::as_str) {
             *self.kinds.entry(kind.to_string()).or_default() += 1;
@@ -1259,6 +1270,9 @@ impl EventTopicStats {
             if let Some(previous) = self.previous_record_hash.as_deref() {
                 if prev_hash != Some(previous) {
                     self.provenance_breaks += 1;
+                    if is_sampled {
+                        self.sample_provenance_breaks += 1;
+                    }
                 }
             }
             self.previous_record_hash = Some(record_hash.to_string());
@@ -1284,8 +1298,8 @@ fn event_records_report(
         "latest_id": latest_id,
         "first_event_id": stats.first_id,
         "last_event_id": stats.last_id,
-        "first_sampled_id": stats.first_id,
-        "last_sampled_id": stats.last_id,
+        "first_sampled_id": stats.first_sampled_id,
+        "last_sampled_id": stats.last_sampled_id,
         "kinds": stats.kinds,
         "payload_event_types": stats.payload_types,
         "roles": stats.roles,
@@ -1293,8 +1307,8 @@ fn event_records_report(
             "records_with_hash": stats.provenance_records,
             "chain_breaks": stats.provenance_breaks,
             "chain_ok": stats.provenance_breaks == 0,
-            "chain_breaks_in_sample": stats.provenance_breaks,
-            "sample_chain_ok": stats.provenance_breaks == 0,
+            "chain_breaks_in_sample": stats.sample_provenance_breaks,
+            "sample_chain_ok": stats.sample_provenance_breaks == 0,
         },
         "samples": stats.samples,
     })
@@ -1382,13 +1396,18 @@ fn event_chain_summary(topic_names: &[String], event_topics: &[JsonValue]) -> Js
             }
         }
     }
+    // A topic can surface from both the JSONL dir and the sqlite db, so dedup
+    // (and sort, for deterministic output) before reporting.
+    let mut agent_event_topics: Vec<String> = topic_names
+        .iter()
+        .filter(|name| name.starts_with("observability.agent_events."))
+        .cloned()
+        .collect();
+    agent_event_topics.sort();
+    agent_event_topics.dedup();
     json!({
         "has_agent_transcript": topic_names.iter().any(|name| name == "agent.transcript.llm"),
-        "agent_event_topics": topic_names
-            .iter()
-            .filter(|name| name.starts_with("observability.agent_events."))
-            .cloned()
-            .collect::<Vec<_>>(),
+        "agent_event_topics": agent_event_topics,
         "payload_event_types": aggregate_payload_types,
         "tool_call_events": aggregate_payload_types.get("tool_call").copied().unwrap_or(0),
         "tool_call_update_events": aggregate_payload_types

@@ -2143,14 +2143,18 @@ pub(crate) async fn run_user_tests(
 fn emit_coverage_report(report: &harn_vm::coverage::Coverage, out: Option<&str>) {
     if report.is_empty() {
         eprintln!("\n[coverage] no executed source files were found on disk to report");
-        return;
+    } else {
+        let (covered, total) = report.totals();
+        println!(
+            "\nLine coverage: {covered}/{total} ({:.1}%)\n{}",
+            report.percent(),
+            report.render_text(),
+        );
     }
-    let (covered, total) = report.totals();
-    println!(
-        "\nLine coverage: {covered}/{total} ({:.1}%)\n{}",
-        report.percent(),
-        report.render_text(),
-    );
+    // Honour an explicit --coverage-out even for an empty report: a CI step that
+    // consumes the tracefile should find it rather than fail on a missing
+    // artifact. An empty `Coverage` renders to a valid empty LCOV (zero
+    // records).
     if let Some(path) = out {
         if let Err(error) = fs::write(path, report.render_lcov()) {
             eprintln!("failed to write coverage report to {path}: {error}");
