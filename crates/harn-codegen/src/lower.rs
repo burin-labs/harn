@@ -6,7 +6,7 @@
 //! of its Harn arity or types:
 //!
 //! ```text
-//! extern "C" fn(args: *const u64, ret: *mut u64, trap: *mut u8)
+//! extern "C" fn(args: *const u64, ret: *mut u64, status: *mut u8)
 //! ```
 //!
 //! Arguments and the result are passed as raw 64-bit slots (see
@@ -14,9 +14,16 @@
 //! monomorphic function pointer — no per-signature transmute zoo — and makes
 //! the AOT object expose one stable, easily-called symbol.
 //!
-//! Integer `/` and `%` by zero set `*trap = 1` and return, mirroring the
-//! interpreter's runtime error instead of executing a hardware trap that would
-//! abort the host process.
+//! The third pointer carries a [`status`] code: `0` means a normal result is in
+//! `*ret`; non-zero means `*ret` is undefined and the code says why. Two faults
+//! divert to shared epilogue blocks rather than executing a hardware trap that
+//! would abort the host process:
+//!
+//! * integer `/` and `%` by zero → [`status::DIVIDE_BY_ZERO`] (a real runtime
+//!   error the VM raises too); and
+//! * an overflowing integer `+`/`-`/`*`/negation → [`status::INTEGER_OVERFLOW`],
+//!   a *deopt* (the VM promotes to `float`, which the monomorphic native code
+//!   cannot represent — see [`crate::outcome`]).
 
 use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
 use cranelift_codegen::ir::{
@@ -30,8 +37,24 @@ use crate::error::CodegenError;
 use crate::value::{ScalarType, ScalarValue};
 use crate::verify::{ScalarFunction, Terminator};
 
-/// Number of pointer parameters in the uniform ABI: `args`, `ret`, `trap`.
+/// Number of pointer parameters in the uniform ABI: `args`, `ret`, `status`.
 const ABI_PARAM_COUNT: usize = 3;
+
+/// Status codes written to the third ABI pointer (`*status`) on return. `0`
+/// means a normal scalar result is in `*ret`; any non-zero code means `*ret` is
+/// undefined and the caller must interpret the code. These are part of the
+/// native ABI contract and are read back in [`crate::jit`].
+pub(crate) mod status {
+    /// Normal return: `*ret` holds the scalar result.
+    pub const OK: u8 = 0;
+    /// Integer divide/remainder by zero — a genuine runtime trap the VM also
+    /// raises.
+    pub const DIVIDE_BY_ZERO: u8 = 1;
+    /// Integer `+`/`-`/`*`/negation overflowed `i64`. The VM promotes to
+    /// `float`; the monomorphic native code deopts (re-run on the VM). Not an
+    /// error — see [`crate::outcome`].
+    pub const INTEGER_OVERFLOW: u8 = 2;
+}
 
 /// Fill in `sig` with the uniform native calling convention for `ptr_ty`.
 pub(crate) fn build_signature(sig: &mut Signature, ptr_ty: Type) {
@@ -112,8 +135,8 @@ pub(crate) fn lower(
         builder.def_var(vars[idx], value);
     }
 
-    // Clear the trap flag up front; only the trap block ever sets it.
-    let zero8 = builder.ins().iconst(types::I8, 0);
+    // Initialise the status byte to OK up front; only a fault epilogue sets it.
+    let zero8 = builder.ins().iconst(types::I8, i64::from(status::OK));
     builder.ins().store(MemFlags::trusted(), zero8, trap_ptr, 0);
 
     // One Cranelift block per scalar block, carrying the operand-stack shape
@@ -130,8 +153,14 @@ pub(crate) fn lower(
         })
         .collect();
 
-    // Shared block for the divide-by-zero trap path.
+    // Shared fault blocks: one for the divide-by-zero trap, one for the
+    // integer-overflow deopt. Each stores its status code and returns.
     let trap_block = builder.create_block();
+    let overflow_block = builder.create_block();
+    let faults = FaultBlocks {
+        trap: trap_block,
+        overflow: overflow_block,
+    };
 
     // Entry falls into block 0 (whose entry stack is empty).
     let no_args: Vec<BlockArg> = Vec::new();
@@ -141,7 +170,7 @@ pub(crate) fn lower(
         builder.switch_to_block(clif_blocks[idx]);
         let mut stack: Vec<Value> = builder.block_params(clif_blocks[idx]).to_vec();
         for instr in &block.body {
-            lower_instr(&mut builder, &vars, &mut stack, instr, trap_block);
+            lower_instr(&mut builder, &vars, &mut stack, instr, faults);
         }
         match block.term {
             Terminator::Return => {
@@ -167,17 +196,57 @@ pub(crate) fn lower(
         }
     }
 
-    // Emit the trap path: set *trap = 1, write a zero result, return.
-    builder.switch_to_block(trap_block);
-    let one8 = builder.ins().iconst(types::I8, 1);
-    builder.ins().store(MemFlags::trusted(), one8, trap_ptr, 0);
-    let zero_ret = zero_of(&mut builder, sf.ret);
-    store_ret(&mut builder, ret_ptr, sf.ret, zero_ret);
-    builder.ins().return_(&[]);
+    // Emit the fault epilogues. Each sets its status byte, writes a throwaway
+    // zero result (the caller ignores `*ret` on any non-zero status), returns.
+    emit_fault_epilogue(
+        &mut builder,
+        trap_block,
+        status::DIVIDE_BY_ZERO,
+        trap_ptr,
+        ret_ptr,
+        sf.ret,
+    );
+    emit_fault_epilogue(
+        &mut builder,
+        overflow_block,
+        status::INTEGER_OVERFLOW,
+        trap_ptr,
+        ret_ptr,
+        sf.ret,
+    );
 
     builder.seal_all_blocks();
     builder.finalize();
     Ok(())
+}
+
+/// The two shared fault destinations threaded through instruction lowering.
+#[derive(Clone, Copy)]
+struct FaultBlocks {
+    /// Integer divide-by-zero trap (status [`status::DIVIDE_BY_ZERO`]).
+    trap: cranelift_codegen::ir::Block,
+    /// Integer-overflow deopt (status [`status::INTEGER_OVERFLOW`]).
+    overflow: cranelift_codegen::ir::Block,
+}
+
+/// Emit a fault block that records `code` in `*status`, stores a zero in
+/// `*ret`, and returns.
+fn emit_fault_epilogue(
+    builder: &mut FunctionBuilder,
+    block: cranelift_codegen::ir::Block,
+    code: u8,
+    status_ptr: Value,
+    ret_ptr: Value,
+    ret: ScalarType,
+) {
+    builder.switch_to_block(block);
+    let code_val = builder.ins().iconst(types::I8, i64::from(code));
+    builder
+        .ins()
+        .store(MemFlags::trusted(), code_val, status_ptr, 0);
+    let zero_ret = zero_of(builder, ret);
+    store_ret(builder, ret_ptr, ret, zero_ret);
+    builder.ins().return_(&[]);
 }
 
 fn lower_instr(
@@ -185,7 +254,7 @@ fn lower_instr(
     vars: &[Variable],
     stack: &mut Vec<Value>,
     instr: &Instr,
-    trap_block: cranelift_codegen::ir::Block,
+    faults: FaultBlocks,
 ) {
     match instr {
         Instr::Const(value) => {
@@ -195,7 +264,7 @@ fn lower_instr(
         Instr::Bin(op) => {
             let b = stack.pop().unwrap();
             let a = stack.pop().unwrap();
-            let result = lower_bin(builder, *op, a, b, trap_block);
+            let result = lower_bin(builder, *op, a, b, faults);
             stack.push(result);
         }
         Instr::Cmp(op) => {
@@ -208,7 +277,13 @@ fn lower_instr(
             let result = if is_float(builder, a) {
                 builder.ins().fneg(a)
             } else {
-                builder.ins().ineg(a)
+                // `-i64::MIN` overflows; the VM promotes to float, so deopt
+                // (matching the reference interpreter's `checked_neg`).
+                let int_min = builder.ins().iconst(types::I64, i64::MIN);
+                let is_min = builder.ins().icmp(IntCC::Equal, a, int_min);
+                let negated = builder.ins().ineg(a);
+                guard_no_overflow(builder, is_min, faults.overflow);
+                negated
             };
             stack.push(result);
         }
@@ -262,7 +337,7 @@ fn lower_bin(
     op: BinOp,
     a: Value,
     b: Value,
-    trap_block: cranelift_codegen::ir::Block,
+    faults: FaultBlocks,
 ) -> Value {
     if is_float(builder, a) {
         return match op {
@@ -273,13 +348,88 @@ fn lower_bin(
             BinOp::Mod => unreachable!("float modulo rejected by the verifier"),
         };
     }
+    // Integer `+`/`-`/`*` deopt on `i64` overflow (the VM promotes to float);
+    // `/`/`%` wrap and trap only on a zero divisor.
     match op {
-        BinOp::Add => builder.ins().iadd(a, b),
-        BinOp::Sub => builder.ins().isub(a, b),
-        BinOp::Mul => builder.ins().imul(a, b),
-        BinOp::Div => lower_idiv(builder, a, b, trap_block, true),
-        BinOp::Mod => lower_idiv(builder, a, b, trap_block, false),
+        BinOp::Add => lower_int_add_sub(builder, a, b, faults.overflow, true),
+        BinOp::Sub => lower_int_add_sub(builder, a, b, faults.overflow, false),
+        BinOp::Mul => lower_int_mul(builder, a, b, faults.overflow),
+        BinOp::Div => lower_idiv(builder, a, b, faults.trap, true),
+        BinOp::Mod => lower_idiv(builder, a, b, faults.trap, false),
     }
+}
+
+/// Branch to `overflow_block` when `overflowed` (an `i8` boolean) is set,
+/// otherwise continue in a fresh block. Mirrors the divide-by-zero guard in
+/// [`lower_idiv`]: the SSA result computed before the guard dominates the
+/// continuation, so it stays usable there.
+fn guard_no_overflow(
+    builder: &mut FunctionBuilder,
+    overflowed: Value,
+    overflow_block: cranelift_codegen::ir::Block,
+) {
+    let cont = builder.create_block();
+    let no_args: Vec<BlockArg> = Vec::new();
+    builder
+        .ins()
+        .brif(overflowed, overflow_block, &no_args, cont, &no_args);
+    builder.switch_to_block(cont);
+}
+
+/// Lower a trap-checked signed `i64` add (`is_add`) or subtract, deopting to
+/// `overflow_block` on signed overflow.
+///
+/// Overflow is detected from the sign bits without a dedicated flag
+/// instruction: for `a + b` it occurs iff `a` and `b` share a sign that
+/// differs from the result's; for `a - b` iff `a` and `b` differ in sign and
+/// the result's sign differs from `a`'s. Both reduce to testing the sign bit
+/// of a small bitwise expression.
+fn lower_int_add_sub(
+    builder: &mut FunctionBuilder,
+    a: Value,
+    b: Value,
+    overflow_block: cranelift_codegen::ir::Block,
+    is_add: bool,
+) -> Value {
+    let result = if is_add {
+        builder.ins().iadd(a, b)
+    } else {
+        builder.ins().isub(a, b)
+    };
+    let lhs = if is_add {
+        builder.ins().bxor(a, result)
+    } else {
+        builder.ins().bxor(a, b)
+    };
+    let rhs = if is_add {
+        builder.ins().bxor(b, result)
+    } else {
+        builder.ins().bxor(a, result)
+    };
+    let combined = builder.ins().band(lhs, rhs);
+    // Sign bit set (value < 0) means overflow.
+    let overflowed = builder.ins().icmp_imm(IntCC::SignedLessThan, combined, 0);
+    guard_no_overflow(builder, overflowed, overflow_block);
+    result
+}
+
+/// Lower a trap-checked signed `i64` multiply, deopting to `overflow_block` on
+/// overflow. The full product's high half (`smulhi`) must equal the sign
+/// extension of the low half; otherwise the result did not fit in `i64`.
+fn lower_int_mul(
+    builder: &mut FunctionBuilder,
+    a: Value,
+    b: Value,
+    overflow_block: cranelift_codegen::ir::Block,
+) -> Value {
+    let low = builder.ins().imul(a, b);
+    let high = builder.ins().smulhi(a, b);
+    // Arithmetic shift by 63 broadcasts the low half's sign bit across all 64
+    // bits; a faithful (non-overflowing) product has `high` equal to it.
+    let sign = builder.ins().sshr_imm(low, 63);
+    let overflowed = builder.ins().icmp(IntCC::NotEqual, high, sign);
+    guard_no_overflow(builder, overflowed, overflow_block);
+    low
 }
 
 /// Lower integer `/` (`is_div = true`) or `%` (`is_div = false`) with the

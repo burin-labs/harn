@@ -35,5 +35,12 @@ cranelift-jit = "0.132"
 cranelift-native = "0.132"
 cranelift-object = "0.132"
 
+[dev-dependencies]
+# Dev-only: the VM-fidelity differential test drives the real `harn-vm`
+# interpreter (async, current-thread) to confirm the native compiler's
+# guard-and-deopt boundaries match the VM's promote-on-overflow semantics.
+# Never linked by the shipped binary.
+tokio = { version = "1", features = ["rt", "macros"] }
+
 [lints]
 workspace = true

@@ -12,13 +12,15 @@ use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::default_libcall_names;
 
 use crate::error::{CodegenError, NativeTrap};
-use crate::lower::define_scalar_function;
+use crate::lower::{define_scalar_function, status};
+use crate::outcome::{DeoptReason, NativeOutcome};
 use crate::symbol_name;
 use crate::value::{ScalarType, ScalarValue};
 use crate::verify::ScalarFunction;
 
-/// The raw uniform ABI of every compiled function.
-type RawFn = extern "C" fn(args: *const u64, ret: *mut u64, trap: *mut u8);
+/// The raw uniform ABI of every compiled function. The third pointer receives a
+/// status code (see [`status`]): `0` = result in `*ret`, non-zero = trap/deopt.
+type RawFn = extern "C" fn(args: *const u64, ret: *mut u64, status: *mut u8);
 
 /// A JIT-compiled scalar function with live executable code.
 ///
@@ -55,11 +57,16 @@ impl NativeFunction {
     /// types — that is a caller bug, analogous to calling a Rust `fn` with the
     /// wrong signature.
     ///
+    /// Returns [`NativeOutcome::Value`] (bit-identical to the Harn VM) on the
+    /// normal path, or [`NativeOutcome::Deopt`] when an integer operation
+    /// overflowed and the VM would promote to `float` (re-run on the VM for the
+    /// true value).
+    ///
     /// # Errors
     ///
     /// Returns [`NativeTrap`] when the code raised a runtime trap (integer
-    /// divide by zero).
-    pub fn call(&self, args: &[ScalarValue]) -> Result<ScalarValue, NativeTrap> {
+    /// divide by zero) — which the VM raises too.
+    pub fn call(&self, args: &[ScalarValue]) -> Result<NativeOutcome, NativeTrap> {
         assert_eq!(
             args.len(),
             self.params.len(),
@@ -83,17 +90,21 @@ impl NativeFunction {
             arg_bits.push(0);
         }
         let mut ret_bits: u64 = 0;
-        let mut trap: u8 = 0;
+        let mut status_code: u8 = status::OK;
 
         // SAFETY: `func_ptr` was produced by Cranelift for the uniform ABI
         // declared in `lower`, and the backing module is kept alive by `self`.
         let raw: RawFn = unsafe { mem::transmute::<*const u8, RawFn>(self.func_ptr) };
-        raw(arg_bits.as_ptr(), &raw mut ret_bits, &raw mut trap);
+        raw(arg_bits.as_ptr(), &raw mut ret_bits, &raw mut status_code);
 
-        if trap != 0 {
-            return Err(NativeTrap::DivideByZero);
+        match status_code {
+            status::OK => Ok(NativeOutcome::Value(ScalarValue::from_bits(
+                self.ret, ret_bits,
+            ))),
+            status::DIVIDE_BY_ZERO => Err(NativeTrap::DivideByZero),
+            status::INTEGER_OVERFLOW => Ok(NativeOutcome::Deopt(DeoptReason::IntegerOverflow)),
+            other => unreachable!("native code returned unknown status code {other}"),
         }
-        Ok(ScalarValue::from_bits(self.ret, ret_bits))
     }
 }
 
