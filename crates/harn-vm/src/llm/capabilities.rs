@@ -3332,8 +3332,10 @@ native_tools = true
         for (provider, model) in [
             // cerebras gpt-oss is native-clean (only throttled).
             ("cerebras", "gpt-oss-120b"),
-            // sambanova minimax is native and interchangeable.
-            ("sambanova", "minimax-m2.7"),
+            // sambanova deepseek-v3.2 is native and interchangeable (minimax was
+            // reclassified native_unreliable upstream, so it is no longer a
+            // known-good native exemplar).
+            ("sambanova", "DeepSeek-V3.2"),
         ] {
             let decision = validate_tool_format(provider, model, "native");
             assert_eq!(
