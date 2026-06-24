@@ -497,15 +497,45 @@ fn __tool_registry_entry(tools, tool_name) {
 }
 
 fn __tool_entry_annotations(entry) {
+  if type_of(entry) != "dict" {
+    return {}
+  }
+  var annotations = {}
+  let policy = entry?.policy
+  if type_of(policy) == "dict" {
+    annotations = annotations + policy
+  }
   let direct = entry?.annotations
   if type_of(direct) == "dict" {
-    return direct
+    annotations = annotations + direct
   }
   let func = entry?.function
+  if type_of(func) == "dict" && type_of(func?.policy) == "dict" {
+    annotations = annotations + func.policy
+  }
   if type_of(func) == "dict" && type_of(func?.annotations) == "dict" {
-    return func.annotations
+    annotations = annotations + func.annotations
+  }
+  return annotations
+}
+
+fn __tool_policy_annotations(policy, tool_name) {
+  if type_of(policy) != "dict" {
+    return {}
+  }
+  let registry = policy?.tool_annotations ?? policy?.toolAnnotations ?? {}
+  if type_of(registry) != "dict" {
+    return {}
+  }
+  let annotations = registry[tool_name]
+  if type_of(annotations) == "dict" {
+    return annotations
   }
   return {}
+}
+
+fn __tool_resource_annotations(entry, policy, tool_name) {
+  return __tool_policy_annotations(policy, tool_name) + __tool_entry_annotations(entry)
 }
 
 fn __tool_envelope(call, tools, options) {
@@ -543,11 +573,7 @@ fn __tool_envelope(call, tools, options) {
   } else {
     entry?.parameters ?? entry?.input_schema ?? entry?.inputSchema
   }
-  let annotations = if entry == nil {
-    nil
-  } else {
-    __tool_entry_annotations(entry)
-  }
+  let annotations = __tool_resource_annotations(entry, options?.policy, tool_name)
   let description = if entry == nil {
     ""
   } else {
@@ -805,6 +831,9 @@ fn __tool_lifecycle_error_category(raw) {
   ) {
     return category
   }
+  if contains(["intra_turn_failure_fanout_collapsed", "intra_turn_resource_fail_fast"], category) {
+    return "rejected_loop"
+  }
   if contains(["tool_rejected", "consent_denied", "egress_blocked", "scope_violation"], category) {
     return "permission_denied"
   }
@@ -831,7 +860,12 @@ fn __emit_tool_lifecycle_finish(envelope, result) {
   if session_id == "" || to_string(envelope?.tool_name ?? "") == "" {
     return
   }
-  let tool_call_id = to_string(result?.tool_call_id ?? envelope.call_id)
+  let result_tool_call_id = to_string(result?.tool_call_id ?? "")
+  let tool_call_id = if result_tool_call_id != "" {
+    result_tool_call_id
+  } else {
+    envelope.call_id
+  }
   let tool_name = to_string(result?.tool_name ?? result?.name ?? envelope.tool_name)
   let raw_output = if result?.result != nil {
     result.result
@@ -850,6 +884,11 @@ fn __emit_tool_lifecycle_finish(envelope, result) {
     executor: result?.executor,
   }
   let _ = agent_emit_event(session_id, "tool_call_update", payload)
+}
+
+fn __emit_synthetic_tool_lifecycle_finish(call, result, tools, options) {
+  let envelope = __tool_envelope(call, tools, options)
+  __emit_tool_lifecycle_finish(envelope, result)
 }
 
 fn __invoke_tool(call, tools, options) {
@@ -1160,6 +1199,7 @@ fn __maybe_inject_parse_error_feedback(session_id, parsed, tool_calls, turn_opts
       has_partial_success: has_partial_success,
       parsed_call_count: parsed_count,
       body_hint: agent_tool_call_paradigm(turn_opts).body_hint,
+      is_native_format: agent_tool_format(turn_opts) == "native",
       is_json_format: agent_tool_format(turn_opts) == "json",
     },
     turn_opts,
@@ -1220,6 +1260,7 @@ fn __maybe_inject_blank_name_feedback(session_id, llm_result, parsed, dispatched
       has_partial_success: has_partial_success,
       parsed_call_count: dispatched_count,
       body_hint: agent_tool_call_paradigm(turn_opts).body_hint,
+      is_native_format: agent_tool_format(turn_opts) == "native",
       is_json_format: agent_tool_format(turn_opts) == "json",
     },
     turn_opts,
@@ -1390,17 +1431,35 @@ fn __intra_turn_annotations_mutate_resource(annotations) -> bool {
     annotations?.side_effect_level ?? annotations?.sideEffectLevel ?? annotations?.side_effect
       ?? annotations?.sideEffect,
   )
-  return side_effect == "workspace_write"
+  if side_effect == "workspace_write" {
+    return true
+  }
+  let mutation = __intra_turn_annotation_text(
+    annotations?.mutation_classification ?? annotations?.mutationClassification
+      ?? annotations?.mutation,
+  )
+  return mutation == "workspace_write"
 }
 
 fn __intra_turn_annotation_path_params(annotations) {
   if type_of(annotations) != "dict" {
     return []
   }
+  let direct = annotations?.path_params ?? annotations?.pathParams ?? annotations?.resource_path_params
+    ?? annotations?.resourcePathParams
+  if type_of(direct) == "list" {
+    return direct
+  }
+  if type_of(direct) == "string" {
+    return [direct]
+  }
   let schema = annotations?.arg_schema ?? annotations?.argSchema ?? {}
   let params = schema?.path_params ?? schema?.pathParams ?? []
   if type_of(params) == "list" {
     return params
+  }
+  if type_of(params) == "string" {
+    return [params]
   }
   return []
 }
@@ -1436,10 +1495,34 @@ fn __intra_turn_push_resource_value(keys, value) {
   return __intra_turn_push_resource_key(keys, value)
 }
 
-fn __intra_turn_resource_keys(call, tools) {
+const __INTRA_TURN_FALLBACK_PATH_ARGS = [
+  "path",
+  "paths",
+  "file",
+  "files",
+  "filepath",
+  "file_path",
+  "target_path",
+  "source_path",
+  "folder",
+  "dir",
+  "directory",
+]
+
+fn __intra_turn_fallback_resource_keys(args) {
+  var keys = []
+  for name in __INTRA_TURN_FALLBACK_PATH_ARGS {
+    if args?[name] != nil {
+      keys = __intra_turn_push_resource_value(keys, args[name])
+    }
+  }
+  return keys
+}
+
+fn __intra_turn_resource_keys(call, tools, options = {}) {
   let tool_name = to_string(call?.name ?? call?.tool_name ?? "")
   let entry = __tool_registry_entry(tools, tool_name)
-  let annotations = __tool_entry_annotations(entry)
+  let annotations = __tool_resource_annotations(entry, options?.policy, tool_name)
   if !__intra_turn_annotations_mutate_resource(annotations) {
     return []
   }
@@ -1450,6 +1533,9 @@ fn __intra_turn_resource_keys(call, tools) {
     if name != "" && args?[name] != nil {
       keys = __intra_turn_push_resource_value(keys, args[name])
     }
+  }
+  if len(keys) == 0 {
+    keys = __intra_turn_fallback_resource_keys(args)
   }
   return keys
 }
@@ -1473,9 +1559,9 @@ fn __intra_turn_add_failed_keys(failed_keys, keys) {
   return out
 }
 
-fn __intra_turn_has_keyed_mutating_calls(tool_calls, tools) -> bool {
+fn __intra_turn_has_keyed_mutating_calls(tool_calls, tools, options = {}) -> bool {
   for call in tool_calls {
-    if len(__intra_turn_resource_keys(call, tools)) > 0 {
+    if len(__intra_turn_resource_keys(call, tools, options)) > 0 {
       return true
     }
   }
@@ -1683,7 +1769,8 @@ fn __dispatch_tool_calls_with_middleware(tool_calls, tools, options, cap) {
   // completion order so text tool-call parsers that key on
   // declaration order still match.
   let resource_fail_fast = options?._intra_turn_resource_fail_fast ?? true
-  let keyed_mutating_batch = resource_fail_fast && __intra_turn_has_keyed_mutating_calls(tool_calls, tools)
+  let keyed_mutating_batch = resource_fail_fast
+    && __intra_turn_has_keyed_mutating_calls(tool_calls, tools, options)
   if cap <= 1 || len(tool_calls) <= 1 || keyed_mutating_batch {
     // Intra-turn failing-fan-out cap (#A4). Dispatch serially; track the count
     // of consecutive byte-identical FAILING results. Once that streak reaches
@@ -1705,19 +1792,23 @@ fn __dispatch_tool_calls_with_middleware(tool_calls, tools, options, cap) {
     var failed_resource_keys = []
     for (index, call) in iter(tool_calls).enumerate() {
       let resource_keys = if resource_fail_fast {
-        __intra_turn_resource_keys(call, tools)
+        __intra_turn_resource_keys(call, tools, options)
       } else {
         []
       }
       if len(resource_keys) > 0 && __intra_turn_intersects(resource_keys, failed_resource_keys) {
-        results = results.push(__intra_turn_resource_blocked_result(call, resource_keys))
+        let blocked = __intra_turn_resource_blocked_result(call, resource_keys)
+        __emit_synthetic_tool_lifecycle_finish(call, blocked, tools, options)
+        results = results.push(blocked)
         continue
       }
       if fanout_cap > 0 && capped_call_signature != nil
         && __intra_turn_call_signature(call) == capped_call_signature {
         // Same failing call as the one that tripped the cap — skip dispatch.
         if !collapsed_emitted {
-          results = results.push(__intra_turn_collapsed_result(call, capped_sample))
+          let collapsed = __intra_turn_collapsed_result(call, capped_sample)
+          __emit_synthetic_tool_lifecycle_finish(call, collapsed, tools, options)
+          results = results.push(collapsed)
           collapsed_emitted = true
         }
         continue
@@ -1831,13 +1922,51 @@ fn __tool_result_ok(result) {
  * Some host tools report product-level rejections as a successful transport
  * result whose rendered/observation text begins with `Error:`. Treating those
  * as successful makes same-turn resource fail-fast and rejected-tool accounting
- * blind to edit rejections. This predicate intentionally does not rewrite the
- * result payload; it only classifies the result for scheduling/lifecycle.
+ * blind to edit rejections. Write tools can also report in-band failures with
+ * Burin's canonical edit/scaffold vocabulary (`## Diagnostics (...)`,
+ * `[Edit rejected]`, missing path, etc.). This predicate intentionally does not
+ * rewrite the result payload; it only classifies the result for
+ * scheduling/lifecycle.
  */
+const __PRODUCT_ERROR_WRITE_TOOL_NAMES = ["edit", "scaffold", "run_codemod", "write"]
+
+fn __tool_result_write_product_tool(result) -> bool {
+  let name = lowercase(trim(to_string(result?.tool_name ?? result?.name ?? result?.tool_name_raw ?? "")))
+  return contains(__PRODUCT_ERROR_WRITE_TOOL_NAMES, name)
+}
+
+fn __tool_result_dispatch_rejection_text(lower: string) -> bool {
+  return lower.contains("\"error\":\"invalid_arguments\"")
+    || lower.contains("\"error\": \"invalid_arguments\"")
+    || lower.contains("error: invalid_arguments")
+    || lower.contains("\"error\":\"permission_denied\"")
+    || lower.contains("\"error\": \"permission_denied\"")
+    || lower.contains("error: permission_denied")
+}
+
+fn __tool_result_write_product_error_text(text: string) -> bool {
+  let lower = lowercase(trim(text))
+  if lower == "" {
+    return false
+  }
+  if lower.starts_with("## diagnostics (") {
+    return !lower.starts_with("## diagnostics (0 errors")
+  }
+  if lower.starts_with("[result of ") && lower.contains("\n## diagnostics (") {
+    return !lower.contains("\n## diagnostics (0 errors")
+  }
+  return lower.starts_with("no ")
+    || lower.starts_with("file already exists")
+    || lower.starts_with("missing required parameter")
+    || lower.contains("[edit rejected]")
+    || __tool_result_dispatch_rejection_text(lower)
+}
+
 fn __tool_result_product_error(result) -> bool {
   if type_of(result) != "dict" {
     return false
   }
+  let write_tool = __tool_result_write_product_tool(result)
   for key in ["error", "observation", "rendered_result", "result", "output"] {
     if result[key] != nil {
       let text = trim(to_string(result[key]))
@@ -1845,6 +1974,9 @@ fn __tool_result_product_error(result) -> bool {
         return true
       }
       if starts_with(text, "[result of ") && contains(text, "\nError:") {
+        return true
+      }
+      if write_tool && __tool_result_write_product_error_text(text) {
         return true
       }
     }
@@ -3708,7 +3840,8 @@ fn __agent_loop_run(message, session, initial_opts) {
         )
         if turns_since_progress >= 2
           && turns_since_progress <= turn_max_nudges
-          && !(outcome?.nudged_this_turn ?? false) {
+          && !(outcome?.nudged_this_turn ?? false)
+          && len(turn_rejected) == 0 {
           let has_tools = len(opts?.tools?.tools ?? []) > 0
           let tool_mode = agent_tool_call_paradigm(turn_opts).kind
           agent_session_inject_feedback(

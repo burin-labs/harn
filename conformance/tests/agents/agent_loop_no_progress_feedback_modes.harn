@@ -17,6 +17,24 @@ fn note_tools() {
   return tools
 }
 
+fn failing_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "explode",
+    "Throw from a Harn-side handler.",
+    {
+      handler: { _args ->
+        throw "boom from tool handler"
+      },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  return tools
+}
+
 fn messages_for_streak_retry(calls) {
   return json_stringify(calls[2].messages)
 }
@@ -80,6 +98,35 @@ pipeline default() {
       __io_println("native.has_native_tool=" + to_string(contains(native_retry, "native tool")))
       __io_println("native.no_tool_call_tag=" + to_string(!contains(native_retry, "<tool_call>")))
       __io_println("native.no_user_response_tag=" + to_string(!contains(native_retry, "<user_response>")))
+    },
+  )
+  with_llm_script(
+    [
+      {text: "", tool_calls: [{id: "bad1", name: "explode", arguments: {}}]},
+      {text: "", tool_calls: [{id: "bad2", name: "explode", arguments: {}}]},
+      llm_text("##DONE##"),
+    ],
+    { ->
+      let rejected_result = agent_loop(
+        "Call the failing tool twice, then finish.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "native",
+          loop_until_done: true,
+          done_sentinel: "##DONE##",
+          done_judge: nil,
+          max_iterations: 4,
+          max_nudges: 4,
+          tools: failing_tools(),
+        },
+      )
+      let rejected_retry = json_stringify(llm_mock_calls()[2].messages)
+      __io_println("rejected.status=" + rejected_result.status)
+      __io_println(
+        "rejected.has_failure=" + to_string(contains(rejected_retry, "boom from tool handler")),
+      )
+      __io_println("rejected.no_streak=" + to_string(!contains(rejected_retry, "no_progress_streak")))
     },
   )
 }

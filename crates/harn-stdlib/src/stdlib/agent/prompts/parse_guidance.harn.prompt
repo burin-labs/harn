@@ -3,6 +3,9 @@ Your tool call could not be parsed: {{ error_summary }}{{ if has_partial_success
 (The other {{ parsed_call_count }} tool call(s) in this turn parsed successfully and were dispatched; the errors above describe only the malformed ones, which were dropped.){{ end }}
 
 {{ body_hint }}
+{{ if is_native_format }}
+Use the provider's native tool channel for the retry. Pass code-bearing arguments such as `content`, `new_text`, and `new_body` as ordinary string argument values. Do not put text-tool heredoc delimiters, XML tool tags, or fenced JSON/tool blocks inside those string values; they would become literal file bytes.
+{{ else }}
 {{ if is_json_format }}
 ```tool
 { "name": "edit", "args": { "action": "create", "path": "main.go", "content": "package main\n\n// backticks, quotes, and backslashes all survive as JSON string bytes:\nconst usage = `go run main.go`\n" } }
@@ -20,4 +23,5 @@ EOF
 })
 
 Do not use backtick template literals for code that contains backtick characters, such as Go raw strings, Rust raw strings, or shell snippets. Heredoc avoids those escaping issues.
+{{ end }}
 {{ end }}
