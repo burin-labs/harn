@@ -26,6 +26,7 @@ pub mod composition;
 pub mod config;
 pub mod connectors;
 pub mod corrections;
+pub mod coverage;
 pub(crate) mod durable_rate_limit;
 pub(crate) mod duration_parse;
 pub mod egress;

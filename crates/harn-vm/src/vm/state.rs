@@ -289,6 +289,9 @@ pub struct Vm {
     pub(crate) source_file: Option<String>,
     /// Source text for error reporting.
     pub(crate) source_text: Option<String>,
+    /// Line-coverage accumulator. `Some` only while a coverage session is
+    /// active (see [`crate::coverage`]); folded into the global report on drop.
+    pub(crate) coverage: Option<crate::coverage::Coverage>,
     /// Optional bridge for delegating unknown builtins in bridge mode.
     pub(crate) bridge: Option<Arc<crate::bridge::HostBridge>>,
     /// Builtins denied by sandbox mode (`--deny` / `--allow` flags).
@@ -415,6 +418,7 @@ impl VmBaseline {
             source_cache: Arc::new(source_cache),
             source_file: self.source_file.clone(),
             source_text: self.source_text.clone(),
+            coverage: crate::coverage::for_primary(self.source_file.as_deref()),
             bridge: None,
             denied_builtins: Arc::clone(&self.denied_builtins),
             cancel_token: None,
@@ -645,6 +649,7 @@ impl Vm {
             source_cache: Arc::new(BTreeMap::new()),
             source_file: None,
             source_text: None,
+            coverage: crate::coverage::for_primary(None),
             bridge: None,
             denied_builtins: Arc::new(HashSet::new()),
             cancel_token: None,
@@ -714,6 +719,9 @@ impl Vm {
     pub fn set_source_info(&mut self, file: &str, text: &str) {
         self.source_file = Some(file.to_string());
         self.source_text = Some(text.to_string());
+        if let Some(cov) = self.coverage.as_mut() {
+            cov.set_primary_file(file);
+        }
         Arc::make_mut(&mut self.source_cache)
             .insert(std::path::PathBuf::from(file), text.to_string());
     }
@@ -803,6 +811,7 @@ impl Vm {
             source_cache: Arc::clone(&self.source_cache),
             source_file: self.source_file.clone(),
             source_text: self.source_text.clone(),
+            coverage: crate::coverage::for_primary(self.source_file.as_deref()),
             bridge: self.bridge.clone(),
             denied_builtins: Arc::clone(&self.denied_builtins),
             cancel_token: self.cancel_token.clone(),
@@ -1067,6 +1076,9 @@ impl Vm {
 
 impl Drop for Vm {
     fn drop(&mut self) {
+        if let Some(coverage) = self.coverage.take() {
+            crate::coverage::merge_into_global(coverage);
+        }
         self.cancel_spawned_tasks();
     }
 }
