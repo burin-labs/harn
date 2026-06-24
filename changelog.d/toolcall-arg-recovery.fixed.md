@@ -1,1 +1,0 @@
-- **OpenAI-compatible streamed tool calls now preserve non-empty argument payloads.** Clean `tool_calls` finishes that stream Harn text-format or otherwise malformed multiline arguments no longer silently dispatch `{}`; complete text-format payloads are recovered and unrecoverable payloads carry an explicit parse error while length-truncation behavior is unchanged.
