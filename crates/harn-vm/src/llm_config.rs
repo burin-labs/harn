@@ -3517,8 +3517,10 @@ mod tests {
             "text"
         );
         // GPT-OSS tool defaults are provider-specific: aggregate OpenRouter and
-        // Fireworks use Harn's heredoc text tools, while direct native-capable
-        // hosts stay on provider-native tool calls.
+        // Fireworks use Harn's heredoc text tools, as does DeepInfra — its
+        // native Harmony channel drops tool calls into the private reasoning
+        // channel (footgun), so it is pinned to text. Native-reliable hosts
+        // (Cerebras, Groq) stay on provider-native tool calls.
         assert_eq!(
             default_tool_format("openai/gpt-oss-120b", "openrouter"),
             "text"
@@ -3530,7 +3532,7 @@ mod tests {
         assert_eq!(default_tool_format("gpt-oss-120b", "cerebras"), "native");
         assert_eq!(
             default_tool_format("openai/gpt-oss-120b", "deepinfra"),
-            "native"
+            "text"
         );
         assert_eq!(default_tool_format("openai/gpt-oss-120b", "groq"), "native");
     }
