@@ -5,10 +5,26 @@
  * stale state. Different resources and successful same-resource sequences still
  * run normally.
  */
+import { agent_capture_events } from "std/agent/events"
 import { llm_text, with_llm_script } from "std/testing"
 
-fn edit_tools() {
+fn edit_tools(metadata_key = "annotations") {
   var tools = tool_registry()
+  let metadata = {kind: "edit", side_effect_level: "workspace_write", arg_schema: {path_params: ["path"]}}
+  let burin_policy = {
+    path_params: ["path"],
+    side_effect_level: "workspace_write",
+    mutation_classification: "workspace_write",
+  }
+  let metadata_field = if metadata_key == "policy" {
+    {policy: metadata}
+  } else if metadata_key == "burin_policy" {
+    {policy: burin_policy}
+  } else if metadata_key == "none" {
+    {}
+  } else {
+    {annotations: metadata}
+  }
   tools = tool_define(
     tools,
     "edit",
@@ -21,17 +37,28 @@ fn edit_tools() {
         if args?.fail_return ?? false {
           return "Error: rejected " + to_string(args?.path ?? "") + " " + to_string(args?.marker ?? "")
         }
+        if args?.diagnostics ?? false {
+          return "## Diagnostics (2 errors, via zig ast-check)\n"
+            + "  L12 ERROR: expected ',' after initializer\n"
+            + "  L19 ERROR: expected statement, found ';'\n"
+            + "-> Fix these errors before browsing, broad rewrites, or declaring done."
+        }
         return "applied " + to_string(args?.path ?? "") + " " + to_string(args?.marker ?? "")
       },
       parameters: {
         path: {type: "string", description: "Workspace-relative path"},
         marker: {type: "string", description: "Probe marker"},
-        fail: {type: "boolean", description: "Whether this call rejects"},
-        fail_return: {type: "boolean", description: "Whether this call returns a product-level error"},
+        fail: {type: "boolean", description: "Whether this call rejects", required: false},
+        fail_return: {type: "boolean", description: "Whether this call returns a product-level error", required: false},
+        diagnostics: {
+          type: "boolean",
+          description: "Whether this call returns product-level diagnostics",
+          required: false,
+        },
       },
       returns: {type: "string"},
-      annotations: {kind: "edit", side_effect_level: "workspace_write", arg_schema: {path_params: ["path"]}},
-    },
+    }
+      + metadata_field,
   )
   return tools
 }
@@ -76,6 +103,26 @@ fn same_file_product_error_batch() {
   ]
 }
 
+fn same_file_diagnostics_batch() {
+  return [
+    {
+      id: "a1",
+      name: "edit",
+      arguments: {path: "src/a.zig", marker: "first", fail: false, diagnostics: true},
+    },
+    {
+      id: "a2",
+      name: "edit",
+      arguments: {path: "src/a.zig", marker: "second", fail: false, diagnostics: false},
+    },
+    {
+      id: "b1",
+      name: "edit",
+      arguments: {path: "src/b.zig", marker: "other", fail: false, diagnostics: false},
+    },
+  ]
+}
+
 fn same_file_success_batch() {
   return [
     {
@@ -95,24 +142,41 @@ fn run_scripted(calls, opts = {}) {
   return with_llm_script(
     [{text: "", tool_calls: calls}, llm_text("I saw the tool results.")],
     { ->
-      let result = agent_loop(
-        "Apply the requested edits.",
-        nil,
-        {
-          provider: "mock",
-          tools: edit_tools(),
-          tool_format: "native",
-          loop_until_done: true,
-          max_iterations: 3,
-          done_judge: nil,
-        }
-          + opts,
+      let session = "intra-turn-resource-" + uuid()
+      let captured = agent_capture_events(
+        session,
+        fn() { return agent_loop(
+          "Apply the requested edits.",
+          nil,
+          {
+            provider: "mock",
+            tools: edit_tools(),
+            tool_format: "native",
+            loop_until_done: true,
+            max_iterations: 3,
+            done_judge: nil,
+            session_id: session,
+          }
+            + opts,
+        ) },
       )
       let mock_calls = llm_mock_calls()
       let transcript = json_stringify(mock_calls[len(mock_calls) - 1].messages)
-      return {result: result, transcript: transcript}
+      return {result: captured.result, transcript: transcript, events: captured.events}
     },
   )
+}
+
+fn has_tool_update(events, status: string, category: string, text: string) -> bool {
+  return events
+    .find(
+    { event -> return event.type == "tool_call_update"
+      && to_string(event.tool_call_id ?? "") != ""
+      && event.status == status
+      && event.error_category == category
+      && contains(to_string(event.error ?? event.raw_output ?? ""), text) },
+  )
+    != nil
 }
 
 pipeline main() {
@@ -122,12 +186,51 @@ pipeline main() {
   __io_println(contains(defaulted.transcript, "skipped dependent `edit` call"))
   __io_println(!contains(defaulted.transcript, "applied src/a.zig second"))
   __io_println(contains(defaulted.transcript, "applied src/b.zig other"))
+  assert(
+    has_tool_update(defaulted.events, "failed", "rejected_loop", "skipped dependent `edit` call"),
+    "synthetic same-resource skip must emit a terminal tool_call_update for the skipped call",
+  )
+  // Burin exposes this metadata as `policy`; Harn must treat it as resource annotations.
+  let policy_metadata = run_scripted(same_file_failure_batch(), {tools: edit_tools("policy")})
+  __io_println(policy_metadata.result.status)
+  __io_println(contains(policy_metadata.transcript, "skipped dependent `edit` call"))
+  __io_println(!contains(policy_metadata.transcript, "applied src/a.zig second"))
+  __io_println(contains(policy_metadata.transcript, "applied src/b.zig other"))
+  // Burin's runtime policy stores path params directly on the policy dict,
+  // not under `arg_schema`; this must still be keyed.
+  let burin_policy_metadata = run_scripted(same_file_failure_batch(), {tools: edit_tools("burin_policy")})
+  __io_println(burin_policy_metadata.result.status)
+  __io_println(contains(burin_policy_metadata.transcript, "skipped dependent `edit` call"))
+  __io_println(!contains(burin_policy_metadata.transcript, "applied src/a.zig second"))
+  __io_println(contains(burin_policy_metadata.transcript, "applied src/b.zig other"))
+  // Some hosts carry canonical tool annotations in the turn policy rather
+  // than each registry entry. The scheduler should still see resource keys.
+  let turn_policy_metadata = run_scripted(
+    same_file_failure_batch(),
+    {
+      tools: edit_tools("none"),
+      policy: {
+        tool_annotations: {edit: {kind: "edit", side_effect_level: "workspace_write", path_params: ["path"]}},
+      },
+    },
+  )
+  __io_println(turn_policy_metadata.result.status)
+  __io_println(contains(turn_policy_metadata.transcript, "skipped dependent `edit` call"))
+  __io_println(!contains(turn_policy_metadata.transcript, "applied src/a.zig second"))
+  __io_println(contains(turn_policy_metadata.transcript, "applied src/b.zig other"))
   // Product-level errors returned as text (`Error: ...`) also block same-resource siblings.
   let product_error = run_scripted(same_file_product_error_batch())
   __io_println(product_error.result.status)
   __io_println(contains(product_error.transcript, "skipped dependent `edit` call"))
   __io_println(!contains(product_error.transcript, "applied src/a.zig second"))
   __io_println(contains(product_error.transcript, "applied src/b.zig other"))
+  // Post-edit diagnostics are product-level write failures even when the
+  // transport dispatch succeeded.
+  let diagnostics_error = run_scripted(same_file_diagnostics_batch())
+  __io_println(diagnostics_error.result.status)
+  __io_println(contains(diagnostics_error.transcript, "skipped dependent `edit` call"))
+  __io_println(!contains(diagnostics_error.transcript, "applied src/a.zig second"))
+  __io_println(contains(diagnostics_error.transcript, "applied src/b.zig other"))
   // A successful first edit does not block a later same-file edit.
   let successful = run_scripted(same_file_success_batch())
   __io_println(successful.result.status)

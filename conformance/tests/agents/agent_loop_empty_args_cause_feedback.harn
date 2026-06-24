@@ -60,6 +60,8 @@ pipeline default() {
       let calls = llm_mock_calls()
       let feedback = json_stringify(calls[1].messages)
       __io_println(result.status)
+      __io_println(contains(feedback, "[result of write_note]"))
+      __io_println(contains(feedback, "[end of write_note result]"))
       __io_println(contains(feedback, "TRUNCATED by the output limit"))
       __io_println(!contains(feedback, "missing required parameter"))
     },
@@ -80,6 +82,8 @@ pipeline default() {
       let calls = llm_mock_calls()
       let feedback = json_stringify(calls[1].messages)
       __io_println(result.status)
+      __io_println(contains(feedback, "[result of write_note]"))
+      __io_println(contains(feedback, "[end of write_note result]"))
       __io_println(contains(feedback, "EMPTY arguments"))
       __io_println(contains(feedback, "Re-issue the same call with its full arguments"))
       __io_println(!contains(feedback, "missing required parameter"))
@@ -101,6 +105,8 @@ pipeline default() {
       let calls = llm_mock_calls()
       let feedback = json_stringify(calls[1].messages)
       __io_println(result.status)
+      __io_println(contains(feedback, "[result of write_note]"))
+      __io_println(contains(feedback, "[end of write_note result]"))
       __io_println(contains(feedback, "missing required parameter(s): path"))
       __io_println(!contains(feedback, "EMPTY arguments"))
     },

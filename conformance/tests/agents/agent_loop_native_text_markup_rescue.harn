@@ -110,6 +110,8 @@ pipeline main() {
       let feedback_messages = json_stringify(calls[2].messages)
       __io_println(contains(feedback_messages, "parse_guidance"))
       __io_println(contains(feedback_messages, "TRUNCATED"))
+      __io_println(contains(feedback_messages, "native tool channel"))
+      __io_println(!contains(feedback_messages, "<<EOF"))
     },
   )
 }

@@ -228,6 +228,8 @@ fn agent_primitive_denied_tool(
             obj.insert("denial".to_string(), denial.to_json());
         }
     }
+    let rendered = agent_tools::render_tool_result(&result);
+    let observation = format!("[result of {tool_name}]\n{rendered}\n[end of {tool_name} result]\n");
     serde_json::json!({
         "ok": false,
         "status": "error",
@@ -235,7 +237,8 @@ fn agent_primitive_denied_tool(
         "tool_call_id": tool_call_id,
         "arguments": tool_args,
         "result": result,
-        "rendered_result": agent_tools::render_tool_result(&result),
+        "rendered_result": rendered,
+        "observation": observation,
         "error": reason,
         "error_category": category.as_str(),
         "denial": denial.map(crate::agent_events::ToolDenial::to_json),
@@ -2017,6 +2020,13 @@ mod denied_tool_routing_tests {
         let result = &envelope["result"];
         assert_eq!(result["error"], serde_json::json!("invalid_arguments"));
         assert_ne!(result["error"], serde_json::json!("permission_denied"));
+        let observation = envelope["observation"]
+            .as_str()
+            .expect("recoverable rejection should carry model-facing observation");
+        assert!(
+            observation.starts_with("[result of edit]\n") && observation.contains("[end of edit result]"),
+            "recoverable argument rejection must use normal tool-result framing, got: {observation}"
+        );
         let next = result["next_step"].as_str().expect("next_step");
         assert!(
             !next.contains("Do not retry"),

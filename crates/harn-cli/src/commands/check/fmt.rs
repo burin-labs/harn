@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::process;
 
 use harn_fmt::{format_source_opts, FmtOptions};
@@ -104,7 +105,7 @@ pub(crate) fn fmt_targets_json(
 pub(crate) fn fmt_targets_report(targets: &[&str], mode: FmtMode, opts: &FmtOptions) -> FmtReport {
     let mut files = Vec::new();
     for target in targets {
-        let path = std::path::Path::new(target);
+        let path = Path::new(target);
         if path.is_dir() {
             files.extend(super::super::collect_source_targets(&[target], true, false).harn);
         } else {
@@ -142,6 +143,14 @@ pub(crate) fn fmt_targets_report(targets: &[&str], mode: FmtMode, opts: &FmtOpti
 
 /// Format a single file.
 fn fmt_file_inner(path: &str, mode: FmtMode, opts: &FmtOptions) -> FmtFileReport {
+    if !is_harn_source_path(Path::new(path)) {
+        return fmt_error(
+            path,
+            "unsupported_extension",
+            format!("harn fmt only formats .harn files; refusing explicit non-Harn target {path}"),
+        );
+    }
+
     let source = match std::fs::read_to_string(path) {
         Ok(source) => source,
         Err(error) => return fmt_error(path, "io", format!("Error reading {path}: {error}")),
@@ -182,6 +191,12 @@ fn fmt_file_inner(path: &str, mode: FmtMode, opts: &FmtOptions) -> FmtFileReport
         diff_lines_changed: 0,
         diagnostics: Vec::new(),
     }
+}
+
+fn is_harn_source_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension == "harn")
 }
 
 fn fmt_error(path: &str, code: &str, message: String) -> FmtFileReport {
@@ -250,4 +265,39 @@ fn diff_lines_changed(before: &str, after: &str) -> usize {
     (0..max_len)
         .filter(|index| before_lines.get(*index) != after_lines.get(*index))
         .count()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn explicit_non_harn_file_targets_are_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("language-catalog.json");
+        std::fs::write(&path, "[{ id: \"zig\" }]\n").unwrap();
+
+        let report = fmt_targets_report(
+            &[path.to_str().unwrap()],
+            FmtMode::Write,
+            &FmtOptions::default(),
+        );
+
+        assert_eq!(report.summary.errors, 1);
+        assert_eq!(report.summary.formatted, 0);
+        let file = report.files.first().expect("file report");
+        assert!(matches!(file.status, FmtFileStatus::Error));
+        assert_eq!(file.diagnostics[0].code, "unsupported_extension");
+        assert!(
+            file.diagnostics[0]
+                .message
+                .contains("only formats .harn files"),
+            "{}",
+            file.diagnostics[0].message
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "[{ id: \"zig\" }]\n"
+        );
+    }
 }
