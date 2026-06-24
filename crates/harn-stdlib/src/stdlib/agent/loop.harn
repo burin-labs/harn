@@ -766,6 +766,9 @@ fn __emit_tool_lifecycle_start(envelope) {
 }
 
 fn __tool_terminal_status(result) -> string {
+  if __tool_result_product_error(result) {
+    return "failed"
+  }
   if result?.ok || result?.success {
     return "completed"
   }
@@ -1811,6 +1814,9 @@ fn __dispatch_results_list(dispatch) {
 }
 
 fn __tool_result_ok(result) {
+  if __tool_result_product_error(result) {
+    return false
+  }
   if result?.ok != nil {
     return result.ok ? true : false
   }
@@ -1819,6 +1825,31 @@ fn __tool_result_ok(result) {
   }
   let status = result?.status ?? ""
   return status == "ok" || status == "success"
+}
+
+/**
+ * Some host tools report product-level rejections as a successful transport
+ * result whose rendered/observation text begins with `Error:`. Treating those
+ * as successful makes same-turn resource fail-fast and rejected-tool accounting
+ * blind to edit rejections. This predicate intentionally does not rewrite the
+ * result payload; it only classifies the result for scheduling/lifecycle.
+ */
+fn __tool_result_product_error(result) -> bool {
+  if type_of(result) != "dict" {
+    return false
+  }
+  for key in ["error", "observation", "rendered_result", "result", "output"] {
+    if result[key] != nil {
+      let text = trim(to_string(result[key]))
+      if starts_with(text, "Error:") {
+        return true
+      }
+      if starts_with(text, "[result of ") && contains(text, "\nError:") {
+        return true
+      }
+    }
+  }
+  return false
 }
 
 fn __tool_result_name(result) {

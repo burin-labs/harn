@@ -18,12 +18,16 @@ fn edit_tools() {
         if args?.fail ?? false {
           throw "rejected " + to_string(args?.path ?? "") + " " + to_string(args?.marker ?? "")
         }
+        if args?.fail_return ?? false {
+          return "Error: rejected " + to_string(args?.path ?? "") + " " + to_string(args?.marker ?? "")
+        }
         return "applied " + to_string(args?.path ?? "") + " " + to_string(args?.marker ?? "")
       },
       parameters: {
         path: {type: "string", description: "Workspace-relative path"},
         marker: {type: "string", description: "Probe marker"},
         fail: {type: "boolean", description: "Whether this call rejects"},
+        fail_return: {type: "boolean", description: "Whether this call returns a product-level error"},
       },
       returns: {type: "string"},
       annotations: {kind: "edit", side_effect_level: "workspace_write", arg_schema: {path_params: ["path"]}},
@@ -34,16 +38,56 @@ fn edit_tools() {
 
 fn same_file_failure_batch() {
   return [
-    {id: "a1", name: "edit", arguments: {path: "src/a.zig", marker: "first", fail: true}},
-    {id: "a2", name: "edit", arguments: {path: "src/a.zig", marker: "second", fail: false}},
-    {id: "b1", name: "edit", arguments: {path: "src/b.zig", marker: "other", fail: false}},
+    {
+      id: "a1",
+      name: "edit",
+      arguments: {path: "src/a.zig", marker: "first", fail: true, fail_return: false},
+    },
+    {
+      id: "a2",
+      name: "edit",
+      arguments: {path: "src/a.zig", marker: "second", fail: false, fail_return: false},
+    },
+    {
+      id: "b1",
+      name: "edit",
+      arguments: {path: "src/b.zig", marker: "other", fail: false, fail_return: false},
+    },
+  ]
+}
+
+fn same_file_product_error_batch() {
+  return [
+    {
+      id: "a1",
+      name: "edit",
+      arguments: {path: "src/a.zig", marker: "first", fail: false, fail_return: true},
+    },
+    {
+      id: "a2",
+      name: "edit",
+      arguments: {path: "src/a.zig", marker: "second", fail: false, fail_return: false},
+    },
+    {
+      id: "b1",
+      name: "edit",
+      arguments: {path: "src/b.zig", marker: "other", fail: false, fail_return: false},
+    },
   ]
 }
 
 fn same_file_success_batch() {
   return [
-    {id: "a1", name: "edit", arguments: {path: "src/a.zig", marker: "first", fail: false}},
-    {id: "a2", name: "edit", arguments: {path: "src/a.zig", marker: "second", fail: false}},
+    {
+      id: "a1",
+      name: "edit",
+      arguments: {path: "src/a.zig", marker: "first", fail: false, fail_return: false},
+    },
+    {
+      id: "a2",
+      name: "edit",
+      arguments: {path: "src/a.zig", marker: "second", fail: false, fail_return: false},
+    },
   ]
 }
 
@@ -64,7 +108,8 @@ fn run_scripted(calls, opts = {}) {
         }
           + opts,
       )
-      let transcript = json_stringify(llm_mock_calls()[1].messages)
+      let mock_calls = llm_mock_calls()
+      let transcript = json_stringify(mock_calls[len(mock_calls) - 1].messages)
       return {result: result, transcript: transcript}
     },
   )
@@ -77,6 +122,12 @@ pipeline main() {
   __io_println(contains(defaulted.transcript, "skipped dependent `edit` call"))
   __io_println(!contains(defaulted.transcript, "applied src/a.zig second"))
   __io_println(contains(defaulted.transcript, "applied src/b.zig other"))
+  // Product-level errors returned as text (`Error: ...`) also block same-resource siblings.
+  let product_error = run_scripted(same_file_product_error_batch())
+  __io_println(product_error.result.status)
+  __io_println(contains(product_error.transcript, "skipped dependent `edit` call"))
+  __io_println(!contains(product_error.transcript, "applied src/a.zig second"))
+  __io_println(contains(product_error.transcript, "applied src/b.zig other"))
   // A successful first edit does not block a later same-file edit.
   let successful = run_scripted(same_file_success_batch())
   __io_println(successful.result.status)
