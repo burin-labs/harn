@@ -19,7 +19,7 @@ No benchmark summary is baked into this checked-in page. To layer local empirica
 | `Cerebras` | OpenAI-compatible chat completions | `cerebras/gpt-oss-120b` | `native` | yes | yes | `native` / `native_json` | `effort,reasoning_effort` | no | `high` | `not_recorded` |
 | `Cohere` | OpenAI-compatible chat completions | `cohere:command-a-plus-05-2026` | `native` | yes | yes | `native` / `native_json` | `adaptive` | no | `high` | `not_recorded` |
 | `Dashscope` | OpenAI-compatible chat completions | `dashscope:qwen3.6*` | `native` | yes | yes | `native` / `delimited` | `disable_directive:/no_think,enabled` | no | `provider_default` | `not_recorded` |
-| `Deepinfra` | OpenAI-compatible chat completions | `deepinfra:deepinfra/Qwen/Qwen3.6-35B-A3B` | `native` | yes | yes | `native` / `native_json` | `enabled` | no | `high` | `not_recorded` |
+| `Deepinfra` | OpenAI-compatible chat completions | `deepinfra:deepinfra/Qwen/Qwen3.6-35B-A3B` | `text` | yes | yes | `native` / `native_json` | `enabled` | no | `high` | `not_recorded` |
 | `Deepseek` | OpenAI-compatible chat completions | `deepseek:deepseek-v4-flash` | `native` | yes | yes | `native` / `native_json` | `enabled` | yes | `high` | `not_recorded` |
 | `Fireworks` | OpenAI-compatible chat completions | `fireworks:accounts/fireworks/models/gpt-oss-120b` | `text` | no | yes | `none` / `native_json` | `effort,reasoning_effort` | no | `high` | `not_recorded` |
 | `Flexai` | OpenAI-compatible chat completions | `flexai` | `text` | no | yes | `none` / `none` | none | no | `provider_default` | `not_recorded` |
@@ -103,6 +103,24 @@ Caveats:
 MCP notes:
 
 - MCP tools are normalized through Harn tool definitions before they become OpenAI-compatible Cerebras tool schemas.
+
+### Deepinfra
+
+- catalog provider: `deepinfra`
+- recommended route: `deepinfra:deepinfra/Qwen/Qwen3.6-35B-A3B` (`deepinfra/Qwen/Qwen3.6-35B-A3B`)
+- endpoint style: OpenAI-compatible chat completions
+- recommended Harn options:
+
+```toml
+provider = "deepinfra"
+model = "deepinfra/Qwen/Qwen3.6-35B-A3B"
+tool_format = "text"
+structured_output_mode = "native_json"
+```
+
+Caveats:
+
+- 2026-06-24 forced-format sweep (N=5): DeepInfra Qwen3.6-35B-A3B native bills empty completions (1/5) and fenced-JSON is flaky (2/5); heredoc text carried a backslash-heavy Zig body byte-clean 5/5.
 
 ### Gemini API
 

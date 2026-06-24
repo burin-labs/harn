@@ -57,7 +57,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `deepinfra` | `*deepseek*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `deepinfra` | `*glm-5*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `json` | yes | yes | `native_unreliable` | yes | yes |
 | `deepinfra` | `*qwen3.7*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
-| `deepinfra` | `*qwen3.6*` | `any` | `enabled` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
+| `deepinfra` | `*qwen3.6*` | `any` | `enabled` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `text` | yes | yes | `native_unreliable` | yes | no |
 | `deepinfra` | `*kimi-*` | `any` | `enabled` | yes | no | no | yes | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `deepinfra` | `*gpt-oss*` | `any` | `effort` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
 | `deepinfra` | `*` | `any` | no | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
@@ -178,7 +178,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `openrouter` | `mistralai/mistral-medium-3-5*` | `any` | `effort` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
 | `openrouter` | `mistralai/mistral*` | `any` | no | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `openrouter` | `mistralai/devstral*` | `any` | no | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
-| `openrouter` | `moonshotai/kimi-k2.7-code` | `any` | `enabled` | yes | no | no | yes | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
+| `openrouter` | `moonshotai/kimi-k2.7-code` | `any` | `enabled` | yes | no | no | yes | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `text` | yes | yes | `native_unreliable` | yes | yes |
 | `openrouter` | `moonshotai/kimi-k2*` | `any` | `enabled` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `openrouter` | `google/gemini-2.5*` | `any` | `enabled,effort` | yes | yes | yes | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `openrouter` | `google/gemini-3.5*` | `any` | `enabled,adaptive` | yes | yes | yes | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
@@ -196,7 +196,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `sambanova` | `*deepseek-v3.2*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `interchangeable` | yes | no |
 | `sambanova` | `*deepseek*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `sambanova` | `*llama*` | `any` | no | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
-| `sambanova` | `*minimax*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
+| `sambanova` | `*minimax*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `text` | yes | yes | `native_unreliable` | yes | yes |
 | `sambanova` | `*gemma-4*` | `any` | `enabled` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `sambanova` | `*gpt-oss*` | `any` | `effort` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
 | `sambanova` | `*` | `any` | no | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
@@ -210,7 +210,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `together` | `deepseek-ai/deepseek-v4*` | `any` | `enabled,effort` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `together` | `moonshotai/kimi-k2*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `together` | `zai-org/glm-5*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `text` | yes | yes | `native_unreliable` | yes | yes |
-| `together` | `minimaxai/minimax-m2.7*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `json` | yes | yes | `native_unreliable` | yes | yes |
+| `together` | `minimaxai/minimax-m2.7*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `text` | yes | yes | `native_unreliable` | yes | yes |
 | `together` | `google/gemma-4*` | `any` | `enabled` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `together` | `moonshotai/*` | `any` | no | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `vertex` | `gemini-*` | `any` | no | no | no | no | no | yes | no | no | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
@@ -257,7 +257,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `cerebras` | `llama-3.3-70b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `cerebras` | `zai-glm-4.7` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `cohere` | `command-a-plus-05-2026` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `deepinfra` | `deepinfra/Qwen/Qwen3.6-35B-A3B` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `deepinfra` | `deepinfra/Qwen/Qwen3.6-35B-A3B` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
 | `deepinfra` | `deepinfra/Qwen/Qwen3.7-Max` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `deepinfra` | `deepinfra/deepseek-ai/DeepSeek-V3.2` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `deepinfra` | `deepinfra/deepseek-ai/DeepSeek-V4-Pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
@@ -354,7 +354,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `openrouter` | `mistralai/mistral-medium-3-5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `mistralai/mistral-small-2603` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `moonshotai/kimi-k2.6` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `openrouter` | `moonshotai/kimi-k2.7-code` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openrouter` | `moonshotai/kimi-k2.7-code` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `openai/gpt-oss-120b` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `qwen/qwen3-coder` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `qwen/qwen3.7-max` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
@@ -368,10 +368,10 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `sambanova` | `sambanova/DeepSeek-V4-Pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `sambanova` | `sambanova/Llama-4-Maverick` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `sambanova` | `sambanova/Meta-Llama-3.3-70B-Instruct` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `sambanova` | `sambanova/MiniMax-M2.7` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `sambanova` | `sambanova/MiniMax-M2.7` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
 | `sambanova` | `sambanova/gemma-4-31B-it` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `sambanova` | `sambanova/gpt-oss-120b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `together` | `MiniMaxAI/MiniMax-M2.7` | `json` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
+| `together` | `MiniMaxAI/MiniMax-M2.7` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
 | `together` | `Qwen/Qwen3-Coder-Next-FP8` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `together` | `Qwen/Qwen3.7-Max` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `together` | `deepseek-ai/DeepSeek-V4-Pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |

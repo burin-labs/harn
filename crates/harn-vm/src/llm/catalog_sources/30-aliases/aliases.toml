@@ -163,10 +163,12 @@ id = "deepinfra/moonshotai/Kimi-K2.7-Code"
 provider = "deepinfra"
 tool_format = "native"
 
+# probed 2026-06-24 (provider-tool-mode-sweep): native bills empty / json flaky,
+# heredoc text 5/5 byte-clean. Route is native_unreliable; pin text.
 [aliases."deepinfra-qwen3.6"]
 id = "deepinfra/Qwen/Qwen3.6-35B-A3B"
 provider = "deepinfra"
-tool_format = "native"
+tool_format = "text"
 
 # Baseten Model APIs. GLM-5.x currently emits tool XML in assistant content on
 # `tool_choice=required` in Harn smoke probes, so pin GLM aliases to the text
@@ -212,10 +214,12 @@ id = "sambanova/Meta-Llama-3.3-70B-Instruct"
 provider = "sambanova"
 tool_format = "native"
 
+# probed 2026-06-24 (provider-tool-mode-sweep): native AND fenced-JSON both
+# corrupt backslash bodies (0/5), heredoc text 5/5 byte-clean. Pin text.
 [aliases."sambanova-minimax-m2.7"]
 id = "sambanova/MiniMax-M2.7"
 provider = "sambanova"
-tool_format = "native"
+tool_format = "text"
 
 [aliases."sambanova-gpt-oss-120b"]
 id = "sambanova/gpt-oss-120b"

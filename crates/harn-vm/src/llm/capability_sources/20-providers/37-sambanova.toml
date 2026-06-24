@@ -53,10 +53,17 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "none"
 
+# probed 2026-06-24 (docs/eval/provider-tool-mode-sweep-2026-06-24.md, N=5,
+# forced-format single-tool authoring of a backslash-heavy Zig body): native
+# 0/5 fidelity AND json 0/5 fidelity (both mangle backslashes — the `\\` Zig
+# multiline prefix collapses to `\`), while heredoc text was 5/5 byte-clean. The
+# escape-free text channel is the only reliable carrier for code on this route.
 [[provider.sambanova]]
 model_match = "*minimax*"
 native_tools = true
-preferred_tool_format = "native"
+preferred_tool_format = "text"
+tool_mode_parity = "native_unreliable"
+tool_mode_parity_notes = "2026-06-24 forced-format sweep (N=5): SambaNova MiniMax-M2.7 corrupted a backslash-heavy body on BOTH native (0/5) and fenced-JSON (0/5); heredoc text carried it byte-clean 5/5."
 structured_output = "native"
 thinking_modes = ["enabled"]
 prompt_caching = true

@@ -2320,7 +2320,11 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
         assert!(caps.prompt_caching);
         assert!(caps.vision_supported);
         assert!(caps.video);
-        assert_eq!(caps.preferred_tool_format.as_deref(), Some("native"));
+        // 2026-06-24 forced-format sweep flipped this route native -> text:
+        // native double-escaped backslash bodies (1/5) and fenced-JSON produced
+        // no parseable Harn call (0/5); heredoc text was 5/5 byte-clean.
+        assert_eq!(caps.preferred_tool_format.as_deref(), Some("text"));
+        assert_eq!(caps.tool_mode_parity.as_deref(), Some("native_unreliable"));
         assert_eq!(caps.thinking_modes, vec!["enabled"]);
         assert_eq!(caps.allowed_tool_choice_modes, vec!["auto", "none"]);
         assert!(!caps.temperature_supported);
@@ -2380,7 +2384,9 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
         let minimax = lookup("together", "MiniMaxAI/MiniMax-M2.7");
         assert!(minimax.native_tools);
         assert!(minimax.prompt_caching);
-        assert_eq!(minimax.preferred_tool_format.as_deref(), Some("json"));
+        // 2026-06-24 forced-format sweep flipped this route json -> text: heredoc
+        // beat fenced-JSON on both dispatch and backslash-body fidelity at N=5.
+        assert_eq!(minimax.preferred_tool_format.as_deref(), Some("text"));
         assert_eq!(
             minimax.tool_mode_parity.as_deref(),
             Some("native_unreliable")
