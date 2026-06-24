@@ -93,14 +93,10 @@ pub(crate) fn parse_text_tool_argument_payload(
     }
 
     match syntax::parse_object_literal_from(trimmed, name) {
-        Ok((arguments, consumed)) if trimmed[consumed..].trim().is_empty() => {
-            return Ok(arguments);
-        }
-        Ok((_arguments, consumed)) => {
-            return Err(format!(
-                "trailing bytes after object literal argument at byte {consumed}"
-            ));
-        }
+        Ok((arguments, consumed)) if trimmed[consumed..].trim().is_empty() => Ok(arguments),
+        Ok((_arguments, consumed)) => Err(format!(
+            "trailing bytes after object literal argument at byte {consumed}"
+        )),
         Err(object_error) => {
             if let Some(name_len) = syntax::ident_length(trimmed.as_bytes()) {
                 if trimmed.as_bytes().get(name_len) == Some(&b'(') {
