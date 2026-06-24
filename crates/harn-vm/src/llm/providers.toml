@@ -945,12 +945,12 @@ tool_format = "native"
 [aliases."moonshot-kimi-k2.7-code"]
 id = "moonshot/kimi-k2.7-code"
 provider = "moonshot"
-tool_format = "native"
+tool_format = "json"
 
 [aliases."moonshot-kimi-k2.7-code-highspeed"]
 id = "moonshot/kimi-k2.7-code-highspeed"
 provider = "moonshot"
-tool_format = "native"
+tool_format = "json"
 
 # DeepInfra — open-weight OpenAI-compatible host.
 [aliases."deepinfra-deepseek"]
@@ -961,7 +961,7 @@ tool_format = "native"
 [aliases."deepinfra-glm-5.2"]
 id = "deepinfra/zai-org/GLM-5.2"
 provider = "deepinfra"
-tool_format = "native"
+tool_format = "json"
 
 [aliases."deepinfra-kimi-k2.7-code"]
 id = "deepinfra/moonshotai/Kimi-K2.7-Code"
@@ -1233,7 +1233,7 @@ tool_format = "native"
 [aliases."openrouter-glm-5.2"]
 id = "z-ai/glm-5.2"
 provider = "openrouter"
-tool_format = "native"
+tool_format = "text"
 
 # DeepSeek V4 direct API aliases.
 [aliases.deepseek]

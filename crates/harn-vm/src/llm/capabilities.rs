@@ -1859,6 +1859,34 @@ mod tests {
     }
 
     #[test]
+    fn every_catalogued_alias_tool_format_pin_is_safe_for_route() {
+        // Alias pins are consumed directly by downstream catalogs and CLI
+        // routing. They must not encode a known-broken channel that the
+        // central runtime guard would have to correct later.
+        reset();
+        let catalog = crate::llm_config::parse_config_toml(BUILTIN_PROVIDERS_TOML)
+            .expect("providers.toml must parse at build time");
+        let mut unsafe_pins = Vec::new();
+        for (alias, def) in &catalog.aliases {
+            let Some(tool_format) = def.tool_format.as_deref() else {
+                continue;
+            };
+            let decision = validate_tool_format(&def.provider, &def.id, tool_format);
+            if let Some(correction) = decision.correction.as_deref() {
+                unsafe_pins.push(format!(
+                    "{alias} -> {}:{} pins {tool_format}, would be corrected to {} ({correction})",
+                    def.provider, def.id, decision.effective
+                ));
+            }
+        }
+        assert!(
+            unsafe_pins.is_empty(),
+            "aliases pin unsafe tool_format values:\n- {}",
+            unsafe_pins.join("\n- ")
+        );
+    }
+
+    #[test]
     fn tool_capability_audit_reports_suggested_defaults() {
         reset();
         let capabilities: CapabilitiesFile = toml::from_str(
