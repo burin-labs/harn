@@ -914,12 +914,9 @@ async fn inspect_eval_run(request: EvalInspectRunRequest) -> Result<JsonValue, S
             .as_ref()
             .and_then(|path| path.parent().map(Path::to_path_buf))
     });
-    let summary_path = request.summary_json.or_else(|| {
-        output_dir
-            .as_ref()
-            .map(|dir| dir.join("summary.json"))
-            .filter(|path| path.exists())
-    });
+    let summary_path = request
+        .summary_json
+        .or_else(|| existing_child(output_dir.as_deref(), "summary.json"));
     let summary = summary_path
         .as_ref()
         .and_then(|path| load_json_file(path).ok());
@@ -927,37 +924,19 @@ async fn inspect_eval_run(request: EvalInspectRunRequest) -> Result<JsonValue, S
     let events_dir = request
         .events_dir
         .or_else(|| path_from_summary(&summary, "event_log_dir"))
-        .or_else(|| {
-            output_dir
-                .as_ref()
-                .map(|dir| dir.join("events"))
-                .filter(|path| path.exists())
-        });
-    let events_db = request.events_db.or_else(|| {
-        output_dir
-            .as_ref()
-            .map(|dir| dir.join("events.sqlite"))
-            .filter(|path| path.exists())
-    });
-    let per_run_jsonl = request.per_run_jsonl.or_else(|| {
-        output_dir
-            .as_ref()
-            .map(|dir| dir.join("per_run.jsonl"))
-            .filter(|path| path.exists())
-    });
+        .or_else(|| existing_child(output_dir.as_deref(), "events"));
+    let events_db = request
+        .events_db
+        .or_else(|| existing_child(output_dir.as_deref(), "events.sqlite"));
+    let per_run_jsonl = request
+        .per_run_jsonl
+        .or_else(|| existing_child(output_dir.as_deref(), "per_run.jsonl"));
     let run_record = request
         .run_record
         .or_else(|| path_from_summary(&summary, "run_record_path"));
-    let llm_transcript_dir = path_from_summary(&summary, "llm_transcript_dir").or_else(|| {
-        output_dir
-            .as_ref()
-            .map(|dir| dir.join("llm"))
-            .filter(|path| path.exists())
-    });
-    let final_diff = output_dir
-        .as_ref()
-        .map(|dir| dir.join("artifacts/final.diff"))
-        .filter(|path| path.exists());
+    let llm_transcript_dir = path_from_summary(&summary, "llm_transcript_dir")
+        .or_else(|| existing_child(output_dir.as_deref(), "llm"));
+    let final_diff = existing_child(output_dir.as_deref(), "artifacts/final.diff");
 
     let artifact_inventory = vec![
         artifact_report("output_dir", output_dir.as_deref())?,
@@ -1017,6 +996,15 @@ fn load_json_file(path: &Path) -> Result<JsonValue, String> {
     let content =
         fs::read_to_string(path).map_err(|error| format!("read {}: {error}", path.display()))?;
     serde_json::from_str(&content).map_err(|error| format!("parse {}: {error}", path.display()))
+}
+
+/// `output_dir/<name>` when it exists on disk, else `None` — the conventional
+/// eval-bundle artifact layout fallback used when a path isn't given explicitly
+/// or named in the summary.
+fn existing_child(output_dir: Option<&Path>, name: &str) -> Option<PathBuf> {
+    output_dir
+        .map(|dir| dir.join(name))
+        .filter(|path| path.exists())
 }
 
 fn path_from_summary(summary: &Option<JsonValue>, key: &str) -> Option<PathBuf> {

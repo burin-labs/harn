@@ -236,13 +236,7 @@ fn parse_read_options(args: &[VmValue]) -> Result<ReadOptions, VmError> {
     match args.first() {
         Some(VmValue::Dict(options)) => {
             let topic = parse_topic(options.get("topic"), "event_log.read")?;
-            let from_cursor = parse_cursor(
-                options
-                    .get("from_cursor")
-                    .or_else(|| options.get("cursor"))
-                    .or_else(|| options.get("from")),
-                "event_log.read",
-            )?;
+            let from_cursor = parse_dict_cursor(options, "event_log.read")?;
             let limit = parse_limit(options.get("limit"), "event_log.read")?;
             let kind_prefix =
                 optional_string(options.get("kind_prefix"), "event_log.read", "kind_prefix")?;
@@ -266,13 +260,7 @@ fn parse_subscribe_options(args: &[VmValue]) -> Result<SubscribeOptions, VmError
     match args.first() {
         Some(VmValue::Dict(options)) => {
             let topic = parse_topic(options.get("topic"), "event_log.subscribe")?;
-            let from_cursor = parse_cursor(
-                options
-                    .get("from_cursor")
-                    .or_else(|| options.get("cursor"))
-                    .or_else(|| options.get("from")),
-                "event_log.subscribe",
-            )?;
+            let from_cursor = parse_dict_cursor(options, "event_log.subscribe")?;
             let kind_prefix = optional_string(
                 options.get("kind_prefix"),
                 "event_log.subscribe",
@@ -310,6 +298,21 @@ fn parse_cursor(value: Option<&VmValue>, builtin: &str) -> Result<Option<u64>, V
             other.type_name()
         ))),
     }
+}
+
+/// Read the cursor from an options dict, accepting `from_cursor`, `cursor`, and
+/// `from` as aliases. Shared by the `read` and `subscribe` dict forms.
+fn parse_dict_cursor(
+    options: &crate::value::DictMap,
+    builtin: &str,
+) -> Result<Option<u64>, VmError> {
+    parse_cursor(
+        options
+            .get("from_cursor")
+            .or_else(|| options.get("cursor"))
+            .or_else(|| options.get("from")),
+        builtin,
+    )
 }
 
 fn parse_limit(value: Option<&VmValue>, builtin: &str) -> Result<usize, VmError> {
