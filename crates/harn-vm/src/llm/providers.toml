@@ -1026,10 +1026,14 @@ id = "sambanova/MiniMax-M2.7"
 provider = "sambanova"
 tool_format = "text"
 
+# gpt-oss (Harmony) native channel is a footgun on the SambaNova pay-per-token
+# route (empty tool_calls / reasoning-channel-only); the route is pinned to TEXT
+# in 37-sambanova.toml, so this alias pins `text` to match (a `native` pin would
+# auto-correct anyway).
 [aliases."sambanova-gpt-oss-120b"]
 id = "sambanova/gpt-oss-120b"
 provider = "sambanova"
-tool_format = "native"
+tool_format = "text"
 
 # Qwen 3.7 via OpenRouter/Together. Keep bare aliases on OpenRouter because it
 # exposes both Max and Plus; Together currently serves only Max.
@@ -1215,11 +1219,13 @@ provider = "minimax"
 id = "MiniMax-M3"
 provider = "minimax"
 
-# Z.AI GLM aliases.
+# Z.AI GLM aliases. GLM-5.x native channel emits `<tool_call>` markup instead of
+# OpenAI message.tool_calls (see 98-zai.toml + the Baseten probe), so the zai
+# GLM-5 rows are pinned to TEXT; these aliases pin `text` to match.
 [aliases.glm]
 id = "glm-5.2"
 provider = "zai"
-tool_format = "native"
+tool_format = "text"
 
 [aliases."glm-5"]
 id = "glm-5"
@@ -1232,7 +1238,7 @@ provider = "zai"
 [aliases."glm-5.2"]
 id = "glm-5.2"
 provider = "zai"
-tool_format = "native"
+tool_format = "text"
 
 [aliases."openrouter-glm-5.2"]
 id = "z-ai/glm-5.2"

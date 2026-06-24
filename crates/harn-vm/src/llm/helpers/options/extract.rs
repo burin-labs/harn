@@ -353,6 +353,20 @@ pub(crate) fn extract_llm_options(
     // known to drop silently (the DeepSeek V3.2 `native` -> unparsed DSML
     // text case); steer it to the route's safe format instead of letting the
     // calls vanish. Calls without tools keep the requested format verbatim.
+    // FOOTGUN-REMOVAL: before resolving a tool_format, fail fast if this route
+    // has NO viable tool channel at all (registry forbids both native and text).
+    // `validate_tool_format` would pass such a combo through unchanged; on a
+    // tool-bearing call that can only yield a silent empty tool stream, so name
+    // the bad combo and a suggested alternative up front instead of dispatching.
+    if enforce_capability_gates && tools_val.is_some() {
+        if let Some(message) =
+            crate::llm::capabilities::no_viable_tool_channel_with_caps(&provider, &model, &caps)
+        {
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                message,
+            ))));
+        }
+    }
     let tool_format = if enforce_capability_gates && tools_val.is_some() {
         let decision = crate::llm::capabilities::validate_tool_format_with_caps(
             &provider,

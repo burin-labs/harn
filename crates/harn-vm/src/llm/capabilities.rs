@@ -1045,6 +1045,81 @@ pub fn validate_tool_format_with_caps(
     }
 }
 
+/// FOOTGUN-REMOVAL — fail fast when a `(provider, model)` route has NO viable
+/// tool channel at all: the registry forbids both the provider-native channel
+/// AND every text-channel grammar. `validate_tool_format` deliberately passes
+/// such a route through unchanged (it has no *better* format to steer to and
+/// must not rewrite to an equally-broken one under a misleading "Using X
+/// instead" message); but a tool-bearing call dispatched on a route with no
+/// working channel can only produce a silent empty tool stream. This guard lets
+/// the call seam reject that combo BEFORE dispatch with an actionable message —
+/// naming the bad `(provider, model)` and a suggested alternative provider for
+/// the same model family — instead of billing a noncommittal completion.
+///
+/// Returns `Some(message)` only when both channels are forbidden (e.g. a route
+/// flagged `native_unreliable` whose text channel is also declared unsupported,
+/// or one explicitly pinned `tool_mode_parity = "unsupported"`). Returns `None`
+/// for every route that still has at least one working channel, so it never
+/// fires on the auto-correctable DeepInfra/SambaNova gpt-oss rows (those keep a
+/// working text channel) or on any healthy route. Modeled on the same
+/// `channel_forbidden` machinery `validate_tool_format` uses, so the two stay in
+/// lock-step: the gate auto-corrects when one channel works and fails fast when
+/// neither does.
+pub fn no_viable_tool_channel(provider: &str, model: &str) -> Option<String> {
+    let caps = lookup(provider, model);
+    no_viable_tool_channel_with_caps(provider, model, &caps)
+}
+
+/// `no_viable_tool_channel` against an already-resolved [`Capabilities`], so hot
+/// callers that already hold one avoid a second matrix lookup.
+pub fn no_viable_tool_channel_with_caps(
+    provider: &str,
+    model: &str,
+    caps: &Capabilities,
+) -> Option<String> {
+    let native_forbidden = channel_forbidden(ToolFormatWire::Native, caps);
+    let text_forbidden = channel_forbidden(ToolFormatWire::Text, caps);
+    if !(native_forbidden && text_forbidden) {
+        return None;
+    }
+    let parity = caps.tool_mode_parity.as_deref().unwrap_or("unknown");
+    let mut message = format!(
+        "no viable tool-calling channel for {provider}/{model} \
+         (tool_mode_parity = `{parity}`): the registry trusts neither the \
+         provider-native `tool_calls` channel nor a text-channel grammar to \
+         return parseable tool calls on this route, so a tool-bearing call here \
+         can only emit a silent empty tool stream. {}",
+        suggested_alternative_provider_hint(model)
+    );
+    if let Some(note) = caps.tool_mode_parity_notes.as_deref() {
+        if !note.is_empty() {
+            message.push_str(" (");
+            message.push_str(note);
+            message.push(')');
+        }
+    }
+    Some(message)
+}
+
+/// A short, actionable "try this provider instead" hint for a model whose
+/// current route has no viable tool channel. gpt-oss (Harmony) is the canonical
+/// case: its native channel is a footgun on several pay-per-token routes, so
+/// steer callers to the channels Harn has proven clean (Fireworks/DeepInfra/
+/// SambaNova on TEXT, or a native-clean route). Generic for everything else.
+fn suggested_alternative_provider_hint(model: &str) -> String {
+    if model.to_ascii_lowercase().contains("gpt-oss") {
+        "For gpt-oss (Harmony), use a TEXT-channel route (e.g. \
+         `fireworks`/`deepinfra`/`sambanova` gpt-oss, which Harn pins to \
+         `tool_format = \"text\"`) or a native-clean route; the provider-native \
+         Harmony channel drops tool calls into the reasoning channel."
+            .to_string()
+    } else {
+        "Pick a provider whose route for this model has a working native or \
+         text tool channel (see `harn providers matrix`)."
+            .to_string()
+    }
+}
+
 /// Return the currently-effective provider capability rule matrix. User
 /// override rows, when installed for the current thread, are emitted before
 /// built-in rows so the display mirrors lookup precedence.
@@ -2594,14 +2669,17 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
         // reasoning-off breaks tool calling. Provider catch-all rules carry no
         // reasoning fields, so without a dedicated `*gpt-oss*` row gpt-oss
         // would fall through to reasoning-OFF and the eval loop would bill a
-        // noncommittal. Tool wire support is provider-specific: OpenRouter and
-        // Fireworks ride Harn's TEXT channel (their provider-native path bills
-        // noncommittal), and within that channel they use the escape-free
-        // heredoc (`text`) grammar rather than fenced-JSON, because gpt-oss
-        // double-escapes the backslashes a JSON string arg requires and corrupts
-        // `\\`-heavy code bodies (empirical A/B 2026-06-21: text beats json on
-        // both dispatch and byte-fidelity). The direct Cerebras/DeepInfra/Groq
-        // routes still use provider-native tools.
+        // noncommittal. Tool wire support is provider-specific: the pay-per-token
+        // routes (OpenRouter, Fireworks, DeepInfra, SambaNova) ride Harn's TEXT
+        // channel — their provider-native Harmony path drops tool calls into the
+        // reasoning/commentary channel (empty `tool_calls` / billed-noncommittal,
+        // see the DeepInfra/SambaNova rows + vLLM #22578/#44216, SGLang
+        // #8976/#10738, openai/harmony #68). Within the text channel they use the
+        // escape-free heredoc (`text`) grammar rather than fenced-JSON, because
+        // gpt-oss double-escapes the backslashes a JSON string arg requires and
+        // corrupts `\\`-heavy code bodies (empirical A/B 2026-06-21: text beats
+        // json on both dispatch and byte-fidelity). Only the native-clean direct
+        // routes (Cerebras, Groq) still use provider-native tools.
         reset();
         for (provider, model, native_tools, preferred_tool_format) in [
             ("openrouter", "openai/gpt-oss-120b", false, "text"),
@@ -2611,8 +2689,9 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
                 false,
                 "text",
             ),
+            ("deepinfra", "openai/gpt-oss-120b", false, "text"),
+            ("sambanova", "sambanova/gpt-oss-120b", false, "text"),
             ("cerebras", "gpt-oss-120b", true, "native"),
-            ("deepinfra", "openai/gpt-oss-120b", true, "native"),
             ("groq", "openai/gpt-oss-120b", true, "native"),
         ] {
             let caps = lookup(provider, model);
@@ -3185,5 +3264,152 @@ native_tools = true
             );
             assert!(decision.correction.is_none());
         }
+    }
+
+    /// FOOTGUN-REMOVAL — gpt-oss (Harmony) on the pay-per-token DeepInfra and
+    /// SambaNova routes drops tool calls into the reasoning channel on native, so
+    /// a `native` pin must auto-correct to the route's `text` channel with an
+    /// explanatory correction. The known-good native routes (cerebras gpt-oss,
+    /// sambanova minimax) must stay untouched.
+    #[test]
+    fn validate_tool_format_autocorrects_gpt_oss_native_pin_to_text() {
+        reset();
+        for (provider, model) in [
+            ("deepinfra", "deepinfra/openai/gpt-oss-120b"),
+            ("sambanova", "sambanova/gpt-oss-120b"),
+        ] {
+            let decision = validate_tool_format(provider, model, "native");
+            assert_eq!(
+                decision.effective, "text",
+                "{provider}/{model}: native must auto-correct to text"
+            );
+            let reason = decision
+                .correction
+                .unwrap_or_else(|| panic!("{provider}/{model}: a correction must be reported"));
+            assert!(
+                reason.contains("native_unreliable"),
+                "{provider}/{model}: names the parity"
+            );
+            assert!(
+                reason.contains("text"),
+                "{provider}/{model}: names the working alternative"
+            );
+            // text is already safe and passes through unchanged.
+            let text = validate_tool_format(provider, model, "text");
+            assert_eq!(text.effective, "text");
+            assert!(text.correction.is_none());
+        }
+    }
+
+    /// FOOTGUN-REMOVAL — the GLM-5.x native channel emits `<tool_call>` markup
+    /// instead of provider-native `tool_calls`, so the zai-direct GLM rows pin
+    /// text and a `native` pin must auto-correct, matching the Fireworks/
+    /// DeepInfra/Baseten precedents.
+    #[test]
+    fn validate_tool_format_autocorrects_zai_glm_native_pin_to_text() {
+        reset();
+        for model in ["glm-5.2", "glm-5.1", "glm-5"] {
+            let decision = validate_tool_format("zai", model, "native");
+            assert_eq!(
+                decision.effective, "text",
+                "zai/{model}: native must auto-correct to text"
+            );
+            let reason = decision
+                .correction
+                .unwrap_or_else(|| panic!("zai/{model}: a correction must be reported"));
+            assert!(
+                reason.contains("native_unreliable"),
+                "zai/{model}: names the parity"
+            );
+        }
+    }
+
+    /// The known-good native routes must NOT be touched by the gpt-oss/GLM
+    /// pins above — a native pin stays native with no spurious correction.
+    #[test]
+    fn validate_tool_format_leaves_known_good_native_routes_unchanged() {
+        reset();
+        for (provider, model) in [
+            // cerebras gpt-oss is native-clean (only throttled).
+            ("cerebras", "gpt-oss-120b"),
+            // sambanova minimax is native and interchangeable.
+            ("sambanova", "minimax-m2.7"),
+        ] {
+            let decision = validate_tool_format(provider, model, "native");
+            assert_eq!(
+                decision.effective, "native",
+                "{provider}/{model}: known-good native route must stay native"
+            );
+            assert!(
+                decision.correction.is_none(),
+                "{provider}/{model}: no spurious correction"
+            );
+        }
+    }
+
+    /// FOOTGUN-REMOVAL — the first-class no-viable-channel guard fires when BOTH
+    /// channels are forbidden (a route the registry trusts on neither native nor
+    /// text), naming the bad combo and a suggested alternative — never a silent
+    /// empty tool stream.
+    #[test]
+    fn no_viable_tool_channel_guard_fires_only_when_both_channels_forbidden() {
+        reset();
+        // Construct a gpt-oss route with NO working channel: native_unreliable
+        // forbids native, and text_tool_wire_format_supported = false forbids the
+        // text channel too.
+        let overrides: CapabilitiesFile = toml::from_str(
+            "[[provider.acme]]\n\
+             model_match = \"acme/gpt-oss-stub\"\n\
+             native_tools = false\n\
+             tool_mode_parity = \"native_unreliable\"\n\
+             text_tool_wire_format_supported = false\n",
+        )
+        .expect("override parses");
+        let caps = lookup_with_user_overrides("acme", "acme/gpt-oss-stub", Some(&overrides));
+        let message = no_viable_tool_channel_with_caps("acme", "acme/gpt-oss-stub", &caps)
+            .expect("the guard must fire when neither channel works");
+        assert!(
+            message.contains("no viable tool-calling channel"),
+            "names the failure: {message}"
+        );
+        assert!(
+            message.contains("acme/gpt-oss-stub"),
+            "names the bad combo: {message}"
+        );
+        // gpt-oss models get the Harmony-specific text-channel hint.
+        assert!(
+            message.contains("gpt-oss") && message.contains("text"),
+            "suggests an alternative: {message}"
+        );
+
+        // The DeepInfra/SambaNova gpt-oss rows keep a working text channel, so
+        // the guard must NOT fire on them (they auto-correct instead).
+        assert!(
+            no_viable_tool_channel("deepinfra", "deepinfra/openai/gpt-oss-120b").is_none(),
+            "auto-correctable route must not trip the fail-fast guard"
+        );
+        assert!(
+            no_viable_tool_channel("sambanova", "sambanova/gpt-oss-120b").is_none(),
+            "auto-correctable route must not trip the fail-fast guard"
+        );
+        // A healthy native-clean route never trips it.
+        assert!(
+            no_viable_tool_channel("cerebras", "gpt-oss-120b").is_none(),
+            "healthy native route must not trip the guard"
+        );
+        // The generic (non-gpt-oss) no-channel case still fires with a generic
+        // hint.
+        let generic: CapabilitiesFile = toml::from_str(
+            "[[provider.acme]]\n\
+             model_match = \"mystery-1\"\n\
+             native_tools = false\n\
+             tool_mode_parity = \"text_only\"\n\
+             text_tool_wire_format_supported = false\n",
+        )
+        .expect("override parses");
+        let caps = lookup_with_user_overrides("acme", "mystery-1", Some(&generic));
+        let message = no_viable_tool_channel_with_caps("acme", "mystery-1", &caps)
+            .expect("guard fires on the generic no-channel route too");
+        assert!(message.contains("harn providers matrix"), "{message}");
     }
 }
