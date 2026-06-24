@@ -23,6 +23,31 @@ pub(crate) fn register_event_log_builtins(vm: &mut Vm) {
 }
 
 #[harn_builtin(
+    sig = "event_log.describe() -> dict",
+    kind = "async",
+    category = "event_log"
+)]
+async fn event_log_describe_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    if !args.is_empty() {
+        return Err(VmError::TypeError(
+            "event_log.describe: expected no arguments".to_string(),
+        ));
+    }
+    let description = ensure_event_log().describe();
+    Ok(crate::stdlib::json_to_vm_value(&serde_json::json!({
+        "backend": description.backend.to_string(),
+        "location": description
+            .location
+            .map(|path| path.to_string_lossy().into_owned()),
+        "size_bytes": description.size_bytes,
+        "queue_depth": description.queue_depth,
+    })))
+}
+
+#[harn_builtin(
     sig = "event_log.emit(topic: string, kind: string, payload?: any, headers?: dict) -> int",
     kind = "async",
     category = "event_log"
@@ -59,6 +84,35 @@ async fn event_log_latest_impl(
     Ok(latest
         .map(|id| VmValue::Int(id as i64))
         .unwrap_or(VmValue::Nil))
+}
+
+#[harn_builtin(
+    sig = "event_log.read(topic_or_options: string | dict, from_cursor?: int | nil, limit?: int) -> list",
+    kind = "async",
+    category = "event_log"
+)]
+async fn event_log_read_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let options = parse_read_options(&args)?;
+    let events = ensure_event_log()
+        .read_range(&options.topic, options.from_cursor, options.limit)
+        .await
+        .map_err(log_error)?;
+    let topic_name = options.topic.as_str().to_string();
+    Ok(VmValue::List(std::sync::Arc::new(
+        events
+            .into_iter()
+            .filter(|(_, event)| {
+                options
+                    .kind_prefix
+                    .as_deref()
+                    .is_none_or(|prefix| event.kind.starts_with(prefix))
+            })
+            .map(|(event_id, event)| event_to_value(&topic_name, event_id, event))
+            .collect(),
+    )))
 }
 
 #[harn_builtin(
@@ -108,14 +162,42 @@ async fn event_log_subscribe_impl(
     }))
 }
 
+#[harn_builtin(
+    sig = "event_log.topics() -> list<string>",
+    kind = "async",
+    category = "event_log"
+)]
+async fn event_log_topics_impl(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    if !args.is_empty() {
+        return Err(VmError::TypeError(
+            "event_log.topics: expected no arguments".to_string(),
+        ));
+    }
+    Ok(VmValue::List(std::sync::Arc::new(
+        ensure_event_log()
+            .topics()
+            .await
+            .map_err(log_error)?
+            .into_iter()
+            .map(|topic| VmValue::String(arcstr::ArcStr::from(topic.as_str())))
+            .collect(),
+    )))
+}
+
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &EVENT_LOG_DESCRIBE_IMPL_DEF,
     &EVENT_LOG_EMIT_IMPL_DEF,
     &EVENT_LOG_LATEST_IMPL_DEF,
+    &EVENT_LOG_READ_IMPL_DEF,
     &EVENT_LOG_SUBSCRIBE_IMPL_DEF,
+    &EVENT_LOG_TOPICS_IMPL_DEF,
 ];
 
 fn register_event_log_namespace(vm: &mut Vm) {
-    let names = ["emit", "latest", "subscribe"];
+    let names = ["describe", "emit", "latest", "read", "subscribe", "topics"];
     vm.set_global(
         "event_log",
         VmValue::dict(
@@ -138,6 +220,46 @@ struct SubscribeOptions {
     topic: Topic,
     from_cursor: Option<u64>,
     kind_prefix: Option<String>,
+}
+
+struct ReadOptions {
+    topic: Topic,
+    from_cursor: Option<u64>,
+    limit: usize,
+    kind_prefix: Option<String>,
+}
+
+const EVENT_LOG_READ_DEFAULT_LIMIT: usize = 100;
+const EVENT_LOG_READ_MAX_LIMIT: usize = 10_000;
+
+fn parse_read_options(args: &[VmValue]) -> Result<ReadOptions, VmError> {
+    match args.first() {
+        Some(VmValue::Dict(options)) => {
+            let topic = parse_topic(options.get("topic"), "event_log.read")?;
+            let from_cursor = parse_cursor(
+                options
+                    .get("from_cursor")
+                    .or_else(|| options.get("cursor"))
+                    .or_else(|| options.get("from")),
+                "event_log.read",
+            )?;
+            let limit = parse_limit(options.get("limit"), "event_log.read")?;
+            let kind_prefix =
+                optional_string(options.get("kind_prefix"), "event_log.read", "kind_prefix")?;
+            Ok(ReadOptions {
+                topic,
+                from_cursor,
+                limit,
+                kind_prefix,
+            })
+        }
+        other => Ok(ReadOptions {
+            topic: parse_topic(other, "event_log.read")?,
+            from_cursor: parse_cursor(args.get(1), "event_log.read")?,
+            limit: parse_limit(args.get(2), "event_log.read")?,
+            kind_prefix: None,
+        }),
+    }
 }
 
 fn parse_subscribe_options(args: &[VmValue]) -> Result<SubscribeOptions, VmError> {
@@ -185,6 +307,17 @@ fn parse_cursor(value: Option<&VmValue>, builtin: &str) -> Result<Option<u64>, V
         Some(VmValue::Int(n)) if *n >= 0 => Ok(Some(*n as u64)),
         Some(other) => Err(VmError::TypeError(format!(
             "{builtin}: from_cursor must be a non-negative int or nil, got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+fn parse_limit(value: Option<&VmValue>, builtin: &str) -> Result<usize, VmError> {
+    match value {
+        None | Some(VmValue::Nil) => Ok(EVENT_LOG_READ_DEFAULT_LIMIT),
+        Some(VmValue::Int(n)) if *n >= 0 => Ok((*n as usize).min(EVENT_LOG_READ_MAX_LIMIT)),
+        Some(other) => Err(VmError::TypeError(format!(
+            "{builtin}: limit must be a non-negative int or nil, got {}",
             other.type_name()
         ))),
     }

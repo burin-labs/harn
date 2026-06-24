@@ -1146,6 +1146,91 @@ async fn queue_and_inspect_tools_return_snapshots() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn eval_inspect_run_reports_artifacts_and_event_chain() {
+    let _guard = lock_harn_state();
+    let temp = TempDir::new().unwrap();
+    write_fixture(&temp);
+    let bundle = temp.path().join("eval-run");
+    write_file(
+        &bundle,
+        "summary.json",
+        r#"{
+          "task": "zig-feat",
+          "model": "fw-gpt-oss-120b",
+          "result": "FAIL",
+          "outcome_kind": "edit_applied_but_wrong",
+          "verification_passed": false,
+          "verify_timed_out": false,
+          "verify_failure_excerpt": "src/schema.zig:1:1: error: file exists in modules",
+          "cross_check": {
+            "e1_verdict": "fail",
+            "e2_verdict": "fail",
+            "e1_e2_aligned": true,
+            "e2_reason": "re-exec verify FAILED in clean checkout (exit 1)",
+            "judge_dead": true
+          },
+          "completion_contract": {
+            "contract_passed": true,
+            "run_ready_for_final": false,
+            "verification_passed": false,
+            "completion_warnings": ["missing_exact_done_sentinel"]
+          },
+          "verification": "FAIL",
+          "run_record_path": null
+        }"#,
+    );
+    write_file(
+        &bundle,
+        "artifacts/final.diff",
+        "diff --git a/src/schema.zig b/src/schema.zig\n",
+    );
+    write_file(
+        &bundle,
+        "events/topics/agent.transcript.llm.jsonl",
+        r#"{"id":1,"event":{"kind":"message","payload":{"role":"user"},"headers":{"harn.provenance.record_hash":"sha256:a"},"occurred_at_ms":1}}"#,
+    );
+    write_file(
+        &bundle,
+        "events/topics/observability.agent_events.session-1.jsonl",
+        concat!(
+            r#"{"id":1,"event":{"kind":"tool","payload":{"event":{"type":"tool_call","tool_call_id":"tc1"}},"headers":{"harn.provenance.record_hash":"sha256:a"},"occurred_at_ms":1}}"#,
+            "\n",
+            r#"{"id":2,"event":{"kind":"tool","payload":{"event":{"type":"tool_call_update","tool_call_id":"tc1"}},"headers":{"harn.provenance.prev_hash":"sha256:a","harn.provenance.record_hash":"sha256:b"},"occurred_at_ms":2}}"#,
+            "\n",
+        ),
+    );
+    let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
+    let mut session = init_session(&service).await;
+
+    let dossier = call_tool(
+        &service,
+        &mut session,
+        "harn.eval.inspect_run",
+        json!({ "output_dir": bundle, "limit": 1 }),
+    )
+    .await;
+
+    assert_eq!(dossier["verdict"]["result"], "FAIL");
+    assert_eq!(dossier["event_chain"]["has_agent_transcript"], true);
+    assert_eq!(dossier["event_chain"]["tool_call_events"], 1);
+    assert_eq!(dossier["event_chain"]["tool_call_update_events"], 1);
+    let agent_events = dossier["event_topics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|topic| topic["topic"] == "observability.agent_events.session-1")
+        .unwrap();
+    assert_eq!(agent_events["record_count"], 2);
+    assert_eq!(agent_events["sampled_event_count"], 1);
+    assert_eq!(agent_events["counts_complete"], true);
+    assert!(dossier["gaps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|gap| gap == "missing run_record or run_record_path is null"));
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn trust_query_returns_filtered_trace_groups() {
     let _guard = lock_harn_state();
     let temp = TempDir::new().unwrap();
