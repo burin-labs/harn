@@ -74,6 +74,53 @@ pub(crate) fn parse_text_tool_calls_in_format(
     }
 }
 
+/// Parse the argument payload from a provider-native tool call that appears to
+/// contain Harn's text-tool syntax rather than strict JSON.
+///
+/// Some OpenAI-compatible providers receive a text-tool prompt but still
+/// surface the model's action through `tool_calls[].function.arguments`. In
+/// that case the argument string may be `{ path: "a.rs", content: <<EOF ... }`
+/// or even `edit({ ... })`. Recover those complete text-format payloads
+/// without requiring a registered tool schema; callers still own normalizing
+/// the final `(name, arguments)` pair.
+pub(crate) fn parse_text_tool_argument_payload(
+    text: &str,
+    name: &str,
+) -> Result<serde_json::Value, String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Ok(serde_json::json!({}));
+    }
+
+    match syntax::parse_object_literal_from(trimmed, name) {
+        Ok((arguments, consumed)) if trimmed[consumed..].trim().is_empty() => Ok(arguments),
+        Ok((_arguments, consumed)) => Err(format!(
+            "trailing bytes after object literal argument at byte {consumed}"
+        )),
+        Err(object_error) => {
+            if let Some(name_len) = syntax::ident_length(trimmed.as_bytes()) {
+                if trimmed.as_bytes().get(name_len) == Some(&b'(') {
+                    let call_name = trimmed[..name_len].to_string();
+                    match syntax::parse_ts_call_from(trimmed, call_name) {
+                        Ok((arguments, consumed)) if trimmed[consumed..].trim().is_empty() => {
+                            return Ok(arguments);
+                        }
+                        Ok((_arguments, consumed)) => {
+                            return Err(format!(
+                                "trailing bytes after tool-call expression at byte {consumed}"
+                            ));
+                        }
+                        Err(call_error) => {
+                            return Err(format!("{object_error}; {call_error}"));
+                        }
+                    }
+                }
+            }
+            Err(object_error)
+        }
+    }
+}
+
 /// Result of parsing a prose-interleaved TS tool-call stream.
 ///
 /// The scanner walks the model's text once and splits it into three
@@ -109,4 +156,59 @@ pub(crate) struct TextToolParseResult {
     /// Used as the assistant's history entry so future turns see the
     /// well-formed shape instead of the raw provider bytes.
     pub canonical: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_text_tool_argument_payload;
+
+    #[test]
+    fn text_tool_argument_payload_parses_object_literal_heredoc() {
+        let parsed = parse_text_tool_argument_payload(
+            r#"{ action: "create", path: "src/main.rs", content: <<EOF
+fn main() {
+    println!("hello");
+}
+EOF
+}"#,
+            "edit",
+        )
+        .expect("object literal payload parses");
+
+        assert_eq!(parsed["action"], serde_json::json!("create"));
+        assert_eq!(parsed["path"], serde_json::json!("src/main.rs"));
+        assert!(
+            parsed["content"]
+                .as_str()
+                .is_some_and(|content| content.contains("println!(\"hello\")")),
+            "content should come from the heredoc body: {parsed:?}"
+        );
+    }
+
+    #[test]
+    fn text_tool_argument_payload_parses_wrapped_call() {
+        let parsed = parse_text_tool_argument_payload(
+            r#"edit({ action: "replace_range", path: "src/lib.rs", range_start: 1, range_end: 2 })"#,
+            "edit",
+        )
+        .expect("wrapped call payload parses");
+
+        assert_eq!(parsed["action"], serde_json::json!("replace_range"));
+        assert_eq!(parsed["path"], serde_json::json!("src/lib.rs"));
+        assert_eq!(parsed["range_start"], serde_json::json!(1));
+    }
+
+    #[test]
+    fn text_tool_argument_payload_rejects_trailing_bytes() {
+        let error = parse_text_tool_argument_payload(
+            r#"{ action: "create", path: "src/main.rs" } trailing"#,
+            "edit",
+        )
+        .expect_err("trailing bytes should fail");
+
+        assert!(
+            error.contains("trailing bytes"),
+            "unexpected error: {error}"
+        );
+    }
 }
