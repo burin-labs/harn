@@ -8,6 +8,120 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.140
+
+### Added
+
+- **Eval run inspection now exposes a read-only MCP debugger and VM event-log
+  introspection.** `harn.eval.inspect_run` builds a chain-of-custody dossier for
+  eval artifacts, and the `event_log` stdlib now supports deterministic
+  `describe`, `topics`, and bounded `read` calls for debugger workflows.
+- `harn test --coverage` reports per-file line coverage for the Harn source a
+  user test suite executes, and `--coverage-out <path>` writes an LCOV tracefile
+  consumable by Codecov, `genhtml`, and the VS Code Coverage Gutters extension.
+  Coverage reuses the per-instruction source-line table the VM already carries,
+  so it needs no separate instrumentation pass; recording is opt-in and adds a
+  single predictable branch to the dispatch loop when no session is active.
+
+### Changed
+
+- **Tool-calling north-star RFC (#3576).** Documents the target tool-calling
+  architecture and the staged path from today's runtime toward it.
+- **Refreshed provider tool-call wire-format pins from a real-spend
+  forced-format sweep (2026-06-24, N=5).** MiniMax-M2.7 (Together, SambaNova),
+  Kimi-K2.7-Code (OpenRouter), and Qwen3.6-35B-A3B (DeepInfra) corrupt
+  backslash-heavy file bodies on the provider-native and fenced-JSON channels
+  but round-trip them byte-clean on the escape-free heredoc `text` channel;
+  those four routes are now pinned `preferred_tool_format = "text"` /
+  `tool_mode_parity = "native_unreliable"`. Evidence:
+  `docs/eval/provider-tool-mode-sweep-2026-06-24.md`.
+- **Release binary size gate now allows the v0.8.139 x86_64 Linux binary
+  (#3561).** The release workflow and local size-check script now share a
+  187 MiB ratchet, matching the 186.11 MiB stripped binary produced by the
+  v0.8.139 release build.
+
+### Fixed
+
+- **Agent loop now gives actionable feedback on empty/unrecoverable tool
+  arguments and fails fast on repeated same-resource failures (#3573).** When a
+  tool call arrives with empty or unrecoverable arguments the loop surfaces a
+  cause-naming nudge instead of silently churning, and repeated identical
+  same-resource failures within a turn are cut early. Adds conformance coverage
+  (`agent_loop_empty_args_cause_feedback`,
+  `agent_loop_intra_turn_resource_fail_fast`,
+  `agent_loop_native_text_markup_rescue`,
+  `agent_loop_no_progress_feedback_modes`).
+- Agent loops now fail-fast later same-resource mutating tool calls in the same
+  assistant response after an earlier sibling fails, using tool annotations and
+  path arguments instead of host-specific heuristics.
+- Treat product-level `Error:` tool results as failures for intra-turn
+  same-resource fail-fast scheduling.
+- **gpt-oss (Harmony) and GLM-5.x native tool-call footguns are now closed at
+  the capability layer (#3574).** DeepInfra and SambaNova `gpt-oss` and the
+  zai-direct `glm-5.x` routes are pinned to the TEXT tool channel with
+  `tool_mode_parity = "native_unreliable"`, so a `native` pin (alias or
+  `--tool-format native`) auto-corrects to `text` with an explanatory
+  `correction` instead of silently emitting an empty tool stream. The
+  provider-native Harmony channel on these pay-per-token routes drops tool calls
+  into the private reasoning/commentary channel (empty `tool_calls` /
+  billed-noncommittal), matching the Fireworks `#3505` precedent and the same
+  failure class reported on vLLM, SGLang, and the OpenAI Harmony repo.
+- **New first-class "no viable tool channel" fail-fast guard
+  (`capabilities::no_viable_tool_channel`).** When a `(provider, model)` route
+  has neither a trusted native nor a trusted text tool channel, a tool-bearing
+  `llm_call` now fails before dispatch with an actionable error naming the bad
+  combo and a suggested alternative, instead of billing a noncommittal
+  completion with no dispatchable tool call.
+- **Native tool-channel degrade now also fires on a vanishing tool call and a
+  function-call protocol refusal (#3577).** The runtime native→text tool-format
+  degrade now also fires on a billed-noncommittal vanishing tool call (the
+  upstream finished cleanly, billed output, and committed no tool call — the
+  action stranded in a private reasoning channel) and on a native function-call
+  protocol refusal (e.g. SambaNova's HTTP 400 "Model started a function call but
+  did not complete it"), not only on the 5xx/EOF server-side parser choke it
+  already handled. These signatures meant a native-channel route that vanished
+  its tool call previously retried the same broken native channel until the
+  budget drained, then surfaced; now it degrades once to the text channel and
+  recovers. The degrade stays a one-way last resort: it remains gated to native
+  channels, fires at most once per call, and never triggers for a
+  `length`/`max_tokens` truncation (continue-on-truncation stays above
+  channel-switch in the remedy order).
+- **OpenAI-compatible streamed tool calls now preserve non-empty argument
+  payloads.** Clean `tool_calls` finishes that stream Harn text-format or
+  otherwise malformed multiline arguments no longer silently dispatch `{}`;
+  complete text-format payloads are recovered and unrecoverable payloads carry
+  an explicit parse error while length-truncation behavior is unchanged.
+- **Text tool-call parser diagnostics now classify unclosed `<user_response>`
+  blocks correctly (#3563).** An accepted opening tag without its closing
+  `</user_response>` is reported as an unclosed block instead of the
+  contradictory unknown-tag fallback.
+- Normalize bare tool-choice names for OpenAI-compatible providers so a specific
+  tool request cannot be forwarded as an invalid scalar value.
+- Pinned unsafe GLM and Moonshot alias tool-format defaults to safe formats.
+- Normalize marker and generic pseudo-tool wrappers with clear read/search/run
+  intent before tool dispatch, reducing recoverable value-model tool-call
+  denials.
+- `harn test --coverage-out <path>` now always writes the LCOV tracefile, even
+  when no on-disk source executed. An explicitly requested artifact is no longer
+  silently skipped on an empty report (which would break a CI step that consumes
+  the file); the empty report renders to a valid zero-record LCOV.
+- The `harn.eval.inspect_run` dossier now reports sample-scoped event stats
+  accurately. `first_sampled_id`/`last_sampled_id` and the provenance
+  `chain_breaks_in_sample`/`sample_chain_ok` cover only the sampled prefix
+  window instead of leaking full-scan values when a JSONL topic has more records
+  than `limit`, and `agent_event_topics` is deduplicated when a topic surfaces
+  from both the JSONL dir and the sqlite log.
+- **The experimental native compiler (`harn-codegen`) no longer disagrees with
+  the VM on integer overflow.** Integer `+`/`-`/`*`/negation now guard against
+  `i64` overflow and deopt (`NativeOutcome::Deopt`) exactly where the VM
+  promotes the result to `float`, instead of silently wrapping — so a
+  JIT-compiled kernel is always bit-identical to the interpreter or signals a
+  fall-back, never a quietly wrong answer. Adds a `tests/vm_fidelity.rs`
+  differential suite that runs the same functions on the real `harn-vm`
+  interpreter to prove the value/deopt/trap boundaries match.
+- Avoid redacting source declarations such as `pub const Token = struct` as
+  secret assignments while preserving generic token assignment redaction.
+
 ## v0.8.139
 
 ### Added
