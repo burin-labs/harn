@@ -255,6 +255,64 @@ fn is_empty_completion_retry_error(err: &VmError) -> bool {
             && lower.contains("upstream contract violation"))
 }
 
+/// A *thrown* failure whose signature says the provider's **native tool-call
+/// channel vanished or refused a call for this route** — distinct from the
+/// generic provider stall (`delivered no content`), which is a link hiccup that
+/// retrying native is the right move for. Two shapes qualify:
+///
+/// 1. **Billed-noncommittal** — the upstream finished cleanly, billed output, and
+///    committed neither a tool call nor visible text: the action was serialized
+///    only onto a private reasoning channel. Surfaced by
+///    [`super::api::is_billed_noncommittal_completion`] /
+///    `billed_noncommittal_completion_error` (`response.rs`). This is the
+///    canonical cheap-model "vanishing call" signature; the 2026-06 transcript
+///    sweep observed it 13× on `deepinfra/openai/gpt-oss-120b` (tf=native), and
+///    the error message itself prescribes a "Harn text/json tool format".
+/// 2. **Native function-call protocol refusal** — the provider rejects a native
+///    tool request with a 4xx whose body says the function call did not complete
+///    (the observed SambaNova shape: HTTP 400 `Model started a function call but
+///    did not complete it`). This is a 4xx, so [`is_native_tool_channel_failure`]
+///    (5xx/EOF only) deliberately does not match it — but it is unambiguously a
+///    broken NATIVE tool channel for the route, not a malformed request from us,
+///    so it earns the same one-shot degrade.
+///
+/// Unlike [`is_empty_completion_retry_error`], this predicate intentionally does
+/// NOT match the bare `delivered no content` stall: a stall has no tool-channel
+/// fingerprint and is correctly handled by a same-channel retry.
+fn is_billed_noncommittal_throw(err: &VmError) -> bool {
+    let msg = match err {
+        VmError::Thrown(crate::value::VmValue::String(s)) => s.as_ref(),
+        VmError::CategorizedError { message, .. } => message.as_str(),
+        VmError::Runtime(s) => s.as_str(),
+        VmError::Thrown(crate::value::VmValue::Dict(d)) => {
+            return d
+                .get("message")
+                .map(|v| v.display())
+                .map(|m| message_is_billed_noncommittal_throw(&m))
+                .unwrap_or(false);
+        }
+        _ => return false,
+    };
+    message_is_billed_noncommittal_throw(msg)
+}
+
+/// String-level half of [`is_billed_noncommittal_throw`], shared by the
+/// string-carrier and dict-carrier paths.
+fn message_is_billed_noncommittal_throw(msg: &str) -> bool {
+    let lower = msg.to_lowercase();
+    // (1) billed-noncommittal contract violation (the reasoning-channel-only
+    // vanish). Requires the billed-output marker so a generic "contract
+    // violation" phrase elsewhere cannot trip it.
+    let billed_noncommittal = lower.contains("completion_tokens=")
+        && lower.contains("no dispatchable tool call or answer")
+        && lower.contains("upstream contract violation");
+    // (2) native function-call protocol refusal (SambaNova 400 shape). Keyed on
+    // the "function call ... did not complete" fingerprint, not a model name.
+    let function_call_refusal = lower.contains("function call")
+        && (lower.contains("did not complete") || lower.contains("not complete it"));
+    billed_noncommittal || function_call_refusal
+}
+
 /// A failure that looks like the *provider's native tool-call channel itself*
 /// is broken for this route — not a generic transient hiccup. The marquee case
 /// is the documented Ollama leak: the embedded qwen3-family tool-call extractor
@@ -1574,20 +1632,41 @@ pub(crate) async fn observed_llm_call(
                 let empty_completion_retry = is_empty_completion_retry_error(&error)
                     && attempt < empty_completion_retry_budget(retry_config, &opts.provider);
                 // Runtime tool_format fallback: a native-channel request whose
-                // failure fingerprint says the provider's *server-side tool-call
-                // parser* choked (the documented Ollama 500 / EOF leak, or any
-                // serving stack that 500s/EOFs on the native assumption) cannot
-                // be rescued by retrying native — every retry re-feeds the same
-                // broken channel. Degrade ONCE to the text channel instead and
-                // retry there, so the call yields parseable output rather than
-                // hard-failing or parse-looping. Keyed on the failure SIGNATURE
-                // (5xx/EOF + tool-parser fingerprint), never a model name; only
-                // fires when the request actually carried provider-native tools.
+                // failure fingerprint says the provider's native tool-call
+                // channel itself is broken for this route cannot be rescued by
+                // retrying native — every retry re-feeds the same broken channel.
+                // Degrade ONCE to the text channel instead and retry there, so the
+                // call yields parseable output rather than hard-failing or
+                // parse-looping. Two broken-channel signatures qualify, both keyed
+                // on the failure SIGNATURE (never a model name) and both only when
+                // the request actually carried provider-native tools:
+                //
+                // 1. **Server-side parser choke** (5xx/EOF + tool-parser
+                //    fingerprint): the documented Ollama 500 / EOF leak, or any
+                //    serving stack that 500s/EOFs on the native assumption.
+                //    Detected by [`is_native_tool_channel_failure`] (the #3500
+                //    mechanism).
+                // 2. **Billed-noncommittal vanishing call** (the canonical
+                //    cheap-model signature): the upstream finished cleanly, billed
+                //    output tokens, and emitted ZERO `tool_calls` — it serialized
+                //    the action only onto a private reasoning channel or returned
+                //    an empty committed message. Detected deterministically one
+                //    layer down by [`super::api::is_billed_noncommittal_completion`]
+                //    and thrown as `billed_noncommittal_completion_error`, matched
+                //    here by [`is_billed_noncommittal_throw`]. Before this, that
+                //    throw routed onto the bounded SAME-CHANNEL empty-completion
+                //    retry, which just re-fed the broken native channel until the
+                //    budget drained, then surfaced — never degrading. A native
+                //    channel that vanishes once vanishes again; the right move is
+                //    the same degrade-to-text as case 1, so the model can produce
+                //    a parseable call on the text channel that the gate already
+                //    guarantees this route can carry.
                 let native_tool_channel_degrade = !degraded_to_text
                     && crate::llm_config::tool_format_channel(&effective_tool_format)
                         == Some(crate::llm_config::ToolFormatChannel::Native)
                     && opts.native_tools.is_some()
-                    && is_native_tool_channel_failure(&error);
+                    && (is_native_tool_channel_failure(&error)
+                        || is_billed_noncommittal_throw(&error));
                 let can_retry = (retryable && attempt < retry_config.retries)
                     || empty_completion_retry
                     || native_tool_channel_degrade;
@@ -1784,6 +1863,87 @@ mod retry_tests {
         assert!(!is_native_tool_channel_failure(&thrown(
             "[http_error] 500 internal server error"
         )));
+    }
+
+    #[test]
+    fn billed_noncommittal_throw_matches_vanish_and_function_call_refusal() {
+        // (1) The billed-noncommittal contract violation (reasoning-channel-only
+        // vanish) — the canonical cheap-model vanishing-call signature, observed
+        // 13x on deepinfra gpt-oss-120b (tf=native) in the 2026-06 sweep.
+        assert!(is_billed_noncommittal_throw(&thrown(
+            "provider deepinfra model openai/gpt-oss-120b returned billed output \
+             (completion_tokens=86) with no dispatchable tool call or answer \
+             (upstream contract violation): the model finished cleanly but committed \
+             neither a tool call nor visible text."
+        )));
+        // Also matches when re-wrapped as a categorized error.
+        assert!(is_billed_noncommittal_throw(&categorized(
+            "model m returned billed output (completion_tokens=5) with no dispatchable \
+             tool call or answer (upstream contract violation)",
+            ErrorCategory::Generic,
+        )));
+        // (2) The SambaNova native function-call protocol refusal (HTTP 400). It
+        // is a 4xx, so `is_native_tool_channel_failure` (5xx/EOF only) does NOT
+        // match it, but it is unambiguously a broken native tool channel.
+        assert!(is_billed_noncommittal_throw(&thrown(
+            "sambanova HTTP 400 Bad Request [invalid_request]: Model started a \
+             function call but did not complete it."
+        )));
+        // 5xx-only path stays separate from the 400 refusal: the refusal is NOT a
+        // 5xx/EOF parser choke, so the #3500 predicate must leave it alone.
+        assert!(!is_native_tool_channel_failure(&thrown(
+            "sambanova HTTP 400 Bad Request [invalid_request]: Model started a \
+             function call but did not complete it."
+        )));
+    }
+
+    #[test]
+    fn billed_noncommittal_throw_ignores_stall_and_unrelated_errors() {
+        // The bare provider stall (`delivered no content`) has no tool-channel
+        // fingerprint: a same-channel retry is the right move, so the degrade
+        // predicate must NOT match it (otherwise a transient hiccup would burn
+        // the route's one-shot channel degrade).
+        assert!(!is_billed_noncommittal_throw(&thrown(
+            "openai-compatible model m reported completion_tokens=12 but delivered \
+             no content, reasoning, or tool calls"
+        )));
+        // A billed-noncommittal phrase WITHOUT the billed-output marker must not
+        // trip (mirrors the `completion_tokens=` guard in the empty-completion
+        // predicate).
+        assert!(!is_billed_noncommittal_throw(&thrown(
+            "upstream contract violation with no dispatchable tool call or answer"
+        )));
+        // A generic 429 / rate limit is never a vanished tool channel.
+        assert!(!is_billed_noncommittal_throw(&thrown(
+            "[rate_limited] too many requests"
+        )));
+        // A 400 about a malformed tool SCHEMA (our request was wrong) is not a
+        // function-call refusal — degrading the channel would not fix it.
+        assert!(!is_billed_noncommittal_throw(&thrown(
+            "bad request: tool schema invalid"
+        )));
+    }
+
+    #[test]
+    fn truncation_does_not_trigger_channel_degrade() {
+        // REMEDY-ORDER INVARIANT: continue-on-truncation must sit ABOVE
+        // channel-switch. A `length`/`max_tokens` truncation (valid tool name,
+        // incomplete args) is a budget problem the loop continues/raises budget
+        // on — NOT a broken channel. A channel switch invalidates the whole
+        // prefix KV cache, so it must never fire for a deterministic truncation
+        // that would just re-truncate. The billed-noncommittal *throw* is only
+        // produced when the turn finished cleanly (the response-layer detector
+        // excludes `stop_reason == length`), so a truncation can never reach the
+        // degrade trigger; assert the predicates agree.
+        assert!(!is_billed_noncommittal_throw(&thrown(
+            "model m hit completion_tokens=2048 length cap mid tool call (truncated)"
+        )));
+        assert!(!is_native_tool_channel_failure(&thrown(
+            "model m hit completion_tokens=2048 length cap mid tool call (truncated)"
+        )));
+        // (The structural detector's exclusion of `stop_reason == length` from the
+        // zero-token empty path is covered by
+        // `zero_token_empty_completion_predicate_edges`.)
     }
 
     #[test]
@@ -2847,6 +3007,94 @@ mod empty_completion_retry_tests {
             assert!(
                 err.to_string().to_lowercase().contains("tool call parser"),
                 "the surfaced error is the second (post-degrade) failure"
+            );
+        });
+    }
+
+    #[test]
+    fn billed_noncommittal_throw_degrades_to_text_and_recovers() {
+        // Mechanism-fitness: the canonical cheap-model vanishing-call signature
+        // (billed output, clean finish, zero tool calls — the action stranded in
+        // the reasoning channel) on a NATIVE channel must degrade to text and
+        // recover, NOT loop re-feeding the broken native channel. Before this
+        // generalization the throw routed onto the bounded SAME-CHANNEL empty-
+        // completion retry and never switched channels. The _guard drop asserts
+        // the second (text-channel) turn was actually consumed.
+        current_thread_runtime().block_on(async {
+            let _guard = install_fake_llm_script(
+                FakeLlmScript::new()
+                    .push(FakeLlmTurn::Error(crate::llm::fake::FakeLlmError::new(
+                        crate::value::ErrorCategory::Generic,
+                        "provider deepinfra model openai/gpt-oss-120b returned billed \
+                         output (completion_tokens=86) with no dispatchable tool call \
+                         or answer (upstream contract violation): the model finished \
+                         cleanly but committed neither a tool call nor visible text.",
+                    )))
+                    .push(FakeLlmTurn::stream(vec![
+                        FakeLlmEvent::Token(
+                            "<tool_call>\nedit({ path: \"a.rs\" })\n</tool_call>".into(),
+                        ),
+                        FakeLlmEvent::Done(FakeStopReason::EndTurn),
+                    ])),
+            );
+            let result = observed_llm_call(
+                &native_opts(),
+                Some("native"),
+                None,
+                &retry_config(0),
+                None,
+                false,
+                false,
+                None,
+            )
+            .await
+            .expect("billed-noncommittal vanish should degrade to text and recover");
+            assert!(
+                result.text.contains("edit({ path: \"a.rs\" })"),
+                "the degraded text-channel turn should be returned"
+            );
+        });
+    }
+
+    #[test]
+    fn sambanova_function_call_refusal_degrades_to_text_and_recovers() {
+        // Mechanism-fitness: a native function-call protocol refusal (the observed
+        // SambaNova HTTP 400 "Model started a function call but did not complete
+        // it") is a 4xx, so the #3500 5xx/EOF predicate deliberately misses it and
+        // it is NOT a generic-retryable error — yet it is unambiguously a broken
+        // native tool channel for the route. It must earn the one-shot degrade to
+        // text rather than aborting the run (the sweep showed 6 such calls abort a
+        // run today).
+        current_thread_runtime().block_on(async {
+            let _guard = install_fake_llm_script(
+                FakeLlmScript::new()
+                    .push(FakeLlmTurn::Error(crate::llm::fake::FakeLlmError::new(
+                        crate::value::ErrorCategory::Generic,
+                        "sambanova HTTP 400 Bad Request [invalid_request]: Model \
+                         started a function call but did not complete it.",
+                    )))
+                    .push(FakeLlmTurn::stream(vec![
+                        FakeLlmEvent::Token(
+                            "<tool_call>\nedit({ path: \"a.rs\" })\n</tool_call>".into(),
+                        ),
+                        FakeLlmEvent::Done(FakeStopReason::EndTurn),
+                    ])),
+            );
+            let result = observed_llm_call(
+                &native_opts(),
+                Some("native"),
+                None,
+                &retry_config(0),
+                None,
+                false,
+                false,
+                None,
+            )
+            .await
+            .expect("native function-call refusal should degrade to text and recover");
+            assert!(
+                result.text.contains("edit({ path: \"a.rs\" })"),
+                "the degraded text-channel turn should be returned"
             );
         });
     }
