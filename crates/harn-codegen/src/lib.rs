@@ -37,6 +37,17 @@
 //! [`CodegenError::Unsupported`], which callers treat as "stay on the
 //! interpreter".
 //!
+//! ## Fidelity: guard-and-deopt on integer overflow
+//!
+//! The native code's result is **always** bit-identical to the Harn VM, or an
+//! explicit deopt — never a quietly wrong answer. The one place the two could
+//! diverge is integer overflow: the VM promotes an overflowing `+`, `-`, `*`,
+//! or unary negation to `float`, which a monomorphic `int` kernel cannot
+//! represent. Rather than wrap (and silently disagree with the interpreter),
+//! both the JIT and the reference interpreter guard those operations and
+//! [`NativeOutcome::Deopt`] on overflow, signalling the caller to re-run on the
+//! VM. See [`outcome`] for the full rationale.
+//!
 //! ## Not part of the distributed binary
 //!
 //! This crate links Cranelift and is intentionally absent from the dependency
@@ -49,6 +60,7 @@ mod error;
 mod eval;
 mod jit;
 mod lower;
+mod outcome;
 mod source;
 mod value;
 mod verify;
@@ -58,6 +70,7 @@ pub use bytecode::{BinOp, CmpOp, Instr};
 pub use error::{CodegenError, NativeTrap};
 pub use eval::{evaluate, EvalError};
 pub use jit::{compile as jit_compile, NativeFunction};
+pub use outcome::{DeoptReason, NativeOutcome};
 pub use source::{analyze_function, analyze_named};
 pub use value::{ScalarType, ScalarValue};
 pub use verify::{verify, Block, ScalarFunction, Terminator};

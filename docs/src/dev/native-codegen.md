@@ -32,7 +32,8 @@ The compiler handles Harn's three unboxed scalar types — `int` (`i64`),
 `float` (`f64`), and `bool` — and the operations over them:
 
 - arithmetic `+ - * /` and integer `%` (trap-checked divide-by-zero; `i64::MIN
-  / -1` wraps like the VM rather than trapping);
+  / -1` wraps like the VM rather than trapping; an overflowing `+`/`-`/`*`/
+  negation *deopts* — see [Overflow fidelity](#overflow-fidelity-guard-and-deopt));
 - comparisons `== != < > <= >=` and logical `!`, `&&`, `||`;
 - `if`/`else`, `while` loops, ternaries, short-circuit operators;
 - `let`/`var` locals and reassignment.
@@ -84,8 +85,33 @@ it always tracks the language the installed VM actually speaks. It then:
 3. **lowers** to Cranelift IR and hands off to a backend.
 
 A pure-Rust reference interpreter (`harn_codegen::evaluate`) mirrors the VM's
-semantics exactly (wrapping integer arithmetic, IEEE-754 floats with NaN
-ordering). It is the differential-test oracle and a dependency-free fallback.
+semantics exactly (promote-on-overflow integer arithmetic surfaced as a deopt,
+IEEE-754 floats with NaN ordering). It is the differential-test oracle and a
+dependency-free fallback.
+
+## Overflow fidelity (guard-and-deopt)
+
+The native code's result is **always** bit-identical to the Harn VM, or an
+explicit deopt — never a quietly wrong answer. The one place the monomorphic
+representation could diverge from the VM is integer overflow.
+
+The Harn VM does *not* wrap an overflowing integer `+`, `-`, `*`, or unary
+negation: it **promotes the result to `float`** (see `int_add` and friends in
+`harn-vm`), so `a + b` agrees with `[a, b].sum()` and never silently loses
+magnitude. A monomorphic `int` kernel cannot represent that runtime int→float
+type change. So instead of wrapping (which would make the JIT disagree with both
+the interpreter and the VM), the JIT and the reference interpreter **guard**
+those operations and return `NativeOutcome::Deopt(DeoptReason::IntegerOverflow)`
+on overflow, signalling the caller to re-run on the interpreter or VM for the
+true promoted value. This is the standard guard-and-deopt discipline of
+production JITs (V8's Smi overflow path, for instance).
+
+`call` / `evaluate` therefore return a `NativeOutcome` — either `Value(v)` (in
+the subset) or `Deopt(reason)` — while genuine runtime errors (integer divide by
+zero, which the VM raises too) stay on the `Err(NativeTrap)` channel.
+`tests/vm_fidelity.rs` confirms the contract against the real VM: at the exact
+inputs where the JIT deopts, the VM does promote to `float`; elsewhere the
+values match bit-for-bit.
 
 ## Calling convention
 
@@ -93,25 +119,31 @@ Every compiled function is emitted with one uniform C signature, regardless of
 its Harn arity or types:
 
 ```text
-extern "C" fn(args: *const u64, ret: *mut u64, trap: *mut u8)
+extern "C" fn(args: *const u64, ret: *mut u64, status: *mut u8)
 ```
 
 Arguments and the result are raw 64-bit slots (`int` keeps its bits, `float`
 uses IEEE-754 bits, `bool` is `0`/`1`). This keeps the Rust ↔ native boundary a
 single monomorphic function pointer and gives the AOT object one stable,
-easily-linked symbol (`harn_scalar_<name>`). Integer divide-by-zero sets
-`*trap = 1` and returns, surfacing as a `NativeTrap` instead of a hardware trap
-that would abort the host.
+easily-linked symbol (`harn_scalar_<name>`). The third pointer receives a status
+byte: `0` = result in `*ret`; `1` = integer divide-by-zero (surfaces as a
+`NativeTrap`, not a hardware trap that would abort the host); `2` = integer
+overflow (surfaces as a `NativeOutcome::Deopt`).
 
 ## Using it
 
 Library:
 
 ```text
-use harn_codegen::{compile_named, ScalarValue};
+use harn_codegen::{compile_named, NativeOutcome, ScalarValue};
 
 let f = compile_named("fn add(a: int, b: int) -> int { return a + b }", "add")?;
-let sum = f.call(&[ScalarValue::Int(2), ScalarValue::Int(3)])?; // Int(5)
+match f.call(&[ScalarValue::Int(2), ScalarValue::Int(3)])? {
+    NativeOutcome::Value(v) => assert_eq!(v, ScalarValue::Int(5)),
+    // Deopt would mean the inputs overflowed and the VM promotes to float;
+    // re-run on the interpreter/VM for the true value.
+    NativeOutcome::Deopt(reason) => eprintln!("deopt: {reason}"),
+}
 ```
 
 CLI (`harn-nativec`):
@@ -129,9 +161,12 @@ harn-nativec kernel.harn score --run 12 3
 
 ## Tests
 
-All tests are in-process and deterministic — no wall clock, no threads, no
-external toolchain. `tests/native.rs` is a differential suite that compiles
-real Harn source and asserts the JIT agrees with the reference interpreter
-across input grids (including overflow, divide-by-zero traps, `i64::MIN / -1`,
-and NaN comparisons); `tests/aot.rs` checks object emission without invoking a
-linker.
+The tests are in-process and deterministic — no wall clock, no external
+toolchain. `tests/native.rs` is a differential suite that compiles real Harn
+source and asserts the JIT agrees with the reference interpreter across input
+grids (including overflow deopts, divide-by-zero traps, `i64::MIN / -1`, and NaN
+comparisons); `tests/aot.rs` checks object emission without invoking a linker;
+`tests/vm_fidelity.rs` runs the same functions on the **real `harn-vm`
+interpreter** (through a dev-only current-thread Tokio runtime) to prove the
+native compiler's value/deopt/trap boundaries match the VM's actual
+promote-on-overflow semantics.

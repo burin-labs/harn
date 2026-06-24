@@ -6,17 +6,28 @@
 //! no external toolchain.
 
 use harn_codegen::{
-    analyze_named, evaluate, jit_compile, CodegenError, EvalError, NativeTrap, ScalarValue,
+    analyze_named, evaluate, jit_compile, CodegenError, DeoptReason, EvalError, NativeOutcome,
+    NativeTrap, ScalarValue,
 };
 
 use ScalarValue::{Bool, Float, Int};
 
-/// Compare two scalar results, treating floats bit-for-bit so NaN results
+/// Compare two scalar values, treating floats bit-for-bit so NaN results
 /// (which are never `==` under `PartialEq`) compare equal when identical.
-fn same(a: ScalarValue, b: ScalarValue) -> bool {
+fn same_value(a: ScalarValue, b: ScalarValue) -> bool {
     match (a, b) {
         (Float(x), Float(y)) => x.to_bits() == y.to_bits(),
         _ => a == b,
+    }
+}
+
+/// Compare two outcomes: values bit-for-bit (per [`same_value`]), deopts by
+/// reason. The JIT and reference interpreter must agree on both.
+fn same(a: NativeOutcome, b: NativeOutcome) -> bool {
+    match (a, b) {
+        (NativeOutcome::Value(x), NativeOutcome::Value(y)) => same_value(x, y),
+        (NativeOutcome::Deopt(x), NativeOutcome::Deopt(y)) => x == y,
+        _ => false,
     }
 }
 
@@ -81,29 +92,73 @@ fn integer_arithmetic_matches_interpreter() {
 }
 
 #[test]
-fn integer_wrapping_overflow() {
-    // i64::MAX + 1 must wrap to i64::MIN, matching the VM's wrapping_add.
-    check(
-        "fn add(a: int, b: int) -> int { return a + b }",
-        "add",
-        &int_pairs(&[(i64::MAX, 1), (i64::MIN, -1), (i64::MAX, i64::MAX)]),
-    );
+fn integer_overflow_deopts_not_wraps() {
+    // The Harn VM promotes an overflowing +/-/* to float; a monomorphic int
+    // kernel cannot, so the JIT and the reference interpreter both deopt
+    // (rather than silently wrapping, which would disagree with the VM).
+    // Each row is `(fn name, operator, overflowing operand pairs)`.
+    type OverflowCase = (&'static str, &'static str, &'static [(i64, i64)]);
+    let overflow_cases: &[OverflowCase] = &[
+        (
+            "add",
+            "+",
+            &[(i64::MAX, 1), (i64::MIN, -1), (i64::MAX, i64::MAX)],
+        ),
+        (
+            "sub",
+            "-",
+            &[(i64::MIN, 1), (i64::MAX, -1), (i64::MIN, i64::MAX)],
+        ),
+        (
+            "mul",
+            "*",
+            &[(i64::MAX, 2), (i64::MIN, -1), (i64::MAX, i64::MAX)],
+        ),
+    ];
+    for (name, op, rows) in overflow_cases {
+        let src = format!("fn {name}(a: int, b: int) -> int {{ return a {op} b }}");
+        let scalar = analyze_named(&src, name).unwrap();
+        let native = jit_compile(&scalar).unwrap();
+        for &(a, b) in *rows {
+            let args = [Int(a), Int(b)];
+            let deopt = NativeOutcome::Deopt(DeoptReason::IntegerOverflow);
+            assert_eq!(native.call(&args), Ok(deopt), "jit {name}({a}, {b})");
+            assert_eq!(evaluate(&scalar, &args), Ok(deopt), "ref {name}({a}, {b})");
+        }
+        // A non-overflowing input on the same function still returns a value.
+        assert!(matches!(
+            native.call(&[Int(2), Int(3)]),
+            Ok(NativeOutcome::Value(_))
+        ));
+    }
+
+    // Unary negation of i64::MIN overflows and must deopt too.
+    let scalar = analyze_named("fn neg(a: int) -> int { return -a }", "neg").unwrap();
+    let native = jit_compile(&scalar).unwrap();
+    let deopt = NativeOutcome::Deopt(DeoptReason::IntegerOverflow);
+    assert_eq!(native.call(&[Int(i64::MIN)]), Ok(deopt));
+    assert_eq!(evaluate(&scalar, &[Int(i64::MIN)]), Ok(deopt));
+    assert_eq!(native.call(&[Int(7)]), Ok(NativeOutcome::Value(Int(-7))));
 }
 
 #[test]
-fn integer_min_div_neg_one_does_not_trap() {
-    // i64::MIN / -1 overflows in two's complement; the VM uses wrapping_div
-    // (-> i64::MIN) and wrapping_rem (-> 0). The JIT must not hardware-trap.
+fn integer_min_div_neg_one_does_not_trap_or_deopt() {
+    // i64::MIN / -1 overflows in two's complement, but the VM's int division
+    // uses wrapping_div (-> i64::MIN) / wrapping_rem (-> 0) rather than
+    // promoting — so the JIT must wrap, not deopt, and not hardware-trap.
     let div = analyze_named("fn d(a: int, b: int) -> int { return a / b }", "d").unwrap();
     let native = jit_compile(&div).unwrap();
     assert_eq!(
         native.call(&[Int(i64::MIN), Int(-1)]).unwrap(),
-        Int(i64::MIN)
+        NativeOutcome::Value(Int(i64::MIN))
     );
 
     let rem = analyze_named("fn m(a: int, b: int) -> int { return a % b }", "m").unwrap();
     let native = jit_compile(&rem).unwrap();
-    assert_eq!(native.call(&[Int(i64::MIN), Int(-1)]).unwrap(), Int(0));
+    assert_eq!(
+        native.call(&[Int(i64::MIN), Int(-1)]).unwrap(),
+        NativeOutcome::Value(Int(0))
+    );
 }
 
 #[test]

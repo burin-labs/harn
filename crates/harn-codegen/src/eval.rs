@@ -1,12 +1,19 @@
 //! A small reference interpreter for [`ScalarFunction`].
 //!
 //! It serves three purposes: it is the executable specification the JIT must
-//! match (its arithmetic mirrors the Harn VM — wrapping integer ops, IEEE-754
-//! floats), it is the differential-test oracle, and it is a pure-Rust fallback
-//! for callers that want scalar evaluation without linking a code generator.
+//! match (its arithmetic mirrors the Harn VM — integer ops that *deopt* to the
+//! VM on `i64` overflow rather than wrapping, IEEE-754 floats), it is the
+//! differential-test oracle, and it is a pure-Rust fallback for callers that
+//! want scalar evaluation without linking a code generator.
+//!
+//! Like the JIT (and the VM), an overflowing integer `+`/`-`/`*`/negation is
+//! reported as [`NativeOutcome::Deopt`] — see [`crate::outcome`] — not silently
+//! wrapped. Integer `/` and `%` keep their wrapping semantics (matching the
+//! VM's `wrapping_div`/`wrapping_rem`) and trap only on a zero divisor.
 
 use crate::bytecode::{BinOp, CmpOp, Instr};
 use crate::error::NativeTrap;
+use crate::outcome::{DeoptReason, NativeOutcome};
 use crate::value::ScalarValue;
 use crate::verify::{ScalarFunction, Terminator};
 
@@ -38,13 +45,17 @@ impl std::fmt::Display for EvalError {
 
 impl std::error::Error for EvalError {}
 
-/// Evaluate `func` with `args`, returning the scalar result.
+/// Evaluate `func` with `args`, returning the scalar [`NativeOutcome`].
+///
+/// The result is a [`NativeOutcome::Value`] bit-identical to the Harn VM, or a
+/// [`NativeOutcome::Deopt`] when an integer operation overflowed and the VM
+/// would promote to `float`.
 ///
 /// # Errors
 ///
-/// Returns [`EvalError`] on a signature mismatch, a runtime trap, or budget
-/// exhaustion.
-pub fn evaluate(func: &ScalarFunction, args: &[ScalarValue]) -> Result<ScalarValue, EvalError> {
+/// Returns [`EvalError`] on a signature mismatch, a runtime trap (integer
+/// divide by zero), or budget exhaustion.
+pub fn evaluate(func: &ScalarFunction, args: &[ScalarValue]) -> Result<NativeOutcome, EvalError> {
     if args.len() != func.params.len() {
         return Err(EvalError::Signature(format!(
             "expected {} argument(s), got {}",
@@ -77,12 +88,15 @@ pub fn evaluate(func: &ScalarFunction, args: &[ScalarValue]) -> Result<ScalarVal
             if steps > STEP_BUDGET {
                 return Err(EvalError::Budget);
             }
-            step(&mut stack, &mut locals, instr)?;
+            if let Some(reason) = step(&mut stack, &mut locals, instr)? {
+                return Ok(NativeOutcome::Deopt(reason));
+            }
         }
         match block.term {
             Terminator::Return => {
                 return stack
                     .pop()
+                    .map(NativeOutcome::Value)
                     .ok_or_else(|| EvalError::Signature("return with empty stack".into()));
             }
             Terminator::Jump(target) => block_idx = target,
@@ -94,17 +108,23 @@ pub fn evaluate(func: &ScalarFunction, args: &[ScalarValue]) -> Result<ScalarVal
     }
 }
 
+/// Apply one instruction. Returns `Ok(Some(reason))` when the instruction
+/// deoptimised (integer overflow the VM would promote to `float`); the caller
+/// stops and yields [`NativeOutcome::Deopt`].
 fn step(
     stack: &mut Vec<ScalarValue>,
     locals: &mut [Option<ScalarValue>],
     instr: &Instr,
-) -> Result<(), EvalError> {
+) -> Result<Option<DeoptReason>, EvalError> {
     match instr {
         Instr::Const(value) => stack.push(*value),
         Instr::Bin(op) => {
             let b = pop(stack);
             let a = pop(stack);
-            stack.push(eval_bin(*op, a, b)?);
+            match eval_bin(*op, a, b)? {
+                Some(v) => stack.push(v),
+                None => return Ok(Some(DeoptReason::IntegerOverflow)),
+            }
         }
         Instr::Cmp(op) => {
             let b = pop(stack);
@@ -113,11 +133,16 @@ fn step(
         }
         Instr::Neg => {
             let a = pop(stack);
-            stack.push(match a {
-                ScalarValue::Int(n) => ScalarValue::Int(n.wrapping_neg()),
+            let value = match a {
+                // `-i64::MIN` overflows; the VM promotes it to float, so deopt.
+                ScalarValue::Int(n) => match n.checked_neg() {
+                    Some(neg) => ScalarValue::Int(neg),
+                    None => return Ok(Some(DeoptReason::IntegerOverflow)),
+                },
                 ScalarValue::Float(x) => ScalarValue::Float(-x),
                 ScalarValue::Bool(_) => unreachable!("verified"),
-            });
+            };
+            stack.push(value);
         }
         Instr::Not => {
             let a = pop(stack);
@@ -150,39 +175,44 @@ fn step(
             unreachable!("terminators are not in block bodies")
         }
     }
-    Ok(())
+    Ok(None)
 }
 
 fn pop(stack: &mut Vec<ScalarValue>) -> ScalarValue {
     stack.pop().expect("verified non-empty operand stack")
 }
 
-fn eval_bin(op: BinOp, a: ScalarValue, b: ScalarValue) -> Result<ScalarValue, EvalError> {
+/// Evaluate a binary op. Returns `Ok(None)` when an integer `+`/`-`/`*`
+/// overflowed `i64` — the VM promotes to `float`, so the caller deopts —
+/// matching the JIT's overflow guards. Integer `/` and `%` wrap (as the VM
+/// does) and trap only on a zero divisor.
+fn eval_bin(op: BinOp, a: ScalarValue, b: ScalarValue) -> Result<Option<ScalarValue>, EvalError> {
     match (a, b) {
-        (ScalarValue::Int(x), ScalarValue::Int(y)) => Ok(ScalarValue::Int(match op {
-            BinOp::Add => x.wrapping_add(y),
-            BinOp::Sub => x.wrapping_sub(y),
-            BinOp::Mul => x.wrapping_mul(y),
+        (ScalarValue::Int(x), ScalarValue::Int(y)) => Ok(match op {
+            // checked_* mirror the VM's promote-on-overflow: None -> deopt.
+            BinOp::Add => x.checked_add(y).map(ScalarValue::Int),
+            BinOp::Sub => x.checked_sub(y).map(ScalarValue::Int),
+            BinOp::Mul => x.checked_mul(y).map(ScalarValue::Int),
             BinOp::Div => {
                 if y == 0 {
                     return Err(EvalError::Trap(NativeTrap::DivideByZero));
                 }
-                x.wrapping_div(y)
+                Some(ScalarValue::Int(x.wrapping_div(y)))
             }
             BinOp::Mod => {
                 if y == 0 {
                     return Err(EvalError::Trap(NativeTrap::DivideByZero));
                 }
-                x.wrapping_rem(y)
+                Some(ScalarValue::Int(x.wrapping_rem(y)))
             }
-        })),
-        (ScalarValue::Float(x), ScalarValue::Float(y)) => Ok(ScalarValue::Float(match op {
+        }),
+        (ScalarValue::Float(x), ScalarValue::Float(y)) => Ok(Some(ScalarValue::Float(match op {
             BinOp::Add => x + y,
             BinOp::Sub => x - y,
             BinOp::Mul => x * y,
             BinOp::Div => x / y,
             BinOp::Mod => unreachable!("float modulo is rejected by the verifier"),
-        })),
+        }))),
         _ => unreachable!("verified matching numeric operands"),
     }
 }
