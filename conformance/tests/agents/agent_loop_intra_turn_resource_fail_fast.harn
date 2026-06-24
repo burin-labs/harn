@@ -1,0 +1,97 @@
+/**
+ * Intra-turn resource fail-fast: when one assistant message emits multiple
+ * mutating calls for the same annotated workspace resource, a failure in an
+ * earlier sibling must stop later same-resource siblings before they can mutate
+ * stale state. Different resources and successful same-resource sequences still
+ * run normally.
+ */
+import { llm_text, with_llm_script } from "std/testing"
+
+fn edit_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "edit",
+    "Edit a workspace file.",
+    {
+      handler: { args ->
+        if args?.fail ?? false {
+          throw "rejected " + to_string(args?.path ?? "") + " " + to_string(args?.marker ?? "")
+        }
+        return "applied " + to_string(args?.path ?? "") + " " + to_string(args?.marker ?? "")
+      },
+      parameters: {
+        path: {type: "string", description: "Workspace-relative path"},
+        marker: {type: "string", description: "Probe marker"},
+        fail: {type: "boolean", description: "Whether this call rejects"},
+      },
+      returns: {type: "string"},
+      annotations: {kind: "edit", side_effect_level: "workspace_write", arg_schema: {path_params: ["path"]}},
+    },
+  )
+  return tools
+}
+
+fn same_file_failure_batch() {
+  return [
+    {id: "a1", name: "edit", arguments: {path: "src/a.zig", marker: "first", fail: true}},
+    {id: "a2", name: "edit", arguments: {path: "src/a.zig", marker: "second", fail: false}},
+    {id: "b1", name: "edit", arguments: {path: "src/b.zig", marker: "other", fail: false}},
+  ]
+}
+
+fn same_file_success_batch() {
+  return [
+    {id: "a1", name: "edit", arguments: {path: "src/a.zig", marker: "first", fail: false}},
+    {id: "a2", name: "edit", arguments: {path: "src/a.zig", marker: "second", fail: false}},
+  ]
+}
+
+fn run_scripted(calls, opts = {}) {
+  return with_llm_script(
+    [{text: "", tool_calls: calls}, llm_text("I saw the tool results.")],
+    { ->
+      let result = agent_loop(
+        "Apply the requested edits.",
+        nil,
+        {
+          provider: "mock",
+          tools: edit_tools(),
+          tool_format: "native",
+          loop_until_done: true,
+          max_iterations: 3,
+          done_judge: nil,
+        }
+          + opts,
+      )
+      let transcript = json_stringify(llm_mock_calls()[1].messages)
+      return {result: result, transcript: transcript}
+    },
+  )
+}
+
+pipeline main() {
+  // Default-on fail-fast: second same-file edit is skipped, different file runs.
+  let defaulted = run_scripted(same_file_failure_batch())
+  __io_println(defaulted.result.status)
+  __io_println(contains(defaulted.transcript, "skipped dependent `edit` call"))
+  __io_println(!contains(defaulted.transcript, "applied src/a.zig second"))
+  __io_println(contains(defaulted.transcript, "applied src/b.zig other"))
+  // A successful first edit does not block a later same-file edit.
+  let successful = run_scripted(same_file_success_batch())
+  __io_println(successful.result.status)
+  __io_println(contains(successful.transcript, "applied src/a.zig first"))
+  __io_println(contains(successful.transcript, "applied src/a.zig second"))
+  __io_println(!contains(successful.transcript, "skipped dependent `edit` call"))
+  // Explicit opt-out preserves legacy dispatch-all behavior.
+  let disabled = run_scripted(same_file_failure_batch(), {intra_turn_resource_fail_fast: false})
+  __io_println(disabled.result.status)
+  __io_println(!contains(disabled.transcript, "skipped dependent `edit` call"))
+  __io_println(contains(disabled.transcript, "applied src/a.zig second"))
+  // Even when parallel dispatch is requested, keyed mutating batches serialize.
+  let parallel_requested = run_scripted(same_file_failure_batch(), {max_concurrent_tools: 4})
+  __io_println(parallel_requested.result.status)
+  __io_println(contains(parallel_requested.transcript, "skipped dependent `edit` call"))
+  __io_println(!contains(parallel_requested.transcript, "applied src/a.zig second"))
+  __io_println(contains(parallel_requested.transcript, "applied src/b.zig other"))
+}

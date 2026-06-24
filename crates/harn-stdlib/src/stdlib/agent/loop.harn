@@ -496,6 +496,18 @@ fn __tool_registry_entry(tools, tool_name) {
   return nil
 }
 
+fn __tool_entry_annotations(entry) {
+  let direct = entry?.annotations
+  if type_of(direct) == "dict" {
+    return direct
+  }
+  let func = entry?.function
+  if type_of(func) == "dict" && type_of(func?.annotations) == "dict" {
+    return func.annotations
+  }
+  return {}
+}
+
 fn __tool_envelope(call, tools, options) {
   let tool_name = to_string(call?.name ?? call?.tool_name ?? "")
   let tool_args_raw = call?.arguments ?? call?.tool_args
@@ -534,7 +546,7 @@ fn __tool_envelope(call, tools, options) {
   let annotations = if entry == nil {
     nil
   } else {
-    entry?.annotations
+    __tool_entry_annotations(entry)
   }
   let description = if entry == nil {
     ""
@@ -1069,15 +1081,7 @@ fn __native_fallback_feedback(policy, fallback_index) {
 }
 
 fn __parse_feedback_tool_annotations(entry) {
-  let direct = entry?.annotations
-  if type_of(direct) == "dict" {
-    return direct
-  }
-  let func = entry?.function
-  if type_of(func) == "dict" && type_of(func?.annotations) == "dict" {
-    return func.annotations
-  }
-  return {}
+  return __tool_entry_annotations(entry)
 }
 
 fn __parse_feedback_annotation_enabled(value) -> bool {
@@ -1312,6 +1316,14 @@ fn __resolve_intra_turn_failure_fanout_cap(turn_opts) {
   return 0
 }
 
+fn __resolve_intra_turn_resource_fail_fast(turn_opts) -> bool {
+  let raw = turn_opts?.intra_turn_resource_fail_fast
+  if type_of(raw) == "bool" {
+    return raw
+  }
+  return true
+}
+
 /**
  * Stable signature of a FAILING dispatch result, used to detect a fan-out of
  * byte-identical failing calls within one batch. Keyed on (tool_name,
@@ -1349,6 +1361,124 @@ fn __intra_turn_call_signature(call) {
   return sha256(json_stringify({name: name, args: args}))
 }
 
+const __INTRA_TURN_RESOURCE_MUTATING_KINDS = ["edit", "write", "scaffold", "delete", "move", "mutation", "mutate"]
+
+fn __intra_turn_call_args(call) {
+  let raw = call?.arguments ?? call?.tool_args
+  if type_of(raw) == "dict" {
+    return raw
+  }
+  return {}
+}
+
+fn __intra_turn_annotation_text(value) -> string {
+  return lowercase(trim(to_string(value ?? "")))
+}
+
+fn __intra_turn_annotations_mutate_resource(annotations) -> bool {
+  if type_of(annotations) != "dict" {
+    return false
+  }
+  let kind = __intra_turn_annotation_text(annotations?.kind ?? annotations?.tool_kind ?? annotations?.toolKind)
+  if contains(__INTRA_TURN_RESOURCE_MUTATING_KINDS, kind) {
+    return true
+  }
+  let side_effect = __intra_turn_annotation_text(
+    annotations?.side_effect_level ?? annotations?.sideEffectLevel ?? annotations?.side_effect
+      ?? annotations?.sideEffect,
+  )
+  return side_effect == "workspace_write"
+}
+
+fn __intra_turn_annotation_path_params(annotations) {
+  if type_of(annotations) != "dict" {
+    return []
+  }
+  let schema = annotations?.arg_schema ?? annotations?.argSchema ?? {}
+  let params = schema?.path_params ?? schema?.pathParams ?? []
+  if type_of(params) == "list" {
+    return params
+  }
+  return []
+}
+
+fn __intra_turn_normalize_resource_path(raw) -> string {
+  var path = trim(to_string(raw ?? ""))
+  while starts_with(path, "./") {
+    path = substring(path, 2)
+  }
+  return path
+}
+
+fn __intra_turn_push_resource_key(keys, value) {
+  let path = __intra_turn_normalize_resource_path(value)
+  if path == "" {
+    return keys
+  }
+  let key = "workspace_path:" + path
+  if contains(keys, key) {
+    return keys
+  }
+  return keys.push(key)
+}
+
+fn __intra_turn_push_resource_value(keys, value) {
+  if type_of(value) == "list" {
+    var out = keys
+    for item in value {
+      out = __intra_turn_push_resource_key(out, item)
+    }
+    return out
+  }
+  return __intra_turn_push_resource_key(keys, value)
+}
+
+fn __intra_turn_resource_keys(call, tools) {
+  let tool_name = to_string(call?.name ?? call?.tool_name ?? "")
+  let entry = __tool_registry_entry(tools, tool_name)
+  let annotations = __tool_entry_annotations(entry)
+  if !__intra_turn_annotations_mutate_resource(annotations) {
+    return []
+  }
+  let args = __intra_turn_call_args(call)
+  var keys = []
+  for param in __intra_turn_annotation_path_params(annotations) {
+    let name = to_string(param)
+    if name != "" && args?[name] != nil {
+      keys = __intra_turn_push_resource_value(keys, args[name])
+    }
+  }
+  return keys
+}
+
+fn __intra_turn_intersects(keys, failed_keys) -> bool {
+  for key in keys {
+    if contains(failed_keys, key) {
+      return true
+    }
+  }
+  return false
+}
+
+fn __intra_turn_add_failed_keys(failed_keys, keys) {
+  var out = failed_keys
+  for key in keys {
+    if !contains(out, key) {
+      out = out.push(key)
+    }
+  }
+  return out
+}
+
+fn __intra_turn_has_keyed_mutating_calls(tool_calls, tools) -> bool {
+  for call in tool_calls {
+    if len(__intra_turn_resource_keys(call, tools)) > 0 {
+      return true
+    }
+  }
+  return false
+}
+
 /**
  * Synthetic collapsed result that stands in for the identical failing calls
  * skipped after the fan-out cap tripped. Mirrors the failing-result shape so
@@ -1375,6 +1505,31 @@ fn __intra_turn_collapsed_result(call, sample_result) {
     observation: observation,
     error: observation,
     error_category: "intra_turn_failure_fanout_collapsed",
+    executor: nil,
+  }
+}
+
+fn __intra_turn_resource_blocked_result(call, keys) {
+  let name = to_string(call?.name ?? call?.tool_name ?? "")
+  let rendered_keys = join(keys, ", ")
+  let observation = "[skipped dependent `" + name + "` call from this turn]\n"
+    + "A previous mutating tool call in the same assistant response failed for "
+    + "the same workspace resource ("
+    + rendered_keys
+    + "), so this call was "
+    + "NOT executed. Wait for the failure feedback, re-read the current file if "
+    + "needed, and issue the next edit in a later turn."
+  return {
+    ok: false,
+    status: "blocked_by_prior_same_resource_failure",
+    tool_name: name,
+    tool_call_id: to_string(call?.id ?? call?.tool_call_id ?? ""),
+    arguments: call?.arguments ?? {},
+    result: nil,
+    rendered_result: observation,
+    observation: observation,
+    error: observation,
+    error_category: "intra_turn_resource_fail_fast",
     executor: nil,
   }
 }
@@ -1498,6 +1653,7 @@ fn __dispatch_tool_calls(session_id, tool_calls, turn_opts) {
     _prefetch_next_turn: turn_opts?.prefetch_next_turn ?? false,
     _stop_reason: turn_opts?._stop_reason ?? "",
     _intra_turn_failure_fanout_cap: __resolve_intra_turn_failure_fanout_cap(turn_opts),
+    _intra_turn_resource_fail_fast: __resolve_intra_turn_resource_fail_fast(turn_opts),
   }
   let caller = turn_opts?._tool_caller
   let raw_dispatch = __dispatch_tool_calls_with_middleware(tool_calls, tools, dispatch_options, cap)
@@ -1523,7 +1679,9 @@ fn __dispatch_tool_calls_with_middleware(tool_calls, tools, options, cap) {
   // requested cap; results come back in source order regardless of
   // completion order so text tool-call parsers that key on
   // declaration order still match.
-  if cap <= 1 || len(tool_calls) <= 1 {
+  let resource_fail_fast = options?._intra_turn_resource_fail_fast ?? true
+  let keyed_mutating_batch = resource_fail_fast && __intra_turn_has_keyed_mutating_calls(tool_calls, tools)
+  if cap <= 1 || len(tool_calls) <= 1 || keyed_mutating_batch {
     // Intra-turn failing-fan-out cap (#A4). Dispatch serially; track the count
     // of consecutive byte-identical FAILING results. Once that streak reaches
     // the configured cap K, skip the remaining calls whose (tool_name, args)
@@ -1541,7 +1699,17 @@ fn __dispatch_tool_calls_with_middleware(tool_calls, tools, options, cap) {
     var capped_call_signature = nil
     var capped_sample = nil
     var collapsed_emitted = false
+    var failed_resource_keys = []
     for (index, call) in iter(tool_calls).enumerate() {
+      let resource_keys = if resource_fail_fast {
+        __intra_turn_resource_keys(call, tools)
+      } else {
+        []
+      }
+      if len(resource_keys) > 0 && __intra_turn_intersects(resource_keys, failed_resource_keys) {
+        results = results.push(__intra_turn_resource_blocked_result(call, resource_keys))
+        continue
+      }
       if fanout_cap > 0 && capped_call_signature != nil
         && __intra_turn_call_signature(call) == capped_call_signature {
         // Same failing call as the one that tripped the cap — skip dispatch.
@@ -1553,6 +1721,9 @@ fn __dispatch_tool_calls_with_middleware(tool_calls, tools, options, cap) {
       }
       let result = __invoke_tool_with_index(call, index, tools, options)
       results = results.push(result)
+      if len(resource_keys) > 0 && !__tool_result_ok(result) {
+        failed_resource_keys = __intra_turn_add_failed_keys(failed_resource_keys, resource_keys)
+      }
       if fanout_cap > 0 {
         let signature = __intra_turn_failure_signature(result)
         if signature == nil {
@@ -1684,7 +1855,7 @@ fn __turn_made_edit(dispatch, tools) -> bool {
   }
   for name in __tool_names_by_status(dispatch, true) {
     let entry = __tool_registry_entry(tools, name)
-    let annotations = entry?.annotations
+    let annotations = __tool_entry_annotations(entry)
     let kind = lowercase(to_string(annotations?.kind ?? annotations?.tool_kind ?? annotations?.toolKind ?? ""))
     if contains(__REPAIR_EDIT_KINDS, kind) {
       return true
