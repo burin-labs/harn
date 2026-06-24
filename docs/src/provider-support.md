@@ -39,14 +39,14 @@ No benchmark summary is baked into this checked-in page. To layer local empirica
 | `OpenAI` | OpenAI chat completions / Responses-compatible routes | `mid` | `native` | yes | yes | `native` / `native_json` | none | no | `high` | `not_recorded` |
 | `Openrouter` | OpenAI-compatible chat completions | `openrouter:google/gemini-2.5-flash` | `native` | yes | yes | `native` / `native_json` | `effort,enabled` | yes | `high` | `not_recorded` |
 | `Parasail` | OpenAI-compatible chat completions | `parasail` | `text` | no | yes | `none` / `none` | none | no | `provider_default` | `not_recorded` |
-| `Sambanova` | OpenAI-compatible chat completions | `sambanova:sambanova/gpt-oss-120b` | `native` | yes | yes | `native` / `native_json` | `effort,reasoning_effort` | no | `high` | `not_recorded` |
+| `Sambanova` | OpenAI-compatible chat completions | `sambanova:sambanova/gpt-oss-120b` | `text` | no | yes | `native` / `native_json` | `effort,reasoning_effort` | no | `high` | `not_recorded` |
 | `Siliconflow` | OpenAI-compatible chat completions | `siliconflow` | `text` | no | yes | `none` / `none` | none | no | `provider_default` | `not_recorded` |
 | `Tgi` | OpenAI-compatible chat completions | `tgi` | `text` | no | yes | `none` / `none` | none | no | `local_zero_cost` | `not_recorded` |
 | `Together` | OpenAI-compatible chat completions | `together:Qwen/Qwen3-Coder-Next-FP8` | `native` | yes | yes | `native` / `delimited` | none | no | `high` | `not_recorded` |
 | `Vertex` | Gemini generateContent | `vertex:gemini-*` | `native` | yes | yes | `none` / `native_json` | none | no | `provider_default` | `not_recorded` |
 | `Vllm` | OpenAI-compatible chat completions | `vllm` | `text` | no | yes | `none` / `none` | none | no | `local_zero_cost` | `not_recorded` |
 | `Xai` | OpenAI-compatible chat completions | `xai:grok-build-0.1` | `native` | yes | yes | `native` / `native_json` | `adaptive` | yes | `high` | `not_recorded` |
-| `Zai` | OpenAI-compatible chat completions | `zai:glm-5` | `native` | yes | yes | `native` / `native_json` | `enabled` | yes | `high` | `not_recorded` |
+| `Zai` | OpenAI-compatible chat completions | `zai:glm-5` | `text` | yes | yes | `native` / `native_json` | `enabled` | yes | `high` | `not_recorded` |
 
 ## Recommended options
 
@@ -313,3 +313,39 @@ Caveats:
 MCP notes:
 
 - Hosted MCP behavior is normalized through Harn tool definitions; provider-side hosted tools remain a separate provider feature.
+
+### Sambanova
+
+- catalog provider: `sambanova`
+- recommended route: `sambanova:sambanova/gpt-oss-120b` (`sambanova/gpt-oss-120b`)
+- endpoint style: OpenAI-compatible chat completions
+- recommended Harn options:
+
+```toml
+provider = "sambanova"
+model = "sambanova/gpt-oss-120b"
+tool_format = "text"
+structured_output_mode = "native_json"
+```
+
+Caveats:
+
+- 2026-06-24 Harn agent-loop (gpt-oss-120b, zig-feat, tool grounding present): SambaNova native ended with a provider/tool-protocol failure (Harmony empty tool_calls / reasoning-channel-only class). Text/heredoc is the clean pay-per-token channel. See vLLM #22578/#44216, SGLang #8976/#10738, openai/harmony #68.
+
+### Zai
+
+- catalog provider: `zai`
+- recommended route: `zai:glm-5` (`glm-5`)
+- endpoint style: OpenAI-compatible chat completions
+- recommended Harn options:
+
+```toml
+provider = "zai"
+model = "glm-5"
+tool_format = "text"
+structured_output_mode = "native_json"
+```
+
+Caveats:
+
+- GLM-5.x native channel emits `<tool_call><arg_key>...` markup as content instead of OpenAI message.tool_calls (2026-06-23 live Baseten probe, see 39-baseten.toml); heredoc text tools parse cleanly. Same family pinned native_unreliable on Fireworks (glm-5p*) and DeepInfra (*glm-5*).

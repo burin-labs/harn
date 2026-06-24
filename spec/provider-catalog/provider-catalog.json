@@ -4383,10 +4383,11 @@
         ]
       },
       "tool_support": {
-        "native": true,
+        "native": false,
         "text": true,
-        "preferred_format": "native",
-        "parity": "unknown",
+        "preferred_format": "text",
+        "parity": "native_unreliable",
+        "parity_notes": "2026-06-24 Harn agent-loop (gpt-oss-120b, zig-feat, tool grounding present): DeepInfra native billed completion_tokens=86 with no dispatchable tool call or answer (Harmony reasoning-channel-only / upstream contract violation), repeated ~10x -> run unusable. Text/heredoc is the clean pay-per-token channel. See vLLM #22578/#44216, SGLang #8976/#10738, openai/harmony #68.",
         "tool_search": []
       },
       "structured_output": "native",
@@ -12620,10 +12621,11 @@
         ]
       },
       "tool_support": {
-        "native": true,
+        "native": false,
         "text": true,
-        "preferred_format": "native",
-        "parity": "unknown",
+        "preferred_format": "text",
+        "parity": "native_unreliable",
+        "parity_notes": "2026-06-24 Harn agent-loop (gpt-oss-120b, zig-feat, tool grounding present): SambaNova native ended with a provider/tool-protocol failure (Harmony empty tool_calls / reasoning-channel-only class). Text/heredoc is the clean pay-per-token channel. See vLLM #22578/#44216, SGLang #8976/#10738, openai/harmony #68.",
         "tool_search": []
       },
       "structured_output": "native",
@@ -13404,8 +13406,9 @@
       "tool_support": {
         "native": true,
         "text": true,
-        "preferred_format": "native",
-        "parity": "unknown",
+        "preferred_format": "text",
+        "parity": "native_unreliable",
+        "parity_notes": "GLM-5.x native channel emits `<tool_call><arg_key>...` markup as content instead of OpenAI message.tool_calls (2026-06-23 live Baseten probe, see 39-baseten.toml); heredoc text tools parse cleanly. Same family pinned native_unreliable on Fireworks (glm-5p*) and DeepInfra (*glm-5*).",
         "tool_search": []
       },
       "structured_output": "native",
@@ -13474,8 +13477,9 @@
       "tool_support": {
         "native": true,
         "text": true,
-        "preferred_format": "native",
-        "parity": "unknown",
+        "preferred_format": "text",
+        "parity": "native_unreliable",
+        "parity_notes": "GLM-5.x native channel emits `<tool_call><arg_key>...` markup as content instead of OpenAI message.tool_calls (2026-06-23 live Baseten probe, see 39-baseten.toml); heredoc text tools parse cleanly. Same family pinned native_unreliable on Fireworks (glm-5p*) and DeepInfra (*glm-5*).",
         "tool_search": []
       },
       "structured_output": "native",
@@ -13551,8 +13555,9 @@
       "tool_support": {
         "native": true,
         "text": true,
-        "preferred_format": "native",
-        "parity": "unknown",
+        "preferred_format": "text",
+        "parity": "native_unreliable",
+        "parity_notes": "GLM-5.x native channel emits `<tool_call><arg_key>...` markup as content instead of OpenAI message.tool_calls (2026-06-23 live Baseten probe, see 39-baseten.toml); heredoc text tools parse cleanly. Same family pinned native_unreliable on Fireworks (glm-5p*) and DeepInfra (*glm-5*).",
         "tool_search": []
       },
       "structured_output": "native",
@@ -13734,7 +13739,7 @@
       "name": "glm",
       "model_id": "glm-5.2",
       "provider": "zai",
-      "tool_format": "native"
+      "tool_format": "text"
     },
     {
       "name": "glm-5",
@@ -13750,7 +13755,7 @@
       "name": "glm-5.2",
       "model_id": "glm-5.2",
       "provider": "zai",
-      "tool_format": "native"
+      "tool_format": "text"
     },
     {
       "name": "grok",
@@ -14116,7 +14121,7 @@
       "name": "sambanova-gpt-oss-120b",
       "model_id": "sambanova/gpt-oss-120b",
       "provider": "sambanova",
-      "tool_format": "native"
+      "tool_format": "text"
     },
     {
       "name": "sambanova-llama",

@@ -1510,19 +1510,19 @@
         "provider": "sambanova",
         "model": "sambanova/gpt-oss-120b",
         "display_name": "GPT-OSS 120B (SambaNova)",
-        "tool_format": "native",
+        "tool_format": "text",
         "harn_options": [
           "provider = \"sambanova\"",
           "model = \"sambanova/gpt-oss-120b\"",
-          "tool_format = \"native\"",
+          "tool_format = \"text\"",
           "structured_output_mode = \"native_json\""
         ]
       },
       "capabilities": {
-        "native_tools": true,
+        "native_tools": false,
         "text_tools": true,
-        "preferred_tool_format": "native",
-        "tool_mode_parity": "unknown",
+        "preferred_tool_format": "text",
+        "tool_mode_parity": "native_unreliable",
         "structured_output_transport": "native",
         "structured_output_mode": "native_json",
         "streaming": true,
@@ -1545,7 +1545,9 @@
         "evidence": []
       },
       "notes": [],
-      "caveats": [],
+      "caveats": [
+        "2026-06-24 Harn agent-loop (gpt-oss-120b, zig-feat, tool grounding present): SambaNova native ended with a provider/tool-protocol failure (Harmony empty tool_calls / reasoning-channel-only class). Text/heredoc is the clean pay-per-token channel. See vLLM #22578/#44216, SGLang #8976/#10738, openai/harmony #68."
+      ],
       "mcp_notes": [],
       "local_setup_notes": []
     },
@@ -1854,19 +1856,19 @@
         "provider": "zai",
         "model": "glm-5",
         "display_name": "GLM 5",
-        "tool_format": "native",
+        "tool_format": "text",
         "harn_options": [
           "provider = \"zai\"",
           "model = \"glm-5\"",
-          "tool_format = \"native\"",
+          "tool_format = \"text\"",
           "structured_output_mode = \"native_json\""
         ]
       },
       "capabilities": {
         "native_tools": true,
         "text_tools": true,
-        "preferred_tool_format": "native",
-        "tool_mode_parity": "unknown",
+        "preferred_tool_format": "text",
+        "tool_mode_parity": "native_unreliable",
         "structured_output_transport": "native",
         "structured_output_mode": "native_json",
         "streaming": true,
@@ -1888,7 +1890,9 @@
         "evidence": []
       },
       "notes": [],
-      "caveats": [],
+      "caveats": [
+        "GLM-5.x native channel emits `<tool_call><arg_key>...` markup as content instead of OpenAI message.tool_calls (2026-06-23 live Baseten probe, see 39-baseten.toml); heredoc text tools parse cleanly. Same family pinned native_unreliable on Fireworks (glm-5p*) and DeepInfra (*glm-5*)."
+      ],
       "mcp_notes": [],
       "local_setup_notes": []
     }

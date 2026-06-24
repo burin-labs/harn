@@ -98,13 +98,28 @@ thinking_block_style = "inline"
 # does not fall through to the non-reasoning default — without it
 # `reasoning_required_for_tools` resolves OFF and the eval loop bills a
 # noncommittal because gpt-oss calls tools INSIDE the chain-of-thought channel.
-# Mirror the Cerebras gpt-oss row: NATIVE tools, reasoning-effort thinking
-# {low, medium, high}, `reasoning_required_for_tools = true`. Must NOT carry a
-# Qwen-style `auto_reasoning_overrides = "off"`.
+# Reasoning-effort thinking {low, medium, high}, `reasoning_required_for_tools =
+# true`. Must NOT carry a Qwen-style `auto_reasoning_overrides = "off"`.
+#
+# TOOL CHANNEL — PINNED TO TEXT (matches the Fireworks #3505 gpt-oss precedent).
+# SambaNova's gpt-oss native channel is a Harmony footgun: a 2026-06-24 Harn
+# agent-loop run (gpt-oss-120b, zig-feat, tool grounding present) ended with a
+# provider/tool-protocol failure on the native channel — the same empty
+# `tool_calls` / reasoning-channel-only class reported across the open-source
+# engines (vLLM #22578, vLLM #44216, SGLang #8976/#10738, openai/harmony #68,
+# HuggingFace openai/gpt-oss-20b discussion #80). The clean+reliable channel on
+# pay-per-token gpt-oss routes is TEXT (heredoc). `tool_mode_parity =
+# "native_unreliable"` makes a `native` pin auto-correct to `text` via
+# `validate_tool_format` with an explanatory `correction`, so no alias pin or
+# `--tool-format native` can silently re-introduce the protocol failure.
+# NOTE: this route is ALSO `serving_precision = "degraded"` (below) — even with
+# the text-channel pin it must not back a meter baseline.
 [[provider.sambanova]]
 model_match = "*gpt-oss*"
-native_tools = true
-preferred_tool_format = "native"
+native_tools = false
+preferred_tool_format = "text"
+tool_mode_parity = "native_unreliable"
+tool_mode_parity_notes = "2026-06-24 Harn agent-loop (gpt-oss-120b, zig-feat, tool grounding present): SambaNova native ended with a provider/tool-protocol failure (Harmony empty tool_calls / reasoning-channel-only class). Text/heredoc is the clean pay-per-token channel. See vLLM #22578/#44216, SGLang #8976/#10738, openai/harmony #68."
 structured_output = "native"
 thinking_modes = ["effort"]
 reasoning_effort_supported = true

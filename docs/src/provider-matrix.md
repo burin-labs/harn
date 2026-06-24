@@ -59,7 +59,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `deepinfra` | `*qwen3.7*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `deepinfra` | `*qwen3.6*` | `any` | `enabled` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `text` | yes | yes | `native_unreliable` | yes | no |
 | `deepinfra` | `*kimi-*` | `any` | `enabled` | yes | no | no | yes | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
-| `deepinfra` | `*gpt-oss*` | `any` | `effort` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
+| `deepinfra` | `*gpt-oss*` | `any` | `effort` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `text` | no | yes | `native_unreliable` | yes | no |
 | `deepinfra` | `*` | `any` | no | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `deepseek` | `deepseek-v4-pro*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `deepseek` | `deepseek-v4-flash*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
@@ -198,7 +198,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `sambanova` | `*llama*` | `any` | no | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `sambanova` | `*minimax*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `text` | yes | yes | `native_unreliable` | yes | yes |
 | `sambanova` | `*gemma-4*` | `any` | `enabled` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
-| `sambanova` | `*gpt-oss*` | `any` | `effort` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
+| `sambanova` | `*gpt-oss*` | `any` | `effort` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `text` | no | yes | `native_unreliable` | yes | no |
 | `sambanova` | `*` | `any` | no | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `siliconflow` | `*` | `any` | no | no | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `together` | `Qwen/Qwen3.7-Max` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
@@ -215,9 +215,9 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `together` | `moonshotai/*` | `any` | no | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `vertex` | `gemini-*` | `any` | no | no | no | no | no | yes | no | no | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `xai` | `grok-*` | `any` | `adaptive` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
-| `zai` | `glm-5.2*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
-| `zai` | `glm-5.1*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
-| `zai` | `glm-5*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
+| `zai` | `glm-5.2*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `text` | yes | yes | `native_unreliable` | yes | yes |
+| `zai` | `glm-5.1*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `text` | yes | yes | `native_unreliable` | yes | yes |
+| `zai` | `glm-5*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `text` | yes | yes | `native_unreliable` | yes | no |
 
 ## Tool-format recommendations by catalog model
 
@@ -262,7 +262,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `deepinfra` | `deepinfra/deepseek-ai/DeepSeek-V3.2` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `deepinfra` | `deepinfra/deepseek-ai/DeepSeek-V4-Pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `deepinfra` | `deepinfra/moonshotai/Kimi-K2.7-Code` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `deepinfra` | `deepinfra/openai/gpt-oss-120b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `deepinfra` | `deepinfra/openai/gpt-oss-120b` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
 | `deepinfra` | `deepinfra/zai-org/GLM-5.2` | `json` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
 | `deepseek` | `deepseek-chat` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `deepseek` | `deepseek-reasoner` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
@@ -370,7 +370,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `sambanova` | `sambanova/Meta-Llama-3.3-70B-Instruct` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `sambanova` | `sambanova/MiniMax-M2.7` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
 | `sambanova` | `sambanova/gemma-4-31B-it` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `sambanova` | `sambanova/gpt-oss-120b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `sambanova` | `sambanova/gpt-oss-120b` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
 | `together` | `MiniMaxAI/MiniMax-M2.7` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
 | `together` | `Qwen/Qwen3-Coder-Next-FP8` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `together` | `Qwen/Qwen3.7-Max` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
@@ -380,6 +380,6 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `together` | `zai-org/GLM-5.2` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
 | `xai` | `grok-4.3` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `xai` | `grok-build-0.1` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `zai` | `glm-5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `zai` | `glm-5.1` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `zai` | `glm-5.2` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `zai` | `glm-5` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
+| `zai` | `glm-5.1` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
+| `zai` | `glm-5.2` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |

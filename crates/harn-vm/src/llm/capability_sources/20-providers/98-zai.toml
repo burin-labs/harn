@@ -1,12 +1,32 @@
 # ---------- Z.AI / GLM-5 family (open-weight, OpenAI-compatible /v1) ---------
 # GLM-5.1 (754B open weights, April 2026) sustains long-horizon agentic
-# tasks; tool calling is native, prompt caching is honored, structured
-# output uses JSON mode (delimited fallback).
+# tasks; prompt caching is honored, structured output uses JSON mode
+# (delimited fallback).
+#
+# TOOL CHANNEL — PINNED TO TEXT (`native_unreliable`). The GLM-5.x native
+# channel is the same `<tool_call>`-markup footgun Harn already pins around on
+# Baseten/Fireworks/DeepInfra: the 2026-06-23 live Baseten probe found GLM-5.2
+# emits visible `<tool_call><arg_key>...` content instead of OpenAI
+# `message.tool_calls` on the native channel, while Harn's heredoc text-tool
+# grammar parsed the same intent cleanly (see 39-baseten.toml). The Fireworks
+# (`glm-5p*`) and DeepInfra (`*glm-5*`) rows already carry
+# `tool_mode_parity = "native_unreliable"` for this family. The zai-direct (and
+# OpenRouter) GLM-5 routes serve the identical weights, so the prior optimistic
+# `native` pin here risked the same vanishing/markup tool stream. Pin to TEXT so
+# a `native` pin or `--tool-format native` auto-corrects to `text` with an
+# explanatory `correction` via `validate_tool_format`, instead of a silent
+# markup-as-content tool call. `text_tool_wire_format_supported = true` keeps the
+# text channel viable (so the no-viable-channel fail-fast guard never fires).
+# TODO(zai-glm-native-probe): if a forced-format native probe against a specific
+# zai-direct GLM-5.x route ever returns clean `message.tool_calls`, narrow this
+# back to `native` for that route with the probe transcript as evidence.
 
 [[provider.zai]]
 model_match = "glm-5.2*"
 native_tools = true
-preferred_tool_format = "native"
+preferred_tool_format = "text"
+tool_mode_parity = "native_unreliable"
+tool_mode_parity_notes = "GLM-5.x native channel emits `<tool_call><arg_key>...` markup as content instead of OpenAI message.tool_calls (2026-06-23 live Baseten probe, see 39-baseten.toml); heredoc text tools parse cleanly. Same family pinned native_unreliable on Fireworks (glm-5p*) and DeepInfra (*glm-5*)."
 structured_output = "native"
 thinking_modes = ["enabled"]
 text_tool_wire_format_supported = true
@@ -22,7 +42,9 @@ prompt_caching = true
 [[provider.zai]]
 model_match = "glm-5.1*"
 native_tools = true
-preferred_tool_format = "native"
+preferred_tool_format = "text"
+tool_mode_parity = "native_unreliable"
+tool_mode_parity_notes = "GLM-5.x native channel emits `<tool_call><arg_key>...` markup as content instead of OpenAI message.tool_calls (2026-06-23 live Baseten probe, see 39-baseten.toml); heredoc text tools parse cleanly. Same family pinned native_unreliable on Fireworks (glm-5p*) and DeepInfra (*glm-5*)."
 structured_output = "native"
 thinking_modes = ["enabled"]
 text_tool_wire_format_supported = true
@@ -38,7 +60,9 @@ prompt_caching = true
 [[provider.zai]]
 model_match = "glm-5*"
 native_tools = true
-preferred_tool_format = "native"
+preferred_tool_format = "text"
+tool_mode_parity = "native_unreliable"
+tool_mode_parity_notes = "GLM-5.x native channel emits `<tool_call><arg_key>...` markup as content instead of OpenAI message.tool_calls (2026-06-23 live Baseten probe, see 39-baseten.toml); heredoc text tools parse cleanly. Same family pinned native_unreliable on Fireworks (glm-5p*) and DeepInfra (*glm-5*)."
 structured_output = "native"
 thinking_modes = ["enabled"]
 text_tool_wire_format_supported = true
