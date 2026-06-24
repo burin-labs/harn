@@ -700,6 +700,39 @@ fn streaming_tool_call_id(provider_id: &str, fallback_index: usize) -> String {
     }
 }
 
+fn preview_chars(s: &str, max_chars: usize) -> String {
+    s.chars().take(max_chars).collect()
+}
+
+fn parse_openai_streamed_tool_arguments(
+    tool_name: &str,
+    arguments: &str,
+    stop_reason: Option<&str>,
+) -> serde_json::Value {
+    if arguments.trim().is_empty() {
+        return serde_json::json!({});
+    }
+    match serde_json::from_str::<serde_json::Value>(arguments) {
+        Ok(value) => value,
+        Err(json_error) => {
+            if crate::llm::agent_session_host::is_length_truncation(stop_reason) {
+                return serde_json::json!({});
+            }
+            crate::llm::tools::parse_text_tool_argument_payload(arguments, tool_name)
+                .unwrap_or_else(|text_error| {
+                    serde_json::json!({
+                        "__parse_error": format!(
+                            "Could not parse streamed tool arguments as JSON or Harn text-tool arguments: JSON error: {}; Harn text-tool error: {}. Raw input: {}",
+                            json_error,
+                            text_error,
+                            preview_chars(arguments, 200)
+                        )
+                    })
+                })
+        }
+    }
+}
+
 /// Pure SSE-line consumer used by the response wrapper and by tests
 /// that drive canned byte streams without standing up a full
 /// `reqwest::Response`. The Anthropic / OpenAI branches and the
@@ -1199,8 +1232,11 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
     }
 
     for (_, stream) in oai_tool_map {
-        let args = serde_json::from_str::<serde_json::Value>(&stream.args)
-            .unwrap_or(serde_json::Value::Object(Default::default()));
+        let args = parse_openai_streamed_tool_arguments(
+            &stream.name,
+            &stream.args,
+            stop_reason.as_deref(),
+        );
         // Dispatch under the id already used for streaming progress so
         // the executed lifecycle continues on the same wire id.
         let (name, args) = crate::llm::tools::normalize_tool_call_shape(&stream.name, args);
@@ -2223,6 +2259,140 @@ mod streaming_tool_call_tests {
             result.tool_calls[0]["arguments"],
             serde_json::json!({}),
             "truncated unparseable args fall back to the empty object"
+        );
+
+        clear_session_sinks(&session_id);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn openai_stream_text_format_arguments_recover_after_raw_partial() {
+        // Some OpenAI-compatible routes are prompted for Harn's text tool
+        // grammar but still surface the action through native tool_calls.
+        // During streaming this is not strict JSON, so clients see a
+        // raw_input_partial; on a clean tool_calls finish we can still recover
+        // the complete Harn object literal instead of dispatching `{}`.
+        let raw_args = r#"edit({ action: "replace_range", path: "src/main.rs", range_start: 1, range_end: 3, content: <<EOF
+fn main() {
+    println!("hello");
+}
+EOF
+})"#;
+        let frame = |value: serde_json::Value| format!("data: {value}\n");
+        let body = format!(
+            "{}{}data: [DONE]\n",
+            frame(serde_json::json!({
+                "choices": [{
+                    "index": 0,
+                    "delta": {
+                        "tool_calls": [{
+                            "index": 0,
+                            "id": "call_edit_text",
+                            "function": {"name": "edit", "arguments": raw_args}
+                        }]
+                    }
+                }]
+            })),
+            frame(serde_json::json!({
+                "choices": [{
+                    "index": 0,
+                    "finish_reason": "tool_calls",
+                    "delta": {}
+                }],
+                "usage": {"prompt_tokens": 4, "completion_tokens": 200}
+            })),
+        );
+        let session_id = fresh_session_id("oai-text-args-recover");
+        let (result, events) = drive(body.as_bytes(), &session_id, false).await;
+
+        let raw_partials: Vec<String> = events
+            .iter()
+            .filter_map(|event| match event {
+                AgentEvent::ToolCallUpdate {
+                    status: ToolCallStatus::Pending,
+                    raw_input_partial: Some(raw),
+                    ..
+                } => Some(raw.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            raw_partials
+                .iter()
+                .any(|raw| raw.contains("edit({") && raw.contains("fn main()")),
+            "expected multiline raw_input_partial before recovery; got {events:#?}"
+        );
+        assert_eq!(result.stop_reason.as_deref(), Some("tool_calls"));
+        assert_eq!(result.tool_calls.len(), 1);
+        assert_eq!(result.tool_calls[0]["name"], "edit");
+        assert_eq!(
+            result.tool_calls[0]["arguments"]["path"],
+            serde_json::json!("src/main.rs")
+        );
+        assert!(
+            result.tool_calls[0]["arguments"]["content"]
+                .as_str()
+                .is_some_and(|content| content.contains("println!(\"hello\")")),
+            "content should be recovered from the Harn text-tool payload: {:?}",
+            result.tool_calls[0]["arguments"]
+        );
+        assert_ne!(result.tool_calls[0]["arguments"], serde_json::json!({}));
+
+        clear_session_sinks(&session_id);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn openai_stream_non_length_unparseable_arguments_do_not_become_empty_object() {
+        // If the provider finishes cleanly but the native arguments channel is
+        // malformed and non-empty, preserve an explicit parse error. The `{}` fallback
+        // is reserved for length truncation (covered above) and true empty args.
+        let raw_args = "edit({\n  path: \"src/main.rs\",\n  content: <<EOF\nfn main() {\n";
+        let frame = |value: serde_json::Value| format!("data: {value}\n");
+        let body = format!(
+            "{}{}data: [DONE]\n",
+            frame(serde_json::json!({
+                "choices": [{
+                    "index": 0,
+                    "delta": {
+                        "tool_calls": [{
+                            "index": 0,
+                            "id": "call_edit_bad_text",
+                            "function": {"name": "edit", "arguments": raw_args}
+                        }]
+                    }
+                }]
+            })),
+            frame(serde_json::json!({
+                "choices": [{
+                    "index": 0,
+                    "finish_reason": "tool_calls",
+                    "delta": {}
+                }],
+                "usage": {"prompt_tokens": 4, "completion_tokens": 200}
+            })),
+        );
+        let session_id = fresh_session_id("oai-text-args-parse-error");
+        let (result, events) = drive(body.as_bytes(), &session_id, false).await;
+
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                AgentEvent::ToolCallUpdate {
+                    status: ToolCallStatus::Pending,
+                    raw_input_partial: Some(raw),
+                    ..
+                } if raw.contains("fn main()")
+            )),
+            "expected non-empty multiline raw_input_partial; got {events:#?}"
+        );
+        assert_eq!(result.stop_reason.as_deref(), Some("tool_calls"));
+        assert_eq!(result.tool_calls.len(), 1);
+        let arguments = &result.tool_calls[0]["arguments"];
+        assert_ne!(*arguments, serde_json::json!({}));
+        assert!(
+            arguments["__parse_error"]
+                .as_str()
+                .is_some_and(|message| message.contains("Could not parse streamed tool arguments")),
+            "unparseable clean-finish arguments must carry a parse error, got {arguments:?}"
         );
 
         clear_session_sinks(&session_id);
