@@ -55,10 +55,17 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "inline"
 
+# probed 2026-06-24 (docs/eval/provider-tool-mode-sweep-2026-06-24.md, N=5,
+# forced-format single-tool authoring of a backslash-heavy Zig body): native
+# 1/5 fidelity (bills empty completions), json 2/5 (flaky parse), text 5/5
+# byte-clean. The provider-native channel cannot carry backslash-heavy code, so
+# steer to the escape-free heredoc text channel.
 [[provider.deepinfra]]
 model_match = "*qwen3.6*"
 native_tools = true
-preferred_tool_format = "native"
+preferred_tool_format = "text"
+tool_mode_parity = "native_unreliable"
+tool_mode_parity_notes = "2026-06-24 forced-format sweep (N=5): DeepInfra Qwen3.6-35B-A3B native bills empty completions (1/5) and fenced-JSON is flaky (2/5); heredoc text carried a backslash-heavy Zig body byte-clean 5/5."
 structured_output = "native"
 thinking_modes = ["enabled"]
 vision = true

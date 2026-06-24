@@ -3951,8 +3951,9 @@
       "tool_support": {
         "native": true,
         "text": true,
-        "preferred_format": "native",
-        "parity": "unknown",
+        "preferred_format": "text",
+        "parity": "native_unreliable",
+        "parity_notes": "2026-06-24 forced-format sweep (N=5): DeepInfra Qwen3.6-35B-A3B native bills empty completions (1/5) and fenced-JSON is flaky (2/5); heredoc text carried a backslash-heavy Zig body byte-clean 5/5.",
         "tool_search": []
       },
       "structured_output": "native",
@@ -11336,8 +11337,9 @@
       "tool_support": {
         "native": true,
         "text": true,
-        "preferred_format": "native",
-        "parity": "unknown",
+        "preferred_format": "text",
+        "parity": "native_unreliable",
+        "parity_notes": "2026-06-24 forced-format sweep (N=5): OpenRouter Kimi-K2.7-Code native dispatched 5/5 but double-escaped backslash bodies (1/5 fidelity); fenced-JSON emitted no parseable Harn call (0/5). Heredoc text carried the body byte-clean 5/5.",
         "tool_search": []
       },
       "structured_output": "native",
@@ -12448,8 +12450,9 @@
       "tool_support": {
         "native": true,
         "text": true,
-        "preferred_format": "native",
-        "parity": "unknown",
+        "preferred_format": "text",
+        "parity": "native_unreliable",
+        "parity_notes": "2026-06-24 forced-format sweep (N=5): SambaNova MiniMax-M2.7 corrupted a backslash-heavy body on BOTH native (0/5) and fenced-JSON (0/5); heredoc text carried it byte-clean 5/5.",
         "tool_search": []
       },
       "structured_output": "native",
@@ -12691,9 +12694,9 @@
       "tool_support": {
         "native": true,
         "text": true,
-        "preferred_format": "json",
+        "preferred_format": "text",
         "parity": "native_unreliable",
-        "parity_notes": "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and prose claiming the tool had run; fenced JSON text-channel tools completed the loop.",
+        "parity_notes": "2026-06-24 forced-format sweep (N=5): Together MiniMax-M2.7 native 1/5 fidelity, fenced-JSON 2/5; heredoc text 4/5 (best on both dispatch and fidelity). Backslash-heavy bodies only round-trip on the escape-free text channel. Supersedes the 2026-06-20 json pin.",
         "tool_search": []
       },
       "structured_output": "native",
@@ -13675,7 +13678,7 @@
       "name": "deepinfra-qwen3.6",
       "model_id": "deepinfra/Qwen/Qwen3.6-35B-A3B",
       "provider": "deepinfra",
-      "tool_format": "native"
+      "tool_format": "text"
     },
     {
       "name": "deepseek",
@@ -14125,7 +14128,7 @@
       "name": "sambanova-minimax-m2.7",
       "model_id": "sambanova/MiniMax-M2.7",
       "provider": "sambanova",
-      "tool_format": "native"
+      "tool_format": "text"
     },
     {
       "name": "small",

@@ -96,12 +96,17 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "inline"
 
+# probed 2026-06-24 (docs/eval/provider-tool-mode-sweep-2026-06-24.md, N=5,
+# forced-format single-tool authoring of a backslash-heavy Zig body): heredoc
+# text beat fenced-JSON on BOTH dispatch (4/5 vs 3/5) and fidelity (4/5 vs 2/5);
+# native was 1/5 fidelity. The prior `json` pin still rode the escaping-prone
+# channel — flip to escape-free heredoc text so backslash-heavy code round-trips.
 [[provider.together]]
 model_match = "minimaxai/minimax-m2.7*"
 native_tools = true
-preferred_tool_format = "json"
+preferred_tool_format = "text"
 tool_mode_parity = "native_unreliable"
-tool_mode_parity_notes = "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and prose claiming the tool had run; fenced JSON text-channel tools completed the loop."
+tool_mode_parity_notes = "2026-06-24 forced-format sweep (N=5): Together MiniMax-M2.7 native 1/5 fidelity, fenced-JSON 2/5; heredoc text 4/5 (best on both dispatch and fidelity). Backslash-heavy bodies only round-trip on the escape-free text channel. Supersedes the 2026-06-20 json pin."
 structured_output = "native"
 thinking_modes = ["enabled"]
 prompt_caching = true
