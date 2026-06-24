@@ -1,5 +1,5 @@
 status:done
-raw_message_count:7
+raw_message_count:6
 projection_events:true
 projection_policy:clean_tool_repair
 projection_safety_blocked:false

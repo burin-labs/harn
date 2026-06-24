@@ -105,6 +105,10 @@ pipeline main() {
           max_iterations: 3,
           done_judge: nil,
           intra_turn_failure_fanout_cap: 3,
+          // Probe the fanout-cap mechanism in isolation. Same-resource fail-fast
+          // (default-on) would otherwise pre-empt the identical-`a.swift` batch
+          // and collapse it as a dependent-resource skip, so disable it here.
+          intra_turn_resource_fail_fast: false,
         },
       )
       let calls = llm_mock_calls()
@@ -186,6 +190,10 @@ pipeline main() {
           max_iterations: 3,
           done_judge: nil,
           intra_turn_failure_fanout_cap: 3,
+          // Isolate the fanout-cap mechanism from same-resource fail-fast so the
+          // two distinct identical-failure groups each emit their own collapse
+          // marker rather than being skipped as dependent-resource writes.
+          intra_turn_resource_fail_fast: false,
         },
       )
       let calls = llm_mock_calls()
