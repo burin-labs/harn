@@ -65,6 +65,14 @@ pub(crate) struct TestArgs {
     /// Re-run user tests when watched files change.
     #[arg(long)]
     pub watch: bool,
+    /// Collect line coverage for executed Harn source and print a per-file
+    /// summary after the run. Supported for user test suites.
+    #[arg(long, action = ArgAction::SetTrue)]
+    pub coverage: bool,
+    /// Write an LCOV tracefile to this path (implies --coverage). Consumable by
+    /// Codecov, `genhtml`, and the VS Code Coverage Gutters extension.
+    #[arg(long = "coverage-out", value_name = "PATH")]
+    pub coverage_out: Option<String>,
     /// Show per-test timing and detailed failures.
     #[arg(short = 'v', long = "verbose", action = ArgAction::SetTrue)]
     pub verbose: bool,

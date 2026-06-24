@@ -510,6 +510,47 @@ Use `require` for runtime invariants in normal pipelines. The linter warns if
 you use `assert*` outside test pipelines, and it suggests `assert*` instead of
 `require` inside test pipelines.
 
+## Line coverage
+
+`harn test --coverage` reports per-file line coverage for the Harn source your
+user test suite executes:
+
+```bash
+# Print a per-file coverage summary after the run
+harn test tests/ --coverage
+
+# Also write an LCOV tracefile (implies --coverage)
+harn test tests/ --coverage --coverage-out coverage/lcov.info
+```
+
+The summary lists each executed source file with its instrumentable line count,
+the number of lines covered, and the percentage, followed by a `TOTAL` row:
+
+```text
+Line coverage: 41/47 (87.2%)
+File              Lines  Covered       %
+tests/math.harn      18       18   100.0
+src/util.harn        29       23    79.3
+TOTAL                47       41    87.2
+```
+
+The `--coverage-out` tracefile is standard
+[LCOV](https://github.com/linux-test-project/lcov), so it drops straight into
+Codecov, `genhtml`, and the VS Code Coverage Gutters extension.
+
+Notes:
+
+- Coverage reuses the per-instruction source-line table the VM already carries,
+  so it adds no separate instrumentation pass. Recording is opt-in; runs without
+  `--coverage` pay nothing.
+- The denominator is the set of distinct source lines that emit bytecode,
+  including the bodies of functions that are loaded but never called (which
+  therefore show as uncovered).
+- Reporting is filtered to source files that exist on disk, so the embedded
+  standard library and in-memory `eval` chunks are excluded.
+- `--coverage` is for user test suites; it cannot be combined with `--watch`,
+  `--determinism`, `--evals`, or the conformance / protocols targets.
+
 ## Cross-platform test coverage
 
 Most workspace tests run on both Unix and Windows. A small set of test

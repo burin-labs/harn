@@ -392,6 +392,14 @@ impl Vm {
             }
 
             let op_byte = frame.chunk.code[frame.ip];
+            // Line-coverage hit. `self.coverage` is `None` unless a coverage
+            // session is active, so this is a single predictable branch on the
+            // hot path (and a disjoint-field borrow from `frame`, which holds
+            // `self.frames`). `frame.ip` is still the index of the instruction
+            // we just read, before the increment below.
+            if let Some(coverage) = self.coverage.as_mut() {
+                coverage.record(&frame.chunk, frame.ip);
+            }
             frame.ip += 1;
 
             // Sync/async split dispatch: skip the `execute_op` async fn

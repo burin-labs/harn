@@ -26,6 +26,25 @@ pub(crate) async fn run_command(args: TestArgs) {
         );
     }
 
+    if args.coverage || args.coverage_out.is_some() {
+        if args.watch {
+            command_error(
+                "`harn test --coverage` cannot combine with --watch; the watch loop never terminates so no report would be written",
+            );
+        }
+        if args.determinism || args.evals {
+            command_error("`harn test --coverage` cannot combine with --determinism or --evals");
+        }
+        if matches!(
+            args.target.as_deref(),
+            Some("conformance") | Some("protocols") | Some("agents-conformance")
+        ) {
+            command_error(
+                "`harn test --coverage` is supported for user test suites, not conformance / protocols / agents-conformance",
+            );
+        }
+    }
+
     let shard_requested = args.shard_index.is_some() || args.shard_total.is_some();
     if args.target.as_deref() == Some("agents-conformance") {
         run_agents_conformance_command(args, shard_requested).await;
@@ -213,6 +232,9 @@ async fn run_user_test_target(path: &str, args: &TestArgs, cli_skill_dirs: &[Pat
     if args.watch {
         run_watch_tests(path, run_args).await;
     } else {
+        let coverage = (args.coverage || args.coverage_out.is_some()).then(|| CoverageOptions {
+            out: args.coverage_out.clone(),
+        });
         run_user_tests(
             path,
             run_args,
@@ -220,9 +242,18 @@ async fn run_user_test_target(path: &str, args: &TestArgs, cli_skill_dirs: &[Pat
                 junit_path: args.junit.as_deref(),
                 json_out_path: args.json_out.as_deref(),
             },
+            coverage,
         )
         .await;
     }
+}
+
+/// Coverage knobs for a user-test run. Present only when `--coverage` (or
+/// `--coverage-out`) was requested.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct CoverageOptions {
+    /// Optional LCOV output path.
+    pub out: Option<String>,
 }
 
 fn default_test_dir_or_exit() -> String {
@@ -2058,6 +2089,7 @@ pub(crate) async fn run_user_tests(
     path_str: &str,
     args: UserTestRunArgs<'_>,
     report_config: UserTestReportConfig<'_>,
+    coverage: Option<CoverageOptions>,
 ) {
     let path = PathBuf::from(path_str);
     if !path.exists() {
@@ -2072,6 +2104,15 @@ pub(crate) async fn run_user_tests(
             preflight_report_path(p);
         }
     }
+    if let Some(opts) = &coverage {
+        if let Some(out) = &opts.out {
+            preflight_report_path(out);
+        }
+        // Arm coverage before any test worker spins up a VM so every isolate
+        // the run constructs records into the shared report.
+        harn_vm::coverage::begin_session();
+    }
+
     let summary = run_user_tests_once(&path, args).await;
 
     if !report_config.is_empty() {
@@ -2085,8 +2126,37 @@ pub(crate) async fn run_user_tests(
         }
     }
 
+    // Emit coverage before the failure exit so a failing suite still reports
+    // what it exercised.
+    if let Some(opts) = &coverage {
+        let report = harn_vm::coverage::end_session();
+        emit_coverage_report(&report, opts.out.as_deref());
+    }
+
     if summary.failed > 0 {
         process::exit(1);
+    }
+}
+
+/// Print the per-file coverage summary and, when an LCOV path was requested,
+/// write the tracefile. A write failure fails the run loudly.
+fn emit_coverage_report(report: &harn_vm::coverage::Coverage, out: Option<&str>) {
+    if report.is_empty() {
+        eprintln!("\n[coverage] no executed source files were found on disk to report");
+        return;
+    }
+    let (covered, total) = report.totals();
+    println!(
+        "\nLine coverage: {covered}/{total} ({:.1}%)\n{}",
+        report.percent(),
+        report.render_text(),
+    );
+    if let Some(path) = out {
+        if let Err(error) = fs::write(path, report.render_lcov()) {
+            eprintln!("failed to write coverage report to {path}: {error}");
+            process::exit(1);
+        }
+        println!("LCOV tracefile written to {path}");
     }
 }
 

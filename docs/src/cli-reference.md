@@ -393,6 +393,8 @@ harn test conformance --verbose        # show per-test timing
 harn test conformance --timing         # show timing summary without verbose failures
 harn test tests/ --record              # record LLM fixtures
 harn test tests/ --replay              # replay LLM fixtures
+harn test tests/ --coverage            # print per-file line coverage
+harn test tests/ --coverage-out lcov.info  # also write an LCOV tracefile
 harn test agents-conformance --target http://localhost:8080 --api-key "$KEY"
 ```
 
@@ -414,6 +416,8 @@ harn test agents-conformance --target http://localhost:8080 --api-key "$KEY"
 | `--timeout <ms>` | Per-test timeout in milliseconds (default: 30000) |
 | `--record` | Record LLM responses to `.harn-fixtures/` |
 | `--replay` | Replay recorded LLM responses |
+| `--coverage` | Print per-file line coverage for executed Harn source (user test suites only) |
+| `--coverage-out <path>` | Write an LCOV tracefile (implies `--coverage`); consumable by Codecov, `genhtml`, and Coverage Gutters |
 
 When no path is given, `harn test` auto-discovers a `tests/` directory
 in the current folder. Conformance targets must resolve to a file or directory
