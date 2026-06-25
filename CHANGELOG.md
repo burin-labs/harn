@@ -8,6 +8,56 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.141
+
+### Fixed
+
+- Fixed four agent-loop convergence bugs found by audit: `strip_thinking_tags` no longer corrupts
+  tool-call arguments that contain `<think>`/`</think>` inside strings or heredoc bodies; completion
+  and step verdict classification now reads the leading word (so `done.` and `done — all pass` are
+  recognized) and drops the reflexive `yes`/`true` done-tokens; a single-message compaction archive is
+  no longer discarded as a false-terminal `context_overflow`; and provider-catalog fragment
+  leading-key bleed (which mislabelled `openai/gpt-oss-120b`) is fixed with a build-time validator.
+- Skill discovery now recognizes the optional `targets:` `SKILL.md`
+  frontmatter field (version-aware grounding) instead of flagging it as an
+  unknown field and logging a warning.
+- The stall detector now location-normalizes diagnostic text (strips
+  `file:line:col` coordinates and bare numbers) before hashing its
+  same-error signature, so the same compile/test error re-firing at a
+  shifting line no longer resets the repeat streak and the
+  `stuck_same_diagnostic` / hard-stop trip fires as intended.
+- The step judge now marks a fail-open pass with `judge_error: true` /
+  `reason: "judge_unavailable"` (surfaced on the `step_judge_decision`
+  event as `judgeError`) when the judge model itself errors, so a swallowed
+  judge failure is observable in telemetry instead of being
+  indistinguishable from a genuine approval.
+
+### Security
+
+- `run`/`command_run` no longer leak secret-bearing environment variables to
+  spawned child processes (and thus to the model, which reads child stdout as
+  the tool result). Under the default `inherit_clean`/`patch` env modes the
+  child environment now strips provider `*_API_KEY`s, `*_TOKEN`/`*_SECRET`/
+  `*_KEY` variables, and explicit names like `GITHUB_TOKEN`,
+  `HARN_CLOUD_API_KEY`, `BURIN_ADMIN_TOKEN`, and `AWS_SECRET_ACCESS_KEY`. Benign
+  build/toolchain vars (`PATH`, `HOME`, `LANG`, `CARGO_*`, …) are preserved, and
+  an explicit caller-supplied `env` is left untouched.
+- The file-backed OAuth/MCP token store now writes its sealed token file with
+  `0o600` permissions on Unix so a wide umask can't leave it group/world
+  readable.
+- Closed a filesystem write/delete symlink-swap TOCTOU in the deterministic
+  `tools/{write_file, delete_file}` builtins (audit finding F5). The
+  workspace-scope check canonicalizes a copy of the path, but the subsequent
+  `write`/`remove_*` ran on the raw path and followed a symlink at the final
+  component at op time, so an in-workspace attacker could swap a check-passed
+  path for a symlink pointing outside the allowed roots and escape the
+  workspace. `write_file` now opens the final component with `O_NOFOLLOW` on
+  Unix (with an `lstat`-reject fallback elsewhere) so a symlink-final path is
+  rejected at open time rather than followed; `delete_file` re-validates an
+  escaping final-component symlink under the active policy and refuses to
+  remove through it. Normal in-root writes, overwrites, and deletes of real
+  files are unaffected.
+
 ## v0.8.140
 
 ### Added
