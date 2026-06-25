@@ -57,6 +57,67 @@ pub enum EnvMode {
     Patch,
 }
 
+/// Explicit secret-bearing environment variable names that the agent's
+/// `run`/`command_run` tool must never leak into a child process (and thus
+/// into the model context, since the child's stdout is returned to the
+/// model as the tool result). These are matched case-insensitively in
+/// addition to the suffix patterns in [`is_sensitive_env_name`].
+const EXPLICIT_SENSITIVE_ENV_NAMES: &[&str] = &[
+    "GITHUB_TOKEN",
+    "GH_TOKEN",
+    "HARN_CLOUD_API_KEY",
+    "BURIN_ADMIN_TOKEN",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
+];
+
+/// Provider-namespace prefixes whose entire family of variables is treated
+/// as secret-bearing (e.g. `ANTHROPIC_API_KEY`, `OPENAI_ORG_ID`). Matched
+/// case-insensitively against the start of the variable name.
+const SENSITIVE_ENV_PREFIXES: &[&str] = &[
+    "ANTHROPIC_",
+    "OPENAI_",
+    "OPENROUTER_",
+    "FIREWORKS_",
+    "TOGETHER_",
+    "XAI_",
+    "GROQ_",
+];
+
+/// Returns `true` when an environment variable name looks like it carries a
+/// secret (provider API key, access token, OAuth client secret, etc.) and so
+/// must be stripped from a child process spawned by the agent's `run` tool.
+///
+/// The check is deliberately conservative about credentials but permissive
+/// about ordinary build/toolchain variables: `PATH`, `HOME`, `LANG`,
+/// `CARGO_HOME`, language toolchain vars, etc. are *not* sensitive and stay
+/// in the child environment so builds and tests still work.
+///
+/// Matching is case-insensitive and covers:
+/// - suffix patterns `_API_KEY`, `_TOKEN`, `_SECRET`, `_KEY`;
+/// - the provider prefixes in [`SENSITIVE_ENV_PREFIXES`];
+/// - the explicit names in [`EXPLICIT_SENSITIVE_ENV_NAMES`].
+pub fn is_sensitive_env_name(name: &str) -> bool {
+    let upper = name.to_ascii_uppercase();
+    if EXPLICIT_SENSITIVE_ENV_NAMES.contains(&upper.as_str()) {
+        return true;
+    }
+    if SENSITIVE_ENV_PREFIXES
+        .iter()
+        .any(|prefix| upper.starts_with(prefix))
+    {
+        return true;
+    }
+    // Suffix patterns catch the long tail of provider/service credentials
+    // (`*_API_KEY`, `*_TOKEN`, `*_SECRET`, `*_KEY`) without enumerating every
+    // vendor. `_KEY` is last and broadest; it still excludes benign names
+    // like `PATH`/`HOME`/`LANG` that don't end in these suffixes.
+    upper.ends_with("_API_KEY")
+        || upper.ends_with("_TOKEN")
+        || upper.ends_with("_SECRET")
+        || upper.ends_with("_KEY")
+}
+
 /// Parameters describing a single spawn. The spawner is responsible for any
 /// sandbox setup (Linux seccomp/landlock, macOS sandbox-exec, etc.) and for
 /// configuring the child's process group when requested.
@@ -211,4 +272,53 @@ pub fn current_spawner() -> Arc<dyn ProcessSpawner> {
 /// Spawn a process via the currently installed spawner.
 pub fn spawn_process(spec: SpawnSpec) -> Result<Box<dyn ProcessHandle>, ProcessError> {
     current_spawner().spawn(spec)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_sensitive_env_name;
+
+    #[test]
+    fn denies_secret_bearing_names() {
+        // Suffix patterns.
+        assert!(is_sensitive_env_name("ANTHROPIC_API_KEY"));
+        assert!(is_sensitive_env_name("OPENAI_API_KEY"));
+        assert!(is_sensitive_env_name("SOME_VENDOR_TOKEN"));
+        assert!(is_sensitive_env_name("MY_CLIENT_SECRET"));
+        assert!(is_sensitive_env_name("RANDOM_KEY"));
+        // Explicit names.
+        assert!(is_sensitive_env_name("GITHUB_TOKEN"));
+        assert!(is_sensitive_env_name("GH_TOKEN"));
+        assert!(is_sensitive_env_name("HARN_CLOUD_API_KEY"));
+        assert!(is_sensitive_env_name("BURIN_ADMIN_TOKEN"));
+        assert!(is_sensitive_env_name("AWS_SECRET_ACCESS_KEY"));
+        assert!(is_sensitive_env_name("AWS_SESSION_TOKEN"));
+        // Provider prefixes (even without a key/token suffix).
+        assert!(is_sensitive_env_name("OPENROUTER_BASE_URL"));
+        assert!(is_sensitive_env_name("FIREWORKS_ACCOUNT"));
+        assert!(is_sensitive_env_name("TOGETHER_ORG"));
+        assert!(is_sensitive_env_name("XAI_REGION"));
+        assert!(is_sensitive_env_name("GROQ_PROJECT"));
+    }
+
+    #[test]
+    fn allows_benign_build_and_toolchain_names() {
+        assert!(!is_sensitive_env_name("PATH"));
+        assert!(!is_sensitive_env_name("HOME"));
+        assert!(!is_sensitive_env_name("CARGO_HOME"));
+        assert!(!is_sensitive_env_name("LANG"));
+        assert!(!is_sensitive_env_name("LC_ALL"));
+        assert!(!is_sensitive_env_name("TERM"));
+        assert!(!is_sensitive_env_name("USER"));
+        assert!(!is_sensitive_env_name("RUSTUP_HOME"));
+        assert!(!is_sensitive_env_name("CARGO_TARGET_DIR"));
+        assert!(!is_sensitive_env_name("SHELL"));
+    }
+
+    #[test]
+    fn matches_case_insensitively() {
+        assert!(is_sensitive_env_name("anthropic_api_key"));
+        assert!(is_sensitive_env_name("github_token"));
+        assert!(!is_sensitive_env_name("path"));
+    }
 }

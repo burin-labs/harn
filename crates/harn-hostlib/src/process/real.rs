@@ -41,8 +41,26 @@ impl ProcessSpawner for RealSpawner {
             command.current_dir(cwd);
         }
 
-        if matches!(spec.env_mode, EnvMode::Replace) {
-            command.env_clear();
+        match spec.env_mode {
+            // `Replace` starts from an empty environment, so nothing to strip.
+            EnvMode::Replace => {
+                command.env_clear();
+            }
+            // `InheritClean`/`Patch` inherit the full parent environment. Strip
+            // secret-bearing variables (provider `*_API_KEY`s, `GITHUB_TOKEN`,
+            // `HARN_CLOUD_API_KEY`, etc.) so build/test commands — and the model
+            // that reads their stdout as the tool result — never see them.
+            // Caller-supplied `env` below is applied afterward and is an
+            // explicit opt-in, so it is intentionally not filtered here.
+            EnvMode::InheritClean | EnvMode::Patch => {
+                for (key, _) in std::env::vars_os() {
+                    if let Some(name) = key.to_str() {
+                        if super::handle::is_sensitive_env_name(name) {
+                            command.env_remove(&key);
+                        }
+                    }
+                }
+            }
         }
         for (key, value) in &spec.env {
             command.env(key, value);
