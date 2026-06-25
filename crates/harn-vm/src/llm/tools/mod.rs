@@ -25,6 +25,7 @@ pub(crate) use parse::parse_fenced_json_tool_calls;
 pub(crate) use parse::parse_text_tool_argument_payload;
 pub(crate) use parse::parse_text_tool_calls_in_format;
 pub(crate) use parse::parse_text_tool_calls_with_tools;
+pub(crate) use parse::unwrap_fully_wrapping_heredoc;
 pub(crate) use parse::StreamingToolCallDetector;
 pub(crate) use parse::TextToolFormat;
 #[cfg(test)]

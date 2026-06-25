@@ -1533,3 +1533,272 @@ fn thinking_tags_inside_arguments_round_trip_verbatim() {
         result.prose
     );
 }
+
+#[test]
+fn repro_zig_shift_operators_in_heredoc_body() {
+    // Zig source uses `<<`, `<<=`, and `>>` as shift operators. None of these
+    // are heredoc openers — they appear mid-line or even at a line start inside
+    // the body — and the captured `content` must equal the body byte-for-byte
+    // with no `<<TAG` opener/closer leaking in.
+    let tools = sample_tool_registry();
+    let body = "const std = @import(\"std\");\n\
+pub fn pack(a: u32, b: u32) u32 {\n\
+    return (a << 2) | (b >> 1);\n\
+}\n\
+test \"shift\" {\n\
+    var x: u32 = 1;\n\
+    x <<= 4;\n\
+    try std.testing.expect(x == 16);\n\
+}";
+    let text = format!(
+        "edit({{\n    action: \"create\",\n    path: \"src/writer.zig\",\n    content: <<EOF\n{body}\nEOF\n}})"
+    );
+    let result = parse_bare_calls_in_body(&text, Some(&tools));
+    assert_eq!(
+        result.calls.len(),
+        1,
+        "should parse one call, errors: {:?}",
+        result.errors
+    );
+    let content = result.calls[0]["arguments"]["content"].as_str().unwrap();
+    assert_eq!(
+        content, body,
+        "heredoc body with shift operators must be captured byte-for-byte"
+    );
+    assert!(
+        !content.contains("<<EOF"),
+        "the heredoc opener must never leak into content: {content:?}"
+    );
+}
+
+#[test]
+fn repro_heredoc_body_line_starts_with_double_angle() {
+    // A body line that *starts* with `<<` (a leading shift, or merge-conflict
+    // marker style) must stay literal content; it must not be read as a new
+    // heredoc opener or leak the delimiter.
+    let tools = sample_tool_registry();
+    let body = "pub fn f(x: u32) u32 {\n\
+    return x\n\
+        << 2;\n\
+}";
+    let text = format!(
+        "edit({{ action: \"create\", path: \"src/writer.zig\", content: <<EOF\n{body}\nEOF }})"
+    );
+    let result = parse_bare_calls_in_body(&text, Some(&tools));
+    assert_eq!(
+        result.calls.len(),
+        1,
+        "should parse one call, errors: {:?}",
+        result.errors
+    );
+    let content = result.calls[0]["arguments"]["content"].as_str().unwrap();
+    assert_eq!(
+        content, body,
+        "leading `<<` line must be preserved verbatim"
+    );
+}
+
+#[test]
+fn repro_heredoc_body_containing_delimiter_like_line() {
+    // A body line equal to the tag with trailing content (`EOF` used as an
+    // identifier prefix on its own line) is covered by the word-boundary rule.
+    // But a body line that is *exactly* the tag would close early. The model
+    // chooses a tag unlikely to appear; verify a near-collision (`EOFX`) does
+    // not terminate.
+    let tools = sample_tool_registry();
+    let body = "line one\nEOFX is not the tag\nline three";
+    let text =
+        format!("edit({{ action: \"create\", path: \"a.zig\", content: <<EOF\n{body}\nEOF }})");
+    let result = parse_bare_calls_in_body(&text, Some(&tools));
+    assert_eq!(result.calls.len(), 1, "errors: {:?}", result.errors);
+    let content = result.calls[0]["arguments"]["content"].as_str().unwrap();
+    assert_eq!(content, body, "near-collision tag line must not terminate");
+}
+
+#[test]
+fn repro_heredoc_body_contains_another_heredoc_opener_line() {
+    // The body itself contains a line `content: <<INNER` (e.g. the model is
+    // writing a Harn/eval fixture file that documents the tool format). The
+    // OUTER scan must run to its own `EOF` closer and capture the inner
+    // `<<INNER` line as literal content.
+    let tools = sample_tool_registry();
+    let body = "Example tool call:\ncontent: <<INNER\nsome inner text\nINNER\nend of example";
+    let text =
+        format!("edit({{ action: \"create\", path: \"doc.md\", content: <<EOF\n{body}\nEOF }})");
+    let result = parse_bare_calls_in_body(&text, Some(&tools));
+    assert_eq!(result.calls.len(), 1, "errors: {:?}", result.errors);
+    let content = result.calls[0]["arguments"]["content"].as_str().unwrap();
+    assert_eq!(content, body, "inner heredoc opener line must stay literal");
+}
+
+#[test]
+fn repro_top_level_chunker_heredoc_with_shift() {
+    // Drive the FULL tagged top-level parser (not just the bare body parser):
+    // a `<tool_call>` wrapping an edit whose content is Zig with `<<` shifts.
+    // The top-level chunker's `skip_heredoc_body` must step over the body and
+    // not let `<<` leak or mis-chunk.
+    let tools = sample_tool_registry();
+    let body = "pub fn f(a: u32) u32 {\n    return a << 3;\n}";
+    let text = format!(
+        "<tool_call>\nedit({{ action: \"create\", path: \"src/writer.zig\", content: <<EOF\n{body}\nEOF }})\n</tool_call>"
+    );
+    let result = parse_text_tool_calls_with_tools(&text, Some(&tools));
+    assert_eq!(
+        result.calls.len(),
+        1,
+        "errors: {:?} violations: {:?}",
+        result.errors,
+        result.violations
+    );
+    let content = result.calls[0]["arguments"]["content"].as_str().unwrap();
+    assert_eq!(
+        content, body,
+        "top-level chunker must capture shift body verbatim"
+    );
+}
+
+#[test]
+fn normalize_strips_native_json_leaked_heredoc_content() {
+    // Observed live (fw-gpt-oss-120b zig-feat): the model emits a NATIVE JSON
+    // tool call whose `content` value is itself the heredoc envelope
+    // `"<<EOF\n...\nEOF"`. Because it arrived as a valid JSON string, no parser
+    // stripped the delimiters, so the written file's first line became a literal
+    // `<<EOF` and Zig failed with `expected type expression, found '<<'`.
+    // normalize_tool_args is the universal dispatch chokepoint and must heal it.
+    let body = "fn valueMatchesType(value: []const u8) bool {\n    return value.len << 1 > 0;\n}";
+    let args = json!({
+        "action": "replace_range",
+        "path": "src/schema.zig",
+        "range_start": 121,
+        "range_end": 129,
+        "content": format!("<<EOF\n{body}\nEOF"),
+    });
+    let normalized = normalize_tool_args("edit", &args);
+    let content = normalized["content"].as_str().unwrap();
+    assert_eq!(
+        content, body,
+        "the leaked heredoc opener/closer must be stripped, leaving the body"
+    );
+    assert!(
+        !content.contains("<<EOF") && !content.starts_with("<<"),
+        "no `<<EOF` delimiter may remain: {content:?}"
+    );
+}
+
+#[test]
+fn normalize_strips_native_json_leaked_heredoc_with_trailing_whitespace() {
+    let body = "const x = 1;";
+    let args = json!({ "content": format!("  <<EOF\n{body}\nEOF\n  ") });
+    let normalized = normalize_tool_args("edit", &args);
+    assert_eq!(normalized["content"].as_str().unwrap(), body);
+}
+
+#[test]
+fn normalize_strips_leaked_heredoc_in_nested_ops_new_body() {
+    // Batched `ops: [{ new_body: "<<EOF\n...\nEOF" }]` through the native channel
+    // must be healed at every leaf, not just top-level args.
+    let body = "x +%= 1;";
+    let args = json!({
+        "path": "a.zig",
+        "ops": [
+            { "op": "replace_body", "function_name": "f", "new_body": format!("<<EOF\n{body}\nEOF") }
+        ],
+    });
+    let normalized = normalize_tool_args("edit", &args);
+    let nb = normalized["ops"][0]["new_body"].as_str().unwrap();
+    assert_eq!(nb, body, "nested leaked heredoc must be stripped: {nb:?}");
+}
+
+#[test]
+fn normalize_preserves_content_that_merely_contains_double_angle() {
+    // A real Zig body using `<<` shift operators (not a wrapping heredoc) must
+    // pass through byte-identical — the strip is strictly opt-in on a value
+    // that is ENTIRELY one heredoc.
+    let body = "pub fn f(a: u32) u32 {\n    return a << 2;\n}";
+    let args = json!({ "action": "create", "path": "a.zig", "content": body });
+    let normalized = normalize_tool_args("edit", &args);
+    assert_eq!(
+        normalized["content"].as_str().unwrap(),
+        body,
+        "content with shift operators must be byte-identical"
+    );
+}
+
+#[test]
+fn normalize_preserves_partial_heredoc_wrap_with_trailing_content() {
+    // A heredoc that closes EARLY (content after the sentinel) is NOT a clean
+    // full wrap; unwrapping would silently drop the trailing bytes, so we leave
+    // the value untouched.
+    let value = "<<EOF\nbody line\nEOF\nORPHAN TRAILING CONTENT";
+    let args = json!({ "content": value });
+    let normalized = normalize_tool_args("edit", &args);
+    assert_eq!(
+        normalized["content"].as_str().unwrap(),
+        value,
+        "a partially-wrapping heredoc must be left byte-identical"
+    );
+}
+
+#[test]
+fn normalize_strips_function_markup_leaked_heredoc_via_full_parse() {
+    // End-to-end: chat-template function markup where the model nested a heredoc
+    // inside `<parameter=content>`. The markup parser keeps the param value
+    // verbatim (so `content` is `<<EOF\n...\nEOF`), and the dispatch chokepoint
+    // then strips the wrapper. Drive the real tagged parser + normalize.
+    let tools = sample_tool_registry();
+    let body = "fn f() void {\n    var x: u32 = 1;\n    x <<= 4;\n}";
+    let text = format!(
+        "<tool_call>\n<function=edit>\n<parameter=action>\ncreate\n</parameter>\n<parameter=path>\nsrc/writer.zig\n</parameter>\n<parameter=content>\n<<EOF\n{body}\nEOF\n</parameter>\n</function>\n</tool_call>"
+    );
+    let result = parse_text_tool_calls_with_tools(&text, Some(&tools));
+    assert_eq!(
+        result.calls.len(),
+        1,
+        "errors: {:?} violations: {:?}",
+        result.errors,
+        result.violations
+    );
+    let raw = result.calls[0]["arguments"]["content"].as_str().unwrap();
+    // The markup parser itself keeps the heredoc verbatim...
+    assert!(
+        raw.starts_with("<<EOF"),
+        "function-markup keeps the param value verbatim: {raw:?}"
+    );
+    // ...and the dispatch normalizer strips the leaked wrapper.
+    let normalized = normalize_tool_args("edit", &result.calls[0]["arguments"]);
+    assert_eq!(
+        normalized["content"].as_str().unwrap(),
+        body,
+        "normalize must strip the function-markup-nested heredoc wrapper"
+    );
+}
+
+#[test]
+fn normalize_preserves_markdown_fenced_content() {
+    // A markdown ```fence``` is legitimate file content (the model is NOT taught
+    // to wrap tool-call values in fences), so it must pass through untouched.
+    // This documents that the heredoc strip is heredoc-specific and does not
+    // generalize to other delimiter-bearing content classes.
+    let body = "# Title\n\n```rust\nfn main() {}\n```\nDone.";
+    let args = json!({ "action": "create", "path": "README.md", "content": body });
+    let normalized = normalize_tool_args("edit", &args);
+    assert_eq!(
+        normalized["content"].as_str().unwrap(),
+        body,
+        "markdown fenced content must be byte-identical"
+    );
+}
+
+#[test]
+fn normalize_preserves_legit_file_that_is_entirely_a_bash_heredoc() {
+    // Edge case: the file content the model is legitimately writing IS itself a
+    // shell heredoc that happens to close at end-of-content. This is the one
+    // shape the strict unwrap will collapse — but it collapses to exactly the
+    // body, which is the only sensible interpretation when the value is byte-
+    // for-byte a single `<<TAG\n...\nTAG`. Asserting the documented behavior so a
+    // future change is a conscious decision, not an accident.
+    let body = "echo hello\necho world";
+    let args = json!({ "content": format!("<<SH\n{body}\nSH") });
+    let normalized = normalize_tool_args("edit", &args);
+    assert_eq!(normalized["content"].as_str().unwrap(), body);
+}
