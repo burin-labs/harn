@@ -1,0 +1,89 @@
+import { agent_capture_events } from "std/agent/events"
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * step_judge fail-open must SURFACE a swallowed judge error.
+ *
+ * When the step-judge model itself errors (provider 5xx / parse failure)
+ * and `fail_open` is in effect (the default), the scrutinized turn still
+ * PROCEEDS — we deliberately do not block on the judge's own flakiness.
+ * But a `verdict: "pass"` here means "the adversarial reviewer was
+ * UNAVAILABLE", not "the reviewer approved this turn". The fail-open record
+ * must carry the distinct `judge_error: true` flag and `judge_unavailable`
+ * reason so an inert review surface is distinguishable from a genuine pass
+ * in the emitted `step_judge_decision` telemetry.
+ *
+ * Script: assistant turn 1 (weak, would normally be scrutinized) -> the
+ * step-judge LLM call ERRORS -> fail-open lets the turn through -> the loop
+ * completes on the done sentinel. We assert the emitted decision carries the
+ * distinct marker, and a CONTROL run with a real `pass` verdict does NOT.
+ */
+fn events_of(events, kind) {
+  return events.filter({ event -> event.type == kind })
+}
+
+fn judge_decisions(captured) {
+  return events_of(captured.events, "step_judge_decision")
+}
+
+pipeline default() {
+  // --- Case 1: the judge model errors -> fail-open, but marked unavailable.
+  with_llm_script(
+    [
+      llm_text("<user_response>2 + 2 = 4</user_response>\n<done>##DONE##</done>"),
+      {error: {category: "generic", message: "judge backend 503"}},
+    ],
+    { ->
+      let session = "step-judge-unavail-" + uuid()
+      let captured = agent_capture_events(
+        session,
+        fn() { return agent_loop(
+          "What is 2 + 2?",
+          nil,
+          {
+            provider: "mock",
+            loop_until_done: true,
+            max_iterations: 2,
+            session_id: session,
+            step_judge: {provider: "mock", on_veto: "replace"},
+          },
+        ) },
+      )
+      let decisions = judge_decisions(captured)
+      let unavailable = decisions.filter({ d -> (d.judge_error ?? false) == true })
+      __io_println(len(unavailable))
+      __io_println(unavailable[0].reason)
+      __io_println(unavailable[0].verdict)
+      __io_println(unavailable[0].vetoed)
+    },
+  )
+  // --- Case 2 (control): a genuine pass carries NO judge_error marker.
+  with_llm_script(
+    [
+      llm_text("<user_response>2 + 2 = 4</user_response>\n<done>##DONE##</done>"),
+      llm_text("{\"verdict\":\"pass\",\"reasoning\":\"correct\",\"critique\":\"\",\"confidence\":0.95}"),
+    ],
+    { ->
+      let session = "step-judge-pass-" + uuid()
+      let captured = agent_capture_events(
+        session,
+        fn() { return agent_loop(
+          "What is 2 + 2?",
+          nil,
+          {
+            provider: "mock",
+            loop_until_done: true,
+            max_iterations: 2,
+            session_id: session,
+            step_judge: {provider: "mock", on_veto: "replace"},
+          },
+        ) },
+      )
+      let decisions = judge_decisions(captured)
+      let unavailable = decisions.filter({ d -> (d.judge_error ?? false) == true })
+      let passes = decisions.filter({ d -> d.verdict == "pass" })
+      __io_println(len(unavailable))
+      __io_println(len(passes) > 0)
+    },
+  )
+}

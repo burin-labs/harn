@@ -256,6 +256,13 @@ pub enum AgentEvent {
         skipped: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reason: Option<String>,
+        /// True when this `verdict: "pass"` is the result of the step-judge
+        /// model itself erroring and `fail_open` swallowing the error — the
+        /// turn proceeded, but the adversarial-review surface was UNAVAILABLE
+        /// (not a genuine approval). Lets telemetry tell an inert reviewer
+        /// apart from a real pass. Mirrors `reason: "judge_unavailable"`.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        judge_error: bool,
         on_veto: String,
         input_tokens: u64,
         output_tokens: u64,
