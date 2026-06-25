@@ -1,0 +1,102 @@
+import { agent_capture_events } from "std/agent/events"
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * Stall location-normalization (mirrors Burin #2953/#2954): the SAME
+ * compile/test error at a SHIFTING `file:line:col` must still trip
+ * `stuck_same_diagnostic`.
+ *
+ * Edit-between-retest thrash where the diagnostic re-fires at a different
+ * line each turn (`foo.zig:42:5` -> `foo.zig:99:1` -> `foo.zig:7:13`). The
+ * raw error TEXT differs every turn, so before location normalization each
+ * failure hashed to a NEW signature, the same-diagnostic streak reset, and
+ * the trip NEVER fired. `__agent_stall_normalize_error` strips
+ * `path:line[:col]` coordinates and bare numbers before hashing, so all
+ * three failures collapse to ONE signature and the streak advances across
+ * the edits — the trip fires exactly as the constant-location case does.
+ */
+fn events_of(events, kind) {
+  return events.filter({ event -> event.type == kind })
+}
+
+fn repair_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "run_test",
+    "Run the test suite",
+    {
+      // The SAME error class, re-reported at a shifting file:line:col taken
+      // from the call argument. Location varies; the diagnostic does not.
+      handler: { args ->
+        throw "foo.zig:" + to_string(args?.loc ?? "1:1") + ": error: expected type 'u8', found 'i32'"
+      },
+      parameters: {loc: {type: "string", description: "file position"}},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  tools = tool_define(
+    tools,
+    "apply_fix",
+    "Apply a corrective edit",
+    {
+      handler: { _args -> "edit applied" },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "edit", side_effect_level: "workspace_write"},
+    },
+  )
+  return tools
+}
+
+fn run_test_call(id, loc) {
+  return {text: "", tool_calls: [{id: id, name: "run_test", arguments: {loc: loc}}]}
+}
+
+fn apply_fix_call(id) {
+  return {text: "", tool_calls: [{id: id, name: "apply_fix", arguments: {}}]}
+}
+
+pipeline default() {
+  with_llm_script(
+    [
+      run_test_call("r1", "42:5"),
+      apply_fix_call("e1"),
+      run_test_call("r2", "99:1"),
+      apply_fix_call("e2"),
+      run_test_call("r3", "7:13"),
+      llm_text("Giving up. ##DONE##"),
+    ],
+    { ->
+      let session = "repair-thrash-loc-" + uuid()
+      let captured = agent_capture_events(
+        session,
+        fn() { return agent_loop(
+          "Make the failing test pass.",
+          nil,
+          {
+            provider: "mock",
+            tools: repair_tools(),
+            tool_format: "native",
+            loop_until_done: true,
+            max_iterations: 10,
+            session_id: session,
+            done_sentinel: "##DONE##",
+            stall_diagnostics: {
+              enabled: true,
+              repair_aware: true,
+              stuck_same_diagnostic_after: 2,
+              inject_feedback: true,
+              max_feedback: 1,
+            },
+          },
+        ) },
+      )
+      let stalls = events_of(captured.events, "agent_loop_stall_warning")
+      let repair_stalls = stalls.filter({ s -> s.warning.pattern == "stuck_same_diagnostic" })
+      __io_println(len(repair_stalls))
+      __io_println(repair_stalls[0].warning.pattern)
+    },
+  )
+}
