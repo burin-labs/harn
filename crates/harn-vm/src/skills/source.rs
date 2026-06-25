@@ -489,6 +489,7 @@ pub fn skill_entry_to_vm(skill: &Skill) -> crate::value::VmValue {
     }
     entry.put_opt_str("shell", skill.manifest.shell.as_deref());
     entry.put_opt_str("argument_hint", skill.manifest.argument_hint.as_deref());
+    entry.put_opt_str("targets", skill.manifest.targets.as_deref());
     entry.put_str("body", skill.body.as_str());
     if let Some(dir) = &skill.skill_dir {
         entry.put_str("skill_dir", dir.display().to_string());
@@ -567,6 +568,7 @@ pub fn skill_manifest_ref_to_vm(skill: &SkillManifestRef) -> crate::value::VmVal
     entry.put_opt_str("effort", skill.manifest.effort.as_deref());
     entry.put_opt_str("shell", skill.manifest.shell.as_deref());
     entry.put_opt_str("argument_hint", skill.manifest.argument_hint.as_deref());
+    entry.put_opt_str("targets", skill.manifest.targets.as_deref());
     entry.put_str("source", skill.layer.label());
     entry.put_opt_str("namespace", skill.namespace.as_deref());
     VmValue::dict(entry)

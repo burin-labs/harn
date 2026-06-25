@@ -85,6 +85,12 @@ pub struct SkillManifest {
     /// User-facing template hint for `$ARGUMENTS`.
     #[serde(default)]
     pub argument_hint: Option<String>,
+    /// Optional version/target constraint for version-aware grounding
+    /// (e.g. `targets: zig >=0.16`). Harn does not interpret this — it is
+    /// an opaque passthrough surfaced as skill metadata so hosts (Burin
+    /// #2965) can pick version-matched grounding cards.
+    #[serde(default)]
+    pub targets: Option<String>,
 }
 
 /// Outcome of parsing a SKILL.md frontmatter block.
@@ -116,6 +122,7 @@ const KNOWN_CANONICAL_KEYS: &[&str] = &[
     "trusted_endorsers",
     "shell",
     "argument_hint",
+    "targets",
 ];
 
 /// Split a SKILL.md file into (frontmatter_yaml, body).
@@ -321,6 +328,21 @@ mod tests {
             Some("<target-env>")
         );
         assert!(parsed.unknown_fields.is_empty());
+    }
+
+    #[test]
+    fn targets_is_recognized_not_unknown() {
+        // Burin #2965: language SKILL.md cards carry a `targets:` field for
+        // version-aware grounding. Harn must accept it (opaque passthrough)
+        // and not flag it as an unknown frontmatter field.
+        let yaml = "name: zig-grounding\nshort: Zig grounding card\ntargets: \"zig >=0.16\"\n";
+        let parsed = parse_frontmatter(yaml).expect("parse");
+        assert_eq!(parsed.manifest.targets.as_deref(), Some("zig >=0.16"));
+        assert!(
+            parsed.unknown_fields.is_empty(),
+            "targets must not surface as an unknown field: {:?}",
+            parsed.unknown_fields,
+        );
     }
 
     #[test]
