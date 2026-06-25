@@ -8,7 +8,11 @@
 // `continue",  "reasoning":`. The classifier must strip the junk so the
 // stored/emitted verdict is the clean token AND classification keys on the
 // real verdict (a mangled pass token must not read as a veto).
-import { __judge_classify_verdict, __judge_verdict_token } from "std/agent/judge_internals"
+import {
+  __judge_classify_verdict,
+  __judge_leading_word,
+  __judge_verdict_token,
+} from "std/agent/judge_internals"
 
 const DONE_TOKENS = ["done", "complete"]
 
@@ -43,16 +47,56 @@ pipeline test_mangled_pass_token_still_classifies_as_pass(task) {
   assert_eq(outcome.verdict, "done")
 }
 
-pipeline test_prose_verdict_without_json_junk_is_unchanged(task) {
-  // Multi-word prose verdicts carry signal; only JSON structural characters
-  // mark upstream mangling, so plain prose passes through verbatim.
+pipeline test_prose_verdict_keys_on_leading_word(task) {
+  // `__judge_verdict_token` still returns the whole prose verdict (only JSON
+  // structural chars mark upstream mangling). Classification, however, keys on
+  // the leading word: `"not done yet"` -> `"not"` -> still a veto, and the
+  // stored verdict carries the clean leading word.
   assert_eq(__judge_verdict_token("not done yet"), "not done yet")
   let outcome = __judge_classify_verdict("not done yet", DONE_TOKENS, [], "fallback")
   assert_eq(outcome.vetoed, true)
-  assert_eq(outcome.verdict, "not done yet")
+  assert_eq(outcome.verdict, "not")
+}
+
+pipeline test_leading_word_strips_decoration(task) {
+  // Cheap models decorate enum values. The leading word reduction strips
+  // trailing/leading punctuation and keeps only the first whitespace token.
+  assert_eq(__judge_leading_word("done."), "done")
+  assert_eq(__judge_leading_word("done!"), "done")
+  assert_eq(__judge_leading_word("done — all tests pass"), "done")
+  assert_eq(__judge_leading_word("(done)"), "done")
+  assert_eq(__judge_leading_word("**done**"), "done")
+  assert_eq(__judge_leading_word("not"), "not")
+}
+
+pipeline test_decorated_done_classifies_as_pass(task) {
+  // `"done."` (trailing period) must pass, not spuriously veto a correct
+  // completion.
+  let dot = __judge_classify_verdict("done.", DONE_TOKENS, [], "fallback")
+  assert_eq(dot.vetoed, false)
+  assert_eq(dot.verdict, "done")
+  let dash = __judge_classify_verdict("done — all tests pass", DONE_TOKENS, [], "fallback")
+  assert_eq(dash.vetoed, false)
+  assert_eq(dash.verdict, "done")
+}
+
+pipeline test_yes_complete_classifies_as_pass(task) {
+  // `"yes, complete"` -> JSON-junk cut at the comma -> `"yes"`. With "yes" in
+  // the allow-list it passes; the leading-word reduction keeps the token clean.
+  let outcome = __judge_classify_verdict("yes, complete", ["yes", "done"], [], "fallback")
+  assert_eq(outcome.vetoed, false)
+  assert_eq(outcome.verdict, "yes")
+}
+
+pipeline test_leading_not_still_vetoes(task) {
+  // A leading negation must always veto regardless of trailing decoration.
+  let outcome = __judge_classify_verdict("not done yet.", DONE_TOKENS, [], "fallback")
+  assert_eq(outcome.vetoed, true)
+  assert_eq(outcome.verdict, "not")
 }
 
 pipeline test_empty_and_nil_verdicts(task) {
   assert_eq(__judge_verdict_token(nil), "")
   assert_eq(__judge_verdict_token("\",,"), "")
+  assert_eq(__judge_leading_word(""), "")
 }

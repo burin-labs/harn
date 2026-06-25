@@ -121,7 +121,11 @@ fn __judge_invoke_structured(harness: Harness, judge_cfg, opts, payload) {
   }
   let result = checkpoint.data
   let {reasoning = "", next_step = ""} = result ?? {}
-  let done_verdicts = ["done", "pass", "passed", "safe", "true", "yes", "yield", "yield_to_user", "complete", "completed"]
+  // The done-judge prompt only ever asks for `done` or `continue`. A reflexive
+  // `"yes"` from a cheap model usually means "yes, keep going" (continue), and
+  // a bare `"true"` is just as ambiguous — classifying either as DONE
+  // terminates incomplete work. Both are dropped from the allow-list.
+  let done_verdicts = ["done", "pass", "passed", "safe", "yield", "yield_to_user", "complete", "completed"]
   let feedback_default = judge_cfg?.feedback_fallback ?? ""
   let outcome = __judge_classify_verdict(
     result?.verdict ?? "continue",
