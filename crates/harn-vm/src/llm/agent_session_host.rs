@@ -2063,6 +2063,10 @@ fn build_agent_event(
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false),
             reason: get_opt_string("reason"),
+            judge_error: payload_obj
+                .and_then(|m| m.get("judge_error"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
             on_veto: get_string("on_veto"),
             input_tokens: payload_obj
                 .and_then(|m| m.get("input_tokens"))

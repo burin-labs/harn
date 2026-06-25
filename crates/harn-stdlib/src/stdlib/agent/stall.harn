@@ -369,6 +369,44 @@ fn __agent_stall_is_context_window_error(text: string) -> bool {
 }
 
 /**
+ * Normalize an error text into a LOCATION-INVARIANT form before hashing it
+ * into a stall signature. The SAME compile/test diagnostic at a shifting
+ * `file:line:col` (the agent edits, the error re-fires one line lower) must
+ * collapse to one signature — otherwise the repeat streak resets every turn
+ * and the same-error trip never fires. Mirrors Burin's pipeline-side fix
+ * (#2953/#2954) and its `error_signature` / `completion_gate_strip_diag_location`
+ * normalizers: strip ANSI, lowercase, drop `path:line[:col]` coordinates,
+ * bare `line N` / `column N` refs, and transient sandbox paths, then collapse
+ * whitespace. Deterministic pure transform — no clock, no LLM.
+ *
+ * We intentionally do NOT strip every bare number: distinguishing identity
+ * lives in numbers (error codes like `E0001`, type widths like `i32`,
+ * symbol/test names), and a blanket digit strip collapses GENUINELY DISTINCT
+ * diagnostics (`E0001` vs `E0002`) into one signature — that would falsely
+ * trip the same-error stall on a model that is making real progress through
+ * different errors. Only positional coordinates (`file:line:col`, `line N`,
+ * `column N`) shift between turns for the SAME diagnostic, so only those are
+ * normalized away.
+ */
+fn __agent_stall_normalize_error(text: string) -> string {
+  var s = lowercase(to_string(text ?? ""))
+  // Strip ANSI SGR escape sequences (color codes) so styled vs plain
+  // diagnostics hash identically.
+  s = regex_replace("\\u{1b}\\[[0-9;]*m", "", s)
+  // file:line[:col] coordinates -> single space, so the same error class at
+  // a different position collapses to one signature.
+  s = regex_replace("[^\\s:]+:[0-9]+(?::[0-9]+)?", " ", s)
+  // bare `line N` / `column N` / `col N` positional references.
+  s = regex_replace("\\b(?:line|col|column)\\s+[0-9]+\\b", " ", s)
+  // collapse transient sandbox/temp paths that shift between runs.
+  s = regex_replace("/tmp/[^\\s:]*", " ", s)
+  s = regex_replace("/var/folders/[^\\s:]*", " ", s)
+  // collapse whitespace.
+  s = trim(regex_replace("\\s+", " ", s))
+  return s
+}
+
+/**
  * Outcome of a dispatched result, normalized for the detector: one of
  * "ok" / "error" / "context_window", plus a byte-stable signature of the
  * observation payload (for "ok") or the error text (for "error").
@@ -382,7 +420,7 @@ fn __agent_stall_result_outcome(result) -> dict {
   if __agent_stall_is_context_window_error(error_text) {
     return {kind: "context_window", signature: "ctx"}
   }
-  return {kind: "error", signature: "err:" + sha256(error_text)}
+  return {kind: "error", signature: "err:" + sha256(__agent_stall_normalize_error(error_text))}
 }
 
 /**

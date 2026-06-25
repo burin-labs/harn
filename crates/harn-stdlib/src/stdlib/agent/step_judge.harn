@@ -90,10 +90,18 @@ fn __invoke(harness: Harness, judge_cfg, opts, payload) {
   if !checkpoint.ok {
     let fail_open = judge_cfg?.fail_open_on_error ?? judge_cfg?.fail_open ?? true
     if fail_open {
+      // Fail-open: the turn PROCEEDS (we deliberately do not block on the
+      // judge's own flakiness). But the swallow must be OBSERVABLE — a
+      // `verdict: "pass"` here means "the adversarial reviewer was
+      // UNAVAILABLE", not "the reviewer approved this turn". Carry a
+      // distinct `judge_error` flag and a `judge_unavailable` reason so
+      // telemetry (the emitted `step_judge_decision` event) can tell an
+      // inert review surface apart from a genuine pass.
       return {
         vetoed: false,
         skipped: true,
-        reason: "judge_error",
+        judge_error: true,
+        reason: "judge_unavailable",
         verdict: "pass",
         critique: "",
         reasoning: checkpoint.error,
@@ -168,6 +176,7 @@ fn __emit_decision(session_id, iteration, on_veto, verdict) {
       vetoed: verdict.vetoed,
       skipped: verdict?.skipped ?? false,
       reason: verdict?.reason,
+      judge_error: verdict?.judge_error ?? false,
       input_tokens: usage?.input_tokens ?? 0,
       output_tokens: usage?.output_tokens ?? 0,
       cost_usd: cost_est?.cost_usd ?? 0,
@@ -190,11 +199,14 @@ fn __emit_decision(session_id, iteration, on_veto, verdict) {
  * Skip-path returns `{vetoed: false, skipped: true, reason: ...}` so
  * the caller can treat skip and pass uniformly. Reasons:
  * `not_configured`, `max_attempts_reached`, `low_iteration_budget`,
- * `empty_response`, `stall_already_detected`, `judge_error` (when
- * fail_open). `skip_when_iterations_remaining` defaults to `1`, so a
- * configured step judge does not veto a turn when no regeneration turn
- * remains. Configured skip paths emit `step_judge_decision` with
- * `skipped: true`.
+ * `empty_response`, `stall_already_detected`, `judge_unavailable` (when
+ * the judge model errored and `fail_open` swallowed it). The
+ * `judge_unavailable` skip ALSO carries `judge_error: true` so a
+ * fail-open swallow is distinguishable from a genuine pass in telemetry —
+ * the turn still proceeds, but the adversarial-review surface was inert.
+ * `skip_when_iterations_remaining` defaults to `1`, so a configured step
+ * judge does not veto a turn when no regeneration turn remains. Configured
+ * skip paths emit `step_judge_decision` with `skipped: true`.
  *
  * @effects: [host]
  * @errors: []
