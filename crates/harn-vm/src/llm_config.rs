@@ -3741,7 +3741,9 @@ mod tests {
         let group_tiers: std::collections::BTreeSet<_> = config
             .models
             .values()
-            .filter(|m| m.equivalence_group.as_deref() == Some("openai-gpt-oss-120b") && !m.deprecated)
+            .filter(|m| {
+                m.equivalence_group.as_deref() == Some("openai-gpt-oss-120b") && !m.deprecated
+            })
             .map(|m| m.tier.clone())
             .collect();
         assert_eq!(
