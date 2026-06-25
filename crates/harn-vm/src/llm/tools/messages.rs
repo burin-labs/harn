@@ -172,7 +172,48 @@ pub(crate) fn normalize_tool_args(name: &str, args: &serde_json::Value) -> serde
         }
     }
 
+    // Strip a leaked tool-call heredoc wrapper from any string argument that is
+    // *entirely* a `<<TAG\n...\nTAG` heredoc. The model is taught the
+    // `content: <<EOF\n...\nEOF` envelope, then sometimes delivers the value
+    // through a channel that never ran the heredoc grammar — a native JSON
+    // string `"<<EOF\n...\nEOF"`, or chat-template/DSML markup — so the opener
+    // and closing sentinel leak verbatim into the written file (e.g. Zig:
+    // `expected type expression, found '<<'`). This is the single chokepoint
+    // every dispatched call passes through, so it covers native and text
+    // channels alike; `unwrap_fully_wrapping_heredoc` is strict enough to leave
+    // a value that merely contains `<<` (a shift operator, a real mid-file
+    // `<<EOF`) byte-identical.
+    for value in obj.values_mut() {
+        strip_wrapping_heredoc_in_place(value);
+    }
+
     let mut normalized = serde_json::Value::Object(obj);
     coerce_integer_like_tool_args(&mut normalized);
     normalized
+}
+
+/// Recursively unwrap a leaked, fully-wrapping `<<TAG\n...\nTAG` heredoc from
+/// every string leaf of a tool-argument value. Recurses into nested
+/// objects/arrays so a batched `ops: [{ new_body: "<<EOF\n...\nEOF" }]` (the
+/// shape weak models emit through the native/markup channels) is healed the same
+/// way a top-level `content` is. Non-string, non-container leaves are untouched.
+fn strip_wrapping_heredoc_in_place(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::String(text) => {
+            if let Some(unwrapped) = crate::llm::tools::unwrap_fully_wrapping_heredoc(text) {
+                *text = unwrapped;
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items.iter_mut() {
+                strip_wrapping_heredoc_in_place(item);
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for nested in map.values_mut() {
+                strip_wrapping_heredoc_in_place(nested);
+            }
+        }
+        _ => {}
+    }
 }

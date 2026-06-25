@@ -742,6 +742,52 @@ pub(super) fn skip_heredoc_body(src: &str, start: usize) -> Option<usize> {
     scan_heredoc(src, start).ok().map(|span| span.end)
 }
 
+/// Unwrap a string value that is *entirely* one well-formed `<<TAG\n...\nTAG`
+/// heredoc, returning its body. Returns `None` for any value that is not a
+/// single fully-wrapping heredoc (the common case), so callers can leave the
+/// value byte-identical.
+///
+/// This is the defense against a heredoc leaking into a tool argument through a
+/// channel that never ran the heredoc grammar: the model is taught the
+/// `content: <<EOF\n...\nEOF` tool-call envelope, then (a) emits the value as a
+/// native JSON string `"<<EOF\n...\nEOF"`, or (b) nests it inside chat-template
+/// `<parameter=content><<EOF\n...\nEOF</parameter>` / DSML markup. In both cases
+/// the `<<TAG` opener and closing sentinel are the model's tool-call delimiters,
+/// not file content — but because the value arrived as a literal string, no
+/// parser stripped them, so the written file's first line becomes a literal
+/// `<<EOF` and the build fails (e.g. Zig: `expected type expression, found
+/// '<<'`). Unwrapping here makes the delimiters drop out exactly as they would
+/// have on the canonical bare-call heredoc path.
+///
+/// The match is deliberately strict to avoid corrupting a legitimate value that
+/// merely *contains* a `<<` (a shift operator, a merge-conflict marker, a bash
+/// `<<EOF` mid-file): the value must, after trimming surrounding whitespace,
+/// begin with a `<<TAG` opener AND have the heredoc's closing sentinel consume
+/// the entire remaining value. A heredoc that closes early (more content after
+/// the sentinel) is left untouched, because that trailing content would be lost.
+pub(crate) fn unwrap_fully_wrapping_heredoc(value: &str) -> Option<String> {
+    let trimmed = value.trim_start();
+    let lead = value.len() - trimmed.len();
+    // Cheap reject: a fully-wrapping heredoc must START with the `<<` opener.
+    if !trimmed.starts_with("<<") {
+        return None;
+    }
+    let span = scan_heredoc(value, lead).ok()?;
+    // The closing sentinel must consume the whole value (only trailing
+    // whitespace may follow). Anything else means the `<<TAG` was real content
+    // with a coincidental sentinel-looking line, or a partial wrap we must not
+    // silently truncate.
+    if !value[span.end..].trim().is_empty() {
+        return None;
+    }
+    let raw = &value[span.content.clone()];
+    if span.escaped {
+        Some(unescape_heredoc_body(raw))
+    } else {
+        Some(raw.to_string())
+    }
+}
+
 /// Outcome of searching for a tag while stepping over heredoc bodies.
 pub(super) enum CloseScan {
     /// The tag begins at this byte offset, outside any heredoc body.
