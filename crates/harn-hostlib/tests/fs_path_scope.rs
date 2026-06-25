@@ -486,3 +486,141 @@ fn dict_field<'a>(value: &'a VmValue, key: &str) -> &'a VmValue {
         other => panic!("not a dict: {other:?}"),
     }
 }
+
+/// Regression for audit finding F5 (filesystem write/delete symlink-swap
+/// TOCTOU).
+///
+/// The scope check canonicalizes a *copy* of the path; the actual
+/// `write`/`remove_*` then ran on the raw path and followed a symlink at
+/// the final component at op time. An attacker with in-workspace write
+/// could plant a symlink at a check-passed path that points *outside* the
+/// roots, escaping the workspace on the subsequent write or delete.
+///
+/// A full race is impractical to drive deterministically, so this exercises
+/// the static guard two ways:
+///
+/// 1. An in-root symlink pointing *outside* — caught by the canonical
+///    scope check *and* the no-follow guard; the outside target must stay
+///    untouched.
+/// 2. An in-root symlink pointing to *another in-root* file — this passes
+///    the canonical scope check (its target is in-scope), so it isolates
+///    the new no-follow guard: the write must be refused / must not follow
+///    the link, leaving the link's in-root target unchanged. This is the
+///    case a swap-after-check would land on, made deterministic.
+///
+/// A normal in-root real-file write + overwrite + delete must still
+/// succeed (no regression).
+#[cfg(unix)]
+#[test]
+fn write_delete_reject_symlink_swap_escape() {
+    use std::os::unix::fs::symlink;
+
+    let root = TempDir::new().unwrap();
+    let outside = TempDir::new().unwrap();
+
+    // A real, secret file living outside the workspace roots.
+    let secret = outside.path().join("secret.txt");
+    fs::write(&secret, "original-secret\n").unwrap();
+
+    // A symlink *inside* the root whose target escapes to the outside file.
+    let evil_link = root.path().join("evil_link.txt");
+    symlink(&secret, &evil_link).unwrap();
+
+    let reg = registry();
+    let _guard = PolicyGuard::worktree(&[root.path()]);
+
+    // (1) Writing through the in-root → outside symlink must NOT clobber the
+    // outside file.
+    let write_res = call(
+        &reg,
+        "hostlib_tools_write_file",
+        &[
+            ("path", vm_string(&path_string(&evil_link))),
+            ("content", vm_string("attacker-payload\n")),
+        ],
+    );
+    assert!(
+        write_res.is_err(),
+        "write through an escaping symlink must be rejected, got {write_res:?}"
+    );
+    assert_eq!(
+        fs::read_to_string(&secret).unwrap(),
+        "original-secret\n",
+        "the outside target must not be modified through the symlink"
+    );
+
+    // Deleting through the in-root → outside symlink must NOT remove the
+    // outside file.
+    let delete_res = call(
+        &reg,
+        "hostlib_tools_delete_file",
+        &[("path", vm_string(&path_string(&evil_link)))],
+    );
+    assert!(
+        delete_res.is_err(),
+        "delete through an escaping symlink must be rejected, got {delete_res:?}"
+    );
+    assert!(
+        secret.exists(),
+        "the outside target must not be deleted through the symlink"
+    );
+
+    // (2) Isolate the no-follow guard: a symlink whose target is *in-root*
+    // passes the canonical scope check, so only the new guard can stop the
+    // write from following it.
+    let in_root_target = root.path().join("victim.txt");
+    fs::write(&in_root_target, "victim-original\n").unwrap();
+    let benign_link = root.path().join("benign_link.txt");
+    symlink(&in_root_target, &benign_link).unwrap();
+    let write_through_in_root = call(
+        &reg,
+        "hostlib_tools_write_file",
+        &[
+            ("path", vm_string(&path_string(&benign_link))),
+            ("content", vm_string("payload-via-symlink\n")),
+        ],
+    );
+    assert!(
+        write_through_in_root.is_err(),
+        "the no-follow guard must refuse to write through a symlink-final path, got \
+         {write_through_in_root:?}"
+    );
+    assert_eq!(
+        fs::read_to_string(&in_root_target).unwrap(),
+        "victim-original\n",
+        "the symlink's target must not be modified by writing through the link"
+    );
+
+    // No regression: a normal in-root real file still writes, overwrites,
+    // and deletes cleanly.
+    let real = root.path().join("real.txt");
+    call(
+        &reg,
+        "hostlib_tools_write_file",
+        &[
+            ("path", vm_string(&path_string(&real))),
+            ("content", vm_string("v1\n")),
+        ],
+    )
+    .expect("in-root real-file create succeeds");
+    assert_eq!(fs::read_to_string(&real).unwrap(), "v1\n");
+
+    call(
+        &reg,
+        "hostlib_tools_write_file",
+        &[
+            ("path", vm_string(&path_string(&real))),
+            ("content", vm_string("v2\n")),
+        ],
+    )
+    .expect("in-root real-file overwrite succeeds");
+    assert_eq!(fs::read_to_string(&real).unwrap(), "v2\n");
+
+    call(
+        &reg,
+        "hostlib_tools_delete_file",
+        &[("path", vm_string(&path_string(&real)))],
+    )
+    .expect("in-root real-file delete succeeds");
+    assert!(!real.exists());
+}

@@ -4,8 +4,8 @@
 //! Shapes are locked by `schemas/tools/{read_file,write_file,delete_file,list_directory}.{request,response}.json`.
 
 use std::fs as stdfs;
-use std::io::{Read, Seek};
-use std::path::PathBuf;
+use std::io::{Read, Seek, Write};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use base64::Engine;
@@ -180,10 +180,7 @@ pub(super) fn write_file(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         }
     }
 
-    stdfs::write(&path, &bytes).map_err(|err| HostlibError::Backend {
-        builtin: WRITE_FILE_BUILTIN,
-        message: format!("write `{path_str}`: {err}"),
-    })?;
+    write_no_follow(WRITE_FILE_BUILTIN, &path, &path_str, &bytes)?;
 
     Ok(build_dict([
         ("path", str_value(&path_str)),
@@ -229,6 +226,19 @@ pub(super) fn delete_file(args: &[VmValue]) -> Result<VmValue, HostlibError> {
             });
         }
     };
+
+    // Defend against a symlink-swap TOCTOU: `enforce_path_scope` above
+    // canonicalized the path through any symlinks and validated where it
+    // *resolved*, but the actual `remove_*` runs on the raw path. If the
+    // final component is a symlink whose target now escapes the workspace
+    // roots, removing through it (notably `remove_dir_all`, which descends
+    // into a symlinked directory's real target) could delete out-of-root
+    // files. Re-validate the link target under the policy and reject an
+    // escaping symlink rather than following it. Removing an in-scope
+    // symlink, or a real file/dir, stays allowed.
+    if metadata.file_type().is_symlink() {
+        reject_escaping_symlink(DELETE_FILE_BUILTIN, &path, &path_str, FsAccess::Delete)?;
+    }
 
     // Capture the pre-image into any open snapshots before mutating disk
     // so a `session/restore_tool_call` can roll the delete back.
@@ -355,6 +365,122 @@ pub(super) fn list_directory(args: &[VmValue]) -> Result<VmValue, HostlibError> 
 
 fn file_size(metadata: &stdfs::Metadata) -> u64 {
     metadata.len()
+}
+
+/// Write `bytes` to `path` without ever following a symlink at the final
+/// path component.
+///
+/// `enforce_path_scope` validated where `path` *resolves* by canonicalizing
+/// a copy of it, but the subsequent disk write runs on the raw path and, by
+/// default, follows a symlink at write time. An attacker with in-workspace
+/// write access could swap the check-passed final component for a symlink
+/// pointing outside the allowed roots between the scope check and the write
+/// (a TOCTOU race), escaping the workspace.
+///
+/// On Unix we open with `O_NOFOLLOW`, which makes the kernel refuse to open
+/// the final component if it is a symlink — closing the race atomically, so
+/// the write targets the same inode the check observed (or fails). On other
+/// platforms we fall back to an `lstat` (no-follow) check on the final
+/// component before writing; this still rejects a symlink-final path,
+/// shrinking the race window to the gap between the `lstat` and the open
+/// (the OS sandbox layer remains the backstop there). Both paths keep
+/// behavior identical for the normal case: creating a new file and
+/// overwriting an existing real file inside the roots still succeed.
+fn write_no_follow(
+    builtin: &'static str,
+    path: &Path,
+    path_str: &str,
+    bytes: &[u8],
+) -> Result<(), HostlibError> {
+    let mut options = stdfs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        // libc::O_NOFOLLOW. Use the raw constant value so harn-hostlib does
+        // not need to take a direct `libc` dependency; the value is part of
+        // the stable Unix ABI across Linux and the BSDs/macOS.
+        #[cfg(target_os = "linux")]
+        const O_NOFOLLOW: i32 = 0x20000;
+        #[cfg(not(target_os = "linux"))]
+        const O_NOFOLLOW: i32 = 0x0100;
+        options.custom_flags(O_NOFOLLOW);
+    }
+
+    #[cfg(not(unix))]
+    {
+        // Cross-platform fallback: reject a symlink at the final component
+        // up front. lstat never follows the link, so this catches the swap
+        // without resolving it.
+        if let Ok(meta) = stdfs::symlink_metadata(path) {
+            if meta.file_type().is_symlink() {
+                return Err(HostlibError::SandboxViolation {
+                    builtin,
+                    path: path.display().to_string(),
+                    message: format!(
+                        "refusing to write `{path_str}`: final path component is a symlink \
+                         (potential workspace-escape via symlink swap)"
+                    ),
+                });
+            }
+        }
+    }
+
+    let mut file = options.open(path).map_err(|err| {
+        // On Unix an `O_NOFOLLOW` rejection of a symlink surfaces as ELOOP
+        // ("Too many levels of symbolic links"); report it as a sandbox
+        // violation rather than a generic backend error.
+        #[cfg(unix)]
+        if err.raw_os_error() == Some(40) {
+            return HostlibError::SandboxViolation {
+                builtin,
+                path: path.display().to_string(),
+                message: format!(
+                    "refusing to write `{path_str}`: final path component is a symlink \
+                     (potential workspace-escape via symlink swap)"
+                ),
+            };
+        }
+        HostlibError::Backend {
+            builtin,
+            message: format!("write `{path_str}`: {err}"),
+        }
+    })?;
+
+    file.write_all(bytes).map_err(|err| HostlibError::Backend {
+        builtin,
+        message: format!("write `{path_str}`: {err}"),
+    })
+}
+
+/// Reject deleting through a final-component symlink whose target escapes the
+/// active workspace roots.
+///
+/// `enforce_path_scope` canonicalized the path through the symlink and may
+/// have accepted it because the *target* was in-root at check time. Re-run
+/// the scope check on the link's resolved target so a swap to an
+/// out-of-root target is caught; if it now resolves outside the roots, the
+/// delete is refused. An in-scope symlink (or a real file/dir) is left for
+/// the caller to remove normally — `remove_file` unlinks a symlink itself
+/// without following it, so only the escaping case needs blocking.
+fn reject_escaping_symlink(
+    builtin: &'static str,
+    path: &Path,
+    path_str: &str,
+    access: FsAccess,
+) -> Result<(), HostlibError> {
+    // `enforce_path_scope` is a no-op when no restricted policy is active, so
+    // re-running it here re-derives the same verdict against the symlink's
+    // resolved target. If the target escapes the roots it now rejects.
+    enforce_path_scope(builtin, path, access).map_err(|_| HostlibError::SandboxViolation {
+        builtin,
+        path: path.display().to_string(),
+        message: format!(
+            "refusing to delete `{path_str}`: final path component is a symlink whose \
+             target escapes the workspace roots (potential symlink swap)"
+        ),
+    })
 }
 
 fn read_bytes(
