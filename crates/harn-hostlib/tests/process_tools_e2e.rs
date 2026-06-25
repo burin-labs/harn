@@ -89,6 +89,63 @@ fn real_run_command_echoes_stdout_and_reports_exit_zero() {
 }
 
 #[test]
+fn real_run_command_strips_secret_env_from_child() {
+    // Regression for the provider-key exfiltration finding: under the default
+    // `InheritClean` env mode (no caller-supplied `env`), the agent `run` tool
+    // spawns a child that inherits the parent environment, and that child's
+    // stdout is returned to the model. Secret-bearing vars must be stripped so
+    // `run({command: "env"})` can't surface provider keys / tokens.
+    //
+    // SAFETY: setting/removing process-wide env vars is not thread-safe in
+    // general, but these names are unique to this test and removed before it
+    // returns, so no sibling test in this binary observes them.
+    unsafe {
+        std::env::set_var("ANTHROPIC_API_KEY", "sk-test-anthropic");
+        std::env::set_var("GITHUB_TOKEN", "ghp_test_github");
+        std::env::set_var("HARN_E2E_BENIGN_VAR", "keep-me");
+    }
+
+    let mut req = dict();
+    req.insert("argv".into(), vlist_str(&["env"]));
+    let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
+
+    unsafe {
+        std::env::remove_var("ANTHROPIC_API_KEY");
+        std::env::remove_var("GITHUB_TOKEN");
+        std::env::remove_var("HARN_E2E_BENIGN_VAR");
+    }
+
+    assert_eq!(require_int(&resp, "exit_code"), 0);
+    let child_env = require_str(&resp, "stdout");
+    assert!(
+        !child_env.contains("sk-test-anthropic"),
+        "ANTHROPIC_API_KEY leaked into child env:\n{child_env}"
+    );
+    assert!(
+        !child_env.contains("ghp_test_github"),
+        "GITHUB_TOKEN leaked into child env:\n{child_env}"
+    );
+    // Secret var NAMES (not just values) must also be gone, and a benign var +
+    // PATH must survive so real builds/tests still work.
+    assert!(
+        !child_env.contains("ANTHROPIC_API_KEY"),
+        "ANTHROPIC_API_KEY name still present in child env:\n{child_env}"
+    );
+    assert!(
+        !child_env.contains("GITHUB_TOKEN"),
+        "GITHUB_TOKEN name still present in child env:\n{child_env}"
+    );
+    assert!(
+        child_env.contains("HARN_E2E_BENIGN_VAR"),
+        "benign env var was incorrectly stripped:\n{child_env}"
+    );
+    assert!(
+        child_env.lines().any(|line| line.starts_with("PATH=")),
+        "PATH must remain available to child:\n{child_env}"
+    );
+}
+
+#[test]
 fn real_run_command_kills_child_when_timeout_elapses() {
     // Smoke: the real `wait_with_timeout` should fire SIGKILL when the
     // child blocks past the deadline. Use a very short sleep so the test

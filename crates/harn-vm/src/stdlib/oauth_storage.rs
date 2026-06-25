@@ -553,6 +553,21 @@ fn write_file_entries(
                 tmp_path.display()
             ))
         })?;
+        // The envelope is AES-GCM sealed, but the on-disk file should still be
+        // owner-only so a wide umask (0644) can't leave it group/world-readable.
+        // Set the mode on the temp file before the rename so the final path is
+        // never observable at looser permissions.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            file.set_permissions(fs::Permissions::from_mode(0o600))
+                .map_err(|error| {
+                    VmError::Runtime(format!(
+                        "oauth storage: failed to set permissions on `{}`: {error}",
+                        tmp_path.display()
+                    ))
+                })?;
+        }
     }
     fs::rename(&tmp_path, path).map_err(|error| {
         VmError::Runtime(format!(
@@ -837,6 +852,28 @@ mod tests {
         let after = backend_get(&handle, "k").await.unwrap();
         assert!(matches!(after, VmValue::Nil));
         assert!(!path.exists());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn file_backend_writes_owner_only_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("tokens.bin");
+        let handle = match file_handle(path.to_str().unwrap(), b"correct-horse-battery-staple") {
+            VmValue::Dict(dict) => dict.as_ref().clone(),
+            other => panic!("expected dict handle, got {other:?}"),
+        };
+        backend_set(&handle, "k", &token_dict("super-secret"), None)
+            .await
+            .unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(
+            mode & 0o777,
+            0o600,
+            "expected token file mode 0o600, got {:o}",
+            mode & 0o777
+        );
     }
 
     #[tokio::test]
