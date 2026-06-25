@@ -106,8 +106,23 @@ fn generated_provider_config(source_dir: &Path) -> Result<GeneratedProviderConfi
     for path in &fragments {
         let fragment = fs::read_to_string(path)
             .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+        // Reject bare `key = value` lines that appear before the first table
+        // header in a model fragment. Fragments are concatenated as raw text, so
+        // any such leading key binds at runtime to the PREVIOUS fragment's last
+        // model table instead of this fragment's first model — silently
+        // mislabeling a model's tier/open_weight/strengths across the fragment
+        // boundary. Keep every model key inside an explicit `[models.X]` table so
+        // concatenation can never reattach it. Scoped to `60-models/`: other
+        // fragment dirs (defaults, routing, aliases) legitimately set root-level
+        // `ProvidersConfig` fields like `default_provider`.
+        let label = fragment_label(source_dir, path);
+        if is_model_fragment(&label) {
+            if let Some(error) = leading_bare_key_error(&label, &fragment) {
+                return Err(error);
+            }
+        }
         body.push_str("\n# --- source: ");
-        body.push_str(&fragment_label(source_dir, path));
+        body.push_str(&label);
         body.push_str(" ---\n");
         body.push_str(fragment.trim_end());
         body.push('\n');
@@ -200,4 +215,94 @@ fn fragment_label(source_dir: &Path, path: &Path) -> String {
         .unwrap_or(path)
         .to_string_lossy()
         .replace('\\', "/")
+}
+
+/// True when a fragment label names a `60-models/` model fragment, where bare
+/// keys are model metadata that must live inside a `[models.X]` table. Other
+/// source dirs (`00-base`, `20-routing`, `40-defaults`, ...) legitimately set
+/// root-level `ProvidersConfig` fields like `default_provider`, so the
+/// leading-bare-key guard does not apply to them.
+fn is_model_fragment(label: &str) -> bool {
+    label.starts_with("60-models/") || label.contains("/60-models/")
+}
+
+/// Return an error message when `fragment` has any bare `key = value` line
+/// before its first `[table]` header. Such a key has no table to belong to
+/// inside the fragment, so after the fragments are concatenated as raw text it
+/// silently attaches to the PREVIOUS fragment's last table — the leading-key
+/// bleed that mislabels a model across the fragment boundary. Comments and
+/// blank lines before the first table are fine; only assignment lines are
+/// rejected. Returns `None` when the fragment is clean.
+fn leading_bare_key_error(label: &str, fragment: &str) -> Option<String> {
+    for (line_number, raw) in fragment.lines().enumerate() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if line.starts_with('[') {
+            // Reached the first table header without seeing a bare key: clean.
+            return None;
+        }
+        // A non-comment, non-blank, non-header line before the first table.
+        // Only `key = value` assignments are the bleed hazard.
+        if line.contains('=') {
+            let key = line.split('=').next().unwrap_or(line).trim();
+            return Some(format!(
+                "provider catalog fragment {label} has a leading bare key `{key}` on line {} \
+                 before its first [table] header. Move it inside the model's `[models.X]` table: \
+                 a bare key before the first table binds to the PREVIOUS fragment's last model \
+                 after concatenation, silently mislabeling that model.",
+                line_number + 1
+            ));
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::leading_bare_key_error;
+
+    #[test]
+    fn rejects_leading_bare_key_before_first_table() {
+        let fragment = "\
+# a comment is fine
+tier = \"mid\"
+open_weight = true
+[models.\"x\"]
+name = \"X\"
+";
+        let error =
+            leading_bare_key_error("60-models/test.toml", fragment).expect("leading key rejected");
+        assert!(error.contains("leading bare key `tier`"), "got: {error}");
+        assert!(error.contains("line 2"), "should report the line: {error}");
+    }
+
+    #[test]
+    fn accepts_fragment_with_only_comments_before_first_table() {
+        let fragment = "\
+# header comment
+# another note
+
+[models.\"x\"]
+name = \"X\"
+tier = \"mid\"
+open_weight = true
+";
+        assert!(leading_bare_key_error("60-models/test.toml", fragment).is_none());
+    }
+
+    #[test]
+    fn accepts_keys_inside_tables() {
+        // Bare keys AFTER a table header belong to that table and are allowed.
+        let fragment = "\
+[models.\"x\"]
+name = \"X\"
+tier = \"mid\"
+[models.\"y\"]
+name = \"Y\"
+tier = \"frontier\"
+";
+        assert!(leading_bare_key_error("60-models/test.toml", fragment).is_none());
+    }
 }

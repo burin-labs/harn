@@ -53,8 +53,13 @@ pipeline test(task) {
     {role: "user", content: "Then update the diagnostics."},
   ]
   let llm_compacted = transcript_auto_compact(base_messages, {provider: "mock", keep_last: 1, token_threshold: 1})
-  __io_println(len(llm_compacted))
-  __io_println(llm_compacted[0].content.contains("auto-compacted"))
+  // transcript_auto_compact now returns { messages, archived, summary }; the
+  // archived count and summary come straight from the engine instead of being
+  // inferred from a length delta.
+  __io_println(len(llm_compacted.messages))
+  __io_println(llm_compacted.archived)
+  __io_println(llm_compacted.messages[0].content.contains("auto-compacted"))
+  __io_println(llm_compacted.summary.contains("auto-compacted"))
   let custom_compacted = transcript_auto_compact(
     base_messages,
     {
@@ -64,7 +69,7 @@ pipeline test(task) {
       compact_callback: { archived -> {summary: "custom compact " + to_string(len(archived))} },
     },
   )
-  __io_println(custom_compacted[0].content.contains("custom compact 2"))
+  __io_println(custom_compacted.messages[0].content.contains("custom compact 2"))
   let policy_compacted = transcript_auto_compact(
     base_messages,
     {
@@ -76,7 +81,8 @@ pipeline test(task) {
     },
   )
   __io_println(
-    policy_compacted[0].content.contains("policy compact preserve_test_failures failing test names"),
+    policy_compacted.messages[0].content
+      .contains("policy compact preserve_test_failures failing test names"),
   )
   let loop_compacted = agent_loop(
     "Inspect the workspace",

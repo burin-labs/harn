@@ -1752,11 +1752,16 @@ Compaction entrypoints accept a typed host/user instruction lane through
 ```harn
 import {compact_preserving_test_failures} from "std/agent/autocompact"
 
-let compacted = transcript_auto_compact(messages, {
+// Returns { messages, archived, summary }. Use `archived` (the engine's true
+// archived-message count) to tell whether compaction happened -- never infer
+// it from a length delta, since archiving one message and inserting one
+// summary leaves the length unchanged.
+let result = transcript_auto_compact(messages, {
   keep_last: 1,
   token_threshold: 1,
   policy: compact_preserving_test_failures({author: "host"})
 })
+let compacted = result.messages
 ```
 
 Omitting `extend_default_instructions` or setting it to `true` appends the

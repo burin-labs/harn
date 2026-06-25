@@ -163,18 +163,72 @@ pub(super) fn strip_thinking_tags(text: &str) -> std::borrow::Cow<'_, str> {
     if !text.contains("<think>") && !text.contains("</think>") {
         return std::borrow::Cow::Borrowed(text);
     }
-    let mut result = text.to_string();
-    while let Some(start) = result.find("<think>") {
-        if let Some(end) = result[start..].find("</think>") {
-            result.replace_range(start..start + end + "</think>".len(), "");
-        } else {
-            result.replace_range(start..start + "<think>".len(), "");
+    // Strip thinking blocks from the surrounding prose only. A `<think>` /
+    // `</think>` literal *inside* a quoted string argument or a `<<TAG ... TAG`
+    // heredoc body is file content (editing an HTML/Markdown/test/prompt file
+    // that mentions those tokens), not a leaked thinking channel — stripping it
+    // would silently corrupt the tool-call argument before it is parsed. Copy
+    // string spans and heredoc bodies through verbatim, applying the same
+    // content-vs-structure rule `strip_tool_call_wrappers` and `find_close_tag`
+    // use, and only excise `<think>...</think>` blocks that begin outside those
+    // spans.
+    let bytes = text.as_bytes();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    // When inside a thinking block, we drop everything (including string/heredoc
+    // bytes) up to the matching `</think>`: a tool call that lives inside the
+    // model's thinking channel is not a real call, so its content is discarded
+    // just as before. Outside a thinking block, strings/heredocs are preserved
+    // verbatim so a literal `<think>` in an argument is never mistaken for a
+    // channel marker.
+    let mut in_think = false;
+    while i < text.len() {
+        if in_think {
+            if text[i..].starts_with("</think>") {
+                i += "</think>".len();
+                in_think = false;
+            } else {
+                i += text[i..].chars().next().map_or(1, char::len_utf8);
+            }
+            continue;
         }
+        if matches!(bytes[i], b'"' | b'\'' | b'`') {
+            if let Some(after) = skip_string_span(text, i) {
+                out.push_str(&text[i..after]);
+                i = after;
+                continue;
+            }
+        }
+        if bytes[i] == b'<' && bytes.get(i + 1) == Some(&b'<') {
+            if let Some(after) = skip_heredoc_body(text, i) {
+                out.push_str(&text[i..after]);
+                i = after;
+                continue;
+            }
+        }
+        if text[i..].starts_with("<think>") {
+            // Only treat this as a real thinking block (and drop its body) when
+            // a matching `</think>` actually follows; an unterminated `<think>`
+            // strips just the marker and keeps the trailing content, matching
+            // the prior behavior so a real tool call after a stray open isn't
+            // swallowed.
+            i += "<think>".len();
+            if text[i..].contains("</think>") {
+                in_think = true;
+            }
+            continue;
+        }
+        if text[i..].starts_with("</think>") {
+            // A stray close marker with no matching open: drop the marker,
+            // matching the old behavior that removed dangling `</think>`.
+            i += "</think>".len();
+            continue;
+        }
+        let ch_len = text[i..].chars().next().map_or(1, char::len_utf8);
+        out.push_str(&text[i..i + ch_len]);
+        i += ch_len;
     }
-    while result.contains("</think>") {
-        result = result.replace("</think>", "");
-    }
-    std::borrow::Cow::Owned(result)
+    std::borrow::Cow::Owned(out)
 }
 
 /// Strip `<tool_call>`/`</tool_call>` (and the compact `<toolcall>` spelling)

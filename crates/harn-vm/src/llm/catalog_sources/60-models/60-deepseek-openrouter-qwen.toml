@@ -3,9 +3,6 @@
 # cap. `deepseek-chat`/`deepseek-reasoner` are retained as deprecated
 # aliases on V4-Flash (non-thinking) and V4-Flash thinking-mode
 # respectively; per provider notes they retire 2026-07-24.
-tier = "mid"
-open_weight = true
-strengths = ["vision", "speed"]
 [models."deepseek-v4-flash"]
 name = "DeepSeek V4 Flash"
 provider = "deepseek"
@@ -76,3 +73,7 @@ name = "Qwen3.5 9B"
 provider = "openrouter"
 context_window = 131072
 capabilities = ["tools", "streaming"]
+# Self-described metadata; previously relied on cross-fragment leading-key bleed.
+tier = "small"
+open_weight = true
+strengths = ["cheap", "speed"]

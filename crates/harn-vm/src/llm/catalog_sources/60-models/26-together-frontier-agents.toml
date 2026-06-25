@@ -2,10 +2,6 @@
 # `GET /v1/models`. Keep rows here when Harn supports the provider but the
 # model is absent from direct-provider catalogs.
 
-tier = "frontier"
-open_weight = false
-strengths = ["agentic", "coding", "long_context", "tool_use", "reasoning"]
-complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "deepseek", "kimi"]
 [models."Qwen/Qwen3.7-Max"]
 name = "Qwen3.7 Max (Together)"
 provider = "together"
@@ -56,3 +52,8 @@ provider = "together"
 context_window = 196608
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.30, output_per_mtok = 1.20, cache_read_per_mtok = 0.06 }
+# Self-described metadata (matches the minimax-m2.7 equivalence group);
+# previously relied on cross-fragment leading-key bleed.
+tier = "frontier"
+open_weight = true
+strengths = ["speed", "coding", "agentic", "tool_use", "reasoning", "long_context"]

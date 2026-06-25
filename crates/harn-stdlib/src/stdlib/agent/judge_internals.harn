@@ -67,6 +67,47 @@ pub fn __judge_verdict_token(raw_verdict) {
 }
 
 /**
+ * Punctuation that cheap models hang off the leading verdict word
+ * (`"done."`, `"done!"`, `"pass:"`, `"(done)"`, quotes/asterisks from
+ * markdown emphasis). Stripped from both ends of the leading token before
+ * the allow-list compare so a decorated `done` still classifies as DONE.
+ */
+const __JUDGE_TOKEN_PUNCT = ".,;:!?\"'`*_-)("
+
+/**
+ * Reduce a normalized verdict to its leading whitespace-delimited word with
+ * surrounding punctuation stripped. Cheap models decorate enum values
+ * (`"done."`, `"yes, complete"`, `"done — all tests pass"`); the verdict's
+ * *intent* is its first word, so classification keys on that word instead of
+ * requiring whole-string equality. `"not done yet"` reduces to `"not"`
+ * (still a veto), while `"done."` reduces to `"done"` (a pass).
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ * @example: __judge_leading_word("done.")
+ */
+pub fn __judge_leading_word(normalized) {
+  var first = ""
+  for piece in normalized.split(" ") {
+    if first == "" && trim(piece) != "" {
+      first = trim(piece)
+    }
+  }
+  // Strip leading punctuation.
+  var start = 0
+  while start < len(first) && __JUDGE_TOKEN_PUNCT.contains(first.char_at(start)) {
+    start = start + 1
+  }
+  // Strip trailing punctuation.
+  var stop = len(first)
+  while stop > start && __JUDGE_TOKEN_PUNCT.contains(first.char_at(stop - 1)) {
+    stop = stop - 1
+  }
+  return first[start:stop]
+}
+
+/**
  * Classify a raw verdict string against an allow-list of pass tokens and
  * compose the `{vetoed, feedback?}` outcome. `feedback_candidates` is
  * tried in order: the first non-nil, non-empty entry wins. Falls back
@@ -74,9 +115,10 @@ pub fn __judge_verdict_token(raw_verdict) {
  *
  * Used by `agent_step_judge` (pass tokens like "pass"/"yes"/"approve") and
  * by `agent_verify_or_continue` (pass tokens like "done"/"complete").
- * The raw verdict is normalized through `__judge_verdict_token` first, so
- * a verdict that captured trailing JSON junk still classifies correctly
- * and the stored/emitted `verdict` field carries the clean token.
+ * The raw verdict is normalized through `__judge_verdict_token` first, then
+ * reduced to its leading word so a decorated enum value (`"done."`,
+ * `"done — all tests pass"`) still classifies. The stored/emitted `verdict`
+ * field carries the clean leading word.
  *
  * @effects: []
  * @errors: []
@@ -84,7 +126,7 @@ pub fn __judge_verdict_token(raw_verdict) {
  * @example: __judge_classify_verdict("pass", ["pass", "yes"], [critique], default)
  */
 pub fn __judge_classify_verdict(raw_verdict, pass_tokens, feedback_candidates, feedback_default) {
-  let normalized = __judge_verdict_token(raw_verdict)
+  let normalized = __judge_leading_word(__judge_verdict_token(raw_verdict))
   if contains(pass_tokens, normalized) {
     return {vetoed: false, verdict: normalized}
   }

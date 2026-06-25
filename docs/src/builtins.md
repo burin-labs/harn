@@ -1896,7 +1896,7 @@ llm_mock_clear()
 | `transcript.clear_reminders(transcript, selector)` | transcript: dict, selector: dict | dict | Return `{transcript, removed_count}` after removing pending reminders selected by `id`, `tag`, or `dedupe_key`; multiple selectors are combined with AND semantics. |
 | `transcript_summarize(transcript, options?)` | transcript: dict, options: dict | transcript | Summarize and compact a transcript via `llm_call` |
 | `transcript_compact(transcript, options?)` | transcript: dict, options: dict | transcript | Compact a transcript with the runtime compaction engine, preserving durable artifacts and compaction events. Pending reminders are TTL-processed and deduped before compaction; only `preserve_on_compact: true` reminders survive verbatim. `strategy: "custom"` requires `custom_compactor`, a closure called with `(messages, reminders)` that returns the replacement transcript state |
-| `transcript_auto_compact(messages, options?)` | messages: list, options: dict | list | Apply the agent-loop compaction pipeline to a message list using `llm`, `truncate`, or `custom` strategy |
+| `transcript_auto_compact(messages, options?)` | messages: list, options: dict | dict | Apply the agent-loop compaction pipeline to a message list using `llm`, `truncate`, or `custom` strategy; returns `{ messages, archived, summary }` |
 
 ### Provider configuration
 
@@ -2807,7 +2807,7 @@ Bare `llm_call(...)` does not fire reminder providers.
 | `estimate_tokens(messages)` | messages: list | int | Estimate token count for a message list (chars / 4 heuristic) |
 | `microcompact(text, max_chars?)` | text, max_chars (default 20000) | string | Snip oversized text, keeping head and tail with a marker |
 | `select_artifacts_adaptive(artifacts, policy)` | artifacts: list, policy: dict | list | Deduplicate, microcompact oversized artifacts, then select with token budget |
-| `transcript_auto_compact(messages, options?)` | messages: list, options: dict | list | Run the same transcript auto-compaction pipeline used by `agent_loop` |
+| `transcript_auto_compact(messages, options?)` | messages: list, options: dict | dict | Run the same transcript auto-compaction pipeline used by `agent_loop`; returns `{ messages, archived, summary }` |
 
 `std/context` also provides the host-neutral
 `harn.context_artifact.v1` envelope for durable repository context. Hosts use
@@ -3043,7 +3043,7 @@ and offline analysis.
 | `transcript_resume(transcript)` | transcript | transcript | Mark transcript active again and append an internal lifecycle event |
 | `transcript_compact(transcript, options?)` | transcript, options | transcript | Compact a transcript with the runtime compaction engine, including reminder TTL/dedupe/preserve handling and `strategy: "custom"` plus `custom_compactor(messages, reminders)` |
 | `transcript_summarize(transcript, options?)` | transcript, options | transcript | Compact via LLM-generated summary |
-| `transcript_auto_compact(messages, options?)` | messages, options | list | Apply the agent-loop compaction pipeline to a message list |
+| `transcript_auto_compact(messages, options?)` | messages, options | dict | Apply the agent-loop compaction pipeline to a message list; returns `{ messages, archived, summary }` |
 | `transcript_render_visible(transcript)` | transcript | string | Render only public/human-visible messages |
 | `transcript_render_full(transcript)` | transcript | string | Render the full execution history |
 

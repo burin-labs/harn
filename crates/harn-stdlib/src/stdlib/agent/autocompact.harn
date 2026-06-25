@@ -196,21 +196,6 @@ fn __compact_options(opts, engine_strategy, keep_last) {
   return compact_opts
 }
 
-fn __auto_compact_summary(before, after) {
-  if len(after) == 0 || len(before) == len(after) {
-    return ""
-  }
-  let head = after[0]
-  if type_of(head) != "dict" {
-    return ""
-  }
-  let {role = "", content = ""} = head ?? {}
-  if role != "user" || type_of(content) != "string" {
-    return ""
-  }
-  return content
-}
-
 fn __compaction_enabled(opts) {
   let auto_cfg = opts?.auto_compact
   let policy_cfg = opts?.compaction
@@ -413,13 +398,16 @@ pub fn agent_autocompact_if_needed(session, opts) {
   if pre_control?.control == "block" {
     return nil
   }
-  let compacted = transcript_auto_compact(messages, compact_opts)
-  let summary = __auto_compact_summary(messages, compacted)
-  let archived = if summary != "" {
-    len(messages) - len(compacted) + 1
-  } else {
-    0
-  }
+  let compact_result = transcript_auto_compact(messages, compact_opts)
+  let compacted = compact_result.messages
+  // Trust the engine's archived count, not a length delta: when exactly one
+  // message is archived and one summary is inserted, len(before) == len(after),
+  // so inferring "did compaction happen?" from the lengths discards a real
+  // compaction. `archived == 0` means the engine did nothing. The engine also
+  // returns the summary text it inserted (its index depends on keep_first), so
+  // we no longer reverse-engineer it from messages[0].
+  let archived = compact_result.archived
+  let summary = compact_result.summary
   if archived > 0 {
     __host_agent_session_replace_messages(session.session_id, compacted, summary)
     let metadata = {
@@ -514,13 +502,14 @@ pub fn agent_emergency_compact(session, opts, attempt) {
     estimated_tokens_before: estimate_tokens(messages),
   }
   __host_fire_session_hook("pre_compact", pre_payload)
-  let compacted = transcript_auto_compact(messages, compact_opts)
-  let summary = __auto_compact_summary(messages, compacted)
-  let archived = if summary != "" {
-    len(messages) - len(compacted) + 1
-  } else {
-    0
-  }
+  let compact_result = transcript_auto_compact(messages, compact_opts)
+  let compacted = compact_result.messages
+  // Use the engine's true archived count. A length-delta heuristic reads an
+  // archive-exactly-one emergency compaction as archived == 0, which the agent
+  // loop treats as terminal/irreducible context_overflow and gives up on a
+  // RECOVERABLE overflow. The engine also returns the inserted summary text.
+  let archived = compact_result.archived
+  let summary = compact_result.summary
   if archived > 0 {
     __host_agent_session_replace_messages(session.session_id, compacted, summary)
     let metadata = {

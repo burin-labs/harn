@@ -1941,14 +1941,16 @@ api_dialect = "openai_chat"
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60, cache_read_per_mtok = 0.015 }
 architecture = { parameter_count_b = 119.0, active_parameter_count_b = 6.5, moe = true, license = "Apache-2.0", source_url = "https://docs.mistral.ai/models/model-cards/mistral-small-4-0-26-03", last_verified = "2026-06-05" }
+# Self-described metadata (matches the mistral-small-4-2603 equivalence group);
+# previously relied on cross-fragment leading-key bleed.
+tier = "mid"
+open_weight = true
+strengths = ["cheap", "coding", "speed", "tool_use", "long_context"]
 
 # --- source: 60-models/20-open-weight-openrouter.toml ---
 # Open-weight executor candidates (<$2/Mtok with function calling). Use
 # these via OpenRouter or Fireworks for fast secondary-model dispatch.
 # Pricing snapshot 2026-05 from OpenRouter / Artificial Analysis.
-tier = "mid"
-open_weight = true
-strengths = ["cheap", "coding", "speed"]
 [models."qwen/qwen3-coder"]
 name = "Qwen3 Coder 480B A35B"
 provider = "openrouter"
@@ -2020,15 +2022,22 @@ api_dialect = "openai_chat"
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60 }
 architecture = { parameter_count_b = 117.0, active_parameter_count_b = 5.1, moe = true, license = "Apache-2.0", source_url = "https://developers.openai.com/api/docs/models/gpt-oss-120b", last_verified = "2026-06-05" }
+# Explicit metadata so this row is self-described. It was previously the last
+# model in this fragment with no inline tier/open_weight/strengths, so the next
+# fragment's (now-removed) leading bare keys bled in and mislabeled it as
+# `open_weight = false` with a spurious `vision` strength. GPT-OSS 120B is
+# Apache-2.0 (open weight) and text-only; it is Burin's cheap coding executor.
+# `tier`/`open_weight`/`strengths` match the rest of the openai-gpt-oss-120b
+# equivalence group (the validator requires one tier per logical model — the
+# conservative shared baseline is `frontier`).
+tier = "frontier"
+open_weight = true
+strengths = ["cheap", "coding", "tool_use", "reasoning"]
 
 # --- source: 60-models/25-openrouter-frontier-agents.toml ---
 # Current OpenRouter-hosted coding/agent models that are not direct provider
 # defaults. Pricing snapshots are from OpenRouter's live `/api/v1/models`.
 
-tier = "frontier"
-open_weight = false
-strengths = ["agentic", "coding", "long_context", "tool_use", "reasoning", "vision"]
-complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "deepseek", "kimi"]
 [models."qwen/qwen3.7-plus"]
 name = "Qwen3.7 Plus"
 provider = "openrouter"
@@ -2068,16 +2077,17 @@ provider = "openrouter"
 context_window = 256000
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.20, output_per_mtok = 1.15, cache_read_per_mtok = 0.04 }
+# Self-described metadata (matches the step-3.7-flash equivalence group);
+# previously relied on cross-fragment leading-key bleed.
+tier = "frontier"
+open_weight = false
+strengths = ["agentic", "coding", "long_context", "tool_use", "reasoning"]
 
 # --- source: 60-models/26-together-frontier-agents.toml ---
 # Current Together serverless frontier/agent routes observed through
 # `GET /v1/models`. Keep rows here when Harn supports the provider but the
 # model is absent from direct-provider catalogs.
 
-tier = "frontier"
-open_weight = false
-strengths = ["agentic", "coding", "long_context", "tool_use", "reasoning"]
-complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "deepseek", "kimi"]
 [models."Qwen/Qwen3.7-Max"]
 name = "Qwen3.7 Max (Together)"
 provider = "together"
@@ -2128,6 +2138,11 @@ provider = "together"
 context_window = 196608
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.30, output_per_mtok = 1.20, cache_read_per_mtok = 0.06 }
+# Self-described metadata (matches the minimax-m2.7 equivalence group);
+# previously relied on cross-fragment leading-key bleed.
+tier = "frontier"
+open_weight = true
+strengths = ["speed", "coding", "agentic", "tool_use", "reasoning", "long_context"]
 
 # --- source: 60-models/30-cerebras.toml ---
 # Cerebras-hosted open-weight models. Serverless rows mirror
@@ -2141,9 +2156,6 @@ pricing = { input_per_mtok = 0.30, output_per_mtok = 1.20, cache_read_per_mtok =
 # the raw model name). Users routing via `model: "cerebras/<name>"` get
 # the slash-prefixed selector stripped by `normalize_model_id` while
 # `infer_provider` routes them to this provider.
-tier = "mid"
-open_weight = true
-strengths = ["cheap", "tool_use"]
 [models."gpt-oss-120b"]
 name = "GPT-OSS 120B (Cerebras)"
 provider = "cerebras"
@@ -2177,6 +2189,11 @@ pricing = { input_per_mtok = 0.85, output_per_mtok = 1.20 }
 availability = "dedicated"
 deprecated = true
 deprecation_note = "Cerebras no longer returns this model from public discovery; use a provisioned dedicated endpoint alias if your organization still serves these weights."
+# Self-described metadata; previously relied on cross-fragment leading-key
+# bleed. Deprecated legacy route.
+tier = "mid"
+open_weight = true
+strengths = ["tool_use"]
 
 # --- source: 60-models/40-minimax.toml ---
 # MiniMax family ─ pricing pages:
@@ -2200,9 +2217,6 @@ deprecation_note = "Cerebras no longer returns this model from public discovery;
 # Tool calls + thinking-mode are supported (release notes call out
 # "agentic harness" support); structured output is delimited (no native
 # JSON schema mode), and prompt caching is hit-priced at 20% of input.
-tier = "mid"
-open_weight = true
-strengths = ["speed", "tool_use"]
 [models."MiniMax-M3"]
 name = "MiniMax M3"
 provider = "minimax"
@@ -2307,14 +2321,15 @@ provider = "openrouter"
 context_window = 204800
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 0.33, output_per_mtok = 1.20 }
+# Self-described metadata; previously relied on cross-fragment leading-key bleed.
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "reasoning"]
 
 # --- source: 60-models/50-zai.toml ---
 # Z.AI GLM-5 family. GLM-5.2 is the current 1M-context open-weight flagship;
 # GLM-5.1 / GLM-5 are kept for pinned callers. Direct Z.AI tariff via the
 # OpenAI-compatible /v1 endpoint. OpenRouter mirrors live below.
-tier = "mid"
-open_weight = true
-strengths = ["coding", "agentic", "cheap"]
 [models."glm-5"]
 name = "GLM 5"
 provider = "zai"
@@ -2381,6 +2396,10 @@ provider = "openrouter"
 context_window = 202752
 capabilities = ["tools", "streaming", "vision"]
 pricing = { input_per_mtok = 1.20, output_per_mtok = 4.00 }
+# Self-described metadata; previously relied on cross-fragment leading-key bleed.
+tier = "frontier"
+open_weight = true
+strengths = ["vision", "coding", "agentic"]
 
 # --- source: 60-models/60-deepseek-openrouter-qwen.toml ---
 # DeepSeek V4 family ─ pricing pages: api-docs.deepseek.com/quick_start/pricing.
@@ -2388,9 +2407,6 @@ pricing = { input_per_mtok = 1.20, output_per_mtok = 4.00 }
 # cap. `deepseek-chat`/`deepseek-reasoner` are retained as deprecated
 # aliases on V4-Flash (non-thinking) and V4-Flash thinking-mode
 # respectively; per provider notes they retire 2026-07-24.
-tier = "mid"
-open_weight = true
-strengths = ["vision", "speed"]
 [models."deepseek-v4-flash"]
 name = "DeepSeek V4 Flash"
 provider = "deepseek"
@@ -2461,14 +2477,15 @@ name = "Qwen3.5 9B"
 provider = "openrouter"
 context_window = 131072
 capabilities = ["tools", "streaming"]
+# Self-described metadata; previously relied on cross-fragment leading-key bleed.
+tier = "small"
+open_weight = true
+strengths = ["cheap", "speed"]
 
 # --- source: 60-models/70-local-ollama.toml ---
 # Ollama / local models — no `pricing` (free); context_window reflects
 # model card ceiling. `runtime_context_window` caps what Harn will
 # actually feed the runtime (host memory budget).
-tier = "small"
-open_weight = true
-strengths = ["cheap", "speed"]
 [models."llama3.2"]
 name = "Llama 3.2"
 provider = "ollama"
@@ -2532,12 +2549,13 @@ context_window = 262144
 runtime_context_window = 32768
 stream_timeout = 600.0
 capabilities = ["tools", "streaming"]
-
-# --- source: 60-models/80-local-runtimes.toml ---
-# llama.cpp — Unsloth Dynamic 2.0 GGUF served by llama-server.
+# Self-described metadata; previously relied on cross-fragment leading-key bleed.
 tier = "mid"
 open_weight = true
 strengths = ["coding", "agentic"]
+
+# --- source: 60-models/80-local-runtimes.toml ---
+# llama.cpp — Unsloth Dynamic 2.0 GGUF served by llama-server.
 [models."qwen3.6-35b-a3b-ud-q4-k-xl"]
 name = "Qwen3.6 35B (Unsloth Q4_K_XL, llama.cpp)"
 provider = "llamacpp"

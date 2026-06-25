@@ -1,10 +1,6 @@
 # Current OpenRouter-hosted coding/agent models that are not direct provider
 # defaults. Pricing snapshots are from OpenRouter's live `/api/v1/models`.
 
-tier = "frontier"
-open_weight = false
-strengths = ["agentic", "coding", "long_context", "tool_use", "reasoning", "vision"]
-complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "deepseek", "kimi"]
 [models."qwen/qwen3.7-plus"]
 name = "Qwen3.7 Plus"
 provider = "openrouter"
@@ -44,3 +40,8 @@ provider = "openrouter"
 context_window = 256000
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.20, output_per_mtok = 1.15, cache_read_per_mtok = 0.04 }
+# Self-described metadata (matches the step-3.7-flash equivalence group);
+# previously relied on cross-fragment leading-key bleed.
+tier = "frontier"
+open_weight = false
+strengths = ["agentic", "coding", "long_context", "tool_use", "reasoning"]

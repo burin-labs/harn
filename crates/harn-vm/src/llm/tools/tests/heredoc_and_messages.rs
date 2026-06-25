@@ -1477,3 +1477,59 @@ fn heredoc_escaped_body_unterminated_errors() {
         "unterminated escaped heredoc must surface a parse error"
     );
 }
+
+#[test]
+fn thinking_tags_inside_arguments_round_trip_verbatim() {
+    // A tool call that legitimately edits a file mentioning `<think>` /
+    // `</think>` — inside a heredoc body and inside a quoted string argument —
+    // must keep those bytes verbatim. The thinking-tag strip is content-aware:
+    // it only removes a real `<think>...</think>` block in the surrounding
+    // prose, never bytes inside a string or heredoc argument.
+    let tools = sample_tool_registry();
+    let text = concat!(
+        "<think>I should write a file documenting the think tags.</think>\n",
+        "edit({\n",
+        "    action: \"create\",\n",
+        "    path: \"doc.md\",\n",
+        "    title: \"use <think> and </think> markers\",\n",
+        "    content: <<EOF\n",
+        "Models emit <think>reasoning</think> on the thinking channel.\n",
+        "Keep the </think> close tag intact in docs.\n",
+        "EOF\n",
+        "})",
+    );
+    let result = parse_bare_calls_in_body(text, Some(&tools));
+    assert_eq!(
+        result.calls.len(),
+        1,
+        "should parse one call, errors: {:?}",
+        result.errors
+    );
+    let args = &result.calls[0]["arguments"];
+
+    // The quoted string argument keeps both tags verbatim.
+    let title = args["title"].as_str().expect("title is a string");
+    assert_eq!(
+        title, "use <think> and </think> markers",
+        "string argument must preserve <think>/</think> bytes verbatim: {title}"
+    );
+
+    // The heredoc body keeps both tags verbatim.
+    let content = args["content"].as_str().expect("content is a string");
+    assert!(
+        content.contains("<think>reasoning</think>"),
+        "heredoc body must preserve inline <think>...</think>: {content}"
+    );
+    assert!(
+        content.contains("Keep the </think> close tag intact"),
+        "heredoc body must preserve a standalone </think>: {content}"
+    );
+
+    // The surrounding-prose thinking block was still stripped: its inner text
+    // must not survive into any parsed value or the visible prose.
+    assert!(
+        !result.prose.contains("I should write a file documenting"),
+        "surrounding-prose <think> block must be stripped from prose: {:?}",
+        result.prose
+    );
+}

@@ -1,9 +1,6 @@
 # Z.AI GLM-5 family. GLM-5.2 is the current 1M-context open-weight flagship;
 # GLM-5.1 / GLM-5 are kept for pinned callers. Direct Z.AI tariff via the
 # OpenAI-compatible /v1 endpoint. OpenRouter mirrors live below.
-tier = "mid"
-open_weight = true
-strengths = ["coding", "agentic", "cheap"]
 [models."glm-5"]
 name = "GLM 5"
 provider = "zai"
@@ -70,3 +67,7 @@ provider = "openrouter"
 context_window = 202752
 capabilities = ["tools", "streaming", "vision"]
 pricing = { input_per_mtok = 1.20, output_per_mtok = 4.00 }
+# Self-described metadata; previously relied on cross-fragment leading-key bleed.
+tier = "frontier"
+open_weight = true
+strengths = ["vision", "coding", "agentic"]
