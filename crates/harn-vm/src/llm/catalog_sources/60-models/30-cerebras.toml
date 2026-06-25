@@ -9,9 +9,6 @@
 # the raw model name). Users routing via `model: "cerebras/<name>"` get
 # the slash-prefixed selector stripped by `normalize_model_id` while
 # `infer_provider` routes them to this provider.
-tier = "mid"
-open_weight = true
-strengths = ["cheap", "tool_use"]
 [models."gpt-oss-120b"]
 name = "GPT-OSS 120B (Cerebras)"
 provider = "cerebras"
@@ -45,4 +42,9 @@ pricing = { input_per_mtok = 0.85, output_per_mtok = 1.20 }
 availability = "dedicated"
 deprecated = true
 deprecation_note = "Cerebras no longer returns this model from public discovery; use a provisioned dedicated endpoint alias if your organization still serves these weights."
+# Self-described metadata; previously relied on cross-fragment leading-key
+# bleed. Deprecated legacy route.
+tier = "mid"
+open_weight = true
+strengths = ["tool_use"]
 

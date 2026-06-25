@@ -1,9 +1,6 @@
 # Open-weight executor candidates (<$2/Mtok with function calling). Use
 # these via OpenRouter or Fireworks for fast secondary-model dispatch.
 # Pricing snapshot 2026-05 from OpenRouter / Artificial Analysis.
-tier = "mid"
-open_weight = true
-strengths = ["cheap", "coding", "speed"]
 [models."qwen/qwen3-coder"]
 name = "Qwen3 Coder 480B A35B"
 provider = "openrouter"
@@ -75,3 +72,14 @@ api_dialect = "openai_chat"
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60 }
 architecture = { parameter_count_b = 117.0, active_parameter_count_b = 5.1, moe = true, license = "Apache-2.0", source_url = "https://developers.openai.com/api/docs/models/gpt-oss-120b", last_verified = "2026-06-05" }
+# Explicit metadata so this row is self-described. It was previously the last
+# model in this fragment with no inline tier/open_weight/strengths, so the next
+# fragment's (now-removed) leading bare keys bled in and mislabeled it as
+# `open_weight = false` with a spurious `vision` strength. GPT-OSS 120B is
+# Apache-2.0 (open weight) and text-only; it is Burin's cheap coding executor.
+# `tier`/`open_weight`/`strengths` match the rest of the openai-gpt-oss-120b
+# equivalence group (the validator requires one tier per logical model — the
+# conservative shared baseline is `frontier`).
+tier = "frontier"
+open_weight = true
+strengths = ["cheap", "coding", "tool_use", "reasoning"]

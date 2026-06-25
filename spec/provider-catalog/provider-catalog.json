@@ -3759,7 +3759,6 @@
       "tier": "mid",
       "open_weight": true,
       "strengths": [
-        "speed",
         "tool_use"
       ]
     },
@@ -10774,12 +10773,13 @@
       ],
       "family": "minimax",
       "lineage": "minimax",
-      "tier": "mid",
+      "tier": "frontier",
       "open_weight": true,
       "strengths": [
         "coding",
         "agentic",
-        "cheap"
+        "tool_use",
+        "reasoning"
       ]
     },
     {
@@ -11228,7 +11228,9 @@
       "strengths": [
         "cheap",
         "coding",
-        "speed"
+        "speed",
+        "tool_use",
+        "long_context"
       ]
     },
     {
@@ -11476,22 +11478,13 @@
       ],
       "family": "openai-gpt",
       "lineage": "openai-legacy",
-      "complementary_with": [
-        "anthropic-claude",
-        "openai-gpt",
-        "google-gemini",
-        "deepseek",
-        "kimi"
-      ],
       "tier": "frontier",
-      "open_weight": false,
+      "open_weight": true,
       "strengths": [
-        "agentic",
+        "cheap",
         "coding",
-        "long_context",
         "tool_use",
-        "reasoning",
-        "vision"
+        "reasoning"
       ]
     },
     {
@@ -11794,13 +11787,6 @@
       ],
       "family": "openrouter",
       "lineage": "openrouter",
-      "complementary_with": [
-        "anthropic-claude",
-        "openai-gpt",
-        "google-gemini",
-        "deepseek",
-        "kimi"
-      ],
       "tier": "frontier",
       "open_weight": false,
       "strengths": [
@@ -12088,11 +12074,12 @@
       ],
       "family": "glm",
       "lineage": "glm",
-      "tier": "mid",
+      "tier": "frontier",
       "open_weight": true,
       "strengths": [
         "vision",
-        "speed"
+        "coding",
+        "agentic"
       ]
     },
     {
@@ -12741,11 +12728,15 @@
       ],
       "family": "minimax",
       "lineage": "minimax",
-      "tier": "mid",
+      "tier": "frontier",
       "open_weight": true,
       "strengths": [
-        "cheap",
-        "tool_use"
+        "speed",
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "long_context"
       ]
     },
     {

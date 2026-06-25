@@ -19,9 +19,6 @@
 # Tool calls + thinking-mode are supported (release notes call out
 # "agentic harness" support); structured output is delimited (no native
 # JSON schema mode), and prompt caching is hit-priced at 20% of input.
-tier = "mid"
-open_weight = true
-strengths = ["speed", "tool_use"]
 [models."MiniMax-M3"]
 name = "MiniMax M3"
 provider = "minimax"
@@ -126,3 +123,7 @@ provider = "openrouter"
 context_window = 204800
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 0.33, output_per_mtok = 1.20 }
+# Self-described metadata; previously relied on cross-fragment leading-key bleed.
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "reasoning"]

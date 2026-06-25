@@ -3707,6 +3707,51 @@ mod tests {
     }
 
     #[test]
+    fn embedded_openrouter_gpt_oss_120b_has_no_fragment_bleed() {
+        // Regression for the provider-catalog leading-key bleed: the openrouter
+        // `openai/gpt-oss-120b` row was the last model in its fragment with no
+        // inline tier/open_weight/strengths, so the next fragment's leading bare
+        // keys reattached to it after raw-text concatenation — mislabeling it as
+        // `open_weight = false` with a spurious `vision` strength. It must now be
+        // self-described: open weight, no vision, and a tier consistent with the
+        // rest of its equivalence group.
+        let config = default_config();
+        let model = config
+            .models
+            .get("openai/gpt-oss-120b")
+            .expect("openrouter gpt-oss-120b row");
+        assert_eq!(model.provider, "openrouter");
+        assert_eq!(
+            model.open_weight,
+            Some(true),
+            "gpt-oss-120b is Apache-2.0 open weight, not the bled-in open_weight=false"
+        );
+        assert!(
+            !model.strengths.iter().any(|s| s == "vision"),
+            "gpt-oss-120b is text-only; the bled-in `vision` strength must be gone: {:?}",
+            model.strengths
+        );
+        assert!(
+            !model.strengths.is_empty(),
+            "gpt-oss-120b must carry its own strengths, not None"
+        );
+
+        // tier is a property of the logical model: every active row in the
+        // openai-gpt-oss-120b equivalence group must agree.
+        let group_tiers: std::collections::BTreeSet<_> = config
+            .models
+            .values()
+            .filter(|m| m.equivalence_group.as_deref() == Some("openai-gpt-oss-120b") && !m.deprecated)
+            .map(|m| m.tier.clone())
+            .collect();
+        assert_eq!(
+            group_tiers.len(),
+            1,
+            "openai-gpt-oss-120b group must share one tier, got {group_tiers:?}"
+        );
+    }
+
+    #[test]
     fn embedded_catalog_every_model_targets_a_registered_provider() {
         let config = default_config();
         let known: std::collections::BTreeSet<&str> =

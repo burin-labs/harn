@@ -1,9 +1,6 @@
 # Ollama / local models — no `pricing` (free); context_window reflects
 # model card ceiling. `runtime_context_window` caps what Harn will
 # actually feed the runtime (host memory budget).
-tier = "small"
-open_weight = true
-strengths = ["cheap", "speed"]
 [models."llama3.2"]
 name = "Llama 3.2"
 provider = "ollama"
@@ -67,4 +64,8 @@ context_window = 262144
 runtime_context_window = 32768
 stream_timeout = 600.0
 capabilities = ["tools", "streaming"]
+# Self-described metadata; previously relied on cross-fragment leading-key bleed.
+tier = "mid"
+open_weight = true
+strengths = ["coding", "agentic"]
 
