@@ -1,0 +1,89 @@
+// Run: harn test tests/agent/autocompact_archived_test.harn
+//
+// Regression tests for the single-message-compaction archive accounting in
+// `std/agent/autocompact`. The compaction engine drains `archived_count`
+// messages and inserts exactly one summary, so a compaction that archives
+// exactly one message leaves `len(before) == len(after)`. The old `.harn`
+// layer inferred "did compaction happen?" from that length delta, so an
+// archive-exactly-one compaction read as `archived == 0`: the engine's
+// shrunk transcript was discarded, and on the emergency-overflow path a
+// RECOVERABLE context_overflow was misreported as terminal (the loop
+// `break`s on `archived <= 0`).
+//
+// `transcript_auto_compact` now returns `{ messages, archived, summary }`
+// with the engine's true archived count and the inserted summary text, so the
+// length-delta inference is gone.
+pipeline test_archive_exactly_one_reports_archived(task) {
+  // keep_first 1 + keep_last 1 over 3 messages drains exactly the single
+  // middle message and inserts one summary -> len(before) == len(after) == 3,
+  // the precise case the length-delta heuristic got wrong.
+  let messages = [
+    {role: "user", content: "u0 ".repeat(10)},
+    {role: "user", content: "u1 ".repeat(10)},
+    {role: "user", content: "u2 ".repeat(10)},
+  ]
+  let result = transcript_auto_compact(
+    messages,
+    {compact_strategy: "truncate", keep_first: 1, keep_last: 1, token_threshold: 1},
+  )
+  // Exactly one message was archived...
+  assert_eq(result.archived, 1)
+  // ...and yet the transcript length is unchanged (1 drained, 1 summary in).
+  assert_eq(len(result.messages), len(messages))
+  // A real summary was produced and surfaced.
+  assert_eq(result.summary != "", true)
+  assert_eq(result.summary.contains("auto-compacted 1 older messages"), true)
+}
+
+pipeline test_archived_count_is_not_inferred_from_length(task) {
+  // The bug was specifically `archived = if len(before) == len(after) { 0 }`.
+  // Prove archived is reported even though the lengths match.
+  let messages = [
+    {role: "user", content: "u0 ".repeat(10)},
+    {role: "user", content: "u1 ".repeat(10)},
+    {role: "user", content: "u2 ".repeat(10)},
+  ]
+  let result = transcript_auto_compact(
+    messages,
+    {compact_strategy: "truncate", keep_first: 1, keep_last: 1, token_threshold: 1},
+  )
+  let length_unchanged = len(result.messages) == len(messages)
+  // Length is unchanged but archived > 0 -> a length-delta inference would be
+  // wrong here, which is the whole point of this fix.
+  assert_eq(length_unchanged, true)
+  assert_eq(result.archived > 0, true)
+}
+
+pipeline test_summary_index_follows_keep_first(task) {
+  // The engine inserts the summary at index `keep_first`, not index 0. The
+  // consumer must read the summary from the engine, not from messages[0].
+  let messages = [
+    {role: "user", content: "preserved-head ".repeat(8)},
+    {role: "user", content: "u1 ".repeat(10)},
+    {role: "user", content: "u2 ".repeat(10)},
+    {role: "user", content: "u3 ".repeat(10)},
+  ]
+  let result = transcript_auto_compact(
+    messages,
+    {compact_strategy: "truncate", keep_first: 1, keep_last: 1, token_threshold: 1},
+  )
+  // The first message is the preserved head, NOT the summary.
+  assert_eq(result.messages[0].content.contains("preserved-head"), true)
+  // The summary lives at the keep_first boundary (index 1) and matches the
+  // engine-returned summary text.
+  assert_eq(result.messages[1].content, result.summary)
+  assert_eq(result.summary.contains("auto-compacted"), true)
+}
+
+pipeline test_no_compaction_reports_zero_archived(task) {
+  // Under threshold: nothing to do. archived is 0, messages unchanged, and the
+  // summary is empty -- the genuine terminal/irreducible signal.
+  let messages = [{role: "user", content: "small"}, {role: "assistant", content: "ok"}]
+  let result = transcript_auto_compact(
+    messages,
+    {compact_strategy: "truncate", keep_last: 1, token_threshold: 1000000},
+  )
+  assert_eq(result.archived, 0)
+  assert_eq(len(result.messages), len(messages))
+  assert_eq(result.summary, "")
+}

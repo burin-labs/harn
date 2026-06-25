@@ -79,9 +79,27 @@ fn non_negative_usize(value: &VmValue, builtin: &str, key: &str) -> Result<usize
     }
 }
 
-/// Apply the workflow/agent transcript auto-compaction primitive to a message list.
+/// Apply the workflow/agent transcript auto-compaction primitive to a message
+/// list, returning `{ messages, archived, summary }`.
+///
+/// `archived` is the engine's true archived-message count (the number of older
+/// messages folded into the single inserted summary), surfaced directly from
+/// the compaction lifecycle. Callers MUST use this field rather than inferring
+/// compaction from `len(before) == len(after)`: when the engine archives
+/// exactly one message and inserts one summary the lengths are equal, so a
+/// length-delta heuristic reads a real compaction as a no-op and discards the
+/// engine's shrunk transcript (and, on the emergency-overflow path, reports a
+/// recoverable overflow as terminal). `archived == 0` means no compaction
+/// happened (already under threshold, a PreCompact hook blocked, or the engine
+/// found nothing to do); in that case `messages` is the input list unchanged,
+/// `archived` is 0, and `summary` is "".
+///
+/// `summary` is the exact summary text the engine inserted, so callers do not
+/// have to reverse-engineer it from a fixed index in `messages` — the summary's
+/// insertion index depends on `keep_first`, so reading `messages[0]` is wrong
+/// whenever the first turns are preserved.
 #[harn_builtin(
-    sig = "transcript_auto_compact(messages: list, options?: dict|nil) -> list",
+    sig = "transcript_auto_compact(messages: list, options?: dict|nil) -> dict",
     kind = "async",
     category = "workflow.host"
 )]
@@ -191,7 +209,10 @@ pub(super) async fn transcript_auto_compact_builtin(
     };
     let lifecycle =
         crate::orchestration::CompactLifecycle::new(crate::orchestration::CompactMode::Workflow);
-    crate::orchestration::run_compaction_lifecycle_with_ctx(
+    // `Ok(None)` means no compaction happened (under threshold / hook blocked /
+    // nothing to do); the messages vec is left untouched, so archived is 0.
+    // Otherwise the engine reports its real archived-message count.
+    let outcome = crate::orchestration::run_compaction_lifecycle_with_ctx(
         Some(&ctx),
         &mut messages,
         &mut config,
@@ -199,12 +220,26 @@ pub(super) async fn transcript_auto_compact_builtin(
         lifecycle,
     )
     .await?;
-    Ok(VmValue::List(std::sync::Arc::new(
+    let (archived, summary) = outcome
+        .map(|o| (o.archived_messages, o.summary))
+        .unwrap_or((0, String::new()));
+    let compacted_messages = VmValue::List(std::sync::Arc::new(
         messages
             .iter()
             .map(crate::stdlib::json_to_vm_value)
             .collect(),
-    )))
+    ));
+    let mut result = crate::value::DictMap::new();
+    result.insert(crate::value::intern_key("messages"), compacted_messages);
+    result.insert(
+        crate::value::intern_key("archived"),
+        VmValue::Int(archived as i64),
+    );
+    result.insert(
+        crate::value::intern_key("summary"),
+        VmValue::String(arcstr::ArcStr::from(summary)),
+    );
+    Ok(VmValue::dict(result))
 }
 
 #[cfg(test)]
