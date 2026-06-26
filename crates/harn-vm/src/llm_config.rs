@@ -3423,6 +3423,26 @@ mod tests {
     }
 
     #[test]
+    fn test_local_vllm_gemma4_advertises_vision() {
+        // harn#3585: the local vLLM/SGLang `gemma-4*` route must advertise vision
+        // (Gemma 4 is multimodal) so the emitted capability_tags + image input
+        // modality match every hosted gemma-4 sibling instead of silently dropping
+        // it for the local provider.
+        reset_overrides();
+
+        let caps = crate::llm::capabilities::lookup("local", "gemma-4-e4b-it");
+        assert!(caps.vision || caps.vision_supported);
+
+        let gemma4_e4b =
+            model_catalog_entry("gemma-4-e4b-it").expect("gemma-4-e4b-it catalog entry");
+        assert!(
+            gemma4_e4b.capabilities.iter().any(|cap| cap == "vision"),
+            "local gemma-4-e4b-it should carry the vision capability tag, got {:?}",
+            gemma4_e4b.capabilities
+        );
+    }
+
+    #[test]
     fn test_external_config_overlays_default_catalog() {
         let mut config = default_config();
         let mut overlay = ProvidersConfig {

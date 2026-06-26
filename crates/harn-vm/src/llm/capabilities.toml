@@ -1475,6 +1475,13 @@ model_match = "gemma-4*"
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
+# Gemma 4 is genuinely multimodal regardless of where it is served, so the local
+# vLLM/SGLang route must advertise vision just like every hosted gemma-4 sibling
+# (gemini/openrouter/together/sambanova/nvidia) and the Ollama-native quant.
+# Omitting it dropped `vision` from the emitted capability_tags + image input
+# modality for local gemma-4 models, contradicting the structured caps (harn#3585).
+vision = true
+vision_supported = true
 thinking_modes = ["enabled"]
 server_parser = "none"
 honors_chat_template_kwargs = false
