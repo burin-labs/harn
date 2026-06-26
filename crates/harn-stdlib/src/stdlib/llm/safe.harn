@@ -315,20 +315,130 @@ pub fn safe_structured_call(prompt, schema, options) {
 }
 
 /**
- * Minimum output-token budget for a structured judge/router call. A call that
- * goes out under this floor risks truncating its JSON mid-object on a reasoning
- * model (the reasoning channel shares the same `max_tokens` budget), which then
- * masquerades as a dead-judge abstention. The floor only RAISES an unset or
- * too-small budget; an explicit larger `max_tokens` (e.g. a 1200-token rubric
- * judge) is left untouched.
+ * Minimum output-token budget for a structured judge/router call on a
+ * NON-reasoning route. A call that goes out under this floor risks truncating
+ * its JSON mid-object, which masquerades as a dead-judge abstention. The floor
+ * only RAISES an unset or too-small budget; an explicit larger `max_tokens`
+ * (e.g. a 1200-token rubric judge) is left untouched.
  */
 let STRUCTURED_MIN_MAX_TOKENS = 512
+
+/**
+ * Headroom (output tokens) reserved for the visible JSON verdict ON TOP of a
+ * reasoning model's hidden reasoning spend. A judge/router verdict object is
+ * small, but it must finish AFTER the reasoning channel has drained part of the
+ * shared `max_tokens` budget, so the floor reserves this much beyond the
+ * resolved reasoning budget.
+ */
+let STRUCTURED_REASONING_VERDICT_HEADROOM = 768
+
+/**
+ * Hard ceiling for the reasoning-aware structured floor, mirroring the Rust
+ * `MAX_TOKENS_RETRY_CEILING` so a high-effort reasoning route never inflates a
+ * single judge call without bound.
+ */
+let STRUCTURED_MAX_MAX_TOKENS = 32768
+
+/**
+ * Approximate reasoning-channel output budget (tokens) Harn's reasoning policy
+ * allocates for an effort level. Mirrors `budget_for_reasoning_level` in
+ * `crates/harn-vm/src/llm/reasoning_policy.rs`; used only as a fallback when the
+ * resolved `thinking` dict carries no explicit `budget_tokens`.
+ */
+fn __reasoning_effort_budget(level) {
+  let normalized = to_string(level ?? "")
+  if normalized == "minimal" || normalized == "low" {
+    return 1024
+  }
+  if normalized == "high" || normalized == "xhigh" {
+    return 12000
+  }
+  return 4096
+}
+
+/**
+ * Resolve the reasoning-channel output budget (tokens) for a structured call's
+ * options, or 0 when reasoning is disabled / absent. Provider-aware: it asks
+ * Harn's own reasoning policy to resolve the route's `thinking`, then reads the
+ * explicit `budget_tokens` (Anthropic-style numeric budget) or maps the effort
+ * level (gpt-oss/Harmony, o-series) to its approximate budget. A caller's
+ * explicit `reasoning_effort` is honoured directly since the policy passes such
+ * opts through untouched.
+ */
+fn __structured_reasoning_budget(options) {
+  let opts = if type_of(options) == "dict" {
+    options
+  } else {
+    {}
+  }
+  let resolved = try {
+    llm_apply_reasoning_policy(opts)
+  }
+  let safe_resolved = if is_err(resolved) {
+    opts
+  } else {
+    unwrap(resolved)
+  }
+  let thinking = safe_resolved?.thinking
+  // Caller set reasoning_effort explicitly -> policy returns opts unchanged
+  // (no `thinking`), so fall back to the caller's effort level.
+  if type_of(thinking) != "dict" {
+    if opts?.reasoning_effort != nil {
+      let effort = to_string(opts.reasoning_effort)
+      if effort == "off" || effort == "none" || effort == "disabled" {
+        return 0
+      }
+      return __reasoning_effort_budget(effort)
+    }
+    return 0
+  }
+  let mode = to_string(thinking?.mode ?? "")
+  if mode == "disabled" {
+    return 0
+  }
+  let explicit_budget = to_int(thinking?.budget_tokens ?? 0) ?? 0
+  if explicit_budget > 0 {
+    return explicit_budget
+  }
+  if mode == "effort" {
+    return __reasoning_effort_budget(thinking?.level)
+  }
+  // `enabled`/`adaptive` with no numeric budget: use the medium fallback so a
+  // reasoning route still clears the verdict-starvation floor.
+  return __reasoning_effort_budget("medium")
+}
+
+/**
+ * Reasoning-aware minimum output-token budget for a structured judge/router
+ * call. On a non-reasoning route this is the flat `STRUCTURED_MIN_MAX_TOKENS`.
+ * On a reasoning route the hidden reasoning channel shares the same `max_tokens`
+ * budget as the visible JSON, so a flat floor can be entirely consumed by
+ * reasoning — re-truncating the verdict to empty. This reserves the resolved
+ * reasoning budget PLUS `STRUCTURED_REASONING_VERDICT_HEADROOM` for the verdict,
+ * clamped to `STRUCTURED_MAX_MAX_TOKENS`. Generalizable: it scales with the
+ * route's actual reasoning effort rather than hardcoding a per-model value.
+ */
+pub fn structured_min_max_tokens(options) {
+  let reasoning_budget = __structured_reasoning_budget(options)
+  if reasoning_budget <= 0 {
+    return STRUCTURED_MIN_MAX_TOKENS
+  }
+  let floor = reasoning_budget + STRUCTURED_REASONING_VERDICT_HEADROOM
+  if floor > STRUCTURED_MAX_MAX_TOKENS {
+    return STRUCTURED_MAX_MAX_TOKENS
+  }
+  if floor < STRUCTURED_MIN_MAX_TOKENS {
+    return STRUCTURED_MIN_MAX_TOKENS
+  }
+  return floor
+}
 
 fn __apply_judge_defaults(schema, options) {
   var resolved = options
   let requested_max_tokens = to_int(resolved?.max_tokens ?? 0) ?? 0
-  if requested_max_tokens < STRUCTURED_MIN_MAX_TOKENS {
-    resolved = resolved + {max_tokens: STRUCTURED_MIN_MAX_TOKENS}
+  let floor = structured_min_max_tokens(resolved)
+  if requested_max_tokens < floor {
+    resolved = resolved + {max_tokens: floor}
   }
   if resolved?.temperature == nil {
     resolved = resolved + {temperature: 0.0}
