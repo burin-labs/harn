@@ -2167,6 +2167,10 @@ fn __next_progress_count(made_progress, turns_since_progress) {
  * this turn — the content nudge takes precedence so a turn is never
  * double-injected; this streak nudge is the fallback for toolless churn.
  * Depth is `turns_since_progress`.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
  */
 pub fn __progress_nudge_text(depth, has_tools, tool_mode = "text", made_tool_calls = false) {
   let action = if has_tools {
