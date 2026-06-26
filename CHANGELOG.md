@@ -8,6 +8,12 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.144
+
+### Fixed
+
+Make the minimum output budget for structured side-calls (completion judge, verifier, router, classifier) reasoning-aware. The flat `STRUCTURED_MIN_MAX_TOKENS = 512` floor was billed against the same `max_tokens` budget as a reasoning route's hidden analysis channel, so on a reasoning model (e.g. gpt-oss at `low` effort, ~1024 reasoning tokens) the thinking consumed the whole budget and the JSON verdict truncated to empty — a silent dead-judge abstention. New `structured_min_max_tokens` resolves the route's reasoning budget and reserves verdict headroom on top (clamped to 32768), only ever raising the floor; non-reasoning routes keep the flat 512.
+
 ## v0.8.143
 
 ### Added
