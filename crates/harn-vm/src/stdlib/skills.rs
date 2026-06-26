@@ -91,13 +91,38 @@ fn vm_skill_catalog_entries(skills: &[VmValue]) -> Vec<VmValue> {
     catalog.into_iter().map(|(_, value)| value).collect()
 }
 
+/// Priority of a skill entry's `source` layer for collision resolution.
+/// Lower is higher priority (matches `skills::Layer`'s `Ord`: `cli` <
+/// `project` < `user` < `host`). Entries with no recognizable `source` sort
+/// last, so a labelled entry wins a tie against an unlabelled one and equal/
+/// absent labels fall back to scan order (first wins). Shared shape with
+/// `skills::runtime::resolve_skill_entry` so `load_skill` and
+/// `skill_who_signed` resolve bare-name collisions identically.
+fn skill_source_priority(entry: &crate::value::DictMap) -> usize {
+    entry
+        .get("source")
+        .map(|value| value.display())
+        .and_then(|label| crate::skills::Layer::from_label(&label))
+        .map(|layer| {
+            crate::skills::Layer::all()
+                .iter()
+                .position(|candidate| *candidate == layer)
+                .unwrap_or(usize::MAX)
+        })
+        .unwrap_or(usize::MAX)
+}
+
 fn vm_skill_who_signed(skills: &[VmValue], target: &str) -> Result<VmValue, VmError> {
     let mut bare_matches: Vec<&crate::value::DictMap> = Vec::new();
     for skill in skills {
         let Some(entry) = skill.as_dict() else {
             continue;
         };
-        if vm_skill_entry_id(entry) == target {
+        let has_namespace = entry
+            .get("namespace")
+            .map(|value| value.display())
+            .is_some_and(|namespace| !namespace.is_empty());
+        if has_namespace && vm_skill_entry_id(entry) == target {
             return Ok(who_signed_entry(entry));
         }
         if entry
@@ -109,13 +134,21 @@ fn vm_skill_who_signed(skills: &[VmValue], target: &str) -> Result<VmValue, VmEr
         }
     }
     match bare_matches.as_slice() {
+        [] => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+            format!("skill_who_signed: skill '{target}' not found"),
+        )))),
         [entry] => Ok(who_signed_entry(entry)),
-        [] => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-            "skill_who_signed: skill '{target}' not found"
-        ))))),
-        _ => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-            "skill_who_signed: skill '{target}' is ambiguous; use the fully qualified id from the catalog"
-        ))))),
+        // Resolve a bare-name collision deterministically by `source` layer
+        // priority instead of erroring — same precedence the hosts apply when
+        // they collapse the catalog, so provenance inspection stays consistent
+        // with the entry `load_skill` would load.
+        _ => {
+            let best = bare_matches
+                .iter()
+                .min_by_key(|entry| skill_source_priority(entry))
+                .expect("bare_matches has >1 element");
+            Ok(who_signed_entry(best))
+        }
     }
 }
 
@@ -858,9 +891,46 @@ fn parse_load_skill_options(
 
 #[cfg(test)]
 mod tests {
-    use super::{render_catalog, vm_skill_catalog_entries};
+    use super::{render_catalog, vm_skill_catalog_entries, vm_skill_who_signed};
     use crate::value::VmValue;
     use std::collections::BTreeMap;
+
+    fn who_signed_skill(name: &str, source: Option<&str>, author: &str) -> VmValue {
+        let mut entry = BTreeMap::from([
+            (
+                "name".to_string(),
+                VmValue::String(arcstr::ArcStr::from(name)),
+            ),
+            (
+                "provenance".to_string(),
+                VmValue::dict(BTreeMap::from([(
+                    "author".to_string(),
+                    VmValue::String(arcstr::ArcStr::from(author)),
+                )])),
+            ),
+        ]);
+        if let Some(source) = source {
+            entry.insert(
+                "source".to_string(),
+                VmValue::String(arcstr::ArcStr::from(source)),
+            );
+        }
+        VmValue::dict(entry)
+    }
+
+    #[test]
+    fn who_signed_resolves_bare_collision_by_source_priority() {
+        // `project` outranks `host`, so provenance inspection of a colliding
+        // bare name returns the project entry deterministically (no error).
+        let skills = vec![
+            who_signed_skill("deploy", Some("host"), "host-author"),
+            who_signed_skill("deploy", Some("project"), "project-author"),
+        ];
+        let result = vm_skill_who_signed(&skills, "deploy")
+            .expect("collision must resolve by precedence, not error");
+        let dict = result.as_dict().unwrap();
+        assert_eq!(dict.get("author").unwrap().display(), "project-author");
+    }
 
     #[test]
     fn catalog_entries_use_fully_qualified_ids_and_sort() {
