@@ -167,6 +167,7 @@ const RUNTIME_ONLY_EXCEPTIONS: &[&str] = &[
     "__pool_snapshot",
     "__pool_submit",
     "__pool_wait",
+    "__progress_nudge_text",
     "__range__",
     "__register_persona",
     "__register_step",
