@@ -417,6 +417,8 @@ fn __structured_reasoning_budget(options) {
  * reasoning budget PLUS `STRUCTURED_REASONING_VERDICT_HEADROOM` for the verdict,
  * clamped to `STRUCTURED_MAX_MAX_TOKENS`. Generalizable: it scales with the
  * route's actual reasoning effort rather than hardcoding a per-model value.
+ * @effects: []
+ * @errors: []
  */
 pub fn structured_min_max_tokens(options) {
   let reasoning_budget = __structured_reasoning_budget(options)
