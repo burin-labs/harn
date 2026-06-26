@@ -63,6 +63,25 @@ pub fn skill_entry_id(entry: &crate::value::DictMap) -> String {
     }
 }
 
+/// Priority of a skill entry's `source` layer for collision resolution.
+/// Lower is higher priority (matches [`super::Layer`]'s `Ord`: `cli` <
+/// `project` < `user` < `host`). Entries without a recognizable `source`
+/// sort last so a labelled entry always wins a tie against an unlabelled one,
+/// and equal/absent labels fall back to scan order (first wins).
+fn skill_source_priority(entry: &crate::value::DictMap) -> usize {
+    entry
+        .get("source")
+        .map(|value| value.display())
+        .and_then(|label| super::Layer::from_label(&label))
+        .map(|layer| {
+            super::Layer::all()
+                .iter()
+                .position(|candidate| *candidate == layer)
+                .unwrap_or(usize::MAX)
+        })
+        .unwrap_or(usize::MAX)
+}
+
 pub fn resolve_skill_entry(
     registry: &VmValue,
     target: &str,
@@ -78,12 +97,20 @@ pub fn resolve_skill_entry(
         }
     };
 
+    // A fully-qualified id (`namespace/name`) is an exact, unambiguous match
+    // and always wins. Collect bare-name matches separately so a non-namespaced
+    // collision does not short-circuit on the first scan-order entry (whose id
+    // equals its bare name) before precedence can be applied.
     let mut bare_matches: Vec<crate::value::DictMap> = Vec::new();
     for skill in skills.iter() {
         let Some(entry) = skill.as_dict() else {
             continue;
         };
-        if skill_entry_id(entry) == target {
+        let has_namespace = entry
+            .get("namespace")
+            .map(|value| value.display())
+            .is_some_and(|namespace| !namespace.is_empty());
+        if has_namespace && skill_entry_id(entry) == target {
             return Ok(entry.clone());
         }
         if entry
@@ -95,12 +122,25 @@ pub fn resolve_skill_entry(
         }
     }
 
+    // Hosts collapse name collisions by precedence before building the
+    // registry, so normally there is at most one bare-name match. When two
+    // survive anyway (e.g. a host that did not collapse), resolve
+    // deterministically by `source` layer priority instead of erroring — the
+    // same project > user > host precedence the hosts apply. This keeps
+    // `load_skill` resolution identical to the catalog the model sees, rather
+    // than failing the turn.
     match bare_matches.len() {
-        1 => Ok(bare_matches.remove(0)),
         0 => Err(format!("skill_not_found: skill '{target}' not found")),
-        _ => Err(format!(
-            "skill '{target}' is ambiguous; use the fully qualified id from the catalog"
-        )),
+        1 => Ok(bare_matches.remove(0)),
+        _ => {
+            let mut best_index = 0;
+            for (index, entry) in bare_matches.iter().enumerate() {
+                if skill_source_priority(entry) < skill_source_priority(&bare_matches[best_index]) {
+                    best_index = index;
+                }
+            }
+            Ok(bare_matches.swap_remove(best_index))
+        }
     }
 }
 
@@ -498,6 +538,78 @@ mod tests {
         assert!(
             !loaded.entry.contains_key("hooks"),
             "sanitized startup registry entry should remain authoritative"
+        );
+    }
+
+    fn named_entry(name: &str, source: Option<&str>, body: &str) -> VmValue {
+        let mut pairs = vec![
+            ("name".to_string(), string(name)),
+            ("body".to_string(), string(body)),
+        ];
+        if let Some(source) = source {
+            pairs.push(("source".to_string(), string(source)));
+        }
+        VmValue::dict(crate::value::DictMap::from_iter(pairs))
+    }
+
+    fn registry_with_entries(entries: Vec<VmValue>) -> VmValue {
+        VmValue::dict(crate::value::DictMap::from_iter([
+            ("_type".to_string(), string("skill_registry")),
+            (
+                "skills".to_string(),
+                VmValue::List(std::sync::Arc::new(entries)),
+            ),
+        ]))
+    }
+
+    #[test]
+    fn bare_name_collision_resolves_by_source_layer_priority() {
+        // Two entries share the bare name `deploy`; the `project`-layer entry
+        // outranks the `host`-layer one, so resolution must pick it
+        // deterministically rather than erroring as ambiguous.
+        let registry = registry_with_entries(vec![
+            named_entry("deploy", Some("host"), "host body"),
+            named_entry("deploy", Some("project"), "project body"),
+        ]);
+        let entry = resolve_skill_entry(&registry, "deploy", "test")
+            .expect("ambiguous bare-name collision must resolve, not error");
+        assert_eq!(
+            entry.get("body").map(|v| v.display()).unwrap_or_default(),
+            "project body"
+        );
+    }
+
+    #[test]
+    fn bare_name_collision_without_source_falls_back_to_first() {
+        // No source labels: deterministic first-wins (scan order) instead of
+        // an ambiguity error.
+        let registry = registry_with_entries(vec![
+            named_entry("deploy", None, "first body"),
+            named_entry("deploy", None, "second body"),
+        ]);
+        let entry = resolve_skill_entry(&registry, "deploy", "test")
+            .expect("unlabelled collision must still resolve");
+        assert_eq!(
+            entry.get("body").map(|v| v.display()).unwrap_or_default(),
+            "first body"
+        );
+    }
+
+    #[test]
+    fn fully_qualified_id_still_wins_over_bare_name() {
+        let registry = registry_with_entries(vec![
+            VmValue::Dict(std::sync::Arc::new(crate::value::DictMap::from_iter([
+                ("name".to_string(), string("deploy")),
+                ("namespace".to_string(), string("acme")),
+                ("body".to_string(), string("namespaced body")),
+            ]))),
+            named_entry("deploy", Some("project"), "bare body"),
+        ]);
+        let entry =
+            resolve_skill_entry(&registry, "acme/deploy", "test").expect("exact id match resolves");
+        assert_eq!(
+            entry.get("body").map(|v| v.display()).unwrap_or_default(),
+            "namespaced body"
         );
     }
 }
