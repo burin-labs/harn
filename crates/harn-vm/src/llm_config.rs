@@ -2244,7 +2244,7 @@ pub(crate) fn capability_tags_from_capabilities(
     {
         tags.push("extended_thinking".to_string());
     }
-    if caps.json_schema.is_some() {
+    if caps.structured_output.is_some() || caps.json_schema.is_some() {
         tags.push("structured_output".to_string());
     }
     tags
@@ -3420,6 +3420,64 @@ mod tests {
         let gemma4 = model_catalog_entry("gemma4:26b").expect("gemma4 catalog entry");
         assert_eq!(gemma4.context_window, 262_144);
         assert!(gemma4.capabilities.iter().any(|cap| cap == "vision"));
+    }
+
+    #[test]
+    fn local_gemma4_source_tags_match_structured_capability_tags() {
+        reset_overrides();
+        let config = default_config();
+        for id in [
+            "gemma-4-e2b-it",
+            "gemma-4-e4b-it",
+            "gemma-4-12b-it",
+            "gemma-4-26b-a4b-it",
+            "gemma-4-31b-it",
+        ] {
+            let source = config
+                .models
+                .get(id)
+                .unwrap_or_else(|| panic!("{id} should be in the embedded catalog"));
+            let derived = effective_model_capability_tags(&source.provider, id);
+            assert_eq!(
+                source.capabilities, derived,
+                "{}/{} source capabilities must match derived capability_tags",
+                source.provider, id
+            );
+        }
+    }
+
+    #[test]
+    fn capability_tags_include_structured_capability_flags() {
+        let caps = crate::llm::capabilities::Capabilities {
+            native_tools: true,
+            tool_search: vec!["web".to_string()],
+            vision_supported: true,
+            audio: true,
+            pdf: true,
+            video: true,
+            files_api_supported: true,
+            prompt_caching: true,
+            thinking_modes: vec!["enabled".to_string()],
+            structured_output: Some("native".to_string()),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            capability_tags_from_capabilities(&caps),
+            vec![
+                "streaming",
+                "tools",
+                "tool_search",
+                "vision",
+                "audio",
+                "pdf",
+                "video",
+                "files",
+                "prompt_caching",
+                "thinking",
+                "structured_output",
+            ]
+        );
     }
 
     #[test]
