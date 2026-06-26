@@ -1928,8 +1928,9 @@ mod tests {
                 VmValue::Int(n) => n,
                 other => panic!("expected Int, got {other:?}"),
             };
-            let expected =
-                i64::from(super::super::reasoning_policy::budget_for_reasoning_level(level));
+            let expected = i64::from(super::super::reasoning_policy::budget_for_reasoning_level(
+                level,
+            ));
             assert_eq!(got, expected, "budget mismatch for level {level:?}");
         }
     }
