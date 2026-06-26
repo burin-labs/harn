@@ -320,7 +320,13 @@ impl<'a> TsValueParser<'a> {
                         out.push(char::from_u32(code)?);
                         pos += 2;
                     }
-                    other => out.push(other as char),
+                    // Unknown escape: keep the backslash AND the char. See the
+                    // `parse_string_literal` arm for the rationale — preserving
+                    // `\d`/`\w`/`\b` (regex), `\begin` (LaTeX), `\section`, etc.
+                    other => {
+                        out.push('\\');
+                        out.push(other as char);
+                    }
                 }
             } else if b == quote {
                 // Candidate close: is the continuation a valid object boundary?
@@ -436,7 +442,20 @@ impl<'a> TsValueParser<'a> {
                                 return Err("invalid \\x code point".to_string());
                             }
                         }
-                        other => out.push(other as char),
+                        // Unknown escape (`\d`, `\w`, `\b`, `\s` regex; `\begin`
+                        // LaTeX; `\section`; a Windows path's `\U`): keep BOTH the
+                        // backslash and the char. JS would collapse `\d` to `d`,
+                        // but tool arguments are content, not evaluated JS — the
+                        // model means the literal `\d`, and the template-literal,
+                        // heredoc, and native-JSON channels all preserve it. The
+                        // bare double/single-quoted channel silently dropping the
+                        // backslash was a cross-channel inconsistency that
+                        // corrupted every regex/LaTeX/format-string the model
+                        // delivered through quotes (`"\d+"` -> `d+`).
+                        other => {
+                            out.push('\\');
+                            self.push_scalar(&mut out, other);
+                        }
                     }
                 }
                 Some(b) => {
@@ -634,6 +653,16 @@ impl<'a> TsValueParser<'a> {
 
 /// Parse a `\uXXXX` or `\u{XXXXXX}` escape starting at bytes[0]. Returns the
 /// decoded character AND the number of bytes consumed after the `\u`.
+///
+/// The plain 4-hex `\uXXXX` form decodes a single UTF-16 code unit, so a
+/// non-BMP scalar (emoji, CJK extension B+, math alphanumerics) arrives as a
+/// **surrogate pair** `😀` — exactly what `JSON.stringify` and most
+/// provider APIs emit. A lone surrogate is not a valid `char`, so without
+/// pairing them `char::from_u32` returns `None`, the caller reports
+/// `invalid \u escape`, and the ENTIRE tool call is dropped (the model's
+/// `edit`/`write` silently never lands). Detect a high surrogate and fold the
+/// following `\uXXXX` low surrogate into the astral scalar, consuming its `\u`
+/// prefix too. The `\u{...}` brace form already carries the full scalar.
 fn parse_unicode_escape(bytes: &[u8]) -> Option<(char, usize)> {
     if bytes.first() == Some(&b'{') {
         // \u{XXXXXX}
@@ -644,7 +673,26 @@ fn parse_unicode_escape(bytes: &[u8]) -> Option<(char, usize)> {
     } else if bytes.len() >= 4 {
         let hex = std::str::from_utf8(&bytes[..4]).ok()?;
         let code = u32::from_str_radix(hex, 16).ok()?;
-        Some((char::from_u32(code)?, 4))
+        if let Some(ch) = char::from_u32(code) {
+            return Some((ch, 4));
+        }
+        // `code` is a surrogate (0xD800..=0xDFFF), invalid as a lone scalar.
+        // If it is a high surrogate followed by `\uXXXX` low surrogate, combine
+        // them into the astral code point. The trailing `\u` (2 bytes) plus its
+        // 4 hex digits are consumed in addition to the first form's 4.
+        if (0xD800..=0xDBFF).contains(&code)
+            && bytes.get(4) == Some(&b'\\')
+            && bytes.get(5) == Some(&b'u')
+            && bytes.len() >= 10
+        {
+            let low_hex = std::str::from_utf8(&bytes[6..10]).ok()?;
+            let low = u32::from_str_radix(low_hex, 16).ok()?;
+            if (0xDC00..=0xDFFF).contains(&low) {
+                let scalar = 0x1_0000 + ((code - 0xD800) << 10) + (low - 0xDC00);
+                return Some((char::from_u32(scalar)?, 10));
+            }
+        }
+        None
     } else {
         None
     }

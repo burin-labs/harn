@@ -23,6 +23,7 @@ mod function_markup;
 mod heredoc_and_messages;
 mod native_tools;
 mod reserved_token;
+mod string_escape_fidelity;
 mod validation_and_tagged;
 
 pub(super) fn vm_dict(pairs: &[(&str, VmValue)]) -> VmValue {
