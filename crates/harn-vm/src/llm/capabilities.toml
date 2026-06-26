@@ -1476,6 +1476,12 @@ native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
 thinking_modes = ["enabled"]
+# Gemma 4 is genuinely multimodal (text+image) on every served surface, so the
+# local OpenAI-compat route exposes vision just like the gemini/openrouter/
+# together siblings (see 50-gemini-gemma.toml). Without this the emitted
+# `capability_tags` drop `vision` for the local route, contradicting the
+# structured caps and the model's real multimodality (harn#3585).
+vision_supported = true
 server_parser = "none"
 honors_chat_template_kwargs = false
 recommended_endpoint = "/v1/chat/completions"
