@@ -16,7 +16,7 @@
 import { agent_emit_event } from "std/agent/state"
 import { cache_get, cache_put } from "std/cache"
 import { llm_call_options } from "std/llm/options"
-import { with_case_insensitive_keys } from "std/llm/safe"
+import { repair_min_max_tokens, with_case_insensitive_keys } from "std/llm/safe"
 
 /**
  * default_llm_caller returns a closure with the canonical (call) -> result
@@ -975,7 +975,23 @@ fn __repair_apply_strategy(call, envelope, strategy, max_tokens, temperature) {
   let original_prompt = to_string(call?.prompt ?? "")
   var repaired_opts = __opts_dict(call?.opts)
   if max_tokens != nil {
-    repaired_opts = repaired_opts + {max_tokens: to_int(max_tokens)}
+    // The repair pass re-issues a structured verdict on the SAME route, so it
+    // shares the reasoning channel's budget. A flat repair `max_tokens` (the
+    // 600 default) is the twin of the pre-#3598 judge starvation: on a
+    // reasoning route the hidden analysis channel drains the shared budget and
+    // truncates the repaired JSON to empty. Floor the repair budget reasoning-
+    // awarely for THIS route (computed from the call's own opts) so it is only
+    // ever raised, never lowered — a non-reasoning route keeps the requested
+    // budget, a reasoning route clears the truncation floor. Reuses the shared
+    // `repair_min_max_tokens` so this never drifts from the judge floor.
+    let requested = to_int(max_tokens) ?? 0
+    let floor = repair_min_max_tokens(repaired_opts)
+    let effective = if requested > floor {
+      requested
+    } else {
+      floor
+    }
+    repaired_opts = repaired_opts + {max_tokens: effective}
   }
   if temperature != nil {
     repaired_opts = repaired_opts + {temperature: temperature}
@@ -993,15 +1009,18 @@ fn __repair_apply_strategy(call, envelope, strategy, max_tokens, temperature) {
  *
  * One-shot repair pass on `schema_validation` failures. When `next(call)`
  * returns `{ok: false, status: "schema_validation", error}`, the wrapper
- * appends a corrective nudge to `call.prompt`, lowers `max_tokens` and
- * `temperature` for the repair pass, and asks `next` once more. The
+ * appends a corrective nudge to `call.prompt`, sets `max_tokens` (reasoning-aware
+ * floored) and `temperature` for the repair pass, and asks `next` once more. The
  * second envelope is returned with `repair_attempted: true`.
  *
  * Options:
  *   - strategy: string | closure(prompt, system, opts, envelope) -> string
  *               Custom corrective nudge. Falls back to a deterministic
  *               schema-failure message that lists the validator's hint.
- *   - max_tokens: int (default 600) — applied to the repair-pass opts
+ *   - max_tokens: int (default 600) — applied to the repair-pass opts, then
+ *                 floored reasoning-awarely via `repair_min_max_tokens` for the
+ *                 call's route (raised, never lowered) so a reasoning route's
+ *                 repaired JSON verdict is not starved by its reasoning channel
  *   - temperature: float (default 0.0)
  *   - enabled: bool (default true) — when false, behaves as a no-op pass
  *

@@ -1,0 +1,10 @@
+non_reasoning=600
+non_reasoning_is_600=true
+non_reasoning_at_or_above_judge_floor=true
+reasoning_exceeds_old_600=true
+reasoning_exceeds_1024_reasoning_budget=true
+reasoning_value=1792
+reasoning_matches_judge_floor=true
+high_scales_above_reasoning=true
+high_within_ceiling=true
+disabled_is_600=true
