@@ -8,6 +8,27 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.143
+
+### Added
+
+- Add a parser-agreement contract test (`harn-hostlib` `parser_agreement_corpus`) that drives a small checked-in polyglot fixture corpus through the bundled tree-sitter `extract_imports` / `parse_errors` facts and fails CI when those facts diverge from declared ground truth — so a grammar-bump regression that mis-lexes valid source into phantom facts is caught before it can ship to an agent. Seeded with the zig `\\` multiline-string mislex.
+- The native scanner now extracts declared package-manifest dependencies for the project root and each detected sub-project, surfaced as `project.available_dependencies` and `sub_projects[].dependencies` in the `scanner.scan_project` / `scanner.scan_incremental` response. Coverage spans 14 ecosystems (npm, Composer, PyPI/Poetry, Cargo, Go modules, RubyGems, Dart pub, sbt, Gradle Groovy/Kotlin, Maven, SwiftPM, Mix, MSBuild/`.csproj`), porting Burin Code's Swift `ManifestDependencyParser` into cross-platform Rust so the fact is computed once in `harn-hostlib`.
+
+### Fixed
+
+Declare vision on the local Gemma 4 capability route so its emitted `capability_tags` and structured caps agree with the model's real multimodality and its hosted siblings (gemini/openrouter/together/nvidia). Previously the local OpenAI-compat `gemma-4*` rule dropped `vision`, giving hosts an inconsistent, route-dependent capability view.
+Stop a malformed `\x`/`\u` escape from dropping a whole tool call in the `name({ key: "value" })`
+text channel. A double/single-quoted string value containing Perl/PCRE `\x{1F600}`, a Windows path
+`C:\users\me`, a trailing `\x`, a short `\uAB`, or `\uABCG` previously errored with `invalid \x/\u
+escape` and the entire `edit`/`run` call was discarded — the model authored nothing and thrashed
+(the same class as the surrogate-pair drop, generalized to every other malformed-known-escape
+shape). The parser now degrades any escape that is not a complete `\xHH` / `\uHHHH` / `\u{...}` to
+its literal `\x`/`\u` bytes, byte-identical to the heredoc and template-literal channels, so the
+call still dispatches with the model's content. A complete-but-invalid escape (an unpaired
+surrogate) is still rejected, and well-formed `\xHH`/`\u{...}` escapes still decode.
+Agent loop: the depth>=4 no-progress nudge no longer accuses a tool-active model of being "stuck in a narration loop." When the model is issuing real tool calls but the loop's progress signal has not advanced, the nudge now steers it to re-read the failing output and target a different location instead of telling it to stop narrating.
+
 ## v0.8.142
 
 ### Fixed
