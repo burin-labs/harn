@@ -286,7 +286,9 @@ pub fn schema_retry_nudge_for(schema, hint) {
  *   temperature      -> 0.0
  *   schema_retries   -> 2
  *   repair.enabled   -> true
- *   repair.max_tokens-> 600
+ *   repair.max_tokens-> floored reasoning-awarely: `max(600, structured floor)`
+ *                       (600 baseline on a non-reasoning route; reasoning budget
+ *                       + verdict headroom on a reasoning route)
  *   repair.temperature -> 0.0
  *   schema_retry_nudge -> derived via `schema_retry_nudge_for`
  *   max_tokens       -> floored to `STRUCTURED_MIN_MAX_TOKENS` (512)
@@ -322,6 +324,17 @@ pub fn safe_structured_call(prompt, schema, options) {
  * (e.g. a 1200-token rubric judge) is left untouched.
  */
 let STRUCTURED_MIN_MAX_TOKENS = 512
+
+/**
+ * Minimum output-token budget for the structured REPAIR side-call on a
+ * NON-reasoning route. The repair pass re-emits the verdict JSON after a
+ * schema-validation failure; historically it ran with a flat 600-token budget.
+ * Kept as the non-reasoning baseline (never lowered) so a reasoning route is
+ * the only thing the reasoning-aware floor raises — preserving exact behavior
+ * for non-reasoning callers while fixing the reasoning-route starvation twin of
+ * the #3598 judge bug.
+ */
+let REPAIR_MIN_MAX_TOKENS = 600
 
 /**
  * Headroom (output tokens) reserved for the visible JSON verdict ON TOP of a
@@ -431,6 +444,29 @@ pub fn structured_min_max_tokens(options) {
   return floor
 }
 
+/**
+ * Reasoning-aware minimum output-token budget for the structured REPAIR
+ * side-call. The repair pass re-emits the verdict JSON on the SAME route after a
+ * schema-validation failure, so it shares the reasoning channel's `max_tokens`
+ * budget exactly like the main call. A flat 600-token repair floor is the twin
+ * of the pre-#3598 judge starvation: on a reasoning route the hidden analysis
+ * channel drains the shared budget and truncates the repaired JSON to empty -> a
+ * silent dead-repair. This returns `max(REPAIR_MIN_MAX_TOKENS, structured floor)`
+ * so a non-reasoning route keeps the historical 600 baseline (unchanged) while a
+ * reasoning route is raised to reasoning_budget + verdict headroom. It reuses
+ * `structured_min_max_tokens` so the repair floor never drifts from the judge
+ * floor. Only ever RAISES; an explicit larger repair budget is left untouched.
+ * @effects: []
+ * @errors: []
+ */
+pub fn repair_min_max_tokens(options) {
+  let floor = structured_min_max_tokens(options)
+  if floor > REPAIR_MIN_MAX_TOKENS {
+    return floor
+  }
+  return REPAIR_MIN_MAX_TOKENS
+}
+
 fn __apply_judge_defaults(schema, options) {
   var resolved = options
   let requested_max_tokens = to_int(resolved?.max_tokens ?? 0) ?? 0
@@ -456,8 +492,16 @@ fn __apply_judge_defaults(schema, options) {
   if repair?.enabled == nil {
     repair = repair + {enabled: true}
   }
-  if repair?.max_tokens == nil {
-    repair = repair + {max_tokens: 600}
+  // Floor the repair budget reasoning-awarely (see `repair_min_max_tokens`):
+  // a non-reasoning route keeps the historical 600 baseline, a reasoning route
+  // gets reasoning_budget + verdict headroom so the repaired JSON verdict is not
+  // starved by the route's hidden reasoning channel (twin of the #3598 judge
+  // bug). Resolved against the same options as the main floor so the two never
+  // drift. Only ever RAISES.
+  let repair_floor = repair_min_max_tokens(resolved)
+  let requested_repair_max_tokens = to_int(repair?.max_tokens ?? 0) ?? 0
+  if requested_repair_max_tokens < repair_floor {
+    repair = repair + {max_tokens: repair_floor}
   }
   if repair?.temperature == nil {
     repair = repair + {temperature: 0.0}
