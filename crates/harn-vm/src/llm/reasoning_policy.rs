@@ -385,7 +385,12 @@ fn lowest_tool_reasoning_level(caps: &Capabilities) -> String {
     "low".to_string()
 }
 
-fn budget_for_reasoning_level(level: &str) -> u32 {
+/// Canonical reasoning-channel output budget (tokens) Harn's reasoning policy
+/// allocates for an effort level. This is the single source of truth for the
+/// effort -> token mapping; the `llm_reasoning_effort_budget` builtin and the
+/// `std/llm/safe` structured-floor fallback both resolve through it rather than
+/// re-hardcoding these numbers.
+pub(crate) fn budget_for_reasoning_level(level: &str) -> u32 {
     match level {
         "minimal" | "low" => 1024,
         "high" | "xhigh" => 12_000,

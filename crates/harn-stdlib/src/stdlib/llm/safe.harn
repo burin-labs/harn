@@ -341,19 +341,15 @@ let STRUCTURED_MAX_MAX_TOKENS = 32768
 
 /**
  * Approximate reasoning-channel output budget (tokens) Harn's reasoning policy
- * allocates for an effort level. Mirrors `budget_for_reasoning_level` in
- * `crates/harn-vm/src/llm/reasoning_policy.rs`; used only as a fallback when the
- * resolved `thinking` dict carries no explicit `budget_tokens`.
+ * allocates for an effort level. Delegates to the `llm_reasoning_effort_budget`
+ * builtin, which is backed by the canonical `budget_for_reasoning_level` in
+ * `crates/harn-vm/src/llm/reasoning_policy.rs` (single source of truth — this
+ * helper does NOT re-hardcode the level -> token numbers). Used only as a
+ * fallback when the resolved `thinking` dict carries no explicit `budget_tokens`
+ * (e.g. an `effort`-mode route, which exposes `{mode, level}` but no budget).
  */
 fn __reasoning_effort_budget(level) {
-  let normalized = to_string(level ?? "")
-  if normalized == "minimal" || normalized == "low" {
-    return 1024
-  }
-  if normalized == "high" || normalized == "xhigh" {
-    return 12000
-  }
-  return 4096
+  return llm_reasoning_effort_budget(to_string(level ?? ""))
 }
 
 /**

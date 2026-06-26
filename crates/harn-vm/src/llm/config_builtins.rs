@@ -26,6 +26,7 @@ const LLM_CONFIG_DEFS: &[&VmBuiltinDef] = &[
     &LLM_QC_DEFAULT_MODEL_BUILTIN_DEF,
     &LLM_RESOLVED_OPTIONS_BUILTIN_DEF,
     &LLM_APPLY_REASONING_POLICY_BUILTIN_DEF,
+    &LLM_REASONING_EFFORT_BUDGET_BUILTIN_DEF,
     &LLM_MODEL_DEFAULTS_BUILTIN_DEF,
     &LLM_PROVIDER_CATALOG_BUILTIN_DEF,
     &LLM_PICK_MODEL_BUILTIN_DEF,
@@ -246,6 +247,24 @@ fn llm_apply_reasoning_policy_builtin(
     })?;
     let out = super::reasoning_policy::apply_policy_to_vm_options(opts)?;
     Ok(VmValue::dict(out))
+}
+
+/// Resolve the canonical reasoning-channel output budget (tokens) for an effort
+/// level, mirroring the policy used when materializing a `thinking` budget. This
+/// is the single source of truth for the effort -> token mapping so callers
+/// (e.g. the `std/llm/safe` structured-floor fallback) do not re-hardcode it.
+/// An unknown/empty level resolves to the medium default.
+#[harn_builtin(
+    sig = "llm_reasoning_effort_budget(level: string) -> int",
+    category = "llm.config"
+)]
+fn llm_reasoning_effort_budget_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let level = args.first().map(|a| a.display()).unwrap_or_default();
+    let budget = super::reasoning_policy::budget_for_reasoning_level(level.trim());
+    Ok(VmValue::Int(i64::from(budget)))
 }
 
 fn toml_value_to_vm_value(value: &toml::Value) -> VmValue {
@@ -1896,6 +1915,24 @@ mod tests {
             dict.is_empty(),
             "unknown model should yield empty defaults dict, got {dict:?}"
         );
+    }
+
+    #[test]
+    fn test_llm_reasoning_effort_budget_matches_canonical_mapping() {
+        let mut out = String::new();
+        for level in ["minimal", "low", "medium", "high", "xhigh", "", "unknown"] {
+            let args = vec![VmValue::String(arcstr::ArcStr::from(level))];
+            let result = llm_reasoning_effort_budget_builtin(&args, &mut out)
+                .expect("builtin returned error");
+            let got = match result {
+                VmValue::Int(n) => n,
+                other => panic!("expected Int, got {other:?}"),
+            };
+            let expected = i64::from(super::super::reasoning_policy::budget_for_reasoning_level(
+                level,
+            ));
+            assert_eq!(got, expected, "budget mismatch for level {level:?}");
+        }
     }
 
     #[test]
