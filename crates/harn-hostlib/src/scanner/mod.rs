@@ -32,6 +32,7 @@ mod extensions;
 mod folders;
 mod git;
 mod imports;
+mod manifest;
 mod result;
 mod scoring;
 mod snapshot;
@@ -157,7 +158,7 @@ pub fn scan_project_with_git(
     let folder_records = folders::build_folder_records(&files, &symbols);
     let test_commands = commands::detect_test_commands(&canonical);
     let code_patterns = commands::detect_code_patterns(&files, &canonical);
-    let project = folders::build_project_metadata(
+    let mut project = folders::build_project_metadata(
         &canonical,
         &files,
         test_commands,
@@ -165,7 +166,8 @@ pub fn scan_project_with_git(
         now_iso8601(),
     );
     let repo_map = folders::build_repo_map(&symbols, &files, opts.repo_map_token_budget);
-    let sub_projects = subproject::detect_subprojects(&canonical, 2);
+    let mut sub_projects = subproject::detect_subprojects(&canonical, 2);
+    attach_manifest_dependencies(&canonical, &mut project, &mut sub_projects);
 
     sort_for_output(&mut files, &mut symbols, &mut dependencies);
 
@@ -313,7 +315,7 @@ pub fn scan_incremental_with_git(
     let folder_records = folders::build_folder_records(&files, &symbols);
     let test_commands = commands::detect_test_commands(&canonical);
     let code_patterns = commands::detect_code_patterns(&files, &canonical);
-    let project = folders::build_project_metadata(
+    let mut project = folders::build_project_metadata(
         &canonical,
         &files,
         test_commands,
@@ -321,7 +323,8 @@ pub fn scan_incremental_with_git(
         now_iso8601(),
     );
     let repo_map = folders::build_repo_map(&symbols, &files, opts.repo_map_token_budget);
-    let sub_projects = subproject::detect_subprojects(&canonical, 2);
+    let mut sub_projects = subproject::detect_subprojects(&canonical, 2);
+    attach_manifest_dependencies(&canonical, &mut project, &mut sub_projects);
 
     sort_for_output(&mut files, &mut symbols, &mut dependencies);
 
@@ -345,6 +348,21 @@ pub fn scan_incremental_with_git(
 
 fn canonicalize(root: &Path) -> PathBuf {
     std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf())
+}
+
+/// Compute package-manifest dependencies for the root and each detected
+/// sub-project. Centralized here so manifest parsing (in [`manifest`]) is
+/// invoked exactly once per project directory by both the full and the
+/// incremental scan paths.
+fn attach_manifest_dependencies(
+    canonical: &Path,
+    project: &mut ProjectMetadata,
+    sub_projects: &mut [SubProject],
+) {
+    project.available_dependencies = manifest::directory_dependencies(canonical);
+    for sp in sub_projects.iter_mut() {
+        sp.dependencies = manifest::directory_dependencies(Path::new(&sp.path));
+    }
 }
 
 fn extract_per_file(
@@ -654,6 +672,11 @@ fn project_to_value(project: &ProjectMetadata) -> VmValue {
         .unwrap_or(VmValue::Nil);
 
     let code_patterns: Vec<VmValue> = project.code_patterns.iter().map(str_value).collect();
+    let available_dependencies: Vec<VmValue> = project
+        .available_dependencies
+        .iter()
+        .map(str_value)
+        .collect();
 
     build_dict([
         ("name", str_value(&project.name)),
@@ -665,6 +688,10 @@ fn project_to_value(project: &ProjectMetadata) -> VmValue {
         ("total_files", VmValue::Int(project.total_files as i64)),
         ("total_lines", VmValue::Int(project.total_lines as i64)),
         ("last_scanned_at", str_value(&project.last_scanned_at)),
+        (
+            "available_dependencies",
+            VmValue::List(Arc::new(available_dependencies)),
+        ),
     ])
 }
 
@@ -743,11 +770,13 @@ fn dependency_to_value(dep: &DependencyEdge) -> VmValue {
 }
 
 fn subproject_to_value(sp: &SubProject) -> VmValue {
+    let dependencies: Vec<VmValue> = sp.dependencies.iter().map(str_value).collect();
     build_dict([
         ("path", str_value(&sp.path)),
         ("name", str_value(&sp.name)),
         ("language", str_value(&sp.language)),
         ("project_marker", str_value(&sp.project_marker)),
+        ("dependencies", VmValue::List(Arc::new(dependencies))),
     ])
 }
 

@@ -187,6 +187,11 @@ pub struct ProjectMetadata {
     pub total_lines: usize,
     /// ISO-8601 UTC timestamp when scanning finished.
     pub last_scanned_at: String,
+    /// Dependency identifiers declared in package manifests located directly
+    /// under the project root (`package.json`, `Cargo.toml`, `go.mod`, …).
+    /// Sorted + de-duplicated. Empty when no recognized manifest is present.
+    #[serde(default)]
+    pub available_dependencies: Vec<String>,
 }
 
 /// One edge of the file-level dependency graph.
@@ -209,6 +214,10 @@ pub struct SubProject {
     pub language: String,
     /// Marker file name.
     pub project_marker: String,
+    /// Dependency identifiers declared in this sub-project's manifests,
+    /// sorted + de-duplicated. Empty when no recognized manifest is present.
+    #[serde(default)]
+    pub dependencies: Vec<String>,
 }
 
 /// Path-delta accompanying a [`scan_incremental`](super::scan_incremental)

@@ -70,6 +70,9 @@ fn scan_dir(
                 name,
                 language: (*language).to_string(),
                 project_marker: (*marker).to_string(),
+                // Populated by the scanner after detection so manifest
+                // parsing stays in `manifest.rs` rather than this walker.
+                dependencies: Vec::new(),
             });
         }
     }

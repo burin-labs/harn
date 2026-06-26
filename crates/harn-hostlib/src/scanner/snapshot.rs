@@ -90,6 +90,7 @@ mod tests {
                 total_files: 0,
                 total_lines: 0,
                 last_scanned_at: "1970-01-01T00:00:00Z".to_string(),
+                available_dependencies: Vec::new(),
             },
             folders: Vec::new(),
             files: Vec::new(),
