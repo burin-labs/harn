@@ -309,17 +309,26 @@ impl<'a> TsValueParser<'a> {
                     b'"' => out.push('"'),
                     b'`' => out.push('`'),
                     b'\n' => { /* line continuation — drop */ }
-                    b'u' => {
-                        let (ch, consumed) = parse_unicode_escape(&self.bytes[pos..])?;
-                        out.push(ch);
-                        pos += consumed;
-                    }
-                    b'x' => {
-                        let hex = std::str::from_utf8(self.bytes.get(pos..pos + 2)?).ok()?;
-                        let code = u32::from_str_radix(hex, 16).ok()?;
-                        out.push(char::from_u32(code)?);
-                        pos += 2;
-                    }
+                    b'u' => match parse_unicode_escape(&self.bytes[pos..]) {
+                        UnicodeEscape::Char(ch, consumed) => {
+                            out.push(ch);
+                            pos += consumed;
+                        }
+                        // An unpaired surrogate aborts recovery (return None) so
+                        // the caller reports the original error rather than
+                        // emitting a half-character.
+                        UnicodeEscape::InvalidScalar => return None,
+                        // Not a complete escape: keep `\u` literal, same as the
+                        // strict pass — never drop content.
+                        UnicodeEscape::NotEscape => out.push_str("\\u"),
+                    },
+                    b'x' => match parse_hex_escape(&self.bytes[pos..]) {
+                        Some((ch, consumed)) => {
+                            out.push(ch);
+                            pos += consumed;
+                        }
+                        None => out.push_str("\\x"),
+                    },
                     // Unknown escape: keep the backslash AND the char. See the
                     // `parse_string_literal` arm for the rationale — preserving
                     // `\d`/`\w`/`\b` (regex), `\begin` (LaTeX), `\section`, etc.
@@ -420,28 +429,32 @@ impl<'a> TsValueParser<'a> {
                         b'"' => out.push('"'),
                         b'`' => out.push('`'),
                         b'\n' => { /* line continuation — drop */ }
-                        b'u' => {
+                        b'u' => match parse_unicode_escape(&self.bytes[self.pos..]) {
                             // \uXXXX or \u{XXXXX}
-                            let (ch, consumed) = parse_unicode_escape(&self.bytes[self.pos..])
-                                .ok_or("invalid \\u escape in string literal")?;
-                            out.push(ch);
-                            self.pos += consumed;
-                        }
-                        b'x' => {
-                            if self.pos + 2 > self.bytes.len() {
-                                return Err("invalid \\x escape in string literal".to_string());
-                            }
-                            let hex = std::str::from_utf8(&self.bytes[self.pos..self.pos + 2])
-                                .map_err(|_| "invalid \\x escape".to_string())?;
-                            let code = u32::from_str_radix(hex, 16)
-                                .map_err(|_| "invalid \\x escape".to_string())?;
-                            if let Some(ch) = char::from_u32(code) {
+                            UnicodeEscape::Char(ch, consumed) => {
                                 out.push(ch);
-                                self.pos += 2;
-                            } else {
-                                return Err("invalid \\x code point".to_string());
+                                self.pos += consumed;
                             }
-                        }
+                            UnicodeEscape::InvalidScalar => {
+                                return Err("invalid \\u escape in string literal".to_string());
+                            }
+                            // Not a complete escape (`\users`, `\uAB`, `\uABCG`):
+                            // keep `\u` literal like any unknown escape rather than
+                            // dropping the whole call. Matches the heredoc and
+                            // template-literal channels byte-for-byte.
+                            UnicodeEscape::NotEscape => out.push_str("\\u"),
+                        },
+                        b'x' => match parse_hex_escape(&self.bytes[self.pos..]) {
+                            Some((ch, consumed)) => {
+                                out.push(ch);
+                                self.pos += consumed;
+                            }
+                            // Not a complete `\xHH` escape (Perl `\x{1F600}`, a
+                            // trailing `\x`, `\x` + non-hex): keep `\x` literal so
+                            // the call still dispatches with the model's content,
+                            // identical to the heredoc/template channels.
+                            None => out.push_str("\\x"),
+                        },
                         // Unknown escape (`\d`, `\w`, `\b`, `\s` regex; `\begin`
                         // LaTeX; `\section`; a Windows path's `\U`): keep BOTH the
                         // backslash and the char. JS would collapse `\d` to `d`,
@@ -651,30 +664,57 @@ impl<'a> TsValueParser<'a> {
     }
 }
 
-/// Parse a `\uXXXX` or `\u{XXXXXX}` escape starting at bytes[0]. Returns the
-/// decoded character AND the number of bytes consumed after the `\u`.
+/// Outcome of reading a `\u` escape, given the bytes that follow the `\u`.
+///
+/// The three cases drive the caller's never-drop-the-call contract: a complete,
+/// valid escape decodes; a complete-but-invalid one (unpaired surrogate, out of
+/// range) is rejected so we never emit a half-character; and anything that is
+/// not even a complete `\u` escape is kept as the literal text `\u…` rather than
+/// dropping the entire tool call.
+enum UnicodeEscape {
+    /// Decoded scalar plus the number of bytes consumed after `\u`.
+    Char(char, usize),
+    /// Syntactically a complete `\uHHHH` / `\u{HHHH}` escape, but the code point
+    /// is not a valid scalar (an unpaired surrogate, or out of range). The model
+    /// clearly intended a unicode escape, so reject rather than silently emit a
+    /// half-character — this keeps the lone-surrogate guard.
+    InvalidScalar,
+    /// Not a syntactically complete `\u` escape (`\u` not followed by four hex
+    /// digits or a `{HHHH}` group — e.g. a Windows path `\users`, a short
+    /// `\uAB`, or `\uABCG`). Treat `\u` as literal content; never drop the call.
+    NotEscape,
+}
+
+/// Classify a `\u` escape from the bytes following the `\u` prefix.
 ///
 /// The plain 4-hex `\uXXXX` form decodes a single UTF-16 code unit, so a
 /// non-BMP scalar (emoji, CJK extension B+, math alphanumerics) arrives as a
 /// **surrogate pair** `😀` — exactly what `JSON.stringify` and most
-/// provider APIs emit. A lone surrogate is not a valid `char`, so without
-/// pairing them `char::from_u32` returns `None`, the caller reports
-/// `invalid \u escape`, and the ENTIRE tool call is dropped (the model's
-/// `edit`/`write` silently never lands). Detect a high surrogate and fold the
-/// following `\uXXXX` low surrogate into the astral scalar, consuming its `\u`
-/// prefix too. The `\u{...}` brace form already carries the full scalar.
-fn parse_unicode_escape(bytes: &[u8]) -> Option<(char, usize)> {
+/// provider APIs emit. Detect a high surrogate and fold the following `\uXXXX`
+/// low surrogate into the astral scalar, consuming its `\u` prefix too. The
+/// `\u{...}` brace form already carries the full scalar.
+fn parse_unicode_escape(bytes: &[u8]) -> UnicodeEscape {
     if bytes.first() == Some(&b'{') {
-        // \u{XXXXXX}
-        let close = bytes.iter().position(|&b| b == b'}')?;
-        let hex = std::str::from_utf8(&bytes[1..close]).ok()?;
-        let code = u32::from_str_radix(hex, 16).ok()?;
-        Some((char::from_u32(code)?, close + 1))
-    } else if bytes.len() >= 4 {
-        let hex = std::str::from_utf8(&bytes[..4]).ok()?;
-        let code = u32::from_str_radix(hex, 16).ok()?;
+        // \u{XXXXXX}. Missing close brace or non-hex contents is not a complete
+        // escape — keep the `\u` literal rather than dropping the whole call.
+        let Some(close) = bytes.iter().position(|&b| b == b'}') else {
+            return UnicodeEscape::NotEscape;
+        };
+        let Some(code) = std::str::from_utf8(&bytes[1..close])
+            .ok()
+            .and_then(|hex| u32::from_str_radix(hex, 16).ok())
+        else {
+            return UnicodeEscape::NotEscape;
+        };
+        match char::from_u32(code) {
+            Some(ch) => UnicodeEscape::Char(ch, close + 1),
+            None => UnicodeEscape::InvalidScalar,
+        }
+    } else if bytes.len() >= 4 && bytes[..4].iter().all(u8::is_ascii_hexdigit) {
+        let code = u32::from_str_radix(std::str::from_utf8(&bytes[..4]).expect("ascii"), 16)
+            .expect("four hex digits");
         if let Some(ch) = char::from_u32(code) {
-            return Some((ch, 4));
+            return UnicodeEscape::Char(ch, 4);
         }
         // `code` is a surrogate (0xD800..=0xDFFF), invalid as a lone scalar.
         // If it is a high surrogate followed by `\uXXXX` low surrogate, combine
@@ -684,16 +724,37 @@ fn parse_unicode_escape(bytes: &[u8]) -> Option<(char, usize)> {
             && bytes.get(4) == Some(&b'\\')
             && bytes.get(5) == Some(&b'u')
             && bytes.len() >= 10
+            && bytes[6..10].iter().all(u8::is_ascii_hexdigit)
         {
-            let low_hex = std::str::from_utf8(&bytes[6..10]).ok()?;
-            let low = u32::from_str_radix(low_hex, 16).ok()?;
+            let low = u32::from_str_radix(std::str::from_utf8(&bytes[6..10]).expect("ascii"), 16)
+                .expect("four hex digits");
             if (0xDC00..=0xDFFF).contains(&low) {
                 let scalar = 0x1_0000 + ((code - 0xD800) << 10) + (low - 0xDC00);
-                return Some((char::from_u32(scalar)?, 10));
+                if let Some(ch) = char::from_u32(scalar) {
+                    return UnicodeEscape::Char(ch, 10);
+                }
             }
         }
-        None
+        // Complete `\uHHHH` syntax, but an unpaired / unmatched surrogate.
+        UnicodeEscape::InvalidScalar
     } else {
-        None
+        // `\u` not followed by four hex digits or `{...}`: literal `\u`.
+        UnicodeEscape::NotEscape
     }
+}
+
+/// Decode a `\xHH` escape (exactly two hex digits) from the bytes following the
+/// `\x` prefix. Returns the scalar and bytes consumed (always 2) when both
+/// following bytes are hex; otherwise `None` so the caller keeps `\x` literal
+/// instead of dropping the whole call. Every `0x00..=0xFF` value is a valid
+/// scalar, so there is no invalid-code-point case here. This keeps content like
+/// Perl `\x{1F600}`, a trailing `\x`, or `\x` + non-hex byte-identical to the
+/// heredoc and template-literal channels.
+fn parse_hex_escape(bytes: &[u8]) -> Option<(char, usize)> {
+    let pair = bytes.get(..2)?;
+    if !pair.iter().all(u8::is_ascii_hexdigit) {
+        return None;
+    }
+    let code = u32::from_str_radix(std::str::from_utf8(pair).expect("ascii"), 16).expect("two hex");
+    char::from_u32(code).map(|ch| (ch, 2))
 }
