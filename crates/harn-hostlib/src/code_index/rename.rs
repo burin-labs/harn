@@ -173,18 +173,46 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
     let symbol_kind_raw = optional_string(BUILTIN, symbol_dict, "kind")?;
     let symbol_kind = symbol_kind_raw.as_deref().map(parse_kind).transpose()?;
 
-    let new_name = require_string(BUILTIN, dict, "new_name")?;
+    // Two modes share the same machinery:
+    //   - rename  : `new_name` is a fresh identifier; shadow-checked, identifier
+    //     -validated; every identifier-context occurrence becomes `new_name`.
+    //   - replace : `replacement_text` is arbitrary text (e.g. `client.fetch`);
+    //     no shadow/identifier gate (a literal replacement can't shadow), but the
+    //     post-edit file must still re-parse. This turns the one-shot atomic
+    //     cross-file primitive into a general symbol-grounded find/replace so an
+    //     API migration is one call instead of N `edit`s.
+    let replacement_text = optional_string(BUILTIN, dict, "replacement_text")?;
     let scope = Scope::parse(&require_string(BUILTIN, dict, "scope")?)?;
     let session_id = optional_string(BUILTIN, dict, "session_id")?;
     let dry_run = optional_bool(BUILTIN, dict, "dry_run", false)?;
     let validate = optional_bool(BUILTIN, dict, "validate", true)?;
 
-    if new_name == symbol_name {
+    let new_name = match &replacement_text {
+        // In rename mode `new_name` is required and reported as the after-text.
+        None => require_string(BUILTIN, dict, "new_name")?,
+        // In replace mode `new_name` is irrelevant; carry the literal so response
+        // shaping (which echoes the after-text) stays uniform.
+        Some(text) => text.clone(),
+    };
+    let is_rename = replacement_text.is_none();
+
+    if is_rename && new_name == symbol_name {
         return Err(HostlibError::InvalidParameter {
             builtin: BUILTIN,
             param: "new_name",
             message: "new_name must differ from symbol_ref.name".into(),
         });
+    }
+    if let Some(text) = &replacement_text {
+        if text.is_empty() {
+            return Err(HostlibError::InvalidParameter {
+                builtin: BUILTIN,
+                param: "replacement_text",
+                message: "replacement_text must be non-empty (to delete a symbol \
+                     use `remove_symbol` / `delete_range`)"
+                    .into(),
+            });
+        }
     }
 
     let guard = index.lock().expect("code_index mutex poisoned");
@@ -236,7 +264,10 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
         return Ok(no_match_response(&env));
     }
 
-    if !is_identifier_token(&new_name) {
+    // The identifier-validity gate is a rename-only concern: an arbitrary
+    // `replacement_text` (e.g. `client.fetch(`) is intentionally not an
+    // identifier. Syntax validation (below) is the safety net for replace mode.
+    if is_rename && !is_identifier_token(&new_name) {
         return Ok(invalid_identifier_response(
             &env,
             "must start with a letter or underscore and consist of identifier characters",
@@ -273,11 +304,15 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
 
         let mut targets = Vec::new();
         let mut local_shadows: Vec<ShadowSite> = Vec::new();
+        // Shadow detection is a rename-only concern (the new identifier must not
+        // already exist). In replace mode `replacement_text` is arbitrary, so
+        // pass an empty shadow target — no source identifier can equal it.
+        let shadow_target: &str = if is_rename { &new_name } else { "" };
         collect_identifier_spans(
             tree.root_node(),
             source.as_bytes(),
             &symbol_name,
-            &new_name,
+            shadow_target,
             identifier_kinds,
             path,
             &mut targets,
@@ -982,6 +1017,20 @@ mod tests {
         run(&capability.shared(), &[dict(&entries)]).expect("rename runs")
     }
 
+    fn replace(
+        capability: &CodeIndexCapability,
+        symbol_ref: VmValue,
+        replacement_text: &str,
+        scope: &str,
+    ) -> VmValue {
+        let entries = vec![
+            ("symbol_ref", symbol_ref),
+            ("replacement_text", vm_string(replacement_text)),
+            ("scope", vm_string(scope)),
+        ];
+        run(&capability.shared(), &[dict(&entries)]).expect("replace runs")
+    }
+
     #[test]
     fn rust_workspace_rename_rewrites_definitions_and_call_sites() {
         let dir = tempdir().unwrap();
@@ -1339,5 +1388,185 @@ mod tests {
         assert!(on_disk_post.contains("fn beta()"));
         assert!(on_disk_post.contains("beta();"));
         assert!(!on_disk_post.contains("alpha"));
+    }
+
+    // === replace mode (#edit-precision): arbitrary-text replacement of a
+    // symbol's true-identifier occurrences across files in one atomic call. ===
+
+    #[test]
+    fn replace_mode_rewrites_call_sites_across_files_with_arbitrary_text() {
+        // An API migration: every call to `old_api` becomes `client.fetch` —
+        // NOT a valid bare identifier, so rename mode would reject it, but
+        // replace mode swaps all true-identifier occurrences across both files
+        // in one shot while leaving the string literal untouched.
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::write(
+            root.join("src/lib.rs"),
+            "pub fn old_api() -> u32 { 0 }\n// old_api is deprecated\nfn helper() -> &'static str { \"old_api\" }\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("src/main.rs"),
+            "use crate::old_api;\nfn main() {\n    let _ = old_api();\n}\n",
+        )
+        .unwrap();
+
+        let capability = build_index(root);
+        let symbol_ref = dict(&[
+            ("name", vm_string("old_api")),
+            ("path", vm_string("src/lib.rs")),
+            ("kind", vm_string("Function")),
+        ]);
+        let result = replace(&capability, symbol_ref, "client_fetch", "workspace");
+        assert_eq!(s(field(&result, "result")), "applied");
+        assert_eq!(list_len(field(&result, "touched_files")), 2);
+
+        let lib = fs::read_to_string(root.join("src/lib.rs")).unwrap();
+        let main = fs::read_to_string(root.join("src/main.rs")).unwrap();
+        // Definition + call sites rewritten.
+        assert!(lib.contains("pub fn client_fetch()"));
+        assert!(main.contains("use crate::client_fetch;"));
+        assert!(main.contains("let _ = client_fetch();"));
+        // String literal and comment text are preserved verbatim.
+        assert!(lib.contains("// old_api is deprecated"));
+        assert!(lib.contains("\"old_api\""));
+    }
+
+    #[test]
+    fn replace_mode_bypasses_identifier_gate_but_keeps_syntax_validation() {
+        // `client.fetch` is not a valid identifier. Rename mode would reject it
+        // up front with `invalid_identifier`. Replace mode bypasses that gate —
+        // it gets as far as splicing every occurrence (including the definition
+        // `fn client.fetch`, which does not parse) and is then caught by the
+        // SAME syntax-validation safety net, returning `syntax_error` (not
+        // `invalid_identifier`). This proves: (a) the identifier gate is
+        // bypassed in replace mode, and (b) validation still protects disk.
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join("src")).unwrap();
+        let original = "fn fetch_thing(n: u32) -> u32 { n }\nfn caller() {\n    let _ = fetch_thing(1);\n}\n";
+        fs::write(root.join("src/lib.rs"), original).unwrap();
+        let capability = build_index(root);
+        let symbol_ref = dict(&[
+            ("name", vm_string("fetch_thing")),
+            ("path", vm_string("src/lib.rs")),
+            ("kind", vm_string("Function")),
+        ]);
+        let result = replace(&capability, symbol_ref, "client.fetch", "file");
+        let tag = s(field(&result, "result"));
+        assert_eq!(
+            tag, "syntax_error",
+            "replace mode must skip the identifier gate yet still validate syntax"
+        );
+        assert_ne!(tag, "invalid_identifier");
+        let on_disk = fs::read_to_string(root.join("src/lib.rs")).unwrap();
+        assert_eq!(on_disk, original, "syntax_error must not write");
+    }
+
+
+    #[test]
+    fn replace_mode_ignores_shadow_conflicts() {
+        // `Gadget` already exists; a RENAME of Widget->Gadget would abort with
+        // a shadow conflict, but REPLACE mode intentionally allows it (the
+        // caller is doing a deliberate textual replacement).
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::write(
+            root.join("src/main.rs"),
+            "pub struct Widget {}\npub struct Gadget {}\nfn main() { let _ = Widget {}; let _ = Gadget {}; }\n",
+        )
+        .unwrap();
+        let capability = build_index(root);
+        let symbol_ref = dict(&[
+            ("name", vm_string("Widget")),
+            ("path", vm_string("src/main.rs")),
+            ("kind", vm_string("Type")),
+        ]);
+        let result = replace(&capability, symbol_ref, "Gadget", "workspace");
+        assert_eq!(
+            s(field(&result, "result")),
+            "applied",
+            "replace mode must not raise a shadow conflict"
+        );
+    }
+
+    #[test]
+    fn replace_mode_aborts_when_result_does_not_parse() {
+        // Replacing the identifier with a syntactically broken token must abort
+        // with no write — the same syntax-validation safety net as rename mode.
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join("src")).unwrap();
+        let original = "fn thing() {}\nfn caller() {\n    let _ = thing();\n}\n";
+        fs::write(root.join("src/lib.rs"), original).unwrap();
+        let capability = build_index(root);
+        let symbol_ref = dict(&[
+            ("name", vm_string("thing")),
+            ("path", vm_string("src/lib.rs")),
+            ("kind", vm_string("Function")),
+        ]);
+        // `@@@` is not valid Rust; the spliced file fails to re-parse.
+        let result = replace(&capability, symbol_ref, "@@@", "file");
+        assert_eq!(s(field(&result, "result")), "syntax_error");
+        let on_disk = fs::read_to_string(root.join("src/lib.rs")).unwrap();
+        assert_eq!(on_disk, original, "syntax_error must not write");
+    }
+
+    #[test]
+    fn replace_mode_rejects_empty_replacement_text() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::write(root.join("src/lib.rs"), "fn thing() {}\n").unwrap();
+        let capability = build_index(root);
+        let symbol_ref = dict(&[
+            ("name", vm_string("thing")),
+            ("path", vm_string("src/lib.rs")),
+            ("kind", vm_string("Function")),
+        ]);
+        let err = run(
+            &capability.shared(),
+            &[dict(&[
+                ("symbol_ref", symbol_ref),
+                ("replacement_text", vm_string("")),
+                ("scope", vm_string("file")),
+            ])],
+        );
+        assert!(err.is_err(), "empty replacement_text must be rejected");
+    }
+
+    #[test]
+    fn replace_mode_dry_run_does_not_write() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join("src")).unwrap();
+        let original = "fn alpha() {}\nfn caller() { alpha(); }\n";
+        fs::write(root.join("src/lib.rs"), original).unwrap();
+        let capability = build_index(root);
+        let symbol_ref = dict(&[
+            ("name", vm_string("alpha")),
+            ("path", vm_string("src/lib.rs")),
+            ("kind", vm_string("Function")),
+        ]);
+        let result = run(
+            &capability.shared(),
+            &[dict(&[
+                ("symbol_ref", symbol_ref),
+                ("replacement_text", vm_string("alpha2")),
+                ("scope", vm_string("file")),
+                ("dry_run", VmValue::Bool(true)),
+            ])],
+        )
+        .expect("replace runs");
+        assert_eq!(s(field(&result, "result")), "applied");
+        match field(&result, "match_count") {
+            VmValue::Int(n) => assert_eq!(*n, 2, "both occurrences planned"),
+            other => panic!("expected int match_count, got {other:?}"),
+        }
+        let on_disk = fs::read_to_string(root.join("src/lib.rs")).unwrap();
+        assert_eq!(on_disk, original, "dry_run must leave disk untouched");
     }
 }
