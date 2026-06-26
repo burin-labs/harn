@@ -2331,6 +2331,28 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
     }
 
     #[test]
+    fn local_gemma4_exposes_vision_like_hosted_siblings() {
+        // harn#3585: Gemma 4 is multimodal on every served surface. The local
+        // OpenAI-compat route must declare vision so the derived structured caps
+        // and the emitted `capability_tags` agree with the gemini/openrouter/
+        // together siblings — previously the local route dropped `vision`,
+        // contradicting the model's real multimodality and the structured caps.
+        reset();
+        for model in ["gemma-4-e4b-it", "gemma-4-e2b-it", "gemma-4-26b-a4b-it"] {
+            let caps = lookup("local", model);
+            assert!(
+                caps.vision_supported,
+                "local {model} should expose vision_supported"
+            );
+            let tags = crate::llm_config::capability_tags_from_capabilities(&caps);
+            assert!(
+                tags.iter().any(|t| t == "vision"),
+                "local {model} emitted capability_tags should include `vision`, got {tags:?}"
+            );
+        }
+    }
+
+    #[test]
     fn ollama_vision_models_have_no_reasoning_scaffold() {
         // Fix B: bakllava / llama3.2-vision / gemma3 are caption/vision models
         // with no reasoning capability; they must resolve to the "none" thinking

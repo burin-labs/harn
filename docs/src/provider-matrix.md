@@ -96,7 +96,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `llamacpp` | `*devstral-small-2*` | `any` | no | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
 | `local` | `*qwen3.6*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `local` | `*qwen3*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
-| `local` | `gemma-4*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
+| `local` | `gemma-4*` | `any` | `enabled` | yes | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `minimax` | `minimax-m3*` | `any` | `adaptive` | yes | no | no | yes | yes | no | `delimited` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `minimax` | `minimax-m2.7*` | `any` | `enabled` | no | no | no | no | yes | no | `delimited` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `json` | yes | yes | `native_unreliable` | yes | yes |
 | `minimax` | `minimax-m2.5*` | `any` | `enabled` | no | no | no | no | yes | no | `delimited` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
