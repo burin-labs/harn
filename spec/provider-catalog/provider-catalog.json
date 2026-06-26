@@ -6101,7 +6101,8 @@
       "stream_timeout": 300.0,
       "modalities": {
         "input": [
-          "text"
+          "text",
+          "image"
         ],
         "output": [
           "text"
@@ -6144,6 +6145,7 @@
       "capability_tags": [
         "streaming",
         "tools",
+        "vision",
         "thinking",
         "structured_output"
       ],
@@ -6168,7 +6170,8 @@
       "stream_timeout": 600.0,
       "modalities": {
         "input": [
-          "text"
+          "text",
+          "image"
         ],
         "output": [
           "text"
@@ -6211,6 +6214,7 @@
       "capability_tags": [
         "streaming",
         "tools",
+        "vision",
         "thinking",
         "structured_output"
       ],
@@ -6233,7 +6237,8 @@
       "stream_timeout": 600.0,
       "modalities": {
         "input": [
-          "text"
+          "text",
+          "image"
         ],
         "output": [
           "text"
@@ -6276,6 +6281,7 @@
       "capability_tags": [
         "streaming",
         "tools",
+        "vision",
         "thinking",
         "structured_output"
       ],
@@ -6299,7 +6305,8 @@
       "stream_timeout": 300.0,
       "modalities": {
         "input": [
-          "text"
+          "text",
+          "image"
         ],
         "output": [
           "text"
@@ -6342,6 +6349,7 @@
       "capability_tags": [
         "streaming",
         "tools",
+        "vision",
         "thinking",
         "structured_output"
       ],
@@ -6365,7 +6373,8 @@
       "stream_timeout": 300.0,
       "modalities": {
         "input": [
-          "text"
+          "text",
+          "image"
         ],
         "output": [
           "text"
@@ -6408,6 +6417,7 @@
       "capability_tags": [
         "streaming",
         "tools",
+        "vision",
         "thinking",
         "structured_output"
       ],
