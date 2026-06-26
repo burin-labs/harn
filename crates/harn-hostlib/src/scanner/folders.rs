@@ -130,6 +130,9 @@ pub fn build_project_metadata(
         total_files,
         total_lines,
         last_scanned_at,
+        // Populated by the scanner after sub-project detection so the
+        // root's manifest dependencies are computed exactly once.
+        available_dependencies: Vec::new(),
     }
 }
 
