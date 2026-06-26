@@ -1446,7 +1446,8 @@ mod tests {
         let dir = tempdir().unwrap();
         let root = dir.path();
         fs::create_dir_all(root.join("src")).unwrap();
-        let original = "fn fetch_thing(n: u32) -> u32 { n }\nfn caller() {\n    let _ = fetch_thing(1);\n}\n";
+        let original =
+            "fn fetch_thing(n: u32) -> u32 { n }\nfn caller() {\n    let _ = fetch_thing(1);\n}\n";
         fs::write(root.join("src/lib.rs"), original).unwrap();
         let capability = build_index(root);
         let symbol_ref = dict(&[
@@ -1464,7 +1465,6 @@ mod tests {
         let on_disk = fs::read_to_string(root.join("src/lib.rs")).unwrap();
         assert_eq!(on_disk, original, "syntax_error must not write");
     }
-
 
     #[test]
     fn replace_mode_ignores_shadow_conflicts() {
