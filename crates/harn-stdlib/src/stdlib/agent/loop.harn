@@ -2167,8 +2167,12 @@ fn __next_progress_count(made_progress, turns_since_progress) {
  * this turn — the content nudge takes precedence so a turn is never
  * double-injected; this streak nudge is the fallback for toolless churn.
  * Depth is `turns_since_progress`.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
  */
-fn __progress_nudge_text(depth, has_tools, tool_mode = "text") {
+pub fn __progress_nudge_text(depth, has_tools, tool_mode = "text", made_tool_calls = false) {
   let action = if has_tools {
     if tool_mode == "native" {
       "Call exactly one native tool through the provider tool channel now, or give your final answer and stop."
@@ -2179,6 +2183,18 @@ fn __progress_nudge_text(depth, has_tools, tool_mode = "text") {
     "Make concrete progress in your reply now, or state your final answer and stop."
   }
   if depth >= 4 {
+    // The "stuck in a narration loop / Do not restate the plan" framing is only
+    // truthful when the recent turns were PURE PROSE. When the model IS issuing
+    // real tool calls (edits/looks/searches/runs) but the loop's progress signal
+    // still has not advanced, accusing it of narrating is wrong and unhelpful —
+    // it is making changes that are not landing. Steer it to a DIFFERENT change
+    // instead of telling it to stop narrating.
+    if made_tool_calls {
+      return "You have made no progress for "
+        + to_string(depth)
+        + " turns — your tool calls are not advancing the task. Stop repeating the same kind of change: re-read the failing output, target a DIFFERENT location, and make one concrete change. "
+        + action
+    }
     return "You have made no progress for "
       + to_string(depth)
       + " turns — you are stuck in a narration loop. "
@@ -3844,15 +3860,21 @@ fn __agent_loop_run(message, session, initial_opts) {
           && len(turn_rejected) == 0 {
           let has_tools = len(opts?.tools?.tools ?? []) > 0
           let tool_mode = agent_tool_call_paradigm(turn_opts).kind
+          let made_tool_calls = tool_count > 0
           agent_session_inject_feedback(
             session.session_id,
             "no_progress_streak",
-            __progress_nudge_text(turns_since_progress, has_tools, tool_mode),
+            __progress_nudge_text(turns_since_progress, has_tools, tool_mode, made_tool_calls),
           )
           agent_emit_event(
             session.session_id,
             "no_progress_streak_nudge",
-            {iteration: iteration_index, turns_since_progress: turns_since_progress, has_tools: has_tools},
+            {
+              iteration: iteration_index,
+              turns_since_progress: turns_since_progress,
+              has_tools: has_tools,
+              made_tool_calls: made_tool_calls,
+            },
           )
         }
       }
@@ -4013,6 +4035,9 @@ fn __agent_loop_run(message, session, initial_opts) {
   return unwrap(run)
 }
 
+// Whether THIS turn actually issued tool calls. When it did, the
+// "narration loop" framing is false (the model is acting, not narrating)
+// so the nudge steers toward a DIFFERENT change instead.
 // Capture the PRIMARY provider/model once, before any post-turn escalation
 // can rebind `opts`. A failed escalated turn falls back to this for one
 // retry instead of unwinding the whole loop into a fake success.
