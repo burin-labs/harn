@@ -121,3 +121,91 @@ fn known_escapes_in_quoted_string_unchanged() {
         json!("a\nb\tc\\d\"e")
     );
 }
+
+/// Parse the `command` value of `run({ command: <literal> })`, returning the
+/// decoded string or an `Err` describing why the call was dropped.
+fn run_command(src: &str) -> Result<String, String> {
+    let tools = sample_tool_registry();
+    let result = parse_bare_calls_in_body(src, Some(&tools));
+    if !result.errors.is_empty() {
+        return Err(format!("{:?}", result.errors));
+    }
+    let call = result.calls.first().ok_or("call was dropped")?;
+    call["arguments"]["command"]
+        .as_str()
+        .map(str::to_string)
+        .ok_or_else(|| "command not a string".to_string())
+}
+
+/// A MALFORMED `\u`/`\x` escape (Perl `\x{...}`, a Windows path `\users`, a
+/// short `\uAB`, `\uABCG`, a trailing `\x`) must NOT drop the whole tool call.
+/// Before this fix `parse_string_literal` returned `Err` on any of these and
+/// the model's edit/run silently never landed — the exact #3589 surrogate
+/// signature, generalized to every other malformed-known-escape shape. The
+/// degraded behavior keeps the `\u`/`\x` literal, byte-identical to the heredoc
+/// and template-literal channels.
+#[test]
+fn malformed_known_escapes_keep_literal_not_dropped() {
+    // (source value literal, expected decoded command)
+    let cases = [
+        (r#""m/\x{1F600}/""#, r"m/\x{1F600}/"), // Perl/PCRE hex-brace regex
+        (r#""C:\xtra\data""#, r"C:\xtra\data"), // \x + non-hex, then \d unknown
+        (r#""ends with \x""#, r"ends with \x"), // trailing \x
+        (r#""bad \uAB stop""#, r"bad \uAB stop"), // short \u (2 hex)
+        (r#""bad \uABCG end""#, r"bad \uABCG end"), // \u + non-hex 4th digit
+        (r#""path C:\users\me""#, r"path C:\users\me"), // \u + non-hex (Windows)
+    ];
+    for (src_value, expected) in cases {
+        let src = format!("run({{ command: {src_value} }})");
+        let got =
+            run_command(&src).unwrap_or_else(|err| panic!("call dropped for {src_value}: {err}"));
+        assert_eq!(got, expected, "for source {src_value}");
+    }
+}
+
+/// Cross-channel byte-identity for a malformed escape: Perl `\x{1F600}` must
+/// decode to the SAME bytes via quoted string, template literal, and heredoc.
+/// Before the fix the quoted channel dropped the call while the other two
+/// preserved the content.
+#[test]
+fn malformed_escape_identical_across_channels() {
+    let tools = sample_tool_registry();
+    let expected = json!(r"m/\x{1F600}/");
+
+    let quoted = parse_bare_calls_in_body(r#"run({ command: "m/\x{1F600}/" })"#, Some(&tools));
+    let template = parse_bare_calls_in_body("run({ command: `m/\\x{1F600}/` })", Some(&tools));
+    let heredoc = parse_bare_calls_in_body(
+        "run({ command: <<EOF\nm/\\x{1F600}/\nEOF\n })",
+        Some(&tools),
+    );
+
+    assert_eq!(quoted.calls[0]["arguments"]["command"], expected, "quoted");
+    assert_eq!(
+        template.calls[0]["arguments"]["command"], expected,
+        "template"
+    );
+    assert_eq!(
+        heredoc.calls[0]["arguments"]["command"], expected,
+        "heredoc"
+    );
+}
+
+/// WELL-FORMED `\xHH` and `\uHHHH` escapes still decode (no over-correction):
+/// the degraded literal path must only engage when the escape is incomplete.
+#[test]
+fn well_formed_hex_and_unicode_escapes_still_decode() {
+    assert_eq!(
+        run_command(r#"run({ command: "\x41\x42" })"#).unwrap(),
+        "AB"
+    );
+    // A literal multibyte scalar in source survives (push_scalar, unaffected).
+    assert_eq!(
+        run_command(r#"run({ command: "snow ☃ done" })"#).unwrap(),
+        "snow \u{2603} done"
+    );
+    // `\u{...}` brace form still decodes a non-BMP scalar.
+    assert_eq!(
+        run_command(r#"run({ command: "emoji \u{1F600} done" })"#).unwrap(),
+        "emoji \u{1F600} done"
+    );
+}
