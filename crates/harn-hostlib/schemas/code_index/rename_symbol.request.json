@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://harnlang.com/schemas/hostlib/code_index/rename_symbol.request.json",
   "title": "code_index.rename_symbol request",
-  "description": "Safe cross-file rename driven by the typed symbol graph (#2434). The host resolves `symbol_ref` against the workspace graph, walks every file in scope, replaces identifier-context occurrences of `symbol_ref.name` with `new_name`, and rejects the edit if `new_name` already exists as an identifier in any rewritten file (shadow check). Writes route through staged-fs (#1722) when `session_id` is supplied so all touched files succeed or none do; without a session id the host still buffers every edit in memory and only writes after pre-flight validation passes.",
+  "description": "Symbol-grounded cross-file edit driven by the typed symbol graph (#2434). Two modes share one atomic, syntax-validated, all-or-nothing machinery: (1) RENAME — supply `new_name`; every identifier-context occurrence of `symbol_ref.name` becomes the new identifier and the edit aborts if `new_name` already exists (shadow check). (2) REPLACE — supply `replacement_text`; every identifier-context occurrence is overwritten with arbitrary text (e.g. an API migration `oldFn` -> `client.newFn(`), skipping the identifier/shadow gates but still requiring the rewritten file to re-parse. Both modes never touch matching text inside strings or comments. Writes route through staged-fs (#1722) when `session_id` is supplied so all touched files succeed or none do; without a session id the host still buffers every edit in memory and only writes after pre-flight validation passes.",
   "type": "object",
   "properties": {
     "symbol_ref": {
@@ -23,7 +23,12 @@
     "new_name": {
       "type": "string",
       "minLength": 1,
-      "description": "Replacement identifier. Must match the per-language identifier syntax and must not equal `symbol_ref.name`."
+      "description": "Rename mode: the replacement identifier. Must match the per-language identifier syntax and must not equal `symbol_ref.name`. Required unless `replacement_text` is supplied."
+    },
+    "replacement_text": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Replace mode: arbitrary text that overwrites every true-identifier occurrence of `symbol_ref.name` (still skipping strings/comments). Use for symbol-grounded find/replace that is NOT a rename — e.g. an API migration `oldFn` -> `client.newFn(`. The identifier-validity gate and shadow check are skipped (a literal replacement cannot shadow), but the rewritten file must still re-parse when `validate` is true. When supplied, `new_name` is ignored."
     },
     "scope": {
       "type": "string",
@@ -44,6 +49,10 @@
       "description": "When true (default) every rewritten file is re-parsed; any tree-sitter ERROR/MISSING node aborts the edit with `result: \"syntax_error\"`."
     }
   },
-  "required": ["symbol_ref", "new_name", "scope"],
+  "required": ["symbol_ref", "scope"],
+  "anyOf": [
+    { "required": ["new_name"] },
+    { "required": ["replacement_text"] }
+  ],
   "additionalProperties": false
 }
