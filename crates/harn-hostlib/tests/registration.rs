@@ -134,6 +134,7 @@ fn code_index_capability_registers_documented_methods() {
             "hostlib_code_index_current_agent_id",
             // Typed symbol graph + Cypher (#2434).
             "hostlib_code_index_cypher",
+            "hostlib_code_index_repo_map",
             "hostlib_code_index_branch_overlay",
             "hostlib_code_index_freshness",
             // Cross-file safe rename (#2508).

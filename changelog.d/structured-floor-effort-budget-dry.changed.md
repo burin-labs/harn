@@ -1,1 +1,8 @@
-Make the canonical reasoning effort -> token budget mapping the single source of truth. The `std/llm/safe` reasoning-aware structured floor previously re-hardcoded the same `low/medium/high -> 1024/4096/12000` numbers that `budget_for_reasoning_level` already owns in `reasoning_policy.rs`. A new `llm_reasoning_effort_budget(level)` builtin exposes that mapping, and the structured-floor fallback now delegates to it instead of duplicating the constants. Behavior-preserving: the gpt-oss low-effort floor stays 1792 and non-reasoning routes stay 512.
+Make the canonical reasoning effort -> token budget mapping the single source of
+truth. The `std/llm/safe` reasoning-aware structured floor previously
+re-hardcoded the same `low/medium/high -> 1024/4096/12000` numbers that
+`budget_for_reasoning_level` already owns in `reasoning_policy.rs`. A new
+`llm_reasoning_effort_budget(level)` builtin exposes that mapping, and the
+structured-floor fallback now delegates to it instead of duplicating the
+constants. Behavior-preserving: the gpt-oss low-effort floor stays 1792 and
+non-reasoning routes stay 512.

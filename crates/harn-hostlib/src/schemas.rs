@@ -609,6 +609,18 @@ pub const SCHEMAS: &[(&str, &str, SchemaKind, &str)] = &[
     ),
     (
         "code_index",
+        "repo_map",
+        SchemaKind::Request,
+        include_str!("../schemas/code_index/repo_map.request.json"),
+    ),
+    (
+        "code_index",
+        "repo_map",
+        SchemaKind::Response,
+        include_str!("../schemas/code_index/repo_map.response.json"),
+    ),
+    (
+        "code_index",
         "branch_overlay",
         SchemaKind::Request,
         include_str!("../schemas/code_index/branch_overlay.request.json"),

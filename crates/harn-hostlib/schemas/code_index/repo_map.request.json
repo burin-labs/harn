@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/repo_map.request.json",
+  "title": "code_index.repo_map request",
+  "description": "Compute a personalized PageRank over the typed symbol graph and render a compact structural repo map.",
+  "type": "object",
+  "properties": {
+    "task": {
+      "type": "string",
+      "description": "Current user task text. Identifier-like terms boost matching symbols."
+    },
+    "context_files": {
+      "type": "array",
+      "description": "Workspace-relative or absolute files already in context. Symbols in these files receive a stronger personalization boost.",
+      "items": { "type": "string" }
+    },
+    "max_entries": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 12,
+      "description": "Maximum ranked definition entries to return before token-budget rendering."
+    },
+    "token_budget": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 800,
+      "description": "Approximate token budget for the rendered map. The renderer caps output at 4 * token_budget characters."
+    }
+  },
+  "additionalProperties": false
+}

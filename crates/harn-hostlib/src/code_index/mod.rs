@@ -42,6 +42,8 @@
 //! - **`freshness`**: per-file hash + mtime comparison against the
 //!   indexed snapshot; consumers detect staleness without forcing a
 //!   rebuild.
+//! - **`repo_map`**: personalized PageRank over the typed graph, rendered
+//!   as a token-budgeted symbol map for agent grounding.
 //!
 //! ### Cross-file safe rename (added in #2508)
 //!
@@ -68,6 +70,7 @@ mod imports;
 mod overlay;
 mod readonly;
 mod rename;
+mod repo_map;
 mod snapshot;
 mod state;
 mod symbol_graph;
@@ -438,6 +441,13 @@ impl HostlibCapability for CodeIndexCapability {
             builtins::BUILTIN_CYPHER,
             "cypher",
             builtins::run_cypher,
+        );
+        register(
+            registry,
+            self.index.clone(),
+            repo_map::BUILTIN,
+            "repo_map",
+            repo_map::run,
         );
         register(
             registry,
