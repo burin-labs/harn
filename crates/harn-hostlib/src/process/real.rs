@@ -66,6 +66,22 @@ impl ProcessSpawner for RealSpawner {
             command.env(key, value);
         }
 
+        // Point the child's temp dir at a sandbox-writable, workspace-local
+        // location so compiler linkers (rustc/cc/ld, Go, Swift, …) and other
+        // toolchains that honor TMPDIR/TMP/TEMP don't false-fail trying to write
+        // intermediates to the unwritable system /tmp under a restricted
+        // sandbox profile. Applied after the caller's `spec.env` so an explicit
+        // caller-set TMPDIR wins; only keys the caller did not set receive the
+        // overlay. No-op when the active profile is unrestricted or no writable
+        // workspace root is available. TMPDIR/TMP/TEMP are workspace paths, not
+        // secrets, so this does not widen the env-secret-scrub surface above.
+        for (key, value) in process_sandbox::active_workspace_tmpdir_env() {
+            if spec.env.contains_key(&key) {
+                continue;
+            }
+            command.env(key, value);
+        }
+
         if spec.configure_process_group {
             configure_background_process_group(&mut command);
         }

@@ -868,6 +868,9 @@ pub(crate) fn build_sandboxed_command(
             .map_err(|e| VmError::Runtime(format!("host_call {label} cwd: {e}")))?;
         cmd.current_dir(cwd);
     }
+    // Track keys the caller set explicitly so the sandbox-local TMPDIR overlay
+    // below never clobbers an intentional per-call value.
+    let mut caller_env_keys: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     if let Some(env) = optional_string_dict(params, "env")? {
         // `env_mode` controls how the provided `env` keys combine with the
         // parent environment:
@@ -890,6 +893,7 @@ pub(crate) fn build_sandboxed_command(
             }
         }
         for (key, value) in env {
+            caller_env_keys.insert(key.clone());
             cmd.env(key, value);
         }
     }
@@ -900,8 +904,23 @@ pub(crate) fn build_sandboxed_command(
     // inside a git hook that sets `GIT_DIR`).
     if let Some(env_remove) = optional_string_list(params, "env_remove") {
         for key in env_remove {
+            caller_env_keys.insert(key.clone());
             cmd.env_remove(key);
         }
+    }
+    // Point the child's temp dir at a sandbox-writable, workspace-local
+    // location so compiler linkers (rustc/cc/ld, Go, Swift, …) and other
+    // toolchains that honor TMPDIR/TMP/TEMP don't false-fail trying to write
+    // intermediates to the unwritable system /tmp. A key the caller set (via
+    // `env`) or explicitly stripped (via `env_remove`) is left as the caller
+    // intended; only keys the caller did not touch receive the overlay. No-op
+    // when the active profile is unrestricted or no writable workspace root is
+    // available.
+    for (key, value) in crate::process_sandbox::active_workspace_tmpdir_env() {
+        if caller_env_keys.contains(&key) {
+            continue;
+        }
+        cmd.env(key, value);
     }
     Ok(cmd)
 }
@@ -1677,6 +1696,106 @@ mod tests {
             assert!(
                 format!("{err:?}").contains("env_mode"),
                 "error should name env_mode, got {err:?}"
+            );
+        });
+    }
+
+    // Drive the real `host_call("process","exec")` builder under a restricted
+    // policy and read back the `$TMPDIR` the child actually saw. This is the
+    // agent-facing path; the assertion is OS-independent (it observes the
+    // injected env, not OS-sandbox enforcement), so it pins the mechanism on
+    // every CI host while the live OS-level link proof runs on tornadough.
+    #[cfg(unix)]
+    async fn process_exec_tmpdir_probe(
+        workspace: &std::path::Path,
+        caller_env: Option<VmValue>,
+    ) -> String {
+        let mut env_pairs = vec![(
+            crate::value::intern_key("mode"),
+            VmValue::String(arcstr::ArcStr::from("argv")),
+        )];
+        env_pairs.push((
+            crate::value::intern_key("argv"),
+            VmValue::List(std::sync::Arc::new(vec![
+                VmValue::String(arcstr::ArcStr::from("/bin/sh")),
+                VmValue::String(arcstr::ArcStr::from("-c")),
+                VmValue::String(arcstr::ArcStr::from("printf '%s' \"$TMPDIR\"")),
+            ])),
+        ));
+        if let Some(env) = caller_env {
+            env_pairs.push((crate::value::intern_key("env"), env));
+        }
+        let params = crate::value::DictMap::from_iter(env_pairs);
+
+        crate::orchestration::push_execution_policy(crate::orchestration::CapabilityPolicy {
+            sandbox_profile: crate::orchestration::SandboxProfile::Worktree,
+            workspace_roots: vec![workspace.to_string_lossy().into_owned()],
+            // Keep OS confinement out of this unit assertion regardless of host
+            // Landlock/seatbelt availability; we are pinning the env injection,
+            // not OS enforcement (which the tornadough run proves end-to-end).
+            ..crate::orchestration::CapabilityPolicy::default()
+        });
+        std::env::set_var("HARN_HANDLER_SANDBOX", "off");
+        let result = super::dispatch_process_exec(&params, serde_json::Value::Null)
+            .await
+            .expect("process.exec result");
+        std::env::remove_var("HARN_HANDLER_SANDBOX");
+        crate::orchestration::pop_execution_policy();
+        result
+            .as_dict()
+            .and_then(|d| d.get("stdout"))
+            .map(VmValue::display)
+            .unwrap_or_default()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn process_exec_injects_workspace_local_tmpdir() {
+        run_host_async_test(|| async {
+            let workspace = tempfile::tempdir().expect("workspace");
+            let tmpdir = process_exec_tmpdir_probe(workspace.path(), None).await;
+
+            assert!(
+                !tmpdir.is_empty(),
+                "sandboxed child must receive a non-empty TMPDIR"
+            );
+            let tmpdir_path = std::path::PathBuf::from(&tmpdir);
+            assert!(
+                tmpdir_path.starts_with(workspace.path()),
+                "child TMPDIR {tmpdir:?} must live inside the workspace {:?}",
+                workspace.path()
+            );
+            assert!(
+                tmpdir_path.ends_with(".harn-tmp"),
+                "child TMPDIR {tmpdir:?} must be the workspace-local .harn-tmp dir"
+            );
+            assert!(
+                tmpdir_path.is_dir(),
+                "the workspace-local TMPDIR must have been created on disk"
+            );
+        });
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn process_exec_respects_caller_pinned_tmpdir() {
+        run_host_async_test(|| async {
+            let workspace = tempfile::tempdir().expect("workspace");
+            let caller_tmp = workspace.path().join("caller-chosen");
+            std::fs::create_dir_all(&caller_tmp).unwrap();
+            let caller_env = VmValue::dict(crate::value::DictMap::from_iter([(
+                crate::value::intern_key("TMPDIR"),
+                VmValue::String(arcstr::ArcStr::from(
+                    caller_tmp.to_string_lossy().into_owned(),
+                )),
+            )]));
+
+            let tmpdir = process_exec_tmpdir_probe(workspace.path(), Some(caller_env)).await;
+
+            assert_eq!(
+                std::path::PathBuf::from(&tmpdir),
+                caller_tmp,
+                "an explicit caller TMPDIR must override the workspace-local default"
             );
         });
     }

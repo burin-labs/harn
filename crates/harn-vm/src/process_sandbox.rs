@@ -18,7 +18,8 @@
 //! `stdlib::*` plumbing.
 
 pub use crate::stdlib::sandbox::{
-    active_backend_available, active_backend_name, check_fs_path_scope, command_output,
-    enforce_process_cwd, process_spawn_error, process_violation_error, std_command_for,
-    tokio_command_for, FsAccess, ProcessCommandConfig, SandboxViolation,
+    active_backend_available, active_backend_name, active_workspace_tmpdir_env,
+    check_fs_path_scope, command_output, enforce_process_cwd, process_spawn_error,
+    process_violation_error, std_command_for, tokio_command_for, FsAccess, ProcessCommandConfig,
+    SandboxViolation,
 };
