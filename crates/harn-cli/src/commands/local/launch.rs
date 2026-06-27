@@ -487,42 +487,81 @@ fn build_managed_args(
         runtime.parallel_arg.as_deref(),
         args.parallel.to_string(),
     );
-    out.extend(runtime.default_args.iter().cloned());
+
+    // Apply the explicit dedicated flags first so they win over `default_args`.
+    // We track which flag keys the user set explicitly, then fold in only the
+    // `default_args` entries that the user did not already override — otherwise
+    // a flag like `--jinja` or `--flash-attn` (present in both `default_args`
+    // and as a dedicated CLI flag) lands in the launch argv twice.
+    let mut explicit = Vec::new();
     push_arg(
-        &mut out,
+        &mut explicit,
         runtime.gpu_layers_arg.as_deref(),
         args.gpu_layers.clone(),
     );
     if let Some(value) = args.cache_type_k.as_deref() {
-        push_arg(&mut out, runtime.cache_type_k_arg.as_deref(), value);
+        push_arg(&mut explicit, runtime.cache_type_k_arg.as_deref(), value);
     }
     if let Some(value) = args.cache_type_v.as_deref() {
-        push_arg(&mut out, runtime.cache_type_v_arg.as_deref(), value);
+        push_arg(&mut explicit, runtime.cache_type_v_arg.as_deref(), value);
     }
     if let Some(value) = args.cache_ram {
         push_arg(
-            &mut out,
+            &mut explicit,
             runtime.cache_ram_arg.as_deref(),
             value.to_string(),
         );
     }
     if args.jinja {
-        out.push("--jinja".to_string());
+        explicit.push("--jinja".to_string());
     }
     if let Some(value) = args.reasoning.as_deref() {
-        out.extend(["--reasoning".to_string(), value.to_string()]);
+        explicit.extend(["--reasoning".to_string(), value.to_string()]);
     }
     if let Some(value) = args.reasoning_format.as_deref() {
-        out.extend(["--reasoning-format".to_string(), value.to_string()]);
+        explicit.extend(["--reasoning-format".to_string(), value.to_string()]);
     }
     if let Some(value) = args.flash_attn.as_deref() {
-        out.extend(["--flash-attn".to_string(), value.to_string()]);
+        explicit.extend(["--flash-attn".to_string(), value.to_string()]);
     }
     if args.metrics {
-        out.push("--metrics".to_string());
+        explicit.push("--metrics".to_string());
     }
+
+    let explicit_keys: std::collections::HashSet<&str> = explicit
+        .iter()
+        .filter(|a| a.starts_with("--"))
+        .map(String::as_str)
+        .collect();
+    out.extend(filter_default_args(&runtime.default_args, &explicit_keys));
+    out.extend(explicit);
     out.extend(args.server_args.iter().cloned());
     out
+}
+
+/// Drop any `--flag` (and its following value, if any) from `default_args`
+/// whose key already appears in `explicit_keys`, so a flag the caller set
+/// explicitly is not also pulled in from the runtime defaults.
+fn filter_default_args(
+    default_args: &[String],
+    explicit_keys: &std::collections::HashSet<&str>,
+) -> Vec<String> {
+    let mut kept = Vec::with_capacity(default_args.len());
+    let mut iter = default_args.iter().peekable();
+    while let Some(arg) = iter.next() {
+        if arg.starts_with("--") && explicit_keys.contains(arg.as_str()) {
+            // Skip this flag, and its value too when the next token is not
+            // itself a flag (covers valued flags like `--flash-attn on`).
+            if let Some(next) = iter.peek() {
+                if !next.starts_with("--") {
+                    iter.next();
+                }
+            }
+            continue;
+        }
+        kept.push(arg.clone());
+    }
+    kept
 }
 
 fn push_arg(out: &mut Vec<String>, key: Option<&str>, value: impl ToString) {
@@ -743,6 +782,64 @@ mod tests {
         assert!(built.contains(&"--jinja".to_string()));
         assert!(built.contains(&"--metrics".to_string()));
         assert!(built.contains(&"--no-warmup".to_string()));
+        // `--jinja` is in both `default_args` and set as a dedicated flag, but
+        // must land in the argv exactly once.
+        assert_eq!(
+            built.iter().filter(|a| *a == "--jinja").count(),
+            1,
+            "--jinja must not be duplicated: {built:?}"
+        );
+    }
+
+    #[test]
+    fn build_managed_args_dedups_flags_shared_with_default_args() {
+        // Mirror the production llamacpp `default_args`, which carry `--jinja`,
+        // `--reasoning off`, `--reasoning-format deepseek`, `--metrics`, and
+        // `--flash-attn on`. The caller also sets all of these as dedicated
+        // flags; none may appear twice, and the explicit value must win.
+        let mut runtime = runtime();
+        runtime.default_args = vec![
+            "--jinja".to_string(),
+            "--reasoning".to_string(),
+            "off".to_string(),
+            "--reasoning-format".to_string(),
+            "deepseek".to_string(),
+            "--metrics".to_string(),
+            "--flash-attn".to_string(),
+            "on".to_string(),
+        ];
+        let mut args = cli_args();
+        // Explicit value differs from the default, to prove the explicit wins.
+        args.flash_attn = Some("auto".to_string());
+
+        let built = build_managed_args(
+            &args,
+            &runtime,
+            "/models/qwen.gguf",
+            "qwen3.6-35b-a3b-ud-q4-k-xl",
+            "127.0.0.1",
+            8001,
+            8192,
+        );
+
+        for flag in [
+            "--jinja",
+            "--reasoning",
+            "--reasoning-format",
+            "--metrics",
+            "--flash-attn",
+        ] {
+            assert_eq!(
+                built.iter().filter(|a| *a == flag).count(),
+                1,
+                "{flag} must appear exactly once: {built:?}"
+            );
+        }
+        // The default `--flash-attn on` is dropped; the explicit `auto` remains.
+        assert!(built
+            .windows(2)
+            .any(|pair| pair == ["--flash-attn", "auto"]));
+        assert!(!built.windows(2).any(|pair| pair == ["--flash-attn", "on"]));
     }
 
     #[test]
