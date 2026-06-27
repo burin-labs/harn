@@ -1560,6 +1560,81 @@ fn __intra_turn_add_failed_keys(failed_keys, keys) {
   return out
 }
 
+/**
+ * Canonical NON-mutating write-failure vocabulary: failure shapes that a host
+ * emits when the write was REJECTED BEFORE TOUCHING the file, so the on-disk
+ * view is byte-identical to what the model already saw. Mirrors the same
+ * canonical strings the product-error classifier (`__tool_result_write_product_error_text`)
+ * already keys on, restricted to the pre-apply (no-mutation) subset. The
+ * post-apply `## diagnostics (...)` shape is DELIBERATELY excluded — that edit
+ * DID land, so a later same-resource sibling could be stale.
+ */
+fn __intra_turn_failure_text_is_nonmutating(text: string) -> bool {
+  let lower = lowercase(trim(text))
+  if lower == "" {
+    return false
+  }
+  // Post-apply diagnostics mean the write LANDED — never treat as non-mutating.
+  if lower.starts_with("## diagnostics (") || lower.contains("\n## diagnostics (") {
+    return false
+  }
+  return lower.contains("[edit rejected]")
+    || lower.contains("not applied")
+    || lower.contains("old_string not found")
+    || lower.starts_with("file already exists")
+    || lower.starts_with("missing required parameter")
+    || __tool_result_dispatch_rejection_text(lower)
+}
+
+/**
+ * Tri-state mutation verdict for a FAILED tool result: did the failure leave the
+ * workspace resource mutated?
+ *
+ *   `false` — the host reported the write was REJECTED before applying (a stale /
+ *             missing anchor, "old_string not found", "[Edit rejected] ... NOT
+ *             applied", an invalid-arguments/permission rejection). The view is
+ *             byte-identical, so a later same-resource sibling is NOT stale.
+ *   `nil`   — unknown. We cannot rule out a mutation (a post-apply diagnostic, an
+ *             opaque error, a non-edit mutating tool), so the caller poisons the
+ *             resource EXACTLY like today.
+ *
+ * Uses the SAME canonical write-failure vocabulary the dispatch classifier
+ * (`__tool_result_write_product_error_text`) already relies on, so it does not
+ * introduce a new, divergent text-matching surface. Conservative by
+ * construction: anything not affirmatively a pre-apply rejection stays `nil`,
+ * preserving today's safety property.
+ */
+fn __intra_turn_result_mutated(result) {
+  if type_of(result) != "dict" {
+    return nil
+  }
+  if !__tool_result_write_product_tool(result) {
+    // Only reason about edit/scaffold/write/run_codemod rejection vocabulary.
+    // Any other mutating tool stays unknown (poison), exactly as today.
+    return nil
+  }
+  for key in ["error", "rendered_result", "observation", "result", "output"] {
+    if result[key] != nil && __intra_turn_failure_text_is_nonmutating(to_string(result[key])) {
+      return false
+    }
+  }
+  return nil
+}
+
+/**
+ * True when a failing same-resource call must POISON the resource for later
+ * siblings — i.e. we cannot rule out that the failure left the resource mutated.
+ * Preserves the safety property: poison unless the failure is an affirmatively
+ * pre-apply (no-mutation) rejection.
+ */
+fn __intra_turn_failure_poisons_resource(result) -> bool {
+  // Poison on `nil` (unknown — cannot rule out a mutation) and on any verdict
+  // other than an affirmative `false`. Only a host-confirmed pre-apply rejection
+  // (view unchanged) skips poisoning. Guards the safety property: unknown stays
+  // conservative, exactly like today.
+  return __intra_turn_result_mutated(result) != false
+}
+
 fn __intra_turn_has_keyed_mutating_calls(tool_calls, tools, options = {}) -> bool {
   for call in tool_calls {
     if len(__intra_turn_resource_keys(call, tools, options)) > 0 {
@@ -1606,9 +1681,14 @@ fn __intra_turn_resource_blocked_result(call, keys) {
     + "A previous mutating tool call in the same assistant response failed for "
     + "the same workspace resource ("
     + rendered_keys
-    + "), so this call was "
-    + "NOT executed. Wait for the failure feedback, re-read the current file if "
-    + "needed, and issue the next edit in a later turn."
+    + "), so this call was NOT executed (its anchor may now be stale).\n"
+    + "Recover in ONE next turn: (1) read the failure feedback from that earlier "
+    + "call just above; (2) re-issue THIS `"
+    + name
+    + "` call now — re-anchor its "
+    + "`old_string` against the file's CURRENT contents (look at the resource first "
+    + "if the earlier call may have changed it). Do not wait extra turns and do not "
+    + "re-send the call that already failed unchanged."
   return {
     ok: false,
     status: "blocked_by_prior_same_resource_failure",
@@ -1816,7 +1896,13 @@ fn __dispatch_tool_calls_with_middleware(tool_calls, tools, options, cap) {
       }
       let result = __invoke_tool_with_index(call, index, tools, options)
       results = results.push(result)
-      if len(resource_keys) > 0 && !__tool_result_ok(result) {
+      // Poison this resource for later same-resource siblings only when the
+      // failure could have left it mutated. A host-confirmed no-op failure
+      // (rejected anchor / "old_string not found") leaves the view byte-identical,
+      // so an independent later edit to the same file is NOT stale and may run.
+      // Unknown (no structured signal) still poisons, preserving today's behavior.
+      if len(resource_keys) > 0 && !__tool_result_ok(result)
+        && __intra_turn_failure_poisons_resource(result) {
         failed_resource_keys = __intra_turn_add_failed_keys(failed_resource_keys, resource_keys)
       }
       if fanout_cap > 0 {

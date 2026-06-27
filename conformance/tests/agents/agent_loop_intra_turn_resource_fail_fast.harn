@@ -31,6 +31,17 @@ fn edit_tools(metadata_key = "annotations") {
     "Edit a workspace file.",
     {
       handler: { args ->
+        if args?.fail_noop ?? false {
+          return "Error: [Edit rejected] old_string not found. Your edit was NOT applied to "
+            + to_string(args?.path ?? "")
+            + " "
+            + to_string(args?.marker ?? "")
+        }
+        if args?.fail_applied ?? false {
+          return "## Diagnostics (1 errors, via zig ast-check)\n"
+            + "  L3 ERROR: expected ';' after statement\n"
+            + "-> Fix these errors before declaring done."
+        }
         if args?.fail ?? false {
           throw "rejected " + to_string(args?.path ?? "") + " " + to_string(args?.marker ?? "")
         }
@@ -50,6 +61,16 @@ fn edit_tools(metadata_key = "annotations") {
         marker: {type: "string", description: "Probe marker"},
         fail: {type: "boolean", description: "Whether this call rejects", required: false},
         fail_return: {type: "boolean", description: "Whether this call returns a product-level error", required: false},
+        fail_noop: {
+          type: "boolean",
+          description: "Whether this call fails WITHOUT mutating (applied: false)",
+          required: false,
+        },
+        fail_applied: {
+          type: "boolean",
+          description: "Whether this call fails AFTER mutating (applied: true)",
+          required: false,
+        },
         diagnostics: {
           type: "boolean",
           description: "Whether this call returns product-level diagnostics",
@@ -130,6 +151,28 @@ fn same_file_success_batch() {
       name: "edit",
       arguments: {path: "src/a.zig", marker: "first", fail: false, fail_return: false},
     },
+    {
+      id: "a2",
+      name: "edit",
+      arguments: {path: "src/a.zig", marker: "second", fail: false, fail_return: false},
+    },
+  ]
+}
+
+fn same_file_noop_failure_batch() {
+  return [
+    {id: "a1", name: "edit", arguments: {path: "src/a.zig", marker: "first", fail_noop: true}},
+    {
+      id: "a2",
+      name: "edit",
+      arguments: {path: "src/a.zig", marker: "second", fail: false, fail_return: false},
+    },
+  ]
+}
+
+fn same_file_applied_failure_batch() {
+  return [
+    {id: "a1", name: "edit", arguments: {path: "src/a.zig", marker: "first", fail_applied: true}},
     {
       id: "a2",
       name: "edit",
@@ -248,4 +291,28 @@ pipeline main() {
   __io_println(contains(parallel_requested.transcript, "skipped dependent `edit` call"))
   __io_println(!contains(parallel_requested.transcript, "applied src/a.zig second"))
   __io_println(contains(parallel_requested.transcript, "applied src/b.zig other"))
+  // Pre-apply REJECTION (`[Edit rejected] ... NOT applied`) leaves the view
+  // byte-identical, so an independent later same-file edit is NOT stale and MUST
+  // still run. Asserted directly (no golden line) so the safety/relaxation
+  // invariant is self-checking.
+  let noop_failure = run_scripted(same_file_noop_failure_batch())
+  assert(
+    contains(noop_failure.transcript, "applied src/a.zig second"),
+    "a pre-apply rejection (not-applied) failure must NOT skip a later same-file edit",
+  )
+  assert(
+    !contains(noop_failure.transcript, "skipped dependent `edit` call"),
+    "no skip marker should be emitted when the prior failure did not mutate the resource",
+  )
+  // Post-apply failure (`## Diagnostics ...`) means the edit DID land, so the
+  // later same-file edit's anchor may be stale and MUST still be skipped.
+  let applied_failure = run_scripted(same_file_applied_failure_batch())
+  assert(
+    contains(applied_failure.transcript, "skipped dependent `edit` call"),
+    "a post-apply (applied-then-flagged) failure must STILL skip a later same-file edit",
+  )
+  assert(
+    !contains(applied_failure.transcript, "applied src/a.zig second"),
+    "the later same-file edit must not run after a mutating failure (stale-anchor hazard)",
+  )
 }
