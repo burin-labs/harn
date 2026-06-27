@@ -1429,6 +1429,12 @@ impl AgentEventSink for AcpAgentEventSink {
                     }),
                 );
             }
+            AgentEvent::LoopStuckSignal {
+                session_id,
+                payload,
+            } => {
+                self.emit_agent_event_ext("loop_stuck", session_id, payload.clone());
+            }
             AgentEvent::DaemonWatchdogTripped {
                 session_id,
                 attempts,

@@ -1851,6 +1851,7 @@ async fn host_agent_emit_event(
             | "tool_call_audit"
             | "budget_exhausted"
             | "budget_circuit_breaker"
+            | "loop_stuck"
             | "context_overflow_recovery"
             | "loop_checkpoint"
     ) {
@@ -2189,6 +2190,10 @@ fn build_agent_event(
             kind: get_string("kind"),
             consecutive_count: get_usize("consecutive_count"),
             paused_for_ms: get_u64("paused_for_ms"),
+        }),
+        "loop_stuck" => Ok(AgentEvent::LoopStuckSignal {
+            session_id: session_id.to_string(),
+            payload: payload.clone(),
         }),
         "tool_search_query" => Ok(AgentEvent::ToolSearchQuery {
             session_id: session_id.to_string(),

@@ -2043,6 +2043,15 @@ fn internal_agent_events_never_emit_session_updates() {
         last_iteration: 4,
         tail_excerpt: "tail".to_string(),
     });
+    sink.handle_event(&AgentEvent::LoopStuckSignal {
+        session_id: "session-1".to_string(),
+        payload: serde_json::json!({
+            "schema": "burin.stuck_handoff.v1",
+            "action": "handoff",
+            "terminal": true,
+            "pattern": "no_progress_terminator",
+        }),
+    });
     sink.handle_event(&AgentEvent::DaemonWatchdogTripped {
         session_id: "session-1".to_string(),
         attempts: 3,
@@ -2066,8 +2075,37 @@ fn internal_agent_events_never_emit_session_updates() {
         );
     }
     assert_eq!(
-        count, 7,
+        count, 8,
         "expected one ExtNotification per fed AgentEvent, got {count}"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn loop_stuck_signal_forwards_pipeline_payload() {
+    let actual = collect_notifications(vec![AgentEvent::LoopStuckSignal {
+        session_id: "session-1".to_string(),
+        payload: serde_json::json!({
+            "schema": "burin.stuck_handoff.v1",
+            "action": "handoff",
+            "terminal": true,
+            "pattern": "no_progress_terminator",
+            "message": "I am stuck after repeated verification failures.",
+        }),
+    }])
+    .await;
+
+    let notification = &actual[0];
+    assert_eq!(notification["method"], HARN_AGENT_EVENT_METHOD);
+    let params = &notification["params"];
+    assert_eq!(params["kind"], "loop_stuck");
+    assert_eq!(params["sessionId"], "session-1");
+    assert_eq!(params["schema"], "burin.stuck_handoff.v1");
+    assert_eq!(params["action"], "handoff");
+    assert_eq!(params["terminal"], true);
+    assert_eq!(params["pattern"], "no_progress_terminator");
+    assert_eq!(
+        params["message"],
+        "I am stuck after repeated verification failures."
     );
 }
 

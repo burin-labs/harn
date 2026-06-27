@@ -362,6 +362,15 @@ pub enum AgentEvent {
         last_iteration: usize,
         tail_excerpt: String,
     },
+    /// Pipeline-authored stuck/escalation signal emitted through
+    /// `agent_emit_event("loop_stuck", payload)`. The runtime-level
+    /// `LoopStuck` variant above remains the built-in max-nudge terminal event;
+    /// this variant preserves the pipeline payload so hosts can surface richer
+    /// handoff/escalation details without inventing another wire kind.
+    LoopStuckSignal {
+        session_id: String,
+        payload: serde_json::Value,
+    },
     /// Emitted when the daemon idle-wait loop trips its watchdog because
     /// every configured wake source returned `None` for N consecutive
     /// attempts. Exists so a broken daemon doesn't hang the session
@@ -822,6 +831,7 @@ impl AgentEvent {
             | Self::BudgetExhausted { session_id, .. }
             | Self::BudgetCircuitBreaker { session_id, .. }
             | Self::LoopStuck { session_id, .. }
+            | Self::LoopStuckSignal { session_id, .. }
             | Self::DaemonWatchdogTripped { session_id, .. }
             | Self::SkillActivated { session_id, .. }
             | Self::SkillDeactivated { session_id, .. }

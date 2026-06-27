@@ -1,10 +1,12 @@
 use serde_json::json;
 
+use crate::agent_events::AgentEvent;
+
 use super::{
-    agent_turn_made_no_llm_call, assistant_message_from_llm_result, canonical_acp_stop_reason,
-    canonical_provider_stop_reason, initial_user_content, is_length_truncation,
-    last_assistant_text, text_has_tool_call_prefix, tool_result_message_for_provider,
-    truncated_tool_call_should_continue, vm_to_json,
+    agent_turn_made_no_llm_call, assistant_message_from_llm_result, build_agent_event,
+    canonical_acp_stop_reason, canonical_provider_stop_reason, initial_user_content,
+    is_length_truncation, last_assistant_text, text_has_tool_call_prefix,
+    tool_result_message_for_provider, truncated_tool_call_should_continue, vm_to_json,
 };
 
 #[test]
@@ -25,6 +27,30 @@ fn real_turn_is_not_flagged_as_no_llm_call() {
     assert!(!agent_turn_made_no_llm_call("error", false, 0, 0, 0));
     assert!(!agent_turn_made_no_llm_call("failed", false, 0, 0, 0));
     assert!(!agent_turn_made_no_llm_call("", true, 0, 0, 0));
+}
+
+#[test]
+fn agent_emit_loop_stuck_preserves_pipeline_payload() {
+    let payload = json!({
+        "schema": "burin.stuck_handoff.v1",
+        "action": "handoff",
+        "terminal": true,
+        "pattern": "no_progress_terminator",
+        "message": "I am stuck after repeated verification failures.",
+    });
+
+    let event = build_agent_event("session-1", "loop_stuck", &payload).expect("loop_stuck event");
+
+    match event {
+        AgentEvent::LoopStuckSignal {
+            session_id,
+            payload: event_payload,
+        } => {
+            assert_eq!(session_id, "session-1");
+            assert_eq!(event_payload, payload);
+        }
+        other => panic!("expected LoopStuckSignal, got {other:?}"),
+    }
 }
 
 #[test]
