@@ -151,7 +151,7 @@ fn collect_imports(tree: &Tree, source: &str, language: Language) -> Vec<String>
     if imports.is_empty() {
         if let Some(keywords) = fallback_keywords(language) {
             for child in children(root) {
-                let text = node_text(child, source).trim().to_string();
+                let text = import_text(child, source);
                 if keywords.iter().any(|kw| text.starts_with(*kw)) {
                     imports.push(text);
                 }
@@ -165,7 +165,7 @@ fn collect_imports(tree: &Tree, source: &str, language: Language) -> Vec<String>
 fn walk(node: Node<'_>, source: &str, language: Language, imports: &mut Vec<String>) {
     let kind = node.kind();
     if IMPORT_NODE_TYPES.contains(&kind) {
-        let text = node_text(node, source).trim().to_string();
+        let text = import_text(node, source);
         if matches!(language, Language::Ruby) && kind == "call" {
             if text.starts_with("require") {
                 imports.push(text);
@@ -196,6 +196,14 @@ fn fallback_keywords(language: Language) -> Option<&'static [&'static str]> {
         Language::R => &["library(", "require(", "source("],
         _ => return None,
     })
+}
+
+fn import_text(node: Node<'_>, source: &str) -> String {
+    node_text(node, source)
+        .replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .trim()
+        .to_string()
 }
 
 fn locate_first_line(statement: &str, lines: &[&str]) -> u32 {
@@ -251,6 +259,15 @@ mod tests {
         let stmts = run_for(src, Language::Rust);
         assert_eq!(stmts.len(), 2);
         assert_eq!(stmts[0].0, "use std::fs;");
+    }
+
+    #[test]
+    fn go_import_block_normalizes_crlf() {
+        let src = "package main\r\n\r\nimport (\r\n\t\"fmt\"\r\n\t\"os\"\r\n)\r\n";
+        let stmts = run_for(src, Language::Go);
+        assert_eq!(stmts.len(), 1);
+        assert_eq!(stmts[0].0, "import (\n\t\"fmt\"\n\t\"os\"\n)");
+        assert_eq!(stmts[0].1, 3);
     }
 
     #[test]
