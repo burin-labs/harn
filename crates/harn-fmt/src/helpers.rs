@@ -128,6 +128,18 @@ pub(crate) fn needs_parens_as_postfix_object(node: &Node) -> bool {
     )
 }
 
+/// Wrap an already-formatted expression in parens when `node` is a range.
+/// Used for contexts a range can't legally occupy bare — a ternary
+/// condition/branch, or another range's bound — where omitting the parens
+/// would change the meaning or fail to re-parse.
+pub(crate) fn paren_if_range(formatted: String, node: &Node) -> String {
+    if matches!(node, Node::RangeExpr { .. }) {
+        format!("({formatted})")
+    } else {
+        formatted
+    }
+}
+
 /// Whether `node` needs parentheses as the operand of a unary prefix (`!`, `-`).
 pub(crate) fn needs_parens_as_unary_operand(node: &Node) -> bool {
     matches!(
@@ -143,6 +155,13 @@ pub(crate) fn needs_parens_as_unary_operand(node: &Node) -> bool {
 /// a parent BinaryOp.  Covers both correctness (semantics-preserving) and
 /// clarity (`&&` / `||` mixing).
 pub(crate) fn child_needs_parens(parent_op: &str, child: &Node, is_right: bool) -> bool {
+    // A range (`a to b`) binds looser than every binary operator, so as an
+    // operand of one it must be parenthesized — both to preserve grouping and
+    // to stay parseable, since the parser only accepts a bare range at the top
+    // of an expression (`parse_range` sits just above `|>`).
+    if matches!(child, Node::RangeExpr { .. }) {
+        return true;
+    }
     if let Node::BinaryOp { op: child_op, .. } = child {
         let p = op_precedence(parent_op);
         let c = op_precedence(child_op);

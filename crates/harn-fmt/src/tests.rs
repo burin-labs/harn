@@ -24,6 +24,35 @@ fn test_roundtrip_basic() {
 }
 
 #[test]
+fn range_nested_in_subexpression_keeps_parens_and_round_trips() {
+    // A range (`a to b`) binds looser than ternary, comparison, and another
+    // range, so it must stay parenthesized in those positions. Before the fix
+    // the formatter dropped the parens, producing output that either failed to
+    // re-parse or silently changed meaning.
+
+    // Parse-failure cases — assert_roundtrip re-parses the formatted output,
+    // which panicked here before the fix (`Unexpected "to"`).
+    assert_roundtrip("pipeline default(task) { let x = c ? (a to b) : d }");
+    assert_roundtrip("pipeline default(task) { let x = (a to b) to c }");
+
+    // Silent-semantic-change cases — the formatted output re-parses cleanly but
+    // to a different AST, so idempotence alone wouldn't catch it; assert the
+    // parens survive.
+    for src in [
+        "pipeline default(task) { let x = (a to b) ? c : d }",
+        "pipeline default(task) { let x = c ? d : (a to b) }",
+        "pipeline default(task) { let x = (a to b) < c }",
+    ] {
+        let formatted = format_source(src).unwrap();
+        assert!(
+            formatted.contains("(a to b)"),
+            "range subexpression must stay parenthesized:\n{formatted}"
+        );
+        assert_roundtrip(src);
+    }
+}
+
+#[test]
 fn test_roundtrip_mutex_bare() {
     assert_roundtrip("pipeline default(task) { mutex { log(1) } }");
 }
