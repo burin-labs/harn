@@ -714,6 +714,102 @@ fn hash_transitive_user_imports(source_path: &Path, source: &str) -> [u8; 32] {
     hash_transitive_user_imports_fingerprinted(source_path, source, CODEGEN_FINGERPRINT)
 }
 
+/// Process-wide memo of `(file content, collect_user_imports(content))` keyed by
+/// the resolved file path plus its stat identity `(len, mtime_ns)`. Walking a
+/// large pipeline's import graph re-encounters the same shared library files for
+/// nearly every module, so without this memo `from_source` re-reads and
+/// re-scans those files hundreds of times in a single cold run. Because the key
+/// includes `(len, mtime_ns)`, any on-disk edit produces a fresh key and the
+/// stale entry is never reused — a warm long-lived process recompiles edited
+/// pipelines correctly. The returned bytes are identical to the un-memoized
+/// path, so cache keys are byte-for-byte unchanged.
+fn imports_file_memo() -> &'static std::sync::Mutex<
+    std::collections::HashMap<(PathBuf, u64, i128), std::sync::Arc<(String, Vec<String>)>>,
+> {
+    use std::sync::OnceLock;
+    static MEMO: OnceLock<
+        std::sync::Mutex<
+            std::collections::HashMap<(PathBuf, u64, i128), std::sync::Arc<(String, Vec<String>)>>,
+        >,
+    > = OnceLock::new();
+    MEMO.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+/// Process-wide memo of `Path::canonicalize`. The import-graph walk canonicalizes
+/// the same resolved module paths hundreds of times across a cold `from_source`
+/// fan-out, and each call is a `realpath(3)` syscall. A successful
+/// canonicalization is stable for the process lifetime (the pipeline tree is not
+/// moved mid-run), so it is memoized. A *failed* canonicalization (the path does
+/// not exist yet) is NOT memoized: a file that later appears — or a symlink that
+/// is created — must canonicalize freshly so the folded path key matches what a
+/// cold process would produce. This keeps the memo a pure speed optimization with
+/// byte-identical output.
+fn canonicalize_cached(path: &Path) -> PathBuf {
+    use std::sync::OnceLock;
+    static MEMO: OnceLock<std::sync::Mutex<std::collections::HashMap<PathBuf, PathBuf>>> =
+        OnceLock::new();
+    let memo = MEMO.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+    if let Some(hit) = memo.lock().unwrap().get(path).cloned() {
+        return hit;
+    }
+    match path.canonicalize() {
+        Ok(canonical) => {
+            memo.lock()
+                .unwrap()
+                .insert(path.to_path_buf(), canonical.clone());
+            canonical
+        }
+        // Unresolved path: fall back to the input, but do not memoize, so a file
+        // that appears later canonicalizes correctly on the next walk.
+        Err(_) => path.to_path_buf(),
+    }
+}
+
+fn file_stat_identity(path: &Path) -> Option<(u64, i128)> {
+    let meta = fs::metadata(path).ok()?;
+    let len = meta.len();
+    // Nanosecond mtime where available; fall back to coarse seconds. Any change
+    // to either component on disk invalidates the memo entry.
+    let mtime_ns = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_nanos() as i128)
+        .unwrap_or(0);
+    Some((len, mtime_ns))
+}
+
+/// Read `path` and scan its user imports, memoized by stat identity. On an I/O
+/// error, returns the `ErrorKind` string the un-memoized path folded in (errors
+/// are not memoized — a transient failure should not be sticky).
+fn read_and_scan_imports_cached(path: &Path) -> Result<(String, Vec<String>), String> {
+    if let Some((len, mtime_ns)) = file_stat_identity(path) {
+        let key = (path.to_path_buf(), len, mtime_ns);
+        if let Some(hit) = imports_file_memo().lock().unwrap().get(&key).cloned() {
+            return Ok((hit.0.clone(), hit.1.clone()));
+        }
+        match fs::read_to_string(path) {
+            Ok(content) => {
+                let nested = collect_user_imports(&content);
+                let entry = std::sync::Arc::new((content.clone(), nested.clone()));
+                imports_file_memo().lock().unwrap().insert(key, entry);
+                Ok((content, nested))
+            }
+            Err(err) => Err(err.kind().to_string()),
+        }
+    } else {
+        // No stat (file vanished between resolve and read): fall back to a direct
+        // read so behavior matches the un-memoized path exactly.
+        match fs::read_to_string(path) {
+            Ok(content) => {
+                let nested = collect_user_imports(&content);
+                Ok((content, nested))
+            }
+            Err(err) => Err(err.kind().to_string()),
+        }
+    }
+}
+
 /// Inner form of [`hash_transitive_user_imports`] parameterized on the compiler
 /// fingerprint so tests can vary it; production always passes
 /// [`CODEGEN_FINGERPRINT`].
@@ -740,30 +836,29 @@ fn hash_transitive_user_imports_fingerprinted(
                 .or_insert(ImportNode::Unresolved { import });
             continue;
         };
-        let canonical = resolved.canonicalize().unwrap_or_else(|_| resolved.clone());
+        let canonical = canonicalize_cached(&resolved);
         if visited.contains_key(&canonical) {
             continue;
         }
-        match fs::read_to_string(&resolved) {
-            Ok(content) => {
-                let nested = collect_user_imports(&content);
-                visited.insert(
-                    canonical.clone(),
-                    ImportNode::Resolved {
-                        content: content.clone(),
-                    },
-                );
+        // Per-file read + import-scan is memoized process-wide, keyed by the
+        // file's identity stat `(len, mtime)`. The same handful of core library
+        // modules (`lib/host/*`, `lib/runtime/*`, ...) sit on the import graph of
+        // nearly every module, so a cold `from_source` over a large pipeline used
+        // to re-read and re-scan the same files hundreds of times across the
+        // module-load fan-out. The memo is invalidated automatically the moment a
+        // file's stat changes on disk, so a warm long-lived process still recompiles
+        // edited pipelines correctly. The folded hash bytes are byte-identical to
+        // the un-memoized path (same content + same `collect_user_imports` output),
+        // so cache keys are unchanged. See `imports_file_memo`.
+        match read_and_scan_imports_cached(&resolved) {
+            Ok((content, nested)) => {
+                visited.insert(canonical.clone(), ImportNode::Resolved { content });
                 for nested_import in nested {
                     frontier.push((resolved.clone(), nested_import));
                 }
             }
-            Err(err) => {
-                visited.insert(
-                    canonical,
-                    ImportNode::IoError {
-                        kind: err.kind().to_string(),
-                    },
-                );
+            Err(kind) => {
+                visited.insert(canonical, ImportNode::IoError { kind });
             }
         }
     }
@@ -1003,5 +1098,66 @@ mod tests {
             before, after,
             "editing a transitively-imported file must change the import-graph hash"
         );
+    }
+
+    #[test]
+    fn import_hash_busts_on_same_length_edit_in_same_process() {
+        // The per-file read/scan memo is keyed by `(path, len, mtime_ns)`. The
+        // hardest case for that key is an edit that preserves byte length: only
+        // the mtime distinguishes the two versions. Guard that a same-length edit
+        // to a transitively-imported file, recomputed in the SAME process so the
+        // memo is warm, still busts the import-graph hash. Without a working
+        // staleness check a warm long-lived process would replay stale bytecode.
+        let tmp = tempfile::tempdir().unwrap();
+        let leaf = tmp.path().join("leaf.harn");
+        std::fs::write(&leaf, "pub fn x() -> int { return 111 }\n").unwrap();
+        let entry = tmp.path().join("entry.harn");
+        std::fs::write(&entry, "import \"./leaf\"\n__io_println(\"hi\")\n").unwrap();
+
+        let before =
+            hash_transitive_user_imports(&entry, &std::fs::read_to_string(&entry).unwrap());
+
+        // Same byte length (`111` -> `222`), so the memo must rely on mtime.
+        // Sleep past the coarsest plausible mtime granularity so the stat key
+        // genuinely changes on every filesystem this runs on.
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        std::fs::write(&leaf, "pub fn x() -> int { return 222 }\n").unwrap();
+        assert_eq!(
+            std::fs::metadata(&leaf).unwrap().len(),
+            33,
+            "the two leaf versions must be the same byte length for this test to \
+             exercise the mtime path"
+        );
+
+        let after = hash_transitive_user_imports(&entry, &std::fs::read_to_string(&entry).unwrap());
+        assert_ne!(
+            before, after,
+            "a same-length edit to a transitively-imported file must still change \
+             the import-graph hash when recomputed in a warm process"
+        );
+    }
+
+    #[test]
+    fn import_hash_stable_across_repeated_calls_same_process() {
+        // The memo must be a pure speed optimization: repeated `from_source`
+        // calls over an unchanged tree (the cold-start module-load fan-out
+        // pattern) must return byte-identical hashes.
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("dep.harn"),
+            "pub fn d() -> int { return 7 }\n",
+        )
+        .unwrap();
+        let entry = tmp.path().join("entry.harn");
+        std::fs::write(&entry, "import \"./dep\"\n__io_println(\"hi\")\n").unwrap();
+        let src = std::fs::read_to_string(&entry).unwrap();
+        let first = hash_transitive_user_imports(&entry, &src);
+        for _ in 0..50 {
+            assert_eq!(
+                hash_transitive_user_imports(&entry, &src),
+                first,
+                "repeated import-graph hashing over an unchanged tree must be stable"
+            );
+        }
     }
 }
