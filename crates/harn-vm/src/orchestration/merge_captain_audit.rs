@@ -622,6 +622,23 @@ pub fn audit_transcript(
                     tools: vec![],
                 });
             }
+            AgentEvent::LoopStuckSignal { payload, .. } => {
+                let terminal = payload
+                    .get("terminal")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(true);
+                if terminal {
+                    saw_terminal = true;
+                    findings.push(AuditFinding {
+                        category: FindingCategory::ExtraModelCall,
+                        severity: FindingSeverity::Error,
+                        message: "loop stuck on pipeline no-progress signal".into(),
+                        event_indices: vec![env.index],
+                        state_step: None,
+                        tools: vec![],
+                    });
+                }
+            }
             AgentEvent::Handoff { .. } => {
                 saw_terminal = true;
                 // Approval-gate step (default) consumes any pending
@@ -1224,6 +1241,16 @@ mod tests {
         )
     }
 
+    fn loop_stuck_signal(index: u64, session: &str, terminal: bool) -> PersistedAgentEvent {
+        env(
+            index,
+            AgentEvent::LoopStuckSignal {
+                session_id: session.into(),
+                payload: json!({"terminal": terminal}),
+            },
+        )
+    }
+
     #[test]
     fn pass_minimal_green_pr_default_rules() {
         let events = vec![
@@ -1340,6 +1367,30 @@ mod tests {
                 .findings
                 .iter()
                 .any(|f| f.category == FindingCategory::MissingApproval),
+            "findings: {:?}",
+            report.findings
+        );
+    }
+
+    #[test]
+    fn non_terminal_loop_stuck_signal_does_not_complete_transcript() {
+        let events = vec![iteration_start(1, "s", 1), loop_stuck_signal(2, "s", false)];
+        let report = audit_transcript(&events, None);
+        assert!(report
+            .findings
+            .iter()
+            .any(|f| f.category == FindingCategory::IncompleteTranscript));
+    }
+
+    #[test]
+    fn terminal_loop_stuck_signal_completes_transcript() {
+        let events = vec![iteration_start(1, "s", 1), loop_stuck_signal(2, "s", true)];
+        let report = audit_transcript(&events, None);
+        assert!(
+            !report
+                .findings
+                .iter()
+                .any(|f| f.category == FindingCategory::IncompleteTranscript),
             "findings: {:?}",
             report.findings
         );
