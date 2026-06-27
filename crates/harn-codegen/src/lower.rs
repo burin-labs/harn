@@ -349,13 +349,14 @@ fn lower_bin(
         };
     }
     // Integer `+`/`-`/`*` deopt on `i64` overflow (the VM promotes to float);
-    // `/`/`%` wrap and trap only on a zero divisor.
+    // `/` deopts on the lone `i64::MIN / -1` overflow for the same reason; `%`
+    // wraps (`i64::MIN % -1 == 0`). All `/`/`%` trap only on a zero divisor.
     match op {
         BinOp::Add => lower_int_add_sub(builder, a, b, faults.overflow, true),
         BinOp::Sub => lower_int_add_sub(builder, a, b, faults.overflow, false),
         BinOp::Mul => lower_int_mul(builder, a, b, faults.overflow),
-        BinOp::Div => lower_idiv(builder, a, b, faults.trap, true),
-        BinOp::Mod => lower_idiv(builder, a, b, faults.trap, false),
+        BinOp::Div => lower_idiv(builder, a, b, faults, true),
+        BinOp::Mod => lower_idiv(builder, a, b, faults, false),
     }
 }
 
@@ -432,17 +433,22 @@ fn lower_int_mul(
     low
 }
 
-/// Lower integer `/` (`is_div = true`) or `%` (`is_div = false`) with the
-/// interpreter's exact wrapping semantics:
+/// Lower integer `/` (`is_div = true`) or `%` (`is_div = false`) matching the
+/// interpreter exactly:
 ///
 /// * divisor `0` → branch to the trap block (runtime error, no hardware trap);
-/// * `i64::MIN / -1` → `i64::MIN`, and `i64::MIN % -1` → `0` (matching
-///   `wrapping_div`/`wrapping_rem`), avoiding Cranelift's overflow trap.
+/// * `i64::MIN / -1` overflows (true value `i64::MAX + 1`): the VM promotes to
+///   float, so deopt to the overflow block — like `+`/`-`/`*`/negation —
+///   rather than wrapping;
+/// * `i64::MIN % -1` → `0` (`wrapping_rem`); no overflow, no deopt.
+///
+/// In both cases `safe_b` substitutes `1` for the `-1` divisor on the overflow
+/// path so the `sdiv`/`srem` we still emit never hits Cranelift's hardware trap.
 fn lower_idiv(
     builder: &mut FunctionBuilder,
     a: Value,
     b: Value,
-    trap_block: cranelift_codegen::ir::Block,
+    faults: FaultBlocks,
     is_div: bool,
 ) -> Value {
     let is_zero = builder.ins().icmp_imm(IntCC::Equal, b, 0);
@@ -450,7 +456,7 @@ fn lower_idiv(
     let no_args: Vec<BlockArg> = Vec::new();
     builder
         .ins()
-        .brif(is_zero, trap_block, &no_args, cont, &no_args);
+        .brif(is_zero, faults.trap, &no_args, cont, &no_args);
     builder.switch_to_block(cont);
 
     let int_min = builder.ins().iconst(types::I64, i64::MIN);
@@ -462,9 +468,12 @@ fn lower_idiv(
     let safe_b = builder.ins().select(overflow, one, b);
 
     if is_div {
+        // Compute with the trap-safe divisor, then deopt on the overflow case
+        // before the (unused) quotient is observed; the non-overflow quotient
+        // dominates the continuation guard_no_overflow switches into.
         let quotient = builder.ins().sdiv(a, safe_b);
-        // sdiv(MIN, 1) == MIN, so the select restores the wrapped result.
-        builder.ins().select(overflow, int_min, quotient)
+        guard_no_overflow(builder, overflow, faults.overflow);
+        quotient
     } else {
         // srem(MIN, 1) == 0 == wrapping_rem(MIN, -1); no fix-up needed.
         builder.ins().srem(a, safe_b)

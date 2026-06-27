@@ -8,8 +8,9 @@
 //!
 //! Like the JIT (and the VM), an overflowing integer `+`/`-`/`*`/negation is
 //! reported as [`NativeOutcome::Deopt`] — see [`crate::outcome`] — not silently
-//! wrapped. Integer `/` and `%` keep their wrapping semantics (matching the
-//! VM's `wrapping_div`/`wrapping_rem`) and trap only on a zero divisor.
+//! wrapped. `i64::MIN / -1` overflows the same way, so it deopts too; integer
+//! `%` keeps its wrapping semantics (`i64::MIN % -1 == 0`). All integer `/`/`%`
+//! still trap only on a zero divisor.
 
 use crate::bytecode::{BinOp, CmpOp, Instr};
 use crate::error::NativeTrap;
@@ -182,10 +183,10 @@ fn pop(stack: &mut Vec<ScalarValue>) -> ScalarValue {
     stack.pop().expect("verified non-empty operand stack")
 }
 
-/// Evaluate a binary op. Returns `Ok(None)` when an integer `+`/`-`/`*`
-/// overflowed `i64` — the VM promotes to `float`, so the caller deopts —
-/// matching the JIT's overflow guards. Integer `/` and `%` wrap (as the VM
-/// does) and trap only on a zero divisor.
+/// Evaluate a binary op. Returns `Ok(None)` when an integer `+`/`-`/`*` or
+/// `i64::MIN / -1` overflowed `i64` — the VM promotes to `float`, so the caller
+/// deopts — matching the JIT's overflow guards. Integer `%` wraps (as the VM
+/// does, `i64::MIN % -1 == 0`); both `/` and `%` trap only on a zero divisor.
 fn eval_bin(op: BinOp, a: ScalarValue, b: ScalarValue) -> Result<Option<ScalarValue>, EvalError> {
     match (a, b) {
         (ScalarValue::Int(x), ScalarValue::Int(y)) => Ok(match op {
@@ -197,7 +198,9 @@ fn eval_bin(op: BinOp, a: ScalarValue, b: ScalarValue) -> Result<Option<ScalarVa
                 if y == 0 {
                     return Err(EvalError::Trap(NativeTrap::DivideByZero));
                 }
-                Some(ScalarValue::Int(x.wrapping_div(y)))
+                // `i64::MIN / -1` overflows; the VM promotes to float, so deopt
+                // (`None`) like `+`/`-`/`*`. `checked_div` is `None` only there.
+                x.checked_div(y).map(ScalarValue::Int)
             }
             BinOp::Mod => {
                 if y == 0 {

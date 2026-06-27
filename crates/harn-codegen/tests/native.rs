@@ -142,17 +142,23 @@ fn integer_overflow_deopts_not_wraps() {
 }
 
 #[test]
-fn integer_min_div_neg_one_does_not_trap_or_deopt() {
-    // i64::MIN / -1 overflows in two's complement, but the VM's int division
-    // uses wrapping_div (-> i64::MIN) / wrapping_rem (-> 0) rather than
-    // promoting — so the JIT must wrap, not deopt, and not hardware-trap.
+fn integer_min_div_neg_one_deopts_and_rem_is_zero() {
+    // i64::MIN / -1 overflows in two's complement (true value i64::MAX + 1). The
+    // VM promotes it to float, so the JIT must deopt — like +/-/*/negation — not
+    // wrap, and not hardware-trap. The reference evaluator agrees.
     let div = analyze_named("fn d(a: int, b: int) -> int { return a / b }", "d").unwrap();
     let native = jit_compile(&div).unwrap();
+    let deopt = NativeOutcome::Deopt(DeoptReason::IntegerOverflow);
+    assert_eq!(native.call(&[Int(i64::MIN), Int(-1)]), Ok(deopt));
+    assert_eq!(evaluate(&div, &[Int(i64::MIN), Int(-1)]), Ok(deopt));
+    // A non-overflowing division on the same function still returns a value.
     assert_eq!(
-        native.call(&[Int(i64::MIN), Int(-1)]).unwrap(),
-        NativeOutcome::Value(Int(i64::MIN))
+        native.call(&[Int(7), Int(2)]).unwrap(),
+        NativeOutcome::Value(Int(3))
     );
 
+    // i64::MIN % -1 == 0 is the correct remainder and does not overflow, so the
+    // modulo path keeps wrapping (no deopt, no trap).
     let rem = analyze_named("fn m(a: int, b: int) -> int { return a % b }", "m").unwrap();
     let native = jit_compile(&rem).unwrap();
     assert_eq!(
