@@ -40,6 +40,7 @@ import {
   agent_stall_done_judge_due,
   agent_stall_initial_state,
   agent_stall_inject_feedback,
+  agent_stall_no_net_progress,
   agent_stall_observe_tool_calls,
   agent_stall_repair_config,
 } from "std/agent/stall"
@@ -3878,6 +3879,7 @@ fn __agent_loop_run(message, session, initial_opts) {
           )
         }
       }
+      let loop_no_net_progress = agent_stall_no_net_progress(turn_opts?.stall_diagnostics, stall_state)
       let loop_state = agent_loop_snapshot_state(
         {
           iteration: iteration,
@@ -3894,6 +3896,7 @@ fn __agent_loop_run(message, session, initial_opts) {
           missing_required_tools: missing_required_for_loop,
           completion_proposed: outcome.kind == "break",
           verdict: verdict_record,
+          progress_no_net_advance: loop_no_net_progress,
         }
           + __agent_loop_state_budget_fields(
           session.session_id,

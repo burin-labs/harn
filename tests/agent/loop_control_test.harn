@@ -40,6 +40,22 @@ fn _state(progress_changed, tool_call_count, remaining, vetoed, required_ok) {
   }
 }
 
+/**
+ * Like `_state` but also sets `progress.no_net_advance` — the outcome-aware
+ * thrash signal the loop sets when the same failing diagnostic recurs past
+ * threshold. When true it must veto the "recent turn made progress" extension.
+ */
+fn _state_with_advance(progress_changed, no_net_advance, remaining, vetoed, required_ok) {
+  return {
+    iteration: 10,
+    budget: {remaining: remaining},
+    turn: {tool_call_count: 3},
+    session: {required_tools_satisfied: required_ok},
+    completion: {vetoed: vetoed},
+    progress: {changed: progress_changed, no_net_advance: no_net_advance},
+  }
+}
+
 pipeline test_text_only_progress_extends(task) {
   // Visible-text progress, ZERO tool calls this turn, at the boundary → extend.
   // This is the bug the rule table fixed.
@@ -79,6 +95,41 @@ pipeline test_completion_veto_extends(task) {
 pipeline test_required_tools_missing_extends(task) {
   // Required tools not yet satisfied extends even with no fresh progress.
   let cmd = agent_loop_control_invoke({}, BUDGET, _state(false, 0, 0, false, false))
+  assert_eq(cmd.action, "extend")
+  assert_eq(cmd.reason, "required tools missing")
+}
+
+pipeline test_thrash_no_net_advance_does_not_extend(task) {
+  // Activity present (progress.changed true, 3 tool calls) but the verification
+  // OUTCOME is not advancing (no_net_advance set by the loop because the same
+  // failing diagnostic recurred past threshold). At the boundary this must NOT
+  // extend — the thrash stops buying itself budget. This is the runaway-budget
+  // root fix: pre-fix this state extended 24->32->...->72.
+  let cmd = agent_loop_control_invoke({}, BUDGET, _state_with_advance(true, true, 0, false, true))
+  assert_eq(cmd.action, "none")
+}
+
+pipeline test_real_progress_still_extends_with_advance_field(task) {
+  // A genuinely-advancing run (changed true, no_net_advance FALSE — error count
+  // draining / signature changing) still reads as progress and keeps its budget.
+  let cmd = agent_loop_control_invoke({}, BUDGET, _state_with_advance(true, false, 0, false, true))
+  assert_eq(cmd.action, "extend")
+  assert_eq(cmd.reason, "recent turn made progress")
+}
+
+pipeline test_no_net_advance_yields_to_completion_veto(task) {
+  // The thrash override only suppresses the PROGRESS rule. A vetoed completion
+  // gate is ordered ahead of progress and still extends even on a thrash turn,
+  // so completion-driven repair is never starved by the budget guard.
+  let cmd = agent_loop_control_invoke({}, BUDGET, _state_with_advance(true, true, 0, true, true))
+  assert_eq(cmd.action, "extend")
+  assert_eq(cmd.reason, "completion gate vetoed")
+}
+
+pipeline test_no_net_advance_yields_to_required_tools(task) {
+  // Likewise, required-tools-missing is ordered ahead of progress and still
+  // extends on a thrash turn.
+  let cmd = agent_loop_control_invoke({}, BUDGET, _state_with_advance(true, true, 0, false, false))
   assert_eq(cmd.action, "extend")
   assert_eq(cmd.reason, "required tools missing")
 }
