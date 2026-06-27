@@ -8,6 +8,73 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.145
+
+### Added
+
+- Add `code_index.repo_map`, a read-only hostlib query that ranks typed symbol
+  definitions with personalized PageRank and returns a prompt-budgeted
+  structural map for agent grounding.
+- `code_index.rename_symbol` now accepts an optional `replacement_text` field.
+  When supplied, the builtin overwrites every true-identifier occurrence of the
+  symbol (still skipping strings and comments) with arbitrary text instead of
+  renaming it, turning the one-shot atomic, syntax-validated, all-or-nothing
+  cross-file primitive into a symbol-grounded find/replace.
+
+### Changed
+
+- Generalized internal documentation comments to vendor-neutral language,
+  removing references to a specific downstream host's private Swift source files
+  and product name. No behavior, wire identifiers, or fixtures changed.
+- Make the canonical reasoning effort -> token budget mapping the single source
+  of truth. A new `llm_reasoning_effort_budget(level)` builtin exposes the
+  mapping, and the structured-floor fallback now delegates to it instead of
+  duplicating the constants.
+
+### Fixed
+
+- Preserve pipeline-authored `loop_stuck` event payloads emitted through `agent_emit_event`.
+- **Provider catalog Gemma 4 capability tags now stay consistent (#3585).** The
+  local Gemma 4 rows now declare the same tools, vision, thinking, and
+  structured-output tags that Harn derives from structured capabilities.
+- **`std/agent`: the adaptive loop-control extension policy is now outcome-aware,
+  so a thrash can no longer extend its own iteration budget without bound.**
+  `agent_loop_is_progressing` keyed "progress" on `progress.changed`, an
+  *activity* signal that fires merely because the model issued tool calls — so a
+  run thrashing through the same compile/test failure every turn (lots of
+  edits/verifies, no error draining toward a green build) read as "progressing"
+  every turn and kept hitting the `extend` rule at the budget boundary (observed
+  24→32→…→72 on a run that should have been cut). A new default-OFF guard
+  (`stall_diagnostics.no_net_progress_extend_guard`, after
+  `no_net_progress_extend_after` turns, default 3) sets `progress.no_net_advance`
+  when the verify-bearing failing path is *not advancing* — the same failure
+  signature has recurred past threshold (the stall detector's
+  `same_diagnostic_streak`) — and `agent_loop_is_progressing` then declines to
+  extend. Outcome-aware and conservative: a productive edit changes the error
+  signature (streak resets → still progress), a passing test clears the failure
+  model (→ still progress), and read-only/explore turns with no failing
+  verification never arm it, so genuinely-advancing and exploring runs keep their
+  budget. New pub `agent_stall_no_net_progress`. Pairs with Burin's product-side
+  no-net-progress ripcord: the loop now neither extends a thrash nor lets it run
+  unaided.
+- `std/llm/safe`: the structured-output **repair** side-call now floors its
+  output budget reasoning-awarely (`repair_min_max_tokens`), the twin fix to the
+  #3598 judge floor. A flat 600-token repair budget was billed against the same
+  `max_tokens` as a reasoning route's hidden analysis channel, truncating the
+  repaired JSON verdict to empty (a silent dead-repair) on reasoning models such
+  as gpt-oss. Non-reasoning routes are unchanged (600 baseline); reasoning routes
+  are raised to `reasoning_budget + verdict headroom`. Applied in
+  `safe_structured_call`'s judge defaults and the `with_repair` caller-seam
+  handler, reusing the same floor as the judge path so the two never drift.
+- `load_skill` and `skill_who_signed` now resolve a bare-name collision
+  deterministically by `source` layer precedence (project > user > host,
+  matching the `Layer` priority table) instead of failing the turn with an
+  "ambiguous" error.
+- `std/lifecycle/pool`: terminal pipeline-scope pool tasks are now durably
+  appended before waiters can observe completion, closing a restart race where a
+  fast `pool_wait` could see `completed` in memory but reload the older
+  `running` record after `pool_simulate_restart`.
+
 ## v0.8.144
 
 ### Fixed

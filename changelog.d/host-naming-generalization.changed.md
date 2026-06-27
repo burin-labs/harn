@@ -1,3 +1,0 @@
-- Generalized internal documentation comments to vendor-neutral language, removing references to a
-  specific downstream host's private Swift source files and product name. No behavior, wire
-  identifiers, or fixtures changed.
