@@ -42,6 +42,15 @@ Where you can safely inject a user message into a running agent, and where you c
 
 <div class="harn-path-card">
 
+## [Cross-session pattern knowledge](./cross-session-pattern-knowledge.md)
+
+Why reusable agent pattern recall is a Harn memory primitive, not a host-side
+session-store extension.
+
+</div>
+
+<div class="harn-path-card">
+
 ## [Coming from elsewhere](./sota-comparison.md)
 
 Terminology cross-reference for readers arriving from OpenAI Agents SDK, Anthropic Claude Agent SDK, LangGraph, Inngest, Mastra, ACP, A2A, and MCP.
