@@ -22,5 +22,56 @@ pub fn agent_mcp_bootstrap_if_needed(session, opts) {
     []
   }
   let reg = {_type: "tool_registry", tools: existing_tools + result.tools_added}
-  return out + {tools: reg}
+  return __with_mcp_tool_ceiling(out + {tools: reg}, result.tools_added)
+}
+
+/**
+ * Admit the just-bootstrapped MCP tools into the execution-policy tool
+ * ceiling so the agent that can SEE them in its catalog can also CALL them.
+ *
+ * The catalog merge above adds the `server__tool` entries to `opts.tools`,
+ * which is what makes the model aware of them; without a matching entry in
+ * `opts.policy.tools` (the ceiling enforced by
+ * `enforce_current_policy_for_tool`) every dispatch is denied with
+ * "exceeds tool ceiling". An MCP tool is a runtime projection — its name is
+ * not known until `tools/list` returns — so the ceiling can only learn it
+ * here, at boot time, not from the host's static surface declaration.
+ *
+ * An EMPTY `policy.tools` means "no ceiling" (allow any tool), so we only
+ * extend a non-empty ceiling: adding names to an empty list would flip an
+ * open policy into a closed one and silently forbid the host's own tools.
+ * Idempotent: never double-adds a name already present.
+ */
+fn __with_mcp_tool_ceiling(opts, tools_added) {
+  let policy = opts?.policy
+  if type_of(policy) != "dict" {
+    return opts
+  }
+  let ceiling = policy?.tools
+  if type_of(ceiling) != "list" || len(ceiling) == 0 {
+    return opts
+  }
+  var names = []
+  for entry in tools_added {
+    let name = __mcp_tool_ceiling_name(entry)
+    if name != "" && !ceiling.contains(name) && !names.contains(name) {
+      names = names + [name]
+    }
+  }
+  if len(names) == 0 {
+    return opts
+  }
+  return opts + {policy: policy + {tools: ceiling + names}}
+}
+
+/** Resolve a bootstrapped tool entry's dispatch name (flat or OpenAI-shape). */
+fn __mcp_tool_ceiling_name(entry) {
+  if type_of(entry) != "dict" {
+    return ""
+  }
+  let flat = to_string(entry?.name ?? "")
+  if flat != "" {
+    return flat
+  }
+  return to_string(entry?.function?.name ?? "")
 }
