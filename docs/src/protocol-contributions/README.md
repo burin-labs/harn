@@ -20,10 +20,12 @@ The Harn convention for cross-protocol primitives is:
    questions for maintainers. The wire-format snippet matches the
    upstream repo's preferred dialect (TypeScript for ACP, JSON Schema
    for MCP, A2A JSON-RPC envelope for A2A).
-3. **Open an upstream discussion** when the RFC is ready. Use the RFC
-   doc as the source of truth for the discussion body so reviewers
-   work from a single shared text. Do not expand scope inside the
-   filed thread — drift looks bad and complicates maintainer triage.
+3. **Open an upstream discussion** when the RFC is ready. Treat the
+   RFC doc as source material, then do a public-filing pass before
+   posting: lead with neutral protocol semantics, deployed peer
+   behavior, and public prior art rather than Harn or Burin-specific
+   adoption claims. Keep the scope fixed inside the filed thread so
+   maintainers can triage one proposal at a time.
 4. **Track outcomes here.** When a proposal lands upstream, update the
    RFC's "Status" header and migrate the Harn `_meta` envelope to the
    standardized field locations in a follow-up PR. When a proposal is
@@ -31,6 +33,10 @@ The Harn convention for cross-protocol primitives is:
    stable for downstream consumers.
 
 ## Current RFCs
+
+Statuses below were last verified on 2026-06-27. See the
+[filing status ledger](./status-ledger.md) for the upstream PR,
+discussion, and issue states checked during triage.
 
 ### Ambient reminder injection ([#1829][1829])
 
@@ -44,8 +50,8 @@ The Harn convention for cross-protocol primitives is:
 
 | RFC | Upstream | Status | Reference impl |
 |---|---|---|---|
-| [ACP `session/suspend`](./acp-session-suspend.md) | agentclientprotocol/agent-client-protocol | Draft (not yet filed upstream) | `__host_worker_suspend` builtin + `_meta.harn.suspend`-decorated session updates; sibling to the already-shipped `session/resume` ([ACP #1726](https://github.com/agentclientprotocol/agent-client-protocol/discussions/1726)) |
-| [A2A `TaskState.PAUSED`](./a2a-paused-state.md) | a2aproject/A2A | Draft (not yet filed upstream) | `metadata.harn.pause`-decorated `tasks/statusUpdate` SSE events |
+| [ACP `session/suspend`](./acp-session-suspend.md) | agentclientprotocol/agent-client-protocol | Discussion open ([ACP #1233](https://github.com/agentclientprotocol/agent-client-protocol/discussions/1233)); no maintainer reply as of 2026-06-27 | `__host_worker_suspend` builtin + `_meta.harn.suspend`-decorated session updates; sibling to the already-shipped `session/resume` ([ACP #1726](https://github.com/agentclientprotocol/agent-client-protocol/discussions/1726)) |
+| [A2A `TaskState.PAUSED`](./a2a-paused-state.md) | a2aproject/A2A | Discussion open ([A2A #1858](https://github.com/a2aproject/A2A/discussions/1858)); community feedback favors one `PAUSED` state plus structured `pause` metadata; no maintainer/TSC reply as of 2026-06-27 | `metadata.harn.pause`-decorated `tasks/statusUpdate` SSE events |
 
 [1848]: https://github.com/burin-labs/harn/issues/1848
 
@@ -53,7 +59,7 @@ The Harn convention for cross-protocol primitives is:
 
 Authoring RFC documents in this repository is in scope for these PRs.
 **Filing upstream discussions, issues, or PRs is the maintainer's
-explicit action — not a step any Harn contributor should take without
+explicit action - not a step any Harn contributor should take without
 the project owner asking for it.** See [#1829][1829] for the upstream
 work that remains open.
 
@@ -61,15 +67,18 @@ work that remains open.
 
 ## Related
 
-- [Harn ACP/MCP extensions v1](../spec/harn-extensions/v1.md) — the
+- [Harn ACP/MCP extensions v1](../spec/harn-extensions/v1.md) - the
   authoritative list of Harn-owned `_meta` fields that ride alongside
   upstream protocol payloads today.
-- [System reminders](../system-reminders.md) — the language-level
+- [System reminders](../system-reminders.md) - the language-level
   reminder primitive the reminder-injection RFCs are proposing to
   standardize.
-- [Transcript architecture](../transcript-architecture.md) — the
+- [Transcript architecture](../transcript-architecture.md) - the
   underlying transcript event model that produces and consumes
   reminders.
-- [`suspend_agent` / `resume_agent` builtins](../builtins.md) — the
+- [`suspend_agent` / `resume_agent` builtins](../builtins.md) - the
   language-level cooperative suspend primitive the
   suspend/resume RFCs are proposing to standardize.
+- [Filing status ledger](./status-ledger.md) - direct links and
+  verification notes for the current upstream discussions, PRs, and
+  issues.

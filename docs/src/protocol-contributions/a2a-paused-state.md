@@ -1,29 +1,35 @@
 # A2A RFC: explicit `PAUSED` task state + `tasks/pause` / `tasks/resume`
 
 **Upstream repo:** [a2aproject/A2A][a2a]
-**Status:** Draft (not yet filed upstream).
+**Discussion:** [A2A #1858 - `TaskState.PAUSED`][a2a-1858].
+**Status:** Open upstream discussion. As of the 2026-06-27
+recheck, community feedback favored one `PAUSED` state with a
+structured `pause` object over separate `PAUSED_BY_CLIENT` /
+`PAUSED_BY_AGENT` enum values; no maintainer/TSC reply was present.
 **Authors:** Burin Labs
 **Reference impl:** `harn-vm` cooperative suspend primitive
-([`crates/harn-vm/src/stdlib/agents.rs`][agents-rs] —
-`__host_worker_suspend` + `WorkerSuspension`) and `harn-serve` A2A
-adapter
+([`crates/harn-vm/src/stdlib/agents.rs`][agents-rs] -
+`__host_worker_suspend`; [`agents_workers/mod.rs`][workers-rs] -
+`WorkerSuspension`) and `harn-serve` A2A adapter
 ([`crates/harn-serve/src/adapters/a2a/`][a2a-dir]).
-**Sibling discussions:** [A2A #1857 — idempotency on
+**Sibling discussions:** [A2A #1857 - idempotency on
 `tasks/send`][a2a-1857] covers a different concern (request
 idempotency). A first-class paused state is still open.
 
 [a2a]: https://github.com/a2aproject/A2A
 [a2a-1857]: https://github.com/a2aproject/A2A/discussions/1857
+[a2a-1858]: https://github.com/a2aproject/A2A/discussions/1858
 [a2a-dir]: https://github.com/burin-labs/harn/tree/main/crates/harn-serve/src/adapters/a2a
 [agents-rs]: https://github.com/burin-labs/harn/blob/main/crates/harn-vm/src/stdlib/agents.rs
+[workers-rs]: https://github.com/burin-labs/harn/blob/main/crates/harn-vm/src/stdlib/agents_workers/mod.rs
 
 ## Problem statement
 
 A2A's `TaskState` enum models task lifecycle as a state machine. The
 current non-terminal "waiting" states are:
 
-- `INPUT_REQUIRED` — the peer needs end-user input to continue.
-- `AUTH_REQUIRED` — the peer needs the caller to refresh credentials
+- `INPUT_REQUIRED` - the peer needs end-user input to continue.
+- `AUTH_REQUIRED` - the peer needs the caller to refresh credentials
   or complete an auth flow.
 
 Both are **callee-initiated soft-pauses** that exist to signal "I
@@ -33,20 +39,22 @@ prompt, an OAuth flow trigger).
 
 A2A has no first-class state for **either**:
 
-1. **`PAUSED_BY_CLIENT`** — the caller asked the peer to pause. The
-   peer is fine; it just shouldn't make any further turns until told
-   to.
-2. **`PAUSED_BY_AGENT`** — the peer voluntarily parked itself waiting
-   on an external condition (a file change, a CI build completion, a
-   scheduled wake-up time) that's neither user input nor an auth
-   refresh.
+1. **Caller-initiated pause** - the caller asked the peer to pause.
+   The peer can continue, but should not make further turns until
+   told to resume.
+2. **Peer-initiated self-park** - the peer voluntarily parked itself
+   waiting on an external condition (a file change, a CI build
+   completion, a scheduled wake-up time) that is neither user input
+   nor an auth refresh.
 
 These are different shapes. Today A2A peers conflate them with
 `INPUT_REQUIRED` (with a synthetic prompt the user is supposed to
 ignore), `AUTH_REQUIRED` (definitely wrong), or `WORKING` (the
 caller-side cancel button still nukes the task). All three workarounds
 lose information: the caller's UI can't distinguish "paused, will
-resume on its own" from "blocked, needs your input."
+resume on its own" from "blocked, needs your input." The upstream
+discussion converged on keeping that distinction in `pause.initiatedBy`
+rather than multiplying the top-level enum surface.
 
 ### Why this matters in practice
 
@@ -55,8 +63,8 @@ Concrete scenarios we hit shipping Harn:
 - **Caller-driven pause for review.** A coordinator agent wants to
   pause a delegated worker, inspect its progress, then decide whether
   to resume or cancel. The coordinator needs to call `tasks/pause`
-  and observe `PAUSED_BY_CLIENT` rather than send `INPUT_REQUIRED`
-  back to itself.
+  and observe `state: "paused"` with `pause.initiatedBy: "client"`
+  rather than send `INPUT_REQUIRED` back to itself.
 - **Agent self-park on long waitpoints.** A peer agent calls a tool
   that spawns a CI build. The agent has nothing useful to do for
   minutes (possibly hours). Today it has to either burn idle turns
@@ -67,8 +75,8 @@ Concrete scenarios we hit shipping Harn:
   involved beyond observing the paused state.
 - **Cost / budget interrupts.** A policy engine wants to pause every
   task that exceeds a token budget. The right state is
-  `PAUSED_BY_CLIENT` (with a reason); the caller can decide whether
-  to refill and resume or cancel.
+  `PAUSED` with `pause.initiatedBy: "client"` and a reason; the
+  caller can decide whether to refill and resume or cancel.
 - **Cross-protocol bridges.** Harn's `harn-serve` adapter today maps
   ACP `session/resume` (#1726) and Harn's `__host_worker_suspend`
   envelope onto A2A. With no `PAUSED` shape, the adapter has to
@@ -96,15 +104,17 @@ breaks the existing client contract:
 - Resume callers MUST send a `Message` to flip out of
   `INPUT_REQUIRED`; we want to flip out of `PAUSED` with a verb
   (`tasks/resume`) that doesn't pollute the message stream.
-- `INPUT_REQUIRED` is a single state; we need to distinguish
-  caller-initiated from agent-initiated pauses for UI and audit.
+- `INPUT_REQUIRED` is a single state; a `PAUSED` state can use the
+  same compatibility-friendly pattern while carrying pause-specific
+  initiator metadata for UI and audit.
 
 ## Proposed wire format
 
 ### `TaskState` additions
 
-Two new non-terminal states, sibling to `INPUT_REQUIRED` /
-`AUTH_REQUIRED`:
+One new non-terminal state, sibling to `INPUT_REQUIRED` /
+`AUTH_REQUIRED`, with initiator and resumability details carried in a
+structured `pause` payload:
 
 ```typescript
 export enum TaskState {
@@ -119,19 +129,31 @@ export enum TaskState {
   REJECTED = "rejected",
 
   /**
-   * Caller asked the peer to pause via `tasks/pause`. Peer commits
-   * no further turns until `tasks/resume` is called or the task is
-   * canceled.
+   * Task is intentionally parked at a resumable boundary. Inspect
+   * `Task.pause` to determine who initiated the pause and how it can
+   * be resumed.
    */
-  PAUSED_BY_CLIENT = "paused-by-client",
+  PAUSED = "paused",
+}
 
-  /**
-   * Peer voluntarily parked itself waiting on an external condition
-   * declared via `tasks/await_resumption`. Peer resumes when the
-   * condition fires, the timeout elapses, or `tasks/resume` is
-   * called explicitly.
-   */
-  PAUSED_BY_AGENT = "paused-by-agent",
+export interface TaskPause {
+  /** Caller requested the pause, or the peer parked itself. */
+  initiatedBy: "client" | "agent"
+  /** Human-readable reason or stable reason code. */
+  reason?: string
+  /** When the task entered the paused state. */
+  pausedAt: string
+  /** Optional lease or deadline after which callers should not assume
+   * the pause remains valid. */
+  pausedUntil?: string
+  /** Opaque consume-once resume token. */
+  resumeToken: string
+  /** Whether the task accepts an explicit `tasks/resume`. */
+  resumable: boolean
+  /** Optional peer-declared resume condition. */
+  conditions?: Record<string, unknown>
+  /** Optional mode hint for how resume input is expected. */
+  resumeMode?: "client_message" | "external_event" | "timeout"
 }
 ```
 
@@ -139,16 +161,16 @@ export enum TaskState {
 
 Allowed transitions (additions only, existing transitions unchanged):
 
-- `WORKING` → `PAUSED_BY_CLIENT` (via `tasks/pause`)
-- `WORKING` → `PAUSED_BY_AGENT` (via `tasks/await_resumption`)
-- `PAUSED_BY_CLIENT` → `WORKING` (via `tasks/resume`)
-- `PAUSED_BY_AGENT` → `WORKING` (via `tasks/resume`, or when the
-  agent's declared resume condition fires)
-- `PAUSED_BY_CLIENT` → `CANCELED` (via `tasks/cancel`)
-- `PAUSED_BY_AGENT` → `CANCELED` (via `tasks/cancel`)
-- `PAUSED_BY_*` → `FAILED` (timeout elapsed with `on_timeout: "fail"`)
+- `WORKING` → `PAUSED` with `pause.initiatedBy: "client"` (via
+  `tasks/pause`)
+- `WORKING` → `PAUSED` with `pause.initiatedBy: "agent"` (via
+  `tasks/await_resumption`)
+- `PAUSED` → `WORKING` (via `tasks/resume`, or when the peer's
+  declared resume condition fires)
+- `PAUSED` → `CANCELED` (via `tasks/cancel`)
+- `PAUSED` → `FAILED` (timeout elapsed with `on_timeout: "fail"`)
 
-Notably **disallowed**: `INPUT_REQUIRED` ↔ `PAUSED_BY_*` direct
+Notably **disallowed**: `INPUT_REQUIRED` <-> `PAUSED` direct
 transitions. A peer that needs user input while paused must first
 flip to `WORKING` and then to `INPUT_REQUIRED`; the two state
 families don't compose because they have different unblock channels.
@@ -177,10 +199,14 @@ Response:
   "id": "req-019abf6b-...",
   "result": {
     "taskId": "task-019abf6b-7d51-7c1d-bb02-...",
-    "state": "paused-by-client",
-    "handle": "suspend-019abf6b-...",
-    "pausedAt": "2026-04-30T12:34:56.789Z",
-    "reason": "operator review"
+    "state": "paused",
+    "pause": {
+      "initiatedBy": "client",
+      "resumeToken": "suspend-019abf6b-...",
+      "pausedAt": "2026-04-30T12:34:56.789Z",
+      "reason": "operator review",
+      "resumable": true
+    }
   }
 }
 ```
@@ -224,9 +250,21 @@ Response:
   "id": "req-019abf6b-...",
   "result": {
     "taskId": "task-019abf6b-7d51-7c1d-bb02-...",
-    "state": "paused-by-agent",
-    "handle": "suspend-019abf6b-...",
-    "pausedAt": "2026-04-30T12:34:56.789Z"
+    "state": "paused",
+    "pause": {
+      "initiatedBy": "agent",
+      "resumeToken": "suspend-019abf6b-...",
+      "pausedAt": "2026-04-30T12:34:56.789Z",
+      "reason": "waiting on ci/build:1234",
+      "conditions": {
+        "onEvent": "ci.build.completed:1234",
+        "timeout": {
+          "durationMinutes": 30,
+          "onTimeout": "fail"
+        }
+      },
+      "resumable": true
+    }
   }
 }
 ```
@@ -240,7 +278,7 @@ Response:
   "method": "tasks/resume",
   "params": {
     "taskId": "task-019abf6b-7d51-7c1d-bb02-...",
-    "handle": "suspend-019abf6b-...",
+    "resumeToken": "suspend-019abf6b-...",
     "input": null,
     "continueTranscript": true,
     "metadata": {}
@@ -266,12 +304,15 @@ state-update notifications:
   "method": "tasks/statusUpdate",
   "params": {
     "taskId": "task-019abf6b-7d51-7c1d-bb02-...",
-    "state": "paused-by-client",
-    "handle": "suspend-019abf6b-...",
-    "reason": "operator review",
-    "initiator": "client",
-    "pausedAt": "2026-04-30T12:34:56.789Z",
-    "conditions": null
+    "state": "paused",
+    "pause": {
+      "initiatedBy": "client",
+      "resumeToken": "suspend-019abf6b-...",
+      "reason": "operator review",
+      "pausedAt": "2026-04-30T12:34:56.789Z",
+      "conditions": null,
+      "resumable": true
+    }
   }
 }
 ```
@@ -285,7 +326,7 @@ and the symmetric resumed shape:
   "params": {
     "taskId": "task-019abf6b-7d51-7c1d-bb02-...",
     "state": "working",
-    "previousState": "paused-by-agent",
+    "previousState": "paused",
     "cause": "condition_fired",
     "hadResumeInput": false,
     "continueTranscript": true,
@@ -329,7 +370,7 @@ Errors follow A2A's existing JSON-RPC error envelope:
 | `-32602` | Malformed `params` (missing `taskId`, unknown enum value on `mode` / `onTimeout`, etc.). |
 | `-32004` | Unknown `taskId`. |
 | `-32011` | Task is in a state that does not allow pause (e.g. already terminal). |
-| `-32012` | Resume `handle` does not match the recorded suspension handle. |
+| `-32012` | Resume `resumeToken` does not match the recorded suspension token. |
 | `-32601` | Peer does not implement `tasks/pause` (i.e., capability missing). |
 
 ## Compatibility and migration
@@ -345,14 +386,15 @@ Harn-as-A2A-peer currently:
   decorating with `metadata.harn.pause` carrying the actual paused
   status, handle, reason, and resume conditions.
 - Maps Harn's `WorkerSuspension` envelope (verbatim from
-  [`crates/harn-vm/src/stdlib/agents.rs`][agents-rs]) onto the
+  [`crates/harn-vm/src/stdlib/agents_workers/mod.rs`][workers-rs]) onto the
   `metadata.harn.pause` shape.
 
 Migration when the standardized state lands:
 
 1. Promote paused state from `metadata.harn.pause.state` to top-level
-   `TaskState.PAUSED_BY_CLIENT` / `PAUSED_BY_AGENT` on
-   `tasks/statusUpdate` events.
+   `TaskState.PAUSED` on `tasks/statusUpdate` events, with
+   `metadata.harn.pause.initiator` mapped to `pause.initiatedBy`.
+   Map the existing suspension `handle` to `pause.resumeToken`.
 2. Implement `tasks/pause`, `tasks/await_resumption`, and
    `tasks/resume` as canonical inbound paths. Keep
    `metadata.harn.pause` reads as a fall-back for one A2A minor
@@ -368,7 +410,7 @@ Migration when the standardized state lands:
 Peers that don't model pause internally can satisfy `tasks/pause` by
 cancelling any in-flight tool calls (or letting them complete in
 `wait_for_completion` mode), persisting the task's last known
-state pointer, and returning a `handle` they can re-open on
+state pointer, and returning a `resumeToken` they can re-open on
 `tasks/resume`. That's strictly stronger than the
 `INPUT_REQUIRED`-with-fake-prompt workaround and requires no message
 schema work. Implementing `tasks/await_resumption` is optional and
@@ -378,8 +420,8 @@ only needed by peers that want to self-park.
 
 | Surface | Status | Notes |
 |---|---|---|
-| `__host_worker_suspend` Rust builtin | Shipping (v0.8.x) | `crates/harn-vm/src/stdlib/agents.rs` — cooperative suspend at the next turn boundary; backs both caller- and agent-initiated paths. |
-| `agent_await_resumption` script builtin | Shipping (v0.8.x) | `crates/harn-stdlib/src/stdlib/agent/workers.harn` — exposes the agent-initiated dual. |
+| `__host_worker_suspend` Rust builtin | Shipping (v0.8.x) | `crates/harn-vm/src/stdlib/agents.rs` - cooperative suspend at the next turn boundary; backs both caller- and agent-initiated paths. |
+| `agent_await_resumption` script builtin | Shipping (v0.8.x) | `crates/harn-stdlib/src/stdlib/agent/workers.harn` - exposes the agent-initiated dual. |
 | `WorkerSuspension` JSON envelope | Shipping | Shared verbatim with the [ACP RFC](./acp-session-suspend.md). |
 | `ResumeConditions` validator (`parse_resume_conditions`) | Shipping | Validates `trigger` / `timeout` / `on_event` shape; backs the proposed `conditions` field field-for-field. |
 | Suspend/resume conformance suite (S-11, #1847) | Shipping | Seven paired `.harn` / `.expected` fixtures cover caller suspend, agent self-park, timeout, double-resume race, close-while-suspended. |
@@ -389,28 +431,24 @@ only needed by peers that want to self-park.
 | A2A adapter `metadata.harn.pause` outbound emission | Reference impl tracked under harn#1848 | Will emit under `metadata.harn.pause` until upstream lands. |
 | Agent card `capabilities.supportsPause` advertisement | Pending upstream schema | Currently advertised under `capabilities._meta.harn.pause` (alongside `capabilities._meta.harn.reminders` from the [reminders RFC](./a2a-message-kind-reminder.md)). |
 
-The canonical lifecycle struct ([`WorkerSuspension`][agents-rs]) is
+The canonical lifecycle struct ([`WorkerSuspension`][workers-rs]) is
 shared verbatim with the [ACP RFC](./acp-session-suspend.md); field
 names round-trip through the A2A JSON shape with conventional
 camelCase translation.
 
 ## Open questions for upstream maintainers
 
-1. **Two states vs one + initiator field.** We propose
-   `PAUSED_BY_CLIENT` and `PAUSED_BY_AGENT` as separate states for
-   the same reason we proposed `tasks/pause` and
-   `tasks/await_resumption` as separate methods: the unblock channels
-   differ (caller call vs condition / timeout / explicit resume) and
-   client UIs render them differently. Maintainers may prefer a
-   single `PAUSED` state plus an `initiator` discriminator on the
-   status notification; we'd accept either, but the typed shape
-   simplifies state-machine validators.
-2. **Naming.** `PAUSED_BY_*` is verbose but unambiguous. Alternatives
-   include `SUSPENDED_BY_CLIENT` (matches the ACP `session/suspend`
-   verb), `STOPPED_BY_*` (overloaded with cancellation in some
-   client UIs), or just `PAUSED` + `initiator` field. We've used
-   `PAUSED_BY_*` to match Temporal's existing `WORKFLOW_PAUSED` /
-   `WORKFLOW_PAUSED_BY_*` taxonomy.
+1. **Exact `pause` field set.** The current discussion points toward
+   `initiatedBy`, `pausedAt`, optional lease/deadline metadata such as
+   `pausedUntil`, `resumeMode`, `resumeToken`, and `resumable`.
+   Maintainers should decide which fields are core versus extension
+   metadata.
+2. **External side-effect pointer.** Community feedback raised an
+   optional `lastSideEffectRef` / `lastExternalEffectRef` digest so a
+   caller can reconcile world state before resuming a task that may
+   already have crossed an external side-effect boundary. That is
+   useful for duplicate-side-effect safety, but it may be too
+   domain-specific for the base pause object.
 3. **`mode` semantics.** Should `tasks/pause` honor the same
    `interrupt_immediate` / `finish_step` / `wait_for_completion`
    delivery modes as the ACP sibling? Our reference impl defaults to
@@ -420,7 +458,7 @@ camelCase translation.
    `trigger`, `timeout`). A2A maintainers may prefer a single opaque
    `Conditions` value the peer is free to parse, leaving the schema
    to peer extension. We've found the typed shape essential for
-   replay determinism — peers that round-trip a condition need a
+   replay determinism; peers that round-trip a condition need a
    stable schema for hashing.
 5. **`continueTranscript` semantics.** Defaulting to `true` preserves
    the existing assumption that resumed tasks pick up where they left
@@ -428,9 +466,9 @@ camelCase translation.
    matches the "fresh turn with a digest" pattern most production
    agents want. We've defaulted to `true` to match the ACP sibling.
 6. **Push notification interaction.** A2A push notifications already
-   exist; should `tasks/statusUpdate` with the new states piggyback
+   exist; should `tasks/statusUpdate` with the new state piggyback
    on them or stay on the SSE stream? Our reference impl uses SSE
-   only — push payloads weren't designed for the back-and-forth
+   only; push payloads weren't designed for the back-and-forth
    pause/resume conversation.
 7. **Capability granularity.** Is `capabilities.supportsPause` /
    `supportsAwaitResumption` the right shape, or should they fold
@@ -439,15 +477,16 @@ camelCase translation.
 8. **Relationship to the ACP RFC.** We've filed a parallel [ACP
    RFC](./acp-session-suspend.md) for `session/suspend` /
    `session/await_resumption`. The two RFCs deliberately share
-   field names (`handle`, `reason`, `conditions`, `cause`) so
+   field names (`resumeToken`, `reason`, `conditions`, `cause`) so
    cross-protocol bridges round-trip verbatim. If A2A's shape
    diverges substantially from ACP's, the cross-protocol story gets
    noisier.
 
 ## References
 
-- [A2A #1857 — `tasks/send` idempotency][a2a-1857] (separate concern;
+- [A2A #1857 - `tasks/send` idempotency][a2a-1857] (separate concern;
   not a substitute for explicit paused state)
+- [A2A #1858 - `TaskState.PAUSED` discussion][a2a-1858]
 - [Sibling ACP RFC: `session/suspend`](./acp-session-suspend.md)
 - [Sibling A2A RFC: `tasks/inject_reminder`](./a2a-message-kind-reminder.md)
 - [`__host_worker_suspend` builtin][agents-rs]
