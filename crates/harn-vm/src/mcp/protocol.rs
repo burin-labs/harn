@@ -37,7 +37,9 @@ pub(crate) fn resolve_protocol_mode(
 ) -> Result<McpProtocolMode, VmError> {
     let normalized = protocol_mode.map(|value| value.trim().to_ascii_lowercase());
     match normalized.as_deref() {
-        Some("legacy") | Some("2025") | Some("2025-11-25") => Ok(McpProtocolMode::Legacy),
+        Some("legacy") | Some("2025") | Some("2025-11-25") | Some("2025-06-18") => {
+            Ok(McpProtocolMode::Legacy)
+        }
         Some("rc") | Some("modern") | Some("draft") | Some("draft-2026-v1") => {
             Ok(McpProtocolMode::Modern)
         }
@@ -200,9 +202,13 @@ pub(crate) fn http_discovery_fallback_response(id: Option<u64>) -> serde_json::V
 }
 
 pub(crate) fn select_supported_protocol_version(supported: &[&str]) -> Option<&'static str> {
-    [DRAFT_PROTOCOL_VERSION, PROTOCOL_VERSION]
-        .into_iter()
-        .find(|candidate| supported.iter().any(|value| value == candidate))
+    [
+        DRAFT_PROTOCOL_VERSION,
+        PROTOCOL_VERSION,
+        LEGACY_2025_06_18_PROTOCOL_VERSION,
+    ]
+    .into_iter()
+    .find(|candidate| supported.iter().any(|value| value == candidate))
 }
 
 pub(crate) fn is_method_not_found_response(msg: &serde_json::Value) -> bool {

@@ -261,6 +261,7 @@
     "final2026ProtocolVersion": "2026-07-28",
     "inputRequiredResultType": "input_required",
     "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
+    "legacy20250618ProtocolVersion": "2025-06-18",
     "loggingLevels": [
       "debug",
       "info",
@@ -317,7 +318,8 @@
     "protocolVersion": "2025-11-25",
     "protocolVersions": [
       "DRAFT-2026-v1",
-      "2025-11-25"
+      "2025-11-25",
+      "2025-06-18"
     ],
     "requiredRequestMetadataKeys": [
       "io.modelcontextprotocol/protocolVersion",

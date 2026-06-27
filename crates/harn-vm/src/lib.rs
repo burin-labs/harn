@@ -54,6 +54,7 @@ pub mod mcp_elicit;
 pub mod mcp_file_upload;
 pub mod mcp_host;
 pub mod mcp_identity;
+pub mod mcp_json_discovery;
 pub mod mcp_oauth;
 pub mod mcp_presets;
 pub mod mcp_progress;

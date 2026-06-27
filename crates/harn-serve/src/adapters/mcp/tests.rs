@@ -73,6 +73,38 @@ pub fn greet(name: string) -> string {
 }
 
 #[tokio::test]
+async fn initialize_accepts_2025_06_18_protocol_version() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let script = dir.path().join("server.harn");
+    std::fs::write(
+        &script,
+        r"
+pub fn greet(name: string) -> string {
+  return name
+}
+",
+    )
+    .expect("write script");
+    let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
+    let server = McpServer::new(McpServerConfig::new(core));
+    let session = SharedSession::new();
+    let init = server.handle_initialize(
+        json!(1),
+        &session,
+        &json!({
+            "protocolVersion": harn_vm::mcp_protocol::LEGACY_2025_06_18_PROTOCOL_VERSION,
+            "clientInfo": {"name": "codex", "version": "1"}
+        }),
+    );
+
+    assert_eq!(
+        init["result"]["protocolVersion"],
+        json!(harn_vm::mcp_protocol::LEGACY_2025_06_18_PROTOCOL_VERSION)
+    );
+    assert!(init["result"].get("resultType").is_none());
+}
+
+#[tokio::test]
 async fn package_context_resources_templates_prompts_and_completions_roundtrip() {
     let dir = tempfile::tempdir().expect("tempdir");
     let script = dir.path().join("server.harn");

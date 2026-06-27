@@ -64,6 +64,7 @@ HTTP mode exposes:
   `Deprecation: true`
 - Legacy SSE POST at `--messages-path` (default `/messages`), marked with
   `Deprecation: true`
+- Unofficial MCP endpoint discovery at `/.well-known/mcp.json`
 
 Streamable HTTP clients initialize with `POST /mcp`. The initialize response
 includes an `Mcp-Session-Id` header, and clients must echo that header on later
@@ -82,6 +83,18 @@ harn mcp serve \
   --transport http \
   --bind 127.0.0.1:8765
 ```
+
+Discovery check:
+
+```bash
+curl http://127.0.0.1:8765/.well-known/mcp.json
+harn mcp discover http://127.0.0.1:8765 --json
+```
+
+Behind a tunnel or reverse proxy, Harn derives the published endpoint from
+`X-Forwarded-Proto` and `X-Forwarded-Host` when present, falling back to
+`Host`. Configure those headers in the proxy so clients see the public MCP
+endpoint rather than the private bind address.
 
 ## Auth
 
@@ -123,6 +136,19 @@ The metadata includes `authorization_servers`, the canonical `resource`, and
 every HTTP request as `Authorization: Bearer <token>`. Tokens are rejected when
 they are inactive, expired, issued for a different audience/resource or issuer,
 or missing required scopes.
+
+For auth debugging, check these endpoints from the same public origin the MCP
+client uses:
+
+```bash
+curl https://mcp.example.com/.well-known/mcp.json
+curl https://mcp.example.com/.well-known/oauth-protected-resource/mcp
+```
+
+The first endpoint answers "where is the MCP Streamable HTTP endpoint?" The
+second answers "which authorization server protects this resource?" Keep both
+responses aligned with the public URL and resource value clients use during
+OAuth.
 
 `HARN_ORCHESTRATOR_API_KEYS` remains available as a legacy compatibility mode.
 Set it to a comma-separated key list to require API keys.

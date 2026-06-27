@@ -63,6 +63,11 @@ pub(super) fn generate_go() -> String {
             MCP_DRAFT_PROTOCOL_VERSION,
         ),
         (
+            "// MCPLegacy20250618ProtocolVersion is the prior stable MCP protocol Harn still accepts.\n",
+            "MCPLegacy20250618ProtocolVersion",
+            MCP_LEGACY_2025_06_18_PROTOCOL_VERSION,
+        ),
+        (
             "// MCPFinal2026ProtocolVersion is the scheduled final identity for the RC profile.\n",
             "MCPFinal2026ProtocolVersion",
             MCP_FINAL_2026_PROTOCOL_VERSION,

@@ -248,6 +248,12 @@ print(json.dumps({
     assert_eq!(handle.protocol_version().await.unwrap(), PROTOCOL_VERSION);
 }
 
+#[test]
+fn rc_protocol_fallback_can_select_2025_06_18() {
+    let selected = select_supported_protocol_version(&[LEGACY_2025_06_18_PROTOCOL_VERSION]);
+    assert_eq!(selected, Some(LEGACY_2025_06_18_PROTOCOL_VERSION));
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn modern_http_sends_stateless_metadata_headers_and_schema_headers() {
     let _guard = http_mcp_test_guard().await;

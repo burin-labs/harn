@@ -23,6 +23,8 @@ pub(crate) enum McpCommand {
     Logout(McpServerRefArgs),
     /// Show stored OAuth status for a server.
     Status(McpServerRefArgs),
+    /// Discover an unofficial /.well-known/mcp.json MCP endpoint descriptor.
+    Discover(McpDiscoverArgs),
     /// Print the default OAuth redirect URI.
     RedirectUri,
     /// List the canonical catalog of well-known MCP server presets.
@@ -32,6 +34,15 @@ pub(crate) enum McpCommand {
 #[derive(Debug, Args)]
 pub(crate) struct McpPresetsArgs {
     /// Emit the catalog as a stable JSON envelope instead of a table.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct McpDiscoverArgs {
+    /// Website or server URL whose origin should publish /.well-known/mcp.json.
+    pub url: String,
+    /// Emit a stable JSON envelope for app/script integration.
     #[arg(long)]
     pub json: bool,
 }

@@ -61,6 +61,7 @@ fn generated_types_include_harn_wire_vocabularies() {
     let ts = generate_typescript();
     assert!(ts.contains("export type JsonRpcId = number | string | null"));
     assert!(ts.contains("export const MCP_DRAFT_PROTOCOL_VERSION = \"DRAFT-2026-v1\""));
+    assert!(ts.contains("export const MCP_LEGACY_2025_06_18_PROTOCOL_VERSION = \"2025-06-18\""));
     assert!(ts.contains("export interface MCPRequestMeta"));
     assert!(ts.contains("export interface MCPDiscoverResult"));
     assert!(ts.contains("export interface MCPInputRequiredResult"));
@@ -86,6 +87,7 @@ fn generated_types_include_harn_wire_vocabularies() {
     let swift = generate_swift();
     assert!(swift.contains("public enum HarnACPAgentMethod"));
     assert!(swift.contains("mcpDraftProtocolVersion = \"DRAFT-2026-v1\""));
+    assert!(swift.contains("mcpLegacy20250618ProtocolVersion = \"2025-06-18\""));
     assert!(swift.contains("public struct HarnMCPRequestMeta"));
     assert!(swift.contains("public struct HarnMCPDiscoverResult"));
     assert!(swift.contains("public struct HarnMCPInputRequiredResult"));
@@ -285,6 +287,7 @@ fn dispatched_acp_methods_match_artifact() {
 fn generated_python_includes_harn_wire_vocabularies() {
     let py = generate_python();
     assert!(py.contains("MCP_DRAFT_PROTOCOL_VERSION: str = \"DRAFT-2026-v1\""));
+    assert!(py.contains("MCP_LEGACY_2025_06_18_PROTOCOL_VERSION: str = \"2025-06-18\""));
     assert!(py.contains("MCP_REQUIRED_METADATA_KEYS: tuple"));
     assert!(py.contains("class MCPDiscoverResult(_HarnDataclass):"));
     assert!(py.contains("class MCPInputRequiredResult(_HarnDataclass):"));
@@ -317,6 +320,7 @@ fn generated_go_includes_harn_wire_vocabularies() {
     let go = generate_go();
     assert!(go.contains("package harnprotocol"));
     assert!(go.contains("const MCPDraftProtocolVersion = \"DRAFT-2026-v1\""));
+    assert!(go.contains("const MCPLegacy20250618ProtocolVersion = \"2025-06-18\""));
     assert!(go.contains("type MCPRequestMeta struct"));
     assert!(go.contains("type MCPDiscoverResult struct"));
     assert!(go.contains("type MCPInputRequiredResult struct"));
@@ -408,6 +412,10 @@ fn manifest_advertises_python_and_go_bindings() {
     assert_eq!(
         manifest["mcp"]["draftProtocolVersion"],
         json!("DRAFT-2026-v1")
+    );
+    assert_eq!(
+        manifest["mcp"]["legacy20250618ProtocolVersion"],
+        json!("2025-06-18")
     );
     assert_eq!(
         manifest["mcp"]["unsupportedProtocolVersionError"]["code"],

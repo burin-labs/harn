@@ -119,13 +119,16 @@ through the existing Harn agent runtime.
 Remote MCP OAuth:
 
 ```bash
+harn mcp discover https://www.notion.com --json
 harn mcp redirect-uri
 harn mcp login https://mcp.notion.com/mcp
 ```
 
 `harn mcp login` prefers Harn's published CIMD client metadata document and
 falls back to dynamic client registration when the authorization server does
-not advertise CIMD support.
+not advertise CIMD support. Stored MCP OAuth tokens are shared by Harn CLI,
+runtime, and host integrations; refresh is single-flight and clears stale state
+when the authorization server returns terminal `invalid_grant`.
 
 Simple LLM call:
 
@@ -355,9 +358,9 @@ defaults, safe, prompts, catalog).
   current operation, or queue until the agent yields back to the human.
 - ACP pending reminder controls for operator UIs: inspect the bridge queue and
   revoke queued `session/remind` reminders before a checkpoint drains them.
-- Remote MCP over stdio and HTTP, including OAuth metadata discovery, stored
-  bearer tokens for standalone CLI use, and automatic token reuse for HTTP MCP
-  servers declared in `harn.toml`.
+- Remote MCP over stdio and HTTP, including `/.well-known/mcp.json` endpoint
+  discovery, OAuth metadata discovery, stored bearer tokens for standalone CLI
+  use, and automatic token reuse for HTTP MCP servers declared in `harn.toml`.
 - Runtime semantic cleanup for older surfaces: repeated `catch e { ... }`
   bindings work within the same enclosing block, and float division keeps
   IEEE `NaN`/`Infinity` behavior instead of raising runtime errors.

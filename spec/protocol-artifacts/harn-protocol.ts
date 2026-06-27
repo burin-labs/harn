@@ -6,6 +6,7 @@ export const HARN_PROTOCOL_ARTIFACT_VERSION = "0.8.146"
 export const MCP_PROTOCOL_VERSION = "2025-11-25"
 export const MCP_STABLE_PROTOCOL_VERSION = "2025-11-25"
 export const MCP_DRAFT_PROTOCOL_VERSION = "DRAFT-2026-v1"
+export const MCP_LEGACY_2025_06_18_PROTOCOL_VERSION = "2025-06-18"
 export const MCP_FINAL_2026_PROTOCOL_VERSION = "2026-07-28"
 export const MCP_JSON_SCHEMA_2020_12_DIALECT = "https://json-schema.org/draft/2020-12/schema"
 export const MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR = { code: -32004, message: "Unsupported protocol version" } as const
@@ -264,6 +265,7 @@ export type A2ATaskEventType = (typeof A2A_TASK_EVENT_TYPES)[number]
 export const MCP_PROTOCOL_VERSIONS = [
   "DRAFT-2026-v1",
   "2025-11-25",
+  "2025-06-18",
 ] as const
 export type MCPProtocolVersion = (typeof MCP_PROTOCOL_VERSIONS)[number]
 

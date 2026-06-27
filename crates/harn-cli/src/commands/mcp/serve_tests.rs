@@ -1560,6 +1560,44 @@ async fn oauth_metadata_and_challenge_are_served_when_configured() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn mcp_json_descriptor_advertises_streamable_http_endpoint() {
+    let _guard = lock_harn_state();
+    let temp = TempDir::new().unwrap();
+    write_fixture(&temp);
+    let args = fixture_args(&temp);
+    let router = http_router_for_local(
+        args.local.clone(),
+        "/mcp".to_string(),
+        "/sse".to_string(),
+        "/messages".to_string(),
+    )
+    .unwrap();
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/.well-known/mcp.json")
+                .header("host", "internal.invalid")
+                .header("x-forwarded-host", "mcp.example.test")
+                .header("x-forwarded-proto", "https")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let descriptor: JsonValue = serde_json::from_slice(&body).unwrap();
+    assert_eq!(descriptor["name"], json!("Harn MCP"));
+    assert_eq!(
+        descriptor["endpoint"],
+        json!("https://mcp.example.test/mcp")
+    );
+    assert!(descriptor["description"].as_str().unwrap().contains("Harn"));
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn oauth_introspection_accepts_valid_token_and_rejects_wrong_audience() {
     async fn introspect(Form(form): Form<BTreeMap<String, String>>) -> Json<JsonValue> {
         match form.get("token").map(String::as_str) {

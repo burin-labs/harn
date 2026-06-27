@@ -33,6 +33,9 @@ const MCPStableProtocolVersion = "2025-11-25"
 // MCPDraftProtocolVersion is the opt-in MCP release-candidate profile identity.
 const MCPDraftProtocolVersion = "DRAFT-2026-v1"
 
+// MCPLegacy20250618ProtocolVersion is the prior stable MCP protocol Harn still accepts.
+const MCPLegacy20250618ProtocolVersion = "2025-06-18"
+
 // MCPFinal2026ProtocolVersion is the scheduled final identity for the RC profile.
 const MCPFinal2026ProtocolVersion = "2026-07-28"
 
@@ -331,6 +334,7 @@ type MCPProtocolVersionValue = string
 var MCPProtocolVersions = []MCPProtocolVersionValue{
 	"DRAFT-2026-v1",
 	"2025-11-25",
+	"2025-06-18",
 }
 
 // MCPMethod is the typed alias for the MCPMethods wire vocabulary.

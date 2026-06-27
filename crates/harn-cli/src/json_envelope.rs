@@ -164,6 +164,13 @@ pub fn catalog() -> Vec<SchemaEntry> {
             schema_json: None,
         },
         SchemaEntry {
+            command: "mcp discover",
+            schema_version: crate::commands::mcp::MCP_DISCOVERY_SCHEMA_VERSION,
+            description:
+                "Unofficial MCP endpoint discovery from /.well-known/mcp.json: source URL, found flag, and descriptor.",
+            schema_json: None,
+        },
+        SchemaEntry {
             command: "run",
             schema_version: crate::commands::run::json_events::RUN_JSON_SCHEMA_VERSION,
             description: "Pipeline-run NDJSON event stream (stdout, stderr, transcript, tool, hook, persona, result, error).",

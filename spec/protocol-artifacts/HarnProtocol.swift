@@ -11,6 +11,7 @@ public enum HarnProtocolConstants {
     public static let mcpProtocolVersion = "2025-11-25"
     public static let mcpStableProtocolVersion = "2025-11-25"
     public static let mcpDraftProtocolVersion = "DRAFT-2026-v1"
+    public static let mcpLegacy20250618ProtocolVersion = "2025-06-18"
     public static let mcpFinal2026ProtocolVersion = "2026-07-28"
     public static let mcpJsonSchema202012Dialect = "https://json-schema.org/draft/2020-12/schema"
     public static let mcpUnsupportedProtocolVersionErrorCode = -32004
@@ -18,6 +19,7 @@ public enum HarnProtocolConstants {
     public static let mcpProtocolVersions: [String] = [
         "DRAFT-2026-v1",
         "2025-11-25",
+        "2025-06-18",
     ]
     public static let mcpRequiredMetadataKeys: [String] = [
         "io.modelcontextprotocol/protocolVersion",

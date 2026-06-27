@@ -120,12 +120,15 @@ let prompt = mcp_get_prompt(client, "review", {code: "fn main() {}"})
 
 ### MCP client support matrix
 
-Harn's MCP client negotiates protocol version `2025-11-25` and advertises
-the `elicitation`, `sampling`, and `roots` client capabilities. It answers
-server `roots/list` requests with the resolved project roots for the active
-script and emits `notifications/roots/list_changed` when that root snapshot
-changes. It does not advertise task capabilities, so servers should treat MCP
-tasks as unavailable when connected to Harn.
+Harn's standard MCP client prefers protocol version `2025-11-25` and can fall
+back to `2025-06-18` when a server only advertises that version. RC mode also
+understands Harn's `DRAFT-2026-v1` profile when a server exposes it through
+`server/discover`. Harn advertises the `elicitation`, `sampling`, and `roots`
+client capabilities. It answers server `roots/list` requests with the resolved
+project roots for the active script and emits
+`notifications/roots/list_changed` when that root snapshot changes. It does not
+advertise task capabilities, so servers should treat MCP tasks as unavailable
+when connected to Harn.
 
 | Method or feature | Harn as MCP client |
 |---|---|
@@ -323,8 +326,10 @@ normally.
 For HTTP MCP servers, Harn can reuse OAuth tokens stored with the CLI:
 
 ```bash
+harn mcp discover https://www.notion.com --json
 harn mcp redirect-uri
 harn mcp login notion
+harn mcp status notion
 ```
 
 OAuth client authentication uses one `auth` table. With no explicit
@@ -371,6 +376,66 @@ The older top-level `client_id`, `client_secret`, `scopes`, and `auth_token`
 fields are accepted for local manifests, but new host-generated config should
 write the `auth = { mode = ... }` form so TUI and GUI clients do not need their
 own OAuth configuration model.
+
+### HTTP discovery and OAuth debugging
+
+`harn mcp discover <url>` fetches the unofficial
+`/.well-known/mcp.json` descriptor from the URL's origin and prints the
+Streamable HTTP endpoint when one is published. This is intentionally separate
+from OAuth discovery: use it to find where to connect, then let normal MCP
+OAuth protected-resource metadata discover where to authorize.
+
+```bash
+harn mcp discover https://www.notion.com
+harn mcp discover https://www.notion.com --json
+```
+
+For remote OAuth, Harn owns the whole browser flow, token exchange, token
+storage, and refresh path. Tokens are keyed by `(resource, issuer, client_id)`
+and all Harn surfaces share the same store, so a token minted by
+`harn mcp login` is the token reused by `harn run`, GUI hosts, and ACP bridge
+requests. Refresh is single-flight across threads and processes: Harn takes an
+in-process mutex plus a file lock, reloads the token inside the lock, and only
+one caller sends the refresh request. This matters for authorization servers
+that rotate refresh tokens and revoke the grant when an old refresh token is
+reused.
+
+Refresh-token behavior is intentionally conservative:
+
+- If refresh succeeds and the server returns a new refresh token, Harn stores
+  the rotated token before releasing the lock.
+- If refresh fails with a transient network/server error, Harn keeps the stored
+  token so a later call can retry.
+- If refresh fails with OAuth `invalid_grant`, Harn treats it as terminal
+  because it may indicate revocation or refresh-token reuse detection. Harn
+  deletes the stored token and active-client index, then reports that
+  re-authorization is required.
+- Token endpoint response bodies are never printed in diagnostics. Harn keeps
+  the OAuth error code, HTTP status, and omitted body length so logs remain
+  useful without leaking credentials.
+
+Useful checks when debugging a remote server:
+
+```bash
+harn mcp discover https://server.example --json
+harn mcp status server-name --json
+harn mcp logout server-name
+harn mcp login server-name
+harn mcp login --reauth --only server-name
+```
+
+When a harness needs custom auth policy, keep secrets and token refresh in
+Harn's OAuth substrate and customize the manifest-level `auth` mode, scopes,
+client metadata, or static bearer secret. Harn scripts should not implement
+their own refresh-token storage loops unless they are deliberately connecting
+to a non-MCP service through a custom integration.
+
+The split is deliberate. Rust owns the host-security substrate: protocol
+negotiation, HTTP auth, token exchange, keyring writes, file locks, redaction,
+and generated host bindings. Harn code should own orchestration policy above
+that layer: which MCP servers a harness uses, when a lazy server starts,
+which scopes a workflow asks for, how diagnostics are presented to an operator,
+and what fallback path an agent takes after `auth_required`.
 
 ### Example: filesystem MCP server
 
@@ -481,8 +546,8 @@ through `pub fn` exports or through the `mcp_tools(...)` /
 `mcp_resource(...)` / `mcp_prompt(...)` registration builtins shown
 above and serves the appropriate one over stdio or Streamable HTTP. All
 `print`/`println` output goes to stderr when stdio is the MCP transport.
-The server supports the `2025-11-25` MCP protocol version on both
-transports.
+The server supports the `2025-11-25` and `2025-06-18` MCP protocol versions on
+both transports, plus Harn's draft profile where advertised.
 
 List endpoints are cursor-paginated. `tools/list`, `resources/list`,
 `resources/templates/list`, and `prompts/list` return up to 100 entries by

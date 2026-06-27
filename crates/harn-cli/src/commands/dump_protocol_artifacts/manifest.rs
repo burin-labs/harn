@@ -112,6 +112,7 @@ pub(super) fn generate_manifest() -> Result<String, String> {
             "protocolVersion": MCP_PROTOCOL_VERSION,
             "stableProtocolVersion": MCP_PROTOCOL_VERSION,
             "draftProtocolVersion": MCP_DRAFT_PROTOCOL_VERSION,
+            "legacy20250618ProtocolVersion": MCP_LEGACY_2025_06_18_PROTOCOL_VERSION,
             "final2026ProtocolVersion": MCP_FINAL_2026_PROTOCOL_VERSION,
             "protocolVersions": MCP_PROTOCOL_VERSIONS,
             "jsonSchemaDialect": MCP_JSON_SCHEMA_2020_12_DIALECT,
