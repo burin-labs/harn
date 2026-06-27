@@ -55,7 +55,7 @@ const POOL_EVENT_LOG_QUEUE_DEPTH: usize = RuntimeLimits::DEFAULT.default_event_l
 const PIPELINE_POOLS_ROOT: &str = ".harn/pools";
 
 /// Default stale-in-flight threshold. A task whose heartbeat is older than
-/// this on reload is re-enqueued. Configurable via `opts.stale_after_ms`.
+/// this on reload is classified as failed. Configurable via `opts.stale_after_ms`.
 const DEFAULT_STALE_AFTER_MS: i64 = 30_000;
 
 #[derive(Clone)]
@@ -97,7 +97,7 @@ struct TaskState {
     /// Wall-clock ms of the latest progress signal (submit, dispatch,
     /// terminal transition). Drives stale-in-flight detection on
     /// pipeline-scope pool reload: any task whose `heartbeat_at_ms` is
-    /// older than `stale_after_ms` at load time is re-enqueued.
+    /// older than `stale_after_ms` at load time is classified as failed.
     heartbeat_at_ms: i64,
     /// Wall-clock ms snapshot taken at submission, used to compute
     /// `queued_for_ms` on the `PoolDequeueReceipt` when the task is
@@ -2365,8 +2365,8 @@ fn finalize_task(
     outcome: Result<VmValue, String>,
 ) {
     let waiters: Vec<tokio::sync::oneshot::Sender<()>>;
-    let task_id;
     {
+        let mut pool_ref = pool.lock();
         let mut state_ref = state.lock();
         state_ref.finished_at = Some(uuid::Uuid::now_v7().to_string());
         state_ref.heartbeat_at_ms = now_ms_for_pool();
@@ -2380,13 +2380,9 @@ fn finalize_task(
                 state_ref.error = Some(error);
             }
         }
-        task_id = state_ref.id.clone();
+        pool_ref.active.remove(&state_ref.id);
+        persist_task_if_durable(&pool_ref, &state_ref);
         waiters = std::mem::take(&mut state_ref.waiters);
-    }
-    {
-        let mut pool_ref = pool.lock();
-        pool_ref.active.remove(&task_id);
-        persist_task_if_durable(&pool_ref, &state.lock());
     }
     wake_task_waiters(waiters);
     dispatch_ready(pool);
