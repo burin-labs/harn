@@ -389,6 +389,15 @@ fn denied_syscalls(policy: &CapabilityPolicy) -> Vec<libc::c_long> {
         libc::SYS_userfaultfd,
     ];
     if !policy_allows_network(policy) {
+        // Deny the syscalls that open or drive an *addressable* socket — the
+        // ones an egress channel needs. `socketpair` is deliberately NOT in
+        // this list: it creates an anonymous, connected AF_UNIX pair with no
+        // address and no route off-host, so it cannot exfiltrate. Build tools
+        // depend on it for local IPC — notably Cargo's jobserver (modern Cargo
+        // on Linux uses a `socketpair`-backed jobserver), without which `cargo
+        // build`/`cargo test` cannot even spawn `rustc` (it fails with
+        // `(never executed)` / EPERM). Denying it FALSE-FAILS every sandboxed
+        // Rust build while buying no egress protection.
         syscalls.extend([
             libc::SYS_accept,
             libc::SYS_accept4,
@@ -400,7 +409,6 @@ fn denied_syscalls(policy: &CapabilityPolicy) -> Vec<libc::c_long> {
             libc::SYS_sendmsg,
             libc::SYS_sendto,
             libc::SYS_socket,
-            libc::SYS_socketpair,
         ]);
     }
     syscalls.sort_unstable();
@@ -575,6 +583,53 @@ mod tests {
             tool_annotations: std::collections::BTreeMap::new(),
             sandbox_profile: SandboxProfile::Worktree,
             process_sandbox: Default::default(),
+        }
+    }
+
+    #[test]
+    fn no_network_denies_addressable_sockets_but_allows_local_socketpair() {
+        // At a sub-network ceiling, the egress-capable socket syscalls are
+        // denied, but `socketpair` (anonymous, unaddressable local IPC) stays
+        // allowed so Cargo's socketpair-backed jobserver can spawn rustc.
+        let policy = linux_policy_with_workspace_ops(&["read_text"]);
+        assert_eq!(
+            policy.side_effect_level.as_deref(),
+            Some("read_only"),
+            "fixture must be below the network ceiling",
+        );
+        let denied = denied_syscalls(&policy);
+
+        assert!(
+            denied.contains(&libc::SYS_socket),
+            "addressable socket() must be denied without network",
+        );
+        assert!(
+            denied.contains(&libc::SYS_connect),
+            "connect() must be denied without network",
+        );
+        assert!(
+            !denied.contains(&libc::SYS_socketpair),
+            "socketpair() (local IPC) must NOT be denied — Cargo's jobserver needs it",
+        );
+    }
+
+    #[test]
+    fn network_ceiling_allows_all_socket_syscalls() {
+        // When network side effects are permitted, none of the socket family
+        // is denied (socketpair included).
+        let mut policy = linux_policy_with_workspace_ops(&["read_text"]);
+        policy.side_effect_level = Some("network".to_string());
+        let denied = denied_syscalls(&policy);
+        for call in [
+            libc::SYS_socket,
+            libc::SYS_socketpair,
+            libc::SYS_connect,
+            libc::SYS_bind,
+        ] {
+            assert!(
+                !denied.contains(&call),
+                "network ceiling must not deny socket-family syscall {call}",
+            );
         }
     }
 

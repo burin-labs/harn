@@ -157,3 +157,104 @@ fn real_run_command_kills_child_when_timeout_elapses() {
     assert!(require_bool(&resp, "timed_out"));
     assert_eq!(require_str(&resp, "status"), "timed_out");
 }
+
+#[test]
+fn real_run_command_points_child_tmpdir_inside_the_workspace() {
+    // Under a restricted sandbox profile, the agent `run_command` tool must
+    // hand its child a writable, workspace-local TMPDIR so compiler linkers
+    // (rustc/cc/ld, Go, Swift, …) write intermediates somewhere the sandbox
+    // permits instead of the unwritable system /tmp. Spawn `env` and confirm
+    // TMPDIR/TMP/TEMP resolve to <workspace>/.harn-tmp.
+    use harn_vm::orchestration::{
+        pop_execution_policy, push_execution_policy, CapabilityPolicy, SandboxProfile,
+    };
+
+    let workspace = tempfile::tempdir().expect("workspace");
+    let expected = workspace.path().join(".harn-tmp");
+
+    // OS confinement is irrelevant to this assertion (we observe the injected
+    // env, not enforcement) and is unavailable on some CI hosts, so disable it.
+    // SAFETY: the slow E2E target runs serially.
+    unsafe {
+        std::env::set_var("HARN_HANDLER_SANDBOX", "off");
+    }
+    push_execution_policy(CapabilityPolicy {
+        sandbox_profile: SandboxProfile::Worktree,
+        workspace_roots: vec![workspace.path().to_string_lossy().into_owned()],
+        ..CapabilityPolicy::default()
+    });
+
+    let mut req = dict();
+    req.insert("argv".into(), vlist_str(&["env"]));
+    // cwd inside the workspace so the sandboxed cwd check passes.
+    req.insert("cwd".into(), vstr(&workspace.path().to_string_lossy()));
+    let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
+
+    pop_execution_policy();
+    unsafe {
+        std::env::remove_var("HARN_HANDLER_SANDBOX");
+    }
+
+    let child_env = require_str(&resp, "stdout");
+    let expected_line = format!("TMPDIR={}", expected.display());
+    assert!(
+        child_env.lines().any(|line| line == expected_line),
+        "child TMPDIR must be the workspace-local .harn-tmp dir.\n\
+         expected line: {expected_line}\nchild env:\n{child_env}"
+    );
+    for key in ["TMP", "TEMP"] {
+        let line = format!("{key}={}", expected.display());
+        assert!(
+            child_env.lines().any(|candidate| candidate == line),
+            "{key} must also point at the workspace-local temp dir:\n{child_env}"
+        );
+    }
+    assert!(
+        expected.is_dir(),
+        "the workspace-local temp dir must be created on disk: {expected:?}"
+    );
+}
+
+#[test]
+fn real_run_command_respects_a_caller_pinned_tmpdir() {
+    // A caller that sets TMPDIR explicitly via `env` keeps it; the injection
+    // only fills the value the child would otherwise inherit.
+    use harn_vm::orchestration::{
+        pop_execution_policy, push_execution_policy, CapabilityPolicy, SandboxProfile,
+    };
+
+    let workspace = tempfile::tempdir().expect("workspace");
+    let caller_tmp = workspace.path().join("caller-chosen");
+    std::fs::create_dir_all(&caller_tmp).unwrap();
+
+    unsafe {
+        std::env::set_var("HARN_HANDLER_SANDBOX", "off");
+    }
+    push_execution_policy(CapabilityPolicy {
+        sandbox_profile: SandboxProfile::Worktree,
+        workspace_roots: vec![workspace.path().to_string_lossy().into_owned()],
+        ..CapabilityPolicy::default()
+    });
+
+    let mut req = dict();
+    req.insert("argv".into(), vlist_str(&["env"]));
+    req.insert("cwd".into(), vstr(&workspace.path().to_string_lossy()));
+    req.insert("env_mode".into(), vstr("patch"));
+    let mut env = dict();
+    env.insert("TMPDIR".into(), vstr(&caller_tmp.to_string_lossy()));
+    req.insert("env".into(), VmValue::dict(env));
+    let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
+
+    pop_execution_policy();
+    unsafe {
+        std::env::remove_var("HARN_HANDLER_SANDBOX");
+    }
+
+    let child_env = require_str(&resp, "stdout");
+    let expected_line = format!("TMPDIR={}", caller_tmp.display());
+    assert!(
+        child_env.lines().any(|line| line == expected_line),
+        "an explicit caller TMPDIR must be preserved untouched.\n\
+         expected: {expected_line}\nchild env:\n{child_env}"
+    );
+}

@@ -216,6 +216,23 @@ let policy = CapabilityPolicy {
 push_execution_policy(policy);
 ```
 
+## Workspace-local temp dir (`TMPDIR`/`TMP`/`TEMP`)
+
+Every sandboxed child spawned under a restricted profile gets `TMPDIR`,
+`TMP`, and `TEMP` pointed at a `.harn-tmp/` directory inside the first
+writable `workspace_root` (created lazily, with a self-`.gitignore` so its
+churn never leaks into a diff, PR, or eval grading). Compiler linkers
+(`rustc`/`cc`/`ld`, Go, Swift, …) and many other toolchains write
+intermediate object/temp files to `$TMPDIR`, defaulting to the system
+`/tmp` when it is unset — which is outside the writable workspace roots, so
+those writes are denied and a build that would otherwise succeed
+FALSE-FAILS for an infrastructure reason (`could not write output to
+/tmp/rustcXXXX/…: Permission denied`). Anchoring temp at an
+already-writable workspace location fixes this for any TMPDIR-honoring
+toolchain without widening the sandbox. A `TMPDIR`/`TMP`/`TEMP` the caller
+sets explicitly (via the process call's `env`) is respected; only the
+otherwise-inherited, non-writable value is overridden.
+
 ## Capability → kernel-knob mapping
 
 The runtime translates the active capability ceiling into per-platform
@@ -233,7 +250,7 @@ small, named kernel feature, never an open-ended escape hatch.
 | `process_sandbox.presets` includes `package_manager_config` | Landlock read-only rules for existing npm, pip, cargo, git, and CA config/cache roots under `$HOME` | package managers can resolve real per-user config without granting Harn file builtin access or write rights |
 | `process_sandbox.read_roots` / `.write_roots` | Landlock read-only rules, plus writable rules only when workspace writes are allowed | process-only roots for SDKs/caches without widening Harn file builtins |
 | standard process devices | Landlock grants read/write on `/dev/null` and read-only access on `/dev/zero`, `/dev/random`, and `/dev/urandom`; ABI ≥ 5 also handles `_IOCTL_DEV` but does not grant it to these device rules | language runtimes and test harnesses can open the devices they normally need without broad `/dev` access or device ioctl rights |
-| `side_effect_level < network` | seccomp-bpf blocklist on `socket`, `socketpair`, `connect`, `accept`, `accept4`, `bind`, `listen`, `sendto`, `sendmsg`, `recvfrom`, `recvmsg` (return `EPERM`) | network syscalls fail without taking down the process |
+| `side_effect_level < network` | seccomp-bpf blocklist on `socket`, `connect`, `accept`, `accept4`, `bind`, `listen`, `sendto`, `sendmsg`, `recvfrom`, `recvmsg` (return `EPERM`). `socketpair` is intentionally **allowed**: it creates an anonymous, unaddressable, connected `AF_UNIX` pair with no route off-host, so it cannot exfiltrate, and build tools need it for local IPC (e.g. Cargo's `socketpair`-backed jobserver, without which `cargo build`/`cargo test` cannot spawn `rustc`) | addressable-socket / egress syscalls fail without taking down the process, while purely local IPC keeps working |
 | always | seccomp-bpf blocklist on `bpf`, `mount`, `umount2`, `init_module`, `delete_module`, `finit_module`, `kexec_*`, `ptrace`, `process_vm_readv`/`process_vm_writev`, `perf_event_open`, `swapon`/`swapoff`, `reboot`, `userfaultfd`, `fanotify_init`, `open_by_handle_at` (return `EPERM`) | tier-1 dangerous syscalls are denied unconditionally |
 | always | `prctl(PR_SET_NO_NEW_PRIVS, 1)` | no setuid escalation across `exec` |
 
