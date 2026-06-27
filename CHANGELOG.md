@@ -8,6 +8,53 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.147
+
+### Added
+
+- Added `std/agent/pattern_knowledge` for cross-session pattern recall and
+  promotion over durable Harn memory.
+
+### Changed
+
+- Added MCP `2025-06-18` compatibility, `/.well-known/mcp.json` discovery and
+  publication, and stricter OAuth refresh-token rotation handling that clears
+  stored MCP OAuth state on terminal `invalid_grant` while keeping token
+  endpoint bodies redacted.
+
+### Fixed
+
+- **Changelog-fragment gate no longer treats nested source files as pip
+  manifests.** The dependency-metadata allowlist matched `requirements.*\.txt` /
+  `constraints.*\.txt`, where `.*` crossed `/`, so a non-dependency path such as
+  `crates/.../requirements_helpers/seed.txt` matched and could slip a
+  source-only change past the changelog gate without a fragment. Tightened both
+  to a single path segment (`requirements[^/]*\.txt`, `constraints[^/]*\.txt`);
+  genuine `requirements*.txt` / `constraints*.txt` manifests are unaffected.
+- **`i64::MIN / -1` now promotes to float instead of silently wrapping.**
+  Integer division wrapped this lone overflow back to `i64::MIN` -- a wrong sign
+  and magnitude -- while `+`/`-`/`*`/negation already promote to float on
+  overflow (the true value is `i64::MAX + 1`). The VM now promotes it, and the
+  native code generator deopts to the VM for it (like the other overflowing ops)
+  so the interpreter and JIT stay in agreement. `i64::MIN % -1` is `0` and is
+  unchanged; division by zero still traps.
+- **`harn fmt` keeps parentheses around a nested range.** A range (`a to b`)
+  binds looser than ternary, comparison, and another range, so it can only
+  appear bare at the top of an expression. The formatter dropped the parens when
+  a range was nested as a ternary condition/branch, a binary operand, or another
+  range's bound, producing output that either failed to re-parse
+  (`c ? (a to b) : d` -> `c ? a to b : d`) or silently changed meaning
+  (`(a to b) < c` -> `a to b < c`, i.e. `a to (b < c)`). Such ranges are now
+  parenthesized at those sites.
+- **Release packaging guard works on BSD/macOS grep again.** The
+  `verify_crate_packages.sh` checks that fail when a packaged `harn-stdlib` /
+  `harn-modules` crate still contains workspace-relative consumer includes used
+  GNU-only BRE alternation (`\(vm\|modules\)`). On BSD/macOS grep `\|` matches
+  literally, so the guards silently never matched and passed even on a broken
+  package -- a no-op on the primary dev platform where `release_gate.sh` is run.
+  Switched both to portable ERE (`grep -RE '(vm|modules)'` /
+  `'(vm|stdlib)'`); behavior on GNU grep is unchanged.
+
 ## v0.8.146
 
 ### Fixed
