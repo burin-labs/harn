@@ -21,7 +21,7 @@ use crate::value::VmValue;
 
 /// Wire-format identifiers for `ProviderTelemetry::source`. Keep these in
 /// sync with the matching strings in `docs/src/observability/*` and the
-/// Burin eval aggregator.
+/// The host eval aggregator.
 pub mod source {
     /// Ollama `/api/chat` NDJSON stream — full timing breakdown.
     pub const OLLAMA_CHAT: &str = "ollama_chat";

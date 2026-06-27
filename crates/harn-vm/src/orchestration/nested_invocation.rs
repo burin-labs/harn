@@ -2,7 +2,7 @@
 //!
 //! When a script that already runs under a parent execution policy
 //! launches another Harn invocation — `harn run`, `harn workflow run`,
-//! `harn supervisor fire/replay`, or a Burin harness — Harn must scan
+//! `harn supervisor fire/replay`, or an embedding host — Harn must scan
 //! the target and reject anything that asks for *more* than the parent
 //! ceiling. This module hosts the scanner: it accepts a parent
 //! [`CapabilityPolicy`] plus a description of the nested target, and
@@ -35,7 +35,7 @@ pub enum NestedInvocationTarget<'a> {
     /// elevated capabilities; that is enough to catch the obvious
     /// widening attempts without forcing the AST into this layer.
     HarnScript { path: &'a str, source: &'a str },
-    /// A Burin harness manifest. The scanner reads
+    /// An embedding-host harness manifest. The scanner reads
     /// `capability_ceiling` and `tools` if present, falling back to
     /// "request everything" so the parent rejects unstructured
     /// manifests rather than rubber-stamping them.

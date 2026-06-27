@@ -3,9 +3,9 @@
 //! A cross-platform, offline, DRY core for cosine/semantic similarity. It
 //! is the single source of truth two consumers share:
 //!
-//! 1. **Push-context Tier-2** (Burin pipelines): auto-injecting
+//! 1. **Push-context Tier-2** (host pipelines): auto-injecting
 //!    skills/canon/memory/few-shot above a similarity threshold.
-//! 2. **`SymbolRelevance`** (Burin Swift): symbol ranking, today split
+//! 2. **`SymbolRelevance`** (host-side): symbol ranking, today split
 //!    between macOS-only `NLEmbedding` and a Linux Jaccard fallback. Both
 //!    can now route through these builtins for one cross-platform path.
 //!

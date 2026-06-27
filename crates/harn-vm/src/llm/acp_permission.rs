@@ -62,7 +62,7 @@ pub(crate) fn reject_response(reason: Option<String>) -> JsonValue {
 /// (`{ sessionUpdate, toolCallId, title, kind, rawInput }`). Harn's
 /// vendor extensions — the HITL `approvalRequest` envelope and the
 /// `policyDecision` receipt — ride along under `toolCall._meta.harn` so
-/// the canonical fields stay clean while harn-aware hosts (the Burin IDE,
+/// the canonical fields stay clean while harn-aware hosts (an IDE,
 /// the REST surface) can still read them.
 pub(crate) fn request_params(
     session_id: Option<&str>,

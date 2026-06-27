@@ -1328,7 +1328,7 @@ pub async fn evaluate_and_inject(
     }))
 }
 
-/// Burin compass (B.9, #2521): steer the agent loop toward the
+/// Compass (B.9, #2521): steer the agent loop toward the
 /// AST-precise edit primitives over freeform text edits.
 ///
 /// The `edit_*` stdlib surface (`edit_apply_node`, `edit_rename_symbol`,

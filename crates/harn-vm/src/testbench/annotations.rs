@@ -254,7 +254,7 @@ pub struct AnnotationSpan {
 }
 
 /// Provenance for an annotation. Surfaces the difference between a human
-/// who clicked through Burin Code and an agent that auto-flagged a turn
+/// who clicked through a host UI and an agent that auto-flagged a turn
 /// during a self-eval.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AnnotationAuthor {

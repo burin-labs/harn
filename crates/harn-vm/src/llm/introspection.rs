@@ -32,7 +32,7 @@ use crate::llm_config;
 use crate::value::{VmError, VmValue};
 
 /// Environment override for the harness identity reported by
-/// `current_harness()`. Hosts that embed Harn (Burin Code, the harn CLI,
+/// `current_harness()`. Hosts that embed Harn (an IDE, the harn CLI,
 /// an IDE plugin, the cloud runner) set this so a model running inside
 /// the harness can answer "what's running you?" truthfully.
 pub const HARN_HARNESS_ENV: &str = "HARN_HARNESS";

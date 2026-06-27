@@ -31,7 +31,7 @@ fn doctor_json_smoke() {
         serde_json::from_str(stdout.trim()).expect("doctor --json is valid JSON");
     let data = assert_envelope(&parsed, DOCTOR_SCHEMA_VERSION);
 
-    // Stable top-level keys consumed by Burin Code preflight automation
+    // Stable top-level keys consumed by host preflight automation
     // (`checks`, `hardware`, `summary`, `next_step`) plus the new
     // capability-matrix fields introduced by #1785
     // (`host`, `targets`, `providers`, `capabilities`).

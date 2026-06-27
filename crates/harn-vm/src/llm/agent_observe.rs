@@ -1184,7 +1184,7 @@ pub(crate) const DEFAULT_LLM_CALL_BACKOFF_MS: u64 = 250;
 /// the caller's transient-retry budget is 0 (the fail-fast `llm_call`
 /// default), mirroring the transport's unconditional single retry for the
 /// Ollama empty-content parser bug: an empty 200 is clearly a provider
-/// hiccup, and most live callers (e.g. the Burin agent loop) retry only on
+/// hiccup, and most live callers (e.g. a host agent loop) retry only on
 /// *errors*, so an empty Ok would otherwise sail through untouched.
 const EMPTY_COMPLETION_BUILTIN_RETRIES: usize = 1;
 
@@ -2788,7 +2788,7 @@ mod empty_completion_retry_tests {
         // Bounded retry on a chronically-broken upstream: once the budget is
         // spent the LOUD thrown error is surfaced unchanged (NOT a silent
         // advance), and it still names the `upstream contract violation` so the
-        // Burin eval layer can classify it as infra, not capability.
+        // a host eval layer can classify it as infra, not capability.
         current_thread_runtime().block_on(async {
             reset_agent_trace_state();
             let _guard = install_fake_llm_script(

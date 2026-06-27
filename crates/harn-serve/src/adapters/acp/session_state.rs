@@ -133,7 +133,7 @@ impl AcpServer {
     /// Register a session the live server never saw so its persisted
     /// replay history can be restored into an interactive session. Used
     /// by `session/load` when a client (e.g. the Rust TUI saved-session
-    /// picker) attaches a Burin saved session after a fresh `harn serve`
+    /// picker) attaches a host-saved session after a fresh `harn serve`
     /// start. The in-process channel server spins prompt turns up on
     /// demand, so the restored session is genuinely live — unlike the
     /// WebSocket hub's `expired_replay_only` fallback, which has no

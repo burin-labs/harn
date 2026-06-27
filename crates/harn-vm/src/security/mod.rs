@@ -1,4 +1,4 @@
-//! Prompt-injection defense substrate (Burin Layers 0/1).
+//! Prompt-injection defense substrate (defense Layers 0/1).
 //!
 //! Three concerns live here:
 //!
@@ -795,7 +795,7 @@ fn policy_summary(policy: &SecurityPolicy) -> VmValue {
 }
 
 /// Register the `security_policy(config: dict) -> dict` builtin. Embedders
-/// (Burin's host, or `std/security::configure`) call it to push a resolved
+/// (the host, or `std/security::configure`) call it to push a resolved
 /// policy from their `[security]` config / feature flag.
 pub fn register_security_builtins(vm: &mut Vm) {
     vm.register_builtin("security_policy", |args, _out| {

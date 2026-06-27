@@ -1,8 +1,8 @@
 //! Shared wire fixtures used by both directions of the RC harness.
 //!
 //! Each fixture is a deterministic JSON document loaded from disk so the
-//! same request/response shapes can be replayed by Rust tests, Burin
-//! Code consumers, and harn-cloud test suites without diverging.
+//! same request/response shapes can be replayed by Rust tests and
+//! downstream-host consumers and harn-cloud test suites without diverging.
 
 use std::fs;
 use std::path::{Path, PathBuf};

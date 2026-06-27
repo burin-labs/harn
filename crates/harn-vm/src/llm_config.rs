@@ -1258,7 +1258,7 @@ pub fn resolve_model(alias: &str) -> (String, Option<String>) {
 }
 
 /// Strip host/provider selector prefixes that identify transport, not the
-/// provider-native model id. This mirrors Burin's existing normalization so
+/// provider-native model id. This mirrors the host's existing normalization so
 /// `ollama:qwen3:30b` reaches Ollama as `qwen3:30b` instead of an invalid
 /// model named `ollama`. Cerebras follows the same convention but uses a
 /// slash separator (`cerebras/gpt-oss-120b`) because its own /v1/models
@@ -2873,7 +2873,7 @@ mod tests {
         // Bare model IDs that the embedded catalog hosts on Cerebras must
         // not be misrouted by the generic `gpt-*` / single-slash inference
         // fallbacks. Regression for harn#2142 (model-info routed
-        // `gpt-oss-120b` to openai, breaking Burin TUI credential checks).
+        // `gpt-oss-120b` to openai, breaking host TUI credential checks).
         let _guard = crate::llm::env_guard();
         let prev_default_provider = std::env::var("HARN_DEFAULT_PROVIDER").ok();
         unsafe {

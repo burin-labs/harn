@@ -58,7 +58,7 @@ pub(crate) struct DoctorCheck {
     pub(crate) docs_url: Option<String>,
     /// Workflows this check gates when it is failing — stable strings such as
     /// `"build"`, `"test"`, `"release"`, `"publish"`, `"portal"`,
-    /// `"scripting"`, or `"editor"`. Consumed by Burin Code / Harn Cloud
+    /// `"scripting"`, or `"editor"`. Consumed by downstream hosts / Harn Cloud
     /// preflight automation.
     pub(crate) blocks: Vec<&'static str>,
 }
@@ -72,7 +72,7 @@ impl DoctorCheck {
 }
 
 /// Stable schema version for `harn doctor --json`. Bump when the JSON shape
-/// changes in a way that downstream consumers (Burin Code preflight, Harn
+/// changes in a way that downstream consumers (host preflight, Harn
 /// Cloud onboarding) need to react to.
 pub(crate) const DOCTOR_SCHEMA_VERSION: u32 = 2;
 

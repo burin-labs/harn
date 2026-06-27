@@ -655,7 +655,7 @@ pub fn build(args: &BuildArgs) -> Result<PackOutcome, PackError> {
     }
     // Carry host-surface extension data — the `[[contributes]]` block plus
     // package identity/permissions — into the signed bundle's metadata so a
-    // host (e.g. Burin) can discover and gate contributions from the verified
+    // host (e.g. an IDE) can discover and gate contributions from the verified
     // artifact alone, with no separate descriptor. Harn stays agnostic about
     // the kind-specific payload; it only ferries it. See `docs` and the
     // `ContributionEntry` schema.

@@ -8,7 +8,7 @@
 
 use super::{json, parse_text_tool_calls_with_tools, sample_tool_registry};
 
-/// The live failure shape from the 2026-06-09 Burin eval meter run: a
+/// The live failure shape from the 2026-06-09 host eval meter run: a
 /// complete, well-formed `edit` call in qwen's chat-template XML style,
 /// wrapped in `<tool_call>` tags, emitted as plain assistant text.
 fn live_qwen_markup() -> String {

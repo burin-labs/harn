@@ -112,7 +112,7 @@ fn provider_catalog_available_only_is_structurally_identical_across_runs() {
 }
 
 /// Catalog must always carry the six top-level keys the downstream
-/// consumers (Burin Code, the JSON schema, the eval JSON aggregator)
+/// consumers (downstream hosts, the JSON schema, the eval JSON aggregator)
 /// depend on. Pin the keyset directly on repeated runs so a drift in
 /// either path shows up here rather than in a downstream regression.
 #[test]

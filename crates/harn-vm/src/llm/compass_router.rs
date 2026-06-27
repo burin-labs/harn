@@ -1,4 +1,4 @@
-//! Burin compass tool-rewrite router (B.9, #2612).
+//! Compass tool-rewrite router (B.9, #2612).
 //!
 //! The compass *steer* (#2521, the `compass_ast_edits` reminder provider)
 //! tells the agent at session start to prefer the AST-precise edit

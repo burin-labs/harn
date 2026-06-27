@@ -13,7 +13,7 @@
 //!   behavior end-to-end.
 //! - [`fixtures`] is the checked-in wire vocabulary every test loads
 //!   from. The same JSON is exported under
-//!   `spec/protocol-artifacts/fixtures/mcp-rc/` so Burin Code and
+//!   `spec/protocol-artifacts/fixtures/mcp-rc/` so downstream hosts and
 //!   harn-cloud can replay the same flows in their own test suites.
 //!
 //! Failures are surfaced per-surface (client, generic server,

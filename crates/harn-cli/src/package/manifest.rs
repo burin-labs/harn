@@ -94,7 +94,7 @@ pub struct Manifest {
     /// commands, themes, …). Harn treats `kind` as a host-owned, namespaced
     /// string and validates only the envelope plus that each contribution's
     /// declared `scopes` are covered by `[package].permissions`; the host
-    /// (e.g. Burin) interprets the kind-specific payload. New contribution
+    /// (e.g. a host) interprets the kind-specific payload. New contribution
     /// kinds therefore need no Harn release. This is the editor-layer twin of
     /// the agent-layer blocks (`[[providers]]`, `[[personas]]`, `[[hooks]]`):
     /// one signed package may populate any mix of both.

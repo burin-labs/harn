@@ -1,4 +1,4 @@
-//! Sub-project detection. Ports `SubProjectDetector.swift`: walk up to
+//! Sub-project detection: walk up to
 //! `max_depth=2` levels from the root, looking for project markers (Cargo,
 //! package.json, go.mod, …). Skip hidden / known-non-project directories.
 
