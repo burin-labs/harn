@@ -8,6 +8,18 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.146
+
+### Fixed
+
+- Narrowed the same-turn dependent-edit skip guard so a later edit to the same
+  file is only skipped when the earlier failure could actually have mutated the
+  file. The dominant intra-turn failure — a pre-apply rejection (`old_string not
+  found`) — leaves the file byte-identical, so a sibling edit is no longer stale
+  and now runs, eliminating a wasted recovery round-trip. Post-apply diagnostics
+  failures, opaque errors, and non-edit mutating tools still poison the resource
+  (safety preserved). (#3611)
+
 ## v0.8.145
 
 ### Added
