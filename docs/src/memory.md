@@ -25,7 +25,9 @@ let summary = memory_summarize("workspace/acme", {limit: 10})
 | `memory_forget(namespace, predicate, options?)` | `dict` | Append a tombstone for matching records |
 
 Typed fact helpers live in `std/agent/fact` and store `harn.fact.v1`
-envelopes on top of this same memory log.
+envelopes on top of this same memory log. Cross-session pattern recall lives in
+`std/agent/pattern_knowledge` and stores reviewable `harn.pattern_learning.v1`
+records in the same append-only substrate.
 
 ## Storage
 
@@ -141,6 +143,24 @@ those observations with `recall_facts(query, "Observation", 0.0, scope)`
 to surface prior probe outcomes before re-running. See
 [`std/agent/probe` in the language spec](spec/language/26-checkpoint-resume.md#stdagentprobe-module)
 for the full surface area and `HARN-PROBE-NNN` diagnostics.
+
+## Pattern knowledge
+
+`std/agent/pattern_knowledge` uses memory for cross-session repeated-work
+recall:
+
+```harn
+import { pattern_learning_observe, pattern_learning_pending } from "std/agent/pattern_knowledge"
+
+pattern_learning_observe("session-1", "Refactor the auth refresh tests", ["read", "edit"])
+let proposals = pattern_learning_pending()
+```
+
+The module keeps observations, pending proposals, and enablement state in the
+`project/pattern-learning` namespace. Accepted proposals are promoted into
+project skills, then recalled during later context assembly. See
+[Cross-session pattern knowledge](concepts/cross-session-pattern-knowledge.md)
+for the design rationale and migration contract.
 
 ## Vector and hybrid backends
 

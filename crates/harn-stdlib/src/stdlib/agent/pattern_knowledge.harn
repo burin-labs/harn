@@ -1,0 +1,1137 @@
+// std/agent/pattern_knowledge.harn
+//
+// Cross-session repeated-work knowledge for agent pattern recall. The durable
+// source of truth is Harn `std/memory`; hosts only provide project-root facts
+// and render review UI.
+import { write_json } from "std/fs"
+import { memory_forget, memory_store, memory_summarize } from "std/memory"
+
+let PATTERN_SCHEMA = "harn.pattern_learning.v1"
+
+let PATTERN_NAMESPACE = "project/pattern-learning"
+
+let OBSERVATION_CAP: int = 500
+
+let DEFAULT_SUPPORT_THRESHOLD: int = 5
+
+let DEFAULT_WINDOW_DAYS: int = 14
+
+let DEFAULT_SUPPRESSION_DAYS: int = 14
+
+let STOP_WORDS = [
+  "about",
+  "after",
+  "again",
+  "all",
+  "and",
+  "any",
+  "are",
+  "can",
+  "could",
+  "for",
+  "from",
+  "has",
+  "have",
+  "how",
+  "into",
+  "just",
+  "make",
+  "more",
+  "not",
+  "now",
+  "off",
+  "the",
+  "this",
+  "that",
+  "then",
+  "there",
+  "these",
+  "those",
+  "through",
+  "use",
+  "using",
+  "was",
+  "what",
+  "when",
+  "where",
+  "with",
+  "would",
+  "you",
+  "your",
+]
+
+fn pl_text(value) -> string {
+  return regex_replace(r"\s+", " ", to_string(value ?? "").trim()) ?? to_string(value ?? "").trim()
+}
+
+fn pl_project_root(options = nil) -> string {
+  return pl_text(options?.project_root ?? project_root() ?? cwd() ?? ".")
+}
+
+fn pl_memory_root(options = nil) -> string {
+  let explicit = pl_text(options?.memory_root ?? options?.root)
+  if explicit != "" {
+    return explicit
+  }
+  return path_join(pl_project_root(options), ".harn", "memory")
+}
+
+fn pl_namespace(options = nil) -> string {
+  let explicit = pl_text(options?.namespace)
+  return explicit == "" ? PATTERN_NAMESPACE : explicit
+}
+
+fn pl_memory_options(options = nil) -> dict {
+  return (options ?? {}) + {root: pl_memory_root(options)}
+}
+
+fn pl_now(options = nil) -> string {
+  let explicit = pl_text(options?.now)
+  return explicit == "" ? date_now_iso() : explicit
+}
+
+fn pl_observation_file(project_root: string) -> string {
+  return path_join(
+    project_root,
+    ".harn",
+    "session-store",
+    "burin.agent_context.pattern_learning.observations.jsonl",
+  )
+}
+
+fn pl_pending_file(project_root: string) -> string {
+  return path_join(
+    project_root,
+    ".harn",
+    "session-store",
+    "burin.agent_context.pattern_learning.pending.jsonl",
+  )
+}
+
+fn pl_state_file(project_root: string) -> string {
+  return path_join(
+    project_root,
+    ".harn",
+    "session-store",
+    "burin.agent_context.pattern_learning.state.jsonl",
+  )
+}
+
+fn pl_migration_marker(options = nil) -> string {
+  return path_join(pl_memory_root(options), pl_namespace(options), ".burin-session-store-migrated-v1.json")
+}
+
+fn pl_read_jsonl_payloads(path: string) -> list {
+  if !path || !harness.fs.exists(path) {
+    return []
+  }
+  var out = []
+  for raw_line in (harness.fs.read_text(path) ?? "").split("\n") {
+    let line = pl_text(raw_line)
+    if line == "" {
+      continue
+    }
+    let parsed = try {
+      json_parse(line)
+    }
+    if is_ok(parsed) {
+      out = out + [unwrap(parsed)?.payload ?? {}]
+    }
+  }
+  return out
+}
+
+fn pl_project_collection(mutations: list) -> list {
+  var records = {}
+  var order = []
+  for mutation in mutations ?? [] {
+    let op = pl_text(mutation?.operation)
+    if op == "upsert" {
+      let record = mutation?.record ?? {}
+      let id = pl_text(record?.id)
+      if id == "" {
+        continue
+      }
+      if records[id] == nil {
+        order = order + [id]
+      }
+      records = records + {[id]: record}
+    } else if op == "delete" {
+      let id = pl_text(mutation?.id)
+      records = records + {[id]: nil}
+      order = order.filter({ existing -> existing != id })
+    } else if op == "replace" {
+      records = {}
+      order = []
+      for record in mutation?.records ?? [] {
+        let id = pl_text(record?.id)
+        if id == "" {
+          continue
+        }
+        if records[id] == nil {
+          order = order + [id]
+        }
+        records = records + {[id]: record}
+      }
+    } else if op == "clear" {
+      records = {}
+      order = []
+    }
+  }
+  return order.map({ id -> records[id] }).filter({ record -> record != nil }).to_list()
+}
+
+fn pl_project_value(mutations: list, fallback: dict) -> dict {
+  var value = fallback
+  for mutation in mutations ?? [] {
+    let op = pl_text(mutation?.operation)
+    if op == "replace" && mutation?.value != nil {
+      value = mutation.value
+    } else if op == "clear" {
+      value = fallback
+    }
+  }
+  return value
+}
+
+fn pl_tags(kind: string, extra = nil) -> list {
+  var tags = ["pattern_learning", "pattern_learning:" + kind, "schema:" + PATTERN_SCHEMA]
+  for raw in extra ?? [] {
+    let tag = pl_text(raw)
+    if tag != "" && !tags.contains(tag) {
+      tags = tags + [tag]
+    }
+  }
+  return tags
+}
+
+fn pl_store_record(kind: string, key: string, value: dict, options = nil) -> dict {
+  let opts = pl_memory_options(options)
+  let now = pl_now(options)
+  let id = pl_text(options?.id)
+  return memory_store(
+    pl_namespace(options),
+    key,
+    value + {schema: PATTERN_SCHEMA, record_kind: kind},
+    pl_tags(kind, options?.tags),
+    opts
+      + {
+      id: id == "" ? key.replace(":", "_") : id,
+      now: now,
+      provenance: options?.provenance ?? {source: "harn.pattern_learning"},
+    },
+  )
+}
+
+fn pl_memory_records(kind: string = "", options = nil) -> list {
+  let window = if kind == "" {
+    {limit: options?.record_limit ?? 2000}
+  } else {
+    {limit: options?.record_limit ?? 2000, tag: "pattern_learning:" + kind}
+  }
+  return memory_summarize(pl_namespace(options), window, pl_memory_options(options))?.records ?? []
+}
+
+fn pl_record_values(kind: string, options = nil) -> list {
+  return pl_memory_records(kind, options)
+    .map({ record -> record?.value ?? {} })
+    .filter(
+    { value -> value?.schema == PATTERN_SCHEMA && (value?.record_kind ?? value?.kind) == kind },
+  )
+    .to_list()
+}
+
+fn pl_replace_state(state: dict, options = nil) -> dict {
+  memory_forget(pl_namespace(options), {key: "state"}, pl_memory_options(options))
+  return pl_store_record(
+    "state",
+    "state",
+    {
+      enabled: state?.enabled ?? true,
+      suppressed_until: state?.suppressed_until ?? state?.suppressedUntil ?? {},
+      updated_at: pl_now(options),
+    },
+    options + {id: pl_unique_record_id("state", options)},
+  )?.value
+}
+
+/**
+ * Return the current pattern-learning state for the selected project memory namespace.
+ *
+ * @effects: [store.read]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn pattern_learning_state(options = nil) -> dict {
+  pattern_learning_ensure_migrated(options)
+  var best = nil
+  for value in pl_record_values("state", options) {
+    if best == nil || pl_text(value?.updated_at) >= pl_text(best?.updated_at) {
+      best = value
+    }
+  }
+  return best ?? {schema: PATTERN_SCHEMA, record_kind: "state", enabled: true, suppressed_until: {}}
+}
+
+/**
+ * Enable or disable observation capture for the selected project memory namespace.
+ *
+ * @effects: [store.read, store.write]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn pattern_learning_set_enabled(enabled: bool, options = nil) -> dict {
+  let state = pattern_learning_state(options)
+  return pl_replace_state(state + {enabled: enabled}, options)
+}
+
+fn pl_normalize_words(text: string) -> list {
+  let cleaned = regex_replace(r"[^a-z0-9]+", " ", (text ?? "").lower()) ?? ""
+  return cleaned.split(" ").filter({ word -> word != "" }).to_list()
+}
+
+fn pl_significant_words(text: string) -> list {
+  var seen = []
+  var out = []
+  for word in pl_normalize_words(text) {
+    if len(word) < 3 || STOP_WORDS.contains(word) || seen.contains(word) {
+      continue
+    }
+    seen = seen + [word]
+    out = out + [word]
+  }
+  return out
+}
+
+fn pl_slugify(raw) -> string {
+  var slug = regex_replace(r"[^a-z0-9]+", "-", pl_text(raw).lower()) ?? ""
+  while slug.starts_with("-") {
+    slug = slug[1:]
+  }
+  while slug.ends_with("-") {
+    slug = slug[0:len(slug) - 1]
+  }
+  return slug
+}
+
+fn pl_short_hash(text: string) -> string {
+  return substring(sha256(text), 0, 12)
+}
+
+fn pl_unique_record_id(prefix: string, options = nil) -> string {
+  return prefix + "_" + pl_short_hash(pl_now(options) + ":" + uuid())
+}
+
+fn pl_sanitize_tool_sequence(sequence: list) -> list {
+  var out = []
+  for raw in sequence ?? [] {
+    let clean = pl_slugify(raw)
+    if clean != "" && clean != "load-skill" {
+      out = out + [clean]
+    }
+  }
+  return out
+}
+
+fn pl_redact_sensitive(text: string) -> string {
+  let no_private = regex_replace(
+    r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----",
+    "<redacted-private-key>",
+    text ?? "",
+  )
+    ?? (text ?? "")
+  return regex_replace(
+    r"(?i)\b(api[_-]?key|token|secret|password|credential)\b\s*[:=]\s*\S+",
+    "$1=<redacted>",
+    no_private,
+  )
+    ?? no_private
+}
+
+fn pl_observation_from_input(input: dict, options = nil) -> dict {
+  let prompt = pl_redact_sensitive(pl_text(input?.prompt ?? input?.message))
+  if prompt == "" {
+    throw "HARN-PATTERN-001: prompt is required"
+  }
+  let id = pl_text(input?.id)
+  return {
+    id: id == "" ? uuid() : id,
+    session_id: pl_text(input?.session_id ?? input?.sessionID),
+    prompt: prompt,
+    tool_sequence: pl_sanitize_tool_sequence(input?.tool_sequence ?? input?.toolSequence ?? []),
+    observed_at: pl_text(input?.observed_at ?? input?.observedAt ?? pl_now(options)),
+  }
+}
+
+fn pl_observation_from_legacy(record: dict, options = nil) -> dict {
+  return pl_observation_from_input(
+    {
+      id: record?.id,
+      session_id: record?.sessionID ?? record?.session_id,
+      prompt: record?.prompt,
+      tool_sequence: record?.toolSequence ?? record?.tool_sequence ?? [],
+      observed_at: record?.observedAt ?? record?.observed_at ?? pl_now(options),
+    },
+    options,
+  )
+}
+
+fn pl_store_observation(record: dict, options = nil) -> dict {
+  return pl_store_record("observation", "observation:" + record.id, record, options + {id: record.id})?.value
+}
+
+/**
+ * Return active pattern-learning observations sorted by observation time.
+ *
+ * @effects: [store.read]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn pattern_learning_observations(options = nil) -> list {
+  pattern_learning_ensure_migrated(options)
+  return pl_record_values("observation", options).sort_by({ item -> pl_text(item?.observed_at) })
+}
+
+fn pl_forget_observation(id: string, options = nil) -> nil {
+  memory_forget(pl_namespace(options), {id: id}, pl_memory_options(options))
+}
+
+fn pl_cap_observations(options = nil) -> nil {
+  let observations = pattern_learning_observations(options)
+  let overflow = len(observations) - OBSERVATION_CAP
+  if overflow <= 0 {
+    return
+  }
+  for observation in observations[0:overflow] {
+    pl_forget_observation(observation.id, options)
+  }
+}
+
+fn pl_prompt_cluster_key(prompt: string) -> string {
+  let words = pl_significant_words(prompt)
+  if len(words) < 3 {
+    return ""
+  }
+  return join(words[0:min(4, len(words))], "-")
+}
+
+fn pl_tool_sequence_key(sequence: list) -> string {
+  let names = pl_sanitize_tool_sequence(sequence)
+  if len(names) < 2 {
+    return ""
+  }
+  return join(names[0:min(8, len(names))], "-")
+}
+
+fn pl_push_group(groups: dict, key: string, observation: dict) -> dict {
+  if key == "" {
+    return groups
+  }
+  let current = groups[key] ?? []
+  return groups + {[key]: current + [observation]}
+}
+
+fn pl_recent_observations(observations: list, now_iso: string, window_days: int) -> list {
+  let now = date_parse(now_iso)
+  let max_age = window_days * 86400
+  var out = []
+  for observation in observations {
+    let observed = try {
+      date_parse(pl_text(observation?.observed_at))
+    }
+    if is_err(observed) {
+      continue
+    }
+    let age_seconds = duration_to_seconds(date_diff(now, unwrap(observed)))
+    if age_seconds >= 0 && age_seconds <= max_age {
+      out = out + [observation]
+    }
+  }
+  return out
+}
+
+fn pl_sample_prompts(observations: list) -> list {
+  var seen = []
+  var out = []
+  for observation in observations.sort_by({ item -> pl_text(item?.observed_at) }) {
+    let prompt = pl_text(observation?.prompt)
+    if prompt == "" || seen.contains(prompt) {
+      continue
+    }
+    seen = seen + [prompt]
+    out = out + [prompt]
+    if len(out) >= 3 {
+      break
+    }
+  }
+  return out
+}
+
+fn pl_representative_tool_sequence(observations: list) -> list {
+  var best = []
+  for observation in observations {
+    let sequence = observation?.tool_sequence ?? []
+    if len(sequence) > len(best) {
+      best = sequence
+    }
+  }
+  return best
+}
+
+fn pl_title_from_words(words: list) -> string {
+  return join(words.map({ word -> word[0:1].upper() + word[1:] }), " ")
+}
+
+fn pl_skill_name(base: string) -> string {
+  let slug = pl_slugify(base)
+  if slug == "" {
+    return "learned-pattern"
+  }
+  var trimmed = slug[0:min(80, len(slug))]
+  while trimmed.ends_with("-") {
+    trimmed = trimmed[0:len(trimmed) - 1]
+  }
+  return trimmed == "" ? "learned-pattern" : trimmed
+}
+
+fn pl_render_skill_body(
+  title: string,
+  description: string,
+  when_to_use: string,
+  support: int,
+  samples: list,
+  sequence: list,
+  source: string,
+) -> string {
+  var lines = [
+    "# " + title,
+    "",
+    description,
+    "",
+    "This skill was drafted from " + to_string(support) + " observed " + source + " matches.",
+    "",
+    "## When To Use",
+    "",
+    when_to_use,
+    "",
+    "## Guidance",
+    "",
+    "- Start by checking whether the current request really matches the observed examples.",
+    "- Reuse the project conventions already loaded in context before introducing a new workflow.",
+    "- Keep verification scoped to the files and commands touched by the task.",
+    "",
+    "## Observed Examples",
+  ]
+  for sample in samples {
+    lines = lines + ["- " + pl_text(sample)]
+  }
+  if len(sequence) > 0 {
+    lines = lines + ["", "## Observed Tool Sequence", "", join(sequence, " -> ")]
+  }
+  return join(lines + [""], "\n")
+}
+
+fn pl_make_prompt_proposal(id: string, key: string, observations: list, existing: dict, now: string) -> dict {
+  let words = key.split("-")
+  let title = pl_title_from_words(words)
+  let description = "Reusable guidance learned from " + to_string(len(observations)) + " similar prompts."
+  let when_to_use = "Use when the request matches these recurring prompt terms: " + key.replace("-", ", ") + "."
+  let sequence = pl_representative_tool_sequence(observations)
+  return {
+    id: id,
+    kind: "skill",
+    source: "prompt_cluster",
+    name: existing?.name ?? pl_skill_name("learned-" + pl_slugify(title)),
+    title: title,
+    description: description,
+    when_to_use: when_to_use,
+    body: pl_render_skill_body(
+      title,
+      description,
+      when_to_use,
+      len(observations),
+      pl_sample_prompts(observations),
+      sequence,
+      "prompt cluster",
+    ),
+    support: len(observations),
+    sample_prompts: pl_sample_prompts(observations),
+    tool_sequence: sequence,
+    created_at: existing?.created_at ?? now,
+    last_seen_at: now,
+  }
+}
+
+fn pl_make_tool_proposal(id: string, key: string, observations: list, existing: dict, now: string) -> dict {
+  let sequence = key.split("-")
+  let title = "Repeated " + join(sequence, " -> ") + " workflow"
+  let description = "Reusable guidance learned from " + to_string(len(observations))
+    + " runs with the same tool sequence."
+  let when_to_use = "Use when the task is likely to follow this tool sequence: " + join(sequence, " -> ") + "."
+  return {
+    id: id,
+    kind: "skill",
+    source: "tool_sequence",
+    name: existing?.name ?? pl_skill_name("learned-" + join(sequence, "-")),
+    title: title,
+    description: description,
+    when_to_use: when_to_use,
+    body: pl_render_skill_body(
+      title,
+      description,
+      when_to_use,
+      len(observations),
+      pl_sample_prompts(observations),
+      sequence,
+      "tool sequence",
+    ),
+    support: len(observations),
+    sample_prompts: pl_sample_prompts(observations),
+    tool_sequence: sequence,
+    created_at: existing?.created_at ?? now,
+    last_seen_at: now,
+  }
+}
+
+fn pl_skill_roots(options = nil) -> list {
+  let root = pl_project_root(options)
+  return [path_join(root, ".claude", "skills"), path_join(root, ".burin", "skills")]
+}
+
+/**
+ * Return the project skill root where accepted learned skills are written.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn pattern_learning_skill_root(options = nil) -> string {
+  return path_join(pl_project_root(options), ".claude", "skills")
+}
+
+fn pl_frontmatter_value(body: string, key: string) -> string {
+  let prefix = key + ":"
+  for line in (body ?? "").split("\n") {
+    let trimmed = to_string(line ?? "").trim()
+    if trimmed.starts_with(prefix) {
+      var value = trimmed[len(prefix):].trim()
+      if len(value) >= 2
+        && ((value.starts_with("\"") && value.ends_with("\""))
+        || (value.starts_with("'") && value.ends_with("'"))) {
+        value = value[1:len(value) - 1]
+      }
+      return value.replace("\\\"", "\"").replace("\\\\", "\\")
+    }
+  }
+  return ""
+}
+
+fn pl_load_skill_file(name: string, path: string) -> dict {
+  let body = harness.fs.read_text(path)
+  return {
+    name: name,
+    description: pl_frontmatter_value(body, "description"),
+    when_to_use: pl_frontmatter_value(body, "when-to-use"),
+    body: body,
+  }
+}
+
+/**
+ * Load accepted learned skills from the project skill roots.
+ *
+ * @effects: [fs.read]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn pattern_learning_accepted_skills(options = nil) -> list {
+  var seen = []
+  var out = []
+  for root in pl_skill_roots(options) {
+    if !harness.fs.exists(root) {
+      continue
+    }
+    for name in (harness.fs.list_dir(root) ?? []).sort() {
+      let skill_file = path_join(root, name, "SKILL.md")
+      if seen.contains(name) || !harness.fs.exists(skill_file) {
+        continue
+      }
+      seen = seen + [name]
+      out = out + [pl_load_skill_file(name, skill_file)]
+    }
+  }
+  return out
+}
+
+fn pl_skill_exists(name: string, options = nil) -> bool {
+  for root in pl_skill_roots(options) {
+    if harness.fs.exists(path_join(root, name, "SKILL.md")) {
+      return true
+    }
+  }
+  return false
+}
+
+fn pl_existing_pending_by_id(options = nil) -> dict {
+  var out = {}
+  for proposal in pattern_learning_pending(options) {
+    out = out + {[proposal.id]: proposal}
+  }
+  return out
+}
+
+fn pl_is_suppressed(id: string, state: dict, now: string) -> bool {
+  let until = pl_text((state?.suppressed_until ?? state?.suppressedUntil ?? {})[id])
+  return until != "" && until > now
+}
+
+fn pl_sorted_proposal_insert(proposals: list, proposal: dict) -> list {
+  var out = []
+  var inserted = false
+  for existing in proposals {
+    let before = proposal.support > (existing?.support ?? 0)
+      || (proposal.support == (existing?.support ?? 0) && proposal.id < existing.id)
+    if before && !inserted {
+      out = out + [proposal]
+      inserted = true
+    }
+    out = out + [existing]
+  }
+  if !inserted {
+    out = out + [proposal]
+  }
+  return out
+}
+
+/**
+ * Recompute reviewable proposals from recent observations and store them as pending records.
+ *
+ * @effects: [store.read, store.write, fs.read]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn pattern_learning_refresh(options = nil) -> list {
+  pattern_learning_ensure_migrated(options)
+  let state = pattern_learning_state(options)
+  if !(state?.enabled ?? true) {
+    return pattern_learning_pending(options)
+  }
+  let now = pl_now(options)
+  let support_threshold = options?.support_threshold ?? DEFAULT_SUPPORT_THRESHOLD
+  let window_days = options?.window_days ?? DEFAULT_WINDOW_DAYS
+  let observations = pl_recent_observations(pattern_learning_observations(options), now, window_days)
+  let existing = pl_existing_pending_by_id(options)
+  var prompt_groups = {}
+  var tool_groups = {}
+  for observation in observations {
+    prompt_groups = pl_push_group(prompt_groups, pl_prompt_cluster_key(observation.prompt), observation)
+    tool_groups = pl_push_group(tool_groups, pl_tool_sequence_key(observation.tool_sequence), observation)
+  }
+  var proposals = []
+  for key in keys(prompt_groups).sort() {
+    let group = prompt_groups[key] ?? []
+    if len(group) < support_threshold {
+      continue
+    }
+    let id = "prompt-" + pl_short_hash(key)
+    if pl_is_suppressed(id, state, now) {
+      continue
+    }
+    let proposal = pl_make_prompt_proposal(id, key, group, existing[id] ?? {}, now)
+    if !pl_skill_exists(proposal.name, options) {
+      proposals = pl_sorted_proposal_insert(proposals, proposal)
+    }
+  }
+  for key in keys(tool_groups).sort() {
+    let group = tool_groups[key] ?? []
+    if len(group) < support_threshold {
+      continue
+    }
+    let id = "tools-" + pl_short_hash(key)
+    if pl_is_suppressed(id, state, now) {
+      continue
+    }
+    let proposal = pl_make_tool_proposal(id, key, group, existing[id] ?? {}, now)
+    if !pl_skill_exists(proposal.name, options) {
+      proposals = pl_sorted_proposal_insert(proposals, proposal)
+    }
+  }
+  memory_forget(pl_namespace(options), {tag: "pattern_learning:pending"}, pl_memory_options(options))
+  for proposal in proposals {
+    pl_store_record(
+      "pending",
+      "pending:" + proposal.id,
+      proposal,
+      options + {id: pl_unique_record_id("pending_" + proposal.id.replace("-", "_"), options)},
+    )
+  }
+  return proposals
+}
+
+/**
+ * Return active pending pattern-learning proposals, ordered by support.
+ *
+ * @effects: [store.read]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn pattern_learning_pending(options = nil) -> list {
+  pattern_learning_ensure_migrated(options)
+  return pl_record_values("pending", options)
+    .sort_by({ item -> to_string(999999 - (item?.support ?? 0)) + ":" + item.id })
+}
+
+/**
+ * Store one completed-run observation and refresh pending proposals when learning is enabled.
+ *
+ * @effects: [store.read, store.write, fs.read]
+ * @errors: [HARN-PATTERN-001]
+ * @api_stability: experimental
+ */
+pub fn pattern_learning_observe(
+  session_id: string,
+  message: string,
+  tool_sequence: list = [],
+  options = nil,
+) -> dict {
+  pattern_learning_ensure_migrated(options)
+  let state = pattern_learning_state(options)
+  if !(state?.enabled ?? true) {
+    return {
+      observed: false,
+      enabled: false,
+      observation_count: len(pattern_learning_observations(options)),
+      pending_count: len(pattern_learning_pending(options)),
+      proposals: pattern_learning_pending(options),
+    }
+  }
+  let observation = pl_store_observation(
+    pl_observation_from_input(
+      {
+        session_id: session_id,
+        prompt: message,
+        tool_sequence: tool_sequence,
+        observed_at: pl_now(options),
+      },
+      options,
+    ),
+    options,
+  )
+  pl_cap_observations(options)
+  let proposals = pattern_learning_refresh(options)
+  return {
+    observed: true,
+    enabled: true,
+    observation: observation,
+    observation_count: len(pattern_learning_observations(options)),
+    pending_count: len(proposals),
+    proposals: proposals,
+  }
+}
+
+fn pl_score_skill(skill_entry: dict, query_words: list) -> dict {
+  if len(query_words) == 0 {
+    return {learned_skill: skill_entry, score: 0.0, reason: "project learned skill"}
+  }
+  let haystack = join([skill_entry.name, skill_entry.description, skill_entry.when_to_use, skill_entry.body], " ")
+  let skill_words = pl_significant_words(haystack)
+  var overlap = []
+  for word in query_words {
+    if skill_words.contains(word) && !overlap.contains(word) {
+      overlap = overlap + [word]
+    }
+  }
+  if len(overlap) == 0 {
+    return {}
+  }
+  return {
+    learned_skill: skill_entry,
+    score: (len(overlap) + 0.0) / (max(1, len(query_words)) + 0.0),
+    reason: "matched " + join(overlap.sort()[0:min(4, len(overlap))], ", "),
+  }
+}
+
+fn pl_insert_match(matches: list, item: dict) -> list {
+  if item?.learned_skill == nil {
+    return matches
+  }
+  var out = []
+  var inserted = false
+  for existing in matches {
+    let before = item.score > existing.score
+      || (item.score == existing.score && item.learned_skill.name < existing.learned_skill.name)
+    if before && !inserted {
+      out = out + [item]
+      inserted = true
+    }
+    out = out + [existing]
+  }
+  if !inserted {
+    out = out + [item]
+  }
+  return out
+}
+
+/**
+ * Rank accepted learned skills against a query string using deterministic lexical overlap.
+ *
+ * @effects: [fs.read]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn pattern_learning_skill_matches(query: string, limit: int = 3, options = nil) -> list {
+  let query_words = pl_significant_words(query)
+  var matches = []
+  for skill_entry in pattern_learning_accepted_skills(options) {
+    matches = pl_insert_match(matches, pl_score_skill(skill_entry, query_words))
+  }
+  return matches[0:min(max(0, limit), len(matches))]
+}
+
+/**
+ * Build the learned-context block and provenance banner for an agent turn.
+ *
+ * @effects: [store.read, fs.read]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn pattern_learning_context(session_id: string, message: string, limit: int = 3, options = nil) -> dict {
+  let pending = pattern_learning_pending(options)
+  let matches = pattern_learning_skill_matches(message, limit, options)
+  if len(matches) == 0 && len(pending) == 0 {
+    return {body: "", matches: [], pending_count: 0, banner: ""}
+  }
+  var lines = ["<learned_context>"]
+  if len(matches) > 0 {
+    let loaded = join(
+      matches.map({ candidate -> candidate.learned_skill.name + " (" + to_string(candidate.score) + ")" }),
+      ", ",
+    )
+    lines = lines
+      + ["<provenance_chip>Loaded learned skills: " + loaded + "</provenance_chip>", "<learned_skills>"]
+    for candidate in matches {
+      lines = lines
+        + [
+        "- `" + candidate.learned_skill.name + "`: " + candidate.learned_skill.description,
+        "  why: " + candidate.reason,
+      ]
+      if pl_text(candidate.learned_skill.when_to_use) != "" {
+        lines = lines + ["  when: " + candidate.learned_skill.when_to_use]
+      }
+    }
+    lines = lines + ["</learned_skills>"]
+  }
+  if len(pending) > 0 {
+    let suffix = len(pending) == 1 ? "" : "s"
+    lines = lines
+      + [
+      "<learning_review>" + to_string(len(pending)) + " proposal" + suffix
+        + " pending; run `/learn list` to review.</learning_review>",
+    ]
+  }
+  let names = join(matches.map({ candidate -> "`" + candidate.learned_skill.name + "`" }), ", ")
+  let match_suffix = len(matches) == 1 ? "" : "s"
+  let banner = if len(matches) > 0 {
+    "loaded " + to_string(len(matches)) + " learned skill" + match_suffix + ": " + names
+  } else {
+    ""
+  }
+  return {
+    body: join(lines + ["</learned_context>"], "\n"),
+    banner: banner,
+    matches: matches,
+    pending_count: len(pending),
+  }
+}
+
+fn pl_yaml_scalar(value: string) -> string {
+  return "\"" + (value ?? "").replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+}
+
+fn pl_validate_skill_name(name: string) -> nil {
+  if name == "" || name != pl_slugify(name) {
+    throw "HARN-PATTERN-002: invalid skill name `" + name + "`"
+  }
+}
+
+fn pl_write_skill(proposal: dict, options = nil) -> string {
+  let name = pl_text(proposal?.name)
+  pl_validate_skill_name(name)
+  let root = pattern_learning_skill_root(options)
+  let dir = path_join(root, name)
+  let path = path_join(dir, "SKILL.md")
+  harness.fs.mkdir(dir)
+  let body = join(
+    [
+      "---",
+      "name: " + name,
+      "description: " + pl_yaml_scalar(proposal.description),
+      "when-to-use: " + pl_yaml_scalar(proposal.when_to_use),
+      "user-invocable: true",
+      "disable-model-invocation: false",
+      "allowed-tools: []",
+      "category: Command",
+      "tags: [learned, " + proposal.source.replace("_", "-") + "]",
+      "---",
+      "",
+      to_string(proposal.body ?? "").trim(),
+      "",
+    ],
+    "\n",
+  )
+  harness.fs.write_text(path, body)
+  return path
+}
+
+fn pl_find_pending(id: string, options = nil) -> dict {
+  for proposal in pattern_learning_pending(options) {
+    if proposal.id == id {
+      return proposal
+    }
+  }
+  for proposal in pattern_learning_refresh(options) {
+    if proposal.id == id {
+      return proposal
+    }
+  }
+  return {}
+}
+
+/**
+ * Promote a pending proposal into a project skill and remove it from review.
+ *
+ * @effects: [store.read, store.write, fs.write]
+ * @errors: [HARN-PATTERN-002]
+ * @api_stability: experimental
+ */
+pub fn pattern_learning_accept(id: string, options = nil) -> dict {
+  let proposal = pl_find_pending(pl_text(id), options)
+  if proposal?.id == nil {
+    return {accepted: false, is_error: true, error: "proposal not found: " + pl_text(id)}
+  }
+  let skill_path = pl_write_skill(proposal, options)
+  memory_forget(pl_namespace(options), {key: "pending:" + proposal.id}, pl_memory_options(options))
+  return {accepted: true, skill_path: skill_path, proposal: proposal}
+}
+
+fn pl_add_days_iso(now: string, days: int) -> string {
+  return date_to_zone(date_add(date_parse(now), duration_days(days)), "UTC")
+}
+
+/**
+ * Reject a pending proposal and suppress regeneration for the configured interval.
+ *
+ * @effects: [store.read, store.write]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn pattern_learning_reject(id: string, options = nil) -> dict {
+  let clean = pl_text(id)
+  let proposal = pl_find_pending(clean, options)
+  if proposal?.id == nil {
+    return {rejected: false, is_error: true, error: "proposal not found: " + clean}
+  }
+  memory_forget(pl_namespace(options), {key: "pending:" + clean}, pl_memory_options(options))
+  let state = pattern_learning_state(options)
+  let suppressed = (state?.suppressed_until ?? {})
+    + {[clean]: pl_add_days_iso(pl_now(options), options?.suppression_days ?? DEFAULT_SUPPRESSION_DAYS)}
+  pl_replace_state(state + {suppressed_until: suppressed}, options)
+  return {rejected: true}
+}
+
+/**
+ * Return enablement, observation, pending, cap, and skill-root status.
+ *
+ * @effects: [store.read]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn pattern_learning_status(options = nil) -> dict {
+  let state = pattern_learning_state(options)
+  let pending = pattern_learning_pending(options)
+  return {
+    enabled: state?.enabled ?? true,
+    observation_count: len(pattern_learning_observations(options)),
+    pending_count: len(pending),
+    observation_cap: OBSERVATION_CAP,
+    skill_root: pattern_learning_skill_root(options),
+  }
+}
+
+fn pl_migrate_observations(options = nil) -> nil {
+  let project = pl_project_root(options)
+  for legacy in pl_project_collection(pl_read_jsonl_payloads(pl_observation_file(project))) {
+    let converted = try {
+      pl_observation_from_legacy(legacy, options)
+    }
+    if is_ok(converted) {
+      pl_store_observation(unwrap(converted), options)
+    }
+  }
+}
+
+fn pl_migrate_pending(options = nil) -> nil {
+  let project = pl_project_root(options)
+  let pending = pl_project_value(pl_read_jsonl_payloads(pl_pending_file(project)), {generatedAt: "", proposals: []})
+  for proposal in pending?.proposals ?? [] {
+    let normalized = {
+      id: pl_text(proposal?.id),
+      kind: pl_text(proposal?.kind) == "" ? "skill" : pl_text(proposal.kind),
+      source: pl_text(proposal?.source),
+      name: pl_text(proposal?.name),
+      title: pl_text(proposal?.title),
+      description: pl_text(proposal?.description),
+      when_to_use: pl_text(proposal?.whenToUse ?? proposal?.when_to_use),
+      body: to_string(proposal?.body ?? ""),
+      support: proposal?.support ?? 0,
+      sample_prompts: proposal?.samplePrompts ?? proposal?.sample_prompts ?? [],
+      tool_sequence: proposal?.toolSequence ?? proposal?.tool_sequence ?? [],
+      created_at: pl_text(proposal?.createdAt ?? proposal?.created_at ?? pl_now(options)),
+      last_seen_at: pl_text(proposal?.lastSeenAt ?? proposal?.last_seen_at ?? pl_now(options)),
+    }
+    if normalized.id != "" {
+      pl_store_record(
+        "pending",
+        "pending:" + normalized.id,
+        normalized,
+        options + {id: pl_unique_record_id("pending_" + normalized.id.replace("-", "_"), options)},
+      )
+    }
+  }
+}
+
+fn pl_migrate_state(options = nil) -> nil {
+  let project = pl_project_root(options)
+  let state = pl_project_value(
+    pl_read_jsonl_payloads(pl_state_file(project)),
+    {enabled: true, suppressedUntil: {}},
+  )
+  pl_replace_state(
+    {
+      enabled: state?.enabled ?? true,
+      suppressed_until: state?.suppressedUntil ?? state?.suppressed_until ?? {},
+    },
+    options,
+  )
+}
+
+/**
+ * Lazily import legacy Burin session-store pattern-learning records into memory.
+ *
+ * @effects: [store.read, store.write, fs.read, fs.write]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn pattern_learning_ensure_migrated(options = nil) -> dict {
+  if options?.skip_migration ?? false {
+    return {migrated: false, skipped: true}
+  }
+  let marker = pl_migration_marker(options)
+  if harness.fs.exists(marker) {
+    return {migrated: false, already_done: true}
+  }
+  pl_migrate_observations(options)
+  pl_migrate_pending(options)
+  pl_migrate_state(options)
+  write_json(marker, {schema: PATTERN_SCHEMA, migrated_at: pl_now(options)}, {pretty: true})
+  return {migrated: true}
+}
