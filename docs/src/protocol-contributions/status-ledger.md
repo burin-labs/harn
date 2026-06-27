@@ -24,24 +24,24 @@ independently checkable examples.
 | Item | Verified state | Notes |
 |---|---|---|
 | [`agentclientprotocol/agent-client-protocol#1220`](https://github.com/agentclientprotocol/agent-client-protocol/discussions/1220) | Open discussion. | A maintainer invited an RFD. The follow-up RFD is PR [`#1261`](https://github.com/agentclientprotocol/agent-client-protocol/pull/1261). |
-| [`agentclientprotocol/agent-client-protocol#1261`](https://github.com/agentclientprotocol/agent-client-protocol/pull/1261) | Open PR, review required, merge-conflicting as of 2026-06-27. | Most review threads were answered; one non-outdated thread remains visible around adapter-owned message IDs. |
+| [`agentclientprotocol/agent-client-protocol#1261`](https://github.com/agentclientprotocol/agent-client-protocol/pull/1261) | Open PR, review required, mergeable as of 2026-06-27 after rebasing onto current `main`. | Rebase note posted at [`discussioncomment-4819339360`](https://github.com/agentclientprotocol/agent-client-protocol/pull/1261#issuecomment-4819339360). |
 | [`agentclientprotocol/agent-client-protocol#484`](https://github.com/agentclientprotocol/agent-client-protocol/pull/484) | Closed in favor of `#1261`. | Relevant predecessor for prompt queueing / steer-via-yield framing. |
-| [`agentclientprotocol/agent-client-protocol#1224`](https://github.com/agentclientprotocol/agent-client-protocol/discussions/1224) | Open discussion, no comments as of 2026-06-27. | Ambient system-role context injection / reminder sibling of `#1220`. |
-| [`agentclientprotocol/agent-client-protocol#1233`](https://github.com/agentclientprotocol/agent-client-protocol/discussions/1233) | Open discussion, no comments as of 2026-06-27. | `session/suspend` + `session/await_resumption`. |
-| [`agentclientprotocol/registry#397`](https://github.com/agentclientprotocol/registry/pull/397) | Open PR, mergeable, no checks or review comments as of 2026-06-27. | Harn ACP Registry submission. |
+| [`agentclientprotocol/agent-client-protocol#1224`](https://github.com/agentclientprotocol/agent-client-protocol/discussions/1224) | Open discussion, no maintainer response visible as of 2026-06-27. | Ambient system-role context injection / reminder sibling of `#1220`; next-step ping posted at [`discussioncomment-17455653`](https://github.com/agentclientprotocol/agent-client-protocol/discussions/1224#discussioncomment-17455653). |
+| [`agentclientprotocol/agent-client-protocol#1233`](https://github.com/agentclientprotocol/agent-client-protocol/discussions/1233) | Open discussion, no maintainer response visible as of 2026-06-27. | `session/suspend` + `session/await_resumption`; next-step ping posted at [`discussioncomment-17455656`](https://github.com/agentclientprotocol/agent-client-protocol/discussions/1233#discussioncomment-17455656). |
+| [`agentclientprotocol/registry#397`](https://github.com/agentclientprotocol/registry/pull/397) | Open PR, mergeable, no checks or review decision as of 2026-06-27. | Registry submission; bump comment posted at [`issuecomment-4819339353`](https://github.com/agentclientprotocol/registry/pull/397#issuecomment-4819339353). |
 
 ## A2A
 
 | Item | Verified state | Notes |
 |---|---|---|
 | [`a2aproject/A2A#1857`](https://github.com/a2aproject/A2A/discussions/1857) | Open discussion. | Separate idempotency / post-cancel semantics thread; not a pause/reminder substitute. |
-| [`a2aproject/A2A#1858`](https://github.com/a2aproject/A2A/discussions/1858) | Open discussion, no maintainer/TSC reply visible as of 2026-06-27. | Good-faith community feedback converged toward one `PAUSED` state plus a structured `pause` object with `initiatedBy`, lease/deadline metadata, `resumeToken`, and optional side-effect reconciliation pointer discussion. |
+| [`a2aproject/A2A#1858`](https://github.com/a2aproject/A2A/discussions/1858) | Open discussion, no maintainer/TSC reply visible as of 2026-06-27. | Good-faith community feedback converged toward one `PAUSED` state plus a structured `pause` object; draft-PR vs extension next-step ping posted at [`discussioncomment-17455657`](https://github.com/a2aproject/A2A/discussions/1858#discussioncomment-17455657). |
 
 ## MCP and OAuth Identity
 
 | Item | Verified state | Notes |
 |---|---|---|
-| [`modelcontextprotocol/modelcontextprotocol#2736`](https://github.com/modelcontextprotocol/modelcontextprotocol/discussions/2736) | Open discussion, one non-maintainer support comment, no maintainer response as of 2026-06-27. | Per-call budget caps for `sampling/createMessage`; separate from reminder notifications. |
+| [`modelcontextprotocol/modelcontextprotocol#2736`](https://github.com/modelcontextprotocol/modelcontextprotocol/discussions/2736) | Open discussion, no maintainer response as of 2026-06-27. | Per-call budget caps for `sampling/createMessage`; SEP-path next-step ping posted with AI disclosure at [`discussioncomment-17455659`](https://github.com/modelcontextprotocol/modelcontextprotocol/discussions/2736#discussioncomment-17455659). |
 | [`modelcontextprotocol/modelcontextprotocol#214`](https://github.com/modelcontextprotocol/modelcontextprotocol/issues/214) | Closed. | Maintainer guidance on 2026-01-16 pointed custom auth pieces toward [`modelcontextprotocol/ext-auth`](https://github.com/modelcontextprotocol/ext-auth). |
 | [`modelcontextprotocol/ext-auth#13`](https://github.com/modelcontextprotocol/ext-auth/issues/13) | Open. | Maintainer response says Enterprise-Managed Authorization does not currently support distinguishing agent vs user identity and points to ID-JAG issue `#73`. |
 | [`oauth-wg/oauth-identity-assertion-authz-grant#73`](https://github.com/oauth-wg/oauth-identity-assertion-authz-grant/issues/73) | Open. | Proposal for workload / agent identity SSO and explicit delegated on-behalf-of access. |
