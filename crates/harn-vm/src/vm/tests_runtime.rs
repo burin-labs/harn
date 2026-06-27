@@ -1559,7 +1559,7 @@ fn test_division_by_zero() {
 }
 
 #[test]
-fn test_int_division_overflow_wraps_instead_of_panicking() {
+fn test_int_division_overflow_promotes_instead_of_wrapping() {
     let out = run_output(
         r"pipeline default(task) {
   let min = -9223372036854775807 - 1
@@ -1567,7 +1567,10 @@ fn test_int_division_overflow_wraps_instead_of_panicking() {
   log(min % -1)
 }",
     );
-    assert_eq!(out, "[harn] -9223372036854775808\n[harn] 0");
+    // `min / -1` overflows i64 (true value `i64::MAX + 1`); the VM promotes to
+    // float rather than wrapping back to `i64::MIN`, matching `+`/`-`/`*`/neg.
+    // `min % -1` is 0, the mathematically correct remainder.
+    assert_eq!(out, "[harn] 9223372036854776000\n[harn] 0");
 }
 
 #[test]

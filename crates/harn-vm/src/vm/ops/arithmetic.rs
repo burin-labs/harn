@@ -37,6 +37,15 @@ fn int_mul(x: i64, y: i64) -> VmValue {
         .map_or_else(|| VmValue::Float(x as f64 * y as f64), VmValue::Int)
 }
 
+fn int_div(x: i64, y: i64) -> VmValue {
+    // Only `i64::MIN / -1` overflows division (true value `i64::MAX + 1`);
+    // promote it rather than wrapping back to `i64::MIN` (a wrong sign and
+    // magnitude). Callers guard `y == 0` before reaching here, so `checked_div`
+    // returns `None` solely for that overflow. Mirrors `int_neg`/`int_mul`.
+    x.checked_div(y)
+        .map_or_else(|| VmValue::Float(x as f64 / y as f64), VmValue::Int)
+}
+
 fn int_neg(n: i64) -> VmValue {
     // Only `i64::MIN` overflows negation; promote it rather than wrapping
     // back to `i64::MIN` (the classic surprise). Mirrors `abs(i64::MIN)`.
@@ -308,7 +317,7 @@ impl super::super::Vm {
             (AdaptiveBinaryOp::Div, BinaryShape::Int, VmValue::Int(_), VmValue::Int(0))
             | (AdaptiveBinaryOp::Mod, BinaryShape::Int, VmValue::Int(_), VmValue::Int(0)) => None,
             (AdaptiveBinaryOp::Div, BinaryShape::Int, VmValue::Int(x), VmValue::Int(y)) => {
-                Some(VmValue::Int(x.wrapping_div(*y)))
+                Some(int_div(*x, *y))
             }
             (AdaptiveBinaryOp::Mod, BinaryShape::Int, VmValue::Int(x), VmValue::Int(y)) => {
                 Some(VmValue::Int(x.wrapping_rem(*y)))
@@ -454,7 +463,7 @@ impl super::super::Vm {
     pub(super) fn execute_div_int(&mut self) -> Result<(), VmError> {
         self.run_typed_binary(AdaptiveBinaryOp::Div, |a, b| match (a, b) {
             (VmValue::Int(_), VmValue::Int(0)) => Some(Err(VmError::DivisionByZero)),
-            (VmValue::Int(x), VmValue::Int(y)) => Some(Ok(VmValue::Int(x.wrapping_div(*y)))),
+            (VmValue::Int(x), VmValue::Int(y)) => Some(Ok(int_div(*x, *y))),
             _ => None,
         })
     }
@@ -639,7 +648,7 @@ impl super::super::Vm {
     fn div(&self, a: VmValue, b: VmValue) -> Result<VmValue, VmError> {
         match (&a, &b) {
             (VmValue::Int(_), VmValue::Int(y)) if *y == 0 => Err(VmError::DivisionByZero),
-            (VmValue::Int(x), VmValue::Int(y)) => Ok(VmValue::Int(x.wrapping_div(*y))),
+            (VmValue::Int(x), VmValue::Int(y)) => Ok(int_div(*x, *y)),
             (VmValue::Float(x), VmValue::Float(y)) => Ok(VmValue::Float(x / y)),
             (VmValue::Int(x), VmValue::Float(y)) => Ok(VmValue::Float(*x as f64 / y)),
             (VmValue::Float(x), VmValue::Int(y)) => Ok(VmValue::Float(x / *y as f64)),
@@ -779,5 +788,20 @@ mod overflow_promotion_tests {
     fn pow_promotes_on_overflow() {
         assert!(matches!(int_pow(2, 10), VmValue::Int(1024)));
         assert!(matches!(int_pow(2, 100), VmValue::Float(_)));
+    }
+
+    #[test]
+    fn div_of_i64_min_by_neg_one_promotes_instead_of_wrapping() {
+        // `i64::MIN / -1` is the one division that overflows: its true value is
+        // `i64::MAX + 1`, but two's-complement wraps it back to `i64::MIN` (a
+        // wrong sign and magnitude). Promotion preserves the magnitude, the same
+        // way `int_neg(i64::MIN)` and `abs(i64::MIN)` already do.
+        match int_div(i64::MIN, -1) {
+            VmValue::Float(f) => assert!(f > 0.0),
+            other => panic!("expected promoted float, got {other:?}"),
+        }
+        // In-range division stays int (truncating toward zero, as before).
+        assert!(matches!(int_div(7, 2), VmValue::Int(3)));
+        assert!(matches!(int_div(i64::MIN, 1), VmValue::Int(i64::MIN)));
     }
 }
