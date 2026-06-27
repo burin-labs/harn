@@ -145,13 +145,18 @@ pub(super) const A2A_TASK_EVENT_TYPES: &[&str] = &["status", "message", "worker_
 
 pub(super) const MCP_DRAFT_PROTOCOL_VERSION: &str = "DRAFT-2026-v1";
 
+pub(super) const MCP_LEGACY_2025_06_18_PROTOCOL_VERSION: &str = "2025-06-18";
+
 pub(super) const MCP_FINAL_2026_PROTOCOL_VERSION: &str = "2026-07-28";
 
 pub(super) const MCP_JSON_SCHEMA_2020_12_DIALECT: &str =
     "https://json-schema.org/draft/2020-12/schema";
 
-pub(super) const MCP_PROTOCOL_VERSIONS: &[&str] =
-    &[MCP_DRAFT_PROTOCOL_VERSION, MCP_PROTOCOL_VERSION];
+pub(super) const MCP_PROTOCOL_VERSIONS: &[&str] = &[
+    MCP_DRAFT_PROTOCOL_VERSION,
+    MCP_PROTOCOL_VERSION,
+    MCP_LEGACY_2025_06_18_PROTOCOL_VERSION,
+];
 
 pub(super) const MCP_METHODS: &[&str] = &[
     "server/discover",

@@ -112,7 +112,8 @@
     },
     "supportedVersions": [
       "DRAFT-2026-v1",
-      "2025-11-25"
+      "2025-11-25",
+      "2025-06-18"
     ]
   },
   "mcpInputRequiredResult": {
@@ -161,7 +162,8 @@
         "requested": "DRAFT-2026-v0",
         "supported": [
           "DRAFT-2026-v1",
-          "2025-11-25"
+          "2025-11-25",
+          "2025-06-18"
         ]
       },
       "message": "Unsupported protocol version"

@@ -20,6 +20,10 @@ pub(super) fn generate_typescript() -> String {
         ("MCP_STABLE_PROTOCOL_VERSION", MCP_PROTOCOL_VERSION),
         ("MCP_DRAFT_PROTOCOL_VERSION", MCP_DRAFT_PROTOCOL_VERSION),
         (
+            "MCP_LEGACY_2025_06_18_PROTOCOL_VERSION",
+            MCP_LEGACY_2025_06_18_PROTOCOL_VERSION,
+        ),
+        (
             "MCP_FINAL_2026_PROTOCOL_VERSION",
             MCP_FINAL_2026_PROTOCOL_VERSION,
         ),

@@ -13,7 +13,8 @@ use harn_vm::mcp_oauth::{self, BeginAuthorization};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-use crate::cli::{McpCommand, McpLoginArgs, McpServerRefArgs};
+use crate::cli::{McpCommand, McpDiscoverArgs, McpLoginArgs, McpServerRefArgs};
+use crate::json_envelope::{self, JsonEnvelope};
 use crate::package::{self, McpAuthConfig, McpServerConfig};
 
 mod mock;
@@ -179,6 +180,12 @@ pub(crate) async fn handle_mcp_command(command: &McpCommand) {
                 }
             }
         }
+        McpCommand::Discover(args) => {
+            if let Err(error) = discover_mcp_json(args).await {
+                eprintln!("error: {error}");
+                process::exit(1);
+            }
+        }
         McpCommand::RedirectUri => {
             println!("{DEFAULT_REDIRECT_URI}");
         }
@@ -187,6 +194,40 @@ pub(crate) async fn handle_mcp_command(command: &McpCommand) {
         }
     }
 }
+
+async fn discover_mcp_json(args: &McpDiscoverArgs) -> Result<(), String> {
+    let discovery = harn_vm::mcp_json_discovery::discover_mcp_json(&args.url).await?;
+    let report = harn_vm::mcp_json_discovery::discovery_report(&args.url, discovery)?;
+    if args.json {
+        println!(
+            "{}",
+            json_envelope::to_string_pretty(&JsonEnvelope::ok(
+                MCP_DISCOVERY_SCHEMA_VERSION,
+                report
+            ))
+        );
+        return Ok(());
+    }
+
+    match report.descriptor {
+        Some(descriptor) => {
+            println!("MCP discovery descriptor found");
+            println!("Source: {}", report.source);
+            println!("Name: {}", descriptor.name);
+            println!("Endpoint: {}", descriptor.endpoint);
+            println!("Description: {}", descriptor.description);
+            if let Some(icon) = descriptor.icon {
+                println!("Icon: {icon}");
+            }
+        }
+        None => {
+            println!("No MCP discovery descriptor found at {}", report.source);
+        }
+    }
+    Ok(())
+}
+
+pub(crate) const MCP_DISCOVERY_SCHEMA_VERSION: u32 = 1;
 
 /// Schema version for `harn mcp status --json`. Bump when the
 /// `McpStatusReport` shape changes in a way agents must detect. Bumped to 3 in

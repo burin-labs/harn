@@ -46,6 +46,10 @@ pub(super) fn generate_python() -> String {
         ("MCP_STABLE_PROTOCOL_VERSION", MCP_PROTOCOL_VERSION),
         ("MCP_DRAFT_PROTOCOL_VERSION", MCP_DRAFT_PROTOCOL_VERSION),
         (
+            "MCP_LEGACY_2025_06_18_PROTOCOL_VERSION",
+            MCP_LEGACY_2025_06_18_PROTOCOL_VERSION,
+        ),
+        (
             "MCP_FINAL_2026_PROTOCOL_VERSION",
             MCP_FINAL_2026_PROTOCOL_VERSION,
         ),
@@ -541,6 +545,7 @@ pub(super) fn python_public_names() -> Vec<String> {
         "MCP_PROTOCOL_VERSION",
         "MCP_STABLE_PROTOCOL_VERSION",
         "MCP_DRAFT_PROTOCOL_VERSION",
+        "MCP_LEGACY_2025_06_18_PROTOCOL_VERSION",
         "MCP_FINAL_2026_PROTOCOL_VERSION",
         "MCP_JSON_SCHEMA_2020_12_DIALECT",
         "MCP_INPUT_REQUIRED_RESULT_TYPE",

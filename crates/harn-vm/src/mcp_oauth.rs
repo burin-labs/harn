@@ -60,8 +60,10 @@ const OAUTH_LOCK_DIR_ENV: &str = "HARN_MCP_OAUTH_LOCK_DIR";
 const HARN_HOME_ENV: &str = "HARN_HOME";
 
 /// Refresh a token this many seconds before its advertised expiry so a call
-/// never races the clock against the authorization server.
-const TOKEN_REFRESH_SKEW_SECS: i64 = 60;
+/// never races the clock against the authorization server. A five-minute skew
+/// also leaves enough room for clients, daemons, and apps to converge on a
+/// rotated refresh token before the old access token expires.
+const TOKEN_REFRESH_SKEW_SECS: i64 = 5 * 60;
 
 /// Upper bound on concurrently pending (begun-but-not-completed) authorizations.
 /// Caps memory from abandoned flows in a long-lived server.
@@ -165,6 +167,81 @@ struct TokenResponse {
     expires_in: Option<i64>,
     #[serde(flatten)]
     extra: serde_json::Map<String, serde_json::Value>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct OAuthEndpointError {
+    context: &'static str,
+    status: reqwest::StatusCode,
+    oauth_error: Option<String>,
+    body_len: usize,
+}
+
+impl OAuthEndpointError {
+    fn is_invalid_grant(&self) -> bool {
+        self.oauth_error.as_deref() == Some("invalid_grant")
+    }
+}
+
+impl std::fmt::Display for OAuthEndpointError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.body_len == 0 {
+            return write!(f, "{}: {}", self.context, self.status);
+        }
+        if let Some(error) = &self.oauth_error {
+            return write!(
+                f,
+                "{}: {} (oauth error `{}`, {} byte response body omitted)",
+                self.context, self.status, error, self.body_len
+            );
+        }
+        write!(
+            f,
+            "{}: {} ({} byte response body omitted)",
+            self.context, self.status, self.body_len
+        )
+    }
+}
+
+#[derive(Debug)]
+enum TokenRequestError {
+    Endpoint(OAuthEndpointError),
+    Other(String),
+}
+
+impl TokenRequestError {
+    fn is_invalid_grant(&self) -> bool {
+        matches!(self, Self::Endpoint(error) if error.is_invalid_grant())
+    }
+}
+
+impl std::fmt::Display for TokenRequestError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Endpoint(error) => write!(f, "{error}"),
+            Self::Other(error) => write!(f, "{error}"),
+        }
+    }
+}
+
+#[derive(Debug)]
+enum TokenRefreshError {
+    InvalidGrant,
+    Other(String),
+}
+
+impl std::fmt::Display for TokenRefreshError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidGrant => {
+                write!(
+                    f,
+                    "Stored OAuth refresh token was rejected with invalid_grant; re-authorization required"
+                )
+            }
+            Self::Other(error) => write!(f, "{error}"),
+        }
+    }
 }
 
 /// Wrap non-empty token-response extras as a JSON object for persistence.
@@ -367,7 +444,8 @@ pub async fn complete_authorization(
         flow.client_secret.as_deref(),
         &form,
     )
-    .await?;
+    .await
+    .map_err(|error| error.to_string())?;
 
     let stored = StoredMcpToken {
         access_token: token.access_token,
@@ -596,16 +674,7 @@ pub async fn delete_token(
     };
     let key = OAuthTokenStoreKey::new(resource, issuer, &client_id);
     let _guard = acquire_oauth_refresh_lock(&key, None).await?;
-    store.delete_token(&key).await?;
-    if store
-        .load_active_client_id(resource, issuer)
-        .await?
-        .as_deref()
-        == Some(client_id.as_str())
-    {
-        store.delete_active_client_id(resource, issuer).await?;
-    }
-    Ok(())
+    delete_stored_token_and_active_index(&store, &key).await
 }
 
 /// Resolve the `(client_id, client_secret, token_endpoint_auth_method)` for a
@@ -707,10 +776,13 @@ async fn dynamic_client_registration(
 async fn refresh_token(
     token: &StoredMcpToken,
     discovery: &McpOAuthDiscovery,
-) -> Result<StoredMcpToken, String> {
-    validate_issuer_binding(&token.issuer, &discovery.authorization_server_issuer)?;
+) -> Result<StoredMcpToken, TokenRefreshError> {
+    validate_issuer_binding(&token.issuer, &discovery.authorization_server_issuer)
+        .map_err(TokenRefreshError::Other)?;
     let refresh_token = token.refresh_token.clone().ok_or_else(|| {
-        "Stored OAuth token has expired and does not include a refresh token".to_string()
+        TokenRefreshError::Other(
+            "Stored OAuth token has expired and does not include a refresh token".to_string(),
+        )
     })?;
     let resource =
         canonical_resource_indicator(&token.resource).unwrap_or_else(|_| token.resource.clone());
@@ -732,13 +804,21 @@ async fn refresh_token(
         token.client_secret.as_deref(),
         &form,
     )
-    .await?;
+    .await
+    .map_err(|error| {
+        if error.is_invalid_grant() {
+            TokenRefreshError::InvalidGrant
+        } else {
+            TokenRefreshError::Other(error.to_string())
+        }
+    })?;
     Ok(StoredMcpToken {
         access_token: refreshed.access_token,
         refresh_token: refreshed
             .refresh_token
             .or_else(|| token.refresh_token.clone()),
-        expires_at_unix: expires_at_from_expires_in(refreshed.expires_in)?,
+        expires_at_unix: expires_at_from_expires_in(refreshed.expires_in)
+            .map_err(TokenRefreshError::Other)?,
         token_endpoint,
         client_id: token.client_id.clone(),
         client_secret: token.client_secret.clone(),
@@ -760,18 +840,22 @@ async fn request_token(
     client_id: &str,
     client_secret: Option<&str>,
     form: &[(&str, String)],
-) -> Result<TokenResponse, String> {
-    validate_token_endpoint_auth_method(token_auth_method)?;
+) -> Result<TokenResponse, TokenRequestError> {
+    validate_token_endpoint_auth_method(token_auth_method).map_err(TokenRequestError::Other)?;
     let mut request = client.post(token_endpoint).form(form);
     match token_auth_method {
         "client_secret_basic" => {
-            let client_secret = client_secret
-                .ok_or_else(|| "Missing client secret for client_secret_basic".to_string())?;
+            let client_secret = client_secret.ok_or_else(|| {
+                TokenRequestError::Other(
+                    "Missing client secret for client_secret_basic".to_string(),
+                )
+            })?;
             request = request.basic_auth(client_id, Some(client_secret));
         }
         "client_secret_post" => {
-            let client_secret = client_secret
-                .ok_or_else(|| "Missing client secret for client_secret_post".to_string())?;
+            let client_secret = client_secret.ok_or_else(|| {
+                TokenRequestError::Other("Missing client secret for client_secret_post".to_string())
+            })?;
             let mut extended = form.to_vec();
             extended.push(("client_secret", client_secret.to_string()));
             request = client.post(token_endpoint).form(&extended);
@@ -781,16 +865,20 @@ async fn request_token(
     let response = request
         .send()
         .await
-        .map_err(|error| format!("Token request failed: {error}"))?;
+        .map_err(|error| TokenRequestError::Other(format!("Token request failed: {error}")))?;
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
-        return Err(oauth_http_error("Token request failed", status, &body));
+        return Err(TokenRequestError::Endpoint(oauth_endpoint_error(
+            "Token request failed",
+            status,
+            &body,
+        )));
     }
     response
         .json::<TokenResponse>()
         .await
-        .map_err(|error| format!("Invalid token response: {error}"))
+        .map_err(|error| TokenRequestError::Other(format!("Invalid token response: {error}")))
 }
 
 async fn exchange_bearer_for_actor_chain(
@@ -1075,15 +1163,27 @@ fn expires_at_from_expires_in(expires_in: Option<i64>) -> Result<Option<i64>, St
     Ok(Some(current_unix_timestamp().saturating_add(seconds)))
 }
 
-fn oauth_http_error(context: &str, status: reqwest::StatusCode, body: &str) -> String {
-    if body.trim().is_empty() {
-        format!("{context}: {status}")
-    } else {
-        format!(
-            "{context}: {status} ({} byte response body omitted)",
-            body.len()
-        )
+fn oauth_http_error(context: &'static str, status: reqwest::StatusCode, body: &str) -> String {
+    oauth_endpoint_error(context, status, body).to_string()
+}
+
+fn oauth_endpoint_error(
+    context: &'static str,
+    status: reqwest::StatusCode,
+    body: &str,
+) -> OAuthEndpointError {
+    OAuthEndpointError {
+        context,
+        status,
+        oauth_error: oauth_error_code(body),
+        body_len: body.len(),
     }
+}
+
+fn oauth_error_code(body: &str) -> Option<String> {
+    let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
+    let error = value.get("error")?.as_str()?.trim();
+    (!error.is_empty()).then(|| error.to_string())
 }
 
 // --- single-flight refresh + cross-process lock ------------------------------
@@ -1107,9 +1207,17 @@ async fn refresh_stored_token_with_store<S: OAuthTokenStorage + ?Sized>(
     if !token_needs_refresh(&current) {
         return Ok(current);
     }
-    let refreshed = refresh_token(&current, discovery).await?;
-    store.save_token(&refreshed).await?;
-    Ok(refreshed)
+    match refresh_token(&current, discovery).await {
+        Ok(refreshed) => {
+            store.save_token(&refreshed).await?;
+            Ok(refreshed)
+        }
+        Err(TokenRefreshError::InvalidGrant) => {
+            delete_stored_token_and_active_index(store, &key).await?;
+            Err(TokenRefreshError::InvalidGrant.to_string())
+        }
+        Err(TokenRefreshError::Other(error)) => Err(error),
+    }
 }
 
 struct OAuthRefreshLockGuard {
@@ -1381,6 +1489,24 @@ async fn load_stored_token_from_store<S: OAuthTokenStorage + ?Sized>(
         .await
 }
 
+async fn delete_stored_token_and_active_index<S: OAuthTokenStorage + ?Sized>(
+    store: &S,
+    key: &OAuthTokenStoreKey,
+) -> Result<(), String> {
+    store.delete_token(key).await?;
+    if store
+        .load_active_client_id(&key.resource, &key.issuer)
+        .await?
+        .as_deref()
+        == Some(key.client_id.as_str())
+    {
+        store
+            .delete_active_client_id(&key.resource, &key.issuer)
+            .await?;
+    }
+    Ok(())
+}
+
 fn token_store_account(resource: &str, issuer: &str, client_id: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(issuer.as_bytes());
@@ -1602,9 +1728,10 @@ mod tests {
         let error = oauth_http_error(
             "Token request failed",
             reqwest::StatusCode::BAD_REQUEST,
-            r#"{"access_token":"secret","error_description":"bad"}"#,
+            r#"{"access_token":"secret","error":"invalid_grant","error_description":"bad"}"#,
         );
         assert!(error.contains("400 Bad Request"), "{error}");
+        assert!(error.contains("invalid_grant"), "{error}");
         assert!(error.contains("response body omitted"), "{error}");
         assert!(!error.contains("secret"), "{error}");
         assert!(!error.contains("bad"), "{error}");
@@ -1638,6 +1765,74 @@ mod tests {
             },
             challenge: None,
             scopes: Vec::new(),
+        }
+    }
+
+    #[derive(Clone, Default)]
+    struct MemoryStore {
+        tokens: Arc<AsyncMutex<StdHashMap<OAuthTokenStoreKey, StoredMcpToken>>>,
+        index: Arc<AsyncMutex<StdHashMap<(String, String), String>>>,
+    }
+
+    #[async_trait]
+    impl OAuthTokenStorage for MemoryStore {
+        async fn load_token(
+            &self,
+            key: &OAuthTokenStoreKey,
+        ) -> Result<Option<StoredMcpToken>, String> {
+            Ok(self.tokens.lock().await.get(key).cloned())
+        }
+
+        async fn save_token(&self, token: &StoredMcpToken) -> Result<(), String> {
+            self.tokens
+                .lock()
+                .await
+                .insert(OAuthTokenStoreKey::from_token(token), token.clone());
+            self.save_active_client_id(&token.resource, &token.issuer, &token.client_id)
+                .await
+        }
+
+        async fn delete_token(&self, key: &OAuthTokenStoreKey) -> Result<(), String> {
+            self.tokens.lock().await.remove(key);
+            Ok(())
+        }
+
+        async fn load_active_client_id(
+            &self,
+            resource: &str,
+            issuer: &str,
+        ) -> Result<Option<String>, String> {
+            Ok(self
+                .index
+                .lock()
+                .await
+                .get(&(resource.to_string(), issuer.to_string()))
+                .cloned())
+        }
+
+        async fn save_active_client_id(
+            &self,
+            resource: &str,
+            issuer: &str,
+            client_id: &str,
+        ) -> Result<(), String> {
+            self.index.lock().await.insert(
+                (resource.to_string(), issuer.to_string()),
+                client_id.to_string(),
+            );
+            Ok(())
+        }
+
+        async fn delete_active_client_id(
+            &self,
+            resource: &str,
+            issuer: &str,
+        ) -> Result<(), String> {
+            self.index
+                .lock()
+                .await
+                .remove(&(resource.to_string(), issuer.to_string()));
+            Ok(())
         }
     }
 
@@ -1704,69 +1899,6 @@ mod tests {
     /// converge on the rotated token.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn expired_token_refresh_is_singleflight() {
-        #[derive(Clone, Default)]
-        struct MemoryStore {
-            tokens: Arc<AsyncMutex<StdHashMap<OAuthTokenStoreKey, StoredMcpToken>>>,
-            index: Arc<AsyncMutex<StdHashMap<(String, String), String>>>,
-        }
-
-        #[async_trait]
-        impl OAuthTokenStorage for MemoryStore {
-            async fn load_token(
-                &self,
-                key: &OAuthTokenStoreKey,
-            ) -> Result<Option<StoredMcpToken>, String> {
-                Ok(self.tokens.lock().await.get(key).cloned())
-            }
-            async fn save_token(&self, token: &StoredMcpToken) -> Result<(), String> {
-                self.tokens
-                    .lock()
-                    .await
-                    .insert(OAuthTokenStoreKey::from_token(token), token.clone());
-                self.save_active_client_id(&token.resource, &token.issuer, &token.client_id)
-                    .await
-            }
-            async fn delete_token(&self, key: &OAuthTokenStoreKey) -> Result<(), String> {
-                self.tokens.lock().await.remove(key);
-                Ok(())
-            }
-            async fn load_active_client_id(
-                &self,
-                resource: &str,
-                issuer: &str,
-            ) -> Result<Option<String>, String> {
-                Ok(self
-                    .index
-                    .lock()
-                    .await
-                    .get(&(resource.to_string(), issuer.to_string()))
-                    .cloned())
-            }
-            async fn save_active_client_id(
-                &self,
-                resource: &str,
-                issuer: &str,
-                client_id: &str,
-            ) -> Result<(), String> {
-                self.index.lock().await.insert(
-                    (resource.to_string(), issuer.to_string()),
-                    client_id.to_string(),
-                );
-                Ok(())
-            }
-            async fn delete_active_client_id(
-                &self,
-                resource: &str,
-                issuer: &str,
-            ) -> Result<(), String> {
-                self.index
-                    .lock()
-                    .await
-                    .remove(&(resource.to_string(), issuer.to_string()));
-                Ok(())
-            }
-        }
-
         // A minimal token endpoint over a raw TCP listener that counts hits.
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let token_endpoint_url = format!("http://{}/token", listener.local_addr().unwrap());
@@ -1866,5 +1998,66 @@ mod tests {
             .unwrap();
         assert_eq!(stored.access_token, "access-new");
         server.abort();
+    }
+
+    #[tokio::test]
+    async fn invalid_grant_refresh_clears_stored_token_and_active_index() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let token_endpoint_url = format!("http://{}/token", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let Ok((mut stream, _)) = listener.accept().await else {
+                return;
+            };
+            let mut buf = [0u8; 4096];
+            let _ = tokio::io::AsyncReadExt::read(&mut stream, &mut buf).await;
+            let body = r#"{"error":"invalid_grant","error_description":"refresh token was reused","access_token":"secret"}"#;
+            let response = format!(
+                "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            let _ = tokio::io::AsyncWriteExt::write_all(&mut stream, response.as_bytes()).await;
+        });
+
+        let store = MemoryStore::default();
+        let stale = StoredMcpToken {
+            access_token: "access-old".to_string(),
+            refresh_token: Some("refresh-old".to_string()),
+            expires_at_unix: Some(current_unix_timestamp().saturating_sub(1)),
+            token_endpoint: token_endpoint_url.clone(),
+            client_id: "client-a".to_string(),
+            client_secret: None,
+            token_endpoint_auth_method: "none".to_string(),
+            issuer: "https://auth.example".to_string(),
+            resource: "https://mcp.example/mcp".to_string(),
+            scopes: None,
+            token_response_extra: None,
+        };
+        store.save_token(&stale).await.unwrap();
+
+        let mut discovery = test_discovery();
+        discovery.authorization_server_metadata.token_endpoint = token_endpoint_url;
+        let lock_dir = tempfile::tempdir().unwrap();
+
+        let error = refresh_stored_token_with_store(
+            &store,
+            &stale,
+            &discovery,
+            Some(lock_dir.path().into()),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(error.contains("invalid_grant"), "{error}");
+        assert!(error.contains("re-authorization"), "{error}");
+        assert!(!error.contains("secret"), "{error}");
+        let key = OAuthTokenStoreKey::from_token(&stale);
+        assert!(store.load_token(&key).await.unwrap().is_none());
+        assert!(store
+            .load_active_client_id(&stale.resource, &stale.issuer)
+            .await
+            .unwrap()
+            .is_none());
+        server.await.unwrap();
     }
 }

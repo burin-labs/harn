@@ -35,6 +35,10 @@ pub(super) fn generate_swift() -> String {
         ("mcpStableProtocolVersion", MCP_PROTOCOL_VERSION),
         ("mcpDraftProtocolVersion", MCP_DRAFT_PROTOCOL_VERSION),
         (
+            "mcpLegacy20250618ProtocolVersion",
+            MCP_LEGACY_2025_06_18_PROTOCOL_VERSION,
+        ),
+        (
             "mcpFinal2026ProtocolVersion",
             MCP_FINAL_2026_PROTOCOL_VERSION,
         ),

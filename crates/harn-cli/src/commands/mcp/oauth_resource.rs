@@ -425,7 +425,7 @@ fn json_strings(value: Option<&JsonValue>) -> Vec<String> {
     }
 }
 
-fn request_origin(headers: &HeaderMap) -> String {
+pub(crate) fn request_origin(headers: &HeaderMap) -> String {
     let scheme = header_str(headers, "x-forwarded-proto")
         .and_then(|value| value.split(',').next())
         .map(str::trim)
@@ -446,7 +446,7 @@ fn header_str<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
     headers.get(name).and_then(|value| value.to_str().ok())
 }
 
-fn normalize_path(path: &str) -> String {
+pub(crate) fn normalize_path(path: &str) -> String {
     let trimmed = path.trim();
     if trimmed.is_empty() || trimmed == "/" {
         "/".to_string()

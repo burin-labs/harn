@@ -4,6 +4,10 @@ use serde_json::{json, Value as JsonValue};
 
 /// Stable, production MCP protocol version that Harn defaults to.
 pub const PROTOCOL_VERSION: &str = "2025-11-25";
+/// Prior stable MCP protocol version with the same initialize/session shape
+/// Harn uses for [`PROTOCOL_VERSION`]. Kept for clients such as Codex that
+/// still negotiate this released version.
+pub const LEGACY_2025_06_18_PROTOCOL_VERSION: &str = "2025-06-18";
 /// RC profile published alongside the stable version. Both clients and
 /// servers opt into this profile per request; the runtime never assumes
 /// a connection is RC-only unless the client signals it via metadata or
@@ -142,7 +146,11 @@ impl McpProtocolMode {
 /// Returns the protocol versions this Harn build understands when
 /// peers ask via `server/discover` or fail with `-32004`.
 pub fn supported_protocol_versions() -> &'static [&'static str] {
-    &[DRAFT_PROTOCOL_VERSION, PROTOCOL_VERSION]
+    &[
+        DRAFT_PROTOCOL_VERSION,
+        PROTOCOL_VERSION,
+        LEGACY_2025_06_18_PROTOCOL_VERSION,
+    ]
 }
 
 pub fn is_supported_protocol_version(version: &str) -> bool {
@@ -908,6 +916,9 @@ mod tests {
         let supported = err["error"]["data"]["supported"].as_array().unwrap();
         assert!(supported.iter().any(|v| v == DRAFT_PROTOCOL_VERSION));
         assert!(supported.iter().any(|v| v == PROTOCOL_VERSION));
+        assert!(supported
+            .iter()
+            .any(|v| v == LEGACY_2025_06_18_PROTOCOL_VERSION));
     }
 
     #[test]
@@ -918,6 +929,16 @@ mod tests {
         };
         let mode = enforce_request_protocol_version(&json!(1), &meta).unwrap();
         assert_eq!(mode, Some(McpProtocolMode::Modern));
+    }
+
+    #[test]
+    fn enforce_request_protocol_version_accepts_2025_06_18_as_legacy() {
+        let meta = McpRequestMetadata {
+            protocol_version: Some(LEGACY_2025_06_18_PROTOCOL_VERSION.to_string()),
+            ..Default::default()
+        };
+        let mode = enforce_request_protocol_version(&json!(1), &meta).unwrap();
+        assert_eq!(mode, Some(McpProtocolMode::Legacy));
     }
 
     #[test]
@@ -1034,6 +1055,9 @@ mod tests {
         let supported = discover["supportedVersions"].as_array().unwrap();
         assert!(supported.iter().any(|v| v == DRAFT_PROTOCOL_VERSION));
         assert!(supported.iter().any(|v| v == PROTOCOL_VERSION));
+        assert!(supported
+            .iter()
+            .any(|v| v == LEGACY_2025_06_18_PROTOCOL_VERSION));
         assert_eq!(discover["instructions"], json!("hello"));
     }
 }

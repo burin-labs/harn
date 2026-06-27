@@ -15,13 +15,16 @@ use futures::{stream, StreamExt};
 use serde_json::Value as JsonValue;
 use uuid::Uuid;
 
+use harn_vm::mcp_json_discovery::{McpJsonDescriptor, WELL_KNOWN_MCP_JSON_PATH};
 use harn_vm::mcp_protocol;
 
 use crate::cli::McpServeArgs;
 #[cfg(test)]
 use crate::cli::OrchestratorLocalArgs;
 
-use super::super::oauth_resource::{OAuthChallengeError, OAuthResourceServer, OAuthTokenError};
+use super::super::oauth_resource::{
+    normalize_path, request_origin, OAuthChallengeError, OAuthResourceServer, OAuthTokenError,
+};
 use super::types::{HttpSession, HttpState, McpOrchestratorService, RpcBridge};
 use super::util::{auth_event_log, normalized_headers};
 use super::watchers::{
@@ -92,6 +95,7 @@ fn http_router(
             "/.well-known/oauth-protected-resource/{*path}",
             get(oauth_protected_resource_metadata),
         )
+        .route(WELL_KNOWN_MCP_JSON_PATH, get(mcp_json_discovery_metadata))
         .route(
             &path,
             post(http_post_request)
@@ -128,6 +132,23 @@ async fn oauth_protected_resource_metadata(
         return StatusCode::NOT_FOUND.into_response();
     };
     Json(oauth.metadata(&headers, &state.mcp_path)).into_response()
+}
+
+async fn mcp_json_discovery_metadata(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+) -> Response {
+    Json(McpJsonDescriptor {
+        name: "Harn MCP".to_string(),
+        description: "Harn orchestrator MCP server.".to_string(),
+        icon: Some("https://harnlang.com/favicon.svg".to_string()),
+        endpoint: format!(
+            "{}{}",
+            request_origin(&headers),
+            normalize_path(&state.mcp_path)
+        ),
+    })
+    .into_response()
 }
 
 async fn http_post_request(
