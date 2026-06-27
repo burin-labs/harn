@@ -1,1 +1,9 @@
-`code_index.rename_symbol` now accepts an optional `replacement_text` field. When supplied, the builtin overwrites every true-identifier occurrence of the symbol (still skipping strings and comments) with arbitrary text instead of renaming it — turning the one-shot atomic, syntax-validated, all-or-nothing cross-file primitive into a symbol-grounded find/replace. This collapses a cross-file API migration such as `oldFn` -> `client.newFn(` into a single call. The identifier-validity and shadow-conflict checks (which are rename-only concerns) are skipped in replace mode, but the post-edit syntax-validation safety net still aborts with no write if any rewritten file fails to re-parse.
+`code_index.rename_symbol` now accepts an optional `replacement_text` field.
+When supplied, the builtin overwrites every true-identifier occurrence of the
+symbol (still skipping strings and comments) with arbitrary text instead of
+renaming it, turning the one-shot atomic, syntax-validated, all-or-nothing
+cross-file primitive into a symbol-grounded find/replace. This collapses a
+cross-file API migration such as `oldFn` -> `client.newFn(` into a single call.
+The identifier-validity and shadow-conflict checks (which are rename-only
+concerns) are skipped in replace mode, but the post-edit syntax-validation
+safety net still aborts with no write if any rewritten file fails to re-parse.

@@ -33,6 +33,36 @@ fn extract_dict(value: &VmValue) -> Arc<harn_vm::value::DictMap> {
     }
 }
 
+fn string_field(dict: &harn_vm::value::DictMap, key: &str) -> String {
+    match dict
+        .get(key)
+        .unwrap_or_else(|| panic!("missing field {key}"))
+    {
+        VmValue::String(s) => s.to_string(),
+        other => panic!("expected string field {key}, got {other:?}"),
+    }
+}
+
+fn bool_field(dict: &harn_vm::value::DictMap, key: &str) -> bool {
+    match dict
+        .get(key)
+        .unwrap_or_else(|| panic!("missing field {key}"))
+    {
+        VmValue::Bool(value) => *value,
+        other => panic!("expected bool field {key}, got {other:?}"),
+    }
+}
+
+fn list_field(dict: &harn_vm::value::DictMap, key: &str) -> Arc<Vec<VmValue>> {
+    match dict
+        .get(key)
+        .unwrap_or_else(|| panic!("missing field {key}"))
+    {
+        VmValue::List(value) => value.clone(),
+        other => panic!("expected list field {key}, got {other:?}"),
+    }
+}
+
 fn build_workspace() -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
@@ -96,6 +126,89 @@ fn cypher_returns_function_by_name() {
         other => panic!("expected string path, got {other:?}"),
     };
     assert_eq!(path, "src/a.rs");
+}
+
+#[test]
+fn repo_map_prioritizes_task_named_symbols() {
+    let dir = build_workspace();
+    let (reg, _cap) = registry();
+    rebuild(&reg, dir.path());
+
+    let result = call(
+        &reg,
+        "hostlib_code_index_repo_map",
+        dict(&[
+            ("task", VmValue::String(arcstr::ArcStr::from("Fix alpha"))),
+            ("max_entries", VmValue::Int(4)),
+            ("token_budget", VmValue::Int(200)),
+        ]),
+    );
+    let outer = extract_dict(&result);
+    let rendered = string_field(&outer, "rendered");
+    assert!(rendered.contains("src/a.rs:"), "rendered map: {rendered}");
+    assert!(rendered.contains("alpha"), "rendered map: {rendered}");
+
+    let entries = list_field(&outer, "entries");
+    assert!(!entries.is_empty(), "repo map should return ranked entries");
+    let first = extract_dict(&entries[0]);
+    assert_eq!(string_field(&first, "name"), "alpha");
+    let reasons = list_field(&first, "reasons");
+    assert!(
+        reasons.iter().any(
+            |value| matches!(value, VmValue::String(reason) if reason.as_str() == "task_symbol")
+        ),
+        "task-named symbol should carry task_symbol reason"
+    );
+}
+
+#[test]
+fn repo_map_boosts_context_files_and_respects_budget() {
+    let dir = build_workspace();
+    let (reg, _cap) = registry();
+    rebuild(&reg, dir.path());
+
+    let result = call(
+        &reg,
+        "hostlib_code_index_repo_map",
+        dict(&[
+            (
+                "context_files",
+                VmValue::List(Arc::new(vec![VmValue::String(arcstr::ArcStr::from(
+                    "src/b.rs",
+                ))])),
+            ),
+            ("max_entries", VmValue::Int(4)),
+            ("token_budget", VmValue::Int(200)),
+        ]),
+    );
+    let outer = extract_dict(&result);
+    let entries = list_field(&outer, "entries");
+    assert!(!entries.is_empty(), "repo map should return ranked entries");
+    let first = extract_dict(&entries[0]);
+    assert_eq!(string_field(&first, "path"), "src/b.rs");
+    let reasons = list_field(&first, "reasons");
+    assert!(
+        reasons.iter().any(
+            |value| matches!(value, VmValue::String(reason) if reason.as_str() == "context_file")
+        ),
+        "context-file symbol should carry context_file reason"
+    );
+
+    let tiny = call(
+        &reg,
+        "hostlib_code_index_repo_map",
+        dict(&[
+            ("max_entries", VmValue::Int(4)),
+            ("token_budget", VmValue::Int(1)),
+        ]),
+    );
+    let tiny_outer = extract_dict(&tiny);
+    let rendered = string_field(&tiny_outer, "rendered");
+    assert!(rendered.len() <= 4, "rendered map must honor char budget");
+    assert!(
+        bool_field(&tiny_outer, "truncated"),
+        "tiny budget should truncate"
+    );
 }
 
 #[test]
