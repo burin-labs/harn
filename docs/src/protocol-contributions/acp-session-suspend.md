@@ -1,24 +1,30 @@
 # ACP RFC: `session/suspend` + `session/await_resumption`
 
 **Upstream repo:** [agentclientprotocol/agent-client-protocol][acp]
-**Sibling discussions:** [ACP #1220 — `session/inject`][acp-1220],
-[ACP #1224 — `session/remind`][acp-1224] (covered by the [sibling
+**Sibling discussions:** [ACP #1220 - `session/inject`][acp-1220],
+[ACP #1224 - `session/remind`][acp-1224] (covered by the [sibling
 `session/inject_reminder` RFC](./acp-session-inject-reminder.md));
 this RFC is the suspend-side companion to the already-shipped
 `session/resume` ([ACP #1726][acp-1726]).
-**Status:** Draft (not yet filed upstream).
+**Discussion:** [ACP #1233 - `session/suspend` +
+`session/await_resumption`][acp-1233].
+**Status:** Open upstream discussion; no maintainer reply was present
+when rechecked on 2026-06-27.
 **Authors:** Burin Labs
 **Reference impl:** `harn-vm` cooperative suspend primitive
-([`crates/harn-vm/src/stdlib/agents.rs`][agents-rs] —
-`__host_worker_suspend` + `WorkerSuspension`) and `harn-serve` ACP
-adapter ([`crates/harn-serve/src/adapters/acp/mod.rs`][acp-mod-rs] —
+([`crates/harn-vm/src/stdlib/agents.rs`][agents-rs] -
+`__host_worker_suspend`; [`agents_workers/mod.rs`][workers-rs] -
+`WorkerSuspension`) and `harn-serve` ACP adapter
+([`crates/harn-serve/src/adapters/acp/mod.rs`][acp-mod-rs] -
 `handle_session_resume`).
 
 [acp]: https://github.com/agentclientprotocol/agent-client-protocol
 [acp-1220]: https://github.com/agentclientprotocol/agent-client-protocol/discussions/1220
 [acp-1224]: https://github.com/agentclientprotocol/agent-client-protocol/discussions/1224
+[acp-1233]: https://github.com/agentclientprotocol/agent-client-protocol/discussions/1233
 [acp-1726]: https://github.com/agentclientprotocol/agent-client-protocol/discussions/1726
 [agents-rs]: https://github.com/burin-labs/harn/blob/main/crates/harn-vm/src/stdlib/agents.rs
+[workers-rs]: https://github.com/burin-labs/harn/blob/main/crates/harn-vm/src/stdlib/agents_workers/mod.rs
 [acp-mod-rs]: https://github.com/burin-labs/harn/blob/main/crates/harn-serve/src/adapters/acp/mod.rs
 
 ## Problem statement

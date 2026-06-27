@@ -271,6 +271,7 @@
 ## Protocol contributions
 
 - [Protocol contribution RFCs](./protocol-contributions/README.md)
+  - [Filing status ledger](./protocol-contributions/status-ledger.md)
   - [ACP: `session/inject_reminder`](./protocol-contributions/acp-session-inject-reminder.md)
   - [A2A: `tasks/inject_reminder`](./protocol-contributions/a2a-message-kind-reminder.md)
   - [MCP: `notifications/reminder`](./protocol-contributions/mcp-notifications-reminder.md)
