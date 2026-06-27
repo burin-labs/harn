@@ -90,27 +90,47 @@ fn __agent_loop_state(args) -> AgentLoopState {
       verdict: args.completion_verdict,
       feedback: args.completion_feedback,
     },
-    progress: {changed: args.progress_changed, summary: args.progress_summary},
+    progress: {
+      changed: args.progress_changed,
+      summary: args.progress_summary,
+      no_net_advance: args.progress_no_net_advance ?? false,
+    },
   }
 }
 
 /**
  * Single source of truth for "the agent is still advancing the task."
- * `progress.changed` (computed once in `agent_loop_snapshot_state`) already
- * covers tool calls, successful tool results, AND visible text — so a turn that
- * is pure planning/narration toward the next edit (no tool call *this* turn) is
- * still forward progress. This is deliberately NOT re-gated on a tool call here:
- * an earlier inline `progress.changed && tool_call_count > 0` denied the
- * extension whenever the budget boundary happened to land on a planning turn,
- * cutting a productive multi-file refactor off mid-work (a methodical model
- * editing across ~6 files stopped at its initial cap because one interleaved
- * planning turn was treated as "no progress"). Degenerate narration that never
- * acts is bounded independently by the iteration max and the stall detector, so
- * progress alone is the correct extension signal. Keep this the *only* place
- * that defines "progress" so a second, competing notion can't be ANDed in.
+ * `progress.changed` (computed once in `agent_loop_snapshot_state`) covers tool
+ * calls, successful tool results, AND visible text — so a turn that is pure
+ * planning/narration toward the next edit (no tool call *this* turn) is still
+ * forward progress. This is deliberately NOT re-gated on a tool call here: an
+ * earlier inline `progress.changed && tool_call_count > 0` denied the extension
+ * whenever the budget boundary happened to land on a planning turn, cutting a
+ * productive multi-file refactor off mid-work (a methodical model editing across
+ * ~6 files stopped at its initial cap because one interleaved planning turn was
+ * treated as "no progress"). Degenerate narration that never acts is bounded
+ * independently by the iteration max and the stall detector.
+ *
+ * The ONE principled override is `progress.no_net_advance`: activity-without-
+ * advancement is NOT progress. `progress.changed` is an ACTIVITY signal — it
+ * fires merely because the model issued tool calls — which makes a thrashing run
+ * (lots of edits/verifies, the SAME compile/test failure recurring turn after
+ * turn, no error draining toward a green build) read as "progressing" every
+ * turn and lets the loop extend its own budget without bound (observed
+ * 24->32->...->72 on a run that should have been cut). `no_net_advance` is set
+ * ONLY on the verify-bearing failing path when the verification OUTCOME is not
+ * advancing (the same failure signature has recurred past a threshold, i.e. the
+ * stall detector's same-diagnostic streak). It is the harn-side twin of burin's
+ * no-net-progress ripcord. Crucially it is OUTCOME-AWARE, not a second activity
+ * notion: a productive edit changes the error signature (streak resets => still
+ * progress) or a test passes (failure model clears => still progress), and
+ * read-only / explore turns with no failing verification never set it. So this
+ * AND only suppresses an extension for a *measured* no-net-advancement thrash;
+ * every genuinely-advancing run keeps its budget. Keep this the *only* place
+ * that defines "progress" so no other competing notion can be ANDed in.
  */
 fn agent_loop_is_progressing(state: AgentLoopState) -> bool {
-  return state.progress.changed
+  return state.progress.changed && !(state.progress?.no_net_advance ?? false)
 }
 
 /**
@@ -230,9 +250,19 @@ fn __agent_record_budget_decision(
   )
 }
 
-fn __agent_progress_summary_text(completion_vetoed: bool, tool_count: int, visible_text: string) -> string {
+fn __agent_progress_summary_text(
+  completion_vetoed: bool,
+  tool_count: int,
+  visible_text: string,
+  no_net_advance: bool,
+) -> string {
   if completion_vetoed {
     return "completion gate vetoed"
+  }
+  // Activity present but the verification outcome is not advancing (same failure
+  // recurring): name the thrash so the recorded loop decision is auditable.
+  if no_net_advance {
+    return "tool activity without net verification progress"
   }
   if tool_count > 0 {
     return "executed " + to_string(tool_count) + " tool call(s)"
@@ -268,7 +298,13 @@ pub fn agent_loop_snapshot_state(args) -> AgentLoopState {
   let turn_successful = args.turn_successful
   let progress_changed = tool_count > 0 || len(turn_successful) > 0
     || trim(visible_text) != ""
-  let progress_summary = __agent_progress_summary_text(completion_vetoed, tool_count, visible_text)
+  // Outcome-aware override: the caller (the loop) passes `progress_no_net_advance`
+  // when this turn is on the verify-bearing failing path AND the verification
+  // outcome is not advancing (same-diagnostic streak past threshold). It only
+  // suppresses the extension when there WAS activity to begin with — a thrash —
+  // never when there is genuinely no activity (that case is already "no progress").
+  let no_net_advance = progress_changed && (args.progress_no_net_advance ?? false)
+  let progress_summary = __agent_progress_summary_text(completion_vetoed, tool_count, visible_text, no_net_advance)
   return __agent_loop_state(
     {
       iteration: args.iteration,
@@ -294,6 +330,7 @@ pub fn agent_loop_snapshot_state(args) -> AgentLoopState {
       completion_verdict: completion_verdict,
       completion_feedback: completion_feedback,
       progress_changed: progress_changed,
+      progress_no_net_advance: no_net_advance,
       progress_summary: progress_summary,
     },
   )

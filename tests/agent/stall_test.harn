@@ -10,6 +10,7 @@ import {
   agent_stall_clear_current_failure,
   agent_stall_current_failure,
   agent_stall_initial_state,
+  agent_stall_no_net_progress,
   agent_stall_observe_tool_calls,
 } from "std/agent/stall"
 
@@ -370,4 +371,101 @@ pipeline test_clear_current_failure_on_success(task) {
   assert(cleared.last_diagnostic_class == "pass")
   assert(cleared.same_diagnostic_streak == 0)
   assert(!cleared.reverify_owed)
+}
+
+// -------------------------------------------------------------------------------------------------
+
+// Budget-extension guard: agent_stall_no_net_progress. This is the harn-side
+// twin of burin's no-net-progress ripcord. The default loop extension policy
+// treats any tool-calling turn as "progress" and keeps extending the iteration
+// budget; this guard reports when a turn is a no-net-advancement thrash so the
+// loop can stop extending. Default OFF, gated on the verify-bearing failing
+// path, and resets on genuine progress.
+
+// -------------------------------------------------------------------------------------------------
+
+// Guard ON; same threshold (3) as the stuck nudge for these tests.
+const GUARD_CONFIG = {
+  enabled: true,
+  repair_aware: true,
+  stuck_same_diagnostic_after: 3,
+  post_edit_reverify: true,
+  no_net_progress_extend_guard: true,
+  no_net_progress_extend_after: 3,
+}
+
+fn _fold_guarded(state, prev_dispatch, prior_made_edit) {
+  return agent_stall_observe_tool_calls(
+    "unit-guard",
+    _run_call(),
+    1,
+    GUARD_CONFIG,
+    state,
+    true,
+    prev_dispatch,
+    "",
+    false,
+    prior_made_edit,
+  )
+}
+
+pipeline test_no_net_progress_default_off(task) {
+  // (a)/(default) Guard OFF (REPAIR_CONFIG has no guard flag): even a long thrash
+  // streak never reports no-net-progress => today's behavior is preserved.
+  let o1 = _fold(agent_stall_initial_state(), _fail_dispatch("boom"), false)
+  let o2 = _fold(o1.state, _fail_dispatch("boom"), false)
+  let o3 = _fold(o2.state, _fail_dispatch("boom"), false)
+  assert(o3.state.same_diagnostic_streak == 3)
+  assert(!agent_stall_no_net_progress(REPAIR_CONFIG, o3.state))
+}
+
+pipeline test_no_net_progress_thrash_trips_once_armed(task) {
+  // (a) Guard ON: a thrash (same failure recurring every turn, no draining)
+  // crosses the threshold and IS reported as no-net-progress, so the loop stops
+  // extending. Below threshold it is NOT reported (conservative).
+  let o1 = _fold_guarded(agent_stall_initial_state(), _fail_dispatch("boom"), false)
+  assert(o1.state.same_diagnostic_streak == 1)
+  assert(!agent_stall_no_net_progress(GUARD_CONFIG, o1.state))
+  let o2 = _fold_guarded(o1.state, _fail_dispatch("boom"), false)
+  assert(o2.state.same_diagnostic_streak == 2)
+  assert(!agent_stall_no_net_progress(GUARD_CONFIG, o2.state))
+  let o3 = _fold_guarded(o2.state, _fail_dispatch("boom"), false)
+  assert(o3.state.same_diagnostic_streak == 3)
+  assert(agent_stall_no_net_progress(GUARD_CONFIG, o3.state))
+}
+
+pipeline test_no_net_progress_productive_run_keeps_budget(task) {
+  // (b) Guard ON: a genuinely-progressing run where each turn changes the error
+  // (a productive edit shifts the signature => streak resets to 1) NEVER reports
+  // no-net-progress, so its budget is preserved. Errors draining is progress.
+  let o1 = _fold_guarded(agent_stall_initial_state(), _fail_dispatch("error A"), true)
+  let o2 = _fold_guarded(o1.state, _fail_dispatch("error B"), true)
+  let o3 = _fold_guarded(o2.state, _fail_dispatch("error C"), true)
+  assert(o3.state.same_diagnostic_streak == 1)
+  assert(!agent_stall_no_net_progress(GUARD_CONFIG, o3.state))
+}
+
+pipeline test_no_net_progress_pass_keeps_budget(task) {
+  // (b) Guard ON: a turn whose verification PASSES clears the failure model
+  // (class != "fail") so it never reports no-net-progress even after a prior
+  // thrash streak — a failing-then-passing run still progresses.
+  let o1 = _fold_guarded(agent_stall_initial_state(), _fail_dispatch("boom"), false)
+  let o2 = _fold_guarded(o1.state, _fail_dispatch("boom"), false)
+  let op = _fold_guarded(o2.state, _ok_dispatch(), false)
+  assert(op.state.last_diagnostic_class == "pass")
+  assert(!agent_stall_no_net_progress(GUARD_CONFIG, op.state))
+}
+
+pipeline test_no_net_progress_explore_turn_not_starved(task) {
+  // (c) Guard ON: a read-only / explore turn has no failing verification, so the
+  // failure model is never armed (class stays "") and the guard NEVER reports
+  // no-net-progress. Legitimately-exploring turns are not starved of budget.
+  let initial = agent_stall_initial_state()
+  assert(initial.last_diagnostic_class != "fail")
+  assert(!agent_stall_no_net_progress(GUARD_CONFIG, initial))
+  // A turn with no verification result (e.g. pure read/list) leaves the model
+  // untouched => still not reported.
+  let o = _fold_guarded(initial, nil, false)
+  assert(o.state.last_diagnostic_class != "fail")
+  assert(!agent_stall_no_net_progress(GUARD_CONFIG, o.state))
 }

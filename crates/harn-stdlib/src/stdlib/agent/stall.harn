@@ -58,6 +58,20 @@ const STALL_REPEAT_CONTEXT_WINDOW_ERROR = 2
 // before the detector trips the "stuck_same_diagnostic" strategy-shift nudge.
 const STALL_STUCK_SAME_DIAGNOSTIC_AFTER = 3
 
+// Budget-extension guard (default OFF, gated by `no_net_progress_extend_guard`):
+// how many turns the SAME failure signature may recur on the verify-bearing path
+// before a turn stops counting as "progress" for the loop's budget-extension
+// decision. The loop's default extension policy treats any tool-calling turn as
+// progress and keeps extending its own iteration budget; a model thrashing
+// through the same compile/test failure therefore buys unbounded runway. Once
+// the same-diagnostic streak reaches this many turns the verification outcome is
+// provably not advancing, so the turn no longer extends the budget and the loop
+// stops at its current cap. Conservative + outcome-aware: a productive edit
+// changes the signature (streak resets) and a pass clears the failure model, so
+// genuine progress is never suppressed. Set at the same depth as the stuck nudge
+// so the strategy-shift nudge fires before/with the extension cut, not after.
+const STALL_NO_NET_PROGRESS_EXTEND_AFTER = 3
+
 // consecutive un-recovered trips before a hard stop is recommended. A trip
 // "recovers" when a turn produces a step that does not itself trip (the agent
 // broke the loop). Past this many back-to-back trips the detector flags
@@ -107,6 +121,8 @@ type AgentStallConfig = {
   repair_aware: bool,
   stuck_same_diagnostic_after: int,
   post_edit_reverify: bool,
+  no_net_progress_extend_guard: bool,
+  no_net_progress_extend_after: int,
 }
 
 type AgentStallWarning = {
@@ -206,6 +222,8 @@ fn __agent_stall_default_config() -> AgentStallConfig {
     repair_aware: false,
     stuck_same_diagnostic_after: STALL_STUCK_SAME_DIAGNOSTIC_AFTER,
     post_edit_reverify: true,
+    no_net_progress_extend_guard: false,
+    no_net_progress_extend_after: STALL_NO_NET_PROGRESS_EXTEND_AFTER,
   }
 }
 
@@ -260,6 +278,8 @@ fn __agent_stall_config(value) -> AgentStallConfig {
     repair_aware: __agent_stall_bool(value?.repair_aware, false, "repair_aware"),
     stuck_same_diagnostic_after: __agent_stall_int(value?.stuck_same_diagnostic_after, STALL_STUCK_SAME_DIAGNOSTIC_AFTER, 2),
     post_edit_reverify: __agent_stall_bool(value?.post_edit_reverify, true, "post_edit_reverify"),
+    no_net_progress_extend_guard: __agent_stall_bool(value?.no_net_progress_extend_guard, false, "no_net_progress_extend_guard"),
+    no_net_progress_extend_after: __agent_stall_int(value?.no_net_progress_extend_after, STALL_NO_NET_PROGRESS_EXTEND_AFTER, 2),
   }
 }
 
@@ -1260,7 +1280,41 @@ pub fn agent_stall_repair_config(raw_config) -> dict {
     repair_aware: config.repair_aware,
     post_edit_reverify: config.post_edit_reverify,
     stuck_same_diagnostic_after: config.stuck_same_diagnostic_after,
+    no_net_progress_extend_guard: config.no_net_progress_extend_guard,
+    no_net_progress_extend_after: config.no_net_progress_extend_after,
   }
+}
+
+/**
+ * agent_stall_no_net_progress reports whether THIS turn is a no-net-advancement
+ * thrash for the purpose of the loop's budget-extension decision. It is the
+ * harn-side twin of burin's no-net-progress ripcord: the default extension
+ * policy treats any tool-calling turn as "progress" and keeps extending the
+ * iteration budget, so a model re-hitting the SAME compile/test failure every
+ * turn (no error draining toward a green build) buys unbounded runway. This
+ * returns true ONLY when the guard is enabled AND the loop is on the verify-
+ * bearing FAILING path (`last_diagnostic_class == "fail"`) AND the same failure
+ * signature has recurred for at least `no_net_progress_extend_after` turns
+ * (`same_diagnostic_streak`, which the diagnostic fold advances on the SAME
+ * signature even across edits and RESETS when a productive edit changes the
+ * error or a test passes). So it never fires for a genuinely-advancing run
+ * (signature changes => streak resets) and never fires on read-only / explore
+ * turns (no failing verification => class != "fail"). Default OFF: when the
+ * guard is disabled it always returns false, preserving today's behavior.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_stall_no_net_progress(raw_config, stall_state: AgentStallState) -> bool {
+  let config = __agent_stall_config(raw_config)
+  if !config.no_net_progress_extend_guard {
+    return false
+  }
+  if stall_state.last_diagnostic_class != "fail" {
+    return false
+  }
+  return stall_state.same_diagnostic_streak >= config.no_net_progress_extend_after
 }
 
 /**
