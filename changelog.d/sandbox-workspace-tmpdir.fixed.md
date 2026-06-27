@@ -17,5 +17,6 @@
   `socketpair` with egress sockets, so `cargo build`/`cargo test` could not even
   spawn `rustc` (Cargo's jobserver is `socketpair`-backed) — it failed with
   `(never executed)` / `Operation not permitted`. `socketpair` is now allowed
-  while `socket`/`connect`/`bind`/`listen`/`send*`/`recv*` stay denied, so local
-  IPC works without opening any egress path.
+  while `socket`/`connect`/`bind`/`listen`/`accept` stay denied, so local IPC
+  works without opening any egress path. (The `send*`/`recv*` family the
+  jobserver drives that pair with is un-denied in a companion fix.)
