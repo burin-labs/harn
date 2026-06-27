@@ -91,4 +91,30 @@ commit_all "$mixed_repo" "change source with dependency"
 mixed_output=$(expect_fail "$mixed_repo" "$mixed_base")
 grep -q "crates/harn-vm/src/lib.rs" <<<"$mixed_output"
 
+# A nested, non-dependency file whose name merely starts with "requirements"
+# must NOT be mistaken for a pip requirements manifest. The dependency-metadata
+# allowlist previously used `requirements.*\.txt`, where `.*` crossed `/`, so a
+# path like `.../requirements_helpers/seed.txt` matched and silently bypassed the
+# gate. It must require a changelog fragment like any other source change.
+reqlike_repo=$(new_repo reqlike)
+mkdir -p "$reqlike_repo/crates/harn-vm/src/requirements_helpers"
+printf 'seed\n' > "$reqlike_repo/crates/harn-vm/src/requirements_helpers/seed.txt"
+commit_all "$reqlike_repo" base
+reqlike_base=$(git -C "$reqlike_repo" rev-parse HEAD)
+printf 'seed v2\n' > "$reqlike_repo/crates/harn-vm/src/requirements_helpers/seed.txt"
+commit_all "$reqlike_repo" "edit a requirements-prefixed source file"
+reqlike_output=$(expect_fail "$reqlike_repo" "$reqlike_base")
+grep -q "crates/harn-vm/src/requirements_helpers/seed.txt" <<<"$reqlike_output"
+
+# A genuine pip requirements file (single path segment) still counts as
+# dependency metadata and passes without a fragment.
+req_repo=$(new_repo requirements)
+printf 'flask==2.0.0\n' > "$req_repo/requirements-dev.txt"
+commit_all "$req_repo" base
+req_base=$(git -C "$req_repo" rev-parse HEAD)
+printf 'flask==2.0.1\n' > "$req_repo/requirements-dev.txt"
+commit_all "$req_repo" "bump python dependency"
+req_output=$(expect_pass "$req_repo" "$req_base")
+grep -q "only dependency manifest/lockfile paths touched" <<<"$req_output"
+
 echo "changelog_fragment_check_test: ok"
