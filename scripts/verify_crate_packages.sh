@@ -194,7 +194,10 @@ while IFS= read -r source; do
   fi
 done < <(find crates/harn-stdlib/src/stdlib -maxdepth 1 -name 'stdlib*.harn' -print | sort)
 
-if grep -R '\.\./harn-\(vm\|modules\)' "$stdlib_pkg/src" >/dev/null; then
+# ERE (-E) so the alternation is portable: BRE `\|` is a GNU-grep extension and
+# matches literally on BSD/macOS grep, which would make this guard a silent no-op
+# on the primary dev platform.
+if grep -RE '\.\./harn-(vm|modules)' "$stdlib_pkg/src" >/dev/null; then
   echo "error: packaged harn-stdlib contains workspace-relative consumer includes" >&2
   exit 1
 fi
@@ -221,7 +224,8 @@ if [[ -e "$modules_pkg/src/stdlib" ]]; then
   exit 1
 fi
 
-if grep -R '\.\./harn-\(vm\|stdlib\)' "$modules_pkg/src" >/dev/null; then
+# ERE (-E): see the harn-stdlib guard above — BRE `\|` no-ops on BSD/macOS grep.
+if grep -RE '\.\./harn-(vm|stdlib)' "$modules_pkg/src" >/dev/null; then
   echo "error: packaged harn-modules contains workspace-relative stdlib includes" >&2
   exit 1
 fi
