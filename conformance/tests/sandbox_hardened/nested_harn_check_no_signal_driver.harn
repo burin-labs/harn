@@ -4,8 +4,10 @@ import "../_common"
 /**
  * A nested static Harn CLI command must not initialize Tokio's Unix
  * signal/process driver before dispatch. Linux worktree sandboxes at the
- * process_exec ceiling deny socket/socketpair, so enabling that driver would
- * panic before `harn check` can inspect the target file.
+ * process_exec ceiling deny `socket` (the Tokio signal/process driver opens
+ * one), so enabling that driver would panic before `harn check` can inspect
+ * the target file. (`socketpair` is allowed — it is anonymous local IPC, not
+ * an egress channel — so this guard rides on `socket`, not `socketpair`.)
  */
 pipeline default() {
   let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()

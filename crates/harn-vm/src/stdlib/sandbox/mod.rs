@@ -495,6 +495,7 @@ fn sandboxed_process_config(
         resolved.cwd = Some(default_process_cwd_for_policy(policy)?);
     }
     neutralize_rustc_wrapper(&mut resolved.env);
+    inject_workspace_tmpdir(&mut resolved.env, policy);
     Ok(resolved)
 }
 
@@ -519,6 +520,112 @@ fn neutralize_rustc_wrapper(env: &mut Vec<(String, String)>) {
             env.push((key.to_string(), String::new()));
         }
     }
+}
+
+/// Workspace-relative directory name for the sandbox-writable temp dir that
+/// [`workspace_local_tmpdir`] points `TMPDIR`/`TMP`/`TEMP` at. Lives inside a
+/// writable workspace root (which both OS backends already grant) so any
+/// toolchain that honors `TMPDIR` writes its intermediates somewhere the
+/// sandbox permits, instead of the unwritable system `/tmp`.
+pub(crate) const WORKSPACE_TMPDIR_NAME: &str = ".harn-tmp";
+
+/// The environment keys a workspace-local temp dir is exported under. `TMPDIR`
+/// is the POSIX/Rust/clang/gcc/Go/Swift convention; `TMP`/`TEMP` cover tools
+/// (and Windows toolchains) that read those instead.
+pub(crate) const TMPDIR_ENV_KEYS: [&str; 3] = ["TMPDIR", "TMP", "TEMP"];
+
+/// Resolve the sandbox-writable, workspace-local temp directory for `policy`,
+/// creating it lazily.
+///
+/// Compiler linkers (`rustc`/`cc`/`ld`, Go, Swift, …) and countless other
+/// toolchains write intermediate object/temp files to `$TMPDIR`, defaulting to
+/// the system `/tmp` when it is unset. Under a restricted profile `/tmp` is
+/// outside the writable workspace roots, so those writes are denied and a build
+/// that would otherwise succeed FALSE-FAILS for an infrastructure reason. By
+/// pointing the child's temp dir at a directory *inside* the first writable
+/// workspace root — which the OS sandbox already grants write access to — the
+/// build's temp writes land somewhere permitted without widening the sandbox.
+///
+/// Returns `None` when the policy declares no writable workspace root (there is
+/// nowhere sandbox-writable to anchor the temp dir) or when the directory could
+/// not be created (the caller then leaves the child's inherited temp dir
+/// untouched rather than failing the spawn).
+pub(crate) fn workspace_local_tmpdir(policy: &CapabilityPolicy) -> Option<PathBuf> {
+    let root = normalized_workspace_roots(policy).into_iter().next()?;
+    let tmpdir = root.join(WORKSPACE_TMPDIR_NAME);
+    if let Err(error) = std::fs::create_dir_all(&tmpdir) {
+        warn_once(
+            "handler_sandbox_workspace_tmpdir",
+            &format!(
+                "could not create workspace-local temp dir '{}': {error}; \
+                 leaving the child's inherited temp dir in place",
+                tmpdir.display()
+            ),
+        );
+        return None;
+    }
+    // Keep the temp dir's churn out of every git-based diff/status (so it never
+    // leaks into an agent's view, a PR, or eval grading) by self-ignoring its
+    // own contents. A `.gitignore` of `*` inside the dir excludes everything,
+    // including itself, regardless of whether the workspace tracks it. Written
+    // best-effort and only when absent so we don't thrash an existing file.
+    let ignore = tmpdir.join(".gitignore");
+    if !ignore.exists() {
+        let _ = std::fs::write(
+            &ignore,
+            "# Created by the Harn sandbox; safe to delete.\n*\n",
+        );
+    }
+    Some(tmpdir)
+}
+
+/// Overlay `TMPDIR`/`TMP`/`TEMP` onto a child's env so a sandboxed toolchain
+/// writes its intermediates to a workspace-local, sandbox-writable directory
+/// instead of the unwritable system `/tmp` (see [`workspace_local_tmpdir`]).
+///
+/// A key the caller set explicitly in `env` is left untouched — an intentional
+/// per-call `TMPDIR` is honored. The inherited-from-parent value is *not*
+/// preserved: that is exactly the non-writable `/tmp` (or empty) we must
+/// override. No-op under an unrestricted/absent policy or when no writable
+/// workspace root is available.
+pub(crate) fn inject_workspace_tmpdir(env: &mut Vec<(String, String)>, policy: &CapabilityPolicy) {
+    if matches!(policy.sandbox_profile, SandboxProfile::Unrestricted) {
+        return;
+    }
+    let Some(tmpdir) = workspace_local_tmpdir(policy) else {
+        return;
+    };
+    let tmpdir = tmpdir.display().to_string();
+    for key in TMPDIR_ENV_KEYS {
+        if env.iter().any(|(existing, _)| existing == key) {
+            // The caller pinned this key explicitly; respect it.
+            continue;
+        }
+        env.push((key.to_string(), tmpdir.clone()));
+    }
+}
+
+/// The `TMPDIR`/`TMP`/`TEMP` overrides for the *currently active* execution
+/// policy, as `(key, value)` pairs, or an empty vec when no restricted policy
+/// is active or no writable workspace root exists.
+///
+/// This reads the active execution policy directly (gating only on a restricted
+/// `sandbox_profile`), deliberately *not* through [`active_sandbox_policy`]:
+/// the workspace-local temp dir is a benefit of the child env, independent of
+/// whether OS confinement is enforced, so it must still engage under
+/// `HARN_HANDLER_SANDBOX=warn`/`off` (which only weaken *enforcement*, not the
+/// profile). [`inject_workspace_tmpdir`] still no-ops under `Unrestricted`.
+///
+/// This is the entry point the `host_call("process", …)` exec/spawn builder and
+/// the `harn-hostlib` real spawner use to overlay the keys onto a
+/// `Command`/`tokio::process::Command`, skipping any the caller already pinned.
+pub fn active_workspace_tmpdir_env() -> Vec<(String, String)> {
+    let Some(policy) = crate::orchestration::current_execution_policy() else {
+        return Vec::new();
+    };
+    let mut env = Vec::new();
+    inject_workspace_tmpdir(&mut env, &policy);
+    env
 }
 
 fn default_process_cwd_for_policy(policy: &CapabilityPolicy) -> Result<PathBuf, VmError> {
@@ -1312,6 +1419,142 @@ mod tests {
         assert_eq!(collected.get("PATH").map(String::as_str), Some("/usr/bin"));
         // No duplicate RUSTC_WRAPPER entries.
         assert_eq!(env.iter().filter(|(k, _)| k == "RUSTC_WRAPPER").count(), 1);
+    }
+
+    #[test]
+    fn workspace_local_tmpdir_lands_inside_the_first_writable_root() {
+        let workspace = tempfile::tempdir().unwrap();
+        let policy = CapabilityPolicy {
+            sandbox_profile: SandboxProfile::Worktree,
+            workspace_roots: vec![workspace.path().to_string_lossy().into_owned()],
+            ..CapabilityPolicy::default()
+        };
+
+        let tmpdir = workspace_local_tmpdir(&policy).expect("a writable root yields a temp dir");
+
+        // The temp dir is created, lives under the writable workspace root, and
+        // is named by the documented convention.
+        assert!(tmpdir.is_dir(), "temp dir must be created: {tmpdir:?}");
+        assert!(
+            path_is_within(&tmpdir, &normalize_for_policy(workspace.path())),
+            "temp dir {tmpdir:?} must be inside the writable workspace root"
+        );
+        assert!(tmpdir.ends_with(WORKSPACE_TMPDIR_NAME));
+        // It self-ignores so its churn never shows in a git diff.
+        let ignore = std::fs::read_to_string(tmpdir.join(".gitignore")).unwrap_or_default();
+        assert!(
+            ignore.lines().any(|line| line.trim() == "*"),
+            "temp dir must carry a self-ignoring .gitignore, got {ignore:?}"
+        );
+        // It is within the sandbox's writable scope: a write under it passes the
+        // same path-scope check the OS sandbox enforces.
+        push_execution_policy(policy);
+        assert!(
+            check_fs_path_scope(&tmpdir.join("rustcXXXX/intermediate.o"), FsAccess::Write).is_ok(),
+            "writes under the workspace-local temp dir must be in sandbox scope"
+        );
+        pop_execution_policy();
+    }
+
+    #[test]
+    fn inject_workspace_tmpdir_is_a_noop_under_unrestricted_profile() {
+        // The unrestricted profile short-circuits the injection helper: an
+        // unsandboxed child keeps whatever TMPDIR it would otherwise inherit.
+        let policy = CapabilityPolicy {
+            sandbox_profile: SandboxProfile::Unrestricted,
+            workspace_roots: vec!["/definitely/not/writable/xyzzy".to_string()],
+            ..CapabilityPolicy::default()
+        };
+        let mut env = Vec::new();
+        inject_workspace_tmpdir(&mut env, &policy);
+        assert!(
+            env.is_empty(),
+            "unrestricted profile must not inject a TMPDIR override, got {env:?}"
+        );
+    }
+
+    #[test]
+    fn inject_workspace_tmpdir_sets_all_three_keys_inside_workspace() {
+        let workspace = tempfile::tempdir().unwrap();
+        let policy = CapabilityPolicy {
+            sandbox_profile: SandboxProfile::Worktree,
+            workspace_roots: vec![workspace.path().to_string_lossy().into_owned()],
+            ..CapabilityPolicy::default()
+        };
+        let mut env = Vec::new();
+        inject_workspace_tmpdir(&mut env, &policy);
+
+        let collected: std::collections::BTreeMap<_, _> = env.into_iter().collect();
+        let expected = workspace_local_tmpdir(&policy)
+            .unwrap()
+            .display()
+            .to_string();
+        for key in TMPDIR_ENV_KEYS {
+            assert_eq!(
+                collected.get(key).map(String::as_str),
+                Some(expected.as_str()),
+                "{key} must point at the workspace-local temp dir"
+            );
+        }
+    }
+
+    #[test]
+    fn inject_workspace_tmpdir_respects_a_caller_pinned_tmpdir() {
+        let workspace = tempfile::tempdir().unwrap();
+        let policy = CapabilityPolicy {
+            sandbox_profile: SandboxProfile::Worktree,
+            workspace_roots: vec![workspace.path().to_string_lossy().into_owned()],
+            ..CapabilityPolicy::default()
+        };
+        // Caller already pinned TMPDIR; only the untouched siblings get filled.
+        let mut env = vec![("TMPDIR".to_string(), "/caller/explicit/tmp".to_string())];
+        inject_workspace_tmpdir(&mut env, &policy);
+
+        let collected: std::collections::BTreeMap<_, _> = env.iter().cloned().collect();
+        assert_eq!(
+            collected.get("TMPDIR").map(String::as_str),
+            Some("/caller/explicit/tmp"),
+            "an explicit caller TMPDIR must be preserved untouched"
+        );
+        let expected = workspace_local_tmpdir(&policy)
+            .unwrap()
+            .display()
+            .to_string();
+        assert_eq!(
+            collected.get("TMP").map(String::as_str),
+            Some(expected.as_str())
+        );
+        assert_eq!(
+            collected.get("TEMP").map(String::as_str),
+            Some(expected.as_str())
+        );
+        // And no duplicate TMPDIR entry was appended.
+        assert_eq!(env.iter().filter(|(k, _)| k == "TMPDIR").count(), 1);
+    }
+
+    #[test]
+    fn sandboxed_process_config_injects_workspace_tmpdir() {
+        let workspace = tempfile::tempdir().unwrap();
+        let policy = CapabilityPolicy {
+            sandbox_profile: SandboxProfile::Worktree,
+            workspace_roots: vec![workspace.path().to_string_lossy().into_owned()],
+            ..CapabilityPolicy::default()
+        };
+        let config = ProcessCommandConfig {
+            cwd: Some(workspace.path().to_path_buf()),
+            ..ProcessCommandConfig::default()
+        };
+        let resolved = sandboxed_process_config(&config, &policy).unwrap();
+        let env: std::collections::BTreeMap<_, _> = resolved.env.into_iter().collect();
+        let expected = workspace_local_tmpdir(&policy)
+            .unwrap()
+            .display()
+            .to_string();
+        assert_eq!(
+            env.get("TMPDIR").map(String::as_str),
+            Some(expected.as_str()),
+            "the command_output path must inject a workspace-local TMPDIR"
+        );
     }
 
     #[test]

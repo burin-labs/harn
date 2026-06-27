@@ -389,18 +389,40 @@ fn denied_syscalls(policy: &CapabilityPolicy) -> Vec<libc::c_long> {
         libc::SYS_userfaultfd,
     ];
     if !policy_allows_network(policy) {
+        // Deny only the syscalls that CREATE or ADDRESS an off-host socket —
+        // `socket` (an addressable AF_INET/AF_INET6 endpoint), `connect`,
+        // `bind`, `listen`, `accept`/`accept4`. Without `socket` and `connect`
+        // there is no addressable fd to route traffic over, so egress is
+        // already foreclosed at the source.
+        //
+        // The send/recv FAMILY (`recvfrom`/`recvmsg`/`sendmsg`/`sendto`) is
+        // deliberately NOT denied. Those operate on an EXISTING fd; with
+        // `socket`/`connect`/`bind` denied the only sockets a sandboxed process
+        // can hold are anonymous `socketpair` pairs (and pipes), so allowing
+        // send/recv buys no egress while it is REQUIRED for local IPC:
+        //   * `socketpair` (kept allowed below the network ceiling) is only
+        //     half the story — modern Cargo's jobserver is a SOCK_SEQPACKET
+        //     `socketpair`, and Cargo acquires/releases build tokens over it
+        //     with `recvfrom`/`sendto`. Denying recvfrom makes the parent's
+        //     token read EPERM, which surfaces as a worker-thread
+        //     `the CLOEXEC pipe failed: Operation not permitted` panic and
+        //     `cargo build`/`cargo test` aborts before any rustc link — i.e.
+        //     un-denying `socketpair` alone (the earlier fix) is necessary but
+        //     NOT sufficient; its send/recv must follow.
+        // Empirically reproduced under this exact seccomp filter: with recvfrom
+        // denied a trivial `cargo build` panics; un-denying the send/recv family
+        // lets it complete, while `socket(AF_INET)`/`connect` stay EPERM.
+        //
+        // `socketpair` itself is also NOT in this list: it creates an
+        // anonymous, connected AF_UNIX pair with no address and no route
+        // off-host, so it cannot exfiltrate.
         syscalls.extend([
             libc::SYS_accept,
             libc::SYS_accept4,
             libc::SYS_bind,
             libc::SYS_connect,
             libc::SYS_listen,
-            libc::SYS_recvfrom,
-            libc::SYS_recvmsg,
-            libc::SYS_sendmsg,
-            libc::SYS_sendto,
             libc::SYS_socket,
-            libc::SYS_socketpair,
         ]);
     }
     syscalls.sort_unstable();
@@ -575,6 +597,83 @@ mod tests {
             tool_annotations: std::collections::BTreeMap::new(),
             sandbox_profile: SandboxProfile::Worktree,
             process_sandbox: Default::default(),
+        }
+    }
+
+    #[test]
+    fn no_network_denies_addressable_sockets_but_allows_local_socketpair() {
+        // At a sub-network ceiling, the egress-capable socket syscalls are
+        // denied, but `socketpair` (anonymous, unaddressable local IPC) stays
+        // allowed so Cargo's socketpair-backed jobserver can spawn rustc.
+        let policy = linux_policy_with_workspace_ops(&["read_text"]);
+        assert_eq!(
+            policy.side_effect_level.as_deref(),
+            Some("read_only"),
+            "fixture must be below the network ceiling",
+        );
+        let denied = denied_syscalls(&policy);
+
+        assert!(
+            denied.contains(&libc::SYS_socket),
+            "addressable socket() must be denied without network",
+        );
+        assert!(
+            denied.contains(&libc::SYS_connect),
+            "connect() must be denied without network",
+        );
+        assert!(
+            !denied.contains(&libc::SYS_socketpair),
+            "socketpair() (local IPC) must NOT be denied — Cargo's jobserver needs it",
+        );
+        // The socketpair-backed jobserver also drives its pair with the
+        // send/recv family; denying those EPERMs Cargo's token read and aborts
+        // the build with a `CLOEXEC pipe failed` worker panic (RC3). They open
+        // no egress while `socket`/`connect`/`bind` stay denied.
+        for call in [
+            libc::SYS_recvfrom,
+            libc::SYS_recvmsg,
+            libc::SYS_sendmsg,
+            libc::SYS_sendto,
+        ] {
+            assert!(
+                !denied.contains(&call),
+                "send/recv syscall {call} must NOT be denied — local socketpair IPC (Cargo jobserver) needs it",
+            );
+        }
+        // The egress-capable openers stay denied: no addressable socket can be
+        // created or routed, so send/recv cannot reach the network.
+        for call in [
+            libc::SYS_socket,
+            libc::SYS_connect,
+            libc::SYS_bind,
+            libc::SYS_listen,
+            libc::SYS_accept,
+            libc::SYS_accept4,
+        ] {
+            assert!(
+                denied.contains(&call),
+                "egress opener {call} must stay denied without network",
+            );
+        }
+    }
+
+    #[test]
+    fn network_ceiling_allows_all_socket_syscalls() {
+        // When network side effects are permitted, none of the socket family
+        // is denied (socketpair included).
+        let mut policy = linux_policy_with_workspace_ops(&["read_text"]);
+        policy.side_effect_level = Some("network".to_string());
+        let denied = denied_syscalls(&policy);
+        for call in [
+            libc::SYS_socket,
+            libc::SYS_socketpair,
+            libc::SYS_connect,
+            libc::SYS_bind,
+        ] {
+            assert!(
+                !denied.contains(&call),
+                "network ceiling must not deny socket-family syscall {call}",
+            );
         }
     }
 

@@ -21,6 +21,18 @@ keeps condensed series summaries instead of full per-patch history.
   publication, and stricter OAuth refresh-token rotation handling that clears
   stored MCP OAuth state on terminal `invalid_grant` while keeping token
   endpoint bodies redacted.
+- Memoized the per-file read+import-scan and `canonicalize` work inside the
+  bytecode cache's transitive import-graph hash (`CacheKey::from_source`). A cold
+  `harn run` over a large pipeline calls `from_source` once per module load --
+  the Burin 286-file pipeline does ~175 of them -- and each call previously
+  re-read, re-scanned, and re-`realpath`'d every shared library file on the import
+  graph. The walk now reads and canonicalizes each file at most once per stat
+  identity, so the import-graph hash drops from ~3.6s to ~0.4s on a warm process
+  and the whole pre-execution module-load phase falls from ~10s to ~0.6s
+  steady-state (~2x faster even on a single-shot cold process). The memo is keyed
+  by `(path, len, mtime_ns)`, so any on-disk edit busts it and a long-lived warm
+  process still recompiles edited pipelines correctly; the folded hash bytes are
+  byte-identical to the un-memoized path, so cache keys are unchanged.
 
 ### Fixed
 
@@ -54,6 +66,52 @@ keeps condensed series summaries instead of full per-patch history.
   package -- a no-op on the primary dev platform where `release_gate.sh` is run.
   Switched both to portable ERE (`grep -RE '(vm|modules)'` /
   `'(vm|stdlib)'`); behavior on GNU grep is unchanged.
+- **`harn local launch` no longer duplicates flags that a runtime's
+  `default_args` and a dedicated CLI flag both supply.** The llama.cpp runtime
+  ships `default_args = [--jinja, --reasoning off, --reasoning-format deepseek,
+  --metrics, --flash-attn on]`; passing the matching dedicated flags
+  (`--jinja`, `--flash-attn on`, ...) appended each one a second time, so the
+  launched argv carried `--jinja ... --jinja` and `--flash-attn on ...
+  --flash-attn on`. The builder now folds in only the `default_args` entries the
+  caller did not override, and the explicit value wins (e.g. `--flash-attn auto`
+  replaces the default `on`). Harmless to llama.cpp, but it made the persisted
+  launch record and logs misleading; deduped output is now exact.
+- **Sandboxed builds get a writable, workspace-local `TMPDIR`.** Compiler
+  linkers (`rustc`/`cc`/`ld`, Go, Swift, ...) and other toolchains write
+  intermediate object/temp files to `$TMPDIR`, defaulting to the system `/tmp`
+  when it is unset -- which is outside the sandbox's writable workspace roots, so
+  those writes were denied and a build that should pass FALSE-FAILED with
+  `could not write output to /tmp/rustcXXXX/...: Cannot create temporary file in
+  /tmp/: Permission denied`. The process command-runner (both the
+  `host_call("process", ...)` exec/spawn path and the `process.exec`/`shell`
+  builtins) now points a sandboxed child's `TMPDIR`/`TMP`/`TEMP` at a lazily
+  created `.harn-tmp/` inside the first writable workspace root, which the OS
+  sandbox already grants. This fixes any TMPDIR-honoring toolchain without
+  widening the sandbox; a `TMPDIR` the caller sets explicitly is respected, and
+  the temp dir self-`.gitignore`s so its churn never leaks into a diff or eval
+  grading.
+- **Linux sandbox no longer denies `socketpair` below the network ceiling.** The
+  seccomp blocklist conflated the anonymous, unaddressable local-IPC `socketpair`
+  with egress sockets, so `cargo build`/`cargo test` could not even spawn `rustc`
+  (Cargo's jobserver is `socketpair`-backed) -- it failed with `(never executed)`
+  / `Operation not permitted`. `socketpair` is now allowed while
+  `socket`/`connect`/`bind`/`listen`/`accept` stay denied, so local IPC works
+  without opening any egress path. The `send*`/`recv*` family the jobserver drives
+  that pair with is un-denied in the companion fix below.
+- **Linux sandbox no longer denies the `send*`/`recv*` family below the network
+  ceiling, so Cargo's socketpair-backed jobserver works.** Un-denying
+  `socketpair` was necessary but not sufficient: Cargo acquires/releases build
+  tokens over that pair with `recvfrom`/`sendto`, and those stayed seccomp-denied
+  so the parent's token read returned `EPERM`, surfacing as a worker-thread
+  `the CLOEXEC pipe failed: Operation not permitted` panic that aborted
+  `cargo build`/`cargo test` before any `rustc`/link step. `recvfrom`, `recvmsg`,
+  `sendmsg`, and `sendto` are now allowed below the network ceiling. They open no
+  egress: with `socket`/`connect`/`bind`/`listen`/`accept` still denied, a
+  sandboxed process can hold only anonymous `socketpair` pairs and pipes, so the
+  send/recv family can only drive local IPC. Reproduced and verified under the
+  exact seccomp filter -- a trivial `cargo build` panics with the family denied
+  and completes with it allowed, while `socket(AF_INET)` and `connect` stay
+  `EPERM`.
 
 ## v0.8.146
 
