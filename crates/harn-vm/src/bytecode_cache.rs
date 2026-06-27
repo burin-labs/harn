@@ -46,6 +46,12 @@ use crate::chunk::{CachedChunk, Chunk};
 use crate::compiler::CompilerOptions;
 use crate::module_artifact::ModuleArtifact;
 
+type ImportScan = (String, Vec<String>);
+type SharedImportScan = std::sync::Arc<ImportScan>;
+type ImportsFileMemoKey = (PathBuf, u64, i128);
+type ImportsFileMemo =
+    std::sync::Mutex<std::collections::HashMap<ImportsFileMemoKey, SharedImportScan>>;
+
 /// Header magic for all bytecode-cache artifact families.
 pub const MAGIC: &[u8; 8] = b"HARNBC\0\0";
 
@@ -723,15 +729,9 @@ fn hash_transitive_user_imports(source_path: &Path, source: &str) -> [u8; 32] {
 /// stale entry is never reused — a warm long-lived process recompiles edited
 /// pipelines correctly. The returned bytes are identical to the un-memoized
 /// path, so cache keys are byte-for-byte unchanged.
-fn imports_file_memo() -> &'static std::sync::Mutex<
-    std::collections::HashMap<(PathBuf, u64, i128), std::sync::Arc<(String, Vec<String>)>>,
-> {
+fn imports_file_memo() -> &'static ImportsFileMemo {
     use std::sync::OnceLock;
-    static MEMO: OnceLock<
-        std::sync::Mutex<
-            std::collections::HashMap<(PathBuf, u64, i128), std::sync::Arc<(String, Vec<String>)>>,
-        >,
-    > = OnceLock::new();
+    static MEMO: OnceLock<ImportsFileMemo> = OnceLock::new();
     MEMO.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
 }
 
