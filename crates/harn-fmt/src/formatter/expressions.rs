@@ -238,9 +238,12 @@ impl Formatter<'_> {
                 true_expr,
                 false_expr,
             } => {
-                let cond = self.format_expr(condition, indent);
-                let t = self.format_expr(true_expr, indent);
-                let f = self.format_expr(false_expr, indent);
+                // A range bound to a ternary part must be parenthesized: a bare
+                // range as the condition would swallow the `?:` into its end
+                // bound, and as a branch it simply fails to re-parse.
+                let cond = paren_if_range(self.format_expr(condition, indent), &condition.node);
+                let t = paren_if_range(self.format_expr(true_expr, indent), &true_expr.node);
+                let f = paren_if_range(self.format_expr(false_expr, indent), &false_expr.node);
                 format!("{cond} ? {t} : {f}")
             }
             Node::Assignment {
@@ -290,8 +293,10 @@ impl Formatter<'_> {
                 end,
                 inclusive,
             } => {
-                let s = self.format_expr(start, indent);
-                let e = self.format_expr(end, indent);
+                // A range bound that is itself a range needs parens; `a to b to c`
+                // is non-associative and would not re-parse.
+                let s = paren_if_range(self.format_expr(start, indent), &start.node);
+                let e = paren_if_range(self.format_expr(end, indent), &end.node);
                 if *inclusive {
                     format!("{s} to {e}")
                 } else {
