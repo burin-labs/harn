@@ -525,7 +525,7 @@ mod tests {
     // The Kotlin file the model authored for eval-kotlin-workflow t1 (`edit`
     // create, native tool_format) is valid and parses with ZERO errors when
     // checked standalone — proving the reported `line 150: }` rejection was a
-    // Burin-side `replace_body` brace-splice defect on a LATER edit, not a
+    // a host-side `replace_body` brace-splice defect on a LATER edit, not a
     // newline-corruption or a grammar gap in the authored content. The body
     // carries real newlines and no literal `\n`.
     #[test]

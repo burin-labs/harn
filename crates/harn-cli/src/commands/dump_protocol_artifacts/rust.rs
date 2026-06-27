@@ -12,7 +12,7 @@ use super::values::*;
 ///
 /// Unlike the Swift/Go/Python artifacts (which publish the full typed envelope
 /// surface), the Rust artifact is intentionally a flat, allocation-free module
-/// of `pub const` wire-name vocabulary plus the published slices. Burin Code
+/// of `pub const` wire-name vocabulary plus the published slices. A downstream host
 /// vendors it verbatim as `protocol/src/generated.rs` and routes/matches on the
 /// constants instead of hand-maintaining a parallel method enum — the exact
 /// HARN_BOUNDARY "don't mirror Harn wire vocabulary by hand" fix.

@@ -571,7 +571,7 @@ async fn acp_session_load_replays_persisted_agent_events() {
 }
 
 /// A fresh in-process server (one that never created the id via
-/// `session/new`) must still restore a Burin saved session from
+/// `session/new`) must still restore a host-saved session from
 /// persisted replay events: register it as a live, promptable session,
 /// replay history, and return the normal restore-result shape. This is
 /// the in-process analogue of the WebSocket hub's persisted fallback and

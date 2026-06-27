@@ -8,7 +8,7 @@
 //! it over a pair of unbounded channels.
 //!
 //! Every in-process embedder (the orchestrator's ACP WebSocket hub, the API
-//! adapter, and Burin Code's Rust TUI) re-implements that exact dance.
+//! adapter, and a host's Rust TUI) re-implements that exact dance.
 //! [`EmbeddedAgent`] packages it once: call [`EmbeddedAgent::spawn`], get back
 //! the request sender, the response receiver, and an [`AcpChannelHandle`] for
 //! graceful shutdown / readiness / termination, and let `Drop` join the worker

@@ -13,7 +13,7 @@
 //! A bundled-grammar regression (a tree-sitter grammar bump that mis-lexes valid
 //! modern source) silently ships PHANTOM facts to the model — a phantom import
 //! the model "fixes", or a phantom parse-error storm that steers it to rewrite
-//! correct code. The Burin host caught one such bug after it shipped: the
+//! correct code. A downstream host caught one such bug after it shipped: the
 //! tree-sitter-zig grammar mis-lexed a valid `\\` multiline string into a storm
 //! of `unexpected '...'` errors (burin-code #3010), and the only defense was a
 //! per-language special-case. This corpus is the GENERALIZED, pre-ship defense:

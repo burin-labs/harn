@@ -1179,7 +1179,7 @@ async fn host_agent_dispatch_tool_call(
         return Ok(json_to_vm_value(&denied));
     }
 
-    // Burin compass tool-rewrite router (B.9, #2612). Observe freeform /
+    // Compass tool-rewrite router (B.9, #2612). Observe freeform /
     // whole-file edit calls and either suggest the AST-precise primitive
     // (advisory; default) or rewrite the call into a provably-equivalent
     // structural form. Runs after permission / pre-tool hooks but before

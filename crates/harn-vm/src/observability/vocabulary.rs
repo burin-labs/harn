@@ -154,7 +154,7 @@ pub const HTTP: VocabNamespace = VocabNamespace {
     ],
 };
 
-/// Burin compass tool-rewrite router (B.9, #2612). The `harn.compass.*`
+/// Compass tool-rewrite router (B.9, #2612). The `harn.compass.*`
 /// counters (`suggested`/`rewritten`/`fell_back`) tag each routing
 /// decision with the persona and the freeform/structural tool names so
 /// eval dashboards can attribute the agent-loop edit-reliability win.

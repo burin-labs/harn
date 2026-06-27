@@ -87,8 +87,8 @@ pub struct SkillManifest {
     pub argument_hint: Option<String>,
     /// Optional version/target constraint for version-aware grounding
     /// (e.g. `targets: zig >=0.16`). Harn does not interpret this — it is
-    /// an opaque passthrough surfaced as skill metadata so hosts (Burin
-    /// #2965) can pick version-matched grounding cards.
+    /// an opaque passthrough surfaced as skill metadata so hosts
+    /// (#2965) can pick version-matched grounding cards.
     #[serde(default)]
     pub targets: Option<String>,
 }
@@ -332,7 +332,7 @@ mod tests {
 
     #[test]
     fn targets_is_recognized_not_unknown() {
-        // Burin #2965: language SKILL.md cards carry a `targets:` field for
+        // #2965: language SKILL.md cards carry a `targets:` field for
         // version-aware grounding. Harn must accept it (opaque passthrough)
         // and not flag it as an unknown frontmatter field.
         let yaml = "name: zig-grounding\nshort: Zig grounding card\ntargets: \"zig >=0.16\"\n";

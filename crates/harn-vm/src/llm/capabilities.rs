@@ -490,7 +490,7 @@ pub struct ProviderRule {
     /// valid requests, silently contaminating any eval/meter that trusts its
     /// numbers. This is the data-driven sibling of [`Self::provider_route_denylist`]
     /// / [`Self::openrouter_provider_order`]: instead of routing *around* a bad
-    /// upstream, it labels the route's measured precision so tooling (the Burin
+    /// upstream, it labels the route's measured precision so tooling (the
     /// meter precision canary) can refuse to trust a `degraded` route and flag a
     /// `throttled` one. Known values are `trusted` (full-precision verified
     /// against a reference), `degraded` (proven to serve at reduced quality),

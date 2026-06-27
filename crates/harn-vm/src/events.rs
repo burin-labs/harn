@@ -294,7 +294,7 @@ impl OtelSink {
     }
 }
 
-/// Burin-side spawns a fresh `harn` child per session, so the only
+/// The host spawns a fresh `harn` child per session, so the only
 /// reliable way to opt into local trace export is via environment
 /// variables read at startup. Prefer the Harn-specific variable so a
 /// caller that points an unrelated process at an OTLP collector via
@@ -452,7 +452,7 @@ static OTEL_PROVIDER: std::sync::OnceLock<
 /// `OTEL_EXPORTER_OTLP_HEADERS` (comma/semicolon-separated
 /// `name=value` pairs).
 ///
-/// Hosts (`harn run`, `harn serve acp`, embedders like Burin) should
+/// Hosts (`harn run`, `harn serve acp`, and other embedders) should
 /// call this once near process startup so any spans emitted during the
 /// session land at the configured collector.
 #[cfg(feature = "otel")]

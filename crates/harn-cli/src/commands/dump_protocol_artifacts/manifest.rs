@@ -22,7 +22,7 @@ pub(super) fn generate_tool_call_receipt_schema() -> Result<String, String> {
 /// Render the protocol-artifact manifest the running Harn would write.
 ///
 /// Re-exposed via `harn package artifacts manifest` so downstream automation
-/// (Burin Code, Harn Cloud) can compare against vendored copies without
+/// (downstream hosts, Harn Cloud) can compare against vendored copies without
 /// shelling out to `dump-protocol-artifacts`.
 pub(crate) fn manifest_json() -> Result<String, String> {
     generate_manifest()

@@ -37,7 +37,7 @@ impl Severity {
     }
 }
 
-/// How risky a rule's `fix` is, mapped onto Burin's edit-safety taxonomy.
+/// How risky a rule's `fix` is, mapped onto the host's edit-safety taxonomy.
 /// Ordered least → most dangerous; the codemod runner auto-applies only the
 /// two safest tiers (see [`Safety::applicability`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Deserialize)]

@@ -119,7 +119,7 @@ pub(crate) struct PersonaListArgs {
 pub(crate) struct PersonaInspectArgs {
     /// Persona name to inspect.
     pub name: String,
-    /// Emit stable JSON for Harn Cloud, Burin Code, or other hosts.
+    /// Emit stable JSON for Harn Cloud or other hosts.
     #[arg(long)]
     pub json: bool,
 }
@@ -132,7 +132,7 @@ pub(crate) struct PersonaStatusArgs {
     /// omitted, falls back to the current UTC wall clock.
     #[arg(long, value_name = "RFC3339")]
     pub at: Option<String>,
-    /// Emit stable JSON for Harn Cloud, Burin Code, or other hosts.
+    /// Emit stable JSON for Harn Cloud or other hosts.
     #[arg(long)]
     pub json: bool,
 }

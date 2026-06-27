@@ -1,13 +1,12 @@
-//! Package-manifest dependency extraction. Ports
-//! `ManifestDependencyParser.swift` from Burin Code so the deterministic
-//! "what dependencies does this project declare" fact is computed once, in
-//! the cross-platform Rust scanner, instead of duplicated in Swift.
+//! Package-manifest dependency extraction — the deterministic
+//! "what dependencies does this project declare" fact, computed once in
+//! the cross-platform Rust scanner instead of duplicated in every host.
 //!
 //! The parsing is intentionally lexical (no real TOML / YAML / XML parser
 //! dependency beyond `serde_json` for the two JSON manifests) so every
 //! supported ecosystem stays in this one file. Coverage mirrors
-//! [`super::subproject::MARKERS`] and the `packageManifests` field of every
-//! entry in Burin's `data/language-catalog.json`.
+//! [`super::subproject::MARKERS`] and the package-manifest set recognized
+//! by the scanner's language catalog.
 
 use std::collections::BTreeSet;
 use std::fs;

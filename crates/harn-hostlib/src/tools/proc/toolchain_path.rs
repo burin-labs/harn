@@ -36,7 +36,7 @@ use std::path::{Path, PathBuf};
 use crate::process::EnvMode;
 
 /// Environment variable that gates the whole feature. Default OFF: the host
-/// (e.g. Burin) opts in per agent-session by setting it, and can disable it for
+/// (e.g. an IDE host) opts in per agent-session by setting it, and can disable it for
 /// a single session by unsetting it. Recognized truthy values: `1`, `on`,
 /// `true`, `auto`, `yes` (case-insensitive). Anything else (or unset) is off.
 pub(crate) const ENABLE_ENV: &str = "HARN_RUN_TOOLCHAIN_PATH";

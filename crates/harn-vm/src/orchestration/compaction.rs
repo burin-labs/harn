@@ -952,7 +952,7 @@ async fn custom_compaction_summary(
 
 /// Marker the host emits inside a tool-output (or message) body to pin its
 /// live grounding — the current file view and just-edited window — so it
-/// survives a compaction pass. Burin renders this literal substring inside
+/// survives a compaction pass. The host renders this literal substring inside
 /// markdown headings (e.g. `## Exact current file text [no-compact]`,
 /// `## Edited region now reads (...) [no-compact]`) in
 /// `lib/tools/result-format.harn`. Compaction matches the substring; it does

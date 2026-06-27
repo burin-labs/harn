@@ -97,7 +97,7 @@ impl Backend for FileStore {
 
 /// Root config directory. The `<account>` segment is appended by the
 /// caller so each application's credentials land in its own subdirectory
-/// (matches Burin's existing `$XDG_CONFIG_HOME/burin/credentials.json`).
+/// (matches the host's existing `$XDG_CONFIG_HOME/burin/credentials.json`).
 fn config_dir() -> PathBuf {
     if let Some(override_root) = env_nonempty("HARN_SECRET_STORE_FILE_ROOT") {
         return PathBuf::from(override_root);

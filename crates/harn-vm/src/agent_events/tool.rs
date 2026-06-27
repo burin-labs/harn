@@ -49,7 +49,7 @@ pub enum ToolCallErrorCategory {
     ToolError,
     /// MCP transport / server-protocol error.
     McpServerError,
-    /// Burin Swift host bridge returned an error during dispatch.
+    /// The host bridge returned an error during dispatch.
     HostBridgeError,
     /// `session/request_permission` denied by the client, or a policy
     /// rule (static or dynamic) refused the call.
@@ -285,7 +285,7 @@ pub enum ToolExecutor {
     /// or any Harn-side handler closure registered in `tools_val`.
     HarnBuiltin,
     /// Capability provided by the host through `HostBridge.builtin_call`
-    /// (Swift-side IDE bridge, BurinApp, BurinCLI host shells).
+    /// (host IDE bridge and CLI host shells).
     HostBridge,
     /// Tool dispatched against a configured MCP server. Detected by the
     /// `_mcp_server` tag that `mcp_list_tools` injects on every tool

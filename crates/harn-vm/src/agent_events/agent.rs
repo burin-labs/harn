@@ -130,7 +130,7 @@ pub enum AgentEvent {
         replace: bool,
         metadata: serde_json::Value,
     },
-    /// Emitted when the Burin compass observes a freeform edit and either
+    /// Emitted when the compass observes a freeform edit and either
     /// suggests a structural primitive, rewrites the tool call, or falls
     /// back because rewrite mode could not prove equivalence.
     CompassRoutingDecision {

@@ -249,7 +249,7 @@ impl Default for RedactionConfig {
     }
 }
 
-/// Prompt-injection defense posture for the runtime (Burin Layers 0/1).
+/// Prompt-injection defense posture for the runtime (defense Layers 0/1).
 ///
 /// `Off` disables every layer. `Spotlight` (the default) frames untrusted
 /// external tool/MCP output as data and gates exfiltration when context is
