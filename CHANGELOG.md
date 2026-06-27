@@ -36,6 +36,10 @@ keeps condensed series summaries instead of full per-patch history.
 
 ### Fixed
 
+- Bootstrapped MCP tools are now admitted into a non-empty agent policy tool
+  ceiling when `agent_mcp_bootstrap_if_needed` adds them to the tool catalog, so
+  an agent that can see a runtime-discovered MCP tool can also dispatch it.
+  Empty `policy.tools` lists still mean "no ceiling" and remain open.
 - **Changelog-fragment gate no longer treats nested source files as pip
   manifests.** The dependency-metadata allowlist matched `requirements.*\.txt` /
   `constraints.*\.txt`, where `.*` crossed `/`, so a non-dependency path such as

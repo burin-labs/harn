@@ -146,7 +146,7 @@ fn empty_ceiling_stays_open() {
     // An empty `policy.tools` means "no ceiling". Adding names would flip it
     // closed and silently forbid the host's own tools — so it must stay empty.
     let lines = run_with_stub(
-        &bootstrap_snippet(r#"[{name: "burin-harness-debugger"}]"#, r#"{tools: []}"#),
+        &bootstrap_snippet(r#"[{name: "burin-harness-debugger"}]"#, r"{tools: []}"),
         &["burin-harness-debugger__list_runs"],
     )
     .expect("snippet runs");
