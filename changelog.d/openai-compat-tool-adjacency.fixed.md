@@ -1,0 +1,1 @@
+- Keep runtime feedback adjacent-safe for strict OpenAI-compatible Moonshot and MiniMax tool-call routes.

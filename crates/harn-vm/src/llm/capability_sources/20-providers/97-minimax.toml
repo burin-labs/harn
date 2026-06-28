@@ -18,6 +18,7 @@ vision_supported = true
 video_supported = true
 prompt_caching = true
 reasoning_text_promotable = false
+requires_tool_result_adjacency = true
 text_tool_wire_format_supported = true
 prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true
@@ -45,6 +46,7 @@ prefers_xml_tools = false
 thinking_block_style = "inline"
 prompt_caching = true
 reasoning_text_promotable = false
+requires_tool_result_adjacency = true
 
 [[provider.minimax]]
 model_match = "minimax-m2.5*"
@@ -61,6 +63,7 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "inline"
 reasoning_text_promotable = false
+requires_tool_result_adjacency = true
 
 [[provider.minimax]]
 model_match = "minimax-m2*"
@@ -77,6 +80,7 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "inline"
 reasoning_text_promotable = false
+requires_tool_result_adjacency = true
 
 [[provider.minimax]]
 model_match = "minimax-text-*"
@@ -91,3 +95,4 @@ supports_assistant_prefill = false
 prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "none"
+requires_tool_result_adjacency = true
