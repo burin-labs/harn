@@ -8,6 +8,29 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.149
+
+### Fixed
+
+- Make the Qwen3.6 llama.cpp local profile choose context length from host
+  memory facts instead of a fixed 65k cap, and remove the stale hybrid-cache
+  reprocess gate.
+- Strip unsupported thinking options when agent loops switch provider routes,
+  so OpenRouter Claude/Sonnet escalations do not inherit Anthropic-native
+  reasoning options the target route rejects.
+- **LLM stream transport fallback.** Agent LLM calls that hit a mid-stream
+  response-body/read failure now retry once through non-streaming
+  request/response transport when the selected route does not require
+  streaming, preventing provider stream glitches from masquerading as agent
+  convergence failures.
+- **`std/agent`: no-net-progress stall detection now has a hard failing-verify
+  floor.** When `stall_diagnostics.no_net_progress_extend_guard` is enabled,
+  Harn counts failing verification turns across changing diagnostic signatures
+  and successful edit calls, resets only on a clean verification pass, and emits
+  a terminal `no_net_progress_hard_cap` stuck warning once the hard cap is
+  crossed. This prevents slow-draining red-build loops from evading the existing
+  same-diagnostic no-net-progress guard.
+
 ## v0.8.148
 
 ### Added
