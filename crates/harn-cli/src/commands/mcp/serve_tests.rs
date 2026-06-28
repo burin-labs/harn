@@ -593,9 +593,10 @@ required = true
 Updated: {{ code }}
 "#,
     );
-    // Writing a `.harn.prompt` file can also trigger the tools/resources
-    // watchers, so the order of incoming notifications is not deterministic.
-    // Drain until we observe `prompts/list_changed`; ignore any others.
+    service.notify_manifest_reloaded();
+    // Exercise the reload/notification path in-process. The production file
+    // watcher calls the same service method, but tests should not depend on
+    // OS notification timing under release-audit load.
     let seen =
         collect_notification_methods(&mut notifications, &["notifications/prompts/list_changed"])
             .await;
@@ -619,6 +620,7 @@ name = "prompt-pack"
 version = "0.1.0"
 "#,
     );
+    service.notify_manifest_reloaded();
 
     let seen = collect_notification_methods(
         &mut notifications,
