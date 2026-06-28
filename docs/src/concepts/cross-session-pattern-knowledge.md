@@ -1,4 +1,4 @@
-# Cross-Session Pattern Knowledge
+# Cross-session pattern knowledge
 
 Harn owns cross-session pattern recall as a typed `harness.knowledge` layer over
 `std/memory`. The concrete stdlib entrypoint is `std/agent/pattern_knowledge`,
@@ -9,7 +9,7 @@ This is not an A.5 session-store cross-session API. Session storage is useful
 for transcript and run-event audit trails; pattern recall is long-lived agent
 knowledge with its own retention, recall, and promotion policy.
 
-## Decision Criteria
+## Decision criteria
 
 | Criterion | Decision |
 |---|---|
@@ -18,7 +18,7 @@ knowledge with its own retention, recall, and promotion policy.
 | Multi-tenant shape | Namespace and memory root isolate local projects today. Cloud agents can map the same namespace to tenant, organization, and project scopes without adding a Burin-specific host API. |
 | Embedding versus keyword | The default clustering is deterministic lexical matching so tests and replay are stable. Hosts that need semantic recall can open the same memory namespace in vector or hybrid mode through `std/memory`. |
 
-## Primitive Shape
+## Primitive shape
 
 `std/agent/pattern_knowledge` stores `harn.pattern_learning.v1` records under the
 `project/pattern-learning` namespace:

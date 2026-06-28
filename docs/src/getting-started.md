@@ -69,7 +69,7 @@ harn version
 The one-line installer and `cargo install harn-cli` do not require a
 Rust toolchain on the user's machine.
 
-### See Harn in action in 30 seconds
+## See Harn in action in 30 seconds
 
 Before configuring anything, run a bundled offline demo. No API keys,
 no project setup, no network — every demo replays from a JSONL tape
@@ -84,7 +84,7 @@ harn demo --list           # one-line summary of every scenario
 See [`harn demo` in the CLI reference](cli-reference.md#harn-demo) for
 the full surface and `--live` opt-in.
 
-### Run this first
+## Run this first
 
 `harn doctor` is the one-command environment readiness check. It probes the
 toolchain, optional dev tools, portal dependencies, platform capabilities,
@@ -103,7 +103,7 @@ releases — IDE hosts and cloud platforms read the `summary.blocked_flows` arra
 decide whether a host can build, test, release, run scripts, or work on the
 portal.
 
-### Optional shell completions
+## Optional shell completions
 
 ```bash
 mkdir -p ~/.local/share/bash-completion/completions
