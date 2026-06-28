@@ -375,6 +375,59 @@ raise — they emit a `pool_drop` audit and return a `rejected` task
 handle. Errors raised inside the closure surface as
 `status: "failed"` with the error message on the task snapshot.
 
+## Parallel sub-agent fan-out: `agent_fanout`
+
+A pool is the right tool when *many independent submitters* must share *one*
+budget, or when work must survive a restart. For the common, simpler case —
+**one orchestrator that wants to map a list of independent units onto concurrent
+child agents and collect their results** — `std/agent/workers` exposes
+`agent_fanout`, a thin composition over the worker primitives you already have
+(`sub_agent_run({background: true})` + `wait_agent`):
+
+```harn,ignore
+import { agent_fanout } from "std/agent/workers"
+
+let results = agent_fanout(
+  [
+    {task: "Port src/a to the new API", options: child_opts_a, label: "a"},
+    {task: "Port src/b to the new API", options: child_opts_b, label: "b"},
+    {task: "Port src/c to the new API", options: child_opts_c, label: "c"},
+  ],
+  {max_parallel: 8},
+)
+
+for r in results {
+  log("${r.label}: ${r.ok ? "ok" : "failed"}")
+}
+```
+
+Each request is launched as a background `sub_agent_run`, so a whole wave's LLM
+turns **overlap in wall-clock time** — the orchestrator's `wait_agent` await is
+where the siblings make progress. `max_parallel` bounds how many run at once
+(default 8); units beyond it run in later waves, so a large fan-out cannot
+exhaust the provider rate budget. Results come back in **input order**
+regardless of completion order, each normalised to
+`{label, index, status, ok, result, error}`.
+
+`agent_fanout` owns only the concurrency, the wave bound, the join, and result
+normalisation. The caller owns everything that makes a child a child — its tool
+surface, capability policy, model, and system prompt — by setting each request's
+`options` (forwarded verbatim to `sub_agent_run`). That keeps product-specific
+delegation policy in the harness while the orchestration mechanics stay general.
+
+### `agent_fanout` vs pools
+
+| | `agent_fanout` | Pool (`pool.submit`) |
+|---|---|---|
+| Concurrency | Cooperative on the caller's `LocalSet` (IO-overlap) | OS-thread parallel (`tokio::spawn`) |
+| Budget | One wave bound per call | Shared named budget across submitters |
+| Queue strategy / fairness | FIFO waves | Pluggable (`fifo`/`priority`/`fair_round_robin`) |
+| Durability | In-process | `scope: "pipeline"` survives restart |
+| Best for | One orchestrator fanning out independent child agents | Many submitters sharing a rate-limited tier |
+
+Reach for `agent_fanout` first; graduate to a pool when you need a shared budget,
+fairness, or restart safety.
+
 ## Design rationale
 
 Pools close a gap between Harn's two existing concurrency tools.

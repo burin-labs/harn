@@ -32,9 +32,16 @@ pub(super) fn parse_worker_audit(
             .unwrap_or_else(|| "read_only".to_string());
     }
     if audit.approval_policy.is_none() {
+        // A top-level agent_loop installs no mutation session, so
+        // `parent_session.approval_policy` is None even under `--approve auto`.
+        // Fall back to the live approval stack so a background worker inherits
+        // the parent's approval policy (auto-approve included) — otherwise its
+        // writes hit the host approval gate with no policy and are denied. This
+        // mirrors the delegated-stage worker path (execution.rs).
         audit.approval_policy = parent_session
             .as_ref()
-            .and_then(|session| session.approval_policy.clone());
+            .and_then(|session| session.approval_policy.clone())
+            .or_else(crate::orchestration::current_approval_policy);
     }
     Ok(audit.normalize())
 }
@@ -53,9 +60,14 @@ pub(in super::super) fn inherited_worker_audit(execution_kind: &str) -> Mutation
             .as_ref()
             .map(|session| session.mutation_scope.clone())
             .unwrap_or_else(|| "read_only".to_string()),
+        // See parse_worker_audit: fall back to the live approval stack so a
+        // background sub-agent (agent_fanout child) inherits the parent's
+        // approval policy / auto-approve instead of defaulting to a denied
+        // permission lane.
         approval_policy: parent_session
             .as_ref()
-            .and_then(|session| session.approval_policy.clone()),
+            .and_then(|session| session.approval_policy.clone())
+            .or_else(crate::orchestration::current_approval_policy),
         ..Default::default()
     }
     .normalize()

@@ -586,3 +586,98 @@ async fn emit_worker_event_routes_through_parent_session_sink() {
 
     clear_session_sinks(&parent_session);
 }
+
+/// The `--approve auto` (headless) shape: a live auto-approve policy sits on
+/// the parent's approval stack while NO mutation session is installed (a
+/// top-level `agent_loop` never installs one). A background sub-agent
+/// (`agent_fanout` child) must inherit that live approval policy via
+/// `inherited_worker_audit` instead of defaulting to None — otherwise its
+/// writes hit the host approval gate with no policy and are denied.
+#[test]
+fn inherited_worker_audit_falls_back_to_live_approval_policy() {
+    use crate::orchestration::{
+        clear_execution_policy_stacks, current_approval_policy, install_current_mutation_session,
+        push_approval_policy, ToolApprovalPolicy,
+    };
+
+    // Isolate the thread-local approval stack + mutation session from any
+    // sibling test that reused this worker thread.
+    clear_execution_policy_stacks();
+    install_current_mutation_session(None);
+
+    // Auto-approve-everything: the `--approve auto` policy shape.
+    let parent_policy = ToolApprovalPolicy {
+        auto_approve: vec!["*".to_string()],
+        ..ToolApprovalPolicy::default()
+    };
+    push_approval_policy(parent_policy.clone());
+    assert_eq!(
+        current_approval_policy(),
+        Some(parent_policy.clone()),
+        "precondition: parent policy is live on the approval stack",
+    );
+
+    let audit = inherited_worker_audit("sub_agent");
+    assert_eq!(
+        audit.approval_policy,
+        Some(parent_policy),
+        "background sub-agent audit must carry the parent's live approval policy",
+    );
+    assert_eq!(audit.execution_kind.as_deref(), Some("sub_agent"));
+
+    // With NEITHER a mutation session NOR a live approval policy, approval
+    // stays None — no spurious policy is synthesized.
+    clear_execution_policy_stacks();
+    install_current_mutation_session(None);
+    assert_eq!(
+        current_approval_policy(),
+        None,
+        "precondition: stack cleared"
+    );
+    let bare = inherited_worker_audit("sub_agent");
+    assert_eq!(
+        bare.approval_policy, None,
+        "no mutation session and no live approval policy => approval stays None",
+    );
+
+    clear_execution_policy_stacks();
+    install_current_mutation_session(None);
+}
+
+/// Companion coverage for `parse_worker_audit`: an audit dict that omits
+/// `approval_policy` must inherit the live parent approval policy from the
+/// stack (same `--approve auto` fallback) rather than deserializing to None.
+#[test]
+fn parse_worker_audit_falls_back_to_live_approval_policy() {
+    use crate::orchestration::{
+        clear_execution_policy_stacks, install_current_mutation_session, push_approval_policy,
+        ToolApprovalPolicy,
+    };
+
+    clear_execution_policy_stacks();
+    install_current_mutation_session(None);
+
+    let parent_policy = ToolApprovalPolicy {
+        auto_approve: vec!["*".to_string()],
+        ..ToolApprovalPolicy::default()
+    };
+    push_approval_policy(parent_policy.clone());
+
+    // Audit dict that carries a scope but deliberately omits approval_policy.
+    let dict: crate::value::DictMap = vec![(
+        "audit".to_string(),
+        vm_dict(vec![("mutation_scope", vm_string("workspace_write"))]),
+    )]
+    .into_iter()
+    .collect();
+    let audit = super::audit::parse_worker_audit(&dict).expect("parse_worker_audit");
+    assert_eq!(
+        audit.approval_policy,
+        Some(parent_policy),
+        "parse_worker_audit must inherit the live approval policy when the dict omits it",
+    );
+    assert_eq!(audit.mutation_scope, "workspace_write");
+
+    clear_execution_policy_stacks();
+    install_current_mutation_session(None);
+}
