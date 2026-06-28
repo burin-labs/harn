@@ -1386,11 +1386,6 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                 }
             },
         },
-        Command::ModelInfo(args) => {
-            if !print_model_info(&args).await {
-                process::exit(1);
-            }
-        }
         Command::Tool(args) => match args.command {
             ToolCommand::New(new_args) => {
                 if let Err(error) = commands::tool::run_new(&new_args).await {
@@ -1490,7 +1485,7 @@ async fn run_version(args: cli::VersionArgs) -> i32 {
     dispatch::dispatch_to_embedded_script("version", argv, args.json).await
 }
 
-async fn print_model_info(args: &ModelInfoArgs) -> bool {
+pub(crate) async fn print_model_info(args: &ModelInfoArgs) -> bool {
     let resolved = harn_vm::llm_config::resolve_model_info(&args.model);
     let api_key_result = harn_vm::llm::resolve_api_key(&resolved.provider);
     let api_key_set = api_key_result.is_ok();
@@ -1576,7 +1571,7 @@ async fn print_model_info(args: &ModelInfoArgs) -> bool {
                 "valid": false,
                 "status": "unsupported_provider",
                 "message": format!(
-                    "model-info --verify is only supported for Ollama models; resolved provider is '{}'",
+                    "models info --verify is only supported for Ollama models; resolved provider is '{}'",
                     resolved.provider
                 ),
                 "provider": resolved.provider,

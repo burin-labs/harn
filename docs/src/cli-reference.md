@@ -1308,16 +1308,16 @@ harn models test qwen3:30b --provider ollama --json
 uses the configured provider client path, so it also respects provider
 credentials, base URL overrides, and `HARN_LLM_CALLS_DISABLED`.
 
-## harn model-info
+## harn models info
 
 Print resolved model metadata as JSON. For Ollama models, `--verify` probes
 `/api/tags` and checks the selected tag. `--warm` implies `--verify` and sends
 an empty `/api/generate` request to preload the matched tag.
 
 ```bash
-harn model-info llama3.2:latest
-harn model-info --verify llama3.2
-harn model-info --warm --keep-alive 30m llama3.2
+harn models info llama3.2:latest
+harn models info --verify llama3.2
+harn models info --warm --keep-alive 30m llama3.2
 ```
 
 Ollama readiness failures use stable `readiness.status` values, including

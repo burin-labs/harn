@@ -9,6 +9,11 @@ use crate::cli::{ModelsArgs, ModelsCommand};
 
 pub(crate) async fn run(args: ModelsArgs) {
     match args.command {
+        ModelsCommand::Info(args) => {
+            if !crate::print_model_info(&args).await {
+                std::process::exit(1);
+            }
+        }
         ModelsCommand::List(args) => list::run(args).await,
         ModelsCommand::Install(args) => install::run(args).await,
         ModelsCommand::Recommend(args) => recommend::run(&args).await,
