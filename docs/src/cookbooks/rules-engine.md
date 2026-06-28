@@ -275,4 +275,4 @@ global plugin paths, or package caches.
   AST-edit primitives the engine builds on.
 - [Destructure with defaults cookbook](./destructure-with-defaults.md) — the
   flagship codemod in depth.
-- The `harn-rules` skill (`harn skills get harn-rules --full`).
+- The `harn-rules` skill (`harn skill get harn-rules --full`).

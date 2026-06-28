@@ -30,7 +30,7 @@ prompts across **four cells** — strategy × context:
   advances to the frontier link; when the frontier also fails, the
   rejected candidate is returned (per the "verifiers gate routing, not
   correctness" semantics).
-- The skill body is the literal output of `harn skills get
+- The skill body is the literal output of `harn skill get
   harn-language --full`, captured at [`harn_language_skill.md`](harn_language_skill.md)
   so the experiment is reproducible without depending on the runtime
   skill registry. When passed via `llm_call(..., system: skill_body, ...)`,

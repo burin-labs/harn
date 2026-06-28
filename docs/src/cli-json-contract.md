@@ -93,7 +93,7 @@ versions.
 | `harn session export --json`   | Portable session bundle export                           |
 | `harn provider catalog show --json` | Resolved provider/model catalog snapshot                 |
 | `harn connect status --json` / `setup-plan --json` | Connector readiness reports        |
-| `harn skills list --json` / `get --json` | Canonical Harn skill corpus frontmatter        |
+| `harn skill list --json` / `get --json` | Canonical Harn skill corpus frontmatter        |
 | `harn version --json`          | CLI build metadata (`name`, `version`, `description`)    |
 | `harn upgrade --json`          | Self-update probe (`--check`) or install summary         |
 

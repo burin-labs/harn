@@ -1,6 +1,9 @@
 use clap::{Args, Subcommand};
 
-use super::skills::SkillsNewArgs;
+use super::skills::{
+    SkillsDumpArgs, SkillsGetArgs, SkillsInspectArgs, SkillsInstallArgs, SkillsListArgs,
+    SkillsMatchArgs, SkillsNewArgs, SkillsResolvedArgs,
+};
 
 #[derive(Debug, Args)]
 pub(crate) struct SkillArgs {
@@ -8,8 +11,25 @@ pub(crate) struct SkillArgs {
     pub command: SkillCommand,
 }
 
+/// Every skill operation: corpus discovery/inspection, scaffolding, and
+/// provenance (signing, endorsement, verification, trust).
 #[derive(Debug, Subcommand)]
 pub(crate) enum SkillCommand {
+    /// List the active canonical Harn skill corpus.
+    List(SkillsListArgs),
+    /// Print one canonical skill's frontmatter (or full body with `--full`).
+    Get(SkillsGetArgs),
+    /// Write the active canonical skill corpus to disk for offline review.
+    Dump(SkillsDumpArgs),
+    /// Show layered-resolution skills discovered from the filesystem.
+    Resolved(SkillsResolvedArgs),
+    /// Dump the resolved SKILL.md plus bundled files and metadata for one skill.
+    Inspect(SkillsInspectArgs),
+    /// Run the metadata matcher against a prompt and show ranked candidates.
+    #[command(name = "match")]
+    Match(SkillsMatchArgs),
+    /// Resolve a git ref or local path into `.harn/skills-cache/` so the layered resolver picks it up.
+    Install(SkillsInstallArgs),
     /// Scaffold a new SKILL.md bundle under `.harn/skills/<name>/`.
     New(SkillsNewArgs),
     /// Manage Ed25519 signing keys for skill provenance.

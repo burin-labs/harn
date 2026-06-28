@@ -6279,8 +6279,8 @@ should be pinned by commit instead of live-linked.
 
 `harn tool new <name>` scaffolds a Harn-native tool package with
 `[[package.tools]]` metadata, a stable `tools` export, package-local dispatch
-tests, API docs, and CI. `harn skill new <name>` is the singular alias for
-`harn skills new <name>`. Tool and skill packages still install through the
+tests, API docs, and CI. `harn skill new <name>` scaffolds a SKILL.md
+bundle. Tool and skill packages still install through the
 same `[dependencies]`, `.harn/packages/`, and `harn.lock` mechanism as ordinary
 module packages.
 

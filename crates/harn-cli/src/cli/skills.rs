@@ -1,31 +1,7 @@
-use clap::{Args, Subcommand};
-
-#[derive(Debug, Args)]
-pub(crate) struct SkillsArgs {
-    #[command(subcommand)]
-    pub command: SkillsCommand,
-}
-
-#[derive(Debug, Subcommand)]
-pub(crate) enum SkillsCommand {
-    /// List the active canonical Harn skill corpus.
-    List(SkillsListArgs),
-    /// Print one canonical skill's frontmatter (or full body with `--full`).
-    Get(SkillsGetArgs),
-    /// Write the active canonical skill corpus to disk for offline review.
-    Dump(SkillsDumpArgs),
-    /// Show layered-resolution skills discovered from the filesystem.
-    Resolved(SkillsResolvedArgs),
-    /// Dump the resolved SKILL.md plus bundled files and metadata for one skill.
-    Inspect(SkillsInspectArgs),
-    /// Run the metadata matcher against a prompt and show ranked candidates.
-    #[command(name = "match")]
-    Match(SkillsMatchArgs),
-    /// Resolve a git ref or local path into `.harn/skills-cache/` so the layered resolver picks it up.
-    Install(SkillsInstallArgs),
-    /// Scaffold a new SKILL.md bundle under `.harn/skills/<name>/`.
-    New(SkillsNewArgs),
-}
+//! Argument structs for the skill corpus/discovery subcommands. These are
+//! the `list`/`get`/`dump`/`resolved`/`inspect`/`match`/`install`/`new`
+//! verbs under the unified `harn skill` noun (see [`super::skill`]).
+use clap::Args;
 
 #[derive(Debug, Args)]
 pub(crate) struct SkillsListArgs {

@@ -33,8 +33,8 @@ use cli::{
     GuardCommand, MergeCaptainCommand, MergeCaptainMockCommand, ModelInfoArgs,
     PackageArtifactsCommand, PackageCacheCommand, PackageCommand, PackageScaffoldCommand,
     PersonaCommand, PersonaSupervisionCommand, PgCommand, ProviderCatalogCommand, ProviderCommand,
-    RunsCommand, ServeCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand, SkillsCommand,
-    TimeCommand, ToolCommand,
+    RunsCommand, ServeCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand, TimeCommand,
+    ToolCommand,
 };
 use harn_lexer::Lexer;
 use harn_parser::{DiagnosticSeverity, Parser, TypeChecker};
@@ -200,6 +200,14 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
             }
         }
         Command::Skill(args) => match args.command {
+            SkillCommand::List(list) => commands::skills::run_list(&list),
+            SkillCommand::Get(get) => commands::skills::run_get(&get),
+            SkillCommand::Dump(dump) => commands::skills::run_dump(&dump),
+            SkillCommand::Resolved(resolved) => commands::skills::run_resolved(&resolved),
+            SkillCommand::Inspect(inspect) => commands::skills::run_inspect(&inspect),
+            SkillCommand::Match(matcher) => commands::skills::run_match(&matcher),
+            SkillCommand::Install(install) => commands::skills::run_install(&install),
+            SkillCommand::New(new_args) => commands::skills::run_new(&new_args),
             SkillCommand::Key(key_args) => match key_args.command {
                 SkillKeyCommand::Generate(generate) => commands::skill::run_key_generate(&generate),
             },
@@ -213,7 +221,6 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                 SkillTrustCommand::Add(add) => commands::skill::run_trust_add(&add),
                 SkillTrustCommand::List(list) => commands::skill::run_trust_list(&list),
             },
-            SkillCommand::New(new_args) => commands::skills::run_new(&new_args),
         },
         Command::Guard(args) => match args.command {
             GuardCommand::List(list_args) => commands::guard::run_list(&list_args),
@@ -1384,16 +1391,6 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                 process::exit(1);
             }
         }
-        Command::Skills(args) => match args.command {
-            SkillsCommand::List(list) => commands::skills::run_list(&list),
-            SkillsCommand::Get(get) => commands::skills::run_get(&get),
-            SkillsCommand::Dump(dump) => commands::skills::run_dump(&dump),
-            SkillsCommand::Resolved(resolved) => commands::skills::run_resolved(&resolved),
-            SkillsCommand::Inspect(inspect) => commands::skills::run_inspect(&inspect),
-            SkillsCommand::Match(matcher) => commands::skills::run_match(&matcher),
-            SkillsCommand::Install(install) => commands::skills::run_install(&install),
-            SkillsCommand::New(new_args) => commands::skills::run_new(&new_args),
-        },
         Command::Tool(args) => match args.command {
             ToolCommand::New(new_args) => {
                 if let Err(error) = commands::tool::run_new(&new_args).await {
