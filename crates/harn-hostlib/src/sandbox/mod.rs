@@ -347,15 +347,6 @@ pub(crate) fn normalized_mount_target(target: &str) -> SandboxResult<String> {
     Ok(trimmed.to_string())
 }
 
-/// POSIX-shell-quote a value for safe inclusion in a generated command.
-pub(crate) fn sh_quote(value: &str) -> String {
-    if value.is_empty() {
-        return "''".to_string();
-    }
-    let escaped = value.replace('\'', "'\"'\"'");
-    format!("'{escaped}'")
-}
-
 /// Quote a value as a Harn string literal.
 pub(crate) fn harn_string(value: &str) -> String {
     let mut out = String::with_capacity(value.len() + 2);
@@ -372,12 +363,6 @@ pub(crate) fn harn_string(value: &str) -> String {
     }
     out.push('"');
     out
-}
-
-/// Whole seconds for a duration, clamped to at least one so `timeout(1)`
-/// never receives a zero argument.
-pub(crate) fn duration_secs(duration: Duration) -> u64 {
-    duration.as_secs().max(1)
 }
 
 #[cfg(test)]
@@ -398,12 +383,6 @@ mod tests {
                 "allowed_hosts": ["api.github.com"]
             })
         );
-    }
-
-    #[test]
-    fn quotes_shell_values() {
-        assert_eq!(sh_quote("a'b"), "'a'\"'\"'b'");
-        assert_eq!(sh_quote(""), "''");
     }
 
     #[test]

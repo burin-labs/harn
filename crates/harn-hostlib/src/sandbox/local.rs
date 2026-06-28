@@ -20,10 +20,10 @@ use harn_vm::{compile_source, stdlib::register_vm_stdlib, Vm, VmValue};
 use tempfile::TempDir;
 
 use super::{
-    duration_secs, harn_string, normalized_mount_target, sh_quote, ExecRequest, ExecResult,
-    FilesystemAccess, FilesystemMount, NetworkPolicy, ResolvedMount, ResourceLimits,
-    SandboxBackend, SandboxCapabilities, SandboxError, SandboxResult, SandboxSession,
-    SandboxSessionId, SandboxSnapshot, SandboxSpec, SandboxState, MEMORY_MOUNT, OUTPUTS_MOUNT,
+    harn_string, normalized_mount_target, ExecRequest, ExecResult, FilesystemAccess,
+    FilesystemMount, NetworkPolicy, ResolvedMount, ResourceLimits, SandboxBackend,
+    SandboxCapabilities, SandboxError, SandboxResult, SandboxSession, SandboxSessionId,
+    SandboxSnapshot, SandboxSpec, SandboxState, MEMORY_MOUNT, OUTPUTS_MOUNT,
 };
 
 /// Configuration for a [`LocalSandbox`].
@@ -274,56 +274,36 @@ impl LocalSession {
                 "exec command cannot be empty".to_string(),
             ));
         }
-        let timeout = request.timeout.or(self.limits.wall_time);
         let source = self.harn_exec_source(&request)?;
         let policy = self.execution_policy()?;
 
         let task = tokio::task::spawn_blocking(move || run_harn_shell(source, policy));
-        match timeout {
-            Some(timeout) => tokio::time::timeout(timeout, task)
-                .await
-                .map_err(|_| SandboxError::Exec("local exec timed out".to_string()))??,
-            None => task.await?,
-        }
+        task.await?
     }
 
     fn harn_exec_source(&self, request: &ExecRequest) -> SandboxResult<String> {
         let cwd = self.resolve_cwd(request.cwd.as_deref())?;
-        let mut shell = String::new();
-        for (key, value) in mount_env(&self.mounts()?) {
-            shell.push_str("export ");
-            shell.push_str(&key);
-            shell.push('=');
-            shell.push_str(&sh_quote(&value));
-            shell.push_str("; ");
-        }
-        for (key, value) in &request.env {
+        let mut env = mount_env(&self.mounts()?);
+        for key in request.env.keys() {
             validate_env_key(key)?;
-            shell.push_str("export ");
-            shell.push_str(key);
-            shell.push('=');
-            shell.push_str(&sh_quote(value));
-            shell.push_str("; ");
         }
+        env.extend(request.env.clone());
+
+        let mut options = vec![
+            format!("cmd: {}", harn_string(&request.command)),
+            format!("args: {}", harn_string_list(&request.args)),
+            format!("cwd: {}", harn_string(&cwd.display().to_string())),
+            format!("env: {}", harn_string_dict(&env)),
+        ];
         if let Some(stdin) = &request.stdin {
-            shell.push_str("printf %s ");
-            shell.push_str(&sh_quote(stdin));
-            shell.push_str(" | ");
+            options.push(format!("stdin: {}", harn_string(stdin)));
         }
         if let Some(timeout) = request.timeout.or(self.limits.wall_time) {
-            shell.push_str("timeout ");
-            shell.push_str(&duration_secs(timeout).to_string());
-            shell.push(' ');
-        }
-        shell.push_str(&sh_quote(&request.command));
-        for arg in &request.args {
-            shell.push(' ');
-            shell.push_str(&sh_quote(arg));
+            options.push(format!("timeout_ms: {}", duration_millis(timeout)));
         }
         Ok(format!(
-            "pipeline local_sandbox_exec(task) {{ return shell_at({}, {}) }}",
-            harn_string(&cwd.display().to_string()),
-            harn_string(&shell),
+            "pipeline local_sandbox_exec(task) {{ return spawn_captured({{{}}}) }}",
+            options.join(", "),
         ))
     }
 
@@ -443,6 +423,28 @@ fn mount_env(mounts: &[ResolvedMount]) -> BTreeMap<String, String> {
     env
 }
 
+fn harn_string_list(values: &[String]) -> String {
+    let items = values
+        .iter()
+        .map(|value| harn_string(value))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("[{items}]")
+}
+
+fn harn_string_dict(values: &BTreeMap<String, String>) -> String {
+    let fields = values
+        .iter()
+        .map(|(key, value)| format!("{}: {}", harn_string(key), harn_string(value)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("{{{fields}}}")
+}
+
+fn duration_millis(duration: std::time::Duration) -> i64 {
+    duration.as_millis().clamp(1, i64::MAX as u128) as i64
+}
+
 fn validate_env_key(key: &str) -> SandboxResult<()> {
     if key.is_empty()
         || key
@@ -504,12 +506,13 @@ fn exec_result_from_value(value: VmValue) -> SandboxResult<ExecResult> {
     };
     let stdout = dict_string(&map, "stdout")?;
     let stderr = dict_string(&map, "stderr")?;
-    let exit_code = dict_int(&map, "status")?;
+    let exit_code = dict_int_any(&map, &["status", "exit_code"])?;
+    let timed_out = dict_bool_optional(&map, "timed_out")?.unwrap_or(false);
     Ok(ExecResult {
         stdout,
         stderr,
         exit_code,
-        timed_out: false,
+        timed_out,
     })
 }
 
@@ -536,6 +539,29 @@ fn dict_int(map: &harn_vm::value::DictMap, key: &str) -> SandboxResult<i32> {
         None => Err(SandboxError::Exec(format!(
             "missing `{key}` in exec result"
         ))),
+    }
+}
+
+fn dict_int_any(map: &harn_vm::value::DictMap, keys: &[&str]) -> SandboxResult<i32> {
+    for key in keys {
+        if map.contains_key(*key) {
+            return dict_int(map, key);
+        }
+    }
+    Err(SandboxError::Exec(format!(
+        "missing any of `{}` in exec result",
+        keys.join("`, `")
+    )))
+}
+
+fn dict_bool_optional(map: &harn_vm::value::DictMap, key: &str) -> SandboxResult<Option<bool>> {
+    match map.get(key) {
+        Some(VmValue::Bool(value)) => Ok(Some(*value)),
+        Some(other) => Err(SandboxError::Exec(format!(
+            "expected `{key}` bool, got {}",
+            other.display()
+        ))),
+        None => Ok(None),
     }
 }
 
@@ -569,6 +595,29 @@ mod tests {
 
         assert_eq!(result.exit_code, 0, "{result:?}");
         assert_eq!(result.stdout, "ok");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn local_backend_timeout_is_enforced_without_shell_timeout_binary() {
+        let backend = LocalSandbox::default();
+        let session = backend.provision(SandboxSpec::default()).await.unwrap();
+
+        let result = backend
+            .exec(
+                &session.id,
+                ExecRequest {
+                    command: "sh".to_string(),
+                    args: vec!["-c".to_string(), "sleep 5".to_string()],
+                    timeout: Some(std::time::Duration::from_millis(25)),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        assert!(result.timed_out, "{result:?}");
+        assert_eq!(result.exit_code, -1, "{result:?}");
     }
 
     #[tokio::test]
