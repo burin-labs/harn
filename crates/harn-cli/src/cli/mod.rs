@@ -135,8 +135,8 @@ pub(crate) use merge_captain::{
     MergeCaptainMockStatusArgs, MergeCaptainMockStepArgs, MergeCaptainRunArgs,
 };
 pub(crate) use models::{
-    ModelRecommendArgs, ModelsArgs, ModelsCommand, ModelsInstallArgs, ModelsListArgs,
-    ModelsTestArgs,
+    ModelInfoArgs, ModelRecommendArgs, ModelsArgs, ModelsCommand, ModelsInstallArgs,
+    ModelsListArgs, ModelsTestArgs,
 };
 pub(crate) use orchestrator::{
     OrchestratorArgs, OrchestratorCommand, OrchestratorDeployArgs, OrchestratorDeployProvider,
@@ -168,7 +168,7 @@ pub(crate) use portal::PortalArgs;
 pub use precompile::PrecompileArgs;
 pub(crate) use profile::ProfileArgs;
 pub(crate) use provider::{
-    refresh_provider_catalog_if_requested, ModelInfoArgs, ProviderArgs, ProviderCapabilitiesArgs,
+    refresh_provider_catalog_if_requested, ProviderArgs, ProviderCapabilitiesArgs,
     ProviderCapabilitiesCommand, ProviderCapabilitiesPromoteFromEvalArgs, ProviderCommand,
     ProviderProbeArgs, ProviderToolProbeArgs, ProviderToolProbeModeArg,
 };
@@ -462,8 +462,6 @@ SCRIPTING
     /// Merge Captain transcript oracle and audit (#1013).
     #[command(name = "merge-captain")]
     MergeCaptain(MergeCaptainArgs),
-    /// Print resolved metadata for a model alias or model id as JSON.
-    ModelInfo(ModelInfoArgs),
     /// List, install, recommend, and test configured LLM models.
     Models(ModelsArgs),
     /// Manage local LLM runtime lifecycle: enumerate, switch, and stop

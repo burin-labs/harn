@@ -58,25 +58,6 @@ pub(crate) struct ProviderCapabilitiesPromoteFromEvalArgs {
 }
 
 #[derive(Debug, Args)]
-pub(crate) struct ModelInfoArgs {
-    /// Verify provider-local readiness for the resolved model when supported.
-    #[arg(long)]
-    pub verify: bool,
-    /// Warm/preload the resolved model when supported. Implies --verify.
-    #[arg(long)]
-    pub warm: bool,
-    /// Ollama keep_alive value to use with --warm (for example 30m, forever, or -1).
-    #[arg(long = "keep-alive", value_name = "VALUE")]
-    pub keep_alive: Option<String>,
-    /// Model alias or provider-native model id.
-    #[arg(
-        value_parser = llm_model_completion_parser(),
-        hide_possible_values = true
-    )]
-    pub model: String,
-}
-
-#[derive(Debug, Args)]
 pub(crate) struct ProviderCatalogShowArgs {
     /// Only include providers that are usable in the current environment.
     #[arg(long)]

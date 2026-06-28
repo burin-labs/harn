@@ -280,7 +280,7 @@ OpenAI Responses-capable rows also expose `responses_api`, `hosted_tools`,
 
 The same matrix is the source of truth for Harn's default tool-calling
 mode. Alias-level `tool_format` still wins when set explicitly, but
-otherwise `preferred_tool_format` chooses `agent_loop()` and `model-info`
+otherwise `preferred_tool_format` chooses `agent_loop()` and `models info`
 tool mode for that provider/model route. Rows that do not set it infer
 `native` when `native_tools = true` and `text` otherwise. Rows can set
 `text_tool_wire_format_supported = true` for runtimes where Harn's text-tool
@@ -536,7 +536,7 @@ runner.
 Inspect what is actually loaded vs. what Harn would request:
 
 ```bash
-harn model-info devstral-small-2 --verify --warm
+harn models info devstral-small-2 --verify --warm
 ```
 
 The JSON output includes:
@@ -551,7 +551,7 @@ If `context_drift` is set, force a reload with:
 
 ```bash
 ollama stop devstral-small-2:24b
-harn model-info devstral-small-2 --verify --warm
+harn models info devstral-small-2 --verify --warm
 ```
 
 The new warmup correctly passes `options.num_ctx`, so the next load

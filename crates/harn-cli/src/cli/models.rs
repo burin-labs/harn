@@ -1,5 +1,7 @@
 use clap::{Args, Subcommand};
 
+use super::util::llm_model_completion_parser;
+
 #[derive(Debug, Args)]
 pub(crate) struct ModelsArgs {
     #[command(subcommand)]
@@ -8,6 +10,8 @@ pub(crate) struct ModelsArgs {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum ModelsCommand {
+    /// Print resolved metadata for a model alias or model id as JSON.
+    Info(ModelInfoArgs),
     /// List models grouped by provider.
     List(ModelsListArgs),
     /// Pull an Ollama model or print setup steps for a known local runtime.
@@ -16,6 +20,25 @@ pub(crate) enum ModelsCommand {
     Recommend(ModelRecommendArgs),
     /// Round-trip a small prompt through a model and report timing, tokens, and cost.
     Test(ModelsTestArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ModelInfoArgs {
+    /// Verify provider-local readiness for the resolved model when supported.
+    #[arg(long)]
+    pub verify: bool,
+    /// Warm/preload the resolved model when supported. Implies --verify.
+    #[arg(long)]
+    pub warm: bool,
+    /// Ollama keep_alive value to use with --warm (for example 30m, forever, or -1).
+    #[arg(long = "keep-alive", value_name = "VALUE")]
+    pub keep_alive: Option<String>,
+    /// Model alias or provider-native model id.
+    #[arg(
+        value_parser = llm_model_completion_parser(),
+        hide_possible_values = true
+    )]
+    pub model: String,
 }
 
 #[derive(Debug, Args)]

@@ -285,10 +285,11 @@ fn test_parses_viz_args() {
 }
 
 #[test]
-fn test_parses_model_info_args() {
+fn test_parses_models_info_args() {
     let cli = Cli::parse_from([
         "harn",
-        "model-info",
+        "models",
+        "info",
         "--verify",
         "--warm",
         "--keep-alive",
@@ -296,8 +297,11 @@ fn test_parses_model_info_args() {
         "tog-gemma4-31b",
     ]);
 
-    let Command::ModelInfo(args) = cli.command.unwrap() else {
-        panic!("expected model-info command");
+    let Command::Models(args) = cli.command.unwrap() else {
+        panic!("expected models command");
+    };
+    let ModelsCommand::Info(args) = args.command else {
+        panic!("expected models info");
     };
     assert_eq!(args.model, "tog-gemma4-31b");
     assert!(args.verify);
