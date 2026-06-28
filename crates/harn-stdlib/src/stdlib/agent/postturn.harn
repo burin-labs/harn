@@ -1066,7 +1066,7 @@ pub fn agent_compute_post_turn(session, llm_result, dispatch, opts, iteration) {
   }
   if __stop_after_successful_tools(opts, dispatch) {
     return __post_turn_with_narrowing(
-      {kind: "break", stop_reason: "natural", needs_verify: false, done_judge_due: false},
+      __completion_result(opts, payload, "natural") + {done_judge_due: false},
       narrowing,
     )
   }
