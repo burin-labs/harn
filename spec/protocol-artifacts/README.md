@@ -39,7 +39,7 @@ tool lifecycle metadata, A2A task events, and MCP metadata.
 - `harn-protocol.rs`: dependency-free Rust module of ACP method-name,
 session-update discriminator, content-extension key, and protocol
 version `pub const`s. The only binding that publishes the complete
-dispatched ACP method surface; Burin Code vendors it as
+dispatched ACP method surface; an IDE host vendors it as
 `protocol/src/generated.rs`.
 - `python/harn_protocol.py`: Python dataclasses, enums, and constants for
 the same host-facing surface (Python 3.9+, stdlib-only).
@@ -51,8 +51,8 @@ aliases, and constants mirroring the Python and Swift bindings.
 (modern success, unsupported-version retry, cache hints,
 input-required, header mismatch, no-session HTTP, recursive
 `$defs` tool schema, legacy 2025-11-25 compat) replayed by
-`make mcp-rc-conformance` and republished here for Burin Code
-and harn-cloud test suites.
+`make mcp-rc-conformance` and republished here for downstream host
+and cloud test suites.
 
 Compatibility rule: additive enum values and optional fields are minor-version
 compatible; removing or renaming a wire value requires a Harn minor-version

@@ -1,7 +1,7 @@
 # Review captain persona
 
-Canonical Harn package for `review_captain`. Hosts (Burin Code,
-harn-cloud, the CLI) discover it through `harn persona list --json` and
+Canonical Harn package for `review_captain`. Hosts (IDE hosts, cloud
+platforms, the CLI) discover it through `harn persona list --json` and
 treat the resulting manifest as Harn-owned metadata.
 
 The persona reviews one PR per invocation. It runs deterministic
@@ -18,7 +18,7 @@ fixture is used so smoke runs stay deterministic.
 
 ```json
 {
-  "repo": "burin-labs/burin-code",
+  "repo": "example-org/example-app",
   "pr_number": 235,
   "head_sha": "...",
   "base_sha": "...",
@@ -27,7 +27,7 @@ fixture is used so smoke runs stay deterministic.
   "max_rounds": 1,
   "dry_run": true,
   "rubric_preset": "code",
-  "policy_path": "personas/review_captain/policies/burin-code.json"
+  "policy_path": "personas/review_captain/policies/example-app.json"
 }
 ```
 

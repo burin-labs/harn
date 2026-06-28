@@ -13,7 +13,7 @@
 // webhook-shaped trigger handler reads its body), and whatever the job
 // returns is printed to stdout as the JSON report.
 //
-// This mirrors the harn-cloud factory `scan_worker` contract: read a JSON
+// This mirrors a cloud worker-factory `scan_worker` contract: read a JSON
 // request, do work, emit a JSON report.
 import "std/triggers"
 

@@ -14,7 +14,7 @@
  *     and re-snapshot to show the deregistration path.
  *
  * Why a demo for this primitive: `harness.mcp.*` is a new public host
- * surface that downstream callers (TUI, BurinCore, harn-cloud) will
+ * surface that downstream callers (TUI, an IDE host, a cloud platform) will
  * lean on. The demo gate (#2526 fragment) flags every public primitive,
  * and this scenario keeps the offline-runnable smoke path covered
  * without needing a live MCP server in the fixture set.

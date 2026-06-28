@@ -260,8 +260,8 @@ The gate validates package metadata, runs `harn check`, `harn lint`,
 `harn fmt --check`, executes package-local `tests/*.harn` fixture programs,
 checks install/import behavior from a clean consumer package, parses standalone
 Harn doc examples, and includes the connector contract check below. Pass
-`--json` to emit a machine-readable readiness report for CI, Harn Cloud, or
-Burin Code.
+`--json` to emit a machine-readable readiness report for CI, cloud platforms, or
+IDE hosts.
 
 Use the lower-level contract harness when iterating only on the connector
 module:

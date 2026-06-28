@@ -103,7 +103,7 @@ pub async fn install_manifest_hooks(
 /// Install manifest hooks. When `lazy` is set, each hook's handler closure
 /// is resolved on first fire (against the firing VM) instead of now — the
 /// resolution loads the handler module's whole import graph, which for
-/// burin-code is ~1s. Eager resolution made every harn test (even pure
+/// a large IDE host is ~1s. Eager resolution made every harn test (even pure
 /// unit tests that never fire a hook) pay that cost during setup; the test
 /// runner therefore installs hooks lazily. Production callers stay eager so
 /// a misconfigured handler fails fast at startup, not mid-turn.

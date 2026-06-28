@@ -50,7 +50,7 @@ Subsequent lines are annotations:
   "event_id": 42,
   "kind": "hypothesis",
   "evidence": "checkout incident — see runbook",
-  "author": {"id": "alice", "kind": "human", "surface": "burin-code"},
+  "author": {"id": "alice", "kind": "human", "surface": "ide-host"},
   "timestamp": "2026-05-10T17:00:00Z",
   "hypothesis_status": "active",
   "span": {"start_event_id": 42, "end_event_id": 50},

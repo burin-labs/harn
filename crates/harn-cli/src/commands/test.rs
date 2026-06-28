@@ -2051,7 +2051,7 @@ fn print_user_test_timing(summary: &test_runner::TestSummary) {
     }
 
     // Phase-level aggregate. Useful for downstream callers (eg.
-    // burin-code's preflight) that want to attribute cold-start vs.
+    // an IDE host's preflight) that want to attribute cold-start vs.
     // assertion cost without running with `--diagnose` per test.
     let agg = summary.aggregate;
     println!();

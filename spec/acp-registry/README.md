@@ -22,7 +22,7 @@ ACP-speaking clients.
 - [`harn/icon.svg`](harn/icon.svg) — 16×16 `currentColor` icon.
 
 This is the agent's free editor discoverability listing. It is **not** the
-signed skills/connectors marketplace (harn-cloud#24).
+signed skills/connectors marketplace (tracked separately).
 
 ## Validation
 

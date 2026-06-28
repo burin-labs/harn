@@ -3,8 +3,8 @@ import heroSnippetRaw from "../examples/hero.harn.txt?raw"
 import { highlightHarnSource } from "../lib/harn-highlight"
 import { useMessages } from "../i18n"
 
-// Hero mockup — a Harn pipeline source pane beside a live agent run, echoing the
-// Burin Code editor mockup but expressing what Harn itself is: orchestration code.
+// Hero mockup — a Harn pipeline source pane beside a live agent run, echoing a
+// familiar editor layout but expressing what Harn itself is: orchestration code.
 export const heroSnippetSource = heroSnippetRaw.trimEnd()
 
 function ChatRow({

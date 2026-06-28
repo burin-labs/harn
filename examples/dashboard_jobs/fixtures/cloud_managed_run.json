@@ -1,7 +1,7 @@
 {
   "environment": "cloud",
-  "runtime": "harn-cloud",
-  "source_clock": "harn-cloud",
+  "runtime": "cloud",
+  "source_clock": "cloud",
   "tenant_id": "tenant-acme",
   "workspace_id": "workspace-prod",
   "job_id": "cloud-triage-feed",

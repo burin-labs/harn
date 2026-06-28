@@ -1,10 +1,9 @@
 # Migration: harn-hostlib host contracts
 
 `harn-hostlib` began as a migration path for code-intelligence and tool
-surfaces that had lived in `burin-labs/burin-code`, including the Swift
-`BurinCore`, `Sources/ASTEngine`, and `Sources/BurinCodeIndex` modules.
-That history explains the early parity tests and the initial schema names,
-but it is no longer the ownership model.
+surfaces that had lived in an external IDE host's Swift code-intelligence
+modules. That history explains the early parity tests and the initial schema
+names, but it is no longer the ownership model.
 
 The current contract is Harn-owned:
 

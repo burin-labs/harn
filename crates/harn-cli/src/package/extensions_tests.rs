@@ -1625,7 +1625,7 @@ fn contributes_block_parses_and_validates() {
 name = "harn-latex"
 version = "0.1.0"
 publisher = "Burin Labs"
-contact = "ext@burincode.com"
+contact = "ext@example.com"
 permissions = ["workspace:read_text", "process:exec"]
 
 [[contributes]]

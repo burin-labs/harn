@@ -3,8 +3,8 @@
 The Harn Agents Protocol is the public wire contract for managed Harn agents.
 It lets clients, hosts, and third-party Harness implementations create
 sessions, submit tasks, stream agent activity, exchange artifacts, verify audit
-receipts, and replay durable execution history without depending on Harn Cloud
-internals.
+receipts, and replay durable execution history without depending on a particular
+host implementation's internals.
 
 This document is the narrative specification for protocol version 1. It is
 authoritative for resource semantics, lifecycle rules, transport behavior,
@@ -26,7 +26,7 @@ https://harnlang.com/spec/agents-protocol/v1
 - Version header: `Harn-Agents-Protocol-Version`
 - Initial version value: `agents-protocol-2026-04-25`
 - Stability: draft until the v1 conformance suite lands
-- Reference implementation: `burin-labs/harn-cloud`
+- Reference implementation: a managed cloud Harness
 - Open source specification home: `burin-labs/harn`
 
 ## Design goals

@@ -21,7 +21,7 @@
     {"name": "make-conformance", "command": "make conformance"}
   ],
   "downstream": [
-    {"repo": "burin-labs/burin-code", "action": "fetch_harn_bump"}
+    {"repo": "example-org/example-app", "action": "fetch_harn_bump"}
   ],
   "bump_after_merge": null,
   "autopilot_states": ["queued", "waiting_checks", "behind"],

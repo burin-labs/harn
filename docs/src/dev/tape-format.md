@@ -202,7 +202,7 @@ record kinds. The following are tracked separately:
 - Tape compaction / GC. The current encoding stores every record;
   pruning can come once tapes get large in practice.
 - Cross-runtime tape exchange (Inngest/Temporal interop). Lives in the
-  harn-cloud#19 harness, not this crate.
+  leaderboard harness ([harn-cloud#19]), not this crate.
 
 ## See also
 

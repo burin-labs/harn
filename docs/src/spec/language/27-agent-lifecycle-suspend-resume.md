@@ -151,7 +151,7 @@ Four canonical presets live in `std/agent/resume_by`:
 |---|---|
 | `ResumeBy.parent_llm` | Always returns `{handled: true, mechanism: "ResumeBy.parent_llm"}`. The parent agent's LLM owns the resume via `subagent_resume`. |
 | `ResumeBy.local_runtime` | Registers `conditions.trigger` with the in-process trigger dispatcher. Declines with `{handled: false, reason: "no_conditions"}` when no conditions are present. |
-| `ResumeBy.cloud_harness` | Registers the suspension with the harn-cloud webhook receiver for durability across process restart. Declines with `{handled: false, reason: "no_cloud_session"}` when no cloud session is bound. |
+| `ResumeBy.cloud_harness` | Registers the suspension with a cloud webhook receiver for durability across process restart. Declines with `{handled: false, reason: "no_cloud_session"}` when no cloud session is bound. |
 | `ResumeBy.pipeline_drain` | Always returns `{handled: true, mechanism: "ResumeBy.pipeline_drain"}`. The enclosing pipeline's drain step owns the resume. |
 
 Presets compose with `std/lifecycle/combinators::first_available`

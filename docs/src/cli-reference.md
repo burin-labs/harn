@@ -459,7 +459,7 @@ writes a JSON report with `iterations[]`, `mean_ms`, `p50_ms`, `p95_ms`,
 as environment aliases.
 
 `harn bench replay` reads `benchmarks/replay/suite.json` by default. It emits
-schema `harn.replay_benchmark.report.v1`, including Harn Cloud ingest metadata,
+schema `harn.replay_benchmark.report.v1`, including cloud-platform ingest metadata,
 fixture receipts, replay-fidelity scores, permission-preservation scores,
 tool-call drift counts, transcript drift counts, observed interaction totals,
 and first-divergence triage data. Use `--output <path>` to write the JSON report
@@ -1105,7 +1105,7 @@ To pick up the selected provider/model defaults in your shell, run
 
 One-command readiness check for new contributors and host integrators. The
 command surfaces actionable, secret-free output for both humans and machine
-consumers (Burin Code preflight, Harn Cloud onboarding).
+consumers (IDE-host preflight, cloud-platform onboarding).
 
 ```bash
 harn doctor                # local checks; skips remote provider probes by default
@@ -1907,7 +1907,7 @@ effects or replay-oracle receipt drift are rejected instead of promoted.
 Pass `--bundle <DIR>` to also emit a portable
 `harn.crystallization.candidate.bundle` directory (`candidate.json`,
 `workflow.harn`, `report.json`, `harn.eval.toml`, redacted `fixtures/`)
-that Harn Cloud or any other importer can consume without bespoke glue:
+that a cloud platform or any other importer can consume without bespoke glue:
 
 ```bash
 harn crystallize \
@@ -2213,7 +2213,7 @@ harn install --json
 `harn.toml` and `harn.lock` disagree. `--offline` also implies locked
 behavior and fails instead of fetching when a locked git package is
 missing from the shared cache. `--json` emits a structured install
-summary suitable for Burin Code and Harn Cloud automation.
+summary suitable for IDE-host and cloud-platform automation.
 
 ## harn lock
 
@@ -2474,7 +2474,7 @@ harn package artifacts check vendor/manifest.json --json
 Harn binary would emit — the same JSON that `make gen-protocol-artifacts`
 ships under `spec/protocol-artifacts/manifest.json`. `check` compares a
 vendored copy of that manifest against the running Harn and reports any
-drift. Hosts that vendor Harn protocol bindings (Burin Code, Harn Cloud,
+drift. Hosts that vendor Harn protocol bindings (IDE hosts, cloud platforms,
 custom integrators) call `check` from CI to detect when a Harn bump
 would require regenerating their bindings.
 

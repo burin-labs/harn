@@ -1,5 +1,5 @@
 {
-  "repo": "burin-labs/harn-cloud",
+  "repo": "example-org/example-service",
   "default_branch": "main",
   "merge_method": "squash",
   "merge_queue_enabled": true,

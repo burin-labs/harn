@@ -8,7 +8,7 @@ script.
 
 The full persona package lives at
 [`personas/merge_captain/`](https://github.com/burin-labs/harn/tree/main/personas/merge_captain)
-and ships with policies for `harn`, `harn-cloud`, and `burin-code`.
+and ships with policies for `harn` plus example service and app repos.
 
 ## What it owns
 
@@ -74,8 +74,8 @@ serves both the smoke fixture and a production sweep.
   "mode": "live",
   "policy_paths": [
     "personas/merge_captain/policies/harn.json",
-    "personas/merge_captain/policies/harn-cloud.json",
-    "personas/merge_captain/policies/burin-code.json"
+    "personas/merge_captain/policies/example-service.json",
+    "personas/merge_captain/policies/example-app.json"
   ],
   "state_root": "/var/lib/harn/merge-captain/state",
   "session_id": "production",
@@ -137,7 +137,7 @@ Only `repo` is required; everything else inherits from
     {"name": "make-test", "command": "make test"},
     {"name": "make-conformance", "command": "make conformance"}
   ],
-  "downstream": [{"repo": "burin-labs/burin-code", "action": "fetch_harn_bump"}],
+  "downstream": [{"repo": "example-org/example-app", "action": "fetch_harn_bump"}],
   "bump_after_merge": null,
   "autopilot_states": ["queued", "waiting_checks", "behind"],
   "require_human_for": ["blocked", "local_repair"]

@@ -23,7 +23,7 @@ pub(crate) struct CrystallizeArgs {
     /// Optional bundle directory. When set, the CLI also emits a portable
     /// crystallization bundle (`candidate.json`, `workflow.harn`,
     /// `report.json`, `harn.eval.toml`, redacted `fixtures/`) ready for
-    /// Harn Cloud import.
+    /// import into a cloud platform.
     #[arg(long = "bundle", value_name = "BUNDLE_DIR")]
     pub bundle: Option<String>,
     /// Override the bundle's external_key (defaults to a sanitized workflow name).

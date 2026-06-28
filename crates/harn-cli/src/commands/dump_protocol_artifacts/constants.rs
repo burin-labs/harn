@@ -48,7 +48,7 @@ pub(super) const ACP_CLIENT_METHODS: &[&str] = &[
 /// services workspace-management, workflow-control, and HITL methods that those
 /// bindings intentionally do not expose as typed enums yet. The Rust artifact
 /// is the first binding to publish the *complete* handled surface so downstream
-/// Rust hosts (e.g. harn-cloud) can route every method without
+/// Rust hosts (e.g. a cloud platform) can route every method without
 /// re-deriving it from the dispatcher by hand. Keep this list in lockstep with
 /// the `match method.as_str()` arms; `dispatched_acp_methods_match_artifact`
 /// guards against drift.

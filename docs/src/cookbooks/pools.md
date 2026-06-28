@@ -81,7 +81,7 @@ does not vanish on restart.
 
 A multi-tenant inference service has four GPUs. Each inference call
 must run on exactly one GPU; the pool's `max_concurrent` is sized to
-the GPU count and the worker tier is pinned via the Harn Cloud worker
+the GPU count and the worker tier is pinned via a cloud worker
 selector. Tenants share the budget fairly, and any cross-tenant burst
 queues rather than spilling onto non-GPU hosts.
 

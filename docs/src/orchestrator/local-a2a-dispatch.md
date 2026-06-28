@@ -32,7 +32,7 @@ Use a local handler when the workflow should run inside the current Harn process
 
 Use A2A dispatch when execution crosses an agent or trust boundary:
 
-- a managed Harn Cloud worker owns the handler
+- a managed cloud worker owns the handler
 - a federated agent has separate credentials, quotas, or receipts
 - an operator needs to see that the work ran remotely
 - retries and DLQ movement should treat the remote endpoint as a destination

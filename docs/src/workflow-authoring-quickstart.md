@@ -52,8 +52,8 @@ You should see:
 ```
 
 The `graph_digest` is a SHA-256 over the canonical workflow graph. The
-same bundle always produces the same digest, which is how Burin GUI/TUI
-hosts and Harn Cloud later compare two runs against the same workflow
+same bundle always produces the same digest, which is how IDE hosts and
+cloud orchestrators later compare two runs against the same workflow
 identity.
 
 ## 2. Preview the normalized graph
@@ -213,6 +213,5 @@ complete host contract, DLQ commands, and recovery flows.
 - Read [Portable workflow bundles](./workflow-bundles.md) for the full
   schema and host contract.
 - For an in-process host that owns approval UX, file mutations, and
-  notifications on top of these bundles, look at Burin Code (the
-  desktop host) or Harn Cloud (hosted multi-tenant execution). Both
-  consume the same bundle JSON without changes.
+  notifications on top of these bundles, embed Harn in an IDE host or a
+  cloud orchestrator. Both consume the same bundle JSON without changes.

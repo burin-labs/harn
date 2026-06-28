@@ -2,8 +2,8 @@
 
 Every published GitHub release uploads a `release-assets.json` file
 alongside the per-target archives. It is the consumer contract for
-downstream packagers — `burin-code/scripts/fetch-harn.sh`, the
-`@burin/cli` npm postinstall, Homebrew/Scoop formula generators —
+downstream packagers — `fetch-harn.sh` scripts, npm CLI postinstall
+hooks, Homebrew/Scoop formula generators —
 so they can verify and download the right binary without scraping the
 releases API.
 

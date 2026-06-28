@@ -1,7 +1,7 @@
 // Review Captain entry pipeline.
 //
 // One invocation reviews one PR. The pipeline accepts an `input` JSON
-// object on stdin so any embedder (Burin Code, harn-cloud, the CLI)
+// object on stdin so any embedder (an IDE host, a cloud platform, the CLI)
 // drives the persona by piping a `ReviewCaptainRequest` payload in;
 // when stdin is empty it falls back to the bundled smoke fixture so
 // `harn run personas/review_captain/manifest.harn` still produces a
@@ -60,7 +60,7 @@ fn summarize_review_step(ctx) {
 
 fn _default_request() {
   return {
-    repo: "burin-labs/burin-code",
+    repo: "example-org/example-app",
     pr_number: 235,
     head_sha: "0000000000000000000000000000000000000000",
     base_sha: "0000000000000000000000000000000000000000",

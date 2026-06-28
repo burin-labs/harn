@@ -28,7 +28,7 @@ allowed_tools:
 # Workflow authoring (Harn workflow bundles)
 
 You are authoring a **portable workflow bundle** — a JSON file Harn validates,
-previews, and runs locally. Hosts (Burin TUI/GUI, Harn Cloud importers) consume
+previews, and runs locally. Hosts (IDE TUI/GUI, cloud-platform importers) consume
 the same bundle without rewriting.
 
 Read **`prompting.md`** in this directory before composing a response. It

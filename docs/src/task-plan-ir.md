@@ -173,7 +173,7 @@ separate task-plan executor or generated-Harn eval path.
 strategies across the [five fixtures in `examples/task_plan`](../../examples/task_plan/README.md):
 
 1. **Baseline** — a single tutorial-style `agent_loop` per task.
-2. **Burin first-order** — Burin Code's existing
+2. **Host-native first-order** — an IDE host's existing
    plan→execute workflow.
 3. **Typed task plan** — the same task lowered through this IR.
 

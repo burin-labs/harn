@@ -3,7 +3,7 @@ import { llm_text, with_llm_script } from "std/testing"
 /**
  * `require_successful_tools` is an active gate: when a required tool
  * never succeeds the agent_loop result carries a structured
- * `error_envelope` (consumable by Harn Cloud receipts) AND emits a
+ * `error_envelope` (consumable by cloud receipts) AND emits a
  * `tool_gap` friction event onto the friction sink so context-pack
  * suggestions and dashboards pick it up alongside natively-emitted
  * events.

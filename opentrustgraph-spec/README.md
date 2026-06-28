@@ -10,7 +10,7 @@ Until that repository exists, the public URL for the artifact is:
 OpenTrustGraph records autonomy decisions as append-only, hash-chained events.
 Each record captures the agent, action, optional approver, outcome, trace id,
 effective autonomy tier, runtime metadata, and hash-chain position. Chain export
-documents wrap those records with enough metadata for Harn Cloud receipts,
+documents wrap those records with enough metadata for cloud receipts,
 supervision UIs, and third-party verifiers to display the chain root without
 inventing another envelope.
 
@@ -92,6 +92,6 @@ one signature receipt in `metadata.approval.signatures`.
   be projected into the chain export shape.
 - The portal `GET /api/trust-graph` endpoint returns records, summaries, and
   verification status for local supervision surfaces.
-- Harn Cloud receipts and Burin supervision UI planning should link to this
+- Cloud receipts and IDE-host supervision UI planning should link to this
   directory or the future standalone repository instead of describing the format
   informally.

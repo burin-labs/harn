@@ -1,7 +1,7 @@
 # Dashboard job envelopes
 
 `std/dashboard/jobs` defines the portable status event Harn emits for Jobs
-surfaces in local Burin and Harn Cloud. The contract is intentionally a
+surfaces in a local editor and a cloud platform. The contract is intentionally a
 dashboard-facing envelope, not a scheduler API: Harn runtimes and connectors
 produce ordered events, and hosts render queue/run/approval/DLQ/receipt state
 from normalized fields.
@@ -31,7 +31,7 @@ log(view.jobs[0].status)
 | Field | Purpose |
 |---|---|
 | `kind` | Event kind such as `run.queued`, `approval.requested`, `dlq.created`, or `receipt.available` |
-| `source` | Runtime and environment, for example local Harn or Harn Cloud |
+| `source` | Runtime and environment, for example local Harn or a cloud platform |
 | `source_clock` | Source clock label plus timestamp for replayable ordering |
 | `tenant_id`, `workspace_id` | Optional partition keys for cloud and multi-workspace hosts |
 | `job_id` | Stable dashboard job key |

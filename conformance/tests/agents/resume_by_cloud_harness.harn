@@ -2,7 +2,7 @@ import { ResumeBy } from "std/agent/resume_by"
 import { lifecycle_audit_log_take } from "std/lifecycle"
 
 /**
- * ResumeBy.cloud_harness defers to the harn-cloud webhook receiver.
+ * ResumeBy.cloud_harness defers to a cloud webhook receiver.
  * Without a bound cloud session (the default in conformance), it
  * declines with `{handled: false, reason: "no_cloud_session"}` and
  * records a `resume_by_declined` audit so a composed

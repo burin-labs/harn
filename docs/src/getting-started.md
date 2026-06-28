@@ -90,7 +90,7 @@ harn doctor --json         # machine-readable output for preflight automation
 ```
 
 The JSON output is versioned (`schema_version`) and stable across patch
-releases — Burin Code and Harn Cloud read the `summary.blocked_flows` array to
+releases — IDE hosts and cloud platforms read the `summary.blocked_flows` array to
 decide whether a host can build, test, release, run scripts, or work on the
 portal.
 

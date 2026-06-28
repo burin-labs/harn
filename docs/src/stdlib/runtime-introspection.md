@@ -101,9 +101,9 @@ variable, trimmed. When unset or empty, it falls back to `"harn"` (the
 bare CLI). Hosts that embed the runtime set it during process startup:
 
 ```shell
-HARN_HARNESS=burin-code harn run main.harn
+HARN_HARNESS=ide-host harn run main.harn
 HARN_HARNESS=claude-code harn run main.harn
-HARN_HARNESS=harn-cloud harn run main.harn
+HARN_HARNESS=cloud harn run main.harn
 ```
 
 The value is opaque to the runtime — pick whatever string your

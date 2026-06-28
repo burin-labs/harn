@@ -68,7 +68,7 @@ grepping logs trivial to write.
 
 ## Host extension points
 
-The default policy is not the only policy. Hosts (Burin Code, the
+The default policy is not the only policy. Hosts (IDE hosts, the
 Harn portal, third-party orchestrators) may want to:
 
 - **Mark an additional header as safe.** A bespoke webhook can opt

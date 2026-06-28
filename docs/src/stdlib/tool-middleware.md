@@ -14,7 +14,7 @@ patching the runtime.
 Both seams compose. The execution-time seam runs *every* dispatch
 regardless of executor (`harn`, `host_bridge`, `mcp_server`,
 `provider_native`), so a single `with_audit_log` reaches script tools,
-host-bridge tools (e.g. burin-code), and MCP-served tools uniformly.
+host-bridge tools (e.g. an IDE host), and MCP-served tools uniformly.
 
 The user-facing module is `std/llm/tool_middleware`.
 
@@ -179,7 +179,7 @@ same append-only JSONL sink used by `sink: "local"`.
 `prompt_fn(call) -> bool | dict` is consulted before each tool call.
 Denied calls short-circuit with `consent_denied`; approved calls
 proceed and record the decision in `audit.consent`. Pair with the host
-UX (e.g. burin-code's approval modal) for destructive tools.
+UX (e.g. an IDE host's approval modal) for destructive tools.
 
 ### `with_scoped_executor(opts) -> caller`
 

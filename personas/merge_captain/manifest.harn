@@ -93,8 +93,8 @@ fn _default_input() {
     fixture_path: "personas/merge_captain/fixtures/github_snapshot.json",
     policy_paths: [
       "personas/merge_captain/policies/harn.json",
-      "personas/merge_captain/policies/harn-cloud.json",
-      "personas/merge_captain/policies/burin-code.json",
+      "personas/merge_captain/policies/example-service.json",
+      "personas/merge_captain/policies/example-app.json",
     ],
     state_root: ".harn/merge-captain/state",
     session_id: "smoke",

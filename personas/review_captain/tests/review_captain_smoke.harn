@@ -17,7 +17,7 @@ pipeline test_smoke_dry_run_emits_receipt(task) {
   assert_eq(receipt.persona, "review_captain")
   assert_eq(receipt.kind, "review_receipt")
   assert_eq(receipt.schema_version, 1)
-  assert_eq(receipt.repo, "burin-labs/burin-code")
+  assert_eq(receipt.repo, "example-org/example-app")
   assert_eq(receipt.pr_number, 235)
   assert_eq(receipt.self_review_skipped_reason, "dry_run")
   assert_eq(receipt.blocking, false)

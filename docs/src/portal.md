@@ -120,8 +120,8 @@ it.
 
 For autonomy supervision, the portal's trust-graph API exposes the same
 `opentrustgraph/v0.1` records documented in
-[`opentrustgraph-spec/`](../../opentrustgraph-spec/). Harn Cloud receipt views
-and Burin supervision surfaces can use that artifact as the stable public
+[`opentrustgraph-spec/`](../../opentrustgraph-spec/). Cloud receipt views
+and IDE-host supervision surfaces can use that artifact as the stable public
 format reference while projecting portal verification metadata into
 `opentrustgraph-chain/v0` exports.
 

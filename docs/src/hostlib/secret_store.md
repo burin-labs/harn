@@ -38,22 +38,22 @@ needs deterministic, file-based storage.
 ### Account namespacing
 
 The `account` argument scopes every key to the calling application
-(`burin`, `harn-cloud-admin`, etc.) so two applications can use the same
+(`my-app`, `cloud-admin`, etc.) so two applications can use the same
 key name without collision:
 
 * **Keychain** — `account` maps to `kSecAttrService`; `key` maps to
-  `kSecAttrAccount`. Matches the layout used by the legacy Swift
-  `KeychainCredentialStore` in burin-code so existing entries are
+  `kSecAttrAccount`. Matches the layout used by a legacy Swift
+  `KeychainCredentialStore` in an IDE host so existing entries are
   reachable without migration.
 * **Credential Manager** — `account/key` becomes the credential's target
-  name (e.g. `burin/OPENAI_API_KEY`).
+  name (e.g. `my-app/OPENAI_API_KEY`).
 * **File backend** — credentials land at
   `$XDG_CONFIG_HOME/<account>/credentials.json`
   (or `%APPDATA%\<account>\credentials.json` on Windows). The file is
   written with `0o600` on Unix; the containing directory with `0o700`.
 
-The path layout for the file backend is byte-compatible with burin-code's
-existing `$XDG_CONFIG_HOME/burin/credentials.json`, so existing
+The path layout for the file backend is byte-compatible with an IDE host's
+existing `$XDG_CONFIG_HOME/<account>/credentials.json` layout, so existing
 deployments migrate without any data movement.
 
 ## Scope and non-goals

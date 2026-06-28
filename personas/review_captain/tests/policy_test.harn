@@ -14,10 +14,10 @@ pipeline test_load_policy_json_returns_default_when_empty(task) {
 }
 
 pipeline test_load_policy_json_round_trips(task) {
-  let raw = "{\"repo\":\"burin-labs/burin-code\",\"risky_paths\":[\"Package.swift\"],\"test_globs\":[\"Tests/\"]}"
+  let raw = "{\"repo\":\"example-org/example-app\",\"risky_paths\":[\"Package.swift\"],\"test_globs\":[\"Tests/\"]}"
   let result = load_policy_json(raw)
   assert_eq(result.ok, true)
-  assert_eq(result.policy.repo, "burin-labs/burin-code")
+  assert_eq(result.policy.repo, "example-org/example-app")
   assert_eq(len(result.policy.risky_paths), 1)
   assert_eq(result.policy.risky_paths[0], "Package.swift")
   assert_eq(len(result.policy.test_globs), 1)

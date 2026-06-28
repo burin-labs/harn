@@ -31,7 +31,7 @@ use super::*;
 /// referenced in the emitted TypeScript bindings must be declared in the
 /// same artifact. The TS section once used the Python-only name
 /// `HarnExtensionMeta` for a `_meta` field; it compiled here (it's just a
-/// Rust string) but broke `tsc` downstream in burin-code, where the
+/// Rust string) but broke `tsc` downstream in an IDE host, where the
 /// failure surfaced far from its cause. This test fails harn's own
 /// `cargo test` on any dangling protocol-type reference, so the class of
 /// bug can't escape the harn build again.
@@ -57,7 +57,7 @@ fn typescript_artifact_has_no_dangling_type_references() {
         dangling.is_empty(),
         "emitted TypeScript references undeclared protocol type(s): {dangling:?}. Every \
              ACP/Harn/A2A/MCP-prefixed type used in the bindings must be declared in the same \
-             artifact; this guard shift-lefts the burin-code `tsc` failure into harn's build."
+             artifact; this guard shift-lefts the downstream `tsc` failure into harn's build."
     );
 }
 

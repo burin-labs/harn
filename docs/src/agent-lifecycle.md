@@ -253,7 +253,7 @@ argument on `agent_await_resumption` names that owner with a callback:
 |---|---|
 | `ResumeBy.parent_llm` | Parent agent's LLM resumes the child via `subagent_resume`. The default when no `conditions` are present. |
 | `ResumeBy.local_runtime` | Local trigger dispatcher registers `conditions.trigger` and calls `resume_agent` on fire. The default when `conditions` are present and no cloud session is bound. |
-| `ResumeBy.cloud_harness` | The harn-cloud webhook receiver persists the suspension across process restart and resumes when the configured event lands. Selected when a cloud session is bound. |
+| `ResumeBy.cloud_harness` | A cloud webhook receiver persists the suspension across process restart and resumes when the configured event lands. Selected when a cloud session is bound. |
 | `ResumeBy.pipeline_drain` | The enclosing pipeline's drain step owns the resume responsibility. Use inside lifecycle combinators. |
 
 Each callback is a pure closure `(harness, suspension) -> {handled, mechanism}`
@@ -380,7 +380,7 @@ authoritative; the table above lists only the `HARN-SUS-*` namespace.
   are durable. A fresh process can load the snapshot with
   `resume_agent(snapshot)` or `harn run --resume <path>` and continue.
   When a cloud session is bound, `ResumeBy.cloud_harness` keeps the
-  registration in harn-cloud so the resume crosses machines.
+  registration with the cloud session so the resume crosses machines.
 - **Double-resume is detected.** Concurrent `resume_agent` calls on the
   same handle raise `HARN-SUS-006`; the second caller observes the race
   and can retry against the now-running handle. See the

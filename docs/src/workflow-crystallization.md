@@ -171,7 +171,7 @@ candidate's expected receipts are substituted into the second execution. Any
 meaningful receipt drift is recorded in `promotion.divergence_history` and
 blocks promotion.
 
-This gives Harn Cloud and local reviewers a deterministic pass/fail surface
+This gives cloud and local reviewers a deterministic pass/fail surface
 before promotion.
 
 ## Checked-in V2 fixture harness
@@ -236,7 +236,7 @@ candidates; it does not perform live model calls or promote the skill.
 ## Portable bundle
 
 Pass `--bundle <DIR>` to also emit a portable crystallization-candidate
-**bundle** that Harn Cloud (and any other downstream importer) can consume
+**bundle** that a cloud platform (and any other downstream importer) can consume
 without bespoke glue:
 
 ```text
@@ -253,7 +253,7 @@ bundle/
     └── ...
 ```
 
-`candidate.json` carries the stable schema markers and metadata Harn Cloud
+`candidate.json` carries the stable schema markers and metadata a cloud platform
 needs to import a candidate directly:
 
 ```json

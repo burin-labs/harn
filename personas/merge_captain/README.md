@@ -1,8 +1,8 @@
 # Merge captain persona
 
 Merge Captain is a Harn-native runbook for owning pull-request queues
-across `harn`, `harn-cloud`, and `burin-code` (or any other repo whose
-policy you check in here). It replaces the shell-driven sweep MVP with
+across `harn` and any other repo whose policy you check in here (the bundled
+examples cover a Rust service and a desktop app). It replaces the shell-driven sweep MVP with
 a deterministic state machine, durable per-PR checkpoints, and a typed
 GitHub adapter that rides the connector contract — no raw
 `process.exec` against `gh` shell strings.
@@ -50,7 +50,7 @@ GitHub adapter that rides the connector contract — no raw
 | [`lib/repair_worker.harn`](lib/repair_worker.harn) | The only `agent_loop` caller. Builds the bundle, runs the gate, dispatches the worker, runs the validators, and returns a `merge_captain.repair_run` record. |
 | [`lib/receipt.harn`](lib/receipt.harn) | Per-PR + sweep receipt builders, including the `merge_captain.repair_run_link` summary. |
 | [`lib/scheduler.harn`](lib/scheduler.harn) | The actual sweep loop. Routes `local_repair` / `dirty` to the repair worker when policy enables it. |
-| [`policies/*.json`](policies) | Per-repo policy fixtures for harn / harn-cloud / burin-code. |
+| [`policies/*.json`](policies) | Per-repo policy fixtures for harn plus example service/app repos. |
 | [`fixtures/github_snapshot.json`](fixtures/github_snapshot.json) | Deterministic GitHub state for evals. |
 | [`tests/`](tests) | Pure-Harn unit + scheduler tests. |
 | [`evals/merge_captain_smoke.json`](evals/merge_captain_smoke.json) | Smoke eval suite. |
@@ -100,8 +100,8 @@ harn test personas/merge_captain/tests/prompt_pack_test.harn
   "mode": "live",
   "policy_paths": [
     "personas/merge_captain/policies/harn.json",
-    "personas/merge_captain/policies/harn-cloud.json",
-    "personas/merge_captain/policies/burin-code.json"
+    "personas/merge_captain/policies/example-service.json",
+    "personas/merge_captain/policies/example-app.json"
   ],
   "state_root": "/var/lib/harn/merge-captain/state",
   "session_id": "production",

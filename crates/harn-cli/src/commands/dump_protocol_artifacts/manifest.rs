@@ -22,7 +22,7 @@ pub(super) fn generate_tool_call_receipt_schema() -> Result<String, String> {
 /// Render the protocol-artifact manifest the running Harn would write.
 ///
 /// Re-exposed via `harn package artifacts manifest` so downstream automation
-/// (downstream hosts, Harn Cloud) can compare against vendored copies without
+/// (downstream hosts, cloud platforms) can compare against vendored copies without
 /// shelling out to `dump-protocol-artifacts`.
 pub(crate) fn manifest_json() -> Result<String, String> {
     generate_manifest()
@@ -199,7 +199,7 @@ pub(super) fn generate_readme() -> String {
          - `harn-protocol.rs`: dependency-free Rust module of ACP method-name,\n\
            session-update discriminator, content-extension key, and protocol\n\
            version `pub const`s. The only binding that publishes the complete\n\
-           dispatched ACP method surface; Burin Code vendors it as\n\
+           dispatched ACP method surface; an IDE host vendors it as\n\
            `protocol/src/generated.rs`.\n\
          - `python/harn_protocol.py`: Python dataclasses, enums, and constants for\n\
            the same host-facing surface (Python 3.9+, stdlib-only).\n\
@@ -211,8 +211,8 @@ pub(super) fn generate_readme() -> String {
            (modern success, unsupported-version retry, cache hints,\n\
            input-required, header mismatch, no-session HTTP, recursive\n\
            `$defs` tool schema, legacy 2025-11-25 compat) replayed by\n\
-           `make mcp-rc-conformance` and republished here for Burin Code\n\
-           and harn-cloud test suites.\n\n\
+           `make mcp-rc-conformance` and republished here for downstream host\n\
+           and cloud test suites.\n\n\
          Compatibility rule: additive enum values and optional fields are minor-version\n\
          compatible; removing or renaming a wire value requires a Harn minor-version\n\
          migration note and a regenerated artifact diff.\n",

@@ -47,7 +47,6 @@ export const en = {
     github: "GitHub",
     releases: "Releases",
     playground: "Playground",
-    burinCode: "Burin Code",
     issues: "Issues",
     discussions: "Discussions",
     contributing: "Contributing",

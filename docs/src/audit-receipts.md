@@ -47,10 +47,10 @@ sink.persist_receipt(&receipt).await?;
 ```
 
 Implement `ReceiptSink` at persistence boundaries. The trait keeps storage
-backends such as harn-cloud-store, local run-record writers, and future host
+backends such as cloud receipt stores, local run-record writers, and future host
 surfaces accepting the same envelope even when their physical storage differs.
 
-## harn-cloud migration
+## Cloud platform migration
 
 `run_receipts.payload` remains JSONB. The migration should enforce the canonical
 envelope at the JSON boundary:
@@ -77,13 +77,13 @@ ALTER TABLE run_receipts
   );
 ```
 
-The existing typed harn-cloud receipt views can stay as projections for public
+Existing typed cloud receipt views can stay as projections for public
 or operator display, but writes to `payload` should come from
 `harn_vm::receipts::Receipt` and the schema in `docs/schemas/receipt.v1.json`.
 
-## burin-code migration
+## IDE host migration
 
-`RunRecord` readers in burin-code should be generated from
+`RunRecord` readers in an IDE host should be generated from
 `docs/schemas/receipt.v1.json` or decode the canonical envelope directly. Swift
 view models may keep local projection types, but they should map from the
 schema-generated receipt type and not carry independent field definitions for

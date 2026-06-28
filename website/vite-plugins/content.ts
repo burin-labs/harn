@@ -284,10 +284,10 @@ function rehypeNormalizeCodeLang() {
 }
 
 // GitHub-style alert blockquotes → the shared `.callout` markup/classes used by
-// burincode.com's <Callout> component (see website/docs-stack-conventions.md).
-// `> [!NOTE]` / `[!TIP]` / `[!IMPORTANT]` / `[!WARNING]` / `[!CAUTION]` become
-// styled callouts; every other blockquote is left untouched. Icon paths are kept
-// in sync with the burin Callout component.
+// the companion marketing site's <Callout> component (see
+// website/docs-stack-conventions.md). `> [!NOTE]` / `[!TIP]` / `[!IMPORTANT]` /
+// `[!WARNING]` / `[!CAUTION]` become styled callouts; every other blockquote is
+// left untouched. Icon paths are kept in sync with that Callout component.
 const ALERT_ICONS = {
   note: "M12 9v4m0 4h.01M12 3a9 9 0 100 18 9 9 0 000-18z",
   tip: "M9.663 17h4.673M12 3v1m0 12a4 4 0 01-2-7.465A4 4 0 1116 9a4 4 0 01-2 3.465V16a2 2 0 01-2 2 2 2 0 01-2-2v-.535",
