@@ -1,17 +1,18 @@
+import { agent_capture_events } from "std/agent/events"
 import { llm_text, with_llm_script } from "std/testing"
 
 /**
- * Evidence-aware repair loop (#repair-diagnostics): the post-edit re-verify
- * mandate. When the repair loop is enabled, a turn that makes a successful
- * corrective edit on top of a LIVE failure must force a verification before the
- * loop continues — a successful edit is not proof the failure is resolved. The
- * verify routes through the EXISTING `verify_completion` entrypoint.
+ * Current-failure loop: the post-edit re-verify mandate. A turn that makes a
+ * successful corrective edit on top of a LIVE failure must force a verification
+ * before the loop continues — a successful edit is not proof the failure is
+ * resolved. The verify routes through the EXISTING `verify_completion`
+ * entrypoint.
  *
- * Positive: repair_aware:true => after the fail->edit sequence the mandate fires
- * `verify_completion` with stop_reason "post_edit_reverify" (observed via the
- * veto feedback injected into the next LLM turn).
- * Negative control: repair_aware:false => no forced verify, the marker feedback
- * never appears.
+ * Positive: repair_aware true OR false => after the fail->edit sequence the
+ * mandate fires `verify_completion` with stop_reason "post_edit_reverify"
+ * (observed via the veto feedback injected into the next LLM turn).
+ * Negative control: post_edit_reverify:false => no forced verify, the marker
+ * feedback never appears.
  */
 fn repair_tools() {
   var tools = tool_registry()
@@ -55,7 +56,7 @@ fn reverify_probe(info) {
   nil
 }
 
-fn run_scenario(repair_aware) {
+fn run_scenario(repair_aware, post_edit_reverify) {
   return with_llm_script(
     [
       // Turn 1: run the tests -> fail.
@@ -83,7 +84,7 @@ fn run_scenario(repair_aware) {
           stall_diagnostics: {
             enabled: true,
             repair_aware: repair_aware,
-            post_edit_reverify: true,
+            post_edit_reverify: post_edit_reverify,
             stuck_same_diagnostic_after: 3,
           },
         },
@@ -94,9 +95,80 @@ fn run_scenario(repair_aware) {
   )
 }
 
+fn first_event(events, event_type) {
+  for event in events {
+    if event.type == event_type {
+      return event
+    }
+  }
+  return nil
+}
+
+fn confirm_post_edit_reverify(info) {
+  if info.stop_reason == "post_edit_reverify" {
+    return nil
+  }
+  return "unexpected verification reason: " + to_string(info.stop_reason)
+}
+
+fn veto_post_edit_reverify(info) {
+  if info.stop_reason == "post_edit_reverify" {
+    return "still red after the edit"
+  }
+  return nil
+}
+
+fn run_cap_scenario(verify_completion) {
+  return with_llm_script(
+    [
+      // Turn 1: run the tests -> fail.
+      {text: "", tool_calls: [{id: "t1", name: "run_test", arguments: {}}]},
+      // Turn 2: apply a fix at the iteration cap. The loop must verify this
+      // edit before deciding whether it can finish.
+      {text: "", tool_calls: [{id: "e1", name: "apply_fix", arguments: {}}]},
+    ],
+    { ->
+      let session = "repair-reverify-cap-" + uuid()
+      return agent_capture_events(
+        session,
+        fn() { return agent_loop(
+          "Make the tests pass.",
+          nil,
+          {
+            provider: "mock",
+            tools: repair_tools(),
+            tool_format: "native",
+            loop_until_done: true,
+            max_iterations: 2,
+            final_wrapup: false,
+            session_id: session,
+            done_sentinel: "##DONE##",
+            verify_completion: verify_completion,
+            stall_diagnostics: {enabled: true, repair_aware: false, post_edit_reverify: true, stuck_same_diagnostic_after: 3},
+          },
+        ) },
+      )
+    },
+  )
+}
+
 pipeline default() {
-  // Positive: the mandate fires after fail->edit.
-  __io_println(run_scenario(true))
-  // Negative control: repair_aware:false => mandate never fires.
-  __io_println(run_scenario(false))
+  // Positive: the mandate fires after fail->edit with repair nudges enabled.
+  __io_println(run_scenario(true, true))
+  // Positive: the same mandate fires with repair nudges disabled.
+  __io_println(run_scenario(false, true))
+  // Negative control: callers may explicitly disable post-edit reverify.
+  __io_println(run_scenario(false, false))
+  // Green post-edit verification can close a last-iteration edit without
+  // requiring one more model turn just to say "done".
+  let cap_confirmed = run_cap_scenario(confirm_post_edit_reverify)
+  __io_println(cap_confirmed.result.status)
+  __io_println(cap_confirmed.result.stop_reason)
+  // Red post-edit verification at the cap stays exhausted and carries the
+  // current failure instead of silently completing.
+  let cap_vetoed = run_cap_scenario(veto_post_edit_reverify)
+  let budget_event = first_event(cap_vetoed.events, "budget_exhausted")
+  __io_println(cap_vetoed.result.status)
+  __io_println(budget_event.kind)
+  __io_println(cap_vetoed.result?.current_failure != nil)
 }

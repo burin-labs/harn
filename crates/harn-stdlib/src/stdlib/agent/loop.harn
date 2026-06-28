@@ -1632,7 +1632,11 @@ fn __intra_turn_failure_poisons_resource(result) -> bool {
   // other than an affirmative `false`. Only a host-confirmed pre-apply rejection
   // (view unchanged) skips poisoning. Guards the safety property: unknown stays
   // conservative, exactly like today.
-  return __intra_turn_result_mutated(result) != false
+  let mutated = __intra_turn_result_mutated(result)
+  if type_of(mutated) == "bool" && !mutated {
+    return false
+  }
+  return true
 }
 
 fn __intra_turn_has_keyed_mutating_calls(tool_calls, tools, options = {}) -> bool {
@@ -2089,15 +2093,15 @@ fn __tool_names_by_status(dispatch, want_ok) {
 
 // Workspace-mutating annotation kinds (mirrors postturn's tool-surface
 // classifier vocabulary). A successful call to a tool of one of these kinds is
-// a corrective edit for the evidence-aware repair loop's `write_epoch`.
+// a corrective edit for the current-failure model's `write_epoch`.
 const __REPAIR_EDIT_KINDS = ["edit", "write", "scaffold", "delete", "mutation", "mutate"]
 
 /**
  * __turn_made_edit reports whether `dispatch` (a single turn's dispatch
  * results) contains a SUCCESSFUL workspace-mutating tool call, by looking up
  * each successful tool's annotation kind in the registry. Reuses
- * `__tool_names_by_status` + `__tool_registry_entry`; only consulted when the
- * evidence-aware repair loop is enabled.
+ * `__tool_names_by_status` + `__tool_registry_entry`; only consulted when
+ * post-edit verification or repair-aware diagnostics are enabled.
  */
 fn __turn_made_edit(dispatch, tools) -> bool {
   if dispatch == nil {
@@ -2112,6 +2116,18 @@ fn __turn_made_edit(dispatch, tools) -> bool {
     }
   }
   return false
+}
+
+fn __agent_loop_verify_closure_exists(turn_opts) -> bool {
+  return turn_opts?.verify_completion != nil || turn_opts?.verify_completion_judge != nil
+}
+
+fn __agent_loop_post_edit_reverify_mandated(repair_cfg, turn_opts, stall_state, dispatch, tools) -> bool {
+  let has_live_failure = stall_state.last_diagnostic_class == "fail" || stall_state.reverify_owed
+  return repair_cfg.post_edit_reverify
+    && __agent_loop_verify_closure_exists(turn_opts)
+    && has_live_failure
+    && __turn_made_edit(dispatch, tools)
 }
 
 fn __merge_tool_names(existing, additions) {
@@ -3824,17 +3840,10 @@ fn __agent_loop_run(message, session, initial_opts) {
       )
       opts = __apply_post_turn_options(opts, outcome)
       let repair_cfg = agent_stall_repair_config(turn_opts?.stall_diagnostics)
-      let has_live_failure = stall_state.last_diagnostic_class == "fail" || stall_state.reverify_owed
-      let this_turn_made_edit = __turn_made_edit(dispatch, opts?.tools)
-      let verify_closure_exists = turn_opts?.verify_completion != nil
-        || turn_opts?.verify_completion_judge != nil
-      let reverify_mandated = repair_cfg.repair_aware
-        && repair_cfg.post_edit_reverify
-        && verify_closure_exists
-        && has_live_failure
-        && this_turn_made_edit
+      let reverify_mandated = __agent_loop_post_edit_reverify_mandated(repair_cfg, turn_opts, stall_state, dispatch, opts?.tools)
       var should_continue = outcome.kind == "continue" || bridge_step_delivered > 0
       var verdict_record = nil
+      var post_edit_reverify_confirmed = false
       if should_continue && reverify_mandated && verify_attempts < max_verify_attempts {
         let reverify_opts = turn_opts
           + {
@@ -3860,6 +3869,7 @@ fn __agent_loop_run(message, session, initial_opts) {
           }
         } else {
           stall_state = stall_state + {reverify_owed: false}
+          post_edit_reverify_confirmed = true
         }
       }
       if should_continue {
@@ -3912,6 +3922,9 @@ fn __agent_loop_run(message, session, initial_opts) {
             break
           } else {
             stall_state = stall_state + {reverify_owed: false}
+            if reverify_mandated {
+              post_edit_reverify_confirmed = true
+            }
           }
         }
         let missing_now = agent_required_tools_missing_from_session(opts, successful_tools_seen)
@@ -3921,6 +3934,14 @@ fn __agent_loop_run(message, session, initial_opts) {
         }
         if !should_continue {
           stop_reason = outcome.stop_reason
+          break
+        }
+      }
+      if should_continue && post_edit_reverify_confirmed && iteration >= current_max {
+        let missing_after_reverify = agent_required_tools_missing_from_session(opts, successful_tools_seen)
+        if len(missing_after_reverify) == 0 {
+          final_status = "done"
+          stop_reason = "post_edit_reverify"
           break
         }
       }
