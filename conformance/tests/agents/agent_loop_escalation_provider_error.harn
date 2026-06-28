@@ -23,7 +23,9 @@ fn first_provider_error_event(events) {
   for event in events {
     if event.type == "iteration_end" {
       let reason = to_string(event?.iteration_info?.skip_reason ?? "")
-      if reason == "provider_failure" || reason == "escalation_provider_failure" {
+      if reason == "provider_failure"
+        || reason == "escalation_provider_failure"
+        || reason == "escalation_aborted_provider_transport" {
         return event
       }
     }
@@ -161,7 +163,74 @@ fn primary_provider_error_case() {
   __io_println("primary_status=" + captured.result.status)
 }
 
+// -------------------------------------------------------------------------------------------------
+// Case 3: tracked transient transport failures during escalation are infra, not model failures.
+// -------------------------------------------------------------------------------------------------
+
+fn escalation_transient_transport_abort_case() {
+  let seen = shared_cell({scope: "task_group", key: "esc-transport-providers", initial: ""})
+  let turn = shared_cell({scope: "task_group", key: "esc-transport-turn", initial: 0})
+  let caller = { call ->
+    let provider = to_string(call?.opts?.provider ?? "")
+    let snap = shared_snapshot(seen)
+    shared_set(seen, snap.value + provider + ",")
+    if provider == "escalated" {
+      return {
+        ok: false,
+        status: "provider_error",
+        stop_reason: "provider_error",
+        error: {
+          category: "transient_network",
+          kind: "transient",
+          reason: "timeout",
+          message: "anthropic stream error (mid-stream read): error decoding response body",
+          provider: "escalated",
+          model: "frontier",
+        },
+      }
+    }
+    return {ok: true, value: {text: "still working", tool_calls: [], provider: "mock", model: "cheap"}}
+  }
+  let post_turn = { _payload ->
+    let count = shared_snapshot(turn)
+    shared_set(turn, count.value + 1)
+    if count.value == 0 {
+      return {next_options: {provider: "escalated", model: "frontier"}}
+    }
+    return nil
+  }
+  let session = "esc-transport-" + uuid()
+  let captured = agent_capture_events(
+    session,
+    fn() { return agent_loop(
+      "do the task",
+      nil,
+      {
+        session_id: session,
+        provider: "mock",
+        model: "cheap",
+        llm_caller: caller,
+        post_turn_callback: post_turn,
+        loop_until_done: true,
+        done_sentinel: "DONE",
+        max_iterations: 5,
+        iteration_budget: {mode: "fixed", max: 5, consecutive_failures: {max: 2}},
+      },
+    ) },
+  )
+  let perr = first_provider_error_event(captured.events)
+  __io_println("transport_event_present=" + to_string(perr != nil))
+  __io_println("transport_skip_reason=" + to_string(perr?.iteration_info?.skip_reason ?? ""))
+  __io_println("transport_status=" + captured.result.status)
+  __io_println("transport_stop_reason=" + captured.result.stop_reason)
+  __io_println(
+    "transport_breaker_count=" + to_string(count_events(captured.events, "budget_circuit_breaker")),
+  )
+  __io_println("transport_providers=" + shared_get(seen))
+}
+
 pipeline default() {
   escalation_fallback_case()
   primary_provider_error_case()
+  escalation_transient_transport_abort_case()
 }
