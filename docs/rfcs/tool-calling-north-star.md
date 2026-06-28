@@ -2,7 +2,7 @@
 
 Status: Draft
 Author: Harn runtime
-Audience: Harn maintainers; Burin Code, Harn Cloud, harn-bump-fleet, 20eq consumers
+Audience: Harn maintainers; IDE hosts, cloud platforms, harn-bump-fleet, 20eq consumers
 Scope: the tool-calling stack in `crates/harn-vm/src/llm/**`
 
 ## 0. One-sentence thesis
@@ -70,8 +70,8 @@ matching what every SOTA agent actually does.
 A coding agent that does nothing wrong and still goes nowhere is the most
 expensive bug we ship, because it reads as a model-capability failure on the
 meter when it is actually a parsing failure in the harness. The dialect problem
-is real and multi-headed (see `docs/blog-drafts/the-tool-call-dialect-problem.md`
-in burin-code, and §2 evidence): "native function calling" is at least four
+is real and multi-headed (see the "tool-call dialect problem" write-up
+and §2 evidence): "native function calling" is at least four
 mutually incompatible wire dialects across the cheap/open routes we actually use,
 and the dominant failure mode is *silence* — `tool_calls: []` with a billed,
 clean-finished turn.
@@ -88,7 +88,7 @@ and commits to the architecture that ends the whack-a-mole.
 
 The failure signatures below are the ground truth from mining the most recent
 ~50 eval transcript runs (2026-06-18 → 2026-06-24) across the two live
-`.burin-evals` roots: `burin-code/.burin-evals` (895 run dirs) and
+eval roots: an IDE-host eval corpus (895 run dirs) and
 `/private/tmp/bc-hardcell-harness/.burin-evals`. Counts are from the forensic
 sweep; byte-level excerpts and absolute source paths are in Appendix A. The
 single most important empirical finding shapes the whole design:
@@ -697,8 +697,8 @@ Together they make Harn the best hands-off orchestration toolchain on the planet
 
 ## Appendix A — Evidence excerpts (byte-level, from the 2026-06-18 → 06-24 sweep)
 
-Inventory: two live `.burin-evals` roots —
-`/Users/ksinder/projects/burin-code/.burin-evals` (895 run dirs) and
+Inventory: two live eval roots —
+an IDE-host eval corpus (895 run dirs) and
 `/private/tmp/bc-hardcell-harness/.burin-evals` (8). Layout per eval: base dir +
 `-llm` (`llm_transcript.jsonl`: `provider_call_request/response/error` records) +
 `-events` (`event_log-*.jsonl`, `topics/agent.transcript.llm.jsonl`); trials roll

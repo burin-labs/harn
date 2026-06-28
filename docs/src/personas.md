@@ -12,7 +12,7 @@ not just natural-language behavior.
 ## Manifest shape
 
 Persona v1 is a typed manifest schema owned by `harn-modules`, so hosts such as
-`harn-cli`, Harn Cloud, and Burin Code can parse and validate the same contract.
+`harn-cli`, cloud platforms, and IDE hosts can parse and validate the same contract.
 The usual form lives in `harn.toml` as `[[personas]]` entries, which keeps
 personas compatible with package manifests and the existing manifest discovery
 model. Standalone persona TOML files can use the same fields at the top level.

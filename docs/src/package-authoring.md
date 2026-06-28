@@ -279,7 +279,7 @@ day-to-day automation surface:
 ## Cross-repo bump workflow
 
 When Harn cuts a new release, downstream package authors and host
-integrators (Burin Code, Harn Cloud, third-party connectors) need a
+integrators (IDE hosts, cloud platforms, third-party connectors) need a
 consistent way to land the bump. The recommended sequence:
 
 1. **Refresh the running Harn binary** in the downstream repo

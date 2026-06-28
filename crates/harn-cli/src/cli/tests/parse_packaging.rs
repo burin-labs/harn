@@ -383,9 +383,9 @@ fn test_parses_publish_git_tag_flow_options() {
         "--remote",
         "upstream",
         "--index-repo",
-        "burin-labs/harn-cloud",
+        "burin-labs/harn-packages",
         "--index-path",
-        "package-index/harn-package-index.toml",
+        "harn-package-index.toml",
         "--registry-name",
         "@burin/acme-lib",
         "--skip-index-pr",
@@ -409,11 +409,8 @@ fn test_parses_publish_git_tag_flow_options() {
     assert_eq!(package, Some(PathBuf::from("pkg")));
     assert!(dry_run);
     assert_eq!(remote, "upstream");
-    assert_eq!(index_repo, "burin-labs/harn-cloud");
-    assert_eq!(
-        index_path,
-        PathBuf::from("package-index/harn-package-index.toml")
-    );
+    assert_eq!(index_repo, "burin-labs/harn-packages");
+    assert_eq!(index_path, PathBuf::from("harn-package-index.toml"));
     assert_eq!(registry_name.as_deref(), Some("@burin/acme-lib"));
     assert!(skip_index_pr);
     assert!(json);

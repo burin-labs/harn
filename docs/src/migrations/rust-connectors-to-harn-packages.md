@@ -2,7 +2,7 @@
 
 GitHub, Slack, Linear, and Notion provider business logic now ships in
 pure-Harn connector packages. Harn core keeps only the shared connector
-primitives, so Harn Cloud and self-hosted orchestrators can adopt connector
+primitives, so cloud platforms and self-hosted orchestrators can adopt connector
 fixes, new event families, and provider API changes without waiting for a Harn
 core release.
 
@@ -88,12 +88,12 @@ one provider on the pure-Harn implementation before moving the rest.
    reports `trigger:<id>` as `via <provider>`, so existing health checks keep
    working.
 
-## Harn cloud specifics
+## Cloud platform specifics
 
-Managed Harn Cloud orchestrators load pure-Harn connector packages through
+Managed cloud orchestrators load pure-Harn connector packages through
 the same `[[providers]]` mechanism documented above. Connector packages are
 resolved through the package manager so the cutover is a manifest change,
-not a Harn Cloud release.
+not a cloud-platform release.
 
 ## What stays in core
 
@@ -119,7 +119,7 @@ duplicate them.
 The Harn core prerequisites are complete:
 
 - The connector contract conformance harness validates pure-Harn replacements
-  through the same adapter path Harn Cloud and self-hosted orchestrators use.
+  through the same adapter path cloud platforms and self-hosted orchestrators use.
 - `NormalizeResult` v1, `poll_tick`, hot-path effect policy, transport
   primitives, structured concurrency, and the connector testkit are in core.
 - The OAuth / connect CLI and package manager give connector packages a stable

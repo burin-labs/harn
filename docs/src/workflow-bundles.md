@@ -1,9 +1,9 @@
 # Portable workflow bundles
 
 A workflow bundle is Harn's local-first artifact for durable engineering
-automations. It is designed to run on a trusted laptop under Burin/Harn and to
-remain importable into Harn Cloud later without changing the workflow's durable
-identity, graph, policy, or replay metadata.
+automations. It is designed to run on a trusted laptop under your editor or the
+CLI and to remain importable into a cloud platform later without changing the
+workflow's durable identity, graph, policy, or replay metadata.
 
 The canonical package format is `.harnpack`: a deterministic `tar.zst` archive
 with `harnpack.json` and `sbom.spdx.json` at the archive root. The manifest can

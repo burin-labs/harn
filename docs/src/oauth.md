@@ -12,7 +12,7 @@ without provider-specific Rust code.
 | `std/oauth/providers` | — | Catalogue of preconfigured providers + `custom(...)` factory |
 | `std/oauth/token_exchange_catalog` | 8693 | Shipped token-exchange capability row data |
 | `std/oauth/token_exchange` | 8693 | Token-exchange row loading + `act` claim helpers |
-| `std/oauth/storage` | — | Five interchangeable token stores (memory, file, harn-cloud session/org, custom) |
+| `std/oauth/storage` | — | Five interchangeable token stores (memory, file, cloud session/org, custom) |
 | `std/oauth/client` | 6749 + 7636 + 8693 + 9700 | Authorization-code flow with PKCE S256, RFC 8693 token exchange, transparent refresh, 401-retry |
 | `std/oauth/device_flow` | 8628 | Headless device authorization grant |
 | `std/oauth/dynamic_registration` | 7591 + 8414 | Worker-side metadata + dynamic client registration |
@@ -321,7 +321,7 @@ or logged.
 
 This module is the *server side* of OAuth — covers the case where Harn
 acts as a resource (or auxiliary service) that other agents register
-clients against. It does not itself host HTTP; embedders (harn-cloud,
+clients against. It does not itself host HTTP; embedders (a cloud platform,
 `harn serve`, custom hosts) mount the returned metadata documents and
 the registration handler.
 
@@ -816,7 +816,7 @@ let issues = request(cli, "GET", "https://api.github.com/orgs/burin-labs/issues"
 ```
 
 `harn_cloud_org()` routes through the `oauth_storage.cloud_*` host
-capability with `scope = "org"`. harn-cloud is responsible for
+capability with `scope = "org"`. A cloud platform is responsible for
 tenant-scoped storage (RLS), so two agents running in the same org
 share the same authenticated client without either of them being able
 to read tokens for a different org. The `storage_key` is per-purpose,

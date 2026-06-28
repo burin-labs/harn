@@ -36,8 +36,8 @@
     "approval_required": true,
     "policies": [
       "policies/harn.json",
-      "policies/harn-cloud.json",
-      "policies/burin-code.json"
+      "policies/example-service.json",
+      "policies/example-app.json"
     ]
   },
   "replay_fixture": {

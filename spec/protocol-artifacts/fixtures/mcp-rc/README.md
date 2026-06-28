@@ -1,8 +1,8 @@
 # MCP DRAFT-2026-v1 wire fixtures
 
 Hand-authored JSON request/response fixtures used by Harn's MCP RC
-compatibility harness. The same fixtures are published here so Burin
-Code and harn-cloud test suites can replay the canonical flows in their
+compatibility harness. The same fixtures are published here so downstream
+host and cloud test suites can replay the canonical flows in their
 own tests instead of copy-pasting wire shapes.
 
 Each fixture file has the shape:

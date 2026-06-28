@@ -5,7 +5,7 @@ client (`OAuth.client(...)`, RFC 6749 + 7636, RFC 8628 device flow). One
 storage handle backs every grant type, every refresh, and every revoke
 the client performs. A handle is just a dict with three closures —
 `get`, `set`, `delete` — so the client never needs to know whether a
-token lives in process memory, on disk, in `harn-cloud`, or in a vault.
+token lives in process memory, on disk, in a cloud platform, or in a vault.
 
 The five backends are:
 
@@ -100,7 +100,7 @@ the `oauth_storage` host capability:
 | `oauth_storage.cloud_delete` | `{scope, key}` | nil |
 
 `scope` is `"session"` for `harn_cloud_session()` and `"org"` for
-`harn_cloud_org()`. The harn-cloud embedder is responsible for
+`harn_cloud_org()`. The cloud-platform embedder is responsible for
 tenant-scoped storage (RLS) and refresh metadata.
 
 Tests can substitute the host with `host_mock("oauth_storage",
@@ -152,7 +152,7 @@ and is exposed as `store.id` so diagnostics can distinguish multiple
 custom backends.
 
 Closure capture is by value in Harn, so the closures cannot mutate
-outer scope to track state. Delegate to a real backend (`harn-cloud`,
+outer scope to track state. Delegate to a real backend (a cloud platform,
 the file backend, an HTTP API, an MCP tool) inside the closures
 instead.
 

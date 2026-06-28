@@ -2,7 +2,7 @@
 import { build_review_receipt, envelope_for_dry_run } from "../lib/receipt"
 
 fn _request() {
-  return {repo: "burin-labs/burin-code", pr_number: 42, head_sha: "abc", base_sha: "def"}
+  return {repo: "example-org/example-app", pr_number: 42, head_sha: "abc", base_sha: "def"}
 }
 
 pipeline test_clean_receipt_returns_approve(task) {
@@ -23,7 +23,7 @@ pipeline test_clean_receipt_returns_approve(task) {
   assert_eq(receipt.handoff, nil)
   assert_eq(receipt.persona, "review_captain")
   assert_eq(receipt.kind, "review_receipt")
-  assert_eq(receipt.repo, "burin-labs/burin-code")
+  assert_eq(receipt.repo, "example-org/example-app")
 }
 
 pipeline test_secret_findings_set_blocking(task) {

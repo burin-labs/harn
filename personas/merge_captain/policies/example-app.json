@@ -1,5 +1,5 @@
 {
-  "repo": "burin-labs/burin-code",
+  "repo": "example-org/example-app",
   "default_branch": "main",
   "merge_method": "squash",
   "merge_queue_enabled": false,

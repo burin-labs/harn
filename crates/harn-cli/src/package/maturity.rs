@@ -1,6 +1,6 @@
 //! Maturity surface for the package manager: outdated/audit/artifacts.
 //!
-//! These commands let downstream automation (hosts, Harn Cloud, CI) ask
+//! These commands let downstream automation (hosts, cloud platforms, CI) ask
 //! a single Harn binary "is this checkout still current?" — covering registry
 //! versions, branch HEAD drift, lockfile provenance, package compatibility,
 //! and the protocol-artifact contract that hosts vendor.

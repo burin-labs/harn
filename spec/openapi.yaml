@@ -19,7 +19,7 @@ externalDocs:
   url: https://harnlang.com/spec/agents-protocol/v1
 servers:
   - url: https://api.harnlang.com
-    description: Harn Cloud production API.
+    description: Managed cloud production API.
   - url: http://localhost:8080
     description: Local Harness development server.
 security:

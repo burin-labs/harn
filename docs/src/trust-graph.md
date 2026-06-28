@@ -47,7 +47,7 @@ The `trust_graph.records` projection carries the runtime query shape:
 
 See [`spec/opentrustgraph.md`](../../spec/opentrustgraph.md) for the normative
 record model, chain export model, and sample event stream. The small public
-artifact that Harn Cloud receipts, Burin supervision UI planning, and external
+artifact that cloud receipts, IDE-host supervision UI planning, and external
 verifiers should link to is
 [`opentrustgraph-spec/`](../../opentrustgraph-spec/). It contains the JSON
 Schema files and conformance fixtures used by Harn's runtime tests.

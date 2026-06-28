@@ -121,10 +121,10 @@
       ]
     }
   },
-  "burin-labs/harn-cloud": {
+  "example-org/example-service": {
     "pulls": [
       {
-        "repo": "burin-labs/harn-cloud",
+        "repo": "example-org/example-service",
         "number": 72,
         "title": "Spec out managed agents API",
         "head_sha": "11111111",
@@ -143,7 +143,7 @@
         "merge_group_active": false
       },
       {
-        "repo": "burin-labs/harn-cloud",
+        "repo": "example-org/example-service",
         "number": 73,
         "title": "Migrations missing review",
         "head_sha": "22222222",
@@ -162,7 +162,7 @@
         "merge_group_active": false
       },
       {
-        "repo": "burin-labs/harn-cloud",
+        "repo": "example-org/example-service",
         "number": 74,
         "title": "Conflict on schema",
         "head_sha": "33333333",
@@ -195,10 +195,10 @@
       "74": []
     }
   },
-  "burin-labs/burin-code": {
+  "example-org/example-app": {
     "pulls": [
       {
-        "repo": "burin-labs/burin-code",
+        "repo": "example-org/example-app",
         "number": 4221,
         "title": "Bridge improvements",
         "head_sha": "AAAAAAAA",
@@ -217,7 +217,7 @@
         "merge_group_active": false
       },
       {
-        "repo": "burin-labs/burin-code",
+        "repo": "example-org/example-app",
         "number": 4222,
         "title": "Held PR with do-not-merge label",
         "head_sha": "BBBBBBBB",

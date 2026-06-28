@@ -7,8 +7,8 @@ Accepted. **Decision: keep the hand-rolled MCP implementation; do not adopt
 *could* host every Harn-specific protocol feature without a fork, so this is a
 deliberate "viable but not compelling" call rather than a "can't be done" one.
 
-The companion DRY work that motivated the wider review — routing the
-`harn-cloud-gateway` remote-attach handlers through the shared
+The companion DRY work that motivated the wider review — routing a downstream
+gateway's remote-attach handlers through the shared
 `harn_vm::jsonrpc` envelope builders — shipped separately and is unaffected by
 this decision.
 
@@ -130,7 +130,7 @@ sufficient; adoption is not *compelling*, for three reasons:
 3. **Migration risk outweighs the savings.** Adoption means rewriting working,
    tested code; injecting `rmcp`'s transport/async dependency tree into
    `harn-vm`, which is consumed as a **published crate** (`harn-vm = "=0.8.x"`)
-   by `harn-cloud` and others, so every dependent inherits the tree; and risking
+   by downstream consumers, so every dependent inherits the tree; and risking
    wire-level drift that the dedicated `harn-mcp-rc-compat` conformance harness
    exists specifically to prevent. The existence of that harness is itself a
    signal that the project values byte-level control `rmcp` would abstract away.
@@ -206,5 +206,5 @@ fires; it is explicitly **not** in scope now.
 - Surface inventory: the four-crate, ~24k-LOC map in the Context section,
   cross-checked against `Cargo.toml`/`Cargo.lock` (confirmed: **zero** existing
   `rmcp` dependency anywhere in the workspace).
-- The companion DRY cutover (`harn-cloud-gateway` → `harn_vm::jsonrpc`) compiles
-  clean (`cargo check -p harn-cloud-gateway`) with byte-identical wire output.
+- The companion DRY cutover (a downstream gateway → `harn_vm::jsonrpc`) compiles
+  clean against that consumer with byte-identical wire output.

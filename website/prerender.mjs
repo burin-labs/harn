@@ -223,9 +223,23 @@ export async function prerenderSite() {
     )
   }
 
+  // sitemap.xml from the canonical URLs the pages already declare, so search
+  // engines can discover every page. robots.txt (in public/) points here.
+  const sitemapUrls = [LANDING_PAGE_META.canonicalUrl]
+  for (const [, data] of docs.pages) {
+    sitemapUrls.push(pageMetaForDoc(data).canonicalUrl)
+  }
+  writeFile(
+    "sitemap.xml",
+    `<?xml version="1.0" encoding="UTF-8"?>\n` +
+      `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n` +
+      sitemapUrls.map((url) => `  <url><loc>${escapeHtml(url)}</loc></url>`).join("\n") +
+      `\n</urlset>\n`,
+  )
+
   console.log(
     `prerender: ${docs.pages.size} doc pages + landing + 404, ${docs.pages.size} content JSON, ` +
-      `${Object.keys(REDIRECTS).length} redirects → docs/dist`,
+      `${Object.keys(REDIRECTS).length} redirects, sitemap.xml (${sitemapUrls.length} urls) → docs/dist`,
   )
 }
 

@@ -1911,7 +1911,7 @@ mod tests {
     fn plan_marks_stdio_repairs_surface_changing_when_harness_is_unreachable() {
         let temp = tempfile::TempDir::new().unwrap();
         let script = temp.path().join("stdio_needs_param.harn");
-        fs::write(&script, "fn helper() {\n  println(\"hi\")\n}\n").unwrap();
+        fs::write(&script, "pub fn helper() {\n  println(\"hi\")\n}\n").unwrap();
 
         let plan = build_plan_with_options(
             &script,
@@ -2002,7 +2002,7 @@ mod tests {
         let script = temp.path().join("stdio_apply.harn");
         fs::write(
             &script,
-            "fn helper() {\n  println(\"hi\")\n}\n\nfn main(harness: Harness) {\n  helper()\n}\n",
+            "pub fn helper() {\n  println(\"hi\")\n}\n\nfn main(harness: Harness) {\n  helper()\n}\n",
         )
         .unwrap();
 
@@ -2164,7 +2164,7 @@ mod tests {
         let script = temp.path().join("pipeline_helper.harn");
         fs::write(
             &script,
-            "fn helper() {\n  println(\"hi\")\n}\n\npipeline default() {\n  helper()\n}\n",
+            "pub fn helper() {\n  println(\"hi\")\n}\n\npipeline default() {\n  helper()\n}\n",
         )
         .unwrap();
 
@@ -2330,7 +2330,7 @@ mod tests {
         let script = temp.path().join("stdio_shared.harn");
         fs::write(
             &script,
-            "fn leaf_a() {\n  println(\"a\")\n}\n\nfn leaf_b() {\n  println(\"b\")\n}\n\nfn middle() {\n  leaf_a()\n  leaf_b()\n}\n\nfn main(harness: Harness) {\n  middle()\n}\n",
+            "pub fn leaf_a() {\n  println(\"a\")\n}\n\npub fn leaf_b() {\n  println(\"b\")\n}\n\npub fn middle() {\n  leaf_a()\n  leaf_b()\n}\n\nfn main(harness: Harness) {\n  middle()\n}\n",
         )
         .unwrap();
 

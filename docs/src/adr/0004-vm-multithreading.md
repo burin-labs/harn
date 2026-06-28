@@ -29,7 +29,7 @@ async-builtin future are `!Send`. ~393 `Rc<` sites across `harn-vm`.
 We want true parallelism for three reasons: the embeddable agent SDK
 ([#2636](https://github.com/burin-labs/harn/issues/2636)) wants a `Send`
 runtime handle; agent / tool / pool fan-out is real but every "parallel"
-task is `spawn_local` and serializes CPU work on one core; and harn-cloud
+task is `spawn_local` and serializes CPU work on one core; and a cloud platform
 wants to saturate a box from one process instead of one-VM-per-OS-thread.
 
 ## Survey

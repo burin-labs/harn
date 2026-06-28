@@ -6,7 +6,8 @@
 //! is the single source of truth — this module formats it, never edits it.
 //!
 //! The JSON sidecar shape is the contract surface for downstream tooling
-//! (burin-code IDE catalog page, harn-cloud hosted error pages). Bumping
+//! (an IDE host's diagnostic catalog page, a cloud platform's hosted error
+//! pages). Bumping
 //! the shape requires bumping `SCHEMA_VERSION` and coordinating the
 //! consumers pinned to epic #1745.
 
@@ -174,7 +175,7 @@ impl Renderer {
             "The structured JSON sidecar that drives this page is committed at \
              [`docs/diagnostics-catalog.json`](https://github.com/burin-labs/harn/blob/main/docs/diagnostics-catalog.json) — its \
              `schemaVersion: 1` shape is the contract consumed by downstream tooling \
-             (burin-code's IDE diagnostic panel, harn-cloud's hosted error pages). \
+             (an IDE host's diagnostic panel, a cloud platform's hosted error pages). \
              Regenerate locally with `make sync-diagnostics-catalog`.\n\n",
         );
         out.push_str(

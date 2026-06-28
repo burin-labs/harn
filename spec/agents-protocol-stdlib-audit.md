@@ -1,7 +1,7 @@
 # Agents protocol stdlib gap audit (issue #634)
 
 First-cut survey of `harn-vm` stdlib primitives needed before a Harn-native
-Harness reference implementation (paired with the harn-cloud reference in
+Harness reference implementation (paired with the cloud-platform reference in
 [#631](https://github.com/burin-labs/harn/issues/631)) can shrink its Rust
 shell to "just the runtime adapter."
 
@@ -26,7 +26,7 @@ Snapshot taken against `harn-vm 0.7.39` (commit
    builtin set so the Harness reference impl can rely on it without
    re-litigating.
 
-The audit deliberately ignores host-side concerns owned by harn-cloud
+The audit deliberately ignores host-side concerns owned by a cloud platform
 (tenant policy, billing, receipt authorization). Per
 [CLAUDE.md](../CLAUDE.md): Harn owns runtime primitives; hosts own
 mutation/UX/policy.
@@ -162,14 +162,14 @@ re-spec them.
 
 ## Out of scope for this audit
 
-- harn-cloud-specific tenant model, persona policy, receipt
+- Cloud-platform-specific tenant model, persona policy, receipt
   authorization rules
 - ACME / certificate issuance automation (track separately if a
   deployment ticket needs it)
 - DNS-rebinding hardening beyond connect-time host resolution (call
   out separately if it becomes load-bearing for the Harness)
 - mTLS / SPIFFE outbound identity (separate primitive)
-- Migration of harn-cloud SQLx schemas — schemas stay host-owned
+- Migration of cloud-platform SQLx schemas — schemas stay host-owned
 
 ## Closing #634
 

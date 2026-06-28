@@ -2,7 +2,7 @@
   "id": "harn",
   "name": "Harn",
   "version": "0.8.151",
-  "description": "Harn runs .harn agent pipelines as a native ACP coding agent over stdio. Powers the Burin Code workbench.",
+  "description": "Harn runs .harn agent pipelines as a native ACP coding agent over stdio.",
   "repository": "https://github.com/burin-labs/harn",
   "website": "https://harnlang.com",
   "authors": [

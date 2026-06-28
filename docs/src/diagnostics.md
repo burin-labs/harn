@@ -14,7 +14,7 @@ harn explain HARN-TYP-014
 harn explain HARN-TYP-014 --json
 ```
 
-The structured JSON sidecar that drives this page is committed at [`docs/diagnostics-catalog.json`](https://github.com/burin-labs/harn/blob/main/docs/diagnostics-catalog.json) — its `schemaVersion: 1` shape is the contract consumed by downstream tooling (burin-code's IDE diagnostic panel, harn-cloud's hosted error pages). Regenerate locally with `make sync-diagnostics-catalog`.
+The structured JSON sidecar that drives this page is committed at [`docs/diagnostics-catalog.json`](https://github.com/burin-labs/harn/blob/main/docs/diagnostics-catalog.json) — its `schemaVersion: 1` shape is the contract consumed by downstream tooling (an IDE host's diagnostic panel, a cloud platform's hosted error pages). Regenerate locally with `make sync-diagnostics-catalog`.
 
 Prose-style tour of common shape and nilable diagnostics: [Reading shape diagnostics](./reading-shape-diagnostics.md).
 

@@ -1,6 +1,5 @@
 // Harn mark — a pipeline glyph: three linked stages flowing left to right,
-// rendered in the teal→amber brand gradient. Deliberately distinct from the
-// Burin Code "engraving tool" mark.
+// rendered in the teal→amber brand gradient.
 export function Logo({ className = "h-8 w-8" }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">

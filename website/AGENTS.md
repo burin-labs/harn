@@ -1,8 +1,8 @@
 # Working in `website/` (harnlang.com)
 
 Read `README.md` for what this app is and how the content pipeline works. Read
-`docs-stack-conventions.md` for the contract shared with burincode.com. This file
-is the short list of conventions to hold to when editing the site.
+`docs-stack-conventions.md` for the contract shared with the companion marketing
+site. This file is the short list of conventions to hold to when editing the site.
 
 ## Setup and checks
 

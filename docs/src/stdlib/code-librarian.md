@@ -4,7 +4,7 @@
 surface that ships behind the `hostlib_code_index_*` builtin family
 (issue [#2434](https://github.com/burin-labs/harn/issues/2434), PR
 [#2441](https://github.com/burin-labs/harn/pull/2441)) as a single
-ergonomic API. Consumers — Burin Code, headless TUI workflows, future
+ergonomic API. Consumers — IDE hosts, headless TUI workflows, future
 personas — call one library instead of stitching outputs from many
 primitives.
 

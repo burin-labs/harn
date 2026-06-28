@@ -1,7 +1,7 @@
 # Replay benchmarks
 
 `harn bench replay` scores replay determinism fixtures and emits a
-machine-readable artifact for CI and Harn Cloud leaderboard ingestion.
+machine-readable artifact for CI and cloud leaderboard ingestion.
 It uses the same `harn.orchestration.replay_trace.v1` trace contract as
 `harn orchestrator replay-oracle`; the benchmark layer adds comparable
 metrics and stable receipt hashes.
@@ -37,7 +37,7 @@ schema lives at `spec/schemas/replay-benchmark.v1.schema.json`.
 
 Top-level fields:
 
-- `cloud_ingest`: Harn Cloud routing metadata. `kind` is
+- `cloud_ingest`: Cloud routing metadata. `kind` is
   `harn_cloud.replay_determinism.leaderboard.v1`.
 - `suite`: suite name, source paths, and fixture count.
 - `summary`: pass/fail counts, average fidelity, permission-preservation
@@ -46,7 +46,7 @@ Top-level fields:
   divergence, and a stable receipt hash.
 
 The receipt hashes are derived from canonicalized replay trace material
-after fixture allowlists have been applied. Harn Cloud can ingest the
+after fixture allowlists have been applied. A cloud platform can ingest the
 benchmark report without re-reading raw EventLog, transcript, or tool
 payloads.
 

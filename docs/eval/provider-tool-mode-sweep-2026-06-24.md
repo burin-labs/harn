@@ -6,8 +6,8 @@ for each `(provider, model)` route we hold a key for, establish which of
 call* and *carries a backslash-heavy body byte-clean*, and which combos to
 avoid.
 
-This sweep follows the 2026-06-21 methodology documented in burin-code
-`docs/blog-drafts/the-tool-call-dialect-problem.md`: a single-tool authoring
+This sweep follows the 2026-06-21 methodology ("the tool-call dialect
+problem"): a single-tool authoring
 call under a forced `tool_format` that bypasses the capability gate, scored on
 (a) **dispatch** (did a parseable tool call come back) and (b) **fidelity**
 (does the authored file body round-trip byte-exact).

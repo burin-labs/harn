@@ -5,7 +5,7 @@ import { ast_search } from "std/ast"
  * wrapper. Verifies full capture bindings (text + range) across grammars,
  * inline-source vs file-path input, `max_matches` truncation, and the
  * structured error variants. The TypeScript case mirrors the first
- * rule-engine customer (#2824 / burin-code#1629): finding every
+ * rule-engine customer (#2824): finding every
  * `obj?.prop ?? fallback` shape and reading each capture by name.
  */
 fn write_fixture(dir: string, name: string, body: string) -> string {

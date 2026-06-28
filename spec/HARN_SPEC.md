@@ -1048,27 +1048,21 @@ declared file inside the installed `acme` package.
 
 A module's **export surface** — the set of names other modules can import,
 whether by wildcard (`import "m"`) or selectively (`import { x } from "m"`) —
-is determined by `pub`:
+is exactly the functions it marks `pub`, plus any `pub import` re-exports.
+Non-`pub` functions are private to the module: usable by the module's own
+functions, but not importable by name or by wildcard. A module that marks
+nothing `pub` exports nothing.
 
-- If the module marks **at least one** function `pub`, it opts into explicit
-  exports: **only** the `pub` functions (plus any `pub import` re-exports) are
-  importable. Non-`pub` functions are private to the module — usable by its
-  own functions, but not importable by name or by wildcard.
-- If the module marks **nothing** `pub`, every function is exported (a
-  zero-ceremony convenience for small modules and scripts, similar to Python's
-  public-by-default model).
+This is the explicit-visibility model of Rust, Go, and TypeScript. Harn does
+**not** have a "public-by-default until the first `pub`" rule: such a rule
+makes adding the first `pub` a silent breaking change, because it would flip
+every *other* function from importable to private. Requiring `pub` up front
+keeps a module's export surface stable as it grows.
 
 The same rule applies to both import forms — a selective import cannot reach a
 private function that a wildcard import would not see. Importing a non-`pub`
-name from a module that has opted into explicit exports is an error
-(`HARN-IMP-002`) at `harn check` time and at load time; the message points at
-the import and suggests marking the symbol `pub`.
-
-**Gotcha — adding the first `pub` is a breaking change to importers.** A
-module with no `pub` exports everything; marking *one* function `pub` flips the
-module into explicit-export mode and makes every *other* function private. If
-downstream code imported those now-private names, it will stop resolving.
-Prefer marking every intended export `pub` from the start.
+name is an error (`HARN-IMP-002`) at `harn check` time and at load time; the
+message points at the import and suggests marking the symbol `pub`.
 
 **Testing private functions.** A non-`pub` function is visible to any
 `pipeline` or `fn` declared in the **same file**, so co-locate unit tests with
@@ -6005,7 +5999,7 @@ Four canonical presets live in `std/agent/resume_by`:
 |---|---|
 | `ResumeBy.parent_llm` | Always returns `{handled: true, mechanism: "ResumeBy.parent_llm"}`. The parent agent's LLM owns the resume via `subagent_resume`. |
 | `ResumeBy.local_runtime` | Registers `conditions.trigger` with the in-process trigger dispatcher. Declines with `{handled: false, reason: "no_conditions"}` when no conditions are present. |
-| `ResumeBy.cloud_harness` | Registers the suspension with the harn-cloud webhook receiver for durability across process restart. Declines with `{handled: false, reason: "no_cloud_session"}` when no cloud session is bound. |
+| `ResumeBy.cloud_harness` | Registers the suspension with a cloud webhook receiver for durability across process restart. Declines with `{handled: false, reason: "no_cloud_session"}` when no cloud session is bound. |
 | `ResumeBy.pipeline_drain` | Always returns `{handled: true, mechanism: "ResumeBy.pipeline_drain"}`. The enclosing pipeline's drain step owns the resume. |
 
 Presets compose with `std/lifecycle/combinators::first_available`
@@ -6574,7 +6568,7 @@ registry index again.
 
 ```toml
 [registry]
-url = "https://burin-labs.github.io/harn-cloud/package-index/harn-package-index.toml"
+url = "https://packages.harnlang.com/harn-package-index.toml"
 ```
 
 The default URL points at the free-tier GitHub-Pages-hosted index in

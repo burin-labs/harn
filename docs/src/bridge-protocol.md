@@ -44,7 +44,7 @@ ACP variants:
 
 Harn emits additional host-facing lifecycle updates outside ACP. They
 ride as top-level `sessionUpdate` discriminators for compatibility with
-existing Burin Code and other host renderers, advertised during
+existing IDE-host and other host renderers, advertised during
 `initialize` under `agentCapabilities._meta.harn.sessionUpdateExtensions`:
 
 - `artifact`
@@ -355,8 +355,8 @@ the action (`ask` for host approval requests). The same receipt is copied into
 auditable and replayable even when the host only persists the canonical request.
 Treat the surrounding `toolCall`, `mutation`, and `declaredPaths` fields as
 compatibility/context fields. The same shape is used in stdlib HITL notifications at
-`harn.hitl.requested.params.payload.approval_request`, so Burin Code,
-harn-cloud approval inboxes, and CLI-style hosts can share one renderer.
+`harn.hitl.requested.params.payload.approval_request`, so IDE hosts,
+cloud approval inboxes, and CLI-style hosts can share one renderer.
 
 Field meanings:
 
@@ -484,7 +484,7 @@ separately.
 
 Harn core exposes an open external-agent contract for paid or autonomous
 delegation over interoperable transports. It does not contain proprietary
-adapters; hosted products, Harn Cloud, or connector packages should translate
+adapters; hosted products, cloud platforms, or connector packages should translate
 their own APIs into the capability metadata and extension methods below.
 
 Agent Cards advertise support under one of:

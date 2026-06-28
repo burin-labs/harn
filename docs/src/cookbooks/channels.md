@@ -15,7 +15,7 @@ pipelines, such as `harn orchestrator`.
 One agent waits for another's emit before proceeding. The PR agent
 emits `pr.merged` on each merge; a release agent batches three of them
 into a single release run; downstream merge-captain agents in
-burin-code and harn-cloud subscribe to the release's
+dependent repos subscribe to the release's
 `harn-release.shipped` event so they can rebase their queues.
 
 ```harn,ignore
@@ -55,7 +55,7 @@ pipeline release_agent_setup() {
   })
 }
 
-// --- merge captains in burin-code / harn-cloud ---
+// --- merge captains in dependent repos ---
 pipeline merge_captain_setup() {
   trigger_register({
     id: "rebase-on-harn-release",

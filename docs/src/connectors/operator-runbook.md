@@ -21,7 +21,7 @@ connector ids, required secrets, scopes, and recovery copy declared by packages.
 | CircleCI | Create a project webhook, capture its signing secret, and mint a `Circle-Token` API token for outbound diagnose/rerun calls. | The catalog documents `circleci-signature` verification and `Circle-Token` outbound auth. Exact secret ids should come from the CircleCI connector package `required_secrets`; do not assume a core id. |
 | Buildkite | Create a webhook token for HMAC verification and mint an API access token with the narrowest scopes needed for build lookup, log fetch, retry, rebuild, and cancel paths. | The catalog documents `X-Buildkite-Signature` and `X-Buildkite-Token` verification plus bearer-token outbound auth. Exact secret ids should come from the Buildkite connector package `required_secrets`; do not assume a core id. |
 | GitHub Actions runners | Decide whether dogfood uses persistent registration or just-in-time runner registration. Record where the runner binary runs, what labels it advertises, how registration credentials are supplied, and how removal is performed. | No repo-local Harn runner-management command is documented here yet. Track this as an operator placeholder next to the GitHub App permission set. |
-| Cloud kill-switches and plan tiers | For each hosted connector reaction, record the exact `HARN_CLOUD_*_ENABLED` flag, default state, owning team, plan gate, and emergency rollback owner. | This repo does not currently define concrete `HARN_CLOUD_*_ENABLED` flags for connectors. Keep placeholders out of checked-in config until Harn Cloud publishes the names. |
+| Cloud kill-switches and plan tiers | For each hosted connector reaction, record the exact `HARN_CLOUD_*_ENABLED` flag, default state, owning team, plan gate, and emergency rollback owner. | This repo does not currently define concrete `HARN_CLOUD_*_ENABLED` flags for connectors. Keep placeholders out of checked-in config until a cloud platform publishes the names. |
 
 Before dogfood starts, save a credential worksheet with:
 
@@ -112,7 +112,7 @@ For trigger and dispatch observability, correlate these surfaces:
 Cloud-specific metrics, receipts for ingress verify/deny, dedupe, dispatch,
 the hosted OTel waterfall, and the IDE `/connectors` panel are operator
 placeholders in this repo-local slice. Link them back here once the exact
-Harn Cloud and Burin surfaces are published.
+cloud and IDE-host surfaces are published.
 
 ## Placeholder policy
 

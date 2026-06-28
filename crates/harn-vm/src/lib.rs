@@ -1,8 +1,23 @@
 #![recursion_limit = "256"]
 #![allow(clippy::result_large_err, clippy::cloned_ref_to_slice_refs)]
+//! # harn-vm
+//!
+//! The Harn compiler, virtual machine, standard library, provider/LLM layer,
+//! orchestration runtime, and host bridge.
+//!
+//! ## Stability
+//!
+//! This crate is consumed both by the in-tree surfaces (`harn-cli`,
+//! `harn-serve`, the LSP and DAP) and by external embedders. The intended
+//! embedding entry points are `Vm`, `Harness`, `compile_source`, and the
+//! `llm`, `orchestration`, `agent_events`, `agent_sessions`, `config`, and
+//! `security` modules. Other public items exist primarily for in-workspace use
+//! and may change between minor releases; anything marked `#[doc(hidden)]` is
+//! an implementation detail with no stability guarantee. The crate follows the
+//! workspace version and is pre-1.0, so the public surface may still evolve.
 
 /// Re-export of the unified clock substrate so downstream crates (CLI,
-/// orchestrator, harn-cloud) can depend on a single canonical `Clock`
+/// orchestrator, and cloud runtimes) can depend on a single canonical `Clock`
 /// trait without each adding `harn-clock` as a direct dependency.
 pub use harn_clock as clock;
 

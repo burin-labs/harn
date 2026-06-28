@@ -229,8 +229,8 @@ The same primitive is available as the free builtin
 `llm_catalog_refresh(options?)` for scripts that do not receive a
 `Harness`. `options.url` overrides the source URL and `options.force`
 ignores a fresh cache entry. The default source is
-`https://burin-labs.github.io/harn-cloud/provider-catalog/provider-catalog.json`;
-set `HARN_PROVIDER_CATALOG_URL` to point at a private catalog.
+`https://harnlang.com/provider-catalog/provider-catalog.json`;
+set `HARN_PROVIDER_CATALOG_URL` to point at a different catalog.
 
 Refresh behavior is intentionally fail-closed:
 

@@ -58,7 +58,7 @@ pub(crate) struct DoctorCheck {
     pub(crate) docs_url: Option<String>,
     /// Workflows this check gates when it is failing — stable strings such as
     /// `"build"`, `"test"`, `"release"`, `"publish"`, `"portal"`,
-    /// `"scripting"`, or `"editor"`. Consumed by downstream hosts / Harn Cloud
+    /// `"scripting"`, or `"editor"`. Consumed by downstream hosts / cloud
     /// preflight automation.
     pub(crate) blocks: Vec<&'static str>,
 }

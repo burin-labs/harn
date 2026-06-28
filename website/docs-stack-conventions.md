@@ -1,18 +1,12 @@
 # Docs-stack conventions
 
-> This file is intentionally **identical** in `burin-labs/burin-code`
-> (`site/docs-stack-conventions.md`) and `burin-labs/harn`
-> (`website/docs-stack-conventions.md`). It is the shared, "common by
-> convention" contract for the two hand-rolled Mintlify-style sites:
-> burincode.com (marketing + help center) and harnlang.com (Diataxis docs).
->
-> We deliberately do **not** share a published engine package. The two sites
-> are still moving, live in separate repos with no shared monorepo, and a
-> cross-repo npm package would add release-ordering coupling worse than the
-> small duplication it removes. Instead we keep the **stack, vocabulary, and
-> output contracts** aligned by copying patterns and keeping this document in
-> sync. Revisit extracting a package only when both engines have stabilized and
-> a third consumer appears.
+> These are the docs-stack conventions for harnlang.com (`website/`). They are
+> kept aligned by convention with a companion marketing site that uses the same
+> hand-rolled Mintlify-style stack. The two sites do **not** share a published
+> engine package: they live in separate repos and still move independently, so a
+> cross-repo npm package would add release-ordering coupling worse than the small
+> duplication it removes. Instead we keep the **stack, vocabulary, and output
+> contracts** aligned by copying patterns and keeping this document in sync.
 
 ## Shared stack
 
@@ -21,7 +15,7 @@ markdown/MDX pipeline built on the unified (`remark` / `rehype`) ecosystem.
 Content is authored as markdown/MDX with YAML frontmatter; rendering, nav, and
 search are generated at build time.
 
-| Concern | burincode.com (`site/`) | harnlang.com (`website/`) |
+| Concern | Companion marketing site | harnlang.com (`website/`) |
 | --- | --- | --- |
 | Content format | MDX (`@mdx-js/rollup`), JSX components inline | Markdown → HTML string at build time |
 | Content source | `src/content/{help,posts,changelog}` | `docs/src` (Diataxis + `SUMMARY.md`) |
@@ -37,9 +31,9 @@ below is the part we keep **common**.
 ## Design tokens (semantic Tailwind v4 `@theme`)
 
 Both `src/index.css` files expose the **same semantic token names**; only the
-palette values differ (burin = engraver's vermilion, harn = teal). A component
-or prose rule written against these names ports between repos unchanged. Keep
-this set in sync — add tokens to both, with the same names:
+palette values differ (harn = teal). A component or prose rule written against
+these names ports between repos unchanged. Keep this set in sync — add tokens to
+both, with the same names:
 
 ```text
 --color-accent-{50..950}
@@ -47,7 +41,7 @@ this set in sync — add tokens to both, with the same names:
 --color-foreground  --color-foreground-secondary  --color-foreground-muted
 --color-border  --color-border-strong
 --color-nav-bg  --color-card-bg  --color-card-border  --color-input-bg  --color-input-border
---font-sans  --font-mono   (burin also: --font-display)
+--font-sans  --font-mono
 ```
 
 ### Dark mode
@@ -90,7 +84,7 @@ block in `index.css` is identical:
 Type vocabulary: `note` · `tip` · `info` · `warning`. Authoring differs by
 surface but maps to the same output:
 
-- **burincode.com (MDX):** `<Callout type="tip" title="…">…</Callout>`
+- **Companion marketing site (MDX):** `<Callout type="tip" title="…">…</Callout>`
 - **harnlang.com (markdown):** GitHub-style alerts —
   `> [!NOTE]` · `> [!TIP]` · `> [!IMPORTANT]` (→ `info`) · `> [!WARNING]` ·
   `> [!CAUTION]` (→ `warning`).
@@ -107,9 +101,9 @@ highlight.js). The **Harn language grammar** is shared by convention:
   `cargo run -p harn-cli -- dump-highlight-keywords` (`make gen-highlight`).
 - `harn/website/vite-plugins/content.ts` builds the highlight.js language from
   that file directly.
-- `burin-code/site/src/lib/harn-highlight.ts` **vendors** the same grammar
-  builder and a snapshot of the keyword table (it has no Rust toolchain). When
-  Harn's keywords change materially, refresh the vendored snapshot.
+- The companion marketing site **vendors** the same grammar builder and a
+  snapshot of the keyword table (it has no Rust toolchain). When Harn's keywords
+  change materially, refresh the vendored snapshot.
 
 Highlighted tokens use highlight.js `.hljs-*` classes; both `index.css` files
 carry the same token-class rules, recolored to each brand's accent.
@@ -123,14 +117,14 @@ Client-side, build-time index, no external service. Target record shape:
 ```
 
 harnlang.com already uses this shape (`_content/search.json`, AND-term
-scoring). burincode.com's help search currently filters
+scoring). The companion marketing site's help search currently filters
 `{ title, description, body }` substrings; converge it toward the shape above as
 the help center grows.
 
 ## Navigation, TOC, prev/next
 
 - **Prev/next** computed from the canonical order (Diataxis category + sort
-  order on burin; `SUMMARY.md` order on harn).
+  order on the marketing site; `SUMMARY.md` order on harn).
 - **On-this-page TOC** collects `h2`/`h3`, tracks the active heading with an
   `IntersectionObserver`.
 - Sidebar/section nav is generated from the nav source above, never hardcoded.
@@ -139,11 +133,8 @@ the help center grows.
 
 - **harnlang.com:** prerendered to static HTML per route (`prerender.mjs`) —
   crawlable, works with JS disabled. This is the reference implementation.
-- **burincode.com:** the SSR-entry + prerender pipeline is **wired** (ported
-  from harn): `npm run build` emits static HTML per route. The site stays
-  `noindex,nofollow` until launch, so the prerender currently just improves
-  first-paint and makes the site crawl-ready. **Turning on SEO at launch is a
-  one-line switch** — remove the `noindex,nofollow` meta in `index.html`; no
-  further build or infra change is required. Keep the marketing/landing surface
-  SSR-safe (guard `window`/`localStorage`/`matchMedia` access behind effects or
-  `typeof window` checks) so the prerender never regresses.
+- **Companion marketing site:** the SSR-entry + prerender pipeline is **wired**
+  (ported from harn): `npm run build` emits static HTML per route. Keep the
+  marketing/landing surface SSR-safe (guard `window`/`localStorage`/`matchMedia`
+  access behind effects or `typeof window` checks) so the prerender never
+  regresses.

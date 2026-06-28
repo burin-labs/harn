@@ -268,8 +268,14 @@ fn _recompute_centroids(points, assignments, k, dims, errors) {
   return {centroids: centroids, counts: counts}
 }
 
-/** Clamp a value between min and max. */
-fn clamp(value, lo, hi) {
+/**
+ * Clamp a value between min and max.
+ * Clamp `value` to the inclusive range [`lo`, `hi`].
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn clamp(value, lo, hi) {
   if value < lo {
     return lo
   }
@@ -279,35 +285,71 @@ fn clamp(value, lo, hi) {
   return value
 }
 
-/** Linear interpolation between a and b by t (0..1). */
-fn lerp(a, b, t) {
+/**
+ * Linear interpolation between a and b by t (0..1).
+ * Linearly interpolate between `a` and `b` by fraction `t`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn lerp(a, b, t) {
   return a + (b - a) * t
 }
 
-/** Map a value from one range to another. */
-fn map_range(value, in_lo, in_hi, out_lo, out_hi) {
+/**
+ * Map a value from one range to another.
+ * Remap `value` from the input range to the output range.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn map_range(value, in_lo, in_hi, out_lo, out_hi) {
   let t = (value - in_lo) / (in_hi - in_lo)
   return lerp(out_lo, out_hi, t)
 }
 
-/** Convert degrees to radians. */
-fn deg_to_rad(degrees) {
+/**
+ * Convert degrees to radians.
+ * Convert an angle in degrees to radians.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn deg_to_rad(degrees) {
   return degrees * pi / 180
 }
 
-/** Convert radians to degrees. */
-fn rad_to_deg(radians) {
+/**
+ * Convert radians to degrees.
+ * Convert an angle in radians to degrees.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn rad_to_deg(radians) {
   return radians * 180 / pi
 }
 
-/** Sum a list of numbers. */
-fn sum(items) {
+/**
+ * Sum a list of numbers.
+ * Sum the numbers in `items`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn sum(items) {
   _require_numeric_list(items)
   return items.reduce(0, { acc, x -> acc + x })
 }
 
-/** Average of a list of numbers. */
-fn avg(items) {
+/**
+ * Average of a list of numbers.
+ * Arithmetic mean of `items` (alias of `mean`).
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn avg(items) {
   _require_numeric_list(items)
   if len(items) == 0 {
     return 0
@@ -315,13 +357,25 @@ fn avg(items) {
   return sum(items) / (len(items) * 1.0)
 }
 
-/** Alias for avg(items). */
-fn mean(items) {
+/**
+ * Alias for avg(items).
+ * Arithmetic mean of `items`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn mean(items) {
   return avg(items)
 }
 
-/** Median of a list of numbers. */
-fn median(items) {
+/**
+ * Median of a list of numbers.
+ * Median of `items`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn median(items) {
   let sorted = _require_non_empty_numeric_list(items).sort()
   let n = len(sorted)
   let mid = floor(n / 2)
@@ -331,8 +385,14 @@ fn median(items) {
   return (sorted[mid - 1] + sorted[mid]) / 2.0
 }
 
-/** R-7 percentile interpolation with p in [0, 100]. */
-fn percentile(items, p) {
+/**
+ * R-7 percentile interpolation with p in [0, 100].
+ * The `p`-th percentile of `items`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn percentile(items, p) {
   let sorted = _require_non_empty_numeric_list(items).sort()
   _require_number(p, "percentile")
   require p >= 0 && p <= 100, "percentile must be between 0 and 100"
@@ -350,21 +410,39 @@ fn percentile(items, p) {
   return sorted[lower - 1] + weight * (sorted[upper - 1] - sorted[lower - 1])
 }
 
-/** Return indices that would sort items ascending. */
-fn argsort(items, score_fn = nil) {
+/**
+ * Return indices that would sort items ascending.
+ * Indices that would sort `items` (optionally by `score_fn`).
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn argsort(items, score_fn = nil) {
   let ranked = _rank_items(items, score_fn)
   return ranked.map({ entry -> entry.index })
 }
 
-/** Return the top k items by score, descending. */
-fn top_k(items, k, score_fn = nil) {
+/**
+ * Return the top k items by score, descending.
+ * The `k` highest-scoring items (optionally by `score_fn`).
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn top_k(items, k, score_fn = nil) {
   let ranked = _rank_items(items, score_fn, true)
   let limit = _require_non_negative_int(k, "k")
   return ranked.take(limit).map({ entry -> entry.item })
 }
 
-/** Population or sample variance. */
-fn variance(items, sample = false) {
+/**
+ * Population or sample variance.
+ * Variance of `items` (population, or sample when `sample` is true).
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn variance(items, sample = false) {
   let xs = _require_non_empty_numeric_list(items)
   if sample {
     require len(xs) >= 2, "sample variance requires at least 2 values"
@@ -383,13 +461,25 @@ fn variance(items, sample = false) {
   return total / denom
 }
 
-/** Population or sample standard deviation. */
-fn stddev(items, sample = false) {
+/**
+ * Population or sample standard deviation.
+ * Standard deviation of `items` (population, or sample when `sample` is true).
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn stddev(items, sample = false) {
   return sqrt(variance(items, sample))
 }
 
-/** Scale a numeric list to [0, 1]. */
-fn minmax_scale(items) {
+/**
+ * Scale a numeric list to [0, 1].
+ * Scale `items` into the [0, 1] range by their min and max.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn minmax_scale(items) {
   let xs = _require_non_empty_numeric_list(items)
   let lo = xs.min()
   let hi = xs.max()
@@ -400,8 +490,14 @@ fn minmax_scale(items) {
   return xs.map({ x -> (x - lo) / span })
 }
 
-/** Standardize a numeric list to zero mean and unit variance. */
-fn zscore(items, sample = false) {
+/**
+ * Standardize a numeric list to zero mean and unit variance.
+ * Standardize `items` to zero mean and unit variance.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn zscore(items, sample = false) {
   let xs = _require_non_empty_numeric_list(items)
   let mu = mean(xs)
   let sigma = stddev(xs, sample)
@@ -411,8 +507,14 @@ fn zscore(items, sample = false) {
   return xs.map({ x -> (x - mu) / sigma })
 }
 
-/** Weighted arithmetic mean. */
-fn weighted_mean(items, weights) {
+/**
+ * Weighted arithmetic mean.
+ * Weighted arithmetic mean of `items` with `weights`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn weighted_mean(items, weights) {
   let xs = _require_non_empty_numeric_list(items)
   let ws = _weight_list(weights)
   require len(xs) == len(ws), "items and weights must have the same length"
@@ -427,8 +529,14 @@ fn weighted_mean(items, weights) {
   return total / total_weight
 }
 
-/** Draw one item according to non-negative weights. */
-fn weighted_choice(items, weights = nil) {
+/**
+ * Draw one item according to non-negative weights.
+ * Pick an index from `items` with probability proportional to `weights`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn weighted_choice(items, weights = nil) {
   require type_of(items) == "list", "items must be a list"
   require len(items) > 0, "items must not be empty"
   let ws = if weights == nil {
@@ -452,8 +560,14 @@ fn weighted_choice(items, weights = nil) {
   return items[len(items) - 1]
 }
 
-/** Convert scores into probabilities. */
-fn softmax(items, temperature = 1.0) {
+/**
+ * Convert scores into probabilities.
+ * Softmax of `items` with optional `temperature`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn softmax(items, temperature = 1.0) {
   let xs = _require_non_empty_numeric_list(items)
   _require_positive_number(temperature, "temperature")
   let max_x = xs.max()
@@ -463,8 +577,14 @@ fn softmax(items, temperature = 1.0) {
   return exps.map({ x -> x / total })
 }
 
-/** Standard normal probability density. */
-fn normal_pdf(x, mu = 0, sigma = 1) {
+/**
+ * Standard normal probability density.
+ * Normal-distribution probability density at `x`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn normal_pdf(x, mu = 0, sigma = 1) {
   _require_number(x, "x")
   _require_number(mu, "mean")
   _require_positive_number(sigma, "stddev")
@@ -472,8 +592,14 @@ fn normal_pdf(x, mu = 0, sigma = 1) {
   return exp(-0.5 * z * z) / (sigma * sqrt(2 * pi))
 }
 
-/** Standard normal cumulative distribution. */
-fn normal_cdf(x, mu = 0, sigma = 1) {
+/**
+ * Standard normal cumulative distribution.
+ * Normal-distribution cumulative probability at `x`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn normal_cdf(x, mu = 0, sigma = 1) {
   _require_number(x, "x")
   _require_number(mu, "mean")
   _require_positive_number(sigma, "stddev")
@@ -494,8 +620,14 @@ fn normal_cdf(x, mu = 0, sigma = 1) {
   return 0.5 * (1 + erf)
 }
 
-/** Inverse normal CDF using Acklam's approximation. */
-fn normal_quantile(prob, mu = 0, sigma = 1) {
+/**
+ * Inverse normal CDF using Acklam's approximation.
+ * Inverse normal CDF (quantile) for probability `prob`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn normal_quantile(prob, mu = 0, sigma = 1) {
   let p = _require_probability(prob)
   _require_number(mu, "mean")
   _require_positive_number(sigma, "stddev")
@@ -543,8 +675,14 @@ fn normal_quantile(prob, mu = 0, sigma = 1) {
   return mu + sigma * x
 }
 
-/** Dot product of two vectors. */
-fn dot(a, b) {
+/**
+ * Dot product of two vectors.
+ * Dot product of vectors `a` and `b`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn dot(a, b) {
   _require_same_vector_dimensions(a, b)
   var total = 0.0
   var idx = 0
@@ -555,35 +693,65 @@ fn dot(a, b) {
   return total
 }
 
-/** Euclidean vector norm. */
-fn vector_norm(v) {
+/**
+ * Euclidean vector norm.
+ * Euclidean (L2) norm of vector `v`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn vector_norm(v) {
   _require_vector(v)
   return sqrt(dot(v, v))
 }
 
-/** Normalize a vector to unit length. */
-fn vector_normalize(v) {
+/**
+ * Normalize a vector to unit length.
+ * Unit vector in the direction of `v`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn vector_normalize(v) {
   _require_vector(v)
   let norm = vector_norm(v)
   require norm > 0, "cannot normalize a zero vector"
   return v.map({ x -> x / norm })
 }
 
-/** Cosine similarity between two vectors. */
-fn cosine_similarity(a, b) {
+/**
+ * Cosine similarity between two vectors.
+ * Cosine similarity between vectors `a` and `b`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn cosine_similarity(a, b) {
   let an = vector_norm(a)
   let bn = vector_norm(b)
   require an > 0 && bn > 0, "cosine similarity requires non-zero vectors"
   return dot(a, b) / (an * bn)
 }
 
-/** Euclidean distance between two vectors. */
-fn euclidean_distance(a, b) {
+/**
+ * Euclidean distance between two vectors.
+ * Euclidean (L2) distance between `a` and `b`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn euclidean_distance(a, b) {
   return sqrt(_sum_squared_deltas(a, b))
 }
 
-/** Manhattan distance between two vectors. */
-fn manhattan_distance(a, b) {
+/**
+ * Manhattan distance between two vectors.
+ * Manhattan (L1) distance between `a` and `b`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn manhattan_distance(a, b) {
   _require_same_vector_dimensions(a, b)
   var total = 0.0
   var idx = 0
@@ -594,8 +762,14 @@ fn manhattan_distance(a, b) {
   return total
 }
 
-/** Chebyshev distance between two vectors. */
-fn chebyshev_distance(a, b) {
+/**
+ * Chebyshev distance between two vectors.
+ * Chebyshev (L-infinity) distance between `a` and `b`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn chebyshev_distance(a, b) {
   _require_same_vector_dimensions(a, b)
   var best = 0.0
   var idx = 0
@@ -609,8 +783,14 @@ fn chebyshev_distance(a, b) {
   return best
 }
 
-/** Population or sample covariance between two numeric lists. */
-fn covariance(xs, ys, sample = false) {
+/**
+ * Population or sample covariance between two numeric lists.
+ * Covariance of paired samples `xs` and `ys`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn covariance(xs, ys, sample = false) {
   _require_parallel_numeric_lists(xs, ys)
   if sample {
     require len(xs) >= 2, "sample covariance requires at least 2 values"
@@ -631,8 +811,14 @@ fn covariance(xs, ys, sample = false) {
   return total / denom
 }
 
-/** Pearson correlation between two numeric lists. */
-fn correlation(xs, ys, sample = false) {
+/**
+ * Pearson correlation between two numeric lists.
+ * Pearson correlation of paired samples `xs` and `ys`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn correlation(xs, ys, sample = false) {
   _require_parallel_numeric_lists(xs, ys)
   if sample {
     require len(xs) >= 2, "sample correlation requires at least 2 values"
@@ -643,8 +829,14 @@ fn correlation(xs, ys, sample = false) {
   return covariance(xs, ys, sample) / (sigma_x * sigma_y)
 }
 
-/** Sliding-window moving average. */
-fn moving_avg(items, window) {
+/**
+ * Sliding-window moving average.
+ * Simple moving average of `items` over `window`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn moving_avg(items, window) {
   let xs = _require_non_empty_numeric_list(items)
   let size = _require_positive_int(window, "window")
   require size <= len(xs), "window must not exceed the number of items"
@@ -657,8 +849,14 @@ fn moving_avg(items, window) {
   return out
 }
 
-/** Exponential moving average, returning one value per input. */
-fn ema(items, alpha) {
+/**
+ * Exponential moving average, returning one value per input.
+ * Exponential moving average of `items` with smoothing factor `alpha`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn ema(items, alpha) {
   let xs = _require_non_empty_numeric_list(items)
   let a = _require_probability(alpha, "alpha")
   var out = [xs[0] * 1.0]
@@ -672,8 +870,14 @@ fn ema(items, alpha) {
   return out
 }
 
-/** Deterministic k-means clustering. */
-fn kmeans(points, k, options = nil) {
+/**
+ * Deterministic k-means clustering.
+ * k-means clustering of `points` into `k` clusters.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn kmeans(points, k, options = nil) {
   let dims = _require_points(points)
   _require_non_negative_int(k, "k")
   require k >= 1, "k must be at least 1"

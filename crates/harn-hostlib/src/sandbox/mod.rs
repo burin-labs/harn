@@ -115,11 +115,10 @@ impl std::fmt::Display for SandboxSessionId {
 /// Egress policy for a sandbox session. The wire shape matches the
 /// Anthropic sandbox network-policy contract so cloud backends can
 /// forward it verbatim.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "mode", rename_all = "snake_case")]
 pub enum NetworkPolicy {
     /// No egress restrictions.
-    #[default]
     Unrestricted,
     /// Egress restricted to the listed hosts. An empty list denies all
     /// network access.
@@ -127,6 +126,19 @@ pub enum NetworkPolicy {
         /// Host allowlist; empty means deny-all.
         allowed_hosts: Vec<String>,
     },
+}
+
+/// Deny egress by default. A [`SandboxSpec`] built without an explicit network
+/// policy gets no network access, so new call sites are secure-by-default and
+/// must opt into egress with a host allowlist (or [`NetworkPolicy::Unrestricted`]).
+/// This matches the deny-by-default lowering in `harn-serve`
+/// (`PermissionPolicy::to_network_policy`, where an empty allowlist denies all).
+impl Default for NetworkPolicy {
+    fn default() -> Self {
+        Self::Limited {
+            allowed_hosts: Vec::new(),
+        }
+    }
 }
 
 /// Whether a mount is writable by the guest.

@@ -199,7 +199,7 @@ let frontier = with_circuit_breaker(
 )
 
 let receipts_sink = { record ->
-  // Forward to harn-cloud receipts / Burin Code transcript / etc.
+  // Forward to cloud receipts / IDE-host transcript / etc.
   agent_emit_event("ops.receipts", "llm_call_log", record)
 }
 
@@ -228,7 +228,7 @@ agent_loop(task, system, {
 `with_routing` chooses cheap-vs-frontier **before** the request goes
 out (so cost stays predictable); `with_budget` enforces the persona's
 USD/token cap deterministically; `with_logging`'s `sink` emits receipt
-records consumed by harn-cloud's ops console.
+records consumed by a cloud platform's ops console.
 
 ### First-class `routing_policy` (recommended)
 

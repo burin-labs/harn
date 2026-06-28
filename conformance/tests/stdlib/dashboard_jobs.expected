@@ -1,6 +1,6 @@
 harn.dashboard_job_event.v1
 harn-local
-cloud:harn-cloud
+cloud:cloud
 waiting_approval
 approval-digest-send-slack
 true

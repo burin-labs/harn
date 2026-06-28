@@ -3,8 +3,8 @@
 Short-lived `harn` invocations spend the bulk of their wall time before
 the VM executes a single instruction: read the source, lex it, parse it,
 run the type checker, compile the AST to a bytecode chunk. Cold-start
-for the kind of subcommand burin-code is porting into `.harn`
-(`burin keys list`, `burin status`, `burin diagnose`) is dominated by
+for the kind of subcommand an IDE host is porting into `.harn`
+(`keys list`, `status`, `diagnose`) is dominated by
 that pipeline — the LLM/HTTP/IO work the script eventually performs
 goes through the same builtins on every run.
 
@@ -152,10 +152,10 @@ imports it.
 ## Out of scope
 
 - JIT (LLVM/Cranelift). Interpreted bytecode plus the cache is enough
-  for the cold-start gate that gates the burin-code thin-rust epic.
+  for the cold-start gate behind the IDE-host CLI-porting effort.
 - Cross-process shared cache / IPC.
 - Standalone artifact loading without source. The current loader
   recomputes the key from the on-disk source, so the source has to
   exist. Shipping bytecode without source would require dropping the
-  rehash and trusting the embedded hash — a follow-on if the
-  burin-code release pipeline grows that constraint.
+  rehash and trusting the embedded hash — a follow-on if an
+  IDE host's release pipeline grows that constraint.

@@ -4302,7 +4302,7 @@ override or add support for custom enterprise authorization servers.
 Token store for the OAuth client with five interchangeable backends.
 Every handle is a dict with three closures (`get`, `set`, `delete`) so
 the client doesn't know the difference between in-process memory, an
-encrypted file, harn-cloud, or a vault.
+encrypted file, a cloud platform, or a vault.
 
 ```harn
 import { memory, file, harn_cloud_session, harn_cloud_org, custom } from "std/oauth/storage"
@@ -4323,11 +4323,11 @@ mem.delete("github")
   AEAD key is derived via HKDF-SHA256 from `key`. Pass high-entropy
   bytes, not a user passphrase.
 - `harn_cloud_*()` route through the `oauth_storage` host capability
-  (`cloud_get / cloud_set / cloud_delete`); harn-cloud enforces RLS.
+  (`cloud_get / cloud_set / cloud_delete`); a cloud platform enforces RLS.
 - `custom({get, set, delete, id?})` validates that the three handlers
   are callables and then dispatches to them. Closure capture is
   by-value, so back the closures with a real store (HTTP, MCP,
-  `harn-cloud`) rather than a captured local.
+  a cloud platform) rather than a captured local.
 
 Full reference: [`docs/src/stdlib/oauth-storage.md`](https://harnlang.com/stdlib/oauth-storage.html).
 
@@ -4370,7 +4370,7 @@ let token_set = device_flow(providers().github, {
 The server side of OAuth. Build RFC 7591 client metadata + RFC 8414
 authorization-server metadata, validate incoming registrations, and
 issue `client_id` / `client_secret` pairs from an in-process store.
-Embedders (`harn serve`, harn-cloud, custom hosts) mount the well-known
+Embedders (`harn serve`, a cloud platform, custom hosts) mount the well-known
 endpoints + the registration handler; this module does not host HTTP
 itself.
 

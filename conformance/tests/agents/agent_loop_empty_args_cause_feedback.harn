@@ -3,8 +3,8 @@ import { llm_text, with_llm_script } from "std/testing"
 /**
  * Native tool calls can arrive with EMPTY `{}` arguments even though the model
  * authored hundreds of output tokens that turn — a provider/template fault
- * observed live on the OpenAI-compatible native route (burin-code#2121:
- * 13/165 edit calls). The dispatch feedback must name the CAUSE instead of
+ * observed live on the OpenAI-compatible native route (13/165 edit calls
+ * in a downstream IDE host). The dispatch feedback must name the CAUSE instead of
  * misdiagnosing it as "missing required parameter(s)" and sending the model
  * into re-call loops:
  *

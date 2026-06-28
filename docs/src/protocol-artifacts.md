@@ -100,11 +100,11 @@ respectively.
 Cross-repo release jobs can run:
 
 ```sh
-BURIN_CODE_ROOT=/path/to/burin-code make check-burin-protocol-artifacts
+BURIN_CODE_ROOT=/path/to/host-checkout make check-burin-protocol-artifacts
 ```
 
-to fail when Burin Code's vendored Swift or TypeScript protocol bindings drift
-from the Harn source artifacts.
+to fail when a downstream host's vendored Swift or TypeScript protocol bindings
+drift from the Harn source artifacts.
 
 For ACP, clients should still follow the wire namespacing rules in
 [Bridge protocol](./bridge-protocol.md): canonical ACP fields remain at the

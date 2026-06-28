@@ -211,7 +211,7 @@ The same metadata reaches hosts two ways:
   `policy`, `reason`, `prefixHash`, `keptCount`, `droppedCount`,
   `providerSafetyBlocked`, and when projection reclaims tool-result bodies,
   `redactedCount`, `reclaimedTokens`, `rootsConsulted`, and
-  `redactionPointers`. Burin Code and other hosts use this to render a
+  `redactionPointers`. IDE hosts and other clients use this to render a
   raw vs. projected side-by-side view without re-parsing the transcript.
 
 Replay can reconstruct both views deterministically: the raw events are

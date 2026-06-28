@@ -3,7 +3,7 @@
 //! The catalog itself lives in `harn_vm::mcp_presets` (the single source of
 //! truth, alongside the rest of harn's MCP machinery). This module only
 //! formats it: a human-readable table by default, or the stable JSON
-//! envelope under `--json` for thin clients (burin-code TUI/GUI) to render
+//! envelope under `--json` for thin clients (IDE host TUI/GUI) to render
 //! the same one-click server list.
 
 use harn_vm::mcp_presets::{self, McpPreset, PresetCatalog};

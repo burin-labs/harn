@@ -29,7 +29,6 @@ export function Footer() {
             <FooterExternal href={GITHUB}>{t.footer.github}</FooterExternal>
             <FooterExternal href={`${GITHUB}/releases`}>{t.footer.releases}</FooterExternal>
             <FooterLink to="/playground.html">{t.footer.playground}</FooterLink>
-            <FooterExternal href="https://burincode.com">{t.footer.burinCode}</FooterExternal>
           </FooterCol>
           <FooterCol title={t.footer.communityTitle}>
             <FooterExternal href={`${GITHUB}/issues`}>{t.footer.issues}</FooterExternal>
