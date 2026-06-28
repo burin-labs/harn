@@ -1797,7 +1797,10 @@ thinking_block_style = "inline"
 # `anthropic/claude-*` models above never get consulted for OpenRouter
 # requests. These explicit rows wire the Anthropic capability matrix
 # back in for `openrouter:anthropic/claude-*` so native tools, prompt
-# caching, and the right preferred-format defaults all flow through.
+# caching, and the right preferred-format defaults all flow through. Do
+# not inherit direct-Anthropic `thinking` controls here: OpenRouter's
+# Anthropic pass-through rejects those wire options even when the direct
+# Anthropic route supports them.
 [[provider.openrouter]]
 model_match = "anthropic/claude-fable-*"
 native_tools = true
@@ -1805,8 +1808,6 @@ preferred_tool_format = "native"
 prompt_caching = true
 cache_breakpoint_style = "top_level"
 structured_output = "tool_use"
-thinking_modes = ["adaptive"]
-interleaved_thinking_supported = true
 text_tool_wire_format_supported = true
 prefers_xml_scaffolding = true
 prefers_markdown_scaffolding = false
@@ -1823,8 +1824,6 @@ preferred_tool_format = "native"
 prompt_caching = true
 cache_breakpoint_style = "top_level"
 structured_output = "tool_use"
-thinking_modes = ["adaptive"]
-interleaved_thinking_supported = true
 text_tool_wire_format_supported = true
 prefers_xml_scaffolding = true
 prefers_markdown_scaffolding = false
@@ -1842,7 +1841,6 @@ preferred_tool_format = "native"
 prompt_caching = true
 cache_breakpoint_style = "top_level"
 structured_output = "tool_use"
-thinking_modes = ["adaptive"]
 text_tool_wire_format_supported = true
 prefers_xml_scaffolding = true
 prefers_markdown_scaffolding = false
@@ -1860,7 +1858,6 @@ preferred_tool_format = "native"
 prompt_caching = true
 cache_breakpoint_style = "top_level"
 structured_output = "tool_use"
-thinking_modes = ["enabled"]
 text_tool_wire_format_supported = true
 prefers_xml_scaffolding = true
 prefers_markdown_scaffolding = false
@@ -1878,7 +1875,6 @@ preferred_tool_format = "native"
 prompt_caching = true
 cache_breakpoint_style = "top_level"
 structured_output = "tool_use"
-thinking_modes = ["adaptive"]
 text_tool_wire_format_supported = true
 prefers_xml_scaffolding = true
 prefers_markdown_scaffolding = false
@@ -1896,7 +1892,6 @@ preferred_tool_format = "native"
 prompt_caching = true
 cache_breakpoint_style = "top_level"
 structured_output = "tool_use"
-thinking_modes = ["enabled"]
 text_tool_wire_format_supported = true
 prefers_xml_scaffolding = true
 prefers_markdown_scaffolding = false
@@ -1914,8 +1909,6 @@ preferred_tool_format = "native"
 prompt_caching = true
 cache_breakpoint_style = "top_level"
 structured_output = "tool_use"
-thinking_modes = ["adaptive"]
-interleaved_thinking_supported = true
 text_tool_wire_format_supported = true
 prefers_xml_scaffolding = true
 prefers_markdown_scaffolding = false
@@ -1933,8 +1926,6 @@ preferred_tool_format = "native"
 prompt_caching = true
 cache_breakpoint_style = "top_level"
 structured_output = "tool_use"
-thinking_modes = ["enabled"]
-interleaved_thinking_supported = true
 text_tool_wire_format_supported = true
 prefers_xml_scaffolding = true
 prefers_markdown_scaffolding = false

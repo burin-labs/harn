@@ -9846,12 +9846,10 @@
         "thinking_block_style": "thinking_blocks"
       },
       "reasoning": {
-        "modes": [
-          "adaptive"
-        ],
+        "modes": [],
         "effort_supported": false,
         "none_supported": false,
-        "interleaved_supported": true,
+        "interleaved_supported": false,
         "preserve_thinking": false
       },
       "prompt_cache": true,
@@ -9870,8 +9868,6 @@
         "streaming",
         "tools",
         "prompt_caching",
-        "thinking",
-        "extended_thinking",
         "structured_output"
       ],
       "family": "anthropic-claude",
@@ -9920,9 +9916,7 @@
         "thinking_block_style": "thinking_blocks"
       },
       "reasoning": {
-        "modes": [
-          "enabled"
-        ],
+        "modes": [],
         "effort_supported": false,
         "none_supported": false,
         "interleaved_supported": false,
@@ -9944,7 +9938,6 @@
         "streaming",
         "tools",
         "prompt_caching",
-        "thinking",
         "structured_output"
       ],
       "family": "anthropic-claude",
@@ -9991,12 +9984,10 @@
         "thinking_block_style": "thinking_blocks"
       },
       "reasoning": {
-        "modes": [
-          "adaptive"
-        ],
+        "modes": [],
         "effort_supported": false,
         "none_supported": false,
-        "interleaved_supported": true,
+        "interleaved_supported": false,
         "preserve_thinking": false
       },
       "prompt_cache": true,
@@ -10015,8 +10006,6 @@
         "streaming",
         "tools",
         "prompt_caching",
-        "thinking",
-        "extended_thinking",
         "structured_output"
       ],
       "family": "anthropic-claude",
@@ -10066,9 +10055,7 @@
         "thinking_block_style": "thinking_blocks"
       },
       "reasoning": {
-        "modes": [
-          "enabled"
-        ],
+        "modes": [],
         "effort_supported": false,
         "none_supported": false,
         "interleaved_supported": false,
@@ -10090,7 +10077,6 @@
         "streaming",
         "tools",
         "prompt_caching",
-        "thinking",
         "structured_output"
       ],
       "family": "anthropic-claude",

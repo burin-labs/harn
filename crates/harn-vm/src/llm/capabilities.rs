@@ -1845,12 +1845,13 @@ mod tests {
             "{model}: structured output mode should match direct Anthropic"
         );
         assert_eq!(
-            routed.thinking_modes, direct.thinking_modes,
-            "{model}: thinking mode breakpoint should match direct Anthropic"
+            routed.thinking_modes,
+            Vec::<String>::new(),
+            "{model}: OpenRouter Claude routes must not advertise direct Anthropic thinking controls"
         );
-        assert_eq!(
-            routed.interleaved_thinking_supported, direct.interleaved_thinking_supported,
-            "{model}: interleaved thinking support should match direct Anthropic"
+        assert!(
+            !routed.interleaved_thinking_supported,
+            "{model}: OpenRouter Claude routes must not advertise interleaved thinking"
         );
         assert_eq!(
             routed.supports_assistant_prefill, direct.supports_assistant_prefill,

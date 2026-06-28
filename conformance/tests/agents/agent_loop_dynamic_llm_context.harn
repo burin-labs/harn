@@ -9,20 +9,30 @@ pipeline test(task) {
   let first_context_ok = atomic(0)
   let second_context_ok = atomic(0)
   let second_call_options_ok = atomic(0)
+  let first_thinking_kept = atomic(0)
+  let second_thinking_stripped = atomic(0)
   let caller = { call ->
     let index = atomic_add(call_count, 1) + 1
     if index == 1
-      && contains(call?.system ?? "", "ctx provider=cheap-provider model=cheap-model") {
+      && contains(call?.system ?? "", "ctx provider=anthropic model=claude-sonnet-4-6") {
       atomic_set(first_context_ok, 1)
     }
     if index == 2
-      && contains(call?.system ?? "", "ctx provider=frontier-provider model=frontier-model") {
+      && contains(call?.system ?? "", "ctx provider=openrouter model=anthropic/claude-sonnet-4-6") {
       atomic_set(second_context_ok, 1)
     }
+    if index == 1
+      && call?.opts?.thinking?.mode == "enabled" {
+      atomic_set(first_thinking_kept, 1)
+    }
     if index == 2
-      && call?.opts?.provider == "frontier-provider"
-      && call?.opts?.model == "frontier-model" {
+      && call?.opts?.provider == "openrouter"
+      && call?.opts?.model == "anthropic/claude-sonnet-4-6" {
       atomic_set(second_call_options_ok, 1)
+    }
+    if index == 2
+      && call?.opts?.thinking == nil {
+      atomic_set(second_thinking_stripped, 1)
     }
     let text = if index == 1 {
       "still working"
@@ -47,8 +57,9 @@ pipeline test(task) {
       "finish",
       nil,
       {
-        provider: "cheap-provider",
-        model: "cheap-model",
+        provider: "anthropic",
+        model: "claude-sonnet-4-6",
+        thinking: {mode: "enabled", budget_tokens: 4096},
         session_id: session,
         llm_caller: caller,
         loop_until_done: true,
@@ -61,7 +72,7 @@ pipeline test(task) {
           if info?.iteration == 0 {
             return {
               message: "escalating after first turn",
-              llm_options: {provider: "frontier-provider", model: "frontier-model"},
+              llm_options: {provider: "openrouter", model: "anthropic/claude-sonnet-4-6"},
             }
           }
           return nil
@@ -72,10 +83,12 @@ pipeline test(task) {
   let starts = iteration_events(captured.events)
   assert(captured.result.status == "done", "loop completed after dynamic model switch")
   assert(atomic_get(call_count) == 2, "two LLM calls were made")
-  assert(atomic_get(first_context_ok) == 1, "first turn rendered cheap model context")
-  assert(atomic_get(second_context_ok) == 1, "second turn rendered frontier model context")
-  assert(atomic_get(second_call_options_ok) == 1, "second call used frontier options")
-  assert(starts[1].provider == "frontier-provider", "iteration telemetry used frontier provider")
-  assert(starts[1].model == "frontier-model", "iteration telemetry used frontier model")
+  assert(atomic_get(first_context_ok) == 1, "first turn rendered primary model context")
+  assert(atomic_get(second_context_ok) == 1, "second turn rendered escalated model context")
+  assert(atomic_get(first_thinking_kept) == 1, "direct Anthropic route kept supported thinking")
+  assert(atomic_get(second_call_options_ok) == 1, "second call used escalated options")
+  assert(atomic_get(second_thinking_stripped) == 1, "OpenRouter route stripped unsupported thinking")
+  assert(starts[1].provider == "openrouter", "iteration telemetry used escalated provider")
+  assert(starts[1].model == "anthropic/claude-sonnet-4-6", "iteration telemetry used escalated model")
   __io_println("dynamic llm context ok")
 }

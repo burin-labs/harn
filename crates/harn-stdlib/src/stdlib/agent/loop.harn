@@ -34,6 +34,7 @@ import {
 } from "std/agent/required_tools"
 import { agent_scratchpad_init, agent_scratchpad_reorganize_if_due } from "std/agent/scratchpad"
 import { agent_skills_match } from "std/agent/skills"
+import { agent_sanitize_model_options } from "std/agent/stack"
 import {
   agent_stall_apply_result,
   agent_stall_clear_current_failure,
@@ -2239,7 +2240,7 @@ fn __agent_loop_llm_overrides(opts) {
 
 fn __agent_loop_effective_llm_options(opts) {
   let base = opts ?? {}
-  return base + __agent_loop_llm_overrides(base)
+  return agent_sanitize_model_options(base + __agent_loop_llm_overrides(base))
 }
 
 fn __agent_loop_with_llm_render_context(opts, render) {
