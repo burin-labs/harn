@@ -212,7 +212,6 @@ impl AcpServer {
                 message_id.clone(),
                 InjectControlRecord {
                     owner: actor.clone(),
-                    status: "pending".to_string(),
                 },
             );
         self.emit_control_outcome(
@@ -296,13 +295,6 @@ impl AcpServer {
         }
         match inject_state.revoke_pending_user_message(message_id).await {
             harn_vm::bridge::PendingUserMessageMutationResult::Mutated => {
-                if let Some(record) = self
-                    .inject_controls
-                    .get_mut(&session_id)
-                    .and_then(|records| records.get_mut(message_id))
-                {
-                    record.status = "revoked".to_string();
-                }
                 self.emit_control_outcome(
                     &session_id,
                     "session/revoke_inject",
@@ -333,13 +325,6 @@ impl AcpServer {
                 );
             }
             harn_vm::bridge::PendingUserMessageMutationResult::AlreadyDelivered => {
-                if let Some(record) = self
-                    .inject_controls
-                    .get_mut(&session_id)
-                    .and_then(|records| records.get_mut(message_id))
-                {
-                    record.status = "delivered".to_string();
-                }
                 self.emit_control_outcome(
                     &session_id,
                     "session/revoke_inject",
@@ -479,13 +464,6 @@ impl AcpServer {
                 );
             }
             harn_vm::bridge::PendingUserMessageMutationResult::AlreadyDelivered => {
-                if let Some(record) = self
-                    .inject_controls
-                    .get_mut(&session_id)
-                    .and_then(|records| records.get_mut(message_id))
-                {
-                    record.status = "delivered".to_string();
-                }
                 self.emit_control_outcome(
                     &session_id,
                     "session/replace_inject",

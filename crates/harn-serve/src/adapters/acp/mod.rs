@@ -153,10 +153,11 @@ fn parse_oauth_redirect_url(
     Ok((state, code, query("iss")))
 }
 
+/// Tracks the ACP actor that owns a pending injected message so that
+/// revoke/replace requests can enforce ownership.
 #[derive(Clone)]
 struct InjectControlRecord {
     owner: serde_json::Value,
-    status: String,
 }
 
 struct TimelineSubscription {

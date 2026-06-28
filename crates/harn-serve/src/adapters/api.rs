@@ -374,9 +374,6 @@ impl ApiState {
         };
         match method.as_str() {
             "session/update" => self.register_session_update(message),
-            "_harn/agentEvent" | "harn.hitl.requested" => {
-                self.append_event(None, None, &method, message);
-            }
             _ => {
                 self.append_event(None, None, &method, message);
             }
