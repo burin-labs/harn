@@ -126,6 +126,10 @@ impl OpenAiCompatibleProvider {
         // every prompt fragment that references the text tool-call paradigm
         // because it operates on the assembled wire bytes, not per-template.
         let remap_tool_call = caps.reserved_tool_call_token;
+        let has_native_tools = opts
+            .native_tools
+            .as_ref()
+            .is_some_and(|tools| !tools.is_empty());
         let mut msgs = Vec::new();
         if let Some(ref sys) = opts.system {
             let sys = maybe_remap_tool_call_text(sys, remap_tool_call);
@@ -173,6 +177,9 @@ impl OpenAiCompatibleProvider {
         msgs = crate::llm::api::normalize_openai_style_messages(msgs, force_string_content);
         if caps.requires_tool_result_adjacency {
             msgs = enforce_tool_result_adjacency(msgs);
+        }
+        if !caps.supports_parallel_tool_calls {
+            msgs = enforce_single_tool_call_history(msgs, has_native_tools);
         }
 
         let wire_model = crate::llm_config::wire_model_id(&opts.model);
@@ -318,10 +325,9 @@ impl OpenAiCompatibleProvider {
                 ));
             }
         }
-        let has_native_tools = opts
-            .native_tools
-            .as_ref()
-            .is_some_and(|tools| !tools.is_empty());
+        if has_native_tools && !caps.supports_parallel_tool_calls {
+            body["parallel_tool_calls"] = serde_json::json!(false);
+        }
         if let Some(ref tc) = opts.tool_choice {
             if let Some(tool_choice) =
                 normalize_tool_choice_for_capabilities(tc, &caps, has_native_tools)
@@ -432,6 +438,134 @@ fn enforce_tool_result_adjacency(messages: Vec<serde_json::Value>) -> Vec<serde_
         normalized.extend(deferred);
     }
     normalized
+}
+
+fn enforce_single_tool_call_history(
+    messages: Vec<serde_json::Value>,
+    has_native_tools: bool,
+) -> Vec<serde_json::Value> {
+    if has_native_tools {
+        split_parallel_native_tool_call_history(messages)
+    } else {
+        strip_native_tool_metadata_from_text_history(messages)
+    }
+}
+
+fn strip_native_tool_metadata_from_text_history(
+    messages: Vec<serde_json::Value>,
+) -> Vec<serde_json::Value> {
+    messages
+        .into_iter()
+        .map(|mut message| {
+            let Some(object) = message.as_object_mut() else {
+                return message;
+            };
+            match object.get("role").and_then(|role| role.as_str()) {
+                Some("assistant") => {
+                    object.remove("tool_calls");
+                }
+                Some("tool") => {
+                    object.insert(
+                        "role".to_string(),
+                        serde_json::Value::String("user".to_string()),
+                    );
+                    object.remove("name");
+                    object.remove("tool_call_id");
+                }
+                _ => {}
+            }
+            message
+        })
+        .collect()
+}
+
+fn split_parallel_native_tool_call_history(
+    messages: Vec<serde_json::Value>,
+) -> Vec<serde_json::Value> {
+    let mut normalized = Vec::with_capacity(messages.len());
+    let mut cursor = 0;
+    while cursor < messages.len() {
+        let message = messages[cursor].clone();
+        let Some(tool_calls) = assistant_tool_calls(&message) else {
+            normalized.push(message);
+            cursor += 1;
+            continue;
+        };
+        if tool_calls.len() <= 1 {
+            normalized.push(message);
+            cursor += 1;
+            continue;
+        }
+
+        let ids = tool_calls
+            .iter()
+            .filter_map(|call| {
+                call.get("id")
+                    .and_then(|value| value.as_str())
+                    .map(ToString::to_string)
+            })
+            .collect::<Vec<_>>();
+        cursor += 1;
+
+        let mut results_by_id: std::collections::BTreeMap<String, Vec<serde_json::Value>> =
+            std::collections::BTreeMap::new();
+        let mut deferred = Vec::new();
+        let mut pending_ids = ids.iter().cloned().collect::<HashSet<_>>();
+        while cursor < messages.len() && !pending_ids.is_empty() {
+            let next = messages[cursor].clone();
+            let matching_ids = matching_tool_result_ids(&next, &pending_ids);
+            if !matching_ids.is_empty() {
+                for id in matching_ids {
+                    pending_ids.remove(&id);
+                    results_by_id.entry(id).or_default().push(next.clone());
+                }
+                cursor += 1;
+                continue;
+            }
+            if is_deferable_non_tool_message(&next) {
+                deferred.push(next);
+                cursor += 1;
+                continue;
+            }
+            break;
+        }
+
+        for (idx, call) in tool_calls.into_iter().enumerate() {
+            let mut assistant = message.clone();
+            if let Some(object) = assistant.as_object_mut() {
+                object.insert(
+                    "tool_calls".to_string(),
+                    serde_json::Value::Array(vec![call.clone()]),
+                );
+                if idx > 0 {
+                    object.insert(
+                        "content".to_string(),
+                        serde_json::Value::String(String::new()),
+                    );
+                }
+            }
+            normalized.push(assistant);
+            if let Some(id) = ids.get(idx) {
+                if let Some(results) = results_by_id.remove(id) {
+                    normalized.extend(results);
+                }
+            }
+        }
+        normalized.extend(deferred);
+    }
+    normalized
+}
+
+fn assistant_tool_calls(message: &serde_json::Value) -> Option<Vec<serde_json::Value>> {
+    if message.get("role").and_then(|role| role.as_str()) != Some("assistant") {
+        return None;
+    }
+    let calls = message.get("tool_calls")?.as_array()?.clone();
+    if calls.is_empty() {
+        None
+    } else {
+        Some(calls)
+    }
 }
 
 fn assistant_tool_call_ids(message: &serde_json::Value) -> Option<HashSet<String>> {
@@ -2022,14 +2156,14 @@ thinking_modes = ["enabled"]
     fn build_request_body_strips_prior_assistant_reasoning_field() {
         // The durable transcript carries a prior assistant turn's private
         // reasoning as a top-level `messages[N].reasoning` field. Strict
-        // OpenAI-compat providers (Fireworks) reject any unknown top-level
+        // OpenAI-compat providers reject any unknown top-level
         // message field with a terminal HTTP 400
         // `Extra inputs are not permitted, field: 'messages[N].reasoning'`.
         // No provider consumes this field on the chat-completions wire, so it
         // must be dropped at the request boundary for every provider.
         let mut payload = base_request_payload();
-        payload.provider = "fireworks".to_string();
-        payload.model = "accounts/fireworks/models/gpt-oss-120b".to_string();
+        payload.provider = "openai".to_string();
+        payload.model = "gpt-4.1".to_string();
         payload.messages = vec![
             json!({"role": "user", "content": "hello"}),
             json!({
@@ -2052,7 +2186,8 @@ thinking_modes = ["enabled"]
                 "outgoing message must not carry a `reasoning` field: {message}"
             );
         }
-        // The rest of the assistant turn (tool_calls + role) must survive intact.
+        // The normal OpenAI-compatible path still preserves portable assistant
+        // history fields while stripping storage-only reasoning.
         let assistant = messages
             .iter()
             .find(|message| message["role"] == "assistant")
@@ -2129,6 +2264,121 @@ thinking_modes = ["enabled"]
         assert_eq!(messages[2]["tool_call_id"], "call_002");
         assert_eq!(messages[3]["tool_call_id"], "call_001");
         assert_eq!(messages[4]["content"], "[runtime_feedback] keep going");
+    }
+
+    #[test]
+    fn single_tool_call_text_route_strips_native_tool_history_metadata() {
+        let mut payload = base_request_payload();
+        payload.provider = "fireworks".to_string();
+        payload.model = "accounts/fireworks/models/gpt-oss-120b".to_string();
+        payload.messages = vec![
+            json!({"role": "user", "content": "inspect"}),
+            json!({
+                "role": "assistant",
+                "content": "<tool_call>\nread({ path: \"a.rs\" })\n</tool_call>\n<tool_call>\nread({ path: \"b.rs\" })\n</tool_call>",
+                "tool_calls": [
+                    {
+                        "id": "call_001",
+                        "type": "function",
+                        "function": {"name": "read", "arguments": "{\"path\":\"a.rs\"}"},
+                    },
+                    {
+                        "id": "call_002",
+                        "type": "function",
+                        "function": {"name": "read", "arguments": "{\"path\":\"b.rs\"}"},
+                    },
+                ],
+            }),
+            json!({"role": "tool", "tool_call_id": "call_001", "name": "read", "content": "a"}),
+        ];
+
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+        assert!(body.get("parallel_tool_calls").is_none());
+        let messages = body["messages"].as_array().expect("messages array");
+        assert_eq!(messages[1]["role"], "assistant");
+        assert!(messages[1]["content"]
+            .as_str()
+            .expect("assistant content")
+            .contains("read({ path: \"a.rs\" })"));
+        assert_eq!(messages[2]["role"], "user");
+        assert!(messages[2].get("tool_call_id").is_none());
+        assert!(messages[2].get("name").is_none());
+        assert!(
+            messages
+                .iter()
+                .all(|message| message.get("tool_calls").is_none()),
+            "text-tool routes must not send native tool_calls history to Fireworks: {messages:?}"
+        );
+    }
+
+    #[test]
+    fn single_tool_call_native_route_splits_parallel_tool_history() {
+        let mut payload = base_request_payload();
+        payload.provider = "fireworks".to_string();
+        payload.model = "accounts/fireworks/models/gpt-oss-120b".to_string();
+        payload.native_tools = Some(vec![json!({
+            "type": "function",
+            "function": {
+                "name": "read",
+                "description": "Read a file",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"path": {"type": "string"}},
+                    "required": ["path"]
+                }
+            }
+        })]);
+        payload.messages = vec![
+            json!({"role": "user", "content": "inspect"}),
+            json!({
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_001",
+                        "type": "function",
+                        "function": {"name": "read", "arguments": "{\"path\":\"a.rs\"}"},
+                    },
+                    {
+                        "id": "call_002",
+                        "type": "function",
+                        "function": {"name": "read", "arguments": "{\"path\":\"b.rs\"}"},
+                    },
+                ],
+            }),
+            json!({"role": "tool", "tool_call_id": "call_001", "content": "a"}),
+            json!({"role": "tool", "tool_call_id": "call_002", "content": "b"}),
+        ];
+
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+        assert_eq!(body["parallel_tool_calls"], false);
+        let messages = body["messages"].as_array().expect("messages array");
+        let roles = messages
+            .iter()
+            .map(|message| message["role"].as_str().unwrap_or("?"))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            roles,
+            vec!["user", "assistant", "tool", "assistant", "tool"]
+        );
+        assert_eq!(messages[1]["tool_calls"][0]["id"], "call_001");
+        assert_eq!(messages[2]["tool_call_id"], "call_001");
+        assert_eq!(messages[3]["tool_calls"][0]["id"], "call_002");
+        assert_eq!(messages[4]["tool_call_id"], "call_002");
+        assert_eq!(
+            messages[1]["tool_calls"]
+                .as_array()
+                .expect("first calls")
+                .len(),
+            1
+        );
+        assert_eq!(
+            messages[3]["tool_calls"]
+                .as_array()
+                .expect("second calls")
+                .len(),
+            1
+        );
     }
 
     #[test]

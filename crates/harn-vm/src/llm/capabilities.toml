@@ -182,6 +182,11 @@
 #                     followed immediately by `role=tool` messages for every
 #                     emitted `tool_call_id`; strict OpenAI-compatible servers
 #                     reject interleaved runtime feedback before the result.
+#   supports_parallel_tool_calls:
+#                     whether one assistant history message may contain multiple
+#                     `tool_calls[]` entries; strict OpenAI-compatible servers
+#                     can reject replayed history with more than one tool call
+#                     even when Harn originally parsed text-tool calls.
 #
 # OPINIONATED PROVIDER/MODEL/CONFIG POLICY (enforced by the footgun gate in
 # crate::llm::capability_audit, wired into `providers build-capabilities
@@ -1624,6 +1629,7 @@ model_match = "accounts/fireworks/models/gpt-oss-*"
 native_tools = false
 preferred_tool_format = "text"
 text_tool_wire_format_supported = true
+supports_parallel_tool_calls = false
 thinking_modes = ["effort"]
 reasoning_effort_supported = true
 reasoning_effort_levels = ["low", "medium", "high"]
