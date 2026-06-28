@@ -21,6 +21,8 @@ pub(crate) struct RamSnapshot {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(crate) struct GpuSnapshot {
     pub kind: GpuKind,
+    pub total_memory_bytes: Option<u64>,
+    pub free_memory_bytes: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -53,6 +55,10 @@ pub(crate) fn bytes_to_gib_rounded(bytes: u64) -> u64 {
 
 pub(crate) fn bytes_to_gib_floor(bytes: u64) -> u64 {
     bytes / GIB
+}
+
+pub(crate) fn bytes_to_gib_f64(bytes: u64) -> f64 {
+    bytes as f64 / GIB as f64
 }
 
 fn detect_ram() -> RamSnapshot {
@@ -88,23 +94,49 @@ fn detect_gpu() -> GpuSnapshot {
     #[cfg(target_os = "macos")]
     {
         if Path::new("/System/Library/Frameworks/MetalPerformanceShaders.framework").exists() {
-            return GpuSnapshot { kind: GpuKind::Mps };
+            return GpuSnapshot {
+                kind: GpuKind::Mps,
+                total_memory_bytes: None,
+                free_memory_bytes: None,
+            };
         }
     }
 
-    if Command::new("nvidia-smi")
-        .arg("-L")
-        .output()
-        .is_ok_and(|output| output.status.success())
-    {
+    if let Some((total, free)) = detect_nvidia_memory_bytes() {
         return GpuSnapshot {
             kind: GpuKind::Cuda,
+            total_memory_bytes: Some(total),
+            free_memory_bytes: Some(free),
         };
     }
 
     GpuSnapshot {
         kind: GpuKind::None,
+        total_memory_bytes: None,
+        free_memory_bytes: None,
     }
+}
+
+fn detect_nvidia_memory_bytes() -> Option<(u64, u64)> {
+    let output = Command::new("nvidia-smi")
+        .args([
+            "--query-gpu=memory.total,memory.free",
+            "--format=csv,noheader,nounits",
+        ])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    parse_nvidia_memory_csv(&String::from_utf8_lossy(&output.stdout))
+}
+
+fn parse_nvidia_memory_csv(text: &str) -> Option<(u64, u64)> {
+    let line = text.lines().find(|line| !line.trim().is_empty())?;
+    let mut parts = line.split(',').map(str::trim);
+    let total_mib = parts.next()?.parse::<u64>().ok()?;
+    let free_mib = parts.next()?.parse::<u64>().ok()?;
+    Some((total_mib * 1024 * 1024, free_mib * 1024 * 1024))
 }
 
 fn detect_disk(path: &Path) -> DiskSnapshot {
@@ -177,7 +209,10 @@ fn parse_page_count(value: &str) -> Option<u64> {
 
 #[cfg(test)]
 mod tests {
-    use super::{bytes_to_gib_rounded, parse_linux_meminfo, parse_macos_vm_stat, RamSnapshot, GIB};
+    use super::{
+        bytes_to_gib_rounded, parse_linux_meminfo, parse_macos_vm_stat, parse_nvidia_memory_csv,
+        RamSnapshot, GIB,
+    };
 
     #[test]
     fn linux_meminfo_reports_total_and_available_bytes() {
@@ -211,5 +246,13 @@ mod tests {
     fn gib_formatting_rounds_to_nearest_gib() {
         assert_eq!(bytes_to_gib_rounded(8 * GIB), 8);
         assert_eq!(bytes_to_gib_rounded(8 * GIB + GIB / 2), 9);
+    }
+
+    #[test]
+    fn nvidia_memory_csv_reports_first_gpu_bytes() {
+        assert_eq!(
+            parse_nvidia_memory_csv("32607, 20480\n24576, 12000\n"),
+            Some((32607 * 1024 * 1024, 20480 * 1024 * 1024))
+        );
     }
 }

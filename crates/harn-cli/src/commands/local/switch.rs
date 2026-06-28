@@ -21,8 +21,8 @@ use std::path::Path;
 use std::time::Duration;
 
 use harn_vm::llm::local_profiles::{
-    evaluate_runtime_profile_gate, local_runtime_profile_report_for, LocalRuntimeProfileReport,
-    RuntimeProbeEvidence, RuntimeProfileGate,
+    evaluate_runtime_profile_gate, LocalRuntimeProfileReport, RuntimeProbeEvidence,
+    RuntimeProfileGate,
 };
 use harn_vm::llm::readiness::probe_provider_readiness;
 use harn_vm::llm::{
@@ -35,7 +35,7 @@ use serde::Serialize;
 use crate::cli::LocalSwitchArgs;
 use crate::commands::hardware::collect_hardware_snapshot;
 
-use super::profile::defaults_for;
+use super::profile::{defaults_for, runtime_profile_host};
 use super::runtime::{
     local_provider_ids, ollama_unload_model, resolve_provider_def, snapshot_provider, terminate_pid,
 };
@@ -78,8 +78,13 @@ pub(crate) async fn run(args: LocalSwitchArgs, base_dir: &Path) -> Result<(), St
             local_provider_ids(None).join(", ")
         ));
     }
-    let runtime_profile =
-        local_runtime_profile_report_for(resolved.alias.as_deref(), &resolved.id, &provider);
+    let hardware = collect_hardware_snapshot();
+    let runtime_profile = harn_vm::llm::local_profiles::local_runtime_profile_report_for_host(
+        resolved.alias.as_deref(),
+        &resolved.id,
+        &provider,
+        Some(runtime_profile_host(&hardware)),
+    );
     let evidence = load_runtime_probe_evidence(&args)?;
     let profile_gate = evaluate_runtime_profile_gate(&runtime_profile, &evidence, args.force);
     if !profile_gate.allowed {
@@ -92,9 +97,14 @@ pub(crate) async fn run(args: LocalSwitchArgs, base_dir: &Path) -> Result<(), St
 
     let def = resolve_provider_def(&provider)?;
     let base_url = llm_config::resolve_base_url(&def);
-    let hardware = collect_hardware_snapshot();
     let defaults = defaults_for(&hardware);
-    let ctx = args.ctx.unwrap_or(defaults.ctx);
+    let ctx = args.ctx.unwrap_or_else(|| {
+        runtime_profile
+            .selected
+            .recommended_num_ctx
+            .filter(|recommended| *recommended > defaults.ctx)
+            .unwrap_or(defaults.ctx)
+    });
     let keep_alive = args
         .keep_alive
         .clone()

@@ -7,7 +7,10 @@
 //! configuration.
 
 use crate::cli::LocalProfileArgs;
-use crate::commands::hardware::{bytes_to_gib_floor, GpuKind, HardwareSnapshot};
+use crate::commands::hardware::{
+    bytes_to_gib_f64, bytes_to_gib_floor, collect_hardware_snapshot, GpuKind, HardwareSnapshot,
+};
+use harn_vm::llm::local_profiles::RuntimeProfileHost;
 
 /// Recommended defaults the user can opt out of with `--ctx` / `--keep-alive`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -77,9 +80,19 @@ pub(crate) fn defaults_for(hardware: &HardwareSnapshot) -> LocalDefaults {
 }
 
 pub(crate) fn run(args: LocalProfileArgs) -> Result<(), String> {
-    let report = harn_vm::llm::local_profiles::local_runtime_profile_report(
-        &args.model,
-        args.provider.as_deref(),
+    let hardware = collect_hardware_snapshot();
+    let resolved = harn_vm::llm_config::resolve_model_info(&args.model);
+    let provider = args
+        .provider
+        .as_deref()
+        .map(str::trim)
+        .filter(|provider| !provider.is_empty())
+        .unwrap_or(&resolved.provider);
+    let report = harn_vm::llm::local_profiles::local_runtime_profile_report_for_host(
+        resolved.alias.as_deref(),
+        &resolved.id,
+        provider,
+        Some(runtime_profile_host(&hardware)),
     );
     if args.json {
         println!(
@@ -108,6 +121,13 @@ pub(crate) fn run(args: LocalProfileArgs) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+pub(crate) fn runtime_profile_host(hardware: &HardwareSnapshot) -> RuntimeProfileHost {
+    RuntimeProfileHost {
+        system_available_gib: hardware.ram.available_bytes.map(bytes_to_gib_f64),
+        accelerator_free_gib: hardware.gpu.free_memory_bytes.map(bytes_to_gib_f64),
+    }
 }
 
 fn bucket_for(hardware: &HardwareSnapshot) -> ProfileBucket {
@@ -140,7 +160,11 @@ mod tests {
                 total_bytes: Some(total_gib * GIB),
                 available_bytes: Some(total_gib * GIB / 2),
             },
-            gpu: GpuSnapshot { kind: gpu },
+            gpu: GpuSnapshot {
+                kind: gpu,
+                total_memory_bytes: None,
+                free_memory_bytes: None,
+            },
             disk: DiskSnapshot {
                 path: PathBuf::from("/tmp"),
                 free_bytes: Some(128 * GIB),
