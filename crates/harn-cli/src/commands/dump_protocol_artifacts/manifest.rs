@@ -85,11 +85,18 @@ pub(super) fn generate_manifest() -> Result<String, String> {
         "acp": {
             "schemaCompatibility": ACP_SCHEMA_COMPATIBILITY,
             "agentMethods": ACP_AGENT_METHODS,
+            "dispatchedMethods": ACP_DISPATCHED_METHODS,
+            "transportControlMethods": ACP_TRANSPORT_CONTROL_METHODS,
+            "handledMethods": concat_unique_wire_values(&[
+                ACP_TRANSPORT_CONTROL_METHODS,
+                ACP_DISPATCHED_METHODS,
+            ]),
             "deprecatedAgentMethods": deprecated_wire_values(ACP_DEPRECATED_AGENT_METHODS),
             "clientMethods": ACP_CLIENT_METHODS,
             "agentNotifications": ACP_AGENT_NOTIFICATIONS,
             "sessionUpdateVariants": all_acp_session_updates(),
             "harnSessionUpdateExtensions": HARN_SESSION_UPDATE_EXTENSIONS,
+            "harnSessionTimelineMethods": HARN_SESSION_TIMELINE_METHODS,
             "harnAgentEventMethod": HARN_AGENT_EVENT_METHOD,
             "harnProviderCatalogMethod": HARN_PROVIDER_CATALOG_METHOD,
             "harnAgentEventKinds": HARN_AGENT_EVENT_KINDS,

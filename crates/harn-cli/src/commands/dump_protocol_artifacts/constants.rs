@@ -1,5 +1,10 @@
 use harn_serve::adapters::acp::HARN_PROVIDER_CATALOG_METHOD;
 use harn_serve::MCP_PROTOCOL_VERSION;
+use harn_vm::orchestration::SESSION_VIEW_QUERY_METHOD;
+use harn_vm::session_timeline::{
+    SESSION_TIMELINE_QUERY_METHOD, SESSION_TIMELINE_SUBSCRIBE_METHOD,
+    SESSION_TIMELINE_UNSUBSCRIBE_METHOD, SESSION_TIMELINE_UPDATE_METHOD,
+};
 
 pub(super) const ACP_AGENT_METHODS: &[&str] = &[
     "initialize",
@@ -51,6 +56,10 @@ pub(super) const ACP_DISPATCHED_METHODS: &[&str] = &[
     "initialize",
     "authenticate",
     HARN_PROVIDER_CATALOG_METHOD,
+    SESSION_TIMELINE_QUERY_METHOD,
+    SESSION_VIEW_QUERY_METHOD,
+    SESSION_TIMELINE_SUBSCRIBE_METHOD,
+    SESSION_TIMELINE_UNSUBSCRIBE_METHOD,
     "session/new",
     "session/load",
     "session/resume",
@@ -105,6 +114,17 @@ pub(super) const ACP_DISPATCHED_METHODS: &[&str] = &[
     "harn.mcp.oauth_callback",
     "mcp/import_token",
     "harn.mcp.import_token",
+];
+
+/// ACP control frames consumed by the transport before regular dispatch.
+pub(super) const ACP_TRANSPORT_CONTROL_METHODS: &[&str] = &["session/set_budget"];
+
+/// Session-timeline extension methods Harn accepts or emits.
+pub(super) const HARN_SESSION_TIMELINE_METHODS: &[&str] = &[
+    SESSION_TIMELINE_QUERY_METHOD,
+    SESSION_TIMELINE_SUBSCRIBE_METHOD,
+    SESSION_TIMELINE_UNSUBSCRIBE_METHOD,
+    SESSION_TIMELINE_UPDATE_METHOD,
 ];
 
 pub(super) const ACP_AGENT_NOTIFICATIONS: &[&str] =
