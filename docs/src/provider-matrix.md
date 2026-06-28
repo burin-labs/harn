@@ -207,6 +207,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `together` | `qwen/*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `together` | `deepseek-ai/deepseek-v3*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `together` | `openai/gpt-oss-*` | `any` | `effort` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
+| `together` | `meta-llama/Llama-3.3-70B-Instruct-Turbo` | `any` | no | no | no | no | no | yes | no | no | `markdown` | `none` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `together` | `deepseek-ai/deepseek-v4*` | `any` | `enabled,effort` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `together` | `moonshotai/kimi-k2*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `together` | `zai-org/glm-5*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `text` | yes | yes | `native_unreliable` | yes | yes |
@@ -377,7 +378,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `together` | `Qwen/Qwen3.7-Max` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `together` | `deepseek-ai/DeepSeek-V4-Pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `together` | `google/gemma-4-31B-it` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `together` | `meta-llama/Llama-3.3-70B-Instruct-Turbo` | `text` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `together` | `meta-llama/Llama-3.3-70B-Instruct-Turbo` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `together` | `zai-org/GLM-5.1` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
 | `together` | `zai-org/GLM-5.2` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
 | `xai` | `grok-4.3` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |

@@ -13130,14 +13130,17 @@
         ]
       },
       "tool_support": {
-        "native": false,
+        "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_notes": "Together documents native tool calls for this serverless sample route; add live parity probes before broadening to all Together-hosted Llama variants.",
         "tool_search": []
       },
       "structured_output": "none",
       "format_preferences": {
         "prefers_xml_scaffolding": false,
-        "prefers_markdown_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
         "structured_output_mode": "none",
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
