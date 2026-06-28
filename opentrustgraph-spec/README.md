@@ -63,7 +63,7 @@ chain extends the parent's `actor_chain` by exactly one hop.
   required but omits the approver/signature evidence.
 - `examples/python/verify_chain.py`: reference, stdlib-only verifier in pure
   Python. Validates every fixture and any chain emitted by
-  `harn trust-graph export`.
+  `harn trust export`.
 
 ## Verification contract
 
@@ -88,7 +88,7 @@ one signature receipt in `metadata.approval.signatures`.
 ## Harn integration points
 
 - Runtime events are emitted to `trust_graph` plus `trust_graph.<agent_id>`.
-- `harn trust-graph verify-chain --json` exposes verification metadata that can
+- `harn trust verify-chain --json` exposes verification metadata that can
   be projected into the chain export shape.
 - The portal `GET /api/trust-graph` endpoint returns records, summaries, and
   verification status for local supervision surfaces.

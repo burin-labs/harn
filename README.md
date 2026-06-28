@@ -54,14 +54,14 @@ Shell completions:
 
 ```bash
 mkdir -p ~/.local/share/bash-completion/completions
-harn completions bash > ~/.local/share/bash-completion/completions/harn
+harn completion bash > ~/.local/share/bash-completion/completions/harn
 
 mkdir -p ~/.zfunc
-harn completions zsh > ~/.zfunc/_harn
+harn completion zsh > ~/.zfunc/_harn
 # Add to ~/.zshrc if needed: fpath=(~/.zfunc $fpath); autoload -Uz compinit; compinit
 
 mkdir -p ~/.config/fish/completions
-harn completions fish > ~/.config/fish/completions/harn.fish
+harn completion fish > ~/.config/fish/completions/harn.fish
 ```
 
 Container image:
