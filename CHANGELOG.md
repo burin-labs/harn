@@ -8,6 +8,36 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.148
+
+### Added
+
+- Added a default-OFF reserved-budget terminal-verify guard
+  (`stall_diagnostics.reserved_terminal_verify`): when an agent loop would
+  terminate on a budget / token / wall-clock boundary with an unverified source
+  write, it spends a small held-back iteration reserve on a final
+  verify(+bounded repair) instead of ending blind on a red build. Closes the
+  budget-exit half of declared-done-with-red-build (the loop-cap half landed in
+  the previous release). A new `reserved_terminal_verify` agent event surfaces
+  the guard's grant / verify_passed / verify_failed phases.
+- Added a Harn Flow `flow_evaluate_invariants` builtin for executing Harn
+  `@invariant` predicates against a slice, including harn-canon-style result
+  adaptation and semantic-predicate skip reporting.
+
+### Fixed
+
+- **MCP and local runtime edge cases.** MCP connects now reject unsupported
+  protocol versions locally and tolerate padded version strings, bytecode cache
+  writes avoid same-process temp-file collisions, and `harn local launch`
+  deduplicates default flags supplied as `--flag=value`.
+- Agent loops now enforce post-edit verification after a live failure
+  independently of repair-aware nudges, including edits made on the final
+  iteration.
+- Fixed macOS process TMPDIR assertions to handle `/var` and `/private/var`
+  path aliases.
+- Ensure `agent_loop` runs configured completion verification when
+  `stop_after_successful_tools` ends a turn.
+
 ## v0.8.147
 
 ### Added

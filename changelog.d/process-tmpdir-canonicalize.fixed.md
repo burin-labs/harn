@@ -1,1 +1,0 @@
-- Fixed macOS process TMPDIR assertions to handle `/var` and `/private/var` path aliases.
