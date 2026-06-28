@@ -1,0 +1,7 @@
+/**
+ * This module marks nothing `pub`, so its export surface is empty: every
+ * function is private. Importing any of them by name must be rejected.
+ */
+fn helper() -> string {
+  return "secret"
+}

@@ -95,12 +95,6 @@ struct ModuleInfo {
     /// (importing file path missing). Prevents `imported_names_for_file`
     /// from returning a partial answer when any import is broken.
     has_unresolved_selective_import: bool,
-    /// Every `fn` declaration at module scope, used to implement the
-    /// fallback "no `pub fn` → export everything" rule that matches the
-    /// runtime loader's behavior.
-    fn_names: Vec<String>,
-    /// True when at least one `pub fn` appeared at module scope.
-    has_pub_fn: bool,
     /// Top-level type-like declarations that can be imported into a caller's
     /// static type environment.
     type_declarations: Vec<SNode>,
@@ -906,9 +900,9 @@ impl ModuleGraph {
     /// wildcard import reaching them, and matches the strict visibility of
     /// TypeScript, Rust, and Go. This is the single source of truth for that
     /// determination — the CLI maps the result onto import spans and emits
-    /// `HARN-IMP-002`, and the runtime loader enforces the same rule. Returns
-    /// an empty vec for modules with no `pub` markers (the export-everything
-    /// fallback leaves nothing private).
+    /// `HARN-IMP-002`, and the runtime loader enforces the same rule. A module
+    /// that marks nothing `pub` exports nothing, so selectively importing any
+    /// name it declares is flagged.
     pub fn non_exported_selective_imports(&self, file: &Path) -> Vec<NonExportedImport> {
         let file = normalize_path(file);
         let Some(module) = self.modules.get(&file) else {
@@ -930,11 +924,6 @@ impl ModuleGraph {
             else {
                 continue;
             };
-            // No `pub` markers → every function is exported, so nothing is
-            // private and there is nothing to flag.
-            if !target.has_pub_fn {
-                continue;
-            }
             for name in selective {
                 // Declared in the target but absent from its export surface
                 // (and not a re-export, which lives in `exports`, not
@@ -992,13 +981,6 @@ fn load_module(path: &Path) -> (ModuleInfo, Option<ParsedModuleSource>) {
         collect_type_declarations(node, &mut module.type_declarations);
         collect_callable_declarations(node, &mut module.callable_declarations);
     }
-    // Fallback matching the VM loader: if the module declares no
-    // `pub fn`, every fn is implicitly exported.
-    if !module.has_pub_fn {
-        for name in &module.fn_names {
-            module.own_exports.insert(name.clone());
-        }
-    }
     // Seed the transitive `exports` set from local exports plus selective
     // re-export names. Wildcard re-exports are folded in by
     // [`resolve_re_exports`] after every module has been loaded.
@@ -1027,9 +1009,7 @@ fn collect_module_info(file: &Path, snode: &SNode, module: &mut ModuleInfo) {
         } => {
             if *is_pub {
                 module.own_exports.insert(name.clone());
-                module.has_pub_fn = true;
             }
-            module.fn_names.push(name.clone());
             module.declarations.insert(
                 name.clone(),
                 decl_site(file, snode.span, name, DefKind::Function),
@@ -1338,16 +1318,20 @@ mod tests {
     }
 
     #[test]
-    fn non_exported_selective_import_allows_everything_when_no_pub() {
+    fn selective_import_from_zero_pub_module_is_flagged() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
-        // No `pub` markers → the export-everything fallback applies, so a
-        // selective import of any function is valid and nothing is flagged.
+        // A module with no `pub` markers exports nothing — Harn has no
+        // "public-by-default" fallback — so selectively importing any of its
+        // functions is flagged just like importing a private name.
         write_file(root, "util.harn", "fn a() { 1 }\nfn b() { 2 }\n");
         let entry = write_file(root, "entry.harn", "import { a } from \"./util\"\n");
 
         let graph = build(std::slice::from_ref(&entry));
-        assert!(graph.non_exported_selective_imports(&entry).is_empty());
+        let offenders = graph.non_exported_selective_imports(&entry);
+        assert_eq!(offenders.len(), 1);
+        assert_eq!(offenders[0].name, "a");
+        assert_eq!(offenders[0].module, "./util");
     }
 
     #[test]

@@ -181,7 +181,7 @@ fn __guardrails_parse_verdict(text) {
  * @errors: ["channel_guardrail_register: ..."]
  * @example: prompt_injection_scanner({on_hit: "warn"})
  */
-fn prompt_injection_scanner(opts) -> string {
+pub fn prompt_injection_scanner(opts) -> string {
   let resolved = opts ?? {}
   if type_of(resolved) != "dict" {
     throw "prompt_injection_scanner: opts must be a dict or nil"
@@ -228,7 +228,7 @@ fn prompt_injection_scanner(opts) -> string {
  * @errors: ["llm_risk_classifier: ..."]
  * @example: llm_risk_classifier({model: "haiku", threshold: 0.8})
  */
-fn llm_risk_classifier(opts) -> string {
+pub fn llm_risk_classifier(opts) -> string {
   let cfg = __guardrails_validate_llm_config(opts ?? {})
   let scan_fn = { payload, context ->
     let payload_text = json_stringify(payload)
@@ -287,7 +287,7 @@ fn llm_risk_classifier(opts) -> string {
  * @errors: ["channel_guardrail_register: ..."]
  * @example: register_guardrail({scan_fn: my_scanner})
  */
-fn register_guardrail(opts) -> string {
+pub fn register_guardrail(opts) -> string {
   let resolved = opts ?? {}
   if type_of(resolved) != "dict" {
     throw "register_guardrail: opts must be a dict"

@@ -1,0 +1,9 @@
+// A module with no `pub` functions exports nothing. Harn has no
+// "public-by-default until the first `pub`" fallback, so selectively importing
+// a name from a zero-`pub` module is rejected just like importing a private
+// function from a module that has opted into explicit exports.
+import { helper } from "selective_import_from_zero_pub_rejected_lib"
+
+pipeline default() {
+  __io_println(helper())
+}

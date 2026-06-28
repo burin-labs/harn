@@ -266,13 +266,9 @@ impl Vm {
             };
             let names_to_reexport: Vec<String> = match &import.selected_names {
                 Some(names) => names.clone(),
-                None => {
-                    if loaded.public_names.is_empty() {
-                        loaded.functions.keys().cloned().collect()
-                    } else {
-                        loaded.public_names.iter().cloned().collect()
-                    }
-                }
+                // A wildcard `pub import` re-exports exactly the target's `pub`
+                // surface. A module with no `pub` functions exports nothing.
+                None => loaded.public_names.iter().cloned().collect(),
             };
             for name in names_to_reexport {
                 let Some(closure) = loaded.functions.get(&name) else {
@@ -314,31 +310,27 @@ impl Vm {
     ) -> Result<(), VmError> {
         let module_name = module_path.display().to_string();
         let export_names: Vec<String> = if let Some(names) = selected_names {
-            // Selective imports may only name symbols the module actually
-            // exports: its `pub` surface, or — when nothing is marked `pub` —
-            // all of its functions (the same set a wildcard import would see).
-            // Reaching a non-`pub` symbol by name used to succeed, which was
-            // inconsistent with wildcard imports and with every strict-
-            // visibility language (TypeScript, Rust, Go).
-            if !loaded.public_names.is_empty() {
-                for name in names {
-                    if !loaded.public_names.contains(name) {
-                        let hint = if loaded.functions.contains_key(name) {
-                            " — it is defined there but not `pub`; mark it `pub` to export it"
-                        } else {
-                            ""
-                        };
-                        return Err(VmError::Runtime(format!(
-                            "Import error: '{name}' is not exported by {module_name}{hint}"
-                        )));
-                    }
+            // Selective imports may only name symbols the module marks `pub`.
+            // A module with no `pub` functions exports nothing — matching every
+            // strict-visibility language (TypeScript, Rust, Go) and removing
+            // the old footgun where adding the first `pub` silently turned every
+            // other (previously importable) function private to callers.
+            for name in names {
+                if !loaded.public_names.contains(name) {
+                    let hint = if loaded.functions.contains_key(name) {
+                        " — it is defined there but not `pub`; mark it `pub` to export it"
+                    } else {
+                        ""
+                    };
+                    return Err(VmError::Runtime(format!(
+                        "Import error: '{name}' is not exported by {module_name}{hint}"
+                    )));
                 }
             }
             names.to_vec()
-        } else if !loaded.public_names.is_empty() {
-            loaded.public_names.iter().cloned().collect()
         } else {
-            loaded.functions.keys().cloned().collect()
+            // Wildcard import brings in exactly the module's `pub` surface.
+            loaded.public_names.iter().cloned().collect()
         };
 
         for name in export_names {
