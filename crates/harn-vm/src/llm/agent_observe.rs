@@ -378,6 +378,43 @@ fn message_is_native_tool_channel_failure(msg: &str) -> bool {
             || lower.contains("eof"))
 }
 
+/// A streaming transport body/read failure after the provider accepted the
+/// request. Retrying the identical streaming request can re-hit the same
+/// HTTP/SSE body path forever; when the route does not require streaming, the
+/// productive fallback is to retry once as a normal request/response call.
+fn is_stream_transport_failure(err: &VmError) -> bool {
+    let msg = match err {
+        VmError::Thrown(crate::value::VmValue::String(s)) => s.as_ref(),
+        VmError::CategorizedError { message, .. } => message.as_str(),
+        VmError::Runtime(s) => s.as_str(),
+        VmError::Thrown(crate::value::VmValue::Dict(d)) => {
+            return d
+                .get("message")
+                .map(|v| v.display())
+                .map(|m| message_is_stream_transport_failure(&m))
+                .unwrap_or(false);
+        }
+        _ => return false,
+    };
+    message_is_stream_transport_failure(msg)
+}
+
+fn message_is_stream_transport_failure(msg: &str) -> bool {
+    let lower = msg.to_lowercase();
+    lower.contains("stream error")
+        && (lower.contains("mid-stream")
+            || lower.contains("response body")
+            || lower.contains("body")
+            || lower.contains("error decoding stream")
+            || lower.contains("connection reset"))
+}
+
+fn can_degrade_stream_transport(opts: &super::api::LlmCallOptions) -> bool {
+    opts.stream
+        && !crate::llm::capabilities::lookup(&opts.provider, &opts.model).requires_streaming
+        && !crate::llm::provider::provider_uses_ollama_messages(&opts.provider, &opts.model)
+}
+
 /// A wire-level "success" that carries nothing at all: zero output tokens, no
 /// text, no thinking, no tool calls, and no server-side tool-search activity.
 /// Observed live (OpenRouter): a provider stall that ends with an empty 200
@@ -1298,6 +1335,14 @@ fn degrade_options_to_text_channel(
     degraded
 }
 
+fn degrade_options_to_non_streaming_transport(
+    opts: &super::api::LlmCallOptions,
+) -> super::api::LlmCallOptions {
+    let mut degraded = opts.clone();
+    degraded.stream = false;
+    degraded
+}
+
 // ---------------------------------------------------------------------------
 // observed_llm_call — shared single-LLM-call wrapper with full observability
 // ---------------------------------------------------------------------------
@@ -1331,6 +1376,7 @@ pub(crate) async fn observed_llm_call(
     let mut working: std::borrow::Cow<'_, super::api::LlmCallOptions> =
         std::borrow::Cow::Borrowed(opts);
     let mut degraded_to_text = false;
+    let mut degraded_stream_transport = false;
     let mut attempt = 0usize;
     loop {
         let opts: &super::api::LlmCallOptions = working.as_ref();
@@ -1667,9 +1713,14 @@ pub(crate) async fn observed_llm_call(
                     && opts.native_tools.is_some()
                     && (is_native_tool_channel_failure(&error)
                         || is_billed_noncommittal_throw(&error));
+                let stream_transport_degrade = !degraded_stream_transport
+                    && !native_tool_channel_degrade
+                    && is_stream_transport_failure(&error)
+                    && can_degrade_stream_transport(opts);
                 let can_retry = (retryable && attempt < retry_config.retries)
                     || empty_completion_retry
-                    || native_tool_channel_degrade;
+                    || native_tool_channel_degrade
+                    || stream_transport_degrade;
                 let status = if can_retry {
                     "retrying"
                 } else if retryable {
@@ -1758,6 +1809,8 @@ pub(crate) async fn observed_llm_call(
                 // reassigned; `opts` is not used again before the loop restarts.
                 let degraded_options =
                     native_tool_channel_degrade.then(|| degrade_options_to_text_channel(opts));
+                let stream_degraded_options = stream_transport_degrade
+                    .then(|| degrade_options_to_non_streaming_transport(opts));
                 attempt += 1;
                 let backoff = llm_retry_backoff_ms(&error, retry_config, attempt, &opts.provider);
                 crate::events::log_warn(
@@ -1797,6 +1850,36 @@ pub(crate) async fn observed_llm_call(
                     ]);
                     effective_tool_format = "json".to_string();
                     degraded_to_text = true;
+                    working = std::borrow::Cow::Owned(degraded);
+                }
+                if let Some(degraded) = stream_degraded_options {
+                    let detail = format!(
+                        "provider {} model {} streaming transport failed ({error}); degrading \
+                         stream=true -> false and retrying through request/response transport",
+                        degraded.provider, degraded.model
+                    );
+                    crate::events::log_warn("llm", &detail);
+                    append_llm_observability_entry(
+                        "stream_transport_degrade",
+                        serde_json::Map::from_iter([
+                            (
+                                "iteration".to_string(),
+                                serde_json::json!(iteration.unwrap_or(0)),
+                            ),
+                            ("attempt".to_string(), serde_json::json!(attempt)),
+                            ("provider".to_string(), serde_json::json!(degraded.provider)),
+                            ("model".to_string(), serde_json::json!(degraded.model)),
+                            ("from".to_string(), serde_json::json!(true)),
+                            ("to".to_string(), serde_json::json!(false)),
+                            ("error".to_string(), serde_json::json!(error.to_string())),
+                        ]),
+                    );
+                    annotate_current_span(&[
+                        ("stream_transport_degrade", serde_json::json!(true)),
+                        ("stream_transport_degrade_from", serde_json::json!(true)),
+                        ("stream_transport_degrade_to", serde_json::json!(false)),
+                    ]);
+                    degraded_stream_transport = true;
                     working = std::borrow::Cow::Owned(degraded);
                 }
                 if backoff > 0 {
@@ -2535,7 +2618,8 @@ mod empty_completion_retry_tests {
 
     use super::*;
     use crate::llm::fake::{
-        install_fake_llm_script, FakeLlmEvent, FakeLlmScript, FakeLlmTurn, FakeStopReason,
+        fake_llm_captured_calls, install_fake_llm_script, FakeLlmEvent, FakeLlmScript, FakeLlmTurn,
+        FakeStopReason,
     };
     use crate::llm::trace::{peek_agent_trace, reset_agent_trace_state, AgentTraceEvent};
 
@@ -3008,6 +3092,92 @@ mod empty_completion_retry_tests {
                 err.to_string().to_lowercase().contains("tool call parser"),
                 "the surfaced error is the second (post-degrade) failure"
             );
+        });
+    }
+
+    #[test]
+    fn stream_body_failure_degrades_to_non_streaming_and_recovers() {
+        // A provider that accepts the request and then fails while reading the
+        // streaming body should not keep retrying the identical SSE path. If the
+        // route does not require streaming, retry once through the ordinary
+        // request/response transport. The fake provider records the forwarded
+        // request, so this test verifies the second call actually carries
+        // `stream=false`.
+        current_thread_runtime().block_on(async {
+            let mut opts = fake_opts();
+            opts.stream = true;
+            let _guard = install_fake_llm_script(
+                FakeLlmScript::new()
+                    .push(FakeLlmTurn::Error(crate::llm::fake::FakeLlmError::new(
+                        crate::value::ErrorCategory::TransientNetwork,
+                        "llamacpp stream error (mid-stream read): error decoding response body",
+                    )))
+                    .push(FakeLlmTurn::stream(vec![
+                        FakeLlmEvent::Token("recovered".into()),
+                        FakeLlmEvent::Done(FakeStopReason::EndTurn),
+                    ])),
+            );
+            let result = observed_llm_call(
+                &opts,
+                None,
+                None,
+                &retry_config(0),
+                None,
+                false,
+                false,
+                None,
+            )
+            .await
+            .expect("stream body failure should degrade transport and recover");
+            assert_eq!(result.text, "recovered");
+
+            let calls = fake_llm_captured_calls();
+            assert_eq!(calls.len(), 2, "expected one degraded retry");
+            assert!(calls[0].stream, "first call should use streaming");
+            assert!(
+                !calls[1].stream,
+                "degraded retry should use non-streaming transport"
+            );
+        });
+    }
+
+    #[test]
+    fn stream_transport_degrade_fires_at_most_once() {
+        current_thread_runtime().block_on(async {
+            let mut opts = fake_opts();
+            opts.stream = true;
+            let _guard = install_fake_llm_script(
+                FakeLlmScript::new()
+                    .push(FakeLlmTurn::Error(crate::llm::fake::FakeLlmError::new(
+                        crate::value::ErrorCategory::TransientNetwork,
+                        "llamacpp stream error (mid-stream read): error decoding response body",
+                    )))
+                    .push(FakeLlmTurn::Error(crate::llm::fake::FakeLlmError::new(
+                        crate::value::ErrorCategory::TransientNetwork,
+                        "llamacpp stream error (mid-stream read): error decoding response body",
+                    ))),
+            );
+            let err = observed_llm_call(
+                &opts,
+                None,
+                None,
+                &retry_config(0),
+                None,
+                false,
+                false,
+                None,
+            )
+            .await
+            .expect_err("second transport failure after degrade must surface");
+            assert!(
+                err.to_string().contains("stream error"),
+                "surface the post-degrade provider error, got: {err}"
+            );
+
+            let calls = fake_llm_captured_calls();
+            assert_eq!(calls.len(), 2, "degrade should be one-shot");
+            assert!(calls[0].stream);
+            assert!(!calls[1].stream);
         });
     }
 
