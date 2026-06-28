@@ -8,6 +8,23 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.152
+
+### Added
+
+- `harn demo` scenarios can now ship sibling files — `.harn.prompt` templates,
+  imported modules, and fixtures — alongside `scenario.harn`. The runner
+  materializes the whole scenario directory into a tempdir and executes it
+  hermetically, so a demo is laid out like a real Harn project. The bundled
+  `review-captain` demo now renders its prompts from `review.harn.prompt` /
+  `clarification.harn.prompt` via `render_prompt`.
+
+### Fixed
+
+- Classify transient transport failures during escalated agent turns as explicit
+  provider aborts instead of budget circuit-breaker exhaustion.
+- Keep runtime feedback adjacent-safe for strict OpenAI-compatible Moonshot and MiniMax tool-call routes.
+
 ## v0.8.151
 
 ### Changed
