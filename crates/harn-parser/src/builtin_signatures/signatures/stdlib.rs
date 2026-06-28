@@ -454,6 +454,15 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     BuiltinSignature::variadic("snake_to_camel", &[Param::new("args", TY_ANY)], TY_STRING),
     BuiltinSignature::simple("env", &[Param::new("name", TY_STRING)], TY_STRING_OR_NIL),
     BuiltinSignature::simple("file_exists", &[Param::new("path", TY_STRING)], TY_BOOL),
+    BuiltinSignature::simple(
+        "flow_evaluate_invariants",
+        &[
+            Param::new("source", TY_STRING),
+            Param::new("slice", TY_DICT),
+            Param::optional("options", TY_DICT_OR_NIL),
+        ],
+        TY_DICT,
+    ),
     BuiltinSignature::simple("json_parse", &[Param::new("text", TY_STRING)], TY_ANY),
     BuiltinSignature::simple("log", &[Param::new("message", TY_ANY)], TY_NIL),
     BuiltinSignature::simple(

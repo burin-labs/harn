@@ -13,18 +13,31 @@
 //! `flow_invariant_confidence`).
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
+use std::time::Duration;
 
 use crate::flow::{
-    Approver, ByteSpan, EvidenceItem, InvariantBlockError, InvariantResult, Remediation, Verdict,
+    parse_invariants_source, Approver, ByteSpan, EvidenceItem, InvariantBlockError,
+    InvariantResult, PredicateKind, Remediation, Verdict,
 };
+use crate::llm::helpers::vm_value_to_json;
+use crate::stdlib::json_to_vm_value;
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
+use crate::vm::{AsyncBuiltinCtx, Vm, VmBuiltinArity, VmBuiltinMetadata};
 
 pub(crate) fn register_flow_builtins(vm: &mut Vm) {
     for def in MODULE_BUILTINS {
         vm.register_builtin_def(def);
     }
+    vm.register_async_builtin_with_metadata(
+        VmBuiltinMetadata::async_static("flow_evaluate_invariants")
+            .signature_static("flow_evaluate_invariants(source: string, slice: dict, options?: dict) -> dict")
+            .arity(VmBuiltinArity::Range { min: 2, max: 3 })
+            .category_static("flow")
+            .doc_static("Evaluate Flow `@invariant` predicate functions from Harn source or a module path against a slice and return typed execution records."),
+        |ctx, args| async move { flow_evaluate_invariants_impl(ctx, args).await },
+    );
 }
 
 #[harn_builtin(sig = "flow_invariant_allow() -> dict", category = "flow")]
@@ -208,6 +221,346 @@ fn flow_invariant_is_blocking_impl(
 fn flow_invariant_confidence_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let result = require_invariant(args, 0, "flow_invariant_confidence")?;
     Ok(VmValue::Float(result.confidence))
+}
+
+async fn flow_evaluate_invariants_impl(
+    ctx: AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let request = InvariantEvalRequest::parse(&args)?;
+    let parsed = parse_invariants_source(&request.source);
+    let mut diagnostics = Vec::new();
+    for diagnostic in &parsed.diagnostics {
+        diagnostics.push(serde_json::json!({
+            "severity": match diagnostic.severity {
+                crate::flow::DiscoveryDiagnosticSeverity::Warning => "warning",
+                crate::flow::DiscoveryDiagnosticSeverity::Error => "error",
+            },
+            "message": diagnostic.message,
+            "span": diagnostic.span.map(|span| serde_json::json!({
+                "start": span.start,
+                "end": span.end,
+            })),
+        }));
+    }
+
+    if parsed
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.severity == crate::flow::DiscoveryDiagnosticSeverity::Error)
+    {
+        return Ok(json_to_vm_value(&serde_json::json!({
+            "ok": false,
+            "status": "discovery_error",
+            "diagnostics": diagnostics,
+            "records": [],
+            "skipped": [],
+        })));
+    }
+
+    let mut vm = ctx.child_vm();
+    let exports = match &request.module_path {
+        Some(path) => vm.load_module_exports(path).await?,
+        None => {
+            vm.load_module_exports_from_source(
+                request
+                    .source_key
+                    .clone()
+                    .unwrap_or_else(|| PathBuf::from("<flow-evaluate-invariants>.harn")),
+                &request.source,
+            )
+            .await?
+        }
+    };
+
+    let slice_arg = json_to_vm_value(&request.slice);
+    let predicate_ctx_arg = json_to_vm_value(&request.predicate_ctx);
+    let repo_at_base_arg = request
+        .repo_at_base
+        .as_ref()
+        .map(json_to_vm_value)
+        .unwrap_or(VmValue::Nil);
+    let mut records = Vec::new();
+    let mut skipped = Vec::new();
+
+    for predicate in parsed.predicates {
+        let kind = predicate.kind;
+        if kind == PredicateKind::Semantic && !request.include_semantic {
+            skipped.push(serde_json::json!({
+                "name": predicate.name,
+                "hash": predicate.source_hash.as_str(),
+                "kind": "semantic",
+                "reason": "semantic predicates require an explicit include_semantic option",
+            }));
+            continue;
+        }
+        if !request
+            .predicate_names
+            .as_ref()
+            .map(|names| names.iter().any(|name| name == &predicate.name))
+            .unwrap_or(true)
+        {
+            skipped.push(serde_json::json!({
+                "name": predicate.name,
+                "hash": predicate.source_hash.as_str(),
+                "kind": predicate_kind_label(kind),
+                "reason": "not selected",
+            }));
+            continue;
+        }
+
+        let Some(closure) = exports.get(&predicate.name).cloned() else {
+            records.push(predicate_error_record(
+                &predicate.name,
+                predicate.source_hash.as_str(),
+                kind,
+                "predicate_missing_export",
+                format!("invariant `{}` was parsed but not exported", predicate.name),
+            ));
+            continue;
+        };
+
+        let first = tokio::time::timeout(
+            request.budget,
+            vm.call_closure_pub(
+                &closure,
+                &[
+                    slice_arg.clone(),
+                    predicate_ctx_arg.clone(),
+                    repo_at_base_arg.clone(),
+                ],
+            ),
+        )
+        .await;
+        let first = match first {
+            Ok(Ok(value)) => value,
+            Ok(Err(error)) => {
+                records.push(predicate_error_record(
+                    &predicate.name,
+                    predicate.source_hash.as_str(),
+                    kind,
+                    "predicate_runtime_error",
+                    error.to_string(),
+                ));
+                continue;
+            }
+            Err(_) => {
+                records.push(predicate_error_record(
+                    &predicate.name,
+                    predicate.source_hash.as_str(),
+                    kind,
+                    "budget_exceeded",
+                    format!(
+                        "{:?} predicate exceeded {}ms budget",
+                        kind,
+                        request.budget.as_millis()
+                    ),
+                ));
+                continue;
+            }
+        };
+        let first_json = vm_value_to_json(&first);
+        let result = adapt_invariant_result(&first).unwrap_or_else(|message| {
+            InvariantResult::block(InvariantBlockError::new(
+                "invalid_predicate_result",
+                message,
+            ))
+        });
+        records.push(serde_json::json!({
+            "name": predicate.name,
+            "hash": predicate.source_hash.as_str(),
+            "kind": predicate_kind_label(kind),
+            "result": serde_json::to_value(&result).unwrap_or(serde_json::Value::Null),
+            "raw_result": first_json,
+            "attempts": 1,
+            "replayable": kind == PredicateKind::Deterministic,
+        }));
+    }
+
+    let ok = records.iter().all(|record| {
+        record
+            .get("result")
+            .and_then(|result| result.get("verdict"))
+            .and_then(|verdict| verdict.get("kind"))
+            .and_then(serde_json::Value::as_str)
+            != Some("block")
+    });
+    Ok(json_to_vm_value(&serde_json::json!({
+        "ok": ok,
+        "status": if ok { "pass" } else { "fail" },
+        "diagnostics": diagnostics,
+        "records": records,
+        "skipped": skipped,
+    })))
+}
+
+struct InvariantEvalRequest {
+    source: String,
+    source_key: Option<PathBuf>,
+    module_path: Option<PathBuf>,
+    slice: serde_json::Value,
+    predicate_ctx: serde_json::Value,
+    repo_at_base: Option<serde_json::Value>,
+    predicate_names: Option<Vec<String>>,
+    include_semantic: bool,
+    budget: Duration,
+}
+
+impl InvariantEvalRequest {
+    fn parse(args: &[VmValue]) -> Result<Self, VmError> {
+        let options = args
+            .get(2)
+            .map(vm_value_to_json)
+            .unwrap_or_else(|| serde_json::json!({}));
+        let options = options.as_object();
+        let module_path = options
+            .and_then(|map| map.get("path").or_else(|| map.get("module_path")))
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from);
+        let source = if let Some(path) = &module_path {
+            std::fs::read_to_string(path).map_err(|error| {
+                VmError::Runtime(format!(
+                    "flow_evaluate_invariants: failed to read {}: {error}",
+                    path.display()
+                ))
+            })?
+        } else {
+            required_string(args, 0, "flow_evaluate_invariants", "source")?
+        };
+        let slice = args.get(1).map(vm_value_to_json).ok_or_else(|| {
+            VmError::Runtime(
+                "flow_evaluate_invariants: missing required slice argument".to_string(),
+            )
+        })?;
+        let predicate_ctx = options
+            .and_then(|map| map.get("ctx").or_else(|| map.get("predicate_ctx")))
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({}));
+        let repo_at_base = options
+            .and_then(|map| map.get("repo_at_base").cloned())
+            .filter(|value| !value.is_null());
+        let predicate_names = options
+            .and_then(|map| map.get("predicate_names").or_else(|| map.get("predicates")))
+            .and_then(serde_json::Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(serde_json::Value::as_str)
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .filter(|items| !items.is_empty());
+        let source_key = options
+            .and_then(|map| map.get("source_key"))
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from);
+        let include_semantic = options
+            .and_then(|map| map.get("include_semantic"))
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        let budget_ms = options
+            .and_then(|map| map.get("budget_ms"))
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(50)
+            .max(1);
+
+        Ok(Self {
+            source,
+            source_key,
+            module_path,
+            slice,
+            predicate_ctx,
+            repo_at_base,
+            predicate_names,
+            include_semantic,
+            budget: Duration::from_millis(budget_ms),
+        })
+    }
+}
+
+fn adapt_invariant_result(value: &VmValue) -> Result<InvariantResult, String> {
+    if let Ok(result) = InvariantResult::from_vm_value(value) {
+        return Ok(result);
+    }
+    let json = vm_value_to_json(value);
+    let Some(object) = json.as_object() else {
+        return Err(format!(
+            "predicate returned {}, expected dict",
+            value.type_name()
+        ));
+    };
+    let verdict = object
+        .get("verdict")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "predicate result missing string `verdict`".to_string())?;
+    let rule = object
+        .get("rule")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("invariant");
+    let remediation = object
+        .get("remediation")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    let finding_count = object
+        .get("findings")
+        .and_then(serde_json::Value::as_array)
+        .map(Vec::len)
+        .unwrap_or(0);
+    match verdict {
+        "Allow" | "allow" => Ok(InvariantResult::allow()),
+        "Warn" | "warn" => Ok(InvariantResult::warn(non_empty_or_rule(remediation, rule))),
+        "Block" | "block" => Ok(InvariantResult::block(InvariantBlockError::new(
+            rule,
+            if remediation.is_empty() {
+                format!("{rule} found {finding_count} finding(s)")
+            } else {
+                remediation.to_string()
+            },
+        ))),
+        other => Err(format!(
+            "predicate result has unsupported verdict `{other}`; expected Allow, Warn, or Block"
+        )),
+    }
+}
+
+fn non_empty_or_rule(value: &str, rule: &str) -> String {
+    if value.is_empty() {
+        rule.to_string()
+    } else {
+        value.to_string()
+    }
+}
+
+fn predicate_error_record(
+    name: &str,
+    hash: &str,
+    kind: PredicateKind,
+    code: &str,
+    message: impl Into<String>,
+) -> serde_json::Value {
+    let result = InvariantResult::block(InvariantBlockError::new(code, message));
+    serde_json::json!({
+        "name": name,
+        "hash": hash,
+        "kind": predicate_kind_label(kind),
+        "result": serde_json::to_value(&result).unwrap_or(serde_json::Value::Null),
+        "raw_result": nil_json(),
+        "attempts": 0,
+        "replayable": kind == PredicateKind::Deterministic,
+    })
+}
+
+fn predicate_kind_label(kind: PredicateKind) -> &'static str {
+    match kind {
+        PredicateKind::Deterministic => "deterministic",
+        PredicateKind::Semantic => "semantic",
+    }
+}
+
+fn nil_json() -> serde_json::Value {
+    serde_json::Value::Null
 }
 
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
@@ -631,5 +984,112 @@ mod tests {
         )
         .unwrap_err();
         assert!(format!("{error:?}").contains("invalid atom id"));
+    }
+
+    async fn eval_source(source: &str, slice: serde_json::Value) -> serde_json::Value {
+        let mut vm = vm_with_flow_builtins();
+        let value = vm
+            .call_named_builtin(
+                "flow_evaluate_invariants",
+                vec![
+                    VmValue::String(arcstr::ArcStr::from(source)),
+                    json_to_vm_value(&slice),
+                ],
+            )
+            .await
+            .unwrap();
+        vm_value_to_json(&value)
+    }
+
+    #[tokio::test]
+    async fn flow_evaluate_invariants_adapts_harn_canon_result_shape() {
+        let report = eval_source(
+            r#"
+@invariant
+@deterministic
+@archivist(evidence: ["fixture"], confidence: 1.0, source_date: "2026-06-28")
+pub fn no_bad(slice, _ctx, _repo_at_base) {
+  return {
+    verdict: "Block",
+    rule: "no_bad",
+    findings: [{path: slice.files[0].path}],
+    remediation: "Remove bad sentinel text.",
+  }
+}
+"#,
+            serde_json::json!({
+                "files": [{"path": "src/lib.rs", "text": "bad"}],
+            }),
+        )
+        .await;
+
+        assert_eq!(report["ok"], false);
+        assert_eq!(report["status"], "fail");
+        assert_eq!(report["records"][0]["name"], "no_bad");
+        assert_eq!(
+            report["records"][0]["result"]["verdict"]["error"]["code"],
+            "no_bad"
+        );
+        assert_eq!(
+            report["records"][0]["raw_result"]["findings"][0]["path"],
+            "src/lib.rs"
+        );
+    }
+
+    #[tokio::test]
+    async fn flow_evaluate_invariants_accepts_typed_flow_results() {
+        let report = eval_source(
+            r#"
+@invariant
+@deterministic
+@archivist(evidence: ["fixture"], confidence: 1.0, source_date: "2026-06-28")
+pub fn typed_block(_slice, _ctx, _repo_at_base) {
+  return flow_invariant_block("typed_rule", "Typed Flow result blocked.")
+}
+"#,
+            serde_json::json!({"files": []}),
+        )
+        .await;
+
+        assert_eq!(report["ok"], false);
+        assert_eq!(
+            report["records"][0]["result"]["verdict"]["error"]["code"],
+            "typed_rule"
+        );
+        assert_eq!(
+            report["records"][0]["raw_result"]["verdict"]["kind"],
+            "block"
+        );
+    }
+
+    #[tokio::test]
+    async fn flow_evaluate_invariants_skips_semantic_by_default() {
+        let report = eval_source(
+            r#"
+@invariant
+@deterministic
+@archivist(evidence: ["fixture"], confidence: 1.0, source_date: "2026-06-28")
+pub fn fallback(_slice, _ctx, _repo_at_base) {
+  return {verdict: "Allow", rule: "fallback", findings: [], remediation: ""}
+}
+
+@invariant
+@semantic(fallback: "fallback")
+@archivist(evidence: ["fixture"], confidence: 1.0, source_date: "2026-06-28")
+pub fn semantic_check(_slice, _ctx, _repo_at_base) {
+  return {verdict: "Block", rule: "semantic_check", findings: [], remediation: "should not run"}
+}
+"#,
+            serde_json::json!({"files": []}),
+        )
+        .await;
+
+        assert_eq!(report["ok"], true);
+        assert_eq!(report["records"][0]["name"], "fallback");
+        assert_eq!(report["skipped"][0]["name"], "semantic_check");
+        assert_eq!(
+            report["skipped"][0]["reason"],
+            "semantic predicates require an explicit include_semantic option"
+        );
     }
 }
