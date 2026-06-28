@@ -17,7 +17,7 @@ python3 verify_chain.py ../../fixtures/invalid/missing-approval.json
 python3 verify_chain.py ../../fixtures/invalid/actor-chain-parentage.json
 
 # Read from stdin (for piping out of a producer):
-harn trust-graph export | python3 verify_chain.py
+harn trust export | python3 verify_chain.py
 ```
 
 The script implements the canonicalization rule documented in

@@ -160,14 +160,14 @@ fn test_parses_trust_demote_flags() {
 }
 
 #[test]
-fn test_parses_trust_graph_verify_chain() {
-    let cli = Cli::parse_from(["harn", "trust-graph", "verify-chain", "--json"]);
+fn test_parses_trust_verify_chain() {
+    let cli = Cli::parse_from(["harn", "trust", "verify-chain", "--json"]);
 
-    let Command::TrustGraph(args) = cli.command.unwrap() else {
-        panic!("expected trust-graph command");
+    let Command::Trust(args) = cli.command.unwrap() else {
+        panic!("expected trust command");
     };
     let TrustCommand::VerifyChain(verify) = args.command else {
-        panic!("expected trust-graph verify-chain");
+        panic!("expected trust verify-chain");
     };
     assert!(verify.json);
 }

@@ -1,7 +1,7 @@
 use clap::{Args, ValueEnum};
 
 #[derive(Debug, Args)]
-pub(crate) struct CompletionsArgs {
+pub(crate) struct CompletionArgs {
     /// Shell to generate completions for.
     #[arg(value_enum)]
     pub shell: CompletionShell,

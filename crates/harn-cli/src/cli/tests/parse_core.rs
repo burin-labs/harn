@@ -240,11 +240,11 @@ fn test_parses_add_registry_override() {
 }
 
 #[test]
-fn test_parses_completions_args() {
-    let cli = Cli::parse_from(["harn", "completions", "zsh"]);
+fn test_parses_completion_args() {
+    let cli = Cli::parse_from(["harn", "completion", "zsh"]);
 
-    let Command::Completions(args) = cli.command.unwrap() else {
-        panic!("expected completions command");
+    let Command::Completion(args) = cli.command.unwrap() else {
+        panic!("expected completion command");
     };
     assert_eq!(args.shell, CompletionShell::Zsh);
 }
@@ -261,7 +261,7 @@ fn test_completion_scripts_include_subcommands() {
     );
     let script = String::from_utf8(output).expect("completion script should be utf-8");
 
-    assert!(script.contains("completions"));
+    assert!(script.contains("completion"));
     assert!(script.contains("tool-probe"));
 }
 

@@ -103,7 +103,7 @@ supervision UIs, and third-party verifiers.
    `records = []`.
 
 The Harn reference impl emits this envelope via
-`harn trust-graph export --output chain.json` (or stdout). External
+`harn trust export --output chain.json` (or stdout). External
 consumers can also project the portal `GET /api/trust-graph` response
 into the envelope shape.
 

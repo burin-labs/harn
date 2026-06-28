@@ -186,13 +186,13 @@ checks Harn runs internally.
 
 ## Producing a chain export
 
-Harn ships `harn trust-graph export` (alias of `harn trust export`),
+Harn ships `harn trust export`,
 which writes a verified `opentrustgraph-chain/v0` envelope to stdout or
 to a file:
 
 ```bash
-harn trust-graph export --output chain.json
-harn trust-graph export | python3 opentrustgraph-spec/examples/python/verify_chain.py
+harn trust export --output chain.json
+harn trust export | python3 opentrustgraph-spec/examples/python/verify_chain.py
 ```
 
 The export uses `verify_trust_chain` internally so `chain.verified` is

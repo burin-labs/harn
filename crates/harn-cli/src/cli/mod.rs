@@ -13,7 +13,7 @@
 mod bench;
 mod check;
 mod codemod;
-mod completions;
+mod completion;
 mod config_cmd;
 mod connect;
 mod connector;
@@ -77,7 +77,7 @@ mod workflow;
 pub(crate) use bench::{BenchArgs, BenchCommand, BenchReplayArgs};
 pub(crate) use check::{CheckArgs, CheckOutputFormat};
 pub(crate) use codemod::CodemodArgs;
-pub(crate) use completions::{CompletionShell, CompletionsArgs};
+pub(crate) use completion::{CompletionArgs, CompletionShell};
 pub(crate) use config_cmd::{ConfigArgs, ConfigCommand, ConfigInspectArgs, ConfigValidateArgs};
 pub(crate) use connect::{
     ConnectApiKeyArgs, ConnectArgs, ConnectCommand, ConnectGenericArgs, ConnectGithubArgs,
@@ -391,13 +391,10 @@ SCRIPTING
     Crystallize(CrystallizeArgs),
     /// Query and manage trust-graph autonomy state.
     Trust(TrustArgs),
-    /// Alias for `harn trust`. Query and verify trust-graph autonomy state.
-    #[command(name = "trust-graph")]
-    TrustGraph(TrustArgs),
     /// Verify a signed Harn provenance receipt.
     Verify(VerifyArgs),
     /// Print shell completion script to stdout.
-    Completions(CompletionsArgs),
+    Completion(CompletionArgs),
     /// Start the orchestrator process that hosts triggers and connector dispatch.
     Orchestrator(OrchestratorArgs),
     /// Run a pipeline against a Harn-native host module for fast iteration.

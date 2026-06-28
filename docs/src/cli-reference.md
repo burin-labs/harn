@@ -312,14 +312,14 @@ harn session schema --check
 safety. `import` and `validate` accept
 `--allow-unsafe-secret-markers` only for trusted local bundles.
 
-## harn completions
+## harn completion
 
 Print shell completion scripts.
 
 ```bash
-harn completions bash
-harn completions zsh
-harn completions fish
+harn completion bash
+harn completion zsh
+harn completion fish
 ```
 
 Generated completions include subcommands plus static candidates for known
@@ -2032,13 +2032,13 @@ Supported filters:
 `--summary` groups records by agent and reports success rate, mean recorded
 cost, tier distribution, and outcome distribution.
 
-## harn trust-graph verify-chain
+## harn trust verify-chain
 
 Verify the workspace trust graph's hash chain.
 
 ```bash
-harn trust-graph verify-chain
-harn trust-graph verify-chain --json
+harn trust verify-chain
+harn trust verify-chain --json
 ```
 
 The command reads `trust_graph` and falls back to legacy `trust.graph` logs,

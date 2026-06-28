@@ -988,7 +988,7 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                 process::exit(1);
             }
         }
-        Command::Trust(args) | Command::TrustGraph(args) => {
+        Command::Trust(args) => {
             if let Err(error) = commands::trust::handle(args).await {
                 eprintln!("error: {error}");
                 process::exit(1);
@@ -1000,7 +1000,7 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                 process::exit(1);
             }
         }
-        Command::Completions(args) => print_completions(args.shell),
+        Command::Completion(args) => print_completions(args.shell),
         Command::Orchestrator(args) => {
             if let Err(error) = commands::orchestrator::handle(args).await {
                 eprintln!("error: {error}");
