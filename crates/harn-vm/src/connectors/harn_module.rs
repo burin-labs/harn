@@ -946,6 +946,14 @@ pub(crate) fn active_harn_connector_ctx() -> Option<ConnectorCtx> {
     ACTIVE_HARN_CONNECTOR_CTX.with(|slot| slot.borrow().last().cloned())
 }
 
+/// Per-task ambient-scope swap of the active connector context. See
+/// `orchestration::ambient_scope`: `ActiveHarnConnectorCtxGuard` is held across
+/// the connector export's `.await`, so concurrent exports on one LocalSet would
+/// otherwise read a sibling's provider/binding/tenant identity.
+pub(crate) fn swap_active_harn_connector_ctx(next: Vec<ConnectorCtx>) -> Vec<ConnectorCtx> {
+    ACTIVE_HARN_CONNECTOR_CTX.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), next))
+}
+
 struct ConnectorExecutionPolicyGuard {
     active: bool,
 }

@@ -78,6 +78,30 @@ pub fn current_approval_policy() -> Option<ToolApprovalPolicy> {
     EXECUTION_APPROVAL_POLICY_STACK.with(|stack| stack.borrow().last().cloned())
 }
 
+// --- Per-task ambient-scope swap primitives -------------------------------
+//
+// The policy/approval/trusted stacks are thread-locals managed as LIFO scopes.
+// That invariant holds for a single synchronous call stack, but a guard held
+// across an `.await` is unsound: under `spawn_local` (and any work-stealing
+// multi-thread executor) a sibling task interleaves and reads/mutates the same
+// thread-local top-of-stack. `AmbientExecutionScope` (see `ambient_scope`)
+// gives each spawned worker its own scope by swapping these stacks in on
+// poll-enter and back out on poll-exit; these `swap_*` helpers are the O(1)
+// primitives it uses. They are intentionally `pub(crate)` — only the ambient
+// combinator should move whole stacks; ordinary code uses push/pop/current.
+
+pub(crate) fn swap_execution_policy_stack(next: Vec<CapabilityPolicy>) -> Vec<CapabilityPolicy> {
+    EXECUTION_POLICY_STACK.with(|stack| std::mem::replace(&mut *stack.borrow_mut(), next))
+}
+
+pub(crate) fn swap_approval_policy_stack(next: Vec<ToolApprovalPolicy>) -> Vec<ToolApprovalPolicy> {
+    EXECUTION_APPROVAL_POLICY_STACK.with(|stack| std::mem::replace(&mut *stack.borrow_mut(), next))
+}
+
+pub(crate) fn swap_trusted_bridge_depth(next: usize) -> usize {
+    TRUSTED_BRIDGE_CALL_DEPTH.with(|depth| std::mem::replace(&mut *depth.borrow_mut(), next))
+}
+
 pub fn current_tool_annotations(tool: &str) -> Option<ToolAnnotations> {
     current_execution_policy().and_then(|policy| policy.tool_annotations.get(tool).cloned())
 }

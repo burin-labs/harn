@@ -2960,6 +2960,7 @@ dependencies = [
  "opentelemetry-otlp",
  "opentelemetry_sdk",
  "parking_lot",
+ "pin-project-lite",
  "proptest",
  "rand 0.10.1",
  "rcgen",

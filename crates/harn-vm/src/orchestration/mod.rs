@@ -77,6 +77,9 @@ pub use replay_bench::*;
 mod policy;
 pub use policy::*;
 
+mod ambient_scope;
+pub(crate) use ambient_scope::{scope_ambient, AmbientExecutionScope};
+
 mod stage_options;
 pub use stage_options::*;
 
