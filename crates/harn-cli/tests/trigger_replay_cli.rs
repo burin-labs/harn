@@ -198,19 +198,26 @@ fn trigger_replay_diff_reports_structured_drift() {
     let temp = TempDir::new().unwrap();
     let workspace_root = temp.path().to_path_buf();
     write_manifest(&workspace_root);
+    let child_replay_expr = if cfg!(windows) {
+        r#"shell("echo|set /p=%HARN_REPLAY%").stdout"#
+    } else {
+        r#"shell("printf '%s' \"$HARN_REPLAY\"").stdout"#
+    };
     write_lib(
         &workspace_root,
-        r#"
+        &format!(
+            r#"
 import "std/triggers"
 
-pub fn on_issue(event: TriggerEvent) -> dict {
-  return {
+pub fn on_issue(event: TriggerEvent) -> dict {{
+  return {{
     event_id: event.id,
     replay_env: env("HARN_REPLAY"),
-    child_replay_env: shell("printf '%s' \"$HARN_REPLAY\"").stdout,
-  }
-}
+    child_replay_env: {child_replay_expr},
+  }}
+}}
 "#,
+        ),
     );
 
     let report = run_in_harn_runtime(move || async move {

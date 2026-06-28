@@ -270,17 +270,14 @@ fn process_tape_persist_and_load_round_trip() {
 
     let temp = TempDir::new().unwrap();
     let tape_path = temp.path().join("process.tape");
+    let (echo_cmd, echo_args) = echo_command_for_process_tape();
 
     // Record a real invocation via the sandbox command_output entry.
     {
         let tape = Arc::new(ProcessTape::recording());
         let _guard = install_process_tape(Arc::clone(&tape));
-        let _output = command_output(
-            "/bin/echo",
-            &["hello-tape".to_string()],
-            &ProcessCommandConfig::default(),
-        )
-        .expect("real subprocess");
+        let _output = command_output(echo_cmd, &echo_args, &ProcessCommandConfig::default())
+            .expect("real subprocess");
         tape.persist(&tape_path).expect("persist tape");
         let recorded = tape.recorded();
         assert_eq!(recorded.len(), 1);
@@ -293,14 +290,25 @@ fn process_tape_persist_and_load_round_trip() {
 
     let replay_tape = Arc::new(loaded);
     let _guard = install_process_tape(Arc::clone(&replay_tape));
-    let output = command_output(
-        "/bin/echo",
-        &["hello-tape".to_string()],
-        &ProcessCommandConfig::default(),
-    )
-    .expect("replay should succeed");
+    let output = command_output(echo_cmd, &echo_args, &ProcessCommandConfig::default())
+        .expect("replay should succeed");
     assert!(String::from_utf8_lossy(&output.stdout).contains("hello-tape"));
     assert!(replay_tape.fully_consumed());
+}
+
+fn echo_command_for_process_tape() -> (&'static str, Vec<String>) {
+    if cfg!(windows) {
+        (
+            "cmd",
+            vec![
+                "/C".to_string(),
+                "echo".to_string(),
+                "hello-tape".to_string(),
+            ],
+        )
+    } else {
+        ("/bin/echo", vec!["hello-tape".to_string()])
+    }
 }
 
 #[test]

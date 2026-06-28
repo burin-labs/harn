@@ -80,6 +80,13 @@ struct PackJsonOutput {
     warnings: Vec<JsonWarning>,
 }
 
+fn logical_bundle_path(path: &Path) -> String {
+    path.components()
+        .map(|component| component.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
 impl JsonOutput for PackJsonOutput {
     const SCHEMA_VERSION: u32 = PACK_SCHEMA_VERSION;
     type Data = PackJsonData;
@@ -351,6 +358,7 @@ pub fn build(args: &BuildArgs) -> Result<PackOutcome, PackError> {
             ),
         )
     })?;
+    let entrypoint_id = logical_bundle_path(&entrypoint_rel);
 
     let prior = match &args.upgrade {
         Some(path) => Some(load_workflow_bundle_any_version(path).map_err(|err| {
@@ -405,7 +413,7 @@ pub fn build(args: &BuildArgs) -> Result<PackOutcome, PackError> {
                 license: None,
             });
             sbom_relationships.push(SBOMRelationship {
-                from: format!("entrypoint:{}", entrypoint_rel.display()),
+                from: format!("entrypoint:{entrypoint_id}"),
                 to: format!("std/{stdlib_name}"),
                 relationship_type: "depends_on".to_string(),
             });
@@ -509,15 +517,16 @@ pub fn build(args: &BuildArgs) -> Result<PackOutcome, PackError> {
             contents.push(HarnpackEntry::new(module_archive_path, artifact_bytes));
         }
 
+        let module_id = logical_bundle_path(&rel);
         if module_path != &entrypoint {
             sbom_relationships.push(SBOMRelationship {
-                from: format!("entrypoint:{}", entrypoint_rel.display()),
-                to: format!("module:{}", rel.display()),
+                from: format!("entrypoint:{entrypoint_id}"),
+                to: format!("module:{module_id}"),
                 relationship_type: "depends_on".to_string(),
             });
         }
         sbom_packages.push(SBOMPackage {
-            name: format!("module:{}", rel.display()),
+            name: format!("module:{module_id}"),
             version: Some(harn_version.clone()),
             package_hash_blake3: Some(source_hash),
             license: None,
@@ -534,7 +543,7 @@ pub fn build(args: &BuildArgs) -> Result<PackOutcome, PackError> {
                 ),
             });
             skipped_assets.push(SkippedAsset {
-                path: asset.rel.clone(),
+                path: logical_bundle_path(&asset.rel),
                 reason: "secret_path".to_string(),
             });
             continue;
@@ -550,19 +559,20 @@ pub fn build(args: &BuildArgs) -> Result<PackOutcome, PackError> {
             )
         })?;
         let asset_hash = blake3_hash(&bytes);
+        let asset_id = logical_bundle_path(&asset.rel);
         contents.push(HarnpackEntry::new(
             PathBuf::from("sources").join(&asset.rel),
             bytes,
         ));
         sbom_packages.push(SBOMPackage {
-            name: format!("asset:{}", asset.rel.display()),
+            name: format!("asset:{asset_id}"),
             version: Some(harn_version.clone()),
             package_hash_blake3: Some(asset_hash),
             license: None,
         });
         sbom_relationships.push(SBOMRelationship {
-            from: format!("entrypoint:{}", entrypoint_rel.display()),
-            to: format!("asset:{}", asset.rel.display()),
+            from: format!("entrypoint:{entrypoint_id}"),
+            to: format!("asset:{asset_id}"),
             relationship_type: "depends_on".to_string(),
         });
     }
@@ -592,7 +602,7 @@ pub fn build(args: &BuildArgs) -> Result<PackOutcome, PackError> {
         license: None,
     });
     sbom_relationships.push(SBOMRelationship {
-        from: format!("entrypoint:{}", entrypoint_rel.display()),
+        from: format!("entrypoint:{entrypoint_id}"),
         to: "harn-provider-catalog".to_string(),
         relationship_type: "depends_on".to_string(),
     });
@@ -622,7 +632,7 @@ pub fn build(args: &BuildArgs) -> Result<PackOutcome, PackError> {
             license: None,
         });
         sbom_relationships.push(SBOMRelationship {
-            from: format!("entrypoint:{}", entrypoint_rel.display()),
+            from: format!("entrypoint:{entrypoint_id}"),
             to: format!("tool:{}", tool.name),
             relationship_type: "depends_on".to_string(),
         });
@@ -853,7 +863,7 @@ struct ImportedAsset {
 
 #[derive(Debug, Serialize, Deserialize)]
 struct SkippedAsset {
-    path: PathBuf,
+    path: String,
     reason: String,
 }
 
