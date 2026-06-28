@@ -1435,6 +1435,12 @@ impl AgentEventSink for AcpAgentEventSink {
             } => {
                 self.emit_agent_event_ext("loop_stuck", session_id, payload.clone());
             }
+            AgentEvent::ReservedTerminalVerify {
+                session_id,
+                payload,
+            } => {
+                self.emit_agent_event_ext("reserved_terminal_verify", session_id, payload.clone());
+            }
             AgentEvent::DaemonWatchdogTripped {
                 session_id,
                 attempts,

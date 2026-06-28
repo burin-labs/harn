@@ -371,6 +371,20 @@ pub enum AgentEvent {
         session_id: String,
         payload: serde_json::Value,
     },
+    /// Emitted by the reserved-budget terminal-verify guard
+    /// (`agent_emit_event("reserved_terminal_verify", payload)`). The guard
+    /// holds back a small iteration reserve the main loop cannot consume; when
+    /// the loop would otherwise terminate on a budget/stuck boundary with an
+    /// unverified source write, it spends the reserve on a final verify(+repair)
+    /// instead of ending blind on a red build. The payload's `phase` field tags
+    /// the step (`grant` / `verify_passed` / `verify_failed`) so replayers and
+    /// operators can see the guard fire and its outcome. Payload-preserving like
+    /// `LoopStuckSignal` so the guard can carry richer detail without inventing
+    /// another wire kind.
+    ReservedTerminalVerify {
+        session_id: String,
+        payload: serde_json::Value,
+    },
     /// Emitted when the daemon idle-wait loop trips its watchdog because
     /// every configured wake source returned `None` for N consecutive
     /// attempts. Exists so a broken daemon doesn't hang the session
@@ -832,6 +846,7 @@ impl AgentEvent {
             | Self::BudgetCircuitBreaker { session_id, .. }
             | Self::LoopStuck { session_id, .. }
             | Self::LoopStuckSignal { session_id, .. }
+            | Self::ReservedTerminalVerify { session_id, .. }
             | Self::DaemonWatchdogTripped { session_id, .. }
             | Self::SkillActivated { session_id, .. }
             | Self::SkillDeactivated { session_id, .. }

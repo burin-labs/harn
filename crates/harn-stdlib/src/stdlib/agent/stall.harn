@@ -72,6 +72,19 @@ const STALL_STUCK_SAME_DIAGNOSTIC_AFTER = 3
 // so the strategy-shift nudge fires before/with the extension cut, not after.
 const STALL_NO_NET_PROGRESS_EXTEND_AFTER = 3
 
+// Reserved terminal-verify guard (default OFF, gated by
+// `reserved_terminal_verify`): how many iterations are HELD BACK from the main
+// loop as a terminal allowance the normal iterations cannot consume. When the
+// loop would otherwise terminate on a budget/iteration boundary while the
+// transcript still has an UNVERIFIED source write (the model wrote source then
+// ran out of runway), the loop spends this reserve on a final verify(+repair)
+// pass instead of terminating blind on a red build. Bounded so the reserve can
+// never itself loop forever: the reserve grants at most this many extra
+// iterations, and the terminal-verify mandate forces a verification on each one
+// (a passing verify ends the run as `done`, a red build surfaces the actual
+// verifier failure rather than a silent `budget_exhausted`).
+const STALL_RESERVED_TERMINAL_VERIFY_ITERATIONS = 2
+
 // consecutive un-recovered trips before a hard stop is recommended. A trip
 // "recovers" when a turn produces a step that does not itself trip (the agent
 // broke the loop). Past this many back-to-back trips the detector flags
@@ -124,6 +137,8 @@ type AgentStallConfig = {
   post_edit_reverify: bool,
   no_net_progress_extend_guard: bool,
   no_net_progress_extend_after: int,
+  reserved_terminal_verify: bool,
+  reserved_terminal_verify_iterations: int,
 }
 
 type AgentStallWarning = {
@@ -281,6 +296,12 @@ fn __agent_stall_config(value) -> AgentStallConfig {
     post_edit_reverify: __agent_stall_bool(value?.post_edit_reverify, true, "post_edit_reverify"),
     no_net_progress_extend_guard: __agent_stall_bool(value?.no_net_progress_extend_guard, false, "no_net_progress_extend_guard"),
     no_net_progress_extend_after: __agent_stall_int(value?.no_net_progress_extend_after, STALL_NO_NET_PROGRESS_EXTEND_AFTER, 2),
+    reserved_terminal_verify: __agent_stall_bool(value?.reserved_terminal_verify, false, "reserved_terminal_verify"),
+    reserved_terminal_verify_iterations: __agent_stall_int(
+      value?.reserved_terminal_verify_iterations,
+      STALL_RESERVED_TERMINAL_VERIFY_ITERATIONS,
+      1,
+    ),
   }
 }
 
@@ -1274,8 +1295,9 @@ pub fn agent_stall_observe_tool_calls(
 
 /**
  * agent_stall_repair_config exposes the parsed evidence-aware repair knobs
- * (repair_aware / post_edit_reverify / stuck_same_diagnostic_after) so the
- * agent loop can decide whether to honor the post-edit re-verify mandate
+ * (repair_aware / post_edit_reverify / stuck_same_diagnostic_after /
+ * reserved_terminal_verify[_iterations]) so the agent loop can decide whether to
+ * honor the post-edit re-verify mandate and the reserved terminal-verify guard
  * without reaching into the private config parser.
  *
  * @effects: []
@@ -1290,6 +1312,8 @@ pub fn agent_stall_repair_config(raw_config) -> dict {
     stuck_same_diagnostic_after: config.stuck_same_diagnostic_after,
     no_net_progress_extend_guard: config.no_net_progress_extend_guard,
     no_net_progress_extend_after: config.no_net_progress_extend_after,
+    reserved_terminal_verify: config.reserved_terminal_verify,
+    reserved_terminal_verify_iterations: config.reserved_terminal_verify_iterations,
   }
 }
 

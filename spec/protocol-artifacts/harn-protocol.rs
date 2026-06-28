@@ -334,6 +334,7 @@ pub const HARN_AGENT_EVENT_KIND_MCP_AUTH_REQUIRED: &str = "mcp_auth_required";
 pub const HARN_AGENT_EVENT_KIND_MCP_CATALOG_CHANGED: &str = "mcp_catalog_changed";
 pub const HARN_AGENT_EVENT_KIND_MCP_NOTIFICATION: &str = "mcp_notification";
 pub const HARN_AGENT_EVENT_KIND_PROGRESS_REPORTED: &str = "progress_reported";
+pub const HARN_AGENT_EVENT_KIND_RESERVED_TERMINAL_VERIFY: &str = "reserved_terminal_verify";
 pub const HARN_AGENT_EVENT_KIND_SCOPE_CLASSIFIER_VERDICT: &str = "scope_classifier_verdict";
 pub const HARN_AGENT_EVENT_KIND_SESSION_CLOSED: &str = "session_closed";
 pub const HARN_AGENT_EVENT_KIND_STRUCTURAL_VALIDATOR_DECISION: &str = "structural_validator_decision";
@@ -364,6 +365,7 @@ pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
     "mcp_catalog_changed",
     "mcp_notification",
     "progress_reported",
+    "reserved_terminal_verify",
     "scope_classifier_verdict",
     "session_closed",
     "structural_validator_decision",
