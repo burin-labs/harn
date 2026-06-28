@@ -1760,8 +1760,12 @@ mod tests {
                 "sandboxed child must receive a non-empty TMPDIR"
             );
             let tmpdir_path = std::path::PathBuf::from(&tmpdir);
+            let canonical_tmpdir = std::fs::canonicalize(&tmpdir_path)
+                .expect("workspace-local TMPDIR should canonicalize");
+            let canonical_workspace =
+                std::fs::canonicalize(workspace.path()).expect("workspace should canonicalize");
             assert!(
-                tmpdir_path.starts_with(workspace.path()),
+                canonical_tmpdir.starts_with(&canonical_workspace),
                 "child TMPDIR {tmpdir:?} must live inside the workspace {:?}",
                 workspace.path()
             );

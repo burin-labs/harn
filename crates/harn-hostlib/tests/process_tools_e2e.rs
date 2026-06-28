@@ -196,6 +196,8 @@ fn real_run_command_points_child_tmpdir_inside_the_workspace() {
     }
 
     let child_env = require_str(&resp, "stdout");
+    let expected =
+        std::fs::canonicalize(&expected).expect("workspace-local temp dir should canonicalize");
     let expected_line = format!("TMPDIR={}", expected.display());
     assert!(
         child_env.lines().any(|line| line == expected_line),
