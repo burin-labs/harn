@@ -97,3 +97,29 @@ function renderHighlightNode(node: HighlightNode, index: number): ReactNode {
 export function highlightHarnSource(source: string) {
   return harnLowlight.highlight("harn", source).children.map(renderHighlightNode)
 }
+
+// `.harn.prompt` files are plain text with `{{ … }}` interpolation. Rather than
+// pretend they are Harn code, we highlight only the template markers so the
+// shape of `render_prompt` substitution reads at a glance. No lowlight grammar
+// needed: split on the marker pattern and wrap the matches.
+const TEMPLATE_MARKER = /\{\{[\s\S]*?\}\}/g
+
+export function highlightPromptTemplate(source: string): ReactNode[] {
+  const nodes: ReactNode[] = []
+  let lastIndex = 0
+  let key = 0
+  for (const match of source.matchAll(TEMPLATE_MARKER)) {
+    const start = match.index ?? 0
+    if (start > lastIndex) nodes.push(source.slice(lastIndex, start))
+    // Bright teal so the substitution slots stand out against the dark panel.
+    // (The hljs theme's own token colors are too low-contrast here.)
+    nodes.push(
+      <span key={key++} className="font-semibold text-[#5eead4]">
+        {match[0]}
+      </span>,
+    )
+    lastIndex = start + match[0].length
+  }
+  if (lastIndex < source.length) nodes.push(source.slice(lastIndex))
+  return nodes
+}
