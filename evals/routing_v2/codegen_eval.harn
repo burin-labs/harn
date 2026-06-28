@@ -10,7 +10,7 @@
  *           typecheck)   |    cell C   |       cell D
  *
  * The skill body lives in `harn_language_skill.md` (captured from
- * `harn skills get harn-language --full` so the cell-B/D system prompt
+ * `harn skill get harn-language --full` so the cell-B/D system prompt
  * matches what a real coding agent would inject).
  *
  * Cost is computed from per-call tokens against a hard-coded OpenRouter

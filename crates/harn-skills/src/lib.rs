@@ -56,7 +56,7 @@ pub struct DiskSkill {
     pub path: PathBuf,
 }
 
-/// The active canonical corpus used by `harn skills list/get`.
+/// The active canonical corpus used by `harn skill list/get`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SkillCorpus {
     Embedded(&'static [EmbeddedSkill]),

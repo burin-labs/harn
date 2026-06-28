@@ -1,4 +1,4 @@
-//! End-to-end coverage for `harn skills list / get / dump` against
+//! End-to-end coverage for `harn skill list / get / dump` against
 //! the canonical skill corpus shipped with the binary or loaded from disk.
 //!
 //! These spawn the real `harn` binary so we exercise the clap parser
@@ -34,9 +34,9 @@ fn parse_json_stdout(out: &Output) -> Value {
 #[test]
 fn list_json_matches_embedded_corpus_count() {
     let output = harn_command_without_skills_dir()
-        .args(["skills", "list", "--json"])
+        .args(["skill", "list", "--json"])
         .output()
-        .expect("spawn harn skills list --json");
+        .expect("spawn harn skill list --json");
     assert!(output.status.success(), "exit={:?}", output.status.code());
 
     let parsed = parse_json_stdout(&output);
@@ -79,9 +79,9 @@ fn list_json_matches_embedded_corpus_count() {
 #[test]
 fn list_human_output_mentions_embedded_skills() {
     let output = harn_command_without_skills_dir()
-        .args(["skills", "list"])
+        .args(["skill", "list"])
         .output()
-        .expect("spawn harn skills list");
+        .expect("spawn harn skill list");
     assert!(output.status.success(), "exit={:?}", output.status.code());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
@@ -101,9 +101,9 @@ fn list_json_uses_harn_skills_dir_when_it_contains_skills() {
 
     let output = harn_command_without_skills_dir()
         .env("HARN_SKILLS_DIR", temp.path())
-        .args(["skills", "list", "--json"])
+        .args(["skill", "list", "--json"])
         .output()
-        .expect("spawn harn skills list --json");
+        .expect("spawn harn skill list --json");
     assert!(output.status.success(), "exit={:?}", output.status.code());
 
     let parsed = parse_json_stdout(&output);
@@ -119,9 +119,9 @@ fn list_json_falls_back_to_embedded_when_harn_skills_dir_is_empty() {
 
     let output = harn_command_without_skills_dir()
         .env("HARN_SKILLS_DIR", temp.path())
-        .args(["skills", "list", "--json"])
+        .args(["skill", "list", "--json"])
         .output()
-        .expect("spawn harn skills list --json");
+        .expect("spawn harn skill list --json");
     assert!(output.status.success(), "exit={:?}", output.status.code());
 
     let parsed = parse_json_stdout(&output);
@@ -136,9 +136,9 @@ fn list_json_falls_back_to_embedded_when_harn_skills_dir_is_missing() {
 
     let output = harn_command_without_skills_dir()
         .env("HARN_SKILLS_DIR", temp.path().join("missing"))
-        .args(["skills", "list", "--json"])
+        .args(["skill", "list", "--json"])
         .output()
-        .expect("spawn harn skills list --json");
+        .expect("spawn harn skill list --json");
     assert!(output.status.success(), "exit={:?}", output.status.code());
 
     let parsed = parse_json_stdout(&output);
@@ -150,9 +150,9 @@ fn list_json_falls_back_to_embedded_when_harn_skills_dir_is_missing() {
 #[test]
 fn get_returns_frontmatter_without_body_by_default() {
     let output = harn_command_without_skills_dir()
-        .args(["skills", "get", "harn-language", "--json"])
+        .args(["skill", "get", "harn-language", "--json"])
         .output()
-        .expect("spawn harn skills get --json");
+        .expect("spawn harn skill get --json");
     assert!(output.status.success(), "exit={:?}", output.status.code());
 
     let parsed = parse_json_stdout(&output);
@@ -172,9 +172,9 @@ fn get_returns_frontmatter_without_body_by_default() {
 #[test]
 fn get_full_includes_body() {
     let output = harn_command_without_skills_dir()
-        .args(["skills", "get", "harn-language", "--full", "--json"])
+        .args(["skill", "get", "harn-language", "--full", "--json"])
         .output()
-        .expect("spawn harn skills get --full --json");
+        .expect("spawn harn skill get --full --json");
     assert!(output.status.success(), "exit={:?}", output.status.code());
 
     let parsed = parse_json_stdout(&output);
@@ -199,9 +199,9 @@ fn get_full_uses_harn_skills_dir_body() {
 
     let output = harn_command_without_skills_dir()
         .env("HARN_SKILLS_DIR", temp.path())
-        .args(["skills", "get", "custom-harn", "--full", "--json"])
+        .args(["skill", "get", "custom-harn", "--full", "--json"])
         .output()
-        .expect("spawn harn skills get --full --json");
+        .expect("spawn harn skill get --full --json");
     assert!(output.status.success(), "exit={:?}", output.status.code());
 
     let parsed = parse_json_stdout(&output);
@@ -218,9 +218,9 @@ fn get_full_uses_harn_skills_dir_body() {
 #[test]
 fn get_unknown_skill_emits_error_envelope_and_nonzero_exit() {
     let output = harn_command_without_skills_dir()
-        .args(["skills", "get", "not-a-real-skill", "--json"])
+        .args(["skill", "get", "not-a-real-skill", "--json"])
         .output()
-        .expect("spawn harn skills get not-a-real-skill --json");
+        .expect("spawn harn skill get not-a-real-skill --json");
     assert!(!output.status.success(), "expected nonzero exit");
 
     let parsed = parse_json_stdout(&output);
@@ -237,9 +237,9 @@ fn get_unknown_skill_emits_error_envelope_and_nonzero_exit() {
 #[test]
 fn get_human_prints_frontmatter() {
     let output = harn_command_without_skills_dir()
-        .args(["skills", "get", "harn-language"])
+        .args(["skill", "get", "harn-language"])
         .output()
-        .expect("spawn harn skills get harn-language");
+        .expect("spawn harn skill get harn-language");
     assert!(output.status.success(), "exit={:?}", output.status.code());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
@@ -259,9 +259,9 @@ fn get_human_prints_frontmatter() {
 #[test]
 fn dump_requires_all_flag() {
     let output = harn_command_without_skills_dir()
-        .args(["skills", "dump"])
+        .args(["skill", "dump"])
         .output()
-        .expect("spawn harn skills dump (no --all)");
+        .expect("spawn harn skill dump (no --all)");
     assert!(!output.status.success(), "dump without --all should fail");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
@@ -276,10 +276,10 @@ fn dump_all_writes_every_skill_to_out_dir() {
     let out = temp.path().join("dump-target");
 
     let output = harn_command_without_skills_dir()
-        .args(["skills", "dump", "--all", "--out"])
+        .args(["skill", "dump", "--all", "--out"])
         .arg(&out)
         .output()
-        .expect("spawn harn skills dump --all --out <dir>");
+        .expect("spawn harn skill dump --all --out <dir>");
     assert!(output.status.success(), "exit={:?}", output.status.code());
 
     for skill in list_embedded_skills() {
@@ -312,10 +312,10 @@ fn dump_all_uses_harn_skills_dir_when_it_contains_skills() {
 
     let output = harn_command_without_skills_dir()
         .env("HARN_SKILLS_DIR", temp.path().join("disk-skills"))
-        .args(["skills", "dump", "--all", "--out"])
+        .args(["skill", "dump", "--all", "--out"])
         .arg(&out)
         .output()
-        .expect("spawn harn skills dump --all --out <dir>");
+        .expect("spawn harn skill dump --all --out <dir>");
     assert!(output.status.success(), "exit={:?}", output.status.code());
 
     let dumped = out.join("custom-harn").join("SKILL.md");
@@ -335,7 +335,7 @@ fn dump_refuses_to_overwrite_without_force() {
 
     // First dump succeeds.
     let first = harn_command_without_skills_dir()
-        .args(["skills", "dump", "--all", "--out"])
+        .args(["skill", "dump", "--all", "--out"])
         .arg(&out)
         .output()
         .expect("spawn first dump");
@@ -343,7 +343,7 @@ fn dump_refuses_to_overwrite_without_force() {
 
     // Second dump without --force should refuse.
     let second = harn_command_without_skills_dir()
-        .args(["skills", "dump", "--all", "--out"])
+        .args(["skill", "dump", "--all", "--out"])
         .arg(&out)
         .output()
         .expect("spawn second dump");
@@ -354,7 +354,7 @@ fn dump_refuses_to_overwrite_without_force() {
 
     // Third dump with --force should succeed.
     let third = harn_command_without_skills_dir()
-        .args(["skills", "dump", "--all", "--force", "--out"])
+        .args(["skill", "dump", "--all", "--force", "--out"])
         .arg(&out)
         .output()
         .expect("spawn forced dump");

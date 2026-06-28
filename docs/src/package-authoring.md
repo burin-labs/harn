@@ -94,7 +94,7 @@ pagination, rate-limit metadata, and package tests stay centralized.
 harn skill new review-helper
 ```
 
-`harn skill new` is the singular alias for `harn skills new`. Package authors
+`harn skill new` is the singular alias for `harn skill new`. Package authors
 can publish skills by adding `[[package.skills]]` entries that point at
 package-root-relative skill directories containing `SKILL.md`.
 

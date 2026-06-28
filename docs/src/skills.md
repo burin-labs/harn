@@ -322,23 +322,23 @@ See [Bridge protocol](./bridge-protocol.md) for wire-format details.
 
 ## Managing skills
 
-The `harn skills` CLI splits into two complementary surfaces:
+The `harn skill` noun covers two complementary surfaces:
 
 - **Canonical corpus** — the Harn skills normally shipped *inside* the
   `harn` binary (`harn-language`, `harn-orchestration`, `harn-testing`,
-  …). Access these with `harn skills list`, `harn skills get <name>`,
-  and `harn skills dump --all`. Set `HARN_SKILLS_DIR` to a directory of
+  …). Access these with `harn skill list`, `harn skill get <name>`,
+  and `harn skill dump --all`. Set `HARN_SKILLS_DIR` to a directory of
   recursive `SKILL.md` files to make `list`, `get`, and `dump` read
   from disk while iterating locally; an unset, missing, or empty
   directory falls back to the embedded corpus.
 - **Layered FS discovery** — user-authored skills picked up from
   `--skill-dir`, `HARN_SKILLS_PATH`, project, manifest, user, packages,
-  system, and host layers. Access these with `harn skills resolved`,
-  `harn skills inspect <name>`, and `harn skills match`. What you see
+  system, and host layers. Access these with `harn skill resolved`,
+  `harn skill inspect <name>`, and `harn skill match`. What you see
   there is byte-for-byte the registry that `harn run` / `harn test` /
   `harn check` hand to the VM.
 
-### `harn skills list`
+### `harn skill list`
 
 Lists the canonical skill corpus for this build of `harn`. By default
 that is the embedded corpus; when `HARN_SKILLS_DIR` points at one or
@@ -347,7 +347,7 @@ Pass `--json` for a versioned `JsonEnvelope` payload that agents and
 CI can pipe through `jq`.
 
 ```text
-$ harn skills list
+$ harn skill list
 Embedded canonical skills (7):
   harn-agent          Agent runtime, supervisor wiring, and tool callers.
   harn-diagnostics    Diagnostic codes, severity rules, suppression hints.
@@ -357,8 +357,8 @@ Embedded canonical skills (7):
   harn-testing        Conformance suite, deterministic test patterns.
   harn-tracing        Transcripts, eval replay, observability surfaces.
 
-Run `harn skills get <name>` for one entry's frontmatter.
-Run `harn skills get <name> --full` to include the body.
+Run `harn skill get <name>` for one entry's frontmatter.
+Run `harn skill get <name> --full` to include the body.
 ```
 
 The `--json` output uses the standard envelope (`schemaVersion`, `ok`,
@@ -366,25 +366,25 @@ The `--json` output uses the standard envelope (`schemaVersion`, `ok`,
 same frontmatter fields shown above:
 
 ```bash
-$ harn skills list --json | jq '.data.skills | length'
+$ harn skill list --json | jq '.data.skills | length'
 7
 ```
 
-### `harn skills get <name>`
+### `harn skill get <name>`
 
 Prints frontmatter for a single canonical skill. Pass `--full` to
 include the SKILL.md body; pass `--json` to wrap the output in a
 `JsonEnvelope` for machine consumption. `HARN_SKILLS_DIR` follows the
-same disk-override/fallback behavior as `harn skills list`.
+same disk-override/fallback behavior as `harn skill list`.
 
 ```text
-$ harn skills get harn-language
+$ harn skill get harn-language
 name:        harn-language
 short:       Harn syntax, modules, types, diagnostics, and script structure.
 description: Use for Harn language syntax, typechecking, modules, imports, and idiomatic script authoring.
 when_to_use: Use when writing, reviewing, or explaining Harn source code and language-level behavior.
 
-$ harn skills get harn-language --full --json | jq '.data | keys'
+$ harn skill get harn-language --full --json | jq '.data | keys'
 [
   "body",
   "description",
@@ -397,7 +397,7 @@ $ harn skills get harn-language --full --json | jq '.data | keys'
 Unknown names return `ok: false` with a `skill_not_found` error code
 and the list of available skills in `error.details.available`.
 
-### `harn skills dump --all [--out <dir>]`
+### `harn skill dump --all [--out <dir>]`
 
 Writes every active canonical skill to disk as a `<dir>/<name>/SKILL.md`
 tree so agents and CI can review the corpus offline. By default that
@@ -407,21 +407,21 @@ Defaults the output directory to `./skills`. Refuses to overwrite
 existing files unless `--force` is passed.
 
 ```text
-$ harn skills dump --all --out /tmp/skills
+$ harn skill dump --all --out /tmp/skills
 Wrote 7 skill(s) to /tmp/skills
   /tmp/skills/harn-agent/SKILL.md
   /tmp/skills/harn-diagnostics/SKILL.md
   …
 ```
 
-### `harn skills resolved`
+### `harn skill resolved`
 
 Prints every FS-resolved skill with the layer it came from. Pass
 `--all` to include shadowed entries; pass `--json` for newline-delimited
 JSON records:
 
 ```text
-$ harn skills resolved
+$ harn skill resolved
 Resolved skills (3):
   deploy         [cli]       Deploy to production when release work is requested
   review         [project]   Review a pull request when asked for code review help
@@ -431,14 +431,14 @@ Shadowed skills (1):
   deploy   winner=[cli] hidden=[user] origin=/home/me/.harn/skills/deploy
 ```
 
-### `harn skills inspect <name>`
+### `harn skill inspect <name>`
 
 Dumps the resolved SKILL.md — frontmatter, bundled files under the
 skill directory, and the full body — for a specific skill. Accepts
 bare `<name>` or fully-qualified `<namespace>/<name>`:
 
 ```text
-$ harn skills inspect deploy
+$ harn skill inspect deploy
 id:          deploy
 name:        deploy
 layer:       cli
@@ -454,14 +454,14 @@ Bundled files:
 Run the deploy. Confirm replicas and then flip traffic.
 ```
 
-### `harn skills match "<query>"`
+### `harn skill match "<query>"`
 
 Runs the built-in metadata matcher (same scorer the agent loop uses)
 against a prompt and prints the ranked candidates with their scores.
 Supports `--working-file` to simulate path-glob matches:
 
 ```text
-$ harn skills match "deploy the staging service" --top-n 3
+$ harn skill match "deploy the staging service" --top-n 3
 Match results for: deploy the staging service
    1. deploy              score=2.400  [cli]       prompt mentions 'deploy'; 1 keyword hit(s)
    2. review              score=0.400  [project]   1 keyword hit(s)
@@ -470,14 +470,14 @@ Match results for: deploy the staging service
 Confirms that a SKILL.md's `short:` and `when_to_use:` frontmatter
 attract the intended prompts.
 
-### `harn skills install <spec>`
+### `harn skill install <spec>`
 
 Materializes a git ref or local path into `.harn/skills-cache/` so
 the filesystem package walker picks it up on the next run. The
 `.harn/skills-cache/` layout mirrors `.harn/packages/`:
 
 ```text
-$ harn skills install acme/harn-skills --tag v1.2.0
+$ harn skill install acme/harn-skills --tag v1.2.0
 installing acme/harn-skills to .harn/skills-cache/harn-skills
 installed — layer=package, path=.harn/skills-cache/harn-skills
 ```
@@ -493,17 +493,17 @@ it shows up in the resolver as `<ns>/<skill>`. Pass `--tag <ref>` to
 pin a git branch or tag. Every install rewrites
 `.harn/skills-cache/skills.lock` with the resolved source + commit.
 
-### `harn skills new <name>`
+### `harn skill new <name>`
 
 Scaffolds a new SKILL.md and `files/` directory under `.harn/skills/`:
 
 ```text
-$ harn skills new deploy --description "Deploy to production"
+$ harn skill new deploy --description "Deploy to production"
 Scaffolded skill 'deploy' at .harn/skills/deploy
   SKILL.md
   files/README.md
 
-Edit the SKILL.md frontmatter and body, then run `harn skills resolved`
+Edit the SKILL.md frontmatter and body, then run `harn skill resolved`
 to verify the compact card is picked up.
 ```
 

@@ -14,8 +14,8 @@ pub(crate) use super::{
     PackageArtifactsCommand, PackageCacheCommand, PackageCommand, PackageScaffoldCommand,
     PersonaCommand, ProjectTemplate, ProviderCapabilitiesCommand, ProviderCatalogCommand,
     ProviderCommand, ProviderToolProbeModeArg, PublishArgs, RuleCommand, RunsCommand,
-    SessionCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand, SkillsCommand, ToolCommand,
-    TraceCommand, TriggerCommand, TrustCommand, TrustOutcomeArg, TrustTierArg,
+    SessionCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand, ToolCommand, TraceCommand,
+    TriggerCommand, TrustCommand, TrustOutcomeArg, TrustTierArg,
 };
 
 mod parse_cmds;

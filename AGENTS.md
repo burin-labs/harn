@@ -7,8 +7,8 @@ existing Harn runtime and stdlib over new host glue.
 
 ## Harn scripts
 
-- Before writing or editing `.harn`, run `harn skills list --json`.
-- Fetch the narrowest guide with `harn skills get <name> --full`.
+- Before writing or editing `.harn`, run `harn skill list --json`.
+- Fetch the narrowest guide with `harn skill get <name> --full`.
 - Use `harn-language` for syntax, modules, types, and `llm_call`.
 - Use `harn-orchestration` for triggers, workers, personas, and agent loops.
 - Fallback docs: `docs/llm/harn-quickref.md` and

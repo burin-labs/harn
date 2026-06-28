@@ -1046,11 +1046,28 @@ The generated package includes `[[package.tools]]` metadata, a stable
 
 ## harn skill
 
-Scaffold or inspect one custom skill. `harn skill new` is the singular alias
-for `harn skills new`.
+Every skill operation lives under one `harn skill` noun: corpus discovery and
+inspection, scaffolding, and provenance (signing, endorsement, verification,
+trust).
 
 ```bash
-harn skill new review-helper
+# Corpus & discovery
+harn skill list                      # canonical embedded corpus
+harn skill get harn-language --full  # one skill's frontmatter (+ body)
+harn skill dump --all                # write the corpus to disk
+harn skill resolved                  # FS-resolved skills (project/user/host layers)
+harn skill inspect deploy            # one resolved skill's files + metadata
+harn skill match "deploy the app"    # rank skills against a prompt
+harn skill install owner/repo        # cache a git/local skill for the resolver
+harn skill new review-helper         # scaffold a new SKILL.md bundle
+
+# Provenance
+harn skill key generate --out signer.pem
+harn skill sign SKILL.md --key signer.pem
+harn skill endorse SKILL.md --key signer.pem
+harn skill verify SKILL.md
+harn skill who-signed SKILL.md
+harn skill trust add --from https://example.com/signer.pem
 ```
 
 ## harn demo
