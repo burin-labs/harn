@@ -68,10 +68,32 @@ pub(super) fn generate_rust() -> String {
         ACP_DISPATCHED_METHODS,
     ));
     out.push_str(&rust_const_group(
+        "ACP_TRANSPORT_CONTROL_METHOD",
+        "ACP_TRANSPORT_CONTROL_METHODS",
+        "ACP control frames consumed by the transport before regular adapter \
+         dispatch.",
+        ACP_TRANSPORT_CONTROL_METHODS,
+    ));
+    let handled_methods =
+        concat_unique_wire_values(&[ACP_TRANSPORT_CONTROL_METHODS, ACP_DISPATCHED_METHODS]);
+    out.push_str(&rust_const_group_owned(
+        "ACP_HANDLED_METHOD",
+        "ACP_HANDLED_METHODS",
+        "Every inbound ACP method Harn handles, whether by transport preemption \
+         or regular adapter dispatch.",
+        &handled_methods,
+    ));
+    out.push_str(&rust_const_group(
         "ACP_CLIENT_METHOD",
         "ACP_CLIENT_METHODS",
         "ACP client methods the agent calls back into the host for.",
         ACP_CLIENT_METHODS,
+    ));
+    out.push_str(&rust_const_group(
+        "HARN_SESSION_TIMELINE_METHOD",
+        "HARN_SESSION_TIMELINE_METHODS",
+        "Session-timeline extension methods Harn accepts or emits.",
+        HARN_SESSION_TIMELINE_METHODS,
     ));
     out.push_str(&rust_const_group(
         "ACP_AGENT_NOTIFICATION",

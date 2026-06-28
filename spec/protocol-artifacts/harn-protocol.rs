@@ -64,6 +64,10 @@ pub const ACP_AGENT_METHODS: &[&str] = &[
 pub const ACP_DISPATCHED_METHOD_INITIALIZE: &str = "initialize";
 pub const ACP_DISPATCHED_METHOD_AUTHENTICATE: &str = "authenticate";
 pub const ACP_DISPATCHED_METHOD_HARN_PROVIDERCATALOG: &str = "_harn/providerCatalog";
+pub const ACP_DISPATCHED_METHOD_HARN_SESSION_TIMELINE_QUERY: &str = "harn.session_timeline.query";
+pub const ACP_DISPATCHED_METHOD_HARN_SESSION_VIEW_QUERY: &str = "harn.session_view.query";
+pub const ACP_DISPATCHED_METHOD_HARN_SESSION_TIMELINE_SUBSCRIBE: &str = "harn.session_timeline.subscribe";
+pub const ACP_DISPATCHED_METHOD_HARN_SESSION_TIMELINE_UNSUBSCRIBE: &str = "harn.session_timeline.unsubscribe";
 pub const ACP_DISPATCHED_METHOD_SESSION_NEW: &str = "session/new";
 pub const ACP_DISPATCHED_METHOD_SESSION_LOAD: &str = "session/load";
 pub const ACP_DISPATCHED_METHOD_SESSION_RESUME: &str = "session/resume";
@@ -124,6 +128,146 @@ pub const ACP_DISPATCHED_METHODS: &[&str] = &[
     "initialize",
     "authenticate",
     "_harn/providerCatalog",
+    "harn.session_timeline.query",
+    "harn.session_view.query",
+    "harn.session_timeline.subscribe",
+    "harn.session_timeline.unsubscribe",
+    "session/new",
+    "session/load",
+    "session/resume",
+    "session/fork",
+    "session/truncate",
+    "session/rollback",
+    "session/redo",
+    "session/set_mode",
+    "session/set_config_option",
+    "session/fs_mode",
+    "session/fs_commit_staged",
+    "session/fs_discard_staged",
+    "session/restore_tool_call",
+    "session/prompt",
+    "session/cancel",
+    "session/cancel_tool_call",
+    "session/close",
+    "session/stop",
+    "session/inject",
+    "session/revoke_inject",
+    "session/replace_inject",
+    "session/remind",
+    "session/pending_injections",
+    "session/revoke_reminder",
+    "session/list",
+    "harn.session_workspace_roots",
+    "harn.session_add_root",
+    "harn.session_reanchor",
+    "harn.session_rollback",
+    "harn.session_redo",
+    "agent/resume",
+    "harn.hitl.respond",
+    "workflow/signal",
+    "harn.workflow.signal",
+    "workflow/query",
+    "harn.workflow.query",
+    "workflow/update",
+    "harn.workflow.update",
+    "workflow/pause",
+    "harn.workflow.pause",
+    "workflow/resume",
+    "harn.workflow.resume",
+    "mcp/catalog",
+    "harn.mcp.catalog",
+    "mcp/status",
+    "harn.mcp.status",
+    "mcp/authorize",
+    "harn.mcp.authorize",
+    "mcp/authorize_batch",
+    "harn.mcp.authorize_batch",
+    "mcp/oauth_callback",
+    "harn.mcp.oauth_callback",
+    "mcp/import_token",
+    "harn.mcp.import_token",
+];
+
+pub const ACP_TRANSPORT_CONTROL_METHOD_SESSION_SET_BUDGET: &str = "session/set_budget";
+
+/// ACP control frames consumed by the transport before regular adapter dispatch.
+pub const ACP_TRANSPORT_CONTROL_METHODS: &[&str] = &[
+    "session/set_budget",
+];
+
+pub const ACP_HANDLED_METHOD_SESSION_SET_BUDGET: &str = "session/set_budget";
+pub const ACP_HANDLED_METHOD_INITIALIZE: &str = "initialize";
+pub const ACP_HANDLED_METHOD_AUTHENTICATE: &str = "authenticate";
+pub const ACP_HANDLED_METHOD_HARN_PROVIDERCATALOG: &str = "_harn/providerCatalog";
+pub const ACP_HANDLED_METHOD_HARN_SESSION_TIMELINE_QUERY: &str = "harn.session_timeline.query";
+pub const ACP_HANDLED_METHOD_HARN_SESSION_VIEW_QUERY: &str = "harn.session_view.query";
+pub const ACP_HANDLED_METHOD_HARN_SESSION_TIMELINE_SUBSCRIBE: &str = "harn.session_timeline.subscribe";
+pub const ACP_HANDLED_METHOD_HARN_SESSION_TIMELINE_UNSUBSCRIBE: &str = "harn.session_timeline.unsubscribe";
+pub const ACP_HANDLED_METHOD_SESSION_NEW: &str = "session/new";
+pub const ACP_HANDLED_METHOD_SESSION_LOAD: &str = "session/load";
+pub const ACP_HANDLED_METHOD_SESSION_RESUME: &str = "session/resume";
+pub const ACP_HANDLED_METHOD_SESSION_FORK: &str = "session/fork";
+pub const ACP_HANDLED_METHOD_SESSION_TRUNCATE: &str = "session/truncate";
+pub const ACP_HANDLED_METHOD_SESSION_ROLLBACK: &str = "session/rollback";
+pub const ACP_HANDLED_METHOD_SESSION_REDO: &str = "session/redo";
+pub const ACP_HANDLED_METHOD_SESSION_SET_MODE: &str = "session/set_mode";
+pub const ACP_HANDLED_METHOD_SESSION_SET_CONFIG_OPTION: &str = "session/set_config_option";
+pub const ACP_HANDLED_METHOD_SESSION_FS_MODE: &str = "session/fs_mode";
+pub const ACP_HANDLED_METHOD_SESSION_FS_COMMIT_STAGED: &str = "session/fs_commit_staged";
+pub const ACP_HANDLED_METHOD_SESSION_FS_DISCARD_STAGED: &str = "session/fs_discard_staged";
+pub const ACP_HANDLED_METHOD_SESSION_RESTORE_TOOL_CALL: &str = "session/restore_tool_call";
+pub const ACP_HANDLED_METHOD_SESSION_PROMPT: &str = "session/prompt";
+pub const ACP_HANDLED_METHOD_SESSION_CANCEL: &str = "session/cancel";
+pub const ACP_HANDLED_METHOD_SESSION_CANCEL_TOOL_CALL: &str = "session/cancel_tool_call";
+pub const ACP_HANDLED_METHOD_SESSION_CLOSE: &str = "session/close";
+pub const ACP_HANDLED_METHOD_SESSION_STOP: &str = "session/stop";
+pub const ACP_HANDLED_METHOD_SESSION_INJECT: &str = "session/inject";
+pub const ACP_HANDLED_METHOD_SESSION_REVOKE_INJECT: &str = "session/revoke_inject";
+pub const ACP_HANDLED_METHOD_SESSION_REPLACE_INJECT: &str = "session/replace_inject";
+pub const ACP_HANDLED_METHOD_SESSION_REMIND: &str = "session/remind";
+pub const ACP_HANDLED_METHOD_SESSION_PENDING_INJECTIONS: &str = "session/pending_injections";
+pub const ACP_HANDLED_METHOD_SESSION_REVOKE_REMINDER: &str = "session/revoke_reminder";
+pub const ACP_HANDLED_METHOD_SESSION_LIST: &str = "session/list";
+pub const ACP_HANDLED_METHOD_HARN_SESSION_WORKSPACE_ROOTS: &str = "harn.session_workspace_roots";
+pub const ACP_HANDLED_METHOD_HARN_SESSION_ADD_ROOT: &str = "harn.session_add_root";
+pub const ACP_HANDLED_METHOD_HARN_SESSION_REANCHOR: &str = "harn.session_reanchor";
+pub const ACP_HANDLED_METHOD_HARN_SESSION_ROLLBACK: &str = "harn.session_rollback";
+pub const ACP_HANDLED_METHOD_HARN_SESSION_REDO: &str = "harn.session_redo";
+pub const ACP_HANDLED_METHOD_AGENT_RESUME: &str = "agent/resume";
+pub const ACP_HANDLED_METHOD_HARN_HITL_RESPOND: &str = "harn.hitl.respond";
+pub const ACP_HANDLED_METHOD_WORKFLOW_SIGNAL: &str = "workflow/signal";
+pub const ACP_HANDLED_METHOD_HARN_WORKFLOW_SIGNAL: &str = "harn.workflow.signal";
+pub const ACP_HANDLED_METHOD_WORKFLOW_QUERY: &str = "workflow/query";
+pub const ACP_HANDLED_METHOD_HARN_WORKFLOW_QUERY: &str = "harn.workflow.query";
+pub const ACP_HANDLED_METHOD_WORKFLOW_UPDATE: &str = "workflow/update";
+pub const ACP_HANDLED_METHOD_HARN_WORKFLOW_UPDATE: &str = "harn.workflow.update";
+pub const ACP_HANDLED_METHOD_WORKFLOW_PAUSE: &str = "workflow/pause";
+pub const ACP_HANDLED_METHOD_HARN_WORKFLOW_PAUSE: &str = "harn.workflow.pause";
+pub const ACP_HANDLED_METHOD_WORKFLOW_RESUME: &str = "workflow/resume";
+pub const ACP_HANDLED_METHOD_HARN_WORKFLOW_RESUME: &str = "harn.workflow.resume";
+pub const ACP_HANDLED_METHOD_MCP_CATALOG: &str = "mcp/catalog";
+pub const ACP_HANDLED_METHOD_HARN_MCP_CATALOG: &str = "harn.mcp.catalog";
+pub const ACP_HANDLED_METHOD_MCP_STATUS: &str = "mcp/status";
+pub const ACP_HANDLED_METHOD_HARN_MCP_STATUS: &str = "harn.mcp.status";
+pub const ACP_HANDLED_METHOD_MCP_AUTHORIZE: &str = "mcp/authorize";
+pub const ACP_HANDLED_METHOD_HARN_MCP_AUTHORIZE: &str = "harn.mcp.authorize";
+pub const ACP_HANDLED_METHOD_MCP_AUTHORIZE_BATCH: &str = "mcp/authorize_batch";
+pub const ACP_HANDLED_METHOD_HARN_MCP_AUTHORIZE_BATCH: &str = "harn.mcp.authorize_batch";
+pub const ACP_HANDLED_METHOD_MCP_OAUTH_CALLBACK: &str = "mcp/oauth_callback";
+pub const ACP_HANDLED_METHOD_HARN_MCP_OAUTH_CALLBACK: &str = "harn.mcp.oauth_callback";
+pub const ACP_HANDLED_METHOD_MCP_IMPORT_TOKEN: &str = "mcp/import_token";
+pub const ACP_HANDLED_METHOD_HARN_MCP_IMPORT_TOKEN: &str = "harn.mcp.import_token";
+
+/// Every inbound ACP method Harn handles, whether by transport preemption or regular adapter dispatch.
+pub const ACP_HANDLED_METHODS: &[&str] = &[
+    "session/set_budget",
+    "initialize",
+    "authenticate",
+    "_harn/providerCatalog",
+    "harn.session_timeline.query",
+    "harn.session_view.query",
+    "harn.session_timeline.subscribe",
+    "harn.session_timeline.unsubscribe",
     "session/new",
     "session/load",
     "session/resume",
@@ -193,6 +337,19 @@ pub const ACP_CLIENT_METHODS: &[&str] = &[
     "terminal/create",
     "terminal/kill",
     "session/request_permission",
+];
+
+pub const HARN_SESSION_TIMELINE_METHOD_HARN_SESSION_TIMELINE_QUERY: &str = "harn.session_timeline.query";
+pub const HARN_SESSION_TIMELINE_METHOD_HARN_SESSION_TIMELINE_SUBSCRIBE: &str = "harn.session_timeline.subscribe";
+pub const HARN_SESSION_TIMELINE_METHOD_HARN_SESSION_TIMELINE_UNSUBSCRIBE: &str = "harn.session_timeline.unsubscribe";
+pub const HARN_SESSION_TIMELINE_METHOD_HARN_SESSION_TIMELINE_UPDATE: &str = "harn.session_timeline.update";
+
+/// Session-timeline extension methods Harn accepts or emits.
+pub const HARN_SESSION_TIMELINE_METHODS: &[&str] = &[
+    "harn.session_timeline.query",
+    "harn.session_timeline.subscribe",
+    "harn.session_timeline.unsubscribe",
+    "harn.session_timeline.update",
 ];
 
 pub const ACP_AGENT_NOTIFICATION_SESSION_MESSAGE: &str = "session/message";

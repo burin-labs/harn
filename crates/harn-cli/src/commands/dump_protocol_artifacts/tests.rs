@@ -10,6 +10,11 @@ use harn_serve::adapters::acp::{
 use harn_vm::llm::receipts::{
     TOOL_CALL_RECEIPT_SCHEMA_ARTIFACT, TOOL_CALL_RECEIPT_SCHEMA_VERSION, TOOL_CALL_RECEIPT_STATUSES,
 };
+use harn_vm::orchestration::SESSION_VIEW_QUERY_METHOD;
+use harn_vm::session_timeline::{
+    SESSION_TIMELINE_QUERY_METHOD, SESSION_TIMELINE_SUBSCRIBE_METHOD,
+    SESSION_TIMELINE_UNSUBSCRIBE_METHOD,
+};
 
 use super::constants::*;
 use super::go::*;
@@ -180,7 +185,11 @@ fn generated_rust_includes_harn_wire_vocabularies() {
     assert!(rust.contains("pub const ACP_AGENT_METHOD_SESSION_PROMPT: &str = \"session/prompt\""));
     assert!(rust.contains("pub const ACP_AGENT_METHODS: &[&str] = &["));
     assert!(rust.contains("pub const ACP_DISPATCHED_METHODS: &[&str] = &["));
+    assert!(rust.contains("pub const ACP_TRANSPORT_CONTROL_METHODS: &[&str] = &["));
+    assert!(rust.contains("pub const ACP_HANDLED_METHODS: &[&str] = &["));
+    assert!(rust.contains("pub const ACP_TRANSPORT_CONTROL_METHOD_SESSION_SET_BUDGET"));
     assert!(rust.contains("pub const ACP_CLIENT_METHODS: &[&str] = &["));
+    assert!(rust.contains("pub const HARN_SESSION_TIMELINE_METHODS: &[&str] = &["));
     // Session-update discriminators (base + Harn extensions).
     assert!(rust.contains("pub const ACP_SESSION_UPDATES: &[&str] = &["));
     assert!(rust.contains("pub const HARN_ACP_SESSION_UPDATE_EXTENSIONS: &[&str] = &["));
@@ -200,6 +209,8 @@ fn generated_rust_includes_harn_wire_vocabularies() {
     for value in ACP_AGENT_METHODS
         .iter()
         .chain(ACP_DISPATCHED_METHODS.iter())
+        .chain(ACP_TRANSPORT_CONTROL_METHODS.iter())
+        .chain(HARN_SESSION_TIMELINE_METHODS.iter())
         .chain(ACP_CLIENT_METHODS.iter())
         .chain(HARN_SESSION_UPDATE_EXTENSIONS.iter())
         .chain(HARN_AGENT_EVENT_KINDS.iter())
@@ -255,8 +266,8 @@ fn dispatched_acp_methods_match_artifact() {
         let trimmed = line.trim();
         // Match-arm heads look like `"method" => {` or `"a" | "b" => {`.
         if !trimmed.contains("=>") || !trimmed.starts_with('"') {
-            if trimmed.starts_with("HARN_PROVIDER_CATALOG_METHOD") {
-                dispatched.insert(HARN_PROVIDER_CATALOG_METHOD.to_string());
+            if let Some(method) = dispatch_arm_constant_value(trimmed) {
+                dispatched.insert(method);
             }
             continue;
         }
@@ -280,6 +291,57 @@ fn dispatched_acp_methods_match_artifact() {
              stale in artifact: {:?}",
         dispatched.difference(&published).collect::<Vec<_>>(),
         published.difference(&dispatched).collect::<Vec<_>>(),
+    );
+}
+
+fn dispatch_arm_constant_value(trimmed_arm: &str) -> Option<String> {
+    let name = trimmed_arm.split("=>").next()?.trim();
+    match name {
+        "HARN_PROVIDER_CATALOG_METHOD" => Some(HARN_PROVIDER_CATALOG_METHOD.to_string()),
+        "harn_vm::session_timeline::SESSION_TIMELINE_QUERY_METHOD" => {
+            Some(SESSION_TIMELINE_QUERY_METHOD.to_string())
+        }
+        "harn_vm::session_timeline::SESSION_TIMELINE_SUBSCRIBE_METHOD" => {
+            Some(SESSION_TIMELINE_SUBSCRIBE_METHOD.to_string())
+        }
+        "harn_vm::session_timeline::SESSION_TIMELINE_UNSUBSCRIBE_METHOD" => {
+            Some(SESSION_TIMELINE_UNSUBSCRIBE_METHOD.to_string())
+        }
+        "harn_vm::orchestration::SESSION_VIEW_QUERY_METHOD" => {
+            Some(SESSION_VIEW_QUERY_METHOD.to_string())
+        }
+        _ => None,
+    }
+}
+
+#[test]
+fn transport_control_acp_methods_match_artifact() {
+    let sessions = read_repo_text("crates/harn-serve/src/adapters/acp/sessions.rs")
+        .expect("read acp sessions");
+    let body = sessions
+        .split_once("pub(super) fn apply_session_budget_rearm")
+        .expect("budget rearm function")
+        .1
+        .split_once("\nfn rearm_dimension")
+        .expect("budget rearm function end")
+        .0;
+    let mut handled = BTreeSet::new();
+    for capture in regex::Regex::new(r#""([^"]+)""#)
+        .unwrap()
+        .captures_iter(body)
+    {
+        let value = capture.get(1).unwrap().as_str();
+        if value.starts_with("session/") {
+            handled.insert(value.to_string());
+        }
+    }
+    let published: BTreeSet<String> = ACP_TRANSPORT_CONTROL_METHODS
+        .iter()
+        .map(|m| m.to_string())
+        .collect();
+    assert_eq!(
+        published, handled,
+        "ACP_TRANSPORT_CONTROL_METHODS is out of sync with transport pre-dispatch control frames"
     );
 }
 
@@ -405,6 +467,30 @@ fn manifest_advertises_python_and_go_bindings() {
         json!("protocol/src/generated.rs")
     );
     assert_eq!(manifest["bindings"]["rust"]["stability"], json!("stable"));
+    assert_eq!(
+        manifest["acp"]["transportControlMethods"],
+        json!(ACP_TRANSPORT_CONTROL_METHODS)
+    );
+    assert_eq!(
+        manifest["acp"]["harnSessionTimelineMethods"],
+        json!(HARN_SESSION_TIMELINE_METHODS)
+    );
+    assert!(
+        manifest["acp"]["dispatchedMethods"]
+            .as_array()
+            .expect("dispatched methods")
+            .iter()
+            .any(|value| value == SESSION_TIMELINE_QUERY_METHOD),
+        "manifest missing timeline query in dispatchedMethods"
+    );
+    assert!(
+        manifest["acp"]["handledMethods"]
+            .as_array()
+            .expect("handled methods")
+            .iter()
+            .any(|value| value == "session/set_budget"),
+        "manifest missing session/set_budget in handledMethods"
+    );
     assert_eq!(
         manifest["bindings"]["typescript"]["stability"],
         json!("stable")

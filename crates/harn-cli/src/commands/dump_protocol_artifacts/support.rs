@@ -67,3 +67,15 @@ pub(super) fn ensure_trailing_newline(mut text: String) -> String {
 pub(super) fn normalize_line_endings(text: &str) -> String {
     text.replace("\r\n", "\n").replace('\r', "\n")
 }
+
+pub(super) fn concat_unique_wire_values(parts: &[&[&str]]) -> Vec<String> {
+    let mut out = Vec::new();
+    for part in parts {
+        for value in *part {
+            if !out.iter().any(|existing| existing == value) {
+                out.push((*value).to_string());
+            }
+        }
+    }
+    out
+}
