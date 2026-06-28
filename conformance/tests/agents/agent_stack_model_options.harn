@@ -35,6 +35,26 @@ pipeline default() {
   )
   __io_println(sanitized.reasoning_effort == nil)
   __io_println(sanitized.cache_control == nil)
+  let direct_thinking = agent_sanitize_model_options(
+    {
+      provider: "anthropic",
+      model: "claude-sonnet-4-6",
+      thinking: {mode: "enabled", budget_tokens: 4096},
+    },
+  )
+  __io_println(direct_thinking.thinking.mode)
+  let proxied_thinking = agent_sanitize_model_options(
+    {
+      provider: "openrouter",
+      model: "anthropic/claude-sonnet-4-6",
+      thinking: {mode: "enabled", budget_tokens: 4096},
+    },
+  )
+  __io_println(proxied_thinking.thinking == nil)
+  let disabled_thinking = agent_sanitize_model_options(
+    {provider: "openrouter", model: "anthropic/claude-sonnet-4-6", thinking: {mode: "disabled"}},
+  )
+  __io_println(disabled_thinking.thinking.mode)
   let healthcheck = agent_sanitize_model_options(
     {
       provider: "cerebras",

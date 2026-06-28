@@ -199,6 +199,61 @@ fn __stack_sanitize_mode(policy) {
   return lowercase(raw)
 }
 
+fn __stack_thinking_mode(value) {
+  if value == nil {
+    return "disabled"
+  }
+  let kind = type_of(value)
+  if kind == "bool" {
+    if value {
+      return "enabled"
+    }
+    return "disabled"
+  }
+  if kind == "string" {
+    let raw = lowercase(trim(value))
+    if raw == "disabled" || raw == "off" || raw == "none" {
+      return "disabled"
+    }
+    if raw == "adaptive" {
+      return "adaptive"
+    }
+    if raw == "minimal" || raw == "low" || raw == "medium" || raw == "high" || raw == "xhigh" {
+      return "effort"
+    }
+    return "enabled"
+  }
+  if kind == "dict" {
+    if __stack_has_key(value, "enabled") && !(value.enabled ?? false) {
+      return "disabled"
+    }
+    let raw = lowercase(to_string(value?.mode ?? "enabled"))
+    if raw == "disabled" || raw == "off" || raw == "none" {
+      return "disabled"
+    }
+    if raw == "adaptive" {
+      return "adaptive"
+    }
+    if raw == "effort" {
+      return "effort"
+    }
+    return "enabled"
+  }
+  return "enabled"
+}
+
+fn __stack_thinking_supported(caps, thinking) {
+  let mode = __stack_thinking_mode(thinking)
+  if mode == "disabled" {
+    return true
+  }
+  let modes = __stack_list(caps?.thinking_modes)
+  if mode == "enabled" {
+    return contains(modes, "enabled") || contains(modes, "adaptive")
+  }
+  return contains(modes, mode)
+}
+
 fn __stack_strip_option_keys(options, stripped, keys) {
   var out = options
   var removed = stripped
@@ -227,6 +282,10 @@ fn __stack_sanitize_result(options, policy = nil) {
   if __stack_has_key(out, "reasoning_effort") && !(caps?.reasoning_effort_supported ?? false) {
     out = out.remove("reasoning_effort")
     stripped = stripped + ["reasoning_effort"]
+  }
+  if __stack_has_key(out, "thinking") && !__stack_thinking_supported(caps, out.thinking) {
+    out = out.remove("thinking")
+    stripped = stripped + ["thinking"]
   }
   if !(caps?.prompt_caching ?? false) {
     let cache = __stack_strip_option_keys(out, stripped, ["prompt_cache", "prompt_caching", "cache_control"])
@@ -301,7 +360,7 @@ fn __stack_configured_model_options(cfg, prefixes) {
 /**
  * Return a capability-sanitized options dict for a provider/model route.
  * Unsupported provider-specific knobs are dropped instead of leaking to the
- * wire. Currently strips unsupported `reasoning_effort` and prompt-cache
+ * wire. Currently strips unsupported `reasoning_effort`, `thinking`, and prompt-cache
  * request keys. Pass `{mode: "healthcheck"}` (or `"preflight"` / `"probe"`)
  * to also drop deliberate-reasoning knobs for cheap readiness probes even
  * when the full route supports them.
