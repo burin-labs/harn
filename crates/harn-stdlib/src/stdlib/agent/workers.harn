@@ -714,3 +714,185 @@ pub fn sub_agent_request(task, options = nil) {
 pub fn sub_agent_run(task, options = nil) {
   return __host_sub_agent_run(sub_agent_request(task, options))
 }
+
+fn __fanout_options(options) {
+  if options == nil {
+    return {}
+  }
+  if type_of(options) == "dict" {
+    return options
+  }
+  throw "agent_fanout: options must be a dict or nil"
+}
+
+fn __fanout_max_parallel(options) {
+  let raw = options?.max_parallel
+  if raw == nil {
+    return 8
+  }
+  if type_of(raw) != "int" {
+    throw "agent_fanout: max_parallel must be an int"
+  }
+  if raw < 1 {
+    return 1
+  }
+  return raw
+}
+
+fn __fanout_normalize_request(entry, index) {
+  let fallback_label = "unit-" + to_string(index + 1)
+  if type_of(entry) == "string" {
+    let task = trim(entry)
+    if task == "" {
+      throw "agent_fanout: request #" + to_string(index + 1) + " has an empty task"
+    }
+    return {task: task, options: {}, label: fallback_label}
+  }
+  if type_of(entry) != "dict" {
+    throw "agent_fanout: request #" + to_string(index + 1)
+      + " must be a string or {task, options?, label?}"
+  }
+  let task = trim(to_string(entry?.task ?? ""))
+  if task == "" {
+    throw "agent_fanout: request #" + to_string(index + 1) + " is missing a non-empty task"
+  }
+  let raw_label = trim(to_string(entry?.label ?? entry?.name ?? ""))
+  let label = if raw_label == "" {
+    fallback_label
+  } else {
+    raw_label
+  }
+  return {task: task, options: __fanout_options(entry?.options), label: label}
+}
+
+fn __fanout_chunks(items, width) {
+  let size = if width < 1 {
+    1
+  } else {
+    width
+  }
+  var chunks = []
+  var current = []
+  for item in items {
+    current = current.push(item)
+    if len(current) >= size {
+      chunks = chunks.push(current)
+      current = []
+    }
+  }
+  if len(current) > 0 {
+    chunks = chunks.push(current)
+  }
+  return chunks
+}
+
+fn __fanout_envelope(summary) {
+  let result = summary?.result
+  if type_of(result) == "dict" {
+    return result
+  }
+  return {}
+}
+
+fn __fanout_ok(summary) {
+  let envelope = __fanout_envelope(summary)
+  if type_of(envelope?.ok) == "bool" {
+    return envelope.ok
+  }
+  let status = trim(to_string(summary?.status ?? "")).lower()
+  return contains(["completed", "done", "succeeded", "success"], status)
+}
+
+fn __fanout_error(summary) {
+  let envelope_error = __fanout_envelope(summary)?.error
+  if envelope_error != nil {
+    return envelope_error
+  }
+  return summary?.error
+}
+
+fn __fanout_result(request, index, summary) {
+  return {
+    label: request.label,
+    index: index,
+    status: trim(to_string(summary?.status ?? "unknown")),
+    ok: __fanout_ok(summary),
+    result: __fanout_envelope(summary),
+    error: __fanout_error(summary),
+  }
+}
+
+/**
+ * agent_fanout runs many sub-agent requests CONCURRENTLY in bounded waves and
+ * joins them, returning one normalized result per request in input order.
+ *
+ * This is the general building block for parallel agent fan-out: map a list of
+ * independent units onto concurrent child agents. Each request is launched as a
+ * background `sub_agent_run(task, options + {background: true})`, so a whole
+ * wave's LLM turns overlap in wall-clock time; `wait_agent` then joins the wave
+ * before the next one starts. Harnesses layer their own per-unit tool surface,
+ * capability policy, model, and prompts on top by setting each request's
+ * `options` — `agent_fanout` owns only the concurrency, the wave bound, the
+ * join, and result normalization.
+ *
+ * requests: a list whose entries are either a bare task string (shorthand for
+ *   `{task: <string>}`) or `{task, options?, label?}`. `task` is the child
+ *   prompt; `options` is forwarded verbatim to `sub_agent_run` (tools, policy,
+ *   system, model, max_iterations, ...) — `background: true` and `name: label`
+ *   are always set, overriding any caller value, because concurrency and a
+ *   stable registry label are part of the contract. `label` (or `name`) names
+ *   the unit in the result and the worker registry.
+ * options: `{max_parallel?: int}`. `max_parallel` bounds how many children run
+ *   at once (default 8, floored to 1); requests beyond it run in later waves so
+ *   a large fan-out cannot exhaust provider rate budget or host resources.
+ *
+ * Returns a list of `{label, index, status, ok, result, error}`, one per request
+ * in INPUT order regardless of completion order: `status` is the worker
+ * lifecycle string, `result` the sub-agent envelope, `ok` its success flag
+ * (falling back to the terminal status when no envelope was produced), and
+ * `error` the first of the envelope error or a worker-level fault (nil on
+ * success).
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_fanout([{task: "port a", options: child_opts, label: "a"}], {max_parallel: 4})
+ */
+pub fn agent_fanout(requests, options = nil) {
+  if type_of(requests) != "list" {
+    throw "agent_fanout: requests must be a list of {task, options?, label?}"
+  }
+  let opts = __fanout_options(options)
+  let max_parallel = __fanout_max_parallel(opts)
+  var normalized = []
+  var index = 0
+  for entry in requests {
+    normalized = normalized.push(__fanout_normalize_request(entry, index))
+    index = index + 1
+  }
+  var results = []
+  var base = 0
+  for wave in __fanout_chunks(normalized, max_parallel) {
+    // Spawn the whole wave as background workers BEFORE joining: each
+    // background `sub_agent_run` returns its handle immediately, so the
+    // children's turns overlap while `wait_agent` awaits them.
+    var handles = []
+    for request in wave {
+      let summary = sub_agent_run(request.task, request.options + {background: true, name: request.label})
+      handles = handles.push(summary)
+    }
+    let waited = wait_agent(handles)
+    var offset = 0
+    for request in wave {
+      let summary = if type_of(waited) == "list" {
+        waited[offset] ?? {}
+      } else {
+        {}
+      }
+      results = results.push(__fanout_result(request, base + offset, summary))
+      offset = offset + 1
+    }
+    base = base + len(wave)
+  }
+  return results
+}

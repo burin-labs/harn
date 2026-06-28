@@ -99,6 +99,14 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_DICT,
     ),
     BuiltinSignature::simple(
+        "agent_fanout",
+        &[
+            Param::new("requests", TY_LIST),
+            Param::optional("options", TY_DICT),
+        ],
+        TY_LIST,
+    ),
+    BuiltinSignature::simple(
         "agent_daemon_snapshot",
         &[
             Param::new("session", TY_DICT),
