@@ -76,6 +76,7 @@ pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
     "mcp_catalog_changed",
     "mcp_notification",
     "progress_reported",
+    "reserved_terminal_verify",
     "scope_classifier_verdict",
     "session_closed",
     "structural_validator_decision",

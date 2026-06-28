@@ -1,0 +1,183 @@
+import { agent_capture_events } from "std/agent/events"
+import { with_llm_script } from "std/testing"
+
+/**
+ * Reserved-budget terminal-verify guard (#reserved-terminal-verify): the
+ * budget-exit half of the declared-done-with-red-build fix.
+ *
+ * The sentinel path (a model emitting a done marker after an unverified edit) is
+ * already vetoed by the completion gate. But a model that writes source and then
+ * runs OUT of iteration/budget runway used to terminate `budget_exhausted` with
+ * NO terminal verify — ending the run blind on a red build. The reserved guard
+ * holds back a small iteration reserve the normal loop cannot consume; when the
+ * loop would otherwise exhaust with an unverified source write, it spends the
+ * reserve on a final verify(+repair) before terminating.
+ *
+ * This is the dominant zig-feat failure mode (exits `budget_exhausted`), so the
+ * guard is the budget-exit counterpart to the sentinel-path completion gate.
+ *
+ * Cases:
+ *  1. ON, repair lands green: edit -> iteration budget exhausts -> reserved verify
+ *     fires (red) -> reserve grants a repair turn -> re-verify passes -> the run
+ *     terminates `done` (NOT a silent `budget_exhausted`), with the guard's grant
+ *     + verify_passed events observable.
+ *  2. ON, repair never lands: the reserve is spent, a final verify RUNS and
+ *     surfaces the red (stop_reason `reserved_terminal_verify_failed`) instead of
+ *     a blind exhaust. Bounded: the reserve cannot loop forever.
+ *  3. OFF (control): identical script with the flag off terminates
+ *     `budget_exhausted` and emits NO `reserved_terminal_verify` events —
+ *     behavior is byte-identical to today.
+ */
+fn build_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "apply_fix",
+    "Apply a corrective edit to the workspace",
+    {
+      handler: { _args -> "edit applied" },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "edit", side_effect_level: "workspace_write"},
+    },
+  )
+  return tools
+}
+
+fn count_events(events, kind) {
+  var n = 0
+  for event in events {
+    if event.type == kind {
+      n = n + 1
+    }
+  }
+  return n
+}
+
+fn has_phase(events, phase) {
+  for event in events {
+    if event.type == "reserved_terminal_verify" && (event?.payload?.phase ?? "") == phase {
+      return true
+    }
+  }
+  return false
+}
+
+// Scenario harness: the model only ever edits (never proposes completion and
+// never runs a green test on its own), so a passing build can ONLY come from the
+// reserved guard's terminal verify. The declared verifier reports green once the
+// loop has reached `green_at_iteration` (a stable, observable signal that
+// survives the nested agent_loop execution, unlike a closure-captured counter):
+// with a low value the repair lands within the reserve (case 1), with a value
+// the reserve can never reach the repair never lands (case 2).
+fn run_scenario(reserved_on, reserve_iterations, green_at_iteration) {
+  return with_llm_script(
+    [
+      {text: "", tool_calls: [{id: "e1", name: "apply_fix", arguments: {}}]},
+      {text: "", tool_calls: [{id: "e2", name: "apply_fix", arguments: {}}]},
+      {text: "", tool_calls: [{id: "e3", name: "apply_fix", arguments: {}}]},
+      {text: "", tool_calls: [{id: "e4", name: "apply_fix", arguments: {}}]},
+      {text: "", tool_calls: [{id: "e5", name: "apply_fix", arguments: {}}]},
+    ],
+    { ->
+      let session = "reserved-verify-" + uuid()
+      let captured = agent_capture_events(
+        session,
+        fn() { return agent_loop(
+          "Make the build green.",
+          nil,
+          {
+            provider: "mock",
+            tools: build_tools(),
+            tool_format: "native",
+            loop_until_done: true,
+            max_iterations: 2,
+            max_nudges: 10,
+            session_id: session,
+            // The declared verifier: red until the loop reaches the configured
+            // iteration, then green. nil verdict == pass. Keyed off the stable
+            // iteration count so the verdict is deterministic across the nested
+            // agent_loop execution.
+            verify_completion: { info ->
+              if info.stop_reason == "reserved_terminal_verify" {
+                if info.iteration >= green_at_iteration {
+                  return nil
+                }
+                return "build still red: fix it"
+              }
+              nil
+            },
+            stall_diagnostics: {
+              enabled: true,
+              repair_aware: true,
+              post_edit_reverify: true,
+              reserved_terminal_verify: reserved_on,
+              reserved_terminal_verify_iterations: reserve_iterations,
+            },
+          },
+        ) },
+      )
+      return {status: captured.result.status, events: captured.events}
+    },
+  )
+}
+
+// A terminal verify provably RAN when the guard emitted either a verify outcome
+// phase (the closure was invoked and its verdict surfaced).
+fn terminal_verify_ran(events) -> bool {
+  return has_phase(events, "verify_passed") || has_phase(events, "verify_failed")
+}
+
+pipeline default() {
+  // Case 1: ON, repair lands green. First terminal verify (iter 2) is red and
+  // grants a repair turn; the re-verify at iter 3 is green -> the run completes
+  // `done` instead of a silent `budget_exhausted`.
+  let case1 = run_scenario(true, 2, 3)
+  __io_println("case1.status=" + case1.status)
+  __io_println("case1.grant=" + to_string(has_phase(case1.events, "grant")))
+  __io_println("case1.verify_passed=" + to_string(has_phase(case1.events, "verify_passed")))
+  assert(
+    case1.status == "done",
+    "case1: run must terminate done after a passing reserved verify, not a blind budget_exhausted",
+  )
+  assert(
+    has_phase(case1.events, "grant"),
+    "case1: a red terminal verify must spend a reserve iteration on a repair turn",
+  )
+  assert(
+    has_phase(case1.events, "verify_passed"),
+    "case1: the terminal verify must run and ultimately pass",
+  )
+  // Case 2: ON, repair never lands (verifier never green) — the reserve is spent
+  // and the FINAL state is a verify that RAN and surfaced the red build, never a
+  // blind exhaust. Bounded: the reserve cannot loop forever (one grant here).
+  let case2 = run_scenario(true, 1, 999)
+  __io_println("case2.status=" + case2.status)
+  __io_println("case2.verify_failed=" + to_string(has_phase(case2.events, "verify_failed")))
+  __io_println("case2.grants=" + to_string(count_events(case2.events, "reserved_terminal_verify")))
+  assert(
+    terminal_verify_ran(case2.events),
+    "case2: a terminal verify must RUN even when repair never lands",
+  )
+  assert(
+    has_phase(case2.events, "verify_failed"),
+    "case2: the unrepaired red build must be surfaced, not swallowed",
+  )
+  assert(case2.status != "done", "case2: an unrepaired red build must not terminate done")
+  // Case 3: OFF control — byte-identical to today. No reserved-verify events,
+  // no terminal verify, plain budget_exhausted.
+  let case3 = run_scenario(false, 2, 3)
+  __io_println("case3.status=" + case3.status)
+  __io_println(
+    "case3.reserved_events=" + to_string(count_events(case3.events, "reserved_terminal_verify")),
+  )
+  assert(
+    case3.status == "budget_exhausted",
+    "case3: with the guard OFF the run exhausts its budget unchanged",
+  )
+  assert(
+    count_events(case3.events, "reserved_terminal_verify") == 0,
+    "case3: OFF must emit no reserved-verify events",
+  )
+  assert(!terminal_verify_ran(case3.events), "case3: OFF must never run a terminal reserved verify")
+}

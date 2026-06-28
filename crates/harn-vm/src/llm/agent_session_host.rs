@@ -1852,6 +1852,7 @@ async fn host_agent_emit_event(
             | "budget_exhausted"
             | "budget_circuit_breaker"
             | "loop_stuck"
+            | "reserved_terminal_verify"
             | "context_overflow_recovery"
             | "loop_checkpoint"
     ) {
@@ -2192,6 +2193,10 @@ fn build_agent_event(
             paused_for_ms: get_u64("paused_for_ms"),
         }),
         "loop_stuck" => Ok(AgentEvent::LoopStuckSignal {
+            session_id: session_id.to_string(),
+            payload: payload.clone(),
+        }),
+        "reserved_terminal_verify" => Ok(AgentEvent::ReservedTerminalVerify {
             session_id: session_id.to_string(),
             payload: payload.clone(),
         }),
