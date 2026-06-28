@@ -453,7 +453,7 @@ registry index again.
 
 ```toml
 [registry]
-url = "https://burin-labs.github.io/harn-cloud/package-index/harn-package-index.toml"
+url = "https://packages.harnlang.com/harn-package-index.toml"
 ```
 
 The default URL points at the free-tier GitHub-Pages-hosted index in

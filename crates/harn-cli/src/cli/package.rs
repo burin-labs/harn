@@ -237,10 +237,10 @@ pub(crate) struct PublishArgs {
     #[arg(long, default_value = "origin")]
     pub remote: String,
     /// GitHub repository that owns the package index.
-    #[arg(long, default_value = "burin-labs/harn-cloud")]
+    #[arg(long, default_value = "burin-labs/harn-packages")]
     pub index_repo: String,
     /// Package-index TOML path inside --index-repo.
-    #[arg(long, default_value = "package-index/harn-package-index.toml")]
+    #[arg(long, default_value = "harn-package-index.toml")]
     pub index_path: PathBuf,
     /// Registry package name to update. Defaults to [package].name.
     #[arg(long)]

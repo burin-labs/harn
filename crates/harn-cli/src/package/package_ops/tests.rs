@@ -171,11 +171,11 @@ version = "1.0.0"
 git = "https://github.com/acme/other-lib"
 rev = "feedface"
 "#;
-    let index_path = Path::new("package-index/harn-package-index.toml");
+    let index_path = Path::new("harn-package-index.toml");
     let options = PackagePublishOptions {
         dry_run: true,
         remote: "origin",
-        index_repo: "burin-labs/harn-cloud",
+        index_repo: "burin-labs/harn-packages",
         index_path,
         registry_name: None,
         skip_index_pr: false,
@@ -222,11 +222,11 @@ fn rule_publish_marks_pure_rule_pack_in_index() {
     write_publishable_rule_pack(tmp.path());
     write_release_changelog(tmp.path(), "0.1.0");
     let _remote = init_publishable_repo(tmp.path());
-    let index_path = Path::new("package-index/harn-package-index.toml");
+    let index_path = Path::new("harn-package-index.toml");
     let options = PackagePublishOptions {
         dry_run: true,
         remote: "origin",
-        index_repo: "burin-labs/harn-cloud",
+        index_repo: "burin-labs/harn-packages",
         index_path,
         registry_name: Some("@acme/rules"),
         skip_index_pr: false,
@@ -302,11 +302,11 @@ fn publish_preflight_rejects_existing_tag_and_missing_changelog_entry() {
     let tmp = tempfile::tempdir().unwrap();
     write_publishable_package(tmp.path());
     let _remote = init_publishable_repo(tmp.path());
-    let index_path = Path::new("package-index/harn-package-index.toml");
+    let index_path = Path::new("harn-package-index.toml");
     let options = PackagePublishOptions {
         dry_run: true,
         remote: "origin",
-        index_repo: "burin-labs/harn-cloud",
+        index_repo: "burin-labs/harn-packages",
         index_path,
         registry_name: None,
         skip_index_pr: false,
@@ -348,11 +348,11 @@ fn publish_preflight_rejects_dirty_worktree() {
     write_release_changelog(tmp.path(), "0.1.0");
     let _remote = init_publishable_repo(tmp.path());
     fs::write(tmp.path().join("scratch.txt"), "dirty\n").unwrap();
-    let index_path = Path::new("package-index/harn-package-index.toml");
+    let index_path = Path::new("harn-package-index.toml");
     let options = PackagePublishOptions {
         dry_run: true,
         remote: "origin",
-        index_repo: "burin-labs/harn-cloud",
+        index_repo: "burin-labs/harn-packages",
         index_path,
         registry_name: None,
         skip_index_pr: false,
