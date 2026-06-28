@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react"
 import { useNavigate } from "react-router"
 import type { SearchDoc } from "../../vite-plugins/content"
+import { useMessages } from "../i18n"
 
 let cachedIndex: SearchDoc[] | null = null
 
@@ -19,7 +20,20 @@ function scoreDoc(doc: SearchDoc, terms: string[]): number {
   return score
 }
 
+// The flattened body text repeats the page title up front (e.g. "CLI reference
+// All commands available…"). Drop that prefix so the result's second line reads
+// as a clean description distinct from the bold title above it.
+function excerptFor(doc: SearchDoc): string {
+  const title = doc.title.trim()
+  const text = doc.text.trim()
+  if (title && text.toLowerCase().startsWith(title.toLowerCase())) {
+    return text.slice(title.length).trimStart()
+  }
+  return text
+}
+
 export function SearchModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const t = useMessages()
   const navigate = useNavigate()
   const [index, setIndex] = useState<SearchDoc[] | null>(cachedIndex)
   const [query, setQuery] = useState("")
@@ -109,17 +123,17 @@ export function SearchModal({ open, onClose }: { open: boolean; onClose: () => v
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder="Search the docs…"
+            placeholder={t.search.placeholder}
             className="w-full bg-transparent py-3.5 text-foreground outline-none placeholder:text-foreground-muted"
           />
           <kbd className="rounded border border-border bg-surface-tertiary px-1.5 py-0.5 text-[11px] text-foreground-muted">
-            esc
+            {t.search.esc}
           </kbd>
         </div>
         <ul className="max-h-[55vh] overflow-y-auto p-2">
           {results.length === 0 && (
             <li className="px-3 py-6 text-center text-sm text-foreground-muted">
-              {index === null ? "Loading…" : "No results."}
+              {index === null ? t.search.loading : t.search.noResults}
             </li>
           )}
           {results.map((doc, i) => (
@@ -137,7 +151,7 @@ export function SearchModal({ open, onClose }: { open: boolean; onClose: () => v
                     {doc.sectionTitle}
                   </span>
                 </span>
-                <span className="line-clamp-1 text-xs text-foreground-muted">{doc.text}</span>
+                <span className="line-clamp-1 text-xs text-foreground-muted">{excerptFor(doc)}</span>
               </button>
             </li>
           ))}

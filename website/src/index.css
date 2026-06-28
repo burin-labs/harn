@@ -494,3 +494,17 @@ body {
   background-clip: padding-box;
   border: 2px solid transparent;
 }
+
+/* Keywords/built-ins in code snippets that carry an inline doc tooltip. The
+   affordance only shows on pointer devices; the bubble itself is rendered by
+   the KeywordTooltip component. */
+@media (hover: hover) {
+  .harn-tip {
+    cursor: help;
+    text-underline-offset: 3px;
+  }
+  .harn-tip:hover {
+    text-decoration: underline dotted currentColor;
+    text-decoration-thickness: 1px;
+  }
+}

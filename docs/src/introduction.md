@@ -30,9 +30,9 @@ pipeline review(task) {
   let files = ["src/main.rs", "src/lib.rs"]
 
   let reviews = parallel each files { file ->
-    let content = read_file(file)
+    let code = read_file(file)
     retry 3 {
-      llm_call("Review this code:\n${content}", "You are a code reviewer.")
+      llm_call(code, "Review this Rust file and list any issues.")
     }
   }
 

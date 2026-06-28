@@ -141,16 +141,19 @@ harn lint file.harn
 harn lint --fix file.harn   # automatically apply safe fixes
 ```
 
-The linter checks for: shadow variables, unused variables, unused pattern
-bindings, unused types, undefined functions, dead code after terminating
-statements, pointless comparisons, redundant clones,
-naming convention drift, branch-heavy functions, prompt-injection risks such as
-interpolated `llm_call` system prompts, and unnecessary conversion calls
-(`to_string("hi")`, `to_int(42)`, etc.). With `--fix`, the linter
-automatically rewrites fixable issues (e.g., `var` → `let`, boolean
-comparison simplification, `let`-then-`return` simplification, redundant
-clone removal, unused import removal, unnecessary-cast removal, unnecessary
-parentheses removal). The same fixes
-are surfaced through the LSP as both
-per-diagnostic quick-fixes and a bulk `source.fixAll.harn` code action
-suitable for `editor.codeActionsOnSave`.
+**What it flags:**
+
+- Unused variables, pattern bindings, types, and imports
+- Shadowed variables and naming-convention drift
+- Undefined functions and dead code after a `return`, `break`, or `continue`
+- Pointless comparisons and redundant clones
+- Branch-heavy functions
+- Unnecessary conversions like `to_string("hi")` or `to_int(42)`
+- Prompt-injection risks, such as interpolating untrusted input into an `llm_call` system prompt
+
+**What `--fix` rewrites automatically:** `var` to `let`, boolean-comparison and
+`let`-then-`return` simplification, and removal of redundant clones, unused
+imports, unnecessary casts, and unnecessary parentheses.
+
+The same fixes show up in the LSP, both as per-diagnostic quick-fixes and as a
+bulk `source.fixAll.harn` code action you can wire to `editor.codeActionsOnSave`.

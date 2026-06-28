@@ -1,12 +1,14 @@
 import { useTheme } from "../hooks/useTheme"
+import { useMessages } from "../i18n"
 
 export function ThemeToggle() {
   const { theme, toggleTheme } = useTheme()
+  const t = useMessages()
   return (
     <button
       onClick={toggleTheme}
       className="rounded-lg p-2 text-foreground-secondary transition-colors hover:bg-surface-tertiary hover:text-foreground"
-      aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+      aria-label={theme === "dark" ? t.theme.toLight : t.theme.toDark}
     >
       {theme === "dark" ? (
         <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
