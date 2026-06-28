@@ -1,1 +1,0 @@
-- Ensure `agent_loop` runs configured completion verification when `stop_after_successful_tools` ends a turn.
