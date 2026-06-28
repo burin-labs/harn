@@ -214,7 +214,12 @@ fn agent_primitive_denied_tool(
     // "permission_denied / Do not retry the same call" after one fixable arg
     // mistake and gave up (false FAIL across ~26 recent eval transcripts). True
     // policy/permission denials keep the don't-retry `denied_tool_result` body.
-    let mut result = if category.is_recoverable() {
+    // A denial the gate marked `retryable` (an argument allow-list miss — the
+    // tool is permitted, only this argument value is out of scope) is coached
+    // like a fixable-argument slip: retry with a corrected argument, not "give
+    // up". Hard ceilings and true permission denials keep the don't-retry body.
+    let retryable_denial = denial.is_some_and(|denial| denial.retryable);
+    let mut result = if category.is_recoverable() || retryable_denial {
         agent_tools::recoverable_tool_result(tool_name, reason.clone())
     } else {
         agent_tools::denied_tool_result(tool_name, reason.clone())
@@ -889,11 +894,24 @@ async fn host_agent_dispatch_tool_call(
             )
         })
     {
-        let denial = crate::agent_events::ToolDenial::terminal(
-            policy_denial.gate,
-            policy_denial.capability,
-            policy_denial.reason,
-        );
+        // An argument allow-list miss (e.g. a sub-agent scoped to `test/users.*`
+        // that tried to edit the shared reference file) is RECOVERABLE: the tool
+        // is permitted, only this path is out of scope, so coach a retry with an
+        // allowed path instead of a terminal "do not retry". Hard ceilings
+        // (tool/capability/side-effect) stay terminal.
+        let denial = if policy_denial.gate == crate::agent_events::DenialGate::ArgConstraint {
+            crate::agent_events::ToolDenial::retryable(
+                policy_denial.gate,
+                policy_denial.capability,
+                policy_denial.reason,
+            )
+        } else {
+            crate::agent_events::ToolDenial::terminal(
+                policy_denial.gate,
+                policy_denial.capability,
+                policy_denial.reason,
+            )
+        };
         return Ok(deny_tool_call_value(
             &session_id,
             &tool_name,
@@ -2055,6 +2073,65 @@ mod denied_tool_routing_tests {
         assert!(
             !next.contains("Do not retry"),
             "empty-name slip must be retry-positive: {next}"
+        );
+    }
+
+    #[test]
+    fn retryable_arg_constraint_denial_is_coached_as_recoverable() {
+        use crate::agent_events::{DenialGate, ToolDenial};
+        // A sub-agent scoped to `test/users.*` that tried to edit the shared
+        // reference file: the tool is permitted, only this path is out of scope.
+        let denial = ToolDenial::retryable(
+            DenialGate::ArgConstraint,
+            None,
+            "tool 'edit' path 'test/accounts.integration.test.ts' is outside your allowed \
+             scope. Allowed path pattern(s): [\"test/users.*\"]. This is fixable: re-issue \
+             the call with a path that matches one of those patterns.",
+        );
+        let envelope = agent_primitive_denied_tool(
+            "edit",
+            "call_3",
+            &serde_json::json!({ "path": "test/accounts.integration.test.ts" }),
+            denial.reason.clone(),
+            ToolCallErrorCategory::PermissionDenied,
+            Some(&denial),
+        );
+        let result = &envelope["result"];
+        // Retry-positive body, NOT a hard permission denial.
+        assert_eq!(result["error"], serde_json::json!("invalid_arguments"));
+        assert_ne!(result["error"], serde_json::json!("permission_denied"));
+        let next = result["next_step"].as_str().expect("next_step");
+        assert!(
+            !next.contains("Do not retry"),
+            "retryable arg-scope denial must coach a correction, not give-up: {next}"
+        );
+        // The structured denial still records the precise gate + retryable flag.
+        assert_eq!(envelope["denial"]["gate"], "arg_constraint");
+        assert_eq!(envelope["denial"]["retryable"], true);
+    }
+
+    #[test]
+    fn hard_capability_denial_stays_terminal() {
+        use crate::agent_events::{DenialGate, ToolDenial};
+        let denial = ToolDenial::terminal(
+            DenialGate::CapabilityCeiling,
+            Some("workspace.write_text".to_string()),
+            "tool 'edit' exceeds capability ceiling: workspace.write_text",
+        );
+        let envelope = agent_primitive_denied_tool(
+            "edit",
+            "call_4",
+            &serde_json::json!({ "path": "x" }),
+            denial.reason.clone(),
+            ToolCallErrorCategory::PermissionDenied,
+            Some(&denial),
+        );
+        let result = &envelope["result"];
+        assert_eq!(result["error"], serde_json::json!("permission_denied"));
+        let next = result["next_step"].as_str().expect("next_step");
+        assert!(
+            next.contains("Do not retry"),
+            "a hard capability ceiling must stay terminal: {next}"
         );
     }
 
