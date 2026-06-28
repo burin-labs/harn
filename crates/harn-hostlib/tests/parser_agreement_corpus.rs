@@ -15,7 +15,7 @@
 //! the model "fixes", or a phantom parse-error storm that steers it to rewrite
 //! correct code. A downstream host caught one such bug after it shipped: the
 //! tree-sitter-zig grammar mis-lexed a valid `\\` multiline string into a storm
-//! of `unexpected '...'` errors (burin-code #3010), and the only defense was a
+//! of `unexpected '...'` errors (observed in an IDE host), and the only defense was a
 //! per-language special-case. This corpus is the GENERALIZED, pre-ship defense:
 //! a grammar regression that disagrees with ground truth fails THIS test in CI
 //! instead of reaching an agent.

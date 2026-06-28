@@ -753,7 +753,7 @@ pg_close(admin)
     run_harn_source(&cleanup);
 }
 
-/// `pg_migrate` against the canonical `harn-cloud-store/migrations/`
+/// `pg_migrate` against the canonical cloud-store `migrations/`
 /// directory. Opt-in via `HARN_TEST_CLOUD_MIGRATIONS_DIR`; verifies
 /// that the runner consumes the full ledger without errors.
 #[test]
@@ -1514,7 +1514,7 @@ pg_close(db)
     );
 }
 
-/// SQLx ledger mode against the canonical harn-cloud `migrations/`
+/// SQLx ledger mode against the canonical cloud-platform `migrations/`
 /// directory: applies the full forward history, then a second run is a
 /// no-op (every version skipped, no checksum drift). This is the
 /// retire-`migrations.rs` acceptance test. Opt-in via

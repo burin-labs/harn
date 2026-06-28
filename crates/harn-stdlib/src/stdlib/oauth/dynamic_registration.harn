@@ -8,7 +8,7 @@
  * against. It does NOT itself host an HTTP server — it produces the
  * RFC 7591 / RFC 8414 metadata documents, validates incoming client
  * registrations, and stores them in an in-process catalogue. Embedders
- * (harn-cloud, `harn serve`, custom hosts) plug those outputs into the
+ * (a cloud platform, `harn serve`, custom hosts) plug those outputs into the
  * routes they already serve.
  *
  * ## Surface
@@ -64,7 +64,7 @@
  *
  * Local `harn run` scripts that do not act as a resource server should
  * simply not call into this module. Embedders that host the well-known
- * endpoints (harn-cloud, `harn serve --oauth-resource ...`) read a
+ * endpoints (a cloud platform, `harn serve --oauth-resource ...`) read a
  * boolean toggle from their own configuration before mounting; this
  * module deliberately does not introduce a global on/off switch
  * because the source of truth lives at the transport layer.
@@ -259,7 +259,7 @@ pub fn well_known_paths(overrides = nil) -> dict {
 /**
  * well_known_response wraps a metadata dict as an HTTP response envelope
  * with `content_type: "application/json"` and a `body` string. This is
- * the shape embedders feed into harn-serve or harn-cloud route
+ * the shape embedders feed into harn-serve or a cloud platform's route
  * handlers — no extra serialization on the embedder side.
  *
  * @effects: []

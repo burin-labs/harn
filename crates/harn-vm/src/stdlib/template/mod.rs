@@ -319,7 +319,7 @@ pub fn render_template_to_string(
 }
 
 /// One byte-range in a rendered prompt mapped back to its source
-/// template. Foundation for the prompt-provenance UX (burin-code #93):
+/// template. Foundation for the prompt-provenance UX (an IDE host feature):
 /// hover a chunk of the live prompt in the debugger and jump to the
 /// `.harn.prompt` line that produced it.
 ///

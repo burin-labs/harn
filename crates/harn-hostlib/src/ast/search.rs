@@ -513,7 +513,7 @@ mod tests {
 
     #[test]
     fn finds_optional_chain_nullish_default_in_typescript() {
-        // The first rule-engine customer (#2824 / burin-code#1629) folds
+        // The first rule-engine customer (#2824) folds
         // `obj?.prop ?? default` shapes; the same syntax is valid TypeScript.
         let source = "const v = config?.timeout ?? 30;\n";
         let result = invoke(dict(&[

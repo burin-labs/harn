@@ -113,7 +113,7 @@ impl Receipt {
 
     /// Append a `model_calls[]` entry that records the per-step model
     /// + token + cost breakdown produced by `crates/harn-vm/src/step_runtime.rs`.
-    ///   Used by run-receipt builders (harn-cloud-store, burin-code) so a
+    ///   Used by run-receipt builders (a cloud store, an IDE host) so a
     ///   single canonical envelope carries per-step economics without
     ///   each consumer reinventing the field layout.
     pub fn push_step_breakdown(&mut self, summary: &crate::step_runtime::CompletedStep) {

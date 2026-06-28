@@ -442,7 +442,7 @@ impl std::fmt::Debug for EventPatternExpression {
 
 /// A manifest hook handler that has not been resolved to a [`VmClosure`]
 /// yet. Resolving a handler requires loading its module's whole import
-/// graph (for burin-code that is ~1s of instantiation), so eager
+/// graph (for an IDE host that is ~1s of instantiation), so eager
 /// resolution at registration time made every test — even pure-logic
 /// unit tests that never fire a hook — pay that cost. A lazy handler
 /// defers the module load until the hook actually fires, against the

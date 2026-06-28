@@ -551,7 +551,7 @@ impl Vm {
     /// used by hover tips, watch expressions, conditional breakpoints,
     /// logpoint interpolation, and `setVariable` / `setExpression`
     /// before we had a unified evaluator there were four separate
-    /// mini-parsers, each with its own rough edges (see burin-code #85).
+    /// mini-parsers, each with its own rough edges (tracked by the IDE host).
     ///
     /// The expression is wrapped as `let __r = (<expr>)` so arbitrary
     /// infix chains, ternaries, and access paths parse uniformly. A

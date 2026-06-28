@@ -133,7 +133,7 @@ fn resolve_render_target(path: &str) -> Result<TemplateAsset, VmError> {
 }
 
 /// `render_with_provenance(path, bindings)` — the debugger's hook for
-/// the prompt-template source-map UX (burin-code #93/#94). Returns
+/// the prompt-template source-map UX (an IDE host feature). Returns
 /// `{ text: string, template_uri: string, spans: list<dict> }` where
 /// each span carries the template range that produced an output byte
 /// range so the IDE can highlight the originating `.harn.prompt`

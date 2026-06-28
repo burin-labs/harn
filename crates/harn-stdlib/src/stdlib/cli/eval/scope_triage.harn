@@ -95,8 +95,8 @@ fn __contains_any(text, needles) {
 fn __reference_classifier(payload) {
   let text = lowercase(to_string(payload?.user_message ?? ""))
   let out_markers = [
-    "burin-code",
-    "harn-cloud",
+    "sibling-ide",
+    "sibling-cloud",
     "project y",
     "project z",
     "unrelated project",

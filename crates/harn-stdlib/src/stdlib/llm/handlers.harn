@@ -737,7 +737,7 @@ pub fn llm_cache_key(prompt, system = nil, options = nil) -> string {
  * `cache_hit` / `cache_miss` events on the agent event tape. On hits,
  * the wrapper records "model calls avoided" + "tokens saved" +
  * "latency saved" receipts pulled from the cached envelope so the
- * persona value ledger (harn-cloud#58) and crystallization receipts
+ * persona value ledger (a cloud platform) and crystallization receipts
  * can read them back.
  *
  * @effects: [llm.call]

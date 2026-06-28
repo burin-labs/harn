@@ -22,7 +22,7 @@ const DEFAULT_HARNPACK_FILE_MODE: u32 = 0o644;
 /// Maximum decompressed size of a `.harnpack` archive. Matches the
 /// VM-level decompression cap in `stdlib/compression.rs`. Keeps a
 /// malicious bundle from exhausting memory during ingest (workflow
-/// bundles ride this exact path when harn-cloud accepts a plan
+/// bundles ride this exact path when a cloud platform accepts a plan
 /// transfer).
 const MAX_HARNPACK_DECOMPRESSED_BYTES: u64 = 100 * 1024 * 1024;
 

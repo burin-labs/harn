@@ -121,7 +121,7 @@ impl SiteStreamProvider for PackProvider {
         }
         if route.path.ends_with("/download") {
             // Binary response half: an embedder-shaped download, exactly
-            // how harn-cloud serves a `.harnpack` / CAS blob.
+            // how a cloud platform serves a `.harnpack` / CAS blob.
             return (
                 StatusCode::OK,
                 [

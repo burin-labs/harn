@@ -178,7 +178,7 @@ const SITE_ADAPTER: &str = "site";
 /// request body is buffered, so it sees the request head
 /// ([`axum::http::request::Parts`]: method, URI, headers, extensions)
 /// plus the matched [`RouteSpec`]. That is enough for the embedder
-/// auth schemes harn-cloud needs: bearer API keys, cookie sessions,
+/// auth schemes a cloud platform needs: bearer API keys, cookie sessions,
 /// token-in-path public routes, worker enrollment tokens.
 #[async_trait]
 pub trait SiteAuth: Send + Sync {

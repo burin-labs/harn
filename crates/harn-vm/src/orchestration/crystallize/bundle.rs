@@ -24,7 +24,7 @@ use crate::value::VmError;
 
 // ===== Crystallization bundle =====
 //
-// A bundle is a directory layout that Harn writes and Harn Cloud (or any
+// A bundle is a directory layout that Harn writes and a cloud platform (or any
 // other importer) reads without bespoke glue. The contract is:
 //
 //   bundle/

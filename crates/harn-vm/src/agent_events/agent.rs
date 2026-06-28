@@ -683,7 +683,7 @@ pub enum AgentEvent {
     /// forms) when a cached lookup returns a hit. Carries the
     /// content-addressed key, the backend that served the value, and a
     /// `metrics` block with the cost-moat receipts the persona value
-    /// ledger (harn-cloud#58) and crystallization receipts read:
+    /// ledger (a cloud platform) and crystallization receipts read:
     /// `model_calls_avoided`, plus `tokens_saved` / `latency_saved_ms`
     /// when the cached envelope carried `usage` / `latency_ms`.
     CacheHit {
@@ -784,7 +784,7 @@ pub enum AgentEvent {
     /// Surfaced when the effective MCP catalog changes — either because a
     /// server emitted a `notifications/tools/list_changed` (or the
     /// resource/prompt equivalents), or because the persisted enable/disable
-    /// allowlist was edited. A thin ACP client (the burin-code TUI / GUI)
+    /// allowlist was edited. A thin ACP client (an IDE host's TUI / GUI)
     /// treats this as a cue to re-fetch the catalog (e.g. via the
     /// `mcp/catalog` request) and re-render its toggle UI, rather than
     /// reconciling any local state. `server` is the server whose list
@@ -798,7 +798,7 @@ pub enum AgentEvent {
     },
     /// Surfaced when an MCP server harn is acting as a client for answers a
     /// request with `401 Unauthorized` mid-session, meaning its OAuth token is
-    /// missing or expired. This is a cue for a thin ACP client (the burin-code
+    /// missing or expired. This is a cue for a thin ACP client (an IDE host's
     /// TUI / GUI) to start an authorization: call `mcp/authorize` to mint a
     /// browser URL, open it, and forward the redirect's `code`+`state` back via
     /// `mcp/oauth_callback`. Token exchange and storage stay in harn. `server`

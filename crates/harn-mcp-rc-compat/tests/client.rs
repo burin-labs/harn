@@ -5,7 +5,7 @@
 //! `crates/harn-vm/src/mcp/` for the in-process client wire tests).
 //! This test file proves the fakes themselves agree with the published
 //! JSON fixtures so the same wire shape is what downstream consumers
-//! (downstream hosts, harn-cloud) replay in their own suites.
+//! (downstream hosts, a cloud platform) replay in their own suites.
 //!
 //! Failures here localize to the **client-facing fake-server surface**:
 //! either the fakes have drifted, or the published fixtures have.

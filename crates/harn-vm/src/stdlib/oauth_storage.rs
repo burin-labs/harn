@@ -16,7 +16,7 @@
 //! wrapper module which invokes user-supplied closures; this file never
 //! sees `custom` handles. Cloud backends route through the
 //! `oauth_storage` host capability (`cloud_get / cloud_set /
-//! cloud_delete`) so embedders such as harn-cloud or burin-code can
+//! cloud_delete`) so embedders such as a cloud platform or IDE host can
 //! supply tenant-scoped storage; without a bridge they raise a
 //! deterministic "not configured" error.
 //!

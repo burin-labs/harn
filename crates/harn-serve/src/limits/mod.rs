@@ -1,6 +1,6 @@
 //! Rate-limiting + backpressure + call-budget primitive for `.harn`
 //! handlers hosted on `harn-serve`. Implements epic A.11 — the
-//! cross-tenant production-readiness shape `harn-cloud-gateway` enforces
+//! cross-tenant production-readiness shape a cloud gateway enforces
 //! today via bespoke middleware (`http_utils::check_rate_limits`), lifted
 //! into one declarative primitive every adapter on `harn-serve` shares.
 //!
@@ -518,7 +518,7 @@ impl LimitRegistry {
         }
 
         if let Some(quota) = limits.per_scope {
-            // Joined-scope keying matches `harn-cloud-gateway` semantics:
+            // Joined-scope keying matches a cloud gateway's semantics:
             // callers that present the same scope set share quota.
             let key = format!("scope:{}:{}", scope_key(ctx.scopes), ctx.route);
             if let Some(retry_after_ms) =

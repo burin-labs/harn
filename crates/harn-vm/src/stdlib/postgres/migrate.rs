@@ -454,7 +454,7 @@ struct SqlxMigration {
 
 /// Discover forward (`*.up.sql` / non-`.down`) SQLx migrations, parse their
 /// versions/descriptions, sort numerically by version, and dedupe duplicate
-/// versions with a warn-and-skip (mirrors harn-cloud's `handled` set). An
+/// versions with a warn-and-skip (mirrors the cloud platform's `handled` set). An
 /// un-parseable integer prefix is a hard error (SQLx behavior).
 fn discover_sqlx_migrations(dir: &Path) -> Result<Vec<SqlxMigration>, VmError> {
     if !dir.exists() {

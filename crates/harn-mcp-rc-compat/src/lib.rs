@@ -14,7 +14,7 @@
 //! - [`fixtures`] is the checked-in wire vocabulary every test loads
 //!   from. The same JSON is exported under
 //!   `spec/protocol-artifacts/fixtures/mcp-rc/` so downstream hosts and
-//!   harn-cloud can replay the same flows in their own test suites.
+//!   a cloud platform can replay the same flows in their own test suites.
 //!
 //! Failures are surfaced per-surface (client, generic server,
 //! orchestrator server, artifacts, downstream-consumers) so CI breakage

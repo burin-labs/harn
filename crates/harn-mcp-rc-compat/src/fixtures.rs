@@ -2,7 +2,7 @@
 //!
 //! Each fixture is a deterministic JSON document loaded from disk so the
 //! same request/response shapes can be replayed by Rust tests and
-//! downstream-host consumers and harn-cloud test suites without diverging.
+//! downstream-host consumers and cloud test suites without diverging.
 
 use std::fs;
 use std::path::{Path, PathBuf};

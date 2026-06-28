@@ -33,7 +33,7 @@
 //! collide on a pool by naming the same alias while resolving to different
 //! credentials.
 //!
-//! This is safe to share across tenants because harn-cloud scopes RLS
+//! This is safe to share across tenants because the cloud platform scopes RLS
 //! **per-transaction** via `set_config('app.current_tenant_id', …, /*local*/
 //! true)` (see `ALLOWED_TRANSACTION_SETTINGS` in the parent module) — tenancy is
 //! *never* encoded in the pool/connection itself. A shared pool therefore only

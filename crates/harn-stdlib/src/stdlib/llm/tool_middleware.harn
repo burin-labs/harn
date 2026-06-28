@@ -730,7 +730,7 @@ pub fn with_audit_log(sink_or_options) {
  * - `false` / `{decision: "denied", reason?}`: short-circuit with status
  *   `consent_denied`.
  *
- * Use to gate destructive tools on host-side approval (e.g. burin-code).
+ * Use to gate destructive tools on host-side approval (e.g. an IDE host).
  * Read-only tools can opt out by returning `{decision: "auto"}`.
  *
  * @effects: []
@@ -1187,7 +1187,7 @@ fn __telemetry_extras(value) {
  * convention), so hosts can render "Searched codebase to find rate
  * limiter middleware" in place of generic tool-call counters.
  *
- * Pair with the host UX layer (e.g. burin-code) that already consumes
+ * Pair with the host UX layer (e.g. an IDE host) that already consumes
  * tool_call_audit events.
  *
  * @effects: []

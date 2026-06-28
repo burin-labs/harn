@@ -295,7 +295,7 @@ pub trait PersonaValueSink: Send + Sync {
     fn handle_value_event(&self, event: &PersonaValueEvent);
 }
 
-/// Append-only multiplexed feed mirroring the harn-cloud
+/// Append-only multiplexed feed mirroring the cloud platform's
 /// `persona_supervision_events` projection. Sinks see the runtime-sourced
 /// `queue_position`, `repair_worker_status`, `receipt`, and
 /// `checkpoint` (restore-ack) variants; supervisor-sourced variants

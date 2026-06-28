@@ -530,7 +530,7 @@ async fn per_method_unlisted_method_falls_back_to_baseline() {
 /// ambient `harness.auth` handle: a route can read the subject, the
 /// embedder-assigned principal kind, and test/enumerate the granted
 /// scopes — the foundation a `.harn`-side auth policy composes (issue
-/// burin-labs/harn#3323; unblocks harn-cloud route-policy adoption).
+/// burin-labs/harn#3323; unblocks cloud-platform route-policy adoption).
 #[tokio::test]
 async fn harness_auth_exposes_bound_principal_to_route() {
     let hook = Arc::new(AllowAuth {
