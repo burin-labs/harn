@@ -13,7 +13,10 @@ use super::types::{
     AbortOnDrop, LogWatcherReadiness, McpListChangeKind, McpLogNotification,
     McpOrchestratorService, McpResourceNotification, McpTaskNotification,
 };
-use super::watchers::{spawn_log_topic_watchers, start_list_change_watcher};
+use super::watchers::{
+    refresh_manifest_derived_state_cache, send_list_changed, spawn_log_topic_watchers,
+    start_list_change_watcher,
+};
 use harn_serve::FilePromptCatalog;
 
 use super::LOG_NOTIFICATION_CAPACITY;
@@ -98,23 +101,21 @@ impl McpOrchestratorService {
     }
 
     pub(super) fn refresh_manifest_derived_state(&self, manifest_source: String) {
-        *self
-            .manifest_source
-            .lock()
-            .expect("manifest source poisoned") = manifest_source.clone();
         let project_root = self
             .config_path
             .parent()
             .unwrap_or_else(|| Path::new("."))
             .to_path_buf();
-        let updated = FilePromptCatalog::discover(&project_root, &manifest_source);
-        *self.prompt_catalog.lock().expect("prompt catalog poisoned") = updated;
+        refresh_manifest_derived_state_cache(
+            &project_root,
+            &self.manifest_source,
+            &self.prompt_catalog,
+            manifest_source,
+        );
     }
 
     pub(super) fn notify_list_changed(&self, kinds: &[McpListChangeKind]) {
-        for kind in kinds {
-            let _ = self.list_notify_tx.send(kind.notification());
-        }
+        send_list_changed(&self.list_notify_tx, kinds);
     }
 
     pub(super) fn subscribe_list_notifications(&self) -> broadcast::Receiver<JsonValue> {
