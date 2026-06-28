@@ -211,7 +211,7 @@ impl AnthropicProvider {
         } else {
             8192
         };
-        let mut messages: Vec<serde_json::Value> = opts
+        let messages: Vec<serde_json::Value> = opts
             .messages
             .iter()
             .cloned()
@@ -239,6 +239,7 @@ impl AnthropicProvider {
                 message
             })
             .collect();
+        let mut messages = enforce_tool_result_adjacency(messages);
         if let Some(ref prefill) = opts.prefill {
             // Claude 4.6+ deprecated the assistant-prefill feature and
             // returns HTTP 400 when the final message is role=assistant.
@@ -378,6 +379,107 @@ impl AnthropicProvider {
         )
         .await
     }
+}
+
+fn enforce_tool_result_adjacency(messages: Vec<serde_json::Value>) -> Vec<serde_json::Value> {
+    let mut normalized = Vec::with_capacity(messages.len());
+    let mut cursor = 0;
+    while cursor < messages.len() {
+        let message = messages[cursor].clone();
+        let Some(mut pending_ids) = assistant_tool_use_ids(&message) else {
+            normalized.push(message);
+            cursor += 1;
+            continue;
+        };
+
+        normalized.push(message);
+        cursor += 1;
+
+        let mut results = Vec::new();
+        let mut deferred = Vec::new();
+        while cursor < messages.len() && !pending_ids.is_empty() {
+            let next = messages[cursor].clone();
+            let matching_ids = matching_tool_result_ids(&next, &pending_ids);
+            if !matching_ids.is_empty() {
+                for id in matching_ids {
+                    pending_ids.remove(&id);
+                }
+                results.push(next);
+                cursor += 1;
+                continue;
+            }
+            if is_user_message_without_tool_result(&next) {
+                deferred.push(next);
+                cursor += 1;
+                continue;
+            }
+            break;
+        }
+
+        normalized.extend(results);
+        normalized.extend(deferred);
+    }
+    normalized
+}
+
+fn assistant_tool_use_ids(message: &serde_json::Value) -> Option<HashSet<String>> {
+    if message.get("role").and_then(|role| role.as_str()) != Some("assistant") {
+        return None;
+    }
+    let blocks = message.get("content")?.as_array()?;
+    let ids: HashSet<String> = blocks
+        .iter()
+        .filter_map(|block| {
+            if block.get("type").and_then(|value| value.as_str()) == Some("tool_use") {
+                block
+                    .get("id")
+                    .and_then(|value| value.as_str())
+                    .map(ToString::to_string)
+            } else {
+                None
+            }
+        })
+        .collect();
+    if ids.is_empty() {
+        None
+    } else {
+        Some(ids)
+    }
+}
+
+fn matching_tool_result_ids(
+    message: &serde_json::Value,
+    pending_ids: &HashSet<String>,
+) -> HashSet<String> {
+    if message.get("role").and_then(|role| role.as_str()) != Some("user") {
+        return HashSet::new();
+    }
+    message
+        .get("content")
+        .and_then(|content| content.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|block| {
+            let block_type = block.get("type").and_then(|value| value.as_str());
+            let id = block.get("tool_use_id").and_then(|value| value.as_str());
+            match (block_type, id) {
+                (Some("tool_result"), Some(id)) if pending_ids.contains(id) => Some(id.to_string()),
+                _ => None,
+            }
+        })
+        .collect()
+}
+
+fn is_user_message_without_tool_result(message: &serde_json::Value) -> bool {
+    if message.get("role").and_then(|role| role.as_str()) != Some("user") {
+        return false;
+    }
+    !message
+        .get("content")
+        .and_then(|content| content.as_array())
+        .into_iter()
+        .flatten()
+        .any(|block| block.get("type").and_then(|value| value.as_str()) == Some("tool_result"))
 }
 
 /// Strip Harn-internal extensions that Anthropic's strict request validator
@@ -645,6 +747,123 @@ mod tests {
         assert_eq!(
             msg.get("cache_control"),
             Some(&serde_json::json!({"type": "ephemeral"}))
+        );
+    }
+
+    #[test]
+    fn injected_feedback_deferred_until_after_tool_result() {
+        let mut opts = base_payload();
+        opts.messages = vec![
+            serde_json::json!({
+                "role": "assistant",
+                "content": [
+                    {"type": "text", "text": "I will verify."},
+                    {
+                        "type": "tool_use",
+                        "id": "toolu_verify",
+                        "name": "verify",
+                        "input": {},
+                    },
+                ],
+            }),
+            serde_json::json!({
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "<runtime_feedback>grounding note</runtime_feedback>"}
+                ],
+            }),
+            serde_json::json!({
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "toolu_verify",
+                        "content": "tests passed",
+                    }
+                ],
+            }),
+        ];
+
+        let body = AnthropicProvider::build_request_body(&opts);
+        let messages = body["messages"].as_array().expect("messages array");
+
+        assert_eq!(
+            messages[0]["content"][1],
+            serde_json::json!({
+                "type": "tool_use",
+                "id": "toolu_verify",
+                "name": "verify",
+                "input": {},
+            })
+        );
+        assert_eq!(
+            messages[1]["content"][0],
+            serde_json::json!({
+                "type": "tool_result",
+                "tool_use_id": "toolu_verify",
+                "content": "tests passed",
+            })
+        );
+        assert_eq!(
+            messages[2]["content"][0],
+            serde_json::json!({
+                "type": "text",
+                "text": "<runtime_feedback>grounding note</runtime_feedback>",
+            })
+        );
+    }
+
+    #[test]
+    fn feedback_deferred_when_tool_use_is_not_final_content_block() {
+        let mut opts = base_payload();
+        opts.messages = vec![
+            serde_json::json!({
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "toolu_verify",
+                        "name": "verify",
+                        "input": {},
+                    },
+                    {"type": "text", "text": "Waiting for the result."},
+                ],
+            }),
+            serde_json::json!({
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "<runtime_feedback>late reminder</runtime_feedback>"}
+                ],
+            }),
+            serde_json::json!({
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "toolu_verify",
+                        "content": "ok",
+                    }
+                ],
+            }),
+        ];
+
+        let body = AnthropicProvider::build_request_body(&opts);
+        let messages = body["messages"].as_array().expect("messages array");
+
+        assert_eq!(
+            messages[1]["content"][0],
+            serde_json::json!({
+                "type": "tool_result",
+                "tool_use_id": "toolu_verify",
+                "content": "ok",
+            })
+        );
+        assert_eq!(
+            messages[2]["content"][0],
+            serde_json::json!({
+                "type": "text",
+                "text": "<runtime_feedback>late reminder</runtime_feedback>",
+            })
         );
     }
 
