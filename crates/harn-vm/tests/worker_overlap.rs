@@ -105,7 +105,7 @@ fn background_workers_overlap_in_wall_clock_time() {
         r#"
 fn make_caller() {{
   return {{ call ->
-    sleep({stall})
+    sleep({STALL_MS})
     return {{
       ok: true,
       value: {{
@@ -136,7 +136,7 @@ pipeline main(task) {{
   // ---- Phase 1: serial baseline (foreground, one agent at a time) ----
   let serial_start = monotonic_ms()
   var serial_done = 0
-  for i in 0 to {n} exclusive {{
+  for i in 0 to {WORKER_COUNT} exclusive {{
     let res = sub_agent_run("serial worker " + to_string(i), base_opts() + {{background: false}})
     if (res?.ok ?? false) == true && contains(to_string(res?.summary ?? ""), "done") {{
       serial_done = serial_done + 1
@@ -146,7 +146,7 @@ pipeline main(task) {{
 
   // ---- Phase 2: concurrent (background workers + wait_agent) ----
   var handles = []
-  for i in 0 to {n} exclusive {{
+  for i in 0 to {WORKER_COUNT} exclusive {{
     handles = handles.push(sub_agent_run("bg worker " + to_string(i), base_opts() + {{background: true}}))
   }}
   let conc_start = monotonic_ms()
@@ -168,8 +168,6 @@ pipeline main(task) {{
   log("CONC_MS=" + to_string(conc_ms))
 }}
 "#,
-        stall = STALL_MS,
-        n = WORKER_COUNT,
     );
 
     let wall = Instant::now();
