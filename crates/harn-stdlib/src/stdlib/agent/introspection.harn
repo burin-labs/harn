@@ -26,7 +26,7 @@
  *
  * Opt-in: this is intentionally NOT wired into `agent_loop` by
  * default. Minimal harnesses skip the call. Hosts that want the model
- * to answer truthfully (e.g. Burin Code, the harn CLI) attach the
+ * to answer truthfully (e.g. an IDE host, the harn CLI) attach the
  * bundle explicitly:
  *
  * ```harn
@@ -88,7 +88,7 @@ fn __introspection_tool_specs() {
     },
     {
       name: "current_harness",
-      description: "Return {harness} — the host shell embedding the runtime (e.g. \"burin-code\", \"harn\", \"claude-code\"). Reads HARN_HARNESS, falls back to \"harn\".",
+      description: "Return {harness} — the host shell embedding the runtime (e.g. \"editor\", \"harn\", \"claude-code\"). Reads HARN_HARNESS, falls back to \"harn\".",
       config: {executor: "harn", parameters: nullary_params, returns: returns_object, annotations: annotations},
     },
     {

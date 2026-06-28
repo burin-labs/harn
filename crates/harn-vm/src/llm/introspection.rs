@@ -90,7 +90,7 @@ pub fn reset_snapshot() {
 /// Return the harness identifier reported by `current_harness()`. Reads
 /// `HARN_HARNESS` if set and non-empty, otherwise falls back to the
 /// `"harn"` CLI default. Trims whitespace so a sloppily-set env var
-/// doesn't surface as `" burin-code "`.
+/// doesn't surface as `" editor "`.
 pub fn harness_identifier() -> String {
     std::env::var(HARN_HARNESS_ENV)
         .ok()
@@ -331,9 +331,9 @@ mod tests {
         reset_env_harness();
         assert_eq!(harness_identifier(), "harn");
         unsafe {
-            std::env::set_var(HARN_HARNESS_ENV, "burin-code");
+            std::env::set_var(HARN_HARNESS_ENV, "editor");
         }
-        assert_eq!(harness_identifier(), "burin-code");
+        assert_eq!(harness_identifier(), "editor");
         unsafe {
             std::env::set_var(HARN_HARNESS_ENV, "  spaced-out  ");
         }

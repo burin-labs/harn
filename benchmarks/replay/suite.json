@@ -1,7 +1,7 @@
 {
   "schema_version": "harn.replay_benchmark.suite.v1",
   "name": "harn-canonical-replay-determinism",
-  "description": "Canonical replay benchmark suite for Harn Cloud leaderboard ingestion.",
+  "description": "Canonical replay benchmark suite for a cloud platform's leaderboard ingestion.",
   "fixtures": [
     {
       "id": "simple_tool_run",

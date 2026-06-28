@@ -1813,7 +1813,7 @@ fn __dispatch_tool_calls(session_id, tool_calls, turn_opts) {
   // (`stop`/`length`/`tool_calls`/...). The dispatch host primitive uses it
   // to cause-name empty-args tool calls: finish_reason=length means the
   // arguments were TRUNCATED by the output cap, anything else means the
-  // provider dropped them (burin-code#2121).
+  // provider dropped them (an IDE host bug report).
   let dispatch_options = {
     session_id: session_id,
     tool_format: turn_opts.tool_format,

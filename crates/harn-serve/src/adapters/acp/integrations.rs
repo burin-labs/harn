@@ -33,7 +33,7 @@ impl AcpServer {
     /// `mcp/catalog`: project the persisted enable/disable allowlist (plus
     /// optional per-project overlay) onto the advertised MCP items and
     /// return the effective catalog (servers → items + `enabled`). The
-    /// merge/projection is harn-owned so thin clients (the burin-code TUI /
+    /// merge/projection is harn-owned so thin clients (an IDE host's TUI /
     /// GUI) render the toggle UI without storing any toggle state. See
     /// `harn_vm::mcp_allowlist`.
     pub(super) fn handle_mcp_catalog(&self, id: &serde_json::Value, params: &serde_json::Value) {

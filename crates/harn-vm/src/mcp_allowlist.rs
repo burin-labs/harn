@@ -1,7 +1,7 @@
 //! Persisted MCP enable/disable allowlist + effective catalog (harn#2647).
 //!
-//! Part of the MCP comprehensiveness sub-epic (burin-code#1428): one
-//! harn-owned MCP implementation, with thin clients (the burin-code Rust
+//! Part of the MCP comprehensiveness sub-epic: one
+//! harn-owned MCP implementation, with thin clients (an IDE host's Rust
 //! TUI and macOS GUI) that render toggle UIs **without storing any toggle
 //! state of their own**. This module is the single source of truth for
 //! which MCP **items** — tools, resources, and prompts — are enabled.

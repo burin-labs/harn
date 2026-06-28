@@ -2237,7 +2237,7 @@ mod streaming_tool_call_tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn openai_stream_tool_call_cut_by_length_keeps_finish_reason() {
-        // burin-code#2121 evidence shape: the output-token cap cuts a native
+        // IDE-host bug-report evidence shape: the output-token cap cuts a native
         // tool call mid-arguments. OpenRouter delivers the truncated args
         // deltas and a final chunk that carries BOTH a `tool_calls` delta and
         // `finish_reason:"length"`. The accumulated args fail to parse (-> the

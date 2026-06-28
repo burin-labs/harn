@@ -42,7 +42,7 @@
 //!     "event_id": 42,
 //!     "kind": "hypothesis",
 //!     "evidence": "checkout incident — see runbook",
-//!     "author": {"id": "alice", "kind": "human", "surface": "burin-code"},
+//!     "author": {"id": "alice", "kind": "human", "surface": "editor"},
 //!     "timestamp": "2026-05-10T17:00:00Z",
 //!     "hypothesis_status": "active"
 //!   }
@@ -228,7 +228,7 @@ impl AnnotationKind {
 }
 
 /// Lifecycle of a hypothesis-kind annotation. Mirrors the
-/// human-hypothesis loop in harn-cloud#54 / burin-code#277.
+/// human-hypothesis loop in a cloud platform / IDE host.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum HypothesisStatus {
@@ -264,7 +264,7 @@ pub struct AnnotationAuthor {
     pub id: Option<String>,
     /// Where the annotation came from.
     pub kind: AuthorKind,
-    /// Surface that authored the record — `burin-code`, `harn-cloud`,
+    /// Surface that authored the record — `editor`, `cloud`,
     /// `cli`, etc. Free-form so new surfaces don't need a schema bump.
     #[serde(default)]
     pub surface: Option<String>,
@@ -789,7 +789,7 @@ mod tests {
             author: Some(AnnotationAuthor {
                 id: Some("alice".into()),
                 kind: AuthorKind::Human,
-                surface: Some("burin-code".into()),
+                surface: Some("editor".into()),
             }),
             timestamp: Some("2026-05-10T17:00:00Z".into()),
             span: None,

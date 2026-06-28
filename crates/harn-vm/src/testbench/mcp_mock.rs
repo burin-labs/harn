@@ -3,7 +3,7 @@
 //! This module is intentionally transport-light: it owns the artifact
 //! schemas and pure JSON-RPC behavior, while `harn-cli` owns stdio
 //! proxy/server loops. That keeps record/replay and simulated-world evals
-//! reusable from conformance tests, harn-cloud, and downstream harnesses.
+//! reusable from conformance tests, a cloud platform, and downstream harnesses.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;

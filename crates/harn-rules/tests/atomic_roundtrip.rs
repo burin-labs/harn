@@ -15,7 +15,7 @@ fn fixture(name: &str) -> PathBuf {
 
 #[test]
 fn destructuring_rule_round_trips_to_matches() {
-    // 1) Load the declarative rule (the #2824 / burin-code#1629 customer).
+    // 1) Load the declarative rule (the #2824 customer).
     let rule = load_rule_file(fixture("destructure_default.toml")).expect("rule loads");
     assert_eq!(rule.id, "destructure-with-defaults");
     // `fix` present -> codemod.

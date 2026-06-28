@@ -2413,7 +2413,7 @@ async fn authorize(
 }
 
 /// Render a scope mismatch as the REST API's standard `forbidden` error
-/// payload, mirroring how `harn-cloud-gateway` reports the same case.
+/// payload, mirroring how a cloud gateway reports the same case.
 /// Uses the same `kind`/`required_scopes`/`granted_scopes`/`missing_scopes`
 /// fields as the JSON-RPC adapters; the only difference is the REST
 /// adapter inlines them under a single `error` envelope object instead

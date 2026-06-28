@@ -645,7 +645,7 @@ fn build_authorization_server_metadata_value(
             VmValue::List(scopes.clone()),
         );
     }
-    // Apply caller overrides last; this lets harn-cloud add e.g.
+    // Apply caller overrides last; this lets a cloud platform add e.g.
     // `registration_endpoint` once they wire the well-known route.
     if let Some(overrides) = overrides {
         for (k, v) in overrides {

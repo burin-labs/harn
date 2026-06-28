@@ -845,8 +845,8 @@ mod tests {
             let _standard = ScopedEnvVar::remove("OTEL_SERVICE_NAME");
             assert_eq!(otel_service_name_from_env(), "harn");
 
-            let _standard = ScopedEnvVar::set("OTEL_SERVICE_NAME", "burin-code");
-            assert_eq!(otel_service_name_from_env(), "burin-code");
+            let _standard = ScopedEnvVar::set("OTEL_SERVICE_NAME", "editor");
+            assert_eq!(otel_service_name_from_env(), "editor");
 
             let _harn = ScopedEnvVar::set("HARN_OTEL_SERVICE_NAME", "burin-tui");
             assert_eq!(otel_service_name_from_env(), "burin-tui");

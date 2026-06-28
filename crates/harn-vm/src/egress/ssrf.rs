@@ -1,7 +1,7 @@
 //! SSRF / egress IP classifier and a connect-time DNS guard.
 //!
 //! The [`is_disallowed_ip`] classifier is ported verbatim from
-//! harn-cloud's `harn-cloud-gateway::url_validation` so the runtime and the
+//! a cloud gateway's `url_validation` so the runtime and the
 //! cloud control plane agree on exactly which addresses are off-limits
 //! (loopback, RFC 1918, link-local incl. the `169.254.169.254` cloud-metadata
 //! endpoint, broadcast, unspecified, multicast, documentation, CGNAT

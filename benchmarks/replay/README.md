@@ -1,7 +1,7 @@
 # Replay benchmark suite
 
 `harn bench replay` reads `suite.json` by default and emits a stable JSON
-artifact for Harn Cloud replay-determinism leaderboard ingestion.
+artifact for a cloud platform's replay-determinism leaderboard ingestion.
 
 The suite references canonical replay-oracle traces instead of duplicating
 them. That keeps pass/fail replay semantics and benchmark scoring on the same

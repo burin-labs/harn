@@ -90,7 +90,7 @@ That's it. The bot takes over once it lands.
 
 ## Cross-repo consumers don't wait on releases
 
-`burin-code`'s `scripts/fetch-harn.sh --local` builds Harn from
+An IDE host's `scripts/fetch-harn.sh --local` builds Harn from
 `~/projects/harn` and installs the binaries directly. Use that during
 cross-repo iteration instead of waiting for crates.io. Release batching
 is a published-version concern, not a developer-loop concern.

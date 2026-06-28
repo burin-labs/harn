@@ -100,8 +100,8 @@ pub struct Capabilities {
     pub supports_harn_host_call: bool,
     /// Custom capability: advertises the `burin/promptProvenance` and
     /// `burin/promptConsumers` reverse-response requests that power the
-    /// IDE's prompt-template source-map highlighting. See burin-code
-    /// issues #93 and #94.
+    /// IDE's prompt-template source-map highlighting. See the IDE
+    /// host's prompt-provenance UX.
     pub supports_burin_prompt_provenance: bool,
     pub exception_breakpoint_filters: Vec<ExceptionBreakpointFilter>,
 }

@@ -167,7 +167,7 @@ async fn published_modern_success_fixture_matches_server_responses() {
     assert_eq!(fixture.kind, WireFixtureKind::Exchange);
 
     // Replay each (request, response) pair. The published fixture lets
-    // downstream consumers (a host, harn-cloud) drive identical
+    // downstream consumers (a host, a cloud platform) drive identical
     // sequences and assert the same envelope/cache shape Harn does.
     for pair in fixture.documents.chunks(2) {
         if pair.len() != 2 {

@@ -1521,7 +1521,7 @@ mod tests {
 
     #[test]
     fn openai_parser_keeps_finish_reason_on_empty_args_tool_call() {
-        // burin-code#2121 evidence shape (non-streaming): the provider
+        // IDE-host bug-report evidence shape (non-streaming): the provider
         // boundary delivers a named tool call with literally "{}" arguments.
         // `finish_reason` must surface as `stop_reason` so downstream
         // feedback can distinguish a length-truncated call from a clean-stop

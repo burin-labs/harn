@@ -82,7 +82,7 @@ pub fn file(path, encryption_key) -> Storage {
 /**
  * harn_cloud_session returns a handle routing through the cloud
  * `oauth_storage.cloud_*` host capability with `scope = "session"`.
- * The embedder (e.g. harn-cloud) is responsible for tenant-scoped
+ * The embedder (e.g. a cloud platform) is responsible for tenant-scoped
  * storage and per-session isolation.
  *
  * @effects: [host_call]
@@ -96,7 +96,7 @@ pub fn harn_cloud_session() -> Storage {
 /**
  * harn_cloud_org returns a handle routing through the cloud
  * `oauth_storage.cloud_*` host capability with `scope = "org"`. The
- * embedder (e.g. harn-cloud) is responsible for org-scoped storage so
+ * embedder (e.g. a cloud platform) is responsible for org-scoped storage so
  * multiple agents in the same org share the same authenticated
  * client.
  *

@@ -159,7 +159,7 @@ pub fn context_eval_manifest(tasks = [], modes = [], options = nil) {
 }
 
 /**
- * Return the report schema id consumed by harn-cloud and local host UIs.
+ * Return the report schema id consumed by a cloud platform and local host UIs.
  *
  * @effects: []
  * @errors: []

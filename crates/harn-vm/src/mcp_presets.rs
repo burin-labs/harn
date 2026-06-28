@@ -1,6 +1,6 @@
 //! Canonical catalog of well-known MCP server presets (harn#2650).
 //!
-//! Thin clients (the burin-code TUI and the macOS GUI) used to each carry
+//! Thin clients (an IDE host's TUI and the macOS GUI) used to each carry
 //! their own hardcoded list of "one-click" MCP servers — Notion, Linear,
 //! GitHub, a local filesystem server, etc. Those lists drifted from each
 //! other. This module is the single harn-owned source of truth.

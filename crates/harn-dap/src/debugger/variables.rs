@@ -360,7 +360,7 @@ impl Debugger {
     /// an lvalue path (e.g. `plan.tasks[0].status`). We currently only
     /// support plain names here; dotted/indexed paths fall through to
     /// an error so the IDE shows a diagnostic instead of silently
-    /// no-opping. Full path support is tracked in burin-code #91 as a
+    /// no-opping. Full path support is tracked by the IDE host as a
     /// follow-up.
     pub(crate) fn handle_set_expression(&mut self, msg: &DapMessage) -> Vec<DapResponse> {
         let args = msg.arguments.as_ref();

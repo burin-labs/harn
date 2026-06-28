@@ -312,7 +312,7 @@ impl Debugger {
     /// offset in a rendered prompt to the originating `.harn.prompt`
     /// source span. The IDE uses this to highlight the template range
     /// that produced the chunk the user clicked in the LLM transcript
-    /// view. See burin-code issues #93 and #94 for the UX backing.
+    /// view. See the IDE host's prompt-provenance UX for the backing.
     fn handle_prompt_provenance(&mut self, msg: &DapMessage) -> Vec<DapResponse> {
         let args = msg.arguments.as_ref();
         let prompt_id = args

@@ -1,7 +1,7 @@
 # Canonical catalog of well-known MCP server presets (harn#2650).
 #
 # This is the harn-owned source of truth for one-click MCP servers, rendered
-# identically by every client (the burin-code TUI and the macOS GUI). It is
+# identically by every client (an IDE host's TUI and the macOS GUI). It is
 # **data, not code** (harn#3348): edit it here to change the shipped defaults,
 # or override/extend it at runtime without a recompile via
 # `~/.config/harn/mcp_presets.toml` (or the `HARN_MCP_PRESETS_CONFIG` env var).

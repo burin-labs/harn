@@ -1056,7 +1056,7 @@ pub(super) fn dump_llm_response(
         // layer has always captured this onto `LlmResult.stop_reason`, but the
         // observability record dropped it — so transcript mining saw
         // stop_reason=None on every provider response and truncation analysis
-        // (burin-code#2121) was blind to output-cap cuts. `null` when the
+        // (an IDE host bug report) was blind to output-cap cuts. `null` when the
         // provider reported nothing.
         "stop_reason": result.stop_reason,
         "response_ms": response_ms,
@@ -2205,7 +2205,7 @@ mod retry_tests {
         );
         assert_eq!(parsed[0]["name"], "run");
         // The provider-reported stop reason must ride the observability record
-        // (burin-code#2121: it was dropped here, blinding transcript mining to
+        // (an IDE host bug report: it was dropped here, blinding transcript mining to
         // length truncations on every provider route).
         assert_eq!(event["stop_reason"], "stop");
 

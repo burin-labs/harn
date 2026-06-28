@@ -147,7 +147,7 @@ pub fn resume_by_local_runtime(harness, suspension) -> ResumeByDispatchResult {
 }
 
 /**
- * resume_by_cloud_harness registers the suspension with the harn-cloud
+ * resume_by_cloud_harness registers the suspension with the cloud
  * webhook receiver for durability across process restarts. Declines
  * with `{handled: false, reason: "no_cloud_session"}` when no cloud
  * session is bound — the local runtime or parent LLM must resume.

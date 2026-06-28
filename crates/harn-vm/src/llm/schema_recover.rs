@@ -1,6 +1,6 @@
 //! `schema_recover(text, schema, opts?)` — best-effort recovery of
 //! malformed LLM output against a target schema. Implements the
-//! three-tier fallback that scripts (notably `burin-code`'s
+//! three-tier fallback that scripts (notably an IDE host's
 //! `grade-lora-corpus.harn` `normalize_grader_output()`) used to
 //! hand-roll: parse → extract → regex → optional LLM repair.
 //!

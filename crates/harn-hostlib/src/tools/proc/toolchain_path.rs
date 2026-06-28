@@ -1,12 +1,12 @@
 //! mise / asdf toolchain PATH normalizer for the `run()` tool family.
 //!
-//! Background (burin-code env-resilience R&D, "Pick B"): when the agent runs a
+//! Background (an IDE host's env-resilience R&D, "Pick B"): when the agent runs a
 //! shell command, the child process should resolve the interpreter the *repo
 //! declares* (`.tool-versions`, `.mise.toml`, `.ruby-version`, `.nvmrc`), not
 //! whatever stale system version happens to be first on `PATH`. The motivating
 //! failure was a keg-only Ruby 2.6.10 shadowing a repo-declared Ruby 3.2 — the
-//! agent burned ~32 turns chasing a phantom. This generalizes burin-code
-//! #2136's hardcoded `/opt/homebrew/opt/ruby/bin` fix into a principled,
+//! agent burned ~32 turns chasing a phantom. This generalizes an IDE host's
+//! hardcoded `/opt/homebrew/opt/ruby/bin` fix into a principled,
 //! language-agnostic, declaration-gated mechanism.
 //!
 //! Guardrails (these are why the design passed adversarial review):

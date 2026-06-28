@@ -250,7 +250,7 @@ fn agent_primitive_denied_tool(
 /// (`{}` or null) and failed required-parameter validation.
 ///
 /// Observed live on the OpenAI-compatible native tool-call route
-/// (burin-code#2121): 13/165 edit calls arrived with literally `{}` arguments
+/// (an IDE host bug report): 13/165 edit calls arrived with literally `{}` arguments
 /// while the model generated 549–5,056 output tokens those turns — the model
 /// authored content, but the provider boundary delivered an empty-args call.
 /// The generic "missing required parameter(s): path" message misdiagnoses

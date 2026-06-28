@@ -476,7 +476,7 @@ mod tests {
 
     #[test]
     fn compiles_destructuring_default_in_typescript() {
-        // The #2824 / burin-code#1629 codemod shape.
+        // The #2824 codemod shape.
         let snippet = "$SRC?.$KEY ?? $DEFAULT";
         let compiled = compile_pattern(snippet, Language::TypeScript).expect("compiles");
         assert_eq!(compiled.metavars, vec!["SRC", "KEY", "DEFAULT"]);

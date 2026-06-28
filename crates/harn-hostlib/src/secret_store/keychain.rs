@@ -1,6 +1,6 @@
 //! Apple Keychain-backed secret store. The `account` namespace maps to
 //! `kSecAttrService`, the `key` argument to `kSecAttrAccount`, matching the
-//! Swift `KeychainCredentialStore` layout from burin-code so existing
+//! Swift `KeychainCredentialStore` layout from an IDE host so existing
 //! credentials are reachable without migration.
 
 #![cfg(any(target_os = "macos", target_os = "ios"))]

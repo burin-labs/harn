@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 /// Coalescing window for `input_json_delta` → `tool_call_update` emission.
 /// Models stream tool args in tens of small chunks; without coalescing a
 /// 200-char tool call could fan out to 30+ events on a slow client. The
-/// 50 ms window matches what burin-code's TUI redraw cadence handles
+/// 50 ms window matches what an IDE host's TUI redraw cadence handles
 /// without dropping frames.
 pub(super) const COALESCE_WINDOW: Duration = Duration::from_millis(50);
 
