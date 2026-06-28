@@ -81,6 +81,9 @@ provider = "minimax"
 context_window = 1000000
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 0.20, output_per_mtok = 1.10 }
+deprecated = true
+deprecation_note = "Dead on api.minimax.io 2026-06-28 (harn#3645 §4): HTTP 500 'token plan not support model (2061)' and absent from GET /v1/models. Use MiniMax-M2 (or M2.5/M2.7)."
+superseded_by = "MiniMax-M2"
 
 # MiniMax mirror on OpenRouter — same family, OpenRouter adds margin and
 # bundles native-tools passthrough so the openai_chat_completions wire

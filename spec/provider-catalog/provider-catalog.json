@@ -6915,7 +6915,9 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "Dead on api.minimax.io 2026-06-28 (harn#3645 §4): HTTP 500 'token plan not support model (2061)' and absent from GET /v1/models. Use MiniMax-M2 (or M2.5/M2.7).",
+        "superseded_by": "MiniMax-M2"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -12736,6 +12738,74 @@
       ]
     },
     {
+      "id": "Qwen/Qwen2.5-7B-Instruct-Turbo",
+      "name": "Qwen2.5 7B Instruct Turbo (Together)",
+      "provider": "together",
+      "aliases": [],
+      "context_window": 32768,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "delimited",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.3,
+        "output_per_mtok": 0.3,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "qwen",
+      "lineage": "qwen",
+      "tier": "small",
+      "open_weight": true,
+      "strengths": [
+        "speed",
+        "cheap",
+        "tool_use"
+      ]
+    },
+    {
       "id": "Qwen/Qwen3-Coder-Next-FP8",
       "name": "Qwen3 Coder Next FP8 (Together, dedicated)",
       "provider": "together",
@@ -13039,6 +13109,74 @@
         "vision",
         "reasoning",
         "coding"
+      ]
+    },
+    {
+      "id": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+      "name": "Llama 3.3 70B Instruct Turbo (Together)",
+      "provider": "together",
+      "aliases": [],
+      "context_window": 131072,
+      "logical_model": "llama-3.3-70b-instruct",
+      "equivalence_group": "llama-3.3-70b-instruct",
+      "served_variant": "together",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_notes": "Together documents native tool calls for this serverless sample route; add live parity probes before broadening to all Together-hosted Llama variants.",
+        "tool_search": []
+      },
+      "structured_output": "none",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "none",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.88,
+        "output_per_mtok": 0.88,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools"
+      ],
+      "family": "llama",
+      "lineage": "llama",
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "tool_use",
+        "cheap"
       ]
     },
     {

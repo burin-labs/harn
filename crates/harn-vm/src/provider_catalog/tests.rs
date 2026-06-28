@@ -1132,3 +1132,72 @@ routes = ["private:img:tag-a", "not-a-route"]
         "sibling routes are unaffected"
     );
 }
+
+#[test]
+fn live_catalog_wire_models_strip_provider_route_prefix() {
+    // harn#3645 §4 regression guard. Hosted rows are keyed by a
+    // `provider/<wire-id>` selector so the same weights stay collision-free
+    // across hosts (e.g. `groq/openai/gpt-oss-20b`,
+    // `deepinfra/Qwen/Qwen3.6-35B-A3B`), but the value sent on the wire must
+    // be the bare provider-native id with no `<provider>/` route prefix.
+    // A wire_model that still carries its own provider prefix 404s at request
+    // time. Assert every catalog row whose wire_model is set does NOT prefix
+    // the wire id with that row's provider segment.
+    let catalog = artifact();
+    let offenders: Vec<String> = catalog
+        .models
+        .iter()
+        .filter_map(|model| {
+            let wire = model.wire_model.as_deref()?;
+            let bad_prefix = format!("{}/", model.provider);
+            if wire.starts_with(&bad_prefix) {
+                Some(format!("{} -> wire_model {}", model.id, wire))
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert!(
+        offenders.is_empty(),
+        "wire_model values must not retain their own `<provider>/` route prefix: {offenders:?}"
+    );
+}
+
+#[test]
+fn live_catalog_deepinfra_wire_models_have_no_deepinfra_prefix() {
+    // harn#3645 §4 (deepinfra). The DeepInfra rows are keyed
+    // `deepinfra/<hf-id>` but dispatch the bare Hugging Face id (carried in
+    // wire_model). Lock that no DeepInfra wire id ever regains the
+    // `deepinfra/` prefix, e.g. the di-qwen3.6 route must send
+    // `Qwen/Qwen3.6-35B-A3B`, never `deepinfra/Qwen/Qwen3.6-35B-A3B`.
+    let catalog = artifact();
+    for model in catalog.models.iter().filter(|m| m.provider == "deepinfra") {
+        if let Some(wire) = model.wire_model.as_deref() {
+            assert!(
+                !wire.starts_with("deepinfra/"),
+                "deepinfra row {} has a wire_model still prefixed with `deepinfra/`: {wire}",
+                model.id
+            );
+        }
+    }
+}
+
+#[test]
+fn live_catalog_nvidia_minimax_m2_7_id_vs_wire_parity() {
+    // harn#3645 §4 (nvidia). The NVIDIA NIM catalog id `nvidia/minimax-m2.7`
+    // differs from the live NIM wire id `minimaxai/minimax-m2.7`. Dispatch is
+    // correct because wire_model carries the NIM id, but any path that uses the
+    // catalog `id` as the wire id 404s. Guard the wire_model so a future
+    // refresh cannot silently drop or wrong-case it.
+    let catalog = artifact();
+    let row = catalog
+        .models
+        .iter()
+        .find(|model| model.id == "nvidia/minimax-m2.7")
+        .expect("catalog has the nvidia/minimax-m2.7 row");
+    assert_eq!(
+        row.wire_model.as_deref(),
+        Some("minimaxai/minimax-m2.7"),
+        "nvidia/minimax-m2.7 must dispatch the NIM wire id minimaxai/minimax-m2.7"
+    );
+}
