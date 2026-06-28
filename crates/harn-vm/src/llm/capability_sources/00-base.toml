@@ -178,6 +178,11 @@
 #                     followed immediately by `role=tool` messages for every
 #                     emitted `tool_call_id`; strict OpenAI-compatible servers
 #                     reject interleaved runtime feedback before the result.
+#   supports_parallel_tool_calls:
+#                     whether one assistant history message may contain multiple
+#                     `tool_calls[]` entries; strict OpenAI-compatible servers
+#                     can reject replayed history with more than one tool call
+#                     even when Harn originally parsed text-tool calls.
 #
 # OPINIONATED PROVIDER/MODEL/CONFIG POLICY (enforced by the footgun gate in
 # crate::llm::capability_audit, wired into `providers build-capabilities
