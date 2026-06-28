@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 
 use super::tool_conformance::{report_satisfies_required_probe, ToolConformanceReport};
-use crate::llm_config;
+use crate::llm_config::{self, LocalMemoryDef, ModelDef};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -58,6 +58,12 @@ pub struct LocalRuntimeProfileReport {
     pub requires_probe_gate: bool,
     pub selected: RuntimeProfile,
     pub runtime_profiles: BTreeMap<String, RuntimeProfile>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct RuntimeProfileHost {
+    pub system_available_gib: Option<f64>,
+    pub accelerator_free_gib: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -133,8 +139,30 @@ pub fn local_runtime_profile_report_for(
     model_id: &str,
     provider: &str,
 ) -> LocalRuntimeProfileReport {
+    local_runtime_profile_report_for_host(alias, model_id, provider, None)
+}
+
+pub fn local_runtime_profile_report_for_host(
+    alias: Option<&str>,
+    model_id: &str,
+    provider: &str,
+    host: Option<RuntimeProfileHost>,
+) -> LocalRuntimeProfileReport {
     let family = model_family(alias, model_id);
-    let runtime_profiles = profiles_for_family(family);
+    let catalog_model = llm_config::model_catalog_entry(model_id);
+    let runtime_profiles = profiles_for_family(family)
+        .into_iter()
+        .map(|(runtime, profile)| {
+            let adjusted = adjust_profile_for_host(
+                family,
+                &runtime,
+                catalog_model.as_ref(),
+                profile,
+                host.as_ref(),
+            );
+            (runtime, adjusted)
+        })
+        .collect::<BTreeMap<_, _>>();
     let selected = runtime_profiles
         .get(provider)
         .cloned()
@@ -238,18 +266,15 @@ fn profiles_for_family(family: &str) -> BTreeMap<String, RuntimeProfile> {
                 "llamacpp".to_string(),
                 profile(
                     RuntimeProfileStatus::Experimental,
-                    &["tool_probe", "two_turn_cache_probe"],
+                    &["tool_probe"],
                     Some(65_536),
+                    &["inflated_input_token_accounting_on_repeated_turns"],
                     &[
-                        "full_prompt_reprocess_on_hybrid_cache",
-                        "inflated_input_token_accounting_on_repeated_turns",
+                        "Run a tool probe before write-heavy evals.",
+                        "Record llama.cpp build, ctx, cache type, and prefix-cache telemetry in eval receipts.",
                     ],
                     &[
-                        "Run a two-turn cache probe before write-heavy evals.",
-                        "Prefer short-lived scan/edit loops until cache telemetry is clean.",
-                    ],
-                    &[
-                        "Qwen3.6-family GGUF stacks can pass simple edits while still re-prefilling expensive prefixes.",
+                        "Current llama.cpp builds reuse two-turn Qwen3.6 hybrid-cache prefixes; keep token accounting visible in receipts.",
                     ],
                 ),
             ),
@@ -349,6 +374,67 @@ fn profiles_for_family(family: &str) -> BTreeMap<String, RuntimeProfile> {
     }
 }
 
+fn adjust_profile_for_host(
+    family: &str,
+    runtime: &str,
+    model: Option<&ModelDef>,
+    mut profile: RuntimeProfile,
+    host: Option<&RuntimeProfileHost>,
+) -> RuntimeProfile {
+    if family == "qwen3.6-a3b-hybrid" && runtime == "llamacpp" {
+        if let (Some(model), Some(host)) = (model, host) {
+            if let Some(ctx) = recommended_context_from_local_memory(model, host) {
+                profile.recommended_num_ctx = Some(ctx);
+            }
+        }
+    }
+    profile
+}
+
+fn recommended_context_from_local_memory(
+    model: &ModelDef,
+    host: &RuntimeProfileHost,
+) -> Option<u64> {
+    let memory = model.local_memory.as_ref()?;
+    let available_gib = host
+        .accelerator_free_gib
+        .or(host.system_available_gib)
+        .filter(|available| *available > 0.0)?;
+    let base = memory.base_resident_gib?;
+    let kv_per_1k = scaled_kv_cache_gib_per_1k(memory)?;
+    let safety = memory.safety_margin_gib.unwrap_or(4.0);
+    let usable_for_kv = available_gib - base - safety;
+    if usable_for_kv <= 0.0 {
+        return Some(8_192);
+    }
+
+    let by_memory = ((usable_for_kv / kv_per_1k) * 1_000.0).floor() as u64;
+    let ceiling = memory
+        .max_recommended_context
+        .or(model.runtime_context_window)
+        .unwrap_or(model.context_window)
+        .min(model.context_window);
+    let floor = 65_536_u64.min(ceiling).min(model.context_window);
+    Some(round_context_down(by_memory.min(ceiling).max(floor)))
+}
+
+fn scaled_kv_cache_gib_per_1k(memory: &LocalMemoryDef) -> Option<f64> {
+    let base = memory.kv_cache_gib_per_1k_ctx?;
+    let multiplier = memory
+        .default_cache_type
+        .as_ref()
+        .and_then(|cache_type| memory.cache_type_multipliers.get(cache_type))
+        .copied()
+        .unwrap_or(1.0);
+    let scaled = base * multiplier;
+    (scaled > 0.0).then_some(scaled)
+}
+
+fn round_context_down(ctx: u64) -> u64 {
+    const STEP: u64 = 8_192;
+    (ctx / STEP).max(1) * STEP
+}
+
 fn generic_profile(provider: &str) -> RuntimeProfile {
     RuntimeProfile {
         status: RuntimeProfileStatus::Unknown,
@@ -399,10 +485,39 @@ mod tests {
 
         let llamacpp = local_runtime_profile_report("local-qwen3.6", Some("llamacpp"));
         assert_eq!(llamacpp.selected_status, RuntimeProfileStatus::Experimental);
-        assert!(llamacpp
+        assert_eq!(llamacpp.selected.requires, vec!["tool_probe".to_string()]);
+        assert!(!llamacpp
             .selected
             .known_risks
             .contains(&"full_prompt_reprocess_on_hybrid_cache".to_string()));
+    }
+
+    #[test]
+    fn qwen_llamacpp_profile_raises_context_when_accelerator_memory_fits() {
+        let report = local_runtime_profile_report_for_host(
+            Some("local-qwen3.6"),
+            "qwen3.6-35b-a3b-ud-q4-k-xl",
+            "llamacpp",
+            Some(RuntimeProfileHost {
+                system_available_gib: None,
+                accelerator_free_gib: Some(32.0),
+            }),
+        );
+        assert_eq!(report.selected.recommended_num_ctx, Some(262_144));
+    }
+
+    #[test]
+    fn qwen_llamacpp_profile_keeps_conservative_context_when_memory_is_tight() {
+        let report = local_runtime_profile_report_for_host(
+            Some("local-qwen3.6"),
+            "qwen3.6-35b-a3b-ud-q4-k-xl",
+            "llamacpp",
+            Some(RuntimeProfileHost {
+                system_available_gib: None,
+                accelerator_free_gib: Some(24.0),
+            }),
+        );
+        assert_eq!(report.selected.recommended_num_ctx, Some(73_728));
     }
 
     #[test]

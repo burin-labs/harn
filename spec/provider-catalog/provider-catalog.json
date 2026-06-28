@@ -5952,7 +5952,7 @@
         "measured_context_window": 8192,
         "measured_cache_type": "q8_0",
         "base_resident_gib": 19.0,
-        "kv_cache_gib_per_1k_ctx": 0.1,
+        "kv_cache_gib_per_1k_ctx": 0.0135,
         "cache_type_multipliers": {
           "f16": 2.0,
           "q4_0": 0.5,
@@ -5963,11 +5963,11 @@
         },
         "default_cache_type": "q8_0",
         "safety_margin_gib": 4.0,
-        "max_recommended_context": 65536,
-        "last_verified": "2026-06-05",
-        "notes": "Empirical llama-server RSS was about 19.5 GiB at ctx=8192 with q8_0 KV on Apple Silicon. Treat as a conservative launch guard, not an exact allocator model."
+        "max_recommended_context": 262144,
+        "last_verified": "2026-06-28",
+        "notes": "Empirical llama.cpp b9821 / CUDA 12.8 / RTX 5090 measurements with q8_0 KV showed SWA-capped KV growth of about 0.87 GiB per 65k tokens and full 262144 ctx fitting with headroom. Treat as a sizing estimate, not an allocator guarantee."
       },
-      "runtime_context_window": 65536,
+      "runtime_context_window": 262144,
       "stream_timeout": 900.0,
       "modalities": {
         "input": [

@@ -3,7 +3,7 @@
 name = "Qwen3.6 35B (Unsloth Q4_K_XL, llama.cpp)"
 provider = "llamacpp"
 context_window = 262144
-runtime_context_window = 65536
+runtime_context_window = 262144
 stream_timeout = 900.0
 capabilities = ["tools", "streaming", "thinking"]
 tier = "mid"
@@ -14,13 +14,13 @@ measured_resident_gib = 19.5
 measured_context_window = 8192
 measured_cache_type = "q8_0"
 base_resident_gib = 19.0
-kv_cache_gib_per_1k_ctx = 0.10
+kv_cache_gib_per_1k_ctx = 0.0135
 default_cache_type = "q8_0"
 safety_margin_gib = 4.0
-max_recommended_context = 65536
+max_recommended_context = 262144
 cache_type_multipliers = { q8_0 = 1.0, f16 = 2.0, q4_0 = 0.5, q4_1 = 0.5, q5_0 = 0.625, q5_1 = 0.625 }
-last_verified = "2026-06-05"
-notes = "Empirical llama-server RSS was about 19.5 GiB at ctx=8192 with q8_0 KV on Apple Silicon. Treat as a conservative launch guard, not an exact allocator model."
+last_verified = "2026-06-28"
+notes = "Empirical llama.cpp b9821 / CUDA 12.8 / RTX 5090 measurements with q8_0 KV showed SWA-capped KV growth of about 0.87 GiB per 65k tokens and full 262144 ctx fitting with headroom. Treat as a sizing estimate, not an allocator guarantee."
 [models."qwen3.6-35b-a3b-ud-q5-k-xl"]
 name = "Qwen3.6 35B (Unsloth Q5_K_XL, llama.cpp)"
 provider = "llamacpp"

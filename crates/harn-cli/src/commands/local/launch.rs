@@ -962,6 +962,8 @@ mod tests {
             },
             gpu: GpuSnapshot {
                 kind: GpuKind::None,
+                total_memory_bytes: None,
+                free_memory_bytes: None,
             },
             disk: DiskSnapshot {
                 path: PathBuf::from("."),
