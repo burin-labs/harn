@@ -1,0 +1,6 @@
+[review_captain][pr={{ pr }}][stage=clarified]
+
+The author answered: "{{ answer }}"
+
+Emit the final verdict envelope as JSON with keys verdict, missing_tests,
+risky_paths, and reasoning.
