@@ -2,6 +2,8 @@
 //! DeepSeek, Fireworks, HuggingFace, local vLLM/SGLang, and any server that
 //! speaks the `/v1/chat/completions` protocol.
 
+use std::collections::HashSet;
+
 use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult, ThinkingConfig};
 use crate::llm::provider::{LlmProvider, LlmProviderChat};
 use crate::llm::providers::common::parse_major_minor_tail;
@@ -169,6 +171,9 @@ impl OpenAiCompatibleProvider {
             }));
         }
         msgs = crate::llm::api::normalize_openai_style_messages(msgs, force_string_content);
+        if caps.requires_tool_result_adjacency {
+            msgs = enforce_tool_result_adjacency(msgs);
+        }
 
         let wire_model = crate::llm_config::wire_model_id(&opts.model);
         let mut body = serde_json::json!({
@@ -386,6 +391,88 @@ impl OpenAiCompatibleProvider {
         .await?;
         Ok(result)
     }
+}
+
+fn enforce_tool_result_adjacency(messages: Vec<serde_json::Value>) -> Vec<serde_json::Value> {
+    let mut normalized = Vec::with_capacity(messages.len());
+    let mut cursor = 0;
+    while cursor < messages.len() {
+        let message = messages[cursor].clone();
+        let Some(mut pending_ids) = assistant_tool_call_ids(&message) else {
+            normalized.push(message);
+            cursor += 1;
+            continue;
+        };
+
+        normalized.push(message);
+        cursor += 1;
+
+        let mut results = Vec::new();
+        let mut deferred = Vec::new();
+        while cursor < messages.len() && !pending_ids.is_empty() {
+            let next = messages[cursor].clone();
+            let matching_ids = matching_tool_result_ids(&next, &pending_ids);
+            if !matching_ids.is_empty() {
+                for id in matching_ids {
+                    pending_ids.remove(&id);
+                }
+                results.push(next);
+                cursor += 1;
+                continue;
+            }
+            if is_deferable_non_tool_message(&next) {
+                deferred.push(next);
+                cursor += 1;
+                continue;
+            }
+            break;
+        }
+
+        normalized.extend(results);
+        normalized.extend(deferred);
+    }
+    normalized
+}
+
+fn assistant_tool_call_ids(message: &serde_json::Value) -> Option<HashSet<String>> {
+    if message.get("role").and_then(|role| role.as_str()) != Some("assistant") {
+        return None;
+    }
+    let ids: HashSet<String> = message
+        .get("tool_calls")?
+        .as_array()?
+        .iter()
+        .filter_map(|call| {
+            call.get("id")
+                .and_then(|value| value.as_str())
+                .map(ToString::to_string)
+        })
+        .collect();
+    if ids.is_empty() {
+        None
+    } else {
+        Some(ids)
+    }
+}
+
+fn matching_tool_result_ids(
+    message: &serde_json::Value,
+    pending_ids: &HashSet<String>,
+) -> HashSet<String> {
+    if message.get("role").and_then(|role| role.as_str()) != Some("tool") {
+        return HashSet::new();
+    }
+    match message.get("tool_call_id").and_then(|value| value.as_str()) {
+        Some(id) if pending_ids.contains(id) => HashSet::from([id.to_string()]),
+        _ => HashSet::new(),
+    }
+}
+
+fn is_deferable_non_tool_message(message: &serde_json::Value) -> bool {
+    !matches!(
+        message.get("role").and_then(|role| role.as_str()),
+        Some("assistant" | "tool")
+    )
 }
 
 /// Remap canonical `<tool_call>` delimiters to the non-special wire form for a
@@ -1971,6 +2058,106 @@ thinking_modes = ["enabled"]
             .find(|message| message["role"] == "assistant")
             .expect("assistant message preserved");
         assert_eq!(assistant["tool_calls"][0]["id"], "call_001");
+    }
+
+    #[test]
+    fn strict_provider_defers_feedback_until_after_tool_result() {
+        let mut payload = base_request_payload();
+        payload.provider = "minimax".to_string();
+        payload.model = "MiniMax-M2".to_string();
+        payload.messages = vec![
+            json!({"role": "user", "content": "inspect"}),
+            json!({
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{
+                    "id": "call_001",
+                    "type": "function",
+                    "function": {"name": "read", "arguments": "{\"path\":\"main.rs\"}"},
+                }],
+            }),
+            json!({"role": "user", "content": "[runtime_feedback] keep going"}),
+            json!({"role": "tool", "tool_call_id": "call_001", "content": "fn main() {}"}),
+        ];
+
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+        let messages = body["messages"].as_array().expect("messages array");
+        let roles = messages
+            .iter()
+            .map(|message| message["role"].as_str().unwrap_or("?"))
+            .collect::<Vec<_>>();
+        assert_eq!(roles, vec!["user", "assistant", "tool", "user"]);
+        assert_eq!(messages[2]["tool_call_id"], "call_001");
+        assert_eq!(messages[3]["content"], "[runtime_feedback] keep going");
+    }
+
+    #[test]
+    fn strict_provider_keeps_parallel_tool_results_adjacent() {
+        let mut payload = base_request_payload();
+        payload.provider = "moonshot".to_string();
+        payload.model = "moonshot/kimi-k2.6".to_string();
+        payload.messages = vec![
+            json!({"role": "user", "content": "inspect"}),
+            json!({
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_001",
+                        "type": "function",
+                        "function": {"name": "read", "arguments": "{\"path\":\"a.rs\"}"},
+                    },
+                    {
+                        "id": "call_002",
+                        "type": "function",
+                        "function": {"name": "read", "arguments": "{\"path\":\"b.rs\"}"},
+                    },
+                ],
+            }),
+            json!({"role": "user", "content": "[runtime_feedback] keep going"}),
+            json!({"role": "tool", "tool_call_id": "call_002", "content": "b"}),
+            json!({"role": "tool", "tool_call_id": "call_001", "content": "a"}),
+        ];
+
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+        let messages = body["messages"].as_array().expect("messages array");
+        let roles = messages
+            .iter()
+            .map(|message| message["role"].as_str().unwrap_or("?"))
+            .collect::<Vec<_>>();
+        assert_eq!(roles, vec!["user", "assistant", "tool", "tool", "user"]);
+        assert_eq!(messages[2]["tool_call_id"], "call_002");
+        assert_eq!(messages[3]["tool_call_id"], "call_001");
+        assert_eq!(messages[4]["content"], "[runtime_feedback] keep going");
+    }
+
+    #[test]
+    fn lenient_provider_preserves_interleaved_tool_feedback_order() {
+        let mut payload = base_request_payload();
+        payload.provider = "openai".to_string();
+        payload.model = "gpt-4o".to_string();
+        payload.messages = vec![
+            json!({"role": "user", "content": "inspect"}),
+            json!({
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{
+                    "id": "call_001",
+                    "type": "function",
+                    "function": {"name": "read", "arguments": "{\"path\":\"main.rs\"}"},
+                }],
+            }),
+            json!({"role": "user", "content": "[runtime_feedback] keep going"}),
+            json!({"role": "tool", "tool_call_id": "call_001", "content": "fn main() {}"}),
+        ];
+
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+        let messages = body["messages"].as_array().expect("messages array");
+        let roles = messages
+            .iter()
+            .map(|message| message["role"].as_str().unwrap_or("?"))
+            .collect::<Vec<_>>();
+        assert_eq!(roles, vec!["user", "assistant", "user", "tool"]);
     }
 
     #[test]

@@ -1363,6 +1363,10 @@ pub(crate) fn capabilities_to_vm_value(
         )),
     );
     dict.insert(
+        crate::value::intern_key("requires_tool_result_adjacency"),
+        VmValue::Bool(caps.requires_tool_result_adjacency),
+    );
+    dict.insert(
         crate::value::intern_key("auto_reasoning_overrides"),
         VmValue::dict(
             caps.auto_reasoning_overrides

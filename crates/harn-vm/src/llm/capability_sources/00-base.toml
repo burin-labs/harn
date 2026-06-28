@@ -173,6 +173,11 @@
 #                     `throttled` (full precision but rate-limited to unusable
 #                     timing — e.g. Cerebras gpt-oss), `unverified` (no verdict;
 #                     same as unset). Defaults to `unverified`.
+#   requires_tool_result_adjacency:
+#                     whether an assistant message with `tool_calls` must be
+#                     followed immediately by `role=tool` messages for every
+#                     emitted `tool_call_id`; strict OpenAI-compatible servers
+#                     reject interleaved runtime feedback before the result.
 #
 # OPINIONATED PROVIDER/MODEL/CONFIG POLICY (enforced by the footgun gate in
 # crate::llm::capability_audit, wired into `providers build-capabilities

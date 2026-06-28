@@ -407,6 +407,10 @@ pub struct ProviderRule {
     /// rejects forced/specified tool choices.
     #[serde(default)]
     pub allowed_tool_choice_modes: Option<Vec<String>>,
+    /// Whether an assistant `tool_calls` message must be followed immediately
+    /// by `role=tool` messages for every emitted `tool_call_id`.
+    #[serde(default)]
+    pub requires_tool_result_adjacency: Option<bool>,
     /// Preferred endpoint family for this provider/model route. Values
     /// are descriptive labels consumed by providers, e.g.
     /// `/api/generate-raw` for Ollama raw prompt bypass.
@@ -568,6 +572,7 @@ pub struct Capabilities {
     pub frequency_penalty_supported: bool,
     pub presence_penalty_supported: bool,
     pub allowed_tool_choice_modes: Vec<String>,
+    pub requires_tool_result_adjacency: bool,
     pub recommended_endpoint: Option<String>,
     pub text_tool_wire_format_supported: bool,
     pub preferred_tool_format: Option<String>,
@@ -650,6 +655,7 @@ impl Default for Capabilities {
             frequency_penalty_supported: true,
             presence_penalty_supported: true,
             allowed_tool_choice_modes: Vec::new(),
+            requires_tool_result_adjacency: false,
             recommended_endpoint: None,
             text_tool_wire_format_supported: true,
             preferred_tool_format: None,
@@ -1570,6 +1576,7 @@ fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
         frequency_penalty_supported: None,
         presence_penalty_supported: None,
         allowed_tool_choice_modes: None,
+        requires_tool_result_adjacency: None,
         recommended_endpoint: None,
         text_tool_wire_format_supported: None,
         preferred_tool_format: None,
@@ -1691,6 +1698,7 @@ fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilitie
             .or(defaults.presence_penalty_supported)
             .unwrap_or(true),
         allowed_tool_choice_modes: rule.allowed_tool_choice_modes.clone().unwrap_or_default(),
+        requires_tool_result_adjacency: rule.requires_tool_result_adjacency.unwrap_or(false),
         recommended_endpoint: rule.recommended_endpoint.clone(),
         text_tool_wire_format_supported: rule.text_tool_wire_format_supported.unwrap_or(true),
         preferred_tool_format: Some(rule_preferred_tool_format(rule)),
@@ -2045,6 +2053,16 @@ preferred_tool_format = "native"
         reset();
         let caps = lookup("anthropic", "claude-opus-4-7");
         assert!(caps.provider_route_denylist.is_empty());
+    }
+
+    #[test]
+    fn strict_openai_compat_rows_require_tool_result_adjacency() {
+        reset();
+        assert!(lookup("moonshot", "moonshot/kimi-k2.6").requires_tool_result_adjacency);
+        assert!(lookup("moonshot", "moonshot/kimi-k2.7-code").requires_tool_result_adjacency);
+        assert!(lookup("minimax", "MiniMax-M2").requires_tool_result_adjacency);
+        assert!(lookup("minimax", "MiniMax-M2.7").requires_tool_result_adjacency);
+        assert!(!lookup("openai", "gpt-4o").requires_tool_result_adjacency);
     }
 
     #[test]
