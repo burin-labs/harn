@@ -594,9 +594,10 @@ Updated: {{ code }}
 "#,
     );
     service.notify_manifest_reloaded();
-    // Exercise the reload/notification path in-process. The production file
-    // watcher calls the same service method, but tests should not depend on
-    // OS notification timing under release-audit load.
+    // Exercise the shared reload/broadcast path in-process. The production
+    // file watcher uses the same cache-refresh and list-change helpers, but
+    // tests should not depend on OS notification timing under release-audit
+    // load.
     let seen =
         collect_notification_methods(&mut notifications, &["notifications/prompts/list_changed"])
             .await;

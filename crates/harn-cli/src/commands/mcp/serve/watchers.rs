@@ -50,11 +50,12 @@ pub(super) fn start_list_change_watcher(
 
         if prompt_changed || manifest_changed || package_changed {
             let manifest_source = std::fs::read_to_string(&config_path).unwrap_or_default();
-            *manifest_source_cache
-                .lock()
-                .expect("manifest source poisoned") = manifest_source.clone();
-            let updated = FilePromptCatalog::discover(&project_root_for_callback, &manifest_source);
-            *prompt_catalog.lock().expect("prompt catalog poisoned") = updated;
+            refresh_manifest_derived_state_cache(
+                &project_root_for_callback,
+                &manifest_source_cache,
+                &prompt_catalog,
+                manifest_source,
+            );
         }
 
         let mut kinds = Vec::new();
@@ -65,15 +66,35 @@ pub(super) fn start_list_change_watcher(
         if prompt_changed || manifest_changed || package_changed {
             kinds.push(McpListChangeKind::Prompts);
         }
-        for kind in kinds {
-            let _ = list_notify_tx.send(kind.notification());
-        }
+        send_list_changed(&list_notify_tx, &kinds);
     })
     .ok()?;
     watcher
         .watch(&project_root, notify::RecursiveMode::Recursive)
         .ok()?;
     Some(watcher)
+}
+
+pub(super) fn refresh_manifest_derived_state_cache(
+    project_root: &Path,
+    manifest_source_cache: &Arc<Mutex<String>>,
+    prompt_catalog: &Arc<Mutex<FilePromptCatalog>>,
+    manifest_source: String,
+) {
+    *manifest_source_cache
+        .lock()
+        .expect("manifest source poisoned") = manifest_source.clone();
+    let updated = FilePromptCatalog::discover(project_root, &manifest_source);
+    *prompt_catalog.lock().expect("prompt catalog poisoned") = updated;
+}
+
+pub(super) fn send_list_changed(
+    list_notify_tx: &broadcast::Sender<JsonValue>,
+    kinds: &[McpListChangeKind],
+) {
+    for kind in kinds {
+        let _ = list_notify_tx.send(kind.notification());
+    }
 }
 
 fn is_prompt_reload_path(path: &Path) -> bool {
