@@ -127,12 +127,37 @@ fn policy_allows_tool(policy: &CapabilityPolicy, tool: &str) -> bool {
     policy.tools.is_empty() || policy.tools.iter().any(|allowed| allowed == tool)
 }
 
+fn policy_grants_capability(policy: &CapabilityPolicy, capability: &str, op: &str) -> bool {
+    policy
+        .capabilities
+        .get(capability)
+        .is_some_and(|ops| ops.is_empty() || ops.iter().any(|allowed| allowed == op))
+}
+
 fn policy_allows_capability(policy: &CapabilityPolicy, capability: &str, op: &str) -> bool {
-    policy.capabilities.is_empty()
-        || policy
-            .capabilities
-            .get(capability)
-            .is_some_and(|ops| ops.is_empty() || ops.iter().any(|allowed| allowed == op))
+    if policy.capabilities.is_empty() {
+        // Empty capability map = allow-all (e.g. the root agent policy).
+        return true;
+    }
+    if policy_grants_capability(policy, capability, op) {
+        return true;
+    }
+    // Capability subsumption: a stronger read grant implies the weaker
+    // observations it already exposes. An existence/metadata probe
+    // (`workspace.exists`, used by `file_exists`/`stat`) reveals strictly less
+    // than reading file contents (`workspace.read_text`) or listing a directory
+    // (`workspace.list`) — both of which already disclose whether a path
+    // exists. A policy that grants read/list but withholds the existence probe
+    // is incoherent, and silently wedges any tool that stats a path before
+    // reading it (look, read_file, edit/scaffold preflight). Narrowed worker
+    // policies derived from tool annotations hit this constantly because no
+    // annotation declares `workspace.exists`. Encode the lattice once here so
+    // every narrowed policy benefits, not one dispatch surface at a time.
+    if capability == "workspace" && op == "exists" {
+        return policy_grants_capability(policy, "workspace", "read_text")
+            || policy_grants_capability(policy, "workspace", "list");
+    }
+    false
 }
 
 fn policy_allows_side_effect(policy: &CapabilityPolicy, requested: &str) -> bool {
@@ -843,6 +868,52 @@ mod approval_policy_tests {
     use super::*;
     use crate::orchestration::{pop_execution_policy, push_execution_policy, CapabilityPolicy};
     use crate::tool_annotations::{ToolAnnotations, ToolArgSchema, ToolKind};
+
+    fn workspace_caps(ops: &[&str]) -> CapabilityPolicy {
+        CapabilityPolicy {
+            capabilities: std::collections::BTreeMap::from([(
+                "workspace".to_string(),
+                ops.iter().map(|s| s.to_string()).collect(),
+            )]),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn read_text_subsumes_exists_probe() {
+        // A narrowed worker policy that grants read_text/list (the shape derived
+        // from look/edit/scaffold tool annotations) but never declares the
+        // weaker `workspace.exists` op must still permit `file_exists`/`stat`:
+        // existence is strictly less information than reading the file. Without
+        // subsumption this silently wedged every parallel sub-agent (look denied
+        // -> zero progress -> zero edits).
+        push_execution_policy(workspace_caps(&[
+            "read_text",
+            "list",
+            "write_text",
+            "apply_edit",
+        ]));
+        assert!(enforce_current_policy_for_builtin("file_exists", &[]).is_ok());
+        assert!(enforce_current_policy_for_builtin("stat", &[]).is_ok());
+        pop_execution_policy();
+    }
+
+    #[test]
+    fn list_alone_subsumes_exists_probe() {
+        // Listing a directory already reveals which entries exist.
+        push_execution_policy(workspace_caps(&["list"]));
+        assert!(enforce_current_policy_for_builtin("file_exists", &[]).is_ok());
+        pop_execution_policy();
+    }
+
+    #[test]
+    fn exists_probe_rejected_without_any_read_grant() {
+        // A write-only grant exposes no read surface, so the existence probe is
+        // genuinely above the ceiling and must still be rejected.
+        push_execution_policy(workspace_caps(&["write_text", "apply_edit"]));
+        assert!(enforce_current_policy_for_builtin("file_exists", &[]).is_err());
+        pop_execution_policy();
+    }
 
     #[test]
     fn auto_deny_takes_precedence_over_auto_approve() {
