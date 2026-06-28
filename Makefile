@@ -475,57 +475,57 @@ check-trigger-quickref:
 # Regenerate the provider/model capability matrix from capabilities.toml.
 gen-provider-matrix:
 	$(MAKE) gen-provider-capabilities
-	$(HARN_CMD) providers matrix
+	$(HARN_CMD) provider catalog matrix
 
 # CI guard: fail if the provider matrix docs drift from capabilities.toml.
 check-provider-matrix:
 	@echo "=== Checking docs/src/provider-matrix.md is up to date ==="
-	@$(HARN_CMD) providers build-capabilities --check
-	@$(HARN_CMD) providers matrix --check
+	@$(HARN_CMD) provider catalog build-capabilities --check
+	@$(HARN_CMD) provider catalog matrix --check
 	@echo "    Harn provider matrix OK."
 
 # Regenerate provider support recommendations from catalog/capabilities/notes.
 gen-provider-support:
 	$(MAKE) gen-provider-capabilities
-	$(HARN_CMD) providers support
+	$(HARN_CMD) provider catalog support
 
 # CI guard: fail if provider support markdown or JSON drift.
 check-provider-support:
 	@echo "=== Checking provider support artifacts are up to date ==="
-	@$(HARN_CMD) providers build-capabilities --check
-	@$(HARN_CMD) providers support --check
+	@$(HARN_CMD) provider catalog build-capabilities --check
+	@$(HARN_CMD) provider catalog support --check
 	@echo "    Harn provider support OK."
 
 # Regenerate the embedded provider capability TOML snapshot from source fragments.
 gen-provider-capabilities:
-	$(HARN_CMD) providers build-capabilities
+	$(HARN_CMD) provider catalog build-capabilities
 
 # CI guard: fail if the embedded provider capability snapshot drifted from fragments.
 check-provider-capabilities:
 	@echo "=== Checking provider capability snapshot ==="
-	@$(HARN_CMD) providers build-capabilities --check
+	@$(HARN_CMD) provider catalog build-capabilities --check
 	@echo "    Harn provider capability snapshot OK."
 
 # Regenerate the embedded provider/model TOML snapshot from source fragments.
 gen-provider-config:
-	$(HARN_CMD) providers build-config
+	$(HARN_CMD) provider catalog build-config
 
 # CI guard: fail if the embedded provider/model TOML snapshot drifted from fragments.
 check-provider-config:
 	@echo "=== Checking provider config snapshot ==="
-	@$(HARN_CMD) providers build-config --check
+	@$(HARN_CMD) provider catalog build-config --check
 	@echo "    Harn provider config snapshot OK."
 
 # Regenerate the checked-in provider/model catalog JSON, schema, and downstream bindings.
 gen-provider-catalog:
 	$(MAKE) gen-provider-config
-	$(HARN_CMD) providers export
+	$(HARN_CMD) provider catalog export
 
 # CI guard: fail if checked-in provider/model catalog artifacts drift.
 check-provider-catalog:
 	@echo "=== Checking provider catalog artifacts ==="
-	@$(HARN_CMD) providers build-config --check
-	@$(HARN_CMD) providers validate --check-artifacts
+	@$(HARN_CMD) provider catalog build-config --check
+	@$(HARN_CMD) provider catalog validate --check-artifacts
 	@echo "    Harn provider catalog artifacts OK."
 
 # Regenerate the connector capability parity matrix from package manifests.

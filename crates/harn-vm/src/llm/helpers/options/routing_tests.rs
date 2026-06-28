@@ -855,7 +855,7 @@ fn assert_unsupported_local_option(option: &str, extra: Vec<(&str, VmValue)>) {
 
     assert!(
             err.to_string().contains(&format!(
-                "option `{option}` is not supported by `unsupported-model` (provider `local`). See `harn providers matrix` for compatibility."
+                "option `{option}` is not supported by `unsupported-model` (provider `local`). See `harn provider catalog matrix` for compatibility."
             )),
             "unexpected error for {option}: {err}"
         );

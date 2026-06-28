@@ -5,10 +5,10 @@ capability matrix. The runtime embeds `../capabilities.toml`, which is generated
 from this directory by:
 
 ```sh
-harn providers build-capabilities
+harn provider catalog build-capabilities
 ```
 
-Use `harn providers build-capabilities --check` to verify that
+Use `harn provider catalog build-capabilities --check` to verify that
 `../capabilities.toml` matches the fragments. Direct edits to
 `../capabilities.toml` are invalid because the next generation pass will
 overwrite them.

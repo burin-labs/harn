@@ -1183,14 +1183,14 @@ patch releases never break the documented field shapes.
 Secrets never appear in any output. Credential checks list the env var
 **names** they looked for, not the values.
 
-## harn provider-ready
+## harn provider ready
 
 Probe a configured provider's `/models` endpoint and optionally require a
 specific model alias or provider-native model id.
 
 ```bash
-harn provider-ready mlx --model mlx-qwen3.6
-harn provider-ready mlx --base-url http://127.0.0.1:8002 --json
+harn provider ready mlx --model mlx-qwen3.6
+harn provider ready mlx --base-url http://127.0.0.1:8002 --json
 ```
 
 The command exits non-zero for unreachable servers, bad HTTP status,
@@ -1216,7 +1216,7 @@ harn provider capabilities audit --json
 harn provider capabilities promote-from-eval .harn-runs/coding-agent-bench/latest/tool_mode_parity_overlay.toml
 ```
 
-## harn provider-probe
+## harn provider probe
 
 Snapshot a provider's readiness and local loaded-model state as JSON. For
 Ollama, the output also includes `/api/ps` memory/context details. When a
@@ -1224,19 +1224,19 @@ model is supplied, local runtime profile metadata is included for eval
 pipelines.
 
 ```bash
-harn provider-probe ollama --model devstral-small-2
-harn provider-probe mlx --model mlx-qwen3.6 --base-url http://127.0.0.1:8002
+harn provider probe ollama --model devstral-small-2
+harn provider probe mlx --model mlx-qwen3.6 --base-url http://127.0.0.1:8002
 ```
 
-## harn provider-tool-probe
+## harn provider tool-probe
 
 Run a harmless one-tool conformance probe. The command asks the model to call
 `echo_marker({value})`, tests streaming and non-streaming modes by default, and
 emits JSON with native/text/disabled fallback classification.
 
 ```bash
-harn provider-tool-probe ollama --model devstral-small-2
-harn provider-tool-probe llamacpp --model local-qwen3.6 --mode non-streaming
+harn provider tool-probe ollama --model devstral-small-2
+harn provider tool-probe llamacpp --model local-qwen3.6 --mode non-streaming
 ```
 
 Use `--response-fixture` to classify a saved provider response without making a

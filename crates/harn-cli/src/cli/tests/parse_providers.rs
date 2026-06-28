@@ -7,7 +7,9 @@ fn test_parses_provider_capabilities_audit_json() {
     let Command::Provider(args) = cli.command.unwrap() else {
         panic!("expected provider command");
     };
-    let ProviderCommand::Capabilities(capabilities) = args.command;
+    let ProviderCommand::Capabilities(capabilities) = args.command else {
+        panic!("expected capabilities command");
+    };
     let ProviderCapabilitiesCommand::Audit(audit) = capabilities.command else {
         panic!("expected audit command");
     };
@@ -29,7 +31,9 @@ fn test_parses_provider_capabilities_promote_from_eval() {
     let Command::Provider(args) = cli.command.unwrap() else {
         panic!("expected provider command");
     };
-    let ProviderCommand::Capabilities(capabilities) = args.command;
+    let ProviderCommand::Capabilities(capabilities) = args.command else {
+        panic!("expected capabilities command");
+    };
     let ProviderCapabilitiesCommand::PromoteFromEval(promote) = capabilities.command else {
         panic!("expected promote-from-eval command");
     };
@@ -327,23 +331,29 @@ fn test_parses_models_test_args() {
     assert!(args.json);
 }
 
+fn parse_provider_catalog(args: &[&str]) -> ProviderCatalogCommand {
+    let mut argv = vec!["harn", "provider", "catalog"];
+    argv.extend_from_slice(args);
+    let cli = Cli::parse_from(argv);
+    let Command::Provider(provider) = cli.command.unwrap() else {
+        panic!("expected provider command");
+    };
+    let ProviderCommand::Catalog(catalog) = provider.command else {
+        panic!("expected provider catalog command");
+    };
+    catalog.command
+}
+
 #[test]
 fn test_parses_providers_refresh_args() {
-    let cli = Cli::parse_from([
-        "harn",
-        "providers",
+    let ProviderCatalogCommand::Refresh(args) = parse_provider_catalog(&[
         "refresh",
         "--live",
         "--check",
         "--script",
         "scripts/update_provider_catalog.harn",
-    ]);
-
-    let Command::Providers(args) = cli.command.unwrap() else {
-        panic!("expected providers command");
-    };
-    let ProvidersCommand::Refresh(args) = args.command else {
-        panic!("expected providers refresh command");
+    ]) else {
+        panic!("expected provider catalog refresh command");
     };
     assert!(args.live);
     assert!(args.check);
@@ -356,9 +366,7 @@ fn test_parses_providers_refresh_args() {
 
 #[test]
 fn test_parses_providers_validate_args() {
-    let cli = Cli::parse_from([
-        "harn",
-        "providers",
+    let ProviderCatalogCommand::Validate(args) = parse_provider_catalog(&[
         "validate",
         "--overlay",
         "providers.local.toml",
@@ -366,13 +374,8 @@ fn test_parses_providers_validate_args() {
         "--artifact-dir",
         "spec/provider-catalog",
         "--json",
-    ]);
-
-    let Command::Providers(args) = cli.command.unwrap() else {
-        panic!("expected providers command");
-    };
-    let ProvidersCommand::Validate(args) = args.command else {
-        panic!("expected providers validate command");
+    ]) else {
+        panic!("expected provider catalog validate command");
     };
     assert_eq!(
         args.overlay.as_deref(),
@@ -388,20 +391,10 @@ fn test_parses_providers_validate_args() {
 
 #[test]
 fn test_parses_providers_export_args() {
-    let cli = Cli::parse_from([
-        "harn",
-        "providers",
-        "export",
-        "--output-dir",
-        "tmp/catalog",
-        "--check",
-    ]);
-
-    let Command::Providers(args) = cli.command.unwrap() else {
-        panic!("expected providers command");
-    };
-    let ProvidersCommand::Export(args) = args.command else {
-        panic!("expected providers export command");
+    let ProviderCatalogCommand::Export(args) =
+        parse_provider_catalog(&["export", "--output-dir", "tmp/catalog", "--check"])
+    else {
+        panic!("expected provider catalog export command");
     };
     assert_eq!(args.output_dir, std::path::PathBuf::from("tmp/catalog"));
     assert!(args.check);
@@ -409,22 +402,15 @@ fn test_parses_providers_export_args() {
 
 #[test]
 fn test_parses_providers_build_config_args() {
-    let cli = Cli::parse_from([
-        "harn",
-        "providers",
+    let ProviderCatalogCommand::BuildConfig(args) = parse_provider_catalog(&[
         "build-config",
         "--source-dir",
         "tmp/catalog_sources",
         "--output",
         "tmp/providers.toml",
         "--check",
-    ]);
-
-    let Command::Providers(args) = cli.command.unwrap() else {
-        panic!("expected providers command");
-    };
-    let ProvidersCommand::BuildConfig(args) = args.command else {
-        panic!("expected providers build-config command");
+    ]) else {
+        panic!("expected provider catalog build-config command");
     };
     assert_eq!(
         args.source_dir,
@@ -436,22 +422,15 @@ fn test_parses_providers_build_config_args() {
 
 #[test]
 fn test_parses_providers_build_capabilities_args() {
-    let cli = Cli::parse_from([
-        "harn",
-        "providers",
+    let ProviderCatalogCommand::BuildCapabilities(args) = parse_provider_catalog(&[
         "build-capabilities",
         "--source-dir",
         "tmp/capability_sources",
         "--output",
         "tmp/capabilities.toml",
         "--check",
-    ]);
-
-    let Command::Providers(args) = cli.command.unwrap() else {
-        panic!("expected providers command");
-    };
-    let ProvidersCommand::BuildCapabilities(args) = args.command else {
-        panic!("expected providers build-capabilities command");
+    ]) else {
+        panic!("expected provider catalog build-capabilities command");
     };
     assert_eq!(
         args.source_dir,
@@ -466,9 +445,7 @@ fn test_parses_providers_build_capabilities_args() {
 
 #[test]
 fn test_parses_providers_matrix_args() {
-    let cli = Cli::parse_from([
-        "harn",
-        "providers",
+    let ProviderCatalogCommand::Matrix(args) = parse_provider_catalog(&[
         "matrix",
         "--output",
         "tmp/provider-matrix.md",
@@ -476,13 +453,8 @@ fn test_parses_providers_matrix_args() {
         "--stdout",
         "--filter",
         "native_tools",
-    ]);
-
-    let Command::Providers(args) = cli.command.unwrap() else {
-        panic!("expected providers command");
-    };
-    let ProvidersCommand::Matrix(args) = args.command else {
-        panic!("expected providers matrix command");
+    ]) else {
+        panic!("expected provider catalog matrix command");
     };
     assert_eq!(
         args.output,
@@ -495,9 +467,7 @@ fn test_parses_providers_matrix_args() {
 
 #[test]
 fn test_parses_providers_support_args() {
-    let cli = Cli::parse_from([
-        "harn",
-        "providers",
+    let ProviderCatalogCommand::Support(args) = parse_provider_catalog(&[
         "support",
         "--output",
         "tmp/provider-support.md",
@@ -508,13 +478,8 @@ fn test_parses_providers_support_args() {
         "--empirical",
         "summary.json",
         "--check",
-    ]);
-
-    let Command::Providers(args) = cli.command.unwrap() else {
-        panic!("expected providers command");
-    };
-    let ProvidersCommand::Support(args) = args.command else {
-        panic!("expected providers support command");
+    ]) else {
+        panic!("expected provider catalog support command");
     };
     assert_eq!(
         args.output,
@@ -537,10 +502,10 @@ fn test_parses_providers_support_args() {
 
 #[test]
 fn test_parses_provider_catalog_args() {
-    let cli = Cli::parse_from(["harn", "provider-catalog", "--available-only", "--refresh"]);
-
-    let Command::ProviderCatalog(args) = cli.command.unwrap() else {
-        panic!("expected provider-catalog command");
+    let ProviderCatalogCommand::Show(args) =
+        parse_provider_catalog(&["show", "--available-only", "--refresh"])
+    else {
+        panic!("expected provider catalog show command");
     };
     assert!(args.available_only);
     assert!(args.refresh);
@@ -550,7 +515,8 @@ fn test_parses_provider_catalog_args() {
 fn test_parses_provider_ready_args() {
     let cli = Cli::parse_from([
         "harn",
-        "provider-ready",
+        "provider",
+        "ready",
         "mlx",
         "--model",
         "mlx-qwen3.6",
@@ -559,8 +525,11 @@ fn test_parses_provider_ready_args() {
         "--json",
     ]);
 
-    let Command::ProviderReady(args) = cli.command.unwrap() else {
-        panic!("expected provider-ready command");
+    let Command::Provider(provider) = cli.command.unwrap() else {
+        panic!("expected provider command");
+    };
+    let ProviderCommand::Ready(args) = provider.command else {
+        panic!("expected provider ready command");
     };
     assert_eq!(args.provider, "mlx");
     assert_eq!(args.model.as_deref(), Some("mlx-qwen3.6"));
@@ -572,7 +541,8 @@ fn test_parses_provider_ready_args() {
 fn test_parses_provider_probe_args() {
     let cli = Cli::parse_from([
         "harn",
-        "provider-probe",
+        "provider",
+        "probe",
         "ollama",
         "--model",
         "devstral-small-2",
@@ -580,8 +550,11 @@ fn test_parses_provider_probe_args() {
         "http://127.0.0.1:11434",
     ]);
 
-    let Command::ProviderProbe(args) = cli.command.unwrap() else {
-        panic!("expected provider-probe command");
+    let Command::Provider(provider) = cli.command.unwrap() else {
+        panic!("expected provider command");
+    };
+    let ProviderCommand::Probe(args) = provider.command else {
+        panic!("expected provider probe command");
     };
     assert_eq!(args.provider, "ollama");
     assert_eq!(args.model.as_deref(), Some("devstral-small-2"));
@@ -595,7 +568,8 @@ fn test_parses_provider_probe_args() {
 fn test_parses_provider_tool_probe_args() {
     let cli = Cli::parse_from([
         "harn",
-        "provider-tool-probe",
+        "provider",
+        "tool-probe",
         "ollama",
         "--model",
         "devstral-small-2",
@@ -609,8 +583,11 @@ fn test_parses_provider_tool_probe_args() {
         "fixture.json",
     ]);
 
-    let Command::ProviderToolProbe(args) = cli.command.unwrap() else {
-        panic!("expected provider-tool-probe command");
+    let Command::Provider(provider) = cli.command.unwrap() else {
+        panic!("expected provider command");
+    };
+    let ProviderCommand::ToolProbe(args) = provider.command else {
+        panic!("expected provider tool-probe command");
     };
     assert_eq!(args.provider, "ollama");
     assert_eq!(args.model, "devstral-small-2");
@@ -625,21 +602,27 @@ fn test_parses_provider_tool_probe_args() {
 fn test_provider_model_completion_candidates_stay_permissive() {
     let cli = Cli::parse_from([
         "harn",
-        "provider-ready",
+        "provider",
+        "ready",
         "custom-provider",
         "--model",
         "vendor/custom-model",
     ]);
-    let Command::ProviderReady(args) = cli.command.unwrap() else {
-        panic!("expected provider-ready command");
+    let Command::Provider(provider) = cli.command.unwrap() else {
+        panic!("expected provider command");
+    };
+    let ProviderCommand::Ready(args) = provider.command else {
+        panic!("expected provider ready command");
     };
     assert_eq!(args.provider, "custom-provider");
     assert_eq!(args.model.as_deref(), Some("vendor/custom-model"));
 
     let command = Cli::command();
     let provider_ready = command
-        .find_subcommand("provider-ready")
-        .expect("provider-ready subcommand");
+        .find_subcommand("provider")
+        .expect("provider subcommand")
+        .find_subcommand("ready")
+        .expect("provider ready subcommand");
     let provider_values: Vec<_> = provider_ready
         .get_arguments()
         .find(|arg| arg.get_id() == "provider")
@@ -676,22 +659,15 @@ fn test_parses_models_recommend_args() {
 
 #[test]
 fn test_parses_providers_recommend_args() {
-    let cli = Cli::parse_from([
-        "harn",
-        "providers",
+    let ProviderCatalogCommand::Recommend(recommend) = parse_provider_catalog(&[
         "recommend",
         "--input",
         "local_readiness.json",
         "--provider",
         "ollama",
         "--json",
-    ]);
-
-    let Command::Providers(args) = cli.command.unwrap() else {
-        panic!("expected providers command");
-    };
-    let ProvidersCommand::Recommend(recommend) = args.command else {
-        panic!("expected providers recommend command");
+    ]) else {
+        panic!("expected provider catalog recommend command");
     };
     assert_eq!(recommend.input, Some(PathBuf::from("local_readiness.json")));
     assert_eq!(recommend.provider.as_deref(), Some("ollama"));

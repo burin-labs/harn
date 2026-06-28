@@ -36,7 +36,7 @@
 //! footgun route is a data edit (set the flag / forget the pin) rather than a
 //! code change — and forgetting the pin trips this gate.
 //!
-//! The audit is wired into `harn providers build-capabilities --check` (see
+//! The audit is wired into `harn provider catalog build-capabilities --check` (see
 //! `harn-cli`), which runs under `make check-provider-capabilities` /
 //! `make check-provider-matrix`, so the matrix cannot drift into a footgun
 //! state without failing CI.

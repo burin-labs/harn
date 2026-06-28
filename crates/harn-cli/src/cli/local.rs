@@ -163,7 +163,7 @@ pub(crate) struct LocalSwitchArgs {
     /// profile's required probes.
     #[arg(long)]
     pub force: bool,
-    /// JSON output from `harn provider-tool-probe`; can satisfy the
+    /// JSON output from `harn provider tool-probe`; can satisfy the
     /// profile's `tool_probe` requirement.
     #[arg(long = "probe-result")]
     pub probe_results: Vec<PathBuf>,

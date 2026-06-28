@@ -5,11 +5,11 @@ catalog. The runtime embeds `../providers.toml`, which is generated from this
 directory by:
 
 ```sh
-harn providers build-config
-harn providers export
+harn provider catalog build-config
+harn provider catalog export
 ```
 
-Use `harn providers build-config --check` to verify that `../providers.toml`
+Use `harn provider catalog build-config --check` to verify that `../providers.toml`
 matches the fragments. Direct edits to `../providers.toml` are invalid because
 the next generation pass will overwrite them.
 

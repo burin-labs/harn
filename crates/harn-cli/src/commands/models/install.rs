@@ -19,7 +19,7 @@ pub(crate) async fn run(args: ModelsInstallArgs) {
         );
         eprintln!("For this provider, start the server yourself and verify it with:");
         eprintln!(
-            "  harn provider-ready {} --model {}",
+            "  harn provider ready {} --model {}",
             resolved.provider, args.model
         );
         std::process::exit(1);
@@ -119,7 +119,7 @@ pub(crate) async fn run(args: ModelsInstallArgs) {
         args.model
     );
     println!("Verify:");
-    println!("  harn provider-ready ollama --model {}", args.model);
+    println!("  harn provider ready ollama --model {}", args.model);
 }
 
 struct SetupPlan {
@@ -151,7 +151,7 @@ fn llamacpp_setup_plan(selector: &str, model_id: &str) -> SetupPlan {
                 "Launch through Harn: `harn local launch {selector} --provider llamacpp --model-source {model_path} --ctx 65536 --parallel 1 --cache-type-k q8_0 --cache-type-v q8_0 --cache-ram 0 --gpu-layers auto --reasoning off`"
             ),
             "Export endpoint: `export LLAMACPP_BASE_URL=http://127.0.0.1:8001`".to_string(),
-            format!("Verify: `harn provider-ready llamacpp --model {selector}`"),
+            format!("Verify: `harn provider ready llamacpp --model {selector}`"),
         ],
     }
 }
@@ -177,7 +177,7 @@ fn mlx_setup_plan(selector: &str, _model_id: &str) -> SetupPlan {
             "Launch through Harn: `harn local launch mlx-qwen3.6 --provider mlx --server-command ~/.harn/mlx-lm/bin/mlx_lm.server --model-source ~/models/qwen3.6-35b-a3b-mlx/Qwen3.6-35B-A3B-UD-MLX-4bit`".to_string(),
             "If `mlx_lm.server` is on PATH, omit `--server-command`; the provider catalog supplies that default.".to_string(),
             "Export endpoint: `export MLX_BASE_URL=http://127.0.0.1:8002`".to_string(),
-            format!("Verify: `harn provider-ready mlx --model {selector}`"),
+            format!("Verify: `harn provider ready mlx --model {selector}`"),
         ],
     }
 }
@@ -188,7 +188,7 @@ fn local_openai_setup_plan(selector: &str, model_id: &str) -> SetupPlan {
         steps: vec![
             "Start your OpenAI-compatible runtime on a stable host and port, for example vLLM/SGLang on `http://127.0.0.1:8000`.".to_string(),
             format!("Export endpoint and model: `export LOCAL_LLM_BASE_URL=http://127.0.0.1:8000 LOCAL_LLM_MODEL={model_id}`"),
-            format!("Verify: `harn provider-ready local --model {selector}`"),
+            format!("Verify: `harn provider ready local --model {selector}`"),
         ],
     }
 }
@@ -236,7 +236,7 @@ mod tests {
         assert!(plan
             .steps
             .iter()
-            .any(|step| step.contains("harn provider-ready llamacpp")));
+            .any(|step| step.contains("harn provider ready llamacpp")));
         assert!(plan.steps.iter().any(|step| step.contains("--ctx 65536")));
     }
 

@@ -392,7 +392,7 @@ Mapping:
 - the adapter owns session state, prompt execution, permission prompts, cancel
   tokens, and bidirectional `session/update` traffic
 - the `_harn/providerCatalog` extension method returns the same normalized
-  provider/model catalog artifact as `harn providers export`
+  provider/model catalog artifact as `harn provider catalog export`
 - each `session/prompt` exposes `prompt` as the text-only prompt string,
   `prompt_content` as normalized Harn content blocks, and `prompt_messages` as a
   user-role message list suitable for `llm_call(..., {messages: prompt_messages})`

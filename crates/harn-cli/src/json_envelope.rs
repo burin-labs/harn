@@ -140,7 +140,7 @@ pub fn catalog() -> Vec<SchemaEntry> {
             schema_json: None,
         },
         SchemaEntry {
-            command: "provider-catalog",
+            command: "provider catalog show",
             schema_version: 1,
             description: "Resolved provider/model catalog snapshot.",
             schema_json: None,
@@ -207,7 +207,7 @@ pub fn catalog() -> Vec<SchemaEntry> {
             schema_json: None,
         },
         SchemaEntry {
-            command: "providers support",
+            command: "provider catalog support",
             schema_version: crate::commands::provider_support::PROVIDER_SUPPORT_SCHEMA_VERSION,
             description: "Generated provider recommendation and support matrix.",
             schema_json: None,

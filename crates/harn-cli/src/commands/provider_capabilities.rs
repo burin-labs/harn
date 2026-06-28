@@ -1,23 +1,18 @@
 use std::fs;
 
 use crate::cli::{
-    ProviderArgs, ProviderCapabilitiesCommand, ProviderCapabilitiesPromoteFromEvalArgs,
-    ProviderCommand,
+    ProviderCapabilitiesArgs, ProviderCapabilitiesCommand, ProviderCapabilitiesPromoteFromEvalArgs,
 };
 use crate::commands::tool_mode_parity::{self, ToolModeParityOverlay, ToolModeParityOverlayRow};
 
-pub(crate) fn run(args: ProviderArgs) -> Result<(), String> {
+pub(crate) fn run(args: ProviderCapabilitiesArgs) -> Result<(), String> {
     match args.command {
-        ProviderCommand::Capabilities(capabilities) => match capabilities.command {
-            ProviderCapabilitiesCommand::Audit(audit) => run_audit(audit.json),
-            ProviderCapabilitiesCommand::PromoteFromEval(promote) => {
-                run_promote_from_eval(&promote)
-            }
-        },
+        ProviderCapabilitiesCommand::Audit(audit) => run_audit(audit.json),
+        ProviderCapabilitiesCommand::PromoteFromEval(promote) => run_promote_from_eval(&promote),
     }
 }
 
-pub(crate) fn run_or_exit(args: ProviderArgs) {
+pub(crate) fn run_or_exit(args: ProviderCapabilitiesArgs) {
     run(args).unwrap_or_else(|error| crate::command_error(&error));
 }
 
