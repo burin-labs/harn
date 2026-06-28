@@ -8,6 +8,14 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.150
+
+### Fixed
+
+- Normalize `harn pack` logical SBOM and skipped-asset paths to `/` separators
+  across platforms, make Windows nightly path/process tests platform-aware, and
+  remove the local sandbox's dependency on GNU `timeout` for macOS nightly runs.
+
 ## v0.8.149
 
 ### Fixed
