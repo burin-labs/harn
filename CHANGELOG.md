@@ -8,6 +8,22 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.151
+
+### Changed
+
+- **Protocol artifacts now publish Harn's complete ACP handled-method surface
+  (#3642).** The generated manifest and Rust binding include
+  `session/set_budget` transport control plus the `harn.session_timeline.*`
+  extension methods, with drift guards tied to the live adapter code paths.
+
+### Fixed
+
+- **Anthropic provider requests.** Runtime feedback injected between an
+  assistant `tool_use` and its matching `tool_result` is now deferred until
+  after the result before sending Anthropic Messages API requests, avoiding
+  non-retryable 400 responses on strict tool-result adjacency validation.
+
 ## v0.8.150
 
 ### Fixed
