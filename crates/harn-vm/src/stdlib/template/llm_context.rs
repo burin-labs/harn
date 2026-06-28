@@ -93,6 +93,15 @@ pub fn current_llm_render_context() -> Option<LlmRenderContext> {
     LLM_RENDER_STACK.with(|stack| stack.borrow().last().cloned())
 }
 
+/// Per-task ambient-scope swap of the LLM render-context stack. See
+/// `orchestration::ambient_scope`: this frame is pushed for the duration of an
+/// `llm_call` (held across the model HTTP `.await`), so concurrent fan-out
+/// children each running their own `llm_call` would otherwise render templates
+/// with a sibling's provider/model/capabilities.
+pub(crate) fn swap_llm_render_stack(next: Vec<LlmRenderContext>) -> Vec<LlmRenderContext> {
+    LLM_RENDER_STACK.with(|stack| std::mem::replace(&mut *stack.borrow_mut(), next))
+}
+
 /// Reset the stack — wired into `reset_thread_local_state` so tests
 /// and serialized adapter sessions start clean.
 pub(crate) fn reset_llm_render_stack() {

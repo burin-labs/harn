@@ -182,6 +182,14 @@ pub fn current_autonomy_policy() -> Option<AutonomyPolicy> {
     AUTONOMY_POLICY_STACK.with(|stack| stack.borrow().last().cloned())
 }
 
+/// Per-task ambient-scope swap of the autonomy-policy stack. See
+/// `orchestration::ambient_scope`: a worker inherits its parent's autonomy
+/// tier, and `push_autonomy_policy` guards are held across `.await`, so the
+/// stack must follow the task rather than leak to interleaved siblings.
+pub(crate) fn swap_autonomy_policy_stack(next: Vec<AutonomyPolicy>) -> Vec<AutonomyPolicy> {
+    AUTONOMY_POLICY_STACK.with(|stack| std::mem::replace(&mut *stack.borrow_mut(), next))
+}
+
 pub fn is_side_effecting_builtin(name: &str) -> bool {
     side_effect_action_for_builtin(name).is_some()
 }

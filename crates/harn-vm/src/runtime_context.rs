@@ -72,6 +72,16 @@ pub fn install_runtime_context_overlay(
     RuntimeContextOverlayGuard
 }
 
+/// Per-task ambient-scope swap of the runtime-context overlay stack. See
+/// `orchestration::ambient_scope`: the overlay attributes events (worker_id,
+/// run_id) to the running task, so it must follow that task across `.await`
+/// rather than leak to cooperatively-scheduled siblings.
+pub(crate) fn swap_runtime_context_overlay_stack(
+    next: Vec<RuntimeContextOverlay>,
+) -> Vec<RuntimeContextOverlay> {
+    RUNTIME_CONTEXT_OVERLAY_STACK.with(|stack| std::mem::replace(&mut *stack.borrow_mut(), next))
+}
+
 impl Drop for RuntimeContextOverlayGuard {
     fn drop(&mut self) {
         RUNTIME_CONTEXT_OVERLAY_STACK.with(|stack| {

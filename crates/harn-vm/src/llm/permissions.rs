@@ -186,6 +186,15 @@ pub(crate) fn pop_dynamic_permission_policy() {
     });
 }
 
+/// Per-task ambient-scope swap of the dynamic-permission stack. See
+/// `orchestration::ambient_scope`. Only the *policy* stack is per-task;
+/// `SESSION_PERMISSION_GRANTS` is keyed by session id and stays shared.
+pub(crate) fn swap_dynamic_permission_stack(
+    next: Vec<DynamicPermissionPolicy>,
+) -> Vec<DynamicPermissionPolicy> {
+    DYNAMIC_PERMISSION_STACK.with(|stack| std::mem::replace(&mut *stack.borrow_mut(), next))
+}
+
 pub(crate) fn clear_dynamic_permission_state() {
     DYNAMIC_PERMISSION_STACK.with(|stack| stack.borrow_mut().clear());
     SESSION_PERMISSION_GRANTS.with(|store| store.borrow_mut().clear());

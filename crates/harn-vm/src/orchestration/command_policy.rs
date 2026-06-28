@@ -92,6 +92,18 @@ pub fn current_command_policy() -> Option<CommandPolicy> {
     COMMAND_POLICY_STACK.with(|stack| stack.borrow().last().cloned())
 }
 
+/// Per-task ambient-scope swap of the command-policy stack and hook depth. See
+/// `orchestration::ambient_scope` — these move whole stacks so a spawned worker
+/// task can carry its own command scope across `.await` without leaking into
+/// cooperatively-scheduled siblings on the same thread.
+pub(crate) fn swap_command_policy_stack(next: Vec<CommandPolicy>) -> Vec<CommandPolicy> {
+    COMMAND_POLICY_STACK.with(|stack| std::mem::replace(&mut *stack.borrow_mut(), next))
+}
+
+pub(crate) fn swap_command_policy_hook_depth(next: usize) -> usize {
+    COMMAND_POLICY_HOOK_DEPTH.with(|depth| std::mem::replace(&mut *depth.borrow_mut(), next))
+}
+
 pub fn command_policy_hook_depth() -> usize {
     COMMAND_POLICY_HOOK_DEPTH.with(|depth| *depth.borrow())
 }
