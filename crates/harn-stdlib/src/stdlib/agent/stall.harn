@@ -89,13 +89,14 @@ const SOFT_PROGRESS_TOOLS = ["agent_progress"]
 
 /**
  * Evidence-aware repair loop (#repair-diagnostics), spanning AgentStallConfig /
- * AgentStallWarning / AgentStallState below. Default OFF: when `repair_aware`
- * is false every repair field is inert and the detector behaves exactly as
- * before. When ON, the loop tracks a current-failure model (signature + epoch)
- * instead of a blind counter, forces a post-edit re-verify, and nudges a
- * strategy shift after the same diagnostic recurs across
- * `stuck_same_diagnostic_after` repair turns.
- *   - Config knobs: repair_aware / stuck_same_diagnostic_after / post_edit_reverify.
+ * AgentStallWarning / AgentStallState below. The current-failure model is the
+ * shared invariant for post-edit verification and repair-aware nudges: when
+ * `post_edit_reverify` is enabled, Harn tracks the last live failure so a
+ * workspace write cannot be mistaken for proof that verification passed. When
+ * `repair_aware` is also enabled, the same model drives the strategy-shift nudge
+ * after the same diagnostic recurs across `stuck_same_diagnostic_after` repair
+ * turns.
+ *   - Config knobs: post_edit_reverify / repair_aware / stuck_same_diagnostic_after.
  *   - Warning extras (only on the "stuck_same_diagnostic" pattern):
  *     diagnostic_class / diagnostic_signature / diagnostic_snippet.
  *   - State (the current-failure model — folded by __agent_stall_fold_diagnostic
@@ -1144,12 +1145,14 @@ fn __agent_stall_observe_core(
 }
 
 /**
- * Evidence-aware repair overlay (#repair-diagnostics). Default OFF. When
- * `repair_aware` is enabled this:
- *   1. folds the current-failure model from the PRIOR turn's verification
- *      result + whether that turn made a successful edit (turn_made_edit), and
- *   2. trips the "stuck_same_diagnostic" strategy-shift nudge when the same
- *      diagnostic has survived `stuck_same_diagnostic_after` repair turns.
+ * Evidence-aware repair overlay (#repair-diagnostics). The current-failure
+ * fold is shared by post-edit verification and repair-aware nudges. When
+ * `post_edit_reverify` is enabled this folds the PRIOR turn's verification
+ * result + whether that turn made a successful edit (turn_made_edit), so the
+ * loop can require a final verify even when repair nudges are disabled. When
+ * `repair_aware` is also enabled this trips the "stuck_same_diagnostic"
+ * strategy-shift nudge when the same diagnostic has survived
+ * `stuck_same_diagnostic_after` repair turns.
  * The trip rides the EXISTING `agent_loop_stall_warning` event +
  * `__agent_stall_register_trip` escalation; no new event type is introduced.
  * When the core observation already produced a warning this turn we keep it
@@ -1164,10 +1167,14 @@ fn __agent_stall_apply_repair(
   turn_made_edit: bool,
   defer_feedback: bool,
 ) -> AgentStallObservation {
-  if !config.repair_aware {
+  let should_fold_current_failure = config.post_edit_reverify || config.repair_aware
+  if !should_fold_current_failure {
     return observation
   }
   let folded = __agent_stall_fold_diagnostic(observation.state, prev_dispatch, turn_made_edit)
+  if !config.repair_aware {
+    return observation + {state: folded}
+  }
   // Trip ONCE when the streak first crosses the threshold, so the strategy-shift
   // nudge fires a single time per stuck episode rather than on every subsequent
   // identical failure. Require that the streak ADVANCED this turn (a fresh
@@ -1214,12 +1221,13 @@ fn __agent_stall_apply_repair(
 }
 
 /**
- * agent_stall_observe_tool_calls detects degenerate agent loops and, when the
- * evidence-aware repair loop is enabled (`stall_diagnostics.repair_aware`),
- * folds a current-failure model and nudges a strategy shift on a stuck
- * diagnostic. `turn_made_edit` reports whether the PRIOR turn (the one
- * `prev_dispatch` describes) made a successful workspace-mutating edit; it is
- * inert unless `repair_aware` is set.
+ * agent_stall_observe_tool_calls detects degenerate agent loops, folds the
+ * current-failure model when post-edit verification is enabled, and when the
+ * evidence-aware repair nudge is enabled (`stall_diagnostics.repair_aware`)
+ * nudges a strategy shift on a stuck diagnostic. `turn_made_edit` reports
+ * whether the PRIOR turn (the one `prev_dispatch` describes) made a successful
+ * workspace-mutating edit; it is inert unless `post_edit_reverify` or
+ * `repair_aware` is set.
  *
  * @effects: [agent]
  * @errors: [agent_loop]

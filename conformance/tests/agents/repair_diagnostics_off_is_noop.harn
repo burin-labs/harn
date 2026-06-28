@@ -2,12 +2,10 @@ import { agent_capture_events } from "std/agent/events"
 import { llm_text, with_llm_script } from "std/testing"
 
 /**
- * Evidence-aware repair loop (#repair-diagnostics): BACKWARD-COMPATIBILITY.
- * With `repair_aware:false` (the default) the feature is fully inert: a
- * repair-shaped script (fail -> edit -> done) emits NO `stuck_same_diagnostic`
- * warnings, forces NO post-edit re-verify, and the result carries NO
- * `current_failure` block. The loop behaves exactly as it did before the
- * feature existed.
+ * Explicit post-edit verification opt-out. `repair_aware:false` disables the
+ * strategy-shift nudge, but no longer disables the core final-verification
+ * invariant. A caller that wants the old fully-inert behavior must opt out of
+ * post-edit verification directly with `post_edit_reverify:false`.
  */
 fn events_of(events, kind) {
   return events.filter({ event -> event.type == kind })
@@ -65,10 +63,11 @@ pipeline default() {
             max_iterations: 6,
             session_id: session,
             done_sentinel: "##DONE##",
-            // verify_completion present to prove that even WITH a verify closure,
-            // repair_aware:false forces no extra verification.
+            // verify_completion present to prove that the explicit
+            // post_edit_reverify:false knob, not repair_aware:false, disables
+            // the extra verification.
             verify_completion: { _info -> nil },
-            stall_diagnostics: {enabled: true, repair_aware: false},
+            stall_diagnostics: {enabled: true, repair_aware: false, post_edit_reverify: false},
           },
         ) },
       )

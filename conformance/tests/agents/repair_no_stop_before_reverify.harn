@@ -2,11 +2,10 @@ import { agent_capture_events } from "std/agent/events"
 import { llm_text, with_llm_script } from "std/testing"
 
 /**
- * Evidence-aware repair loop (#repair-diagnostics): a successful corrective edit
- * that ALSO proposes completion (done-sentinel) must not terminate the loop
- * "done" until the post-edit re-verify has run. When the verify closure vetoes,
- * the loop continues instead of stopping — the edit was re-verified, not taken
- * on faith.
+ * Current-failure loop: a successful corrective edit that ALSO proposes
+ * completion (done-sentinel) must not terminate the loop "done" until the
+ * post-edit re-verify has run. When the verify closure vetoes, the loop
+ * continues instead of stopping — the edit was re-verified, not taken on faith.
  */
 fn repair_tools() {
   var tools = tool_registry()
@@ -72,7 +71,7 @@ pipeline default() {
             session_id: session,
             done_sentinel: "##DONE##",
             verify_completion: verify_once_then_confirm,
-            stall_diagnostics: {enabled: true, repair_aware: true, post_edit_reverify: true, stuck_same_diagnostic_after: 3},
+            stall_diagnostics: {enabled: true, repair_aware: false, post_edit_reverify: true, stuck_same_diagnostic_after: 3},
           },
         ) },
       )

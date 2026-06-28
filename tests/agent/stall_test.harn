@@ -304,11 +304,19 @@ pipeline test_fold_different_failure_resets_streak(task) {
   assert(o3.warning == nil)
 }
 
-pipeline test_fold_repair_off_is_inert(task) {
-  // repair_aware:false => the fold is a no-op: no current-failure model, no
-  // new fields populated beyond their initial defaults.
-  let off_config = {enabled: true, repair_aware: false}
-  let o = agent_stall_observe_tool_calls(
+pipeline test_fold_repair_off_tracks_for_reverify_without_nudge(task) {
+  // repair_aware:false disables the strategy-shift nudge, not the
+  // current-failure model used by post-edit final verification.
+  let off_config = {
+    enabled: true,
+    repair_aware: false,
+    stuck_same_diagnostic_after: 2,
+    repeat_same_error: 99,
+    repeat_same_observation: 99,
+    no_progress_messages: 99,
+    ping_pong_cycles: 99,
+  }
+  let o1 = agent_stall_observe_tool_calls(
     "unit-repair-off",
     _run_call(),
     1,
@@ -320,9 +328,24 @@ pipeline test_fold_repair_off_is_inert(task) {
     false,
     false,
   )
-  assert(o.state.last_diagnostic_class == "")
-  assert(o.state.same_diagnostic_streak == 0)
-  assert(o.warning == nil)
+  assert(o1.state.last_diagnostic_class == "fail")
+  assert(o1.state.same_diagnostic_streak == 1)
+  assert(!o1.state.reverify_owed)
+  assert(o1.warning == nil)
+  let o2 = agent_stall_observe_tool_calls(
+    "unit-repair-off",
+    _run_call(),
+    2,
+    off_config,
+    o1.state,
+    true,
+    _fail_dispatch("boom"),
+    "",
+    false,
+    false,
+  )
+  assert(o2.warning == nil)
+  assert(o2.state.same_diagnostic_streak == 2)
 }
 
 pipeline test_reset_action_preserves_failure_model(task) {
