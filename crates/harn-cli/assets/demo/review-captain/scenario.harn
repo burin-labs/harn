@@ -3,10 +3,14 @@
  * diff, asks one clarifying question (HITL surfaced via the structured
  * receipt), then emits a verdict with reasoning and a cost rollup.
  *
- * Designed to run fully offline against the bundled `tape.jsonl`
- * fixture under `assets/demo/review-captain/`. The same script also
- * runs against a real provider when invoked via `harn demo
- * review-captain --live`.
+ * The two model prompts are written as readable multi-line templates and
+ * filled with `render_string(template, bindings)`. The same templates can live
+ * in standalone `.harn.prompt` files rendered with `render_prompt(path, ...)`;
+ * this demo keeps them inline because the demo bundle is embedded in the binary.
+ *
+ * Runs fully offline against the bundled `tape.jsonl` fixture under
+ * `assets/demo/review-captain/`. The same script runs against a real provider
+ * via `harn demo review-captain --live`.
  */
 fn diff_summary() {
   return {
@@ -22,29 +26,64 @@ fn diff_summary() {
   }
 }
 
-fn render_review_prompt(diff) {
-  let total_added = diff.files[0].loc_added + diff.files[1].loc_added + diff.files[2].loc_added
-    + diff.files[3].loc_added
-    + diff.files[4].loc_added
-  return "[review_captain][pr=${diff.pr_number}][stage=review] Review this 5-file diff: src/retry.ts (+86/-12, high risk), src/retry.test.ts (+124/-0), src/http.ts (+14/-8), docs/retry.md (+38/-0), package.json (+1/-1). Total added: ${total_added}. Identify regressions, missing test coverage, and risky paths. Ask exactly one clarifying question, then propose a verdict."
+fn total_added(files) {
+  var total = 0
+  for f in files {
+    total = total + f.loc_added
+  }
+  return total
 }
 
-fn render_clarification_prompt(question) {
-  return "[review_captain][pr=502][stage=clarified] The author answered: \"${question}\" — emit the final verdict envelope as JSON with keys verdict, missing_tests, risky_paths, reasoning."
+let REVIEW_PROMPT = """
+[review_captain][pr={{ pr }}][stage=review]
+
+Review this {{ file_count }}-file diff:
+{{ for f in files }}
+  - {{ f.path }} (+{{ f.loc_added }}/-{{ f.loc_removed }}, {{ f.risk }} risk)
+{{ end }}
+
+Total lines added: {{ total_added }}.
+
+Identify regressions, missing test coverage, and risky paths. Ask exactly one
+clarifying question, then propose a verdict.
+"""
+
+let CLARIFICATION_PROMPT = """
+[review_captain][pr={{ pr }}][stage=clarified]
+
+The author answered: "{{ answer }}"
+
+Emit the final verdict envelope as JSON with keys verdict, missing_tests,
+risky_paths, and reasoning.
+"""
+
+fn render_review_prompt(diff) {
+  return render_string(
+    REVIEW_PROMPT,
+    {
+      pr: diff.pr_number,
+      file_count: len(diff.files),
+      files: diff.files,
+      total_added: total_added(diff.files),
+    },
+  )
+}
+
+fn render_clarification_prompt(pr, answer) {
+  return render_string(CLARIFICATION_PROMPT, {pr: pr, answer: answer})
 }
 
 pipeline default(_task) {
   let diff = diff_summary()
+  let system = "You are review_captain, a thorough code reviewer."
   let review_prompt = render_review_prompt(diff)
-  let initial_envelope = llm_call(review_prompt, "You are review_captain, a thorough code reviewer.")
-  let initial_response = initial_envelope.text
+  let initial_envelope = llm_call(review_prompt, system)
   __io_println("=== review_captain · stage 1 (initial scan) ===")
-  __io_println(initial_response)
+  __io_println(initial_envelope.text)
   __io_println("")
   let author_answer = "Yes, the retry middleware is intended to wrap idempotent requests only; non-idempotent calls bypass it via the `safe: false` opt-out."
-  let clarification_prompt = render_clarification_prompt(author_answer)
-  let final_envelope = llm_call(clarification_prompt, "You are review_captain, a thorough code reviewer.")
-  let final_response = final_envelope.text
+  let clarification_prompt = render_clarification_prompt(diff.pr_number, author_answer)
+  let final_envelope = llm_call(clarification_prompt, system)
   let receipt = {
     persona: "review_captain",
     execution_mode: "advisory",
@@ -54,7 +93,7 @@ pipeline default(_task) {
     files_reviewed: len(diff.files),
     clarifying_question_asked: true,
     clarifying_question_answer: author_answer,
-    final_verdict: final_response,
+    final_verdict: final_envelope.text,
     receipt_kind: "review_receipt",
   }
   __io_println("=== review_captain · stage 2 (final verdict) ===")

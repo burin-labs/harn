@@ -51,9 +51,29 @@ fn classify(pr) {
   return "merge"
 }
 
+let PR_PROMPT = """
+[merge_captain][pr={{ number }}][tag={{ tag }}]
+
+Decide: should PR #{{ number }} ({{ title }}) merge, hand off to
+review_captain, or block?
+
+  - Failing checks: {{ failing_checks }}
+  - Stale threads: {{ stale_threads }}
+  - Diff size: {{ diff_lines }} lines
+"""
+
 fn render_pr_prompt(pr) {
-  let header = "[merge_captain][pr=${pr.number}][tag=${pr.tag}]"
-  return "${header} Decide: should PR #${pr.number} (${pr.title}) merge, hand off to review_captain, or block? Failing checks: ${len(pr.failing_checks)}. Stale threads: ${len(pr.stale_threads)}. Diff size: ${pr.diff_lines} lines."
+  return render_string(
+    PR_PROMPT,
+    {
+      number: pr.number,
+      tag: pr.tag,
+      title: pr.title,
+      failing_checks: len(pr.failing_checks),
+      stale_threads: len(pr.stale_threads),
+      diff_lines: pr.diff_lines,
+    },
+  )
 }
 
 pipeline default(_task) {
