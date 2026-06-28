@@ -106,10 +106,12 @@ export const en = {
       sectionBody:
         "The same checked scenario files ship in the CLI demo bundle and run locally with deterministic fixtures.",
       tablistAria: "Runnable Harn examples",
-      fileLabel: "scenario.harn",
+      filesAria: "Scenario files",
+      multiFileNote:
+        "This scenario ships more than one file. The prompts live in sibling .harn.prompt templates and load with render_prompt, the way a real Harn project is laid out.",
       copy: "Copy",
       copied: "Copied",
-      copyAria: "Copy scenario source",
+      copyAria: "Copy file source",
       viewSource: "View source",
       readDocs: "Read the docs",
       // Keyed by scenario slug (see examples/gallery.ts).
