@@ -1,5 +1,5 @@
 /**
- * `harn provider-probe` ported to .harn — see harn#2310 (W10).
+ * `harn provider probe` ported to .harn — see harn#2310 (W10).
  *
  * Host aggregation combines provider
  * readiness (`/v1/models` or equivalent), Ollama `/api/ps` runtime

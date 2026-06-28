@@ -91,7 +91,7 @@ versions.
 | `harn explain <CODE> --json`   | Per-diagnostic-code explanation                          |
 | `harn explain --catalog --json` | Full diagnostic-code catalog                            |
 | `harn session export --json`   | Portable session bundle export                           |
-| `harn provider-catalog --json` | Resolved provider/model catalog snapshot                 |
+| `harn provider catalog show --json` | Resolved provider/model catalog snapshot                 |
 | `harn connect status --json` / `setup-plan --json` | Connector readiness reports        |
 | `harn skills list --json` / `get --json` | Canonical Harn skill corpus frontmatter        |
 | `harn version --json`          | CLI build metadata (`name`, `version`, `description`)    |

@@ -145,13 +145,13 @@ prefers_xml_tools = false
 thinking_block_style = "inline"
 
 # Exact Qwen3.6 Q4 route validated with `harn local launch` +
-# `harn provider-tool-probe` on 2026-06-05: native and streaming native passed
+# `harn provider tool-probe` on 2026-06-05: native and streaming native passed
 # with llama-server `--jinja --reasoning off --reasoning-format deepseek`.
 [[provider.llamacpp]]
 model_match = "qwen3.6-35b-a3b-ud-q4-k-xl"
 native_tools = true
 # This route pins the NATIVE channel (provider JSON tool calling), validated by
-# `harn provider-tool-probe` on the llama.cpp :8001 endpoint Burin routes to for
+# `harn provider tool-probe` on the llama.cpp :8001 endpoint Burin routes to for
 # local-qwen3.6. `json` (fenced-JSON) is now the GLOBAL text-channel default, so
 # no per-model json pin is needed; the `native` pin below is only kept because
 # this row deliberately selects the native channel over any text format. To run

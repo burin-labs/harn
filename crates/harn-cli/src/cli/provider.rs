@@ -14,6 +14,17 @@ pub(crate) struct ProviderArgs {
 pub(crate) enum ProviderCommand {
     /// Inspect provider/model capability metadata.
     Capabilities(ProviderCapabilitiesArgs),
+    /// Validate and generate provider/model catalog artifacts, or print the
+    /// catalog Harn loaded (`provider catalog show`).
+    Catalog(super::providers::ProviderCatalogArgs),
+    /// Probe a provider's /models endpoint and optionally verify a served model.
+    Ready(ProviderReadyArgs),
+    /// Snapshot a provider: readiness, served models, loaded models with
+    /// memory/context details. Designed for eval pipelines that need a
+    /// stable telemetry envelope per provider.
+    Probe(ProviderProbeArgs),
+    /// Run one-tool provider conformance and classify native/text fallback.
+    ToolProbe(ProviderToolProbeArgs),
 }
 
 #[derive(Debug, Args)]
@@ -66,7 +77,7 @@ pub(crate) struct ModelInfoArgs {
 }
 
 #[derive(Debug, Args)]
-pub(crate) struct ProviderCatalogArgs {
+pub(crate) struct ProviderCatalogShowArgs {
     /// Only include providers that are usable in the current environment.
     #[arg(long)]
     pub available_only: bool,
@@ -75,7 +86,7 @@ pub(crate) struct ProviderCatalogArgs {
     pub refresh: bool,
 }
 
-pub(crate) async fn refresh_provider_catalog_if_requested(args: &ProviderCatalogArgs) {
+pub(crate) async fn refresh_provider_catalog_if_requested(args: &ProviderCatalogShowArgs) {
     if !args.refresh {
         return;
     }

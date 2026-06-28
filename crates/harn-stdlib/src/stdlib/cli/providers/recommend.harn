@@ -1,5 +1,5 @@
 /**
- * `harn providers recommend` ported to .harn — see harn#2310 (W10).
+ * `harn provider catalog recommend` ported to .harn — see harn#2310 (W10).
  *
  * Host aggregation reads coding-agent
  * readiness JSON / summary JSON / default-report from disk (with a

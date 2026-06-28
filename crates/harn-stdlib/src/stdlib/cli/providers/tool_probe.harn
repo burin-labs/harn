@@ -1,5 +1,5 @@
 /**
- * `harn provider-tool-probe` ported to .harn — see harn#2310 (W10).
+ * `harn provider tool-probe` ported to .harn — see harn#2310 (W10).
  *
  * Host aggregation either fires an HTTP
  * probe through `run_tool_conformance_probe` or replays a fixture

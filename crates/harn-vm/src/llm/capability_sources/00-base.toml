@@ -1,7 +1,7 @@
 # Harn provider capability matrix source fragments.
 #
 # The files under capability_sources/ are the source of truth for Harn's
-# built-in provider/model capability rules. `harn providers build-capabilities`
+# built-in provider/model capability rules. `harn provider catalog build-capabilities`
 # concatenates these fragments into llm/capabilities.toml, which is compiled
 # into the VM with include_str!.
 #

@@ -2,14 +2,16 @@ use std::path::PathBuf;
 
 use clap::{Args, Subcommand};
 
+use super::provider::ProviderCatalogShowArgs;
+
 #[derive(Debug, Args)]
-pub(crate) struct ProvidersArgs {
+pub(crate) struct ProviderCatalogArgs {
     #[command(subcommand)]
-    pub command: ProvidersCommand,
+    pub command: ProviderCatalogCommand,
 }
 
 #[derive(Debug, Subcommand)]
-pub(crate) enum ProvidersCommand {
+pub(crate) enum ProviderCatalogCommand {
     /// Run the provider catalog refresh workflow.
     Refresh(ProvidersRefreshArgs),
     /// Validate the loaded catalog and generated artifact contract.
@@ -26,6 +28,8 @@ pub(crate) enum ProvidersCommand {
     Support(ProvidersSupportArgs),
     /// Recommend local provider/model presets from coding-agent readiness data.
     Recommend(ProvidersRecommendArgs),
+    /// Print the provider/model catalog Harn loaded as JSON.
+    Show(ProviderCatalogShowArgs),
 }
 
 #[derive(Debug, Args)]

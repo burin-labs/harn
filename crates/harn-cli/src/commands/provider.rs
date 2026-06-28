@@ -72,14 +72,14 @@ async fn dispatch_provider_probe(args: ProviderProbeArgs) -> i32 {
     let payload_json = match serde_json::to_string(&probe) {
         Ok(json) => json,
         Err(error) => {
-            eprintln!("error: failed to serialise provider-probe payload: {error}");
+            eprintln!("error: failed to serialise provider probe payload: {error}");
             return 1;
         }
     };
     let payload_pretty = match serde_json::to_string_pretty(&probe) {
         Ok(json) => json,
         Err(error) => {
-            eprintln!("error: failed to render provider-probe payload: {error}");
+            eprintln!("error: failed to render provider probe payload: {error}");
             return 1;
         }
     };

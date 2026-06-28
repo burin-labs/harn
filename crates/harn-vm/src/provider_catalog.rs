@@ -17,7 +17,7 @@ use chrono::{NaiveDate, Utc};
 pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 2;
 pub const PROVIDER_CATALOG_SCHEMA_ID: &str =
     "https://harnlang.com/schemas/provider-catalog.v2.json";
-pub const PROVIDER_CATALOG_GENERATOR: &str = "harn providers export";
+pub const PROVIDER_CATALOG_GENERATOR: &str = "harn provider catalog export";
 pub const HARN_DISABLE_CATALOG_REFRESH_ENV: &str = "HARN_DISABLE_CATALOG_REFRESH";
 pub const HARN_PROVIDER_CATALOG_URL_ENV: &str = "HARN_PROVIDER_CATALOG_URL";
 pub const HARN_PROVIDER_CATALOG_ALLOW_UNSIGNED_ENV: &str = "HARN_PROVIDER_CATALOG_ALLOW_UNSIGNED";
@@ -178,7 +178,7 @@ pub fn artifact() -> ProviderCatalogArtifact {
 /// (`HARN_PROVIDERS_CONFIG`, `HARN_DEFAULT_PROVIDER`, `HARN_LLM_*`), the
 /// process runtime-catalog overlay, and any thread-local user overrides.
 ///
-/// This is what `harn providers export` / `providers validate
+/// This is what `harn provider catalog export` / `provider catalog validate
 /// --check-artifacts` use so the checked-in `spec/provider-catalog/*` artifacts
 /// are a pure function of the source tree. Do NOT use this for live runtime
 /// catalog presentation — use [`artifact`] / [`artifact_with_overrides`] there,

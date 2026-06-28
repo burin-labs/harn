@@ -1,7 +1,7 @@
 #![recursion_limit = "256"]
 
-//! Dispatch contract tests for the providers cluster: `provider-catalog`,
-//! `provider-probe`, `provider-tool-probe`, and `providers recommend`
+//! Dispatch contract tests for the provider cluster: `provider catalog show`,
+//! `provider probe`, `provider tool-probe`, and `provider catalog recommend`
 //! (harn#2310 / W10).
 //!
 //! Each subcommand's render pipeline now lives in
@@ -60,7 +60,7 @@ fn parse_json(s: &str, label: &str) -> serde_json::Value {
     })
 }
 
-// ─── provider-catalog ────────────────────────────────────────────────────
+// ─── provider catalog show ────────────────────────────────────────────────────
 
 /// Catalog dump is JSON-only on repeated runs. Compare structurally
 /// because `json_stringify` sorts dict keys alphabetically while serde
@@ -68,33 +68,33 @@ fn parse_json(s: &str, label: &str) -> serde_json::Value {
 /// shape must match.
 #[test]
 fn provider_catalog_full_is_structurally_identical_across_runs() {
-    let harn = run(&["provider-catalog"], &[]);
+    let harn = run(&["provider", "catalog", "show"], &[]);
     assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
-    let repeat = run(&["provider-catalog"], &[]);
+    let repeat = run(&["provider", "catalog", "show"], &[]);
     assert_eq!(repeat.exit_code, 0, "repeat stderr={}", repeat.stderr);
     let harn_value = parse_json(&harn.stdout, "harn");
     let repeat_value = parse_json(&repeat.stdout, "repeat");
     assert_eq!(
         repeat_value, harn_value,
-        "provider-catalog shape diverged\n--- repeat ---\n{}\n--- harn ---\n{}",
+        "provider catalog show shape diverged\n--- repeat ---\n{}\n--- harn ---\n{}",
         repeat.stdout, harn.stdout
     );
 }
 
 #[test]
 fn provider_catalog_available_only_is_structurally_identical_across_runs() {
-    let harn = run(&["provider-catalog", "--available-only"], &[]);
+    let harn = run(&["provider", "catalog", "show", "--available-only"], &[]);
     assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
-    let repeat = run(&["provider-catalog", "--available-only"], &[]);
+    let repeat = run(&["provider", "catalog", "show", "--available-only"], &[]);
     assert_eq!(repeat.exit_code, 0, "repeat stderr={}", repeat.stderr);
     let harn_value = parse_json(&harn.stdout, "harn");
     let repeat_value = parse_json(&repeat.stdout, "repeat");
     assert_eq!(
         repeat_value, harn_value,
-        "provider-catalog --available-only shape diverged"
+        "provider catalog show --available-only shape diverged"
     );
     // Sanity: --available-only must be a subset (by name) of full.
-    let full = run(&["provider-catalog"], &[]);
+    let full = run(&["provider", "catalog", "show"], &[]);
     let full_value = parse_json(&full.stdout, "full");
     let full_names: std::collections::BTreeSet<String> = full_value["providers"]
         .as_array()
@@ -117,9 +117,9 @@ fn provider_catalog_available_only_is_structurally_identical_across_runs() {
 /// either path shows up here rather than in a downstream regression.
 #[test]
 fn provider_catalog_carries_canonical_top_level_keyset() {
-    let harn = run(&["provider-catalog"], &[]);
+    let harn = run(&["provider", "catalog", "show"], &[]);
     assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
-    let repeat = run(&["provider-catalog"], &[]);
+    let repeat = run(&["provider", "catalog", "show"], &[]);
     assert_eq!(repeat.exit_code, 0, "repeat stderr={}", repeat.stderr);
     for label in [("harn", &harn), ("repeat", &repeat)] {
         let (name, outcome) = label;
@@ -146,9 +146,9 @@ fn provider_catalog_carries_canonical_top_level_keyset() {
 /// always has the local/mlx/ollama family available without API keys).
 #[test]
 fn provider_catalog_available_only_includes_local_provider_family() {
-    let harn = run(&["provider-catalog", "--available-only"], &[]);
+    let harn = run(&["provider", "catalog", "show", "--available-only"], &[]);
     assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
-    let repeat = run(&["provider-catalog", "--available-only"], &[]);
+    let repeat = run(&["provider", "catalog", "show", "--available-only"], &[]);
     assert_eq!(repeat.exit_code, 0, "repeat stderr={}", repeat.stderr);
     for label in [("harn", &harn), ("repeat", &repeat)] {
         let (name, outcome) = label;
@@ -170,16 +170,16 @@ fn provider_catalog_available_only_includes_local_provider_family() {
     }
 }
 
-// ─── provider-probe ──────────────────────────────────────────────────────
+// ─── provider probe ──────────────────────────────────────────────────────
 
 /// Mock provider always reports ready, so this exit code is
 /// deterministic.
 #[test]
 fn provider_probe_mock_json_is_structurally_identical_across_runs() {
-    let harn = run(&["provider-probe", "mock"], &[]);
-    let repeat = run(&["provider-probe", "mock"], &[]);
+    let harn = run(&["provider", "probe", "mock"], &[]);
+    let repeat = run(&["provider", "probe", "mock"], &[]);
     assert_eq!(harn.exit_code, repeat.exit_code, "exit code diverged");
-    // Default for provider-probe is JSON (clap default_value_t = true).
+    // Default for provider probe is JSON (clap default_value_t = true).
     let harn_value = parse_json(&harn.stdout, "harn");
     let repeat_value = parse_json(&repeat.stdout, "repeat");
     // Compare a stable subset — `readiness.message` and `available_models`
@@ -211,8 +211,8 @@ fn provider_probe_mock_json_is_structurally_identical_across_runs() {
 /// the readiness message is stable.
 #[test]
 fn provider_probe_mock_human_is_byte_identical_across_runs() {
-    let harn = run(&["provider-probe", "mock", "--json=false"], &[]);
-    let repeat = run(&["provider-probe", "mock", "--json=false"], &[]);
+    let harn = run(&["provider", "probe", "mock", "--json=false"], &[]);
+    let repeat = run(&["provider", "probe", "mock", "--json=false"], &[]);
     assert_eq!(
         harn.exit_code, repeat.exit_code,
         "exit code diverged; harn stderr={} repeat stderr={}",
@@ -220,12 +220,12 @@ fn provider_probe_mock_human_is_byte_identical_across_runs() {
     );
     assert_eq!(
         harn.stdout, repeat.stdout,
-        "provider-probe mock human stdout diverged\n--- repeat ---\n{}\n--- harn ---\n{}",
+        "provider probe mock human stdout diverged\n--- repeat ---\n{}\n--- harn ---\n{}",
         repeat.stdout, harn.stdout
     );
 }
 
-// ─── provider-tool-probe (fixture mode) ──────────────────────────────────
+// ─── provider tool-probe (fixture mode) ──────────────────────────────────
 
 /// Fixture-mode tool probe runs offline and is deterministic. Create a
 /// minimal valid response on the fly so the test doesn't depend on a
@@ -237,7 +237,8 @@ fn provider_tool_probe_fixture_json_is_structurally_identical_across_runs() {
     write_minimal_tool_fixture(&fixture);
     let path = fixture.to_string_lossy().into_owned();
     let argv = [
-        "provider-tool-probe",
+        "provider",
+        "tool-probe",
         "mock",
         "--model",
         "mock",
@@ -270,7 +271,8 @@ fn provider_tool_probe_fixture_human_is_byte_identical_across_runs() {
     write_minimal_tool_fixture(&fixture);
     let path = fixture.to_string_lossy().into_owned();
     let argv = [
-        "provider-tool-probe",
+        "provider",
+        "tool-probe",
         "mock",
         "--model",
         "mock",
@@ -302,17 +304,17 @@ fn write_minimal_tool_fixture(path: &Path) {
     std::fs::write(path, body).expect("write fixture");
 }
 
-// ─── providers recommend ────────────────────────────────────────────────
+// ─── provider catalog recommend ────────────────────────────────────────────────
 
-/// `providers recommend` reads from disk or the default summary cache
+/// `provider catalog recommend` reads from disk or the default summary cache
 /// and renders the filtered report. The default-load path is
 /// deterministic on a clean system.
 #[test]
 fn providers_recommend_human_is_byte_identical_across_runs() {
     // The default `load_default_report` returns the bundled seed report
     // when no on-disk readiness file is present.
-    let harn = run(&["providers", "recommend"], &[]);
-    let repeat = run(&["providers", "recommend"], &[]);
+    let harn = run(&["provider", "catalog", "recommend"], &[]);
+    let repeat = run(&["provider", "catalog", "recommend"], &[]);
     assert_eq!(
         harn.exit_code, repeat.exit_code,
         "exit code diverged; harn stderr={} repeat stderr={}",
@@ -320,15 +322,15 @@ fn providers_recommend_human_is_byte_identical_across_runs() {
     );
     assert_eq!(
         harn.stdout, repeat.stdout,
-        "providers recommend human stdout diverged\n--- repeat ---\n{}\n--- harn ---\n{}",
+        "provider catalog recommend human stdout diverged\n--- repeat ---\n{}\n--- harn ---\n{}",
         repeat.stdout, harn.stdout
     );
 }
 
 #[test]
 fn providers_recommend_json_is_structurally_identical_across_runs() {
-    let harn = run(&["providers", "recommend", "--json"], &[]);
-    let repeat = run(&["providers", "recommend", "--json"], &[]);
+    let harn = run(&["provider", "catalog", "recommend", "--json"], &[]);
+    let repeat = run(&["provider", "catalog", "recommend", "--json"], &[]);
     assert_eq!(
         harn.exit_code, repeat.exit_code,
         "exit code diverged; harn stderr={} repeat stderr={}",
@@ -338,7 +340,7 @@ fn providers_recommend_json_is_structurally_identical_across_runs() {
     let repeat_value = parse_json(&repeat.stdout, "repeat");
     assert_eq!(
         repeat_value, harn_value,
-        "providers recommend JSON shape diverged\n--- repeat ---\n{}\n--- harn ---\n{}",
+        "provider catalog recommend JSON shape diverged\n--- repeat ---\n{}\n--- harn ---\n{}",
         repeat.stdout, harn.stdout
     );
 }
@@ -350,7 +352,8 @@ fn providers_recommend_provider_filter_human_is_byte_identical_across_runs() {
     // render path.
     let harn = run(
         &[
-            "providers",
+            "provider",
+            "catalog",
             "recommend",
             "--provider",
             "definitely-not-a-real-provider",
@@ -359,7 +362,8 @@ fn providers_recommend_provider_filter_human_is_byte_identical_across_runs() {
     );
     let repeat = run(
         &[
-            "providers",
+            "provider",
+            "catalog",
             "recommend",
             "--provider",
             "definitely-not-a-real-provider",
@@ -373,18 +377,32 @@ fn providers_recommend_provider_filter_human_is_byte_identical_across_runs() {
     );
     assert_eq!(
         harn.stdout, repeat.stdout,
-        "providers recommend --provider stdout diverged"
+        "provider catalog recommend --provider stdout diverged"
     );
 }
 
 #[test]
 fn providers_recommend_provider_filter_json_is_structurally_identical_across_runs() {
     let harn = run(
-        &["providers", "recommend", "--provider", "ollama", "--json"],
+        &[
+            "provider",
+            "catalog",
+            "recommend",
+            "--provider",
+            "ollama",
+            "--json",
+        ],
         &[],
     );
     let repeat = run(
-        &["providers", "recommend", "--provider", "ollama", "--json"],
+        &[
+            "provider",
+            "catalog",
+            "recommend",
+            "--provider",
+            "ollama",
+            "--json",
+        ],
         &[],
     );
     assert_eq!(
@@ -396,7 +414,7 @@ fn providers_recommend_provider_filter_json_is_structurally_identical_across_run
     let repeat_value = parse_json(&repeat.stdout, "repeat");
     assert_eq!(
         repeat_value, harn_value,
-        "providers recommend --provider --json shape diverged"
+        "provider catalog recommend --provider --json shape diverged"
     );
 }
 
@@ -408,11 +426,25 @@ fn providers_recommend_provider_filter_json_is_structurally_identical_across_run
 #[test]
 fn provider_probe_mock_human_with_model_is_byte_identical_across_runs() {
     let harn = run(
-        &["provider-probe", "mock", "--model", "mock", "--json=false"],
+        &[
+            "provider",
+            "probe",
+            "mock",
+            "--model",
+            "mock",
+            "--json=false",
+        ],
         &[],
     );
     let repeat = run(
-        &["provider-probe", "mock", "--model", "mock", "--json=false"],
+        &[
+            "provider",
+            "probe",
+            "mock",
+            "--model",
+            "mock",
+            "--json=false",
+        ],
         &[],
     );
     assert_eq!(
@@ -422,7 +454,7 @@ fn provider_probe_mock_human_with_model_is_byte_identical_across_runs() {
     );
     assert_eq!(
         harn.stdout, repeat.stdout,
-        "provider-probe mock --model human stdout diverged"
+        "provider probe mock --model human stdout diverged"
     );
 }
 
@@ -430,8 +462,8 @@ fn provider_probe_mock_human_with_model_is_byte_identical_across_runs() {
 /// branch even though mock isn't in `LOCAL_PROVIDERS`.
 #[test]
 fn provider_probe_mock_json_with_model_is_structurally_identical_across_runs() {
-    let harn = run(&["provider-probe", "mock", "--model", "mock"], &[]);
-    let repeat = run(&["provider-probe", "mock", "--model", "mock"], &[]);
+    let harn = run(&["provider", "probe", "mock", "--model", "mock"], &[]);
+    let repeat = run(&["provider", "probe", "mock", "--model", "mock"], &[]);
     assert_eq!(
         harn.exit_code, repeat.exit_code,
         "exit code diverged; harn stderr={} repeat stderr={}",
@@ -458,7 +490,8 @@ fn provider_tool_probe_fixture_streaming_only_json_is_structurally_identical_acr
     write_minimal_tool_fixture(&fixture);
     let path = fixture.to_string_lossy().into_owned();
     let argv = [
-        "provider-tool-probe",
+        "provider",
+        "tool-probe",
         "mock",
         "--model",
         "mock",
@@ -492,7 +525,8 @@ fn provider_tool_probe_fixture_nonstreaming_human_is_byte_identical_across_runs(
     write_minimal_tool_fixture(&fixture);
     let path = fixture.to_string_lossy().into_owned();
     let argv = [
-        "provider-tool-probe",
+        "provider",
+        "tool-probe",
         "mock",
         "--model",
         "mock",

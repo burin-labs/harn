@@ -12,8 +12,8 @@ pub(crate) use super::{
     MergeCaptainCommand, ModelsCommand, OrchestratorCommand, OrchestratorDeployProvider,
     OrchestratorLogFormat, OrchestratorQueueCommand, OrchestratorTenantCommand,
     PackageArtifactsCommand, PackageCacheCommand, PackageCommand, PackageScaffoldCommand,
-    PersonaCommand, ProjectTemplate, ProviderCapabilitiesCommand, ProviderCommand,
-    ProviderToolProbeModeArg, ProvidersCommand, PublishArgs, RuleCommand, RunsCommand,
+    PersonaCommand, ProjectTemplate, ProviderCapabilitiesCommand, ProviderCatalogCommand,
+    ProviderCommand, ProviderToolProbeModeArg, PublishArgs, RuleCommand, RunsCommand,
     SessionCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand, SkillsCommand, ToolCommand,
     TraceCommand, TriggerCommand, TrustCommand, TrustOutcomeArg, TrustTierArg,
 };

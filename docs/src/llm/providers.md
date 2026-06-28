@@ -12,7 +12,7 @@ space, and GPU availability, then write starter `providers.toml`, `harn.toml`,
 and `.env` files.
 
 Run `harn models recommend` to choose a starter model for the current hardware.
-Run `harn providers recommend --json` to inspect the coding-agent readiness
+Run `harn provider catalog recommend --json` to inspect the coding-agent readiness
 evidence that orders local provider/model presets for quickstart. The report
 reads the latest `harn eval coding-agent --include-local` output when present
 and falls back to bundled seed evidence, while keeping runtime transport
@@ -92,7 +92,7 @@ responsible for cleanup.
 
 For an Apple Silicon MLX OpenAI-compatible server, Harn uses
 `MLX_BASE_URL` with a default of `http://127.0.0.1:8002`. Run
-`harn provider-ready mlx --model mlx-qwen3.6` to probe `/v1/models`
+`harn provider ready mlx --model mlx-qwen3.6` to probe `/v1/models`
 and verify that the configured model or alias is currently served. `harn local
 launch mlx-qwen3.6 --provider mlx --model-source <mlx-path-or-hf-repo>`
 uses the catalog's MLX launch shape (`mlx_lm.server`, host, port, readiness)
@@ -163,7 +163,7 @@ Use the one-tool conformance probe to produce the JSON receipt consumed by
 local lifecycle gates and eval harnesses:
 
 ```bash
-harn provider-tool-probe ollama --model devstral-small-2 --mode both --json
+harn provider tool-probe ollama --model devstral-small-2 --mode both --json
 harn local switch ollama-gemma4 --probe-result gemma4-tool-probe.json
 ```
 

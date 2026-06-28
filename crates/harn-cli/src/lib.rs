@@ -32,9 +32,9 @@ use cli::{
     refresh_provider_catalog_if_requested, Cli, Command, CompletionShell, EvalCommand,
     GuardCommand, MergeCaptainCommand, MergeCaptainMockCommand, ModelInfoArgs,
     PackageArtifactsCommand, PackageCacheCommand, PackageCommand, PackageScaffoldCommand,
-    PersonaCommand, PersonaSupervisionCommand, PgCommand, ProvidersCommand, RunsCommand,
-    ServeCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand, SkillsCommand, TimeCommand,
-    ToolCommand,
+    PersonaCommand, PersonaSupervisionCommand, PgCommand, ProviderCatalogCommand, ProviderCommand,
+    RunsCommand, ServeCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand, SkillsCommand,
+    TimeCommand, ToolCommand,
 };
 use harn_lexer::Lexer;
 use harn_parser::{DiagnosticSeverity, Parser, TypeChecker};
@@ -784,50 +784,75 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
         }
         Command::Models(args) => commands::models::run(args).await,
         Command::Local(args) => commands::local::run(args).await,
-        Command::Providers(args) => match args.command {
-            ProvidersCommand::Refresh(refresh) => {
-                if let Err(error) = commands::providers::run_refresh(&refresh).await {
-                    command_error(&error);
-                }
+        Command::Provider(args) => match args.command {
+            ProviderCommand::Capabilities(capabilities) => {
+                commands::provider_capabilities::run_or_exit(capabilities);
             }
-            ProvidersCommand::Validate(validate) => {
-                if let Err(error) = commands::providers::run_validate(&validate) {
-                    command_error(&error);
+            ProviderCommand::Catalog(catalog) => match catalog.command {
+                ProviderCatalogCommand::Refresh(refresh) => {
+                    if let Err(error) = commands::providers::run_refresh(&refresh).await {
+                        command_error(&error);
+                    }
                 }
+                ProviderCatalogCommand::Validate(validate) => {
+                    if let Err(error) = commands::providers::run_validate(&validate) {
+                        command_error(&error);
+                    }
+                }
+                ProviderCatalogCommand::BuildConfig(build_config) => {
+                    if let Err(error) = commands::providers::run_build_config(&build_config) {
+                        command_error(&error);
+                    }
+                }
+                ProviderCatalogCommand::BuildCapabilities(build_capabilities) => {
+                    if let Err(error) =
+                        commands::providers::run_build_capabilities(&build_capabilities)
+                    {
+                        command_error(&error);
+                    }
+                }
+                ProviderCatalogCommand::Export(export) => {
+                    if let Err(error) = commands::providers::run_export(&export) {
+                        command_error(&error);
+                    }
+                }
+                ProviderCatalogCommand::Matrix(matrix) => {
+                    if let Err(error) = commands::providers::run_matrix(&matrix) {
+                        command_error(&error);
+                    }
+                }
+                ProviderCatalogCommand::Support(support) => {
+                    if let Err(error) = commands::provider_support::run(&support) {
+                        command_error(&error);
+                    }
+                }
+                ProviderCatalogCommand::Recommend(recommend) => {
+                    if let Err(error) = commands::providers::run_recommend(&recommend).await {
+                        command_error(&error);
+                    }
+                }
+                ProviderCatalogCommand::Show(show) => {
+                    refresh_provider_catalog_if_requested(&show).await;
+                    let exit_code = dispatch_provider_catalog(show.available_only).await;
+                    if exit_code != 0 {
+                        process::exit(exit_code);
+                    }
+                }
+            },
+            ProviderCommand::Ready(ready) => {
+                run_provider_ready(
+                    &ready.provider,
+                    ready.model.as_deref(),
+                    ready.base_url.as_deref(),
+                    ready.json,
+                )
+                .await;
             }
-            ProvidersCommand::BuildConfig(build_config) => {
-                if let Err(error) = commands::providers::run_build_config(&build_config) {
-                    command_error(&error);
-                }
-            }
-            ProvidersCommand::BuildCapabilities(build_capabilities) => {
-                if let Err(error) = commands::providers::run_build_capabilities(&build_capabilities)
-                {
-                    command_error(&error);
-                }
-            }
-            ProvidersCommand::Export(export) => {
-                if let Err(error) = commands::providers::run_export(&export) {
-                    command_error(&error);
-                }
-            }
-            ProvidersCommand::Matrix(matrix) => {
-                if let Err(error) = commands::providers::run_matrix(&matrix) {
-                    command_error(&error);
-                }
-            }
-            ProvidersCommand::Support(support) => {
-                if let Err(error) = commands::provider_support::run(&support) {
-                    command_error(&error);
-                }
-            }
-            ProvidersCommand::Recommend(recommend) => {
-                if let Err(error) = commands::providers::run_recommend(&recommend).await {
-                    command_error(&error);
-                }
+            ProviderCommand::Probe(probe) => commands::provider::run_provider_probe(probe).await,
+            ProviderCommand::ToolProbe(tool_probe) => {
+                commands::provider::run_provider_tool_probe(tool_probe).await;
             }
         },
-        Command::Provider(args) => commands::provider_capabilities::run_or_exit(args),
         Command::Scan(args) => commands::scan::run(args).await,
         Command::Codemod(args) => commands::codemod::run(args).await,
         Command::Rule(args) => commands::rule::run(args).await,
@@ -1359,24 +1384,6 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                 process::exit(1);
             }
         }
-        Command::ProviderCatalog(args) => {
-            refresh_provider_catalog_if_requested(&args).await;
-            let exit_code = dispatch_provider_catalog(args.available_only).await;
-            if exit_code != 0 {
-                process::exit(exit_code);
-            }
-        }
-        Command::ProviderReady(args) => {
-            run_provider_ready(
-                &args.provider,
-                args.model.as_deref(),
-                args.base_url.as_deref(),
-                args.json,
-            )
-            .await;
-        }
-        Command::ProviderProbe(args) => commands::provider::run_provider_probe(args).await,
-        Command::ProviderToolProbe(args) => commands::provider::run_provider_tool_probe(args).await,
         Command::Skills(args) => match args.command {
             SkillsCommand::List(list) => commands::skills::run_list(&list),
             SkillsCommand::Get(get) => commands::skills::run_get(&get),
@@ -1683,7 +1690,7 @@ fn build_provider_catalog_payload(available_only: bool) -> serde_json::Value {
     })
 }
 
-/// Dispatch shim for `harn provider-catalog`. Aggregation stays in
+/// Dispatch shim for `harn provider catalog show`. Aggregation stays in
 /// Rust (the script can't reach `llm_config` for the catalog walk);
 /// the .harn renderer in `stdlib/cli/providers/catalog.harn` only
 /// re-emits the JSON envelope.

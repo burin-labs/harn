@@ -168,13 +168,12 @@ pub(crate) use portal::PortalArgs;
 pub use precompile::PrecompileArgs;
 pub(crate) use profile::ProfileArgs;
 pub(crate) use provider::{
-    refresh_provider_catalog_if_requested, ModelInfoArgs, ProviderArgs,
-    ProviderCapabilitiesCommand, ProviderCapabilitiesPromoteFromEvalArgs, ProviderCatalogArgs,
-    ProviderCommand, ProviderProbeArgs, ProviderReadyArgs, ProviderToolProbeArgs,
-    ProviderToolProbeModeArg,
+    refresh_provider_catalog_if_requested, ModelInfoArgs, ProviderArgs, ProviderCapabilitiesArgs,
+    ProviderCapabilitiesCommand, ProviderCapabilitiesPromoteFromEvalArgs, ProviderCommand,
+    ProviderProbeArgs, ProviderToolProbeArgs, ProviderToolProbeModeArg,
 };
 pub(crate) use providers::{
-    ProvidersArgs, ProvidersBuildCapabilitiesArgs, ProvidersBuildConfigArgs, ProvidersCommand,
+    ProviderCatalogCommand, ProvidersBuildCapabilitiesArgs, ProvidersBuildConfigArgs,
     ProvidersExportArgs, ProvidersMatrixArgs, ProvidersRecommendArgs, ProvidersRefreshArgs,
     ProvidersSupportArgs, ProvidersValidateArgs,
 };
@@ -473,20 +472,8 @@ SCRIPTING
     /// Manage local LLM runtime lifecycle: enumerate, switch, and stop
     /// Ollama, llama.cpp, MLX, and other OpenAI-compatible local servers.
     Local(LocalArgs),
-    /// Validate and generate provider/model catalog artifacts.
-    Providers(ProvidersArgs),
-    /// Inspect provider/model capabilities.
+    /// Inspect provider/model capabilities, catalog, and readiness.
     Provider(ProviderArgs),
-    /// Print the provider/model catalog Harn loaded as JSON.
-    ProviderCatalog(ProviderCatalogArgs),
-    /// Probe a provider's /models endpoint and optionally verify a served model.
-    ProviderReady(ProviderReadyArgs),
-    /// Snapshot a provider: readiness, served models, loaded models with
-    /// memory/context details. Designed for eval pipelines that need a
-    /// stable telemetry envelope per provider.
-    ProviderProbe(ProviderProbeArgs),
-    /// Run one-tool provider conformance and classify native/text fallback.
-    ProviderToolProbe(ProviderToolProbeArgs),
     /// Read-only structural search + lint: run a pattern, rule, or rule pack
     /// over a fileset and report matches or per-file counts (`--report-only`).
     Scan(ScanArgs),

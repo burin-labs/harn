@@ -1,5 +1,5 @@
 /**
- * `harn provider-catalog` ported to .harn — see harn#2310 (W10).
+ * `harn provider catalog show` ported to .harn — see harn#2310 (W10).
  *
  * Pure-passthrough port. The whole subcommand is "look up the
  * configured providers + models + aliases, fold in credential

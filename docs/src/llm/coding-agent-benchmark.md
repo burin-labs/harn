@@ -97,10 +97,10 @@ Turn the latest local benchmark output into a machine-readable recommendation
 surface with:
 
 ```sh
-harn providers recommend --json
+harn provider catalog recommend --json
 ```
 
-`harn providers recommend --input <path>` accepts either `local_readiness.json`
+`harn provider catalog recommend --input <path>` accepts either `local_readiness.json`
 or a raw coding-agent `summary.json`. Without an input path, it reads the latest
 benchmark report and falls back to bundled seed evidence. `harn quickstart` uses
 the same recommendation order when choosing among installed local Ollama models.
@@ -109,7 +109,7 @@ Use the same `summary.json` to refresh the generated provider support page and
 JSON sidecar:
 
 ```sh
-harn providers support \
+harn provider catalog support \
   --empirical .harn-runs/coding-agent-bench/latest/summary.json
 ```
 

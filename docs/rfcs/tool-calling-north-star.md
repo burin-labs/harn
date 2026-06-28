@@ -610,7 +610,7 @@ this RFC's companion PR).**
 
 **Phase 4 — Living registry drift detector (NON-breaking; proposes only).**
 
-- Per-route health ring buffer + `harn providers drift-proposals` + proposal
+- Per-route health ring buffer + `harn provider catalog drift-proposals` + proposal
   records. Gate stays the only binding layer.
 
 - Mechanism-fitness: feed a scripted stream of vanishing-call data for a

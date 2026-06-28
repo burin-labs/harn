@@ -670,7 +670,7 @@ impl Default for Capabilities {
     }
 }
 
-/// Display-oriented row for `harn providers matrix`, the legacy
+/// Display-oriented row for `harn provider catalog matrix`, the legacy
 /// `harn check --provider-matrix` surface, and the generated docs page. Rows
 /// are intentionally rule-shaped: `model` is the rule's `model_match` pattern,
 /// because the shipped capability source of truth is a first-match rule table
@@ -813,7 +813,7 @@ pub fn set_user_overrides_toml(src: &str) -> Result<(), String> {
 /// Parse a capabilities TOML document (the same layout used by the built-in
 /// `capabilities.toml`) without installing it anywhere, for callers that
 /// thread an explicit capability overlay instead of mutating thread state
-/// (e.g. `harn providers export --capabilities-overlay`).
+/// (e.g. `harn provider catalog export --capabilities-overlay`).
 pub fn parse_capabilities_toml(src: &str) -> Result<CapabilitiesFile, String> {
     toml::from_str(src).map_err(|e| e.to_string())
 }
@@ -1121,7 +1121,7 @@ fn suggested_alternative_provider_hint(model: &str) -> String {
             .to_string()
     } else {
         "Pick a provider whose route for this model has a working native or \
-         text tool channel (see `harn providers matrix`)."
+         text tool channel (see `harn provider catalog matrix`)."
             .to_string()
     }
 }
@@ -3453,6 +3453,9 @@ native_tools = true
         let caps = lookup_with_user_overrides("acme", "mystery-1", Some(&generic));
         let message = no_viable_tool_channel_with_caps("acme", "mystery-1", &caps)
             .expect("guard fires on the generic no-channel route too");
-        assert!(message.contains("harn providers matrix"), "{message}");
+        assert!(
+            message.contains("harn provider catalog matrix"),
+            "{message}"
+        );
     }
 }

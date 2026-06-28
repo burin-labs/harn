@@ -1,5 +1,5 @@
 # Curated provider-support guidance layered onto generated catalog and
-# capability data by `harn providers support`.
+# capability data by `harn provider catalog support`.
 
 [[entry]]
 id = "anthropic"
@@ -147,13 +147,13 @@ recommended_options = [
 ]
 notes = [
   "Local Ollama model quality varies by template and quantization; Harn defaults known fragile routes to the text-tool contract.",
-  "Use `harn provider-tool-probe` receipts to promote aliases from unknown to native/text/disabled on a machine.",
+  "Use `harn provider tool-probe` receipts to promote aliases from unknown to native/text/disabled on a machine.",
 ]
 caveats = [
   "Some Ollama native tool parsers reject otherwise valid text-mode model output; the capability table records those routes as text-only.",
 ]
 local_setup_notes = [
-  "Run `harn models install devstral-small-2`, then verify with `harn provider-ready ollama --model <model>`. For local qwen3.x, use the llamacpp provider (e.g. `local-qwen3.6`) — Ollama's qwen3.5-family tool-call parser 500s on text-tool output.",
+  "Run `harn models install devstral-small-2`, then verify with `harn provider ready ollama --model <model>`. For local qwen3.x, use the llamacpp provider (e.g. `local-qwen3.6`) — Ollama's qwen3.5-family tool-call parser 500s on text-tool output.",
 ]
 mcp_notes = [
   "MCP tools are local Harn tools; prefer the text tool contract unless a probe proves native calls work for the installed model.",
@@ -180,7 +180,7 @@ caveats = [
   "Prefer `llamacpp` or `mlx` when those runtimes are known, because their capability rows can encode template-specific behavior.",
 ]
 local_setup_notes = [
-  "Set `LOCAL_LLM_BASE_URL` and either `LOCAL_LLM_MODEL` or an explicit Harn model selector, then run `harn provider-ready local`.",
+  "Set `LOCAL_LLM_BASE_URL` and either `LOCAL_LLM_MODEL` or an explicit Harn model selector, then run `harn provider ready local`.",
 ]
 mcp_notes = [
   "MCP tools are exposed as OpenAI-compatible tool definitions unless the route is configured to prefer Harn text tools.",
@@ -229,7 +229,7 @@ notes = [
   "MLX routes use native tools only after the served identity and tool probe match the cataloged model.",
 ]
 caveats = [
-  "`mlx_lm.server` flags vary by release; launch first, then verify with `harn provider-ready mlx`.",
+  "`mlx_lm.server` flags vary by release; launch first, then verify with `harn provider ready mlx`.",
 ]
 local_setup_notes = [
   "Run `harn models install mlx-qwen3.6` for the venv, download, launch, and verification commands.",

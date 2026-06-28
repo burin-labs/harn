@@ -262,7 +262,7 @@ fn test_completion_scripts_include_subcommands() {
     let script = String::from_utf8(output).expect("completion script should be utf-8");
 
     assert!(script.contains("completions"));
-    assert!(script.contains("provider-ready"));
+    assert!(script.contains("tool-probe"));
 }
 
 #[test]
