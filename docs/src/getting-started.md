@@ -27,6 +27,16 @@ To upgrade later, run `harn upgrade` — it reuses the same release
 artifacts and SHA256SUMS manifest to atomically replace the running
 binary.
 
+### Windows (PowerShell)
+
+```powershell
+irm https://harnlang.com/install.ps1 | iex
+```
+
+Downloads and SHA256-verifies the Windows release archive, installs
+`harn`, `harn-dap`, and `harn-lsp`, and adds the install directory to
+your user `PATH`.
+
 ### From crates.io
 
 If you already have a Rust toolchain:
@@ -41,8 +51,7 @@ cargo install harn-cli
 git clone https://github.com/burin-labs/harn
 cd harn
 ./scripts/dev_setup.sh   # installs dev tooling, portal deps/build, git hooks, sccache
-cargo build --release
-cp target/release/harn ~/.local/bin/
+cargo install --path crates/harn-cli
 ```
 
 Verify the installation:
@@ -53,8 +62,8 @@ harn version
 
 ## Prerequisites for building from source
 
-- **[Rust](https://rustup.rs/)** 1.70 or later -- install with
-  `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
+- **[Rust](https://rustup.rs/)** 1.95 or later (`rustup update` to upgrade) --
+  install with `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
 - **Git**
 
 The one-line installer and `cargo install harn-cli` do not require a

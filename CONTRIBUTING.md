@@ -64,6 +64,16 @@ What triggers a cold rebuild:
 On macOS, Spotlight may index freshly-linked test binaries on first run,
 adding ~30–60 s of stat traffic unrelated to cargo.
 
+### Stale bytecode cache
+
+If tests fail in ways that don't match your edits — especially right after
+switching branches or Rust versions — clear the on-disk Harn bytecode cache.
+It keys on a compiler fingerprint, but bypassing it rules the cache out:
+
+```bash
+rm -rf ~/.cache/harn/bytecode   # or run with HARN_BYTECODE_CACHE=0 to bypass
+```
+
 ### Test tiers
 
 The workspace splits tests into two tiers and keeps pre-push targeted so local
