@@ -59,4 +59,10 @@ cp "$repo_root/docs/llm/harn-triggers-quickref.md" \
 cp "$repo_root/install.sh" "$dist_dir/install.sh"
 cp "$repo_root/install.ps1" "$dist_dir/install.ps1"
 
+# Provider/model catalog served from the site so the CLI's default refresh URL
+# (https://harnlang.com/provider-catalog/provider-catalog.json) resolves.
+mkdir -p "$dist_dir/provider-catalog"
+cp "$repo_root/spec/provider-catalog/provider-catalog.json" \
+  "$dist_dir/provider-catalog/provider-catalog.json"
+
 echo "docs site built → $dist_dir"

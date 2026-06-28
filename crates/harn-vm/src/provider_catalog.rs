@@ -23,7 +23,7 @@ pub const HARN_PROVIDER_CATALOG_URL_ENV: &str = "HARN_PROVIDER_CATALOG_URL";
 pub const HARN_PROVIDER_CATALOG_ALLOW_UNSIGNED_ENV: &str = "HARN_PROVIDER_CATALOG_ALLOW_UNSIGNED";
 pub const HARN_PROVIDER_CATALOG_TRUSTED_KEYS_ENV: &str = "HARN_PROVIDER_CATALOG_TRUSTED_KEYS";
 pub const DEFAULT_PROVIDER_CATALOG_URL: &str =
-    "https://burin-labs.github.io/harn-cloud/provider-catalog/provider-catalog.json";
+    "https://harnlang.com/provider-catalog/provider-catalog.json";
 
 const DEFAULT_REMOTE_TTL_MS: u64 = 24 * 60 * 60 * 1000;
 const REMOTE_CACHE_DIR: &str = "provider-catalog";

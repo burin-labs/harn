@@ -227,8 +227,8 @@ defaults, safe, prompts, catalog).
   source, privacy, and TTL fields; `bulletin_emit` always writes proposals
   to `personas.bulletins.proposed`, and `bulletin_accept` / `bulletin_reject`
   / `bulletin_expire` / `bulletin_supersede` emit
-  `harn.profile_bulletin_decision.v1` audit records so hosts (Burin local,
-  Harn Cloud) can review persona context instead of accepting silent prompt
+  `harn.profile_bulletin_decision.v1` audit records so hosts (an IDE host, a
+  cloud platform) can review persona context instead of accepting silent prompt
   mutation.
 - Delegated worker lifecycle builtins via `spawn_agent(...)`, `send_input(...)`,
   `resume_agent(...)`, `wait_agent(...)`, `close_agent(...)`, and `list_agents()`,
