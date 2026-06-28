@@ -98,7 +98,7 @@ case "$OS" in
     esac
     ;;
   msys*|mingw*|cygwin*)
-    die "Windows installs use harn-x86_64-pc-windows-msvc.zip from ${RELEASES_URL}"
+    die "On Windows, install from PowerShell: irm https://harnlang.com/install.ps1 | iex"
     ;;
   *)
     die "unsupported OS: $OS"

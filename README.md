@@ -47,6 +47,9 @@ cd harn
 cargo install --path crates/harn-cli
 ```
 
+Building from source or with `cargo install` requires **Rust 1.95 or newer**
+(`rustup update` to upgrade). The one-line installer needs no Rust toolchain.
+
 Shell completions:
 
 ```bash

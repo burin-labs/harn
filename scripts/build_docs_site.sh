@@ -53,4 +53,10 @@ cp "$repo_root/docs/llm/harn-quickref.md" \
 cp "$repo_root/docs/llm/harn-triggers-quickref.md" \
   "$dist_dir/docs/llm/harn-triggers-quickref.md"
 
+# Installer scripts served from the site root so the documented one-liners
+# (`curl -fsSL https://harnlang.com/install.sh | sh` and
+# `irm https://harnlang.com/install.ps1 | iex`) resolve.
+cp "$repo_root/install.sh" "$dist_dir/install.sh"
+cp "$repo_root/install.ps1" "$dist_dir/install.ps1"
+
 echo "docs site built → $dist_dir"
