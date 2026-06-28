@@ -382,11 +382,7 @@ fn encode_artifact(key: &CacheKey, kind: u8, payload: &[u8]) -> Vec<u8> {
 }
 
 fn write_atomic(target: &Path, buf: &[u8]) -> io::Result<()> {
-    let tmp_name = match target.file_name() {
-        Some(name) => format!(".{}.{}.tmp", name.to_string_lossy(), std::process::id()),
-        None => format!(".harn-cache.{}.tmp", std::process::id()),
-    };
-    let tmp_path = target.with_file_name(tmp_name);
+    let tmp_path = atomic_tmp_path(target);
     let mut tmp_file = fs::File::create(&tmp_path)?;
     tmp_file.write_all(buf)?;
     tmp_file.sync_all()?;
@@ -398,6 +394,21 @@ fn write_atomic(target: &Path, buf: &[u8]) -> io::Result<()> {
             Err(err)
         }
     }
+}
+
+fn atomic_tmp_path(target: &Path) -> PathBuf {
+    static NEXT_TMP_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let id = NEXT_TMP_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp_name = match target.file_name() {
+        Some(name) => format!(
+            ".{}.{}.{}.tmp",
+            name.to_string_lossy(),
+            std::process::id(),
+            id
+        ),
+        None => format!(".harn-cache.{}.{}.tmp", std::process::id(), id),
+    };
+    target.with_file_name(tmp_name)
 }
 
 /// Parsed cache header. Read by both the chunk and module loaders so the
@@ -933,6 +944,17 @@ mod tests {
         let on_disk_bytes = std::fs::read(&on_disk).unwrap();
         let in_memory_bytes = serialize_chunk_artifact(&key, &chunk).expect("serialize");
         assert_eq!(in_memory_bytes, on_disk_bytes);
+    }
+
+    #[test]
+    fn atomic_temp_paths_are_unique_within_process() {
+        let target = Path::new("entry.harnbc");
+        let first = atomic_tmp_path(target);
+        let second = atomic_tmp_path(target);
+        assert_ne!(
+            first, second,
+            "same-process concurrent cache writes must not share a temp file"
+        );
     }
 
     #[test]

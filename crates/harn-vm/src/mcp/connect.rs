@@ -57,14 +57,10 @@ pub(crate) async fn mcp_connect_http_impl(
     let client = reqwest::Client::builder()
         .build()
         .map_err(|e| VmError::Runtime(format!("MCP HTTP client error: {e}")))?;
-    let protocol_mode = resolve_protocol_mode(
+    let options = resolve_connect_protocol_options(
         spec.protocol_mode.as_deref(),
         spec.protocol_version.as_deref(),
     )?;
-    let protocol_version = spec
-        .protocol_version
-        .clone()
-        .unwrap_or_else(|| default_protocol_version(protocol_mode).to_string());
     let resolved_auth = resolve_http_auth_token_source(spec).await;
 
     let handle = VmMcpClientHandle {
@@ -75,8 +71,8 @@ pub(crate) async fn mcp_connect_http_impl(
             auth_token: resolved_auth.token,
             auth_token_source: resolved_auth.source,
             token_exchange: spec.token_exchange.clone().map(Arc::new),
-            protocol_mode,
-            protocol_version,
+            protocol_mode: options.protocol_mode,
+            protocol_version: options.protocol_version,
             session_id: None,
             next_id: 1,
             proxy_server_name: spec.proxy_server_name.clone(),
@@ -167,20 +163,16 @@ pub async fn connect_mcp_server_from_spec(
 ) -> Result<VmMcpClientHandle, VmError> {
     let mut handle = match spec.transport {
         McpTransport::Stdio => {
-            let protocol_mode = resolve_protocol_mode(
+            let options = resolve_connect_protocol_options(
                 spec.protocol_mode.as_deref(),
                 spec.protocol_version.as_deref(),
             )?;
-            let protocol_version = spec
-                .protocol_version
-                .clone()
-                .unwrap_or_else(|| default_protocol_version(protocol_mode).to_string());
             mcp_connect_stdio_impl(
                 &spec.command,
                 &spec.args,
                 &spec.env,
-                protocol_mode,
-                protocol_version,
+                options.protocol_mode,
+                options.protocol_version,
             )
             .await?
         }

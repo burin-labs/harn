@@ -53,10 +53,7 @@ pub(crate) fn resolve_protocol_mode(
 
 pub(crate) fn mcp_connect_options(value: Option<&VmValue>) -> Result<McpConnectOptions, VmError> {
     let Some(value) = value else {
-        return Ok(McpConnectOptions {
-            protocol_mode: McpProtocolMode::Legacy,
-            protocol_version: PROTOCOL_VERSION.to_string(),
-        });
+        return resolve_connect_protocol_options(None, None);
     };
     let VmValue::Dict(options) = value else {
         return Err(VmError::Runtime(format!(
@@ -66,12 +63,32 @@ pub(crate) fn mcp_connect_options(value: Option<&VmValue>) -> Result<McpConnectO
     };
     let protocol_mode_value = options.get("protocol_mode").map(|value| value.display());
     let protocol_version_value = options.get("protocol_version").map(|value| value.display());
-    let protocol_mode = resolve_protocol_mode(
+    resolve_connect_protocol_options(
         protocol_mode_value.as_deref(),
         protocol_version_value.as_deref(),
-    )?;
+    )
+}
+
+pub(crate) fn resolve_connect_protocol_options(
+    protocol_mode_value: Option<&str>,
+    protocol_version_value: Option<&str>,
+) -> Result<McpConnectOptions, VmError> {
+    let protocol_mode_value = protocol_mode_value
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let protocol_version_value = protocol_version_value
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let protocol_mode = resolve_protocol_mode(protocol_mode_value, protocol_version_value)?;
     let protocol_version = protocol_version_value
-        .unwrap_or_else(|| default_protocol_version(protocol_mode).to_string());
+        .unwrap_or_else(|| default_protocol_version(protocol_mode))
+        .to_string();
+    if !crate::mcp_protocol::is_supported_protocol_version(&protocol_version) {
+        return Err(VmError::Runtime(format!(
+            "mcp_connect: unsupported protocol_version {protocol_version:?}; expected one of {}",
+            crate::mcp_protocol::supported_protocol_versions().join(", ")
+        )));
+    }
     Ok(McpConnectOptions {
         protocol_mode,
         protocol_version,
