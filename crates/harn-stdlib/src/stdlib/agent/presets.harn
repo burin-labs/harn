@@ -202,12 +202,22 @@ fn __tool_using_defaults(kind) {
       repair_aware: false,
       stuck_same_diagnostic_after: 3,
       post_edit_reverify: true,
+      no_net_progress_extend_guard: false,
+      no_net_progress_extend_after: 3,
+      no_net_progress_hard_cap_after: 16,
     },
     // Discovery surface (#repair-diagnostics). Mirrors the repair knobs above
     // so consumers (e.g. Burin, via a feature flag) can find and opt into the
     // evidence-aware repair loop without spelunking `stall_diagnostics`.
     // Subsumes Burin's futile-retry-guard.harn.
-    repair_diagnostics: {repair_aware: false, stuck_same_diagnostic_after: 3, post_edit_reverify: true},
+    repair_diagnostics: {
+      repair_aware: false,
+      stuck_same_diagnostic_after: 3,
+      post_edit_reverify: true,
+      no_net_progress_extend_guard: false,
+      no_net_progress_extend_after: 3,
+      no_net_progress_hard_cap_after: 16,
+    },
   }
 }
 

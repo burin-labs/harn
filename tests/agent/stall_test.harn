@@ -415,6 +415,7 @@ const GUARD_CONFIG = {
   post_edit_reverify: true,
   no_net_progress_extend_guard: true,
   no_net_progress_extend_after: 3,
+  no_net_progress_hard_cap_after: 16,
 }
 
 fn _fold_guarded(state, prev_dispatch, prior_made_edit) {
@@ -491,4 +492,83 @@ pipeline test_no_net_progress_explore_turn_not_starved(task) {
   let o = _fold_guarded(initial, nil, false)
   assert(o.state.last_diagnostic_class != "fail")
   assert(!agent_stall_no_net_progress(GUARD_CONFIG, o.state))
+}
+
+const HARD_CAP_CONFIG = {
+  enabled: true,
+  repair_aware: false,
+  post_edit_reverify: true,
+  no_net_progress_extend_guard: true,
+  no_net_progress_extend_after: 99,
+  no_net_progress_hard_cap_after: 3,
+  repeat_same_error: 99,
+  repeat_same_observation: 99,
+  no_progress_messages: 99,
+  ping_pong_cycles: 99,
+}
+
+fn _fold_hard_cap(state, prev_dispatch, prior_made_edit) {
+  return agent_stall_observe_tool_calls(
+    "unit-hard-cap",
+    _run_call(),
+    1,
+    HARD_CAP_CONFIG,
+    state,
+    true,
+    prev_dispatch,
+    "",
+    false,
+    prior_made_edit,
+  )
+}
+
+pipeline test_no_net_progress_hard_cap_trips_on_varied_failures(task) {
+  // A slow-draining failing run can keep changing the error signature, so the
+  // same-diagnostic streak never reaches the no-net threshold. The hard cap is
+  // deliberately signature-agnostic: three failing verify turns without a clean
+  // pass trips the terminal stuck path anyway.
+  let o1 = _fold_hard_cap(agent_stall_initial_state(), _fail_dispatch("error A"), false)
+  assert(o1.state.same_diagnostic_streak == 1)
+  assert(o1.state.failing_verify_turns == 1)
+  assert(o1.warning == nil)
+  assert(!agent_stall_no_net_progress(HARD_CAP_CONFIG, o1.state))
+  let o2 = _fold_hard_cap(o1.state, _fail_dispatch("error B"), false)
+  assert(o2.state.same_diagnostic_streak == 1)
+  assert(o2.state.failing_verify_turns == 2)
+  assert(o2.warning == nil)
+  assert(!agent_stall_no_net_progress(HARD_CAP_CONFIG, o2.state))
+  let o3 = _fold_hard_cap(o2.state, _fail_dispatch("error C"), false)
+  assert(o3.state.same_diagnostic_streak == 1)
+  assert(o3.state.failing_verify_turns == 3)
+  assert(o3.warning != nil)
+  assert(o3.warning.pattern == "no_net_progress_hard_cap")
+  assert(o3.hard_stop)
+  assert(o3.state.hard_stop)
+  assert(agent_stall_no_net_progress(HARD_CAP_CONFIG, o3.state))
+}
+
+pipeline test_no_net_progress_hard_cap_resets_only_on_clean_verify(task) {
+  let o1 = _fold_hard_cap(agent_stall_initial_state(), _fail_dispatch("error A"), false)
+  let o2 = _fold_hard_cap(o1.state, _fail_dispatch("error B"), false)
+  assert(o2.state.failing_verify_turns == 2)
+  let pass = _fold_hard_cap(o2.state, _ok_dispatch(), false)
+  assert(pass.state.last_diagnostic_class == "pass")
+  assert(pass.state.failing_verify_turns == 0)
+  assert(!agent_stall_no_net_progress(HARD_CAP_CONFIG, pass.state))
+  let fail_after_pass = _fold_hard_cap(pass.state, _fail_dispatch("error C"), false)
+  assert(fail_after_pass.state.failing_verify_turns == 1)
+  assert(fail_after_pass.warning == nil)
+}
+
+pipeline test_no_net_progress_hard_cap_preserves_across_edit_success(task) {
+  // Edit success is not a clean verification. It should preserve the failing
+  // verify counter so a model cannot evade the cap by interleaving successful
+  // writes with still-red verifies.
+  let o1 = _fold_hard_cap(agent_stall_initial_state(), _fail_dispatch("error A"), false)
+  let edit_ok = _fold_hard_cap(o1.state, _ok_dispatch(), true)
+  assert(edit_ok.state.reverify_owed)
+  assert(edit_ok.state.failing_verify_turns == 1)
+  let o2 = _fold_hard_cap(edit_ok.state, _fail_dispatch("error B"), false)
+  assert(o2.state.failing_verify_turns == 2)
+  assert(o2.warning == nil)
 }

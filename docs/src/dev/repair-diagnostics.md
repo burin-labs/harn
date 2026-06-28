@@ -136,6 +136,17 @@ tool-using defaults preset (`presets.harn`), default-safe-off:
 - `repair_aware` (bool, default `false`)
 - `stuck_same_diagnostic_after` (int, default `3`)
 - `post_edit_reverify` (bool, default `true`)
+- `no_net_progress_extend_guard` (bool, default `false`)
+- `no_net_progress_extend_after` (int, default `3`)
+- `no_net_progress_hard_cap_after` (int, default `16`)
+
+When `no_net_progress_extend_guard` is enabled, Harn now uses two complementary
+signals. The same-diagnostic threshold catches flat stalls early and suppresses
+adaptive budget extension. The hard cap counts every failing verification turn
+and resets only on a clean non-edit verification pass, so a model cannot evade
+recovery by slowly changing error signatures or interleaving successful edits
+with still-red verifies. Crossing the hard cap emits
+`no_net_progress_hard_cap` and terminates through the existing `stuck` path.
 
 ## Subsumption of Burin's futile-retry-guard.harn
 
