@@ -52,7 +52,9 @@ mod tests {
     #[test]
     fn nonexistent_path_selector_errors() {
         let store = GuardStore::at_root(std::env::temp_dir().join("harn-guard-resolve-path"));
-        let err = resolve_dir(&store, "/no/such/guard/model/dir").unwrap_err();
+        let missing = store.root().join("no-such").join("guard-model-dir");
+        let selector = missing.to_string_lossy();
+        let err = resolve_dir(&store, &selector).unwrap_err();
         assert!(matches!(err, GuardError::PathNotFound(_)));
     }
 }

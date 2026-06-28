@@ -451,7 +451,8 @@ mod tests {
                 skill.name
             );
             assert!(
-                skill.source.contains(&format!("name: {}\n", skill.name)),
+                skill.source.contains(&format!("name: {}\n", skill.name))
+                    || skill.source.contains(&format!("name: {}\r\n", skill.name)),
                 "{} source missing canonical name field",
                 skill.name
             );
