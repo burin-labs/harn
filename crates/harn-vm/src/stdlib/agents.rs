@@ -149,6 +149,16 @@ fn fresh_worker_state(
     let mut audit = init.audit.normalize();
     audit.worker_id = Some(worker_id.clone());
     audit.execution_kind = Some(mode.clone());
+    // Receipts/lineage: a sub-agent's audit session_id must be its REAL session
+    // (`sub_agent_session_*`, the same id its event topic + transcript live
+    // under) so a fan-out is reconstructable from the audit alone. `normalize()`
+    // above otherwise minted a fresh random `session_*` that points at no topic,
+    // poisoning every downstream join (provenance, ACP wire, snapshot).
+    if let WorkerConfig::SubAgent { spec } = &init.config {
+        if !spec.session_id.is_empty() {
+            audit.session_id = spec.session_id.clone();
+        }
+    }
     let request = worker_request_for_config(&init.task, &init.config);
     Arc::new(parking_lot::Mutex::new(WorkerState {
         id: worker_id.clone(),
