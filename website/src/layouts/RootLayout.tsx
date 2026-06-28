@@ -3,6 +3,7 @@ import { Outlet, useLocation } from "react-router"
 import { Navbar } from "../components/Navbar"
 import { Footer } from "../components/Footer"
 import { SearchModal } from "../components/SearchModal"
+import { KeywordTooltip } from "../components/KeywordTooltip"
 
 export function RootLayout() {
   const [searchOpen, setSearchOpen] = useState(false)
@@ -42,6 +43,7 @@ export function RootLayout() {
       </main>
       <Footer />
       <SearchModal open={searchOpen} onClose={closeSearch} />
+      <KeywordTooltip />
     </div>
   )
 }

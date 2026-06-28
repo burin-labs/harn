@@ -1,6 +1,7 @@
 import type { ReactNode } from "react"
 import type { Mode } from "highlight.js"
 import { createLowlight, type LanguageFn } from "lowlight"
+import { KEYWORD_DOCS } from "./keyword-docs"
 
 const harnLanguage: LanguageFn = (hljs) => {
   const keywords = {
@@ -59,15 +60,34 @@ type HighlightNode = {
 
 const harnLowlight = createLowlight({ harn: harnLanguage })
 
+// Token classes whose text we offer inline docs for (keywords + built-ins).
+const TIPPABLE = new Set(["hljs-keyword", "hljs-built_in"])
+
+function nodeText(node: HighlightNode): string {
+  if (node.type === "text") return node.value ?? ""
+  return (node.children ?? []).map(nodeText).join("")
+}
+
+function classList(node: HighlightNode): string[] {
+  const className = node.properties?.className
+  if (!className) return []
+  return Array.isArray(className) ? className : [className]
+}
+
 function renderHighlightNode(node: HighlightNode, index: number): ReactNode {
   if (node.type === "text") return node.value ?? ""
   if (node.type !== "element") return null
 
-  const className = node.properties?.className
+  const classes = classList(node)
+  // Offer a hover doc when this token is a keyword/built-in we have a note for.
+  // The shared KeywordTooltip listener reads `data-harn-tip`, so there is no per-token JS.
+  const tip = classes.some((c) => TIPPABLE.has(c)) ? KEYWORD_DOCS[nodeText(node).trim()] : undefined
+
   return (
     <span
       key={index}
-      className={Array.isArray(className) ? className.join(" ") : className}
+      className={tip ? [...classes, "harn-tip"].join(" ") : classes.join(" ")}
+      data-harn-tip={tip}
     >
       {(node.children ?? []).map(renderHighlightNode)}
     </span>
