@@ -57,3 +57,37 @@ pricing = { input_per_mtok = 0.30, output_per_mtok = 1.20, cache_read_per_mtok =
 tier = "frontier"
 open_weight = true
 strengths = ["speed", "coding", "agentic", "tool_use", "reasoning", "long_context"]
+
+# Reliable Together serverless sample routes (harn#3645 §4). The prior
+# representative serverless rows were unusable as one-click samples:
+# `Qwen/Qwen3-Coder-Next-FP8` returns `model_not_available` on serverless
+# chat-completions (needs a dedicated endpoint; carried as
+# `availability = "dedicated"` in 20-open-weight-openrouter.toml), and the
+# Together `google/gemma-4-31B-it` route is a reasoning model with an
+# empty-content footgun. These two non-reasoning Turbo routes are live on
+# Together's serverless `/v1/chat/completions` with native tool calls and
+# serve as dependable cheap executor samples. Verified live ids on
+# together.ai/models (Qwen2.5 7B Instruct Turbo, Llama 3.3 70B Instruct
+# Turbo).
+[models."Qwen/Qwen2.5-7B-Instruct-Turbo"]
+name = "Qwen2.5 7B Instruct Turbo (Together)"
+provider = "together"
+context_window = 32768
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 0.30, output_per_mtok = 0.30 }
+tier = "small"
+open_weight = true
+strengths = ["speed", "cheap", "tool_use"]
+[models."meta-llama/Llama-3.3-70B-Instruct-Turbo"]
+name = "Llama 3.3 70B Instruct Turbo (Together)"
+provider = "together"
+context_window = 131072
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 0.88, output_per_mtok = 0.88 }
+logical_model = "llama-3.3-70b-instruct"
+equivalence_group = "llama-3.3-70b-instruct"
+served_variant = "together"
+api_dialect = "openai_chat"
+tier = "mid"
+open_weight = true
+strengths = ["tool_use", "cheap"]
