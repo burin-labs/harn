@@ -549,12 +549,16 @@ fn filter_default_args(
     let mut kept = Vec::with_capacity(default_args.len());
     let mut iter = default_args.iter().peekable();
     while let Some(arg) = iter.next() {
-        if arg.starts_with("--") && explicit_keys.contains(arg.as_str()) {
+        if arg.starts_with("--") && explicit_keys.contains(default_arg_key(arg)) {
             // Skip this flag, and its value too when the next token is not
             // itself a flag (covers valued flags like `--flash-attn on`).
-            if let Some(next) = iter.peek() {
-                if !next.starts_with("--") {
-                    iter.next();
+            // `--flag=value` carries its value inline, so only that one token
+            // is skipped.
+            if !arg.contains('=') {
+                if let Some(next) = iter.peek() {
+                    if !next.starts_with("--") {
+                        iter.next();
+                    }
                 }
             }
             continue;
@@ -562,6 +566,10 @@ fn filter_default_args(
         kept.push(arg.clone());
     }
     kept
+}
+
+fn default_arg_key(arg: &str) -> &str {
+    arg.split_once('=').map(|(key, _)| key).unwrap_or(arg)
 }
 
 fn push_arg(out: &mut Vec<String>, key: Option<&str>, value: impl ToString) {
@@ -840,6 +848,38 @@ mod tests {
             .windows(2)
             .any(|pair| pair == ["--flash-attn", "auto"]));
         assert!(!built.windows(2).any(|pair| pair == ["--flash-attn", "on"]));
+    }
+
+    #[test]
+    fn build_managed_args_dedups_equals_form_default_args() {
+        let mut runtime = runtime();
+        runtime.default_args = vec![
+            "--flash-attn=off".to_string(),
+            "--reasoning-format=none".to_string(),
+            "--jinja".to_string(),
+        ];
+        let mut args = cli_args();
+        args.flash_attn = Some("auto".to_string());
+        args.reasoning_format = Some("deepseek".to_string());
+
+        let built = build_managed_args(
+            &args,
+            &runtime,
+            "/models/qwen.gguf",
+            "qwen3.6-35b-a3b-ud-q4-k-xl",
+            "127.0.0.1",
+            8001,
+            8192,
+        );
+
+        assert!(!built.iter().any(|arg| arg == "--flash-attn=off"));
+        assert!(!built.iter().any(|arg| arg == "--reasoning-format=none"));
+        assert!(built
+            .windows(2)
+            .any(|pair| pair == ["--flash-attn", "auto"]));
+        assert!(built
+            .windows(2)
+            .any(|pair| pair == ["--reasoning-format", "deepseek"]));
     }
 
     #[test]

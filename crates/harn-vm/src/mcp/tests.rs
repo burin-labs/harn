@@ -64,6 +64,26 @@ fn http_spec(url: &str, auth_token: Option<&str>) -> McpServerSpec {
     }
 }
 
+#[test]
+fn connect_protocol_options_reject_unsupported_versions() {
+    let error = match resolve_connect_protocol_options(None, Some("2099-01-01")) {
+        Ok(_) => panic!("unsupported protocol version must fail locally"),
+        Err(error) => error,
+    };
+    assert!(
+        error.to_string().contains("unsupported protocol_version"),
+        "{error}"
+    );
+}
+
+#[test]
+fn connect_protocol_options_trim_before_mode_inference() {
+    let options = resolve_connect_protocol_options(None, Some(" DRAFT-2026-v1 "))
+        .expect("trimmed draft protocol version");
+    assert_eq!(options.protocol_mode, McpProtocolMode::Modern);
+    assert_eq!(options.protocol_version, DRAFT_PROTOCOL_VERSION);
+}
+
 #[tokio::test]
 async fn http_auth_resolution_prefers_explicit_token() {
     let spec = http_spec("https://mcp.example/mcp", Some("configured"));
