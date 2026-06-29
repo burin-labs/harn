@@ -1,0 +1,47 @@
+// agent_session_inject_reminder: a bridge-free, single-turn ephemeral system
+// reminder. This is the in-process seam Burin #3183 L4 uses to make
+// runtime_feedback ephemeral (rendered once into the next prompt, then evicted,
+// never re-billed as a durable transcript message).
+import {
+  agent_session_apply_reminder_post_turn,
+  agent_session_inject_reminder,
+} from "std/agent/state"
+
+pipeline main(task) {
+  let s = agent_session_open()
+  agent_session_reset(s)
+  let id = agent_session_inject_reminder(
+    s,
+    {
+      body: "re-read auth.go",
+      ttl_turns: 1,
+      role_hint: "user_block",
+      dedupe_key: "runtime-feedback/grounding",
+    },
+  )
+  require id != nil && id != "", "inject_reminder returns a reminder id"
+  // Lands in the EVENT stream (renders into the next prompt), never in
+  // `messages` (so it is not re-sent / re-billed on every later turn).
+  require agent_session_length(s) == 0, "reminder is not a transcript message"
+  let before = transcript_events_by_kind(agent_session_snapshot(s), "system_reminder")
+  require len(before) == 1, "exactly one reminder is pending in the event stream"
+  require before[0].reminder.body == "re-read auth.go", "reminder carries the body"
+  // One turn boundary later the ttl=1 reminder expires and is removed — so a note
+  // injected at turn N is absent from the turn N+2 payload.
+  let report = agent_session_apply_reminder_post_turn(s, 1)
+  require report.expired_count == 1, "the ttl=1 reminder expires after exactly one turn"
+  require report.remaining_count == 0, "nothing is carried to the next turn"
+  let after = transcript_events_by_kind(agent_session_snapshot(s), "system_reminder")
+  require len(after) == 0, "the reminder is dropped from carried history"
+  // Idempotent: a later post-turn pass finds nothing to evict.
+  let second = agent_session_apply_reminder_post_turn(s, 2)
+  require second.expired_count == 0, "no double-eviction"
+  // dedupe_key collapses a re-injected same-kind reminder to one pending entry.
+  agent_session_inject_reminder(s, {body: "first", ttl_turns: 1, dedupe_key: "k"})
+  agent_session_inject_reminder(s, {body: "second", ttl_turns: 1, dedupe_key: "k"})
+  let deduped = transcript_events_by_kind(agent_session_snapshot(s), "system_reminder")
+  require len(deduped) == 1, "same dedupe_key replaces the prior reminder"
+  require deduped[0].reminder.body == "second", "the latest reminder wins"
+  agent_session_close(s)
+  log("agent_session_inject_reminder ephemeral ttl=1 tests passed")
+}

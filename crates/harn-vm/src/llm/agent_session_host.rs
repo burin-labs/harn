@@ -35,6 +35,7 @@ const HOST_SESSION_PUSH_BRIDGE_INJECTION: &str = "__host_agent_session_push_brid
 const HOST_SESSION_PUSH_USER_MESSAGE: &str = "__host_agent_session_push_user_message";
 const HOST_SESSION_PENDING_INJECTIONS: &str = "__host_agent_session_pending_injections";
 const HOST_SESSION_REVOKE_REMINDER: &str = "__host_agent_session_revoke_reminder";
+const HOST_SESSION_INJECT_REMINDER: &str = "__host_agent_session_inject_reminder";
 const HOST_SESSION_TOTALS: &str = "__host_agent_session_totals";
 const HOST_SESSION_POST_EVENT: &str = "__host_agent_session_post_event";
 const HOST_SESSION_APPLY_REMINDER_POST_TURN: &str = "__host_agent_session_apply_reminder_post_turn";
@@ -1481,6 +1482,51 @@ fn host_agent_session_inject_feedback_builtin(
     )
     .map_err(VmError::Runtime)?;
     Ok(VmValue::Nil)
+}
+
+/// Inject a single typed system reminder directly into a live session's
+/// transcript event stream, bridge-free. The in-process sibling of the
+/// `push_bridge_injection` -> `drain_bridge_injections` reminder path: a host
+/// that drives the agent loop in-process (no ACP `HostBridge` attached, e.g.
+/// Burin's headless/TUI surfaces) can queue a single-turn ephemeral reminder
+/// synchronously, the same way `transcript.inject_reminder` does for a
+/// transcript value. `options` mirrors that shape — `body` required; optional
+/// `tags`, `dedupe_key`, `ttl_turns`, `preserve_on_compact`, `propagate`,
+/// `role_hint`. Same-`dedupe_key` reminders are replaced. The reminder renders
+/// into the next model prompt and the loop's existing `apply_reminder_post_turn`
+/// pass evicts it once its `ttl_turns` reaches zero. Returns the reminder id.
+#[harn_builtin(
+    sig = "__host_agent_session_inject_reminder(session_id: string, options: dict) -> string",
+    category = "agent.host",
+    runtime_only = true
+)]
+fn host_agent_session_inject_reminder_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let session_id = match args.first() {
+        Some(VmValue::String(value)) if !value.is_empty() => value.to_string(),
+        _ => {
+            return Err(VmError::Runtime(format!(
+                "{HOST_SESSION_INJECT_REMINDER}: session_id must be a non-empty string"
+            )))
+        }
+    };
+    let Some(options) = args.get(1).and_then(|value| value.as_dict()) else {
+        return Err(VmError::Runtime(format!(
+            "{HOST_SESSION_INJECT_REMINDER}: options must be a dict with a string `body`"
+        )));
+    };
+    super::conversation::ensure_known_reminder_keys(
+        HOST_SESSION_INJECT_REMINDER,
+        options,
+        super::conversation::INJECT_REMINDER_KEYS,
+    )?;
+    let reminder =
+        super::conversation::parse_inject_reminder_options(options, HOST_SESSION_INJECT_REMINDER)?;
+    let report =
+        crate::agent_sessions::inject_reminder(&session_id, reminder).map_err(VmError::Runtime)?;
+    Ok(VmValue::String(arcstr::ArcStr::from(report.reminder_id)))
 }
 
 /// Post an event into a running session's `agent_inbox`. Surface for
@@ -3406,6 +3452,7 @@ const HOST_SESSION_BUILTINS: &[&VmBuiltinDef] = &[
     &HOST_AGENT_SESSION_TOTALS_BUILTIN_DEF,
     &HOST_AGENT_TRUNCATED_TOOL_CALL_BUILTIN_DEF,
     &HOST_AGENT_SESSION_INJECT_FEEDBACK_BUILTIN_DEF,
+    &HOST_AGENT_SESSION_INJECT_REMINDER_BUILTIN_DEF,
     &HOST_AGENT_SESSION_POST_EVENT_BUILTIN_DEF,
     &HOST_AGENT_SESSION_APPLY_REMINDER_POST_TURN_BUILTIN_DEF,
     &HOST_AGENT_SESSION_SET_ACTIVE_SKILLS_BUILTIN_DEF,

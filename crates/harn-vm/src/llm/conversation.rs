@@ -16,7 +16,7 @@ use super::helpers::{
     REMINDER_INJECTED_EVENT_KIND, SYSTEM_REMINDER_EVENT_KIND,
 };
 
-const INJECT_REMINDER_KEYS: &[&str] = &[
+pub(crate) const INJECT_REMINDER_KEYS: &[&str] = &[
     "body",
     "tags",
     "dedupe_key",
@@ -764,7 +764,7 @@ fn require_reminder_options<'a>(
     }
 }
 
-fn ensure_known_reminder_keys(
+pub(crate) fn ensure_known_reminder_keys(
     context: &str,
     options: &crate::value::DictMap,
     allowed: &[&str],
@@ -785,7 +785,7 @@ fn ensure_known_reminder_keys(
     }
 }
 
-fn parse_inject_reminder_options(
+pub(crate) fn parse_inject_reminder_options(
     options: &crate::value::DictMap,
     context: &str,
 ) -> Result<SystemReminder, VmError> {
