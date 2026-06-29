@@ -8,6 +8,37 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.156
+
+### Added
+
+- Added lifecycle hooks to `std/edit`'s `edit_safe_text_patch` commit path so
+  hosts can reject, rewrite, advise, and invalidate rollback state without
+  reimplementing the edit primitive.
+
+### Fixed
+
+- **Agent loop truncation recovery.** Length-truncated turns that contain only
+  hidden reasoning now auto-continue with a raised output cap instead of
+  flowing into empty-turn parse or stall handling (#3645).
+- **Flake detection CI now fails loudly on broken nextest filter discovery
+  (#3699).** The touched-path mapper is portable to Bash 3, ignores non-Rust
+  paths itself, and scheduled reruns are bounded by a 180-minute job timeout.
+- **Harmony text tool calls.** Recover leaked
+  `tool_call to=... code<|message|>{...}` text-format tool calls instead of
+  rejecting the response as stray text.
+- **Harn CLI Windows paths.** Windows drive-letter paths are now treated as
+  filesystem paths instead of URL schemes in package registry, archive, and
+  connector/OpenAPI flows, and CLI JSON/TOML artifacts normalize path output
+  deterministically across platforms.
+- **Release protocol artifacts.** Release preparation now regenerates protocol
+  artifacts with a post-bump Harn binary so their artifact version matches the
+  new workspace version.
+- **Worker lifecycle metadata now exposes millisecond timing fields.** Worker
+  summaries and `worker_update` bridge events include decoded `created_at_ms`,
+  `started_at_ms`, `finished_at_ms`, and `wall_ms` values instead of forcing
+  clients to parse UUIDv7 timestamp IDs themselves.
+
 ## v0.8.155
 
 ### Added
