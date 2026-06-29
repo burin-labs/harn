@@ -136,9 +136,12 @@ async fn watch_mode_reload_handle_applies_manifest_changes() {
         ("HARN_ORCHESTRATOR_HMAC_SECRET", "shared-secret"),
     ])
     .await;
+    let clock = harn_vm::clock::PausedClock::new(OffsetDateTime::UNIX_EPOCH);
     let harness = start_harness_with(&temp, |mut config| {
         config.watch_manifest = true;
-        config
+        // Keep the file-watch debounce pending so the explicit admin reload
+        // deterministically owns the manifest diff in this test.
+        config.with_clock(clock)
     })
     .await;
     let base_url = harness.listener_url().to_string();
