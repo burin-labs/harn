@@ -332,7 +332,60 @@ fn sub_agent_base_envelope(
     envelope.insert(crate::value::intern_key("data"), VmValue::Nil);
     envelope.insert(crate::value::intern_key("error"), VmValue::Nil);
     envelope.put_str("session_id", session_id);
+    // Per-child receipt fields (#29): the files this child actually mutated and
+    // its token usage. `files_written` is DRAINED from the session's authoritative
+    // hostlib write record (denied writes never reach it), so a failed child that
+    // still wrote files is visible and a "claimed-done, zero writes" child is
+    // detectable downstream. Present on BOTH the success and error envelope so the
+    // parent fan-out report can reason about every child uniformly.
+    envelope.insert(
+        crate::value::intern_key("files_written"),
+        crate::stdlib::json_to_vm_value(&serde_json::json!(
+            crate::agent_sessions::take_session_changed_paths(session_id)
+        )),
+    );
+    envelope.insert(
+        crate::value::intern_key("usage"),
+        crate::stdlib::json_to_vm_value(&serde_json::json!({ "total_tokens": tokens_used })),
+    );
     envelope
+}
+
+/// Split a child transcript's token usage into (input, output). Mirrors
+/// [`transcript_tokens_used`] (whose total is `input + output`) but keeps the two
+/// halves so the receipt can report `tokens_in` / `tokens_out` separately.
+fn transcript_usage(transcript: &VmValue) -> (i64, i64) {
+    let Some(events) = transcript
+        .as_dict()
+        .and_then(|dict| dict.get("events"))
+        .and_then(|value| match value {
+            VmValue::List(list) => Some(list),
+            _ => None,
+        })
+    else {
+        return (0, 0);
+    };
+    let mut input = 0i64;
+    let mut output = 0i64;
+    for metadata in events
+        .iter()
+        .filter_map(|event| event.as_dict())
+        .filter_map(|dict| dict.get("metadata").and_then(|value| value.as_dict()))
+    {
+        input = input.saturating_add(
+            metadata
+                .get("input_tokens")
+                .and_then(VmValue::as_int)
+                .unwrap_or(0),
+        );
+        output = output.saturating_add(
+            metadata
+                .get("output_tokens")
+                .and_then(VmValue::as_int)
+                .unwrap_or(0),
+        );
+    }
+    (input, output)
 }
 
 fn wrap_sub_agent_error(
@@ -879,6 +932,17 @@ pub(super) async fn execute_sub_agent(
         &spec.session_id,
     );
     envelope.insert(crate::value::intern_key("transcript"), transcript.clone());
+    // Enrich the receipt's `usage` with the input/output split now that a full
+    // transcript is in hand (the base envelope carries total-only).
+    let (input_tokens, output_tokens) = transcript_usage(&transcript);
+    envelope.insert(
+        crate::value::intern_key("usage"),
+        crate::stdlib::json_to_vm_value(&serde_json::json!({
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": tokens_used,
+        })),
+    );
 
     if spec.returns_schema.is_none() && option_requests_structured_output(&spec.options) {
         if let Some(candidate) = synthesized.structured_json.as_ref() {
@@ -1001,6 +1065,74 @@ mod tests {
             ..CapabilityPolicy::default()
         });
         ExecutionPolicyGuard
+    }
+
+    #[test]
+    fn base_envelope_carries_files_written_and_usage_then_drains() {
+        let session = format!("test-files-written-{}", uuid::Uuid::now_v7());
+        crate::agent_sessions::clear_session_changed_paths(&session);
+        crate::agent_sessions::record_session_changed_path(&session, "src/alpha.rs");
+        crate::agent_sessions::record_session_changed_path(&session, "src/beta.rs");
+
+        let envelope = sub_agent_base_envelope(
+            "did the work".to_string(),
+            VmValue::List(std::sync::Arc::new(Vec::new())),
+            0,
+            1234,
+            false,
+            &session,
+        );
+
+        let files = envelope
+            .get("files_written")
+            .and_then(|value| match value {
+                VmValue::List(list) => Some(list.clone()),
+                _ => None,
+            })
+            .expect("files_written is a list");
+        let paths: Vec<String> = files
+            .iter()
+            .filter_map(|value| match value {
+                VmValue::String(text) => Some(text.to_string()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            paths.contains(&"src/alpha.rs".to_string()),
+            "alpha written: {paths:?}"
+        );
+        assert!(
+            paths.contains(&"src/beta.rs".to_string()),
+            "beta written: {paths:?}"
+        );
+
+        let total = envelope
+            .get("usage")
+            .and_then(VmValue::as_dict)
+            .and_then(|usage| usage.get("total_tokens"))
+            .and_then(VmValue::as_int)
+            .expect("usage.total_tokens present");
+        assert_eq!(total, 1234, "usage carries the child's total tokens");
+
+        // The base envelope DRAINS the session record, so a second build sees no
+        // double-counted writes.
+        let again = sub_agent_base_envelope(
+            "again".to_string(),
+            VmValue::List(std::sync::Arc::new(Vec::new())),
+            0,
+            0,
+            false,
+            &session,
+        );
+        let again_files = again.get("files_written").and_then(|value| match value {
+            VmValue::List(list) => Some(list.len()),
+            _ => None,
+        });
+        assert_eq!(
+            again_files,
+            Some(0),
+            "files_written drains after the first build"
+        );
     }
 
     fn assistant_message(text: &str) -> VmValue {

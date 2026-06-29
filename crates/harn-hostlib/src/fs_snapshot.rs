@@ -447,6 +447,15 @@ pub(crate) fn auto_capture_for_write(builtin: &'static str, path: &Path) {
     let Some(session_id) = active_session_id() else {
         return;
     };
+    // Record the mutated path against the session BEFORE the snapshot/tool-call
+    // gate below: this is the single chokepoint every hostlib write reaches, so
+    // it is the authoritative source for a session's `files_written` (consumed by
+    // the sub-agent receipt). Recorded unconditionally — even when no restore
+    // snapshot is open (no active tool call) — because the write still happened.
+    harn_vm::agent_sessions::record_session_changed_path(
+        &session_id,
+        normalize_logical(path).to_string_lossy().as_ref(),
+    );
     let Some(snapshot_id) = harn_vm::agent_sessions::current_tool_call_id() else {
         return;
     };
@@ -1090,6 +1099,44 @@ mod tests {
         let restored = restore(&session, &scope, &[]).unwrap();
         assert_eq!(restored.restored_paths.len(), 1);
         assert_eq!(stdfs::read(&file).unwrap(), b"pre");
+    }
+
+    #[test]
+    fn auto_capture_records_session_changed_path_for_files_written_receipt() {
+        let dir = TempDir::new().unwrap();
+        let one = dir.path().join("a.txt");
+        let two = dir.path().join("b.txt");
+        let session = unique_session("snap-changed");
+        harn_vm::agent_sessions::clear_session_changed_paths(&session);
+        let _session_guard = enter_session(&session);
+
+        // No active tool call / open snapshot: the write still happened, so the
+        // path must be recorded for the receipt regardless.
+        auto_capture_for_write("hostlib_tools_write_file", &one);
+        auto_capture_for_write("hostlib_tools_write_file", &two);
+        // A duplicate write of the same path must dedupe.
+        auto_capture_for_write("hostlib_tools_write_file", &one);
+
+        let changed = harn_vm::agent_sessions::session_changed_paths(&session);
+        assert_eq!(changed.len(), 2, "two distinct paths recorded (deduped)");
+        let expect_one = normalize_logical(&one).to_string_lossy().into_owned();
+        let expect_two = normalize_logical(&two).to_string_lossy().into_owned();
+        assert!(
+            changed.contains(&expect_one),
+            "path a recorded: {changed:?}"
+        );
+        assert!(
+            changed.contains(&expect_two),
+            "path b recorded: {changed:?}"
+        );
+
+        // `take` drains so the receipt captures the set exactly once.
+        let drained = harn_vm::agent_sessions::take_session_changed_paths(&session);
+        assert_eq!(drained.len(), 2);
+        assert!(
+            harn_vm::agent_sessions::session_changed_paths(&session).is_empty(),
+            "take drains the session's recorded paths"
+        );
     }
 
     #[test]
