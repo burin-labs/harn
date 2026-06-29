@@ -674,6 +674,18 @@ pub(super) async fn await_topic_event(
     topic: &str,
     predicate: impl Fn(&LogEvent) -> bool,
 ) -> LogEvent {
+    await_topic_event_after(event_log, topic, || {}, predicate).await
+}
+
+/// Subscribe to a topic, run `trigger`, then wait for the first event matching
+/// `predicate`. Use this when `trigger` can emit quickly enough that subscribing
+/// afterward would race the broadcast delivery.
+pub(super) async fn await_topic_event_after(
+    event_log: &Arc<AnyEventLog>,
+    topic: &str,
+    trigger: impl FnOnce(),
+    predicate: impl Fn(&LogEvent) -> bool,
+) -> LogEvent {
     let topic_obj = Topic::new(topic).unwrap_or_else(|error| {
         panic!("invalid topic `{topic}`: {error}");
     });
@@ -682,6 +694,7 @@ pub(super) async fn await_topic_event(
         .subscribe(&topic_obj, None)
         .await
         .unwrap_or_else(|error| panic!("subscribe to {topic} failed: {error}"));
+    trigger();
     let result = tokio::time::timeout(EVENT_FAIL_FAST_TIMEOUT, async {
         loop {
             let next = stream
