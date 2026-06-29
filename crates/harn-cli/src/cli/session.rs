@@ -49,6 +49,9 @@ pub(crate) struct SessionImportArgs {
     /// Allow bundles that still contain high-confidence secret markers.
     #[arg(long)]
     pub allow_unsafe_secret_markers: bool,
+    /// Print a JSON import report with materialized worker snapshot resume commands.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]
