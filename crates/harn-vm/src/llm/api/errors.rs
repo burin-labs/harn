@@ -133,7 +133,7 @@ fn structured_provider_error_summary(body: &str) -> Option<String> {
         let message = truncate_chars(message, MAX_PROVIDER_ERROR_BODY_CHARS.saturating_sub(256));
         let mut details = Vec::new();
         collect_error_details(error, &mut details);
-        if !std::ptr::eq(error, &json) {
+        if !std::ptr::eq(std::ptr::from_ref(error), std::ptr::addr_of!(json)) {
             collect_error_details(&json, &mut details);
         }
         if details.is_empty() {

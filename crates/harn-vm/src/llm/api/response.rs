@@ -213,7 +213,7 @@ fn parse_tool_arguments(arguments: Option<&serde_json::Value>) -> serde_json::Va
 
 fn parse_openai_tool_argument_values(args_str: &str) -> Vec<serde_json::Value> {
     match serde_json::from_str::<serde_json::Value>(args_str) {
-        Ok(value) => return vec![value],
+        Ok(value) => vec![value],
         Err(first_error) => {
             let mut values = Vec::new();
             for parsed in
