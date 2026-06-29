@@ -103,6 +103,7 @@ pub fn session_bundle_schema() -> JsonValue {
                     "run_record": {"type": ["object", "null"]},
                     "observability": {"type": ["object", "null"]},
                     "verification_outcomes": {"type": "array", "items": {"type": "object"}},
+                    "worker_snapshots": {"type": "array", "items": {"$ref": "#/$defs/worker_snapshot"}},
                     "event_log_pointers": {"type": "array", "items": {"type": "object"}},
                     "transitions": {"type": "array", "items": {"type": "object"}},
                     "checkpoints": {"type": "array", "items": {"type": "object"}},
@@ -150,6 +151,19 @@ pub fn session_bundle_schema() -> JsonValue {
                     "events": {"type": "array", "items": true},
                     "assets": {"type": "array", "items": true},
                     "metadata": {"type": "object"}
+                }
+            },
+            "worker_snapshot": {
+                "type": "object",
+                "required": ["worker_id", "worker_name", "status", "snapshot_ref", "value"],
+                "additionalProperties": true,
+                "properties": {
+                    "worker_id": {"type": "string"},
+                    "worker_name": {"type": "string"},
+                    "status": {"type": "string"},
+                    "snapshot_ref": {"type": "string"},
+                    "source_path": {"type": ["string", "null"]},
+                    "value": {"type": "object"}
                 }
             }
         }

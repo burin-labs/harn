@@ -43,6 +43,9 @@ pub(crate) struct SessionImportArgs {
     /// Write the imported run record to this path.
     #[arg(long, value_name = "PATH")]
     pub out: Option<String>,
+    /// Directory for worker snapshots embedded in the bundle.
+    #[arg(long, value_name = "PATH")]
+    pub worker_snapshot_dir: Option<String>,
     /// Allow bundles that still contain high-confidence secret markers.
     #[arg(long)]
     pub allow_unsafe_secret_markers: bool,

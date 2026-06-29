@@ -1,11 +1,12 @@
 use std::fs;
+use std::path::{Path, PathBuf};
 
 use serde_json::json;
 
 use super::*;
 use crate::orchestration::{
-    LlmUsageRecord, RunObservabilityRecord, RunStageRecord, RunTranscriptPointerRecord,
-    RunVerificationOutcomeRecord,
+    LlmUsageRecord, RunChildRecord, RunObservabilityRecord, RunStageRecord,
+    RunTranscriptPointerRecord, RunVerificationOutcomeRecord, RunWorkerLineageRecord,
 };
 
 fn repo_fixture_path(name: &str) -> String {
@@ -113,6 +114,65 @@ fn fixture_replay_fixture(run: &RunRecord) -> ReplayFixture {
         expected_status: run.status.clone(),
         ..ReplayFixture::default()
     }
+}
+
+fn fixture_run_with_worker_snapshot(root: &Path) -> (RunRecord, PathBuf) {
+    let mut run = fixture_run();
+    let snapshot_path = root.join("workers").join("worker_1.json");
+    fs::create_dir_all(snapshot_path.parent().unwrap()).unwrap();
+    fs::write(
+        &snapshot_path,
+        serde_json::to_string_pretty(&json!({
+            "_type": "worker_snapshot",
+            "id": "worker_1",
+            "name": "sub-agent",
+            "task": "continue portable work",
+            "status": "suspended",
+            "snapshot_path": snapshot_path.to_string_lossy(),
+            "config": {
+                "mode": "sub_agent",
+                "spec": {
+                    "name": "sub-agent",
+                    "task": "continue portable work",
+                    "session_id": "session-child",
+                    "parent_session_id": "session-parent"
+                }
+            },
+            "suspension": {
+                "reason": "operator",
+                "initiator": "operator",
+                "suspended_at": "2026-05-01T00:00:20Z",
+                "snapshot_ref": snapshot_path.to_string_lossy()
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    run.child_runs = vec![RunChildRecord {
+        worker_id: "worker_1".to_string(),
+        worker_name: "sub-agent".to_string(),
+        task: "continue portable work".to_string(),
+        status: "suspended".to_string(),
+        started_at: "2026-05-01T00:00:00Z".to_string(),
+        session_id: Some("session-child".to_string()),
+        parent_session_id: Some("session-parent".to_string()),
+        snapshot_path: Some(snapshot_path.to_string_lossy().into_owned()),
+        ..RunChildRecord::default()
+    }];
+    run.observability = Some(RunObservabilityRecord {
+        worker_lineage: vec![RunWorkerLineageRecord {
+            worker_id: "worker_1".to_string(),
+            worker_name: "sub-agent".to_string(),
+            task: "continue portable work".to_string(),
+            status: "suspended".to_string(),
+            session_id: Some("session-child".to_string()),
+            parent_session_id: Some("session-parent".to_string()),
+            snapshot_path: Some(snapshot_path.to_string_lossy().into_owned()),
+            ..RunWorkerLineageRecord::default()
+        }],
+        ..RunObservabilityRecord::default()
+    });
+    (run, snapshot_path)
 }
 
 #[test]
@@ -355,6 +415,86 @@ fn replay_only_export_withholds_observability_verification_summaries() {
         bundle.replay.verification_outcomes[0].summary.as_deref(),
         Some(REPLAY_ONLY_PLACEHOLDER)
     );
+}
+
+#[test]
+fn local_export_embeds_worker_snapshots_and_import_materializes_them() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (run, source_snapshot_path) = fixture_run_with_worker_snapshot(tmp.path());
+
+    let bundle = export_run_record_bundle(
+        &run,
+        &SessionBundleExportOptions {
+            mode: SessionBundleExportMode::Local,
+            ..SessionBundleExportOptions::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(bundle.replay.worker_snapshots.len(), 1);
+    let snapshot = &bundle.replay.worker_snapshots[0];
+    assert_eq!(snapshot.worker_id, "worker_1");
+    assert_eq!(snapshot.status, "suspended");
+    assert_eq!(
+        snapshot.source_path.as_deref(),
+        Some(source_snapshot_path.to_string_lossy().as_ref())
+    );
+    assert_eq!(snapshot.value["config"]["mode"], json!("sub_agent"));
+
+    let imported_dir = tmp.path().join("imported-worker-snapshots");
+    let materialized = materialize_worker_snapshots(&bundle, &imported_dir).unwrap();
+    assert_eq!(materialized.len(), 1);
+    assert_eq!(materialized[0].worker_id, "worker_1");
+
+    let materialized_snapshot: JsonValue =
+        serde_json::from_str(&fs::read_to_string(&materialized[0].path).unwrap()).unwrap();
+    assert_eq!(
+        materialized_snapshot["snapshot_path"],
+        json!(materialized[0].path)
+    );
+    assert_eq!(
+        materialized_snapshot["suspension"]["snapshot_ref"],
+        json!(materialized[0].path)
+    );
+    assert_eq!(
+        materialized_snapshot["config"]["spec"]["session_id"],
+        json!("session-child")
+    );
+
+    let imported =
+        import_run_record_value_with_materialized_worker_snapshots(&bundle, &materialized).unwrap();
+    assert_eq!(
+        imported["child_runs"][0]["snapshot_path"],
+        json!(materialized[0].path)
+    );
+    assert_eq!(
+        imported["observability"]["worker_lineage"][0]["snapshot_path"],
+        json!(materialized[0].path)
+    );
+    assert_ne!(
+        imported["child_runs"][0]["snapshot_path"],
+        json!(source_snapshot_path.to_string_lossy())
+    );
+}
+
+#[test]
+fn sanitized_export_redacts_worker_snapshot_local_paths() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (run, source_snapshot_path) = fixture_run_with_worker_snapshot(tmp.path());
+
+    let bundle = export_run_record_bundle(&run, &SessionBundleExportOptions::default()).unwrap();
+    let snapshot = &bundle.replay.worker_snapshots[0];
+
+    assert_eq!(snapshot.source_path.as_deref(), Some(REDACTED_PLACEHOLDER));
+    assert_eq!(snapshot.snapshot_ref, REDACTED_PLACEHOLDER);
+    assert_eq!(snapshot.value["snapshot_path"], json!(REDACTED_PLACEHOLDER));
+    assert_eq!(
+        snapshot.value["suspension"]["snapshot_ref"],
+        json!(REDACTED_PLACEHOLDER)
+    );
+    assert!(!serde_json::to_string(&bundle)
+        .unwrap()
+        .contains(source_snapshot_path.to_string_lossy().as_ref()));
 }
 
 #[test]

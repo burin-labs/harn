@@ -163,6 +163,8 @@ fn test_parses_session_bundle_commands() {
         "bundle.json",
         "--out",
         "imported.json",
+        "--worker-snapshot-dir",
+        "workers",
         "--allow-unsafe-secret-markers",
     ]);
 
@@ -174,6 +176,7 @@ fn test_parses_session_bundle_commands() {
     };
     assert_eq!(import.bundle, "bundle.json");
     assert_eq!(import.out.as_deref(), Some("imported.json"));
+    assert_eq!(import.worker_snapshot_dir.as_deref(), Some("workers"));
     assert!(import.allow_unsafe_secret_markers);
 
     let cli = Cli::parse_from(["harn", "session", "validate", "bundle.json", "--json"]);
