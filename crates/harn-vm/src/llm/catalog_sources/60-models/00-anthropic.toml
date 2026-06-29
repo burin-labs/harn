@@ -211,8 +211,6 @@ tier = "frontier"
 open_weight = false
 strengths = ["reasoning", "coding", "long_context", "agentic"]
 benchmarks = { swe_bench_verified = 80.8, swe_bench_pro = 53.4 }
-# Fast mode DEPRECATED at the Opus 4.8 launch; removed ~30 days later.
-fast_mode = { param = "speed", value = "fast", beta_header = "fast-mode-2026-02-01", otps_speedup = 2.5, status = "deprecated", pricing = { input_per_mtok = 30.00, output_per_mtok = 150.00, cache_read_per_mtok = 3.00, cache_write_per_mtok = 37.50 }, note = "Deprecated at the Opus 4.8 launch; removed ~30 days later, after which speed=fast silently falls back to standard speed/pricing. Migrate to Opus 4.8 or 4.7 fast mode." }
 [models."claude-opus-4-7"]
 name = "Claude Opus 4.7"
 provider = "anthropic"
