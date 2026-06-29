@@ -16,7 +16,7 @@
           "transport": "JSONRPC"
         }
       ],
-      "version": "0.8.152",
+      "version": "0.8.153",
       "defaultInputModes": [
         "application/json"
       ],
