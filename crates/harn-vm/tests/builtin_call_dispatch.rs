@@ -86,3 +86,30 @@ fn builtin_argument_validation_still_fires_on_fast_path() {
         "expected a validation error for abs(string), got {result:?}"
     );
 }
+
+#[test]
+fn string_slice_aliases_substring_with_list_semantics() {
+    // `slice` is historically a list method; harness authors routinely call it
+    // on strings (JS/Python muscle memory). It must now work on strings —
+    // char-based, negative-index aware, clamped — mirroring `list.slice`,
+    // so "string has no method `slice`" can never crash an agent loop again.
+    assert!(matches!(
+        eval(r#"pipeline t(task) { return "hello world".slice(0, 5) }"#),
+        Ok(VmValue::String(ref s)) if s == "hello"
+    ));
+    // Negative indices count from the end (like list.slice).
+    assert!(matches!(
+        eval(r#"pipeline t(task) { return "hello".slice(-3) }"#),
+        Ok(VmValue::String(ref s)) if s == "llo"
+    ));
+    // Out-of-range end clamps instead of panicking.
+    assert!(matches!(
+        eval(r#"pipeline t(task) { return "hi".slice(0, 999) }"#),
+        Ok(VmValue::String(ref s)) if s == "hi"
+    ));
+    // start > end yields empty, never a slice-index panic.
+    assert!(matches!(
+        eval(r#"pipeline t(task) { return "hello".slice(4, 1) }"#),
+        Ok(VmValue::String(ref s)) if s.is_empty()
+    ));
+}

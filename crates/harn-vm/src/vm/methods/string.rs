@@ -42,6 +42,36 @@ impl crate::vm::Vm {
                     args.get(1).and_then(|a| a.as_int()),
                 ),
             ))),
+            // `slice` is a list method, but harness authors (and JS/Python
+            // muscle memory) routinely call it on strings. Aliasing it to a
+            // char-based, negative-index-aware substring — mirroring
+            // `list.slice` semantics exactly — structurally removes the entire
+            // "string has no method `slice`" crash class instead of chasing
+            // each call site. End index defaults to the char length.
+            "slice" => {
+                let chars: Vec<char> = s.chars().collect();
+                let len = chars.len() as i64;
+                let start_raw = args.first().and_then(|a| a.as_int()).unwrap_or(0);
+                let start = if start_raw < 0 {
+                    (len + start_raw).max(0) as usize
+                } else {
+                    start_raw.min(len) as usize
+                };
+                let end = if args.len() > 1 {
+                    let end_raw = args[1].as_int().unwrap_or(len);
+                    if end_raw < 0 {
+                        (len + end_raw).max(0) as usize
+                    } else {
+                        end_raw.min(len) as usize
+                    }
+                } else {
+                    len as usize
+                };
+                let end = end.max(start);
+                Ok(VmValue::String(arcstr::ArcStr::from(
+                    chars[start..end].iter().collect::<String>(),
+                )))
+            }
             "index_of" => {
                 let needle = args.first().map(|a| a.as_str_cow()).unwrap_or_default();
                 let idx = s

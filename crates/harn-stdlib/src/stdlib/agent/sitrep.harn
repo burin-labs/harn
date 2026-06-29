@@ -100,7 +100,19 @@ fn __sitrep_truncate(text, max_chars) {
   if max_chars == nil || max_chars <= 0 || len(text) <= max_chars {
     return text
   }
-  return substring(text, 0, max_chars) + " …[truncated]"
+  // Keep both ends: a head-only clip drops the tail, which for tool/command
+  // output is usually where the error lives. Preserve a head + tail with an
+  // explicit elision marker so the cut is visible and the failing detail
+  // survives.
+  let total = len(text)
+  let tail_chars = max_chars / 3
+  let head_chars = max_chars - tail_chars
+  let omitted = total - head_chars - tail_chars
+  return substring(text, 0, head_chars)
+    + " …["
+    + to_string(omitted)
+    + " chars elided]… "
+    + substring(text, total - tail_chars, total)
 }
 
 fn __sitrep_format_messages(messages, max_chars_per_message) {

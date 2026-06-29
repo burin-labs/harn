@@ -491,10 +491,29 @@ fn __agent_stall_result_snippet(result) -> string {
   }
   let text = to_string(result?.error ?? result?.message ?? result?.result ?? "")
   let normalized = trim(text)
-  if len(normalized) <= 240 {
-    return normalized
+  return __agent_clip_head_tail(normalized, 4000)
+}
+
+/**
+ * Clip an evidence string to `cap` chars WITHOUT amputating the tail. The root
+ * cause of a failure is often split across both ends — the exception/class up
+ * top, the decisive line (failing assertion, last compiler error) at the
+ * bottom. A blind head-only clip silently hid that tail from the model. Keep a
+ * generous head + tail with an explicit elision marker so nothing is dropped
+ * invisibly. `cap` is intentionally large; we are NOT trying to save tokens,
+ * only to bound a pathological multi-megabyte blob.
+ */
+fn __agent_clip_head_tail(text, cap) {
+  let total = len(text)
+  if total <= cap {
+    return text
   }
-  return normalized.slice(0, 240)
+  let tail_len = cap / 3
+  let head_len = cap - tail_len
+  let omitted = total - head_len - tail_len
+  let head = text.substring(0, head_len)
+  let tail = text.substring(total - tail_len, total)
+  return head + "\n…[" + to_string(omitted) + " chars elided — middle of output]…\n" + tail
 }
 
 /**

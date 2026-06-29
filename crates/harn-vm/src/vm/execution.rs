@@ -816,16 +816,28 @@ impl crate::vm::Vm {
     /// trace. Appends ` (line N)` to error variants whose messages don't
     /// already carry location context.
     pub(crate) fn enrich_error_with_line(&self, error: VmError) -> VmError {
-        // Determine the line from the captured stack trace (innermost frame).
-        let line = self
+        // Determine the line AND source file from the captured stack trace
+        // (innermost frame) so the error names the exact `.harn` it crashed in.
+        // A bare `(line N)` is ambiguous across 100+ stdlib files and forces a
+        // manual hunt; `(stall.harn:497)` pinpoints it immediately.
+        let (line, file) = self
             .error_stack_trace
             .last()
-            .map(|(_, l, _, _)| *l)
-            .unwrap_or_else(|| self.current_line());
+            .map(|(_, l, _, f)| (*l, f.clone()))
+            .unwrap_or_else(|| (self.current_line(), None));
         if line == 0 {
             return error;
         }
-        let suffix = format!(" (line {line})");
+        let suffix = match file.as_deref() {
+            Some(path) => {
+                let name = std::path::Path::new(path)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or(path);
+                format!(" ({name}:{line})")
+            }
+            None => format!(" (line {line})"),
+        };
         match error {
             VmError::Runtime(msg) => VmError::Runtime(format!("{msg}{suffix}")),
             VmError::TypeError(msg) => VmError::TypeError(format!("{msg}{suffix}")),
