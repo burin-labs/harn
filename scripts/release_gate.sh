@@ -438,7 +438,10 @@ updated = re.sub(r'tag = "v\d+\.\d+\.\d+"', f'tag = "v{next_version}"', text)
 if updated != text:
     doc.write_text(updated)
 PY
-  make gen-protocol-artifacts
+  # HARN_BIN may still point at the pre-bump binary warmed during the audit
+  # phase. Protocol artifacts stamp the compiled crate version, so force this
+  # target through a fresh post-bump cargo-built binary.
+  HARN_BIN= make gen-protocol-artifacts
   cargo check --workspace --all-targets >/dev/null
   echo "Version updated: $current -> $next"
   echo "Next steps:"
