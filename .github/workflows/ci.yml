@@ -319,6 +319,7 @@ jobs:
   windows:
     name: Rust on Windows (build + smoke test)
     runs-on: windows-latest
+    timeout-minutes: 60
     needs: windows-plan
     # Windows coverage stays off the default PR / merge-queue path, but runs
     # before merge for Windows-sensitive process, sandbox, workflow, and release
@@ -475,6 +476,7 @@ jobs:
   macos:
     name: Rust on macOS (deny-warnings build + lint)
     runs-on: macos-latest
+    timeout-minutes: 60
     needs: macos-plan
     # macOS coverage stays off the default PR / merge-queue critical path, but
     # runs before merge for changes that touch macOS-gated process, sandbox,
