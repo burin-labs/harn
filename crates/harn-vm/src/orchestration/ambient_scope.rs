@@ -39,6 +39,7 @@ use super::policy::{
     CapabilityPolicy, ToolApprovalPolicy,
 };
 use super::{swap_mutation_session, MutationSessionRecord, RunExecutionRecord};
+use crate::agent_sessions::swap_current_session_stack;
 use crate::autonomy::{swap_autonomy_policy_stack, AutonomyPolicy};
 use crate::connectors::harn_module::swap_active_harn_connector_ctx;
 use crate::connectors::ConnectorCtx;
@@ -59,6 +60,10 @@ pub(crate) struct AmbientExecutionScope {
     autonomy: Vec<AutonomyPolicy>,
     llm_render: Vec<LlmRenderContext>,
     connector_ctx: Vec<ConnectorCtx>,
+    /// Active agent-session breadcrumb. It starts empty for a spawned worker
+    /// (never inherited from the parent), then the child's own
+    /// `begin_agent_session` push is saved/restored across awaits.
+    session_stack: Vec<String>,
     /// The thread execution context (cwd/env/source-dir + capability path-scope
     /// root). Not a LIFO stack — a single `Option` the worker sets at startup and
     /// holds across the whole agent loop's awaits, so it cross-wires fan-out
@@ -98,6 +103,11 @@ impl AmbientExecutionScope {
     /// child's own `llm_call` / connector export — and only need isolation, not
     /// inheritance. Autonomy policy IS inherited (the child runs under the
     /// parent's autonomy tier).
+    /// `CURRENT_SESSION_STACK` is also isolated but deliberately starts empty:
+    /// inheriting the parent's active session would attribute child writes to
+    /// the parent. The child's own agent-session init pushes its session id into
+    /// this task-local copy, and `swap_in` preserves that breadcrumb across
+    /// subsequent awaits.
     ///
     /// The execution context, source dir, and mutation session ARE inherited:
     /// the worker overwrites all three at the top of `execute_worker_config`,
@@ -130,6 +140,7 @@ impl AmbientExecutionScope {
             autonomy: swap_autonomy_policy_stack(self.autonomy),
             llm_render: swap_llm_render_stack(self.llm_render),
             connector_ctx: swap_active_harn_connector_ctx(self.connector_ctx),
+            session_stack: swap_current_session_stack(self.session_stack),
             execution_context: swap_thread_execution_context(self.execution_context),
             source_dir: swap_source_dir(self.source_dir),
             mutation_session: swap_mutation_session(self.mutation_session),
@@ -198,6 +209,8 @@ const AMBIENT_THREAD_LOCAL_CATALOG: &[(&str, AmbientScoping)] = &[
     ("VM_SOURCE_DIR", AmbientScoping::Captured),
     // F2: audit/run_id/approval/secret-scope.
     ("CURRENT_MUTATION_SESSION", AmbientScoping::Captured),
+    // Files-written/session breadcrumb: isolated per task, but not inherited.
+    ("CURRENT_SESSION_STACK", AmbientScoping::Captured),
     // --- Uncaptured: audited capability/identity context, same shape, NOT yet
     // read across a fan-out child's awaits. Wire each into the scope the day it
     // becomes cross-task-read (mirrors AUDITED_LATENT_CAPABILITIES). ---
@@ -261,13 +274,6 @@ const AMBIENT_THREAD_LOCAL_CATALOG: &[(&str, AmbientScoping)] = &[
         AmbientScoping::Uncaptured(
             "step_runtime.rs snapshots+restores this at the worker boundary (own isolation \
              path); not read raw across a fan-out child await.",
-        ),
-    ),
-    (
-        "CURRENT_SESSION_STACK",
-        AmbientScoping::Uncaptured(
-            "agent_sessions.rs session breadcrumb; each worker opens its own session at \
-             startup. Audited 2026-06-28: not read across a child await.",
         ),
     ),
     (
@@ -417,6 +423,80 @@ mod tests {
             .await;
         // The outer thread is left clean — neither task's policy leaked out.
         assert!(current_execution_policy().is_none());
+    }
+
+    /// Files-written attribution regression: fan-out workers are spawned while a
+    /// parent session may be current, but they must NOT inherit that session.
+    /// Each child opens its own current session and yields before recording a
+    /// write. The child's session breadcrumb must survive those awaits and each
+    /// path must drain under the child session, not the parent or sibling.
+    #[tokio::test]
+    async fn scoped_tasks_preserve_child_current_session_for_write_attribution() {
+        let parent_session = format!("parent-{}", uuid::Uuid::now_v7());
+        let alpha_session = format!("alpha-{}", uuid::Uuid::now_v7());
+        let beta_session = format!("beta-{}", uuid::Uuid::now_v7());
+        for session in [&parent_session, &alpha_session, &beta_session] {
+            crate::agent_sessions::clear_session_changed_paths(session);
+        }
+
+        let _parent_guard = crate::agent_sessions::enter_current_session(parent_session.clone());
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let alpha_scope = AmbientExecutionScope::capture_inherited();
+                let beta_scope = AmbientExecutionScope::capture_inherited();
+                let alpha_id = alpha_session.clone();
+                let beta_id = beta_session.clone();
+
+                let alpha = tokio::task::spawn_local(scope_ambient(alpha_scope, async move {
+                    assert!(
+                        crate::agent_sessions::current_session_id().is_none(),
+                        "child scope must not inherit the parent session"
+                    );
+                    let _guard = crate::agent_sessions::enter_current_session(alpha_id.clone());
+                    tokio::task::yield_now().await;
+                    tokio::task::yield_now().await;
+                    let current = crate::agent_sessions::current_session_id()
+                        .expect("child session survives await");
+                    crate::agent_sessions::record_session_changed_path(&current, "src/alpha.rs");
+                    current
+                }));
+                let beta = tokio::task::spawn_local(scope_ambient(beta_scope, async move {
+                    assert!(
+                        crate::agent_sessions::current_session_id().is_none(),
+                        "child scope must not inherit the parent session"
+                    );
+                    let _guard = crate::agent_sessions::enter_current_session(beta_id.clone());
+                    tokio::task::yield_now().await;
+                    tokio::task::yield_now().await;
+                    let current = crate::agent_sessions::current_session_id()
+                        .expect("child session survives await");
+                    crate::agent_sessions::record_session_changed_path(&current, "src/beta.rs");
+                    current
+                }));
+
+                assert_eq!(alpha.await.unwrap(), alpha_session);
+                assert_eq!(beta.await.unwrap(), beta_session);
+            })
+            .await;
+
+        assert_eq!(
+            crate::agent_sessions::current_session_id().as_deref(),
+            Some(parent_session.as_str()),
+            "parent session restored after child polls"
+        );
+        assert_eq!(
+            crate::agent_sessions::take_session_changed_paths(&alpha_session),
+            vec!["src/alpha.rs".to_string()]
+        );
+        assert_eq!(
+            crate::agent_sessions::take_session_changed_paths(&beta_session),
+            vec!["src/beta.rs".to_string()]
+        );
+        assert!(
+            crate::agent_sessions::take_session_changed_paths(&parent_session).is_empty(),
+            "child writes must not attribute to parent"
+        );
     }
 
     /// A task's scope must not leak into work that runs after it on the same
@@ -656,6 +736,7 @@ mod tests {
             "VM_EXECUTION_CONTEXT",
             "VM_SOURCE_DIR",
             "CURRENT_MUTATION_SESSION",
+            "CURRENT_SESSION_STACK",
         ]
         .into_iter()
         .collect();

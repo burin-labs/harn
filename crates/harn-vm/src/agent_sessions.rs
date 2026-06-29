@@ -492,6 +492,10 @@ pub(crate) fn push_current_session(id: String) {
     CURRENT_SESSION_STACK.with(|stack| stack.borrow_mut().push(id));
 }
 
+pub(crate) fn swap_current_session_stack(replacement: Vec<String>) -> Vec<String> {
+    CURRENT_SESSION_STACK.with(|stack| std::mem::replace(&mut *stack.borrow_mut(), replacement))
+}
+
 pub(crate) fn pop_current_session() {
     CURRENT_SESSION_STACK.with(|stack| {
         let _ = stack.borrow_mut().pop();
