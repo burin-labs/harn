@@ -20,6 +20,27 @@ fn vm_dict(pairs: Vec<(&str, VmValue)>) -> VmValue {
     )
 }
 
+fn uuid_v7_at_ms(ms: u64) -> String {
+    format!(
+        "{:08x}-{:04x}-7000-8000-000000000000",
+        (ms >> 16) as u32,
+        (ms & 0xffff) as u16
+    )
+}
+
+#[test]
+fn worker_timestamp_helpers_decode_uuid_v7_without_wall_clock() {
+    let start = uuid_v7_at_ms(1_700_000_010_000);
+    let finish = uuid_v7_at_ms(1_700_000_010_321);
+    let earlier = uuid_v7_at_ms(1_700_000_009_999);
+
+    assert_eq!(worker_timestamp_unix_ms(&start), Some(1_700_000_010_000));
+    assert_eq!(worker_wall_ms(&start, Some(&finish)), Some(321));
+    assert_eq!(worker_wall_ms(&start, Some(&earlier)), None);
+    assert_eq!(worker_timestamp_unix_ms("not-a-uuid"), None);
+    assert_eq!(worker_wall_ms(&start, None), None);
+}
+
 #[test]
 fn worker_snapshot_round_trip_preserves_resume_fields() {
     // Use an explicit per-test snapshot path inside a unique temp dir instead of
@@ -208,14 +229,17 @@ fn parse_worker_config_rejects_unknown_carry_options() {
 
 #[test]
 fn worker_summary_exposes_request_and_provenance() {
+    let created_at = uuid_v7_at_ms(1_700_000_000_000);
+    let started_at = uuid_v7_at_ms(1_700_000_000_250);
+    let finished_at = uuid_v7_at_ms(1_700_000_001_750);
     let mut state = WorkerState {
         id: "worker_123".to_string(),
         name: "worker".to_string(),
         task: "latest task".to_string(),
         status: "completed".to_string(),
-        created_at: "created".to_string(),
-        started_at: "started".to_string(),
-        finished_at: Some("finished".to_string()),
+        created_at: created_at.clone(),
+        started_at: started_at.clone(),
+        finished_at: Some(finished_at.clone()),
         awaiting_started_at: None,
         awaiting_since: None,
         mode: "sub_agent".to_string(),
@@ -285,6 +309,22 @@ fn worker_summary_exposes_request_and_provenance() {
         serde_json::json!("session_parent")
     );
     assert_eq!(summary["task"], serde_json::json!("latest task"));
+    assert_eq!(summary["created_at"], serde_json::json!(created_at));
+    assert_eq!(summary["started_at"], serde_json::json!(started_at));
+    assert_eq!(summary["finished_at"], serde_json::json!(finished_at));
+    assert_eq!(
+        summary["created_at_ms"],
+        serde_json::json!(1_700_000_000_000i64)
+    );
+    assert_eq!(
+        summary["started_at_ms"],
+        serde_json::json!(1_700_000_000_250i64)
+    );
+    assert_eq!(
+        summary["finished_at_ms"],
+        serde_json::json!(1_700_000_001_750i64)
+    );
+    assert_eq!(summary["wall_ms"], serde_json::json!(1_500i64));
 
     state.status = "suspended".to_string();
     state.suspension = Some(WorkerSuspension {
@@ -300,6 +340,22 @@ fn worker_summary_exposes_request_and_provenance() {
     });
 
     let event_snapshot = super::bridge::worker_event_snapshot(&state);
+    assert_eq!(
+        event_snapshot.metadata["created_at_ms"],
+        serde_json::json!(1_700_000_000_000i64)
+    );
+    assert_eq!(
+        event_snapshot.metadata["started_at_ms"],
+        serde_json::json!(1_700_000_000_250i64)
+    );
+    assert_eq!(
+        event_snapshot.metadata["finished_at_ms"],
+        serde_json::json!(1_700_000_001_750i64)
+    );
+    assert_eq!(
+        event_snapshot.metadata["wall_ms"],
+        serde_json::json!(1_500i64)
+    );
     let suspension = &event_snapshot.metadata["suspension"];
     assert_eq!(suspension["handle"], serde_json::json!("worker_123"));
     assert_eq!(suspension["reason"], serde_json::json!("waiting on review"));

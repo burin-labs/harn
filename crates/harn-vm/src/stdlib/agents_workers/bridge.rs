@@ -33,6 +33,13 @@ fn worker_bridge_metadata(state: &WorkerState) -> serde_json::Value {
         "created_at": state.created_at,
         "started_at": state.started_at,
         "finished_at": state.finished_at,
+        // Real wall-clock ms decoded from the UUIDv7 ids above, so a worker_update
+        // consumer (TUI pane, ACP, dispatch receipt) gets a usable timestamp/
+        // duration instead of an opaque id. See `worker_timestamp_unix_ms`.
+        "created_at_ms": super::worker_timestamp_unix_ms(&state.created_at),
+        "started_at_ms": super::worker_timestamp_unix_ms(&state.started_at),
+        "finished_at_ms": state.finished_at.as_deref().and_then(super::worker_timestamp_unix_ms),
+        "wall_ms": super::worker_wall_ms(&state.started_at, state.finished_at.as_deref()),
         "awaiting_started_at": state.awaiting_started_at,
         "artifact_count": state.artifacts.len(),
         "has_transcript": state.transcript.is_some(),

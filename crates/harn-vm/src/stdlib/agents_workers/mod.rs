@@ -445,6 +445,29 @@ pub(super) fn worker_provenance(state: &WorkerState) -> WorkerProvenanceRecord {
     }
 }
 
+/// Decode the millisecond Unix timestamp embedded in a UUIDv7 string. Worker
+/// `created_at` / `started_at` / `finished_at` are stored as the time-ordered
+/// `uuid::Uuid::now_v7()` ids those points stamp in — which carry a real 48-bit
+/// wall-clock-ms prefix. Consumers (the TUI subagent pane, ACP worker updates,
+/// the dispatch receipt) want that millisecond value, not the opaque id; reading
+/// it back here fixes the long-standing "timestamp is a UUID string, not ms" bug
+/// without changing how the ids are stored (so persisted workers decode too).
+/// Returns None for a non-UUIDv7 string.
+pub(super) fn worker_timestamp_unix_ms(value: &str) -> Option<i64> {
+    let uuid = uuid::Uuid::parse_str(value).ok()?;
+    let (secs, nanos) = uuid.get_timestamp()?.to_unix();
+    Some(secs as i64 * 1000 + i64::from(nanos / 1_000_000))
+}
+
+/// Wall-clock milliseconds between two UUIDv7 worker timestamps, when both decode
+/// and are ordered. None when either is missing/undecodable or finished precedes
+/// started (a clock skew we decline to report as a negative duration).
+pub(super) fn worker_wall_ms(started_at: &str, finished_at: Option<&str>) -> Option<i64> {
+    let start = worker_timestamp_unix_ms(started_at)?;
+    let end = worker_timestamp_unix_ms(finished_at?)?;
+    (end >= start).then_some(end - start)
+}
+
 pub(super) fn clone_worker_state(state: &WorkerState) -> serde_json::Value {
     serde_json::json!({
         "_type": "agent_handle",
@@ -456,6 +479,10 @@ pub(super) fn clone_worker_state(state: &WorkerState) -> serde_json::Value {
         "created_at": state.created_at,
         "started_at": state.started_at,
         "finished_at": state.finished_at,
+        "created_at_ms": worker_timestamp_unix_ms(&state.created_at),
+        "started_at_ms": worker_timestamp_unix_ms(&state.started_at),
+        "finished_at_ms": state.finished_at.as_deref().and_then(worker_timestamp_unix_ms),
+        "wall_ms": worker_wall_ms(&state.started_at, state.finished_at.as_deref()),
         "awaiting_started_at": state.awaiting_started_at,
         "history": state.history,
         "request": state.request,
