@@ -110,20 +110,18 @@ impl harn_vm::agent_events::AgentEventSink for A2aWorkerSink {
             }
             _ => return,
         };
-        let task_for_push = {
+        {
             let mut tasks = self.tasks.lock().expect("tasks poisoned");
             let Some(task) = tasks.get_mut(&self.task_id) else {
                 return;
             };
             publish_locked(task, payload);
-            task_to_json(task)
-        };
+        }
         // No `deliver_push` here: worker_update events stream live to
         // active subscribers but don't fire push-config webhooks. Push
         // delivery is reserved for the canonical task lifecycle
         // transitions so high-volume worker traffic doesn't flood
         // outbound HTTP endpoints.
-        let _ = task_for_push;
     }
 }
 

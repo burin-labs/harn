@@ -225,7 +225,6 @@ impl AcpServer {
     }
 
     /// Send a JSON-RPC notification (no id, no response expected).
-    #[allow(dead_code)]
     pub(super) fn send_notification(&self, method: &str, params: serde_json::Value) {
         let notification = harn_vm::jsonrpc::notification(method, params);
         if let Ok(line) = serde_json::to_string(&notification) {
@@ -234,7 +233,6 @@ impl AcpServer {
     }
 
     /// Send a `session/update` notification with an agent message chunk.
-    #[allow(dead_code)]
     pub(super) fn send_update(&self, session_id: &str, text: &str) {
         let visible_text = sanitize_visible_assistant_text(text, true);
         let mut content = serde_json::json!({
