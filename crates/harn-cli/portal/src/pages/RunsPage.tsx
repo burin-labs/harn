@@ -66,7 +66,11 @@ function readPageSize(value: string | null) {
   return (RUN_PAGE_SIZES as readonly number[]).includes(parsed) ? parsed : 25
 }
 
-export function RunsPage() {
+type RunsPageProps = {
+  poll?: boolean
+}
+
+export function RunsPage({ poll = true }: RunsPageProps = {}) {
   const intl = useIntl()
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -83,7 +87,7 @@ export function RunsPage() {
     page,
     pageSize,
     skill: skill || undefined,
-    poll: true,
+    poll,
   })
 
   function updateParams(next: Record<string, string | number | null>) {

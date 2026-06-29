@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { IntlProvider } from "react-intl"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -44,20 +44,23 @@ describe("LaunchPanel", () => {
       </IntlProvider>,
     )
 
-    await userEvent.clear(screen.getByLabelText("Task"))
-    await userEvent.type(screen.getByLabelText("Task"), "Draft a release note")
+    fireEvent.change(screen.getByLabelText("Task"), {
+      target: { value: "Draft a release note" },
+    })
     fireEvent.change(screen.getByLabelText("Env JSON overrides"), {
       target: { value: '{"OPENAI_API_KEY":"test-key"}' },
     })
-    await userEvent.click(screen.getAllByRole("button", { name: "Run now" }).at(-1)!)
+    fireEvent.click(screen.getAllByRole("button", { name: "Run now" }).at(-1)!)
 
-    expect(onLaunch).toHaveBeenCalledWith({
-      env: { OPENAI_API_KEY: "test-key" },
-      file_path: undefined,
-      model: "gpt-4.1-mini",
-      provider: "openai",
-      source: undefined,
-      task: "Draft a release note",
+    await waitFor(() => {
+      expect(onLaunch).toHaveBeenCalledWith({
+        env: { OPENAI_API_KEY: "test-key" },
+        file_path: undefined,
+        model: "gpt-4.1-mini",
+        provider: "openai",
+        source: undefined,
+        task: "Draft a release note",
+      })
     })
   })
 

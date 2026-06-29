@@ -1,28 +1,12 @@
 import { render, screen, within } from "@testing-library/react"
-import { IntlProvider } from "react-intl"
 import { describe, expect, it } from "vitest"
 
-import type { PortalActivity, PortalRunDetail, RunSummary } from "../types"
-import { RunDetail } from "./RunDetail"
+import type { PortalActivity } from "../types"
+import { RunActivityItem } from "./RunActivityItem"
 
-const baseSummary: RunSummary = {
-  path: "run.json",
-  id: "run-1",
-  workflow_name: "demo",
-  status: "completed",
-  last_stage_node_id: "finalize",
-  failure_summary: null,
-  started_at: "2026-05-16T10:00:00Z",
-  finished_at: "2026-05-16T10:00:05Z",
-  duration_ms: 5000,
-  stage_count: 1,
-  child_run_count: 0,
-  call_count: 2,
-  input_tokens: 10,
-  output_tokens: 5,
-  models: ["gpt-5"],
-  updated_at_ms: 1,
-  skills: [],
+const labels = {
+  auditLayersTooltip: "Middleware layers (outer -> inner)",
+  auditReceiptLink: "View receipt",
 }
 
 const auditedActivity: PortalActivity = {
@@ -56,63 +40,8 @@ const plainActivity: PortalActivity = {
   summary: "tool call summary",
 }
 
-function buildDetail(activities: PortalActivity[]): PortalRunDetail {
-  return {
-    summary: baseSummary,
-    task: "Demo audit chip rendering",
-    workflow_id: "wf",
-    parent_run_id: null,
-    root_run_id: null,
-    policy_summary: {
-      tools: [],
-      capabilities: [],
-      workspace_roots: [],
-      side_effect_level: null,
-      recursion_limit: null,
-      tool_arg_constraints: [],
-      validation_valid: true,
-      validation_errors: [],
-      validation_warnings: [],
-      reachable_nodes: [],
-    },
-    replay_summary: null,
-    execution: null,
-    insights: [],
-    stages: [],
-    spans: [],
-    activities,
-    transitions: [],
-    checkpoints: [],
-    artifacts: [],
-    execution_summary: null,
-    transcript_steps: [],
-    template_renders: [],
-    story: [],
-    child_runs: [],
-    observability: {
-      schema_version: 4,
-      planner_rounds: [],
-      research_fact_count: 0,
-      action_graph_nodes: [],
-      action_graph_edges: [],
-      worker_lineage: [],
-      verification_outcomes: [],
-      transcript_pointers: [],
-      daemon_events: [],
-    },
-    skill_timeline: [],
-    skill_match_events: [],
-    tool_load_events: [],
-    active_skills: [],
-  }
-}
-
-function renderRunDetail(detail: PortalRunDetail) {
-  return render(
-    <IntlProvider locale="en">
-      <RunDetail detail={detail} runs={[baseSummary]} onSelectRun={() => {}} />
-    </IntlProvider>,
-  )
+function renderActivity(item: PortalActivity) {
+  return render(<RunActivityItem item={item} labels={labels} />)
 }
 
 function findActivityRow(label: string) {
@@ -122,9 +51,9 @@ function findActivityRow(label: string) {
     .find((node): node is HTMLElement => node instanceof HTMLElement)
 }
 
-describe("RunDetail audit chip", () => {
+describe("RunActivityItem audit chip", () => {
   it("renders the rationale chip, layer tooltip, and receipt link when audit is present", () => {
-    renderRunDetail(buildDetail([auditedActivity]))
+    renderActivity(auditedActivity)
 
     const row = findActivityRow("search_files")
     expect(row).toBeTruthy()
@@ -152,7 +81,7 @@ describe("RunDetail audit chip", () => {
   })
 
   it("renders no audit container when audit is absent", () => {
-    const { container } = renderRunDetail(buildDetail([plainActivity]))
+    const { container } = renderActivity(plainActivity)
 
     const row = findActivityRow("read_file")
     expect(row).toBeTruthy()

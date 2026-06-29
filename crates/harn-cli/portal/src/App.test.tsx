@@ -179,7 +179,7 @@ describe("App", () => {
     render(
       <MemoryRouter initialEntries={["/runs?page=1.5&page_size=37&status=bogus&sort=weird"]}>
         <IntlProvider locale="en">
-          <RunsPage />
+          <RunsPage poll={false} />
         </IntlProvider>
       </MemoryRouter>,
     )
