@@ -102,6 +102,52 @@ pipeline main(_) {
     );
 }
 
+/// A command policy can require host approval without throwing or running the command.
+#[test]
+fn command_policy_can_return_require_approval_verdict() {
+    let body = r#"
+import { agent_command_tools } from "std/agent/host_tools"
+
+fn require_approval(request, args) {
+  return {require_approval: true, reason: "needs human approval", approval_id: "approval-123"}
+}
+
+pipeline main(_) {
+  let opts = {root: "/workspace", command_policy: require_approval, output_format: "value"}
+  let h = tool_find(agent_command_tools(tool_registry(), opts), "run_command").handler
+  let r = h({argv: ["definitely-not-run-command-policy-sentinel"]})
+  __io_println("STATUS=" + to_string(r.status))
+  __io_println("REQUIRES=" + to_string(r.requires_approval))
+  __io_println("REASON=" + r.reason)
+  __io_println("APPROVAL_ID=" + r.approval_id)
+  __io_println("MODE=" + to_string(r.request?.mode))
+  __io_println("ARGV=" + json_stringify(r.request?.argv))
+}
+"#;
+    let stdout = run_script(body);
+    assert!(
+        stdout.contains("STATUS=requires_approval"),
+        "require_approval verdict should return a structured approval request; got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("REQUIRES=true"),
+        "approval result should carry requires_approval=true; got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("REASON=needs human approval"),
+        "approval result should preserve the policy reason; got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("APPROVAL_ID=approval-123"),
+        "approval result should preserve the optional approval id; got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("MODE=argv")
+            && stdout.contains(r#"ARGV=["definitely-not-run-command-policy-sentinel"]"#),
+        "approval result should include the shaped command request; got:\n{stdout}"
+    );
+}
+
 /// A non-empty `command` LIST routes to argv mode even when shell is disabled
 /// (argv mode never needs a shell), instead of being rejected.
 #[test]
