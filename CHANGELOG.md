@@ -8,6 +8,107 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.153
+
+### Breaking
+
+- **CLI naming cleanup.** The `harn trust-graph` alias is removed — use
+  `harn trust` (its canonical name). The shell-completion command is renamed
+  from `harn completions <shell>` to `harn completion <shell>` for consistency
+  with the rest of the CLI. No aliases are kept; both are direct cutovers.
+- **Provider commands are consolidated under a single `harn provider` noun.**
+  The six top-level commands `providers`, `provider`, `provider-catalog`,
+  `provider-ready`, `provider-probe`, and `provider-tool-probe` are gone.
+  Use `harn provider capabilities`, `harn provider catalog <refresh|validate|
+  build-config|build-capabilities|export|matrix|support|recommend|show>`
+  (`show` prints the loaded catalog JSON, formerly `provider-catalog`),
+  `harn provider ready`, `harn provider probe`, and `harn provider tool-probe`.
+- **Skill commands are unified under a single `harn skill` noun.** The
+  separate `harn skills` (corpus discovery) command is gone; its verbs now live
+  alongside the provenance verbs under `harn skill`: `list`, `get`, `dump`,
+  `resolved`, `inspect`, `match`, `install`, `new`, plus `key`, `sign`,
+  `endorse`, `verify`, `who-signed`, and `trust`. No aliases — direct cutover.
+- **Module exports now require explicit `pub`.** A module's import surface is exactly the functions it marks
+  `pub` (plus `pub import` re-exports); a module with no `pub` functions exports nothing. The previous
+  "a module with no `pub` exports everything" fallback is removed — it made adding the first `pub` a silent
+  breaking change for a module's importers. Both `harn check` (`HARN-IMP-002`) and the runtime loader enforce
+  the rule. To migrate, mark intended exports `pub`; the diagnostic points at any selective import that needs it.
+
+### Added
+
+Added `agent_fanout(requests, options)` to `std/agent/workers` — a general parallel sub-agent fan-out primitive. It
+maps a list of independent units onto concurrent background `sub_agent_run` children in bounded waves (`max_parallel`,
+default 8), joins them, and returns one normalized `{label, index, status, ok, result, error}` per request in input
+order. Composes the existing worker primitives (no new host surface); the caller owns each child's tool surface,
+capability policy, model, and prompt via per-request `options`. Two integration tests lock the contract:
+`worker_overlap` proves the children's LLM turns overlap in wall-clock time (A/B serial-vs-concurrent), and
+`agent_fanout` proves order/label preservation, per-child isolation, ok/error normalization, and wave chunking. See
+`docs/src/agent-pools.md` (“Parallel sub-agent fan-out”).
+- Windows PowerShell installer: `irm https://harnlang.com/install.ps1 | iex` downloads, checksum-verifies, and
+  installs the Windows release archive and adds the install directory to the user PATH. The POSIX `install.sh`
+  now points Windows shells at it instead of erroring.
+
+### Changed
+
+- Bumped `wasmtime` / `wasmtime-wasi` 45 → 46 (testbench WASI sandbox
+  backend) and `tower-http` 0.6 → 0.7 (`harn serve` compression + CORS
+  layers). No behavior change; both upgrades are API-compatible with our
+  usage.
+- Genericized documentation, spec, persona, and example references to specific
+  downstream products into role terms (an IDE host, a cloud platform), so the
+  public repo describes integration surfaces rather than naming closed products.
+  Company attribution and `burin-labs` GitHub URLs/release links are unchanged.
+- The minimum supported Rust version (MSRV) is now declared as `rust-version = "1.95"` across the workspace, so
+  `cargo install harn-cli` on an older toolchain fails with a clear message instead of a confusing build error.
+- The default package index now resolves from `https://packages.harnlang.com/harn-package-index.toml`, and
+  `harn publish` opens its index PR against the public `burin-labs/harn-packages` repo (previously the index
+  was served from a private repo's GitHub Pages). Override per-command with `--registry` / `HARN_PACKAGE_REGISTRY`
+  for resolution, or `--index-repo` / `--index-path` for publishing.
+- When no provider is configured (`HARN_DEFAULT_PROVIDER` and `default_provider` both unset), Harn now
+  auto-selects a provider instead of silently assuming Anthropic: it prefers a configured cloud provider whose
+  API key is present, then a local/auth-free provider (Ollama, `harn local`), and only then falls back to the
+  documented Anthropic default — warning once (with how to configure one) so non-Anthropic adopters get a clear
+  nudge rather than a raw auth failure. Detection reads catalog `auth_env`/`local_runtime` metadata only, with
+  no hardcoded paths or ports.
+- The provider/model catalog now refreshes from `https://harnlang.com/provider-catalog/provider-catalog.json`
+  (served from Harn's own site) instead of a private repo's GitHub Pages. The catalog bundled in the binary
+  remains the offline default; set `HARN_PROVIDER_CATALOG_URL` to point at a different catalog.
+
+### Fixed
+
+- Let narrowed sub-agent fan-out workers stat paths and carry their real session
+  id: subsume `workspace.exists` under a `read_text`/`list` grant (so `look`,
+  `read_file`, and edit preflight stop hard-failing under a tool-derived child
+  policy), and stamp a sub-agent's audit with its real `sub_agent_session_*` id
+  instead of a fresh random one that joins to nothing.
+- **Provider catalog corrections from the cross-provider footgun pre-mortem (harn#3645 §4).**
+  Added two reliable Together serverless sample routes
+  (`Qwen/Qwen2.5-7B-Instruct-Turbo`, `meta-llama/Llama-3.3-70B-Instruct-Turbo`)
+  to replace representative routes that were unusable as one-click samples
+  (`Qwen/Qwen3-Coder-Next-FP8` is dedicated-only; the Together Gemma route is a
+  reasoning model with an empty-content footgun). Marked the dead
+  `MiniMax-Text-01` route deprecated (HTTP 500 / absent from
+  `GET /v1/models`; use `MiniMax-M2`). Added three live-catalog contract tests
+  that guard the wire-id conventions the audit relied on: no `wire_model` retains
+  its own `<provider>/` route prefix, no DeepInfra wire id regains the
+  `deepinfra/` prefix, and `nvidia/minimax-m2.7` still dispatches the NIM wire id
+  `minimaxai/minimax-m2.7` (#3645).
+- Normalize single-tool-call provider history so Fireworks GPT-OSS runs do not
+  replay parallel native tool calls into a provider-side 400.
+- The `curl -fsSL https://harnlang.com/install.sh | sh` one-liner is now published by the docs-site build,
+  which previously returned 404 because `install.sh` was never copied into the rendered site.
+MCP list-change notifications now refresh manifest-derived prompt state through
+the same in-process path used by the file watcher, making prompt and package
+metadata updates deterministic under load.
+
+### Security
+
+- The default sandbox `NetworkPolicy` is now deny-all instead of unrestricted: a `SandboxSpec` constructed
+  without an explicit network policy gets no egress, so embedders are secure-by-default and must opt into network
+  access with a host allowlist (or `NetworkPolicy::Unrestricted`). The wire variants are unchanged, and the
+  `harn-serve` permission lowering already denied egress for an empty allowlist; this aligns the type's default
+  with that posture.
+
 ## v0.8.152
 
 ### Added
