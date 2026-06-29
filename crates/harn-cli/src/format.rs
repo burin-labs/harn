@@ -4,6 +4,7 @@
 //! timestamp / human-friendly duration formatters; consolidating them
 //! here keeps formatting consistent across the user-facing surface.
 
+use std::path::Path;
 use std::time::Duration as StdDuration;
 
 use time::format_description::well_known::Rfc3339;
@@ -113,6 +114,29 @@ pub(crate) fn escape_toml_basic_string(value: &str) -> String {
     out
 }
 
+/// Render a full TOML basic string literal.
+pub(crate) fn toml_basic_string_literal(value: &str) -> String {
+    format!("\"{}\"", escape_toml_basic_string(value))
+}
+
+/// Normalize path separators in machine-readable output. Harn package and
+/// bundle artifacts use slash-separated logical paths even on Windows.
+pub(crate) fn slash_separators(value: &str) -> String {
+    value.replace('\\', "/")
+}
+
+/// Render a path with slash separators for deterministic JSON/report output.
+pub(crate) fn slash_path(path: &Path) -> String {
+    slash_separators(&path.to_string_lossy())
+}
+
+/// True when a string starts with Windows drive syntax such as `C:\`, `C:/`,
+/// or drive-relative `C:foo`. URL parsers otherwise treat these as scheme `c`.
+pub(crate) fn looks_like_windows_drive_path(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -140,6 +164,33 @@ mod tests {
         // Other C0 controls (the case the old connector copy missed
         // entirely) become \uXXXX escapes.
         assert_eq!(escape_toml_basic_string("bell\u{7}"), "bell\\u0007");
+    }
+
+    #[test]
+    fn toml_basic_string_literal_round_trips_windows_paths() {
+        let raw = r"C:\Users\RUNNER~1\AppData\Local\Temp\.tmpJHS6sR\coding-pack";
+        let parsed: toml::Value =
+            toml::from_str(&format!("path = {}\n", toml_basic_string_literal(raw))).unwrap();
+        assert_eq!(parsed.get("path").and_then(toml::Value::as_str), Some(raw));
+    }
+
+    #[test]
+    fn slash_path_normalizes_windows_separators() {
+        assert_eq!(
+            slash_separators(r"C:\tmp\pkg\lib.harn"),
+            "C:/tmp/pkg/lib.harn"
+        );
+    }
+
+    #[test]
+    fn detects_windows_drive_paths_without_url_parser() {
+        assert!(looks_like_windows_drive_path(r"C:\tmp\registry.toml"));
+        assert!(looks_like_windows_drive_path("D:/tmp/registry.toml"));
+        assert!(looks_like_windows_drive_path("E:relative"));
+        assert!(!looks_like_windows_drive_path(
+            "https://example.com/index.toml"
+        ));
+        assert!(!looks_like_windows_drive_path("/tmp/index.toml"));
     }
 
     #[test]

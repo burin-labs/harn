@@ -48,7 +48,7 @@ struct BundleManifestBuilder {
 
 impl BundleManifestBuilder {
     fn add_module(&mut self, path: &Path, role: &'static str) {
-        let key = path.display().to_string();
+        let key = crate::format::slash_path(path);
         self.modules
             .entry(key.clone())
             .or_insert(BundleModuleRecord { path: key, role });
@@ -56,8 +56,8 @@ impl BundleManifestBuilder {
 
     fn add_import_edge(&mut self, from: &Path, to: &Path) {
         self.import_edges.insert(BundleImportEdge {
-            from: from.display().to_string(),
-            to: to.display().to_string(),
+            from: crate::format::slash_path(from),
+            to: crate::format::slash_path(to),
         });
     }
 
@@ -76,22 +76,31 @@ impl BundleManifestBuilder {
                 .iter()
                 .find(|path| path.exists())
                 .or_else(|| candidates.first())
-                .map(|path| path.display().to_string())
+                .map(|path| crate::format::slash_path(path))
                 .unwrap_or_else(|| target.to_string())
         });
         let candidate_strings = stdlib_asset
             .iter()
             .cloned()
-            .chain(candidates.iter().map(|path| path.display().to_string()))
+            .chain(
+                candidates
+                    .iter()
+                    .map(|path| crate::format::slash_path(path)),
+            )
             .collect::<Vec<_>>();
         let exists = if stdlib_asset.is_some() {
             harn_vm::stdlib_modules::get_stdlib_prompt_asset(target).is_some()
         } else {
             candidates.iter().any(|path| path.exists())
         };
-        let key = format!("{}\u{0}{}\u{0}{}", declared_in.display(), via, resolved);
+        let key = format!(
+            "{}\u{0}{}\u{0}{}",
+            crate::format::slash_path(declared_in),
+            via,
+            resolved
+        );
         self.assets.entry(key).or_insert(BundleAssetRecord {
-            declared_in: declared_in.display().to_string(),
+            declared_in: crate::format::slash_path(declared_in),
             via: via.to_string(),
             kind,
             target: target.to_string(),
@@ -171,7 +180,7 @@ impl BundleManifestBuilder {
             .collect::<BTreeMap<_, _>>();
         serde_json::json!({
             "version": 1,
-            "targets": targets.iter().map(|path| path.display().to_string()).collect::<Vec<_>>(),
+            "targets": targets.iter().map(|path| crate::format::slash_path(path)).collect::<Vec<_>>(),
             "bundle_root": config.bundle_root,
             "entry_modules": entry_modules,
             "import_modules": import_modules,
@@ -284,11 +293,9 @@ fn scan_node_bundle(
         }
         Node::FunctionCall { name, args, .. } if name == "exec_at" || name == "shell_at" => {
             if let Some(dir) = args.first().and_then(literal_string) {
-                manifest.execution_dirs.insert(
-                    resolve_source_relative(file_path, &dir)
-                        .display()
-                        .to_string(),
-                );
+                manifest.execution_dirs.insert(crate::format::slash_path(
+                    &resolve_source_relative(file_path, &dir),
+                ));
             }
             let children = args.iter().collect::<Vec<_>>();
             scan_children_bundle(&children, file_path, config, visited, manifest);
@@ -539,21 +546,21 @@ fn collect_spawn_agent_bundle(
         return;
     };
     if let Some(cwd) = dict_literal_field(execution, "cwd").and_then(literal_string) {
-        manifest.execution_dirs.insert(
-            resolve_source_relative(file_path, &cwd)
-                .display()
-                .to_string(),
-        );
+        manifest
+            .execution_dirs
+            .insert(crate::format::slash_path(&resolve_source_relative(
+                file_path, &cwd,
+            )));
     }
     let Some(worktree) = dict_literal_field(execution, "worktree") else {
         return;
     };
     if let Some(repo) = dict_literal_field(worktree, "repo").and_then(literal_string) {
-        manifest.worktree_repos.insert(
-            resolve_source_relative(file_path, &repo)
-                .display()
-                .to_string(),
-        );
+        manifest
+            .worktree_repos
+            .insert(crate::format::slash_path(&resolve_source_relative(
+                file_path, &repo,
+            )));
     }
 }
 

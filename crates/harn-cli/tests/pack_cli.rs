@@ -674,10 +674,11 @@ fn pack_verify_require_trusted_signer_rejects_signer_outside_policy_allowlist() 
         let policy = workdir.path().join("trust-policy.json");
         fs::write(
             &policy,
-            format!(
-                r#"{{"signer_registry_url":"{}","trusted_signers":["not-the-real-signer"]}}"#,
-                signers_dir.display()
-            ),
+            serde_json::to_string(&serde_json::json!({
+                "signer_registry_url": signers_dir.display().to_string(),
+                "trusted_signers": ["not-the-real-signer"],
+            }))
+            .unwrap(),
         )
         .unwrap();
 

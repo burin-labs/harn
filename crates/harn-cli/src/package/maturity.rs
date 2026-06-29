@@ -908,7 +908,7 @@ version = "0.1.0"
         let root = project_tmp.path();
         let workspace = TestWorkspace::new(root);
         fs::create_dir_all(root.join(".git")).unwrap();
-        let dep_path = dep_root.display().to_string();
+        let dep_path = crate::format::toml_basic_string_literal(&dep_root.display().to_string());
         fs::write(
             root.join(MANIFEST),
             format!(
@@ -918,7 +918,7 @@ name = "workspace"
 version = "0.1.0"
 
 [dependencies]
-openapi = {{ path = "{dep_path}" }}
+openapi = {{ path = {dep_path} }}
 "#
             ),
         )
@@ -1069,8 +1069,8 @@ acme-lib = {{ git = "{git}", rev = "v1.0.0" }}
         let project_tmp = tempfile::tempdir().unwrap();
         let root = project_tmp.path();
         let registry_path = root.join("index.toml");
-        let workspace =
-            TestWorkspace::new(root).with_registry_source(registry_path.display().to_string());
+        let workspace = TestWorkspace::new(root)
+            .with_registry_source(registry_path.to_string_lossy().to_string());
         let git = normalize_git_url(repo.to_string_lossy().as_ref()).unwrap();
         let harn_range = current_harn_range_example();
         fs::write(

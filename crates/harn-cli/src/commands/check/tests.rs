@@ -346,11 +346,9 @@ pipeline main() {
         .find(|d| d.message.contains("render_prompt target"))
         .expect("expected render_prompt target diagnostic for missing @/ asset");
     assert!(
-        render_diag.message.contains(
+        render_diag.message.contains(&crate::format::slash_path(
             &dir.join("prompts/missing.harn.prompt")
-                .display()
-                .to_string()
-        ),
+        )),
         "expected diagnostic to surface the resolved project-root path, got: {}",
         render_diag.message
     );
@@ -415,11 +413,9 @@ pipeline main() {
         .find(|d| d.message.contains("render_prompt target"))
         .expect("expected render_prompt target diagnostic for missing aliased asset");
     assert!(
-        render_diag.message.contains(
+        render_diag.message.contains(&crate::format::slash_path(
             &dir.join("src/prompts/missing.harn.prompt")
-                .display()
-                .to_string()
-        ),
+        )),
         "expected diagnostic to surface the alias-resolved path, got: {}",
         render_diag.message
     );
