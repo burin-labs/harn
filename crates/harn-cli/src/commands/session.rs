@@ -106,14 +106,18 @@ fn run_import(args: SessionImportArgs) {
         }
     };
     write_text(&out, &rendered);
-    if !materialized.is_empty() {
-        eprintln!(
-            "materialized {} worker snapshot(s) under {}",
-            materialized.len(),
-            snapshot_dir.display()
-        );
+    if args.json {
+        write_json_stdout(&session_import_report(&out, &snapshot_dir, &materialized));
+    } else {
+        if !materialized.is_empty() {
+            eprintln!(
+                "materialized {} worker snapshot(s) under {}",
+                materialized.len(),
+                snapshot_dir.display()
+            );
+        }
+        println!("{}", out.display());
     }
-    println!("{}", out.display());
 }
 
 fn run_validate(args: SessionValidateArgs) {
@@ -233,6 +237,40 @@ fn write_stdout(content: &str) {
     }
 }
 
+fn write_json_stdout(value: &serde_json::Value) {
+    match serde_json::to_string_pretty(value) {
+        Ok(json) => println!("{json}"),
+        Err(error) => {
+            eprintln!("error: failed to render import report: {error}");
+            process::exit(1);
+        }
+    }
+}
+
+fn session_import_report(
+    out: &Path,
+    worker_snapshot_dir: &Path,
+    materialized: &[harn_vm::session_bundle::MaterializedWorkerSnapshot],
+) -> serde_json::Value {
+    let worker_snapshots = materialized
+        .iter()
+        .map(|snapshot| {
+            serde_json::json!({
+                "worker_id": snapshot.worker_id,
+                "path": snapshot.path,
+                "resume_command": ["harn", "run", "--resume", snapshot.path],
+            })
+        })
+        .collect::<Vec<_>>();
+    serde_json::json!({
+        "ok": true,
+        "run_record_path": out.to_string_lossy(),
+        "worker_snapshot_dir": worker_snapshot_dir.to_string_lossy(),
+        "worker_snapshot_count": materialized.len(),
+        "worker_snapshots": worker_snapshots,
+    })
+}
+
 fn default_worker_snapshot_dir(out: &Path, run_record_id: &str) -> PathBuf {
     let name = out
         .file_stem()
@@ -247,4 +285,39 @@ fn default_worker_snapshot_dir(out: &Path, run_record_id: &str) -> PathBuf {
 
 fn normalize_line_endings(input: &str) -> String {
     input.replace("\r\n", "\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn session_import_report_includes_resume_commands() {
+        let materialized = vec![harn_vm::session_bundle::MaterializedWorkerSnapshot {
+            worker_id: "worker_1".to_string(),
+            path: "/tmp/imported.worker-snapshots/worker_1.json".to_string(),
+        }];
+
+        let report = session_import_report(
+            Path::new("/tmp/imported/run.json"),
+            Path::new("/tmp/imported.worker-snapshots"),
+            &materialized,
+        );
+
+        assert_eq!(report["ok"], serde_json::json!(true));
+        assert_eq!(
+            report["run_record_path"],
+            serde_json::json!("/tmp/imported/run.json")
+        );
+        assert_eq!(report["worker_snapshot_count"], serde_json::json!(1));
+        assert_eq!(
+            report["worker_snapshots"][0]["resume_command"],
+            serde_json::json!([
+                "harn",
+                "run",
+                "--resume",
+                "/tmp/imported.worker-snapshots/worker_1.json"
+            ])
+        );
+    }
 }
