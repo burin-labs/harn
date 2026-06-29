@@ -149,6 +149,12 @@ fi
 # expensive steps). Reached only once the fast validators above pass.
 # ---------------------------------------------------------------------------
 
+if [ "${HARN_PREPUSH_FAST_ONLY:-0}" = "1" ]; then
+  echo "=== Pre-push: skipping expensive local checks (HARN_PREPUSH_FAST_ONLY=1) ==="
+  echo "    Signature, merge-queue, and fast drift guards passed; remote CI remains required."
+  exit 0
+fi
+
 echo "=== Pre-push: running targeted local checks ==="
 if [ "${HARN_PREPUSH_FULL_TESTS:-0}" = "1" ] && hook_paths_match "$changed" "$HOOK_TEST_PATTERN"; then
   make test
