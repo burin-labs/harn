@@ -5,7 +5,7 @@ fn list_tools() {
     "list_directory",
     "List directory contents",
     {
-      handler: { args -> "" },
+      handler: { _args -> "" },
       parameters: {path: {type: "string", description: "Directory path"}},
       returns: {type: "string"},
     },
@@ -27,6 +27,6 @@ pipeline test(task) {
   )
   log(result?.tools?.rejected[0])
   log(
-    json_stringify(transcript_messages(result?.transcript)).contains("does not match allowed patterns"),
+    json_stringify(transcript_messages(result?.transcript)).contains("is outside your allowed scope"),
   )
 }

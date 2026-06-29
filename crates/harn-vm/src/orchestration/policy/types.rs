@@ -106,9 +106,11 @@ pub fn enforce_tool_arg_constraints(
                 DenialGate::ArgConstraint,
                 None,
                 format!(
-                    "tool '{tool_name}' {arg_key} '{candidate}' does not match allowed patterns: {:?}. \
-                     Only the {arg_key} argument is checked against this allow-list — other argument \
-                     values are not.",
+                    "tool '{tool_name}' {arg_key} '{candidate}' is outside your allowed scope. \
+                     Allowed {arg_key} pattern(s): {:?}. This is fixable: re-issue the call with a \
+                     {arg_key} that matches one of those patterns. If '{candidate}' is a \
+                     reference/example you only need to consult, read it with `look` instead — never \
+                     write to a path outside your scope.",
                     constraint.arg_patterns
                 ),
             );

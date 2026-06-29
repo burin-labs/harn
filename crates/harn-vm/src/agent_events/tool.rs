@@ -263,6 +263,27 @@ impl ToolDenial {
         }
     }
 
+    /// Build a SOFT denial (`retryable: true`): the call was refused for *this*
+    /// argument, but re-issuing it with a corrected argument can succeed — so
+    /// the model should be coached to retry with the correction rather than told
+    /// to give up. Used for the argument allow-list gate (`ArgConstraint`),
+    /// where a path/command outside the allowed scope is a fixable slip, not a
+    /// hard capability ceiling. The dispatch boundary routes a retryable denial
+    /// through the recoverable (retry-positive) tool-result body.
+    pub fn retryable(
+        gate: DenialGate,
+        capability: Option<String>,
+        reason: impl Into<String>,
+    ) -> Self {
+        Self {
+            gate,
+            capability,
+            denied_paths: Vec::new(),
+            retryable: true,
+            reason: reason.into(),
+        }
+    }
+
     pub fn to_json(&self) -> serde_json::Value {
         serde_json::to_value(self).unwrap_or(serde_json::Value::Null)
     }
