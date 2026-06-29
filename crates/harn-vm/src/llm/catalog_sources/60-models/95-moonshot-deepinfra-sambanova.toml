@@ -120,7 +120,13 @@ served_variant = "deepinfra"
 api_dialect = "openai_chat"
 context_window = 1048576
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 1.40, output_per_mtok = 4.40, cache_read_per_mtok = 0.26 }
+# DeepInfra's published GLM-5.2 rate, verified 2026-06-28 against their pricing
+# API (cents_per_input_token 9.5e-05 -> $0.95/MTok; cents_per_output_token
+# 3e-04 -> $3.00/MTok; cached-read ratio -> $0.18/MTok) and reconciled against a
+# live chat-completion `estimated_cost` (175 in + 36 out billed $0.00027425,
+# exact). OpenRouter's z-ai/glm-5.2 listing agrees ($0.95/$3.00/$0.18). The prior
+# 1.40/4.40/0.26 was the together/baseten placeholder, not DeepInfra's rate.
+pricing = { input_per_mtok = 0.95, output_per_mtok = 3.00, cache_read_per_mtok = 0.18 }
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
