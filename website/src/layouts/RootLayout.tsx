@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { Outlet, useLocation } from "react-router"
 import { Navbar } from "../components/Navbar"
+import { PrereleaseBanner } from "../components/PrereleaseBanner"
 import { Footer } from "../components/Footer"
 import { SearchModal } from "../components/SearchModal"
 import { KeywordTooltip } from "../components/KeywordTooltip"
@@ -37,6 +38,7 @@ export function RootLayout() {
 
   return (
     <div className="flex min-h-screen flex-col">
+      <PrereleaseBanner />
       <Navbar onOpenSearch={openSearch} />
       <main className="flex-1">
         <Outlet />

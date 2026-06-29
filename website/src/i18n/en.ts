@@ -13,6 +13,12 @@ export const en = {
     github: "GitHub",
   },
 
+  banner: {
+    label: "Pre-release",
+    prerelease: "Harn is pre-1.0 — the language, standard library, and CLI may change between releases.",
+    changelogLink: "See the release notes",
+  },
+
   nav: {
     brandHomeAria: "Harn home",
     docs: "Docs",
