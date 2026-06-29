@@ -150,11 +150,15 @@ description = "JSON Schema for the session-bundle DTO, generated from the Rust S
 gen = "gen-session-bundle-schema"
 check = "check-session-bundle-schema"
 outputs = ["spec/schemas/session-bundle.v1.schema.json"]
-sources = ["crates/harn-vm/src/sessions/", "crates/harn-cli/src/commands/session.rs"]
+sources = [
+  "crates/harn-vm/src/session_bundle.rs",
+  "crates/harn-vm/src/session_bundle/",
+  "crates/harn-cli/src/commands/session.rs",
+]
 ci = true
 make_all = true
 pre_commit = false
-pre_push = false
+pre_push = true
 
 [[artifact]]
 id = "run-session-view-fixtures"

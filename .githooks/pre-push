@@ -215,6 +215,14 @@ else
   echo "=== Pre-push: skipping portal lint (no portal changes) ==="
 fi
 
+if hook_paths_match "$changed" "$HOOK_SESSION_BUNDLE_SCHEMA_PATTERN"; then
+  echo "=== Pre-push: checking session bundle schema ==="
+  make -s check-session-bundle-schema
+  echo "    Session bundle schema OK."
+else
+  echo "=== Pre-push: skipping session bundle schema check (no session-bundle schema changes) ==="
+fi
+
 # Generated-mirror drift guard. The `harn-generated` merge driver
 # silently keeps the current side during merge/rebase (see
 # scripts/configure_merge_drivers.sh) and the post-rewrite hook
