@@ -598,13 +598,19 @@ pub(crate) struct CompletionContractSignals<'a> {
 /// to `agent_loop`, which can accept it, nudge for more work, or fail required
 /// tool policy.
 pub(crate) fn is_billed_noncommittal_completion(signals: &CompletionContractSignals) -> bool {
-    let finished_clean = !matches!(signals.stop_reason, Some("length"));
+    let finished_clean = !is_length_stop_reason(signals.stop_reason);
     finished_clean
         && signals.output_tokens > 0
         && signals.tools_offered
         && signals.tool_call_count == 0
         && !signals.has_tool_search_block
         && signals.text.trim().is_empty()
+}
+
+fn is_length_stop_reason(stop_reason: Option<&str>) -> bool {
+    stop_reason.is_some_and(|reason| {
+        reason.eq_ignore_ascii_case("length") || reason.eq_ignore_ascii_case("max_tokens")
+    })
 }
 
 /// Build the loud, actionable error returned when
@@ -903,6 +909,8 @@ pub(crate) fn parse_llm_response(
         let stop_reason = finish_reason.map(|s| s.to_string());
         let request_id = json["id"].as_str().filter(|value| !value.is_empty());
         let telemetry = ProviderTelemetry::from_openai_usage(&json["usage"], request_id);
+        let billed_length_truncation =
+            is_length_stop_reason(stop_reason.as_deref()) && output_tokens > 0;
 
         // OpenAI Responses-API `tool_search_call` / `tool_search_output`
         // blocks (harn#71) are server-executed and get stripped from
@@ -910,7 +918,10 @@ pub(crate) fn parse_llm_response(
         // blocks. Count their presence as "did deliver something" so
         // the empty-response error below doesn't trip when the
         // server's response consisted entirely of a search
-        // query/result exchange.
+        // query/result exchange. Also let billed length-truncated turns
+        // through so the agent loop can raise max_tokens and continue them:
+        // hidden reasoning can consume the whole cap without leaving a
+        // provider-visible reasoning string to preserve here.
         let has_tool_search_block = blocks.iter().any(|b| {
             matches!(
                 b.get("type").and_then(|v| v.as_str()),
@@ -922,6 +933,7 @@ pub(crate) fn parse_llm_response(
             && reasoning_summary.is_empty()
             && tool_calls.is_empty()
             && !has_tool_search_block
+            && !billed_length_truncation
         {
             return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 format!(
@@ -1171,6 +1183,19 @@ mod tests {
     }
 
     #[test]
+    fn contract_violation_silent_on_max_tokens_truncation() {
+        let signals = CompletionContractSignals {
+            stop_reason: Some("max_tokens"),
+            output_tokens: 4096,
+            tools_offered: true,
+            tool_call_count: 0,
+            has_tool_search_block: false,
+            text: "",
+        };
+        assert!(!is_billed_noncommittal_completion(&signals));
+    }
+
+    #[test]
     fn contract_violation_silent_when_no_tools_offered() {
         // A deliberately terse text reply to a tool-less prompt is fine.
         let signals = CompletionContractSignals {
@@ -1225,6 +1250,35 @@ mod tests {
             message.contains("upstream contract violation"),
             "error must name the contract violation: {message}"
         );
+    }
+
+    #[test]
+    fn parse_llm_response_allows_billed_empty_length_truncation() {
+        // Some reasoning routes consume the output cap in a hidden channel and
+        // return no visible content or reasoning string, only a length stop and
+        // billed completion tokens. The parser must hand this shape to the
+        // agent loop so it can auto-continue with a raised cap.
+        let response = serde_json::json!({
+            "id": "gen-hidden-truncated",
+            "choices": [{
+                "index": 0,
+                "finish_reason": "length",
+                "message": {
+                    "role": "assistant",
+                    "content": ""
+                }
+            }],
+            "usage": { "prompt_tokens": 321, "completion_tokens": 342 }
+        });
+        let result = parse_llm_response(&response, "openrouter", "hidden-reasoning", false, true)
+            .expect("billed length truncation is recoverable");
+
+        assert_eq!(result.text, "");
+        assert!(result.tool_calls.is_empty());
+        assert_eq!(result.output_tokens, 342);
+        assert_eq!(result.stop_reason.as_deref(), Some("length"));
+        assert_eq!(result.thinking, None);
+        assert_eq!(result.thinking_summary, None);
     }
 
     #[test]

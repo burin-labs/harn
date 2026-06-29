@@ -227,10 +227,12 @@ fn __invoke_llm(message, turn_system, llm_opts) {
 // Bounded to a small number of continuations; if still truncated after the cap
 // we return the last result and the existing parse-guidance path takes over.
 //
-// The gate (`__host_agent_truncated_tool_call`) fires ONLY on a real length
-// truncation with zero usable calls AND a partial-call signal, so it never
-// double-handles the clean-stop-but-malformed (#3137) or reasoning-leak (#3142)
-// cases — those stop with `end_turn`/`stop`, not `length`/`max_tokens`.
+// The tool-call gate (`__host_agent_truncated_tool_call`) fires ONLY on a real
+// length truncation with zero usable calls AND a partial-call signal. A second
+// gate covers hidden-reasoning-only truncation: strict providers can return no
+// visible text/tool calls, `stop_reason: length`, and non-empty reasoning. That
+// is still a budget exhaustion, so retry with a larger output cap instead of
+// handing an empty turn to the normal loop body.
 
 // -------------------------------------------------------------------------------------------------
 
@@ -272,6 +274,29 @@ fn __autocontinue_raised_cap(current, llm_opts) {
   return raised
 }
 
+fn __autocontinue_is_length_stop(stop_reason) {
+  let normalized = lowercase(trim(to_string(stop_reason ?? "")))
+  return normalized == "length" || normalized == "max_tokens"
+}
+
+fn __autocontinue_hidden_reasoning_truncated(llm_result, tool_call_count) {
+  if !__autocontinue_is_length_stop(llm_result?.stop_reason) {
+    return false
+  }
+  if tool_call_count > 0 {
+    return false
+  }
+  if trim(to_string(llm_result?.text ?? "")) != "" {
+    return false
+  }
+  let thinking = trim(to_string(llm_result?.thinking ?? ""))
+  let summary = trim(to_string(llm_result?.thinking_summary ?? ""))
+  if thinking != "" || summary != "" {
+    return true
+  }
+  return (to_int(llm_result?.output_tokens ?? 0) ?? 0) > 0
+}
+
 /**
  * Detect whether `call` is a length-truncated turn that resolved no usable
  * tool call but looks like it was mid-call — the one condition where
@@ -289,12 +314,15 @@ fn __autocontinue_should_continue(call, turn_opts) {
   let parsed = agent_parse_tool_calls(raw_text, turn_opts?.tools, turn_opts?.tool_format)
   let tool_calls = __resolve_tool_calls(llm_result, parsed)
   let has_parse_errors = len(parsed?.tool_parse_errors ?? []) > 0
-  return __host_agent_truncated_tool_call(
+  if __host_agent_truncated_tool_call(
     llm_result?.stop_reason,
     raw_text,
     len(tool_calls),
     has_parse_errors,
-  )
+  ) {
+    return true
+  }
+  return __autocontinue_hidden_reasoning_truncated(llm_result, len(tool_calls))
 }
 
 /**
