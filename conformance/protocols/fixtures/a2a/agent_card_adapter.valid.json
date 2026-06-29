@@ -20,7 +20,7 @@
           "transport": "HTTP+JSON"
         }
       ],
-      "version": "0.8.155",
+      "version": "0.8.156",
       "provider": {
         "organization": "Harn",
         "url": "https://harn.dev"
