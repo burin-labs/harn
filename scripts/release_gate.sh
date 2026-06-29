@@ -409,6 +409,18 @@ cmd_prepare() {
   current="$(current_version)"
   next="$(next_version "$bump")"
   bump_version "$next"
+  # The audit lanes that ran before prepare populate cache state keyed to the
+  # old workspace crate hashes. Once `bump_version` rewrites Cargo.toml, the
+  # prepare-time cargo calls are one-shot rebuilds of generated-artifact
+  # helpers; caching them has little value and has failed under macOS sccache
+  # file-descriptor pressure. Use direct rustc and skip incremental state for
+  # this post-bump phase. `CARGO_BUILD_RUSTC_WRAPPER=` is required because
+  # Harn's checked-in `.cargo/config.toml` otherwise still applies sccache.
+  export CARGO_INCREMENTAL=0
+  export RUSTC_WRAPPER=
+  export CARGO_BUILD_RUSTC_WRAPPER=
+  export SCCACHE_DISABLE=1
+
   harn_cmd run scripts/sync_protocol_fixture_runtime_versions.harn -- --from "$current" --to "$next"
   # Keep the embedding guide's `tag = "vX.Y.Z"` pins on the released version
   # line. Nothing owned these before and they silently drifted ~46 versions
@@ -426,15 +438,6 @@ updated = re.sub(r'tag = "v\d+\.\d+\.\d+"', f'tag = "v{next_version}"', text)
 if updated != text:
     doc.write_text(updated)
 PY
-  # The audit lanes that ran before prepare populate cache state keyed to the
-  # old workspace crate hashes. Once `bump_version` rewrites Cargo.toml, the
-  # prepare-time cargo calls are one-shot rebuilds of generated-artifact
-  # helpers; caching them has little value and has failed under macOS sccache
-  # file-descriptor pressure. Use direct rustc and skip incremental state for
-  # this post-bump phase.
-  export CARGO_INCREMENTAL=0
-  export RUSTC_WRAPPER=
-  export SCCACHE_DISABLE=1
   make gen-protocol-artifacts
   cargo check --workspace --all-targets >/dev/null
   echo "Version updated: $current -> $next"

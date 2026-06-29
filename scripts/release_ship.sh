@@ -236,6 +236,38 @@ print(f"{major}.{minor}.{patch}")
 PY
 }
 
+debug_harn_binary() {
+  local target_dir="${CARGO_TARGET_DIR:-}"
+  if [[ -z "$target_dir" ]]; then
+    target_dir="$(cargo metadata --format-version=1 --no-deps \
+      | python3 -c 'import json, sys; print(json.load(sys.stdin)["target_directory"])')"
+  fi
+  local suffix=""
+  case "${OS:-$(uname -s)}" in
+    Windows_NT|MINGW*|MSYS*|CYGWIN*) suffix=".exe" ;;
+  esac
+  printf '%s/debug/harn%s\n' "$target_dir" "$suffix"
+}
+
+export_warmed_harn_bin() {
+  if [[ -n "${HARN_BIN:-}" ]]; then
+    return 0
+  fi
+  local harn_bin
+  harn_bin="$(debug_harn_binary)"
+  if [[ -x "$harn_bin" ]]; then
+    export HARN_BIN="$harn_bin"
+    printf 'Reusing warmed HARN_BIN: %s\n' "$HARN_BIN"
+  fi
+}
+
+disable_prepare_cargo_cache_wrappers() {
+  export CARGO_INCREMENTAL=0
+  export RUSTC_WRAPPER=
+  export CARGO_BUILD_RUSTC_WRAPPER=
+  export SCCACHE_DISABLE=1
+}
+
 require_base_branch() {
   local base="$1"
   local branch
@@ -459,6 +491,7 @@ open_bump_pr() {
   log_step "Create bump branch"
   git switch -c "$branch"
 
+  export_warmed_harn_bin
   log_step "Version bump"
   "$RELEASE_GATE_SCRIPT" prepare --bump "$BUMP"
   local actual_next
@@ -539,6 +572,7 @@ prepare_here() {
   # --allow-dirty (see scripts/publish.sh).
   run_common_gates
 
+  export_warmed_harn_bin
   log_step "Version bump (in place)"
   "$RELEASE_GATE_SCRIPT" prepare --bump "$BUMP" --allow-dirty
   local actual_next
@@ -552,9 +586,7 @@ prepare_here() {
   # one-shot rebuilds. That export does not survive the subprocess boundary,
   # so re-apply it for the cargo invocations `regenerate_derived_files` runs in
   # this shell.
-  export CARGO_INCREMENTAL=0
-  export RUSTC_WRAPPER=
-  export SCCACHE_DISABLE=1
+  disable_prepare_cargo_cache_wrappers
   regenerate_derived_files
 
   log_step "Stage release content"
