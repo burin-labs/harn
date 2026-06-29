@@ -67,6 +67,40 @@
         "metadata"
       ],
       "type": "object"
+    },
+    "worker_snapshot": {
+      "additionalProperties": true,
+      "properties": {
+        "snapshot_ref": {
+          "type": "string"
+        },
+        "source_path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "type": "string"
+        },
+        "value": {
+          "type": "object"
+        },
+        "worker_id": {
+          "type": "string"
+        },
+        "worker_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "worker_id",
+        "worker_name",
+        "status",
+        "snapshot_ref",
+        "value"
+      ],
+      "type": "object"
     }
   },
   "$id": "https://harnlang.com/schemas/session-bundle.v1.json",
@@ -208,6 +242,12 @@
         "verification_outcomes": {
           "items": {
             "type": "object"
+          },
+          "type": "array"
+        },
+        "worker_snapshots": {
+          "items": {
+            "$ref": "#/$defs/worker_snapshot"
           },
           "type": "array"
         }

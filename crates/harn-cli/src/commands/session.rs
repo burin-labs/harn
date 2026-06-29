@@ -70,13 +70,34 @@ fn run_import(args: SessionImportArgs) {
         args.allow_unsafe_secret_markers,
         "invalid session bundle",
     );
-    let run_record = match harn_vm::session_bundle::import_run_record_value(&bundle) {
-        Ok(run_record) => run_record,
-        Err(error) => {
-            eprintln!("error: failed to import session bundle: {error}");
-            process::exit(1);
-        }
-    };
+    let out = args.out.map(PathBuf::from).unwrap_or_else(|| {
+        harn_vm::runtime_paths::run_root(Path::new("."))
+            .join("imported")
+            .join(format!("{}.json", bundle.source.run_record_id))
+    });
+    let snapshot_dir = args
+        .worker_snapshot_dir
+        .map(PathBuf::from)
+        .unwrap_or_else(|| default_worker_snapshot_dir(&out, &bundle.source.run_record_id));
+    let materialized =
+        match harn_vm::session_bundle::materialize_worker_snapshots(&bundle, &snapshot_dir) {
+            Ok(materialized) => materialized,
+            Err(error) => {
+                eprintln!("error: failed to materialize worker snapshots: {error}");
+                process::exit(1);
+            }
+        };
+    let run_record =
+        match harn_vm::session_bundle::import_run_record_value_with_materialized_worker_snapshots(
+            &bundle,
+            &materialized,
+        ) {
+            Ok(run_record) => run_record,
+            Err(error) => {
+                eprintln!("error: failed to import session bundle: {error}");
+                process::exit(1);
+            }
+        };
     let rendered = match serde_json::to_string_pretty(&run_record) {
         Ok(json) => format!("{json}\n"),
         Err(error) => {
@@ -84,12 +105,14 @@ fn run_import(args: SessionImportArgs) {
             process::exit(1);
         }
     };
-    let out = args.out.map(PathBuf::from).unwrap_or_else(|| {
-        harn_vm::runtime_paths::run_root(Path::new("."))
-            .join("imported")
-            .join(format!("{}.json", bundle.source.run_record_id))
-    });
     write_text(&out, &rendered);
+    if !materialized.is_empty() {
+        eprintln!(
+            "materialized {} worker snapshot(s) under {}",
+            materialized.len(),
+            snapshot_dir.display()
+        );
+    }
     println!("{}", out.display());
 }
 
@@ -208,6 +231,18 @@ fn write_stdout(content: &str) {
         eprintln!("error: failed to write stdout: {error}");
         process::exit(1);
     }
+}
+
+fn default_worker_snapshot_dir(out: &Path, run_record_id: &str) -> PathBuf {
+    let name = out
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(run_record_id);
+    out.parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."))
+        .join(format!("{name}.worker-snapshots"))
 }
 
 fn normalize_line_endings(input: &str) -> String {

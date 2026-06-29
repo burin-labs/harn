@@ -7,8 +7,9 @@
 //! a second persistence model.
 
 use std::borrow::Cow;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::fs;
 use std::path::Path;
 
 use chrono::{DateTime, SecondsFormat, Utc};
@@ -290,11 +291,31 @@ pub struct BundleReplay {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub observability: Option<RunObservabilityRecord>,
     pub verification_outcomes: Vec<RunVerificationOutcomeRecord>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub worker_snapshots: Vec<BundleWorkerSnapshot>,
     pub event_log_pointers: Vec<BundleEventLogPointer>,
     pub transitions: Vec<RunTransitionRecord>,
     pub checkpoints: Vec<RunCheckpointRecord>,
     pub trace_spans: Vec<RunTraceSpanRecord>,
     pub deterministic_events: Vec<BundleJsonEntry>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct BundleWorkerSnapshot {
+    pub worker_id: String,
+    pub worker_name: String,
+    pub status: String,
+    pub snapshot_ref: String,
+    pub source_path: Option<String>,
+    pub value: JsonValue,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct MaterializedWorkerSnapshot {
+    pub worker_id: String,
+    pub path: String,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -578,10 +599,109 @@ pub fn import_run_record_value(bundle: &SessionBundle) -> Result<JsonValue, Sess
             "metadata": {
                 "imported_from_session_bundle": bundle.bundle_id.clone(),
                 "session_bundle_schema_version": bundle.schema_version,
+                "worker_snapshot_count": bundle.replay.worker_snapshots.len(),
             }
         }));
     }
     Err(SessionBundleError::MissingRunRecord)
+}
+
+pub fn import_run_record_value_with_materialized_worker_snapshots(
+    bundle: &SessionBundle,
+    materialized: &[MaterializedWorkerSnapshot],
+) -> Result<JsonValue, SessionBundleError> {
+    let mut run_record = import_run_record_value(bundle)?;
+    apply_materialized_worker_snapshot_paths(&mut run_record, materialized);
+    Ok(run_record)
+}
+
+pub fn materialize_worker_snapshots(
+    bundle: &SessionBundle,
+    out_dir: &Path,
+) -> Result<Vec<MaterializedWorkerSnapshot>, SessionBundleError> {
+    if bundle.replay.worker_snapshots.is_empty() {
+        return Ok(Vec::new());
+    }
+    fs::create_dir_all(out_dir).map_err(|error| {
+        SessionBundleError::Encode(format!(
+            "failed to create worker snapshot directory {}: {error}",
+            out_dir.display()
+        ))
+    })?;
+
+    let mut materialized = Vec::new();
+    for (index, snapshot) in bundle.replay.worker_snapshots.iter().enumerate() {
+        let worker_id = if snapshot.worker_id.trim().is_empty() {
+            format!("worker_{index}")
+        } else {
+            snapshot.worker_id.clone()
+        };
+        let path = out_dir.join(worker_snapshot_file_name(&worker_id, index));
+        let value = worker_snapshot_value_for_import(&snapshot.value, &path);
+        let rendered = serde_json::to_string_pretty(&value)
+            .map(|json| format!("{json}\n"))
+            .map_err(|error| SessionBundleError::Encode(error.to_string()))?;
+        fs::write(&path, rendered).map_err(|error| {
+            SessionBundleError::Encode(format!(
+                "failed to write worker snapshot {}: {error}",
+                path.display()
+            ))
+        })?;
+        materialized.push(MaterializedWorkerSnapshot {
+            worker_id,
+            path: path.to_string_lossy().into_owned(),
+        });
+    }
+    Ok(materialized)
+}
+
+fn apply_materialized_worker_snapshot_paths(
+    run_record: &mut JsonValue,
+    materialized: &[MaterializedWorkerSnapshot],
+) {
+    if materialized.is_empty() {
+        return;
+    }
+
+    let paths_by_worker_id = materialized
+        .iter()
+        .filter(|snapshot| !snapshot.worker_id.is_empty())
+        .map(|snapshot| (snapshot.worker_id.as_str(), snapshot.path.as_str()))
+        .collect::<BTreeMap<_, _>>();
+    if paths_by_worker_id.is_empty() {
+        return;
+    }
+
+    rewrite_worker_snapshot_paths(run_record.get_mut("child_runs"), &paths_by_worker_id);
+    rewrite_worker_snapshot_paths(
+        run_record
+            .get_mut("observability")
+            .and_then(|observability| observability.get_mut("worker_lineage")),
+        &paths_by_worker_id,
+    );
+}
+
+fn rewrite_worker_snapshot_paths(
+    records: Option<&mut JsonValue>,
+    paths_by_worker_id: &BTreeMap<&str, &str>,
+) {
+    let Some(records) = records.and_then(JsonValue::as_array_mut) else {
+        return;
+    };
+    for record in records {
+        let Some(worker_id) = record.get("worker_id").and_then(JsonValue::as_str) else {
+            continue;
+        };
+        let Some(path) = paths_by_worker_id.get(worker_id) else {
+            continue;
+        };
+        if let JsonValue::Object(map) = record {
+            map.insert(
+                "snapshot_path".to_string(),
+                JsonValue::String((*path).to_string()),
+            );
+        }
+    }
 }
 
 fn replay_observability_for_import(replay: &BundleReplay) -> Option<RunObservabilityRecord> {
@@ -888,6 +1008,7 @@ fn raw_bundle_from_run(
             run_record: Some(run_record_value),
             observability: run.observability.clone(),
             verification_outcomes: verification_outcomes_for_run(run),
+            worker_snapshots: worker_snapshots_from_run(run),
             event_log_pointers: event_log_pointers_from_run(run),
             transitions: run.transitions.clone(),
             checkpoints: run.checkpoints.clone(),
@@ -929,7 +1050,9 @@ fn bundle_redaction_policy(base: &RedactionPolicy) -> RedactionPolicy {
         .with_extra_field("persisted_path")
         .with_extra_field("primary")
         .with_extra_field("run_path")
+        .with_extra_field("snapshot_ref")
         .with_extra_field("snapshot_path")
+        .with_extra_field("source_path")
 }
 
 fn workspace_from_run(run: &RunRecord) -> Option<BundleWorkspace> {
@@ -1168,6 +1291,116 @@ fn event_log_pointers_from_run(run: &RunRecord) -> Vec<BundleEventLogPointer> {
         }
     }
     pointers
+}
+
+fn worker_snapshots_from_run(run: &RunRecord) -> Vec<BundleWorkerSnapshot> {
+    let mut snapshots = Vec::new();
+    let mut seen_paths = BTreeSet::new();
+    for child in &run.child_runs {
+        let Some(path) = child.snapshot_path.as_deref() else {
+            continue;
+        };
+        if !seen_paths.insert(path.to_string()) {
+            continue;
+        }
+        if let Some(snapshot) = worker_snapshot_from_path(
+            &child.worker_id,
+            &child.worker_name,
+            &child.status,
+            Path::new(path),
+        ) {
+            snapshots.push(snapshot);
+        }
+    }
+    if let Some(observability) = run.observability.as_ref() {
+        for worker in &observability.worker_lineage {
+            let Some(path) = worker.snapshot_path.as_deref() else {
+                continue;
+            };
+            if !seen_paths.insert(path.to_string()) {
+                continue;
+            }
+            if let Some(snapshot) = worker_snapshot_from_path(
+                &worker.worker_id,
+                &worker.worker_name,
+                &worker.status,
+                Path::new(path),
+            ) {
+                snapshots.push(snapshot);
+            }
+        }
+    }
+    snapshots
+}
+
+fn worker_snapshot_from_path(
+    worker_id: &str,
+    worker_name: &str,
+    status: &str,
+    path: &Path,
+) -> Option<BundleWorkerSnapshot> {
+    let content = fs::read_to_string(path).ok()?;
+    let value = serde_json::from_str::<JsonValue>(&content).ok()?;
+    Some(BundleWorkerSnapshot {
+        worker_id: if worker_id.is_empty() {
+            value
+                .get("id")
+                .and_then(JsonValue::as_str)
+                .unwrap_or_default()
+                .to_string()
+        } else {
+            worker_id.to_string()
+        },
+        worker_name: if worker_name.is_empty() {
+            value
+                .get("name")
+                .and_then(JsonValue::as_str)
+                .unwrap_or("worker")
+                .to_string()
+        } else {
+            worker_name.to_string()
+        },
+        status: if status.is_empty() {
+            value
+                .get("status")
+                .and_then(JsonValue::as_str)
+                .unwrap_or_default()
+                .to_string()
+        } else {
+            status.to_string()
+        },
+        snapshot_ref: value
+            .get("suspension")
+            .and_then(|value| value.get("snapshot_ref"))
+            .and_then(JsonValue::as_str)
+            .or_else(|| value.get("snapshot_path").and_then(JsonValue::as_str))
+            .unwrap_or_else(|| path.to_str().unwrap_or_default())
+            .to_string(),
+        source_path: Some(path.to_string_lossy().into_owned()),
+        value,
+    })
+}
+
+fn worker_snapshot_file_name(worker_id: &str, index: usize) -> String {
+    let component = sanitize_topic_component(worker_id);
+    let component = if component.is_empty() {
+        format!("worker_{index}")
+    } else {
+        component
+    };
+    format!("{component}.json")
+}
+
+fn worker_snapshot_value_for_import(value: &JsonValue, path: &Path) -> JsonValue {
+    let mut value = value.clone();
+    let path = path.to_string_lossy().into_owned();
+    if let JsonValue::Object(map) = &mut value {
+        map.insert("snapshot_path".to_string(), JsonValue::String(path.clone()));
+        if let Some(JsonValue::Object(suspension)) = map.get_mut("suspension") {
+            suspension.insert("snapshot_ref".to_string(), JsonValue::String(path));
+        }
+    }
+    value
 }
 
 fn deterministic_events_from_run(
