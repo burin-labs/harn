@@ -569,11 +569,6 @@ fn build_tracer_provider_from_env(
 
     let exporter = opentelemetry_otlp::SpanExporter::builder()
         .with_http()
-        .with_http_client(
-            reqwest::Client::builder()
-                .build()
-                .map_err(|error| format!("failed to build OTLP HTTP client: {error}"))?,
-        )
         .with_protocol(Protocol::HttpJson)
         .with_endpoint(endpoint)
         .with_headers(headers)
