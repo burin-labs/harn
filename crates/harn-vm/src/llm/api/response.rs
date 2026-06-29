@@ -211,6 +211,53 @@ fn parse_tool_arguments(arguments: Option<&serde_json::Value>) -> serde_json::Va
     }
 }
 
+fn parse_openai_tool_argument_values(args_str: &str) -> Vec<serde_json::Value> {
+    match serde_json::from_str::<serde_json::Value>(args_str) {
+        Ok(value) => return vec![value],
+        Err(first_error) => {
+            let mut values = Vec::new();
+            for parsed in
+                serde_json::Deserializer::from_str(args_str).into_iter::<serde_json::Value>()
+            {
+                match parsed {
+                    Ok(value) => values.push(value),
+                    Err(_) => {
+                        return vec![tool_argument_parse_error(args_str, first_error)];
+                    }
+                }
+            }
+            if values.len() > 1
+                && values
+                    .iter()
+                    .all(|value| matches!(value, serde_json::Value::Object(_)))
+            {
+                return values;
+            }
+            vec![tool_argument_parse_error(args_str, first_error)]
+        }
+    }
+}
+
+fn tool_argument_parse_error(args_str: &str, error: serde_json::Error) -> serde_json::Value {
+    serde_json::json!({
+        "__parse_error": format!(
+            "Could not parse tool arguments as JSON: {}. Raw input: {}",
+            error,
+            preview_chars(args_str, 200)
+        )
+    })
+}
+
+fn openai_synthetic_tool_call_id(base_id: &str, call_index: usize, arg_index: usize) -> String {
+    if base_id.is_empty() {
+        format!("call_{call_index}_{}", arg_index + 1)
+    } else if arg_index == 0 {
+        base_id.to_string()
+    } else {
+        format!("{base_id}_{}", arg_index + 1)
+    }
+}
+
 fn openai_responses_tool_kind(item_type: &str) -> &'static str {
     match item_type {
         "web_search_call" => "web_search",
@@ -779,7 +826,7 @@ pub(crate) fn parse_llm_response(
 
         let mut tool_calls = Vec::new();
         if let Some(calls) = message["tool_calls"].as_array() {
-            for call in calls {
+            for (call_index, call) in calls.iter().enumerate() {
                 // OpenAI Responses-API tool_search (harn#71) emits
                 // `tool_search_call` blocks when the server-hosted
                 // search runs. These are NOT dispatchable tools — the
@@ -825,33 +872,27 @@ pub(crate) fn parse_llm_response(
                 }
                 let raw_name = call["function"]["name"].as_str().unwrap_or("").to_string();
                 let args_str = call["function"]["arguments"].as_str().unwrap_or("{}");
-                let arguments: serde_json::Value = match serde_json::from_str(args_str) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        serde_json::json!({
-                            "__parse_error": format!(
-                                "Could not parse tool arguments as JSON: {}. Raw input: {}",
-                                e,
-                                preview_chars(args_str, 200)
-                            )
-                        })
-                    }
-                };
-                let (name, arguments) =
-                    crate::llm::tools::normalize_tool_call_shape(&raw_name, arguments);
-                let id = call["id"].as_str().unwrap_or("").to_string();
-                tool_calls.push(serde_json::json!({
-                    "id": id,
-                    "name": name,
-                    "arguments": arguments,
-                }));
-                blocks.push(serde_json::json!({
-                    "type": "tool_call",
-                    "id": call["id"].clone(),
-                    "name": name,
-                    "arguments": arguments.clone(),
-                    "visibility": "internal",
-                }));
+                let base_id = call["id"].as_str().unwrap_or("");
+                for (arg_index, arguments) in parse_openai_tool_argument_values(args_str)
+                    .into_iter()
+                    .enumerate()
+                {
+                    let (name, arguments) =
+                        crate::llm::tools::normalize_tool_call_shape(&raw_name, arguments);
+                    let id = openai_synthetic_tool_call_id(base_id, call_index, arg_index);
+                    tool_calls.push(serde_json::json!({
+                        "id": id.clone(),
+                        "name": name,
+                        "arguments": arguments,
+                    }));
+                    blocks.push(serde_json::json!({
+                        "type": "tool_call",
+                        "id": id,
+                        "name": name,
+                        "arguments": arguments.clone(),
+                        "visibility": "internal",
+                    }));
+                }
             }
         }
 
@@ -1550,6 +1591,76 @@ mod tests {
             assert_eq!(result.tool_calls[0]["name"], "edit");
             assert_eq!(result.tool_calls[0]["arguments"], serde_json::json!({}));
         }
+    }
+
+    #[test]
+    fn openai_parser_splits_concatenated_tool_argument_objects() {
+        let response = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "chatcmpl-tool-1",
+                            "type": "function",
+                            "function": {
+                                "name": "read",
+                                "arguments": "{\"path\":\"a.rs\"}{\"path\":\"b.rs\"}"
+                            }
+                        }
+                    ]
+                },
+                "finish_reason": "tool_calls"
+            }],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 20}
+        });
+
+        let result = parse_llm_response(&response, "openrouter", "google/gemma-4", false, false)
+            .expect("parser succeeds");
+
+        assert_eq!(result.tool_calls.len(), 2);
+        assert_eq!(result.tool_calls[0]["id"], "chatcmpl-tool-1");
+        assert_eq!(result.tool_calls[0]["name"], "read");
+        assert_eq!(result.tool_calls[0]["arguments"]["path"], "a.rs");
+        assert_eq!(result.tool_calls[1]["id"], "chatcmpl-tool-1_2");
+        assert_eq!(result.tool_calls[1]["name"], "read");
+        assert_eq!(result.tool_calls[1]["arguments"]["path"], "b.rs");
+        let tool_blocks = result
+            .blocks
+            .iter()
+            .filter(|block| block["type"] == "tool_call")
+            .collect::<Vec<_>>();
+        assert_eq!(tool_blocks.len(), 2);
+        assert_eq!(tool_blocks[1]["id"], "chatcmpl-tool-1_2");
+    }
+
+    #[test]
+    fn openai_parser_splits_concatenated_tool_arguments_without_source_id() {
+        let response = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "type": "function",
+                            "function": {
+                                "name": "read",
+                                "arguments": "{\"path\":\"a.rs\"}{\"path\":\"b.rs\"}"
+                            }
+                        }
+                    ]
+                },
+                "finish_reason": "tool_calls"
+            }],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 20}
+        });
+
+        let result = parse_llm_response(&response, "openrouter", "google/gemma-4", false, false)
+            .expect("parser succeeds");
+
+        assert_eq!(result.tool_calls.len(), 2);
+        assert_eq!(result.tool_calls[0]["id"], "call_0_1");
+        assert_eq!(result.tool_calls[1]["id"], "call_0_2");
     }
 
     #[test]
