@@ -66,6 +66,10 @@ fn sub_agent_spec_to_json(spec: &SubAgentRunSpec) -> serde_json::Value {
         "session_id": &spec.session_id,
         "parent_session_id": &spec.parent_session_id,
         "reminder_propagation": &spec.reminder_propagation,
+        "workspace_anchor": spec
+            .workspace_anchor
+            .as_ref()
+            .map(crate::workspace_anchor::WorkspaceAnchor::to_json),
     })
 }
 
