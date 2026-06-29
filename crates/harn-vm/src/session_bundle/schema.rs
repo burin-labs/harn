@@ -101,6 +101,7 @@ pub fn session_bundle_schema() -> JsonValue {
                 "properties": {
                     "replay_fixture": {"type": ["object", "null"]},
                     "run_record": {"type": ["object", "null"]},
+                    "observability": {"type": ["object", "null"]},
                     "event_log_pointers": {"type": "array", "items": {"type": "object"}},
                     "transitions": {"type": "array", "items": {"type": "object"}},
                     "checkpoints": {"type": "array", "items": {"type": "object"}},

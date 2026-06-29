@@ -3,7 +3,10 @@ use std::fs;
 use serde_json::json;
 
 use super::*;
-use crate::orchestration::{LlmUsageRecord, RunStageRecord};
+use crate::orchestration::{
+    LlmUsageRecord, RunObservabilityRecord, RunStageRecord, RunTranscriptPointerRecord,
+    RunVerificationOutcomeRecord,
+};
 
 fn repo_fixture_path(name: &str) -> String {
     format!(
@@ -76,6 +79,42 @@ fn fixture_run() -> RunRecord {
     }
 }
 
+fn fixture_observability() -> RunObservabilityRecord {
+    RunObservabilityRecord {
+        schema_version: 4,
+        verification_outcomes: vec![RunVerificationOutcomeRecord {
+            stage_id: "stage_1".to_string(),
+            node_id: "answer".to_string(),
+            status: "completed".to_string(),
+            passed: Some(true),
+            summary: Some("verification passed with private details".to_string()),
+        }],
+        transcript_pointers: vec![RunTranscriptPointerRecord {
+            id: "transcript_1".to_string(),
+            label: "LLM transcript".to_string(),
+            kind: "llm_jsonl".to_string(),
+            location: "run-llm/llm_transcript.jsonl".to_string(),
+            path: Some("/private/harn/run_123/run-llm/llm_transcript.jsonl".to_string()),
+            available: true,
+        }],
+        ..RunObservabilityRecord::default()
+    }
+}
+
+fn fixture_replay_fixture(run: &RunRecord) -> ReplayFixture {
+    ReplayFixture {
+        type_name: "replay_fixture".to_string(),
+        id: "fixture_run_123".to_string(),
+        source_run_id: run.id.clone(),
+        workflow_id: run.workflow_id.clone(),
+        workflow_name: run.workflow_name.clone(),
+        created_at: "2026-05-01T00:00:30Z".to_string(),
+        eval_kind: Some("replay".to_string()),
+        expected_status: run.status.clone(),
+        ..ReplayFixture::default()
+    }
+}
+
 #[test]
 fn sanitized_export_redacts_secrets_and_records_manifest() {
     let bundle =
@@ -110,6 +149,114 @@ fn replay_only_export_withholds_prompt_and_tool_payloads() {
         .entries
         .iter()
         .any(|entry| entry.action == "withheld"));
+}
+
+#[test]
+fn observability_exports_in_replay_envelope_and_imports_without_embedded_run_record() {
+    let mut run = fixture_run();
+    run.replay_fixture = Some(fixture_replay_fixture(&run));
+    run.observability = Some(fixture_observability());
+
+    let mut bundle = export_run_record_bundle(
+        &run,
+        &SessionBundleExportOptions {
+            mode: SessionBundleExportMode::Local,
+            ..SessionBundleExportOptions::default()
+        },
+    )
+    .unwrap();
+
+    let observability = bundle
+        .replay
+        .observability
+        .as_ref()
+        .expect("bundle replay observability");
+    assert_eq!(observability.schema_version, 4);
+    assert_eq!(observability.verification_outcomes.len(), 1);
+    assert_eq!(
+        observability.verification_outcomes[0].node_id.as_str(),
+        "answer"
+    );
+    assert_eq!(observability.transcript_pointers.len(), 1);
+
+    bundle.replay.run_record = None;
+    let imported = import_run_record_value(&bundle).unwrap();
+    assert_eq!(
+        imported["observability"]["verification_outcomes"][0]["passed"],
+        json!(true)
+    );
+    assert_eq!(
+        imported["observability"]["transcript_pointers"][0]["path"],
+        json!("/private/harn/run_123/run-llm/llm_transcript.jsonl")
+    );
+}
+
+#[test]
+fn import_backfills_observability_from_replay_envelope_when_run_record_lacks_it() {
+    let mut run = fixture_run();
+    run.observability = Some(fixture_observability());
+
+    let mut bundle = export_run_record_bundle(
+        &run,
+        &SessionBundleExportOptions {
+            mode: SessionBundleExportMode::Local,
+            ..SessionBundleExportOptions::default()
+        },
+    )
+    .unwrap();
+    bundle.replay.run_record.as_mut().unwrap()["observability"] = JsonValue::Null;
+
+    let imported = import_run_record_value(&bundle).unwrap();
+    assert_eq!(
+        imported["observability"]["verification_outcomes"][0]["summary"],
+        json!("verification passed with private details")
+    );
+}
+
+#[test]
+fn sanitized_export_redacts_replay_observability_pointer_paths() {
+    let mut run = fixture_run();
+    run.observability = Some(fixture_observability());
+
+    let bundle = export_run_record_bundle(&run, &SessionBundleExportOptions::default()).unwrap();
+    let observability = bundle
+        .replay
+        .observability
+        .as_ref()
+        .expect("bundle replay observability");
+    assert_eq!(
+        observability.transcript_pointers[0].path.as_deref(),
+        Some(REDACTED_PLACEHOLDER)
+    );
+    assert!(bundle.redaction.entries.iter().any(|entry| {
+        entry.path == "$.replay.observability.transcript_pointers[0].path"
+            && entry.class == "local_pointer_path"
+    }));
+}
+
+#[test]
+fn replay_only_export_withholds_observability_verification_summaries() {
+    let mut run = fixture_run();
+    run.observability = Some(fixture_observability());
+    let options = SessionBundleExportOptions {
+        mode: SessionBundleExportMode::ReplayOnly,
+        ..SessionBundleExportOptions::default()
+    };
+
+    let bundle = export_run_record_bundle(&run, &options).unwrap();
+    let rendered = serde_json::to_string(&bundle).unwrap();
+    assert!(!rendered.contains("private details"));
+    assert_eq!(
+        bundle
+            .replay
+            .observability
+            .as_ref()
+            .unwrap()
+            .verification_outcomes[0]
+            .summary
+            .as_deref(),
+        Some(REPLAY_ONLY_PLACEHOLDER)
+    );
 }
 
 #[test]
