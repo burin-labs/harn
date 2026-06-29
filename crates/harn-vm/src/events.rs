@@ -251,19 +251,8 @@ impl OtelSink {
         let headers = otel_headers_from_env();
         let service_name = otel_service_name_from_env();
 
-        // opentelemetry-otlp does not pull in any default HTTP client
-        // because the `reqwest-rustls` feature only opts the dep in —
-        // the exporter still requires an explicit client. Reuse the
-        // same reqwest configuration as the orchestrator-side
-        // provider so both surfaces hit the collector with identical
-        // TLS + connection-pool behaviour.
-        let http_client = reqwest::Client::builder()
-            .build()
-            .map_err(|error| format!("failed to build OTLP HTTP client: {error}"))?;
-
         let mut exporter_builder = SpanExporter::builder()
             .with_http()
-            .with_http_client(http_client)
             .with_protocol(Protocol::HttpJson)
             .with_headers(headers);
         if let Some(endpoint) = endpoint.as_deref() {
