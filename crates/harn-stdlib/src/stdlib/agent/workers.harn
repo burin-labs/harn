@@ -823,6 +823,24 @@ fn __fanout_result(request, index, summary) {
 }
 
 /**
+ * __fanout_spawn_error_summary turns a spawn-time throw into a synthetic worker
+ * summary shaped exactly like a terminal failure: `__fanout_envelope` reads the
+ * `ok: false` envelope, `__fanout_ok` returns false, and `__fanout_error`
+ * surfaces the spawn fault — so a child that never launched still produces a
+ * 1:1 ok:false result at its own offset instead of aborting the wave.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+fn __fanout_spawn_error_summary(error) {
+  return {
+    status: "failed",
+    result: {ok: false, error: __sub_agent_string(error, "sub_agent_run: spawn failed")},
+  }
+}
+
+/**
  * agent_fanout runs many sub-agent requests CONCURRENTLY in bounded waves and
  * joins them, returning one normalized result per request in input order.
  *
@@ -876,18 +894,42 @@ pub fn agent_fanout(requests, options = nil) {
     // Spawn the whole wave as background workers BEFORE joining: each
     // background `sub_agent_run` returns its handle immediately, so the
     // children's turns overlap while `wait_agent` awaits them.
-    var handles = []
+    //
+    // A spawn can throw SYNCHRONOUSLY (bad request `options`, e.g. a malformed
+    // `allowed_tools`, or a host worker-spawn fault) before any handle exists.
+    // We catch each spawn so one failing unit becomes that unit's ok:false
+    // result instead of aborting the whole wave and every later wave. The
+    // outcome list stays positionally aligned with `wave`; only the units that
+    // actually spawned are joined via `wait_agent`.
+    var outcomes = []
     for request in wave {
-      let summary = sub_agent_run(request.task, request.options + {background: true, name: request.label})
-      handles = handles.push(summary)
+      let outcome = try {
+        let handle = sub_agent_run(request.task, request.options + {background: true, name: request.label})
+        {spawned: true, handle: handle}
+      } catch (spawn_error) {
+        {spawned: false, error: spawn_error}
+      }
+      outcomes = outcomes.push(outcome)
     }
-    let waited = wait_agent(handles)
+    var live_handles = []
+    for outcome in outcomes {
+      if outcome.spawned {
+        live_handles = live_handles.push(outcome.handle)
+      }
+    }
+    let waited = wait_agent(live_handles)
     var offset = 0
+    var live_index = 0
     for request in wave {
-      let summary = if type_of(waited) == "list" {
-        waited[offset] ?? {}
+      let outcome = outcomes[offset]
+      var summary = {}
+      if outcome.spawned {
+        if type_of(waited) == "list" {
+          summary = waited[live_index] ?? {}
+        }
+        live_index = live_index + 1
       } else {
-        {}
+        summary = __fanout_spawn_error_summary(outcome.error)
       }
       results = results.push(__fanout_result(request, base + offset, summary))
       offset = offset + 1
