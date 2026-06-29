@@ -20,6 +20,7 @@ jobs:
   flake-rerun:
     name: 50x flake rerun (touched tests)
     runs-on: ubuntu-latest
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -53,7 +54,7 @@ jobs:
           FILTER=""
           if [[ -n "${TOUCHED// }" ]]; then
             read -ra PATHS <<< "$TOUCHED"
-            FILTER=$(./scripts/nextest_filters_from_paths.sh "${PATHS[@]}" 2>/dev/null || true)
+            FILTER=$(./scripts/nextest_filters_from_paths.sh "${PATHS[@]}")
           fi
           if [[ -n "$FILTER" ]]; then
             echo "has_tests=true" >> "$GITHUB_OUTPUT"

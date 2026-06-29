@@ -7,7 +7,7 @@
 #
 # Outputs a nextest -E filter expression on stdout (e.g.
 # "binary(orchestrator_http) or package(harn-vm)"), or nothing if no
-# Rust test-relevant paths are given.  Exit code is always 0.
+# Rust test-relevant paths are given.
 #
 # Mapping rules (first match wins):
 #
@@ -38,19 +38,20 @@ fi
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-declare -A seen
-declare -A workspace_packages
+workspace_members=()
+workspace_package_names=()
+seen_filters=()
 filters=()
 
 load_workspace_packages() {
     if ! command -v python3 >/dev/null 2>&1; then
-        return 0
+        echo "python3 is required to discover Cargo workspace packages" >&2
+        return 1
     fi
 
-    while IFS=$'\t' read -r member package; do
-        [[ -z "$member" || -z "$package" ]] && continue
-        workspace_packages["$member"]="$package"
-    done < <(python3 - "$repo_root" <<'PY'
+    local package_map
+    package_map=$(mktemp "${TMPDIR:-/tmp}/harn-nextest-filter-packages.XXXXXX")
+    if ! python3 - "$repo_root" > "$package_map" <<'PY'
 import fnmatch
 import pathlib
 import sys
@@ -58,7 +59,8 @@ import sys
 try:
     import tomllib
 except ModuleNotFoundError:
-    sys.exit(0)
+    print("tomllib is required to read Cargo.toml", file=sys.stderr)
+    sys.exit(1)
 
 root = pathlib.Path(sys.argv[1])
 with (root / "Cargo.toml").open("rb") as handle:
@@ -87,20 +89,39 @@ for pattern in members:
         if name:
             print(f"{relative}\t{name}")
 PY
-    )
+    then
+        rm -f "$package_map"
+        echo "failed to discover Cargo workspace packages" >&2
+        return 1
+    fi
+
+    while IFS=$'\t' read -r member package; do
+        [[ -z "$member" || -z "$package" ]] && continue
+        workspace_members+=("$member")
+        workspace_package_names+=("$package")
+    done < "$package_map"
+    rm -f "$package_map"
 }
 
 workspace_package_for_crate_dir() {
     local crate_dir="$1"
-    printf '%s' "${workspace_packages[$crate_dir]-}"
+    local index
+    for ((index = 0; index < ${#workspace_members[@]}; index++)); do
+        if [[ "${workspace_members[$index]}" == "$crate_dir" ]]; then
+            printf '%s' "${workspace_package_names[$index]}"
+            return 0
+        fi
+    done
 }
 
 add_filter() {
     local f="$1"
-    if [[ -z "${seen[$f]+_}" ]]; then
-        seen["$f"]=1
-        filters+=("$f")
-    fi
+    local seen_filter
+    for seen_filter in "${seen_filters[@]}"; do
+        [[ "$seen_filter" == "$f" ]] && return 0
+    done
+    seen_filters+=("$f")
+    filters+=("$f")
 }
 
 load_workspace_packages
@@ -109,6 +130,7 @@ for path in "$@"; do
     # Strip leading ./ and skip blank entries.
     path="${path#./}"
     [[ -z "$path" ]] && continue
+    [[ "$path" != *.rs ]] && continue
 
     # crates/<pkg>/tests/<name>.rs — top-level integration test binary.
     if [[ "$path" =~ ^crates/([^/]+)/tests/([^/]+)\.rs$ ]]; then

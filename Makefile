@@ -327,6 +327,7 @@ test-agent-scripts:
 
 test-pr-gate-scripts:
 	./scripts/tests/changelog_fragment_check_test.sh
+	./scripts/tests/nextest_filters_from_paths_test.sh
 	./scripts/tests/release_gate_harn_bin_test.sh
 	./scripts/tests/release_prepare_env_test.sh
 	./scripts/tests/publish_script_test.sh
