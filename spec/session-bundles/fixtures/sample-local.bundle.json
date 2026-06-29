@@ -388,7 +388,8 @@
         "timestamp": "2026-05-01T00:00:01Z",
         "to_node_id": "answer"
       }
-    ]
+    ],
+    "verification_outcomes": []
   },
   "runtime": {
     "harn_version": "fixture",
