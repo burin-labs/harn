@@ -333,3 +333,167 @@ pipeline main(task) {{
     }
     eprintln!("WAVES CONFIRMED: 5 requests across waves of 2 all completed in input order with own markers");
 }
+
+#[test]
+fn fanout_isolates_a_spawn_time_throw() {
+    // A spawn can throw SYNCHRONOUSLY — before any worker handle exists —
+    // when a request's `options` are malformed. Here index 1 ("bravo") carries
+    // an `allowed_tools` list with a non-string entry, so `sub_agent_run` ->
+    // `sub_agent_request` -> `__sub_agent_string_list` throws inside the wave
+    // spawn loop. The fix must turn that into THAT unit's ok:false result
+    // (status "failed", error surfaced) without aborting the wave — the whole
+    // `agent_fanout` call must NOT throw, and the siblings must still return
+    // their own markers in input order.
+    let source = format!(
+        r#"{PRELUDE}
+pipeline main(task) {{
+  let labels = ["alpha", "bravo", "charlie"]
+  var reqs = []
+  var i = 0
+  for label in labels {{
+    let marker = "MARK-" + to_string(i)
+    let opts = if i == 1 {{
+      base_opts(ok_caller(marker)) + {{allowed_tools: [123]}}
+    }} else {{
+      base_opts(ok_caller(marker))
+    }}
+    reqs = reqs.push({{task: "do " + marker, options: opts, label: label}})
+    i = i + 1
+  }}
+  let results = agent_fanout(reqs, {{max_parallel: 8}})
+  log("COUNT=" + to_string(len(results)))
+  emit_rows(results)
+}}
+"#
+    );
+
+    // The whole call must NOT throw — `.expect` here is itself the regression
+    // guard: before the fix, the spawn throw propagated out of `agent_fanout`.
+    let raw = run_with_bridge(&source).expect("a spawn-time throw must not abort agent_fanout");
+    let lines = out_lines(&raw);
+    eprintln!("--- harn output ---\n{}", lines.join("\n"));
+
+    let rows = parse_rows(&lines);
+    let labels = ["alpha", "bravo", "charlie"];
+    assert_eq!(
+        rows.len(),
+        labels.len(),
+        "spawn throw dropped sibling results; lines: {lines:?}"
+    );
+
+    for (i, expected_label) in labels.iter().enumerate() {
+        let row = &rows[i];
+        assert_eq!(row.index, i, "lines: {lines:?}");
+        assert_eq!(&row.label, expected_label, "lines: {lines:?}");
+        if i == 1 {
+            // The unit whose spawn threw: synthetic failure result, error
+            // surfaced, never ran an LLM turn (no marker summary).
+            assert!(
+                !row.ok,
+                "spawn-failed unit (index 1) must have ok == false; lines: {lines:?}"
+            );
+            assert!(
+                row.error_present,
+                "spawn-failed unit (index 1) must surface the spawn fault; lines: {lines:?}"
+            );
+            assert_eq!(
+                row.status, "failed",
+                "spawn-failed unit (index 1) status should be 'failed'; lines: {lines:?}"
+            );
+            assert_eq!(
+                row.summary, "",
+                "spawn-failed unit (index 1) never produced an envelope summary; lines: {lines:?}"
+            );
+        } else {
+            // Siblings unaffected: still ok, still carry their own marker.
+            assert!(row.ok, "sibling {i} should still be ok; lines: {lines:?}");
+            assert!(
+                !row.error_present,
+                "sibling {i} should have no error; lines: {lines:?}"
+            );
+            assert_eq!(
+                row.summary,
+                format!("MARK-{i}"),
+                "sibling {i} cross-talk / drop under a spawn throw; lines: {lines:?}"
+            );
+        }
+    }
+    eprintln!(
+        "SPAWN-THROW ISOLATION CONFIRMED: index 1 spawn fault -> ok=false+error, siblings ok+own-marker, no wave abort"
+    );
+}
+
+#[test]
+fn fanout_spawn_throw_in_first_wave_does_not_drop_later_waves() {
+    // Four requests with max_parallel: 2 -> waves [0,1], [2,3]. Index 0's spawn
+    // throws (malformed allowed_tools) in the FIRST wave. Before the fix that
+    // throw aborted the wave AND every later wave, silently dropping waves 2.
+    // The fix must let later waves run: all four results come back, in order,
+    // with only index 0 marked failed.
+    let source = format!(
+        r#"{PRELUDE}
+pipeline main(task) {{
+  let labels = ["w0", "w1", "w2", "w3"]
+  var reqs = []
+  var i = 0
+  for label in labels {{
+    let marker = "WAVE-" + to_string(i)
+    let opts = if i == 0 {{
+      base_opts(ok_caller(marker)) + {{allowed_tools: [123]}}
+    }} else {{
+      base_opts(ok_caller(marker))
+    }}
+    reqs = reqs.push({{task: "do " + marker, options: opts, label: label}})
+    i = i + 1
+  }}
+  let results = agent_fanout(reqs, {{max_parallel: 2}})
+  log("COUNT=" + to_string(len(results)))
+  emit_rows(results)
+}}
+"#
+    );
+
+    let raw =
+        run_with_bridge(&source).expect("a first-wave spawn throw must not abort later waves");
+    let lines = out_lines(&raw);
+    eprintln!("--- harn output ---\n{}", lines.join("\n"));
+
+    let rows = parse_rows(&lines);
+    let labels = ["w0", "w1", "w2", "w3"];
+    assert_eq!(
+        rows.len(),
+        labels.len(),
+        "a first-wave spawn throw dropped later waves; lines: {lines:?}"
+    );
+
+    for (i, expected_label) in labels.iter().enumerate() {
+        let row = &rows[i];
+        assert_eq!(row.index, i, "wave reordering at {i}; lines: {lines:?}");
+        assert_eq!(&row.label, expected_label, "lines: {lines:?}");
+        if i == 0 {
+            assert!(
+                !row.ok,
+                "spawn-failed wave child 0 must be ok=false; lines: {lines:?}"
+            );
+            assert!(
+                row.error_present,
+                "spawn-failed wave child 0 must surface an error; lines: {lines:?}"
+            );
+            assert_eq!(row.status, "failed", "lines: {lines:?}");
+        } else {
+            // The crucial assertion: wave-2 children (index 2,3) still ran.
+            assert!(
+                row.ok,
+                "later-wave child {i} should be ok; lines: {lines:?}"
+            );
+            assert_eq!(
+                row.summary,
+                format!("WAVE-{i}"),
+                "later-wave child {i} returned the wrong marker / was dropped; lines: {lines:?}"
+            );
+        }
+    }
+    eprintln!(
+        "LATER-WAVES-SURVIVE CONFIRMED: wave-1 spawn throw at index 0 did not drop wave-2 children"
+    );
+}
