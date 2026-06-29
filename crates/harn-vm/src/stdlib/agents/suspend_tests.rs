@@ -974,6 +974,72 @@ async fn suspended_worker_survives_process_restart_via_snapshot() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn suspended_worker_snapshot_preserves_sub_agent_workspace_anchor() {
+    let _guard = suspend_test_lock().await;
+    let (worker_id, dir) = seed_test_worker("worker-suspend-anchor");
+    let primary = dir.join("workspace");
+    let readonly = dir.join("readonly");
+    std::fs::create_dir_all(&primary).unwrap();
+    std::fs::create_dir_all(&readonly).unwrap();
+    let anchor = crate::workspace_anchor::WorkspaceAnchor {
+        primary,
+        additional_roots: vec![crate::workspace_anchor::MountedRoot {
+            path: readonly,
+            mount_mode: crate::workspace_anchor::MountMode::ReadOnly,
+            mounted_at: "2026-06-29T00:00:00Z".to_string(),
+        }],
+        anchored_at: "2026-06-29T00:00:00Z".to_string(),
+    };
+    let snapshot_path = WORKER_REGISTRY.with(|registry| {
+        registry
+            .borrow()
+            .get(&worker_id)
+            .unwrap()
+            .lock()
+            .snapshot_path
+            .clone()
+    });
+    with_worker_state(&worker_id, |state| {
+        let mut worker = state.lock();
+        match &mut worker.config {
+            WorkerConfig::SubAgent { spec } => {
+                spec.workspace_anchor = Some(anchor.clone());
+            }
+            _ => unreachable!("seed_test_worker creates a sub-agent worker"),
+        }
+        Ok(())
+    })
+    .expect("install workspace anchor");
+
+    suspend_agent_builtin(
+        crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
+        vec![
+            handle_value(&worker_id),
+            VmValue::String(arcstr::ArcStr::from("checkpoint before placement move")),
+        ],
+    )
+    .await
+    .expect("suspend");
+
+    WORKER_REGISTRY.with(|registry| {
+        registry.borrow_mut().remove(&worker_id);
+    });
+    let reloaded =
+        agents_workers::load_worker_state_snapshot(&snapshot_path).expect("reload snapshot");
+    let restored_anchor = match &reloaded.config {
+        WorkerConfig::SubAgent { spec } => spec.workspace_anchor.clone(),
+        _ => unreachable!("seed_test_worker creates a sub-agent worker"),
+    };
+    assert_eq!(
+        restored_anchor,
+        Some(anchor),
+        "sub-agent snapshots must preserve workspace anchors for portable resume"
+    );
+
+    teardown(&dir, &worker_id);
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn suspend_resume_links_lifecycle_spans_across_snapshot_reload() {
     let _guard = suspend_test_lock().await;
     crate::tracing::reset_tracing();
