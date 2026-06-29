@@ -2121,7 +2121,7 @@ pub(super) fn resolve_preflight_target(
 fn render_candidate_paths(candidates: &[PathBuf]) -> String {
     candidates
         .iter()
-        .map(|path| path.display().to_string())
+        .map(|path| crate::format::slash_path(path))
         .collect::<Vec<_>>()
         .join(" or ")
 }
@@ -2240,11 +2240,11 @@ fn render_target_miss_help(file_path: &Path, template_path: &str) -> String {
     }
     let display = near
         .strip_prefix(&project_root)
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|_| near.display().to_string());
+        .map(crate::format::slash_path)
+        .unwrap_or_else(|_| crate::format::slash_path(&near));
     format!(
         "did you mean '{display}'? (found at {}). Otherwise: {GENERIC}",
-        near.display()
+        crate::format::slash_path(&near)
     )
 }
 

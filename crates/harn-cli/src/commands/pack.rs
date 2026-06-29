@@ -1162,7 +1162,10 @@ fn collect_path(
             format!("failed to read contribution asset {}: {err}", abs.display()),
         )
     })?;
-    entries.push(HarnpackEntry::new(rel.to_path_buf(), bytes));
+    entries.push(HarnpackEntry::new(
+        PathBuf::from(logical_bundle_path(rel)),
+        bytes,
+    ));
     Ok(())
 }
 
@@ -1342,7 +1345,7 @@ path = "SKILL.md"
         let assets = carry_extension_metadata(temp.path(), &mut bundle).unwrap();
         let paths: std::collections::BTreeSet<String> = assets
             .iter()
-            .map(|e| e.path.to_string_lossy().to_string())
+            .map(|e| crate::format::slash_path(&e.path))
             .collect();
         assert!(paths.contains("assets/preview.html"), "{paths:?}");
         assert!(paths.contains("canon/latex/invariants.harn"), "{paths:?}");

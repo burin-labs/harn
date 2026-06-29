@@ -630,9 +630,7 @@ pub(crate) fn safe_package_relative_path(
 
 pub(super) fn has_windows_rooted_or_drive_relative_prefix(path: &str) -> bool {
     let normalized = path.replace('\\', "/");
-    let bytes = normalized.as_bytes();
-    normalized.starts_with('/')
-        || (bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':')
+    normalized.starts_with('/') || crate::format::looks_like_windows_drive_path(&normalized)
 }
 
 pub(super) fn has_windows_separator_escape(path: &str) -> bool {

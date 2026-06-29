@@ -814,9 +814,9 @@ fn run_install_import_smoke(package_dir: &Path, metadata_ok: bool) -> ConnectorG
     };
     let consumer = temp.path();
     let manifest = format!(
-        "[package]\nname = \"connector-smoke-consumer\"\nversion = \"0.0.0\"\n\n[dependencies]\n\"{}\" = {{ path = \"{}\" }}\n",
-        crate::format::escape_toml_basic_string(&package_name),
-        crate::format::escape_toml_basic_string(&package_dependency_path)
+        "[package]\nname = \"connector-smoke-consumer\"\nversion = \"0.0.0\"\n\n[dependencies]\n{} = {{ path = {} }}\n",
+        crate::format::toml_basic_string_literal(&package_name),
+        crate::format::toml_basic_string_literal(&package_dependency_path)
     );
     if let Err(error) = fs::write(consumer.join("harn.toml"), manifest) {
         return gate_check_from_findings(
@@ -1737,7 +1737,10 @@ transient_provider_outage = "Retry after the provider is reachable."
 
         let dependency_path = package_dependency_path(relative).unwrap();
 
-        assert_eq!(dependency_path, dir.path().display().to_string());
+        assert_eq!(
+            dependency_path,
+            dir.path().canonicalize().unwrap().display().to_string()
+        );
     }
 
     #[tokio::test]

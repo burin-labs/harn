@@ -127,6 +127,9 @@ struct LoadedSpec {
 }
 
 async fn load_spec(spec: &str) -> Result<LoadedSpec, PackageError> {
+    if crate::format::looks_like_windows_drive_path(spec) {
+        return loaded_spec_from_bytes(read_spec_path(&expand_tilde(spec))?);
+    }
     let (source_label, bytes) = match Url::parse(spec) {
         Ok(url) => match url.scheme() {
             "http" | "https" => fetch_spec_url(&url).await?,
@@ -146,6 +149,12 @@ async fn load_spec(spec: &str) -> Result<LoadedSpec, PackageError> {
         Err(_) => read_spec_path(&expand_tilde(spec))?,
     };
 
+    loaded_spec_from_bytes((source_label, bytes))
+}
+
+fn loaded_spec_from_bytes(
+    (source_label, bytes): (String, Vec<u8>),
+) -> Result<LoadedSpec, PackageError> {
     if bytes.len() as u64 > MAX_SPEC_BYTES {
         return Err(format!(
             "OpenAPI spec {} is {} bytes; maximum supported size is {} bytes",

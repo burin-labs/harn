@@ -1906,11 +1906,11 @@ name = "workspace"
 version = "0.1.0"
 
 [dependencies]
-coding-pack = {{ path = "{}" }}
-helper-lib = {{ path = "{}" }}
+coding-pack = {{ path = {} }}
+helper-lib = {{ path = {} }}
 "#,
-                dependency.display(),
-                helper.display()
+                crate::format::toml_basic_string_literal(&dependency.display().to_string()),
+                crate::format::toml_basic_string_literal(&helper.display().to_string())
             ),
         )
         .unwrap();

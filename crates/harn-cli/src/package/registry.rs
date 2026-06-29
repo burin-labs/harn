@@ -562,6 +562,9 @@ pub(crate) fn path_from_source_uri(source: &str) -> Result<PathBuf, PackageError
     let raw = source
         .strip_prefix("path+")
         .ok_or_else(|| format!("invalid path source: {source}"))?;
+    if crate::format::looks_like_windows_drive_path(raw) {
+        return Ok(PathBuf::from(raw));
+    }
     if let Ok(url) = Url::parse(raw) {
         return url
             .to_file_path()
@@ -581,6 +584,9 @@ pub(crate) fn archive_source_uri(raw: &str) -> Result<String, PackageError> {
 }
 
 pub(crate) fn registry_file_url_or_path(raw: &str) -> Result<Option<PathBuf>, PackageError> {
+    if crate::format::looks_like_windows_drive_path(raw) {
+        return Ok(Some(PathBuf::from(raw)));
+    }
     if let Ok(url) = Url::parse(raw) {
         if url.scheme() == "file" {
             return url.to_file_path().map(Some).map_err(|_| {
@@ -596,6 +602,9 @@ pub(crate) fn normalize_archive_url(raw: &str) -> Result<String, PackageError> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return Err("archive URL cannot be empty".to_string().into());
+    }
+    if crate::format::looks_like_windows_drive_path(trimmed) {
+        return normalize_archive_path(trimmed);
     }
     if let Ok(url) = Url::parse(trimmed) {
         return match url.scheme() {
@@ -621,7 +630,11 @@ pub(crate) fn normalize_archive_url(raw: &str) -> Result<String, PackageError> {
         };
     }
 
-    let path = PathBuf::from(trimmed);
+    normalize_archive_path(trimmed)
+}
+
+fn normalize_archive_path(raw: &str) -> Result<String, PackageError> {
+    let path = PathBuf::from(raw);
     if !path.exists() {
         return Err(format!("package archive not found: {}", path.display()).into());
     }
@@ -629,7 +642,7 @@ pub(crate) fn normalize_archive_url(raw: &str) -> Result<String, PackageError> {
         .canonicalize()
         .map_err(|error| format!("failed to canonicalize {}: {error}", path.display()))?;
     let url = Url::from_file_path(canonical)
-        .map_err(|_| format!("failed to convert {trimmed} to file:// URL"))?;
+        .map_err(|_| format!("failed to convert {raw} to file:// URL"))?;
     Ok(url.to_string())
 }
 
@@ -2526,6 +2539,21 @@ pub fn show_package_registry_info(spec: &str, registry: Option<&str>, json: bool
 mod tests {
     use super::*;
     use crate::package::test_support::*;
+
+    #[test]
+    fn windows_drive_registry_sources_are_file_paths_not_url_schemes() {
+        let source = r"C:\Users\RUNNER~1\AppData\Local\Temp\index.toml";
+        let path = registry_file_url_or_path(source).unwrap().unwrap();
+        assert_eq!(path, PathBuf::from(source));
+
+        let archive_error = normalize_archive_url(source).unwrap_err();
+        assert!(
+            archive_error
+                .to_string()
+                .contains("package archive not found"),
+            "expected missing Windows path to be treated as a file path, got: {archive_error}"
+        );
+    }
 
     #[test]
     fn pick_ls_remote_commit_prefers_peeled_tag_over_tag_object() {

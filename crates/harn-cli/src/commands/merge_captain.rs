@@ -510,12 +510,12 @@ mod tests {
                 r#"
 version = 1
 id = "merge-captain-ladders"
-base_dir = "{}"
+base_dir = {}
 
 [[ladders]]
 id = "green-pr-value-model"
 persona = "merge_captain"
-artifact-root = "{}"
+artifact-root = {}
 
 [ladders.backend]
 kind = "replay"
@@ -529,8 +529,10 @@ route = "local/gemma-value"
 id = "balanced"
 max-tool-calls = 4
 "#,
-                repo_root().display(),
-                temp.path().join("artifacts").display()
+                crate::format::toml_basic_string_literal(&repo_root().display().to_string()),
+                crate::format::toml_basic_string_literal(
+                    &temp.path().join("artifacts").display().to_string()
+                )
             ),
         );
 
