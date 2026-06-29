@@ -141,6 +141,63 @@ impl MetadataState {
         self.entries.get(directory).cloned().unwrap_or_default()
     }
 
+    fn lineage_directories(&mut self, directory: &str) -> Vec<String> {
+        self.ensure_loaded();
+        let mut lineage = Vec::new();
+        if self.entries.contains_key(".") {
+            lineage.push(".".to_string());
+        } else if self.entries.contains_key("") {
+            lineage.push(String::new());
+        }
+
+        let components = directory.split('/').filter(|c| !c.is_empty() && *c != ".");
+        let mut current = String::new();
+        for component in components {
+            if current.is_empty() {
+                current = component.to_string();
+            } else {
+                current = format!("{current}/{component}");
+            }
+            if self.entries.contains_key(&current) {
+                lineage.push(current.clone());
+            }
+        }
+        lineage
+    }
+
+    fn origin_directory(
+        &mut self,
+        directory: &str,
+        namespace: &str,
+        key: Option<&str>,
+    ) -> Option<String> {
+        if namespace.is_empty() {
+            return None;
+        }
+
+        let mut origin = None;
+        for candidate in self.lineage_directories(directory) {
+            let Some(fields) = self
+                .entries
+                .get(&candidate)
+                .and_then(|metadata| metadata.namespaces.get(namespace))
+            else {
+                continue;
+            };
+            if fields.is_empty() {
+                continue;
+            }
+            if let Some(key) = key {
+                if fields.contains_key(key) {
+                    origin = Some(candidate);
+                }
+            } else {
+                origin = Some(candidate);
+            }
+        }
+        origin
+    }
+
     /// Set metadata for a directory + namespace.
     fn set_namespace(
         &mut self,
@@ -856,6 +913,283 @@ fn metadata_set_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     })
 }
 
+fn metadata_fields_from_value(
+    namespace: &str,
+    value: &VmValue,
+) -> BTreeMap<FieldKey, serde_json::Value> {
+    let mut data = BTreeMap::new();
+    match value {
+        VmValue::Dict(dict) => {
+            for (k, v) in dict.iter() {
+                data.insert(k.to_string(), vm_to_json(v));
+            }
+        }
+        VmValue::String(_) if !namespace.is_empty() => {
+            data.insert(namespace.to_string(), vm_to_json(value));
+        }
+        _ => {}
+    }
+    data
+}
+
+fn classification_field<'a>(
+    metadata: &'a DirectoryMetadata,
+    key: &str,
+) -> Option<&'a serde_json::Value> {
+    metadata
+        .namespaces
+        .get("classification")
+        .and_then(|classification| classification.get(key))
+}
+
+fn classification_string(metadata: &DirectoryMetadata, key: &str) -> Option<String> {
+    classification_field(metadata, key)
+        .and_then(|value| value.as_str())
+        .map(ToString::to_string)
+}
+
+fn metadata_full_dir(base: &Path, dir: &str) -> PathBuf {
+    if dir.is_empty() || dir == "." {
+        base.to_path_buf()
+    } else {
+        base.join(dir)
+    }
+}
+
+fn metadata_inspect_stale_flags(
+    base: &Path,
+    dir: &str,
+    metadata: &DirectoryMetadata,
+) -> (bool, bool) {
+    let full_dir = metadata_full_dir(base, dir);
+    if let Some(stored_hash) = classification_string(metadata, "structureHash") {
+        let current_hash = compute_structure_hash(&full_dir);
+        if current_hash != stored_hash {
+            return (true, true);
+        }
+    }
+    if let Some(stored_hash) = classification_string(metadata, "contentHash") {
+        let current_hash = compute_content_hash_for_dir(&full_dir);
+        if current_hash != stored_hash {
+            return (true, true);
+        }
+    }
+    (false, false)
+}
+
+fn optional_string_value(value: Option<String>) -> VmValue {
+    value
+        .map(|text| VmValue::String(arcstr::ArcStr::from(text)))
+        .unwrap_or(VmValue::Nil)
+}
+
+fn refresh_metadata_hashes(st: &mut MetadataState) {
+    st.ensure_loaded();
+    let base = st.base_dir.clone();
+    let dirs: Vec<String> = st.entries.keys().cloned().collect();
+    for dir in dirs {
+        let full_dir = if dir.is_empty() {
+            base.clone()
+        } else {
+            base.join(&dir)
+        };
+        let hash = compute_structure_hash(&full_dir);
+        let entry = st.entries.entry(dir).or_default();
+        let ns = entry
+            .namespaces
+            .entry("classification".to_string())
+            .or_default();
+        ns.insert("structureHash".to_string(), serde_json::Value::String(hash));
+    }
+    st.dirty = true;
+}
+
+fn param_string(params: &crate::value::DictMap, key: &str) -> String {
+    params
+        .get(key)
+        .map(|value| value.display())
+        .unwrap_or_default()
+}
+
+fn optional_param_string(params: &crate::value::DictMap, key: &str) -> Option<String> {
+    let value = param_string(params, key);
+    if value.is_empty() {
+        None
+    } else {
+        Some(value)
+    }
+}
+
+/// Standalone `host_call("project.metadata_get", ...)` fallback.
+///
+/// Embedders such as Burin may provide their own bridge-backed project metadata
+/// store. When no bridge handles the call, route the host-shaped operation to
+/// Harn's built-in metadata store so standalone agent/debug/eval runs keep the
+/// same cross-run learning substrate instead of failing closed.
+pub(crate) fn project_metadata_host_get(
+    params: &crate::value::DictMap,
+) -> Result<VmValue, VmError> {
+    let dir = param_string(params, "dir");
+    let namespace = optional_param_string(params, "namespace");
+    with_state("project.metadata_get", |st| {
+        if let Some(ns) = namespace {
+            match st.get_namespace(&dir, &ns) {
+                Some(fields) => Ok(namespace_fields_to_vm(&fields)),
+                None => Ok(VmValue::Nil),
+            }
+        } else {
+            let resolved = st.resolve(&dir);
+            if resolved.namespaces.is_empty() {
+                Ok(VmValue::Nil)
+            } else {
+                Ok(directory_metadata_to_vm(&resolved))
+            }
+        }
+    })
+}
+
+/// Standalone `host_call("project.metadata_inspect", ...)` fallback.
+pub(crate) fn project_metadata_host_inspect(
+    params: &crate::value::DictMap,
+) -> Result<VmValue, VmError> {
+    let dir = param_string(params, "dir");
+    let namespace = param_string(params, "namespace");
+    let key = optional_param_string(params, "key");
+    with_state("project.metadata_inspect", |st| {
+        let resolved = st.resolve(&dir);
+        let origin = st.origin_directory(&dir, &namespace, key.as_deref());
+        let inspection_dir = origin.clone().unwrap_or_else(|| dir.clone());
+        let missing_structure_hash = classification_string(&resolved, "structureHash").is_none();
+        let missing_content_hash = classification_string(&resolved, "contentHash").is_none();
+        let (stale_tier1, stale_tier2) = if missing_structure_hash || missing_content_hash {
+            (false, false)
+        } else {
+            metadata_inspect_stale_flags(&st.base_dir, &inspection_dir, &resolved)
+        };
+
+        let mut payload = BTreeMap::new();
+        payload.insert(
+            "dir".to_string(),
+            VmValue::String(arcstr::ArcStr::from(dir)),
+        );
+        payload.insert(
+            "namespace".to_string(),
+            VmValue::String(arcstr::ArcStr::from(namespace.clone())),
+        );
+        payload.insert(
+            "origin_dir".to_string(),
+            optional_string_value(origin.clone().map(|raw| normalize_directory_key(&raw))),
+        );
+        payload.insert(
+            "inspected_dir".to_string(),
+            VmValue::String(arcstr::ArcStr::from(normalize_directory_key(
+                &inspection_dir,
+            ))),
+        );
+        payload.insert(
+            "missing_structure_hash".to_string(),
+            VmValue::Bool(missing_structure_hash),
+        );
+        payload.insert(
+            "missing_content_hash".to_string(),
+            VmValue::Bool(missing_content_hash),
+        );
+        payload.insert("stale_tier1".to_string(), VmValue::Bool(stale_tier1));
+        payload.insert("stale_tier2".to_string(), VmValue::Bool(stale_tier2));
+        let enriched_at = classification_field(&resolved, "enrichedAt");
+        payload.insert(
+            "has_enriched_at".to_string(),
+            VmValue::Bool(enriched_at.is_some()),
+        );
+        payload.insert(
+            "enriched_at_ms".to_string(),
+            enriched_at.map(json_to_vm).unwrap_or(VmValue::Nil),
+        );
+        payload.insert(
+            "structure_hash".to_string(),
+            optional_string_value(classification_string(&resolved, "structureHash")),
+        );
+        payload.insert(
+            "content_hash".to_string(),
+            optional_string_value(classification_string(&resolved, "contentHash")),
+        );
+
+        if namespace.is_empty() {
+            payload.insert("resolved".to_string(), directory_metadata_to_vm(&resolved));
+            payload.insert("origin".to_string(), VmValue::Nil);
+        } else {
+            let resolved_fields = resolved
+                .namespaces
+                .get(&namespace)
+                .map(namespace_fields_to_vm)
+                .unwrap_or(VmValue::dict(crate::value::DictMap::new()));
+            payload.insert("resolved".to_string(), resolved_fields);
+            let origin_fields = origin
+                .as_ref()
+                .and_then(|origin_dir| st.entries.get(origin_dir))
+                .and_then(|metadata| metadata.namespaces.get(&namespace))
+                .map(namespace_fields_to_vm)
+                .unwrap_or(VmValue::Nil);
+            payload.insert("origin".to_string(), origin_fields);
+        }
+        Ok(VmValue::dict(payload))
+    })
+}
+
+/// Standalone `host_call("project.metadata_set", ...)` fallback.
+pub(crate) fn project_metadata_host_set(
+    params: &crate::value::DictMap,
+) -> Result<VmValue, VmError> {
+    let dir = param_string(params, "dir");
+    let namespace = param_string(params, "namespace");
+    let value = params
+        .get("value")
+        .or_else(|| params.get("data"))
+        .cloned()
+        .unwrap_or(VmValue::Nil);
+    let data = metadata_fields_from_value(&namespace, &value);
+    if namespace.is_empty() || data.is_empty() {
+        return Ok(VmValue::Nil);
+    }
+    with_state("project.metadata_set", |st| {
+        st.set_namespace(&dir, &namespace, data);
+        st.save().map_err(VmError::Runtime)?;
+        Ok(VmValue::Nil)
+    })
+}
+
+/// Standalone `host_call("project.metadata_save", ...)` fallback.
+pub(crate) fn project_metadata_host_save(
+    _params: &crate::value::DictMap,
+) -> Result<VmValue, VmError> {
+    with_state("project.metadata_save", |st| {
+        st.save().map_err(VmError::Runtime)?;
+        Ok(VmValue::Nil)
+    })
+}
+
+/// Standalone `host_call("project.metadata_stale", ...)` fallback.
+pub(crate) fn project_metadata_host_stale(
+    _params: &crate::value::DictMap,
+) -> Result<VmValue, VmError> {
+    with_state("project.metadata_stale", |st| {
+        st.ensure_loaded();
+        let base = st.base_dir.clone();
+        Ok(metadata_stale_value(st, &base))
+    })
+}
+
+/// Standalone `host_call("project.metadata_refresh_hashes", ...)` fallback.
+pub(crate) fn project_metadata_host_refresh_hashes(
+    _params: &crate::value::DictMap,
+) -> Result<VmValue, VmError> {
+    with_state("project.metadata_refresh_hashes", |st| {
+        refresh_metadata_hashes(st);
+        st.save().map_err(VmError::Runtime)?;
+        Ok(VmValue::Nil)
+    })
+}
+
 #[harn_builtin(sig = "metadata_save() -> nil", category = "metadata")]
 fn metadata_save_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     with_state("metadata_save", |st| {
@@ -924,24 +1258,7 @@ fn metadata_stale_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 #[harn_builtin(sig = "metadata_refresh_hashes() -> nil", category = "metadata")]
 fn metadata_refresh_hashes_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     with_state("metadata_refresh_hashes", |st| {
-        st.ensure_loaded();
-        let base = st.base_dir.clone();
-        let dirs: Vec<String> = st.entries.keys().cloned().collect();
-        for dir in dirs {
-            let full_dir = if dir.is_empty() {
-                base.clone()
-            } else {
-                base.join(&dir)
-            };
-            let hash = compute_structure_hash(&full_dir);
-            let entry = st.entries.entry(dir).or_default();
-            let ns = entry
-                .namespaces
-                .entry("classification".to_string())
-                .or_default();
-            ns.insert("structureHash".to_string(), serde_json::Value::String(hash));
-        }
-        st.dirty = true;
+        refresh_metadata_hashes(st);
         Ok(VmValue::Nil)
     })
 }

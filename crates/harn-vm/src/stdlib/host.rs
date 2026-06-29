@@ -622,6 +622,14 @@ async fn dispatch_builtin_host_operation(
                 Ok(VmValue::Nil)
             }
         }
+        ("project", "metadata_get") => crate::metadata::project_metadata_host_get(params),
+        ("project", "metadata_inspect") => crate::metadata::project_metadata_host_inspect(params),
+        ("project", "metadata_set") => crate::metadata::project_metadata_host_set(params),
+        ("project", "metadata_save") => crate::metadata::project_metadata_host_save(params),
+        ("project", "metadata_stale") => crate::metadata::project_metadata_host_stale(params),
+        ("project", "metadata_refresh_hashes") => {
+            crate::metadata::project_metadata_host_refresh_hashes(params)
+        }
         // Standalone-run fallbacks for capabilities normally supplied by
         // an embedder's JSON-RPC bridge. `runtime.task` lets a debugger or
         // CLI invocation read the pipeline input from `HARN_TASK` without

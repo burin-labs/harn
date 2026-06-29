@@ -63,6 +63,7 @@ fn default_host_capabilities() -> HashMap<String, HashSet<String>> {
                 "lessons".to_string(),
                 "mcp_config".to_string(),
                 "metadata_get".to_string(),
+                "metadata_inspect".to_string(),
                 "metadata_refresh_hashes".to_string(),
                 "metadata_save".to_string(),
                 "metadata_set".to_string(),

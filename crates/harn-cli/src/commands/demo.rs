@@ -101,6 +101,17 @@ const SCENARIOS: &[Scenario] = &[
         tape: include_str!("../../assets/demo/embed-similarity/tape.jsonl"),
     },
     Scenario {
+        id: "project-metadata",
+        title: "project.metadata_* falls back to Harn metadata offline",
+        description: "Drive standalone `host_call(\"project.metadata_*\", ...)` through Harn's \
+                      built-in metadata store: set a namespace, read it with hierarchical \
+                      inheritance, inspect the origin, refresh structure hashes, and save. \
+                      Demonstrates the CLI/debug fallback path while product host bridges keep \
+                      precedence when attached.",
+        script: include_str!("../../assets/demo/project-metadata/scenario.harn"),
+        tape: include_str!("../../assets/demo/project-metadata/tape.jsonl"),
+    },
+    Scenario {
         id: "command-capture",
         title: "run_command preserves a slow command's full output past a `| tail` filter",
         description: "Walk the std/agent/command_capture recognizer: rewrite `producer | tail/wc/grep` \

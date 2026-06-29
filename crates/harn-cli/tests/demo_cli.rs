@@ -242,6 +242,38 @@ fn embed_similarity_demo_runs_end_to_end_against_bundled_tape() {
 }
 
 #[test]
+fn project_metadata_demo_runs_end_to_end_against_bundled_tape() {
+    let outcome = run_demo_scenario("project-metadata");
+    assert_eq!(
+        outcome.exit_code, 0,
+        "project-metadata demo failed (exit {}):\nstderr:\n{}\nstdout:\n{}",
+        outcome.exit_code, outcome.stderr, outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("project_metadata_receipt"),
+        "project-metadata demo should emit the receipt envelope:\n{}",
+        outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("\"origin_dir\":\"demo\""),
+        "metadata_inspect should report the parent origin directory:\n{}",
+        outcome.stdout
+    );
+    assert!(
+        outcome
+            .stdout
+            .contains("\"inherited_import_rule\":\"prefer relative imports for sibling modules\""),
+        "metadata_get should inherit the parent namespace from a child directory:\n{}",
+        outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("\"hash_refreshed\":true"),
+        "metadata_refresh_hashes should clear the missing structure hash flag:\n{}",
+        outcome.stdout
+    );
+}
+
+#[test]
 fn compaction_policy_demo_runs_end_to_end_against_bundled_tape() {
     let outcome = run_demo_scenario("compaction-policy");
     assert_eq!(
@@ -538,6 +570,7 @@ fn every_scenario_listed_has_a_passing_smoke_run() {
         "routing-policy",
         "stdlib-toolkit",
         "embed-similarity",
+        "project-metadata",
         "compaction-policy",
         "edit-rename-symbol",
         "edit-language-coverage",
