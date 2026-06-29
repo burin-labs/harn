@@ -201,6 +201,19 @@ pub fn install_current_mutation_session(session: Option<MutationSessionRecord>) 
 pub fn current_mutation_session() -> Option<MutationSessionRecord> {
     CURRENT_MUTATION_SESSION.with(|slot| slot.borrow().clone())
 }
+
+/// Per-task ambient-scope swap of the current mutation session. See
+/// `orchestration::ambient_scope`: the mutation session attributes audit
+/// records, `run_id`, approval policy, and secret-access scope to the running
+/// task, so a worker holding it across an `.await` must keep its OWN copy rather
+/// than read whatever a cooperatively-scheduled fan-out sibling left behind. The
+/// helper is `pub(crate)` — only the ambient combinator moves whole sessions;
+/// ordinary code uses `install_current_mutation_session`/`current_mutation_session`.
+pub(crate) fn swap_mutation_session(
+    next: Option<MutationSessionRecord>,
+) -> Option<MutationSessionRecord> {
+    CURRENT_MUTATION_SESSION.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), next))
+}
 pub(crate) fn parse_json_payload<T: for<'de> Deserialize<'de>>(
     json: serde_json::Value,
     label: &str,

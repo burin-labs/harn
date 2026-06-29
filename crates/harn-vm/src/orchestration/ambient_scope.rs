@@ -2,14 +2,18 @@
 //!
 //! Capability/identity context — execution policy, approval policy, command
 //! policy, dynamic permissions, the bridge-trust + command-hook depths, and the
-//! runtime-context overlay — is held in thread-local LIFO stacks. That model is
-//! sound for a single synchronous call stack, but a guard held across an
-//! `.await` is **not**: workers are spawned with [`tokio::task::spawn_local`],
-//! so several of them interleave on one thread (and, under a work-stealing
-//! multi-thread runtime, migrate between threads). A child that pushes its
-//! policy, awaits its model call, and resumes would otherwise read whatever a
-//! *sibling* pushed in the meantime — cross-wiring each child's file scoping,
-//! tool ceiling, approval, and event attribution.
+//! runtime-context overlay — is held in thread-local LIFO stacks. The same
+//! hazard applies to the single-slot `Option` contexts a worker installs for the
+//! whole agent loop: the VM execution context (cwd/env/source-dir + the
+//! capability path-scope root) and the mutation session (audit/run_id/approval/
+//! secret-scope). That model is sound for a single synchronous call stack, but a
+//! guard held across an `.await` is **not**: workers are spawned with
+//! [`tokio::task::spawn_local`], so several of them interleave on one thread
+//! (and, under a work-stealing multi-thread runtime, migrate between threads). A
+//! child that installs its policy/context, awaits its model call, and resumes
+//! would otherwise read whatever a *sibling* installed in the meantime —
+//! cross-wiring each child's file scoping, env, worktree root, tool ceiling,
+//! approval, secret scope, and event attribution.
 //!
 //! [`AmbientExecutionScope`] gives every spawned worker its **own** copy of
 //! these stacks. [`scope_ambient`] wraps the worker future so the task's scope
@@ -17,10 +21,11 @@
 //! poll-exit (the same technique `tracing::Instrument` uses for span context).
 //! Only the currently-polling task's scope is ever live on a thread, so the
 //! cooperative/work-stealing interleaving is invisible to capability checks.
-//! Each swap is an O(1) `mem::replace` of a `Vec`/`usize`, so the per-poll cost
-//! is a handful of pointer swaps regardless of stack depth.
+//! Each swap is an O(1) `mem::replace` of a `Vec`/`usize`/`Option`, so the
+//! per-poll cost is a handful of pointer swaps regardless of stack depth.
 
 use std::future::Future;
+use std::path::PathBuf;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
@@ -33,11 +38,13 @@ use super::policy::{
     swap_approval_policy_stack, swap_execution_policy_stack, swap_trusted_bridge_depth,
     CapabilityPolicy, ToolApprovalPolicy,
 };
+use super::{swap_mutation_session, MutationSessionRecord, RunExecutionRecord};
 use crate::autonomy::{swap_autonomy_policy_stack, AutonomyPolicy};
 use crate::connectors::harn_module::swap_active_harn_connector_ctx;
 use crate::connectors::ConnectorCtx;
 use crate::llm::permissions::{swap_dynamic_permission_stack, DynamicPermissionPolicy};
 use crate::runtime_context::{swap_runtime_context_overlay_stack, RuntimeContextOverlay};
+use crate::stdlib::process::{swap_source_dir, swap_thread_execution_context};
 use crate::stdlib::template::llm_context::{swap_llm_render_stack, LlmRenderContext};
 
 /// An isolated snapshot of every ambient capability/identity stack a worker
@@ -52,15 +59,26 @@ pub(crate) struct AmbientExecutionScope {
     autonomy: Vec<AutonomyPolicy>,
     llm_render: Vec<LlmRenderContext>,
     connector_ctx: Vec<ConnectorCtx>,
+    /// The thread execution context (cwd/env/source-dir + capability path-scope
+    /// root). Not a LIFO stack — a single `Option` the worker sets at startup and
+    /// holds across the whole agent loop's awaits, so it cross-wires fan-out
+    /// siblings without per-task scoping.
+    execution_context: Option<RunExecutionRecord>,
+    /// The VM source directory, which anchors source-relative path resolution.
+    source_dir: Option<PathBuf>,
+    /// The current mutation session (audit/run_id/approval/secret-scope). Same
+    /// shape as `execution_context`: one `Option` held across the loop's awaits.
+    mutation_session: Option<MutationSessionRecord>,
     trusted_depth: usize,
     command_hook_depth: usize,
 }
 
-/// Clone the contents of one ambient stack without disturbing it: swap it out,
-/// clone, swap it back. Used only at spawn time (rare), so the double swap is
-/// immaterial.
-fn clone_via_swap<T: Clone>(swap: impl Fn(Vec<T>) -> Vec<T>) -> Vec<T> {
-    let owned = swap(Vec::new());
+/// Clone the contents of one ambient slot without disturbing it: swap it out,
+/// clone, swap it back. Works for both the LIFO `Vec` stacks and the single
+/// `Option` contexts (their `Default` is the empty value the swap leaves
+/// behind). Used only at spawn time (rare), so the double swap is immaterial.
+fn clone_via_swap<T: Clone + Default>(swap: impl Fn(T) -> T) -> T {
+    let owned = swap(T::default());
     let cloned = owned.clone();
     let _ = swap(owned);
     cloned
@@ -80,12 +98,22 @@ impl AmbientExecutionScope {
     /// child's own `llm_call` / connector export — and only need isolation, not
     /// inheritance. Autonomy policy IS inherited (the child runs under the
     /// parent's autonomy tier).
+    ///
+    /// The execution context, source dir, and mutation session ARE inherited:
+    /// the worker overwrites all three at the top of `execute_worker_config`,
+    /// but it first awaits (`emit_worker_event`) while they still hold the
+    /// parent's values — pre-scoping the raw thread-local already read through to
+    /// the parent there, so capturing them keeps the single-worker path
+    /// byte-identical while giving each fan-out child its own isolated copy.
     pub(crate) fn capture_inherited() -> Self {
         Self {
             command: clone_via_swap(swap_command_policy_stack),
             permissions: clone_via_swap(swap_dynamic_permission_stack),
             runtime_context: clone_via_swap(swap_runtime_context_overlay_stack),
             autonomy: clone_via_swap(swap_autonomy_policy_stack),
+            execution_context: clone_via_swap(swap_thread_execution_context),
+            source_dir: clone_via_swap(swap_source_dir),
+            mutation_session: clone_via_swap(swap_mutation_session),
             ..Self::default()
         }
     }
@@ -102,11 +130,195 @@ impl AmbientExecutionScope {
             autonomy: swap_autonomy_policy_stack(self.autonomy),
             llm_render: swap_llm_render_stack(self.llm_render),
             connector_ctx: swap_active_harn_connector_ctx(self.connector_ctx),
+            execution_context: swap_thread_execution_context(self.execution_context),
+            source_dir: swap_source_dir(self.source_dir),
+            mutation_session: swap_mutation_session(self.mutation_session),
             trusted_depth: swap_trusted_bridge_depth(self.trusted_depth),
             command_hook_depth: swap_command_policy_hook_depth(self.command_hook_depth),
         }
     }
 }
+
+/// How an ambient-shape thread-local relates to per-task fan-out scoping.
+///
+/// "Ambient-shape" means a thread-local whose name follows the LIFO-stack
+/// (`*_STACK`), recursion-depth (`*_DEPTH`), or single-slot
+/// execution/identity context (`*_CONTEXT` / `*_SESSION` / `*_CTX`, plus
+/// `VM_SOURCE_DIR`) convention — the family that holds context which a worker
+/// future may read across an `.await`. F1/F2 were `RefCell<Option<_>>` context
+/// slots that escaped the original `*_STACK`-only audit, so the drift guard
+/// covers the single-slot shapes too.
+///
+/// This catalog is the drift guard's test fixture, so it is `#[cfg(test)]`; it
+/// lives next to the scope it documents on purpose — read it before adding any
+/// ambient thread-local.
+#[cfg(test)]
+#[derive(Clone, Copy)]
+enum AmbientScoping {
+    /// Swapped per-poll by [`AmbientExecutionScope::swap_in`]. The worker keeps
+    /// its own copy across `.await`, so cooperatively-scheduled siblings never
+    /// cross-wire it.
+    Captured,
+    /// A human reviewed this thread-local and deliberately left it out of the
+    /// scope (today). The string records why. Audited capability/identity stacks
+    /// that should be wired in the day they become read-across-await inside
+    /// fan-out are also listed in [`AUDITED_LATENT_CAPABILITIES`].
+    Uncaptured(&'static str),
+}
+
+/// THE decision record for every ambient-shape thread-local in this crate.
+///
+/// F1/F2 (VM_EXECUTION_CONTEXT + CURRENT_MUTATION_SESSION cross-wiring) happened
+/// because the capture set was a hand-maintained allow-list with no forcing
+/// function: two same-shape thread-locals existed, were read across a worker's
+/// awaits, and nobody noticed they weren't captured. This catalog plus
+/// `drift_every_ambient_shape_thread_local_is_cataloged` is that forcing
+/// function — a new `*_STACK` / `*_DEPTH` / `*_CONTEXT` / `*_SESSION` / `*_CTX`
+/// thread-local FAILS the test until it is classified here, so the author must
+/// consciously decide `Captured` vs `Uncaptured`.
+///
+/// Keep the `Captured` entries in lockstep with the fields of
+/// [`AmbientExecutionScope`] and the swaps in `swap_in`; the
+/// `captured_catalog_matches_scope_fields` test enforces the set.
+#[cfg(test)]
+const AMBIENT_THREAD_LOCAL_CATALOG: &[(&str, AmbientScoping)] = &[
+    // --- Captured: swapped per-poll into each worker's isolated scope. ---
+    ("EXECUTION_POLICY_STACK", AmbientScoping::Captured),
+    ("EXECUTION_APPROVAL_POLICY_STACK", AmbientScoping::Captured),
+    ("COMMAND_POLICY_STACK", AmbientScoping::Captured),
+    ("DYNAMIC_PERMISSION_STACK", AmbientScoping::Captured),
+    ("RUNTIME_CONTEXT_OVERLAY_STACK", AmbientScoping::Captured),
+    ("AUTONOMY_POLICY_STACK", AmbientScoping::Captured),
+    ("LLM_RENDER_STACK", AmbientScoping::Captured),
+    ("ACTIVE_HARN_CONNECTOR_CTX", AmbientScoping::Captured),
+    ("TRUSTED_BRIDGE_CALL_DEPTH", AmbientScoping::Captured),
+    ("COMMAND_POLICY_HOOK_DEPTH", AmbientScoping::Captured),
+    // F1: cwd/env/source-dir + capability path-scope root.
+    ("VM_EXECUTION_CONTEXT", AmbientScoping::Captured),
+    ("VM_SOURCE_DIR", AmbientScoping::Captured),
+    // F2: audit/run_id/approval/secret-scope.
+    ("CURRENT_MUTATION_SESSION", AmbientScoping::Captured),
+    // --- Uncaptured: audited capability/identity context, same shape, NOT yet
+    // read across a fan-out child's awaits. Wire each into the scope the day it
+    // becomes cross-task-read (mirrors AUDITED_LATENT_CAPABILITIES). ---
+    (
+        "SECURITY_POLICY_STACK",
+        AmbientScoping::Uncaptured(
+            "[latent-capability] security/mod.rs MCP-schema/security policy; not \
+             set per-worker today. Capture when a fan-out child reads it across an await.",
+        ),
+    ),
+    (
+        "ACTIVE_TENANT_STACK",
+        AmbientScoping::Uncaptured(
+            "[latent-capability] harness_tenant.rs tenant identity; not set per-worker today.",
+        ),
+    ),
+    (
+        "ACTIVE_PRINCIPAL_STACK",
+        AmbientScoping::Uncaptured(
+            "[latent-capability] harness_auth.rs principal identity; not set per-worker today.",
+        ),
+    ),
+    (
+        "REQUIRE_EXPLICIT_EGRESS_POLICY_DEPTH",
+        AmbientScoping::Uncaptured(
+            "[latent-capability] egress/mod.rs egress-policy enforcement depth; not entered \
+             per-worker today.",
+        ),
+    ),
+    (
+        "REQUIRE_SSRF_GUARD_DEPTH",
+        AmbientScoping::Uncaptured(
+            "[latent-capability] egress/mod.rs SSRF-guard depth; not entered per-worker today.",
+        ),
+    ),
+    (
+        "REDACTION_POLICY_STACK",
+        AmbientScoping::Uncaptured(
+            "[latent-capability] redact/mod.rs redaction policy; pushed around synchronous \
+             redaction, not held across a child await today.",
+        ),
+    ),
+    (
+        "ACTIVE_REQUEST_ID_STACK",
+        AmbientScoping::Uncaptured(
+            "[latent-capability] observability/request_id.rs request-id breadcrumb; attribution \
+             only, no capability decision rides on it.",
+        ),
+    ),
+    // --- Uncaptured: shape-matches the naming convention but is structurally
+    // not cross-task ambient context. ---
+    (
+        "PERSONA_STACK",
+        AmbientScoping::Uncaptured(
+            "step_runtime.rs snapshots+restores this at the worker boundary (own isolation \
+             path); not read raw across a fan-out child await.",
+        ),
+    ),
+    (
+        "STEP_STACK",
+        AmbientScoping::Uncaptured(
+            "step_runtime.rs snapshots+restores this at the worker boundary (own isolation \
+             path); not read raw across a fan-out child await.",
+        ),
+    ),
+    (
+        "CURRENT_SESSION_STACK",
+        AmbientScoping::Uncaptured(
+            "agent_sessions.rs session breadcrumb; each worker opens its own session at \
+             startup. Audited 2026-06-28: not read across a child await.",
+        ),
+    ),
+    (
+        "CURRENT_TOOL_CALL_STACK",
+        AmbientScoping::Uncaptured(
+            "agent_sessions.rs tool-call breadcrumb; pushed+popped within a single synchronous \
+             dispatch frame.",
+        ),
+    ),
+    (
+        "TRANSCRIPT_DIR_STACK",
+        AmbientScoping::Uncaptured(
+            "llm/agent_observe.rs transcript output dir; push/pop balanced within an observe \
+             scope.",
+        ),
+    ),
+    (
+        "VM_TRACE_STACK",
+        AmbientScoping::Uncaptured(
+            "stdlib/logging.rs log-trace breadcrumb (trace ids for log lines); attribution \
+             only, no capability decision rides on it.",
+        ),
+    ),
+    (
+        "ACTIVE_DISPATCH_CONTEXT",
+        AmbientScoping::Uncaptured(
+            "triggers/dispatcher trigger-dispatch context for the dispatcher runner, not the \
+             fan-out worker path.",
+        ),
+    ),
+    (
+        "CURRENT_WORKFLOW_SKILL_CONTEXT",
+        AmbientScoping::Uncaptured(
+            "orchestration/mod.rs workflow skill context; the workflow runner pins itself to \
+             one LocalSet task, so every stage observes the same context (see its doc-comment).",
+        ),
+    ),
+];
+
+/// The same-shape capability/identity thread-locals the F1/F2 audit named as
+/// latent: NOT captured today, but the next dev to make one cross-task-relevant
+/// must wire it into [`AmbientExecutionScope`]. `audited_latent_capabilities_are_cataloged`
+/// asserts each stays present and `Uncaptured` so they cannot silently flip.
+#[cfg(test)]
+const AUDITED_LATENT_CAPABILITIES: &[&str] = &[
+    "SECURITY_POLICY_STACK",
+    "ACTIVE_TENANT_STACK",
+    "ACTIVE_PRINCIPAL_STACK",
+    "REQUIRE_EXPLICIT_EGRESS_POLICY_DEPTH",
+    "REQUIRE_SSRF_GUARD_DEPTH",
+];
 
 pin_project! {
     /// A future that runs `inner` with `scope` installed as the ambient
@@ -223,5 +435,260 @@ mod tests {
             })
             .await;
         assert!(current_execution_policy().is_none());
+    }
+
+    fn execution_context_named(name: &str) -> RunExecutionRecord {
+        let mut env = std::collections::BTreeMap::new();
+        env.insert("WORKER".to_string(), name.to_string());
+        RunExecutionRecord {
+            cwd: Some(format!("/worktrees/{name}")),
+            env,
+            ..Default::default()
+        }
+    }
+
+    fn mutation_session_named(name: &str) -> MutationSessionRecord {
+        MutationSessionRecord {
+            session_id: format!("session-{name}"),
+            run_id: Some(format!("run-{name}")),
+            ..Default::default()
+        }
+    }
+
+    /// F1 regression: two cooperatively-scheduled tasks set DISTINCT execution
+    /// contexts (distinct cwd + env) and yield twice so the sibling runs in
+    /// between. Each task must read back ONLY its own cwd/env. Without scoping
+    /// the second-polled task's context overwrites the thread-local and the
+    /// first task resumes reading the SIBLING's worktree root + env — the
+    /// write-capable fan-out cross-wire.
+    #[tokio::test]
+    async fn scoped_tasks_do_not_cross_wire_execution_context() {
+        use crate::stdlib::process::{current_execution_context, set_thread_execution_context};
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let alpha = tokio::task::spawn_local(scope_ambient(
+                    AmbientExecutionScope::default(),
+                    async {
+                        set_thread_execution_context(Some(execution_context_named("alpha")));
+                        tokio::task::yield_now().await;
+                        tokio::task::yield_now().await;
+                        current_execution_context()
+                            .map(|ctx| (ctx.cwd, ctx.env.get("WORKER").cloned()))
+                    },
+                ));
+                let beta = tokio::task::spawn_local(scope_ambient(
+                    AmbientExecutionScope::default(),
+                    async {
+                        set_thread_execution_context(Some(execution_context_named("beta")));
+                        tokio::task::yield_now().await;
+                        tokio::task::yield_now().await;
+                        current_execution_context()
+                            .map(|ctx| (ctx.cwd, ctx.env.get("WORKER").cloned()))
+                    },
+                ));
+                assert_eq!(
+                    alpha.await.unwrap(),
+                    Some((
+                        Some("/worktrees/alpha".to_string()),
+                        Some("alpha".to_string())
+                    ))
+                );
+                assert_eq!(
+                    beta.await.unwrap(),
+                    Some((
+                        Some("/worktrees/beta".to_string()),
+                        Some("beta".to_string())
+                    ))
+                );
+            })
+            .await;
+        // The outer thread is left clean — neither task's context leaked out.
+        assert!(crate::stdlib::process::current_execution_context().is_none());
+    }
+
+    /// F2 regression: two cooperatively-scheduled tasks install DISTINCT
+    /// mutation sessions and yield twice. Each must read back ONLY its own
+    /// session; without scoping the interleaving children overwrite each other's
+    /// session and audit/run-id/secret-access attribution lands under the wrong
+    /// child.
+    #[tokio::test]
+    async fn scoped_tasks_do_not_cross_wire_mutation_session() {
+        use crate::orchestration::{current_mutation_session, install_current_mutation_session};
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let alpha = tokio::task::spawn_local(scope_ambient(
+                    AmbientExecutionScope::default(),
+                    async {
+                        install_current_mutation_session(Some(mutation_session_named("alpha")));
+                        tokio::task::yield_now().await;
+                        tokio::task::yield_now().await;
+                        current_mutation_session().map(|s| (s.session_id, s.run_id))
+                    },
+                ));
+                let beta = tokio::task::spawn_local(scope_ambient(
+                    AmbientExecutionScope::default(),
+                    async {
+                        install_current_mutation_session(Some(mutation_session_named("beta")));
+                        tokio::task::yield_now().await;
+                        tokio::task::yield_now().await;
+                        current_mutation_session().map(|s| (s.session_id, s.run_id))
+                    },
+                ));
+                assert_eq!(
+                    alpha.await.unwrap(),
+                    Some(("session-alpha".to_string(), Some("run-alpha".to_string())))
+                );
+                assert_eq!(
+                    beta.await.unwrap(),
+                    Some(("session-beta".to_string(), Some("run-beta".to_string())))
+                );
+            })
+            .await;
+        // The outer thread is left clean — neither task's session leaked out.
+        assert!(crate::orchestration::current_mutation_session().is_none());
+    }
+
+    /// F3 drift guard. Walk the crate source, discover every ambient-shape
+    /// thread-local (the `*_STACK` / `*_DEPTH` / `*_CONTEXT` / `*_SESSION` /
+    /// `*_CTX` / `VM_SOURCE_DIR` family), and assert each is classified in
+    /// `AMBIENT_THREAD_LOCAL_CATALOG`. A NEW ambient thread-local fails this test
+    /// until the author classifies it `Captured` or `Uncaptured` — the forcing
+    /// function F1/F2 lacked. Also fails on stale catalog entries.
+    #[test]
+    fn drift_every_ambient_shape_thread_local_is_cataloged() {
+        use std::collections::BTreeSet;
+
+        fn is_ambient_shape(name: &str) -> bool {
+            name == "VM_SOURCE_DIR"
+                || name.ends_with("_STACK")
+                || name.ends_with("_DEPTH")
+                || name.ends_with("_CONTEXT")
+                || name.ends_with("_SESSION")
+                || name.ends_with("_CTX")
+        }
+
+        fn collect(dir: &std::path::Path, out: &mut BTreeSet<String>) {
+            for entry in std::fs::read_dir(dir).expect("read_dir src") {
+                let path = entry.expect("dir entry").path();
+                // Skip test-support trees so test-only thread-locals (mock
+                // clocks, fixtures) never have to enter the production catalog.
+                if path.to_string_lossy().contains("test") {
+                    continue;
+                }
+                if path.is_dir() {
+                    collect(&path, out);
+                } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+                    let content = std::fs::read_to_string(&path).expect("read src file");
+                    for line in content.lines() {
+                        // Thread-locals are the only `static _: RefCell<_>` decls
+                        // (a bare static RefCell is not Sync, so will not compile).
+                        if !line.contains("RefCell") {
+                            continue;
+                        }
+                        let Some(idx) = line.find("static ") else {
+                            continue;
+                        };
+                        let after = &line[idx + "static ".len()..];
+                        let name: String = after
+                            .chars()
+                            .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                            .collect();
+                        if !name.is_empty() && is_ambient_shape(&name) {
+                            out.insert(name);
+                        }
+                    }
+                }
+            }
+        }
+
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut discovered = BTreeSet::new();
+        collect(&src, &mut discovered);
+
+        let cataloged: BTreeSet<String> = AMBIENT_THREAD_LOCAL_CATALOG
+            .iter()
+            .map(|(name, _)| (*name).to_string())
+            .collect();
+
+        let missing: Vec<_> = discovered.difference(&cataloged).cloned().collect();
+        assert!(
+            missing.is_empty(),
+            "new ambient-shape thread-local(s) not classified in \
+             AMBIENT_THREAD_LOCAL_CATALOG (orchestration/ambient_scope.rs): {missing:?}. Decide \
+             whether each must be Captured into AmbientExecutionScope (it is held across a \
+             fan-out worker's awaits and would otherwise cross-wire siblings) or is safely \
+             Uncaptured, then add it to the catalog. This is the F1/F2 drift guard."
+        );
+
+        let stale: Vec<_> = cataloged.difference(&discovered).cloned().collect();
+        assert!(
+            stale.is_empty(),
+            "AMBIENT_THREAD_LOCAL_CATALOG names thread-local(s) no longer in src \
+             (renamed/removed?): {stale:?}. Update the catalog."
+        );
+    }
+
+    /// The catalog's `Captured` set must exactly mirror what the scope actually
+    /// swaps. Adding/removing a field+swap in `AmbientExecutionScope` must update
+    /// this list and the catalog together; the cross-wire tests above prove the
+    /// captured ones isolate.
+    #[test]
+    fn captured_catalog_matches_scope_fields() {
+        use std::collections::BTreeSet;
+        let captured: BTreeSet<&str> = AMBIENT_THREAD_LOCAL_CATALOG
+            .iter()
+            .filter(|(_, scoping)| matches!(scoping, AmbientScoping::Captured))
+            .map(|(name, _)| *name)
+            .collect();
+        let expected: BTreeSet<&str> = [
+            "EXECUTION_POLICY_STACK",
+            "EXECUTION_APPROVAL_POLICY_STACK",
+            "COMMAND_POLICY_STACK",
+            "DYNAMIC_PERMISSION_STACK",
+            "RUNTIME_CONTEXT_OVERLAY_STACK",
+            "AUTONOMY_POLICY_STACK",
+            "LLM_RENDER_STACK",
+            "ACTIVE_HARN_CONNECTOR_CTX",
+            "TRUSTED_BRIDGE_CALL_DEPTH",
+            "COMMAND_POLICY_HOOK_DEPTH",
+            "VM_EXECUTION_CONTEXT",
+            "VM_SOURCE_DIR",
+            "CURRENT_MUTATION_SESSION",
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(
+            captured, expected,
+            "the catalog's Captured set diverged from AmbientExecutionScope's swapped fields; \
+             keep the struct fields, swap_in, and the catalog in lockstep."
+        );
+    }
+
+    /// The audited latent capability/identity thread-locals (the F1/F2 audit
+    /// named these as same-shape but not-yet-cross-task-read) must stay cataloged
+    /// and `Uncaptured` with their tag — a forcing function so a future dev who
+    /// makes one read-across-await in fan-out has to revisit the capture decision.
+    #[test]
+    fn audited_latent_capabilities_are_cataloged() {
+        for latent in AUDITED_LATENT_CAPABILITIES {
+            let found = AMBIENT_THREAD_LOCAL_CATALOG
+                .iter()
+                .find(|(name, _)| name == latent);
+            let Some((_, scoping)) = found else {
+                panic!("{latent} missing from AMBIENT_THREAD_LOCAL_CATALOG");
+            };
+            match scoping {
+                AmbientScoping::Uncaptured(reason) => assert!(
+                    reason.contains("[latent-capability]"),
+                    "{latent} must keep its [latent-capability] reason tag so the call-out stays visible"
+                ),
+                AmbientScoping::Captured => panic!(
+                    "{latent} is now Captured — wire it fully and drop it from \
+                     AUDITED_LATENT_CAPABILITIES"
+                ),
+            }
+        }
     }
 }
