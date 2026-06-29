@@ -833,29 +833,17 @@ mod tests {
 
     #[test]
     fn provider_http_errors_surface_openrouter_previous_errors_tail() {
+        let body = concat!(
+            r#"{"error":{"message":"No endpoints could satisfy the request","code":502,"metadata":{"#,
+            r#""request_id":"or_req_456","previous_errors":["#,
+            r#"{"provider_name":"Cerebras","error":{"message":"tools is incompatible with response_format"}},"#,
+            r#"{"provider_name":"Groq","message":"Request too large"}]}}}"#,
+        );
         let info = classify_provider_http_error(
             "openrouter",
             reqwest::StatusCode::BAD_GATEWAY,
             None,
-            r#"{
-                "error": {
-                    "message": "No endpoints could satisfy the request",
-                    "code": 502,
-                    "metadata": {
-                        "request_id": "or_req_456",
-                        "previous_errors": [
-                            {
-                                "provider_name": "Cerebras",
-                                "error": {"message": "tools is incompatible with response_format"}
-                            },
-                            {
-                                "provider_name": "Groq",
-                                "message": "Request too large"
-                            }
-                        ]
-                    }
-                }
-            }"#,
+            body,
         );
 
         assert_eq!(info.kind, LlmErrorKind::Transient);
