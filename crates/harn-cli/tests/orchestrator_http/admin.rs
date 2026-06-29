@@ -143,12 +143,6 @@ async fn watch_mode_reloads_manifest_changes() {
     .await;
     let base_url = harness.listener_url().to_string();
 
-    write_file(
-        temp.path(),
-        "harn.toml",
-        &a2a_manifest(None).replace("/a2a/review", "/a2a/review-watch"),
-    );
-
     let client = reqwest::Client::new();
     let mut auth_headers = json_headers();
     auth_headers.insert(AUTHORIZATION, HeaderValue::from_static("Bearer reload-key"));
@@ -157,16 +151,27 @@ async fn watch_mode_reloads_manifest_changes() {
     // event on `orchestrator.manifest` once the new route is live;
     // that is exactly the signal HTTP requests would otherwise have
     // to discover by retrying.
-    await_topic_event(&harness.event_log(), "orchestrator.manifest", |event| {
-        event.kind == "reload_succeeded"
-            && event.payload["summary"]["modified"]
-                .as_array()
-                .is_some_and(|modified| {
-                    modified
-                        .iter()
-                        .any(|item| item.as_str() == Some("incoming-review-task"))
-                })
-    })
+    await_topic_event_after(
+        &harness.event_log(),
+        "orchestrator.manifest",
+        || {
+            write_file(
+                temp.path(),
+                "harn.toml",
+                &a2a_manifest(None).replace("/a2a/review", "/a2a/review-watch"),
+            );
+        },
+        |event| {
+            event.kind == "reload_succeeded"
+                && event.payload["summary"]["modified"]
+                    .as_array()
+                    .is_some_and(|modified| {
+                        modified
+                            .iter()
+                            .any(|item| item.as_str() == Some("incoming-review-task"))
+                    })
+        },
+    )
     .await;
 
     let response = client
