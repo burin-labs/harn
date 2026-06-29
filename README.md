@@ -15,6 +15,11 @@ reserved `metadata` keys (`effects_grant`, `effects_used`,
 `effects_used` stayed inside the parent's `effects_grant`. The public
 schema and fixtures live in [`opentrustgraph-spec/`](./opentrustgraph-spec/).
 
+> **Pre-release.** Harn is pre-1.0 — the language, standard library, and
+> CLI may change between releases. Track what moved in the
+> [release notes](https://github.com/burin-labs/harn/releases) and
+> [`CHANGELOG.md`](./CHANGELOG.md).
+
 ## Install
 
 One-line installer (recommended; no Rust toolchain required):
