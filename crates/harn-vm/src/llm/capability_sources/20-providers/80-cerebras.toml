@@ -27,11 +27,17 @@
 # with reasoning_effort_levels above, reasoning_policy floors an auto "off" to
 # the lowest accepted effort ("low") for tool tasks instead of disabling
 # reasoning. Must NOT carry a Qwen-style `auto_reasoning_overrides = "off"`.
+#
+# Cerebras accepts native tools and structured output independently, but rejects
+# `tools` + `response_format` in the same chat-completions request. Prefer the
+# interactive tool loop when both are requested, and drop response_format at the
+# OpenAI-compatible wire boundary.
 [[provider.cerebras]]
 model_match = "gpt-oss-*"
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
+tools_exclude_response_format = true
 thinking_modes = ["effort"]
 reasoning_effort_supported = true
 reasoning_effort_levels = ["low", "medium", "high"]
@@ -58,6 +64,7 @@ model_match = "zai-glm-*"
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
+tools_exclude_response_format = true
 thinking_modes = ["effort"]
 reasoning_effort_supported = true
 reasoning_none_supported = true
@@ -74,6 +81,7 @@ model_match = "llama-*"
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
+tools_exclude_response_format = true
 prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true
 structured_output_mode = "native_json"
@@ -87,6 +95,7 @@ model_match = "qwen-*"
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
+tools_exclude_response_format = true
 prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true
 structured_output_mode = "native_json"
@@ -94,4 +103,3 @@ supports_assistant_prefill = false
 prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "none"
-

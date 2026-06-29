@@ -147,6 +147,9 @@ impl OpenAiCompatibleProvider {
             }));
         }
         msgs = crate::llm::api::normalize_openai_style_messages(msgs, force_string_content);
+        if has_native_tools {
+            msgs = drop_orphan_tool_result_messages(msgs);
+        }
         if caps.requires_tool_result_adjacency {
             msgs = enforce_tool_result_adjacency(msgs);
         }
@@ -261,6 +264,11 @@ impl OpenAiCompatibleProvider {
                     }
                 });
             }
+        }
+        if has_native_tools && caps.tools_exclude_response_format {
+            body.as_object_mut()
+                .expect("request body is object")
+                .remove("response_format");
         }
         if opts.provider == "openrouter"
             && (body.get("response_format").is_some() || body.get("top_k").is_some())
@@ -408,6 +416,27 @@ fn enforce_tool_result_adjacency(messages: Vec<serde_json::Value>) -> Vec<serde_
 
         normalized.extend(results);
         normalized.extend(deferred);
+    }
+    normalized
+}
+
+fn drop_orphan_tool_result_messages(messages: Vec<serde_json::Value>) -> Vec<serde_json::Value> {
+    let mut live_tool_call_ids = HashSet::new();
+    let mut normalized = Vec::with_capacity(messages.len());
+    for message in messages {
+        match message.get("role").and_then(|role| role.as_str()) {
+            Some("assistant") => {
+                if let Some(ids) = assistant_tool_call_ids(&message) {
+                    live_tool_call_ids.extend(ids);
+                }
+                normalized.push(message);
+            }
+            Some("tool") => match message.get("tool_call_id").and_then(|value| value.as_str()) {
+                Some(id) if live_tool_call_ids.remove(id) => normalized.push(message),
+                _ => {}
+            },
+            _ => normalized.push(message),
+        }
     }
     normalized
 }
@@ -826,7 +855,13 @@ fn normalize_tool_choice_for_capabilities(
     caps: &crate::llm::capabilities::Capabilities,
     has_native_tools: bool,
 ) -> Option<serde_json::Value> {
-    let tool_choice = normalize_openai_compat_tool_choice(tool_choice, has_native_tools)?;
+    // OpenAI-compatible providers interpret `tool_choice` as a selector over the
+    // native `tools` array. Text-tool routes deliberately omit that array, and
+    // stricter providers reject any `tool_choice` without tools.
+    if !has_native_tools {
+        return None;
+    }
+    let tool_choice = normalize_openai_compat_tool_choice(tool_choice)?;
     if caps.allowed_tool_choice_modes.is_empty() {
         return Some(tool_choice);
     }
@@ -859,7 +894,6 @@ fn normalize_tool_choice_for_capabilities(
 
 fn normalize_openai_compat_tool_choice(
     tool_choice: &serde_json::Value,
-    has_native_tools: bool,
 ) -> Option<serde_json::Value> {
     match tool_choice {
         serde_json::Value::String(raw) => {
@@ -871,26 +905,12 @@ fn normalize_openai_compat_tool_choice(
             if matches!(mode.as_str(), "auto" | "none" | "any" | "required") {
                 return Some(serde_json::Value::String(mode));
             }
-            if !has_native_tools {
-                return Some(serde_json::Value::String("required".to_string()));
-            }
             Some(serde_json::json!({
                 "type": "function",
                 "function": {"name": trimmed},
             }))
         }
-        serde_json::Value::Object(object) => {
-            if !has_native_tools {
-                let is_specific_tool = matches!(
-                    object.get("type").and_then(|value| value.as_str()),
-                    Some("function" | "tool")
-                );
-                if is_specific_tool {
-                    return Some(serde_json::Value::String("required".to_string()));
-                }
-            }
-            Some(tool_choice.clone())
-        }
+        serde_json::Value::Object(_) => Some(tool_choice.clone()),
         serde_json::Value::Null => None,
         _ => Some(tool_choice.clone()),
     }
@@ -1464,11 +1484,27 @@ mod tests {
         let mut payload = base_request_payload();
         payload.provider = "openrouter".to_string();
         payload.model = "moonshotai/kimi-k2.7-code".to_string();
+        payload.native_tools = Some(vec![json!({
+            "type": "function",
+            "function": {
+                "name": "add_two",
+                "description": "Add two integers.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "a": {"type": "integer"},
+                        "b": {"type": "integer"}
+                    },
+                    "required": ["a", "b"]
+                }
+            }
+        })]);
         payload.tool_choice = Some(json!("none"));
 
         let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
 
         assert_eq!(body["tool_choice"], "none");
+        assert_eq!(body["tools"][0]["function"]["name"], "add_two");
     }
 
     #[test]
@@ -1503,7 +1539,7 @@ mod tests {
     }
 
     #[test]
-    fn openai_compat_specific_tool_choice_degrades_for_text_tool_routes() {
+    fn openai_compat_omits_tool_choice_for_text_tool_routes() {
         let mut payload = base_request_payload();
         payload.provider = "fireworks".to_string();
         payload.model = "accounts/fireworks/models/gpt-oss-120b".to_string();
@@ -1511,7 +1547,20 @@ mod tests {
 
         let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
 
-        assert_eq!(body["tool_choice"], "required");
+        assert!(body.get("tool_choice").is_none());
+        assert!(body.get("tools").is_none());
+    }
+
+    #[test]
+    fn openai_compat_omits_required_tool_choice_without_native_tools() {
+        let mut payload = base_request_payload();
+        payload.provider = "together".to_string();
+        payload.model = "zai-org/glm-5.2".to_string();
+        payload.tool_choice = Some(json!("required"));
+
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+
+        assert!(body.get("tool_choice").is_none());
         assert!(body.get("tools").is_none());
     }
 
@@ -2024,6 +2073,47 @@ thinking_modes = ["enabled"]
     }
 
     #[test]
+    fn cerebras_tools_drop_response_format() {
+        let mut payload = base_request_payload();
+        payload.provider = "cerebras".to_string();
+        payload.model = "gpt-oss-120b".to_string();
+        payload.output_format = crate::llm::api::OutputFormat::JsonObject;
+        payload.native_tools = Some(vec![json!({
+            "type": "function",
+            "function": {
+                "name": "read",
+                "description": "Read a file",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"path": {"type": "string"}},
+                    "required": ["path"]
+                }
+            }
+        })]);
+
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+
+        assert!(body.get("tools").is_some());
+        assert!(
+            body.get("response_format").is_none(),
+            "Cerebras rejects tools + response_format together: {body}"
+        );
+    }
+
+    #[test]
+    fn cerebras_keeps_response_format_without_tools() {
+        let mut payload = base_request_payload();
+        payload.provider = "cerebras".to_string();
+        payload.model = "gpt-oss-120b".to_string();
+        payload.output_format = crate::llm::api::OutputFormat::JsonObject;
+
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+
+        assert_eq!(body["response_format"]["type"], "json_object");
+        assert!(body.get("tools").is_none());
+    }
+
+    #[test]
     fn openrouter_structured_output_requires_supported_parameters() {
         let mut payload = base_request_payload();
         payload.output_format = crate::llm::api::OutputFormat::JsonSchema {
@@ -2310,6 +2400,59 @@ thinking_modes = ["enabled"]
         assert_eq!(messages[2]["tool_call_id"], "call_002");
         assert_eq!(messages[3]["tool_call_id"], "call_001");
         assert_eq!(messages[4]["content"], "[runtime_feedback] keep going");
+    }
+
+    #[test]
+    fn native_route_drops_orphan_tool_result_messages() {
+        let mut payload = base_request_payload();
+        payload.provider = "groq".to_string();
+        payload.model = "openai/gpt-oss-120b".to_string();
+        payload.native_tools = Some(vec![json!({
+            "type": "function",
+            "function": {
+                "name": "read",
+                "description": "Read a file.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"path": {"type": "string"}},
+                    "required": ["path"]
+                }
+            }
+        })]);
+        payload.messages = vec![
+            json!({"role": "user", "content": "inspect"}),
+            json!({"role": "tool", "tool_call_id": "stale_call", "content": "stale compacted result"}),
+            json!({
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{
+                    "id": "call_001",
+                    "type": "function",
+                    "function": {"name": "read", "arguments": "{\"path\":\"a.rs\"}"},
+                }],
+            }),
+            json!({"role": "tool", "tool_call_id": "call_001", "content": "fresh result"}),
+            json!({"role": "tool", "tool_call_id": "call_001", "content": "duplicate result"}),
+            json!({"role": "user", "content": "continue"}),
+        ];
+
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+        let messages = body["messages"].as_array().expect("messages array");
+        let roles = messages
+            .iter()
+            .map(|message| message["role"].as_str().unwrap_or("?"))
+            .collect::<Vec<_>>();
+
+        assert_eq!(roles, vec!["user", "assistant", "tool", "user"]);
+        assert_eq!(messages[2]["tool_call_id"], "call_001");
+        assert_eq!(messages[2]["content"], "fresh result");
+        assert!(
+            messages
+                .iter()
+                .all(|message| message["content"] != "stale compacted result"
+                    && message["content"] != "duplicate result"),
+            "orphaned or duplicate tool results must not reach native tool providers: {messages:?}"
+        );
     }
 
     #[test]
