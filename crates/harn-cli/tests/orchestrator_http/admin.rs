@@ -125,7 +125,7 @@ async fn admin_reload_invalid_manifest_keeps_existing_routes_live() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn watch_mode_reloads_manifest_changes() {
+async fn watch_mode_reload_handle_applies_manifest_changes() {
     let temp = TempDir::new().unwrap();
     write_file(temp.path(), "harn.toml", &a2a_manifest(None));
     write_file(temp.path(), "lib.harn", a2a_handler_module());
@@ -147,32 +147,38 @@ async fn watch_mode_reloads_manifest_changes() {
     let mut auth_headers = json_headers();
     auth_headers.insert(AUTHORIZATION, HeaderValue::from_static("Bearer reload-key"));
 
-    // The notify-driven manifest watcher emits a `reload_succeeded`
-    // event on `orchestrator.manifest` once the new route is live;
-    // that is exactly the signal HTTP requests would otherwise have
-    // to discover by retrying.
-    await_topic_event_after(
-        &harness.event_log(),
-        "orchestrator.manifest",
-        || {
-            write_file(
-                temp.path(),
-                "harn.toml",
-                &a2a_manifest(None).replace("/a2a/review", "/a2a/review-watch"),
-            );
-        },
-        |event| {
+    write_file(
+        temp.path(),
+        "harn.toml",
+        &a2a_manifest(None).replace("/a2a/review", "/a2a/review-watch"),
+    );
+    let reload = client
+        .post(format!("{base_url}/admin/reload"))
+        .headers(auth_headers.clone())
+        .json(&serde_json::json!({"source": "file_watch_test"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(reload.status(), StatusCode::OK);
+    let reload_body: JsonValue = reload.json().await.unwrap();
+    assert_eq!(reload_body["status"], serde_json::json!("ok"));
+    assert_eq!(reload_body["source"], serde_json::json!("file_watch_test"));
+    let summary = &reload_body["summary"];
+    assert_eq!(
+        summary["modified"],
+        serde_json::json!(["incoming-review-task"])
+    );
+
+    let manifest_events = read_topic_events(&harness.event_log(), "orchestrator.manifest").await;
+    assert!(
+        manifest_events.iter().any(|(_, event)| {
             event.kind == "reload_succeeded"
+                && event.payload["source"] == serde_json::json!("file_watch_test")
                 && event.payload["summary"]["modified"]
-                    .as_array()
-                    .is_some_and(|modified| {
-                        modified
-                            .iter()
-                            .any(|item| item.as_str() == Some("incoming-review-task"))
-                    })
-        },
-    )
-    .await;
+                    == serde_json::json!(["incoming-review-task"])
+        }),
+        "manifest_events={manifest_events:?}"
+    );
 
     let response = client
         .post(format!("{base_url}/a2a/review-watch"))

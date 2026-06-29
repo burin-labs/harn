@@ -35,6 +35,8 @@ use super::ReadyState;
 use super::{PENDING_TOPIC, STATE_SNAPSHOT_FILE};
 use crate::package::{self, Manifest};
 
+const MANIFEST_WATCH_DEBOUNCE: Duration = Duration::from_millis(200);
+
 pub(super) async fn orchestrator_task(
     config: OrchestratorConfig,
     ready_tx: oneshot::Sender<Result<ReadyState, OrchestratorError>>,
@@ -360,6 +362,7 @@ async fn orchestrator_lifecycle(
         Some(spawn_manifest_watcher(
             config_path.clone(),
             admin_reload.clone(),
+            config.clock.clone(),
         )?)
     } else {
         None
@@ -534,8 +537,9 @@ async fn orchestrator_lifecycle(
 fn spawn_manifest_watcher(
     config_path: PathBuf,
     reload: AdminReloadHandle,
+    clock: Arc<dyn harn_vm::clock::Clock>,
 ) -> Result<notify::RecommendedWatcher, OrchestratorError> {
-    use notify::{Event, EventKind, RecursiveMode, Watcher};
+    use notify::{Event, RecursiveMode, Watcher};
 
     let watch_dir = config_path.parent().ok_or_else(|| {
         format!(
@@ -553,29 +557,11 @@ fn spawn_manifest_watcher(
             )
         })?
         .to_string();
-    let (tx, mut rx) = mpsc::unbounded_channel::<()>();
-    tokio::task::spawn_local(async move {
-        while rx.recv().await.is_some() {
-            tokio::time::sleep(Duration::from_millis(200)).await;
-            while rx.try_recv().is_ok() {}
-            let _ = reload.trigger("file_watch");
-        }
-    });
+    let (tx, rx) = mpsc::unbounded_channel::<()>();
+    spawn_manifest_reload_debouncer(rx, reload, clock, MANIFEST_WATCH_DEBOUNCE);
     let mut watcher =
         notify::recommended_watcher(move |res: Result<Event, notify::Error>| match res {
-            Ok(event)
-                if matches!(
-                    event.kind,
-                    EventKind::Modify(_)
-                        | EventKind::Create(_)
-                        | EventKind::Remove(_)
-                        | EventKind::Any
-                ) && event.paths.iter().any(|path| {
-                    path.file_name()
-                        .and_then(|name| name.to_str())
-                        .is_some_and(|name| name == target_name)
-                }) =>
-            {
+            Ok(event) if manifest_watch_event_matches(&event, &target_name) => {
                 let _ = tx.send(());
             }
             _ => {}
@@ -590,6 +576,34 @@ fn spawn_manifest_watcher(
             )
         })?;
     Ok(watcher)
+}
+
+fn spawn_manifest_reload_debouncer(
+    mut rx: mpsc::UnboundedReceiver<()>,
+    reload: AdminReloadHandle,
+    clock: Arc<dyn harn_vm::clock::Clock>,
+    debounce: Duration,
+) -> tokio::task::JoinHandle<()> {
+    tokio::task::spawn_local(async move {
+        while rx.recv().await.is_some() {
+            clock.sleep(debounce).await;
+            while rx.try_recv().is_ok() {}
+            let _ = reload.trigger("file_watch");
+        }
+    })
+}
+
+fn manifest_watch_event_matches(event: &notify::Event, target_name: &str) -> bool {
+    use notify::EventKind;
+
+    matches!(
+        event.kind,
+        EventKind::Modify(_) | EventKind::Create(_) | EventKind::Remove(_) | EventKind::Any
+    ) && event.paths.iter().any(|path| {
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name == target_name)
+    })
 }
 
 pub(crate) fn load_manifest(config_path: &Path) -> Result<(Manifest, PathBuf), OrchestratorError> {
@@ -654,4 +668,73 @@ fn has_mcp_oauth_configured() -> bool {
     std::env::var("HARN_MCP_OAUTH_AUTHORIZATION_SERVERS")
         .ok()
         .is_some_and(|value| value.split(',').any(|segment| !segment.trim().is_empty()))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use notify::event::{AccessKind, CreateKind, ModifyKind, RemoveKind};
+    use notify::{Event, EventKind};
+
+    use super::*;
+
+    fn event(kind: EventKind, path: &str) -> Event {
+        Event::new(kind).add_path(PathBuf::from(path))
+    }
+
+    #[test]
+    fn manifest_watch_event_matches_manifest_mutations_only() {
+        assert!(manifest_watch_event_matches(
+            &event(EventKind::Any, "/workspace/harn.toml"),
+            "harn.toml"
+        ));
+        assert!(manifest_watch_event_matches(
+            &event(EventKind::Modify(ModifyKind::Any), "/workspace/harn.toml"),
+            "harn.toml"
+        ));
+        assert!(manifest_watch_event_matches(
+            &event(EventKind::Create(CreateKind::File), "/workspace/harn.toml"),
+            "harn.toml"
+        ));
+        assert!(manifest_watch_event_matches(
+            &event(EventKind::Remove(RemoveKind::File), "/workspace/harn.toml"),
+            "harn.toml"
+        ));
+        assert!(!manifest_watch_event_matches(
+            &event(EventKind::Access(AccessKind::Read), "/workspace/harn.toml"),
+            "harn.toml"
+        ));
+        assert!(!manifest_watch_event_matches(
+            &event(EventKind::Modify(ModifyKind::Any), "/workspace/lib.harn"),
+            "harn.toml"
+        ));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn manifest_reload_debouncer_coalesces_pending_signals_without_wall_clock_sleep() {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let clock = harn_vm::clock::PausedClock::new(time::OffsetDateTime::UNIX_EPOCH);
+                let (reload, mut reload_rx) = AdminReloadHandle::channel();
+                let (tx, rx) = mpsc::unbounded_channel();
+                let task = spawn_manifest_reload_debouncer(rx, reload, clock, Duration::ZERO);
+
+                tx.send(()).unwrap();
+                tx.send(()).unwrap();
+                tx.send(()).unwrap();
+
+                let request = tokio::time::timeout(Duration::from_secs(1), reload_rx.recv())
+                    .await
+                    .expect("debouncer emitted reload")
+                    .expect("reload channel open");
+                assert_eq!(request.source, "file_watch");
+                assert!(reload_rx.try_recv().is_err());
+
+                drop(tx);
+                task.abort();
+            })
+            .await;
+    }
 }
