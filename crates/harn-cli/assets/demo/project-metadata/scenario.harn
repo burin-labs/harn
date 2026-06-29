@@ -1,0 +1,56 @@
+/**
+ * project-metadata demo: standalone host-call fallbacks use Harn's
+ * built-in metadata store when no product host bridge handles them.
+ *
+ * This exercises the host-shaped `project.metadata_*` operations directly:
+ * set a namespace on a parent directory, read it from a child directory via
+ * inheritance, inspect the origin, refresh structure hashes, and flush the
+ * store. Product embedders such as Burin can still override these operations
+ * through their host bridge; this offline demo covers the standalone CLI path.
+ */
+pipeline default(_task) {
+  harness.fs.mkdir("demo", true)
+  harness.fs.mkdir("demo/src", true)
+  harness.fs.write_text("demo/src/lib.harn", "pipeline default(_) { return 1 }\n")
+  host_call(
+    "project.metadata_set",
+    {
+      dir: "demo",
+      namespace: "learning",
+      value: {
+        gotchas: ["prefer relative imports for sibling modules", "refresh hashes after structural edits"],
+        source: "demo",
+      },
+    },
+  )
+  let exact = host_call("project.metadata_get", {dir: "demo", namespace: "learning"})
+  let inherited = host_call("project.metadata_get", {dir: "demo/src", namespace: "learning"})
+  let all = host_call("project.metadata_get", {dir: "demo/src"})
+  let before = host_call("project.metadata_inspect", {dir: "demo/src", namespace: "learning", key: "gotchas"})
+  assert_eq(exact.gotchas[0], "prefer relative imports for sibling modules")
+  assert_eq(inherited.gotchas[1], "refresh hashes after structural edits")
+  assert_eq(all.learning.source, "demo")
+  assert_eq(before.origin_dir, "demo")
+  assert_eq(before.missing_structure_hash, true)
+  let stale_before = host_call("project.metadata_stale", {dir: "demo"})
+  assert_eq(type_of(stale_before.tier1), "list")
+  assert_eq(type_of(stale_before.tier2), "list")
+  host_call("project.metadata_refresh_hashes", {dir: "demo"})
+  let after = host_call("project.metadata_inspect", {dir: "demo/src", namespace: "learning", key: "gotchas"})
+  assert_eq(after.origin_dir, "demo")
+  assert_eq(after.missing_structure_hash, false)
+  assert_eq(after.stale_tier1, false)
+  host_call("project.metadata_save", {})
+  let receipt = {
+    receipt_kind: "project_metadata_receipt",
+    origin_dir: after.origin_dir,
+    inherited_import_rule: inherited.gotchas[0],
+    all_namespace_source: all.learning.source,
+    stale_lists_present: type_of(stale_before.tier1) == "list"
+      && type_of(stale_before.tier2) == "list",
+    hash_refreshed: after.missing_structure_hash == false,
+  }
+  __io_println("=== project-metadata receipt ===")
+  __io_println(json_stringify(receipt))
+  return receipt
+}

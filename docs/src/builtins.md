@@ -2122,6 +2122,14 @@ from parents). The default filesystem backend persists namespace shards
 under `.harn/metadata/<namespace>/entries.json` and still reads the legacy
 monolithic `root.json` shard.
 
+Standalone `host_call("project.metadata_*", ...)` calls use this same store
+when no attached host bridge handles the operation. This lets CLI, debugger,
+and conformance runs share the project metadata path used by hosted runs while
+still giving an attached product host precedence for product-owned metadata.
+The standalone fallback covers `metadata_get`, `metadata_inspect`,
+`metadata_set`, `metadata_save`, `metadata_stale`, and
+`metadata_refresh_hashes`.
+
 Directory entries inherit; file entries do not. The shard schema is shared:
 each namespace shard has a directory map under `entries` and an optional
 file map under `files`, both keyed by normalized relative path. Shards

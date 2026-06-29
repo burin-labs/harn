@@ -1214,6 +1214,7 @@ pub fn default_persona_capability_map() -> BTreeMap<&'static str, Vec<&'static s
                 "lessons",
                 "mcp_config",
                 "metadata_get",
+                "metadata_inspect",
                 "metadata_refresh_hashes",
                 "metadata_save",
                 "metadata_set",

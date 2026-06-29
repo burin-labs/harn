@@ -788,6 +788,7 @@ fn preflight_accepts_known_host_capabilities() {
     let source = r#"
 pipeline main() {
   host_call("project.metadata_get", {dir: ".", namespace: "facts"})
+  host_call("project.metadata_inspect", {dir: ".", namespace: "facts"})
   host_call("process.exec", {command: "ls"})
 }
 "#;
