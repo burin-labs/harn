@@ -432,13 +432,38 @@ fn fast_opts_into_tier_for_supported_model_and_guards_others() {
         other => panic!("expected thrown error for gpt-4o, got {:?}", other.is_ok()),
     }
 
-    // Deprecated tier -> rejected.
+    // Opus 4.6's fast tier has been removed from the catalog after
+    // Anthropic's June 29, 2026 removal date.
     match extract_with_options(fast_options("claude-opus-4-6")) {
+        Err(VmError::Thrown(VmValue::String(message))) => {
+            assert!(message.contains("no accelerated-serving tier"), "{message}");
+        }
+        other => panic!(
+            "expected thrown error for opus 4.6, got {:?}",
+            other.is_ok()
+        ),
+    }
+
+    // Deprecated tier -> rejected. Keep this covered with a synthetic catalog
+    // row now that no built-in model has a deprecated fast tier.
+    let overlay = crate::llm_config::parse_config_toml(
+        r#"
+[models."test-deprecated-fast"]
+name = "Deprecated Fast Test"
+provider = "anthropic"
+context_window = 128000
+fast_mode = { param = "speed", value = "fast", status = "deprecated", note = "removed" }
+"#,
+    )
+    .expect("test catalog overlay");
+    crate::llm_config::set_user_overrides(Some(overlay));
+    super::super::reset_provider_key_cache();
+    match extract_with_options(fast_options("test-deprecated-fast")) {
         Err(VmError::Thrown(VmValue::String(message))) => {
             assert!(message.contains("deprecated"), "{message}");
         }
         other => panic!(
-            "expected thrown error for opus 4.6, got {:?}",
+            "expected thrown error for deprecated fast tier, got {:?}",
             other.is_ok()
         ),
     }

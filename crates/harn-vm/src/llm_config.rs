@@ -756,7 +756,7 @@ impl ModelArchitectureDef {
 /// `service_tier = "fast"` / `"priority"`. Premium pricing is stored as
 /// absolute per-MTok rates rather than a single multiplier because
 /// providers price the tier asymmetrically (Anthropic Opus 4.8 is 2x
-/// standard; Opus 4.6/4.7 fast mode is 6x).
+/// standard; Opus 4.7 fast mode is 6x).
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct FastModeDef {
     /// Request field that opts into the fast tier (e.g. "speed" for
@@ -4118,6 +4118,21 @@ mod tests {
                 "{model} should be superseded by claude-opus-4-8"
             );
         }
+    }
+
+    #[test]
+    fn opus_46_no_longer_advertises_fast_mode() {
+        let opus46 = model_catalog_entry("claude-opus-4-6").expect("opus 4.6 catalog entry");
+        assert!(
+            opus46.fast_mode.is_none(),
+            "Anthropic removed Opus 4.6 fast mode on 2026-06-29; Harn should not advertise it"
+        );
+
+        let opus47 = model_catalog_entry("claude-opus-4-7").expect("opus 4.7 catalog entry");
+        assert!(
+            opus47.fast_mode.is_some(),
+            "Opus 4.7 still advertises its own fast-mode tier"
+        );
     }
 
     #[test]

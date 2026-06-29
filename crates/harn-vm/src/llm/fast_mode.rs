@@ -115,11 +115,27 @@ mod tests {
     #[test]
     fn gate_rejects_unsupported_and_deprecated() {
         assert!(matches!(gate("gpt-4o"), FastModeGate::Unsupported));
-        // Opus 4.6's fast tier is deprecated in the catalog.
+        // Opus 4.6's fast tier has been removed from the catalog after
+        // Anthropic's June 29, 2026 removal date.
+        assert!(matches!(gate("claude-opus-4-6"), FastModeGate::Unsupported));
+
+        let overlay = crate::llm_config::parse_config_toml(
+            r#"
+[models."test-deprecated-fast"]
+name = "Deprecated Fast Test"
+provider = "test"
+context_window = 128000
+fast_mode = { param = "speed", value = "fast", status = "deprecated", note = "removed" }
+"#,
+        )
+        .expect("test catalog overlay");
+        crate::llm_config::set_user_overrides(Some(overlay));
         assert!(matches!(
-            gate("claude-opus-4-6"),
+            gate("test-deprecated-fast"),
             FastModeGate::Deprecated { .. }
         ));
+        crate::llm_config::clear_user_overrides();
+
         assert!(matches!(gate("gpt-5.5"), FastModeGate::Usable));
     }
 

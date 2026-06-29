@@ -1951,20 +1951,6 @@
       "benchmarks": {
         "swe_bench_pro": 53.4,
         "swe_bench_verified": 80.8
-      },
-      "fast_mode": {
-        "param": "speed",
-        "value": "fast",
-        "beta_header": "fast-mode-2026-02-01",
-        "otps_speedup": 2.5,
-        "status": "deprecated",
-        "pricing": {
-          "input_per_mtok": 30.0,
-          "output_per_mtok": 150.0,
-          "cache_read_per_mtok": 3.0,
-          "cache_write_per_mtok": 37.5
-        },
-        "note": "Deprecated at the Opus 4.8 launch; removed ~30 days later, after which speed=fast silently falls back to standard speed/pricing. Migrate to Opus 4.8 or 4.7 fast mode."
       }
     },
     {
