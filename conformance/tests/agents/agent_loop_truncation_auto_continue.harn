@@ -120,4 +120,29 @@ pipeline default() {
       __io_println(contains(json_stringify(calls[1].messages), "parse_guidance"))
     },
   )
+  // (d) Length truncation with billed hidden work but no visible text/tool
+  // calls is still budget exhaustion. Retry with a raised cap instead of
+  // feeding an empty turn into parse/stall accounting.
+  with_llm_script(
+    [{text: "", output_tokens: 342, stop_reason: "length"}, llm_text("<done>##DONE##</done>")],
+    { ->
+      let result = agent_loop(
+        "Think briefly, then finish.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "text",
+          loop_until_done: true,
+          max_iterations: 3,
+          max_nudges: 3,
+          max_tokens: 64,
+          tools: note_tools(),
+        },
+      )
+      let calls = llm_mock_calls()
+      __io_println(result.status)
+      __io_println(len(calls))
+      __io_println(!contains(json_stringify(calls[1].messages), "parse_guidance"))
+    },
+  )
 }
