@@ -8,6 +8,95 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.155
+
+### Added
+
+Added `agent_session_inject_reminder(session_id, options)` — inject a single typed
+system reminder directly into a live session's transcript event stream,
+bridge-free. The in-process sibling of the
+`push_bridge_injection`/`drain_bridge_injections` reminder path, for hosts that
+drive the agent loop without an ACP `HostBridge`. `options` mirrors
+`transcript.inject_reminder` (`body` required; optional `tags`, `dedupe_key`,
+`ttl_turns`, `preserve_on_compact`, `propagate`, `role_hint`); the loop's
+existing `apply_reminder_post_turn` pass evicts the reminder once its `ttl_turns`
+reaches zero.
+Sub-agent result envelopes (and therefore `agent_fanout` per-child results) now
+carry `files_written` — the authoritative set of workspace paths the child
+actually mutated through the deterministic hostlib write surface, collected at
+the single `fs_snapshot::auto_capture_for_write` chokepoint so capability-denied
+out-of-scope writes are excluded — plus a `usage` object
+(`input_tokens`/`output_tokens`/`total_tokens`). This lets a fan-out parent
+attribute writes to each child and detect a child that claimed completion but
+wrote nothing or wrote outside its scope, without re-parsing transcripts, and
+works headless. Exposed via new
+`harn_vm::agent_sessions::{record,session,take,clear}_session_changed_path(s)`
+helpers fed from the hostlib write chokepoint.
+
+### Fixed
+
+- `std/agent/host_tools` command policies now accept `require_approval` verdicts
+  and return structured approval requests instead of throwing or executing.
+Anthropic requests now drop whitespace-only text blocks at provider egress,
+avoiding strict validator 400s without changing stored transcripts.
+OpenAI-compatible chat-completions handling now avoids strict-provider failures by
+omitting invalid request combinations, dropping orphaned native tool results, and
+splitting concatenated JSON tool-argument objects into dispatchable calls.
+- **Corrected the DeepInfra GLM-5.2 catalog pricing to its published rate.**
+  The `deepinfra/zai-org/GLM-5.2` row carried `1.40/4.40/0.26` — the
+  together/baseten placeholder copied onto the sibling DeepInfra row, not
+  DeepInfra's own rate. DeepInfra's published GLM-5.2 pricing, verified against
+  their pricing API and reconciled exactly against a live `chat/completions`
+  `estimated_cost` (and corroborated by OpenRouter's `z-ai/glm-5.2` listing),
+  is `$0.95` in / `$3.00` out / `$0.18` cached read per MTok. Catalog data only,
+  no behavior change; this fixes cost accounting for the DeepInfra GLM-5.2 route.
+- **Runtime errors now name the source file, not just the line.** Error
+  enrichment appended a bare `(line N)` drawn from the innermost stack frame,
+  which is ambiguous across 100+ stdlib `.harn` files and forced a manual hunt
+  to locate a crash. When the frame carries a source path the suffix is now
+  `(<file>:N)` (e.g. `(stall.harn:497)`); the bare `(line N)` form is kept
+  as the fallback when no path is known.
+- **Failure-evidence snippets no longer amputate the tail.** `agent/stall`'s
+  diagnostic snippet and `agent/sitrep`'s message truncation both did a
+  head-only clip, silently dropping the end of the text — which for tool and
+  command output is usually where the decisive error lives (failing assertion,
+  last compiler error). Both now preserve a generous head **and** tail with an
+  explicit `…[N chars elided]…` marker, so the model never loses the part of a
+  tool-call error that pinpoints the fix.
+- Fixed two SEV-1 fan-out concurrency cross-wires: the per-worker VM execution
+  context (cwd/env/source-dir + capability path-scope root) and mutation session
+  (audit/run_id/approval/secret-scope) are now captured into
+  `AmbientExecutionScope` and swapped per-poll, so cooperatively-scheduled
+  `spawn_local` children no longer read a sibling's worktree root, environment,
+  or audit/secret attribution across an `.await`. A drift guard now fails CI if a
+  new ambient-shape thread-local is added without classifying it.
+- **`agent_fanout` no longer loses a whole batch when one child fails to spawn.**
+  A background `sub_agent_run` validates and builds its request synchronously
+  (e.g. parsing `allowed_tools`) and can also hit a host worker-spawn fault, so
+  it can `throw` before any handle exists. The per-wave spawn loop had no
+  per-child guard, so a single malformed unit aborted the entire wave *and*
+  every later wave — silently dropping every sibling result. Each spawn is now
+  caught individually: a spawn-time throw becomes that unit's own `ok: false`
+  result (`status: "failed"`, the fault in `error`) at its correct offset, the
+  surviving children are still joined, and results stay 1:1 and positionally
+  aligned with `requests`. One bad unit can no longer nuke a parallel fan-out.
+OpenAI-compatible providers now strip transcript-only and provider-private
+message fields before sending chat completions requests, avoiding strict-provider
+rejections of stored reasoning or cache metadata.
+OpenAI-compatible requests now clamp emitted temperature and top_p values to
+provider-safe ranges before send.
+OpenAI-compatible provider errors now surface numeric codes, request ids, and
+upstream failure tails from varied provider error envelopes.
+- **Strings now support `.slice(start, end?)` as an alias for `.substring`.**
+  `slice` was a list-only method, so calling it on a string raised a runtime
+  `string has no method \`slice\`` that aborted the whole agent loop. Harness
+  authors (and JS/Python muscle memory) reach for `.slice` on strings
+  constantly; it is now char-based and negative-index aware, mirroring
+  `list.slice` exactly, which structurally removes the crash class rather than
+  chasing individual call sites. This was crashing `agent/stall`'s failure-
+  snippet path whenever a failing tool result carried a >240-char error body
+  (e.g. a long compiler error), terminating the loop mid-fix.
+
 ## v0.8.154
 
 ### Breaking
