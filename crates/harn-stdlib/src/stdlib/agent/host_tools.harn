@@ -295,6 +295,21 @@ fn __agent_host_policy_blocked(reason, request, args, options) {
   }
 }
 
+fn __agent_host_policy_requires_approval(verdict, request, args) {
+  let approval_request = verdict?.request ?? verdict?.rewrite ?? request
+  var out = {
+    requires_approval: true,
+    status: "requires_approval",
+    reason: verdict?.reason ?? "command_policy requires approval",
+    request: approval_request,
+    args: args,
+  }
+  if verdict?.approval_id != nil {
+    out = out + {approval_id: verdict.approval_id}
+  }
+  return out
+}
+
 fn __agent_host_apply_command_policy(request, args, options) {
   let opts = __agent_host_options(options)
   let policy = opts?.command_policy ?? opts?.allow_command
@@ -316,6 +331,10 @@ fn __agent_host_apply_command_policy(request, args, options) {
     return __agent_host_policy_blocked(verdict, request, args, opts)
   }
   if kind == "dict" {
+    let approval_value = verdict?.require_approval ?? verdict?.requires_approval
+    if type_of(approval_value) == "bool" && approval_value {
+      return __agent_host_policy_requires_approval(verdict, request, args)
+    }
     if verdict?.request != nil {
       return verdict.request
     }
@@ -777,7 +796,7 @@ pub fn agent_command_tools(registry = nil, options = nil) {
           ),
           handler: { args ->
             let req = __agent_host_command_request(args, opts)
-            if req?.blocked ?? false {
+            if (req?.blocked ?? false) || (req?.requires_approval ?? false) {
               return __agent_host_render(req, opts, key)
             }
             let planned = if opts?.preserve_filtered_output ?? true {
