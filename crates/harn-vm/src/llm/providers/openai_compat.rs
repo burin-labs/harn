@@ -136,35 +136,7 @@ impl OpenAiCompatibleProvider {
             msgs.push(serde_json::json!({"role": "system", "content": sys}));
         }
         msgs.extend(opts.messages.iter().cloned().map(|mut message| {
-            if let Some(object) = message.as_object_mut() {
-                // The durable transcript stores a prior assistant turn's
-                // private reasoning as a top-level `reasoning` field (see
-                // `build_assistant_response_message`). That field is for
-                // host/run-record storage only — no provider consumes a prior
-                // assistant message's `reasoning` on the chat-completions wire.
-                // Strict OpenAI-compat providers (e.g. Fireworks) reject any
-                // unknown top-level message field with HTTP 400 `Extra inputs
-                // are not permitted, field: 'messages[N].reasoning'`, which is
-                // terminal and non-retryable. Tolerant providers (Cerebras,
-                // groq, OpenRouter, DeepInfra, SambaNova) silently ignore it.
-                // Drop it here at the single, comprehensive wire boundary so the
-                // request is portable across every strict provider; reasoning
-                // continuity that DOES matter rides separate, typed channels
-                // (Gemini `thoughtSignature`, Anthropic signed thinking blocks,
-                // the OpenAI Responses reasoning items API).
-                object.remove("reasoning");
-                if let Some(content) = object.get("content").cloned() {
-                    let content = if remap_tool_call {
-                        remap_tool_call_content(&content)
-                    } else {
-                        content
-                    };
-                    object.insert(
-                        "content".to_string(),
-                        crate::llm::content::openai_content(&content),
-                    );
-                }
-            }
+            sanitize_openai_message_for_request(&mut message, remap_tool_call);
             message
         }));
         if let Some(ref prefill) = opts.prefill {
@@ -816,6 +788,37 @@ pub(crate) fn apply_openrouter_provider_order(body: &mut serde_json::Value, orde
         "allow_fallbacks".to_string(),
         serde_json::Value::Bool(false),
     );
+}
+
+fn sanitize_openai_message_for_request(message: &mut serde_json::Value, remap_tool_call: bool) {
+    let Some(object) = message.as_object_mut() else {
+        return;
+    };
+    let role = object
+        .get("role")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string);
+
+    object.retain(|key, _| openai_message_key_allowed(role.as_deref(), key));
+
+    if let Some(content) = object.get("content").cloned() {
+        let content = if remap_tool_call {
+            remap_tool_call_content(&content)
+        } else {
+            content
+        };
+        object.insert(
+            "content".to_string(),
+            crate::llm::content::openai_content(&content),
+        );
+    }
+}
+
+fn openai_message_key_allowed(role: Option<&str>, key: &str) -> bool {
+    matches!(key, "role" | "content" | "name")
+        || (key == "tool_calls" && role == Some("assistant"))
+        || (key == "reasoning_content" && role == Some("assistant"))
+        || (key == "tool_call_id" && role == Some("tool"))
 }
 
 fn normalize_tool_choice_for_capabilities(
@@ -2153,46 +2156,89 @@ thinking_modes = ["enabled"]
     }
 
     #[test]
-    fn build_request_body_strips_prior_assistant_reasoning_field() {
-        // The durable transcript carries a prior assistant turn's private
-        // reasoning as a top-level `messages[N].reasoning` field. Strict
-        // OpenAI-compat providers reject any unknown top-level
-        // message field with a terminal HTTP 400
-        // `Extra inputs are not permitted, field: 'messages[N].reasoning'`.
-        // No provider consumes this field on the chat-completions wire, so it
-        // must be dropped at the request boundary for every provider.
+    fn build_request_body_strips_storage_only_message_fields() {
+        // The durable transcript carries storage-only fields on prior turns.
+        // Strict OpenAI-compat providers reject unknown top-level message
+        // fields with terminal HTTP 400s, so the chat-completions boundary must
+        // retain only portable OpenAI message keys.
         let mut payload = base_request_payload();
         payload.provider = "openai".to_string();
         payload.model = "gpt-4.1".to_string();
         payload.messages = vec![
-            json!({"role": "user", "content": "hello"}),
+            json!({
+                "role": "user",
+                "content": "hello",
+                "private_reasoning": "storage only",
+                "cache_control": {"type": "ephemeral"},
+                "reasoning_content": "wrong role",
+                "tool_calls": [{
+                    "id": "wrong_role",
+                    "type": "function",
+                    "function": {"name": "read", "arguments": "{}"},
+                }],
+            }),
             json!({
                 "role": "assistant",
                 "content": "",
                 "reasoning": "let me inspect the file before editing",
+                "private_reasoning": "storage only",
+                "thinking": {"signature": "provider-private"},
+                "cache_control": {"type": "ephemeral"},
+                "tool_call_id": "wrong_role",
+                "reasoning_content": "fireworks echoes this allowed field",
                 "tool_calls": [{
                     "id": "call_001",
                     "type": "function",
                     "function": {"name": "read", "arguments": "{\"path\":\"main.rs\"}"},
                 }],
             }),
-            json!({"role": "user", "content": "continue"}),
+            json!({
+                "role": "tool",
+                "tool_call_id": "call_001",
+                "content": "{\"ok\":true}",
+                "tool_calls": [{
+                    "id": "wrong_role",
+                    "type": "function",
+                    "function": {"name": "read", "arguments": "{}"},
+                }],
+                "reasoning": "storage only",
+                "reasoning_content": "wrong role",
+            }),
         ];
         let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
         let messages = body["messages"].as_array().expect("messages array");
         for message in messages {
-            assert!(
-                message.get("reasoning").is_none(),
-                "outgoing message must not carry a `reasoning` field: {message}"
-            );
+            for key in [
+                "reasoning",
+                "private_reasoning",
+                "thinking",
+                "cache_control",
+            ] {
+                assert!(
+                    message.get(key).is_none(),
+                    "outgoing message must not carry `{key}`: {message}"
+                );
+            }
         }
-        // The normal OpenAI-compatible path still preserves portable assistant
-        // history fields while stripping storage-only reasoning.
-        let assistant = messages
-            .iter()
-            .find(|message| message["role"] == "assistant")
-            .expect("assistant message preserved");
+        let user = &messages[0];
+        assert_eq!(user["role"], "user");
+        assert!(user.get("tool_calls").is_none());
+        assert!(user.get("reasoning_content").is_none());
+
+        let assistant = &messages[1];
+        assert_eq!(assistant["role"], "assistant");
+        assert!(assistant.get("tool_call_id").is_none());
+        assert_eq!(
+            assistant["reasoning_content"],
+            "fireworks echoes this allowed field"
+        );
         assert_eq!(assistant["tool_calls"][0]["id"], "call_001");
+
+        let tool = &messages[2];
+        assert_eq!(tool["role"], "tool");
+        assert_eq!(tool["tool_call_id"], "call_001");
+        assert!(tool.get("tool_calls").is_none());
+        assert!(tool.get("reasoning_content").is_none());
     }
 
     #[test]
