@@ -8,6 +8,39 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.154
+
+### Breaking
+
+- **`harn model-info` is folded into `harn models info`.** The standalone
+  top-level `model-info` command is removed; the same model-metadata lookup now
+  lives under the `models` noun (`harn models info <model> [--verify] [--warm]`),
+  matching the `provider`/`skill` consolidations. No alias is kept.
+
+### Fixed
+
+- Give each spawned agent/worker task its own ambient execution scope. Capability
+  context (execution/approval/command/autonomy policy, dynamic permissions, the
+  bridge-trust + command-hook depths, the runtime-context overlay, the LLM
+  render context, and the active connector context) lived in thread-local LIFO
+  stacks whose guards were held across `.await`. Because workers run interleaved
+  on a `spawn_local` LocalSet, a child reading its policy after an await could
+  observe a *sibling's* top-of-stack — cross-wiring per-child file scoping, tool
+  ceilings, approval, autonomy tier, template render context, and event
+  attribution between concurrent fan-out children. Each worker future now swaps
+  its own scope in and out around every poll (the `tracing::Instrument`
+  technique), so only the currently-polling task's context is ever live on a
+  thread. Correct under both cooperative and work-stealing multi-thread runtimes;
+  O(1) per poll.
+- Coach a retry instead of a give-up when a tool call is refused by the argument
+  allow-list. A path/command outside an agent's scoped `tool_arg_constraints`
+  (e.g. a fan-out child scoped to `test/users.*` that tried to edit the shared
+  reference file) is now a SOFT, retryable denial: the model is told its allowed
+  pattern(s) and to re-issue with a matching argument — and to read reference
+  files with `look` rather than editing them — rather than reading the terminal
+  "permission denied / do not retry" body and abandoning the turn. Hard
+  capability/side-effect/tool ceilings stay terminal.
+
 ## v0.8.153
 
 ### Breaking
