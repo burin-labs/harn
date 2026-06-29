@@ -129,15 +129,12 @@ fn sanitize_provider_error_body(body: &str) -> String {
 fn structured_provider_error_summary(body: &str) -> Option<String> {
     let json: serde_json::Value = serde_json::from_str(body).ok()?;
     let error = json.get("error").unwrap_or(&json);
-    if let Some(message) = error.get("message").and_then(serde_json::Value::as_str) {
+    if let Some(message) = provider_error_message(error).or_else(|| provider_error_message(&json)) {
         let message = truncate_chars(message, MAX_PROVIDER_ERROR_BODY_CHARS.saturating_sub(256));
         let mut details = Vec::new();
-        for key in ["type", "code", "status"] {
-            if let Some(value) = error.get(key).and_then(serde_json::Value::as_str) {
-                if !value.is_empty() {
-                    details.push(format!("{key}: {value}"));
-                }
-            }
+        collect_error_details(error, &mut details);
+        if !std::ptr::eq(std::ptr::from_ref(error), std::ptr::addr_of!(json)) {
+            collect_error_details(&json, &mut details);
         }
         if details.is_empty() {
             Some(message)
@@ -146,6 +143,100 @@ fn structured_provider_error_summary(body: &str) -> Option<String> {
         }
     } else {
         error.as_str().map(str::to_string)
+    }
+}
+
+fn provider_error_message(value: &serde_json::Value) -> Option<&str> {
+    match value {
+        serde_json::Value::String(message) => non_empty_str(message),
+        serde_json::Value::Object(object) => ["message", "detail", "error_description"]
+            .into_iter()
+            .find_map(|key| object.get(key).and_then(provider_error_message)),
+        _ => None,
+    }
+}
+
+fn collect_error_details(value: &serde_json::Value, details: &mut Vec<String>) {
+    let Some(object) = value.as_object() else {
+        return;
+    };
+    for key in [
+        "type",
+        "code",
+        "status",
+        "http_code",
+        "request_id",
+        "requestId",
+    ] {
+        if let Some(value) = object.get(key).and_then(provider_error_detail_value) {
+            push_unique_detail(details, key, &value);
+        }
+    }
+    if let Some(metadata) = object.get("metadata") {
+        collect_error_details(metadata, details);
+        if let Some(previous) = metadata
+            .get("previous_errors")
+            .and_then(serde_json::Value::as_array)
+        {
+            if let Some(summary) = previous_errors_summary(previous) {
+                push_unique_detail(details, "previous_errors", &summary);
+            }
+        }
+    }
+}
+
+fn provider_error_detail_value(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(text) => non_empty_str(text).map(str::to_string),
+        serde_json::Value::Number(number) => Some(number.to_string()),
+        serde_json::Value::Bool(value) => Some(value.to_string()),
+        _ => None,
+    }
+}
+
+fn previous_errors_summary(errors: &[serde_json::Value]) -> Option<String> {
+    let mut parts = Vec::new();
+    for error in errors.iter().rev().take(3).rev() {
+        let provider = error
+            .get("provider_name")
+            .or_else(|| error.get("provider"))
+            .and_then(provider_error_detail_value);
+        let message = error
+            .get("error")
+            .and_then(provider_error_message)
+            .or_else(|| provider_error_message(error));
+        if let Some(message) = message {
+            let message = truncate_chars(message, 180);
+            if let Some(provider) = provider {
+                parts.push(format!("{provider}: {message}"));
+            } else {
+                parts.push(message);
+            }
+        }
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(" | "))
+    }
+}
+
+fn push_unique_detail(details: &mut Vec<String>, key: &str, value: &str) {
+    if value.is_empty() {
+        return;
+    }
+    let detail = format!("{key}: {value}");
+    if !details.iter().any(|existing| existing == &detail) {
+        details.push(detail);
+    }
+}
+
+fn non_empty_str(value: &str) -> Option<&str> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
     }
 }
 
@@ -464,6 +555,10 @@ fn is_model_unavailable(lower: &str) -> bool {
         // so caller fallback logic routes around it instead of surfacing a
         // generic invalid_request to the agent.
         || lower.contains("non-serverless model")
+        // MiniMax returns HTTP 500 with a provider-specific numeric code for
+        // account/model-plan mismatches; retries cannot change the route.
+        || lower.contains("token plan not support model")
+        || lower.contains("(2061)")
         // OpenRouter's HTTP-400 wording for an unknown model ID
         // ("<id> is not a valid model ID"). Mirror the `not_found` mapping in
         // `value::error::classify_error_message` so the reason taxonomy agrees
@@ -717,6 +812,64 @@ mod tests {
         assert!(!message.contains("secret-material"));
         assert!(message.contains("<redacted:jwt:"));
         assert!(message.contains("<redacted:private_key_block:"));
+    }
+
+    #[test]
+    fn provider_http_errors_surface_numeric_codes_and_request_ids() {
+        let info = classify_provider_http_error(
+            "minimax",
+            reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            None,
+            r#"{"type":"error","error":{"message":"token plan not support model","http_code":"500","code":2061,"request_id":"req_123"}}"#,
+        );
+
+        assert_eq!(info.kind, LlmErrorKind::Terminal);
+        assert_eq!(info.reason, LlmErrorReason::ModelUnavailable);
+        assert!(info.message.contains("token plan not support model"));
+        assert!(info.message.contains("http_code: 500"));
+        assert!(info.message.contains("code: 2061"));
+        assert!(info.message.contains("request_id: req_123"));
+    }
+
+    #[test]
+    fn provider_http_errors_surface_openrouter_previous_errors_tail() {
+        let body = concat!(
+            r#"{"error":{"message":"No endpoints could satisfy the request","code":502,"metadata":{"#,
+            r#""request_id":"or_req_456","previous_errors":["#,
+            r#"{"provider_name":"Cerebras","error":{"message":"tools is incompatible with response_format"}},"#,
+            r#"{"provider_name":"Groq","message":"Request too large"}]}}}"#,
+        );
+        let info = classify_provider_http_error(
+            "openrouter",
+            reqwest::StatusCode::BAD_GATEWAY,
+            None,
+            body,
+        );
+
+        assert_eq!(info.kind, LlmErrorKind::Transient);
+        assert_eq!(info.reason, LlmErrorReason::ServerError);
+        assert!(info
+            .message
+            .contains("No endpoints could satisfy the request"));
+        assert!(info.message.contains("code: 502"));
+        assert!(info.message.contains("request_id: or_req_456"));
+        assert!(info.message.contains(
+            "previous_errors: Cerebras: tools is incompatible with response_format | Groq: Request too large"
+        ));
+    }
+
+    #[test]
+    fn provider_http_errors_accept_top_level_json_string() {
+        let info = classify_provider_http_error(
+            "nvidia",
+            reqwest::StatusCode::NOT_FOUND,
+            None,
+            r#""404 page not found""#,
+        );
+
+        assert_eq!(info.kind, LlmErrorKind::Terminal);
+        assert_eq!(info.reason, LlmErrorReason::ModelUnavailable);
+        assert!(info.message.contains("404 page not found"));
     }
 
     #[test]

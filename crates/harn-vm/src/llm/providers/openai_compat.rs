@@ -171,10 +171,10 @@ impl OpenAiCompatibleProvider {
             body[token_limit_field] = serde_json::json!(opts.max_tokens);
         }
         if let Some(temp) = opts.temperature.filter(|_| caps.temperature_supported) {
-            body["temperature"] = serde_json::json!(temp);
+            body["temperature"] = serde_json::json!(clamp_temperature(temp));
         }
         if let Some(top_p) = opts.top_p.filter(|_| caps.top_p_supported) {
-            body["top_p"] = serde_json::json!(top_p);
+            body["top_p"] = serde_json::json!(clamp_probability(top_p));
         }
         if let Some(top_k) = opts.top_k.filter(|_| caps.top_k_supported) {
             body["top_k"] = serde_json::json!(top_k);
@@ -555,6 +555,20 @@ fn split_parallel_native_tool_call_history(
         normalized.extend(deferred);
     }
     normalized
+}
+
+fn clamp_temperature(value: f64) -> f64 {
+    if !value.is_finite() {
+        return 1.0;
+    }
+    value.clamp(0.0, 2.0)
+}
+
+fn clamp_probability(value: f64) -> f64 {
+    if !value.is_finite() {
+        return 1.0;
+    }
+    value.clamp(0.0, 1.0)
 }
 
 fn assistant_tool_calls(message: &serde_json::Value) -> Option<Vec<serde_json::Value>> {
@@ -1185,6 +1199,26 @@ mod tests {
         payload.fast = false;
         let body_off = OpenAiCompatibleProvider::build_request_body(&payload, false);
         assert!(body_off.get("service_tier").is_none());
+    }
+
+    #[test]
+    fn build_request_body_clamps_sampling_ranges_before_send() {
+        let mut payload = base_request_payload();
+        payload.provider = "openai".to_string();
+        payload.model = "gpt-4o".to_string();
+        payload.temperature = Some(99.0);
+        payload.top_p = Some(5000.0);
+
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+
+        assert_eq!(body["temperature"], json!(2.0));
+        assert_eq!(body["top_p"], json!(1.0));
+
+        payload.temperature = Some(f64::NEG_INFINITY);
+        payload.top_p = Some(f64::NAN);
+        let non_finite_body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+        assert_eq!(non_finite_body["temperature"], json!(1.0));
+        assert_eq!(non_finite_body["top_p"], json!(1.0));
     }
 
     #[test]
