@@ -115,6 +115,7 @@ const RUNTIME_ONLY_EXCEPTIONS: &[&str] = &[
     "__host_agent_session_finalize",
     "__host_agent_session_init",
     "__host_agent_session_inject_feedback",
+    "__host_agent_session_inject_reminder",
     "__host_agent_session_messages",
     "__host_agent_session_pop_last_assistant",
     "__host_agent_session_post_event",

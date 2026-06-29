@@ -251,6 +251,24 @@ pub fn agent_session_inject_feedback(session_id, kind, content) {
 }
 
 /**
+ * agent_session_inject_reminder. Inject a single typed system reminder
+ * directly into a live session's transcript event stream, bridge-free —
+ * the in-process sibling of the `push_bridge_injection`/`drain` reminder
+ * path for hosts that drive the loop without an ACP HostBridge. `options`
+ * mirrors `transcript.inject_reminder` (`body` required; optional `tags`,
+ * `dedupe_key`, `ttl_turns`, `preserve_on_compact`, `propagate`,
+ * `role_hint`). Returns the reminder id.
+ *
+ * @effects: [host]
+ * @errors: [runtime]
+ * @api_stability: experimental
+ * @example: agent_session_inject_reminder(session_id, {body: "re-read auth.go", ttl_turns: 1})
+ */
+pub fn agent_session_inject_reminder(session_id, options) {
+  return __host_agent_session_inject_reminder(session_id, options)
+}
+
+/**
  * agent_session_pop_last_assistant. Discard the trailing assistant
  * turn from a session transcript. Used by `agent_step_judge` in
  * `replace` (pop-and-regen) mode to remove a vetoed assistant
