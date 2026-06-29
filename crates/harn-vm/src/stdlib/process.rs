@@ -41,6 +41,26 @@ pub(crate) fn current_execution_context() -> Option<RunExecutionRecord> {
     VM_EXECUTION_CONTEXT.with(|current| current.borrow().clone())
 }
 
+/// Per-task ambient-scope swap of the thread execution context. See
+/// `orchestration::ambient_scope`: the execution context carries the running
+/// task's cwd/env/source-dir AND anchors the capability path-scope workspace
+/// root, so a worker holding it across an `.await` must keep its OWN copy rather
+/// than read whatever a cooperatively-scheduled fan-out sibling left behind. The
+/// helper is `pub(crate)` — only the ambient combinator moves whole contexts;
+/// ordinary code uses `set_thread_execution_context`/`current_execution_context`.
+pub(crate) fn swap_thread_execution_context(
+    next: Option<RunExecutionRecord>,
+) -> Option<RunExecutionRecord> {
+    VM_EXECUTION_CONTEXT.with(|current| std::mem::replace(&mut *current.borrow_mut(), next))
+}
+
+/// Per-task ambient-scope swap of the VM source directory. Same rationale as
+/// [`swap_thread_execution_context`]: it anchors source-relative path
+/// resolution for the running task, so it must follow that task across `.await`.
+pub(crate) fn swap_source_dir(next: Option<PathBuf>) -> Option<PathBuf> {
+    VM_SOURCE_DIR.with(|current| std::mem::replace(&mut *current.borrow_mut(), next))
+}
+
 /// Reset thread-local process state (for test isolation).
 pub(crate) fn reset_process_state() {
     VM_SOURCE_DIR.with(|sd| *sd.borrow_mut() = None);
