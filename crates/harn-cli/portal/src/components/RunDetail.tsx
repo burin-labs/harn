@@ -4,6 +4,7 @@ import { defineMessages, useIntl } from "react-intl"
 import { fetchRunCompare, replayTriggerEvent } from "../lib/api"
 import { formatDuration, formatNumber, pct, statusClass } from "../lib/format"
 import type { PortalRunDetail, PortalRunDiff, RunSummary } from "../types"
+import { RunActivityItem } from "./RunActivityItem"
 import { SkillObservability } from "./SkillObservability"
 
 const messages = defineMessages({
@@ -621,6 +622,10 @@ export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
       : detail.policy_summary.validation_valid
         ? intl.formatMessage(messages.validationPassed)
         : intl.formatMessage(messages.validationFailed)
+  const activityItemLabels = {
+    auditLayersTooltip: intl.formatMessage(messages.auditLayersTooltip),
+    auditReceiptLink: intl.formatMessage(messages.auditReceiptLink),
+  }
   const graphNodeLabels = new Map(detail.observability.action_graph_nodes.map((node) => [node.id, node.label]))
   const actionGraphNodes = [...detail.observability.action_graph_nodes].sort((left, right) => {
     const order = ["trigger", "predicate", "trigger_predicate", "approval", "dispatch", "a2a_hop", "worker_enqueue", "retry", "dlq"]
@@ -1302,72 +1307,12 @@ export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
           <div className="activity-list">
             {detail.activities.length ? (
               detail.activities.slice(0, 40).map((item) => {
-                const audit = item.audit
-                const layerChain = audit?.layers.length
-                  ? audit.layers.map((layer) => layer.name).join(" → ")
-                  : null
-                const tooltipId = audit
-                  ? `activity-audit-${item.call_id ?? item.label}-${item.started_offset_ms}`
-                  : undefined
                 return (
-                  <div
-                    className="activity-item"
+                  <RunActivityItem
                     key={`${item.label}-${item.started_offset_ms}`}
-                  >
-                    <div className="row">
-                      <strong>{item.label}</strong>
-                      <span>{formatDuration(item.duration_ms)}</span>
-                    </div>
-                    {audit ? (
-                      <div className="activity-audit">
-                        {audit.reason ? (
-                          <span
-                            className="turn-chip activity-audit-reason"
-                            title={audit.reason}
-                          >
-                            {audit.reason}
-                          </span>
-                        ) : null}
-                        {layerChain ? (
-                          <span
-                            className="turn-chip activity-audit-layers"
-                            aria-describedby={tooltipId}
-                            title={layerChain}
-                          >
-                            {audit.layers.length} layer
-                            {audit.layers.length === 1 ? "" : "s"}
-                            <span
-                              id={tooltipId}
-                              role="tooltip"
-                              className="activity-audit-tooltip"
-                            >
-                              <span className="activity-audit-tooltip-title">
-                                {intl.formatMessage(messages.auditLayersTooltip)}
-                              </span>
-                              <span className="activity-audit-tooltip-chain">
-                                {layerChain}
-                              </span>
-                            </span>
-                          </span>
-                        ) : null}
-                        {audit.receipt_uri ? (
-                          <a
-                            className="turn-chip activity-audit-receipt"
-                            href={audit.receipt_uri}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            {intl.formatMessage(messages.auditReceiptLink)}
-                          </a>
-                        ) : null}
-                      </div>
-                    ) : null}
-                    <div className="meta">
-                      {item.kind} • +{formatDuration(item.started_offset_ms)}
-                      {item.stage_node_id ? ` • ${item.stage_node_id}` : ""}
-                    </div>
-                    <div className="meta">{item.summary}</div>
-                  </div>
+                    item={item}
+                    labels={activityItemLabels}
+                  />
                 )
               })
             ) : (
