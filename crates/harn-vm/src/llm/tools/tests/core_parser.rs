@@ -349,6 +349,100 @@ fn strips_gemma_tool_code_prefix_so_native_format_parses() {
 }
 
 #[test]
+fn recovers_fireworks_harmony_tool_call_to_message() {
+    let tools = sample_tool_registry();
+    let text = r#"<|start|>assistant<|channel|>commentary<|message|>tool_call to=edit code<|message|>{"action":"create","path":"src/schema.zig","content":"pub const ok = true;"}"#;
+    let result = parse_bare_calls_in_body(text, Some(&tools));
+    assert!(
+        result.errors.is_empty(),
+        "harmony leak should parse without hard errors: {:?}",
+        result.errors
+    );
+    assert_eq!(result.calls.len(), 1);
+    assert_eq!(result.calls[0]["name"], json!("edit"));
+    assert_eq!(result.calls[0]["arguments"]["action"], json!("create"));
+    assert_eq!(
+        result.calls[0]["arguments"]["path"],
+        json!("src/schema.zig")
+    );
+    assert_eq!(
+        result.calls[0]["arguments"]["content"],
+        json!("pub const ok = true;")
+    );
+    assert!(
+        !result.prose.contains("tool_call to=edit"),
+        "recovered harmony line should not remain in prose: {:?}",
+        result.prose
+    );
+}
+
+#[test]
+fn tagged_parser_salvages_harmony_leak_as_soft_wrapper_violation() {
+    let tools = sample_tool_registry();
+    let text =
+        r#"<|message|>tool_call to=run code<|message|>{"command":"zig test src/schema.zig"}"#;
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert!(
+        result.errors.is_empty(),
+        "tagged parser should salvage the leaked call instead of rejecting stray text: {:?}",
+        result.errors
+    );
+    assert_eq!(result.calls.len(), 1);
+    assert_eq!(result.calls[0]["name"], json!("run"));
+    assert_eq!(
+        result.calls[0]["arguments"]["command"],
+        json!("zig test src/schema.zig")
+    );
+    assert!(
+        result
+            .violations
+            .iter()
+            .all(|violation| !violation.contains("Stray text outside response tags")),
+        "harmony leak should not produce the terminal stray-text diagnostic: {:?}",
+        result.violations
+    );
+}
+
+#[test]
+fn tagged_parser_preserves_canonical_blocks_around_harmony_leak() {
+    let tools = sample_tool_registry();
+    let text = r#"<assistant_prose>
+Checking the Zig parser.
+</assistant_prose>
+<|message|>tool_call to=run code<|message|>{"command":"zig test src/schema.zig"}"#;
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert!(
+        result.errors.is_empty(),
+        "mixed canonical/harmony response should recover cleanly: {:?}",
+        result.errors
+    );
+    assert_eq!(result.calls.len(), 1);
+    assert_eq!(result.prose, "Checking the Zig parser.");
+    assert_eq!(
+        result.calls[0]["arguments"]["command"],
+        json!("zig test src/schema.zig")
+    );
+    assert!(
+        result.canonical.contains("<assistant_prose>"),
+        "canonical replay should retain the normal prose block: {:?}",
+        result.canonical
+    );
+}
+
+#[test]
+fn harmony_tool_call_requires_known_tool_name() {
+    let tools = sample_tool_registry();
+    let text = r#"<|message|>tool_call to=unknown code<|message|>{"command":"zig test"}"#;
+    let result = parse_bare_calls_in_body(text, Some(&tools));
+    assert!(result.calls.is_empty());
+    assert!(
+        result.errors.is_empty(),
+        "unknown harmony tool leaks should remain prose, not become parser errors: {:?}",
+        result.errors
+    );
+}
+
+#[test]
 fn parses_qwen_call_colon_object_literal_tool_marker() {
     // Some Qwen/Gemma local templates emit `call:name{...}` instead of
     // `name({...})`. The name is still registry-checked; this only relaxes

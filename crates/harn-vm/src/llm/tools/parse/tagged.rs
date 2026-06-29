@@ -109,6 +109,21 @@ pub(crate) fn parse_text_tool_calls_with_tools(
             continue;
         }
 
+        if src[cursor..].starts_with("<|") {
+            let start = cursor;
+            while cursor < bytes.len() && bytes[cursor] != b'\n' {
+                cursor += 1;
+            }
+            report_stray(
+                &src[start..cursor],
+                &mut violations,
+                tools_val,
+                &mut calls,
+                &mut canonical_parts,
+            );
+            continue;
+        }
+
         if let Some((body, after)) = match_tool_call_block(src, cursor, TEXT_TOOL_CALL_TAG)
             .or_else(|| match_tool_call_block(src, cursor, TEXT_TOOL_CALL_TAG_COMPACT))
         {

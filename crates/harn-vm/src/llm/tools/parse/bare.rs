@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::BTreeSet;
 
 use super::native_json::parse_native_json_tool_calls;
@@ -44,12 +45,6 @@ pub(crate) fn parse_bare_calls_in_body(
     let unwrapped = strip_tool_call_wrappers(cleaned.as_ref());
     let text = unwrapped.as_ref();
 
-    if let Some(unwrapped) = unwrap_exact_code_wrapper(text) {
-        let result = parse_bare_calls_in_body(unwrapped, tools_val);
-        if !result.calls.is_empty() || !result.errors.is_empty() {
-            return result;
-        }
-    }
     let mut known: BTreeSet<String> = collect_tool_schemas(tools_val, None)
         .into_iter()
         .map(|schema| schema.name)
@@ -58,6 +53,15 @@ pub(crate) fn parse_bare_calls_in_body(
     // the user-declared tool registry).
     known.insert("ledger".to_string());
     known.insert("load_skill".to_string());
+    let harmony_normalized = normalize_harmony_tool_call_lines(text, &known);
+    let text = harmony_normalized.as_ref();
+
+    if let Some(unwrapped) = unwrap_exact_code_wrapper(text) {
+        let result = parse_bare_calls_in_body(unwrapped, tools_val);
+        if !result.calls.is_empty() || !result.errors.is_empty() {
+            return result;
+        }
+    }
     let mut calls = Vec::new();
     let mut errors = Vec::new();
     // Byte ranges excised from the original text to form `prose`.
@@ -387,4 +391,56 @@ pub(crate) fn parse_bare_calls_in_body(
         done_marker: None,
         canonical: String::new(),
     }
+}
+
+fn normalize_harmony_tool_call_lines<'a>(text: &'a str, known: &BTreeSet<String>) -> Cow<'a, str> {
+    if !text.contains("tool_call to=") || !text.contains("<|message|>") {
+        return Cow::Borrowed(text);
+    }
+
+    let mut changed = false;
+    let mut normalized = String::with_capacity(text.len());
+    for segment in text.split_inclusive('\n') {
+        let (line, newline) = segment
+            .strip_suffix('\n')
+            .map_or((segment, ""), |line| (line, "\n"));
+        if let Some(rewritten) = rewrite_harmony_tool_call_line(line, known) {
+            normalized.push_str(&rewritten);
+            normalized.push_str(newline);
+            changed = true;
+        } else {
+            normalized.push_str(segment);
+        }
+    }
+
+    if changed {
+        Cow::Owned(normalized)
+    } else {
+        Cow::Borrowed(text)
+    }
+}
+
+fn rewrite_harmony_tool_call_line(line: &str, known: &BTreeSet<String>) -> Option<String> {
+    let call_start = line.find("tool_call to=")?;
+    let prefix = line[..call_start].trim();
+    if !prefix.is_empty() && !prefix.contains("<|") {
+        return None;
+    }
+
+    let after_to = &line[call_start + "tool_call to=".len()..];
+    let raw_name_end = after_to
+        .find(|ch: char| ch.is_whitespace() || ch == '<' || ch == ',' || ch == '(')
+        .unwrap_or(after_to.len());
+    let raw_name = after_to[..raw_name_end].trim_matches(['"', '\'', '`']);
+    let name = raw_name.split("<|").next().unwrap_or("").trim();
+    if name.is_empty() || !known.contains(name) {
+        return None;
+    }
+
+    let after_name = &after_to[raw_name_end..];
+    let marker_pos = after_name.find("<|message|>")?;
+    let payload = after_name[marker_pos + "<|message|>".len()..].trim_start();
+    let (_arguments, consumed) = parse_object_literal_from(payload, name).ok()?;
+    let object_literal = payload[..consumed].trim_end();
+    Some(format!("{name}({object_literal})"))
 }
