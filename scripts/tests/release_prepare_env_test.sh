@@ -106,6 +106,17 @@ if ! grep -Fq "run scripts/sync_protocol_fixture_runtime_versions.harn -- --from
   exit 1
 fi
 
+if ! grep -Fxq "target=gen-protocol-artifacts" "$record_make"; then
+  echo "release_gate prepare did not regenerate protocol artifacts" >&2
+  cat "$record_make" >&2
+  exit 1
+fi
+if ! grep -Fxq "HARN_BIN=" "$record_make"; then
+  echo "release_gate prepare should force protocol artifact generation through a post-bump binary" >&2
+  cat "$record_make" >&2
+  exit 1
+fi
+
 for record in "$record_cargo" "$record_make"; do
   if ! grep -Fxq "CARGO_INCREMENTAL=0" "$record"; then
     echo "expected CARGO_INCREMENTAL=0 in $record" >&2
