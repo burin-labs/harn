@@ -215,13 +215,13 @@ impl AnthropicProvider {
             .messages
             .iter()
             .cloned()
-            .map(|mut message| {
+            .filter_map(|mut message| {
                 if let Some(object) = message.as_object_mut() {
                     if let Some(content) = object.get("content").cloned() {
-                        object.insert(
-                            "content".to_string(),
+                        let content = drop_anthropic_whitespace_text_blocks(
                             crate::llm::content::anthropic_content(&content),
                         );
+                        object.insert("content".to_string(), content);
                     }
                     // Durable transcript turns carry storage-only metadata
                     // keys (e.g. `reasoning` from
@@ -236,7 +236,11 @@ impl AnthropicProvider {
                     // `message.reasoning`.
                     object.retain(|key, _| ANTHROPIC_MESSAGE_KEYS.contains(&key.as_str()));
                 }
-                message
+                if is_empty_anthropic_message(&message) {
+                    None
+                } else {
+                    Some(message)
+                }
             })
             .collect();
         let mut messages = enforce_tool_result_adjacency(messages);
@@ -378,6 +382,34 @@ impl AnthropicProvider {
             false, // is_ollama
         )
         .await
+    }
+}
+
+fn drop_anthropic_whitespace_text_blocks(content: serde_json::Value) -> serde_json::Value {
+    match content {
+        serde_json::Value::Array(blocks) => serde_json::Value::Array(
+            blocks
+                .into_iter()
+                .filter(|block| !is_whitespace_text_block(block))
+                .collect(),
+        ),
+        other => other,
+    }
+}
+
+fn is_whitespace_text_block(block: &serde_json::Value) -> bool {
+    block.get("type").and_then(|value| value.as_str()) == Some("text")
+        && block
+            .get("text")
+            .and_then(|value| value.as_str())
+            .is_some_and(|text| text.trim().is_empty())
+}
+
+fn is_empty_anthropic_message(message: &serde_json::Value) -> bool {
+    match message.get("content") {
+        Some(serde_json::Value::String(text)) => text.trim().is_empty(),
+        Some(serde_json::Value::Array(blocks)) => blocks.is_empty(),
+        _ => false,
     }
 }
 
@@ -748,6 +780,71 @@ mod tests {
             msg.get("cache_control"),
             Some(&serde_json::json!({"type": "ephemeral"}))
         );
+    }
+
+    #[test]
+    fn whitespace_only_text_blocks_are_dropped_before_anthropic_egress() {
+        let mut opts = base_payload();
+        opts.messages = vec![serde_json::json!({
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "  \n\t"},
+                {"type": "text", "text": "keep me"},
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_read",
+                    "content": "result"
+                }
+            ],
+        })];
+
+        let body = AnthropicProvider::build_request_body(&opts);
+        let content = body["messages"][0]["content"]
+            .as_array()
+            .expect("content blocks");
+
+        assert_eq!(content.len(), 2);
+        assert_eq!(content[0]["type"], "text");
+        assert_eq!(content[0]["text"], "keep me");
+        assert_eq!(content[1]["type"], "tool_result");
+        assert_eq!(content[1]["tool_use_id"], "toolu_read");
+    }
+
+    #[test]
+    fn whitespace_only_messages_are_dropped_before_tool_result_adjacency() {
+        let mut opts = base_payload();
+        opts.messages = vec![
+            serde_json::json!({
+                "role": "assistant",
+                "content": [{
+                    "type": "tool_use",
+                    "id": "toolu_verify",
+                    "name": "verify",
+                    "input": {},
+                }],
+            }),
+            serde_json::json!({
+                "role": "assistant",
+                "content": [{"type": "text", "text": "\n   \t"}],
+            }),
+            serde_json::json!({
+                "role": "user",
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_verify",
+                    "content": "ok",
+                }],
+            }),
+        ];
+
+        let body = AnthropicProvider::build_request_body(&opts);
+        let messages = body["messages"].as_array().expect("messages array");
+
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0]["role"], "assistant");
+        assert_eq!(messages[1]["role"], "user");
+        assert_eq!(messages[1]["content"][0]["type"], "tool_result");
+        assert_eq!(messages[1]["content"][0]["tool_use_id"], "toolu_verify");
     }
 
     #[test]
