@@ -177,6 +177,11 @@ fn observability_exports_in_replay_envelope_and_imports_without_embedded_run_rec
         observability.verification_outcomes[0].node_id.as_str(),
         "answer"
     );
+    assert_eq!(bundle.replay.verification_outcomes.len(), 1);
+    assert_eq!(
+        bundle.replay.verification_outcomes[0].node_id.as_str(),
+        "answer"
+    );
     assert_eq!(observability.transcript_pointers.len(), 1);
 
     bundle.replay.run_record = None;
@@ -188,6 +193,95 @@ fn observability_exports_in_replay_envelope_and_imports_without_embedded_run_rec
     assert_eq!(
         imported["observability"]["transcript_pointers"][0]["path"],
         json!("/private/harn/run_123/run-llm/llm_transcript.jsonl")
+    );
+}
+
+#[test]
+fn import_backfills_observability_from_first_class_verification_outcomes() {
+    let mut run = fixture_run();
+    run.observability = Some(fixture_observability());
+
+    let mut bundle = export_run_record_bundle(
+        &run,
+        &SessionBundleExportOptions {
+            mode: SessionBundleExportMode::Local,
+            ..SessionBundleExportOptions::default()
+        },
+    )
+    .unwrap();
+    bundle.replay.observability = None;
+    bundle
+        .replay
+        .run_record
+        .as_mut()
+        .unwrap()
+        .as_object_mut()
+        .unwrap()
+        .remove("observability");
+
+    let imported = import_run_record_value(&bundle).unwrap();
+    assert_eq!(
+        imported["observability"]["verification_outcomes"][0]["summary"],
+        json!("verification passed with private details")
+    );
+    assert_eq!(
+        imported["observability"]["verification_outcomes"][0]["passed"],
+        json!(true)
+    );
+}
+
+#[test]
+fn export_derives_first_class_verification_outcomes_when_observability_is_missing() {
+    let mut run = fixture_run();
+    run.stages[0].kind = "verify".to_string();
+    run.stages[0].status = "completed".to_string();
+    run.stages[0].outcome = "success".to_string();
+    run.stages[0].verification = Some(json!({"pass": true, "summary": "tests passed"}));
+
+    let mut bundle = export_run_record_bundle(
+        &run,
+        &SessionBundleExportOptions {
+            mode: SessionBundleExportMode::Local,
+            ..SessionBundleExportOptions::default()
+        },
+    )
+    .unwrap();
+
+    assert!(bundle.replay.observability.is_none());
+    assert_eq!(bundle.replay.verification_outcomes.len(), 1);
+    assert_eq!(bundle.replay.verification_outcomes[0].passed, Some(true));
+
+    bundle.replay.run_record = None;
+    bundle.replay.replay_fixture = Some(fixture_replay_fixture(&run));
+    let imported = import_run_record_value(&bundle).unwrap();
+    assert_eq!(
+        imported["observability"]["verification_outcomes"][0]["summary"],
+        json!("{\"pass\":true,\"summary\":\"tests passed\"}")
+    );
+}
+
+#[test]
+fn replay_fixture_import_preserves_first_class_verification_outcomes() {
+    let mut run = fixture_run();
+    run.replay_fixture = Some(fixture_replay_fixture(&run));
+    run.observability = Some(fixture_observability());
+
+    let mut bundle = export_run_record_bundle(
+        &run,
+        &SessionBundleExportOptions {
+            mode: SessionBundleExportMode::Local,
+            ..SessionBundleExportOptions::default()
+        },
+    )
+    .unwrap();
+    bundle.replay.run_record = None;
+    bundle.replay.observability = None;
+
+    let imported = import_run_record_value(&bundle).unwrap();
+    assert_eq!(imported["observability"]["schema_version"], json!(4));
+    assert_eq!(
+        imported["observability"]["verification_outcomes"][0]["node_id"],
+        json!("answer")
     );
 }
 
@@ -255,6 +349,10 @@ fn replay_only_export_withholds_observability_verification_summaries() {
             .verification_outcomes[0]
             .summary
             .as_deref(),
+        Some(REPLAY_ONLY_PLACEHOLDER)
+    );
+    assert_eq!(
+        bundle.replay.verification_outcomes[0].summary.as_deref(),
         Some(REPLAY_ONLY_PLACEHOLDER)
     );
 }

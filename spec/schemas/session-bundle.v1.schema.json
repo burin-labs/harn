@@ -204,6 +204,12 @@
             "type": "object"
           },
           "type": "array"
+        },
+        "verification_outcomes": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
         }
       },
       "required": [

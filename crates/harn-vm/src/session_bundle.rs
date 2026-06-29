@@ -9,6 +9,7 @@
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fmt;
+use std::path::Path;
 
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
@@ -17,9 +18,9 @@ use serde_json::{json, Value as JsonValue};
 use crate::agent_events::AgentEvent;
 use crate::event_log::sanitize_topic_component;
 use crate::orchestration::{
-    new_id, now_rfc3339, AgentSessionReplayEvent, ReplayFixture, RunCheckpointRecord,
-    RunHitlQuestionRecord, RunObservabilityRecord, RunRecord, RunTraceSpanRecord,
-    RunTransitionRecord, ToolCallRecord,
+    derive_run_observability, new_id, now_rfc3339, AgentSessionReplayEvent, ReplayFixture,
+    RunCheckpointRecord, RunHitlQuestionRecord, RunObservabilityRecord, RunRecord,
+    RunTraceSpanRecord, RunTransitionRecord, RunVerificationOutcomeRecord, ToolCallRecord,
 };
 use crate::redact::{RedactionPolicy, REDACTED_PLACEHOLDER};
 use crate::workspace_anchor::{anchor_from_transcript_metadata_json, MountedRoot, WorkspaceAnchor};
@@ -288,6 +289,7 @@ pub struct BundleReplay {
     pub run_record: Option<JsonValue>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub observability: Option<RunObservabilityRecord>,
+    pub verification_outcomes: Vec<RunVerificationOutcomeRecord>,
     pub event_log_pointers: Vec<BundleEventLogPointer>,
     pub transitions: Vec<RunTransitionRecord>,
     pub checkpoints: Vec<RunCheckpointRecord>,
@@ -511,6 +513,7 @@ pub fn validate_session_bundle_str(
 }
 
 pub fn import_run_record_value(bundle: &SessionBundle) -> Result<JsonValue, SessionBundleError> {
+    let replay_observability = replay_observability_for_import(&bundle.replay);
     if let Some(mut run_record) = bundle.replay.run_record.clone() {
         let should_fill_observability = match run_record.get("observability") {
             Some(value) => value.is_null(),
@@ -518,7 +521,7 @@ pub fn import_run_record_value(bundle: &SessionBundle) -> Result<JsonValue, Sess
         };
         if should_fill_observability {
             if let (JsonValue::Object(map), Some(observability)) =
-                (&mut run_record, &bundle.replay.observability)
+                (&mut run_record, replay_observability.as_ref())
             {
                 map.insert(
                     "observability".to_string(),
@@ -567,7 +570,7 @@ pub fn import_run_record_value(bundle: &SessionBundle) -> Result<JsonValue, Sess
             "transcript": transcript,
             "usage": bundle.runtime.usage.clone(),
             "replay_fixture": fixture,
-            "observability": bundle.replay.observability.clone(),
+            "observability": replay_observability,
             "trace_spans": bundle.replay.trace_spans.clone(),
             "tool_recordings": bundle.tools.calls.clone(),
             "hitl_questions": hitl_questions,
@@ -579,6 +582,22 @@ pub fn import_run_record_value(bundle: &SessionBundle) -> Result<JsonValue, Sess
         }));
     }
     Err(SessionBundleError::MissingRunRecord)
+}
+
+fn replay_observability_for_import(replay: &BundleReplay) -> Option<RunObservabilityRecord> {
+    let mut observability = replay.observability.clone().unwrap_or_default();
+    let has_observability = replay.observability.is_some();
+    let has_verification_outcomes = !replay.verification_outcomes.is_empty();
+    if !has_observability && !has_verification_outcomes {
+        return None;
+    }
+    if observability.schema_version == 0 {
+        observability.schema_version = 4;
+    }
+    if observability.verification_outcomes.is_empty() && has_verification_outcomes {
+        observability.verification_outcomes = replay.verification_outcomes.clone();
+    }
+    Some(observability)
 }
 
 pub fn session_bundle_from_agent_session_events(
@@ -868,6 +887,7 @@ fn raw_bundle_from_run(
             replay_fixture: run.replay_fixture.clone(),
             run_record: Some(run_record_value),
             observability: run.observability.clone(),
+            verification_outcomes: verification_outcomes_for_run(run),
             event_log_pointers: event_log_pointers_from_run(run),
             transitions: run.transitions.clone(),
             checkpoints: run.checkpoints.clone(),
@@ -894,6 +914,14 @@ fn raw_bundle_from_run(
         json!("Session bundles are portable JSON envelopes; hosted share links should reference sanitized bundles rather than raw run records."),
     );
     Ok(bundle)
+}
+
+fn verification_outcomes_for_run(run: &RunRecord) -> Vec<RunVerificationOutcomeRecord> {
+    if let Some(observability) = run.observability.as_ref() {
+        return observability.verification_outcomes.clone();
+    }
+    derive_run_observability(run, run.persisted_path.as_deref().map(Path::new))
+        .verification_outcomes
 }
 
 fn bundle_redaction_policy(base: &RedactionPolicy) -> RedactionPolicy {
