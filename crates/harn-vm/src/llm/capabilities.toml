@@ -187,6 +187,10 @@
 #                     `tool_calls[]` entries; strict OpenAI-compatible servers
 #                     can reject replayed history with more than one tool call
 #                     even when Harn originally parsed text-tool calls.
+#   tools_exclude_response_format:
+#                     whether the route rejects `response_format` when native
+#                     `tools` are present. Harn drops response_format for these
+#                     routes only when tools are actually being sent.
 #
 # OPINIONATED PROVIDER/MODEL/CONFIG POLICY (enforced by the footgun gate in
 # crate::llm::capability_audit, wired into `providers build-capabilities
@@ -4015,11 +4019,17 @@ thinking_block_style = "none"
 # with reasoning_effort_levels above, reasoning_policy floors an auto "off" to
 # the lowest accepted effort ("low") for tool tasks instead of disabling
 # reasoning. Must NOT carry a Qwen-style `auto_reasoning_overrides = "off"`.
+#
+# Cerebras accepts native tools and structured output independently, but rejects
+# `tools` + `response_format` in the same chat-completions request. Prefer the
+# interactive tool loop when both are requested, and drop response_format at the
+# OpenAI-compatible wire boundary.
 [[provider.cerebras]]
 model_match = "gpt-oss-*"
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
+tools_exclude_response_format = true
 thinking_modes = ["effort"]
 reasoning_effort_supported = true
 reasoning_effort_levels = ["low", "medium", "high"]
@@ -4046,6 +4056,7 @@ model_match = "zai-glm-*"
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
+tools_exclude_response_format = true
 thinking_modes = ["effort"]
 reasoning_effort_supported = true
 reasoning_none_supported = true
@@ -4062,6 +4073,7 @@ model_match = "llama-*"
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
+tools_exclude_response_format = true
 prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true
 structured_output_mode = "native_json"
@@ -4075,6 +4087,7 @@ model_match = "qwen-*"
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
+tools_exclude_response_format = true
 prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true
 structured_output_mode = "native_json"

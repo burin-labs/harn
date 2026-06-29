@@ -1,0 +1,1 @@
+OpenAI-compatible chat-completions requests now avoid strict-provider 400s by omitting `response_format` for Cerebras native-tool calls, omitting `tool_choice` whenever no native `tools` array is sent, and dropping orphaned native tool-result messages before send.

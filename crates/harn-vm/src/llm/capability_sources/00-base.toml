@@ -183,6 +183,10 @@
 #                     `tool_calls[]` entries; strict OpenAI-compatible servers
 #                     can reject replayed history with more than one tool call
 #                     even when Harn originally parsed text-tool calls.
+#   tools_exclude_response_format:
+#                     whether the route rejects `response_format` when native
+#                     `tools` are present. Harn drops response_format for these
+#                     routes only when tools are actually being sent.
 #
 # OPINIONATED PROVIDER/MODEL/CONFIG POLICY (enforced by the footgun gate in
 # crate::llm::capability_audit, wired into `providers build-capabilities

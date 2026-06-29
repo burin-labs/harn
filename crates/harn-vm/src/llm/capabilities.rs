@@ -418,6 +418,11 @@ pub struct ProviderRule {
     /// one-call assistant turns for those routes.
     #[serde(default)]
     pub supports_parallel_tool_calls: Option<bool>,
+    /// Whether the route rejects `response_format` when native `tools` are
+    /// present. Strict OpenAI-compatible servers such as Cerebras accept each
+    /// feature alone but reject the pair together.
+    #[serde(default)]
+    pub tools_exclude_response_format: Option<bool>,
     /// Preferred endpoint family for this provider/model route. Values
     /// are descriptive labels consumed by providers, e.g.
     /// `/api/generate-raw` for Ollama raw prompt bypass.
@@ -581,6 +586,7 @@ pub struct Capabilities {
     pub allowed_tool_choice_modes: Vec<String>,
     pub requires_tool_result_adjacency: bool,
     pub supports_parallel_tool_calls: bool,
+    pub tools_exclude_response_format: bool,
     pub recommended_endpoint: Option<String>,
     pub text_tool_wire_format_supported: bool,
     pub preferred_tool_format: Option<String>,
@@ -665,6 +671,7 @@ impl Default for Capabilities {
             allowed_tool_choice_modes: Vec::new(),
             requires_tool_result_adjacency: false,
             supports_parallel_tool_calls: true,
+            tools_exclude_response_format: false,
             recommended_endpoint: None,
             text_tool_wire_format_supported: true,
             preferred_tool_format: None,
@@ -1587,6 +1594,7 @@ fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
         allowed_tool_choice_modes: None,
         requires_tool_result_adjacency: None,
         supports_parallel_tool_calls: None,
+        tools_exclude_response_format: None,
         recommended_endpoint: None,
         text_tool_wire_format_supported: None,
         preferred_tool_format: None,
@@ -1710,6 +1718,7 @@ fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilitie
         allowed_tool_choice_modes: rule.allowed_tool_choice_modes.clone().unwrap_or_default(),
         requires_tool_result_adjacency: rule.requires_tool_result_adjacency.unwrap_or(false),
         supports_parallel_tool_calls: rule.supports_parallel_tool_calls.unwrap_or(true),
+        tools_exclude_response_format: rule.tools_exclude_response_format.unwrap_or(false),
         recommended_endpoint: rule.recommended_endpoint.clone(),
         text_tool_wire_format_supported: rule.text_tool_wire_format_supported.unwrap_or(true),
         preferred_tool_format: Some(rule_preferred_tool_format(rule)),
@@ -2084,6 +2093,14 @@ preferred_tool_format = "native"
                 .supports_parallel_tool_calls
         );
         assert!(lookup("openai", "gpt-4o").supports_parallel_tool_calls);
+    }
+
+    #[test]
+    fn cerebras_tools_exclude_response_format() {
+        reset();
+        assert!(lookup("cerebras", "gpt-oss-120b").tools_exclude_response_format);
+        assert!(lookup("cerebras", "zai-glm-4.7").tools_exclude_response_format);
+        assert!(!lookup("openai", "gpt-4o").tools_exclude_response_format);
     }
 
     #[test]
