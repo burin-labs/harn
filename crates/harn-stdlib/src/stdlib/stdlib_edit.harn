@@ -1064,6 +1064,200 @@ pub fn edit_batch_apply(params) {
   )
 }
 
+fn __edit_hook_callable(value) {
+  return type_of(value) == "closure"
+}
+
+fn __edit_lifecycle_hooks(options) {
+  let opts = options ?? {}
+  let nested = opts?.lifecycle ?? {}
+  return {
+    pre_apply: opts?.pre_apply ?? nested?.pre_apply,
+    post_apply: opts?.post_apply ?? nested?.post_apply,
+    write_policy: opts?.write_policy ?? nested?.write_policy,
+    on_rollback: opts?.on_rollback ?? nested?.on_rollback,
+  }
+}
+
+fn __edit_lifecycle_forward_options(options) {
+  let hooks = __edit_lifecycle_hooks(options)
+  return {
+    pre_apply: hooks.pre_apply,
+    post_apply: hooks.post_apply,
+    write_policy: hooks.write_policy,
+    on_rollback: hooks.on_rollback,
+  }
+}
+
+fn __edit_lifecycle_rejection(kind, verdict) {
+  if verdict == nil {
+    return nil
+  }
+  if type_of(verdict) == "string" {
+    let reason = trim(verdict)
+    if reason != "" {
+      return {code: kind + "_rejected", reason: reason}
+    }
+    return nil
+  }
+  if type_of(verdict) != "dict" {
+    return nil
+  }
+  if verdict?.reject ?? false {
+    return {
+      code: verdict?.code ?? (kind + "_rejected"),
+      reason: verdict?.reason ?? verdict?.message ?? (kind + " rejected the edit"),
+      cause: verdict?.cause,
+      verdict: verdict,
+    }
+  }
+  return nil
+}
+
+fn __edit_lifecycle_reject_fields(kind, rejection, fields = nil) {
+  let reason = rejection?.reason ?? (kind + " rejected the edit")
+  let code = rejection?.code ?? (kind + "_rejected")
+  return (fields ?? {})
+    .merge(
+    {
+      result: "rejected",
+      errors: [{code: code, message: reason, reason: reason, cause: rejection?.cause, lifecycle_hook: kind}],
+      rejection: {hook: kind, code: code, reason: reason, cause: rejection?.cause},
+    },
+  )
+}
+
+fn __edit_lifecycle_pre_apply(options, action) {
+  let hooks = __edit_lifecycle_hooks(options)
+  let request = (options ?? {}).merge({action: action})
+  if !__edit_hook_callable(hooks.pre_apply) {
+    return {ok: true, request: request}
+  }
+  let verdict = try {
+    hooks.pre_apply(request)
+  } catch {
+    return {
+      ok: false,
+      rejection: {code: "pre_apply_failed", reason: "pre_apply hook failed"},
+      request: request,
+    }
+  }
+  let rejection = __edit_lifecycle_rejection("pre_apply", verdict)
+  if rejection != nil {
+    return {ok: false, rejection: rejection, verdict: verdict, request: request}
+  }
+  if type_of(verdict) == "dict" && verdict?.rewrite != nil {
+    if type_of(verdict.rewrite) != "dict" {
+      return {
+        ok: false,
+        rejection: {code: "pre_apply_invalid_rewrite", reason: "pre_apply rewrite must be a request dict"},
+        verdict: verdict,
+        request: request,
+      }
+    }
+    return {ok: true, request: verdict.rewrite, verdict: verdict}
+  }
+  return {ok: true, request: request, verdict: verdict}
+}
+
+fn __edit_lifecycle_write_policy(options, path, content, action) {
+  let hooks = __edit_lifecycle_hooks(options)
+  if !__edit_hook_callable(hooks.write_policy) {
+    return {ok: true}
+  }
+  let verdict = try {
+    hooks.write_policy(path, content, action)
+  } catch {
+    return {ok: false, rejection: {code: "write_policy_failed", reason: "write_policy hook failed"}}
+  }
+  let rejection = __edit_lifecycle_rejection("write_policy", verdict)
+  if rejection != nil {
+    return {ok: false, rejection: rejection, verdict: verdict}
+  }
+  return {ok: true, verdict: verdict}
+}
+
+fn __edit_lifecycle_has_post_apply(options) {
+  return __edit_hook_callable(__edit_lifecycle_hooks(options).post_apply)
+}
+
+fn __edit_lifecycle_post_apply(options, context) {
+  let hooks = __edit_lifecycle_hooks(options)
+  if !__edit_hook_callable(hooks.post_apply) {
+    return {ok: true, warnings: []}
+  }
+  let verdict = try {
+    hooks.post_apply(context)
+  } catch {
+    return {ok: false, rejection: {code: "post_apply_failed", reason: "post_apply hook failed"}, warnings: []}
+  }
+  let rejection = __edit_lifecycle_rejection("post_apply", verdict)
+  if rejection != nil {
+    return {ok: false, rejection: rejection, verdict: verdict, warnings: []}
+  }
+  if type_of(verdict) == "dict" && verdict?.advisory != nil {
+    return {ok: true, verdict: verdict, warnings: [{code: "post_apply_advisory", message: verdict.advisory}]}
+  }
+  return {ok: true, verdict: verdict, warnings: []}
+}
+
+fn __edit_lifecycle_snapshot(path, options) {
+  let session_id = "edit-lifecycle-" + uuid_v7()
+  let snapshot_id = "post-apply-" + uuid_v7()
+  var request = {session_id: session_id, scope_id: snapshot_id, paths: [path]}
+  if options?.snapshot_root != nil {
+    request = request.merge({root: options.snapshot_root})
+  } else if options?.root != nil {
+    request = request.merge({root: options.root})
+  }
+  let captured = try {
+    hostlib_fs_snapshot(request)
+  } catch {
+    nil
+  }
+  if captured?.snapshot_id != snapshot_id {
+    return {
+      ok: false,
+      error: "failed to capture rollback snapshot",
+      session_id: session_id,
+      snapshot_id: snapshot_id,
+    }
+  }
+  return {ok: true, session_id: session_id, snapshot_id: snapshot_id, path: path, captured: captured}
+}
+
+fn __edit_lifecycle_restore(snapshot, options, path) {
+  if !(snapshot?.ok ?? false) {
+    return {ok: false, error: "rollback snapshot was not available"}
+  }
+  let restored = try {
+    hostlib_fs_restore(
+      {session_id: snapshot.session_id, snapshot_id: snapshot.snapshot_id, paths: [path]},
+    )
+  } catch {
+    nil
+  }
+  let skipped = restored?.skipped_paths_with_reasons ?? []
+  let restore_ok = restored != nil && len(skipped) == 0
+  let hooks = __edit_lifecycle_hooks(options)
+  var hook_result = nil
+  if __edit_hook_callable(hooks.on_rollback) {
+    hook_result = try {
+      hooks.on_rollback(path)
+    } catch {
+      nil
+    }
+  }
+  hostlib_fs_drop_snapshot({session_id: snapshot.session_id, snapshot_id: snapshot.snapshot_id})
+  return {ok: restore_ok, restored: restored, skipped_paths_with_reasons: skipped, on_rollback: hook_result}
+}
+
+fn __edit_lifecycle_drop_snapshot(snapshot) {
+  if snapshot?.ok ?? false {
+    hostlib_fs_drop_snapshot({session_id: snapshot.session_id, snapshot_id: snapshot.snapshot_id})
+  }
+}
+
 fn __edit_safe_patch_telemetry(result, hunks_count, failed_hunk_index) {
   return {
     result: result,
@@ -1088,6 +1282,11 @@ fn __edit_safe_patch_telemetry(result, hunks_count, failed_hunk_index) {
     } else {
       0
     },
+    rejected: if result == "rejected" {
+      1
+    } else {
+      0
+    },
     failed_hunk_index: failed_hunk_index,
   }
 }
@@ -1098,16 +1297,18 @@ fn __edit_safe_patch_result(ctx, fields = nil) {
   let matched = result == "applied" || result == "no_op"
   let failed_idx = extra?.failed_hunk_index
   let bytes_written = extra?.bytes_written ?? 0
-  hostlib_fs_emit_safe_text_patch_result(
-    {
-      session_id: ctx.session_id,
-      path: ctx.path,
-      result: result,
-      hunks_count: ctx.hunks_count,
-      bytes_written: bytes_written,
-      failed_hunk_index: failed_idx,
-    },
-  )
+  if result == "applied" || result == "no_op" || result == "stale_base" || result == "hunk_conflict" {
+    hostlib_fs_emit_safe_text_patch_result(
+      {
+        session_id: ctx.session_id,
+        path: ctx.path,
+        result: result,
+        hunks_count: ctx.hunks_count,
+        bytes_written: bytes_written,
+        failed_hunk_index: failed_idx,
+      },
+    )
+  }
   let base = {
     ok: matched,
     result: result,
@@ -1167,6 +1368,18 @@ fn __edit_safe_patch_result(ctx, fields = nil) {
  *   into every hunk; per-hunk `options` win when keys overlap.
  * - `dry_run`: when true the post-image is computed and returned in
  *   `preview` but no bytes are written.
+ * - `pre_apply(req)`: optional lifecycle hook. Return `nil` to continue,
+ *   a string or `{reject: true, reason}` to reject before matching, or
+ *   `{rewrite: req}` to replace the request before it is evaluated.
+ * - `write_policy(path, content, action)`: optional final-content hook.
+ *   Return `nil` to continue or a string / `{reject: true, reason}` to
+ *   reject before the write reaches disk.
+ * - `post_apply(ctx)`: optional post-write hook. Return
+ *   `{advisory: string}` to attach a warning, or `{reject: true, reason}`
+ *   to restore the pre-image atomically and return `result: "rejected"`.
+ * - `on_rollback(path)`: optional host-injected invalidation hook called
+ *   after a `post_apply` rejection restores the pre-image. Harn performs
+ *   the filesystem restore; hosts own their own index/cache invalidation.
  *
  * ## Result
  *
@@ -1187,7 +1400,26 @@ fn __edit_safe_patch_result(ctx, fields = nil) {
  * @example: edit_safe_text_patch({path: "src/lib.rs", expected_hash: "sha256:...", hunks: [{old_text: "x = 1", new_text: "x = 2"}]})
  */
 pub fn edit_safe_text_patch(params) {
-  let opts = params ?? {}
+  var opts = params ?? {}
+  let pre_apply = __edit_lifecycle_pre_apply(opts, "safe_text_patch")
+  let initial_ctx = {
+    path: opts?.path ?? "",
+    session_id: opts?.session_id,
+    before_hash: __edit_sha256(""),
+    current_hash: __edit_sha256(""),
+    expected_hash: opts?.expected_hash,
+    hunks_count: len(opts?.hunks ?? []),
+    dry_run: opts?.dry_run ?? false,
+    result: "rejected",
+    options: opts,
+  }
+  if !pre_apply.ok {
+    return __edit_safe_patch_result(
+      initial_ctx,
+      __edit_lifecycle_reject_fields("pre_apply", pre_apply.rejection),
+    )
+  }
+  opts = pre_apply.request ?? opts
   let {path = "", hunks = []} = opts ?? {}
   let session_id = opts?.session_id
   let {match_options = {}, dry_run = false} = opts ?? {}
@@ -1267,6 +1499,35 @@ pub fn edit_safe_text_patch(params) {
       {result: result_kind, after_sha256: after_hash, hunk_results: hunk_results, preview: working},
     )
   }
+  let policy = __edit_lifecycle_write_policy(opts, path, working, "safe_text_patch")
+  if !policy.ok {
+    return __edit_safe_patch_result(
+      ctx,
+      __edit_lifecycle_reject_fields(
+        "write_policy",
+        policy.rejection,
+        {after_sha256: __edit_sha256(working), hunk_results: hunk_results},
+      ),
+    )
+  }
+  let rollback_snapshot = if __edit_lifecycle_has_post_apply(opts) {
+    __edit_lifecycle_snapshot(path, opts)
+  } else {
+    nil
+  }
+  if rollback_snapshot != nil && !rollback_snapshot.ok {
+    return __edit_safe_patch_result(
+      ctx,
+      __edit_lifecycle_reject_fields(
+        "post_apply",
+        {
+          code: "rollback_snapshot_failed",
+          reason: rollback_snapshot?.error ?? "failed to capture rollback snapshot",
+        },
+        {after_sha256: __edit_sha256(working), hunk_results: hunk_results},
+      ),
+    )
+  }
   let commit = hostlib_fs_safe_text_patch(
     {
       path: path,
@@ -1281,6 +1542,7 @@ pub fn edit_safe_text_patch(params) {
   let committed_hash = commit?.current_hash ?? current_hash
   let committed_after = commit?.after_sha256 ?? current_hash
   if commit_result == "stale_base" {
+    __edit_lifecycle_drop_snapshot(rollback_snapshot)
     return __edit_safe_patch_result(
       ctx.merge({current_hash: committed_hash}),
       {
@@ -1298,6 +1560,41 @@ pub fn edit_safe_text_patch(params) {
       },
     )
   }
+  let post = __edit_lifecycle_post_apply(
+    opts,
+    {
+      path: path,
+      action: "safe_text_patch",
+      original_text: current_content,
+      new_text: working,
+      applied: commit_result == "applied",
+      result: commit_result,
+      dry_run: false,
+    },
+  )
+  if !post.ok {
+    let rollback = __edit_lifecycle_restore(rollback_snapshot, opts, path)
+    let rollback_hash = if rollback.ok {
+      current_hash
+    } else {
+      committed_after
+    }
+    return __edit_safe_patch_result(
+      ctx.merge({current_hash: rollback_hash}),
+      __edit_lifecycle_reject_fields(
+        "post_apply",
+        post.rejection,
+        {
+          after_sha256: rollback_hash,
+          hunk_results: hunk_results,
+          bytes_written: commit?.bytes_written ?? 0,
+          created: commit?.created ?? false,
+          rollback: rollback,
+        },
+      ),
+    )
+  }
+  __edit_lifecycle_drop_snapshot(rollback_snapshot)
   return __edit_safe_patch_result(
     ctx.merge({current_hash: committed_hash}),
     {
@@ -1306,6 +1603,7 @@ pub fn edit_safe_text_patch(params) {
       hunk_results: hunk_results,
       bytes_written: commit?.bytes_written ?? 0,
       created: commit?.created ?? false,
+      warnings: post.warnings ?? [],
     },
   )
 }
@@ -1782,7 +2080,7 @@ pub fn edit_fast_apply(params) {
         },
       ],
       match_options: {allow_empty_old_text: true, allow_noop: true, allow_lazy_placeholders: false},
-    },
+    }.merge(__edit_lifecycle_forward_options(opts)),
   )
   return __edit_fast_apply_result(
     ctx,
