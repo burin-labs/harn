@@ -175,6 +175,12 @@
           },
           "type": "array"
         },
+        "observability": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
         "replay_fixture": {
           "type": [
             "object",
