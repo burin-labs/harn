@@ -8626,8 +8626,9 @@
       "tool_support": {
         "native": true,
         "text": true,
-        "preferred_format": "native",
-        "parity": "unknown",
+        "preferred_format": "text",
+        "parity": "native_unreliable",
+        "parity_notes": "GLM-5.x's native channel emits `<tool_call><arg_key>...` markup as content instead of OpenAI message.tool_calls — a weight-intrinsic behavior reproduced across every GLM-5 host probed (zai/Baseten live, Together + OpenRouter agent-loop smoke, DeepInfra, Fireworks glm-5p*). NVIDIA serves the same weights, so the same leak applies; pin the clean heredoc text channel for family parity. Flagged by the native_unreliable-family consistency gate.",
         "tool_search": []
       },
       "structured_output": "native",
