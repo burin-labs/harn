@@ -30,6 +30,7 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &AGENT_SESSION_SNAPSHOT_BUILTIN_DEF,
     &AGENT_SESSION_ANCESTRY_BUILTIN_DEF,
     &AGENT_SESSION_CURRENT_ID_BUILTIN_DEF,
+    &AGENT_SESSION_RECORD_CHANGED_PATH_BUILTIN_DEF,
     &AGENT_SESSION_ACTOR_CHAIN_BUILTIN_DEF,
     &ACTOR_CHAIN_VALIDATE_SCOPE_ATTENUATION_BUILTIN_DEF,
     &AGENT_SESSION_TOOL_FORMAT_BUILTIN_DEF,
@@ -607,6 +608,34 @@ fn agent_session_current_id_builtin(
     Ok(agent_sessions::current_session_id()
         .map(|id| VmValue::String(arcstr::ArcStr::from(id)))
         .unwrap_or(VmValue::Nil))
+}
+
+#[harn_builtin(
+    sig = "agent_session_record_changed_path(path: string, session_id?: string) -> bool",
+    category = "agent.session",
+    doc = "Record `path` as mutated by an agent session so the sub-agent receipt's \
+           `files_written` includes host-side edits. Writes that go through host \
+           workspace capabilities (e.g. a product host's `edit`/`write_file`) bypass \
+           the hostlib write chokepoint (`auto_capture_for_write`) that normally \
+           populates the per-session changed-path set, so the host must report them \
+           here. Defaults to the innermost active session. Returns whether a \
+           non-empty session id and path were resolved to attribute the write to."
+)]
+fn agent_session_record_changed_path_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let path = arg_string_required(args, 0, "agent_session_record_changed_path", "path")?;
+    let session_id = arg_string_opt(args, 1, "agent_session_record_changed_path", "session_id")?
+        .filter(|id| !id.trim().is_empty())
+        .or_else(agent_sessions::current_session_id);
+    match session_id {
+        Some(session_id) if !session_id.trim().is_empty() && !path.trim().is_empty() => {
+            agent_sessions::record_session_changed_path(&session_id, &path);
+            Ok(VmValue::Bool(true))
+        }
+        _ => Ok(VmValue::Bool(false)),
+    }
 }
 
 #[harn_builtin(
@@ -1906,6 +1935,82 @@ mod tests {
         let current = call_current_id_builtin();
         crate::agent_sessions::pop_current_session();
         assert!(matches!(current, VmValue::String(value) if value.as_str() == "unit-test-session"));
+    }
+
+    fn call_builtin_with_args(name: &str, args: Vec<VmValue>) -> VmValue {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        rt.block_on(async {
+            let local = tokio::task::LocalSet::new();
+            local
+                .run_until(async {
+                    let mut vm = crate::Vm::new();
+                    crate::register_vm_stdlib(&mut vm);
+                    vm.call_named_builtin(name, args)
+                        .await
+                        .expect("builtin call")
+                })
+                .await
+        })
+    }
+
+    #[test]
+    fn record_changed_path_builtin_attributes_to_current_session() {
+        // The receipt's `files_written` drains `take_session_changed_paths`, and
+        // host-side edits (which bypass the hostlib write chokepoint) must reach
+        // that store through this builtin or they vanish from the receipt.
+        crate::reset_thread_local_state();
+        let session = "record-changed-path-session";
+        crate::agent_sessions::clear_session_changed_paths(session);
+        crate::agent_sessions::push_current_session(session.to_string());
+        let recorded = call_builtin_with_args(
+            "agent_session_record_changed_path",
+            vec![VmValue::String(arcstr::ArcStr::from(
+                "test/users.integration.test.ts",
+            ))],
+        );
+        crate::agent_sessions::pop_current_session();
+        assert!(matches!(recorded, VmValue::Bool(true)));
+        assert_eq!(
+            crate::agent_sessions::take_session_changed_paths(session),
+            vec!["test/users.integration.test.ts".to_string()],
+            "the builtin must record under the active session so the receipt drains it"
+        );
+    }
+
+    #[test]
+    fn record_changed_path_builtin_no_session_records_nothing() {
+        // Outside any active session (and with no explicit id), there is nothing
+        // to attribute to: the builtin must be a no-op returning false, never
+        // recording under an empty key.
+        crate::reset_thread_local_state();
+        let recorded = call_builtin_with_args(
+            "agent_session_record_changed_path",
+            vec![VmValue::String(arcstr::ArcStr::from("test/orphan.ts"))],
+        );
+        assert!(matches!(recorded, VmValue::Bool(false)));
+        assert!(crate::agent_sessions::take_session_changed_paths("").is_empty());
+    }
+
+    #[test]
+    fn record_changed_path_builtin_honors_explicit_session_argument() {
+        crate::reset_thread_local_state();
+        let session = "record-changed-path-explicit";
+        crate::agent_sessions::clear_session_changed_paths(session);
+        let recorded = call_builtin_with_args(
+            "agent_session_record_changed_path",
+            vec![
+                VmValue::String(arcstr::ArcStr::from("src/orders.ts")),
+                VmValue::String(arcstr::ArcStr::from(session)),
+            ],
+        );
+        assert!(matches!(recorded, VmValue::Bool(true)));
+        assert_eq!(
+            crate::agent_sessions::take_session_changed_paths(session),
+            vec!["src/orders.ts".to_string()]
+        );
     }
 
     #[test]
