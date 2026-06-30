@@ -17,6 +17,9 @@ mod sqlite;
 mod util;
 
 #[cfg(test)]
+pub(crate) use util::pin_test_occurred_at_ms;
+
+#[cfg(test)]
 mod tests;
 
 pub use file::FileEventLog;

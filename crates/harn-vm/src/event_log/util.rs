@@ -198,7 +198,55 @@ fn fsync_file(path: &Path) -> std::io::Result<()> {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Test-only pin for the timestamp stamped onto freshly constructed
+    /// `LogEvent`s. Defaults to `None`, and the setter below is `#[cfg(test)]`,
+    /// so production builds never observe it — `now_ms` falls straight through
+    /// to the real wall clock. Tests that need strictly-increasing event
+    /// timestamps pin explicit values here instead of sleeping between
+    /// `now_utc()` captures.
+    static TEST_OCCURRED_AT_MS: std::cell::Cell<Option<i64>> = const { std::cell::Cell::new(None) };
+}
+
+/// Pin (or clear) the `occurred_at_ms` value handed to new `LogEvent`s on the
+/// current thread. Test-only. Pass `None` to fall back to the real wall clock.
+#[cfg(test)]
+pub(crate) fn set_test_occurred_at_ms(value: Option<i64>) {
+    TEST_OCCURRED_AT_MS.with(|cell| cell.set(value));
+}
+
+/// RAII guard that clears the per-thread `occurred_at_ms` pin on drop so a
+/// test cannot leak its pinned clock into a sibling test on the same thread.
+#[cfg(test)]
+pub(crate) struct TestOccurredAtGuard {
+    previous: Option<i64>,
+}
+
+#[cfg(test)]
+impl Drop for TestOccurredAtGuard {
+    fn drop(&mut self) {
+        set_test_occurred_at_ms(self.previous);
+    }
+}
+
+/// Pin the event-log timestamp to `value` and return a guard that clears it on
+/// drop. Test-only.
+#[cfg(test)]
+pub(crate) fn pin_test_occurred_at_ms(value: i64) -> TestOccurredAtGuard {
+    let previous = TEST_OCCURRED_AT_MS.with(|cell| {
+        let previous = cell.get();
+        cell.set(Some(value));
+        previous
+    });
+    TestOccurredAtGuard { previous }
+}
+
 pub(super) fn now_ms() -> i64 {
+    #[cfg(test)]
+    if let Some(value) = TEST_OCCURRED_AT_MS.with(std::cell::Cell::get) {
+        return value;
+    }
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_millis() as i64)
