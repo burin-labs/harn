@@ -727,6 +727,16 @@ async fn execute_conformance_source(
     harn_vm::reset_thread_local_state();
     install_cli_llm_mock_mode(llm_mock_mode)
         .map_err(|error| format!("llm mock setup error: {error}"))?;
+    let state_temp_dir = tempfile::Builder::new()
+        .prefix("harn-conformance-state-")
+        .tempdir()
+        .map_err(|error| format!("tempdir for conformance state: {error}"))?;
+    let state_dir = state_temp_dir.path().join(".harn");
+    std::fs::create_dir_all(&state_dir)
+        .map_err(|error| format!("create conformance state dir: {error}"))?;
+    let state_dir = state_dir.to_string_lossy().into_owned();
+    let _state_dir_guard =
+        ScopedEnvVar::set(harn_vm::runtime_paths::HARN_STATE_DIR_ENV, &state_dir);
     let harness_sidecar = match testbench.harness.as_ref() {
         Some(path) => Some(HarnessSidecar::load(path)?),
         None => None,
