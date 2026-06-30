@@ -17,6 +17,7 @@ import { agent_loop_options, agent_tool_format } from "std/agent/options"
 import {
   agent_apply_tool_surface_narrowing,
   agent_compute_post_turn,
+  agent_compute_terminal_callback,
   agent_reset_tool_surface_narrowing,
 } from "std/agent/postturn"
 import {
@@ -2500,6 +2501,20 @@ fn __agent_loop_record_budget_stop(decisions, iteration, current_max, reason) {
   )
 }
 
+fn __agent_loop_record_terminal_callback_continue(decisions, iteration, old_limit, new_limit) {
+  return decisions
+    .push(
+    {
+      iteration: iteration,
+      action: "extend",
+      old_limit: old_limit,
+      new_limit: new_limit,
+      reason: "terminal_callback_continue",
+      status: "",
+    },
+  )
+}
+
 fn __agent_loop_state_budget_fields(
   session_id,
   totals,
@@ -3137,6 +3152,21 @@ fn __agent_loop_wrapup_eligible_status(final_status) {
     || final_status == "stuck"
 }
 
+fn __agent_loop_terminal_callback_continue_allowed(final_status, stop_reason) {
+  if final_status == "stuck" {
+    return true
+  }
+  return final_status == "budget_exhausted" && (stop_reason ?? "") == "max_iterations"
+}
+
+fn __agent_loop_terminal_callback_extend_by(budget) {
+  let by = budget?.extend_by ?? 0
+  if type_of(by) == "int" && by > 0 {
+    return by
+  }
+  return 1
+}
+
 /**
  * Forced terminal wrap-up turn. When the loop exits on exhaustion/cap while the
  * last turn still called tools, the surfaced final text would otherwise be a
@@ -3258,6 +3288,7 @@ fn __agent_loop_run(message, session, initial_opts) {
       0
     }
     var in_terminal_verify_reserve = false
+    var terminal_callback_continues = 0
     while true {
       while iteration < current_max {
         let boundary_exhaustion = __agent_loop_budget_exhaustion(
@@ -4233,6 +4264,47 @@ fn __agent_loop_run(message, session, initial_opts) {
           continue
         }
         stop_reason = "reserved_terminal_verify_failed"
+      }
+      if final_status != ""
+        && suspend_result == nil
+        && terminal_error == nil
+        && terminal_callback_continues == 0
+        && __agent_loop_terminal_callback_continue_allowed(final_status, stop_reason) {
+        let terminal_outcome = agent_compute_terminal_callback(
+          session,
+          opts,
+          {
+            iteration: iteration,
+            final_status: final_status,
+            stop_reason: stop_reason ?? "",
+            max_iterations: current_max,
+            iteration_budget: budget,
+          },
+        )
+        if terminal_outcome.kind == "continue" {
+          terminal_callback_continues = terminal_callback_continues + 1
+          opts = __apply_post_turn_options(opts, terminal_outcome)
+          let old_limit = current_max
+          let extra = __agent_loop_terminal_callback_extend_by(budget)
+          current_max = max(current_max, iteration + extra)
+          budget_decisions = __agent_loop_record_terminal_callback_continue(budget_decisions, iteration, old_limit, current_max)
+          agent_emit_event(
+            session.session_id,
+            "loop_control_decision",
+            {
+              iteration: iteration,
+              action: "extend",
+              old_limit: old_limit,
+              new_limit: current_max,
+              reason: "terminal_callback_continue",
+              status: "",
+            },
+          )
+          final_status = ""
+          stop_reason = nil
+          budget_exhausted_emitted = false
+          continue
+        }
       }
       break
     }

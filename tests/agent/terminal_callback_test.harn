@@ -1,0 +1,55 @@
+// Run: harn test tests/agent/terminal_callback_test.harn
+//
+// In-process regression coverage for terminal callback rescue. This uses the
+// mock LLM script and explicit callback verdicts, so it proves the loop
+// mechanics without sleeps, wall-clock polling, API calls, or broad eval
+// machinery.
+import { llm_text, with_llm_script } from "std/testing"
+
+pipeline test_terminal_callback_can_continue_max_iteration_exit(task) {
+  with_llm_script(
+    [
+      llm_text("The first turn still needs work."),
+      llm_text("The rescue turn completed the task. ##DONE##"),
+    ],
+    { ->
+      let result = agent_loop(
+        "Continue once, then finish.",
+        nil,
+        {
+          provider: "mock",
+          loop_until_done: true,
+          iteration_budget: {mode: "fixed", initial: 1, max: 1, extend_by: 0, expose_decisions: true},
+          post_turn_callback: { _info -> return {message: "Keep going until the done sentinel is present."} },
+          terminal_callback: { info ->
+            assert_eq(info?.final_status, "budget_exhausted")
+            assert_eq(info?.stop_reason, "max_iterations")
+            assert(info?.budget_exhausted ?? false, "payload must expose a budget_exhausted boolean")
+            return {
+              message: "Terminal callback granted a bounded rescue turn.",
+              next_options: {llm_options: {temperature: 0.0}},
+            }
+          },
+        },
+      )
+      assert_eq(result.status, "done")
+      assert(result.llm.iterations >= 2, "terminal callback must allow the scripted rescue turn")
+      let decisions = result?.adaptive_budget?.decisions ?? []
+      assert(
+        len(decisions) > 0 && decisions[len(decisions) - 1]?.reason == "terminal_callback_continue",
+        "adaptive budget decisions should record the terminal rescue extension",
+      )
+      let messages = result?.transcript?.messages ?? []
+      var saw_terminal_feedback = false
+      for message in messages {
+        if contains(message?.content ?? "", "<runtime_feedback kind=\"terminal_callback\">") {
+          saw_terminal_feedback = true
+        }
+      }
+      assert(
+        saw_terminal_feedback,
+        "terminal callback feedback should be labeled separately from post_turn feedback",
+      )
+    },
+  )
+}

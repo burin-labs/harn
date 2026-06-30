@@ -105,6 +105,15 @@ fn __interpret_verdict(verdict) {
   return {kind: "none"}
 }
 
+fn __terminal_callback_verdict(opts, payload) {
+  let cb = opts?.terminal_callback
+  if cb == nil {
+    return {kind: "none"}
+  }
+  let verdict = cb(payload)
+  return __interpret_verdict(verdict)
+}
+
 fn __successful_tool_names(dispatch) {
   return __tool_names_by_status(dispatch, true)
 }
@@ -576,19 +585,19 @@ fn __completion_result(opts, payload, stop_reason) {
   return {kind: "break", stop_reason: stop_reason, needs_verify: false, done_judge_due: false}
 }
 
-fn __post_turn_verdict_result(session, opts, verdict) {
+fn __post_turn_verdict_result(session, opts, verdict, feedback_kind = "post_turn") {
   if verdict.kind == "stop" {
     return {kind: "break", stop_reason: "post_turn_stop", needs_verify: opts?.verify_completion != nil}
   }
   if verdict.kind == "inject" {
-    agent_session_inject_feedback(session.session_id, "post_turn", verdict.message)
+    agent_session_inject_feedback(session.session_id, feedback_kind, verdict.message)
     return {kind: "continue"}
   }
   if verdict.kind != "rich" {
     return nil
   }
   if verdict.message != nil {
-    agent_session_inject_feedback(session.session_id, "post_turn", verdict.message)
+    agent_session_inject_feedback(session.session_id, feedback_kind, verdict.message)
   }
   if verdict.stop {
     let stop_reason = if verdict?.stop_reason != nil && verdict.stop_reason != "" {
@@ -1071,7 +1080,7 @@ pub fn agent_compute_post_turn(session, llm_result, dispatch, opts, iteration) {
     )
   }
   let verdict = __post_turn_callback_verdict(opts, payload)
-  let verdict_result = __post_turn_verdict_result(session, opts, verdict)
+  let verdict_result = __post_turn_verdict_result(session, opts, verdict, "terminal_callback")
   if verdict_result != nil {
     return __post_turn_with_narrowing(verdict_result, narrowing)
   }
@@ -1097,6 +1106,49 @@ pub fn agent_compute_post_turn(session, llm_result, dispatch, opts, iteration) {
     {kind: "continue", done_judge_due: false, nudged_this_turn: confirmation_nudged || action_nudged},
     narrowing,
   )
+}
+
+/**
+ * agent_compute_terminal_callback gives host policy one bounded chance to
+ * transform a non-successful loop terminal (for example max-iteration exhaustion
+ * over a still-red workspace) into a normal continuation with `next_options`.
+ * It intentionally uses a distinct `terminal_callback` option instead of
+ * replaying `post_turn_callback`, so ordinary no-tool/no-write nudges do not
+ * accidentally reinterpret every terminal budget exit as a normal turn.
+ *
+ * @effects: [host]
+ * @errors: []
+ */
+pub fn agent_compute_terminal_callback(session, opts, terminal) {
+  let payload = {
+    session_id: session.session_id,
+    session: {id: session.session_id},
+    terminal: true,
+    iteration: terminal?.iteration ?? 0,
+    final_status: terminal?.final_status ?? "",
+    stop_reason: terminal?.stop_reason ?? "",
+    budget_exhausted: (terminal?.final_status ?? "") == "budget_exhausted",
+    max_iterations: terminal?.max_iterations ?? 0,
+    iteration_budget: terminal?.iteration_budget,
+    has_tool_calls: false,
+    dispatch: {results: []},
+    tool_results: [],
+    tool_count: 0,
+    tool_names: [],
+    successful_tool_names: [],
+    rejected_tool_names: [],
+    session_successful_tools: opts?._session_successful_tools ?? [],
+    session_rejected_tools: opts?._session_rejected_tools ?? [],
+    text: "",
+    visible_text: "",
+    last_assistant_text: "",
+  }
+  let verdict = __terminal_callback_verdict(opts, payload)
+  let verdict_result = __post_turn_verdict_result(session, opts, verdict)
+  if verdict_result != nil {
+    return verdict_result
+  }
+  return {kind: "none"}
 }
 
 fn visible_text_excerpt(text) {
