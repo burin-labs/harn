@@ -221,6 +221,7 @@ pub(crate) fn spawn_long_running_with_options(
     let handle_id = format!("hto-{:x}-{id}", std::process::id());
     let command_id = proc::next_command_id();
     let started_at = proc::now_rfc3339();
+    let _artifacts = proc::register_live_artifacts(&command_id, Some(&handle_id))?;
 
     let mut all_argv = vec![program];
     all_argv.extend(args.iter().cloned());

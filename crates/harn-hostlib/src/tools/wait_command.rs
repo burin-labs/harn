@@ -6,9 +6,12 @@ use harn_vm::VmValue;
 
 use crate::error::HostlibError;
 use crate::tools::payload::{optional_string, optional_u64, require_dict_arg, require_string};
+use crate::tools::proc;
 use crate::tools::response::ResponseBuilder;
 
 pub(crate) const NAME: &str = "hostlib_tools_wait_command";
+
+const RUNNING_INLINE_OUTPUT_MAX_BYTES: u64 = 32 * 1024;
 
 pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let map = require_dict_arg(NAME, args)?;
@@ -44,12 +47,30 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         }
     }
 
-    Ok(ResponseBuilder::new()
-        .str("handle_id", handle_id)
+    let mut builder = ResponseBuilder::new()
+        .str("handle_id", handle_id.clone())
         .str("status", "running")
         .bool("completed", false)
-        .bool("timed_out", false)
-        .build())
+        .bool("timed_out", false);
+    if let Some(artifacts) = proc::live_artifact_snapshot(None, Some(&handle_id)) {
+        builder = builder
+            .str("output_path", artifacts.output_path.display().to_string())
+            .str("stdout_path", artifacts.stdout_path.display().to_string())
+            .str("stderr_path", artifacts.stderr_path.display().to_string())
+            .int("line_count", artifacts.line_count as i64)
+            .int("byte_count", artifacts.byte_count as i64)
+            .str("output_sha256", artifacts.output_sha256);
+        if let Some(output) =
+            proc::live_artifact_tail(None, Some(&handle_id), RUNNING_INLINE_OUTPUT_MAX_BYTES)
+        {
+            if !output.is_empty() {
+                builder = builder
+                    .str("combined", output.clone())
+                    .str("inline_output", output);
+            }
+        }
+    }
+    Ok(builder.build())
 }
 
 fn drain_matching_result(session_id: &str, handle_id: &str) -> Option<VmValue> {

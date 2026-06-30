@@ -658,6 +658,7 @@ fn run_command_long_running_returns_handle_immediately() {
     );
     assert_eq!(require_str(&resp, "status"), "running");
     assert!(require_str(&resp, "command_id").starts_with("cmd_"));
+    let output_path = require_str(&resp, "output_path");
     assert!(require_int(&resp, "pid") > 0);
     assert!(require_int(&resp, "process_group_id") > 0);
     assert!(require_str(&resp, "started_at").contains('T'));
@@ -666,6 +667,13 @@ fn run_command_long_running_returns_handle_immediately() {
         cmd.contains("sleep"),
         "command should contain 'sleep', got {cmd}"
     );
+
+    let mut read_req = dict();
+    read_req.insert("handle_id".into(), vstr(&handle_id));
+    let read_resp = require_dict(call("hostlib_tools_read_command_output", read_req).unwrap());
+    assert_eq!(require_str(&read_resp, "path"), output_path);
+    assert_eq!(require_int(&read_resp, "total_bytes"), 0);
+    assert_eq!(require_str(&read_resp, "content"), "");
 
     // Block on waiter completion before returning so the test stays
     // deterministic — cancel signals the notifier itself.
@@ -732,6 +740,23 @@ fn run_command_background_after_returns_progress_snapshot() {
     assert_eq!(require_str(&resp, "stdout"), "started\n");
     assert!(require_str(&resp, "output_path").contains("harn-command-"));
     let handle_id = require_str(&resp, "handle_id");
+
+    let mut read_req = dict();
+    read_req.insert("handle_id".into(), vstr(&handle_id));
+    read_req.insert("length".into(), VmValue::Int(200));
+    let read_resp = require_dict(call("hostlib_tools_read_command_output", read_req).unwrap());
+    assert_eq!(require_str(&read_resp, "content"), "started\n");
+    assert!(require_str(&read_resp, "path").contains("combined.txt"));
+    assert_eq!(require_int(&read_resp, "total_bytes"), 8);
+
+    let mut wait_req = dict();
+    wait_req.insert("handle_id".into(), vstr(&handle_id));
+    wait_req.insert("timeout_ms".into(), VmValue::Int(0));
+    let waited = require_dict(call("hostlib_tools_wait_command", wait_req).unwrap());
+    assert_eq!(require_str(&waited, "status"), "running");
+    assert_eq!(require_str(&waited, "combined"), "started\n");
+    assert_eq!(require_str(&waited, "inline_output"), "started\n");
+    assert_eq!(require_int(&waited, "byte_count"), 8);
 
     let completion_rx = register_completion_notifier(&handle_id);
     let mut cancel_req = dict();
@@ -903,6 +928,9 @@ fn wait_command_reports_running_when_handle_has_not_completed() {
     assert_eq!(require_str(&waited, "status"), "running");
     assert_eq!(require_str(&waited, "handle_id"), handle_id);
     assert!(!require_bool(&waited, "completed"));
+    assert!(require_str(&waited, "output_path").contains("combined.txt"));
+    assert_eq!(require_int(&waited, "byte_count"), 0);
+    assert_eq!(require_int(&waited, "line_count"), 0);
 
     let mut cancel_req = dict();
     cancel_req.insert("handle_id".into(), vstr(&handle_id));
