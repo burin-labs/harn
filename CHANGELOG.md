@@ -8,6 +8,32 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.161
+
+### Added
+
+- Added opt-in `poll_command`, `wait_command`, and `kill_command` lifecycle tools to
+  `agent_command_tools`, backed by the existing deterministic command handle builtins.
+
+### Fixed
+
+- **Visible assistant text sanitization now strips orphan protocol residue in the
+  VM (#3757).** Final messages no longer surface truncated tool/prose markers
+  or bare internal verdict JSON as user-visible assistant text.
+- Fan-out agent workers now preserve and isolate the active host bridge across
+  cooperative awaits, so child `host_call` operations keep using the intended
+  host bridge when sibling tasks interleave.
+- Isolate `harn test conformance` runtime state per case so ignored `.harn/metadata`
+  output from earlier runs cannot make metadata fixtures flaky.
+- Prevent the project-metadata demo test from reusing persisted metadata across flake-detection iterations.
+- When a restricted policy declares no explicit `workspace_roots`, the file
+  write/read jail now falls back to the active session's workspace anchor and
+  the host-declared `HARN_PROJECT_ROOT` project before the process execution
+  cwd. Dispatched sub-agent workers running where the process cwd differs from
+  the project (the eval pattern) can now write into the project instead of
+  being rejected with a `HARN-CAP-201` sandbox violation rooted at the cwd.
+- Add a bounded terminal callback hook so agent loops can recover iteration-cap or stuck exits.
+
 ## v0.8.160
 
 ### Fixed
