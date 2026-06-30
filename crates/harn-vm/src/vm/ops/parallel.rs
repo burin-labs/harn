@@ -85,6 +85,31 @@ where
         .collect())
 }
 
+/// Wrap an inline concurrent subtask future (a `parallel` / `parallel_each` /
+/// `parallel settle` map body, or a `spawn` block) so it runs under an isolated
+/// COPY of the spawning task's FULL ambient scope — the active agent session,
+/// execution context, mutation session, and capability/approval policies — in
+/// addition to its pool-registry scope.
+///
+/// The scope snapshot is captured EAGERLY here, synchronously in the spawn
+/// loop, while the spawning task's `scope_ambient` is still swapped in, so each
+/// subtask carries the agent's CURRENT session. That session is what the hostlib
+/// write chokepoint (`fs_snapshot::auto_capture_for_write` -> `active_session_id`)
+/// reads to record `files_written`. Without it, a subtask polled while a fan-out
+/// worker's scope is swapped out (the subtasks are independent `LocalSet` tasks,
+/// not nested in the parent's poll) reads an empty/sibling session and its
+/// writes vanish from the sub-agent receipt — the single-worker path hid this
+/// because nothing competed for the thread-local there.
+fn scope_inline_subtask<F: std::future::Future + 'static>(
+    registry: Arc<crate::stdlib::pool::PoolRegistry>,
+    future: F,
+) -> impl std::future::Future<Output = F::Output> {
+    crate::orchestration::scope_ambient(
+        crate::orchestration::AmbientExecutionScope::capture_for_inline_subtask(),
+        crate::stdlib::pool::with_pool_registry_scope(registry, future),
+    )
+}
+
 async fn stream_capped_unordered<F, T>(
     futures: Vec<F>,
     cap: Option<usize>,
@@ -182,19 +207,13 @@ impl super::super::Vm {
                 task_ids.push(task_id);
                 let registry = child.pool_registry.clone();
                 let closure = closure.clone();
-                futures.push(crate::stdlib::pool::with_pool_registry_scope(
-                    registry,
-                    async move {
-                        let arg = VmValue::Int(i as i64);
-                        let result = child
-                            .call_closure_args(&closure, CallArgs::One(&arg))
-                            .await?;
-                        Ok::<(VmValue, String), VmError>((
-                            result,
-                            std::mem::take(&mut child.output),
-                        ))
-                    },
-                ));
+                futures.push(scope_inline_subtask(registry, async move {
+                    let arg = VmValue::Int(i as i64);
+                    let result = child
+                        .call_closure_args(&closure, CallArgs::One(&arg))
+                        .await?;
+                    Ok::<(VmValue, String), VmError>((result, std::mem::take(&mut child.output)))
+                }));
             }
             let _wait = self
                 .wait_for_graph
@@ -240,18 +259,15 @@ impl super::super::Vm {
                     let registry = child.pool_registry.clone();
                     let closure = closure.clone();
                     let item = item.clone();
-                    futures.push(crate::stdlib::pool::with_pool_registry_scope(
-                        registry,
-                        async move {
-                            let result = child
-                                .call_closure_args(&closure, CallArgs::One(&item))
-                                .await?;
-                            Ok::<(VmValue, String), VmError>((
-                                result,
-                                std::mem::take(&mut child.output),
-                            ))
-                        },
-                    ));
+                    futures.push(scope_inline_subtask(registry, async move {
+                        let result = child
+                            .call_closure_args(&closure, CallArgs::One(&item))
+                            .await?;
+                        Ok::<(VmValue, String), VmError>((
+                            result,
+                            std::mem::take(&mut child.output),
+                        ))
+                    }));
                 }
                 let _wait = self
                     .wait_for_graph
@@ -294,14 +310,11 @@ impl super::super::Vm {
                     let registry = child.pool_registry.clone();
                     let closure = closure.clone();
                     let item = item.clone();
-                    futures.push(crate::stdlib::pool::with_pool_registry_scope(
-                        registry,
-                        async move {
-                            child
-                                .call_closure_args(&closure, CallArgs::One(&item))
-                                .await
-                        },
-                    ));
+                    futures.push(scope_inline_subtask(registry, async move {
+                        child
+                            .call_closure_args(&closure, CallArgs::One(&item))
+                            .await
+                    }));
                 }
 
                 let (tx, rx) = tokio::sync::mpsc::channel::<Result<VmValue, VmError>>(1);
@@ -351,16 +364,13 @@ impl super::super::Vm {
                     let registry = child.pool_registry.clone();
                     let closure = closure.clone();
                     let item = item.clone();
-                    futures.push(crate::stdlib::pool::with_pool_registry_scope(
-                        registry,
-                        async move {
-                            let result = child
-                                .call_closure_args(&closure, CallArgs::One(&item))
-                                .await;
-                            let output = std::mem::take(&mut child.output);
-                            (result, output)
-                        },
-                    ));
+                    futures.push(scope_inline_subtask(registry, async move {
+                        let result = child
+                            .call_closure_args(&closure, CallArgs::One(&item))
+                            .await;
+                        let output = std::mem::take(&mut child.output);
+                        (result, output)
+                    }));
                 }
                 let _wait = self
                     .wait_for_graph
@@ -419,14 +429,11 @@ impl super::super::Vm {
             child.cancel_token = Some(cancel_token.clone());
             let registry = child.pool_registry.clone();
             let scheduled_activity = self.wait_for_graph.register_task(runtime_task_id.clone());
-            let handle = tokio::task::spawn_local(crate::stdlib::pool::with_pool_registry_scope(
-                registry,
-                async move {
-                    let _scheduled_activity = scheduled_activity;
-                    let result = child.call_closure_args(&closure, CallArgs::Empty).await?;
-                    Ok((result, std::mem::take(&mut child.output)))
-                },
-            ));
+            let handle = tokio::task::spawn_local(scope_inline_subtask(registry, async move {
+                let _scheduled_activity = scheduled_activity;
+                let result = child.call_closure_args(&closure, CallArgs::Empty).await?;
+                Ok((result, std::mem::take(&mut child.output)))
+            }));
             self.spawned_tasks.insert(
                 task_id.clone(),
                 VmTaskHandle {
