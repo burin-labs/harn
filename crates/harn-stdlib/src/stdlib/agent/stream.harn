@@ -45,6 +45,89 @@ fn __stream_drop_keys(d, keys) {
   return out
 }
 
+fn __stream_is_verdict_json_blob(text) -> bool {
+  let trimmed = trim(__stream_string(text))
+  if trimmed == "" || !starts_with(trimmed, "{") || !ends_with(trimmed, "}") {
+    return false
+  }
+  let parsed = try {
+    json_parse(trimmed)
+  }
+  if is_err(parsed) {
+    return false
+  }
+  let value = unwrap(parsed)
+  if type_of(value) != "dict" || !__stream_has_key(value, "verdict") {
+    return false
+  }
+  return __stream_has_key(value, "reasoning")
+    || __stream_has_key(value, "reason")
+    || __stream_has_key(value, "feedback")
+    || __stream_has_key(value, "next_step")
+    || __stream_has_key(value, "vetoed")
+}
+
+fn __stream_strip_control_residue(text: string) -> string {
+  var out = text
+  out = regex_replace_all(
+    "(?m)^[ \\t]*(?:(?:_call>|l_call>|</tool_call>|</assistant_prose>|<\\|message\\|>|<\\|channel\\|>|<\\|end\\|>)[ \\t]*)+(?:\\r?\\n|$)",
+    "",
+    out,
+  )
+  out = regex_replace_all(
+    "(?m)^[ \\t]*tool_call[ \\t]+to=[^ \\t\\r\\n]+[ \\t]+code(?:<\\|message\\|>)?.*(?:\\r?\\n|$)",
+    "",
+    out,
+  )
+  out = regex_replace_all("(?m)^[ \\t]*<assistant_prose[^\\r\\n>]*(?:\\r?\\n|$)", "", out)
+  let prose_close = "__HARN_STREAM_ASSISTANT_PROSE_CLOSE__"
+  out = out.replace("</assistant_prose>", prose_close)
+  out = regex_replace_all(
+    "(?m)[ \\t]*(?:(?:_call>|l_call>|</tool_call>|</assistant_pr[^\\r\\n]*|sponse>|<\\|message\\|>|<\\|channel\\|>|<\\|end\\|>)[ \\t]*)+$",
+    "",
+    out,
+  )
+  out = out.replace(prose_close, "</assistant_prose>")
+  return out
+}
+
+fn __stream_sanitized_delta(previous, visible) -> string {
+  let prior = __stream_string(previous)
+  if starts_with(visible, prior) {
+    return visible[len(prior):len(visible)]
+  }
+  return ""
+}
+
+/**
+ * Remove malformed model control-token residue from finalized visible text.
+ *
+ * This is a conservative presentation guard for app-facing streams. It drops
+ * line-only/trailing tool/prose marker fragments and whole-body completion
+ * judge JSON, while leaving ordinary prose and well-formed inline content
+ * intact.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_visible_text_sanitize(text) -> string {
+  let raw = __stream_string(text)
+  if __stream_is_verdict_json_blob(raw) {
+    return ""
+  }
+  let stripped_raw = __stream_strip_control_residue(raw)
+  let stripped = if stripped_raw != raw {
+    regex_replace_all("[ \\t]*(?:\\r?\\n)+$", "", stripped_raw)
+  } else {
+    stripped_raw
+  }
+  if __stream_is_verdict_json_blob(stripped) {
+    return ""
+  }
+  return stripped
+}
+
 fn __stream_private_config(config) {
   let cfg = __stream_dict(config)
   let nested = __stream_dict(cfg?.private)
@@ -216,7 +299,9 @@ pub fn agent_private_stream_finish(state = nil, config = nil) {
     final_delta = pending
     pending = ""
   }
-  let visible = __stream_string(existing?.visible_text) + final_delta
+  let prior_visible = __stream_string(existing?.visible_text)
+  let visible = agent_visible_text_sanitize(prior_visible + final_delta)
+  let sanitized_delta = __stream_sanitized_delta(prior_visible, visible)
   let next = existing
     + {
     config: cfg,
@@ -230,7 +315,7 @@ pub fn agent_private_stream_finish(state = nil, config = nil) {
     ok: true,
     text: __stream_string(existing?.raw_text),
     visible_text: visible,
-    visible_delta: final_delta,
+    visible_delta: sanitized_delta,
     private_open: private_open,
     withheld_suffix: len(pending) > 0,
     unterminated_private: private_open,
@@ -284,12 +369,14 @@ pub fn agent_stream_call(prompt, system = nil, options = nil) {
     true
   }
   if is_err(consumed) {
+    let sanitized = agent_visible_text_sanitize(state.visible_text)
+    state = state + {visible_text: sanitized}
     var result = {
       ok: false,
       status: "stream_interrupt",
       error: unwrap_err(consumed),
       text: state.raw_text,
-      visible_text: state.visible_text,
+      visible_text: sanitized,
       chunks: state.chunks,
       finish_reason: finish_reason,
       state: state,

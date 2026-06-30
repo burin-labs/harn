@@ -3,6 +3,7 @@ import {
   agent_private_stream_finish,
   agent_private_stream_state,
   agent_private_text_filter,
+  agent_visible_text_sanitize,
 } from "std/agent/stream"
 
 pipeline default() {
@@ -27,4 +28,15 @@ pipeline default() {
   __io_println("[" + a.visible_delta + "]")
   __io_println("[" + b.visible_text + "]")
   __io_println(b.withheld_suffix)
+  __io_println(agent_visible_text_sanitize("Implemented the fix.</assistant_pr\n_call>_call>"))
+  __io_println(
+    agent_visible_text_sanitize("<assistant_prose>Ready.</assistant_prose>\nedit({path:\"a\"})"),
+  )
+  __io_println(
+    "[" + agent_visible_text_sanitize("{\"verdict\":\"done\",\"reasoning\":\"the loop is stuck\"}")
+      + "]",
+  )
+  __io_println(
+    agent_visible_text_sanitize("tool_call to=edit code<|message|>{\"path\":\"a\"}\nDone."),
+  )
 }
