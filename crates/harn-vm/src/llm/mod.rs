@@ -247,7 +247,7 @@ pub use self::agent_config::{
 pub use self::agent_runtime::{current_agent_session_id, register_session_end_hook};
 pub(crate) use self::agent_runtime::{
     current_host_bridge, emit_agent_event_sync as emit_live_agent_event_sync,
-    emit_agent_event_with_ctx as emit_live_agent_event_with_ctx,
+    emit_agent_event_with_ctx as emit_live_agent_event_with_ctx, swap_current_host_bridge,
 };
 pub use self::api::fetch_provider_max_context;
 pub(crate) use self::api::vm_call_llm_full;

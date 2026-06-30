@@ -182,6 +182,12 @@ pub(crate) fn clear_current_host_bridge() {
     });
 }
 
+pub(crate) fn swap_current_host_bridge(
+    bridge: Option<Arc<crate::bridge::HostBridge>>,
+) -> Option<Arc<crate::bridge::HostBridge>> {
+    CURRENT_HOST_BRIDGE.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), bridge))
+}
+
 pub(crate) fn current_host_bridge() -> Option<Arc<crate::bridge::HostBridge>> {
     CURRENT_HOST_BRIDGE.with(|slot| slot.borrow().clone())
 }
