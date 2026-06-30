@@ -28,6 +28,68 @@ env:
   RUSTFLAGS: "-D warnings"
 
 jobs:
+  # Decide whether the heavy Linux Rust lanes (rust-builds, audit-scripts) need
+  # to run at all.
+  #
+  # SAFETY PRINCIPLE — prune for PR fast feedback, run comprehensive on the
+  # merge-queue speculative commit and the post-merge backstop. Coarse
+  # path-filtering is sound for `pull_request` events: a PR that touches only
+  # docs/website/markdown cannot regress the Rust build, so the ~45 paid
+  # Linux-min those four matrix lanes cost are pure waste. But the merge queue
+  # (`merge_group`) builds a speculative merge commit (target + earlier-queued
+  # PRs + this PR) and is the ONLY place a cross-PR interaction regression is
+  # caught; `push` to main is the post-merge backstop. On those events we MUST
+  # NOT prune — the `force` step below overrides the filter to `'true'` on
+  # `merge_group` / `push`. Do not wire the downstream `if:`s back to the raw
+  # `steps.filter.outputs.*`; they must read `steps.force.outputs.*`.
+  #
+  # The filter is an EXCLUSION list with `predicate-quantifier: every`: a file
+  # only fails to mark `rust=true` when it matches EVERY pattern, i.e. it is
+  # under neither `docs/` nor `website/` and is not a `*.md` file. Any
+  # Rust/Cargo/toolchain/workflow/script/Makefile/conformance/spec/pipeline/
+  # fixture change — anything that is not purely docs — runs the heavy lanes.
+  # When in doubt, RUN.
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      rust: ${{ steps.force.outputs.rust }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+        id: filter
+        with:
+          predicate-quantifier: every
+          filters: |
+            rust:
+              - '**/*'
+              - '!docs/**'
+              - '!website/**'
+              - '!**/*.md'
+      - name: Resolve heavy-lane gate (force on merge_group / push)
+        id: force
+        # `pull_request`: honour the paths filter — a docs/website/markdown-only
+        #   PR skips the heavy Linux Rust lanes for fast, cheap feedback.
+        # `merge_group` / `push`: force `rust=true` — the speculative merge
+        #   commit and the post-merge backstop must run the full suite so a
+        #   cross-PR interaction regression can't slip the queue.
+        env:
+          FORCE_ALL: ${{ github.event_name == 'merge_group' || github.event_name == 'push' }}
+          F_RUST: ${{ steps.filter.outputs.rust }}
+        run: |
+          set -euo pipefail
+          if [ "${FORCE_ALL}" = "true" ]; then
+            echo "::notice::changes: ${GITHUB_EVENT_NAME} — forcing heavy Linux Rust lanes on (merge-queue / post-merge backstop is never pruned)"
+            echo "rust=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::changes: ${GITHUB_EVENT_NAME} — heavy Linux Rust lanes gated by paths filter (rust=${F_RUST})"
+            echo "rust=${F_RUST}" >> "$GITHUB_OUTPUT"
+          fi
+
   fmt:
     name: Format check
     # Runs `make fmt-check` + a small shell script; no compilation, no cache
@@ -57,7 +119,19 @@ jobs:
   # needless minutes after the branch is already known-bad.
   rust-builds:
     name: ${{ matrix.name }}
+    needs: changes
+    # Heavy Linux Rust lanes. Skipped on a docs/website/markdown-only PR; forced
+    # on for merge_group / push (see the `changes` job). ci-status treats a skip
+    # here as PASS so branch protection isn't deadlocked.
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
+    # Linux-only: emit line-tables-only debuginfo for dev builds. Trims link
+    # time and disk on these link-bound lanes while keeping panic line numbers
+    # for nextest backtraces. NOT applied to the Windows/macOS jobs — #2127/
+    # #2128/#2129 found `line-tables-only` REGRESSED Windows compile time, and
+    # the macOS lane mirrors that decision.
+    env:
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
     strategy:
       fail-fast: true
       matrix:
@@ -222,11 +296,21 @@ jobs:
 
   audit-scripts:
     name: Audit scripts
+    needs: changes
+    # Heavy Linux lane (compiles the harn CLI via `cargo run`). Skipped on a
+    # docs/website/markdown-only PR; forced on for merge_group / push (see the
+    # `changes` job). ci-status treats a skip here as PASS.
+    if: needs.changes.outputs.rust == 'true'
     # Mixed audit gates. The first checks are pure Python / shell and stay
     # first for fast failure. Later targets run Harn scripts through
     # `cargo run --bin harn`, so restore the Rust cache before those instead
     # of making this parallel lane pay a cold CLI compile on every PR.
     runs-on: ubuntu-latest
+    # Linux-only line-tables-only debuginfo, matching rust-builds (see that
+    # job's env note). This lane compiles harn through cargo, so it benefits
+    # from the same link-time/disk trim.
+    env:
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -287,27 +371,53 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
+          # Full history on PR and push so the diff base (PR base SHA / pushed
+          # `before` SHA) is reachable for the path detection below. merge_group
+          # keeps the shallow checkout (it never diffs — run stays false).
+          fetch-depth: ${{ (github.event_name == 'pull_request' || github.event_name == 'push') && '0' || '1' }}
       - name: Detect Windows-relevant changes
         id: detect
         shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          # Previous tip of the pushed ref — the diff base for `push` events.
+          # Routed through env (never inlined into the script) to avoid a
+          # template-injection sink, matching how BASE_SHA is handled.
+          BEFORE_SHA: ${{ github.event.before || '' }}
         run: |
           set -euo pipefail
           run_windows=false
 
+          # Single source of truth for the Windows-relevant path set, shared by
+          # the pull_request and push code paths so they can never drift.
+          windows_pattern='^(Cargo\.lock|Cargo\.toml|rust-toolchain\.toml|\.config/nextest\.toml|crates/harn-vm/Cargo\.toml|crates/harn-vm/src/(process_sandbox\.rs|shells\.rs|stdlib/(process\.rs|sandbox(/|\.rs))|vm/tests_runtime\.rs)|\.github/workflows/(ci|windows-nightly|build-release-binaries|release-smoke)\.yml|scripts/(release_smoke|smoke_installed_binary)\.sh)$'
+
+          # Pick the diff base per event. push diffs against the previous tip;
+          # pull_request diffs against the PR base. merge_group leaves
+          # run_windows=false (the merge queue never path-gates the platform
+          # plan jobs — unchanged behavior).
+          diff_base=""
           if [[ "$EVENT_NAME" == "push" ]]; then
-            run_windows=true
+            diff_base="$BEFORE_SHA"
           elif [[ "$EVENT_NAME" == "pull_request" ]]; then
-            if [[ -z "$BASE_SHA" ]]; then
-              echo "windows: missing pull_request base SHA; running Windows smoke defensively."
+            diff_base="$BASE_SHA"
+          fi
+
+          if [[ "$EVENT_NAME" == "push" || "$EVENT_NAME" == "pull_request" ]]; then
+            if [[ -z "$diff_base" || "$diff_base" == "0000000000000000000000000000000000000000" ]]; then
+              # New branch / first push / force-push / missing PR base — the diff
+              # base is invalid, so run the full build defensively.
+              echo "windows: missing or zero diff base ($EVENT_NAME); running Windows smoke defensively."
+              run_windows=true
+            elif ! git diff --name-only "$diff_base" HEAD > "$RUNNER_TEMP/windows-changed-files.txt" 2>/dev/null; then
+              # Diff failed (e.g. base SHA not present) — never silently skip the
+              # backstop; run defensively.
+              echo "windows: git diff against $diff_base failed; running Windows smoke defensively."
               run_windows=true
             else
-              git diff --name-only "$BASE_SHA" HEAD > "$RUNNER_TEMP/windows-changed-files.txt"
               cat "$RUNNER_TEMP/windows-changed-files.txt"
-              if grep -E -q '^(Cargo\.lock|Cargo\.toml|rust-toolchain\.toml|\.config/nextest\.toml|crates/harn-vm/Cargo\.toml|crates/harn-vm/src/(process_sandbox\.rs|shells\.rs|stdlib/(process\.rs|sandbox(/|\.rs))|vm/tests_runtime\.rs)|\.github/workflows/(ci|windows-nightly|build-release-binaries|release-smoke)\.yml|scripts/(release_smoke|smoke_installed_binary)\.sh)$' "$RUNNER_TEMP/windows-changed-files.txt"; then
+              if grep -E -q "$windows_pattern" "$RUNNER_TEMP/windows-changed-files.txt"; then
                 run_windows=true
               fi
             fi
@@ -435,36 +545,61 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
+          # Full history on PR and push so the diff base (PR base SHA / pushed
+          # `before` SHA) is reachable for the path detection below. merge_group
+          # keeps the shallow checkout (it never diffs — run stays false).
+          fetch-depth: ${{ (github.event_name == 'pull_request' || github.event_name == 'push') && '0' || '1' }}
       - name: Detect macOS-relevant changes
         id: detect
         shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          # Previous tip of the pushed ref — the diff base for `push` events.
+          # Routed through env (never inlined into the script) to avoid a
+          # template-injection sink, matching how BASE_SHA is handled.
+          BEFORE_SHA: ${{ github.event.before || '' }}
         run: |
           set -euo pipefail
           run_macos=false
 
+          # Single source of truth for the macOS-relevant path set, shared by
+          # the pull_request and push code paths so they can never drift.
+          # Route on the files that carry `#[cfg(target_os = "macos")]`
+          # (or `cfg(any(macos, windows))`) code. Linux PR lanes never
+          # compile these paths, so a stray unused import / dead_code /
+          # deprecation only surfaces on a Mac — historically at release
+          # `prepare` time under `-D warnings`. Keep this list in sync with
+          # `grep -rl 'target_os = "macos"' crates/` plus the workflow
+          # itself and the Cargo graph roots. When in doubt, the daily
+          # macos-nightly.yml backstop covers the rest.
+          macos_pattern='^(Cargo\.lock|Cargo\.toml|rust-toolchain\.toml|\.config/nextest\.toml|crates/harn-vm/src/(shells\.rs|stdlib/(process\.rs|sandbox(/|\.rs))|vm/tests_runtime\.rs)|crates/harn-vm/tests/sandbox_hardened\.rs|crates/harn-hostlib/(src/(secret_store(/|\.rs)|tools/proc\.rs)|tests/(secret_store_os_native|sandbox_npm_offline_install)\.rs)|crates/harn-cli/src/(commands/(test|upgrade|doctor|quickstart|hardware|models/install)\.rs|package/manifest\.rs)|\.github/workflows/(ci|macos-nightly|build-release-binaries|release-smoke)\.yml|scripts/(release_smoke|smoke_installed_binary)\.sh)$'
+
+          # Pick the diff base per event. push diffs against the previous tip;
+          # pull_request diffs against the PR base. merge_group leaves
+          # run_macos=false (the merge queue never path-gates the platform plan
+          # jobs — unchanged behavior).
+          diff_base=""
           if [[ "$EVENT_NAME" == "push" ]]; then
-            run_macos=true
+            diff_base="$BEFORE_SHA"
           elif [[ "$EVENT_NAME" == "pull_request" ]]; then
-            if [[ -z "$BASE_SHA" ]]; then
-              echo "macos: missing pull_request base SHA; running macOS check defensively."
+            diff_base="$BASE_SHA"
+          fi
+
+          if [[ "$EVENT_NAME" == "push" || "$EVENT_NAME" == "pull_request" ]]; then
+            if [[ -z "$diff_base" || "$diff_base" == "0000000000000000000000000000000000000000" ]]; then
+              # New branch / first push / force-push / missing PR base — the diff
+              # base is invalid, so run the full build defensively.
+              echo "macos: missing or zero diff base ($EVENT_NAME); running macOS check defensively."
+              run_macos=true
+            elif ! git diff --name-only "$diff_base" HEAD > "$RUNNER_TEMP/macos-changed-files.txt" 2>/dev/null; then
+              # Diff failed (e.g. base SHA not present) — never silently skip the
+              # backstop; run defensively.
+              echo "macos: git diff against $diff_base failed; running macOS check defensively."
               run_macos=true
             else
-              git diff --name-only "$BASE_SHA" HEAD > "$RUNNER_TEMP/macos-changed-files.txt"
               cat "$RUNNER_TEMP/macos-changed-files.txt"
-              # Route on the files that carry `#[cfg(target_os = "macos")]`
-              # (or `cfg(any(macos, windows))`) code. Linux PR lanes never
-              # compile these paths, so a stray unused import / dead_code /
-              # deprecation only surfaces on a Mac — historically at release
-              # `prepare` time under `-D warnings`. Keep this list in sync with
-              # `grep -rl 'target_os = "macos"' crates/` plus the workflow
-              # itself and the Cargo graph roots. When in doubt, the push +
-              # merge-queue backstop and the full macos-nightly.yml cover the
-              # rest.
-              if grep -E -q '^(Cargo\.lock|Cargo\.toml|rust-toolchain\.toml|\.config/nextest\.toml|crates/harn-vm/src/(shells\.rs|stdlib/(process\.rs|sandbox(/|\.rs))|vm/tests_runtime\.rs)|crates/harn-vm/tests/sandbox_hardened\.rs|crates/harn-hostlib/(src/(secret_store(/|\.rs)|tools/proc\.rs)|tests/(secret_store_os_native|sandbox_npm_offline_install)\.rs)|crates/harn-cli/src/(commands/(test|upgrade|doctor|quickstart|hardware|models/install)\.rs|package/manifest\.rs)|\.github/workflows/(ci|macos-nightly|build-release-binaries|release-smoke)\.yml|scripts/(release_smoke|smoke_installed_binary)\.sh)$' "$RUNNER_TEMP/macos-changed-files.txt"; then
+              if grep -E -q "$macos_pattern" "$RUNNER_TEMP/macos-changed-files.txt"; then
                 run_macos=true
               fi
             fi
@@ -639,21 +774,40 @@ jobs:
     name: CI status
     runs-on: ubuntu-latest
     if: always()
-    needs: [fmt, lint-md, rust-builds, audit-scripts, windows-plan, windows, macos-plan, macos, portal, docs-site, actions, e2e]
+    needs: [changes, fmt, lint-md, rust-builds, audit-scripts, windows-plan, windows, macos-plan, macos, portal, docs-site, actions, e2e]
     steps:
       - name: Verify required CI jobs
         run: |
           declare -A results=(
+            ["Detect changes"]="${{ needs.changes.result }}"
             ["Format check"]="${{ needs.fmt.result }}"
             ["Markdown lint"]="${{ needs['lint-md'].result }}"
-            ["Rust build group"]="${{ needs['rust-builds'].result }}"
-            ["Audit scripts"]="${{ needs['audit-scripts'].result }}"
             ["Windows CI routing"]="${{ needs['windows-plan'].result }}"
             ["macOS CI routing"]="${{ needs['macos-plan'].result }}"
             ["Portal frontend"]="${{ needs.portal.result }}"
             ["Docs site"]="${{ needs['docs-site'].result }}"
             ["GitHub Actions hygiene"]="${{ needs.actions.result }}"
           )
+
+          # The heavy Linux Rust lanes (rust-builds, audit-scripts) skip on a
+          # docs/website/markdown-only PR (gated by the `changes` job) and run
+          # unconditionally on merge_group / push. Treat `skipped` as passing
+          # here so branch protection isn't deadlocked when they skip; only an
+          # actual failure should fail the gate. (The `changes` job itself stays
+          # a hard required-success above, so a filter-job failure still blocks.)
+          rust_builds_result="${{ needs['rust-builds'].result }}"
+          echo "Rust build group: $rust_builds_result"
+          if [ "$rust_builds_result" != "success" ] && [ "$rust_builds_result" != "skipped" ]; then
+            echo "::error::Rust build group failed."
+            exit 1
+          fi
+
+          audit_scripts_result="${{ needs['audit-scripts'].result }}"
+          echo "Audit scripts: $audit_scripts_result"
+          if [ "$audit_scripts_result" != "success" ] && [ "$audit_scripts_result" != "skipped" ]; then
+            echo "::error::Audit scripts failed."
+            exit 1
+          fi
 
           # The Windows job runs on `push` to main and on pull requests whose
           # diff touches Windows-sensitive process/sandbox/workflow paths. It
