@@ -727,3 +727,174 @@ fn sort_redaction_entries(value: &mut JsonValue) {
             .cmp(b.get("path").and_then(JsonValue::as_str).unwrap_or(""))
     });
 }
+
+// --- Agent-session liveness (#3682 portable suspend/resume keystone) ---
+
+fn replay_event(event_id: u64, occurred_at_ms: i64, event: AgentEvent) -> AgentSessionReplayEvent {
+    let kind = match &event {
+        AgentEvent::UserMessage { .. } => "user_message",
+        AgentEvent::AgentMessageChunk { .. } => "agent_message_chunk",
+        AgentEvent::SessionClosed { .. } => "session_closed",
+        _ => "event",
+    }
+    .to_string();
+    AgentSessionReplayEvent {
+        event_id,
+        kind,
+        occurred_at_ms,
+        event,
+    }
+}
+
+fn user_turn(session_id: &str, event_id: u64, occurred_at_ms: i64) -> AgentSessionReplayEvent {
+    replay_event(
+        event_id,
+        occurred_at_ms,
+        AgentEvent::UserMessage {
+            session_id: session_id.to_string(),
+            message_id: format!("m{event_id}"),
+            content: vec![json!({ "type": "text", "text": "do the thing" })],
+        },
+    )
+}
+
+fn assistant_turn(session_id: &str, event_id: u64, occurred_at_ms: i64) -> AgentSessionReplayEvent {
+    replay_event(
+        event_id,
+        occurred_at_ms,
+        AgentEvent::AgentMessageChunk {
+            session_id: session_id.to_string(),
+            content: "working on it".to_string(),
+        },
+    )
+}
+
+fn session_closed(
+    session_id: &str,
+    event_id: u64,
+    occurred_at_ms: i64,
+    status: &str,
+) -> AgentSessionReplayEvent {
+    replay_event(
+        event_id,
+        occurred_at_ms,
+        AgentEvent::SessionClosed {
+            session_id: session_id.to_string(),
+            reason: "done".to_string(),
+            status: status.to_string(),
+            metadata: json!({}),
+        },
+    )
+}
+
+#[test]
+fn liveness_is_closed_when_session_closed_present() {
+    let sid = "sess-closed";
+    let events = vec![
+        user_turn(sid, 1, 1_000),
+        assistant_turn(sid, 2, 1_500),
+        session_closed(sid, 3, 2_000, "succeeded"),
+    ];
+    assert_eq!(
+        agent_session_liveness(&events),
+        AgentSessionLiveness::Closed {
+            status: "succeeded".to_string(),
+            finished_at_ms: 2_000,
+        }
+    );
+}
+
+#[test]
+fn liveness_falls_back_to_completed_for_empty_close_status() {
+    let sid = "sess-empty-status";
+    let events = vec![user_turn(sid, 1, 1_000), session_closed(sid, 2, 2_000, "")];
+    let liveness = agent_session_liveness(&events);
+    assert_eq!(liveness.status(), SESSION_BUNDLE_STATUS_COMPLETED);
+    assert!(!liveness.is_suspended());
+}
+
+#[test]
+fn liveness_is_suspended_when_no_session_closed() {
+    // A live loop frozen mid-turn (or a time-traveled prefix) has no terminal
+    // SessionClosed event. It must NOT be labeled completed.
+    let sid = "sess-live";
+    let events = vec![user_turn(sid, 1, 1_000), assistant_turn(sid, 2, 1_500)];
+    let liveness = agent_session_liveness(&events);
+    assert_eq!(liveness, AgentSessionLiveness::Suspended);
+    assert!(liveness.is_suspended());
+    assert_eq!(liveness.status(), SESSION_BUNDLE_STATUS_SUSPENDED);
+}
+
+#[test]
+fn bundle_status_reflects_suspended_loop_not_completed() {
+    let sid = "sess-suspend-bundle";
+    let events = vec![user_turn(sid, 1, 1_000), assistant_turn(sid, 2, 1_500)];
+    let bundle = session_bundle_from_agent_session_events(sid, &events).expect("bundle");
+    assert_eq!(bundle.source.status, SESSION_BUNDLE_STATUS_SUSPENDED);
+    assert_eq!(bundle.source.finished_at, None);
+    assert_eq!(
+        bundle.metadata.get(SESSION_BUNDLE_LIVENESS_KEY),
+        Some(&json!("suspended"))
+    );
+    assert_eq!(
+        bundle
+            .replay
+            .replay_fixture
+            .as_ref()
+            .unwrap()
+            .expected_status,
+        SESSION_BUNDLE_STATUS_SUSPENDED
+    );
+}
+
+#[test]
+fn bundle_status_reflects_closed_loop() {
+    let sid = "sess-closed-bundle";
+    let events = vec![
+        user_turn(sid, 1, 1_000),
+        assistant_turn(sid, 2, 1_500),
+        session_closed(sid, 3, 2_000, "succeeded"),
+    ];
+    let bundle = session_bundle_from_agent_session_events(sid, &events).expect("bundle");
+    assert_eq!(bundle.source.status, "succeeded");
+    assert!(bundle.source.finished_at.is_some());
+    assert_eq!(
+        bundle.metadata.get(SESSION_BUNDLE_LIVENESS_KEY),
+        Some(&json!("closed"))
+    );
+}
+
+#[test]
+fn time_travel_prefix_is_suspended_not_completed() {
+    // Truncating a completed session to a mid-run prefix (the replay `--at`
+    // path) drops the SessionClosed event; the prefix is suspended.
+    let sid = "sess-timetravel";
+    let full = vec![
+        user_turn(sid, 1, 1_000),
+        assistant_turn(sid, 2, 1_500),
+        session_closed(sid, 3, 2_000, "succeeded"),
+    ];
+    assert!(!agent_session_liveness(&full).is_suspended());
+    let prefix = &full[..2];
+    assert_eq!(
+        agent_session_liveness(prefix),
+        AgentSessionLiveness::Suspended
+    );
+    let bundle = session_bundle_from_agent_session_events(sid, prefix).expect("bundle");
+    assert_eq!(bundle.source.status, SESSION_BUNDLE_STATUS_SUSPENDED);
+}
+
+#[test]
+fn suspended_bundle_export_is_deterministic_round_trip() {
+    // Byte-faithful freeze: re-exporting the same frozen stream yields an
+    // identical bundle (modulo nondeterministic producer/version fields), the
+    // determinism the resume side relies on.
+    let sid = "sess-determinism";
+    let events = vec![user_turn(sid, 1, 1_000), assistant_turn(sid, 2, 1_500)];
+    let first = session_bundle_from_agent_session_events(sid, &events).expect("first");
+    let second = session_bundle_from_agent_session_events(sid, &events).expect("second");
+    assert_eq!(
+        serde_json::to_value(&first).unwrap(),
+        serde_json::to_value(&second).unwrap()
+    );
+}
