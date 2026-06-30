@@ -8,15 +8,51 @@
 //! but the tape doesn't (or vice versa), this suite goes red.
 
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::thread;
 
 use harn_cli::commands::demo::scenario_ids;
-use harn_cli::commands::run::{execute_run, CliLlmMockMode, RunOutcome, RunProfileOptions};
+use harn_cli::commands::run::{
+    execute_run_with_sandbox_options, CliLlmMockMode, RunOutcome, RunProfileOptions,
+    RunSandboxOptions,
+};
 use harn_cli::env_guard::ScopedEnvVar;
 use harn_cli::tests::common::{cwd_lock, env_lock};
 
 const MANIFEST_DIR: &str = env!("CARGO_MANIFEST_DIR");
+
+struct ScopedCwd {
+    previous: PathBuf,
+}
+
+impl ScopedCwd {
+    fn enter(dir: &Path) -> Self {
+        let previous = std::env::current_dir().expect("read current dir");
+        std::env::set_current_dir(dir).expect("set isolated demo cwd");
+        Self { previous }
+    }
+}
+
+impl Drop for ScopedCwd {
+    fn drop(&mut self) {
+        let _ = std::env::set_current_dir(&self.previous);
+    }
+}
+
+fn copy_demo_assets(src: &Path, dst: &Path) {
+    fs::create_dir_all(dst).expect("create isolated demo asset dir");
+    for entry in fs::read_dir(src).expect("read demo asset dir") {
+        let entry = entry.expect("read demo asset entry");
+        let source = entry.path();
+        let target = dst.join(entry.file_name());
+        if source.is_dir() {
+            copy_demo_assets(&source, &target);
+        } else {
+            fs::copy(&source, &target).expect("copy demo asset file");
+        }
+    }
+}
 
 fn run_in_harn_runtime<F, Fut, R>(future_factory: F) -> R
 where
@@ -40,13 +76,22 @@ where
 
 fn run_demo_scenario(id: &str) -> RunOutcome {
     let assets = PathBuf::from(MANIFEST_DIR).join("assets/demo").join(id);
-    let script = assets.join("scenario.harn");
-    let tape = assets.join("tape.jsonl");
-    assert!(script.is_file(), "missing scenario.harn for {id}");
-    assert!(tape.is_file(), "missing tape.jsonl for {id}");
+    assert!(
+        assets.join("scenario.harn").is_file(),
+        "missing scenario.harn for {id}"
+    );
+    assert!(
+        assets.join("tape.jsonl").is_file(),
+        "missing tape.jsonl for {id}"
+    );
     run_in_harn_runtime(move || async move {
         let _env_guard = env_lock::lock_env().lock().await;
         let _cwd_guard = cwd_lock::lock_cwd_async().await;
+        let isolated_assets = tempfile::TempDir::new().expect("create isolated demo assets dir");
+        copy_demo_assets(&assets, isolated_assets.path());
+        let script = isolated_assets.path().join("scenario.harn");
+        let tape = isolated_assets.path().join("tape.jsonl");
+        let _demo_cwd = ScopedCwd::enter(isolated_assets.path());
         // Hermetic bytecode cache: point `harn run` at a fresh per-test
         // directory so the demo always compiles the scenario from source
         // instead of replaying whatever the ambient `$HOME/.cache/harn`
@@ -61,7 +106,7 @@ fn run_demo_scenario(id: &str) -> RunOutcome {
             cache_dir.path().to_str().expect("temp cache path is utf-8"),
         );
         harn_vm::reset_thread_local_state();
-        execute_run(
+        execute_run_with_sandbox_options(
             script.to_string_lossy().as_ref(),
             false,
             HashSet::new(),
@@ -72,6 +117,7 @@ fn run_demo_scenario(id: &str) -> RunOutcome {
             },
             None,
             RunProfileOptions::default(),
+            RunSandboxOptions::default().with_workspace_root(isolated_assets.path()),
         )
         .await
     })
