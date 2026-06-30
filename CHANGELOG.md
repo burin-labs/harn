@@ -8,6 +8,41 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.159
+
+### Added
+
+- **Session-bundle liveness.** Exporting a session bundle from an event stream
+  now classifies the session's liveness: a stream without a terminal
+  `SessionClosed` event — a loop frozen mid-turn for cross-compute migration, or
+  a time-traveled replay prefix — is labeled `suspended` (with a machine-readable
+  `session_liveness` metadata tag and a null `finished_at`) instead of being
+  silently reported as `completed`. This is the discriminator a resume host needs
+  to continue a pending turn rather than replay a finished run.
+`harn provider tool-probe` accepts `--repeat` for live provider reliability checks and reports repeated summaries conservatively.
+
+### Fixed
+
+- **`files_written` on the fan-out path.** A sub-agent's edits are no longer
+  dropped from its receipt when the agent loop dispatches the turn's tool calls
+  through `parallel` / `parallel settle`. Those subtasks now run under an
+  isolated copy of the spawning agent's full ambient scope (session, execution
+  context, mutation session, policies), so a dispatched tool's write attributes
+  to the agent's session even while a fan-out worker's scope is swapped out.
+  Previously the receipt reported `files_written: []` for a child that really
+  did edit files, which a downstream host renders as "wrote 0 file(s)" /
+  "0/N units completed" and can trigger wasteful parent re-work.
+- **Host-side edits now feed `files_written`.** Added the
+  `agent_session_record_changed_path(path, session_id?)` builtin so a product
+  host whose edit/write funnel goes through workspace capabilities (rather than
+  the hostlib write chokepoint `auto_capture_for_write`) can report the path it
+  mutated into the active agent session's changed-path set. Without this, a
+  sub-agent's edits performed via the host write path never reached the set the
+  receipt drains, so its `files_written` came back empty — surfaced downstream
+  as "wrote 0 file(s)" / "0/N units completed" for a child that really did edit.
+Split concatenated streamed OpenAI-compatible tool-call argument objects into separate
+tool calls instead of surfacing a parse error.
+
 ## v0.8.158
 
 ### Fixed
