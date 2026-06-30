@@ -959,7 +959,11 @@ async fn host_agent_dispatch_tool_call(
                     escalated,
                 );
             }
-            permissions::PermissionCheck::Denied { reason, escalated } => {
+            permissions::PermissionCheck::Denied {
+                reason,
+                escalated,
+                recoverable,
+            } => {
                 if escalated {
                     emit_permission_event(
                         &session_id,
@@ -970,11 +974,25 @@ async fn host_agent_dispatch_tool_call(
                         true,
                     );
                 }
-                let denial = crate::agent_events::ToolDenial::terminal(
-                    crate::agent_events::DenialGate::DynamicPermission,
-                    None,
-                    reason,
-                );
+                // A dynamic-permission denial scoped to a specific argument
+                // value/path (the tool is otherwise permitted) is RECOVERABLE:
+                // coach a retry with an allowed value, mirroring the
+                // ArgConstraint allow-list gate (harn#3670). A hard
+                // dynamic-permission ceiling — the whole tool is denied, or an
+                // approval/escalation refusal — stays terminal.
+                let denial = if recoverable {
+                    crate::agent_events::ToolDenial::retryable(
+                        crate::agent_events::DenialGate::DynamicPermission,
+                        None,
+                        reason,
+                    )
+                } else {
+                    crate::agent_events::ToolDenial::terminal(
+                        crate::agent_events::DenialGate::DynamicPermission,
+                        None,
+                        reason,
+                    )
+                };
                 return Ok(deny_tool_call_value(
                     &session_id,
                     &tool_name,
@@ -2133,6 +2151,93 @@ mod denied_tool_routing_tests {
             next.contains("Do not retry"),
             "a hard capability ceiling must stay terminal: {next}"
         );
+    }
+
+    #[test]
+    fn arg_scoped_dynamic_permission_denial_is_coached_as_recoverable() {
+        use crate::agent_events::{DenialGate, ToolDenial};
+        // A dynamic permission rule denied a specific path while the tool itself
+        // is permitted (analogous to ArgConstraint): coach a retry with an
+        // allowed value rather than a terminal "do not retry".
+        let denial = ToolDenial::retryable(
+            DenialGate::DynamicPermission,
+            None,
+            "permission denied: path 'docs/secret.md' is outside custom path scope",
+        );
+        let envelope = agent_primitive_denied_tool(
+            "edit",
+            "call_5",
+            &serde_json::json!({ "path": "docs/secret.md" }),
+            denial.reason.clone(),
+            ToolCallErrorCategory::PermissionDenied,
+            Some(&denial),
+        );
+        let result = &envelope["result"];
+        // Retry-positive body, NOT a hard permission denial.
+        assert_eq!(result["error"], serde_json::json!("invalid_arguments"));
+        assert_ne!(result["error"], serde_json::json!("permission_denied"));
+        let next = result["next_step"].as_str().expect("next_step");
+        assert!(
+            !next.contains("Do not retry"),
+            "arg-scoped dynamic-permission denial must coach a correction: {next}"
+        );
+        assert_eq!(envelope["denial"]["gate"], "dynamic_permission");
+        assert_eq!(envelope["denial"]["retryable"], true);
+    }
+
+    #[test]
+    fn hard_dynamic_permission_ceiling_stays_terminal() {
+        use crate::agent_events::{DenialGate, ToolDenial};
+        // The whole tool is denied by the dynamic policy: a retry can't help.
+        let denial = ToolDenial::terminal(
+            DenialGate::DynamicPermission,
+            None,
+            "permission denied: tool 'exec' is not allowed by this agent's permissions",
+        );
+        let envelope = agent_primitive_denied_tool(
+            "exec",
+            "call_6",
+            &serde_json::json!({ "command": "rm -rf /" }),
+            denial.reason.clone(),
+            ToolCallErrorCategory::PermissionDenied,
+            Some(&denial),
+        );
+        let result = &envelope["result"];
+        assert_eq!(result["error"], serde_json::json!("permission_denied"));
+        let next = result["next_step"].as_str().expect("next_step");
+        assert!(
+            next.contains("Do not retry"),
+            "a hard dynamic-permission ceiling must stay terminal: {next}"
+        );
+        assert_eq!(envelope["denial"]["retryable"], false);
+    }
+
+    #[test]
+    fn approval_unavailable_and_host_rejected_stay_terminal() {
+        use crate::agent_events::{DenialGate, ToolDenial};
+        // ApprovalUnavailable means no approver exists; HostRejected means the
+        // user said no. A retry yields the same result, so both stay terminal
+        // and are never marked recoverable.
+        for gate in [DenialGate::ApprovalUnavailable, DenialGate::HostRejected] {
+            let denial = ToolDenial::terminal(gate, None, "approval refused");
+            assert!(!denial.retryable, "{} must stay terminal", gate.as_str());
+            let envelope = agent_primitive_denied_tool(
+                "exec",
+                "call_7",
+                &serde_json::json!({ "command": "ls" }),
+                denial.reason.clone(),
+                ToolCallErrorCategory::PermissionDenied,
+                Some(&denial),
+            );
+            let result = &envelope["result"];
+            assert_eq!(result["error"], serde_json::json!("permission_denied"));
+            let next = result["next_step"].as_str().expect("next_step");
+            assert!(
+                next.contains("Do not retry"),
+                "{} must stay terminal: {next}",
+                gate.as_str()
+            );
+        }
     }
 
     use super::empty_args_cause_named_feedback;
