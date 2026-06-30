@@ -1,10 +1,9 @@
 //! Criterion benchmark for `hostlib_ast_parse_file` warm parse latency.
 //!
-//! Replaces the wall-clock perf budget assertions that previously lived
-//! in `crates/harn-hostlib/tests/ast_builtins.rs`. Wall-clock budgets in
-//! unit/integration tests flake on shared CI runners under contention;
-//! Criterion's statistical sampling tracks the same parse-latency signal
-//! (issue #564's 20ms target) without that flake.
+//! Uses Criterion's statistical sampling for the issue #564 parse-latency
+//! target instead of a wall-clock assertion in a unit/integration test. Shared
+//! CI runners can add enough contention to make a hard wall-clock budget
+//! flaky.
 //!
 //! Run with `cargo bench --bench ast_parse`.
 

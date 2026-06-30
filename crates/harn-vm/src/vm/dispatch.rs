@@ -651,8 +651,7 @@ fn builtin_def_metadata(
 /// Derive a [`VmBuiltinArity`] from a parsed [`BuiltinSignature`]. Required
 /// params count toward the floor; optional params and `has_rest` widen the
 /// ceiling. Returns `Variadic` for `(...args: any)`-shaped sigs that have
-/// no required params, matching how the DSL builder previously declared
-/// `Variadic` explicitly.
+/// no required params.
 fn arity_from_sig(sig: &harn_builtin_meta::BuiltinSignature) -> VmBuiltinArity {
     let required = sig.params.iter().filter(|p| !p.optional).count();
     let total = sig.params.len();

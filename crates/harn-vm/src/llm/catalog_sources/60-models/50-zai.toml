@@ -67,7 +67,7 @@ provider = "openrouter"
 context_window = 202752
 capabilities = ["tools", "streaming", "vision"]
 pricing = { input_per_mtok = 1.20, output_per_mtok = 4.00 }
-# Self-described metadata; previously relied on cross-fragment leading-key bleed.
+# Inline metadata keeps this row independent of fragment-order defaults.
 tier = "frontier"
 open_weight = true
 strengths = ["vision", "coding", "agentic"]

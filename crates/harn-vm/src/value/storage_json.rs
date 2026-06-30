@@ -5,8 +5,8 @@
 //! covers the scalar / list / dict shapes those persistence paths actually
 //! store and maps every other value kind (closures, handles, …) to `null`
 //! rather than to a display string, because a persisted record should not carry
-//! a stringified handle. The three persistence modules previously each kept an
-//! identical private copy of this function; they now share this one.
+//! a stringified handle. Keep persistence callers on this shared conversion
+//! path so handle/closure treatment stays consistent.
 
 use crate::value::VmValue;
 

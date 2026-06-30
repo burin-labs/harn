@@ -1,10 +1,10 @@
 //! Per-session compaction policy declarations.
 //!
-//! `harn-serve` consumers (TUI, IDE, cloud) used to maintain their own
-//! "when do I compact?" logic alongside the engine. This registry lifts
-//! that decision into the runtime so any caller can `compaction_policy(...)`
+//! `harn-serve` consumers (TUI, IDE, cloud) share this runtime-owned
+//! "when do I compact?" decision instead of re-encoding thresholds at each
+//! surface. Any caller can `compaction_policy(...)`
 //! once and then `compaction_check(session_id)` / `compaction_run(...)`
-//! on every turn without re-encoding thresholds at the call site.
+//! on every turn.
 //!
 //! Policies are thread-local because `agent_sessions` is. A `None` lookup
 //! falls back to the default policy registered with the empty session key.

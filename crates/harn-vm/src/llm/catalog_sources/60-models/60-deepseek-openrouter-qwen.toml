@@ -73,7 +73,7 @@ name = "Qwen3.5 9B"
 provider = "openrouter"
 context_window = 131072
 capabilities = ["tools", "streaming"]
-# Self-described metadata; previously relied on cross-fragment leading-key bleed.
+# Inline metadata keeps this row independent of fragment-order defaults.
 tier = "small"
 open_weight = true
 strengths = ["cheap", "speed"]

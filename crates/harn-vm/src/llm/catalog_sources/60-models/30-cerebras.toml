@@ -42,9 +42,8 @@ pricing = { input_per_mtok = 0.85, output_per_mtok = 1.20 }
 availability = "dedicated"
 deprecated = true
 deprecation_note = "Cerebras no longer returns this model from public discovery; use a provisioned dedicated endpoint alias if your organization still serves these weights."
-# Self-described metadata; previously relied on cross-fragment leading-key
-# bleed. Deprecated legacy route.
+# Inline metadata keeps this deprecated legacy route independent of
+# fragment-order defaults.
 tier = "mid"
 open_weight = true
 strengths = ["tool_use"]
-

@@ -752,9 +752,9 @@ fn evaluate_resolved_addrs(
 
     // (2) NetPolicy deny CIDR/IP wins over allow: if ANY resolved address
     //     matches a deny IP/CIDR rule (port-aware), block. This is the gap
-    //     #3174 closes — a hostname that resolves into a denied CIDR was
-    //     previously never matched. Matching against the rule list (rather than
-    //     pre-reduced nets) preserves per-rule `:port` scoping.
+    //     #3174 covers: a hostname that resolves into a denied CIDR must be
+    //     blocked. Matching against the rule list (rather than pre-reduced
+    //     nets) preserves per-rule `:port` scoping.
     if let Some(rule) = configured.and_then(|c| {
         c.policy.deny.iter().find(|rule| {
             rule.is_ip_matcher()

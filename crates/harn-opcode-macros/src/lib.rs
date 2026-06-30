@@ -4,8 +4,8 @@
 //! `harn-vm/src/chunk.rs` emits the `Op` enum, the byte-to-variant mapping,
 //! the sync and async dispatch tables, the disassembly renderer, and the
 //! classification helpers (`op_reads_outer_name`, `is_adaptive_binary_op`).
-//! Adding or renaming an opcode is a one-line edit; coverage drift across
-//! the previously hand-maintained tables is now impossible.
+//! Adding or renaming an opcode is a one-line edit; generated tables keep
+//! dispatch, disassembly, and classification coverage aligned.
 
 extern crate proc_macro;
 

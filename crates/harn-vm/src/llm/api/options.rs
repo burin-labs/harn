@@ -453,11 +453,8 @@ pub(crate) struct LlmCallOptions {
 /// Resolve effective request timeout: explicit value > `HARN_LLM_TIMEOUT` env >
 /// model-catalog `stream_timeout` > 120s default.
 ///
-/// `stream_timeout` (fractional seconds in the model catalog) was previously
-/// only projected into the config dict for pipelines — no transport consumed
-/// it, so a slow local model with `stream_timeout = 900.0` was still cut off
-/// (and a hung remote provider only bounded) by the generic 120s default.
-/// It now feeds the same whole-request deadline every provider applies via
+/// `stream_timeout` (fractional seconds in the model catalog) feeds the same
+/// whole-request deadline every provider applies via
 /// `reqwest::RequestBuilder::timeout`, which covers both the non-streaming
 /// response read and the streamed body.
 fn resolve_timeout(explicit: Option<u64>, model: &str) -> u64 {

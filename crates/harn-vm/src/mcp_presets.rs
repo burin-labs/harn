@@ -1,9 +1,9 @@
 //! Canonical catalog of well-known MCP server presets (harn#2650).
 //!
-//! Thin clients (an IDE host's TUI and the macOS GUI) used to each carry
-//! their own hardcoded list of "one-click" MCP servers — Notion, Linear,
-//! GitHub, a local filesystem server, etc. Those lists drifted from each
-//! other. This module is the single harn-owned source of truth.
+//! Thin clients (an IDE host's TUI and the macOS GUI) read this shared
+//! harn-owned source of truth for "one-click" MCP servers — Notion, Linear,
+//! GitHub, a local filesystem server, etc. Keep client lists derived from this
+//! catalog so presets do not drift across surfaces.
 //!
 //! **Data, not code (harn#3348).** The catalog ships as bundled TOML
 //! (`mcp_presets.toml`, compiled in via `include_str!`) and is overlayable at
@@ -443,7 +443,7 @@ mod tests {
             notion.get("oauthScopes").is_none(),
             "Notion MCP does not currently expose configurable OAuth scopes"
         );
-        // Notion now ships a token_response identity descriptor (harn#3349).
+        // Notion declares a token_response identity descriptor (harn#3349).
         assert_eq!(notion["identity"]["resolution"], serde_json::json!("user"));
         assert_eq!(
             notion["identity"]["confidence"],

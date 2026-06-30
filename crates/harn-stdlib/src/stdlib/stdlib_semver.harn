@@ -5,10 +5,8 @@
 // Scope: parse "MAJOR.MINOR.PATCH" triples (no prerelease/build metadata),
 // strip/add the canonical leading `v`, compute single-step bumps, classify
 // which bump separates two versions, and unpack release branches / tags.
-// These helpers used to live in each release-tooling repo (harn-bump-fleet's
-// `lib/semver.harn`, harn's own `scripts/detect_bump_type.harn`); promoting
-// them to the stdlib removes the per-repo drift and the inconsistent error
-// messages.
+// Keep release-tooling repos on this stdlib implementation so SemVer parsing,
+// bump detection, and error messages do not drift between repos.
 //
 // Import with:
 //   import {

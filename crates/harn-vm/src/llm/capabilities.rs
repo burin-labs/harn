@@ -14,10 +14,9 @@
 //! - exposing a stable `Capabilities` struct that the `LlmProvider`
 //!   trait delegates to as the single source of truth.
 //!
-//! Before this module the Anthropic / OpenAI gates were spread across
-//! `providers/anthropic.rs` and `providers/openai_compat.rs`. Their
-//! generation parsers are still used here for `version_min`, but the
-//! boolean gates that used to live alongside them are now data.
+//! Provider adapters still supply generation parsers for `version_min`, but
+//! feature gates live in this data table instead of adapter-specific boolean
+//! branches.
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashSet};
@@ -1826,9 +1825,9 @@ fn extract_version(model: &str) -> Option<(u32, u32)> {
     claude_generation(model).or_else(|| gpt_generation(model))
 }
 
-// Model-pattern matching for capability rules. Shared workspace semantics
-// live in `harn-glob` (this used to be a hand-mirrored copy of the
-// `llm_config.rs` helper with a "keep them in sync" comment).
+// Model-pattern matching for capability rules. Shared workspace semantics live
+// in `harn-glob`; keep capability and provider matching on that helper instead
+// of mirroring glob behavior locally.
 use harn_glob::match_name as glob_match;
 
 #[cfg(test)]
@@ -1843,10 +1842,11 @@ mod tests {
         let caps = lookup("cerebras", model);
         assert_eq!(caps.thinking_modes, vec!["effort"]);
         assert!(caps.reasoning_effort_supported);
-        // tool_format is NOT asserted here: cerebras gpt-oss and zai-glm now
-        // diverge (gpt-oss harmonized to `json`, glm stays `native`), and this
-        // shared helper is about reasoning-effort behavior. Tool-format
-        // resolution is asserted in the dedicated harmonization tests.
+        // tool_format is NOT asserted here: cerebras gpt-oss and zai-glm have
+        // different defaults (gpt-oss harmonized to `json`, glm stays
+        // `native`), and this shared helper is about reasoning-effort
+        // behavior. Tool-format resolution is asserted in the dedicated
+        // harmonization tests.
         assert_eq!(caps.structured_output.as_deref(), Some("native"));
         assert_eq!(caps.structured_output_mode, "native_json");
         assert_eq!(caps.thinking_block_style, thinking_block_style);
@@ -2390,10 +2390,9 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
     #[test]
     fn local_gemma4_exposes_vision_like_hosted_siblings() {
         // harn#3585: Gemma 4 is multimodal on every served surface. The local
-        // OpenAI-compat route must declare vision so the derived structured caps
-        // and the emitted `capability_tags` agree with the gemini/openrouter/
-        // together siblings — previously the local route dropped `vision`,
-        // contradicting the model's real multimodality and the structured caps.
+        // OpenAI-compat route must declare vision so the derived structured
+        // caps and emitted `capability_tags` agree with the gemini/openrouter/
+        // together siblings.
         reset();
         for model in ["gemma-4-e4b-it", "gemma-4-e2b-it", "gemma-4-26b-a4b-it"] {
             let caps = lookup("local", model);
@@ -2576,11 +2575,9 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
 
     #[test]
     fn openrouter_anthropic_claude_models_support_native_tools() {
-        // Regression for #2319: without explicit openrouter rules,
-        // openrouter:anthropic/claude-* used to fall through the
-        // openrouter→openai family chain and miss the [[provider.anthropic]]
-        // matchers entirely, so native-tool requests HTTP 400'd with
-        // "option `tools` is not supported by ... (provider openrouter)".
+        // Regression for #2319: OpenRouter Anthropic slugs must match the
+        // Anthropic capability rules before the OpenRouter -> OpenAI family
+        // chain, otherwise native-tool requests get rejected as unsupported.
         reset();
         for model in [
             "anthropic/claude-haiku-4-5",
@@ -2721,11 +2718,10 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
         let caps = lookup("cerebras", "gpt-oss-120b");
         assert_eq!(caps.message_wire_format, "openai");
         assert_eq!(caps.native_tool_wire_format, "openai");
-        // gpt-oss uses NATIVE tool calls across cerebras/groq/together. The
-        // prior `json` pin was a defensive workaround for an empty-native-payload
-        // defect that no longer reproduces; under json/text gpt-oss emits a bare
-        // {"tool","arguments"} dialect the fenced-JSON parser rejects (zero
-        // parsed calls), so native is the only working channel.
+        // gpt-oss uses NATIVE tool calls across cerebras/groq/together. Under
+        // json/text it emits a bare {"tool","arguments"} dialect the
+        // fenced-JSON parser rejects (zero parsed calls), so native is the only
+        // working channel.
         assert!(caps.native_tools);
         assert_eq!(caps.preferred_tool_format.as_deref(), Some("native"));
     }
@@ -2962,10 +2958,9 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
                 caps.text_tool_wire_format_supported,
                 "{provider}: text tools should remain available"
             );
-            // devstral has no reserved-token constraint, so it dropped its stale
-            // heredoc `text` pin and now inherits the global `json` (fenced-JSON)
-            // text-channel default. Heredoc stays reachable via an explicit
-            // `preferred_tool_format = "text"` pin.
+            // devstral has no reserved-token constraint, so it uses the global
+            // `json` (fenced-JSON) text-channel default. Heredoc stays
+            // reachable via an explicit `preferred_tool_format = "text"` pin.
             assert_eq!(
                 caps.preferred_tool_format.as_deref(),
                 Some("json"),
@@ -3411,9 +3406,9 @@ native_tools = true
         for (provider, model) in [
             // cerebras gpt-oss is native-clean (only throttled).
             ("cerebras", "gpt-oss-120b"),
-            // sambanova deepseek-v3.2 is native and interchangeable (minimax was
-            // reclassified native_unreliable upstream, so it is no longer a
-            // known-good native exemplar).
+            // sambanova deepseek-v3.2 is native and interchangeable; minimax is
+            // native_unreliable upstream and is not a known-good native
+            // exemplar.
             ("sambanova", "DeepSeek-V3.2"),
         ] {
             let decision = validate_tool_format(provider, model, "native");

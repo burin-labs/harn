@@ -285,13 +285,10 @@ latency_p50_ms = 1900
 method = "GET"
 path = "/models"
 
-# Moonshot AI — first-party host of the Kimi K2 family. OpenAI-compatible
-# `/v1/chat/completions`; the same models were previously only reachable
-# through OpenRouter/Together aggregator routes. Moonshot also exposes an
-# Anthropic-compatible `/anthropic` surface, but Harn dials the
-# OpenAI-compatible endpoint so the shared openai_chat_completions wire
-# format Just Works. Use the `.cn` base via MOONSHOT_BASE_URL for the
-# China region.
+# Moonshot AI — first-party host of the Kimi K2 family. Harn dials the
+# OpenAI-compatible `/v1/chat/completions` endpoint so the shared
+# openai_chat_completions wire format Just Works. Use the `.cn` base via
+# MOONSHOT_BASE_URL for the China region.
 [providers.moonshot]
 base_url = "https://api.moonshot.ai/v1"
 base_url_env = "MOONSHOT_BASE_URL"

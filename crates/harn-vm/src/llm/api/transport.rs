@@ -281,12 +281,12 @@ pub(crate) async fn vm_call_llm_api_with_body(
     // OpenAI-compat path (`chat_impl`), the *unregistered* OpenAI-compat
     // fallback in `vm_call_llm_api` (e.g. a `llamacpp` provider configured via
     // providers.toml but never `provider_register`-ed), and both the streaming
-    // (SSE/NDJSON) and non-streaming transports. Previously the remap lived
-    // only in `chat_impl`, so an unregistered `llamacpp` qwen3.6 route returned
-    // raw `[[CALL]]` text, the parser found zero `<tool_call>` blocks, and the
-    // agent dispatched no tools (convergence-fatal). The streamed live deltas
-    // are canonicalized separately by `canonicalizing_delta_tx`; this remaps the
-    // assembled `result.text` that the parser/transcript consume.
+    // (SSE/NDJSON) and non-streaming transports. Without this shared remap an
+    // unregistered `llamacpp` qwen3.6 route can return raw `[[CALL]]` text, the
+    // parser finds zero `<tool_call>` blocks, and the agent dispatches no tools
+    // (convergence-fatal). The streamed live deltas are canonicalized
+    // separately by `canonicalizing_delta_tx`; this remaps the assembled
+    // `result.text` that the parser/transcript consume.
     if crate::llm::capabilities::lookup(&opts.provider, &opts.model).reserved_tool_call_token {
         let wire_open = result.text.matches("[[CALL]]").count();
         result.text = crate::llm::tool_delimiter::wire_to_canonical(&result.text);
@@ -475,11 +475,11 @@ async fn vm_call_llm_api_with_body_inner(
             )
             .await
             {
-                // A `done_reason == "length"` truncation now returns Ok with an
-                // empty body and `stop_reason: Some("length")`, so it bypasses
-                // the retry guard below entirely — a deterministic token-cap cut
-                // would just re-truncate on every retry. Only the genuine
-                // empty-content parser bug (done_reason stop/absent) is retried.
+                // A `done_reason == "length"` truncation returns Ok with an
+                // empty body and `stop_reason: Some("length")`, bypassing the
+                // retry guard below. A deterministic token-cap cut would just
+                // re-truncate on every retry. Only the genuine empty-content
+                // parser bug (done_reason stop/absent) is retried.
                 Ok(result) => return Ok(result),
                 Err(err)
                     if is_ollama
@@ -834,13 +834,10 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
             Ok(None) => break,
             Err(error) => {
                 // A mid-body read failure (the whole-request reqwest timeout
-                // from `resolve_timeout`, a connection reset, ...) used to be
-                // swallowed here, silently truncating the stream and returning
-                // a zero-token "success" that the agent loop accepted as an
-                // empty assistant turn (observed live: an OpenRouter call hung
-                // 133s and came back with output_tokens=0). Surface it in the
-                // same transient stream-error class other transports use so
-                // the existing retry machinery picks it up.
+                // from `resolve_timeout`, a connection reset, ...) must surface
+                // as a transient stream error rather than a truncated
+                // zero-token success that the agent loop accepts as an empty
+                // assistant turn.
                 return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                     format!("{provider} stream error (mid-stream read): {error}"),
                 ))));
@@ -1061,8 +1058,8 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
             // `"'s"`, `" a"`, `" thinking"`. Concatenate them verbatim;
             // `extract_openai_message_field_as_text` + `append_paragraph`
             // would `.trim()` each fragment (losing inter-token spaces)
-            // and inject a newline between every chunk, producing the
-            // one-token-per-line reasoning text we used to surface as
+            // and inject a newline between every chunk, producing
+            // one-token-per-line reasoning text like
             // `"The\ntask\nis\nto\nextend"`. The non-streaming response
             // path still uses `append_paragraph` because there each
             // field arrives as a single complete block.
@@ -2677,7 +2674,7 @@ EOF
 mod sse_read_error_tests {
     //! Mid-stream read failures must surface as transient errors, not as a
     //! silently truncated zero-token "success". The whole-request reqwest
-    //! timeout (`resolve_timeout`, now fed by the model catalog's
+    //! timeout (`resolve_timeout`, including the model catalog's
     //! `stream_timeout`) materializes as exactly such a body-read error, so
     //! these tests drive `consume_sse_lines` with an erroring byte stream —
     //! the same shape `reqwest::Response::bytes_stream()` produces when the

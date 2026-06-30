@@ -303,11 +303,9 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
 }
 
 /// Registers the native fast-paths for the `std/collections` and `std/json`
-/// option-builder helpers. The `std/*.harn` modules used to express these
-/// in pure Harn with `result + {[k]: v}` accumulators, paying a fresh
-/// `BTreeMap` allocation per inserted entry. The native paths cut every
-/// helper to one allocation and skip the per-entry callback dispatch
-/// `filter_nil`'s `.filter(closure)` form previously paid.
+/// option-builder helpers. The native paths build each result with one
+/// allocation and avoid per-entry callback dispatch for the `filter_nil`
+/// helpers.
 ///
 /// Implementations are individual `#[harn_builtin]`-annotated functions
 /// below; `register_dict_builder_builtins` walks the collected
@@ -421,10 +419,9 @@ const DICT_BUILDER_BUILTINS: &[&VmBuiltinDef] = &[
     &DICT_FROM_PAIRS_IMPL_DEF,
 ];
 
-// (Per-module MODULE_BUILTINS slice deleted — `#[harn_builtin]` now
-// auto-registers each emitted DEF via the linkme distributed slice
-// `crate::stdlib::macros::ALL_BUILTIN_DEFS`, so no aggregation here is
-// needed.)
+// `#[harn_builtin]` auto-registers each emitted DEF via the linkme distributed
+// slice `crate::stdlib::macros::ALL_BUILTIN_DEFS`, so this module needs no
+// separate builtin aggregation.
 
 /// Returns a shallow copy of `value`. Dicts and lists become fresh
 /// allocations independent of the source; primitives are returned by value.

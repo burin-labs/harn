@@ -1,10 +1,9 @@
 // std/agent/judge_internals — private helpers shared by `std/agent/judge`
 // (verify_completion + done_judge) and `std/agent/step_judge`. NOT
 // intended as a public surface: every export is prefixed `__judge_` and
-// the file is excluded from the docs sweep. Consolidates the bits that
-// used to be copy-pasted between the two callers (LLM-options
-// overrides, structured-output schema field names, and the
-// "raw_verdict -> {vetoed, feedback}" classifier).
+// the file is excluded from the docs sweep. Keep shared judge plumbing here:
+// LLM-option overrides, structured-output schema field names, and the
+// "raw_verdict -> {vetoed, feedback}" classifier.
 /**
  * Keys on `judge_cfg` that override `opts.llm_options` when present.
  * Listed once here so adding (or renaming) an LLM tuning knob is a

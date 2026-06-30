@@ -630,11 +630,9 @@ impl<T> std::ops::Deref for EqIgnored<T> {
     }
 }
 
-/// Per-call auto-compaction settings. First-class replacement for
-/// what used to live on `TranscriptPolicy` — the mode/fork/compact
-/// lifecycle fields are gone; lifecycle is driven by explicit
-/// `agent_session_*` builtins. Only the per-call tuning for how the
-/// agent loop manages its context window survives.
+/// Per-call auto-compaction settings. Lifecycle is driven by explicit
+/// `agent_session_*` builtins; this policy only controls how the agent loop
+/// manages its context window.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct AutoCompactPolicy {

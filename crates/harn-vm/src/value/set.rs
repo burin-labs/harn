@@ -6,12 +6,9 @@ use super::{value_structural_hash_key, VmValue};
 /// Backing store for [`VmValue::Set`](super::VmValue::Set).
 ///
 /// A Harn set is an *ordered* collection that deduplicates by structural
-/// equality. Membership used to be answered by rebuilding a
-/// `HashSet<String>` of structural hash keys from the backing `Vec` on every
-/// `contains` / `union` / `intersect` / … call — O(n) work (plus an
-/// allocation) per query. `VmSet` keeps that index resident alongside the
-/// items, so membership is O(1) and the set-algebra builtins drop from
-/// rebuild-per-call to a single key computation per probe.
+/// equality. `VmSet` keeps a resident structural-hash index alongside the
+/// ordered items, so membership is O(1) and set-algebra builtins do one key
+/// computation per probe instead of rebuilding an index for each query.
 ///
 /// Invariants:
 /// * `keys` holds exactly one entry per item: `value_structural_hash_key(item)`.

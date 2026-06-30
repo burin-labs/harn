@@ -250,10 +250,9 @@ impl InProcessHost {
 
 /// How a queued bridge injection is delivered into the agent loop.
 ///
-/// `AuditOnly` was previously called `WaitForCompletion`; the rename is
-/// truth-in-advertising (harn#2212). These injections drain at
-/// `loop_exit`, *after* the last LLM call has returned — so they land in
-/// the transcript audit but are **never rendered into a model prompt**.
+/// `AuditOnly` injections drain at `loop_exit`, *after* the last LLM call has
+/// returned, so they land in the transcript audit but are **never rendered into
+/// a model prompt**.
 /// Hosts that want the model to react to the reminder on its final
 /// iteration should use `FinishStep` instead, which drains at every
 /// `iteration_start` / `post_tool_dispatch` / `iteration_end` checkpoint.

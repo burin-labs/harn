@@ -555,13 +555,12 @@ fn line_has_file_line_prefix(trimmed: &str) -> bool {
 /// True when a single line carries failure signal worth preserving verbatim
 /// when we shrink a large tool output. This is the ONE filter shared by both
 /// the microcompact path (`microcompact_tool_output`) and the observation-mask
-/// path (`default_mask_tool_result`) — previously the mask path had a weaker,
-/// divergent filter that dropped assertion-value lines, rustc continuation
-/// lines, and structured failing-line markers, silently shredding the failure
-/// detail the model re-reads to fix the bug.
+/// path (`default_mask_tool_result`). Keep these paths on one filter so
+/// assertion values, rustc continuation lines, and structured failing-line
+/// markers survive in the detail the model re-reads to fix the bug.
 ///
 /// In addition to keyword/positional error lines and `file:line` diagnostics,
-/// this keeps three structured kinds the mask path used to drop:
+/// this keeps three structured kinds that are easy to drop accidentally:
 ///   - assertion value lines with no `file:line` (`left:`, `right:`,
 ///     `expected:`, `actual:`, `got`, `want`) — the values the model needs to
 ///     see the actual-vs-expected mismatch.
@@ -1374,9 +1373,8 @@ pub(crate) async fn auto_compact_messages_with_result_with_ctx(
 
     // Clamp oversized tool-result bodies in the *kept* window so the live
     // context honors the policy's `tool_output_max_chars` (and the
-    // `compress_callback` override), not just the archived/summarized window —
-    // the two config fields were previously parsed and defaulted but never
-    // applied here. Runs before the hard-limit estimate so tier-2 escalation
+    // `compress_callback` override), not just the archived/summarized window.
+    // Runs before the hard-limit estimate so tier-2 escalation
     // keys off the post-clamp size. Only the text body is rewritten; `role`
     // and `tool_call_id` are preserved so tool_call/tool_result pairing stays
     // intact.
@@ -1720,7 +1718,7 @@ mod tests {
     #[test]
     fn auto_compact_clamps_oversized_tool_output_to_max_chars() {
         // A large tool result in the *kept* window must be clamped to honor
-        // `tool_output_max_chars` — the engine previously ignored that config.
+        // `tool_output_max_chars`.
         let big = "x".repeat(4000);
         let big_len = big.len();
         let mut messages = vec![

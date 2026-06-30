@@ -496,8 +496,8 @@ pub fn emit_transcript_compacted_event_sync(
 }
 
 // ---------------------------------------------------------------------------
-// Internal payload + reminder helpers (previously duplicated across stdlib
-// builtins and the agent-session host).
+// Internal payload + reminder helpers shared by stdlib builtins and the
+// agent-session host.
 // ---------------------------------------------------------------------------
 
 enum HookPayloadStage<'a> {

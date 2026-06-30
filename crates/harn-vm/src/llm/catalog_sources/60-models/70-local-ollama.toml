@@ -64,8 +64,7 @@ context_window = 262144
 runtime_context_window = 32768
 stream_timeout = 600.0
 capabilities = ["tools", "streaming"]
-# Self-described metadata; previously relied on cross-fragment leading-key bleed.
+# Inline metadata keeps this row independent of fragment-order defaults.
 tier = "mid"
 open_weight = true
 strengths = ["coding", "agentic"]
-

@@ -3,16 +3,14 @@
 #
 # WHY THIS FILE EXISTS
 # --------------------
-# The gen/check pairs used to be enumerated independently in FOUR places:
+# Generated-artifact drift guards must stay wired through four consumers:
 #   1. the `all:` recipe in the Makefile
 #   2. the audit step(s) in .github/workflows/ci.yml
 #   3. .githooks/pre-commit
 #   4. .githooks/pre-push
-# Nothing forced those four lists to agree, and they drifted: several
-# `check-*` drift guards that exist in the Makefile (and were even
-# advertised in a CI comment as "promoted so a stale artifact fails the
-# PR") never actually ran in any workflow. A contributor could edit
-# spec/openapi.yaml, ship stale bindings, and still get green CI.
+# The registry below is the authority that keeps those surfaces in sync. Without
+# it, a stale generated output can pass review when one consumer forgets to run
+# the corresponding `check-*` target.
 #
 # This registry is the one list. `scripts/check_generated_registry.harn`
 # (`make check-generated-registry`) audits the other consumers against
@@ -108,8 +106,8 @@ pre_commit = true
 pre_push = true
 
 # ---------------------------------------------------------------------------
-# Mirrors whose drift guard previously ran ONLY in `make all` (and so never
-# in any CI workflow). Flagged ci = true here; this PR wires them into CI.
+# Mirrors whose drift guards are required in both `make all` and CI. Keep this
+# section wired through the workflow audit before adding new generated outputs.
 # ---------------------------------------------------------------------------
 
 [[artifact]]
