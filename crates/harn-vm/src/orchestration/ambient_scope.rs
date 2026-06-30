@@ -128,6 +128,48 @@ impl AmbientExecutionScope {
         }
     }
 
+    /// Capture an isolated COPY of the FULL current ambient context for an
+    /// inline concurrent subtask — the `parallel` / `parallel_each` /
+    /// `parallel settle` primitives that an agent loop uses to dispatch a turn's
+    /// tool calls (and that user pipelines use for fan-out map bodies).
+    ///
+    /// Unlike [`capture_inherited`] — which resets `session_stack` and leaves the
+    /// re-pushed policy/render slots empty because a fan-out WORKER opens its own
+    /// agent session and pushes its own execution/approval policy — an inline
+    /// subtask is the SAME logical agent as the task that spawned it. It runs
+    /// that agent's tool calls concurrently and never re-establishes any of this
+    /// context itself, so it must inherit every slot, INCLUDING the active
+    /// session. That session is what the hostlib write chokepoint
+    /// (`fs_snapshot::auto_capture_for_write` -> `active_session_id`) reads to
+    /// record `files_written`.
+    ///
+    /// Without this, a subtask spawned while the parent's `scope_ambient` is
+    /// swapped out (e.g. a fan-out worker awaiting the parallel-tool join — the
+    /// subtasks are polled by the `LocalSet` as independent tasks, NOT nested in
+    /// the parent's poll) reads an empty or sibling `CURRENT_SESSION_STACK`, so
+    /// its writes are dropped from the session's changed-path record and the
+    /// sub-agent receipt reports `files_written: []` for a child that really did
+    /// edit files. The single-worker path hid this because nothing competes for
+    /// the thread-local there.
+    pub(crate) fn capture_for_inline_subtask() -> Self {
+        Self {
+            execution: clone_via_swap(swap_execution_policy_stack),
+            approval: clone_via_swap(swap_approval_policy_stack),
+            command: clone_via_swap(swap_command_policy_stack),
+            permissions: clone_via_swap(swap_dynamic_permission_stack),
+            runtime_context: clone_via_swap(swap_runtime_context_overlay_stack),
+            autonomy: clone_via_swap(swap_autonomy_policy_stack),
+            llm_render: clone_via_swap(swap_llm_render_stack),
+            connector_ctx: clone_via_swap(swap_active_harn_connector_ctx),
+            session_stack: clone_via_swap(swap_current_session_stack),
+            execution_context: clone_via_swap(swap_thread_execution_context),
+            source_dir: clone_via_swap(swap_source_dir),
+            mutation_session: clone_via_swap(swap_mutation_session),
+            trusted_depth: clone_via_swap(swap_trusted_bridge_depth),
+            command_hook_depth: clone_via_swap(swap_command_policy_hook_depth),
+        }
+    }
+
     /// Install this scope into the ambient thread-locals, returning whatever was
     /// installed before so the caller can restore it. O(1) per stack.
     fn swap_in(self) -> Self {
@@ -496,6 +538,117 @@ mod tests {
         assert!(
             crate::agent_sessions::take_session_changed_paths(&parent_session).is_empty(),
             "child writes must not attribute to parent"
+        );
+    }
+
+    /// `files_written` fan-out regression: an agent loop dispatches a turn's tool
+    /// calls through `parallel` / `parallel settle`, which run each call as an
+    /// INDEPENDENT `LocalSet` task — not nested in the worker's poll. While the
+    /// worker awaits that join its `scope_ambient` is swapped out, so a subtask
+    /// that does NOT carry the worker's session reads an empty/sibling
+    /// `CURRENT_SESSION_STACK` and its write is dropped from the receipt
+    /// (the real bug behind a "wrote 0 file(s)" / "0/N units completed" report).
+    /// [`capture_for_inline_subtask`] is what `vm::ops::parallel` wraps each
+    /// subtask with so the write attributes to the agent's session. Two
+    /// contending workers prove each subtask sees ITS worker's session — and a
+    /// `capture_inherited` CONTROL proves the contention is real (an
+    /// un-inherited subtask genuinely sees no session, so the assertion is not
+    /// vacuous).
+    #[tokio::test]
+    async fn inline_subtask_scope_carries_worker_session_under_contention() {
+        let parent_session = format!("parent-{}", uuid::Uuid::now_v7());
+        let alpha_session = format!("alpha-{}", uuid::Uuid::now_v7());
+        let beta_session = format!("beta-{}", uuid::Uuid::now_v7());
+        for session in [&parent_session, &alpha_session, &beta_session] {
+            crate::agent_sessions::clear_session_changed_paths(session);
+        }
+
+        let _parent_guard = crate::agent_sessions::enter_current_session(parent_session.clone());
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                // One fan-out worker: opens its own session (never the parent's),
+                // yields, then dispatches an inline subtask exactly like the agent
+                // loop's `parallel settle` tool dispatch.
+                let run_worker = |worker_session: String, path: &'static str| {
+                    let worker_scope = AmbientExecutionScope::capture_inherited();
+                    tokio::task::spawn_local(scope_ambient(worker_scope, async move {
+                        assert!(
+                            crate::agent_sessions::current_session_id().is_none(),
+                            "fan-out worker must not inherit the parent session"
+                        );
+                        let _guard =
+                            crate::agent_sessions::enter_current_session(worker_session.clone());
+                        tokio::task::yield_now().await;
+
+                        // CONTROL: a subtask spawned WITHOUT inline-subtask
+                        // scoping does not see the worker session — this is the
+                        // dropped-write bug, and proves the contention is real.
+                        let control = tokio::task::spawn_local(scope_ambient(
+                            AmbientExecutionScope::capture_inherited(),
+                            async move {
+                                tokio::task::yield_now().await;
+                                tokio::task::yield_now().await;
+                                crate::agent_sessions::current_session_id()
+                            },
+                        ))
+                        .await
+                        .unwrap();
+                        assert!(
+                            control.is_none(),
+                            "control subtask must NOT inherit the worker session"
+                        );
+
+                        // FIX: the inline-subtask scope carries the worker session,
+                        // so the dispatched tool's write records against it.
+                        let observed = tokio::task::spawn_local(scope_ambient(
+                            AmbientExecutionScope::capture_for_inline_subtask(),
+                            async move {
+                                tokio::task::yield_now().await;
+                                tokio::task::yield_now().await;
+                                let session = crate::agent_sessions::current_session_id();
+                                if let Some(ref session) = session {
+                                    crate::agent_sessions::record_session_changed_path(
+                                        session, path,
+                                    );
+                                }
+                                session
+                            },
+                        ))
+                        .await
+                        .unwrap();
+                        observed
+                    }))
+                };
+
+                let alpha = run_worker(alpha_session.clone(), "src/alpha.rs");
+                let beta = run_worker(beta_session.clone(), "src/beta.rs");
+                assert_eq!(
+                    alpha.await.unwrap().as_deref(),
+                    Some(alpha_session.as_str()),
+                    "alpha's inline subtask must observe alpha's worker session"
+                );
+                assert_eq!(
+                    beta.await.unwrap().as_deref(),
+                    Some(beta_session.as_str()),
+                    "beta's inline subtask must observe beta's worker session"
+                );
+            })
+            .await;
+
+        assert_eq!(
+            crate::agent_sessions::take_session_changed_paths(&alpha_session),
+            vec!["src/alpha.rs".to_string()],
+            "alpha's dispatched write attributes to alpha's session"
+        );
+        assert_eq!(
+            crate::agent_sessions::take_session_changed_paths(&beta_session),
+            vec!["src/beta.rs".to_string()],
+            "beta's dispatched write attributes to beta's session"
+        );
+        assert!(
+            crate::agent_sessions::take_session_changed_paths(&parent_session).is_empty(),
+            "inline-subtask writes must not attribute to the parent"
         );
     }
 
