@@ -313,6 +313,63 @@ fn strip_inline_internal_planning_json(text: &str, partial: bool) -> String {
     stripped
 }
 
+fn protocol_residue_regex() -> &'static Regex {
+    // Orphan / truncated protocol-tag litter that the well-formed block
+    // patterns above cannot match: a closing tag with no surviving opener, and
+    // the right-anchored `</tool_call>` truncations (`tool_call>`, `ol_call>`,
+    // `l_call>`, `_call>`) plus `</assistant_prose>` / `_prose>` / `</done>` /
+    // `/done>` fragments that weak open-weight models (incl. the GLM default)
+    // emit mid-stream. These are control-token residue, never legitimate
+    // narration, so they are stripped unconditionally — including from the
+    // FINAL transcript, which the partial-only strippers below never see.
+    // Bounds are tight (anchored on `_call>` / explicit tag names) to avoid
+    // touching ordinary prose like "x > y" or words ending in "e".
+    // Scope is deliberately limited to the UNAMBIGUOUS corruption families that
+    // never occur in real prose: right-anchored `</tool_call>` truncations
+    // (`</tool_call>`, `tool_call>`, `ol_call>`, `l_call>`, `_call>`, with the
+    // `<|tool_call|>` channel variant) and the `<assistant_prose>` close-tag
+    // truncations (`</assistant_prose>`, `assistant_prose>`, `nt_prose>`,
+    // `_prose>`). We do NOT blanket-strip `<user_response>`/`<done>`/
+    // `<tool_result>` here — those are owned by the position/fence-aware logic
+    // above and have legitimate inline-mention forms (see the placeholder/fence
+    // tests), so touching them regresses those guarantees.
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"<?/?\|?(?:t?o?o?l?)_call\|?>|<?/?\|?[a-z]*_prose>")
+            .expect("valid protocol residue regex")
+    })
+}
+
+fn strip_protocol_residue(text: &str) -> String {
+    // Fence-aware, matching the rest of this module: a fenced code block may
+    // legitimately show `</tool_call>` as an example, so residue inside a
+    // markdown fence is preserved; only standalone litter is removed.
+    protocol_residue_regex()
+        .replace_all(text, |caps: &regex::Captures| {
+            let matched = caps.get(0).expect("capture group 0 always present");
+            if inside_markdown_fence(text, matched.start()) {
+                matched.as_str().to_string()
+            } else {
+                String::new()
+            }
+        })
+        .to_string()
+}
+
+fn strip_bare_internal_json(text: &str) -> String {
+    // A finalized turn whose entire visible body is an internal control object
+    // — e.g. the completion judge's `{"verdict":...,"reasoning":...}` — must
+    // never surface as the agent's message. The fenced/inline planner strips
+    // above only catch ```json fences and `{"mode":...}`; a bare top-level
+    // verdict/reasoning blob slips through. Only strips when the WHOLE trimmed
+    // body is recognized internal JSON, so legitimate prose that merely quotes
+    // JSON is untouched.
+    if looks_like_internal_planning_json(text) {
+        return String::new();
+    }
+    text.to_string()
+}
+
 fn strip_partial_marker_suffix(text: &str) -> String {
     const MARKERS: [&str; 13] = [
         "<|tool_call|>",
@@ -360,6 +417,12 @@ pub fn sanitize_visible_assistant_text(text: &str, partial: bool) -> String {
     sanitized = extract_visible_prose(&sanitized);
     sanitized = strip_internal_json_fences(&sanitized);
     sanitized = strip_inline_internal_planning_json(&sanitized, partial);
+    // Unconditional: orphan/truncated control-token residue and bare internal
+    // control JSON leak into FINAL transcripts too, where the partial-only
+    // strippers below never run. Bare-JSON check runs on the trimmed body so a
+    // verdict blob surrounded by whitespace is still recognized.
+    sanitized = strip_protocol_residue(&sanitized);
+    sanitized = strip_bare_internal_json(sanitized.trim());
     if partial {
         sanitized = strip_unclosed_internal_blocks(&sanitized);
         sanitized = strip_partial_marker_suffix(&sanitized);
@@ -435,6 +498,55 @@ mod tests {
         assert_eq!(sanitize_visible_assistant_text(raw, false), "");
         let raw = r#"{"status":"ok","message":"hello"}"#;
         assert_eq!(sanitize_visible_assistant_text(raw, false), raw);
+    }
+
+    #[test]
+    fn sanitize_strips_orphan_tool_call_residue_and_truncations() {
+        // Real leak: weak/GLM models emit truncated `</tool_call>` fragments as
+        // standalone visible text. None match the well-formed block patterns.
+        assert_eq!(sanitize_visible_assistant_text("_call>", false), "");
+        assert_eq!(sanitize_visible_assistant_text("l_call>l_call>", false), "");
+        assert_eq!(
+            sanitize_visible_assistant_text("Done.\n})\n</tool_call>_call>", false),
+            "Done.\n})"
+        );
+        assert_eq!(
+            sanitize_visible_assistant_text("Implemented.</assistant_prose>", false),
+            "Implemented."
+        );
+        // `_prose>` close-tag truncation (no opening tag) is also litter.
+        assert_eq!(
+            sanitize_visible_assistant_text("Implemented.\nnt_prose>", false),
+            "Implemented."
+        );
+        // Fence-aware: a fenced example showing the tag is preserved verbatim.
+        let fenced = "```\n</tool_call>\n```\nDone.";
+        assert_eq!(sanitize_visible_assistant_text(fenced, false), fenced);
+    }
+
+    #[test]
+    fn sanitize_does_not_touch_ordinary_prose_or_inequalities() {
+        // Guard against over-eager residue stripping.
+        let raw = "Use a_call> only as— wait, compare x > y and y > z here.";
+        // `a_call>` IS residue-shaped (`_call>` truncation); ensure the rest survives.
+        let out = sanitize_visible_assistant_text(raw, false);
+        assert!(out.contains("compare x > y and y > z here."), "got: {out}");
+        assert_eq!(
+            sanitize_visible_assistant_text("The phrase tool call is normal prose.", false),
+            "The phrase tool call is normal prose."
+        );
+    }
+
+    #[test]
+    fn sanitize_drops_bare_completion_judge_verdict_json() {
+        let raw = r#"{"verdict":"done","reasoning":"All tests pass.","next_step":""}"#;
+        assert_eq!(sanitize_visible_assistant_text(raw, false), "");
+        // A bare verdict blob surrounded by whitespace is still recognized.
+        let padded = "\n  {\"verdict\":\"continue\",\"reasoning\":\"does not compile\"}  \n";
+        assert_eq!(sanitize_visible_assistant_text(padded, false), "");
+        // Legitimate non-internal JSON is preserved (consistent with existing behavior).
+        let keep = r#"{"status":"ok","message":"hello"}"#;
+        assert_eq!(sanitize_visible_assistant_text(keep, false), keep);
     }
 
     #[test]
