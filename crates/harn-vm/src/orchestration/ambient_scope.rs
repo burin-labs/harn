@@ -1,8 +1,9 @@
 //! Per-task ambient execution scope.
 //!
 //! Capability/identity context — execution policy, approval policy, command
-//! policy, dynamic permissions, the bridge-trust + command-hook depths, and the
-//! runtime-context overlay — is held in thread-local LIFO stacks. The same
+//! policy, dynamic permissions, the current host bridge, the bridge-trust +
+//! command-hook depths, and the runtime-context overlay — is held in
+//! thread-local LIFO stacks or single slots. The same
 //! hazard applies to the single-slot `Option` contexts a worker installs for the
 //! whole agent loop: the VM execution context (cwd/env/source-dir + the
 //! capability path-scope root) and the mutation session (audit/run_id/approval/
@@ -44,6 +45,7 @@ use crate::autonomy::{swap_autonomy_policy_stack, AutonomyPolicy};
 use crate::connectors::harn_module::swap_active_harn_connector_ctx;
 use crate::connectors::ConnectorCtx;
 use crate::llm::permissions::{swap_dynamic_permission_stack, DynamicPermissionPolicy};
+use crate::llm::swap_current_host_bridge;
 use crate::runtime_context::{swap_runtime_context_overlay_stack, RuntimeContextOverlay};
 use crate::stdlib::process::{swap_source_dir, swap_thread_execution_context};
 use crate::stdlib::template::llm_context::{swap_llm_render_stack, LlmRenderContext};
@@ -74,6 +76,10 @@ pub(crate) struct AmbientExecutionScope {
     /// The current mutation session (audit/run_id/approval/secret-scope). Same
     /// shape as `execution_context`: one `Option` held across the loop's awaits.
     mutation_session: Option<MutationSessionRecord>,
+    /// Host capability bridge installed for the current agent loop. Fan-out
+    /// workers inherit the parent's bridge so `host_call` remains routed to the
+    /// session host even when their workspace differs from the process cwd.
+    host_bridge: Option<std::sync::Arc<crate::bridge::HostBridge>>,
     trusted_depth: usize,
     command_hook_depth: usize,
 }
@@ -124,6 +130,7 @@ impl AmbientExecutionScope {
             execution_context: clone_via_swap(swap_thread_execution_context),
             source_dir: clone_via_swap(swap_source_dir),
             mutation_session: clone_via_swap(swap_mutation_session),
+            host_bridge: clone_via_swap(swap_current_host_bridge),
             ..Self::default()
         }
     }
@@ -165,6 +172,7 @@ impl AmbientExecutionScope {
             execution_context: clone_via_swap(swap_thread_execution_context),
             source_dir: clone_via_swap(swap_source_dir),
             mutation_session: clone_via_swap(swap_mutation_session),
+            host_bridge: clone_via_swap(swap_current_host_bridge),
             trusted_depth: clone_via_swap(swap_trusted_bridge_depth),
             command_hook_depth: clone_via_swap(swap_command_policy_hook_depth),
         }
@@ -186,6 +194,7 @@ impl AmbientExecutionScope {
             execution_context: swap_thread_execution_context(self.execution_context),
             source_dir: swap_source_dir(self.source_dir),
             mutation_session: swap_mutation_session(self.mutation_session),
+            host_bridge: swap_current_host_bridge(self.host_bridge),
             trusted_depth: swap_trusted_bridge_depth(self.trusted_depth),
             command_hook_depth: swap_command_policy_hook_depth(self.command_hook_depth),
         }
@@ -251,6 +260,9 @@ const AMBIENT_THREAD_LOCAL_CATALOG: &[(&str, AmbientScoping)] = &[
     ("VM_SOURCE_DIR", AmbientScoping::Captured),
     // F2: audit/run_id/approval/secret-scope.
     ("CURRENT_MUTATION_SESSION", AmbientScoping::Captured),
+    // Host capability bridge: fan-out workers need the same host_call routing
+    // as the parent agent loop, even when process cwd differs from project root.
+    ("CURRENT_HOST_BRIDGE", AmbientScoping::Captured),
     // Files-written/session breadcrumb: isolated per task, but not inherited.
     ("CURRENT_SESSION_STACK", AmbientScoping::Captured),
     // --- Uncaptured: audited capability/identity context, same shape, NOT yet
@@ -688,6 +700,69 @@ mod tests {
         }
     }
 
+    fn test_host_bridge(start_id: u64) -> std::sync::Arc<crate::bridge::HostBridge> {
+        let pending =
+            std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
+        let cancelled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let writer: crate::bridge::HostBridgeWriter = std::sync::Arc::new(|_| Ok(()));
+        std::sync::Arc::new(crate::bridge::HostBridge::from_parts_with_writer(
+            pending, cancelled, writer, start_id,
+        ))
+    }
+
+    /// F4 regression: fan-out workers must inherit the current host bridge so
+    /// `host_call("workspace.project_root")` and other host capabilities still
+    /// route to the Burin session host inside children. Each task may install
+    /// its own bridge while it runs, and that must not cross-wire a sibling or
+    /// leak back to the parent thread-local.
+    #[tokio::test]
+    async fn scoped_tasks_inherit_and_isolate_current_host_bridge() {
+        crate::llm::clear_current_host_bridge();
+        let parent_bridge = test_host_bridge(100);
+        crate::llm::install_current_host_bridge(parent_bridge.clone());
+
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let run_worker = |name: &'static str, start_id: u64| {
+                    let scope = AmbientExecutionScope::capture_inherited();
+                    let expected_parent = parent_bridge.clone();
+                    let worker_bridge = test_host_bridge(start_id);
+                    let expected_worker = worker_bridge.clone();
+                    tokio::task::spawn_local(scope_ambient(scope, async move {
+                        let inherited = crate::llm::current_host_bridge()
+                            .expect("worker inherits parent host bridge");
+                        assert!(
+                            std::sync::Arc::ptr_eq(&inherited, &expected_parent),
+                            "{name} must inherit the parent host bridge before installing its own"
+                        );
+
+                        crate::llm::install_current_host_bridge(worker_bridge);
+                        tokio::task::yield_now().await;
+                        tokio::task::yield_now().await;
+
+                        let observed = crate::llm::current_host_bridge()
+                            .expect("worker host bridge survives awaits");
+                        assert!(
+                            std::sync::Arc::ptr_eq(&observed, &expected_worker),
+                            "{name} must keep its own host bridge after sibling interleaving"
+                        );
+                    }))
+                };
+
+                let alpha = run_worker("alpha", 200);
+                let beta = run_worker("beta", 300);
+                alpha.await.unwrap();
+                beta.await.unwrap();
+            })
+            .await;
+
+        let restored =
+            crate::llm::current_host_bridge().expect("parent host bridge restored after workers");
+        assert!(std::sync::Arc::ptr_eq(&restored, &parent_bridge));
+        crate::llm::clear_current_host_bridge();
+    }
+
     /// F1 regression: two cooperatively-scheduled tasks set DISTINCT execution
     /// contexts (distinct cwd + env) and yield twice so the sibling runs in
     /// between. Each task must read back ONLY its own cwd/env. Without scoping
@@ -795,6 +870,7 @@ mod tests {
 
         fn is_ambient_shape(name: &str) -> bool {
             name == "VM_SOURCE_DIR"
+                || name == "CURRENT_HOST_BRIDGE"
                 || name.ends_with("_STACK")
                 || name.ends_with("_DEPTH")
                 || name.ends_with("_CONTEXT")
@@ -889,6 +965,7 @@ mod tests {
             "VM_EXECUTION_CONTEXT",
             "VM_SOURCE_DIR",
             "CURRENT_MUTATION_SESSION",
+            "CURRENT_HOST_BRIDGE",
             "CURRENT_SESSION_STACK",
         ]
         .into_iter()
