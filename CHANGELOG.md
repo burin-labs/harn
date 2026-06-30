@@ -8,6 +8,17 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.160
+
+### Fixed
+
+- Fixed sub-agent worker write scopes so unanchored child agents inherit the parent
+  workspace anchor as their default execution cwd.
+- **Orchestrator pump startup readiness.** The in-process orchestrator harness now
+  waits for pending, inbox, cron, and waitpoint pumps to subscribe before it
+  reports startup readiness, preventing immediately accepted trigger requests
+  from racing ahead of the pump cursor and being skipped under CI scheduling.
+
 ## v0.8.159
 
 ### Added
