@@ -1149,7 +1149,9 @@ mod tests {
         // sleeping or using a large absolute timestamp literal.
         let future = std::fs::metadata(&leaf).unwrap().modified().unwrap()
             + std::time::Duration::from_secs(10);
-        std::fs::File::open(&leaf)
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&leaf)
             .unwrap()
             .set_times(std::fs::FileTimes::new().set_modified(future))
             .unwrap();
