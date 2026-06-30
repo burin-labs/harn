@@ -15,11 +15,25 @@
 
 #![cfg(unix)]
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use harn_hostlib::tools::ToolsCapability;
 use harn_hostlib::{BuiltinRegistry, HostlibCapability, HostlibError};
 use harn_vm::VmValue;
+
+/// Serializes the tests in this binary that mutate process-wide environment
+/// variables. `std::env::set_var` / `remove_var` are not thread-safe (and are
+/// `unsafe` under the 2024 edition): without this lock libtest's threaded
+/// runner can tear a sibling test's env read, leak a secret var across tests,
+/// or, rarely, segfault. Every env-mutating test below acquires this guard and
+/// holds it for its full duration.
+static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+fn lock_env() -> MutexGuard<'static, ()> {
+    ENV_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 fn registry() -> BuiltinRegistry {
     let mut registry = BuiltinRegistry::new();
@@ -96,9 +110,12 @@ fn real_run_command_strips_secret_env_from_child() {
     // stdout is returned to the model. Secret-bearing vars must be stripped so
     // `run({command: "env"})` can't surface provider keys / tokens.
     //
-    // SAFETY: setting/removing process-wide env vars is not thread-safe in
-    // general, but these names are unique to this test and removed before it
-    // returns, so no sibling test in this binary observes them.
+    // This test must set the secret vars on the PARENT process so the child can
+    // (attempt to) inherit them; per-`Command` `.env` wouldn't exercise the
+    // strip path. SAFETY: `ENV_LOCK` is held for the whole test, so no sibling
+    // env-mutating test runs concurrently, and the vars are removed before the
+    // guard is released.
+    let _env_guard = lock_env();
     unsafe {
         std::env::set_var("ANTHROPIC_API_KEY", "sk-test-anthropic");
         std::env::set_var("GITHUB_TOKEN", "ghp_test_github");
@@ -174,7 +191,9 @@ fn real_run_command_points_child_tmpdir_inside_the_workspace() {
 
     // OS confinement is irrelevant to this assertion (we observe the injected
     // env, not enforcement) and is unavailable on some CI hosts, so disable it.
-    // SAFETY: the slow E2E target runs serially.
+    // SAFETY: `ENV_LOCK` is held for the whole test so no sibling env-mutating
+    // test runs concurrently, and the var is removed before the guard drops.
+    let _env_guard = lock_env();
     unsafe {
         std::env::set_var("HARN_HANDLER_SANDBOX", "off");
     }
@@ -229,6 +248,9 @@ fn real_run_command_respects_a_caller_pinned_tmpdir() {
     let caller_tmp = workspace.path().join("caller-chosen");
     std::fs::create_dir_all(&caller_tmp).unwrap();
 
+    // SAFETY: `ENV_LOCK` is held for the whole test so no sibling env-mutating
+    // test runs concurrently, and the var is removed before the guard drops.
+    let _env_guard = lock_env();
     unsafe {
         std::env::set_var("HARN_HANDLER_SANDBOX", "off");
     }

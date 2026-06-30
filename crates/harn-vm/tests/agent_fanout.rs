@@ -109,7 +109,6 @@ fn parse_rows(lines: &[String]) -> Vec<Row> {
 const PRELUDE: &str = r#"
 fn ok_caller(marker) {
   return { call ->
-    sleep(15)
     return {
       ok: true,
       value: {
@@ -125,7 +124,6 @@ fn ok_caller(marker) {
 
 fn fail_caller(marker) {
   return { call ->
-    sleep(15)
     // Throw so the child's agent_loop unwinds and execute_sub_agent wraps it
     // as an `ok: false` sub-agent envelope with a non-nil error. (A graceful
     // `{ok: false}` return is instead absorbed into a "completed" envelope.)
