@@ -1254,10 +1254,13 @@ emits JSON with native/text/disabled fallback classification.
 ```bash
 harn provider tool-probe ollama --model devstral-small-2
 harn provider tool-probe llamacpp --model local-qwen3.6 --mode non-streaming
+harn provider tool-probe dashscope --model qwen3.6-35b-a3b --mode non-streaming --repeat 5
 ```
 
 Use `--response-fixture` to classify a saved provider response without making a
-network request. `harn local switch` can consume the JSON with `--probe-result`.
+network request. Use `--repeat` for live reliability checks; repeated summaries
+only pass when every attempted probe for that mode succeeds. `harn local switch`
+can consume the JSON with `--probe-result`.
 
 ## harn local launch
 

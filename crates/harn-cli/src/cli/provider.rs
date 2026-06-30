@@ -173,6 +173,9 @@ pub(crate) struct ProviderToolProbeArgs {
     /// Override the marker the model must echo through the tool call.
     #[arg(long, default_value = harn_vm::llm::tool_conformance::DEFAULT_TOOL_PROBE_MARKER)]
     pub marker: String,
+    /// Repeat each live probe mode N times.
+    #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u16).range(1..=100))]
+    pub repeat: u16,
     /// Classify a saved provider response body instead of making a live request.
     #[arg(long = "response-fixture")]
     pub response_fixture: Option<PathBuf>,

@@ -203,6 +203,13 @@ async fn aggregate_tool_conformance_report(
     args: &ProviderToolProbeArgs,
 ) -> Result<harn_vm::llm::tool_conformance::ToolConformanceReport, String> {
     if let Some(path) = args.response_fixture.as_ref() {
+        if args.repeat != 1 {
+            return Err(
+                "error: --repeat is only supported for live provider tool probes; \
+                 --response-fixture classifies one saved response"
+                    .to_string(),
+            );
+        }
         let raw = std::fs::read_to_string(path)
             .map_err(|error| format!("error: failed to read {}: {error}", path.display()))?;
         Ok(
@@ -225,6 +232,7 @@ async fn aggregate_tool_conformance_report(
         options.base_url = args.base_url.clone();
         options.modes = modes_for_arg(args.mode);
         options.marker = args.marker.clone();
+        options.repeat = usize::from(args.repeat);
         options.timeout_secs = args.timeout_secs;
         Ok(harn_vm::llm::tool_conformance::run_tool_conformance_probe(options).await)
     }

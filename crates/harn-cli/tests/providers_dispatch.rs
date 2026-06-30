@@ -294,6 +294,36 @@ fn provider_tool_probe_fixture_human_is_byte_identical_across_runs() {
     );
 }
 
+#[test]
+fn provider_tool_probe_fixture_rejects_repeat() {
+    let dir = tempfile::tempdir().expect("create tempdir");
+    let fixture = dir.path().join("response.json");
+    write_minimal_tool_fixture(&fixture);
+    let path = fixture.to_string_lossy().into_owned();
+    let output = run(
+        &[
+            "provider",
+            "tool-probe",
+            "mock",
+            "--model",
+            "mock",
+            "--response-fixture",
+            path.as_str(),
+            "--repeat",
+            "5",
+        ],
+        &[],
+    );
+    assert_eq!(output.exit_code, 1, "stderr={}", output.stderr);
+    assert!(
+        output
+            .stderr
+            .contains("--repeat is only supported for live"),
+        "stderr={}",
+        output.stderr
+    );
+}
+
 fn write_minimal_tool_fixture(path: &Path) {
     // An OpenAI-style response body the fixture classifier accepts.
     // The marker matches the default `DEFAULT_TOOL_PROBE_MARKER`. Even

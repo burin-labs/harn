@@ -164,6 +164,7 @@ local lifecycle gates and eval harnesses:
 
 ```bash
 harn provider tool-probe ollama --model devstral-small-2 --mode both --json
+harn provider tool-probe dashscope --model qwen3.6-35b-a3b --mode non-streaming --repeat 5 --json
 harn local switch ollama-gemma4 --probe-result gemma4-tool-probe.json
 ```
 
@@ -171,7 +172,9 @@ The report classifies each mode as a structured native tool call, parseable
 Harn text tool call, raw model-specific tag, prose-only response, malformed
 arguments, empty response, HTTP error, or transport error. Its
 `tool_calling.fallback_mode` is the machine-readable choice downstream
-systems should record: `native`, `text`, or `disabled`.
+systems should record: `native`, `text`, or `disabled`. Use `--repeat` for
+provider reliability measurements; repeated summaries only pass when every
+attempt for that mode succeeds.
 
 ### Enterprise providers
 
