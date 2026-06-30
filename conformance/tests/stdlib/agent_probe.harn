@@ -79,7 +79,7 @@ pipeline test_agent_probe(_task) {
   // --- stub kinds return unknown with confidence 0.4
   let test_stub = probe("test", "anything", opts + {now: "2026-05-23T22:00:06Z"})
   assert_eq(test_stub.outcome, "unknown")
-  assert(contains(test_stub.observed, "not yet implemented"))
+  assert(contains(test_stub.observed, "not supported"))
   let inspect_stub = probe("Inspect", "anything", opts + {now: "2026-05-23T22:00:07Z"})
   assert_eq(inspect_stub.outcome, "unknown")
   // --- validation errors

@@ -1209,24 +1209,35 @@ fn ed25519_verify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     let msg = bytes_or_string_input(Some(&args[1]))?;
     let sig_hex = args[2].display();
 
-    let pub_bytes = match hex::decode(&pub_hex) {
-        Ok(b) => b,
-        Err(_) => return Ok(VmValue::Bool(false)),
-    };
+    // The public key is the caller's trusted reference material. Malformed key
+    // input is a programming error (wrong variable, hex/base64 mixup), so we
+    // throw rather than silently report "verification failed" forever. The
+    // signature, by contrast, is the untrusted thing being checked: a bad-hex
+    // or wrong-length signature simply does not verify (`false`), and we never
+    // throw on attacker-controlled input.
+    let pub_bytes = hex::decode(&pub_hex).map_err(|e| {
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+            "ed25519_verify: public_hex is not valid hex: {e}"
+        ))))
+    })?;
+    let pub_arr: [u8; 32] = pub_bytes.as_slice().try_into().map_err(|_| {
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+            "ed25519_verify: public key must be 32 bytes, got {}",
+            pub_bytes.len()
+        ))))
+    })?;
+    let verifying = VerifyingKey::from_bytes(&pub_arr).map_err(|e| {
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+            "ed25519_verify: invalid public key: {e}"
+        ))))
+    })?;
+
     let sig_bytes = match hex::decode(&sig_hex) {
         Ok(b) => b,
         Err(_) => return Ok(VmValue::Bool(false)),
     };
-    let pub_arr: [u8; 32] = match pub_bytes.as_slice().try_into() {
-        Ok(a) => a,
-        Err(_) => return Ok(VmValue::Bool(false)),
-    };
     let sig_arr: [u8; 64] = match sig_bytes.as_slice().try_into() {
         Ok(a) => a,
-        Err(_) => return Ok(VmValue::Bool(false)),
-    };
-    let verifying = match VerifyingKey::from_bytes(&pub_arr) {
-        Ok(v) => v,
         Err(_) => return Ok(VmValue::Bool(false)),
     };
     let signature = Signature::from_bytes(&sig_arr);

@@ -134,7 +134,6 @@ pub enum ConfigError {
         path: PathBuf,
         message: String,
     },
-    #[allow(dead_code)]
     Io {
         path: PathBuf,
         error: std::io::Error,
@@ -201,7 +200,19 @@ pub fn load_for_path(start: &Path) -> Result<HarnConfig, ConfigError> {
 fn parse_manifest(path: &Path) -> Result<HarnConfig, ConfigError> {
     let content = match fs::read_to_string(path) {
         Ok(c) => c,
-        Err(_) => return Ok(HarnConfig::default()),
+        // The manifest existed at `is_file()` time; if it vanished in the
+        // race window, fall back to defaults. Any other I/O error (permission
+        // denied, bad symlink) is surfaced so a misconfigured manifest never
+        // silently degrades to default config.
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(HarnConfig::default());
+        }
+        Err(error) => {
+            return Err(ConfigError::Io {
+                path: path.to_path_buf(),
+                error,
+            });
+        }
     };
     let raw: RawManifest = toml::from_str(&content).map_err(|e| ConfigError::Parse {
         path: path.to_path_buf(),
