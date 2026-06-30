@@ -22,7 +22,7 @@ use super::audit::{
 use super::config::{DrainConfig, OrchestratorConfig, PumpConfig};
 use super::pumps::{
     spawn_cron_pump, spawn_inbox_pump, spawn_pending_pump, spawn_waitpoint_cancel_pump,
-    spawn_waitpoint_resume_pump, spawn_waitpoint_sweeper, PumpDrainGate,
+    spawn_waitpoint_resume_pump, spawn_waitpoint_sweeper, PumpDrainGate, PumpHandle,
 };
 use super::reload::{handle_reload_request, RuntimeCtx};
 use super::routing::{
@@ -32,10 +32,39 @@ use super::routing::{
 };
 use super::shutdown::{graceful_shutdown, GracefulShutdownCtx};
 use super::ReadyState;
-use super::{PENDING_TOPIC, STATE_SNAPSHOT_FILE};
+use super::{CRON_TICK_TOPIC, PENDING_TOPIC, STATE_SNAPSHOT_FILE};
 use crate::package::{self, Manifest};
 
 const MANIFEST_WATCH_DEBOUNCE: Duration = Duration::from_millis(200);
+
+async fn wait_for_pump_startup(
+    pending_pumps: &mut [(String, PumpHandle)],
+    inbox_pumps: &mut [(String, PumpHandle)],
+    cron_pump: &mut PumpHandle,
+    waitpoint_pump: &mut PumpHandle,
+    waitpoint_cancel_pump: &mut PumpHandle,
+) -> Result<Vec<String>, OrchestratorError> {
+    let mut topics = Vec::new();
+    for (topic, pump) in pending_pumps {
+        pump.wait_ready(topic).await?;
+        topics.push(topic.clone());
+    }
+    for (topic, pump) in inbox_pumps {
+        pump.wait_ready(topic).await?;
+        topics.push(topic.clone());
+    }
+    cron_pump.wait_ready(CRON_TICK_TOPIC).await?;
+    topics.push(CRON_TICK_TOPIC.to_string());
+    waitpoint_pump
+        .wait_ready(harn_vm::WAITPOINT_RESUME_TOPIC)
+        .await?;
+    topics.push(harn_vm::WAITPOINT_RESUME_TOPIC.to_string());
+    waitpoint_cancel_pump
+        .wait_ready(harn_vm::TRIGGER_CANCEL_REQUESTS_TOPIC)
+        .await?;
+    topics.push(harn_vm::TRIGGER_CANCEL_REQUESTS_TOPIC.to_string());
+    Ok(topics)
+}
 
 pub(super) async fn orchestrator_task(
     config: OrchestratorConfig,
@@ -313,21 +342,21 @@ async fn orchestrator_lifecycle(
             ));
         }
     }
-    let cron_pump = spawn_cron_pump(
+    let mut cron_pump = spawn_cron_pump(
         event_log.clone(),
         dispatcher.clone(),
         pump_config,
         metrics_registry.clone(),
         pump_drain_gate.clone(),
     )?;
-    let waitpoint_pump = spawn_waitpoint_resume_pump(
+    let mut waitpoint_pump = spawn_waitpoint_resume_pump(
         event_log.clone(),
         dispatcher.clone(),
         pump_config,
         metrics_registry.clone(),
         pump_drain_gate.clone(),
     )?;
-    let waitpoint_cancel_pump = spawn_waitpoint_cancel_pump(
+    let mut waitpoint_cancel_pump = spawn_waitpoint_cancel_pump(
         event_log.clone(),
         dispatcher.clone(),
         pump_config,
@@ -376,6 +405,23 @@ async fn orchestrator_lifecycle(
         "[harn] activated connectors: {}",
         format_activation_summary(&connector_runtime.activations)
     );
+
+    let ready_pump_topics = wait_for_pump_startup(
+        &mut pending_pumps,
+        &mut inbox_pumps,
+        &mut cron_pump,
+        &mut waitpoint_pump,
+        &mut waitpoint_cancel_pump,
+    )
+    .await?;
+    append_lifecycle_event(
+        &event_log,
+        "pumps_ready",
+        json!({
+            "topics": ready_pump_topics,
+        }),
+    )
+    .await?;
 
     listener.mark_ready();
     eprintln!("[harn] HTTP listener ready on {}", listener.url());
