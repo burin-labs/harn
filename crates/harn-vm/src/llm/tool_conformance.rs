@@ -24,6 +24,7 @@ pub struct ToolConformanceProbeOptions {
     pub base_url: Option<String>,
     pub modes: Vec<ToolProbeMode>,
     pub marker: String,
+    pub repeat: usize,
     pub timeout_secs: u64,
 }
 
@@ -35,6 +36,7 @@ impl ToolConformanceProbeOptions {
             base_url: None,
             modes: vec![ToolProbeMode::NonStreaming, ToolProbeMode::Streaming],
             marker: DEFAULT_TOOL_PROBE_MARKER.to_string(),
+            repeat: 1,
             timeout_secs: 120,
         }
     }
@@ -205,18 +207,21 @@ pub async fn run_tool_conformance_probe(
         llm_config::provider_config(&provider).map(|def| llm_config::resolve_base_url(&def))
     });
     let mut cases = Vec::new();
-    for mode in normalized_modes(&options.modes) {
-        cases.push(
-            execute_live_probe_case(
-                &provider,
-                &model_id,
-                base_url.as_deref(),
-                mode,
-                &options.marker,
-                options.timeout_secs,
-            )
-            .await,
-        );
+    let modes = normalized_modes(&options.modes);
+    for _ in 0..options.repeat.max(1) {
+        for mode in &modes {
+            cases.push(
+                execute_live_probe_case(
+                    &provider,
+                    &model_id,
+                    base_url.as_deref(),
+                    *mode,
+                    &options.marker,
+                    options.timeout_secs,
+                )
+                .await,
+            );
+        }
     }
     report_from_cases(provider, model_id, base_url, options.marker, cases)
 }
@@ -284,43 +289,9 @@ fn report_from_cases(
 }
 
 fn summarize_cases(cases: &[ToolConformanceCase]) -> ToolCallingConformanceSummary {
-    let mut native = ToolProbeStatus::Unknown;
-    let mut streaming_native = ToolProbeStatus::Unknown;
-    let mut text = ToolProbeStatus::Unknown;
-
-    for case in cases {
-        if case.classification == ToolProbeClassification::StructuredNativeToolCall {
-            if case.mode == ToolProbeMode::Streaming {
-                streaming_native = if case.ok {
-                    ToolProbeStatus::Pass
-                } else {
-                    ToolProbeStatus::Fail
-                };
-            } else {
-                native = if case.ok {
-                    ToolProbeStatus::Pass
-                } else {
-                    ToolProbeStatus::Fail
-                };
-            }
-        } else if case.mode == ToolProbeMode::Streaming
-            && streaming_native == ToolProbeStatus::Unknown
-        {
-            streaming_native = ToolProbeStatus::Fail;
-        } else if case.mode == ToolProbeMode::NonStreaming && native == ToolProbeStatus::Unknown {
-            native = ToolProbeStatus::Fail;
-        }
-
-        if case.classification == ToolProbeClassification::ParseableHarnTextToolCall {
-            text = if case.ok {
-                ToolProbeStatus::Pass
-            } else {
-                ToolProbeStatus::Fail
-            };
-        } else if text == ToolProbeStatus::Unknown && case.text_tool_call_count > 0 {
-            text = ToolProbeStatus::Fail;
-        }
-    }
+    let native = summarize_native_mode(cases, ToolProbeMode::NonStreaming);
+    let streaming_native = summarize_native_mode(cases, ToolProbeMode::Streaming);
+    let text = summarize_text_mode(cases);
 
     let fallback_mode =
         if native == ToolProbeStatus::Pass || streaming_native == ToolProbeStatus::Pass {
@@ -343,6 +314,55 @@ fn summarize_cases(cases: &[ToolConformanceCase]) -> ToolCallingConformanceSumma
         streaming_native,
         fallback_mode,
         failure_reason,
+    }
+}
+
+fn summarize_native_mode(cases: &[ToolConformanceCase], mode: ToolProbeMode) -> ToolProbeStatus {
+    let mut saw_mode = false;
+    let mut all_passed = true;
+    for case in cases.iter().filter(|case| case.mode == mode) {
+        saw_mode = true;
+        if !(case.ok && case.classification == ToolProbeClassification::StructuredNativeToolCall) {
+            all_passed = false;
+        }
+    }
+    match (saw_mode, all_passed) {
+        (false, _) => ToolProbeStatus::Unknown,
+        (true, true) => ToolProbeStatus::Pass,
+        (true, false) => ToolProbeStatus::Fail,
+    }
+}
+
+fn summarize_text_mode(cases: &[ToolConformanceCase]) -> ToolProbeStatus {
+    let mut saw_text = false;
+    let mut saw_passing_mode = false;
+    for mode in [ToolProbeMode::NonStreaming, ToolProbeMode::Streaming] {
+        let mut saw_mode = false;
+        let mut saw_text_in_mode = false;
+        let mut all_mode_cases_passed = true;
+        for case in cases.iter().filter(|case| case.mode == mode) {
+            saw_mode = true;
+            saw_text_in_mode |= case.classification
+                == ToolProbeClassification::ParseableHarnTextToolCall
+                || case.text_tool_call_count > 0;
+            if !(case.ok
+                && case.classification == ToolProbeClassification::ParseableHarnTextToolCall)
+            {
+                all_mode_cases_passed = false;
+            }
+        }
+        saw_text |= saw_text_in_mode;
+        if saw_mode && saw_text_in_mode && all_mode_cases_passed {
+            saw_passing_mode = true;
+        }
+    }
+    if !saw_text {
+        return ToolProbeStatus::Unknown;
+    }
+    if saw_passing_mode {
+        ToolProbeStatus::Pass
+    } else {
+        ToolProbeStatus::Fail
     }
 }
 
@@ -1005,5 +1025,87 @@ mod tests {
             &report,
             "native_tool_probe"
         ));
+    }
+
+    #[test]
+    fn summary_requires_every_repeated_native_case_to_pass() {
+        let summary = summarize_cases(&[
+            probe_case(
+                ToolProbeMode::NonStreaming,
+                true,
+                ToolProbeClassification::StructuredNativeToolCall,
+            ),
+            probe_case(
+                ToolProbeMode::NonStreaming,
+                false,
+                ToolProbeClassification::ProseOnlyNonTool,
+            ),
+        ]);
+        assert_eq!(summary.native, ToolProbeStatus::Fail);
+        assert_eq!(summary.fallback_mode, ToolProbeFallbackMode::Disabled);
+    }
+
+    #[test]
+    fn summary_requires_every_repeated_text_case_to_pass() {
+        let summary = summarize_cases(&[
+            probe_case(
+                ToolProbeMode::NonStreaming,
+                true,
+                ToolProbeClassification::ParseableHarnTextToolCall,
+            ),
+            probe_case(
+                ToolProbeMode::NonStreaming,
+                false,
+                ToolProbeClassification::MalformedJsonArguments,
+            ),
+        ]);
+        assert_eq!(summary.native, ToolProbeStatus::Fail);
+        assert_eq!(summary.text, ToolProbeStatus::Fail);
+        assert_eq!(summary.fallback_mode, ToolProbeFallbackMode::Disabled);
+    }
+
+    #[test]
+    fn summary_preserves_nonstreaming_text_fallback_when_streaming_fails() {
+        let summary = summarize_cases(&[
+            probe_case(
+                ToolProbeMode::NonStreaming,
+                true,
+                ToolProbeClassification::ParseableHarnTextToolCall,
+            ),
+            probe_case(
+                ToolProbeMode::Streaming,
+                false,
+                ToolProbeClassification::ProseOnlyNonTool,
+            ),
+        ]);
+        assert_eq!(summary.native, ToolProbeStatus::Fail);
+        assert_eq!(summary.streaming_native, ToolProbeStatus::Fail);
+        assert_eq!(summary.text, ToolProbeStatus::Pass);
+        assert_eq!(summary.fallback_mode, ToolProbeFallbackMode::Text);
+    }
+
+    fn probe_case(
+        mode: ToolProbeMode,
+        ok: bool,
+        classification: ToolProbeClassification,
+    ) -> ToolConformanceCase {
+        let native_tool_call_count =
+            usize::from(classification == ToolProbeClassification::StructuredNativeToolCall);
+        let text_tool_call_count =
+            usize::from(classification == ToolProbeClassification::ParseableHarnTextToolCall);
+        ToolConformanceCase {
+            mode,
+            ok,
+            classification,
+            fallback_mode: ToolProbeFallbackMode::Disabled,
+            failure_reason: None,
+            http_status: None,
+            elapsed_ms: None,
+            native_tool_call_count,
+            text_tool_call_count,
+            parser_errors: Vec::new(),
+            protocol_violations: Vec::new(),
+            content_sample: None,
+        }
     }
 }

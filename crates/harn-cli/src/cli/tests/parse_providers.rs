@@ -583,6 +583,8 @@ fn test_parses_provider_tool_probe_args() {
         "non-streaming",
         "--marker",
         "marker",
+        "--repeat",
+        "5",
         "--response-fixture",
         "fixture.json",
     ]);
@@ -598,6 +600,7 @@ fn test_parses_provider_tool_probe_args() {
     assert_eq!(args.base_url.as_deref(), Some("http://127.0.0.1:11434"));
     assert!(matches!(args.mode, ProviderToolProbeModeArg::NonStreaming));
     assert_eq!(args.marker, "marker");
+    assert_eq!(args.repeat, 5);
     assert_eq!(args.response_fixture, Some(PathBuf::from("fixture.json")));
     assert!(args.json);
 }
