@@ -885,7 +885,7 @@ pub fn agent_command_tools(registry = nil, options = nil) {
         key,
         {
           parameters: {
-            handle_id: {type: "string"},
+            handle_id: {type: "string", required: false},
             handle: {type: "string", required: false},
             session_id: {type: "string", required: false},
           },
@@ -915,7 +915,7 @@ pub fn agent_command_tools(registry = nil, options = nil) {
         key,
         {
           parameters: {
-            handle_id: {type: "string"},
+            handle_id: {type: "string", required: false},
             handle: {type: "string", required: false},
             timeout_ms: {type: "integer", required: false},
             session_id: {type: "string", required: false},
@@ -952,7 +952,7 @@ pub fn agent_command_tools(registry = nil, options = nil) {
         key,
         {
           parameters: {
-            handle_id: {type: "string"},
+            handle_id: {type: "string", required: false},
             handle: {type: "string", required: false},
             wait_result_ms: {type: "integer", required: false},
             timed_out: {type: "boolean", required: false},

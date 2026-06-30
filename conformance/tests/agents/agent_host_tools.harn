@@ -85,12 +85,21 @@ pipeline main() {
   __io_println(tool_find(lifecycle_tools, "poll_command") != nil)
   __io_println(tool_find(lifecycle_tools, "wait_command") != nil)
   __io_println(tool_find(lifecycle_tools, "kill_command") != nil)
+  __io_println(!tool_find(lifecycle_tools, "poll_command").parameters.handle_id.required)
+  __io_println(!tool_find(lifecycle_tools, "wait_command").parameters.handle_id.required)
+  __io_println(!tool_find(lifecycle_tools, "kill_command").parameters.handle_id.required)
   let poll = agent_dispatch_tool_call(
     {id: "p1", name: "poll_command", arguments: {handle_id: "missing-handle"}},
     lifecycle_tools,
   )
   let poll_data = json_parse(poll.rendered_result)
   __io_println(poll_data.status)
+  let poll_alias = agent_dispatch_tool_call(
+    {id: "p2", name: "poll_command", arguments: {handle: "missing-handle-alias"}},
+    lifecycle_tools,
+  )
+  let poll_alias_data = json_parse(poll_alias.rendered_result)
+  __io_println(poll_alias_data.status)
   let background = agent_dispatch_tool_call(
     {
       id: "bg1",
