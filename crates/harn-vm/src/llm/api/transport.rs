@@ -15,7 +15,8 @@ use super::options::{DeltaSender, LlmRequestPayload};
 use super::partial_tool_args::{project_partial, DeltaCoalescer, PartialToolArgs};
 use super::response::{
     billed_noncommittal_completion_error, extract_cache_read_tokens, extract_cache_write_tokens,
-    is_billed_noncommittal_completion, parse_llm_response, CompletionContractSignals,
+    is_billed_noncommittal_completion, parse_llm_response, parse_openai_tool_argument_json_values,
+    CompletionContractSignals,
 };
 use super::result::LlmResult;
 use super::telemetry::{elapsed_ms, source as telemetry_source, ProviderTelemetry};
@@ -704,23 +705,24 @@ fn preview_chars(s: &str, max_chars: usize) -> String {
     s.chars().take(max_chars).collect()
 }
 
-fn parse_openai_streamed_tool_arguments(
+fn parse_openai_streamed_tool_argument_values(
     tool_name: &str,
     arguments: &str,
     stop_reason: Option<&str>,
-) -> serde_json::Value {
+) -> Vec<serde_json::Value> {
     if arguments.trim().is_empty() {
-        return serde_json::json!({});
+        return vec![serde_json::json!({})];
     }
-    match serde_json::from_str::<serde_json::Value>(arguments) {
-        Ok(value) => value,
+    match parse_openai_tool_argument_json_values(arguments) {
+        Ok(values) => values,
         Err(json_error) => {
             if crate::llm::agent_session_host::is_length_truncation(stop_reason) {
-                return serde_json::json!({});
+                return vec![serde_json::json!({})];
             }
-            crate::llm::tools::parse_text_tool_argument_payload(arguments, tool_name)
-                .unwrap_or_else(|text_error| {
-                    serde_json::json!({
+            vec![
+                crate::llm::tools::parse_text_tool_argument_payload(arguments, tool_name)
+                    .unwrap_or_else(|text_error| {
+                        serde_json::json!({
                         "__parse_error": format!(
                             "Could not parse streamed tool arguments as JSON or Harn text-tool arguments: JSON error: {}; Harn text-tool error: {}. Raw input: {}",
                             json_error,
@@ -728,7 +730,8 @@ fn parse_openai_streamed_tool_arguments(
                             preview_chars(arguments, 200)
                         )
                     })
-                })
+                    }),
+            ]
         }
     }
 }
@@ -1232,24 +1235,35 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
     }
 
     for (_, stream) in oai_tool_map {
-        let args = parse_openai_streamed_tool_arguments(
+        let args_values = parse_openai_streamed_tool_argument_values(
             &stream.name,
             &stream.args,
             stop_reason.as_deref(),
         );
+        let base_tool_call_id = stream.tool_call_id;
         // Dispatch under the id already used for streaming progress so
-        // the executed lifecycle continues on the same wire id.
-        let (name, args) = crate::llm::tools::normalize_tool_call_shape(&stream.name, args);
-        tool_calls.push(serde_json::json!({
-            "id": stream.tool_call_id, "name": name, "arguments": args,
-        }));
-        blocks.push(serde_json::json!({
-            "type": "tool_call",
-            "id": stream.tool_call_id,
-            "name": name,
-            "arguments": args,
-            "visibility": "internal",
-        }));
+        // the executed lifecycle continues on the same wire id. If a
+        // provider packed multiple top-level JSON objects into one streamed
+        // arguments string, split them into synthetic sibling calls matching
+        // the non-streaming parser's semantics.
+        for (arg_index, args) in args_values.into_iter().enumerate() {
+            let id = if arg_index == 0 {
+                base_tool_call_id.clone()
+            } else {
+                format!("{}_{}", base_tool_call_id, arg_index + 1)
+            };
+            let (name, args) = crate::llm::tools::normalize_tool_call_shape(&stream.name, args);
+            tool_calls.push(serde_json::json!({
+                "id": id, "name": name, "arguments": args,
+            }));
+            blocks.push(serde_json::json!({
+                "type": "tool_call",
+                "id": id,
+                "name": name,
+                "arguments": args,
+                "visibility": "internal",
+            }));
+        }
     }
 
     let final_visible = oai_thinking_splitter.flush();
@@ -2394,6 +2408,35 @@ EOF
                 .is_some_and(|message| message.contains("Could not parse streamed tool arguments")),
             "unparseable clean-finish arguments must carry a parse error, got {arguments:?}"
         );
+
+        clear_session_sinks(&session_id);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn openai_stream_splits_concatenated_tool_argument_objects() {
+        // Some OpenAI-compatible routes stream multiple top-level JSON objects
+        // in one `function.arguments` string. Match the non-streaming parser:
+        // split them into sibling tool calls instead of surfacing a parse error.
+        let body = concat!(
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_weather\",\"function\":{\"name\":\"weather\",\"arguments\":\"{\\\"city\\\":\\\"Paris\\\"}{\\\"city\\\":\\\"Tokyo\\\"}\"}}]}}]}\n",
+            "data: {\"choices\":[{\"index\":0,\"finish_reason\":\"tool_calls\",\"delta\":{}}],\"usage\":{\"prompt_tokens\":4,\"completion_tokens\":3}}\n",
+            "data: [DONE]\n",
+        );
+        let session_id = fresh_session_id("oai-stream-split-args");
+        let (result, _events) = drive(body.as_bytes(), &session_id, false).await;
+
+        assert_eq!(result.stop_reason.as_deref(), Some("tool_calls"));
+        assert_eq!(result.tool_calls.len(), 2);
+        assert_eq!(result.tool_calls[0]["id"], "call_weather");
+        assert_eq!(result.tool_calls[0]["name"], "weather");
+        assert_eq!(result.tool_calls[0]["arguments"]["city"], "Paris");
+        assert_eq!(result.tool_calls[1]["id"], "call_weather_2");
+        assert_eq!(result.tool_calls[1]["name"], "weather");
+        assert_eq!(result.tool_calls[1]["arguments"]["city"], "Tokyo");
+        assert!(result
+            .tool_calls
+            .iter()
+            .all(|call| { call["arguments"].get("__parse_error").is_none() }));
 
         clear_session_sinks(&session_id);
     }

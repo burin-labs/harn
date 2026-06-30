@@ -211,9 +211,11 @@ fn parse_tool_arguments(arguments: Option<&serde_json::Value>) -> serde_json::Va
     }
 }
 
-fn parse_openai_tool_argument_values(args_str: &str) -> Vec<serde_json::Value> {
+pub(super) fn parse_openai_tool_argument_json_values(
+    args_str: &str,
+) -> Result<Vec<serde_json::Value>, serde_json::Error> {
     match serde_json::from_str::<serde_json::Value>(args_str) {
-        Ok(value) => vec![value],
+        Ok(value) => Ok(vec![value]),
         Err(first_error) => {
             let mut values = Vec::new();
             for parsed in
@@ -222,7 +224,7 @@ fn parse_openai_tool_argument_values(args_str: &str) -> Vec<serde_json::Value> {
                 match parsed {
                     Ok(value) => values.push(value),
                     Err(_) => {
-                        return vec![tool_argument_parse_error(args_str, first_error)];
+                        return Err(first_error);
                     }
                 }
             }
@@ -231,11 +233,16 @@ fn parse_openai_tool_argument_values(args_str: &str) -> Vec<serde_json::Value> {
                     .iter()
                     .all(|value| matches!(value, serde_json::Value::Object(_)))
             {
-                return values;
+                return Ok(values);
             }
-            vec![tool_argument_parse_error(args_str, first_error)]
+            Err(first_error)
         }
     }
+}
+
+fn parse_openai_tool_argument_values(args_str: &str) -> Vec<serde_json::Value> {
+    parse_openai_tool_argument_json_values(args_str)
+        .unwrap_or_else(|err| vec![tool_argument_parse_error(args_str, err)])
 }
 
 fn tool_argument_parse_error(args_str: &str, error: serde_json::Error) -> serde_json::Value {
