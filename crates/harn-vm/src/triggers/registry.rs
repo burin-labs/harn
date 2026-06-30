@@ -1825,9 +1825,20 @@ fn now_ms() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event_log::{install_default_for_base_dir, reset_active_event_log};
+    use crate::event_log::{
+        install_default_for_base_dir, pin_test_occurred_at_ms, reset_active_event_log,
+    };
     use crate::events::{add_event_sink, clear_event_sinks, CollectorSink, EventLevel};
     use std::rc::Rc;
+
+    /// Build the `OffsetDateTime` that corresponds to a pinned event-log
+    /// `occurred_at_ms`, so `as_of` cutoffs can be expressed in the same
+    /// reference frame as `pin_test_occurred_at_ms` without touching the wall
+    /// clock.
+    fn offset_from_ms(ms: i64) -> OffsetDateTime {
+        OffsetDateTime::from_unix_timestamp_nanos((ms as i128) * 1_000_000)
+            .expect("epoch ms within OffsetDateTime range")
+    }
 
     fn manifest_spec(id: &str, fingerprint: &str) -> TriggerBindingSpec {
         TriggerBindingSpec {
@@ -2124,22 +2135,26 @@ mod tests {
         let tempdir = tempfile::tempdir().expect("tempdir");
         install_default_for_base_dir(tempdir.path()).expect("install event log");
 
+        // Pin the event-log timestamp instead of sleeping between captures:
+        // v1's lifecycle events stamp at T1, v2's at T2 > T1, with zero
+        // wall-clock dependence. `before_reload` sits at T1 (so v1 is active
+        // but v2 is not yet), `after_reload` at T2 (so v2 is active).
+        const T1_MS: i64 = 1_700_000_000_000;
+        const T2_MS: i64 = T1_MS + 50;
+        let before_reload = offset_from_ms(T1_MS);
+        let after_reload = offset_from_ms(T2_MS);
+
+        let clock = pin_test_occurred_at_ms(T1_MS);
         install_manifest_triggers(vec![manifest_spec("github-new-issue", "v1")])
             .await
             .expect("initial manifest trigger installs");
-        // Capture before_reload from real wall-clock. The event log's
-        // occurred_at_ms also uses the real wall-clock (util::now_ms via
-        // std::time::SystemTime), so the same reference frame applies.
-        // The 50ms sleep gives at least one full timer-tick on any POSIX
-        // platform (even those with a ~15ms tick), ensuring v2's event
-        // timestamp is strictly after before_reload.
-        let before_reload = OffsetDateTime::now_utc();
-        std::thread::sleep(std::time::Duration::from_millis(50));
+        drop(clock);
 
+        let clock = pin_test_occurred_at_ms(T2_MS);
         install_manifest_triggers(vec![manifest_spec("github-new-issue", "v2")])
             .await
             .expect("updated manifest trigger installs");
-        let after_reload = OffsetDateTime::now_utc();
+        drop(clock);
 
         assert_eq!(
             binding_version_as_of("github-new-issue", before_reload)
@@ -2165,6 +2180,14 @@ mod tests {
         let tempdir = tempfile::tempdir().expect("tempdir");
         install_default_for_base_dir(tempdir.path()).expect("install event log");
 
+        // Pin the event-log timestamps: v1..v3 land at T1, v4 at T2 > T1, with
+        // `received_at` at T1 so the gc fallback resolves to v3 (the latest
+        // binding active at-or-before `received_at`) while v4 is strictly later.
+        const T1_MS: i64 = 1_700_000_000_000;
+        const T2_MS: i64 = T1_MS + 50;
+        let received_at = offset_from_ms(T1_MS);
+
+        let clock = pin_test_occurred_at_ms(T1_MS);
         install_manifest_triggers(vec![manifest_spec("github-new-issue", "v1")])
             .await
             .expect("install v1");
@@ -2174,14 +2197,13 @@ mod tests {
         install_manifest_triggers(vec![manifest_spec("github-new-issue", "v3")])
             .await
             .expect("install v3");
-        // received_at uses the real wall-clock (same reference frame as the
-        // event log's occurred_at_ms). The 50ms sleep guarantees v4's event
-        // timestamp is strictly after received_at on any POSIX platform.
-        let received_at = OffsetDateTime::now_utc();
-        std::thread::sleep(std::time::Duration::from_millis(50));
+        drop(clock);
+
+        let clock = pin_test_occurred_at_ms(T2_MS);
         install_manifest_triggers(vec![manifest_spec("github-new-issue", "v4")])
             .await
             .expect("install v4");
+        drop(clock);
 
         let binding = resolve_live_or_as_of(
             "github-new-issue",

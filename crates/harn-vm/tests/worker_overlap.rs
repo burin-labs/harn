@@ -2,68 +2,93 @@
 //! Proof that Harn background agent workers run CONCURRENTLY.
 //!
 //! Each agent runs an `agent_loop` whose single LLM turn is stubbed via the
-//! `llm_caller` seam to `sleep(STALL_MS)` before returning a clean `done`
-//! response. The test runs the *same* N-agent workload twice:
+//! `llm_caller` seam. The stub brackets its `sleep(STALL_MS)` with two
+//! host builtins — `__overlap_enter` / `__overlap_exit` — that maintain a
+//! shared in-flight counter on the Rust side and record the high-water mark. N
+//! background `sub_agent_run(...{background: true})` spawns are joined with
+//! `wait_agent([...])`. If the workers overlap, all N stubs sit in their
+//! `sleep` at once, so the in-flight counter reaches N.
 //!
-//!   1. **Serial baseline** — N foreground `sub_agent_run` calls, one at a
-//!      time. Total ≈ `N * (per_agent_overhead + STALL_MS)`.
-//!   2. **Concurrent** — N background `sub_agent_run(...{background: true})`
-//!      spawns joined with `wait_agent([...])`. If the workers overlap, the N
-//!      stub `sleep`s collapse onto each other, so this run is shorter by
-//!      ≈ `(N-1) * STALL_MS`.
+//! The assertion is therefore a *logical* peak-concurrency claim — the
+//! recorded high-water mark equals `WORKER_COUNT` — instead of a brittle
+//! wall-clock delta (`saved ≈ (N-1)*STALL_MS`) that compresses under CI load.
+//! The `sleep` is retained purely as a virtual-time barrier that lets all N
+//! workers park at the same time; the Tokio clock is paused and advanced in
+//! process, so the test pays no wall-clock delay. The test also asserts every
+//! agent completed its stubbed turn, so it cannot pass vacuously by skipping
+//! work.
 //!
-//! Because both phases pay the *identical* per-agent synchronous overhead
-//! (session init, prompt assembly, compaction checkpoints), the *difference*
-//! between them isolates exactly the overlapped sleep time — a far more honest
-//! signal than a fixed wall-clock threshold. If the background workers ran
-//! serially, the two phases would take the same time and `saved ≈ 0`.
-//!
-//! The runtime is a real (non-paused) current-thread tokio runtime driving a
-//! `LocalSet`; Harn workers `spawn_local` onto that set, so the stub `sleep`
-//! resolves against the real `tokio::time::sleep` and concurrent sleeps
-//! genuinely overlap in wall-clock time. The test also asserts every agent in
-//! both phases actually completed its stubbed turn, so it cannot pass
-//! vacuously by skipping work.
+//! The runtime is a paused current-thread tokio runtime driving a `LocalSet`;
+//! Harn workers `spawn_local` onto that set, so the stub `sleep` resolves
+//! against virtual Tokio time and concurrent sleeps genuinely overlap.
 
-use std::time::Instant;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use harn_vm::bridge::HostBridge;
-use harn_vm::value::VmError;
-use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex};
+use harn_vm::value::{VmError, VmValue};
 
 /// Number of agents in each phase of the overlap proof.
 const WORKER_COUNT: usize = 4;
-/// Per-agent stub LLM stall, in milliseconds.
+/// Per-agent stub LLM stall, in milliseconds. Acts only as the barrier that
+/// lets all background workers park in their stub simultaneously; no assertion
+/// reads wall-clock time.
 const STALL_MS: u64 = 200;
 
-fn run_with_bridge(source: &str) -> Result<String, String> {
+fn run_with_bridge(
+    source: &str,
+    register: impl FnOnce(&mut harn_vm::Vm) + 'static,
+    peak: Arc<AtomicUsize>,
+) -> Result<String, String> {
     harn_vm::reset_thread_local_state();
     let chunk = harn_vm::compile_source(source)?;
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
+        .start_paused(true)
         .build()
         .map_err(|e| e.to_string())?;
     rt.block_on(async {
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async {
-                let bridge = Arc::new(HostBridge::from_parts(
-                    Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-                    Arc::new(AtomicBool::new(false)),
-                    Arc::new(Mutex::new(())),
-                    1,
-                ));
-                harn_vm::llm::install_current_host_bridge(bridge.clone());
-                let mut vm = harn_vm::Vm::new();
-                harn_vm::register_vm_stdlib(&mut vm);
-                let result = vm
-                    .execute(&chunk)
-                    .await
-                    .map_err(|e: VmError| format!("{e:?}"));
-                harn_vm::llm::clear_current_host_bridge();
-                result?;
-                Ok(vm.output().to_string())
+                let vm_task = tokio::task::spawn_local(async move {
+                    let bridge = Arc::new(HostBridge::from_parts(
+                        Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+                        Arc::new(AtomicBool::new(false)),
+                        Arc::new(Mutex::new(())),
+                        1,
+                    ));
+                    harn_vm::llm::install_current_host_bridge(bridge.clone());
+                    let mut vm = harn_vm::Vm::new();
+                    harn_vm::register_vm_stdlib(&mut vm);
+                    register(&mut vm);
+                    let result = vm
+                        .execute(&chunk)
+                        .await
+                        .map_err(|e: VmError| format!("{e:?}"));
+                    let output = vm.output().to_string();
+                    harn_vm::llm::clear_current_host_bridge();
+                    result.map(|_| output)
+                });
+
+                for _ in 0..1_000 {
+                    if peak.load(Ordering::SeqCst) >= WORKER_COUNT || vm_task.is_finished() {
+                        break;
+                    }
+                    tokio::task::yield_now().await;
+                }
+
+                if peak.load(Ordering::SeqCst) < WORKER_COUNT {
+                    vm_task.abort();
+                    return Err(format!(
+                        "background workers never all parked before virtual-time advance; peak={}",
+                        peak.load(Ordering::SeqCst)
+                    ));
+                }
+
+                tokio::time::advance(Duration::from_millis(STALL_MS)).await;
+                vm_task.await.map_err(|e| e.to_string())?
             })
             .await
     })
@@ -88,24 +113,19 @@ fn require_usize(lines: &[String], key: &str) -> usize {
         .unwrap_or_else(|| panic!("missing/unparseable {key}; lines: {lines:?}"))
 }
 
-fn require_u64(lines: &[String], key: &str) -> u64 {
-    parse_kv(lines, key)
-        .and_then(|v| v.parse().ok())
-        .unwrap_or_else(|| panic!("missing/unparseable {key}; lines: {lines:?}"))
-}
-
 #[test]
-fn background_workers_overlap_in_wall_clock_time() {
-    // Phase 1 runs N agents serially (foreground sub_agent_run, where the
-    // result envelope is returned directly). Phase 2 runs the same N agents
-    // as background workers joined with wait_agent (where each wait result
-    // nests the envelope under `result`). Each agent's stub LLM turn sleeps
-    // STALL_MS then returns a clean text completion.
+fn background_workers_overlap_by_peak_in_flight_count() {
+    // N background agents are joined with wait_agent, whose result envelope
+    // nests each worker's own envelope under `result`. Each agent's stub LLM
+    // turn brackets its sleep with __overlap_enter/__overlap_exit so the Rust
+    // side observes the peak number of concurrently-parked stubs.
     let source = format!(
         r#"
 fn make_caller() {{
   return {{ call ->
+    __overlap_enter()
     sleep({STALL_MS})
+    __overlap_exit()
     return {{
       ok: true,
       value: {{
@@ -133,25 +153,11 @@ fn base_opts() {{
 }}
 
 pipeline main(task) {{
-  // ---- Phase 1: serial baseline (foreground, one agent at a time) ----
-  let serial_start = monotonic_ms()
-  var serial_done = 0
-  for i in 0 to {WORKER_COUNT} exclusive {{
-    let res = sub_agent_run("serial worker " + to_string(i), base_opts() + {{background: false}})
-    if (res?.ok ?? false) == true && contains(to_string(res?.summary ?? ""), "done") {{
-      serial_done = serial_done + 1
-    }}
-  }}
-  let serial_ms = monotonic_ms() - serial_start
-
-  // ---- Phase 2: concurrent (background workers + wait_agent) ----
   var handles = []
   for i in 0 to {WORKER_COUNT} exclusive {{
     handles = handles.push(sub_agent_run("bg worker " + to_string(i), base_opts() + {{background: true}}))
   }}
-  let conc_start = monotonic_ms()
   let results = wait_agent(handles)
-  let conc_ms = monotonic_ms() - conc_start
 
   var conc_done = 0
   for r in results {{
@@ -161,37 +167,47 @@ pipeline main(task) {{
     }}
   }}
 
-  log("SERIAL_DONE=" + to_string(serial_done))
   log("CONC_RESULTS=" + to_string(len(results)))
   log("CONC_DONE=" + to_string(conc_done))
-  log("SERIAL_MS=" + to_string(serial_ms))
-  log("CONC_MS=" + to_string(conc_ms))
 }}
 "#,
     );
 
-    let wall = Instant::now();
-    let raw = run_with_bridge(&source).expect("overlap pipeline must run");
-    let total_wall = wall.elapsed();
+    // Shared in-flight counter and high-water mark, mutated by the host
+    // builtins the Harn stub calls around its sleep.
+    let in_flight = Arc::new(AtomicUsize::new(0));
+    let peak = Arc::new(AtomicUsize::new(0));
+    let register = {
+        let enter_in_flight = in_flight.clone();
+        let enter_peak = peak.clone();
+        let exit_in_flight = in_flight.clone();
+        move |vm: &mut harn_vm::Vm| {
+            vm.register_builtin("__overlap_enter", move |_args, _out| {
+                let now = enter_in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+                enter_peak.fetch_max(now, Ordering::SeqCst);
+                Ok(VmValue::Int(now as i64))
+            });
+            vm.register_builtin("__overlap_exit", move |_args, _out| {
+                exit_in_flight.fetch_sub(1, Ordering::SeqCst);
+                Ok(VmValue::Nil)
+            });
+        }
+    };
+
+    let raw = run_with_bridge(&source, register, peak.clone()).expect("overlap pipeline must run");
     let lines = out_lines(&raw);
 
     eprintln!("--- harn output ---");
     for line in &lines {
         eprintln!("{line}");
     }
-    eprintln!("--- total host wall: {total_wall:?} ---");
 
-    let serial_done = require_usize(&lines, "SERIAL_DONE");
     let conc_results = require_usize(&lines, "CONC_RESULTS");
     let conc_done = require_usize(&lines, "CONC_DONE");
-    let serial_ms = require_u64(&lines, "SERIAL_MS");
-    let conc_ms = require_u64(&lines, "CONC_MS");
+    let peak_in_flight = peak.load(Ordering::SeqCst);
+    let residual_in_flight = in_flight.load(Ordering::SeqCst);
 
-    // (1) Non-vacuity: every agent in BOTH phases ran its stubbed LLM turn.
-    assert_eq!(
-        serial_done, WORKER_COUNT,
-        "serial baseline: every agent must complete; lines: {lines:?}"
-    );
+    // (1) Non-vacuity: every background agent ran its stubbed LLM turn.
     assert_eq!(
         conc_results, WORKER_COUNT,
         "concurrent phase: wait_agent must return one result per worker; lines: {lines:?}"
@@ -201,34 +217,21 @@ pipeline main(task) {{
         "concurrent phase: every background worker must complete; lines: {lines:?}"
     );
 
-    // (2) Sanity floor: the stub really slept. The concurrent phase still
-    //     spends at least one full STALL_MS overlapping the sleeps.
-    assert!(
-        conc_ms >= STALL_MS / 2,
-        "concurrent window {conc_ms}ms is implausibly small — did the stub sleep run? \
-         (STALL_MS={STALL_MS}); lines: {lines:?}"
+    // (2) Bookkeeping sanity: every enter was matched by an exit.
+    assert_eq!(
+        residual_in_flight, 0,
+        "every __overlap_enter must be matched by an __overlap_exit; residual={residual_in_flight}"
     );
 
-    // (3) Overlap proof. If the workers overlap, the concurrent phase collapses
-    //     N stub sleeps onto each other, saving ≈ (N-1) * STALL_MS versus the
-    //     serial baseline (which pays the identical per-agent overhead). We
-    //     require realizing at least 60% of that theoretical saving — well
-    //     above zero (serial workers) yet tolerant of scheduling jitter.
-    let saved_ms = serial_ms.saturating_sub(conc_ms);
-    let theoretical_overlap_ms = (WORKER_COUNT as u64 - 1) * STALL_MS;
-    let required_saving_ms = theoretical_overlap_ms * 6 / 10;
-
-    assert!(
-        saved_ms >= required_saving_ms,
-        "OVERLAP REFUTED: serial={serial_ms}ms concurrent={conc_ms}ms saved={saved_ms}ms \
-         — expected to save >= {required_saving_ms}ms (60% of {theoretical_overlap_ms}ms of \
-         overlappable sleep across {WORKER_COUNT} agents). Background workers did not run \
-         concurrently. lines: {lines:?}"
+    // (3) Overlap proof. If the background workers overlap, all N stubs sit in
+    //     their `sleep` simultaneously, so the in-flight high-water mark equals
+    //     WORKER_COUNT. If they ran serially the counter would never exceed 1.
+    //     This is a structural concurrency claim with no wall-clock-delta math.
+    assert_eq!(
+        peak_in_flight, WORKER_COUNT,
+        "OVERLAP REFUTED: peak concurrent in-flight workers was {peak_in_flight}, expected \
+         {WORKER_COUNT}. Background workers did not all run concurrently. lines: {lines:?}"
     );
 
-    eprintln!(
-        "OVERLAP CONFIRMED: N={WORKER_COUNT}, STALL={STALL_MS}ms, serial≈{serial_ms}ms, \
-         concurrent≈{conc_ms}ms, saved≈{saved_ms}ms (>= required {required_saving_ms}ms; \
-         theoretical overlap {theoretical_overlap_ms}ms)"
-    );
+    eprintln!("OVERLAP CONFIRMED: N={WORKER_COUNT}, peak in-flight={peak_in_flight}");
 }

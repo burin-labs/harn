@@ -71,12 +71,23 @@ pub(crate) fn test_git_command(repo: &Path) -> process::Command {
     // make simple test commands invoke hooks, signing prompts, or editors.
     command
         .args([
+            // Pin identity and default branch so the tests do not depend on the
+            // host's user.name/user.email or init.defaultBranch.
+            "-c",
+            "user.email=harn-test@example.com",
+            "-c",
+            "user.name=harn-test",
+            "-c",
+            "init.defaultBranch=main",
+            // Disable every flavour of host commit/tag signing policy.
             "-c",
             "commit.gpgSign=false",
             "-c",
             "tag.gpgSign=false",
             "-c",
             "tag.forceSignAnnotated=false",
+            "-c",
+            "gpg.format=openpgp",
             "-c",
             "core.hooksPath=/dev/null",
             "-c",

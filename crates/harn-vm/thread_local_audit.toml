@@ -69,6 +69,12 @@ category = "runtime_registry"
 plan = "arc_registry_scope"
 
 [[thread_local]]
+path = "src/event_log/util.rs"
+statics = ["TEST_OCCURRED_AT_MS"]
+category = "thread_private"
+plan = "thread_private_test"
+
+[[thread_local]]
 path = "src/events.rs"
 statics = ["EVENT_SINKS"]
 category = "runtime_registry"

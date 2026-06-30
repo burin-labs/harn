@@ -2902,10 +2902,18 @@ mod tests {
     use std::fs;
     use std::rc::Rc;
 
-    use crate::event_log::{install_default_for_base_dir, EventLog};
+    use crate::event_log::{install_default_for_base_dir, pin_test_occurred_at_ms, EventLog};
     use crate::events::{add_event_sink, clear_event_sinks, CollectorSink, EventLevel};
     use crate::triggers::event::{CronEventPayload, KnownProviderPayload};
     use crate::{install_manifest_triggers, register_vm_stdlib, ProviderId, ProviderPayload};
+
+    /// Build the `OffsetDateTime` for a pinned event-log `occurred_at_ms`, so
+    /// `received_at` cutoffs share the reference frame of
+    /// `pin_test_occurred_at_ms` without reading the wall clock.
+    fn offset_from_ms(ms: i64) -> OffsetDateTime {
+        OffsetDateTime::from_unix_timestamp_nanos((ms as i128) * 1_000_000)
+            .expect("epoch ms within OffsetDateTime range")
+    }
 
     fn manifest_binding(
         id: &str,
@@ -3014,6 +3022,14 @@ pub fn on_tick_v4(event: TriggerEvent) -> dict {
             .await
             .expect("load handler exports");
 
+        // Pin the event-log timestamps: v1..v3 land at T1, v4 at T2 > T1, with
+        // `received_at` at T1 so the gc fallback resolves the stale event to v3
+        // (latest binding active at-or-before `received_at`) while v4 is later.
+        const T1_MS: i64 = 1_700_000_000_000;
+        const T2_MS: i64 = T1_MS + 10;
+        let received_at = offset_from_ms(T1_MS);
+
+        let clock = pin_test_occurred_at_ms(T1_MS);
         install_manifest_triggers(vec![manifest_binding(
             "replay-cron",
             "v1",
@@ -3038,8 +3054,9 @@ pub fn on_tick_v4(event: TriggerEvent) -> dict {
         )])
         .await
         .expect("install v3");
-        let received_at = OffsetDateTime::now_utc();
-        std::thread::sleep(std::time::Duration::from_millis(10));
+        drop(clock);
+
+        let clock = pin_test_occurred_at_ms(T2_MS);
         install_manifest_triggers(vec![manifest_binding(
             "replay-cron",
             "v4",
@@ -3048,6 +3065,7 @@ pub fn on_tick_v4(event: TriggerEvent) -> dict {
         )])
         .await
         .expect("install v4");
+        drop(clock);
 
         assert!(matches!(
             crate::resolve_live_trigger_binding("replay-cron", Some(1)),
