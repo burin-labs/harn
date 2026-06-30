@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant, SystemTime};
@@ -78,6 +79,42 @@ pub(crate) fn persist_artifacts(
     Ok(artifacts)
 }
 
+pub(crate) fn register_live_artifacts(
+    command_id: &str,
+    handle_id: Option<&str>,
+) -> Result<CommandArtifacts, HostlibError> {
+    maybe_sweep_stale_artifacts();
+    let artifacts = planned_artifact_paths(command_id);
+    std::fs::create_dir_all(artifacts.output_path.parent().unwrap()).map_err(|e| {
+        HostlibError::Backend {
+            builtin: "hostlib_tools_run_command",
+            message: format!("failed to create command artifact dir: {e}"),
+        }
+    })?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(
+            artifacts.output_path.parent().unwrap(),
+            std::fs::Permissions::from_mode(0o700),
+        );
+    }
+    std::fs::File::create(&artifacts.stdout_path).map_err(|e| HostlibError::Backend {
+        builtin: "hostlib_tools_run_command",
+        message: format!("failed to create stdout artifact: {e}"),
+    })?;
+    std::fs::File::create(&artifacts.stderr_path).map_err(|e| HostlibError::Backend {
+        builtin: "hostlib_tools_run_command",
+        message: format!("failed to create stderr artifact: {e}"),
+    })?;
+    std::fs::File::create(&artifacts.output_path).map_err(|e| HostlibError::Backend {
+        builtin: "hostlib_tools_run_command",
+        message: format!("failed to create combined output artifact: {e}"),
+    })?;
+    register_artifacts(command_id, handle_id, &artifacts);
+    Ok(artifacts)
+}
+
 pub(crate) fn planned_artifact_paths(command_id: &str) -> CommandArtifacts {
     let dir = std::env::temp_dir().join(format!("harn-command-{command_id}"));
     CommandArtifacts {
@@ -105,12 +142,47 @@ pub(crate) fn resolve_output_path(
         .map(|a| a.output_path.clone())
 }
 
+pub(crate) fn live_artifact_snapshot(
+    command_id: Option<&str>,
+    handle_id: Option<&str>,
+) -> Option<CommandArtifacts> {
+    let mut artifacts = lookup_artifacts(command_id, handle_id)?;
+    artifacts.byte_count = std::fs::metadata(&artifacts.output_path)
+        .map(|metadata| metadata.len())
+        .unwrap_or(0);
+    Some(artifacts)
+}
+
+pub(crate) fn live_artifact_tail(
+    command_id: Option<&str>,
+    handle_id: Option<&str>,
+    max_bytes: u64,
+) -> Option<String> {
+    let artifacts = lookup_artifacts(command_id, handle_id)?;
+    let mut file = std::fs::File::open(&artifacts.output_path).ok()?;
+    let len = file.metadata().ok()?.len();
+    let offset = len.saturating_sub(max_bytes);
+    file.seek(SeekFrom::Start(offset)).ok()?;
+
+    let mut bytes = Vec::with_capacity(len.saturating_sub(offset) as usize);
+    file.take(max_bytes).read_to_end(&mut bytes).ok()?;
+    Some(String::from_utf8_lossy(&bytes).into_owned())
+}
+
 fn register_artifacts(command_id: &str, handle_id: Option<&str>, artifacts: &CommandArtifacts) {
     let mut store = ARTIFACTS.lock().expect("command artifact store poisoned");
     store.insert(command_id.to_string(), artifacts.clone());
     if let Some(handle_id) = handle_id {
         store.insert(handle_id.to_string(), artifacts.clone());
     }
+}
+
+fn lookup_artifacts(command_id: Option<&str>, handle_id: Option<&str>) -> Option<CommandArtifacts> {
+    let store = ARTIFACTS.lock().expect("command artifact store poisoned");
+    command_id
+        .and_then(|id| store.get(id))
+        .or_else(|| handle_id.and_then(|id| store.get(id)))
+        .cloned()
 }
 
 fn maybe_sweep_stale_artifacts() {
