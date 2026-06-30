@@ -333,7 +333,7 @@ jobs:
         with:
           ref: ${{ needs.setup.outputs.ref }}
 
-      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # master
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
         with:
           toolchain: stable
 
