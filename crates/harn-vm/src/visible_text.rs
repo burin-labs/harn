@@ -356,15 +356,70 @@ fn strip_protocol_residue(text: &str) -> String {
         .to_string()
 }
 
+fn looks_like_bare_internal_verdict_json(source: &str) -> bool {
+    let trimmed = source.trim();
+    if !trimmed.starts_with('{') {
+        return false;
+    }
+
+    let Ok(serde_json::Value::Object(map)) = serde_json::from_str::<serde_json::Value>(trimmed)
+    else {
+        return false;
+    };
+
+    let Some(verdict) = map
+        .get("verdict")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return false;
+    };
+
+    let verdict = verdict.to_ascii_lowercase();
+    let has_completion_explanation = map.contains_key("reasoning")
+        || map.contains_key("reason")
+        || map.contains_key("next_step")
+        || map.contains_key("nextStep");
+    let has_judge_metadata = map.contains_key("critique")
+        || map.contains_key("confidence")
+        || map.contains_key("category")
+        || map.contains_key("error");
+
+    let known_internal_verdict = matches!(verdict.as_str(), "done" | "continue")
+        && has_completion_explanation
+        || matches!(verdict.as_str(), "revise" | "pass" | "fail" | "unclear") && has_judge_metadata
+        || matches!(verdict.as_str(), "allow" | "warn" | "block") && has_judge_metadata;
+    if !known_internal_verdict {
+        return false;
+    }
+
+    map.keys().all(|key| {
+        matches!(
+            key.as_str(),
+            "verdict"
+                | "reasoning"
+                | "reason"
+                | "next_step"
+                | "nextStep"
+                | "critique"
+                | "confidence"
+                | "category"
+                | "error"
+        )
+    })
+}
+
 fn strip_bare_internal_json(text: &str) -> String {
     // A finalized turn whose entire visible body is an internal control object
     // — e.g. the completion judge's `{"verdict":...,"reasoning":...}` — must
     // never surface as the agent's message. The fenced/inline planner strips
     // above only catch ```json fences and `{"mode":...}`; a bare top-level
-    // verdict/reasoning blob slips through. Only strips when the WHOLE trimmed
-    // body is recognized internal JSON, so legitimate prose that merely quotes
-    // JSON is untouched.
-    if looks_like_internal_planning_json(text) {
+    // verdict/reasoning blob slips through. Keep this narrower than
+    // `looks_like_internal_planning_json`: user-facing JSON-only answers can
+    // legitimately contain keys like `tasks`, `steps`, or `reasoning`, and the
+    // visible-text sanitizer must not blank those whole messages.
+    if looks_like_bare_internal_verdict_json(text) {
         return String::new();
     }
     text.to_string()
@@ -547,6 +602,25 @@ mod tests {
         // Legitimate non-internal JSON is preserved (consistent with existing behavior).
         let keep = r#"{"status":"ok","message":"hello"}"#;
         assert_eq!(sanitize_visible_assistant_text(keep, false), keep);
+        // Guard against blanking legitimate JSON-only answers that happen to
+        // use broad planning-ish keys. The bare verdict sanitizer is scoped to
+        // small internal control envelopes, not arbitrary structured answers.
+        let visible_answer =
+            r#"{"tasks":["ship"],"steps":["test"],"reasoning":"user-visible rationale"}"#;
+        assert_eq!(
+            sanitize_visible_assistant_text(visible_answer, false),
+            visible_answer
+        );
+        let visible_verdict = r#"{"verdict":"pass","summary":"public result"}"#;
+        assert_eq!(
+            sanitize_visible_assistant_text(visible_verdict, false),
+            visible_verdict
+        );
+        let visible_verdict_rationale = r#"{"verdict":"pass","reasoning":"public rationale"}"#;
+        assert_eq!(
+            sanitize_visible_assistant_text(visible_verdict_rationale, false),
+            visible_verdict_rationale
+        );
     }
 
     #[test]
