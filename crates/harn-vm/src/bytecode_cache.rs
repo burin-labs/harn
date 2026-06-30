@@ -1145,7 +1145,10 @@ mod tests {
         // the `(path, len, mtime_ns)` stat key changes instantly on every
         // filesystem this runs on.
         std::fs::write(&leaf, "pub fn x() -> int { return 222 }\n").unwrap();
-        let future = std::time::UNIX_EPOCH + std::time::Duration::from_secs(4_102_444_800);
+        // Bump from the file's own current mtime by a fixed margin instead of
+        // sleeping or using a large absolute timestamp literal.
+        let future = std::fs::metadata(&leaf).unwrap().modified().unwrap()
+            + std::time::Duration::from_secs(10);
         std::fs::File::open(&leaf)
             .unwrap()
             .set_times(std::fs::FileTimes::new().set_modified(future))
