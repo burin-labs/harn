@@ -37,13 +37,15 @@ mod tests {
 
     #[test]
     fn empty_selector_resolves_to_none() {
-        let store = GuardStore::at_root(std::env::temp_dir().join("harn-guard-resolve-empty"));
+        let tmp = tempfile::tempdir().unwrap();
+        let store = GuardStore::at_root(tmp.path().to_path_buf());
         assert!(resolve_dir(&store, "").unwrap().is_none());
     }
 
     #[test]
     fn uninstalled_catalog_name_is_none_not_error() {
-        let store = GuardStore::at_root(std::env::temp_dir().join("harn-guard-resolve-missing"));
+        let tmp = tempfile::tempdir().unwrap();
+        let store = GuardStore::at_root(tmp.path().to_path_buf());
         assert!(resolve_dir(&store, "deberta-v3-prompt-injection-v2")
             .unwrap()
             .is_none());
@@ -51,7 +53,8 @@ mod tests {
 
     #[test]
     fn nonexistent_path_selector_errors() {
-        let store = GuardStore::at_root(std::env::temp_dir().join("harn-guard-resolve-path"));
+        let tmp = tempfile::tempdir().unwrap();
+        let store = GuardStore::at_root(tmp.path().to_path_buf());
         let missing = store.root().join("no-such").join("guard-model-dir");
         let selector = missing.to_string_lossy();
         let err = resolve_dir(&store, &selector).unwrap_err();

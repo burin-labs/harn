@@ -1140,10 +1140,19 @@ mod tests {
             hash_transitive_user_imports(&entry, &std::fs::read_to_string(&entry).unwrap());
 
         // Same byte length (`111` -> `222`), so the memo must rely on mtime.
-        // Sleep past the coarsest plausible mtime granularity so the stat key
-        // genuinely changes on every filesystem this runs on.
-        std::thread::sleep(std::time::Duration::from_millis(1100));
+        // Instead of sleeping out the coarsest plausible mtime granularity,
+        // push the rewritten file's mtime deterministically into the future so
+        // the `(path, len, mtime_ns)` stat key changes instantly on every
+        // filesystem this runs on.
         std::fs::write(&leaf, "pub fn x() -> int { return 222 }\n").unwrap();
+        // Bump from the file's own current mtime by a fixed margin instead of
+        // sleeping or using a large absolute timestamp literal.
+        let future = std::fs::metadata(&leaf).unwrap().modified().unwrap()
+            + std::time::Duration::from_secs(10);
+        std::fs::File::open(&leaf)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(future))
+            .unwrap();
         assert_eq!(
             std::fs::metadata(&leaf).unwrap().len(),
             33,
