@@ -708,7 +708,25 @@ pub(super) async fn await_topic_event_after(
         }
     })
     .await;
-    result.unwrap_or_else(|_| panic!("timed out waiting for matching {topic} event"))
+    match result {
+        Ok(event) => event,
+        Err(_) => {
+            let recent = event_log
+                .read_range(&topic_obj, None, usize::MAX)
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .rev()
+                .take(8)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .map(|(event_id, event)| format!("#{event_id:?} {} {}", event.kind, event.payload))
+                .collect::<Vec<_>>()
+                .join(" | ");
+            panic!("timed out waiting for matching {topic} event; recent events: {recent}");
+        }
+    }
 }
 
 /// Read all events for a topic from the event log.
@@ -730,8 +748,13 @@ pub(super) async fn read_topic_events(
 /// finished, so reading any handler-written marker file is race-free.
 pub(super) async fn await_pump_dispatch_completed(harness: &OrchestratorHarness) {
     await_topic_event(&harness.event_log(), "orchestrator.lifecycle", |event| {
-        event.kind == "pump_dispatch_completed"
-            && event.payload["status"] == serde_json::json!("completed")
+        match pump_dispatch_status(event) {
+            Some("completed") => true,
+            Some("failed") => {
+                panic!("pump dispatch failed: {}", event.payload);
+            }
+            _ => false,
+        }
     })
     .await;
 }
@@ -740,11 +763,10 @@ pub(super) async fn await_pump_dispatch_completed(harness: &OrchestratorHarness)
 /// `dispatched` count reaches `count`. Useful when several events feed the
 /// same pump and you need to wait for the Nth to drain.
 pub(super) async fn await_pump_dispatch_count(harness: &OrchestratorHarness, count: u64) {
-    let mut topic_obj = Topic::new("orchestrator.lifecycle").unwrap();
-    let _ = &mut topic_obj;
+    let topic = Topic::new("orchestrator.lifecycle").unwrap();
     let mut stream = harness
         .event_log()
-        .subscribe(&Topic::new("orchestrator.lifecycle").unwrap(), None)
+        .subscribe(&topic, None)
         .await
         .expect("subscribe lifecycle");
     let mut total: u64 = 0;
@@ -755,19 +777,33 @@ pub(super) async fn await_pump_dispatch_count(harness: &OrchestratorHarness, cou
                 .await
                 .expect("lifecycle stream ended")
                 .expect("lifecycle stream error");
-            if event.kind == "pump_dispatch_completed"
-                && event.payload["status"] == serde_json::json!("completed")
-            {
-                let dispatched = event.payload["dispatched"].as_u64().unwrap_or(0);
-                total = total.saturating_add(dispatched);
-                if total >= count {
-                    return;
+            match pump_dispatch_status(&event) {
+                Some("completed") => {
+                    let dispatched = event.payload["dispatched"].as_u64().unwrap_or(0);
+                    total = total.saturating_add(dispatched);
+                    if total >= count {
+                        return;
+                    }
                 }
+                Some("failed") => {
+                    panic!(
+                        "pump dispatch failed before reaching {count}: {}",
+                        event.payload
+                    );
+                }
+                _ => {}
             }
         }
     })
     .await
     .unwrap_or_else(|_| panic!("timed out waiting for {count} pump dispatches; got {total}"));
+}
+
+fn pump_dispatch_status(event: &LogEvent) -> Option<&str> {
+    if event.kind != "pump_dispatch_completed" {
+        return None;
+    }
+    event.payload.get("status").and_then(JsonValue::as_str)
 }
 
 /// Wait until `path` exists, polling at the approved cadence. The
