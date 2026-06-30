@@ -118,7 +118,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `nvidia` | `*minimax-m3*` | `any` | `adaptive` | yes | no | no | yes | yes | no | `delimited` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `nvidia` | `*minimax-m2.7*` | `any` | `enabled` | no | no | no | no | yes | no | `delimited` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `nvidia` | `*kimi-k2.6*` | `any` | `enabled` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
-| `nvidia` | `*glm-5*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
+| `nvidia` | `*glm-5*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `text` | yes | yes | `native_unreliable` | yes | yes |
 | `nvidia` | `*step-3.7-flash*` | `any` | `enabled` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `interchangeable` | yes | yes |
 | `nvidia` | `*mistral*` | `any` | no | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `nvidia` | `*gemma-4*` | `any` | `enabled` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
@@ -318,7 +318,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `nvidia` | `nvidia/openai/gpt-oss-120b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `nvidia` | `nvidia/openai/gpt-oss-20b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `nvidia` | `nvidia/step-3.7-flash` | `native` | `interchangeable` | - | - | - | - | - | `data not yet collected` |
-| `nvidia` | `nvidia/z-ai/glm-5.1` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `nvidia` | `nvidia/z-ai/glm-5.1` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
 | `ollama` | `devstral-small-2:24b` | `json` | `text_only` | - | - | - | - | - | `data not yet collected` |
 | `ollama` | `gemma4:12b-mlx` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
 | `ollama` | `gemma4:12b-mxfp8` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
