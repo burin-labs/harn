@@ -1,4 +1,4 @@
-import { agent_host_tools } from "std/agent/host_tools"
+import { agent_command_tools, agent_host_tools } from "std/agent/host_tools"
 
 pipeline main() {
   let root = path_join(harness.fs.temp_dir(), "harn-host-tools-" + uuid())
@@ -28,6 +28,7 @@ pipeline main() {
   __io_println(surface.valid)
   __io_println(tool_find(tools, "release_run").annotations.result_readers[0])
   __io_println(tool_find(tools, "release_run").annotations.fixture_marker)
+  __io_println(tool_find(tools, "poll_command") == nil)
   let read = agent_dispatch_tool_call(
     {id: "r1", name: "read_file", arguments: {path: "README.md", limit_bytes: 5}},
     tools,
@@ -77,4 +78,49 @@ pipeline main() {
   let blocked = agent_dispatch_tool_call({id: "c3", name: "release_run", arguments: {argv: ["echo", "no"]}}, tools)
   let blocked_data = json_parse(blocked.rendered_result)
   __io_println(blocked_data.blocked)
+  let lifecycle_tools = agent_command_tools(
+    nil,
+    {root: root, cwd: root, background_commands: true, allow_argv_prefixes: [["sh", "-c"]]},
+  )
+  __io_println(tool_find(lifecycle_tools, "poll_command") != nil)
+  __io_println(tool_find(lifecycle_tools, "wait_command") != nil)
+  __io_println(tool_find(lifecycle_tools, "kill_command") != nil)
+  let poll = agent_dispatch_tool_call(
+    {id: "p1", name: "poll_command", arguments: {handle_id: "missing-handle"}},
+    lifecycle_tools,
+  )
+  let poll_data = json_parse(poll.rendered_result)
+  __io_println(poll_data.status)
+  let background = agent_dispatch_tool_call(
+    {
+      id: "bg1",
+      name: "run_command",
+      arguments: {argv: ["sh", "-c", "printf toolwait"], background: true},
+    },
+    lifecycle_tools,
+  )
+  let background_data = json_parse(background.rendered_result)
+  __io_println(background_data.handle_id != nil)
+  let waited = agent_dispatch_tool_call(
+    {
+      id: "w1",
+      name: "wait_command",
+      arguments: {handle_id: background_data.handle_id, timeout_ms: 5000},
+    },
+    lifecycle_tools,
+  )
+  let waited_data = json_parse(waited.rendered_result)
+  __io_println(waited_data.status)
+  __io_println(
+    contains(
+      waited_data?.combined ?? waited_data?.stdout ?? waited_data?.inline_output ?? "",
+      "toolwait",
+    ),
+  )
+  let killed = agent_dispatch_tool_call(
+    {id: "k1", name: "kill_command", arguments: {handle_id: "missing-handle"}},
+    lifecycle_tools,
+  )
+  let killed_data = json_parse(killed.rendered_result)
+  __io_println(killed_data.cancelled)
 }

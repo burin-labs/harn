@@ -52,6 +52,29 @@ fn __agent_host_tool_enabled(options, key, group) {
   return true
 }
 
+fn __agent_host_lifecycle_tool_enabled(options, key) {
+  let opts = __agent_host_options(options)
+  let enabled = opts?.enabled_tools ?? opts?.tools
+  let explicitly_enabled = __agent_host_list_contains(enabled, key)
+    || __agent_host_list_contains(enabled, "command_lifecycle")
+  let opted_in = opts?.background_commands ?? opts?.enable_background_commands ?? opts?.command_lifecycle_tools
+    ?? false
+  if !opted_in && !explicitly_enabled {
+    return false
+  }
+  let disabled = opts?.disabled_tools ?? []
+  if __agent_host_list_contains(disabled, "command")
+    || __agent_host_list_contains(disabled, "command_lifecycle")
+    || __agent_host_list_contains(disabled, key) {
+    return false
+  }
+  if enabled != nil && !explicitly_enabled && !__agent_host_list_contains(enabled, "all")
+    && !__agent_host_list_contains(enabled, "command") {
+    return false
+  }
+  return true
+}
+
 fn __agent_host_name(options, key, default_name) {
   let opts = __agent_host_options(options)
   return opts?.names?[key] ?? opts[key + "_name"] ?? default_name
@@ -549,6 +572,36 @@ fn __agent_host_command_result_readers(options, read_name, tail_name) {
   return readers
 }
 
+fn __agent_host_command_handle_id(args, tool_name: string) -> string {
+  let handle_id = trim(to_string(args?.handle_id ?? args?.handle ?? ""))
+  if handle_id != "" {
+    return handle_id
+  }
+  throw tool_name + ": pass handle_id from a background run_command result"
+}
+
+fn __agent_host_wait_command_request(args, tool_name: string, timeout_ms) {
+  var req = {handle_id: __agent_host_command_handle_id(args, tool_name)}
+  if timeout_ms != nil {
+    req = req + {timeout_ms: timeout_ms}
+  }
+  if args?.session_id != nil {
+    req = req + {session_id: args.session_id}
+  }
+  return req
+}
+
+fn __agent_host_cancel_command_request(args) {
+  var req = {handle_id: __agent_host_command_handle_id(args, "kill_command")}
+  if args?.wait_result_ms != nil {
+    req = req + {wait_result_ms: args.wait_result_ms}
+  }
+  if args?.timed_out != nil {
+    req = req + {timed_out: args.timed_out}
+  }
+  return req
+}
+
 /**
  * agent_read_tools adds root-scoped read, directory, outline, search, and git inspection tools.
  *
@@ -813,6 +866,104 @@ pub fn agent_command_tools(registry = nil, options = nil) {
             }
             return __agent_host_render(final_result, opts, key)
           },
+        },
+      ),
+    )
+  }
+  if __agent_host_lifecycle_tool_enabled(opts, "poll_command") {
+    let key = "poll_command"
+    tools = tool_define(
+      tools,
+      __agent_host_name(opts, key, "poll_command"),
+      __agent_host_description(
+        opts,
+        key,
+        "Check a background run_command handle without blocking. If the command is still running, returns status and live output artifact metadata; if it completed, returns the final command result.",
+      ),
+      __agent_host_config(
+        opts,
+        key,
+        {
+          parameters: {
+            handle_id: {type: "string"},
+            handle: {type: "string", required: false},
+            session_id: {type: "string", required: false},
+          },
+          returns: {type: "object"},
+          annotations: __agent_host_annotations(opts, key, {kind: "execute", side_effect_level: "read_only"}),
+          handler: { args -> __agent_host_render(
+            hostlib_tools_wait_command(__agent_host_wait_command_request(args, key, 0)),
+            opts,
+            key,
+          ) },
+        },
+      ),
+    )
+  }
+  if __agent_host_lifecycle_tool_enabled(opts, "wait_command") {
+    let key = "wait_command"
+    tools = tool_define(
+      tools,
+      __agent_host_name(opts, key, "wait_command"),
+      __agent_host_description(
+        opts,
+        key,
+        "Wait for a background run_command handle and return the final command result, or a running status if the timeout elapses first.",
+      ),
+      __agent_host_config(
+        opts,
+        key,
+        {
+          parameters: {
+            handle_id: {type: "string"},
+            handle: {type: "string", required: false},
+            timeout_ms: {type: "integer", required: false},
+            session_id: {type: "string", required: false},
+          },
+          returns: {type: "object"},
+          annotations: __agent_host_annotations(opts, key, {kind: "execute", side_effect_level: "read_only"}),
+          handler: { args -> __agent_host_render(
+            hostlib_tools_wait_command(
+              __agent_host_wait_command_request(
+                args,
+                key,
+                args?.timeout_ms ?? opts?.wait_command_timeout_ms ?? 60000,
+              ),
+            ),
+            opts,
+            key,
+          ) },
+        },
+      ),
+    )
+  }
+  if __agent_host_lifecycle_tool_enabled(opts, "kill_command") {
+    let key = "kill_command"
+    tools = tool_define(
+      tools,
+      __agent_host_name(opts, key, "kill_command"),
+      __agent_host_description(
+        opts,
+        key,
+        "Cancel a background run_command handle when it is no longer useful. Optionally wait briefly for the final killed-result payload.",
+      ),
+      __agent_host_config(
+        opts,
+        key,
+        {
+          parameters: {
+            handle_id: {type: "string"},
+            handle: {type: "string", required: false},
+            wait_result_ms: {type: "integer", required: false},
+            timed_out: {type: "boolean", required: false},
+          },
+          returns: {type: "object"},
+          annotations: __agent_host_annotations(opts, key, {kind: "execute", side_effect_level: "process_exec"}),
+          handler: { args -> __agent_host_render(
+            hostlib_tools_cancel_handle(__agent_host_cancel_command_request(args)),
+            opts,
+            key,
+          ) },
         },
       ),
     )
