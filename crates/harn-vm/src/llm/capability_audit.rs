@@ -32,9 +32,24 @@
 //!     builders see mutually incompatible capability facts and harness authors
 //!     get provider-specific surprises instead of one normalized toolchain.
 //!
-//! Both checks are driven entirely by capability-row fields, so adding a new
-//! footgun route is a data edit (set the flag / forget the pin) rather than a
-//! code change — and forgetting the pin trips this gate.
+//!   * **native-unreliable family consistency** — for a model family whose
+//!     provider-native tool channel is unreliable as a *weight-intrinsic*
+//!     property (it leaks tool markup into content / bills empty native
+//!     completions on every host that serves those weights), EVERY route must
+//!     steer to a text channel. A single outlier host pinning
+//!     `preferred_tool_format = "native"` while its siblings pin text is exactly
+//!     how a value model silently thrashes on one provider. This is the only
+//!     check keyed on a model-family substring (see
+//!     [`NATIVE_UNRELIABLE_TOOL_FAMILIES`]) rather than pure capability fields,
+//!     and the bar to add a family is deliberately high: weight-intrinsic
+//!     unreliability reproduced across independent hosts, never one rehoster's
+//!     flakiness (which belongs in that host's own row).
+//!
+//! The first three checks are driven entirely by capability-row fields and the
+//! fourth by a tiny evidence-gated family list, so adding/closing a footgun
+//! route is a data edit (set the flag / forget the pin / pin native for an
+//! unreliable family) rather than a code change — and the mistake trips this
+//! gate.
 //!
 //! The audit is wired into `harn provider catalog build-capabilities --check` (see
 //! `harn-cli`), which runs under `make check-provider-capabilities` /
@@ -48,6 +63,29 @@ use crate::llm::capabilities::CapabilitiesFile;
 /// channel. Mirrors the guarded set in
 /// [`crate::llm::reasoning_policy`].
 const TOOL_TASKS: [&str; 3] = ["agent", "code", "verify"];
+
+/// Model families whose **provider-native** tool channel is unreliable as a
+/// *weight-intrinsic* property — the model itself emits tool-call markup as
+/// assistant content (or bills empty native completions) on every host that
+/// serves those weights, regardless of provider. For such a family, EVERY route
+/// must steer to a text channel (`preferred_tool_format` = `text`/`json`) and
+/// declare `tool_mode_parity = "native_unreliable"`; a route that pins
+/// `preferred_tool_format = "native"` is a footgun (it re-opens the leak this
+/// host can't fix server-side). Each entry is `(model_match-substring, evidence)`.
+///
+/// The bar for entry is HIGH on purpose: a quirk earns a row here only when it is
+/// demonstrated to be intrinsic to the weights (reproduced across independent
+/// hosts), NOT merely observed on one rehoster. Host-specific native flakiness
+/// belongs in that host's own row, not this cross-host invariant — e.g. a
+/// first-party authoritative endpoint may serve native cleanly while third-party
+/// rehosters do not, and that difference must be measured per host, not assumed.
+const NATIVE_UNRELIABLE_TOOL_FAMILIES: &[(&str, &str)] = &[(
+    "glm-5",
+    "GLM-5.x's native channel emits `<tool_call><arg_key>...` markup as assistant \
+     content instead of OpenAI message.tool_calls — reproduced across every GLM-5 host \
+     probed (zai/Baseten live, Together + OpenRouter agent-loop smoke, DeepInfra, Fireworks \
+     glm-5p*). Pin a text channel + tool_mode_parity = \"native_unreliable\".",
+)];
 
 /// A single footgun finding: a capability row that violates an opinionated
 /// provider/model/config invariant.
@@ -189,6 +227,37 @@ pub fn audit_capabilities(file: &CapabilitiesFile) -> CapabilityAuditReport {
                         tool-choice declaration."
                         .to_string(),
                 });
+            }
+
+            // Footgun 4: a route pins the provider-native tool channel for a model
+            // family whose native channel is unreliable as a weight-intrinsic
+            // property (see NATIVE_UNRELIABLE_TOOL_FAMILIES). One outlier host
+            // pinning `native` while every sibling host pins text is exactly how a
+            // value model silently thrashes (the model leaks tool markup into
+            // content / bills empty native completions, and this host can't fix it
+            // server-side). The family verdict must hold on every route.
+            let pins_native = rule
+                .preferred_tool_format
+                .as_deref()
+                .map(|format| format.eq_ignore_ascii_case("native"))
+                .unwrap_or(false);
+            if pins_native {
+                let model_match_lower = rule.model_match.to_ascii_lowercase();
+                for (family, evidence) in NATIVE_UNRELIABLE_TOOL_FAMILIES {
+                    if model_match_lower.contains(family) {
+                        report.footguns.push(CapabilityFootgun {
+                            provider: provider.clone(),
+                            model_match: rule.model_match.clone(),
+                            message: format!(
+                                "pins preferred_tool_format = \"native\" for the \
+                                 native-unreliable `{family}` family. {evidence} Steer this \
+                                 route to a text channel (preferred_tool_format = \"text\" or \
+                                 \"json\") and set tool_mode_parity = \"native_unreliable\" so \
+                                 the family verdict is consistent across hosts."
+                            ),
+                        });
+                    }
+                }
             }
         }
     }
@@ -337,6 +406,55 @@ preferred_tool_format = "native"
         assert!(report.footguns[0]
             .message
             .contains("preferred_tool_format = \"native\""));
+    }
+
+    #[test]
+    fn flags_native_unreliable_family_pinning_native() {
+        // A GLM-5 route that pins the native channel (the nvidia outlier shape):
+        // native_tools = true keeps Footgun 3 quiet, so the ONLY footgun is the
+        // family-consistency gate.
+        let report = audit_toml(
+            r#"
+[[provider.nvidia]]
+model_match = "*glm-5*"
+native_tools = true
+preferred_tool_format = "native"
+"#,
+        );
+        assert_eq!(report.footguns.len(), 1, "{}", report.render());
+        assert!(report.footguns[0]
+            .message
+            .contains("native-unreliable `glm-5` family"));
+    }
+
+    #[test]
+    fn native_unreliable_family_on_text_channel_is_clean() {
+        // The family verdict satisfied: text channel + native_unreliable.
+        let report = audit_toml(
+            r#"
+[[provider.nvidia]]
+model_match = "*glm-5*"
+native_tools = true
+preferred_tool_format = "text"
+tool_mode_parity = "native_unreliable"
+"#,
+        );
+        assert!(report.is_clean(), "{}", report.render());
+    }
+
+    #[test]
+    fn native_pin_for_non_family_model_is_clean() {
+        // A native pin is fine for a model NOT in the native-unreliable family
+        // list — the gate is scoped to families with weight-intrinsic evidence.
+        let report = audit_toml(
+            r#"
+[[provider.someprov]]
+model_match = "some-reliable-native-model-*"
+native_tools = true
+preferred_tool_format = "native"
+"#,
+        );
+        assert!(report.is_clean(), "{}", report.render());
     }
 
     #[test]
