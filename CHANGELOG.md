@@ -8,6 +8,15 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.162
+
+### Fixed
+
+- Narrowed the visible-text sanitizer's bare JSON control-message filter so
+  legitimate JSON-only assistant answers with keys such as `tasks`, `steps`, or
+  `reasoning` remain visible while leaked internal verdict envelopes are still
+  hidden.
+
 ## v0.8.161
 
 ### Added
