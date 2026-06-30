@@ -37,6 +37,86 @@ pub const SESSION_BUNDLE_SCHEMA_VERSION: u32 = 1;
 pub const SESSION_BUNDLE_SCHEMA_ID: &str = "https://harnlang.com/schemas/session-bundle.v1.json";
 pub const REPLAY_ONLY_PLACEHOLDER: &str = "[withheld]";
 
+/// Bundle `source.status` for a session reconstructed from an event stream that
+/// has no terminal `SessionClosed` event — a live loop frozen mid-turn for
+/// cross-compute migration (#3682), or a time-traveled prefix truncated before
+/// the close. The next action is still pending, so a consumer must CONTINUE the
+/// loop, not treat it as finished.
+pub const SESSION_BUNDLE_STATUS_SUSPENDED: &str = "suspended";
+
+/// Bundle `source.status` fallback for a session that closed without an
+/// explicit status on its terminal `SessionClosed` event.
+pub const SESSION_BUNDLE_STATUS_COMPLETED: &str = "completed";
+
+/// `metadata` key carrying the machine-readable liveness verdict
+/// (`"suspended"` | `"closed"`) so a resume host can decide continue-vs-replay
+/// without string-matching the human-facing `status`.
+pub const SESSION_BUNDLE_LIVENESS_KEY: &str = "session_liveness";
+
+/// Liveness of an agent session reconstructed from its event log.
+///
+/// Derived purely from the event stream: a session is [`Closed`] only when the
+/// stream contains a terminal `SessionClosed` event. Any other stream is
+/// [`Suspended`] — its next action is still pending.
+///
+/// [`Closed`]: AgentSessionLiveness::Closed
+/// [`Suspended`]: AgentSessionLiveness::Suspended
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AgentSessionLiveness {
+    /// The stream ends in a `SessionClosed` event. `status` is that event's
+    /// status, or [`SESSION_BUNDLE_STATUS_COMPLETED`] when it was empty.
+    Closed { status: String, finished_at_ms: i64 },
+    /// No terminal `SessionClosed` event: the loop is frozen mid-flight and a
+    /// consumer must resume it rather than replay it as a finished run.
+    Suspended,
+}
+
+impl AgentSessionLiveness {
+    /// The human-facing `source.status` string for this liveness.
+    pub fn status(&self) -> &str {
+        match self {
+            AgentSessionLiveness::Closed { status, .. } => status,
+            AgentSessionLiveness::Suspended => SESSION_BUNDLE_STATUS_SUSPENDED,
+        }
+    }
+
+    /// The machine-readable [`SESSION_BUNDLE_LIVENESS_KEY`] tag.
+    pub fn tag(&self) -> &'static str {
+        match self {
+            AgentSessionLiveness::Closed { .. } => "closed",
+            AgentSessionLiveness::Suspended => "suspended",
+        }
+    }
+
+    /// Whether a consumer must CONTINUE the loop (vs. treat it as finished).
+    pub fn is_suspended(&self) -> bool {
+        matches!(self, AgentSessionLiveness::Suspended)
+    }
+}
+
+/// Classify an agent session's liveness from its replay event stream by finding
+/// the last terminal `SessionClosed` event. The keystone discriminator behind
+/// portable suspend/resume (#3682): without it, a frozen-mid-flight or
+/// time-traveled session is silently mislabeled `completed` and a resume host
+/// replays it instead of continuing the pending turn.
+pub fn agent_session_liveness(events: &[AgentSessionReplayEvent]) -> AgentSessionLiveness {
+    events
+        .iter()
+        .rev()
+        .find_map(|entry| match &entry.event {
+            AgentEvent::SessionClosed { status, .. } => Some(AgentSessionLiveness::Closed {
+                status: if status.is_empty() {
+                    SESSION_BUNDLE_STATUS_COMPLETED.to_string()
+                } else {
+                    status.clone()
+                },
+                finished_at_ms: entry.occurred_at_ms,
+            }),
+            _ => None,
+        })
+        .unwrap_or(AgentSessionLiveness::Suspended)
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SessionBundleExportMode {
     Local,
@@ -732,18 +812,18 @@ pub fn session_bundle_from_agent_session_events(
 
     let stable_id = sanitize_topic_component(session_id);
     let started_at = rfc3339_from_epoch_ms(events[0].occurred_at_ms);
-    let finished_at = events.iter().rev().find_map(|entry| match &entry.event {
-        AgentEvent::SessionClosed { .. } => Some(rfc3339_from_epoch_ms(entry.occurred_at_ms)),
-        _ => None,
-    });
-    let status = events
-        .iter()
-        .rev()
-        .find_map(|entry| match &entry.event {
-            AgentEvent::SessionClosed { status, .. } if !status.is_empty() => Some(status.clone()),
-            _ => None,
-        })
-        .unwrap_or_else(|| "completed".to_string());
+    // Liveness, not a `completed` default: a stream without a terminal
+    // `SessionClosed` event (a frozen-mid-flight loop, or a time-traveled
+    // prefix) is `suspended`, so `finished_at` stays null and a resume host
+    // continues the pending turn rather than replaying a "finished" run.
+    let liveness = agent_session_liveness(events);
+    let finished_at = match &liveness {
+        AgentSessionLiveness::Closed { finished_at_ms, .. } => {
+            Some(rfc3339_from_epoch_ms(*finished_at_ms))
+        }
+        AgentSessionLiveness::Suspended => None,
+    };
+    let status = liveness.status().to_string();
     let run_id = session_id.to_string();
     let workflow_id = "agent_session".to_string();
     let created_at = finished_at.clone().unwrap_or_else(|| started_at.clone());
@@ -824,6 +904,10 @@ pub fn session_bundle_from_agent_session_events(
             deterministic_events: deterministic_events_from_agent_session(events)?,
             ..BundleReplay::default()
         },
+        metadata: BTreeMap::from([(
+            SESSION_BUNDLE_LIVENESS_KEY.to_string(),
+            json!(liveness.tag()),
+        )]),
         ..SessionBundle::default()
     })
 }
