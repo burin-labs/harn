@@ -221,9 +221,8 @@ impl super::super::Vm {
 
     /// Compute the next adaptive-binary cache state from the peeked
     /// previous state and the freshly-observed `shape`. Operates on
-    /// `Copy` state directly — the helper no longer needs to take the
-    /// wrapping `InlineCacheEntry` by value (which used to force the
-    /// caller to clone the enum on the miss path too).
+    /// `Copy` state directly so the miss path does not clone the wrapping
+    /// `InlineCacheEntry`.
     fn next_adaptive_binary_state(
         previous: Option<AdaptiveBinaryState>,
         shape: BinaryShape,

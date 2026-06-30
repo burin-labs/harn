@@ -712,9 +712,9 @@ impl super::super::Vm {
         VmError::TypeError(format!("cannot index into list with {}", index.type_name()))
     }
 
-    /// Index-assignment is only supported on lists and dicts. This used to
-    /// be a silent no-op (e.g. `s[0] = "Z"` on a string left `s` untouched);
-    /// it is now the same class of error the property path raises.
+    /// Index-assignment is only supported on lists and dicts. Strings and
+    /// other scalar values raise the same class of error as unsupported
+    /// property assignment.
     fn subscript_assign_type_error(target: &VmValue) -> VmError {
         VmError::TypeError(format!(
             "cannot assign by index into {}; only lists and dicts support \

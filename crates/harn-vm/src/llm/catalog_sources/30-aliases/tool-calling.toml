@@ -38,8 +38,8 @@ streaming_native = "pass"
 fallback_mode = "native"
 last_probe_at = "2026-06-05"
 
-# MLX route now serves the Qwen3.6-35B-A3B MoE via mlx_lm.server (burin #2717).
-# native is UNPROVEN on mlx_lm.server (the runtime profile requires a tool_probe
+# MLX route serves the Qwen3.6-35B-A3B MoE via mlx_lm.server (burin #2717).
+# Native is UNPROVEN on mlx_lm.server (the runtime profile requires a tool_probe
 # before native is trusted; the validated `native` precedent is the llama.cpp
 # sibling, a different server). Keep native = "unknown" so the readiness/probe
 # path verifies served identity + a one-tool probe before selecting native.

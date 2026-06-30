@@ -815,9 +815,8 @@ async fn authorize_script_rpc(
 /// before the runtime executes it. The list is deny-by-default: only
 /// `initialize` (required to establish the session) and `ping`
 /// (connectivity check) are exempt; every other method — including
-/// catalog and listing methods that previously bypassed auth and
-/// leaked the script's tool/resource/prompt surface — now goes through
-/// `AuthPolicy::authorize`.
+/// catalog and listing methods that expose the script's
+/// tool/resource/prompt surface — goes through `AuthPolicy::authorize`.
 ///
 /// New MCP methods (notifications/*, completion/complete,
 /// sampling/createMessage, elicitation/create, custom RPCs) are
@@ -1056,8 +1055,8 @@ mod tests {
         assert!(script_method_requires_auth("resources/read"));
         assert!(script_method_requires_auth("prompts/get"));
         // The reason for the inversion: every other method (catalog
-        // listings, notifications, sampling, elicitation, custom RPCs)
-        // now requires auth instead of leaking the script's surface.
+        // listings, notifications, sampling, elicitation, custom RPCs) must
+        // require auth before exposing the script's surface.
         assert!(script_method_requires_auth("tools/list"));
         assert!(script_method_requires_auth("resources/list"));
         assert!(script_method_requires_auth("prompts/list"));

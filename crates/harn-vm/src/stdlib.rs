@@ -283,9 +283,9 @@ fn stdlib_probe_vm() -> Vm {
 ///
 /// Backed by the `linkme::distributed_slice` declared on
 /// [`crate::stdlib::macros::ALL_BUILTIN_DEFS`] — every annotated fn
-/// contributes one entry automatically at link time, eliminating the
-/// per-module `MODULE_BUILTINS` arrays and the hand-maintained aggregator
-/// that used to live here.
+/// contributes one entry automatically at link time. Keep builtin registration
+/// on this distributed slice instead of per-module arrays plus a central
+/// hand-maintained aggregator.
 ///
 /// **Force-link warning** (linkme issue #36): rlib dead-code stripping
 /// can drop these statics when `harn-vm` is linked transitively. Every

@@ -251,8 +251,8 @@ api_dialect = "openai_chat"
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60, cache_read_per_mtok = 0.015 }
 architecture = { parameter_count_b = 119.0, active_parameter_count_b = 6.5, moe = true, license = "Apache-2.0", source_url = "https://docs.mistral.ai/models/model-cards/mistral-small-4-0-26-03", last_verified = "2026-06-05" }
-# Self-described metadata (matches the mistral-small-4-2603 equivalence group);
-# previously relied on cross-fragment leading-key bleed.
+# Inline metadata matches the mistral-small-4-2603 equivalence group and keeps
+# this row independent of fragment-order defaults.
 tier = "mid"
 open_weight = true
 strengths = ["cheap", "coding", "speed", "tool_use", "long_context"]

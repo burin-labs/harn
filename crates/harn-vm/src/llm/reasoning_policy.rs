@@ -569,8 +569,8 @@ mod tests {
         // The capability matrix declares `auto_reasoning_overrides =
         // { agent = "off", verify = "off" }` on the ollama qwen3 rules
         // to neutralize the Qwen3 tool-call/thinking regression at the
-        // data layer. Previously this lived as a hard-coded
-        // `local_qwen_route` branch in resolve_policy.
+        // data layer. Keep route-specific exceptions in data rather than
+        // adding provider/model branches to `resolve_policy`.
         let opts = crate::value::DictMap::from_iter([
             (
                 crate::value::intern_key("provider"),

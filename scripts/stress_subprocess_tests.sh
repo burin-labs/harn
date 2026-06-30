@@ -4,9 +4,7 @@
 # relaxed `harn-subprocess` / `harn-cli-bin` nextest group caps
 # introduced by harn#949.
 #
-# Background: those test groups used to be capped at `max-threads = 4`
-# to avoid macOS dyld + AMFI cold-cache scheduler starvation. The
-# architectural fix is the per-process pre-warm in
+# Those test groups rely on the per-process pre-warm in
 # `crates/harn-cli/tests/test_util/process.rs::harn_e2e_command()`. This
 # script gives reviewers a reproducible way to verify the fix holds:
 # loop the harn-cli nextest run N times and report any flakes.

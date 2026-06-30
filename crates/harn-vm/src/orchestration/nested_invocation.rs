@@ -571,7 +571,7 @@ mod tests {
     #[test]
     fn harn_script_keyword_in_comment_is_ignored() {
         let source = r#"
-            // exec("rm -rf /") is what we used to do but no longer
+            // exec("rm -rf /") is a comment-only token and must not trip policy.
             let x = read_file("README.md")
         "#;
         let report = enforce_nested_invocation_ceiling(

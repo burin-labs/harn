@@ -692,8 +692,8 @@ mod tests {
 
     #[test]
     fn policy_for_code_with_config_applies_worktree_confinement() {
-        // When the embedder opts into sandboxing, ActAuto `code` mode now
-        // honors it as a Worktree-level OS sandbox instead of discarding it.
+        // When the embedder opts into sandboxing, ActAuto `code` mode must
+        // honor it as a Worktree-level OS sandbox.
         let roots = vec!["/work/project".to_string()];
         let sandbox = AcpSandboxConfig::with_read_only_roots(roots.clone());
         assert!(sandbox.is_configured());
@@ -823,8 +823,8 @@ mod tests {
 
     #[test]
     fn code_mode_honors_embedder_read_only_roots() {
-        // Previously full-access mode discarded embedder roots entirely. Now a
-        // configured embedder gets Worktree confinement with its roots applied.
+        // A configured embedder gets Worktree confinement with its declared
+        // read-only roots applied, even in full-access ACP code mode.
         let sandbox =
             AcpSandboxConfig::with_read_only_roots(vec!["/opt/burin/pipelines".to_string()]);
         let policy = policy_for_mode("code", &sandbox).expect("configured code mode has policy");

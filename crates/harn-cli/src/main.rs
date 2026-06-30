@@ -49,9 +49,8 @@ fn invoked_as() -> Option<String> {
 ///
 /// The sidecars speak a wire protocol over stdin/stdout and don't otherwise
 /// parse argv, so without this a `--version` probe would silently start the
-/// server and hang waiting on stdin. As standalone binaries they used to
-/// answer `--version`; the multi-call collapse dropped that. Regression fix
-/// for #2975.
+/// server and hang waiting on stdin. Keep this probe path aligned with the
+/// standalone sidecar binaries. Regression fix for #2975.
 fn run_sidecar(name: &str, serve: fn()) {
     match sidecar_query(std::env::args_os().skip(1)) {
         Some(SidecarQuery::Version) => println!("{name} {}", env!("CARGO_PKG_VERSION")),

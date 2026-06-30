@@ -1,9 +1,7 @@
 //! The single authoritative permission primitive for harn.
 //!
-//! Subsumes what used to live as four parallel implementations: the TUI
-//! permission policy, a host IDE approval modal, a cloud
-//! gateway middleware, and a cloud sandbox backend. Each of those
-//! surfaces now delegates to the same data model, store, and audit
+//! TUI policy, host IDE approvals, cloud gateway middleware, and cloud
+//! sandbox backends all delegate to the same data model, store, and audit
 //! channel exposed here, so a user's "remember this answer" rule flows
 //! between local sessions and supervised cloud agents identically.
 //!

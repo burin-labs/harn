@@ -1,5 +1,5 @@
-# Direct first-party / fast-inference routes for models that were
-# previously only reachable through aggregator providers.
+# Direct first-party / fast-inference routes for models also available through
+# aggregator providers.
 #
 # Each row is keyed by a `provider/<wire-id>` selector so it stays
 # collision-free with the same weights hosted elsewhere (e.g. the

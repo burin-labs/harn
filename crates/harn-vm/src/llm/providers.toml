@@ -316,13 +316,10 @@ latency_p50_ms = 1900
 method = "GET"
 path = "/models"
 
-# Moonshot AI — first-party host of the Kimi K2 family. OpenAI-compatible
-# `/v1/chat/completions`; the same models were previously only reachable
-# through OpenRouter/Together aggregator routes. Moonshot also exposes an
-# Anthropic-compatible `/anthropic` surface, but Harn dials the
-# OpenAI-compatible endpoint so the shared openai_chat_completions wire
-# format Just Works. Use the `.cn` base via MOONSHOT_BASE_URL for the
-# China region.
+# Moonshot AI — first-party host of the Kimi K2 family. Harn dials the
+# OpenAI-compatible `/v1/chat/completions` endpoint so the shared
+# openai_chat_completions wire format Just Works. Use the `.cn` base via
+# MOONSHOT_BASE_URL for the China region.
 [providers.moonshot]
 base_url = "https://api.moonshot.ai/v1"
 base_url_env = "MOONSHOT_BASE_URL"
@@ -1138,10 +1135,10 @@ tool_format = "native"
 
 # llama.cpp — Unsloth Dynamic 2.0 GGUF served by llama-server.
 # No `tool_format` pin: this non-native-quant id matches the `*qwen3.6*`
-# text-channel capability row, which now resolves to the global `json`
-# (fenced-JSON) default. json's ```tool fence sidesteps the reserved
-# <tool_call> token (so the reserved-token remap stays correct) and is
-# delimiter-safe vs heredoc. To force heredoc, set `tool_format = "text"`.
+# text-channel capability row's `json` (fenced-JSON) default. json's ```tool
+# fence sidesteps the reserved <tool_call> token (so the reserved-token remap
+# stays correct) and is delimiter-safe vs heredoc. To force heredoc, set
+# `tool_format = "text"`.
 [aliases."llamacpp-qwen3.6"]
 id = "qwen3.6-35b-a3b"
 provider = "llamacpp"
@@ -1161,13 +1158,11 @@ id = "qwen3.6-35b-a3b-ud-q4-k-xl"
 provider = "llamacpp"
 tool_format = "native"
 
-# MLX (Apple Silicon). Burin #2717 retired the never-downloaded dense vision
-# model `unsloth/Qwen3.6-27B-UD-MLX-4bit` (HF cache held only zero-byte
-# `.incomplete` blobs) and switched the local MLX route to the coding-tuned
-# Qwen3.6-35B-A3B MoE served via `mlx_lm.server`. Point every MLX alias at the
-# live MoE so `auto`/preset selection lands on real weights. These share the
-# `qwen3.6-35b-a3b` equivalence_group with the llama.cpp GGUF route, so eval
-# aggregation compares the two runtimes directly.
+# MLX (Apple Silicon). Local MLX routes use the coding-tuned Qwen3.6-35B-A3B
+# MoE served via `mlx_lm.server` (burin #2717). Keep every MLX alias pointed at
+# live MoE weights so `auto`/preset selection lands on real weights. These
+# share the `qwen3.6-35b-a3b` equivalence_group with the llama.cpp GGUF route,
+# so eval aggregation compares the two runtimes directly.
 [aliases."mlx-qwen3.6"]
 id = "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit"
 provider = "mlx"
@@ -1180,8 +1175,8 @@ provider = "mlx"
 id = "unsloth/Qwen3.6-35B-A3B-UD-MLX-8bit"
 provider = "mlx"
 
-# Back-compat: the old 27B alias names now resolve to the live 35B-A3B MoE so
-# any pinned config keeps working instead of pointing at non-existent weights.
+# Back-compat: the old 27B alias names resolve to the live 35B-A3B MoE so any
+# pinned config keeps working instead of pointing at non-existent weights.
 [aliases.mlx-qwen36-27b]
 id = "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit"
 provider = "mlx"
@@ -1294,11 +1289,10 @@ provider = "xai"
 
 # Devstral (Mistral's agentic-coding tune).
 # No `tool_format` pin: these aliases inherit the `devstral-small-2*` capability
-# row's resolved default, now `json` (fenced-JSON) — the global text-channel
-# default. devstral has no reserved-token constraint, so the stale heredoc
-# `text` pin that used to sit here had no structural reason to exist; json is
-# delimiter-safe and root-cause-fixes heredoc's `<<EOF` content leak. To force
-# heredoc, set `tool_format = "text"` here or pin the capability row.
+# row's `json` (fenced-JSON) text-channel default. devstral has no
+# reserved-token constraint, so json is delimiter-safe and avoids heredoc's
+# `<<EOF` content leak. To force heredoc, set `tool_format = "text"` here or pin
+# the capability row.
 [aliases.devstral-small-2]
 id = "devstral-small-2:24b"
 provider = "ollama"
@@ -1311,7 +1305,7 @@ provider = "ollama"
 # Devstral Small 2 on Ollama is text-tool-only (see the `devstral-small-2*`
 # capability rule: native_tools = false). A `tool_format = "native"` pin here
 # would be silently half-supported — accepted by resolution but degraded to
-# the text protocol downstream — which the catalog validator now rejects.
+# the text protocol downstream — which the catalog validator rejects.
 
 # --- source: 30-aliases/tool-calling.toml ---
 # ── Alias tool-calling probe state ───────────────────────────────────────────
@@ -1354,8 +1348,8 @@ streaming_native = "pass"
 fallback_mode = "native"
 last_probe_at = "2026-06-05"
 
-# MLX route now serves the Qwen3.6-35B-A3B MoE via mlx_lm.server (burin #2717).
-# native is UNPROVEN on mlx_lm.server (the runtime profile requires a tool_probe
+# MLX route serves the Qwen3.6-35B-A3B MoE via mlx_lm.server (burin #2717).
+# Native is UNPROVEN on mlx_lm.server (the runtime profile requires a tool_probe
 # before native is trusted; the validated `native` precedent is the llama.cpp
 # sibling, a different server). Keep native = "unknown" so the readiness/probe
 # path verifies served identity + a one-tool probe before selecting native.
@@ -1939,8 +1933,8 @@ api_dialect = "openai_chat"
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60, cache_read_per_mtok = 0.015 }
 architecture = { parameter_count_b = 119.0, active_parameter_count_b = 6.5, moe = true, license = "Apache-2.0", source_url = "https://docs.mistral.ai/models/model-cards/mistral-small-4-0-26-03", last_verified = "2026-06-05" }
-# Self-described metadata (matches the mistral-small-4-2603 equivalence group);
-# previously relied on cross-fragment leading-key bleed.
+# Inline metadata matches the mistral-small-4-2603 equivalence group and keeps
+# this row independent of fragment-order defaults.
 tier = "mid"
 open_weight = true
 strengths = ["cheap", "coding", "speed", "tool_use", "long_context"]
@@ -2020,11 +2014,9 @@ api_dialect = "openai_chat"
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60 }
 architecture = { parameter_count_b = 117.0, active_parameter_count_b = 5.1, moe = true, license = "Apache-2.0", source_url = "https://developers.openai.com/api/docs/models/gpt-oss-120b", last_verified = "2026-06-05" }
-# Explicit metadata so this row is self-described. It was previously the last
-# model in this fragment with no inline tier/open_weight/strengths, so the next
-# fragment's (now-removed) leading bare keys bled in and mislabeled it as
-# `open_weight = false` with a spurious `vision` strength. GPT-OSS 120B is
-# Apache-2.0 (open weight) and text-only; it is Burin's cheap coding executor.
+# Explicit metadata keeps this row self-described across fragment boundaries.
+# GPT-OSS 120B is Apache-2.0 (open weight) and text-only; it is Burin's cheap
+# coding executor.
 # `tier`/`open_weight`/`strengths` match the rest of the openai-gpt-oss-120b
 # equivalence group (the validator requires one tier per logical model — the
 # conservative shared baseline is `frontier`).
@@ -2075,8 +2067,8 @@ provider = "openrouter"
 context_window = 256000
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.20, output_per_mtok = 1.15, cache_read_per_mtok = 0.04 }
-# Self-described metadata (matches the step-3.7-flash equivalence group);
-# previously relied on cross-fragment leading-key bleed.
+# Inline metadata matches the step-3.7-flash equivalence group and keeps this
+# row independent of fragment-order defaults.
 tier = "frontier"
 open_weight = false
 strengths = ["agentic", "coding", "long_context", "tool_use", "reasoning"]
@@ -2136,8 +2128,8 @@ provider = "together"
 context_window = 196608
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.30, output_per_mtok = 1.20, cache_read_per_mtok = 0.06 }
-# Self-described metadata (matches the minimax-m2.7 equivalence group);
-# previously relied on cross-fragment leading-key bleed.
+# Inline metadata matches the minimax-m2.7 equivalence group and keeps this row
+# independent of fragment-order defaults.
 tier = "frontier"
 open_weight = true
 strengths = ["speed", "coding", "agentic", "tool_use", "reasoning", "long_context"]
@@ -2221,8 +2213,8 @@ pricing = { input_per_mtok = 0.85, output_per_mtok = 1.20 }
 availability = "dedicated"
 deprecated = true
 deprecation_note = "Cerebras no longer returns this model from public discovery; use a provisioned dedicated endpoint alias if your organization still serves these weights."
-# Self-described metadata; previously relied on cross-fragment leading-key
-# bleed. Deprecated legacy route.
+# Inline metadata keeps this deprecated legacy route independent of
+# fragment-order defaults.
 tier = "mid"
 open_weight = true
 strengths = ["tool_use"]
@@ -2356,7 +2348,7 @@ provider = "openrouter"
 context_window = 204800
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 0.33, output_per_mtok = 1.20 }
-# Self-described metadata; previously relied on cross-fragment leading-key bleed.
+# Inline metadata keeps this row independent of fragment-order defaults.
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning"]
@@ -2431,7 +2423,7 @@ provider = "openrouter"
 context_window = 202752
 capabilities = ["tools", "streaming", "vision"]
 pricing = { input_per_mtok = 1.20, output_per_mtok = 4.00 }
-# Self-described metadata; previously relied on cross-fragment leading-key bleed.
+# Inline metadata keeps this row independent of fragment-order defaults.
 tier = "frontier"
 open_weight = true
 strengths = ["vision", "coding", "agentic"]
@@ -2512,7 +2504,7 @@ name = "Qwen3.5 9B"
 provider = "openrouter"
 context_window = 131072
 capabilities = ["tools", "streaming"]
-# Self-described metadata; previously relied on cross-fragment leading-key bleed.
+# Inline metadata keeps this row independent of fragment-order defaults.
 tier = "small"
 open_weight = true
 strengths = ["cheap", "speed"]
@@ -2584,7 +2576,7 @@ context_window = 262144
 runtime_context_window = 32768
 stream_timeout = 600.0
 capabilities = ["tools", "streaming"]
-# Self-described metadata; previously relied on cross-fragment leading-key bleed.
+# Inline metadata keeps this row independent of fragment-order defaults.
 tier = "mid"
 open_weight = true
 strengths = ["coding", "agentic"]
@@ -2949,8 +2941,8 @@ open_weight = false
 strengths = ["coding", "agentic", "tool_use", "reasoning", "vision"]
 
 # --- source: 60-models/95-moonshot-deepinfra-sambanova.toml ---
-# Direct first-party / fast-inference routes for models that were
-# previously only reachable through aggregator providers.
+# Direct first-party / fast-inference routes for models also available through
+# aggregator providers.
 #
 # Each row is keyed by a `provider/<wire-id>` selector so it stays
 # collision-free with the same weights hosted elsewhere (e.g. the

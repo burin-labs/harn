@@ -996,8 +996,8 @@ fn __visible_text(parsed, raw_text) {
  * malformation, not a dispatchable call. Some providers emit a stray
  * `{name: "", arguments: {}}` block alongside valid sibling calls (observed
  * live on go/rust eval runs: a turn carrying `[look, "", look]`). Dispatching
- * the nameless call resolves no tool and used to terminate the agent loop
- * silently — a pure harness failure that read as a model give-up
+ * the nameless call resolves no tool and can otherwise terminate the agent
+ * loop silently — a pure harness failure that reads as a model give-up
  * (result=INCOMPLETE, outcome_kind=null). Detect it here so callers can drop
  * the malformed call, keep the valid siblings, and inject parse-guidance.
  */
@@ -4392,10 +4392,9 @@ fn __agent_loop_run(message, session, initial_opts) {
 // Capture the PRIMARY provider/model once, before any post-turn escalation
 // can rebind `opts`. A failed escalated turn falls back to this for one
 // retry instead of unwinding the whole loop into a fake success.
-// NON-tracked provider failure. Previously this branch broke SILENTLY
-// (no event), so a fast pre-dispatch escalation failure unwound the
-// loop while ACP still returned the prior cheap-model text as a fake
-// success. Two fixes, always-correct:
+// Non-tracked provider failure. A fast pre-dispatch escalation failure must not
+// unwind the loop while ACP returns the prior cheap-model text as a fake
+// success. Two fixes, always correct:
 //   1. Always emit an observable provider_error `iteration_end` event.
 //   2. If this was an ESCALATED turn (current provider/model differs
 //      from the captured primary) and we have not already retried the

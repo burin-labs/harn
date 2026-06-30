@@ -886,8 +886,8 @@ pub(crate) fn build_sandboxed_command(
         //     provided keys. This is the least-surprising behavior — a
         //     caller passing `env: {ONE_VAR: "x"}` keeps PATH/HOME/etc.
         //   - "replace": clear the parent env entirely, then set only the
-        //     provided keys. Must be requested explicitly now; previously
-        //     this was the (footgun) default whenever `env` was supplied.
+        //     provided keys. This is the footgun shape and must be requested
+        //     explicitly whenever `env` is supplied.
         let env_mode = optional_string(params, "env_mode");
         match env_mode.as_deref().unwrap_or("merge") {
             "replace" => {

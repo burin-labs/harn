@@ -1,10 +1,9 @@
 //! Unified redaction policy for persisted and rendered operational data.
 //!
 //! Harn writes transcripts, receipts, event logs, portal JSON, connector
-//! status snapshots, and workflow artifacts. Each of those surfaces was
-//! previously responsible for its own ad-hoc scrubbing of HTTP headers,
-//! URL query parameters, JSON tokens, and free-form strings. This module
-//! is the single source of truth for "what is sensitive" so the same
+//! status snapshots, and workflow artifacts. This module is the single source
+//! of truth for scrubbing HTTP headers, URL query parameters, JSON tokens, and
+//! free-form strings so the same
 //! representative secret cannot leak through two surfaces by accident.
 //!
 //! # Categories
@@ -633,9 +632,9 @@ mod tests {
         assert_eq!(value["list"][0]["name"], "alice");
         assert_eq!(value["clientSecret"], REDACTED_PLACEHOLDER);
         let free_form = value["free_form"].as_str().unwrap();
-        // Free-form pattern matches now produce the OA-06 named
-        // placeholder `<redacted:<pattern>:<len>>` so audit logs can
-        // attribute leaks to a specific provider.
+        // Free-form pattern matches produce the OA-06 named placeholder
+        // `<redacted:<pattern>:<len>>` so audit logs can attribute leaks to a
+        // specific provider.
         assert!(
             free_form.contains("<redacted:"),
             "expected named placeholder, got: {free_form}"
