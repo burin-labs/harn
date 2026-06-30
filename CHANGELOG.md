@@ -8,6 +8,71 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.157
+
+### Added
+
+- **Session bundles now carry run observability records explicitly (#3684).**
+  Verification outcomes and transcript pointers travel in the replay envelope
+  even when consumers import from bundle-level replay data.
+- Added direct session-bundle replay verification outcomes so verify results
+  survive portable replay/import without requiring the full observability
+  snapshot.
+Session bundles now carry embedded suspended worker snapshots and materialize them
+on import, so portable checkpoint bundles no longer depend on source-host snapshot
+paths.
+Added a site-wide pre-release notice (banner above the navbar on every page, plus a README callout) that links to the GitHub release notes so readers know the language, standard library, and CLI may change between releases.
+Added a capability-matrix consistency gate that forbids any route from pinning
+the provider-native tool channel for a model family whose native channel is
+unreliable as a weight-intrinsic property (starting with GLM-5.x, which leaks
+`<tool_call>` markup into assistant content instead of returning native tool
+calls). Fixed the NVIDIA GLM-5 route — the lone outlier that pinned `native`
+while the rest of the family uses the clean text channel — so a value model can
+no longer silently thrash on a single mis-pinned provider.
+- **Session bundle import reports (#3682).** `harn session import --json` now
+  prints the imported run-record path, materialized worker snapshot paths, and
+  argv-form `harn run --resume` commands for portable checkpoint restore
+  workflows.
+
+### Changed
+
+- **Pre-push hooks can now run in fast-only mode.** Set
+  `HARN_PREPUSH_FAST_ONLY=1` to keep signature, merge-queue, and cheap drift
+  guards while deferring expensive local build checks to remote CI.
+
+### Removed
+
+- Removed stale Anthropic Opus 4.6 fast-mode catalog metadata after Anthropic's June 29, 2026 removal date;
+  Harn no longer advertises `speed = "fast"` for `claude-opus-4-6`.
+
+### Fixed
+
+- Preserve sub-agent workspace anchors in persisted worker snapshots so
+  suspended workers retain placement boundaries after cold restore.
+Fixed fan-out child `files_written` attribution so each child agent's own session breadcrumb
+survives awaits without inheriting the parent session.
+- **OpenTelemetry tracing exporters now use one compatible dependency family
+  (#3711).** The OTLP setup paths no longer mix Harn's direct `reqwest`
+  version with the HTTP client expected by the upgraded OpenTelemetry stack.
+Fixed local pre-push coverage for session-bundle schema drift.
+Arg/path-scoped dynamic-permission denials are now coached as recoverable
+instead of terminal: when a route is permitted but a specific argument value or
+path is out of policy, the agent is told to retry with an allowed value (the
+same treatment the argument allow-list gate already gets, harn#3670). Hard
+capability ceilings, approval-unavailable, and explicit user rejections stay
+terminal — a retry there yields the same answer.
+- **Model capability matrix.** GLM-5 family routes now fail the capability
+  audit if a provider pins the unreliable native tool channel, and the NVIDIA
+  GLM-5 row is corrected to the text tool format (#3729).
+Surface real `harn.toml` read errors (permission denied, bad symlink) instead of silently falling back to default config, and make `ed25519_verify` throw on malformed public-key input (wrong length / non-hex) instead of reporting it as a failed signature.
+- Standalone `host_call("project.metadata_*", ...)` now routes metadata get,
+  inspect, set, save, stale, and refresh calls to Harn's built-in metadata
+  store when no host bridge handles the call, and `harn check` recognizes the
+  inspect operation by default. This preserves project metadata learning in
+  CLI/debug runs.
+- **Orchestrator watch-mode reload coverage is now deterministic.** The admin
+  reload test no longer races the manifest file-watch debounce.
+
 ## v0.8.156
 
 ### Added
