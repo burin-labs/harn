@@ -1782,7 +1782,7 @@ pub fn payload_schema() {
 }
 
 pub fn init(ctx) {
-  if ctx.capabilities.secret_get != true {
+  if !ctx.capabilities.secret_get {
     throw "secret_get capability missing"
   }
 }

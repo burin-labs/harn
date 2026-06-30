@@ -261,6 +261,15 @@ fn sessions() -> &'static Mutex<BTreeMap<String, SessionState>> {
     SESSIONS.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
+/// Lock the session map, panicking with one canonical message if a prior
+/// holder poisoned the mutex. Every accessor goes through here so the poison
+/// policy and message live in exactly one place.
+fn lock_sessions() -> std::sync::MutexGuard<'static, BTreeMap<String, SessionState>> {
+    sessions()
+        .lock()
+        .expect("hostlib fs session mutex poisoned")
+}
+
 /// Remember the workspace root associated with a live session.
 ///
 /// ACP calls this when a prompt starts so Harn code can call
@@ -270,9 +279,7 @@ pub fn configure_session_root(session_id: &str, root: &Path) {
         return;
     }
     let root = normalize_logical(root);
-    let mut guard = sessions()
-        .lock()
-        .expect("hostlib fs session mutex poisoned");
+    let mut guard = lock_sessions();
     match guard.get_mut(session_id) {
         Some(state) if state.entries.is_empty() => {
             state.root = root;
@@ -295,9 +302,7 @@ pub fn configured_session_root(session_id: &str) -> Option<PathBuf> {
     if session_id.trim().is_empty() {
         return None;
     }
-    let guard = sessions()
-        .lock()
-        .expect("hostlib fs session mutex poisoned");
+    let guard = lock_sessions();
     guard.get(session_id).map(|state| state.root.clone())
 }
 
@@ -308,9 +313,7 @@ pub fn set_mode(
     root: Option<&Path>,
 ) -> Result<SetModeResult, HostlibError> {
     validate_session_id(SET_MODE_BUILTIN, session_id)?;
-    let mut guard = sessions()
-        .lock()
-        .expect("hostlib fs session mutex poisoned");
+    let mut guard = lock_sessions();
     let mut state = state_for_locked(&mut guard, session_id, root.map(normalize_logical))?;
     let previous_mode = state.mode;
     state.mode = mode;
@@ -325,9 +328,7 @@ pub fn set_mode(
 /// Return the staged status for a session.
 pub fn staged_status(session_id: &str) -> Result<StagedStatus, HostlibError> {
     validate_session_id(STATUS_BUILTIN, session_id)?;
-    let mut guard = sessions()
-        .lock()
-        .expect("hostlib fs session mutex poisoned");
+    let mut guard = lock_sessions();
     let state = state_for_locked(&mut guard, session_id, None)?;
     let status = status_from_state(&state);
     guard.insert(session_id.to_string(), state);
@@ -337,9 +338,7 @@ pub fn staged_status(session_id: &str) -> Result<StagedStatus, HostlibError> {
 /// Commit staged changes for all paths or for a filtered path list.
 pub fn commit_staged(session_id: &str, paths: &[String]) -> Result<CommitResult, HostlibError> {
     validate_session_id(COMMIT_BUILTIN, session_id)?;
-    let mut guard = sessions()
-        .lock()
-        .expect("hostlib fs session mutex poisoned");
+    let mut guard = lock_sessions();
     let mut state = state_for_locked(&mut guard, session_id, None)?;
     let selected = selected_paths(&state, paths);
     let mut committed_paths = Vec::new();
@@ -387,9 +386,7 @@ pub fn commit_staged(session_id: &str, paths: &[String]) -> Result<CommitResult,
 /// Discard staged changes for all paths or for a filtered path list.
 pub fn discard_staged(session_id: &str, paths: &[String]) -> Result<DiscardResult, HostlibError> {
     validate_session_id(DISCARD_BUILTIN, session_id)?;
-    let mut guard = sessions()
-        .lock()
-        .expect("hostlib fs session mutex poisoned");
+    let mut guard = lock_sessions();
     let mut state = state_for_locked(&mut guard, session_id, None)?;
     let selected = selected_paths(&state, paths);
     let mut discarded_paths = Vec::new();
@@ -415,9 +412,7 @@ pub fn discard_staged(session_id: &str, paths: &[String]) -> Result<DiscardResul
 /// their preview is rendered.
 pub fn remove_session_state(session_id: &str, root: Option<&Path>) -> Result<(), HostlibError> {
     validate_session_id(DISCARD_BUILTIN, session_id)?;
-    let mut guard = sessions()
-        .lock()
-        .expect("hostlib fs session mutex poisoned");
+    let mut guard = lock_sessions();
     let state = match guard.remove(session_id) {
         Some(state) => state,
         None => load_state(session_id, root.map(normalize_logical)).map_err(|err| {
@@ -443,9 +438,7 @@ pub(crate) fn read(
     explicit_session_id: Option<&str>,
 ) -> Option<std::io::Result<Vec<u8>>> {
     let session_id = active_session_id(explicit_session_id)?;
-    let mut guard = sessions()
-        .lock()
-        .expect("hostlib fs session mutex poisoned");
+    let mut guard = lock_sessions();
     let state = state_for_locked(&mut guard, &session_id, None).ok()?;
     let result = if state.mode == FsMode::Staged {
         overlay_read(&state, path)
@@ -474,9 +467,7 @@ pub(crate) fn read_dir(
     explicit_session_id: Option<&str>,
 ) -> Option<std::io::Result<Vec<OverlayDirEntry>>> {
     let session_id = active_session_id(explicit_session_id)?;
-    let mut guard = sessions()
-        .lock()
-        .expect("hostlib fs session mutex poisoned");
+    let mut guard = lock_sessions();
     let state = state_for_locked(&mut guard, &session_id, None).ok()?;
     let result = if state.mode == FsMode::Staged {
         Some(overlay_read_dir(&state, path))
@@ -498,9 +489,7 @@ pub(crate) fn stage_write_or_none(
     let Some(session_id) = active_session_id(explicit_session_id) else {
         return Ok(None);
     };
-    let mut guard = sessions()
-        .lock()
-        .expect("hostlib fs session mutex poisoned");
+    let mut guard = lock_sessions();
     let mut state = state_for_locked(&mut guard, &session_id, None)?;
     if state.mode != FsMode::Staged {
         guard.insert(session_id, state);
@@ -557,9 +546,7 @@ pub(crate) fn stage_delete_or_none(
     let Some(session_id) = active_session_id(explicit_session_id) else {
         return Ok(None);
     };
-    let mut guard = sessions()
-        .lock()
-        .expect("hostlib fs session mutex poisoned");
+    let mut guard = lock_sessions();
     let mut state = state_for_locked(&mut guard, &session_id, None)?;
     if state.mode != FsMode::Staged {
         guard.insert(session_id, state);
@@ -720,9 +707,7 @@ fn safe_text_patch_staged(
     let Some(session) = active_session_id(session_id) else {
         return Ok(None);
     };
-    let mut guard = sessions()
-        .lock()
-        .expect("hostlib fs session mutex poisoned");
+    let mut guard = lock_sessions();
     let mut state = state_for_locked(&mut guard, &session, None)?;
     if state.mode != FsMode::Staged {
         guard.insert(session, state);

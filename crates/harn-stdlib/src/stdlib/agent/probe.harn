@@ -350,7 +350,7 @@ fn __probe_envelope(kind, outcome, observed, evidence, opts) -> ProbeResult {
 }
 
 fn __probe_unsupported(kind, body, opts) -> ProbeResult {
-  let observed = "probe kind `" + kind + "` is not yet implemented (MVP supports eval, typecheck)"
+  let observed = "probe kind `" + kind + "` is not supported (supported kinds: eval, typecheck)"
   let evidence = __probe_evidence(kind, body, nil, observed, nil, nil)
   return __probe_envelope(kind, "unknown", observed, evidence, opts)
 }
