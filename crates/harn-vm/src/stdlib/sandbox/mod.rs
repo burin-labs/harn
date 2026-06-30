@@ -859,8 +859,68 @@ pub(crate) fn unavailable(
     }
 }
 
+/// Writable workspace roots derived from the active agent session's
+/// workspace anchor: the anchor `primary` plus any `Extend` (writable)
+/// mounts. Read-only mounts are intentionally excluded — they are not
+/// writable jail roots (a read of one is permitted via the read-only-roots
+/// path, but a write must not be). Returns `None` when there is no current
+/// session or the session has no anchor, so the caller falls back to the
+/// process execution root.
+fn current_session_anchor_workspace_roots() -> Option<Vec<PathBuf>> {
+    let session_id = crate::agent_sessions::current_session_id()?;
+    let anchor = crate::agent_sessions::workspace_anchor(&session_id)?;
+    let mut roots = vec![anchor.primary.clone()];
+    for mounted in &anchor.additional_roots {
+        if matches!(
+            mounted.mount_mode,
+            crate::workspace_anchor::MountMode::Extend
+        ) {
+            roots.push(mounted.path.clone());
+        }
+    }
+    Some(roots)
+}
+
+/// The host-declared project root (`HARN_PROJECT_ROOT`), if set and
+/// non-empty. This mirrors the standalone project-root fallback the
+/// `workspace.project_root` host capability already uses
+/// (`stdlib::host`), so the write jail and the reported project root
+/// agree. It is the project a run is bound to even when the OS process
+/// cwd differs (the eval harness runs `burin-headless` from the repo with
+/// `--project <fixture>`, and the real IDE may launch from elsewhere).
+fn project_root_env_workspace_root() -> Option<PathBuf> {
+    std::env::var("HARN_PROJECT_ROOT")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
 fn normalized_workspace_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
     if policy.workspace_roots.is_empty() {
+        // An empty `policy.workspace_roots` means no explicit write-jail was
+        // configured for this call. Historically this fell straight back to the
+        // process execution root, but under the eval pattern (process cwd !=
+        // `--project`) and dispatch fan-out children, the process cwd is the
+        // repo, not the project the run is bound to — so a write that correctly
+        // resolved INTO the project was rejected as outside the jail
+        // (HARN-CAP-201), the dispatched child wrote nothing, and the parent
+        // silently compensated. Prefer, in order: (1) the active agent
+        // session's workspace anchor (primary + writable `Extend` mounts) when
+        // the session is anchored; (2) the host-declared `HARN_PROJECT_ROOT`
+        // project root (robust across the session nesting that an unanchored
+        // dispatch child sees); (3) the process execution root, the historical
+        // default. Explicit `policy.workspace_roots` still take precedence
+        // (handled in the non-empty branch below).
+        if let Some(anchor_roots) = current_session_anchor_workspace_roots() {
+            return anchor_roots
+                .iter()
+                .map(|root| normalize_for_policy(root))
+                .collect();
+        }
+        if let Some(project_root) = project_root_env_workspace_root() {
+            return vec![normalize_for_policy(&project_root)];
+        }
         return vec![normalize_for_policy(
             &crate::stdlib::process::execution_root_path(),
         )];
@@ -1268,6 +1328,13 @@ mod tests {
 
     #[test]
     fn empty_workspace_roots_default_to_execution_root_for_fs_paths() {
+        // Serialize env mutation and clear HARN_PROJECT_ROOT so this asserts the
+        // pure execution-root fallback (the project-root-env preference is
+        // covered by the next test).
+        let _env_lock = crate::runtime_paths::test_env_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        std::env::remove_var("HARN_PROJECT_ROOT");
         let dir = tempfile::tempdir().unwrap();
         crate::stdlib::process::set_thread_execution_context(Some(
             crate::orchestration::RunExecutionRecord {
@@ -1300,6 +1367,70 @@ mod tests {
 
         pop_execution_policy();
         crate::stdlib::process::set_thread_execution_context(None);
+    }
+
+    /// Regression for burin-labs/burin-code#3288. When a restricted policy has
+    /// no explicit `workspace_roots`, the write jail must follow the
+    /// host-declared `HARN_PROJECT_ROOT` project — NOT the process/execution
+    /// cwd. This is the eval/dispatch pattern: `burin-headless` runs from the
+    /// repo (`execution cwd = repo`) with `--project <fixture>` + matching
+    /// `HARN_PROJECT_ROOT`, and a dispatched sub-agent worker's writes resolve
+    /// into the fixture. Before the fix the empty-roots fallback used the
+    /// execution cwd (the repo), so the in-project write was rejected
+    /// (HARN-CAP-201) and the dispatched child wrote nothing.
+    #[test]
+    fn empty_workspace_roots_prefer_project_root_env_over_execution_root() {
+        let _env_lock = crate::runtime_paths::test_env_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let project = tempfile::tempdir().unwrap();
+        let execution_cwd = tempfile::tempdir().unwrap();
+        std::env::set_var("HARN_PROJECT_ROOT", project.path());
+        crate::stdlib::process::set_thread_execution_context(Some(
+            crate::orchestration::RunExecutionRecord {
+                cwd: Some(execution_cwd.path().to_string_lossy().into_owned()),
+                source_dir: None,
+                env: Default::default(),
+                adapter: None,
+                repo_path: None,
+                worktree_path: None,
+                branch: None,
+                base_ref: None,
+                cleanup: None,
+            },
+        ));
+        push_execution_policy(CapabilityPolicy {
+            sandbox_profile: SandboxProfile::Worktree,
+            ..CapabilityPolicy::default()
+        });
+
+        // A write that resolves INTO the project is allowed even though the
+        // process/execution cwd is elsewhere.
+        assert!(
+            enforce_fs_path(
+                "write_file",
+                &project.path().join("test/created.ts"),
+                FsAccess::Write,
+            )
+            .is_ok(),
+            "write into HARN_PROJECT_ROOT must be allowed"
+        );
+        // A write under the execution cwd (the repo, in the eval pattern) is NOT
+        // the project and must still be rejected — the jail moved to the
+        // project, it did not widen to both.
+        assert!(
+            enforce_fs_path(
+                "write_file",
+                &execution_cwd.path().join("escape.ts"),
+                FsAccess::Write,
+            )
+            .is_err(),
+            "write under the execution cwd (outside the project) must be rejected"
+        );
+
+        pop_execution_policy();
+        crate::stdlib::process::set_thread_execution_context(None);
+        std::env::remove_var("HARN_PROJECT_ROOT");
     }
 
     #[test]
