@@ -8,6 +8,14 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.158
+
+### Fixed
+
+- **Background command output.** Running command handles now expose their live
+  output artifacts before completion, so hosts can poll or read in-progress
+  build and test diagnostics instead of spinning blind.
+
 ## v0.8.157
 
 ### Added
