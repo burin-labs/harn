@@ -130,7 +130,7 @@ fn conformance_json_ignores_fixture_parent_runtime_state() {
     write_fixture(
         temp.path(),
         "metadata/isolated.harn",
-        "pipeline test(task) {\n  assert_eq(metadata_get(\".\", \"classification\"), nil)\n  let stale = metadata_stale(\".\")\n  assert_eq(stale.any_stale, false)\n  log(\"isolated\")\n}\n",
+        "pipeline test(task) {\n  assert_eq(metadata_get(\".\", \"classification\"), nil)\n  let stale = metadata_stale(\".\")\n  assert_eq(stale.any_stale, false)\n  let paths = runtime_paths()\n  assert_eq(paths.state_root.ends_with(\".harn\"), true)\n  assert_eq(paths.worktree_root.ends_with(\".harn/worktrees\"), true)\n  log(\"isolated\")\n}\n",
         "[harn] isolated\n",
     );
     let stale_state = temp
