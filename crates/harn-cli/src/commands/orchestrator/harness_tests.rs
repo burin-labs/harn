@@ -131,3 +131,66 @@ async fn stream_trigger_route_uses_generic_stream_connector_in_process() {
         .await
         .expect("harness shutdown");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn harness_start_waits_for_topic_pumps_before_ready() {
+    let _env_lock = crate::tests::common::env_lock::lock_env().lock().await;
+    let _secret_providers = crate::env_guard::ScopedEnvVar::set("HARN_SECRET_PROVIDERS", "env");
+
+    let temp = tempfile::TempDir::new().unwrap();
+    let marker_path = temp.path().join("stream-handler.json");
+    write_test_file(temp.path(), "harn.toml", stream_manifest_fixture());
+    write_test_file(
+        temp.path(),
+        "lib.harn",
+        &stream_handler_fixture(&marker_path),
+    );
+
+    let config =
+        OrchestratorConfig::for_test(temp.path().join("harn.toml"), temp.path().join("state"));
+    let harness = OrchestratorHarness::start(config)
+        .await
+        .expect("harness start");
+    let event_log = harness.event_log();
+    let topic = Topic::new("orchestrator.lifecycle").unwrap();
+    let lifecycle = event_log
+        .read_range(&topic, None, usize::MAX)
+        .await
+        .expect("read lifecycle");
+
+    let (pumps_ready_id, pumps_ready) = lifecycle
+        .iter()
+        .find(|(_, event)| event.kind == "pumps_ready")
+        .expect("pumps_ready lifecycle event");
+    let (startup_id, _) = lifecycle
+        .iter()
+        .find(|(_, event)| event.kind == "startup")
+        .expect("startup lifecycle event");
+    assert!(
+        pumps_ready_id < startup_id,
+        "pumps_ready must precede startup: lifecycle={lifecycle:?}"
+    );
+
+    let topics = pumps_ready
+        .payload
+        .get("topics")
+        .and_then(serde_json::Value::as_array)
+        .expect("pumps_ready topics");
+    for expected in [
+        "orchestrator.triggers.pending",
+        harn_vm::TRIGGER_INBOX_ENVELOPES_TOPIC,
+        "connectors.cron.tick",
+        harn_vm::WAITPOINT_RESUME_TOPIC,
+        harn_vm::TRIGGER_CANCEL_REQUESTS_TOPIC,
+    ] {
+        assert!(
+            topics.iter().any(|topic| topic.as_str() == Some(expected)),
+            "missing pump topic {expected}: topics={topics:?}"
+        );
+    }
+
+    harness
+        .shutdown(std::time::Duration::from_secs(5))
+        .await
+        .expect("harness shutdown");
+}

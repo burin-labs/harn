@@ -7,7 +7,7 @@ use std::time::Duration;
 use futures::StreamExt;
 use serde::Deserialize;
 use serde_json::json;
-use tokio::sync::watch;
+use tokio::sync::{oneshot, watch};
 use tokio::task::JoinSet;
 
 use harn_vm::event_log::{AnyEventLog, ConsumerId, EventLog};
@@ -107,10 +107,24 @@ impl PumpDrainReport {
 
 pub(super) struct PumpHandle {
     mode_tx: watch::Sender<PumpMode>,
+    ready_rx: Option<oneshot::Receiver<Result<(), String>>>,
     join: tokio::task::JoinHandle<Result<PumpDrainReport, OrchestratorError>>,
 }
 
 impl PumpHandle {
+    pub(super) async fn wait_ready(&mut self, topic_name: &str) -> Result<(), OrchestratorError> {
+        let ready_rx = self.ready_rx.take().ok_or_else(|| {
+            OrchestratorError::Serve(format!("pump {topic_name} readiness already consumed"))
+        })?;
+        match ready_rx.await {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(error)) => {
+                Err(format!("pump {topic_name} failed to initialize: {error}").into())
+            }
+            Err(_) => Err(format!("pump {topic_name} exited before signaling readiness").into()),
+        }
+    }
+
     pub(super) async fn drain(
         self,
         log: &Arc<AnyEventLog>,
@@ -143,6 +157,15 @@ impl PumpHandle {
             Ok(result) => result,
             Err(error) => Err(format!("pump task join failed: {error}").into()),
         }
+    }
+}
+
+fn signal_pump_ready(
+    ready_tx: &mut Option<oneshot::Sender<Result<(), String>>>,
+    result: Result<(), String>,
+) {
+    if let Some(sender) = ready_tx.take() {
+        let _ = sender.send(result);
     }
 }
 
@@ -260,26 +283,44 @@ pub(super) fn spawn_inbox_pump(
     let topic = harn_vm::event_log::Topic::new(topic_name).map_err(|error| error.to_string())?;
     let consumer = pump_consumer_id(&topic)?;
     let inbox_task_release_file = inbox_task_test_release_file();
+    let (ready_tx, ready_rx) = oneshot::channel();
+    let mut ready_tx = Some(ready_tx);
     let (mode_tx, mut mode_rx) = watch::channel(PumpMode::Running);
     let join = tokio::task::spawn_local(async move {
-        let start_from = event_log
-            .consumer_cursor(&topic, &consumer)
-            .await
-            .map_err(|error| format!("failed to read consumer cursor for {topic}: {error}"))?
-            .or(event_log
-                .latest(&topic)
-                .await
-                .map_err(|error| format!("failed to read topic head {topic}: {error}"))?);
-        let mut stream = event_log
-            .clone()
-            .subscribe(&topic, start_from)
-            .await
-            .map_err(|error| format!("failed to subscribe topic {topic}: {error}"))?;
+        let start_from = match event_log.consumer_cursor(&topic, &consumer).await {
+            Ok(cursor) => match event_log.latest(&topic).await {
+                Ok(latest) => cursor.or(latest),
+                Err(error) => {
+                    let message = format!("failed to read topic head {topic}: {error}");
+                    signal_pump_ready(&mut ready_tx, Err(message.clone()));
+                    return Err(message.into());
+                }
+            },
+            Err(error) => {
+                let message = format!("failed to read consumer cursor for {topic}: {error}");
+                signal_pump_ready(&mut ready_tx, Err(message.clone()));
+                return Err(message.into());
+            }
+        };
+        let mut stream = match event_log.clone().subscribe(&topic, start_from).await {
+            Ok(stream) => stream,
+            Err(error) => {
+                let message = format!("failed to subscribe topic {topic}: {error}");
+                signal_pump_ready(&mut ready_tx, Err(message.clone()));
+                return Err(message.into());
+            }
+        };
         let mut stats = PumpStats {
             last_seen: start_from.unwrap_or(0),
             processed: 0,
         };
-        record_pump_metrics(&metrics_registry, &event_log, &topic, stats.last_seen, 0).await?;
+        if let Err(error) =
+            record_pump_metrics(&metrics_registry, &event_log, &topic, stats.last_seen, 0).await
+        {
+            signal_pump_ready(&mut ready_tx, Err(error.to_string()));
+            return Err(error);
+        }
+        signal_pump_ready(&mut ready_tx, Ok(()));
         let mut drain_progress = None;
         let mut tasks = JoinSet::new();
 
@@ -503,7 +544,11 @@ pub(super) fn spawn_inbox_pump(
                 stop_reason: PumpDrainStopReason::Drained,
             }))
     });
-    Ok(PumpHandle { mode_tx, join })
+    Ok(PumpHandle {
+        mode_tx,
+        ready_rx: Some(ready_rx),
+        join,
+    })
 }
 
 pub(super) fn spawn_waitpoint_resume_pump(
@@ -604,26 +649,44 @@ where
 {
     let consumer = pump_consumer_id(&topic)?;
     let mut pump_drain_gate_rx = pump_drain_gate.subscribe();
+    let (ready_tx, ready_rx) = oneshot::channel();
+    let mut ready_tx = Some(ready_tx);
     let (mode_tx, mut mode_rx) = watch::channel(PumpMode::Running);
     let join = tokio::task::spawn_local(async move {
-        let start_from = event_log
-            .consumer_cursor(&topic, &consumer)
-            .await
-            .map_err(|error| format!("failed to read consumer cursor for {topic}: {error}"))?
-            .or(event_log
-                .latest(&topic)
-                .await
-                .map_err(|error| format!("failed to read topic head {topic}: {error}"))?);
-        let mut stream = event_log
-            .clone()
-            .subscribe(&topic, start_from)
-            .await
-            .map_err(|error| format!("failed to subscribe topic {topic}: {error}"))?;
+        let start_from = match event_log.consumer_cursor(&topic, &consumer).await {
+            Ok(cursor) => match event_log.latest(&topic).await {
+                Ok(latest) => cursor.or(latest),
+                Err(error) => {
+                    let message = format!("failed to read topic head {topic}: {error}");
+                    signal_pump_ready(&mut ready_tx, Err(message.clone()));
+                    return Err(message.into());
+                }
+            },
+            Err(error) => {
+                let message = format!("failed to read consumer cursor for {topic}: {error}");
+                signal_pump_ready(&mut ready_tx, Err(message.clone()));
+                return Err(message.into());
+            }
+        };
+        let mut stream = match event_log.clone().subscribe(&topic, start_from).await {
+            Ok(stream) => stream,
+            Err(error) => {
+                let message = format!("failed to subscribe topic {topic}: {error}");
+                signal_pump_ready(&mut ready_tx, Err(message.clone()));
+                return Err(message.into());
+            }
+        };
         let mut stats = PumpStats {
             last_seen: start_from.unwrap_or(0),
             processed: 0,
         };
-        record_pump_metrics(&metrics_registry, &event_log, &topic, stats.last_seen, 0).await?;
+        if let Err(error) =
+            record_pump_metrics(&metrics_registry, &event_log, &topic, stats.last_seen, 0).await
+        {
+            signal_pump_ready(&mut ready_tx, Err(error.to_string()));
+            return Err(error);
+        }
+        signal_pump_ready(&mut ready_tx, Ok(()));
         let mut drain_progress = None;
         loop {
             if let Some(progress) = drain_progress {
@@ -711,7 +774,11 @@ where
                 stop_reason: PumpDrainStopReason::Drained,
             }))
     });
-    Ok(PumpHandle { mode_tx, join })
+    Ok(PumpHandle {
+        mode_tx,
+        ready_rx: Some(ready_rx),
+        join,
+    })
 }
 
 // ── Drain helpers ─────────────────────────────────────────────────────────────

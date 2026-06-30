@@ -140,8 +140,39 @@ async fn stream_trigger_route_uses_generic_stream_connector() {
         .send()
         .await
         .unwrap();
-    assert_status(response, StatusCode::OK).await;
+    let status = response.status();
+    let body = response.text().await.unwrap();
+    assert_eq!(status, StatusCode::OK, "status={status} body={body}");
+    let accepted: JsonValue = serde_json::from_str(&body).unwrap();
+    assert_eq!(
+        accepted.get("status").and_then(JsonValue::as_str),
+        Some("accepted"),
+        "body={accepted}"
+    );
+    assert_eq!(
+        accepted.get("trigger_id").and_then(JsonValue::as_str),
+        Some("ws-stream"),
+        "body={accepted}"
+    );
+    assert!(
+        accepted
+            .get("event_id")
+            .and_then(JsonValue::as_str)
+            .is_some(),
+        "body={accepted}"
+    );
 
+    let event_log = harness.event_log();
+    await_topic_event(&event_log, "orchestrator.triggers.pending", |event| {
+        event.kind == "trigger_event"
+    })
+    .await;
+    await_topic_event(
+        &event_log,
+        harn_vm::TRIGGER_INBOX_ENVELOPES_TOPIC,
+        |event| event.kind == "event_ingested",
+    )
+    .await;
     await_pump_dispatch_completed(&harness).await;
     let marker: JsonValue =
         serde_json::from_str(&fs::read_to_string(&marker_path).unwrap()).unwrap();
