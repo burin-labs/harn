@@ -38,6 +38,23 @@ enum PermissionMatcher {
     Predicate(VmValue),
 }
 
+impl PermissionMatcher {
+    /// Whether a denial this matcher produces is scoped to a specific argument
+    /// value/path (the tool is otherwise permitted) rather than a hard,
+    /// tool-wide ceiling. Arg/path-scoped denials are recoverable — coaching a
+    /// retry with an allowed value is correct, mirroring the `ArgConstraint`
+    /// allow-list gate (harn#3670). A bare/`Any`/`Bool` match denies the whole
+    /// tool, and a predicate can deny on any basis, so both stay hard ceilings.
+    fn denial_is_arg_scoped(&self) -> bool {
+        matches!(
+            self,
+            PermissionMatcher::Patterns(_)
+                | PermissionMatcher::KeyedPatterns { .. }
+                | PermissionMatcher::PathScope(_)
+        )
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 struct PathScopeMatcher {
@@ -79,8 +96,22 @@ enum PathScopeAction {
 }
 
 pub(crate) enum PermissionCheck {
-    Granted { reason: String, escalated: bool },
-    Denied { reason: String, escalated: bool },
+    Granted {
+        reason: String,
+        escalated: bool,
+    },
+    Denied {
+        reason: String,
+        escalated: bool,
+        /// Whether the denial is scoped to a specific argument value/path (the
+        /// tool is otherwise permitted) rather than a hard, tool-wide ceiling.
+        /// An arg/path-scoped denial is RECOVERABLE: the dispatch boundary
+        /// coaches a retry with an allowed value, mirroring the `ArgConstraint`
+        /// allow-list gate (harn#3670). A hard ceiling stays terminal. Hook
+        /// blocks and escalation rejections are approval-style refusals — a
+        /// retry yields the same answer — so they stay terminal (`false`).
+        recoverable: bool,
+    },
 }
 
 /// Build the transcript event that callers append to a session when a
@@ -470,8 +501,16 @@ pub(crate) async fn check_dynamic_permission(
         )
         .await?
         {
-            PermissionCheck::Denied { reason, escalated } => {
-                return Ok(Some(PermissionCheck::Denied { reason, escalated }));
+            PermissionCheck::Denied {
+                reason,
+                escalated,
+                recoverable,
+            } => {
+                return Ok(Some(PermissionCheck::Denied {
+                    reason,
+                    escalated,
+                    recoverable,
+                }));
             }
             grant @ PermissionCheck::Granted { .. } => {
                 grant_result = Some(grant);
@@ -510,19 +549,40 @@ async fn check_one_dynamic_permission(
         Some(first_matching_allow_rule(ctx, &policy.allow, tool_name, args, session_id).await?)
     };
 
-    let denial_reason = if let Some(reason) = denied {
-        Some(format!("permission denied by deny rule: {reason}"))
+    let denial = if let Some(denied) = denied {
+        Some(DenialOutcome {
+            reason: format!("permission denied by deny rule: {}", denied.reason),
+            // A deny rule that keys on a specific argument value/path is
+            // arg-scoped (re-issuing with an allowed value can succeed); a
+            // bare/`Any`/`Bool`/predicate deny is a hard, tool-wide ceiling.
+            recoverable: denied.arg_scoped,
+        })
     } else {
         match allowed.as_ref() {
             Some(AllowRuleMatch::Matched(_)) | None => None,
-            Some(AllowRuleMatch::NoMatch) => Some(format!(
-                "permission denied: tool '{tool_name}' is not allowed by this agent's permissions"
-            )),
-            Some(AllowRuleMatch::Rejected(reason)) => Some(format!("permission denied: {reason}")),
+            // The tool itself is not in this agent's allow-list: a hard
+            // ceiling, so retrying the call can never succeed.
+            Some(AllowRuleMatch::NoMatch) => Some(DenialOutcome {
+                reason: format!(
+                    "permission denied: tool '{tool_name}' is not allowed by this agent's permissions"
+                ),
+                recoverable: false,
+            }),
+            // A path-scope allow rule rejected this specific path: the tool is
+            // permitted, only this path is out of scope — recoverable, mirroring
+            // the `ArgConstraint` allow-list gate (harn#3670).
+            Some(AllowRuleMatch::Rejected(reason)) => Some(DenialOutcome {
+                reason: format!("permission denied: {reason}"),
+                recoverable: true,
+            }),
         }
     };
 
-    let Some(reason) = denial_reason else {
+    let Some(DenialOutcome {
+        reason,
+        recoverable,
+    }) = denial
+    else {
         let allow_reason = match allowed {
             Some(AllowRuleMatch::Matched(reason)) => {
                 format!("permission granted by allow rule: {reason}")
@@ -554,9 +614,12 @@ async fn check_one_dynamic_permission(
         crate::orchestration::HookControl::Block {
             reason: block_reason,
         } => {
+            // A hook block is an approval-style refusal — retrying yields the
+            // same answer — so it stays terminal regardless of arg scope.
             return Ok(PermissionCheck::Denied {
                 reason: block_reason,
                 escalated: true,
+                recoverable: false,
             });
         }
         crate::orchestration::HookControl::Decision {
@@ -579,9 +642,12 @@ async fn check_one_dynamic_permission(
                     .unwrap_or_else(|| format!("permission denied by session hook: {reason}"));
                 fire_permission_replied(ctx, session_id, tool_name, args, "deny", &denied_reason)
                     .await;
+                // A session-hook `deny` decision is an approval-style refusal;
+                // stays terminal.
                 return Ok(PermissionCheck::Denied {
                     reason: denied_reason,
                     escalated: true,
+                    recoverable: false,
                 });
             }
             _ => {}
@@ -591,9 +657,13 @@ async fn check_one_dynamic_permission(
     }
 
     let Some(on_escalation) = policy.on_escalation.as_ref() else {
+        // No escalation path: surface the policy denial, carrying the arg-scope
+        // discriminant so the dispatch boundary can coach a retry for an
+        // arg/path-scoped miss and stay terminal for a hard ceiling.
         return Ok(PermissionCheck::Denied {
             reason,
             escalated: false,
+            recoverable,
         });
     };
 
@@ -615,9 +685,12 @@ async fn check_one_dynamic_permission(
             .reason
             .unwrap_or_else(|| "permission escalation denied".to_string());
         fire_permission_replied(ctx, session_id, tool_name, args, "deny", &deny_reason).await;
+        // The escalation approver rejected the call — like a host-rejected
+        // approval, a retry yields the same answer — so it stays terminal.
         Ok(PermissionCheck::Denied {
             reason: deny_reason,
             escalated: true,
+            recoverable: false,
         })
     }
 }
@@ -657,6 +730,20 @@ enum AllowRuleMatch {
     NoMatch,
 }
 
+/// A resolved dynamic-permission denial plus whether it is arg/path-scoped
+/// (recoverable) or a hard ceiling (terminal).
+struct DenialOutcome {
+    reason: String,
+    recoverable: bool,
+}
+
+/// A matched deny rule plus whether that rule keys on a specific argument
+/// value/path (arg-scoped, recoverable) rather than denying the whole tool.
+struct DeniedMatch {
+    reason: String,
+    arg_scoped: bool,
+}
+
 struct MatcherEvaluation {
     matched: bool,
     reason: Option<String>,
@@ -669,7 +756,7 @@ async fn first_matching_deny_rule(
     tool_name: &str,
     args: &serde_json::Value,
     session_id: &str,
-) -> Result<Option<String>, VmError> {
+) -> Result<Option<DeniedMatch>, VmError> {
     for rule in rules {
         if !crate::orchestration::glob_match(&rule.tool_pattern, tool_name) {
             continue;
@@ -677,16 +764,21 @@ async fn first_matching_deny_rule(
         let evaluation = evaluate_matcher(ctx, &rule.matcher, args, session_id).await?;
         if matches!(rule.matcher, PermissionMatcher::PathScope(_)) {
             if let Some(reason) = evaluation.rejection {
-                return Ok(Some(reason));
+                // Path-scope rejection names a specific out-of-scope path.
+                return Ok(Some(DeniedMatch {
+                    reason,
+                    arg_scoped: true,
+                }));
             }
             continue;
         }
         if evaluation.matched {
-            return Ok(Some(
-                evaluation
+            return Ok(Some(DeniedMatch {
+                reason: evaluation
                     .reason
                     .unwrap_or_else(|| rule.tool_pattern.clone()),
-            ));
+                arg_scoped: rule.matcher.denial_is_arg_scoped(),
+            }));
         }
     }
     Ok(None)
@@ -1325,6 +1417,156 @@ mod tests {
         .expect("check allow rules");
         assert!(
             matches!(result, AllowRuleMatch::Rejected(reason) if reason.contains("outside anchor"))
+        );
+    }
+
+    fn denial_recoverable(check: PermissionCheck) -> bool {
+        match check {
+            PermissionCheck::Denied { recoverable, .. } => recoverable,
+            PermissionCheck::Granted { reason, .. } => {
+                panic!("expected a denial, got grant: {reason}")
+            }
+        }
+    }
+
+    /// A path-scope allow rule that rejects this specific path is arg/path-scoped:
+    /// the tool is permitted, only the path is out of scope, so the denial is
+    /// RECOVERABLE (mirrors the ArgConstraint allow-list gate, harn#3670).
+    #[tokio::test(flavor = "current_thread")]
+    async fn path_scope_allow_rejection_is_recoverable() {
+        crate::reset_thread_local_state();
+        let temp = tempfile::tempdir().expect("tempdir");
+        let anchor = anchor(temp.path());
+        let outside_path = path_string(&temp.path().join("harn-anchor-z").join("file.txt"));
+        let session_id =
+            crate::agent_sessions::open_or_create(Some("dyn-perm-path-scope".to_string()));
+        crate::agent_sessions::set_workspace_anchor(&session_id, Some(anchor)).expect("set anchor");
+        let policy = DynamicPermissionPolicy {
+            allow: vec![PermissionRule {
+                tool_pattern: "Read".to_string(),
+                matcher: PermissionMatcher::PathScope(PathScopeMatcher {
+                    scope: PathScopeMode::AnchorOnly,
+                    arg_keys: vec!["path".to_string()],
+                    on_violation: PathScopeAction::Deny,
+                }),
+            }],
+            deny: Vec::new(),
+            on_escalation: None,
+        };
+        let mut grants = BTreeSet::new();
+        let check = check_one_dynamic_permission(
+            None,
+            &policy,
+            0,
+            &mut grants,
+            "Read",
+            &serde_json::json!({"path": outside_path}),
+            &session_id,
+        )
+        .await
+        .expect("permission check");
+        assert!(
+            denial_recoverable(check),
+            "path-scope allow rejection must be recoverable"
+        );
+    }
+
+    /// A tool that matches no allow rule is a hard ceiling: the tool itself is
+    /// not permitted, so the denial is TERMINAL (not recoverable).
+    #[tokio::test(flavor = "current_thread")]
+    async fn tool_not_in_allow_list_is_terminal() {
+        crate::reset_thread_local_state();
+        let session_id =
+            crate::agent_sessions::open_or_create(Some("dyn-perm-tool-ceiling".to_string()));
+        let policy = DynamicPermissionPolicy {
+            allow: vec![PermissionRule {
+                tool_pattern: "Read".to_string(),
+                matcher: PermissionMatcher::Any,
+            }],
+            deny: Vec::new(),
+            on_escalation: None,
+        };
+        let mut grants = BTreeSet::new();
+        let check = check_one_dynamic_permission(
+            None,
+            &policy,
+            0,
+            &mut grants,
+            "exec",
+            &serde_json::json!({"command": "ls"}),
+            &session_id,
+        )
+        .await
+        .expect("permission check");
+        assert!(
+            !denial_recoverable(check),
+            "a tool outside the allow-list is a hard ceiling and must be terminal"
+        );
+    }
+
+    /// A deny rule keyed on a specific argument value is arg-scoped: re-issuing
+    /// with an allowed value can succeed, so the denial is RECOVERABLE.
+    #[tokio::test(flavor = "current_thread")]
+    async fn arg_keyed_deny_rule_is_recoverable() {
+        crate::reset_thread_local_state();
+        let session_id =
+            crate::agent_sessions::open_or_create(Some("dyn-perm-arg-deny".to_string()));
+        let policy = DynamicPermissionPolicy {
+            allow: Vec::new(),
+            deny: vec![PermissionRule {
+                tool_pattern: "exec".to_string(),
+                matcher: PermissionMatcher::Patterns(vec!["rm *".to_string()]),
+            }],
+            on_escalation: None,
+        };
+        let mut grants = BTreeSet::new();
+        let check = check_one_dynamic_permission(
+            None,
+            &policy,
+            0,
+            &mut grants,
+            "exec",
+            &serde_json::json!({"command": "rm -rf /"}),
+            &session_id,
+        )
+        .await
+        .expect("permission check");
+        assert!(
+            denial_recoverable(check),
+            "an arg-keyed deny rule is arg-scoped and must be recoverable"
+        );
+    }
+
+    /// A bare/`Any` deny rule denies the whole tool: a hard ceiling, so the
+    /// denial is TERMINAL.
+    #[tokio::test(flavor = "current_thread")]
+    async fn whole_tool_deny_rule_is_terminal() {
+        crate::reset_thread_local_state();
+        let session_id =
+            crate::agent_sessions::open_or_create(Some("dyn-perm-tool-deny".to_string()));
+        let policy = DynamicPermissionPolicy {
+            allow: Vec::new(),
+            deny: vec![PermissionRule {
+                tool_pattern: "exec".to_string(),
+                matcher: PermissionMatcher::Any,
+            }],
+            on_escalation: None,
+        };
+        let mut grants = BTreeSet::new();
+        let check = check_one_dynamic_permission(
+            None,
+            &policy,
+            0,
+            &mut grants,
+            "exec",
+            &serde_json::json!({"command": "ls"}),
+            &session_id,
+        )
+        .await
+        .expect("permission check");
+        assert!(
+            !denial_recoverable(check),
+            "a whole-tool deny rule is a hard ceiling and must be terminal"
         );
     }
 }
