@@ -22,6 +22,8 @@
 
 use harn_vm::bridge::HostBridge;
 use harn_vm::value::VmError;
+use std::collections::BTreeMap;
+use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
@@ -50,6 +52,86 @@ fn run_with_bridge(source: &str) -> Result<String, String> {
                     .await
                     .map_err(|e: VmError| format!("{e:?}"));
                 harn_vm::llm::clear_current_host_bridge();
+                result?;
+                Ok(vm.output().to_string())
+            })
+            .await
+    })
+}
+
+fn run_with_bridge_in_parent_workspace(
+    source: &str,
+    parent_cwd: &Path,
+    parent_session_id: &str,
+    project_root: &Path,
+) -> Result<String, String> {
+    harn_vm::reset_thread_local_state();
+    let chunk = harn_vm::compile_source(source)?;
+    let parent_cwd = parent_cwd.to_string_lossy().into_owned();
+    let project_root = project_root.to_path_buf();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| e.to_string())?;
+    rt.block_on(async {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let bridge = Arc::new(HostBridge::from_parts(
+                    Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+                    Arc::new(AtomicBool::new(false)),
+                    Arc::new(Mutex::new(())),
+                    1,
+                ));
+                harn_vm::llm::install_current_host_bridge(bridge.clone());
+
+                let parent_id =
+                    harn_vm::agent_sessions::open_or_create(Some(parent_session_id.to_string()));
+                harn_vm::agent_sessions::set_workspace_anchor(
+                    &parent_id,
+                    Some(harn_vm::workspace_anchor::WorkspaceAnchor {
+                        primary: project_root.clone(),
+                        additional_roots: Vec::new(),
+                        anchored_at: "2026-06-30T00:00:00Z".to_string(),
+                    }),
+                )?;
+                let _session_guard = harn_vm::agent_sessions::enter_current_session(parent_id);
+
+                harn_vm::stdlib::process::set_thread_execution_context(Some(
+                    harn_vm::orchestration::RunExecutionRecord {
+                        cwd: Some(parent_cwd),
+                        source_dir: None,
+                        env: BTreeMap::new(),
+                        adapter: None,
+                        repo_path: None,
+                        worktree_path: None,
+                        branch: None,
+                        base_ref: None,
+                        cleanup: None,
+                    },
+                ));
+                harn_vm::orchestration::push_execution_policy(
+                    harn_vm::orchestration::CapabilityPolicy {
+                        capabilities: BTreeMap::from([(
+                            "workspace".to_string(),
+                            vec!["read_text".to_string(), "write_text".to_string()],
+                        )]),
+                        side_effect_level: Some("workspace_write".to_string()),
+                        ..harn_vm::orchestration::CapabilityPolicy::default()
+                    },
+                );
+
+                let mut vm = harn_vm::Vm::new();
+                harn_vm::register_vm_stdlib(&mut vm);
+                let result = vm
+                    .execute(&chunk)
+                    .await
+                    .map_err(|e: VmError| format!("{e:?}"));
+
+                harn_vm::orchestration::pop_execution_policy();
+                harn_vm::stdlib::process::set_thread_execution_context(None);
+                harn_vm::llm::clear_current_host_bridge();
+
                 result?;
                 Ok(vm.output().to_string())
             })
@@ -330,6 +412,120 @@ pipeline main(task) {{
         );
     }
     eprintln!("WAVES CONFIRMED: 5 requests across waves of 2 all completed in input order with own markers");
+}
+
+#[test]
+fn fanout_child_write_inherits_parent_workspace_anchor_for_scope() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let process_root = temp.path().join("process-root");
+    let project_root = temp.path().join("fixture-project");
+    std::fs::create_dir_all(&process_root).expect("process root");
+    std::fs::create_dir_all(&project_root).expect("project root");
+    let target = project_root.join("child-output.txt");
+    let target_literal = serde_json::to_string(&target.to_string_lossy()).expect("json string");
+
+    let source = format!(
+        r#"{PRELUDE}
+pipeline main(task) {{
+  clear_tool_hooks()
+  let registry = tool_registry()
+  let tools = tool_define(
+    registry,
+    "write_child_file",
+    "Write a fixture file from inside a child sub-agent.",
+    {{
+      parameters: {{}},
+      handler: {{ _args ->
+        write_file({target_literal}, "child-ok")
+        return "wrote child-output.txt"
+      }},
+    }},
+  )
+  let call_count = shared_cell(
+    {{scope: "task_group", key: "fanout-child-write-scope", initial: 0}},
+  )
+  let mock_llm = {{ _call ->
+    let snap = shared_snapshot(call_count)
+    let n = snap.value
+    shared_cas(call_count, snap, n + 1)
+    if n == 0 {{
+      return {{
+        ok: true,
+        value: {{
+          text: "",
+          tool_calls: [{{id: "call_write", name: "write_child_file", arguments: {{}}}}],
+          provider: "mock",
+          model: "mock",
+        }},
+      }}
+    }}
+    return {{
+      ok: true,
+      value: {{
+        text: "<user_response>child wrote the file</user_response>\n<done>##DONE##</done>",
+        tool_calls: [],
+        provider: "mock",
+        model: "mock",
+      }},
+    }}
+  }}
+  let results = agent_fanout(
+    [
+      {{
+        task: "write the child output file",
+        label: "writer",
+        options: {{
+          provider: "mock",
+          model: "fanout-model",
+          tools: tools,
+          tool_format: "native",
+          llm_caller: mock_llm,
+          loop_until_done: true,
+          done_judge: false,
+          max_iterations: 3,
+          final_wrapup: false,
+        }},
+      }},
+    ],
+    {{max_parallel: 1}},
+  )
+  log("COUNT=" + to_string(len(results)))
+  emit_rows(results)
+  if results[0]?.error != nil {{
+    log("ERR=" + json_stringify(results[0]?.error))
+  }}
+}}
+"#
+    );
+
+    let raw = run_with_bridge_in_parent_workspace(
+        &source,
+        &process_root,
+        "fanout-parent-workspace-anchor",
+        &project_root,
+    )
+    .expect("fanout child write pipeline must run");
+    let lines = out_lines(&raw);
+    eprintln!("--- harn output ---\n{}", lines.join("\n"));
+
+    let rows = parse_rows(&lines);
+    assert_eq!(rows.len(), 1, "lines: {lines:?}");
+    assert_eq!(rows[0].label, "writer", "lines: {lines:?}");
+    assert!(
+        rows[0].ok,
+        "child write result should be ok; lines: {lines:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&target).expect("child output file"),
+        "child-ok"
+    );
+    assert!(
+        !process_root.join("child-output.txt").exists(),
+        "child write should land in the inherited project root, not the process cwd"
+    );
+    eprintln!(
+        "CHILD-WRITE-SCOPE CONFIRMED: child tool write succeeded under the parent workspace anchor"
+    );
 }
 
 #[test]

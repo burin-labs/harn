@@ -130,11 +130,14 @@ pub(super) fn parse_sub_agent_request(args: &[VmValue]) -> Result<ParsedSubAgent
             .collect::<Result<Vec<_>, _>>()?,
         None => inherited_reminders_from_parent(parent_session_id.as_deref()),
     };
-    let workspace_anchor = parse_sub_agent_workspace_anchor(&mut parser)?;
+    let requested_workspace_anchor = parse_sub_agent_workspace_anchor(&mut parser)?;
     parser.finish_strict(&[])?;
-    if let Some(anchor) = workspace_anchor.as_ref() {
-        validate_child_anchor_against_parent(parent_session_id.as_deref(), anchor)?;
-    }
+    let workspace_anchor = resolve_sub_agent_workspace_anchor(
+        parent_session_id.as_deref(),
+        requested_workspace_anchor,
+    )?;
+    let mut execution = policies.execution;
+    default_sub_agent_execution_cwd(&mut execution, workspace_anchor.as_ref());
 
     Ok(ParsedSubAgentRequest {
         spec: SubAgentRunSpec {
@@ -150,7 +153,7 @@ pub(super) fn parse_sub_agent_request(args: &[VmValue]) -> Result<ParsedSubAgent
         },
         background,
         carry_policy: policies.carry_policy,
-        execution: policies.execution,
+        execution,
         worker_policy: policies.worker_policy,
     })
 }
@@ -167,6 +170,36 @@ fn parse_sub_agent_workspace_anchor(
     let anchor = crate::workspace_anchor::parse_anchor_dict(value)
         .map_err(|message| VmError::Runtime(format!("{SUB_AGENT_RUN_FN}: anchor: {message}")))?;
     Ok(Some(anchor))
+}
+
+fn resolve_sub_agent_workspace_anchor(
+    parent_session_id: Option<&str>,
+    requested: Option<crate::workspace_anchor::WorkspaceAnchor>,
+) -> Result<Option<crate::workspace_anchor::WorkspaceAnchor>, VmError> {
+    match requested {
+        Some(anchor) => {
+            validate_child_anchor_against_parent(parent_session_id, &anchor)?;
+            Ok(Some(anchor))
+        }
+        None => Ok(parent_session_id.and_then(crate::agent_sessions::workspace_anchor)),
+    }
+}
+
+fn default_sub_agent_execution_cwd(
+    execution: &mut agents_workers::WorkerExecutionProfile,
+    anchor: Option<&crate::workspace_anchor::WorkspaceAnchor>,
+) {
+    if execution
+        .cwd
+        .as_deref()
+        .is_some_and(|cwd| !cwd.trim().is_empty())
+    {
+        return;
+    }
+    let Some(anchor) = anchor else {
+        return;
+    };
+    execution.cwd = Some(anchor.primary.to_string_lossy().into_owned());
 }
 
 /// Reject child anchors that escape the parent's anchor + mounted
@@ -1231,6 +1264,86 @@ mod tests {
 
     fn path_string(path: &std::path::Path) -> String {
         path.to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn parse_sub_agent_request_inherits_parent_anchor_as_execution_cwd() {
+        crate::agent_sessions::reset_session_store();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let project = dir.path().join("project");
+        let project_text = path_string(&project);
+        let parent_id =
+            crate::agent_sessions::open_or_create(Some("anchor-inherit-parent".to_string()));
+        crate::agent_sessions::set_workspace_anchor(
+            &parent_id,
+            Some(crate::workspace_anchor::WorkspaceAnchor {
+                primary: project.clone(),
+                additional_roots: Vec::new(),
+                anchored_at: "2026-05-24T00:00:00Z".to_string(),
+            }),
+        )
+        .unwrap();
+        let _guard = crate::agent_sessions::enter_current_session(parent_id.clone());
+
+        let parsed = parse_sub_agent_request(&[normalized_request(Vec::new())]).unwrap();
+
+        assert_eq!(
+            parsed.spec.parent_session_id.as_deref(),
+            Some(parent_id.as_str())
+        );
+        assert_eq!(
+            parsed.spec.workspace_anchor.as_ref().unwrap().primary,
+            project
+        );
+        assert_eq!(
+            parsed.execution.cwd.as_deref(),
+            Some(project_text.as_str()),
+            "unanchored child workers default their sandbox execution cwd to the parent workspace"
+        );
+    }
+
+    #[test]
+    fn parse_sub_agent_request_preserves_explicit_execution_cwd() {
+        crate::agent_sessions::reset_session_store();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let project = dir.path().join("project");
+        let child = project.join("child");
+        let explicit_cwd = dir.path().join("explicit-cwd");
+        let explicit_cwd_text = path_string(&explicit_cwd);
+        let parent_id =
+            crate::agent_sessions::open_or_create(Some("anchor-explicit-cwd-parent".to_string()));
+        crate::agent_sessions::set_workspace_anchor(
+            &parent_id,
+            Some(crate::workspace_anchor::WorkspaceAnchor {
+                primary: project,
+                additional_roots: Vec::new(),
+                anchored_at: "2026-05-24T00:00:00Z".to_string(),
+            }),
+        )
+        .unwrap();
+        let _guard = crate::agent_sessions::enter_current_session(parent_id);
+
+        let parsed = parse_sub_agent_request(&[normalized_request(vec![
+            ("anchor", anchor_dict(&path_string(&child), Vec::new())),
+            (
+                "execution",
+                VmValue::dict(crate::value::DictMap::from_iter([(
+                    crate::value::intern_key("cwd"),
+                    VmValue::String(arcstr::ArcStr::from(explicit_cwd_text.clone())),
+                )])),
+            ),
+        ])])
+        .unwrap();
+
+        assert_eq!(
+            parsed.spec.workspace_anchor.as_ref().unwrap().primary,
+            child
+        );
+        assert_eq!(
+            parsed.execution.cwd.as_deref(),
+            Some(explicit_cwd_text.as_str()),
+            "explicit execution.cwd remains authoritative"
+        );
     }
 
     #[test]
