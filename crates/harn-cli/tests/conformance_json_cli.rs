@@ -125,6 +125,53 @@ fn conformance_json_fails_on_failures_and_unexpected_xfail_passes() {
 }
 
 #[test]
+fn conformance_json_ignores_fixture_parent_runtime_state() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    write_fixture(
+        temp.path(),
+        "metadata/isolated.harn",
+        "pipeline test(task) {\n  assert_eq(metadata_get(\".\", \"classification\"), nil)\n  let stale = metadata_stale(\".\")\n  assert_eq(stale.any_stale, false)\n  log(\"isolated\")\n}\n",
+        "[harn] isolated\n",
+    );
+    let stale_state = temp
+        .path()
+        .join("conformance")
+        .join("metadata")
+        .join(".harn")
+        .join("metadata")
+        .join("classification");
+    std::fs::create_dir_all(&stale_state).expect("create stale metadata dir");
+    std::fs::write(
+        stale_state.join("entries.json"),
+        r#"{
+  "backend": "filesystem",
+  "entries": {
+    ".": {
+      "structureHash": "stale"
+    }
+  },
+  "namespace": "classification",
+  "version": 1
+}
+"#,
+    )
+    .expect("write stale metadata");
+
+    let output = run_conformance_json(temp.path());
+    assert!(
+        output.status.success(),
+        "exit={:?} stderr={} stdout={}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stderr),
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let parsed = parse_stdout(&output);
+    let data = assert_envelope(&parsed, CONFORMANCE_TEST_SCHEMA_VERSION);
+    assert_eq!(data["summary"]["pass"], 1);
+    assert_eq!(result(data, "metadata/isolated.harn")["outcome"], "pass");
+}
+
+#[test]
 fn conformance_json_schema_catalog_entry_is_registered() {
     let output = Command::new(binary_path())
         .args(["--json-schemas", "--command", "test conformance"])
