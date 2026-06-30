@@ -1948,7 +1948,9 @@ mod tests {
                 .run_until(async {
                     let mut vm = crate::Vm::new();
                     crate::register_vm_stdlib(&mut vm);
-                    vm.call_named_builtin(name, args).await.expect("builtin call")
+                    vm.call_named_builtin(name, args)
+                        .await
+                        .expect("builtin call")
                 })
                 .await
         })
