@@ -608,6 +608,10 @@ jobs:
       - name: Upload binary-size report
         if: always() && matrix.target == 'x86_64-unknown-linux-gnu'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        # The size report is diagnostic. The budget check above is the hard
+        # gate; do not let transient Actions artifact-store failures block a
+        # release artifact that otherwise built and packaged successfully.
+        continue-on-error: true
         with:
           name: harn-binary-size-${{ matrix.target }}
           path: dist/binary-size-${{ matrix.target }}
@@ -616,6 +620,11 @@ jobs:
       - name: Upload artifact (unix)
         if: needs.setup.outputs.is_release == 'true' && runner.os != 'Windows'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        # The GitHub Release upload below is the authoritative shipping path.
+        # Keep this secondary run artifact best-effort so a transient
+        # artifact-store outage cannot fail a signed/notarized/packageable leg
+        # before it publishes the official archive.
+        continue-on-error: true
         with:
           name: harn-${{ matrix.target }}
           path: dist/harn-${{ matrix.target }}.tar.gz
@@ -624,6 +633,11 @@ jobs:
       - name: Upload artifact (windows)
         if: needs.setup.outputs.is_release == 'true' && runner.os == 'Windows'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        # The GitHub Release upload below is the authoritative shipping path.
+        # Keep this secondary run artifact best-effort so a transient
+        # artifact-store outage cannot fail a signed/packageable leg before it
+        # publishes the official archive.
+        continue-on-error: true
         with:
           name: harn-${{ matrix.target }}
           path: dist/harn-${{ matrix.target }}.zip
