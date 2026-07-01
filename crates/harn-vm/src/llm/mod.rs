@@ -228,6 +228,8 @@ pub fn install_current_host_bridge(bridge: Arc<crate::bridge::HostBridge>) {
     agent_runtime::install_current_host_bridge(bridge);
 }
 
+pub use agent_runtime::scope_agent_event_sink;
+
 pub fn clear_current_host_bridge() {
     agent_runtime::clear_current_host_bridge();
 }

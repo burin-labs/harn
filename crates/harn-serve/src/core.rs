@@ -1,10 +1,12 @@
 use std::collections::{BTreeMap, VecDeque};
+use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
+use harn_vm::agent_events::{AgentEvent, AgentEventSink};
 use harn_vm::event_log::{
     active_event_log, install_active_event_log, install_default_for_base_dir, AnyEventLog,
 };
@@ -133,9 +135,17 @@ pub struct CallRequest {
     /// onto the thread-local agent-session stack so worker lifecycle
     /// events fire under it. Adapters use this to scope an
     /// `AgentEventSink` to the request (e.g. A2A maps `task.id` to a
-    /// session id and registers a sink that publishes worker updates
-    /// onto the task event stream).
+    /// session id and publishes worker/progress updates onto the task
+    /// event stream).
     pub agent_session_id: Option<String>,
+    /// Optional request-local event sink for live transport streams.
+    ///
+    /// Unlike the process-global `harn_vm::agent_events` registry, this sink is
+    /// installed only for the active dispatch and is filtered to
+    /// `agent_session_id`. That keeps long-lived transports such as A2A SSE
+    /// streams from losing in-flight events when sibling tests or embedders
+    /// reset global Harn VM state.
+    pub agent_event_sink: Option<DispatchAgentEventSink>,
     /// Actor chain to bind to the active agent session for this
     /// dispatch. When unset, `DispatchCore` derives the origin from the
     /// authenticated principal after admission.
@@ -184,6 +194,49 @@ pub struct CallRequest {
     /// authorization policy. `None` (the default) leaves the dispatch
     /// unauthenticated (`harness.auth.is_authenticated()` is `false`).
     pub auth_principal: Option<harn_vm::AuthPrincipal>,
+}
+
+#[derive(Clone)]
+pub struct DispatchAgentEventSink {
+    inner: Arc<dyn AgentEventSink>,
+}
+
+impl DispatchAgentEventSink {
+    pub fn new(inner: Arc<dyn AgentEventSink>) -> Self {
+        Self { inner }
+    }
+}
+
+impl fmt::Debug for DispatchAgentEventSink {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("DispatchAgentEventSink(..)")
+    }
+}
+
+struct SessionScopedAgentEventSink {
+    session_id: String,
+    inner: Arc<dyn AgentEventSink>,
+}
+
+impl AgentEventSink for SessionScopedAgentEventSink {
+    fn handle_event(&self, event: &AgentEvent) {
+        if event.session_id() != self.session_id {
+            return;
+        }
+        if harn_vm::agent_events::session_has_external_sink(&self.session_id, &self.inner) {
+            return;
+        }
+        self.inner.handle_event(event);
+    }
+}
+
+fn request_event_sink(request: &CallRequest) -> Option<Arc<dyn AgentEventSink>> {
+    let session_id = request.agent_session_id.as_ref()?;
+    let sink = request.agent_event_sink.as_ref()?;
+    Some(Arc::new(SessionScopedAgentEventSink {
+        session_id: session_id.clone(),
+        inner: sink.inner.clone(),
+    }))
 }
 
 fn resolve_request_actor_chain(
@@ -570,6 +623,7 @@ impl DispatchCore {
             .clone()
             .unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
         let agent_session_id = request.agent_session_id.clone();
+        let agent_event_sink = request_event_sink(request);
         let actor_chain = request.actor_chain.clone();
         let progress = request.progress.clone();
 
@@ -581,42 +635,45 @@ impl DispatchCore {
         let local = LocalSet::new();
         local
             .run_until(harn_vm::mcp_progress::scope_context(progress, async move {
-                let _event_log = install_scoped_event_log(self.event_log.clone());
-                let _session_guard = agent_session_id.as_deref().map(|session_id| {
-                    harn_vm::agent_sessions::open_or_create_with_actor_chain(
-                        Some(session_id.to_string()),
-                        actor_chain.clone(),
-                    );
-                    harn_vm::agent_sessions::enter_current_session(session_id.to_string())
-                });
-                let _tenant_guard = tenant_id.map(harn_vm::enter_tenant);
-                let _budget_guard = budget.as_ref().and_then(BudgetSpec::install);
-                let _request_id_guard = request_id.map(harn_vm::enter_request_id);
-                let _auth_context_guard = auth_context.map(crate::enter_auth_context);
-                let _auth_principal_guard = auth_principal.map(harn_vm::enter_auth_principal);
+                harn_vm::llm::scope_agent_event_sink(agent_event_sink, async move {
+                    let _event_log = install_scoped_event_log(self.event_log.clone());
+                    let _session_guard = agent_session_id.as_deref().map(|session_id| {
+                        harn_vm::agent_sessions::open_or_create_with_actor_chain(
+                            Some(session_id.to_string()),
+                            actor_chain.clone(),
+                        );
+                        harn_vm::agent_sessions::enter_current_session(session_id.to_string())
+                    });
+                    let _tenant_guard = tenant_id.map(harn_vm::enter_tenant);
+                    let _budget_guard = budget.as_ref().and_then(BudgetSpec::install);
+                    let _request_id_guard = request_id.map(harn_vm::enter_request_id);
+                    let _auth_context_guard = auth_context.map(crate::enter_auth_context);
+                    let _auth_principal_guard = auth_principal.map(harn_vm::enter_auth_principal);
 
-                let mut vm = Vm::new();
-                install_dispatch_vm_runtime(&mut vm, &script_path, &source, cancel_token);
-                self.config.vm_configurator.configure(&mut vm)?;
+                    let mut vm = Vm::new();
+                    install_dispatch_vm_runtime(&mut vm, &script_path, &source, cancel_token);
+                    self.config.vm_configurator.configure(&mut vm)?;
 
-                let exports = vm
-                    .load_module_exports(&script_path)
-                    .await
-                    .map_err(|error| DispatchError::Execution(error.to_string()))?;
-                let Some(closure) = exports.get(&request.function) else {
-                    return Err(DispatchError::MissingExport(format!(
-                        "function '{}' is not exported by {}",
-                        request.function,
-                        script_path.display()
-                    )));
-                };
-                let args = build_vm_args(&request.arguments, function, &vm)?;
-                let result = vm.call_closure_pub(closure, &args).await;
+                    let exports = vm
+                        .load_module_exports(&script_path)
+                        .await
+                        .map_err(|error| DispatchError::Execution(error.to_string()))?;
+                    let Some(closure) = exports.get(&request.function) else {
+                        return Err(DispatchError::MissingExport(format!(
+                            "function '{}' is not exported by {}",
+                            request.function,
+                            script_path.display()
+                        )));
+                    };
+                    let args = build_vm_args(&request.arguments, function, &vm)?;
+                    let result = vm.call_closure_pub(closure, &args).await;
 
-                match result {
-                    Ok(value) => Ok((vm_value_to_json(&value), vm.output().to_string())),
-                    Err(error) => Err(classify_vm_error(error)),
-                }
+                    match result {
+                        Ok(value) => Ok((vm_value_to_json(&value), vm.output().to_string())),
+                        Err(error) => Err(classify_vm_error(error)),
+                    }
+                })
+                .await
             }))
             .await
     }
@@ -652,6 +709,7 @@ impl DispatchCore {
             .clone()
             .unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
         let agent_session_id = request.agent_session_id.clone();
+        let agent_event_sink = request_event_sink(request);
         let actor_chain = request.actor_chain.clone();
         let progress = request.progress.clone();
 
@@ -663,36 +721,39 @@ impl DispatchCore {
         let local = LocalSet::new();
         local
             .run_until(harn_vm::mcp_progress::scope_context(progress, async move {
-                let _event_log = install_scoped_event_log(self.event_log.clone());
-                let _session_guard = agent_session_id.as_deref().map(|session_id| {
-                    harn_vm::agent_sessions::open_or_create_with_actor_chain(
-                        Some(session_id.to_string()),
-                        actor_chain.clone(),
-                    );
-                    harn_vm::agent_sessions::enter_current_session(session_id.to_string())
-                });
-                let _tenant_guard = tenant_id.map(harn_vm::enter_tenant);
-                let _budget_guard = budget.as_ref().and_then(BudgetSpec::install);
-                let _request_id_guard = request_id.map(harn_vm::enter_request_id);
-                let _auth_context_guard = auth_context.map(crate::enter_auth_context);
-                let _auth_principal_guard = auth_principal.map(harn_vm::enter_auth_principal);
+                harn_vm::llm::scope_agent_event_sink(agent_event_sink, async move {
+                    let _event_log = install_scoped_event_log(self.event_log.clone());
+                    let _session_guard = agent_session_id.as_deref().map(|session_id| {
+                        harn_vm::agent_sessions::open_or_create_with_actor_chain(
+                            Some(session_id.to_string()),
+                            actor_chain.clone(),
+                        );
+                        harn_vm::agent_sessions::enter_current_session(session_id.to_string())
+                    });
+                    let _tenant_guard = tenant_id.map(harn_vm::enter_tenant);
+                    let _budget_guard = budget.as_ref().and_then(BudgetSpec::install);
+                    let _request_id_guard = request_id.map(harn_vm::enter_request_id);
+                    let _auth_context_guard = auth_context.map(crate::enter_auth_context);
+                    let _auth_principal_guard = auth_principal.map(harn_vm::enter_auth_principal);
 
-                let mut vm = Vm::new();
-                install_dispatch_vm_runtime(&mut vm, &script_path, &source, cancel_token);
-                self.config.vm_configurator.configure(&mut vm)?;
-                for (name, value) in globals {
-                    vm.set_global(&name, value);
-                }
-
-                let result = vm.execute_arc(Arc::clone(&chunk)).await;
-
-                match result {
-                    Ok(_) => {
-                        let output = vm.output().to_string();
-                        Ok((serde_json::Value::String(output.clone()), output))
+                    let mut vm = Vm::new();
+                    install_dispatch_vm_runtime(&mut vm, &script_path, &source, cancel_token);
+                    self.config.vm_configurator.configure(&mut vm)?;
+                    for (name, value) in globals {
+                        vm.set_global(&name, value);
                     }
-                    Err(error) => Err(classify_vm_error(error)),
-                }
+
+                    let result = vm.execute_arc(Arc::clone(&chunk)).await;
+
+                    match result {
+                        Ok(_) => {
+                            let output = vm.output().to_string();
+                            Ok((serde_json::Value::String(output.clone()), output))
+                        }
+                        Err(error) => Err(classify_vm_error(error)),
+                    }
+                })
+                .await
             }))
             .await
     }
@@ -934,6 +995,7 @@ pub fn greet(name: string) -> string {
                 metadata: BTreeMap::new(),
                 cancel_token: None,
                 agent_session_id: None,
+                agent_event_sink: None,
                 actor_chain: None,
                 actor_chain_hop: None,
                 progress: None,
@@ -989,6 +1051,7 @@ pub fn run_help(binary: string) -> int {
                 metadata: BTreeMap::new(),
                 cancel_token: None,
                 agent_session_id: None,
+                agent_event_sink: None,
                 actor_chain: None,
                 actor_chain_hop: None,
                 progress: None,
@@ -1034,6 +1097,7 @@ pipeline default(task) {
                 metadata: BTreeMap::new(),
                 cancel_token: None,
                 agent_session_id: None,
+                agent_event_sink: None,
                 actor_chain: None,
                 actor_chain_hop: None,
                 progress: None,
@@ -1097,6 +1161,7 @@ pub fn greet(name: string) -> string {
                 metadata: BTreeMap::new(),
                 cancel_token: None,
                 agent_session_id: None,
+                agent_event_sink: None,
                 actor_chain: None,
                 actor_chain_hop: None,
                 progress: None,
@@ -1139,6 +1204,7 @@ pub fn inspect(upload: string) -> string {
             metadata: BTreeMap::new(),
             cancel_token: None,
             agent_session_id: None,
+            agent_event_sink: None,
             actor_chain: None,
             actor_chain_hop: None,
             progress: None,
@@ -1195,6 +1261,7 @@ pub fn inspect(value: string) -> string {
             metadata: BTreeMap::new(),
             cancel_token: None,
             agent_session_id: None,
+            agent_event_sink: None,
             actor_chain: Some(actor_chain),
             actor_chain_hop: None,
             progress: None,
@@ -1249,6 +1316,7 @@ pub fn greet(name: string) -> string {
                 metadata: BTreeMap::new(),
                 cancel_token: None,
                 agent_session_id: None,
+                agent_event_sink: None,
                 actor_chain: None,
                 actor_chain_hop: None,
                 progress: None,
@@ -1303,6 +1371,7 @@ pub fn spin() -> string {
                 metadata: BTreeMap::new(),
                 cancel_token: Some(cancel_token),
                 agent_session_id: None,
+                agent_event_sink: None,
                 actor_chain: None,
                 actor_chain_hop: None,
                 progress: None,
@@ -1368,6 +1437,7 @@ pub fn whoami(harness: Harness) -> string {
                 metadata: BTreeMap::new(),
                 cancel_token: None,
                 agent_session_id: None,
+                agent_event_sink: None,
                 actor_chain: None,
                 actor_chain_hop: None,
                 progress: None,
@@ -1434,6 +1504,7 @@ pub fn actor_chain() -> any {
                 metadata: BTreeMap::new(),
                 cancel_token: None,
                 agent_session_id: Some("dispatch-actor-chain".to_string()),
+                agent_event_sink: None,
                 actor_chain: None,
                 actor_chain_hop: Some("agent:merge-captain".to_string()),
                 progress: None,
@@ -1491,6 +1562,7 @@ pub fn whoami(harness: Harness) -> string {
                 metadata: BTreeMap::new(),
                 cancel_token: None,
                 agent_session_id: None,
+                agent_event_sink: None,
                 actor_chain: None,
                 actor_chain_hop: None,
                 progress: None,
@@ -1558,6 +1630,7 @@ pub fn whoami(harness: Harness) -> string {
                 metadata: BTreeMap::new(),
                 cancel_token: None,
                 agent_session_id: None,
+                agent_event_sink: None,
                 actor_chain: None,
                 actor_chain_hop: None,
                 progress: None,

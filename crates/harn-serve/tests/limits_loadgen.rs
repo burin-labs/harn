@@ -41,6 +41,7 @@ fn synth_request(function: &str) -> CallRequest {
         metadata: BTreeMap::new(),
         cancel_token: None,
         agent_session_id: None,
+        agent_event_sink: None,
         actor_chain: None,
         actor_chain_hop: None,
         progress: None,

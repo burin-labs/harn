@@ -37,6 +37,10 @@ fn events_json(events: &[JsonValue]) -> String {
     serde_json::to_string_pretty(events).unwrap_or_else(|_| "<unprintable events>".to_string())
 }
 
+fn is_progress_status_update(event: &JsonValue) -> bool {
+    event.pointer("/result/kind").and_then(JsonValue::as_str) == Some("status-update")
+}
+
 #[tokio::test]
 async fn send_message_dispatches_to_shared_core_export() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -463,11 +467,19 @@ pub fn triage(task: string) -> string {
     };
     let events = collect_task_stream_until_terminal(rx).await;
 
+    let progress_count = events
+        .iter()
+        .filter(|event| is_progress_status_update(event))
+        .count();
+    assert_eq!(
+        progress_count,
+        1,
+        "progress must stream exactly once: {}",
+        events_json(&events)
+    );
     let progress_index = events
         .iter()
-        .position(|event| {
-            event.pointer("/result/kind").and_then(JsonValue::as_str) == Some("status-update")
-        })
+        .position(is_progress_status_update)
         .unwrap_or_else(|| panic!("progress status update missing: {}", events_json(&events)));
     let completed_index = events
         .iter()
@@ -507,6 +519,81 @@ pub fn triage(task: string) -> string {
         Some(
             "Agent is checking progress.\n\nPlan:\n- [x] Inspect code. (priority: high)\n- [ ] Run A2A stream. (in progress)"
         )
+    );
+}
+
+#[derive(Clone)]
+struct ClearCurrentSessionSinksConfigurator;
+
+impl crate::VmConfigurator for ClearCurrentSessionSinksConfigurator {
+    fn configure(&self, vm: &mut harn_vm::Vm) -> Result<(), crate::DispatchError> {
+        vm.register_builtin("__test_clear_current_session_sinks", |_args, _out| {
+            if let Some(session_id) = harn_vm::agent_sessions::current_session_id() {
+                harn_vm::agent_events::clear_session_sinks(&session_id);
+            }
+            Ok(harn_vm::VmValue::Nil)
+        });
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn streaming_agent_progress_survives_global_session_sink_clear() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let script = dir.path().join("server.harn");
+    std::fs::write(
+        &script,
+        r#"
+import { agent_progress } from "std/agent/progress"
+
+pub fn triage(task: string) -> string {
+  __test_clear_current_session_sinks()
+  agent_progress({message: "Still streaming after registry cleanup."})
+  return task
+}
+"#,
+    )
+    .expect("write script");
+    let mut config = DispatchCoreConfig::for_script(&script);
+    config.vm_configurator = Arc::new(ClearCurrentSessionSinksConfigurator);
+    let core = DispatchCore::new(config).expect("core");
+    let server = Arc::new(A2aServer::new(A2aServerConfig::new(core)));
+    let request = harn_vm::jsonrpc::request(
+        "stream-progress-reset-1",
+        "message/stream",
+        json!({
+            "function": "triage",
+            "message": {
+                "parts": [{"type": "text", "text": "stream after reset"}]
+            }
+        }),
+    );
+
+    let processed = server.process_rpc(request, AuthRequest::default()).await;
+    let RpcOutcome::Sse(rx) = processed.outcome else {
+        panic!("expected sse response");
+    };
+    let events = collect_task_stream_until_terminal(rx).await;
+
+    let progress_count = events
+        .iter()
+        .filter(|event| is_progress_status_update(event))
+        .count();
+    assert_eq!(
+        progress_count,
+        1,
+        "progress must stream exactly once: {}",
+        events_json(&events)
+    );
+    let progress = events
+        .iter()
+        .find(|event| is_progress_status_update(event))
+        .unwrap_or_else(|| panic!("progress status update missing: {}", events_json(&events)));
+    assert_eq!(
+        progress
+            .pointer("/result/status/message/parts/0/text")
+            .and_then(JsonValue::as_str),
+        Some("Still streaming after registry cleanup.")
     );
 }
 

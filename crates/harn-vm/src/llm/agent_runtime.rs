@@ -91,6 +91,21 @@ pub(crate) fn emit_agent_event_sync(event: &AgentEvent) {
     }
 }
 
+/// Run `future` with a thread-local live event sink installed.
+///
+/// Transport adapters use this for per-request observation surfaces that should
+/// not depend on the process-global external sink registry. The normal global
+/// registry still receives every event via [`emit_agent_event_sync`] /
+/// [`emit_agent_event_with_ctx`]; this scoped sink is an additional,
+/// dispatch-local path that cannot be cleared by sibling reset code.
+pub async fn scope_agent_event_sink<F, T>(sink: Option<Arc<dyn AgentEventSink>>, future: F) -> T
+where
+    F: std::future::Future<Output = T>,
+{
+    let _guard = LoopSinkGuard::install(sink);
+    future.await
+}
+
 /// Emit an event through both external sinks (sync) and closure
 /// subscribers (async, via the agent-loop's VM context).
 ///

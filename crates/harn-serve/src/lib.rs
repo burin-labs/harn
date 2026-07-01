@@ -67,8 +67,8 @@ pub use auth::{
 };
 pub use auth_context::{current_auth_context, enter_auth_context, AuthContextScopeGuard};
 pub use core::{
-    CallArguments, CallRequest, CallResponse, DispatchCore, DispatchCoreConfig, NoopVmConfigurator,
-    VmConfigurator,
+    CallArguments, CallRequest, CallResponse, DispatchAgentEventSink, DispatchCore,
+    DispatchCoreConfig, NoopVmConfigurator, VmConfigurator,
 };
 pub use embed::{EmbeddedAgent, EmbeddedAgentClient, EmbeddedAgentError, EmbeddedAgentEvent};
 pub use error::{forbidden_data_payload, forbidden_message, DispatchError};
