@@ -1371,6 +1371,8 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         let state_path = temp.path().join("llm-rate-limits.sqlite");
         let _env = EnvVarGuard::set_path(DURABLE_RATE_LIMIT_STATE_PATH_ENV, &state_path);
+        let _clock =
+            crate::clock_mock::install_override(crate::clock_mock::MockClock::at_wall_ms(1_000));
         init_from_config();
 
         let runtime = tokio::runtime::Builder::new_current_thread()
