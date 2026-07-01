@@ -37,6 +37,26 @@ log("hello")
 }
 
 #[test]
+fn test_unused_discard_parameter_ignored() {
+    let diags = lint_source(
+        r#"
+pipeline default(task) {
+fn greet(name, _) {
+    log(name)
+}
+let f = { _, value -> log(value) }
+greet("hi", "there")
+f("ignored", "kept")
+}
+"#,
+    );
+    assert!(
+        !has_rule(&diags, "unused-parameter"),
+        "discard parameters should not trigger unused-parameter: {diags:?}"
+    );
+}
+
+#[test]
 fn test_unused_fn_param() {
     let diags = lint_source(
         r#"
@@ -214,8 +234,8 @@ fn test_fix_unused_variable_simple_let_binding() {
     );
     let result = apply_fixes(source, &diags);
     assert!(
-        result.contains("let _unused_thing = 42"),
-        "expected `_unused_thing` prefix, got: {result}"
+        result.contains("let _ = 42"),
+        "expected discard binding, got: {result}"
     );
     assert!(
         !result.contains("let unused_thing"),
@@ -239,8 +259,8 @@ fn test_fix_unused_variable_simple_let_binding_with_type() {
         format!("{before}{}{after}", edit.replacement)
     };
     assert!(
-        renamed.contains("let _leftover: int = 3"),
-        "expected `_leftover: int` prefix, got: {renamed}"
+        renamed.contains("let _: int = 3"),
+        "expected discard binding with type annotation, got: {renamed}"
     );
     assert!(
         !renamed.contains("let leftover:"),
@@ -291,7 +311,7 @@ fn test_fix_unused_variable_is_word_boundary_safe() {
     assert!(fix.is_some(), "expected autofix, got: {diags:?}");
     let result = apply_fixes(source, &diags);
     assert!(
-        result.contains("let _threshold_ms = threshold_ms_default()"),
+        result.contains("let _ = threshold_ms_default()"),
         "expected only the LHS binding renamed, got: {result}"
     );
 }
