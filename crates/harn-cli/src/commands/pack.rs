@@ -11,6 +11,8 @@
 //! signature (if any), and cross-checks every per-module BLAKE3.
 
 use std::collections::BTreeMap;
+use std::env;
+use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process;
 
@@ -25,13 +27,13 @@ use harn_vm::orchestration::{
     ConnectorRequirement, Ed25519Signature, EnvironmentRequirements, HarnpackEntry, ModuleEntry,
     RetryPolicySpec, SBOMDoc, SBOMPackage, SBOMRelationship, ToolEntry, WorkflowBundle,
     WorkflowBundlePolicy, WorkflowBundleReplayMetadata, WorkflowBundleTrigger,
-    WORKFLOW_BUNDLE_SCHEMA_VERSION,
+    HARNPACK_MANIFEST_PATH, WORKFLOW_BUNDLE_SCHEMA_VERSION,
 };
 use harn_vm::Compiler;
 use harn_vm::{AutonomyTier, TrustRecord};
 use serde::{Deserialize, Serialize};
 
-use crate::cli::{PackArgs, PackCommand, PackVerifyArgs};
+use crate::cli::{PackArgs, PackCommand, PackRepackArgs, PackUnpackArgs, PackVerifyArgs};
 use crate::command_error;
 use crate::json_envelope::{to_string_pretty, JsonEnvelope, JsonOutput, JsonWarning};
 use crate::parse_source_file;
@@ -41,6 +43,7 @@ use crate::skill_provenance;
 /// [`PackJsonData`] changes shape in a way that agents need to detect.
 pub const PACK_SCHEMA_VERSION: u32 = 2;
 pub const PACK_SBOM_ARCHIVE_PATH: &str = "sbom.spdx.json";
+const DEFAULT_PACK_FILE_MODE: u32 = 0o644;
 
 /// JSON payload emitted under `JsonEnvelope.data` for `harn pack`.
 #[derive(Debug, Clone, Serialize)]
@@ -100,6 +103,8 @@ impl JsonOutput for PackJsonOutput {
 pub fn run(args: PackArgs) {
     if let Some(command) = args.command {
         match command {
+            PackCommand::Unpack(unpack_args) => return run_unpack(unpack_args),
+            PackCommand::Repack(repack_args) => return run_repack(repack_args),
             PackCommand::Verify(verify_args) => return run_verify(verify_args),
         }
     }
@@ -285,6 +290,435 @@ impl PackError {
             message: message.into(),
         }
     }
+}
+
+#[derive(Debug)]
+pub struct PackUnpackOutcome {
+    pub output_dir: PathBuf,
+    pub content_entry_count: usize,
+}
+
+#[derive(Debug)]
+pub struct PackRepackOutcome {
+    pub output_path: PathBuf,
+    pub size_bytes: u64,
+    pub content_entry_count: usize,
+}
+
+pub fn run_unpack(args: PackUnpackArgs) {
+    match unpack(&args) {
+        Ok(outcome) => {
+            println!(
+                "unpacked {} to {} ({} payload entries)",
+                args.bundle.display(),
+                outcome.output_dir.display(),
+                outcome.content_entry_count
+            );
+        }
+        Err(err) => command_error(&err.message),
+    }
+}
+
+pub fn run_repack(args: PackRepackArgs) {
+    match repack(&args) {
+        Ok(outcome) => {
+            println!(
+                "repacked {} to {} ({} payload entries, {} bytes)",
+                args.dir.display(),
+                outcome.output_path.display(),
+                outcome.content_entry_count,
+                outcome.size_bytes
+            );
+        }
+        Err(err) => command_error(&err.message),
+    }
+}
+
+pub fn unpack(args: &PackUnpackArgs) -> Result<PackUnpackOutcome, PackError> {
+    let bytes = fs::read(&args.bundle).map_err(|err| {
+        PackError::new(
+            "unpack.read_failed",
+            format!("failed to read {}: {err}", args.bundle.display()),
+        )
+    })?;
+    let archive = read_harnpack(&bytes).map_err(|err| {
+        PackError::new(
+            "unpack.archive_failed",
+            format!("failed to parse {}: {err}", args.bundle.display()),
+        )
+    })?;
+    prepare_unpack_dir(&args.out, args.force)?;
+
+    let manifest_bytes = serde_json::to_vec_pretty(&archive.manifest).map_err(|err| {
+        PackError::new(
+            "unpack.manifest_failed",
+            format!("failed to encode {HARNPACK_MANIFEST_PATH}: {err}"),
+        )
+    })?;
+    write_unpack_file(
+        &args.out,
+        Path::new(HARNPACK_MANIFEST_PATH),
+        &manifest_bytes,
+        DEFAULT_PACK_FILE_MODE,
+    )?;
+    for entry in &archive.contents {
+        write_unpack_file(&args.out, &entry.path, &entry.bytes, entry.mode)?;
+    }
+
+    Ok(PackUnpackOutcome {
+        output_dir: args.out.clone(),
+        content_entry_count: archive.contents.len(),
+    })
+}
+
+pub fn repack(args: &PackRepackArgs) -> Result<PackRepackOutcome, PackError> {
+    if !args.dir.is_dir() {
+        return Err(PackError::new(
+            "repack.input_not_directory",
+            format!("input is not a directory: {}", args.dir.display()),
+        ));
+    }
+    reject_repack_output_inside_input(&args.dir, &args.out)?;
+    if args.out.exists() && !args.force {
+        return Err(PackError::new(
+            "repack.output_exists",
+            format!(
+                "output path already exists: {} (re-run with --force to replace it)",
+                args.out.display()
+            ),
+        ));
+    }
+    if args.out.is_dir() {
+        return Err(PackError::new(
+            "repack.output_is_directory",
+            format!("output path is a directory: {}", args.out.display()),
+        ));
+    }
+
+    let manifest_path = args.dir.join(HARNPACK_MANIFEST_PATH);
+    let manifest = load_workflow_bundle_any_version(&manifest_path).map_err(|err| {
+        PackError::new(
+            "repack.manifest_failed",
+            format!("failed to read {}: {err}", manifest_path.display()),
+        )
+    })?;
+    let contents = collect_repack_entries(&args.dir)?;
+    let archive_bytes = build_harnpack(&manifest, &contents).map_err(|err| {
+        PackError::new(
+            "repack.archive_failed",
+            format!("failed to assemble {}: {err}", args.out.display()),
+        )
+    })?;
+    if let Some(parent) = args
+        .out
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent).map_err(|err| {
+            PackError::new(
+                "repack.write_failed",
+                format!("failed to create {}: {err}", parent.display()),
+            )
+        })?;
+    }
+    fs::write(&args.out, &archive_bytes).map_err(|err| {
+        PackError::new(
+            "repack.write_failed",
+            format!("failed to write {}: {err}", args.out.display()),
+        )
+    })?;
+
+    Ok(PackRepackOutcome {
+        output_path: args.out.clone(),
+        size_bytes: archive_bytes.len() as u64,
+        content_entry_count: contents.len(),
+    })
+}
+
+fn prepare_unpack_dir(out: &Path, force: bool) -> Result<(), PackError> {
+    if out.exists() {
+        if !force {
+            return Err(PackError::new(
+                "unpack.output_exists",
+                format!(
+                    "output path already exists: {} (re-run with --force to replace it)",
+                    out.display()
+                ),
+            ));
+        }
+        let metadata = fs::symlink_metadata(out).map_err(|err| {
+            PackError::new(
+                "unpack.read_failed",
+                format!("failed to stat {}: {err}", out.display()),
+            )
+        })?;
+        if metadata.file_type().is_symlink() {
+            return Err(PackError::new(
+                "unpack.output_symlink",
+                format!("refusing to replace symlink {}", out.display()),
+            ));
+        }
+        if metadata.is_dir() {
+            require_prior_unpack_dir(out)?;
+            fs::remove_dir_all(out).map_err(|err| {
+                PackError::new(
+                    "unpack.remove_failed",
+                    format!("failed to remove {}: {err}", out.display()),
+                )
+            })?;
+        } else if metadata.is_file() {
+            fs::remove_file(out).map_err(|err| {
+                PackError::new(
+                    "unpack.remove_failed",
+                    format!("failed to remove {}: {err}", out.display()),
+                )
+            })?;
+        } else {
+            return Err(PackError::new(
+                "unpack.output_unsupported",
+                format!("refusing to replace non-file output path {}", out.display()),
+            ));
+        }
+    }
+    fs::create_dir_all(out).map_err(|err| {
+        PackError::new(
+            "unpack.write_failed",
+            format!("failed to create {}: {err}", out.display()),
+        )
+    })
+}
+
+fn require_prior_unpack_dir(out: &Path) -> Result<(), PackError> {
+    if is_current_dir(out) {
+        return Err(PackError::new(
+            "unpack.output_unsafe",
+            format!("refusing to replace current directory {}", out.display()),
+        ));
+    }
+    let manifest = out.join(HARNPACK_MANIFEST_PATH);
+    if manifest.is_file() {
+        return Ok(());
+    }
+    Err(PackError::new(
+        "unpack.output_not_harnpack_dir",
+        format!(
+            "refusing to remove {} because it does not contain {}; choose a fresh --out dir or remove it manually",
+            out.display(),
+            HARNPACK_MANIFEST_PATH
+        ),
+    ))
+}
+
+fn is_current_dir(path: &Path) -> bool {
+    let Ok(path) = path.canonicalize() else {
+        return false;
+    };
+    let Ok(cwd) = env::current_dir().and_then(|cwd| cwd.canonicalize()) else {
+        return false;
+    };
+    path == cwd
+}
+
+fn write_unpack_file(
+    root: &Path,
+    archive_path: &Path,
+    bytes: &[u8],
+    mode: u32,
+) -> Result<(), PackError> {
+    let safe_path = normalize_safe_archive_path(archive_path)?;
+    let destination = root.join(&safe_path);
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent).map_err(|err| {
+            PackError::new(
+                "unpack.write_failed",
+                format!("failed to create {}: {err}", parent.display()),
+            )
+        })?;
+    }
+    fs::write(&destination, bytes).map_err(|err| {
+        PackError::new(
+            "unpack.write_failed",
+            format!("failed to write {}: {err}", destination.display()),
+        )
+    })?;
+    set_file_mode(&destination, mode)?;
+    Ok(())
+}
+
+fn collect_repack_entries(root: &Path) -> Result<Vec<HarnpackEntry>, PackError> {
+    let mut entries = Vec::new();
+    collect_repack_entries_inner(root, root, &mut entries)?;
+    entries.sort_by(|left, right| left.path.cmp(&right.path));
+    Ok(entries)
+}
+
+fn reject_repack_output_inside_input(input_dir: &Path, out: &Path) -> Result<(), PackError> {
+    let input = input_dir.canonicalize().map_err(|err| {
+        PackError::new(
+            "repack.read_failed",
+            format!("failed to canonicalize {}: {err}", input_dir.display()),
+        )
+    })?;
+    let out_parent = out
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let out_file_name = out.file_name().ok_or_else(|| {
+        PackError::new(
+            "repack.output_invalid",
+            format!("output path must include a file name: {}", out.display()),
+        )
+    })?;
+    let out_parent = out_parent.canonicalize().unwrap_or_else(|_| {
+        if out_parent.is_absolute() {
+            out_parent.to_path_buf()
+        } else {
+            env::current_dir()
+                .unwrap_or_else(|_| PathBuf::from("."))
+                .join(out_parent)
+        }
+    });
+    let output = out_parent.join(out_file_name);
+    if output.starts_with(&input) {
+        return Err(PackError::new(
+            "repack.output_inside_input",
+            format!(
+                "refusing to write {} inside input directory {}; choose an output path outside the unpacked tree",
+                out.display(),
+                input_dir.display()
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn collect_repack_entries_inner(
+    root: &Path,
+    current: &Path,
+    entries: &mut Vec<HarnpackEntry>,
+) -> Result<(), PackError> {
+    let mut children = fs::read_dir(current)
+        .map_err(|err| {
+            PackError::new(
+                "repack.read_failed",
+                format!("failed to read {}: {err}", current.display()),
+            )
+        })?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|err| {
+            PackError::new(
+                "repack.read_failed",
+                format!("failed to read {}: {err}", current.display()),
+            )
+        })?;
+    children.sort_by_key(|entry| entry.path());
+
+    for child in children {
+        let path = child.path();
+        let metadata = fs::symlink_metadata(&path).map_err(|err| {
+            PackError::new(
+                "repack.read_failed",
+                format!("failed to stat {}: {err}", path.display()),
+            )
+        })?;
+        if metadata.file_type().is_symlink() {
+            return Err(PackError::new(
+                "repack.unsupported_entry",
+                format!("refusing to pack symlink {}", path.display()),
+            ));
+        }
+        if metadata.is_dir() {
+            collect_repack_entries_inner(root, &path, entries)?;
+            continue;
+        }
+        if !metadata.is_file() {
+            return Err(PackError::new(
+                "repack.unsupported_entry",
+                format!("refusing to pack non-file entry {}", path.display()),
+            ));
+        }
+
+        let rel = path.strip_prefix(root).map_err(|err| {
+            PackError::new(
+                "repack.path_failed",
+                format!(
+                    "failed to relativize {} against {}: {err}",
+                    path.display(),
+                    root.display()
+                ),
+            )
+        })?;
+        let archive_path = normalize_safe_archive_path(rel)?;
+        if archive_path == Path::new(HARNPACK_MANIFEST_PATH) {
+            continue;
+        }
+        let bytes = fs::read(&path).map_err(|err| {
+            PackError::new(
+                "repack.read_failed",
+                format!("failed to read {}: {err}", path.display()),
+            )
+        })?;
+        entries.push(HarnpackEntry::new(archive_path, bytes).with_mode(file_mode(&metadata)));
+    }
+    Ok(())
+}
+
+fn normalize_safe_archive_path(path: &Path) -> Result<PathBuf, PackError> {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Normal(part) => normalized.push(part),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                return Err(PackError::new(
+                    "pack.unsafe_archive_path",
+                    format!("archive path may not contain '..': {}", path.display()),
+                ));
+            }
+            Component::Prefix(_) | Component::RootDir => {
+                return Err(PackError::new(
+                    "pack.unsafe_archive_path",
+                    format!("archive path must be relative: {}", path.display()),
+                ));
+            }
+        }
+    }
+    if normalized.as_os_str().is_empty() {
+        return Err(PackError::new(
+            "pack.unsafe_archive_path",
+            "archive path may not be empty",
+        ));
+    }
+    Ok(normalized)
+}
+
+#[cfg(unix)]
+fn file_mode(metadata: &fs::Metadata) -> u32 {
+    use std::os::unix::fs::PermissionsExt;
+
+    metadata.permissions().mode() & 0o7777
+}
+
+#[cfg(not(unix))]
+fn file_mode(_metadata: &fs::Metadata) -> u32 {
+    DEFAULT_PACK_FILE_MODE
+}
+
+#[cfg(unix)]
+fn set_file_mode(path: &Path, mode: u32) -> Result<(), PackError> {
+    use std::os::unix::fs::PermissionsExt;
+
+    fs::set_permissions(path, fs::Permissions::from_mode(mode)).map_err(|err| {
+        PackError::new(
+            "unpack.write_failed",
+            format!("failed to set permissions on {}: {err}", path.display()),
+        )
+    })
+}
+
+#[cfg(not(unix))]
+fn set_file_mode(_path: &Path, _mode: u32) -> Result<(), PackError> {
+    Ok(())
 }
 
 pub fn build(args: &BuildArgs) -> Result<PackOutcome, PackError> {

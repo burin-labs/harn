@@ -149,7 +149,7 @@ pub(crate) use orchestrator::{
     OrchestratorTenantCreateArgs, OrchestratorTenantDeleteArgs, OrchestratorTenantLsArgs,
     OrchestratorTenantSuspendArgs,
 };
-pub use pack::{PackArgs, PackCommand, PackVerifyArgs};
+pub use pack::{PackArgs, PackCommand, PackRepackArgs, PackUnpackArgs, PackVerifyArgs};
 pub(crate) use package::{
     AddArgs, InstallArgs, PackageArgs, PackageArtifactsCommand, PackageCacheCommand,
     PackageCommand, PackageScaffoldCommand, PackageScaffoldOpenapiArgs, PackageSearchArgs,

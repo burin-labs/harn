@@ -16,7 +16,8 @@ pipeline default() {
     path_join(root, "hello.harnpack"),
   )
   __io_println(pack.success)
-  let unpack = exec_at(root, "sh", "-lc", "mkdir unpack && zstd -d -c hello.harnpack | tar -xf - -C unpack")
+  let unpack_dir = path_join(root, "unpack")
+  let unpack = exec_at(root, harn_bin, "pack", "unpack", "hello.harnpack", "--out", unpack_dir)
   __io_println(unpack.success)
   let tamper = exec_at(
     root,
@@ -27,12 +28,7 @@ pipeline default() {
     path_join(root, "unpack/sbom.spdx.json"),
   )
   __io_println(tamper.success)
-  let repack = exec_at(
-    root,
-    "sh",
-    "-lc",
-    "cd unpack && tar -cf - harnpack.json sbom.spdx.json sources bytecode | zstd -f -o ../tampered.harnpack",
-  )
+  let repack = exec_at(root, harn_bin, "pack", "repack", unpack_dir, "--out", "tampered.harnpack")
   __io_println(repack.success)
   let lenient = exec_at(
     root,

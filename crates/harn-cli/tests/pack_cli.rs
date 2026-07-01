@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 
 use ed25519_dalek::pkcs8::{spki::der::pem::LineEnding, DecodePrivateKey, EncodePublicKey};
 use ed25519_dalek::SigningKey;
-use harn_cli::cli::{PackArgs, PackVerifyArgs};
+use harn_cli::cli::{PackArgs, PackRepackArgs, PackUnpackArgs, PackVerifyArgs};
 use harn_cli::commands::pack;
 use harn_cli::commands::pack::BuildArgs;
 use harn_cli::tests::common::cwd_lock;
@@ -521,6 +521,118 @@ fn pack_verify_signed_bundle_passes_and_reports_signature_key() {
     );
     assert_eq!(report.module_count, 1);
     assert!(report.content_entry_count >= 3, "{report:?}");
+}
+
+#[test]
+fn pack_unpack_and_repack_round_trip_without_host_archive_tools() {
+    let workdir = TempDir::new().unwrap();
+    let entry = workdir.path().join("hello.harn");
+    fs::write(&entry, "__io_println(\"hi\")\n").unwrap();
+    let out = workdir.path().join("hello.harnpack");
+    build_pack(&pack_args(entry, out.clone()));
+
+    let unpack_dir = workdir.path().join("unpacked");
+    let unpacked = pack::unpack(&PackUnpackArgs {
+        bundle: out.clone(),
+        out: unpack_dir.clone(),
+        force: false,
+    })
+    .expect("unpack succeeds");
+    assert_eq!(unpacked.output_dir, unpack_dir);
+    assert!(unpacked.content_entry_count >= 3, "{unpacked:?}");
+    assert!(unpack_dir.join("harnpack.json").exists());
+    assert!(unpack_dir.join("sources/hello.harn").exists());
+    assert!(unpack_dir.join("bytecode/hello.harnbc").exists());
+
+    let repacked = workdir.path().join("repacked.harnpack");
+    let repacked_outcome = pack::repack(&PackRepackArgs {
+        dir: unpack_dir,
+        out: repacked.clone(),
+        force: false,
+    })
+    .expect("repack succeeds");
+    assert_eq!(repacked_outcome.output_path, repacked);
+    assert_eq!(
+        repacked_outcome.content_entry_count,
+        unpacked.content_entry_count
+    );
+    pack::verify(&PackVerifyArgs {
+        bundle: repacked.clone(),
+        allow_unsigned: true,
+        trust_policy: None,
+        require_trusted_signer: false,
+        strict: true,
+        json: false,
+    })
+    .expect("repacked bundle verifies");
+
+    let original = read_harnpack(&fs::read(&out).unwrap()).unwrap();
+    let round_trip = read_harnpack(&fs::read(&repacked).unwrap()).unwrap();
+    assert_eq!(round_trip.manifest, original.manifest);
+    assert_eq!(round_trip.contents, original.contents);
+}
+
+#[test]
+fn pack_unpack_force_only_replaces_prior_unpack_dir() {
+    let workdir = TempDir::new().unwrap();
+    let entry = workdir.path().join("hello.harn");
+    fs::write(&entry, "__io_println(\"hi\")\n").unwrap();
+    let bundle = workdir.path().join("hello.harnpack");
+    build_pack(&pack_args(entry, bundle.clone()));
+
+    let unrelated = workdir.path().join("unrelated");
+    fs::create_dir(&unrelated).unwrap();
+    fs::write(unrelated.join("notes.txt"), "do not delete\n").unwrap();
+    let err = pack::unpack(&PackUnpackArgs {
+        bundle: bundle.clone(),
+        out: unrelated.clone(),
+        force: true,
+    })
+    .expect_err("force must not remove an arbitrary directory");
+    assert_eq!(err.code, "unpack.output_not_harnpack_dir");
+    assert!(unrelated.join("notes.txt").exists());
+
+    let unpack_dir = workdir.path().join("unpacked");
+    pack::unpack(&PackUnpackArgs {
+        bundle,
+        out: unpack_dir.clone(),
+        force: false,
+    })
+    .expect("initial unpack succeeds");
+    fs::write(unpack_dir.join("stale.txt"), "old payload\n").unwrap();
+    pack::unpack(&PackUnpackArgs {
+        bundle: workdir.path().join("hello.harnpack"),
+        out: unpack_dir.clone(),
+        force: true,
+    })
+    .expect("force replaces a prior unpack directory");
+    assert!(!unpack_dir.join("stale.txt").exists());
+    assert!(unpack_dir.join("harnpack.json").exists());
+}
+
+#[test]
+fn pack_repack_refuses_output_inside_input_dir() {
+    let workdir = TempDir::new().unwrap();
+    let entry = workdir.path().join("hello.harn");
+    fs::write(&entry, "__io_println(\"hi\")\n").unwrap();
+    let bundle = workdir.path().join("hello.harnpack");
+    build_pack(&pack_args(entry, bundle.clone()));
+
+    let unpack_dir = workdir.path().join("unpacked");
+    pack::unpack(&PackUnpackArgs {
+        bundle,
+        out: unpack_dir.clone(),
+        force: false,
+    })
+    .expect("unpack succeeds");
+
+    let err = pack::repack(&PackRepackArgs {
+        dir: unpack_dir.clone(),
+        out: unpack_dir.join("nested.harnpack"),
+        force: false,
+    })
+    .expect_err("repack output inside input should be rejected");
+    assert_eq!(err.code, "repack.output_inside_input");
 }
 
 #[test]
