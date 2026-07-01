@@ -74,6 +74,7 @@ fn gemini_thinking_budget(
             ReasoningEffort::Medium => 8_192,
             ReasoningEffort::High => gemini_max_thinking_budget(caps),
             ReasoningEffort::XHigh => gemini_max_thinking_budget(caps),
+            ReasoningEffort::Max => gemini_max_thinking_budget(caps),
         }),
     }
 }

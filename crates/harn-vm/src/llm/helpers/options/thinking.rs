@@ -16,8 +16,9 @@ pub(super) fn parse_reasoning_effort_field(
         "medium" => Ok(crate::llm::api::ReasoningEffort::Medium),
         "high" => Ok(crate::llm::api::ReasoningEffort::High),
         "xhigh" => Ok(crate::llm::api::ReasoningEffort::XHigh),
+        "max" => Ok(crate::llm::api::ReasoningEffort::Max),
         other => Err(thinking_error(format!(
-            "{field}: expected \"none\" | \"minimal\" | \"low\" | \"medium\" | \"high\" | \"xhigh\", got \"{other}\""
+            "{field}: expected \"none\" | \"minimal\" | \"low\" | \"medium\" | \"high\" | \"xhigh\" | \"max\", got \"{other}\""
         ))),
     }
 }
@@ -38,7 +39,7 @@ pub(super) fn parse_reasoning_effort_option(
         VmValue::Nil | VmValue::Bool(false) => Ok(None),
         VmValue::String(level) => parse_reasoning_effort_field("reasoning_effort", level).map(Some),
         other => Err(thinking_error(format!(
-            "reasoning_effort: expected \"none\" | \"minimal\" | \"low\" | \"medium\" | \"high\" | \"xhigh\", got {}",
+            "reasoning_effort: expected \"none\" | \"minimal\" | \"low\" | \"medium\" | \"high\" | \"xhigh\" | \"max\", got {}",
             other.type_name()
         ))),
     }
@@ -92,11 +93,11 @@ pub(super) fn parse_thinking_option(
                 budget_tokens: None,
             }),
             "adaptive" => Ok(ThinkingConfig::Adaptive),
-            "minimal" | "low" | "medium" | "high" | "xhigh" => Ok(ThinkingConfig::Effort {
+            "minimal" | "low" | "medium" | "high" | "xhigh" | "max" => Ok(ThinkingConfig::Effort {
                 level: parse_reasoning_effort(s.as_str())?,
             }),
             other => Err(thinking_error(format!(
-                "thinking: expected bool, dict, or one of \"enabled\" | \"adaptive\" | \"minimal\" | \"low\" | \"medium\" | \"high\" | \"xhigh\", got \"{other}\""
+                "thinking: expected bool, dict, or one of \"enabled\" | \"adaptive\" | \"minimal\" | \"low\" | \"medium\" | \"high\" | \"xhigh\" | \"max\", got \"{other}\""
             ))),
         },
         VmValue::Dict(d) => {

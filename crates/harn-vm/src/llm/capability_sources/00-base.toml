@@ -96,19 +96,25 @@
 #                     request field for those options; defaults to
 #                     chat_template_kwargs, Baseten uses chat_template_args.
 #   requires_completion_tokens: whether to send max_completion_tokens instead of max_tokens.
-#   reasoning_effort_supported: whether reasoning_effort is accepted.
+#   reasoning_effort_supported:
+#                     whether the route accepts Harn's provider-neutral
+#                     reasoning effort control. Providers project this to
+#                     their native field (for example OpenAI
+#                     reasoning_effort or Anthropic output_config.effort).
 #   reasoning_effort_levels:
-#                     accepted reasoning_effort values when the provider
-#                     accepts only a subset of Harn's neutral enum.
-#   reasoning_none_supported: whether reasoning_effort="none" is accepted.
+#                     accepted effort values when the provider accepts only
+#                     a subset of Harn's neutral enum.
+#   reasoning_none_supported:
+#                     whether the effort surface accepts "none" as a true
+#                     reasoning-off setting.
 #   max_thinking_budget:
-#                     max thinkingBudget tokens for high/xhigh reasoning when
-#                     the provider takes an explicit token budget (native
-#                     Gemini API thinkingConfig). Differs per model
+#                     max thinkingBudget tokens for high/xhigh/max reasoning
+#                     when the provider takes an explicit token budget
+#                     (native Gemini API thinkingConfig). Differs per model
 #                     (2.5 Flash 24576, 2.5 Pro 32768).
 #   reasoning_disable_supported:
-#                     whether `reasoning: {enabled:false}` is accepted when
-#                     the provider uses an enabled/disabled reasoning switch.
+#                     whether the route accepts an explicit disabled/off
+#                     reasoning switch.
 #   reasoning_required_for_tools:
 #                     whether the model calls tools *inside* its reasoning
 #                     channel, so disabling reasoning breaks tool calling

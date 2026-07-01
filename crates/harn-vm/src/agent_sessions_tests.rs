@@ -591,7 +591,7 @@ fn pinned_reasoning_policy_round_trips_through_session_state_and_snapshot() {
 
     let error = set_pinned_reasoning_policy(&id, Some("slow".into())).unwrap_err();
     assert!(
-        error.contains("expected auto, off, minimal, low, medium, high, or xhigh"),
+        error.contains("expected auto, off, minimal, low, medium, high, xhigh, or max"),
         "invalid policy should explain accepted values: {error}",
     );
 }

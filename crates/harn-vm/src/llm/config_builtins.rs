@@ -1924,7 +1924,9 @@ mod tests {
     #[test]
     fn test_llm_reasoning_effort_budget_matches_canonical_mapping() {
         let mut out = String::new();
-        for level in ["minimal", "low", "medium", "high", "xhigh", "", "unknown"] {
+        for level in [
+            "minimal", "low", "medium", "high", "xhigh", "max", "", "unknown",
+        ] {
             let args = vec![VmValue::String(arcstr::ArcStr::from(level))];
             let result = llm_reasoning_effort_budget_builtin(&args, &mut out)
                 .expect("builtin returned error");

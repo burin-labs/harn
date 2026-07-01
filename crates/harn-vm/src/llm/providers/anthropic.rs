@@ -3,7 +3,7 @@
 use std::cell::RefCell;
 use std::collections::HashSet;
 
-use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult, ThinkingConfig};
+use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult, ReasoningEffort, ThinkingConfig};
 use crate::llm::provider::{LlmProvider, LlmProviderChat};
 use crate::llm::providers::common::parse_major_minor_tail;
 use crate::value::VmError;
@@ -82,6 +82,55 @@ fn model_rejects_sampling_params(model: &str) -> bool {
 fn model_requires_adaptive_thinking(model: &str) -> bool {
     let lower = model.to_lowercase();
     matches!(claude_generation(&lower), Some((major, minor)) if (major, minor) >= (4, 7))
+}
+
+/// True for Claude models whose adaptive thinking is on by default. These
+/// models don't need a `thinking: {type:"adaptive"}` request field when
+/// `output_config.effort` is enough to steer the default-on reasoning.
+fn model_defaults_to_adaptive_thinking(model: &str) -> bool {
+    let lower = model.to_lowercase();
+    lower.contains("claude-fable-")
+        || lower.contains("claude-mythos-")
+        || lower.contains("claude-sonnet-5")
+}
+
+/// Fable/Mythos always think and reject an explicit disabled thinking config.
+/// Sonnet 5 also defaults thinking on, but it accepts
+/// `thinking: {type:"disabled"}` as the explicit off switch.
+fn model_rejects_disabled_thinking(model: &str) -> bool {
+    let lower = model.to_lowercase();
+    lower.contains("claude-fable-") || lower.contains("claude-mythos-")
+}
+
+fn model_supports_anthropic_effort(model: &str) -> bool {
+    crate::llm::capabilities::lookup("anthropic", model).reasoning_effort_supported
+}
+
+fn anthropic_effort_value(level: ReasoningEffort) -> Option<&'static str> {
+    match level {
+        ReasoningEffort::None => None,
+        // Harn's provider-neutral policy has a `minimal` notch for OpenAI.
+        // Anthropic's current public effort surface starts at low, so floor
+        // any direct minimal request to the lowest accepted Anthropic level.
+        ReasoningEffort::Minimal | ReasoningEffort::Low => Some("low"),
+        ReasoningEffort::Medium => Some("medium"),
+        ReasoningEffort::High => Some("high"),
+        ReasoningEffort::XHigh => Some("xhigh"),
+        ReasoningEffort::Max => Some("max"),
+    }
+}
+
+fn set_output_config_effort(body: &mut serde_json::Value, effort: &str) {
+    let Some(body_object) = body.as_object_mut() else {
+        return;
+    };
+    let output_config = body_object
+        .entry("output_config")
+        .or_insert_with(|| serde_json::json!({}));
+    if !output_config.is_object() {
+        *output_config = serde_json::json!({});
+    }
+    output_config["effort"] = serde_json::json!(effort);
 }
 
 fn model_supports_anthropic_prefill(model: &str) -> bool {
@@ -343,12 +392,29 @@ impl AnthropicProvider {
             // Claude Opus 4.7+ replaced extended thinking with adaptive
             // thinking; `type: enabled` returns HTTP 400. Rewrite the
             // payload transparently rather than fighting the deprecation.
-            ThinkingConfig::Disabled => {}
+            ThinkingConfig::Disabled => {
+                if model_defaults_to_adaptive_thinking(&opts.model)
+                    && !model_rejects_disabled_thinking(&opts.model)
+                {
+                    body["thinking"] = serde_json::json!({ "type": "disabled" });
+                }
+            }
             ThinkingConfig::Adaptive => {
                 body["thinking"] = serde_json::json!({ "type": "adaptive" });
             }
-            ThinkingConfig::Effort { .. } => {
-                body["thinking"] = serde_json::json!({ "type": "adaptive" });
+            ThinkingConfig::Effort { level } => {
+                if let Some(effort) = anthropic_effort_value(*level) {
+                    if model_supports_anthropic_effort(&opts.model) {
+                        set_output_config_effort(&mut body, effort);
+                    }
+                    if !model_defaults_to_adaptive_thinking(&opts.model) {
+                        body["thinking"] = serde_json::json!({ "type": "adaptive" });
+                    }
+                } else if model_defaults_to_adaptive_thinking(&opts.model)
+                    && !model_rejects_disabled_thinking(&opts.model)
+                {
+                    body["thinking"] = serde_json::json!({ "type": "disabled" });
+                }
             }
             ThinkingConfig::Enabled { budget_tokens }
                 if model_requires_adaptive_thinking(&opts.model) =>
@@ -648,8 +714,8 @@ fn warn_forced_json_overrides_tools(model: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::llm::api::LlmRequestPayload;
     use crate::llm::api::{LlmErrorKind, LlmErrorReason};
+    use crate::llm::api::{LlmRequestPayload, ReasoningEffort};
 
     fn base_payload() -> LlmRequestPayload {
         LlmRequestPayload {
@@ -1014,6 +1080,46 @@ mod tests {
             body2.get("temperature").is_none(),
             "temperature must be stripped for claude-fable-5"
         );
+    }
+
+    #[test]
+    fn sonnet_5_effort_uses_output_config_and_default_on_thinking() {
+        let mut payload = base_payload();
+        payload.model = "claude-sonnet-5".to_string();
+        payload.thinking = ThinkingConfig::Effort {
+            level: ReasoningEffort::High,
+        };
+        let body = AnthropicProvider::build_request_body(&payload);
+        assert_eq!(body["output_config"]["effort"], serde_json::json!("high"));
+        assert!(
+            body.get("thinking").is_none(),
+            "Sonnet 5 defaults adaptive thinking on; effort should not send legacy thinking budgets"
+        );
+
+        let mut disabled = base_payload();
+        disabled.model = "claude-sonnet-5".to_string();
+        disabled.thinking = ThinkingConfig::Disabled;
+        let disabled_body = AnthropicProvider::build_request_body(&disabled);
+        assert_eq!(
+            disabled_body["thinking"],
+            serde_json::json!({ "type": "disabled" })
+        );
+        assert!(
+            disabled_body.get("output_config").is_none(),
+            "turning Sonnet 5 thinking off should not also send an effort level"
+        );
+    }
+
+    #[test]
+    fn opus_adaptive_effort_uses_output_config_with_adaptive_thinking() {
+        let mut payload = base_payload();
+        payload.model = "claude-opus-4-7".to_string();
+        payload.thinking = ThinkingConfig::Effort {
+            level: ReasoningEffort::Max,
+        };
+        let body = AnthropicProvider::build_request_body(&payload);
+        assert_eq!(body["thinking"], serde_json::json!({ "type": "adaptive" }));
+        assert_eq!(body["output_config"]["effort"], serde_json::json!("max"));
     }
 
     #[test]

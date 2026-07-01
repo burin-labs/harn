@@ -1469,9 +1469,10 @@
       },
       "reasoning": {
         "modes": [
-          "adaptive"
+          "adaptive",
+          "effort"
         ],
-        "effort_supported": false,
+        "effort_supported": true,
         "none_supported": false,
         "interleaved_supported": true,
         "preserve_thinking": false
@@ -1993,9 +1994,10 @@
       },
       "reasoning": {
         "modes": [
-          "adaptive"
+          "adaptive",
+          "effort"
         ],
-        "effort_supported": false,
+        "effort_supported": true,
         "none_supported": false,
         "interleaved_supported": true,
         "preserve_thinking": false
@@ -2098,9 +2100,10 @@
       },
       "reasoning": {
         "modes": [
-          "adaptive"
+          "adaptive",
+          "effort"
         ],
-        "effort_supported": false,
+        "effort_supported": true,
         "none_supported": false,
         "interleaved_supported": true,
         "preserve_thinking": false

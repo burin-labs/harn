@@ -11,7 +11,9 @@ use crate::value::{VmError, VmValue};
 
 pub const INHERIT_POLICY_VALUE: &str = "@inherit";
 
-const POLICY_VALUES: &[&str] = &["auto", "off", "minimal", "low", "medium", "high", "xhigh"];
+const POLICY_VALUES: &[&str] = &[
+    "auto", "off", "minimal", "low", "medium", "high", "xhigh", "max",
+];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ReasoningPolicyApplication {
@@ -220,7 +222,7 @@ fn normalize_policy_str(raw: &str) -> Result<String, String> {
         return Ok(policy);
     }
     Err(format!(
-        "expected auto, off, minimal, low, medium, high, or xhigh; got {raw:?}"
+        "expected auto, off, minimal, low, medium, high, xhigh, or max; got {raw:?}"
     ))
 }
 
@@ -306,6 +308,11 @@ fn thinking_for_reasoning_level(
     caps: &Capabilities,
 ) -> Option<(ThinkingConfig, String)> {
     if level == "off" {
+        if caps.reasoning_disable_supported
+            && (caps_supports(caps, "adaptive") || caps_supports(caps, "enabled"))
+        {
+            return Some((ThinkingConfig::Disabled, "off".to_string()));
+        }
         if caps_supports(caps, "effort") || caps.reasoning_effort_supported {
             if caps.reasoning_none_supported {
                 return Some((
@@ -351,12 +358,13 @@ fn reasoning_effort_from_level(level: &str) -> Option<ReasoningEffort> {
         "medium" => ReasoningEffort::Medium,
         "high" => ReasoningEffort::High,
         "xhigh" => ReasoningEffort::XHigh,
+        "max" => ReasoningEffort::Max,
         _ => return None,
     })
 }
 
 fn lowest_supported_effort(caps: &Capabilities) -> Option<ReasoningEffort> {
-    ["minimal", "low", "medium", "high", "xhigh"]
+    ["minimal", "low", "medium", "high", "xhigh", "max"]
         .into_iter()
         .find_map(|candidate| {
             caps.reasoning_effort_levels
@@ -373,7 +381,7 @@ fn lowest_supported_effort(caps: &Capabilities) -> Option<ReasoningEffort> {
 /// Cerebras gpt-oss, which rejects "minimal"/"none", floors to its accepted
 /// "low"); fall back to "low" otherwise.
 fn lowest_tool_reasoning_level(caps: &Capabilities) -> String {
-    for candidate in ["minimal", "low", "medium", "high", "xhigh"] {
+    for candidate in ["minimal", "low", "medium", "high", "xhigh", "max"] {
         if caps
             .reasoning_effort_levels
             .iter()
@@ -393,7 +401,7 @@ fn lowest_tool_reasoning_level(caps: &Capabilities) -> String {
 pub(crate) fn budget_for_reasoning_level(level: &str) -> u32 {
     match level {
         "minimal" | "low" => 1024,
-        "high" | "xhigh" => 12_000,
+        "high" | "xhigh" | "max" => 12_000,
         _ => 4096,
     }
 }
@@ -726,6 +734,64 @@ auto_reasoning_overrides = { agent = "off" }
             Some("disabled")
         );
         crate::llm::capabilities::clear_user_overrides();
+    }
+
+    #[test]
+    fn off_policy_uses_disabled_when_adaptive_effort_route_has_disable_switch() {
+        let opts = crate::value::DictMap::from_iter([
+            (
+                crate::value::intern_key("provider"),
+                VmValue::String(arcstr::ArcStr::from("anthropic")),
+            ),
+            (
+                crate::value::intern_key("model"),
+                VmValue::String(arcstr::ArcStr::from("claude-sonnet-5")),
+            ),
+            (
+                crate::value::intern_key("reasoning_policy"),
+                VmValue::String(arcstr::ArcStr::from("off")),
+            ),
+        ]);
+        let out = apply(opts);
+        let thinking = out
+            .get("thinking")
+            .and_then(VmValue::as_dict)
+            .expect("thinking");
+        assert_eq!(
+            thinking.get("mode").map(VmValue::display).as_deref(),
+            Some("disabled")
+        );
+    }
+
+    #[test]
+    fn off_policy_floors_when_adaptive_effort_route_rejects_disable_switch() {
+        let opts = crate::value::DictMap::from_iter([
+            (
+                crate::value::intern_key("provider"),
+                VmValue::String(arcstr::ArcStr::from("anthropic")),
+            ),
+            (
+                crate::value::intern_key("model"),
+                VmValue::String(arcstr::ArcStr::from("claude-fable-5")),
+            ),
+            (
+                crate::value::intern_key("reasoning_policy"),
+                VmValue::String(arcstr::ArcStr::from("off")),
+            ),
+        ]);
+        let out = apply(opts);
+        let thinking = out
+            .get("thinking")
+            .and_then(VmValue::as_dict)
+            .expect("thinking");
+        assert_eq!(
+            thinking.get("mode").map(VmValue::display).as_deref(),
+            Some("effort")
+        );
+        assert_eq!(
+            thinking.get("level").map(VmValue::display).as_deref(),
+            Some("low")
+        );
     }
 
     fn agent_opts(provider: &str, model: &str, task: &str, policy: &str) -> crate::value::DictMap {
