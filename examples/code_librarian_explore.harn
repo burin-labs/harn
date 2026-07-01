@@ -14,7 +14,7 @@ import "std/code_librarian"
 
 pipeline default() {
   let root = "crates/harn-hostlib/tests/fixtures/code_index_queries/corpus"
-  let _rebuild = hostlib_code_index_rebuild({root: root})
+  let _ = hostlib_code_index_rebuild({root: root})
   // 1. Direct Cypher pass-through.
   let alpha: LibrarianCypherResult = code_librarian_query("MATCH (f:Function {name: 'main'}) RETURN f.path AS path")
   __io_println("functions named `main`: " + to_string(len(alpha.rows)))

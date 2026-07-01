@@ -2028,7 +2028,7 @@ impl<'a> Linter<'a> {
 
     fn finalize_core(&mut self) {
         for decl in &self.declarations {
-            if decl.name.starts_with('_') {
+            if !decl.is_simple_ident && decl.name.starts_with('_') {
                 continue;
             }
             if !self.references.contains(&decl.name) {

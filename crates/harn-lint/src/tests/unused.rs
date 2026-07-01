@@ -37,6 +37,66 @@ log("hello")
 }
 
 #[test]
+fn test_unused_underscore_prefixed_local_warns() {
+    let source = r#"
+pipeline default(task) {
+let _cleanup = cleanup()
+log("hello")
+}
+"#;
+    let diags = lint_source(source);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.rule == "unused-variable" && d.message.contains("`_cleanup`")),
+        "expected unused-variable for underscore-prefixed local, got: {diags:?}"
+    );
+    let result = apply_fixes(source, &diags);
+    assert!(
+        result.contains("let _ = cleanup()"),
+        "expected underscore-prefixed local to autofix to discard binding, got: {result}"
+    );
+}
+
+#[test]
+fn test_used_underscore_prefixed_local_is_not_rewritten() {
+    let source = r"
+pipeline default(task) {
+let _totals = record_usage()
+log(_totals)
+}
+";
+    let diags = lint_source(source);
+    assert!(
+        !diags
+            .iter()
+            .any(|d| d.rule == "unused-variable" && d.message.contains("`_totals`")),
+        "used underscore-prefixed locals must not trigger unused-variable: {diags:?}"
+    );
+    let result = apply_fixes(source, &diags);
+    assert!(
+        result.contains("let _totals = record_usage()"),
+        "used underscore-prefixed local must not be rewritten: {result}"
+    );
+}
+
+#[test]
+fn test_unused_underscore_prefixed_pattern_binding_ignored() {
+    let diags = lint_source(
+        r#"
+pipeline default(task) {
+let { _ignored } = { _ignored: 42 }
+log("hello")
+}
+"#,
+    );
+    assert!(
+        !has_rule(&diags, "unused-pattern-binding"),
+        "underscore-prefixed pattern bindings should stay intent-preserving: {diags:?}"
+    );
+}
+
+#[test]
 fn test_unused_discard_parameter_ignored() {
     let diags = lint_source(
         r#"

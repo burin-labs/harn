@@ -36,7 +36,7 @@ pipeline default(_task) {
   let conflict_root = assets + "/seed-conflict"
   // The symbol graph is per-workspace; rebuild seeds the index before
   // any rename runs.
-  let _rebuild = hostlib_code_index_rebuild({root: seed_root})
+  let _ = hostlib_code_index_rebuild({root: seed_root})
   // 1. Dry-run rename: planning only, no disk writes. The plan walks
   //    the typed symbol graph (#2434) from the `Widget` Type node and
   //    re-parses every in-scope file with tree-sitter to collect the
@@ -52,7 +52,7 @@ pipeline default(_task) {
   // 2. Conflict path: re-target the rebuilder at the conflict seed,
   //    where Widget and Gadget already share the same file. The host
   //    detects the shadow site and refuses to touch disk.
-  let _rebuild_conflict = hostlib_code_index_rebuild({root: conflict_root})
+  let _ = hostlib_code_index_rebuild({root: conflict_root})
   let conflict = edit_rename_symbol(
     {
       symbol_ref: {name: "Widget", path: "src/main.rs", kind: "Type"},
