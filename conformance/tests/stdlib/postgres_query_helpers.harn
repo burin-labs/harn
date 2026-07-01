@@ -4,6 +4,7 @@ import {
   exec,
   ident,
   ident_path,
+  jsonb_object,
   many,
   named,
   named_raw_sql,
@@ -16,6 +17,10 @@ import {
   run,
   select_clause,
   sql,
+  sql_and,
+  sql_fragment,
+  sql_not,
+  sql_or,
   timestamptz_json,
   uuid_text,
 } from "std/postgres/query"
@@ -191,4 +196,58 @@ LIMIT {limit}
   }
   __io_println(is_err(raw_named_empty))
   __io_println(regex_match("nope", to_string(unwrap_err(raw_named_empty))) != nil)
+  let record_projection = jsonb_object(
+    [
+      {key: "id", value: sql_fragment("{id}::text", {id: ident_path(["receipts", "id"])})},
+      {key: "owner's note", value: ident_path(["receipts", "note"])},
+      {
+        key: "created_at",
+        value: sql_fragment("to_json({created_at})#>>'{{}}'", {created_at: ident_path(["receipts", "created_at"])}),
+      },
+    ],
+  )
+  let active_scope = sql_and(
+    [
+      sql_or(
+        [
+          sql_fragment("{tenant} IS NULL", {tenant: ident_path(["receipts", "tenant_id"])}),
+          sql_fragment(
+            "{tenant} = {owner}",
+            {tenant: ident_path(["receipts", "tenant_id"]), owner: ident_path(["receipts", "owner_tenant_id"])},
+          ),
+        ],
+      ),
+      sql_not(sql_fragment("{status} = 'archived'", {status: ident_path(["receipts", "status"])})),
+    ],
+  )
+  let composed_query = sql(
+    "SELECT {record} AS record FROM {table} WHERE {predicate} AND id = {id}::uuid",
+    {record: record_projection, table: ident("receipts"), predicate: active_scope, id: "r1"},
+  )
+  __io_println(composed_query.sql)
+  __io_println(composed_query.params?[0])
+  let fragment_with_bound_value = try {
+    sql_fragment("{column} = {value}", {column: ident("id"), value: "r1"})
+  }
+  __io_println(is_err(fragment_with_bound_value))
+  let empty_and = try {
+    sql_and([])
+  }
+  __io_println(is_err(empty_and))
+  let empty_jsonb_object = try {
+    jsonb_object([])
+  }
+  __io_println(is_err(empty_jsonb_object))
+  let missing_jsonb_value = try {
+    jsonb_object([{key: "id"}])
+  }
+  __io_println(is_err(missing_jsonb_value))
+  let raw_predicate_string = try {
+    sql_and(["archived = false"])
+  }
+  __io_println(is_err(raw_predicate_string))
+  let raw_jsonb_value_string = try {
+    jsonb_object([{key: "id", value: "id::text"}])
+  }
+  __io_println(is_err(raw_jsonb_value_string))
 }

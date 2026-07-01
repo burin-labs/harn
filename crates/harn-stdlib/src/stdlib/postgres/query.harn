@@ -436,6 +436,28 @@ pub fn unsafe_sql(fragment: string) -> PgSqlFragment {
   return __sql_fragment(fragment)
 }
 
+/**
+ * Build a trusted SQL fragment from a source-controlled template.
+ *
+ * This is the structural-fragment companion to [`sql`]. Placeholders must
+ * render to trusted SQL fragments (`ident(...)`, `ident_path(...)`,
+ * `unsafe_sql(...)`, `columns(...)`, `jsonb_object(...)`, etc.); ordinary
+ * values are rejected because fragments cannot carry bind parameters. Keep
+ * dynamic data in the outer `sql(...)` / `named_sql(...)` template instead.
+ *
+ * @effects: []
+ * @errors: validation
+ * @api_stability: experimental
+ * @example: sql_fragment("{column} IS NOT NULL", {column: ident("created_at")})
+ */
+pub fn sql_fragment(template: string, values: dict = {}) -> PgSqlFragment {
+  let rendered = __render_sql_template(template, values)
+  if len(rendered.params) != 0 {
+    throw "std/postgres/query: SQL fragment placeholders must be trusted SQL fragments; bind values through sql/named_sql"
+  }
+  return __sql_fragment(rendered.sql)
+}
+
 fn __projection_part_text(part) -> string {
   if __is_sql_fragment(part) {
     return __sql_fragment_text(part)
@@ -447,6 +469,125 @@ fn __projection_part_text(part) -> string {
     return part
   }
   throw "std/postgres/query: projection part must be a SQL fragment or string"
+}
+
+fn __sql_string_literal(value: string) -> string {
+  if type_of(value) != "string" {
+    throw "std/postgres/query: SQL string literal must be a string"
+  }
+  return "'" + replace(value, "'", "''") + "'"
+}
+
+fn __trusted_fragment_text(value, label: string) -> string {
+  if !__is_sql_fragment(value) {
+    throw "std/postgres/query: " + label + " must be a trusted SQL fragment"
+  }
+  return __sql_fragment_text(value)
+}
+
+fn __predicate_part_text(part) -> string {
+  let sql = __trusted_fragment_text(part, "predicate part")
+  if trim(sql) == "" {
+    throw "std/postgres/query: predicate part must be non-empty"
+  }
+  return sql
+}
+
+/**
+ * Combine predicate fragments with `AND`, wrapping each child and the result in
+ * parentheses so later composition cannot change precedence.
+ *
+ * @effects: []
+ * @errors: validation
+ * @api_stability: experimental
+ * @example: sql_and([sql_fragment("a"), sql_fragment("b")])
+ */
+pub fn sql_and(parts: list) -> PgSqlFragment {
+  if type_of(parts) != "list" {
+    throw "std/postgres/query: sql_and requires a list of predicate fragments"
+  }
+  if len(parts) == 0 {
+    throw "std/postgres/query: sql_and requires at least one predicate fragment"
+  }
+  var rendered = []
+  for part in parts {
+    rendered = rendered.push("(" + __predicate_part_text(part) + ")")
+  }
+  return __sql_fragment("(" + join(rendered, " AND ") + ")")
+}
+
+/**
+ * Combine predicate fragments with `OR`, wrapping each child and the result in
+ * parentheses so later composition cannot change precedence.
+ *
+ * @effects: []
+ * @errors: validation
+ * @api_stability: experimental
+ * @example: sql_or([sql_fragment("a"), sql_fragment("b")])
+ */
+pub fn sql_or(parts: list) -> PgSqlFragment {
+  if type_of(parts) != "list" {
+    throw "std/postgres/query: sql_or requires a list of predicate fragments"
+  }
+  if len(parts) == 0 {
+    throw "std/postgres/query: sql_or requires at least one predicate fragment"
+  }
+  var rendered = []
+  for part in parts {
+    rendered = rendered.push("(" + __predicate_part_text(part) + ")")
+  }
+  return __sql_fragment("(" + join(rendered, " OR ") + ")")
+}
+
+/**
+ * Negate one predicate fragment, preserving precedence with explicit
+ * parentheses.
+ *
+ * @effects: []
+ * @errors: validation
+ * @api_stability: experimental
+ * @example: sql_not(sql_fragment("archived"))
+ */
+pub fn sql_not(part) -> PgSqlFragment {
+  return __sql_fragment("(NOT (" + __predicate_part_text(part) + "))")
+}
+
+/**
+ * Render a `jsonb_build_object(...)` expression from static keys and trusted
+ * SQL value expressions.
+ *
+ * Each field is `{key: string, value: PgSqlFragment}`. Keys are emitted as SQL
+ * string literals with quote escaping; values must already be trusted SQL
+ * fragments. The result is a single trusted expression, suitable for
+ * envelope/projection slots like `SELECT {record} AS record`.
+ *
+ * @effects: []
+ * @errors: validation
+ * @api_stability: experimental
+ * @example: jsonb_object([{key: "id", value: sql_fragment("{id}::text", {id: ident_path(["t", "id"])})}])
+ */
+pub fn jsonb_object(fields: list) -> PgSqlFragment {
+  if type_of(fields) != "list" {
+    throw "std/postgres/query: jsonb_object requires a list of fields"
+  }
+  if len(fields) == 0 {
+    throw "std/postgres/query: jsonb_object requires at least one field"
+  }
+  var rendered = []
+  for field in fields {
+    if type_of(field) != "dict" {
+      throw "std/postgres/query: jsonb_object field must be a dict"
+    }
+    if !contains(field.keys(), "key") || type_of(field.key) != "string" || trim(field.key) == "" {
+      throw "std/postgres/query: jsonb_object field key must be a non-empty string"
+    }
+    if !contains(field.keys(), "value") {
+      throw "std/postgres/query: jsonb_object field value is required"
+    }
+    rendered = rendered.push(__sql_string_literal(field.key))
+    rendered = rendered.push(__trusted_fragment_text(field.value, "jsonb_object field value"))
+  }
+  return __sql_fragment("jsonb_build_object(" + join(rendered, ", ") + ")")
 }
 
 /**

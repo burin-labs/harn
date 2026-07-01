@@ -41,3 +41,11 @@ many
 true
 true
 true
+SELECT jsonb_build_object('id', "receipts"."id"::text, 'owner''s note', "receipts"."note", 'created_at', to_json("receipts"."created_at")#>>'{}') AS record FROM "receipts" WHERE (((("receipts"."tenant_id" IS NULL) OR ("receipts"."tenant_id" = "receipts"."owner_tenant_id"))) AND ((NOT ("receipts"."status" = 'archived')))) AND id = $1::uuid
+r1
+true
+true
+true
+true
+true
+true
