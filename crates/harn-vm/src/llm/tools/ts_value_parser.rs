@@ -136,8 +136,21 @@ impl<'a> TsValueParser<'a> {
             b'.' if self.bytes.get(self.pos + 1).is_some_and(u8::is_ascii_digit) => {
                 self.parse_number()
             }
+            // The dominant real-world cause of this error from weak value models
+            // is pasting a RAW multi-line body (a code block for `content` /
+            // `new_text` / `new_body` / `old_string`) directly after `key:`
+            // instead of quoting it or using a heredoc — the parser skips any
+            // leading `//` comment and then trips on the first brace/paren of the
+            // pasted code. The bare "unexpected character" message is a dead end:
+            // it never names the heredoc form the parser already supports (see
+            // `b'<' if ... => parse_heredoc` above), so a model loops re-emitting
+            // the same raw body. Name the recovery so the next turn can self-heal.
             other => Err(format!(
-                "unexpected character `{}` starting a value",
+                "unexpected character `{}` starting a value. For a multi-line body \
+                 (e.g. `content`/`new_text`/`new_body`/`old_string`), do not paste raw text — \
+                 wrap it in a heredoc: put `<key>: <<BODY` on the key line, then the body lines \
+                 verbatim, then `BODY` alone on its own closing line. For a short value, wrap it \
+                 in double quotes.",
                 other as char
             )),
         }

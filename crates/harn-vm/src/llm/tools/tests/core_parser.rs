@@ -520,6 +520,39 @@ fn explicit_parse_error_for_unknown_label_prefix_on_known_tool() {
 }
 
 #[test]
+fn raw_multiline_body_value_error_teaches_heredoc() {
+    // The dominant real cause of "unexpected character starting a value" from
+    // weak value models: pasting a RAW multi-line body after `content:` instead
+    // of quoting it or using a heredoc. The parser skips the leading `//`
+    // comment then trips on the pasted code's brace. The error must NAME the
+    // heredoc recovery so the next turn can self-heal, not dead-end on
+    // "unexpected character".
+    let tools = sample_tool_registry();
+    let text = "edit({ action: \"replace_range\", path: \"a.zig\", content: // helper\n} })";
+    let result = parse_bare_calls_in_body(text, Some(&tools));
+    assert!(
+        result.calls.is_empty(),
+        "a raw-body call should not parse: {:?}",
+        result.calls
+    );
+    assert_eq!(
+        result.errors.len(),
+        1,
+        "one parse error expected: {:?}",
+        result.errors
+    );
+    let err = &result.errors[0];
+    assert!(
+        err.contains("heredoc"),
+        "error must teach the heredoc recovery: {err}"
+    );
+    assert!(
+        err.contains("<<"),
+        "error must show the heredoc marker: {err}"
+    );
+}
+
+#[test]
 fn parses_gemma_fenced_tool_code_block() {
     // The full-response `unwrap_exact_code_wrapper` path handles Gemma's
     // other native form: ```tool_code\nrun({...})\n```
