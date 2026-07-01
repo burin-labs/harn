@@ -8,6 +8,32 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.164
+
+### Added
+
+- **MCP HTTP transport now step-ups OAuth on a `403 insufficient_scope`
+  challenge, not just a `401`.** Per RFC 6750 §3.1, a `403` whose
+  `WWW-Authenticate: Bearer` header carries `error="insufficient_scope"` means
+  the presented token is valid but lacks a required scope. Harn now treats it
+  like a `401`: it emits `mcp_auth_required` (carrying the challenge's elevated
+  `scope`) and re-runs the authorization flow, so a tool call that needs an
+  additional scope recovers in place instead of dead-ending. A plain `403`
+  without an `insufficient_scope` challenge is still a hard denial and falls
+  through unchanged.
+- MCP servers that announce a changed tool/resource/prompt list
+  (`notifications/*/list_changed`) now emit an `mcp_catalog_changed` agent event,
+  so a connected client re-fetches the catalog and surfaces newly added tools
+  within the same session — no restart.
+
+### Fixed
+
+- **Release binary publishing now treats Actions run-artifact uploads as
+  best-effort.** Official GitHub Release archives still publish through the
+  hard `gh release upload` path, so transient artifact-store outages no longer
+  block otherwise valid signed release artifacts before checksum and smoke gates
+  can run.
+
 ## v0.8.163
 
 ### Added
