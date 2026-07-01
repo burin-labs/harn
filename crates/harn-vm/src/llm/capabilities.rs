@@ -340,30 +340,31 @@ pub struct ProviderRule {
     /// neutral `stream` preferences.
     #[serde(default)]
     pub requires_streaming: Option<bool>,
-    /// Whether this route accepts OpenAI's `reasoning_effort` request field.
+    /// Whether this route accepts Harn's provider-neutral reasoning effort
+    /// control. Providers project this to their native field (for example
+    /// OpenAI `reasoning_effort` or Anthropic `output_config.effort`).
     #[serde(default)]
     pub reasoning_effort_supported: Option<bool>,
-    /// Accepted `reasoning_effort` values for routes that expose a narrower
-    /// subset than Harn's provider-neutral enum. Empty means "unknown/all".
+    /// Accepted effort values for routes that expose a narrower subset than
+    /// Harn's provider-neutral enum. Empty means "unknown/all".
     #[serde(default)]
     pub reasoning_effort_levels: Option<Vec<String>>,
-    /// Whether this route accepts `reasoning_effort: "none"` as a true
-    /// reasoning-off setting. Older GPT-5 variants support effort but only
-    /// floor at `minimal`.
+    /// Whether this route accepts effort "none" as a true reasoning-off
+    /// setting. Older GPT-5 variants support effort but only floor at
+    /// `minimal`.
     #[serde(default)]
     pub reasoning_none_supported: Option<bool>,
-    /// Maximum thinking-budget tokens this model accepts for its high/xhigh
-    /// reasoning levels, when the provider takes an explicit token budget
-    /// rather than an effort enum. The canonical case is the native Gemini
-    /// API `generationConfig.thinkingConfig.thinkingBudget` field, whose
-    /// ceiling differs by model (Gemini 2.5 Flash caps at 24576, Pro at
-    /// 32768). Declared alongside the model's other wire capabilities instead
-    /// of a hard-coded `model.contains("flash")` branch in the provider.
+    /// Maximum thinking-budget tokens this model accepts for its high/xhigh/max
+    /// reasoning levels, when the provider takes an explicit token budget rather
+    /// than an effort enum. The canonical case is the native Gemini API
+    /// `generationConfig.thinkingConfig.thinkingBudget` field, whose ceiling
+    /// differs by model (Gemini 2.5 Flash caps at 24576, Pro at 32768).
+    /// Declared alongside the model's other wire capabilities instead of a
+    /// hard-coded `model.contains("flash")` branch in the provider.
     #[serde(default)]
     pub max_thinking_budget: Option<i64>,
-    /// Whether this route accepts an explicit enabled/disabled reasoning switch
-    /// set to false. Some OpenRouter endpoints require reasoning and return
-    /// 400 when sent `reasoning: {enabled:false}`.
+    /// Whether this route accepts an explicit disabled/off reasoning switch.
+    /// Some routes require reasoning and reject the provider's disabled shape.
     #[serde(default)]
     pub reasoning_disable_supported: Option<bool>,
     /// Whether this model performs *tool calls inside its reasoning channel*,
@@ -457,7 +458,7 @@ pub struct ProviderRule {
     /// Per-task auto-policy reasoning-level overrides for this route.
     /// Keys are task labels (`agent`, `verify`, `chat`, `summarize`,
     /// `code`); values are reasoning levels (`off`, `minimal`, `low`,
-    /// `medium`, `high`, `xhigh`). Consulted by `reasoning_policy` only
+    /// `medium`, `high`, `xhigh`, `max`). Consulted by `reasoning_policy` only
     /// when policy resolves to `auto` — explicit policies always win.
     ///
     /// Use this to declare known per-model regressions that should
@@ -1878,6 +1879,10 @@ mod tests {
             "{model}: OpenRouter Claude routes must not advertise direct Anthropic thinking controls"
         );
         assert!(
+            !routed.reasoning_effort_supported,
+            "{model}: OpenRouter Claude routes must not advertise direct Anthropic effort controls"
+        );
+        assert!(
             !routed.interleaved_thinking_supported,
             "{model}: OpenRouter Claude routes must not advertise interleaved thinking"
         );
@@ -2146,7 +2151,13 @@ preferred_tool_format = "native"
         assert!(caps.defer_loading);
         assert_eq!(caps.tool_search, vec!["bm25", "regex"]);
         assert!(caps.prompt_caching);
-        assert_eq!(caps.thinking_modes, vec!["adaptive"]);
+        assert_eq!(caps.thinking_modes, vec!["adaptive", "effort"]);
+        assert!(caps.reasoning_effort_supported);
+        assert_eq!(
+            caps.reasoning_effort_levels,
+            vec!["low", "medium", "high", "xhigh", "max"]
+        );
+        assert!(caps.interleaved_thinking_supported);
         assert!(caps.vision_supported);
         assert!(caps.audio);
         assert!(caps.pdf);
@@ -2159,6 +2170,43 @@ preferred_tool_format = "native"
         assert!(!caps.prefers_role_developer);
         assert!(caps.prefers_xml_tools);
         assert_eq!(caps.thinking_block_style, "thinking_blocks");
+    }
+
+    #[test]
+    fn anthropic_sonnet_5_gets_adaptive_effort_capabilities() {
+        reset();
+        let caps = lookup("anthropic", "claude-sonnet-5");
+        assert!(caps.native_tools);
+        assert!(caps.defer_loading);
+        assert_eq!(caps.tool_search, vec!["bm25", "regex"]);
+        assert!(caps.prompt_caching);
+        assert_eq!(caps.thinking_modes, vec!["adaptive", "effort"]);
+        assert!(caps.reasoning_effort_supported);
+        assert_eq!(
+            caps.reasoning_effort_levels,
+            vec!["low", "medium", "high", "xhigh", "max"]
+        );
+        assert!(caps.reasoning_disable_supported);
+        assert!(!caps.reasoning_none_supported);
+        assert!(caps.interleaved_thinking_supported);
+        assert!(!caps.supports_assistant_prefill);
+        assert_eq!(caps.thinking_block_style, "thinking_blocks");
+    }
+
+    #[test]
+    fn anthropic_fable_effort_cannot_be_disabled() {
+        reset();
+        for model in ["claude-fable-5", "anthropic/claude-fable-5"] {
+            let caps = lookup("anthropic", model);
+            assert_eq!(caps.thinking_modes, vec!["adaptive", "effort"]);
+            assert!(caps.reasoning_effort_supported);
+            assert_eq!(
+                caps.reasoning_effort_levels,
+                vec!["low", "medium", "high", "xhigh", "max"]
+            );
+            assert!(!caps.reasoning_disable_supported);
+            assert!(!caps.supports_assistant_prefill);
+        }
     }
 
     #[test]
@@ -2189,6 +2237,7 @@ preferred_tool_format = "native"
             "anthropic/claude-haiku-4-7",
             "anthropic/claude-sonnet-4-6",
             "anthropic/claude-sonnet-4-7",
+            "anthropic/claude-sonnet-5",
             "anthropic/claude-opus-4-6",
             "anthropic/claude-opus-4-7",
         ] {

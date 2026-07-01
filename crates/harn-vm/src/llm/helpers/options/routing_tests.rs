@@ -1199,10 +1199,11 @@ fn explicit_thinking_wins_over_session_pinned_reasoning_policy() {
 }
 
 #[test]
-fn standalone_reasoning_effort_accepts_none_and_xhigh_when_supported() {
+fn standalone_reasoning_effort_accepts_none_xhigh_and_max_when_supported() {
     for (raw, expected) in [
         ("none", crate::llm::api::ReasoningEffort::None),
         ("xhigh", crate::llm::api::ReasoningEffort::XHigh),
+        ("max", crate::llm::api::ReasoningEffort::Max),
     ] {
         let options = crate::value::DictMap::from_iter([
             (

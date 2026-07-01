@@ -16,6 +16,7 @@ pub(crate) enum ReasoningEffort {
     Medium,
     High,
     XHigh,
+    Max,
 }
 
 impl ReasoningEffort {
@@ -27,6 +28,7 @@ impl ReasoningEffort {
             ReasoningEffort::Medium => "medium",
             ReasoningEffort::High => "high",
             ReasoningEffort::XHigh => "xhigh",
+            ReasoningEffort::Max => "max",
         }
     }
 }
@@ -491,7 +493,16 @@ impl LlmCallOptions {
         }
         if matches!(
             self.thinking,
-            ThinkingConfig::Enabled { .. } | ThinkingConfig::Adaptive
+            ThinkingConfig::Enabled { .. }
+                | ThinkingConfig::Adaptive
+                | ThinkingConfig::Effort {
+                    level: ReasoningEffort::Minimal
+                        | ReasoningEffort::Low
+                        | ReasoningEffort::Medium
+                        | ReasoningEffort::High
+                        | ReasoningEffort::XHigh
+                        | ReasoningEffort::Max,
+                }
         ) && caps.interleaved_thinking_supported
         {
             push_unique_anthropic_beta_feature(

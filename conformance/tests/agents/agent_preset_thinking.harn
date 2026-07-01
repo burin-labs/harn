@@ -6,6 +6,7 @@ pipeline default() {
   // lowers that through the shared provider-aware policy implementation.
   let audit_anthropic = agent_loop_options(agent_preset("audit", {provider: "anthropic", model: "claude-opus-4-7"}))
   __io_println(audit_anthropic.thinking.mode)
+  __io_println(audit_anthropic.thinking.level)
   __io_println(audit_anthropic._agent_reasoning_policy_applied.policy)
   __io_println(audit_anthropic._agent_reasoning_policy_applied.scale)
   __io_println(audit_anthropic._agent_reasoning_policy_applied.task)

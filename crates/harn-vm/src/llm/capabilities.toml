@@ -100,19 +100,25 @@
 #                     request field for those options; defaults to
 #                     chat_template_kwargs, Baseten uses chat_template_args.
 #   requires_completion_tokens: whether to send max_completion_tokens instead of max_tokens.
-#   reasoning_effort_supported: whether reasoning_effort is accepted.
+#   reasoning_effort_supported:
+#                     whether the route accepts Harn's provider-neutral
+#                     reasoning effort control. Providers project this to
+#                     their native field (for example OpenAI
+#                     reasoning_effort or Anthropic output_config.effort).
 #   reasoning_effort_levels:
-#                     accepted reasoning_effort values when the provider
-#                     accepts only a subset of Harn's neutral enum.
-#   reasoning_none_supported: whether reasoning_effort="none" is accepted.
+#                     accepted effort values when the provider accepts only
+#                     a subset of Harn's neutral enum.
+#   reasoning_none_supported:
+#                     whether the effort surface accepts "none" as a true
+#                     reasoning-off setting.
 #   max_thinking_budget:
-#                     max thinkingBudget tokens for high/xhigh reasoning when
-#                     the provider takes an explicit token budget (native
-#                     Gemini API thinkingConfig). Differs per model
+#                     max thinkingBudget tokens for high/xhigh/max reasoning
+#                     when the provider takes an explicit token budget
+#                     (native Gemini API thinkingConfig). Differs per model
 #                     (2.5 Flash 24576, 2.5 Pro 32768).
 #   reasoning_disable_supported:
-#                     whether `reasoning: {enabled:false}` is accepted when
-#                     the provider uses an enabled/disabled reasoning switch.
+#                     whether the route accepts an explicit disabled/off
+#                     reasoning switch.
 #   reasoning_required_for_tools:
 #                     whether the model calls tools *inside* its reasoning
 #                     channel, so disabling reasoning breaks tool calling
@@ -300,12 +306,12 @@ top_k_supported = false
 # ---------- Anthropic (Claude) ------------------------------------------------
 
 # Claude Fable 5 / Mythos 5 — the Mythos-class tier above Opus (launched
-# 2026-06-09). Same surface as Opus 4.7+: adaptive thinking only (and on
+# 2026-06-09). Same surface as Opus 4.7+: adaptive thinking (and on
 # this family thinking is always on — an explicit `disabled` is a 400, so
-# the request builder must omit the field), interleaved thinking, no
-# assistant prefill, sampling params rejected. No version_min: every
-# fable/mythos id is Mythos-class. Without these rows the ids would fall
-# through to the permissive `claude-*` catch-all at the bottom of this
+# the request builder must omit the field), effort control, interleaved
+# thinking, no assistant prefill, sampling params rejected. No version_min:
+# every fable/mythos id is Mythos-class. Without these rows the ids would
+# fall through to the permissive `claude-*` catch-all at the bottom of this
 # file, which wrongly grants `thinking_modes = ["enabled"]` and prefill.
 [[provider.anthropic]]
 model_match = "claude-fable-*"
@@ -320,7 +326,10 @@ audio_supported = true
 pdf_supported = true
 files_api_supported = true
 structured_output = "tool_use"
-thinking_modes = ["adaptive"]
+thinking_modes = ["adaptive", "effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high", "xhigh", "max"]
+reasoning_disable_supported = false
 interleaved_thinking_supported = true
 vision_supported = true
 prefers_xml_scaffolding = true
@@ -344,7 +353,10 @@ audio_supported = true
 pdf_supported = true
 files_api_supported = true
 structured_output = "tool_use"
-thinking_modes = ["adaptive"]
+thinking_modes = ["adaptive", "effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high", "xhigh", "max"]
+reasoning_disable_supported = false
 interleaved_thinking_supported = true
 vision_supported = true
 prefers_xml_scaffolding = true
@@ -368,7 +380,10 @@ audio_supported = true
 pdf_supported = true
 files_api_supported = true
 structured_output = "tool_use"
-thinking_modes = ["adaptive"]
+thinking_modes = ["adaptive", "effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high", "xhigh", "max"]
+reasoning_disable_supported = false
 interleaved_thinking_supported = true
 vision_supported = true
 prefers_xml_scaffolding = true
@@ -392,7 +407,10 @@ audio_supported = true
 pdf_supported = true
 files_api_supported = true
 structured_output = "tool_use"
-thinking_modes = ["adaptive"]
+thinking_modes = ["adaptive", "effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high", "xhigh", "max"]
+reasoning_disable_supported = false
 interleaved_thinking_supported = true
 vision_supported = true
 prefers_xml_scaffolding = true
@@ -442,7 +460,36 @@ audio_supported = true
 pdf_supported = true
 files_api_supported = true
 structured_output = "tool_use"
-thinking_modes = ["adaptive"]
+thinking_modes = ["adaptive", "effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high", "xhigh", "max"]
+interleaved_thinking_supported = true
+vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
+
+[[provider.anthropic]]
+model_match = "claude-sonnet-5*"
+native_tools = true
+preferred_tool_format = "native"
+defer_loading = true
+tool_search = ["bm25", "regex"]
+max_tools = 10000
+prompt_caching = true
+vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
+structured_output = "tool_use"
+thinking_modes = ["adaptive", "effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high", "xhigh", "max"]
+reasoning_disable_supported = true
 interleaved_thinking_supported = true
 vision_supported = true
 prefers_xml_scaffolding = true
@@ -641,7 +688,36 @@ audio_supported = true
 pdf_supported = true
 files_api_supported = true
 structured_output = "tool_use"
-thinking_modes = ["adaptive"]
+thinking_modes = ["adaptive", "effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high", "xhigh", "max"]
+interleaved_thinking_supported = true
+vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
+
+[[provider.anthropic]]
+model_match = "anthropic/claude-sonnet-5*"
+native_tools = true
+preferred_tool_format = "native"
+defer_loading = true
+tool_search = ["bm25", "regex"]
+max_tools = 10000
+prompt_caching = true
+vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
+structured_output = "tool_use"
+thinking_modes = ["adaptive", "effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high", "xhigh", "max"]
+reasoning_disable_supported = true
 interleaved_thinking_supported = true
 vision_supported = true
 prefers_xml_scaffolding = true
