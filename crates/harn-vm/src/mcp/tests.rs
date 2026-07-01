@@ -966,6 +966,50 @@ fn install_capturing_agent_sink(
     events
 }
 
+#[test]
+fn list_changed_notification_emits_catalog_changed_cue() {
+    let session_id = crate::agent_sessions::open_or_create(Some("mcp-list-changed".to_string()));
+    let _session_guard = crate::agent_sessions::enter_current_session(session_id.clone());
+    let captured = install_capturing_agent_sink(&session_id);
+
+    // A `tools/list_changed` notification emits the catalog-change cue so a thin
+    // client re-fetches the catalog and surfaces the new tools this session.
+    super::notifications::relay_resource_notification(
+        "calc",
+        "notifications/tools/list_changed",
+        &serde_json::json!({ "method": "notifications/tools/list_changed" }),
+    );
+    // A content-only `resources/updated` is not a catalog change and must not.
+    super::notifications::relay_resource_notification(
+        "calc",
+        "notifications/resources/updated",
+        &serde_json::json!({ "method": "notifications/resources/updated" }),
+    );
+
+    let events = captured.lock().unwrap().clone();
+    let catalog_changed: Vec<_> = events
+        .iter()
+        .filter(|event| {
+            matches!(
+                event,
+                crate::agent_events::AgentEvent::McpCatalogChanged { .. }
+            )
+        })
+        .collect();
+    assert_eq!(
+        catalog_changed.len(),
+        1,
+        "exactly one catalog-changed cue for the single list_changed notification"
+    );
+    match catalog_changed[0] {
+        crate::agent_events::AgentEvent::McpCatalogChanged { server, reason, .. } => {
+            assert_eq!(server.as_deref(), Some("calc"));
+            assert_eq!(reason, "list_changed");
+        }
+        _ => unreachable!(),
+    }
+}
+
 fn test_stored_mcp_token(resource: &str, access_token: &str) -> crate::mcp_oauth::StoredMcpToken {
     crate::mcp_oauth::StoredMcpToken {
         access_token: access_token.to_string(),
