@@ -5,9 +5,9 @@
 //   (a) EMIT an observable `iteration_end` provider_error event carrying the
 //       failed provider/model/status — never an invisible `break`;
 //   (b) NOT terminate as a fake success;
-//   (c) DEGRADE the failed escalation back to the PRIMARY provider for one more
-//       turn (primary-retry fallback) so the run continues with the cheap model
-//       instead of dying.
+//   (c) DEGRADE the failed escalation back to the PRIMARY route for one more
+//       turn (provider/model/tool_format primary-retry fallback) so the run
+//       continues with the cheap model instead of dying.
 //
 // A second case pins the regression guard: a plain primary provider_error with
 // NO escalation in effect still surfaces an event and stops with provider_error
@@ -48,14 +48,20 @@ fn count_events(events, event_type) {
 // -------------------------------------------------------------------------------------------------
 
 fn escalation_fallback_case() {
-  // Records the provider seen on every LLM call, in order, so we can prove the
-  // escalated call fired then the loop retried the PRIMARY provider.
+  // Records the provider/tool_format route seen on every LLM call, in order,
+  // so we can prove the escalated call fired then the loop retried the PRIMARY
+  // route. The tool_format clause prevents native escalations from leaking
+  // back into text-only primaries after an escalation provider error.
   let seen = shared_cell({scope: "task_group", key: "esc-providers", initial: ""})
+  let formats = shared_cell({scope: "task_group", key: "esc-formats", initial: ""})
   let turn = shared_cell({scope: "task_group", key: "esc-turn", initial: 0})
   let caller = { call ->
     let provider = to_string(call?.opts?.provider ?? "")
+    let tool_format = to_string(call?.opts?.tool_format ?? "")
     let snap = shared_snapshot(seen)
     shared_set(seen, snap.value + provider + ",")
+    let format_snap = shared_snapshot(formats)
+    shared_set(formats, format_snap.value + tool_format + ",")
     if provider == "escalated" {
       return {
         ok: false,
@@ -77,7 +83,7 @@ fn escalation_fallback_case() {
     let count = shared_snapshot(turn)
     shared_set(turn, count.value + 1)
     if count.value == 0 {
-      return {next_options: {provider: "escalated", model: "frontier"}}
+      return {next_options: {provider: "escalated", model: "frontier", tool_format: "native"}}
     }
     return nil
   }
@@ -91,6 +97,7 @@ fn escalation_fallback_case() {
         session_id: session,
         provider: "mock",
         model: "cheap",
+        tool_format: "text",
         llm_caller: caller,
         post_turn_callback: post_turn,
         loop_until_done: true,
@@ -108,9 +115,11 @@ fn escalation_fallback_case() {
   __io_println("esc_event_model=" + to_string(perr?.iteration_info?.model ?? ""))
   __io_println("esc_event_status=" + to_string(perr?.iteration_info?.provider_status ?? ""))
   __io_println("esc_event_fallback=" + to_string(perr?.iteration_info?.escalation_fallback ?? false))
-  // (c) The provider call sequence proves: primary -> escalated (failed) ->
-  //     primary again (the fallback retry) -> primary (completion).
+  // (c) The provider/tool_format call sequence proves:
+  //     primary:text -> escalated:native (failed) -> primary:text again
+  //     (the fallback retry) -> primary:text (completion).
   __io_println("esc_providers=" + shared_get(seen))
+  __io_println("esc_tool_formats=" + shared_get(formats))
   // (b) The run did NOT terminate as a fake success on the failed escalation:
   //     it converged via the primary fallback to a real "done".
   __io_println("esc_status=" + captured.result.status)
