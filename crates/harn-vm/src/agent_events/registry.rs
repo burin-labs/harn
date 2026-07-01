@@ -37,14 +37,10 @@ pub fn register_sink(session_id: impl Into<String>, sink: Arc<dyn AgentEventSink
 pub fn clear_session_sinks(session_id: &str) {
     #[cfg(test)]
     {
-        let owner = std::thread::current().id();
-        let mut reg = external_sinks().write().expect("sink registry poisoned");
-        if let Some(sinks) = reg.get_mut(session_id) {
-            sinks.retain(|sink| sink.owner != owner);
-            if sinks.is_empty() {
-                reg.remove(session_id);
-            }
-        }
+        external_sinks()
+            .write()
+            .expect("sink registry poisoned")
+            .remove(session_id);
     }
     #[cfg(not(test))]
     {
@@ -136,15 +132,8 @@ pub fn emit_event(event: &AgentEvent) {
         let reg = external_sinks().read().expect("sink registry poisoned");
         #[cfg(test)]
         {
-            let owner = std::thread::current().id();
             reg.get(event.session_id())
-                .map(|sinks| {
-                    sinks
-                        .iter()
-                        .filter(|sink| sink.owner == owner)
-                        .map(|sink| sink.sink.clone())
-                        .collect()
-                })
+                .map(|sinks| sinks.iter().map(|sink| sink.sink.clone()).collect())
                 .unwrap_or_default()
         }
         #[cfg(not(test))]
@@ -260,12 +249,11 @@ pub fn reset_wildcard_sinks() {
 pub fn session_external_sink_count(session_id: &str) -> usize {
     #[cfg(test)]
     {
-        let owner = std::thread::current().id();
         return external_sinks()
             .read()
             .expect("sink registry poisoned")
             .get(session_id)
-            .map(|sinks| sinks.iter().filter(|sink| sink.owner == owner).count())
+            .map(Vec::len)
             .unwrap_or(0);
     }
     #[cfg(not(test))]

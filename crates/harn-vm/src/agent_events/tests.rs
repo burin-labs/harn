@@ -59,6 +59,30 @@ fn session_scoped_sink_routing() {
 }
 
 #[test]
+fn session_scoped_sink_routing_crosses_worker_threads() {
+    reset_all_sinks();
+    let delivered = Arc::new(AtomicUsize::new(0));
+    let session_id = format!("session-cross-thread-{}", uuid::Uuid::now_v7());
+    register_sink(&session_id, Arc::new(CountingSink(delivered.clone())));
+
+    let emit_session_id = session_id.clone();
+    std::thread::spawn(move || {
+        emit_event(&AgentEvent::IterationStart {
+            session_id: emit_session_id,
+            iteration: 0,
+            provider: String::new(),
+            model: String::new(),
+        });
+    })
+    .join()
+    .expect("worker thread");
+
+    assert_eq!(delivered.load(Ordering::SeqCst), 1);
+    clear_session_sinks(&session_id);
+    assert_eq!(session_external_sink_count(&session_id), 0);
+}
+
+#[test]
 fn newly_opened_child_session_inherits_current_external_sinks() {
     reset_all_sinks();
     let delivered = Arc::new(AtomicUsize::new(0));
