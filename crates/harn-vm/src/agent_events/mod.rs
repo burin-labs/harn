@@ -39,7 +39,7 @@ pub use registry::reset_wildcard_sinks;
 pub use registry::{
     clear_session_sinks, emit_event, mirror_session_sinks, register_sink, register_wildcard_sink,
     reset_all_sinks, session_closure_subscriber_count, session_external_sink_count,
-    unregister_wildcard_sink, WildcardSinkHandle,
+    session_has_external_sink, unregister_wildcard_sink, WildcardSinkHandle,
 };
 pub use sinks::{AgentEventSink, EventLogSink, JsonlEventSink, MultiSink, PersistedAgentEvent};
 pub use tool::{DenialGate, ToolCallErrorCategory, ToolCallStatus, ToolDenial, ToolExecutor};

@@ -37,8 +37,8 @@ use uuid::Uuid;
 
 use crate::{
     AdapterDescriptor, AuthMethodConfig, AuthPolicy, AuthRequest, AuthorizationDecision,
-    CallArguments, CallRequest, CallResponse, DispatchCore, DispatchError, DispatchRuntime,
-    ExportCatalog, HttpTlsConfig, TransportAdapter,
+    CallArguments, CallRequest, CallResponse, DispatchAgentEventSink, DispatchCore, DispatchError,
+    DispatchRuntime, ExportCatalog, HttpTlsConfig, TransportAdapter,
 };
 
 mod auth;

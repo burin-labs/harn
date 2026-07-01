@@ -107,7 +107,7 @@ impl A2aServer {
             task_id: task.id.clone(),
             tasks: self.tasks.clone(),
         });
-        harn_vm::agent_events::register_sink(session_id.clone(), sink);
+        harn_vm::agent_events::register_sink(session_id.clone(), sink.clone());
         let _sink_registration = AgentEventSinkRegistration::new(session_id.clone());
 
         let result = self
@@ -124,6 +124,7 @@ impl A2aServer {
                 metadata: BTreeMap::new(),
                 cancel_token: Some(task.cancel_token.clone()),
                 agent_session_id: Some(session_id.clone()),
+                agent_event_sink: Some(DispatchAgentEventSink::new(sink)),
                 actor_chain: task.actor_chain.clone(),
                 actor_chain_hop: Some(self.agent_name.clone()),
                 progress: None,

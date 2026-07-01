@@ -267,6 +267,26 @@ pub fn session_external_sink_count(session_id: &str) -> usize {
     }
 }
 
+/// Return whether `sink` is still registered for `session_id`.
+///
+/// Request-local transports use this to install a scoped fallback sink without
+/// double-delivering events while their process-global registration is healthy.
+/// If sibling reset code clears the global registration mid-dispatch, the
+/// scoped sink can detect that absence and continue streaming live events.
+pub fn session_has_external_sink(session_id: &str, sink: &Arc<dyn AgentEventSink>) -> bool {
+    let reg = external_sinks().read().expect("sink registry poisoned");
+    #[cfg(test)]
+    {
+        reg.get(session_id)
+            .is_some_and(|sinks| sinks.iter().any(|entry| Arc::ptr_eq(&entry.sink, sink)))
+    }
+    #[cfg(not(test))]
+    {
+        reg.get(session_id)
+            .is_some_and(|sinks| sinks.iter().any(|entry| Arc::ptr_eq(entry, sink)))
+    }
+}
+
 pub fn session_closure_subscriber_count(session_id: &str) -> usize {
     crate::agent_sessions::subscriber_count(session_id)
 }
