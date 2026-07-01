@@ -108,6 +108,13 @@ fn resolve_semantic_alias(
     name: String,
     arguments: serde_json::Value,
 ) -> (String, serde_json::Value) {
+    // Canonical `run` calls can still arrive with Codex/OpenAI-style argv
+    // payloads (`{"command":["bash","lc","..."]}`) from native providers.
+    // Normalize those arguments even when no alias rewrite is needed.
+    if name == "run" {
+        return (name, remap_command_args(arguments));
+    }
+
     // 1. Browser-namespace aliases (Codex / Aider-style file-explorer vocab).
     //    Strip a known `*_browser.` prefix, then map the verb to look/search.
     if let Some((canonical, mapped_args)) = resolve_browser_alias(&name, &arguments) {
@@ -570,6 +577,38 @@ mod tests {
         );
         assert_eq!(name, "run");
         assert_eq!(mapped["command"], "git commit -m 'fix tool calls'");
+    }
+
+    #[test]
+    fn normalizes_canonical_run_argv_command_string() {
+        let (name, mapped) = normalize_tool_call_shape(
+            "run",
+            serde_json::json!({"command": ["bash", "lc", "ls -R"]}),
+        );
+        assert_eq!(name, "run");
+        assert_eq!(mapped["command"], "ls -R");
+    }
+
+    #[test]
+    fn normalizes_canonical_run_cmd_alias() {
+        let (name, mapped) = normalize_tool_call_shape(
+            "run",
+            serde_json::json!({"cmd": ["bash", "-lc", "swift test"], "timeout_ms": 1000}),
+        );
+        assert_eq!(name, "run");
+        assert_eq!(mapped["command"], "swift test");
+        assert_eq!(mapped["timeout_ms"], 1000);
+        assert!(mapped.get("cmd").is_none());
+    }
+
+    #[test]
+    fn normalizes_namespaced_run_argv_command_string() {
+        let (name, mapped) = normalize_tool_call_shape(
+            "functions.run",
+            serde_json::json!({"command": ["git", "status", "--short"]}),
+        );
+        assert_eq!(name, "run");
+        assert_eq!(mapped["command"], "git status --short");
     }
 
     #[test]

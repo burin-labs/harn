@@ -1796,6 +1796,41 @@ mod tests {
     }
 
     #[test]
+    fn openai_parser_normalizes_canonical_run_argv_command() {
+        let response = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "call_run_argv",
+                            "type": "function",
+                            "function": {
+                                "name": "run",
+                                "arguments": "{\"command\":[\"bash\",\"lc\",\"ls -R\"]}"
+                            }
+                        }
+                    ]
+                },
+                "finish_reason": "tool_calls"
+            }],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 20}
+        });
+
+        let result = parse_llm_response(
+            &response,
+            "fireworks",
+            "accounts/fireworks/models/gpt-oss-120b",
+            false,
+            false,
+        )
+        .expect("parser succeeds");
+        assert_eq!(result.tool_calls.len(), 1);
+        assert_eq!(result.tool_calls[0]["name"], "run");
+        assert_eq!(result.tool_calls[0]["arguments"]["command"], "ls -R");
+    }
+
+    #[test]
     fn openai_parser_records_tool_search_call_as_query_event() {
         // OpenAI's Responses API (harn#71) surfaces the server-hosted
         // tool_search as a `tool_search_call` entry in the `tool_calls`
