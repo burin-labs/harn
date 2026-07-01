@@ -628,6 +628,43 @@ pub fn active_workspace_tmpdir_env() -> Vec<(String, String)> {
     env
 }
 
+/// Environment overlay that pins a child tool's *message* output to a
+/// deterministic, English, UTF-8-preserving locale, as `(key, value)` pairs.
+///
+/// Build/test/verify commands inherit the parent environment, so a user whose
+/// shell sets `LC_ALL=ja_JP.UTF-8` (or `LANG=de_DE.UTF-8`) would otherwise get
+/// *localized* compiler/test output. Every downstream matcher that keys on
+/// English diagnostics — deterministic syntax repair, error-signature
+/// grounding, completion/pass-fail classification — would then silently
+/// misfire for a non-Anglosphere user. Forcing a stable message locale is the
+/// root-cause fix: it keeps the English matchers correct by construction,
+/// without shipping per-locale translations of every toolchain.
+///
+/// `LC_MESSAGES=C` forces untranslated (English) messages for gettext-based
+/// tools (gcc/clang, git-l10n, GNU coreutils, gradle) while deliberately *not*
+/// touching `LC_CTYPE`/`LANG`, so UTF-8 handling of non-ASCII source and
+/// identifiers is preserved (unlike the blunt `LC_ALL=C`, which forces an ASCII
+/// ctype and can mangle non-ASCII identifiers in diagnostics). The .NET CLI
+/// ignores `LC_*` and localizes from its own variable / the OS UI language, so
+/// `DOTNET_CLI_UI_LANGUAGE=en` is required in addition.
+///
+/// A user-inherited `LC_ALL` would override `LC_MESSAGES`, so the spawn sites
+/// additionally strip `LC_ALL` (unless the caller pinned it) before applying
+/// this overlay. Both are subject to the caller-pinned-key rule (like the
+/// `TMPDIR` overlay): an explicit `env`/`env_remove` still wins.
+pub fn deterministic_message_locale_env() -> Vec<(String, String)> {
+    vec![
+        ("LC_MESSAGES".to_string(), "C".to_string()),
+        ("DOTNET_CLI_UI_LANGUAGE".to_string(), "en".to_string()),
+    ]
+}
+
+/// The environment variable a user-inherited value of which would override
+/// [`deterministic_message_locale_env`]'s `LC_MESSAGES`. Spawn sites strip this
+/// (unless the caller pinned it) so the forced message locale actually takes
+/// effect. Kept as a named constant so both spawn paths stay in sync.
+pub const MESSAGE_LOCALE_OVERRIDE_ENV: &str = "LC_ALL";
+
 fn default_process_cwd_for_policy(policy: &CapabilityPolicy) -> Result<PathBuf, VmError> {
     let roots = normalized_workspace_roots(policy);
     let current = std::env::current_dir().map_err(|error| {
@@ -1627,6 +1664,31 @@ mod tests {
                 "{key} must point at the workspace-local temp dir"
             );
         }
+    }
+
+    #[test]
+    fn deterministic_message_locale_env_forces_english_utf8_safe_messages() {
+        let env: std::collections::BTreeMap<_, _> =
+            deterministic_message_locale_env().into_iter().collect();
+        // gettext tools (gcc/clang, git-l10n, coreutils, gradle) honor
+        // LC_MESSAGES; `C` yields untranslated English.
+        assert_eq!(env.get("LC_MESSAGES").map(String::as_str), Some("C"));
+        // .NET ignores LC_* and localizes from its own variable.
+        assert_eq!(
+            env.get("DOTNET_CLI_UI_LANGUAGE").map(String::as_str),
+            Some("en")
+        );
+        // Deliberately NOT setting LC_ALL/LC_CTYPE/LANG so UTF-8 handling of
+        // non-ASCII source and identifiers is preserved (unlike `LC_ALL=C`).
+        assert!(
+            !env.contains_key("LC_ALL"),
+            "must not force LC_ALL (would clobber UTF-8 ctype)"
+        );
+        assert!(!env.contains_key("LC_CTYPE"));
+        assert!(!env.contains_key("LANG"));
+        // The override-strip constant names the one variable that would defeat
+        // LC_MESSAGES if inherited.
+        assert_eq!(MESSAGE_LOCALE_OVERRIDE_ENV, "LC_ALL");
     }
 
     #[test]

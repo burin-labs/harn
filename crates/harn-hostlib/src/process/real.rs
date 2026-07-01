@@ -82,6 +82,26 @@ impl ProcessSpawner for RealSpawner {
             command.env(key, value);
         }
 
+        // Pin tool *message* output to a deterministic English/UTF-8 locale so
+        // downstream English-diagnostic matchers (deterministic syntax repair,
+        // error-signature grounding, completion/pass-fail classification) do not
+        // misfire for a non-Anglosphere user whose shell localizes compiler/test
+        // output. A user-inherited `LC_ALL` overrides `LC_MESSAGES`, so strip it
+        // first — unless the caller pinned it. Then apply the overlay with the
+        // same caller-wins rule as the TMPDIR overlay above.
+        if !spec
+            .env
+            .contains_key(process_sandbox::MESSAGE_LOCALE_OVERRIDE_ENV)
+        {
+            command.env_remove(process_sandbox::MESSAGE_LOCALE_OVERRIDE_ENV);
+        }
+        for (key, value) in process_sandbox::deterministic_message_locale_env() {
+            if spec.env.contains_key(&key) {
+                continue;
+            }
+            command.env(key, value);
+        }
+
         if spec.configure_process_group {
             configure_background_process_group(&mut command);
         }

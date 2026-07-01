@@ -930,6 +930,22 @@ pub(crate) fn build_sandboxed_command(
         }
         cmd.env(key, value);
     }
+    // Pin tool *message* output to a deterministic English/UTF-8 locale so
+    // downstream English-diagnostic matchers (deterministic syntax repair,
+    // error-signature grounding, completion/pass-fail classification) do not
+    // misfire for a non-Anglosphere user whose shell localizes compiler/test
+    // output. A user-inherited `LC_ALL` overrides `LC_MESSAGES`, so strip it
+    // first — unless the caller pinned it via `env`/`env_remove` — then apply
+    // the overlay with the same caller-wins rule as the TMPDIR overlay above.
+    if !caller_env_keys.contains(crate::process_sandbox::MESSAGE_LOCALE_OVERRIDE_ENV) {
+        cmd.env_remove(crate::process_sandbox::MESSAGE_LOCALE_OVERRIDE_ENV);
+    }
+    for (key, value) in crate::process_sandbox::deterministic_message_locale_env() {
+        if caller_env_keys.contains(&key) {
+            continue;
+        }
+        cmd.env(key, value);
+    }
     Ok(cmd)
 }
 
@@ -1272,9 +1288,10 @@ async fn host_tool_call_builtin(
 #[cfg(test)]
 mod tests {
     use super::{
-        capability_manifest_with_mocks, clear_host_call_bridge, dispatch_host_operation,
-        dispatch_host_tool_call, dispatch_host_tool_list, dispatch_mock_host_call, push_host_mock,
-        reset_host_state, resolve_process_exec_cwd, set_host_call_bridge, HostCallBridge, HostMock,
+        build_sandboxed_command, capability_manifest_with_mocks, clear_host_call_bridge,
+        dispatch_host_operation, dispatch_host_tool_call, dispatch_host_tool_list,
+        dispatch_mock_host_call, push_host_mock, reset_host_state, resolve_process_exec_cwd,
+        set_host_call_bridge, HostCallBridge, HostMock,
     };
     use crate::value::VmDictExt;
 
@@ -1284,6 +1301,98 @@ mod tests {
     };
 
     use crate::value::{VmError, VmValue};
+
+    /// Collect a built command's env mutations as `(name, Option<value>)`,
+    /// where `None` marks a variable the command removes from the inherited
+    /// environment.
+    fn command_env(
+        cmd: &tokio::process::Command,
+    ) -> std::collections::BTreeMap<String, Option<String>> {
+        cmd.as_std()
+            .get_envs()
+            .map(|(k, v)| {
+                (
+                    k.to_string_lossy().into_owned(),
+                    v.map(|value| value.to_string_lossy().into_owned()),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn build_sandboxed_command_forces_deterministic_message_locale() {
+        // A verify command spawned by a non-Anglosphere user whose *shell*
+        // exports LC_ALL (inherited via the parent env, NOT pinned by the
+        // caller's `env` dict) must still emit English diagnostics, or the
+        // downstream English-keyed matchers (syntax repair, error grounding,
+        // pass/fail classification) misfire. In merge mode the child inherits
+        // the parent env implicitly, so the builder must issue an explicit
+        // LC_ALL removal — observable here as a `(key, None)` mutation — and
+        // pin LC_MESSAGES=C + DOTNET_CLI_UI_LANGUAGE=en. The caller pins no
+        // locale key here, so the overlay engages.
+        let mut params = crate::value::DictMap::new();
+        params.put_str("mode", "argv");
+        params.put(
+            "argv",
+            VmValue::List(Arc::new(vec![VmValue::string("/bin/true")])),
+        );
+        params.put_str("env_mode", "merge");
+        let mut caller_env = crate::value::DictMap::new();
+        // An innocuous caller env key that must NOT suppress the locale overlay.
+        caller_env.put_str("CARGO_TARGET_DIR", "/tmp/target");
+        params.put("env", VmValue::dict_map(caller_env));
+
+        let cmd = build_sandboxed_command(&params, "process.exec").expect("build command");
+        let env = command_env(&cmd);
+
+        assert_eq!(
+            env.get("LC_ALL"),
+            Some(&None),
+            "the builder must remove LC_ALL from the child so an inherited shell \
+             value cannot override the forced LC_MESSAGES"
+        );
+        assert_eq!(
+            env.get("LC_MESSAGES"),
+            Some(&Some("C".to_string())),
+            "LC_MESSAGES must be pinned to C for untranslated (English) tool output"
+        );
+        assert_eq!(
+            env.get("DOTNET_CLI_UI_LANGUAGE"),
+            Some(&Some("en".to_string())),
+            ".NET ignores LC_* and needs its own UI-language override"
+        );
+    }
+
+    #[test]
+    fn build_sandboxed_command_respects_a_caller_pinned_locale() {
+        // A caller that explicitly pins the locale keys (or LC_ALL) wins over
+        // the deterministic overlay — same caller-wins rule as TMPDIR.
+        let mut params = crate::value::DictMap::new();
+        params.put_str("mode", "argv");
+        params.put(
+            "argv",
+            VmValue::List(Arc::new(vec![VmValue::string("/bin/true")])),
+        );
+        params.put_str("env_mode", "merge");
+        let mut caller_env = crate::value::DictMap::new();
+        caller_env.put_str("LC_ALL", "fr_FR.UTF-8");
+        caller_env.put_str("LC_MESSAGES", "fr_FR.UTF-8");
+        params.put("env", VmValue::dict_map(caller_env));
+
+        let cmd = build_sandboxed_command(&params, "process.exec").expect("build command");
+        let env = command_env(&cmd);
+
+        assert_eq!(
+            env.get("LC_ALL"),
+            Some(&Some("fr_FR.UTF-8".to_string())),
+            "a caller that pins LC_ALL keeps it — the overlay must not strip an explicit value"
+        );
+        assert_eq!(
+            env.get("LC_MESSAGES"),
+            Some(&Some("fr_FR.UTF-8".to_string())),
+            "a caller-pinned LC_MESSAGES wins over the C overlay"
+        );
+    }
 
     #[test]
     fn process_exec_relative_cwd_resolves_against_execution_root() {
