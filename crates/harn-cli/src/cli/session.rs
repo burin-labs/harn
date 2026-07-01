@@ -10,6 +10,8 @@ pub(crate) struct SessionArgs {
 pub(crate) enum SessionCommand {
     /// Export a persisted run record as a portable Harn session bundle.
     Export(SessionExportArgs),
+    /// Export a suspended worker snapshot as a resumable checkpoint bundle.
+    Checkpoint(SessionCheckpointArgs),
     /// Import a Harn session bundle back into a local run record.
     Import(SessionImportArgs),
     /// Validate a Harn session bundle without importing it.
@@ -30,6 +32,24 @@ pub(crate) struct SessionExportArgs {
     pub local: bool,
     /// Export replay metadata with prompt/tool payloads withheld.
     #[arg(long, conflicts_with = "local")]
+    pub replay_only: bool,
+    /// Include artifact payloads in the bundle. Omitted by default for share safety.
+    #[arg(long)]
+    pub include_attachments: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct SessionCheckpointArgs {
+    /// Path to a suspended worker snapshot JSON file.
+    pub worker_snapshot: String,
+    /// Write the checkpoint bundle to this path. Prints JSON to stdout when omitted.
+    #[arg(long, value_name = "PATH")]
+    pub out: Option<String>,
+    /// Redact local-only content for share-safe inspection. The default local mode preserves resumability.
+    #[arg(long, conflicts_with = "replay_only")]
+    pub sanitized: bool,
+    /// Export replay metadata with prompt/tool payloads withheld.
+    #[arg(long, conflicts_with = "sanitized")]
     pub replay_only: bool,
     /// Include artifact payloads in the bundle. Omitted by default for share safety.
     #[arg(long)]

@@ -478,6 +478,151 @@ fn local_export_embeds_worker_snapshots_and_import_materializes_them() {
 }
 
 #[test]
+fn worker_snapshot_checkpoint_builds_resumable_bundle() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (_run, source_snapshot_path) = fixture_run_with_worker_snapshot(tmp.path());
+
+    let run = run_record_from_worker_snapshot(&source_snapshot_path).unwrap();
+    assert_eq!(run.status, "suspended");
+    assert_eq!(run.workflow_id, "worker_snapshot_checkpoint");
+    assert_eq!(run.checkpoints[0].persisted_at, "2026-05-01T00:00:20Z");
+    assert_eq!(
+        run.replay_fixture.as_ref().unwrap().created_at,
+        "2026-05-01T00:00:20Z"
+    );
+    assert_eq!(
+        run.replay_fixture.as_ref().unwrap().eval_kind.as_deref(),
+        Some("worker_snapshot_checkpoint")
+    );
+    assert_eq!(run.checkpoints.len(), 1);
+    assert_eq!(run.child_runs.len(), 1);
+    assert_eq!(
+        run.child_runs[0].snapshot_path.as_deref(),
+        Some(source_snapshot_path.to_string_lossy().as_ref())
+    );
+    assert_eq!(run.observability.as_ref().unwrap().schema_version, 4);
+    assert_eq!(
+        run.observability.as_ref().unwrap().worker_lineage[0]
+            .snapshot_path
+            .as_deref(),
+        Some(source_snapshot_path.to_string_lossy().as_ref())
+    );
+
+    let bundle = export_worker_snapshot_bundle(
+        &source_snapshot_path,
+        &SessionBundleExportOptions {
+            mode: SessionBundleExportMode::Local,
+            ..SessionBundleExportOptions::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(bundle.source.status, "suspended");
+    assert!(bundle.replay.replay_fixture.is_some());
+    assert_eq!(bundle.replay.checkpoints.len(), 1);
+    assert!(bundle
+        .replay
+        .deterministic_events
+        .iter()
+        .any(|event| event.source == "run.checkpoints"));
+    assert_eq!(bundle.replay.worker_snapshots.len(), 1);
+    assert_eq!(bundle.replay.worker_snapshots[0].worker_id, "worker_1");
+    assert_eq!(
+        bundle.replay.worker_snapshots[0].source_path.as_deref(),
+        Some(source_snapshot_path.to_string_lossy().as_ref())
+    );
+
+    let imported_dir = tmp.path().join("checkpoint-imported-worker-snapshots");
+    let materialized = materialize_worker_snapshots(&bundle, &imported_dir).unwrap();
+    let imported =
+        import_run_record_value_with_materialized_worker_snapshots(&bundle, &materialized).unwrap();
+    assert_eq!(
+        imported["metadata"]["worker_snapshot_path"],
+        json!(materialized[0].path)
+    );
+    assert_ne!(
+        imported["metadata"]["worker_snapshot_path"],
+        json!(source_snapshot_path.to_string_lossy())
+    );
+}
+
+#[test]
+fn worker_snapshot_checkpoint_rejects_non_suspended_snapshot() {
+    let tmp = tempfile::tempdir().unwrap();
+    let snapshot_path = tmp.path().join("worker-completed.json");
+    fs::write(
+        &snapshot_path,
+        serde_json::to_string_pretty(&json!({
+            "_type": "worker_snapshot",
+            "id": "worker_done",
+            "name": "done",
+            "task": "already finished",
+            "status": "completed",
+            "snapshot_path": snapshot_path.to_string_lossy()
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let err = run_record_from_worker_snapshot(&snapshot_path).unwrap_err();
+    assert_eq!(
+        err,
+        SessionBundleError::UnsupportedCheckpointState {
+            status: "completed".to_string()
+        }
+    );
+}
+
+#[test]
+fn worker_snapshot_checkpoint_rejects_non_worker_snapshot_json() {
+    let tmp = tempfile::tempdir().unwrap();
+    let snapshot_path = tmp.path().join("not-worker.json");
+    fs::write(
+        &snapshot_path,
+        serde_json::to_string_pretty(&json!({
+            "_type": "run_record",
+            "id": "looks_suspended",
+            "status": "suspended",
+            "config": {},
+            "suspension": {}
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let err = run_record_from_worker_snapshot(&snapshot_path).unwrap_err();
+    assert_eq!(
+        err,
+        SessionBundleError::InvalidType {
+            path: "$.worker_snapshot._type".to_string(),
+            expected: "\"worker_snapshot\"".to_string()
+        }
+    );
+}
+
+#[test]
+fn worker_snapshot_checkpoint_requires_resume_critical_fields() {
+    let tmp = tempfile::tempdir().unwrap();
+    let snapshot_path = tmp.path().join("worker-missing-suspension.json");
+    fs::write(
+        &snapshot_path,
+        serde_json::to_string_pretty(&json!({
+            "_type": "worker_snapshot",
+            "id": "worker_missing_suspension",
+            "status": "suspended",
+            "config": {}
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let err = run_record_from_worker_snapshot(&snapshot_path).unwrap_err();
+    assert_eq!(
+        err,
+        SessionBundleError::MissingRequired("$.worker_snapshot.suspension".to_string())
+    );
+}
+
+#[test]
 fn sanitized_export_redacts_worker_snapshot_local_paths() {
     let tmp = tempfile::tempdir().unwrap();
     let (run, source_snapshot_path) = fixture_run_with_worker_snapshot(tmp.path());

@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 use std::process;
 
 use crate::cli::{
-    SessionArgs, SessionCommand, SessionExportArgs, SessionImportArgs, SessionSchemaArgs,
-    SessionValidateArgs,
+    SessionArgs, SessionCheckpointArgs, SessionCommand, SessionExportArgs, SessionImportArgs,
+    SessionSchemaArgs, SessionValidateArgs,
 };
 
 const DEFAULT_SCHEMA_PATH: &str = "spec/schemas/session-bundle.v1.schema.json";
@@ -13,6 +13,7 @@ const DEFAULT_SCHEMA_PATH: &str = "spec/schemas/session-bundle.v1.schema.json";
 pub(crate) fn run(args: SessionArgs) {
     match args.command {
         SessionCommand::Export(export) => run_export(export),
+        SessionCommand::Checkpoint(checkpoint) => run_checkpoint(checkpoint),
         SessionCommand::Import(import) => run_import(import),
         SessionCommand::Validate(validate) => run_validate(validate),
         SessionCommand::Schema(schema) => run_schema(schema),
@@ -46,6 +47,44 @@ fn run_export(args: SessionExportArgs) {
         Ok(bundle) => bundle,
         Err(error) => {
             eprintln!("error: failed to export session bundle: {error}");
+            process::exit(1);
+        }
+    };
+    let rendered = match serde_json::to_string_pretty(&bundle) {
+        Ok(json) => format!("{json}\n"),
+        Err(error) => {
+            eprintln!("error: failed to render session bundle: {error}");
+            process::exit(1);
+        }
+    };
+    if let Some(out) = args.out {
+        write_text(Path::new(&out), &rendered);
+        println!("{out}");
+    } else {
+        write_stdout(&rendered);
+    }
+}
+
+fn run_checkpoint(args: SessionCheckpointArgs) {
+    let mode = if args.replay_only {
+        harn_vm::session_bundle::SessionBundleExportMode::ReplayOnly
+    } else if args.sanitized {
+        harn_vm::session_bundle::SessionBundleExportMode::Sanitized
+    } else {
+        harn_vm::session_bundle::SessionBundleExportMode::Local
+    };
+    let options = harn_vm::session_bundle::SessionBundleExportOptions {
+        mode,
+        include_attachments: args.include_attachments,
+        ..Default::default()
+    };
+    let bundle = match harn_vm::session_bundle::export_worker_snapshot_bundle(
+        Path::new(&args.worker_snapshot),
+        &options,
+    ) {
+        Ok(bundle) => bundle,
+        Err(error) => {
+            eprintln!("error: failed to checkpoint worker snapshot: {error}");
             process::exit(1);
         }
     };
@@ -202,16 +241,38 @@ fn read_validated_bundle(
             process::exit(1);
         }
     };
-    let options = harn_vm::session_bundle::SessionBundleValidationOptions {
-        allow_unsafe_secret_markers,
-        ..Default::default()
-    };
-    match harn_vm::session_bundle::validate_session_bundle_str(&content, &options) {
+    match validated_bundle_from_str(&content, allow_unsafe_secret_markers) {
         Ok(bundle) => bundle,
         Err(error) => {
             eprintln!("error: {context}: {error}");
             process::exit(1);
         }
+    }
+}
+
+fn validated_bundle_from_str(
+    content: &str,
+    allow_unsafe_secret_markers: bool,
+) -> Result<harn_vm::session_bundle::SessionBundle, harn_vm::session_bundle::SessionBundleError> {
+    let options = harn_vm::session_bundle::SessionBundleValidationOptions {
+        allow_unsafe_secret_markers,
+        ..Default::default()
+    };
+    match harn_vm::session_bundle::validate_session_bundle_str(content, &options) {
+        Ok(bundle) => Ok(bundle),
+        Err(error @ harn_vm::session_bundle::SessionBundleError::UnsafeSecretMarker { .. })
+            if !allow_unsafe_secret_markers =>
+        {
+            let local_options = harn_vm::session_bundle::SessionBundleValidationOptions {
+                allow_unsafe_secret_markers: true,
+                ..Default::default()
+            };
+            match harn_vm::session_bundle::validate_session_bundle_str(content, &local_options) {
+                Ok(bundle) if bundle.redaction.mode == "local" => Ok(bundle),
+                Ok(_) | Err(_) => Err(error),
+            }
+        }
+        Err(error) => Err(error),
     }
 }
 
@@ -290,6 +351,84 @@ fn normalize_line_endings(input: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn minimal_bundle_json(mode: &str, secret_text: &str) -> String {
+        serde_json::json!({
+            "_type": "harn_session_bundle",
+            "schema_version": 1,
+            "bundle_id": "bundle_test",
+            "created_at": "2026-05-01T00:00:00Z",
+            "producer": {
+                "name": "harn",
+                "version": "0.0.0",
+                "schema_id": "https://harnlang.com/schemas/session-bundle.v1.json"
+            },
+            "source": {
+                "kind": "run_record",
+                "run_record_id": "run_test",
+                "workflow_id": "worker_snapshot_checkpoint",
+                "task": "checkpoint",
+                "status": "suspended"
+            },
+            "runtime": {
+                "harn_version": "0.0.0",
+                "provider_models": []
+            },
+            "transcript": {
+                "sections": [{
+                    "id": "run",
+                    "label": "Run transcript",
+                    "scope": "run",
+                    "location": "$.transcript",
+                    "messages": [{"role": "user", "content": secret_text}],
+                    "events": [],
+                    "assets": [],
+                    "metadata": {}
+                }]
+            },
+            "tools": {
+                "schemas": [],
+                "calls": []
+            },
+            "permissions": [],
+            "replay": {
+                "event_log_pointers": [],
+                "transitions": [],
+                "checkpoints": [],
+                "trace_spans": [],
+                "deterministic_events": []
+            },
+            "redaction": {
+                "mode": mode,
+                "policy": "test",
+                "placeholder": "[REDACTED]",
+                "entries": [],
+                "unsafe_secret_markers_rejected": mode != "local"
+            },
+            "attachments": [],
+            "metadata": {}
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn local_session_bundle_import_allows_secret_shaped_transcript_text() {
+        let secret = format!("{}{}", "sk-test_", "1234567890abcdefghijklmnop");
+        let bundle = validated_bundle_from_str(&minimal_bundle_json("local", &secret), false)
+            .expect("local resumable bundle imports without --allow");
+        assert_eq!(bundle.redaction.mode, "local");
+    }
+
+    #[test]
+    fn sanitized_session_bundle_import_rejects_secret_shaped_transcript_text() {
+        let secret = format!("{}{}", "sk-test_", "1234567890abcdefghijklmnop");
+        let err = validated_bundle_from_str(&minimal_bundle_json("sanitized", &secret), false)
+            .expect_err("sanitized bundle remains fail-closed");
+        assert!(matches!(
+            err,
+            harn_vm::session_bundle::SessionBundleError::UnsafeSecretMarker { .. }
+        ));
+    }
 
     #[test]
     fn session_import_report_includes_resume_commands() {

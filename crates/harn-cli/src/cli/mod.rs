@@ -188,8 +188,8 @@ pub(crate) use serve::{
     ServeCommand, ServeMcpArgs, ServeObsMode, ServeTlsMode, SiteServeArgs, WorkerServeArgs,
 };
 pub(crate) use session::{
-    SessionArgs, SessionCommand, SessionExportArgs, SessionImportArgs, SessionSchemaArgs,
-    SessionValidateArgs,
+    SessionArgs, SessionCheckpointArgs, SessionCommand, SessionExportArgs, SessionImportArgs,
+    SessionSchemaArgs, SessionValidateArgs,
 };
 pub(crate) use skill::{
     SkillArgs, SkillCommand, SkillEndorseArgs, SkillKeyCommand, SkillKeyGenerateArgs,

@@ -159,6 +159,26 @@ fn test_parses_session_bundle_commands() {
     let cli = Cli::parse_from([
         "harn",
         "session",
+        "checkpoint",
+        "worker.json",
+        "--out",
+        "checkpoint.bundle.json",
+        "--sanitized",
+    ]);
+
+    let Command::Session(args) = cli.command.unwrap() else {
+        panic!("expected session command");
+    };
+    let SessionCommand::Checkpoint(checkpoint) = args.command else {
+        panic!("expected session checkpoint");
+    };
+    assert_eq!(checkpoint.worker_snapshot, "worker.json");
+    assert_eq!(checkpoint.out.as_deref(), Some("checkpoint.bundle.json"));
+    assert!(checkpoint.sanitized);
+
+    let cli = Cli::parse_from([
+        "harn",
+        "session",
         "import",
         "bundle.json",
         "--out",
