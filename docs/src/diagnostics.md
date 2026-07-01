@@ -2410,7 +2410,7 @@ result)
 unused variable lint
 
 - **Repair:** `bindings/rename-unused` &nbsp;·&nbsp; **Safety:** `behavior-preserving`
-- Prefix the unused binding with `_` to silence the lint
+- Use the `_` discard binding for an unused binding
 
 #### How to fix
 
@@ -2424,7 +2424,7 @@ unused variable lint
 unused pattern binding lint
 
 - **Repair:** `bindings/rename-unused` &nbsp;·&nbsp; **Safety:** `behavior-preserving`
-- Prefix the unused binding with `_` to silence the lint
+- Use the `_` discard binding for an unused binding
 
 #### How to fix
 
@@ -2438,7 +2438,7 @@ unused pattern binding lint
 unused parameter lint
 
 - **Repair:** `bindings/rename-unused` &nbsp;·&nbsp; **Safety:** `behavior-preserving`
-- Prefix the unused binding with `_` to silence the lint
+- Use the `_` discard binding for an unused binding
 
 #### How to fix
 
