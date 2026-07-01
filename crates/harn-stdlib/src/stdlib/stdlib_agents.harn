@@ -1537,7 +1537,7 @@ pub fn workflow_session_reset(prev, carry_summary) {
 pub fn continue_as_new(prev, options = nil) {
   let session = workflow_session(prev)
   let carry_summary = options?.carry_summary ?? true
-  let _state = workflow.continue_as_new(session)
+  let _ = workflow.continue_as_new(session)
   return workflow_session(
     {
       workflow_id: session.workflow_id,

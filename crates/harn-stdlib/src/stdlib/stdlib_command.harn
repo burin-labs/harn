@@ -181,7 +181,7 @@ fn __command_normalize_result(result) {
  * @errors: []
  */
 pub fn command_run(spec, options = nil) -> dict {
-  let _enabled = hostlib_enable("tools:deterministic")
+  let _ = hostlib_enable("tools:deterministic")
   return __command_normalize_result(hostlib_tools_run_command(__command_request(spec, options)))
 }
 
@@ -215,7 +215,7 @@ fn __command_wait_request(locator, options) {
  * @example: command_wait(result, {timeout_ms: 1000})
  */
 pub fn command_wait(locator, options = nil) -> dict {
-  let _enabled = hostlib_enable("tools:deterministic")
+  let _ = hostlib_enable("tools:deterministic")
   return __command_normalize_result(hostlib_tools_wait_command(__command_wait_request(locator, options)))
 }
 
@@ -227,7 +227,7 @@ pub fn command_wait(locator, options = nil) -> dict {
  */
 pub fn command_cancel(locator, options = nil) -> dict {
   let opts = __command_options(options)
-  let _enabled = hostlib_enable("tools:deterministic")
+  let _ = hostlib_enable("tools:deterministic")
   var req = {handle_id: __command_handle_id(locator, "command_cancel")}
   if opts?.wait_result_ms != nil {
     req = req + {wait_result_ms: opts.wait_result_ms}
@@ -429,7 +429,7 @@ fn __command_locator(locator, options) {
  */
 pub fn command_output_range(locator, options = nil) -> dict {
   let opts = __command_options(options)
-  let _enabled = hostlib_enable("tools:deterministic")
+  let _ = hostlib_enable("tools:deterministic")
   let req = __command_locator(locator, opts)
     + {offset: opts?.offset ?? 0, length: opts?.length ?? 65536}
   let result = hostlib_tools_read_command_output(req)

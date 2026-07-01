@@ -611,7 +611,7 @@ fn __agent_host_cancel_command_request(args) {
  */
 pub fn agent_read_tools(registry = nil, options = nil) {
   let opts = __agent_host_options(options)
-  let _enabled = hostlib_enable("tools:deterministic")
+  let _ = hostlib_enable("tools:deterministic")
   var tools = registry ?? tool_registry()
   if __agent_host_tool_enabled(opts, "read_file", "read") {
     let key = "read_file"
@@ -799,7 +799,7 @@ pub fn agent_read_tools(registry = nil, options = nil) {
  */
 pub fn agent_command_tools(registry = nil, options = nil) {
   let opts = __agent_host_options(options)
-  let _enabled = hostlib_enable("tools:deterministic")
+  let _ = hostlib_enable("tools:deterministic")
   var tools = registry ?? tool_registry()
   let read_name = __agent_host_name(opts, "read_command_output", "read_command_output")
   let tail_name = __agent_host_name(opts, "read_command_output_tail", "read_command_output_tail")

@@ -38,7 +38,7 @@ fn count_supporting(rows, field) {
 pipeline default(_task) {
   // The edit primitives that write to disk share the deterministic-tools
   // gate; enable it once before any apply_node call (even dry-run).
-  let _gate = hostlib_enable("tools:deterministic")
+  let _ = hostlib_enable("tools:deterministic")
   // 1. Capability matrix — the onboarding contract, queryable.
   let caps = edit_capabilities()
   let rows = caps.languages
