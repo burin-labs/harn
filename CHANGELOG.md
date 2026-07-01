@@ -8,6 +8,13 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.166
+
+### Fixed
+
+- Canonical native `run` tool calls now normalize `command`/`cmd` argv arrays into
+  Harn command strings, matching the existing `container.exec` alias recovery path.
+
 ## v0.8.165
 
 ### Added
