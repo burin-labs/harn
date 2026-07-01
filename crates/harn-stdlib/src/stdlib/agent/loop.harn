@@ -2272,6 +2272,14 @@ fn __agent_loop_effective_llm_options(opts) {
   return agent_sanitize_model_options(base + __agent_loop_llm_overrides(base))
 }
 
+fn __agent_loop_route_options(provider, model, tool_format) {
+  return {
+    provider: to_string(provider ?? ""),
+    model: to_string(model ?? ""),
+    tool_format: to_string(tool_format ?? ""),
+  }
+}
+
 fn __agent_loop_with_llm_render_context(opts, render) {
   let effective = __agent_loop_effective_llm_options(opts)
   let provider = to_string(effective?.provider ?? "")
@@ -3241,6 +3249,7 @@ fn __agent_loop_run(message, session, initial_opts) {
     let primary_llm_opts = __agent_loop_effective_llm_options(opts)
     let primary_provider = to_string(primary_llm_opts?.provider ?? "")
     let primary_model = to_string(primary_llm_opts?.model ?? "")
+    let primary_tool_format = to_string(primary_llm_opts?.tool_format ?? "")
     var escalation_retry_pending = false
     var stop_reason = nil
     var final_status = ""
@@ -3469,13 +3478,10 @@ fn __agent_loop_run(message, session, initial_opts) {
             "",
           )
           if can_retry_primary {
+            let primary_route = __agent_loop_route_options(primary_provider, primary_model, primary_tool_format)
             opts = opts
-              + {
-              provider: primary_provider,
-              model: primary_model,
-              llm_options: (opts?.llm_options ?? {})
-                + {provider: primary_provider, model: primary_model},
-            }
+              + primary_route
+              + {llm_options: (opts?.llm_options ?? {}) + primary_route}
             escalation_retry_pending = true
             iteration = iteration + 1
             continue
