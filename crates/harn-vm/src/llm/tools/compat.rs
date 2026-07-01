@@ -175,16 +175,57 @@ fn remap_command_args(arguments: serde_json::Value) -> serde_json::Value {
     let serde_json::Value::Object(mut map) = arguments else {
         return arguments;
     };
-    if map.contains_key("command") {
+    if let Some(value) = map.remove("command") {
+        map.insert("command".to_string(), normalize_command_value(value));
         return serde_json::Value::Object(map);
     }
     for key in ["script", "cmd"] {
         if let Some(value) = map.remove(key) {
-            map.insert("command".to_string(), value);
+            map.insert("command".to_string(), normalize_command_value(value));
             break;
         }
     }
     serde_json::Value::Object(map)
+}
+
+fn normalize_command_value(value: serde_json::Value) -> serde_json::Value {
+    let serde_json::Value::Array(items) = value else {
+        return value;
+    };
+    let Some(argv) = items
+        .iter()
+        .map(serde_json::Value::as_str)
+        .collect::<Option<Vec<_>>>()
+    else {
+        return serde_json::Value::Array(items);
+    };
+    if argv.len() == 3 && is_shell_argv_prefix(argv[0], argv[1]) {
+        return serde_json::Value::String(argv[2].to_string());
+    }
+    serde_json::Value::String(
+        argv.into_iter()
+            .map(shell_quote_arg)
+            .collect::<Vec<_>>()
+            .join(" "),
+    )
+}
+
+fn is_shell_argv_prefix(binary: &str, flag: &str) -> bool {
+    matches!(binary, "bash" | "sh" | "/bin/bash" | "/bin/sh")
+        && matches!(flag, "-lc" | "-c" | "lc" | "c")
+}
+
+fn shell_quote_arg(arg: &str) -> String {
+    if arg.is_empty() {
+        return "''".to_string();
+    }
+    if arg
+        .bytes()
+        .all(|byte| matches!(byte, b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'_' | b'-' | b'.' | b'/' | b':' | b'+' | b'=' | b',' | b'@' | b'%'))
+    {
+        return arg.to_string();
+    }
+    format!("'{}'", arg.replace('\'', "'\"'\"'"))
 }
 
 /// Edit-action verbs that exist ONLY as `edit({ action: <verb> })` enum values,
@@ -497,6 +538,38 @@ mod tests {
         // `cmd` is remapped onto `command` so run's arg validation passes.
         assert_eq!(mapped["command"], "cargo test");
         assert!(mapped.get("cmd").is_none());
+    }
+
+    #[test]
+    fn aliases_container_exec_argv_to_run_command_string() {
+        let (name, mapped) = normalize_tool_call_shape(
+            "container.exec",
+            serde_json::json!({"cmd": ["bash", "-lc", "ls -R"], "timeout_ms": 1000}),
+        );
+        assert_eq!(name, "run");
+        assert_eq!(mapped["command"], "ls -R");
+        assert_eq!(mapped["timeout_ms"], 1000);
+        assert!(mapped.get("cmd").is_none());
+    }
+
+    #[test]
+    fn aliases_container_exec_malformed_shell_argv_to_script_string() {
+        let (name, mapped) = normalize_tool_call_shape(
+            "container.exec",
+            serde_json::json!({"command": ["bash", "lc", "ls -R"]}),
+        );
+        assert_eq!(name, "run");
+        assert_eq!(mapped["command"], "ls -R");
+    }
+
+    #[test]
+    fn aliases_container_exec_general_argv_with_shell_quoting() {
+        let (name, mapped) = normalize_tool_call_shape(
+            "container.exec",
+            serde_json::json!({"cmd": ["git", "commit", "-m", "fix tool calls"]}),
+        );
+        assert_eq!(name, "run");
+        assert_eq!(mapped["command"], "git commit -m 'fix tool calls'");
     }
 
     #[test]
