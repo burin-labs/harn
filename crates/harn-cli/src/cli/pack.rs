@@ -77,11 +77,51 @@ pub struct PackArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum PackCommand {
+    /// Expand a `.harnpack` bundle into a directory containing
+    /// `harnpack.json` plus the archive payload entries. Intended for
+    /// audit/debug workflows and tests that need to inspect or mutate a
+    /// bundle without depending on host `tar`/`zstd` binaries.
+    Unpack(PackUnpackArgs),
+
+    /// Reassemble a directory produced by `harn pack unpack` back into
+    /// a `.harnpack` bundle.
+    Repack(PackRepackArgs),
+
     /// Verify a `.harnpack` bundle: check the embedded Ed25519
     /// signature (if present), recompute the canonical bundle hash,
     /// and compare each archive entry's BLAKE3 against the manifest's
     /// recorded hashes. Exits non-zero on any mismatch.
     Verify(PackVerifyArgs),
+}
+
+#[derive(Debug, Args)]
+#[command(arg_required_else_help = true)]
+pub struct PackUnpackArgs {
+    /// Path to the `.harnpack` archive to unpack.
+    pub bundle: PathBuf,
+
+    /// Output directory to create.
+    #[arg(long, value_name = "DIR")]
+    pub out: PathBuf,
+
+    /// Replace the output path if it already exists.
+    #[arg(long, default_value_t = false)]
+    pub force: bool,
+}
+
+#[derive(Debug, Args)]
+#[command(arg_required_else_help = true)]
+pub struct PackRepackArgs {
+    /// Directory containing `harnpack.json` and archive payload entries.
+    pub dir: PathBuf,
+
+    /// Output `.harnpack` path.
+    #[arg(long, value_name = "PATH")]
+    pub out: PathBuf,
+
+    /// Replace the output file if it already exists.
+    #[arg(long, default_value_t = false)]
+    pub force: bool,
 }
 
 #[derive(Debug, Args)]

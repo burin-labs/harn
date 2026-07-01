@@ -242,6 +242,49 @@ fn test_parses_pack_verify_subcommand() {
 }
 
 #[test]
+fn test_parses_pack_unpack_and_repack_subcommands() {
+    use crate::cli::PackCommand;
+
+    let cli = Cli::parse_from([
+        "harn",
+        "pack",
+        "unpack",
+        "bundle.harnpack",
+        "--out",
+        "bundle-dir",
+        "--force",
+    ]);
+    let Command::Pack(args) = cli.command.unwrap() else {
+        panic!("expected pack command");
+    };
+    let Some(PackCommand::Unpack(unpack)) = args.command else {
+        panic!("expected pack unpack subcommand");
+    };
+    assert_eq!(unpack.bundle, PathBuf::from("bundle.harnpack"));
+    assert_eq!(unpack.out, PathBuf::from("bundle-dir"));
+    assert!(unpack.force);
+
+    let cli = Cli::parse_from([
+        "harn",
+        "pack",
+        "repack",
+        "bundle-dir",
+        "--out",
+        "bundle.harnpack",
+        "--force",
+    ]);
+    let Command::Pack(args) = cli.command.unwrap() else {
+        panic!("expected pack command");
+    };
+    let Some(PackCommand::Repack(repack)) = args.command else {
+        panic!("expected pack repack subcommand");
+    };
+    assert_eq!(repack.dir, PathBuf::from("bundle-dir"));
+    assert_eq!(repack.out, PathBuf::from("bundle.harnpack"));
+    assert!(repack.force);
+}
+
+#[test]
 fn test_parses_install_integrity_flags() {
     let cli = Cli::parse_from(["harn", "install", "--locked", "--offline"]);
 
