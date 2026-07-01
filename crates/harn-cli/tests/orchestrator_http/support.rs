@@ -868,36 +868,38 @@ pub(super) async fn assert_status(response: reqwest::Response, expected: StatusC
 }
 
 pub(super) fn json_headers() -> HeaderMap {
+    base_json_headers()
+}
+
+fn base_json_headers() -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
     headers
 }
 
-pub(super) fn github_signature(secret: &str, body: &[u8]) -> String {
-    let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).unwrap();
-    mac.update(body);
-    let bytes = mac.finalize().into_bytes();
-    let mut encoded = String::with_capacity(bytes.len() * 2);
+fn hex_encode(bytes: impl IntoIterator<Item = u8>) -> String {
+    let mut encoded = String::new();
     for byte in bytes {
         encoded.push_str(&format!("{byte:02x}"));
     }
-    format!("sha256={encoded}")
+    encoded
+}
+
+pub(super) fn github_signature(secret: &str, body: &[u8]) -> String {
+    let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).unwrap();
+    mac.update(body);
+    format!("sha256={}", hex_encode(mac.finalize().into_bytes()))
 }
 
 pub(super) fn slack_signature(secret: &str, timestamp: i64, body: &[u8]) -> String {
     let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).unwrap();
     mac.update(format!("v0:{timestamp}:").as_bytes());
     mac.update(body);
-    let mut encoded = String::new();
-    for byte in mac.finalize().into_bytes() {
-        encoded.push_str(&format!("{byte:02x}"));
-    }
-    format!("v0={encoded}")
+    format!("v0={}", hex_encode(mac.finalize().into_bytes()))
 }
 
 pub(super) fn github_headers(secret: &str, body: &[u8], origin: Option<&str>) -> HeaderMap {
-    let mut headers = HeaderMap::new();
-    headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    let mut headers = base_json_headers();
     headers.insert("X-GitHub-Event", HeaderValue::from_static("issues"));
     headers.insert(
         "X-GitHub-Delivery",
@@ -914,8 +916,7 @@ pub(super) fn github_headers(secret: &str, body: &[u8], origin: Option<&str>) ->
 }
 
 pub(super) fn slack_headers(secret: &str, timestamp: i64, body: &[u8]) -> HeaderMap {
-    let mut headers = HeaderMap::new();
-    headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    let mut headers = base_json_headers();
     headers.insert(
         "X-Slack-Request-Timestamp",
         HeaderValue::from_str(&timestamp.to_string()).unwrap(),
@@ -928,8 +929,7 @@ pub(super) fn slack_headers(secret: &str, timestamp: i64, body: &[u8]) -> Header
 }
 
 pub(super) fn notion_headers(secret: &str, body: &[u8]) -> HeaderMap {
-    let mut headers = HeaderMap::new();
-    headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    let mut headers = base_json_headers();
     headers.insert(
         "X-Notion-Signature",
         HeaderValue::from_str(&github_signature(secret, body)).unwrap(),
