@@ -19,7 +19,7 @@ use crate::decls::{Declaration, FnDeclaration, ImportInfo, ParamDeclaration, Typ
 use crate::diagnostic::{LintDiagnostic, LintSeverity, DEFAULT_COMPLEXITY_THRESHOLD};
 use crate::fixes::{
     append_sink_fix, is_pure_expression, remove_method_call_wrapper_fix,
-    replace_identifier_text_fix, simple_ident_rename_fix,
+    replace_identifier_text_fix, simple_ident_discard_fix,
 };
 use crate::naming::{is_pascal_case, is_snake_case, to_pascal_case, to_snake_case};
 use crate::rule::{Rule, RuleCtx};
@@ -2037,15 +2037,15 @@ impl<'a> Linter<'a> {
                         Code::LintUnusedVariable,
                         "unused-variable",
                         format!("variable `{}` is declared but never used", decl.name),
-                        format!("prefix with underscore: `_{}`", decl.name),
-                        simple_ident_rename_fix(self.source, decl.span, &decl.name),
+                        "replace with discard binding: `_`".to_string(),
+                        simple_ident_discard_fix(self.source, decl.span, &decl.name),
                     )
                 } else {
                     (
                         Code::LintUnusedPatternBinding,
                         "unused-pattern-binding",
                         format!("pattern binding `{}` is never used", decl.name),
-                        "rename the binding with an underscore prefix or remove it from the pattern"
+                        "rename the binding to `_`, prefix it with `_` if the name carries useful intent, or remove it from the pattern"
                             .to_string(),
                         None,
                     )
@@ -2073,7 +2073,7 @@ impl<'a> Linter<'a> {
                     message: format!("parameter `{}` is declared but never used", decl.name),
                     span: decl.span,
                     severity: LintSeverity::Warning,
-                    suggestion: Some(format!("prefix with underscore: `_{}`", decl.name)),
+                    suggestion: Some("replace the parameter name with `_`".to_string()),
                     fix: None,
                 });
             }

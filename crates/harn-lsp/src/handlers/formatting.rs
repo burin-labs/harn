@@ -264,7 +264,7 @@ pub(crate) fn build_code_actions(
                         uri.clone(),
                         vec![TextEdit {
                             range: edit_range,
-                            new_text: format!("_{name}"),
+                            new_text: "_".to_string(),
                         }],
                     );
                     let label = if msg.contains("[unused-variable]") {
@@ -273,7 +273,7 @@ pub(crate) fn build_code_actions(
                         "parameter"
                     };
                     actions.push(CodeActionOrCommand::CodeAction(CodeAction {
-                        title: format!("Prefix {label} `{name}` with `_`"),
+                        title: format!("Replace unused {label} `{name}` with `_`"),
                         kind: Some(diagnostic_repair_code_action_kind(diag)),
                         diagnostics: Some(vec![diag.clone()]),
                         data: diagnostic_repair_code_action_data(diag),

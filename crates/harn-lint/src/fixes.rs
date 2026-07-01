@@ -5,10 +5,10 @@
 use harn_lexer::{FixEdit, Span};
 use harn_parser::{Node, SNode};
 
-/// Rename a simple `let`/`var` binding's identifier with an underscore
-/// prefix. Returns `None` for destructuring patterns, unusual formatting,
-/// or anything else where the rewrite is not unambiguously safe.
-pub(crate) fn simple_ident_rename_fix(
+/// Replace a simple `let`/`var` binding's identifier with the discard binding
+/// `_`. Returns `None` for destructuring patterns, unusual formatting, or
+/// anything else where the rewrite is not unambiguously safe.
+pub(crate) fn simple_ident_discard_fix(
     source: Option<&str>,
     span: Span,
     name: &str,
@@ -54,10 +54,9 @@ pub(crate) fn simple_ident_rename_fix(
 
     let ident_start = span.start + cursor;
     let ident_end = ident_start + name_bytes.len();
-    let replacement = format!("_{name}");
     Some(vec![FixEdit {
         span: Span::with_offsets(ident_start, ident_end, span.line, span.column + cursor),
-        replacement,
+        replacement: "_".to_string(),
     }])
 }
 
