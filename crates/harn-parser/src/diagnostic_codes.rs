@@ -919,7 +919,7 @@ const REPAIR_BINDINGS_MAKE_IMMUTABLE: RepairTemplate = RepairTemplate {
 
 const REPAIR_BINDINGS_RENAME_UNUSED: RepairTemplate = RepairTemplate {
     id: "bindings/rename-unused",
-    summary: "Prefix the unused binding with `_` to silence the lint",
+    summary: "Use the `_` discard binding for an unused binding",
     safety: RepairSafety::BehaviorPreserving,
 };
 

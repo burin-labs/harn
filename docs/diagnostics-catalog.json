@@ -1628,7 +1628,7 @@
         {
           "id": "bindings/rename-unused",
           "safety": "behavior-preserving",
-          "summary": "Prefix the unused binding with `_` to silence the lint"
+          "summary": "Use the `_` discard binding for an unused binding"
         }
       ],
       "related": [],
@@ -1643,7 +1643,7 @@
         {
           "id": "bindings/rename-unused",
           "safety": "behavior-preserving",
-          "summary": "Prefix the unused binding with `_` to silence the lint"
+          "summary": "Use the `_` discard binding for an unused binding"
         }
       ],
       "related": [],
@@ -1658,7 +1658,7 @@
         {
           "id": "bindings/rename-unused",
           "safety": "behavior-preserving",
-          "summary": "Prefix the unused binding with `_` to silence the lint"
+          "summary": "Use the `_` discard binding for an unused binding"
         }
       ],
       "related": [],
