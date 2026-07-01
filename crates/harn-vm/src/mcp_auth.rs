@@ -40,6 +40,26 @@ impl WwwAuthenticateChallenge {
             .then(|| self.params.get("scope").map(String::as_str))
             .flatten()
     }
+
+    /// The RFC 6750 §3 `error` code carried by a Bearer challenge, e.g.
+    /// `invalid_token` or `insufficient_scope`. A resource server returns a
+    /// `403` with `error="insufficient_scope"` when the presented token is
+    /// valid but lacks a required scope — the cue to run a step-up
+    /// authorization requesting the additional scope from [`bearer_scope`].
+    pub fn bearer_error(&self) -> Option<&str> {
+        self.scheme
+            .eq_ignore_ascii_case("bearer")
+            .then(|| self.params.get("error").map(String::as_str))
+            .flatten()
+    }
+
+    /// True when this Bearer challenge signals `insufficient_scope` — a valid
+    /// token missing a required scope, resolvable by re-authorizing with the
+    /// elevated scope.
+    pub fn is_insufficient_scope(&self) -> bool {
+        self.bearer_error()
+            .is_some_and(|error| error.eq_ignore_ascii_case("insufficient_scope"))
+    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -1126,6 +1146,28 @@ mod tests {
             canonical_resource_indicator("https://mcp.example.com/mcp/").unwrap(),
             "https://mcp.example.com/mcp"
         );
+    }
+
+    #[test]
+    fn bearer_error_and_insufficient_scope_detection() {
+        let challenges =
+            parse_www_authenticate(r#"Bearer error="insufficient_scope", scope="repo admin""#);
+        let challenge = challenges.first().expect("one Bearer challenge");
+        assert_eq!(challenge.bearer_error(), Some("insufficient_scope"));
+        assert_eq!(challenge.bearer_scope(), Some("repo admin"));
+        assert!(challenge.is_insufficient_scope());
+
+        // A plain 401 Bearer challenge with no error param is not a scope gap.
+        let plain = parse_www_authenticate(r#"Bearer scope="repo""#);
+        let plain = plain.first().expect("one Bearer challenge");
+        assert_eq!(plain.bearer_error(), None);
+        assert!(!plain.is_insufficient_scope());
+
+        // A non-Bearer scheme never reports a Bearer error.
+        let basic = parse_www_authenticate(r#"Basic realm="x", error="insufficient_scope""#);
+        let basic = basic.first().expect("one challenge");
+        assert_eq!(basic.bearer_error(), None);
+        assert!(!basic.is_insufficient_scope());
     }
 
     #[test]

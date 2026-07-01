@@ -244,13 +244,21 @@ pub(crate) async fn send_http_request(
             continue;
         }
 
-        if status == 401 {
+        // RFC 6750 §3.1: a `401` means no/invalid/expired token; a `403` with
+        // `error="insufficient_scope"` means the token is valid but lacks a
+        // required scope. Both carry a Bearer `WWW-Authenticate` challenge and
+        // both are resolved by re-running the OAuth flow — the emitted
+        // `mcp_auth_required` event carries the challenge's `scope`, so a
+        // step-up authorization requests exactly the elevated scope. A plain
+        // `403` without an `insufficient_scope` challenge is a genuine denial,
+        // not an authorization gap, so it falls through unchanged.
+        if status == 401 || (status == 403 && www_authenticate_insufficient_scope(&headers)) {
             emit_mcp_auth_required_event(server_name, &inner.url, &headers);
             if auth_retry_used {
                 return Err(mcp_auth_required_error(
                     server_name,
                     &inner.url,
-                    "server still returned 401 after authorization completed",
+                    "server still returned an authorization challenge after authorization completed",
                 ));
             }
             auth_retry_used = true;
@@ -305,6 +313,21 @@ pub(crate) async fn send_http_request(
         }
         return Ok(msg);
     }
+}
+
+/// True when any `WWW-Authenticate` Bearer challenge in the response headers
+/// carries `error="insufficient_scope"` (RFC 6750 §3.1). Paired with a `403`
+/// status, this is the cue to run a step-up authorization for the elevated
+/// scope rather than treating the response as a hard denial.
+fn www_authenticate_insufficient_scope(headers: &reqwest::header::HeaderMap) -> bool {
+    let challenges: Vec<&str> = headers
+        .get_all(reqwest::header::WWW_AUTHENTICATE)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .collect();
+    crate::mcp_auth::parse_www_authenticate_headers(challenges.iter().copied())
+        .iter()
+        .any(crate::mcp_auth::WwwAuthenticateChallenge::is_insufficient_scope)
 }
 
 async fn wait_for_http_mcp_authorization(
