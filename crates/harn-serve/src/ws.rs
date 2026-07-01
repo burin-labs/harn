@@ -310,6 +310,7 @@ mod tests {
     use futures::{SinkExt, StreamExt};
     use std::net::SocketAddr;
     use tokio::net::TcpListener;
+    use tokio::sync::Notify;
     use tokio_tungstenite::tungstenite::protocol::Message as TungMessage;
 
     async fn echo(session: WsSession) {
@@ -365,19 +366,26 @@ mod tests {
     #[tokio::test]
     async fn ws_session_send_does_not_block_on_pending_recv() {
         // Regression guard for the split sink/stream design: a
-        // long-running `recv` (the client never sends) must not lock
+        // long-running receive path (the client never sends) must not lock
         // out a parallel `send`. Before the split, recv held the
         // single socket mutex across `next().await`, so a sibling
         // send (or the background ping task) would deadlock.
-        async fn push_then_wait(session: WsSession) {
-            // Start a recv that will block waiting for a client
-            // message that never comes.
-            let recv_task = tokio::spawn(async move {
-                tokio::time::timeout(std::time::Duration::from_millis(500), session.recv()).await
-            });
-            let _ = recv_task.await;
-        }
-        let app = Router::new().route("/ws", ws_route(push_then_wait, WsConfig::default()));
+        let receive_path_held = std::sync::Arc::new(Notify::new());
+        let handler_receive_path_held = receive_path_held.clone();
+        let app = Router::new().route(
+            "/ws",
+            ws_route(
+                move |session| {
+                    let receive_path_held = handler_receive_path_held.clone();
+                    async move {
+                        let _receive_guard = session.stream.lock().await;
+                        receive_path_held.notify_one();
+                        session.send("server-ready").await.unwrap();
+                    }
+                },
+                WsConfig::default(),
+            ),
+        );
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move {
@@ -386,10 +394,9 @@ mod tests {
 
         let url = format!("ws://{addr}/ws");
         let (mut socket, _response) = tokio_tungstenite::connect_async(url).await.unwrap();
-        // Wait briefly, then close — the server must be responsive
-        // (not stuck holding a single big lock) during the recv.
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        socket.send(TungMessage::Close(None)).await.unwrap();
+        receive_path_held.notified().await;
+        let message = socket.next().await.unwrap().unwrap();
+        assert_eq!(message, TungMessage::Text("server-ready".into()));
     }
 
     #[tokio::test]
