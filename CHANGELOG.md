@@ -8,6 +8,37 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.165
+
+### Added
+
+- Teach the Anthropic provider catalog and request builder about Claude Sonnet 5,
+  including default-on adaptive thinking, `thinking: disabled`, native
+  `output_config.effort`, and the provider-neutral `max` reasoning effort level.
+- Added `harn pack unpack` and `harn pack repack` for native `.harnpack`
+  inspection, mutation, and release-audit workflows without requiring host
+  `tar` or `zstd` binaries.
+
+### Fixed
+
+- A2A streaming tasks now attach their worker-event sink directly to the active
+  dispatch, so progress status updates keep streaming even if the process-global
+  agent-event registry is reset by sibling work.
+- A2A streaming tasks keep progress-event sinks registered until terminal task publication,
+  preventing final progress updates from being dropped at dispatch shutdown.
+- Session-scoped agent event sinks now deliver across worker threads in test builds,
+  matching production registry semantics and stabilizing A2A progress streaming
+  coverage under full-suite execution.
+- Fixed escalated provider-error fallback so it restores the primary provider,
+  model, and tool format instead of leaking the escalated route's tool-calling
+  mode into the retry.
+- Normalize Codex-style shell argv tool calls into Harn run command strings.
+- Tool-call parse errors for an unquoted multi-line value (e.g. a raw code body
+  pasted after `content:`/`new_text:`) now name the heredoc recovery
+  (`key: <<BODY … BODY`) instead of dead-ending on "unexpected character starting
+  a value", so a weak value model can self-heal instead of looping on the same
+  malformed edit.
+
 ## v0.8.164
 
 ### Added
