@@ -479,6 +479,78 @@ async fn modern_http_401_auth_required_waits_for_oauth_and_retries_tool_call() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn modern_http_403_insufficient_scope_waits_for_step_up_and_retries_tool_call() {
+    let _guard = http_mcp_test_guard().await;
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (base_url, mut requests, auth_challenged) =
+                spawn_insufficient_scope_modern_http_mcp_server().await;
+            let handle = modern_http_handle(&base_url).await;
+            let server_url = format!("{base_url}/mcp");
+            let resource = crate::mcp_auth::canonical_resource_indicator(&server_url).unwrap();
+            let session_id =
+                crate::agent_sessions::open_or_create(Some("mcp-scope-stepup".to_string()));
+            let _session_guard = crate::agent_sessions::enter_current_session(session_id.clone());
+            let _bridge_guard = CurrentHostBridgeGuard::install();
+            let captured_events = install_capturing_agent_sink(&session_id);
+
+            let notifier = tokio::spawn({
+                let resource = resource.clone();
+                async move {
+                    auth_challenged
+                        .await
+                        .expect("mock server should issue an insufficient_scope challenge");
+                    let token = test_stored_mcp_token(&resource, "fresh-token");
+                    crate::mcp_oauth::notify_authorization_completed(&token);
+                }
+            });
+
+            let result = call_mcp_tool(
+                &handle,
+                "execute_sql",
+                serde_json::json!({"region": "us-west1", "query": "select 1"}),
+            )
+            .await
+            .unwrap();
+            notifier.await.expect("auth notifier task should complete");
+            assert_eq!(result, serde_json::json!("ok"));
+
+            let discover = recv_recorded_request(&mut requests).await;
+            assert_modern_http_request(&discover, "server/discover", None);
+            let first_call = recv_recorded_request(&mut requests).await;
+            assert_modern_http_request(&first_call, "tools/call", Some("execute_sql"));
+            let retry_call = recv_recorded_request(&mut requests).await;
+            assert_modern_http_request(&retry_call, "tools/call", Some("execute_sql"));
+            assert_eq!(
+                retry_call.headers.get("authorization").map(String::as_str),
+                Some("Bearer fresh-token")
+            );
+
+            let events = captured_events.lock().unwrap().clone();
+            assert!(
+                events.iter().any(|event| matches!(
+                    event,
+                    crate::agent_events::AgentEvent::McpAuthRequired {
+                        session_id: event_session_id,
+                        server,
+                        resource: event_resource,
+                        scope: Some(scope),
+                    } if event_session_id == &session_id
+                        && server == "modern-http"
+                        && event_resource == &resource
+                        // The step-up event carries the elevated scope from the
+                        // insufficient_scope challenge, not just the base scope.
+                        && scope == "repo admin"
+                )),
+                "expected McpAuthRequired step-up event with elevated scope, got {events:?}"
+            );
+            crate::agent_events::clear_session_sinks(&session_id);
+            handle.disconnect().await.unwrap();
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn modern_http_401_without_interactive_host_returns_auth_error() {
     let _guard = http_mcp_test_guard().await;
     tokio::task::LocalSet::new()
@@ -818,6 +890,39 @@ async fn spawn_auth_required_modern_http_mcp_server() -> (
     mpsc::UnboundedReceiver<RecordedHttpRequest>,
     oneshot::Receiver<()>,
 ) {
+    // A `401 Unauthorized` with a Bearer challenge: no/invalid token.
+    spawn_challenge_then_ok_modern_http_mcp_server("401 Unauthorized", r#"Bearer scope="repo""#)
+        .await
+}
+
+async fn spawn_insufficient_scope_modern_http_mcp_server() -> (
+    String,
+    mpsc::UnboundedReceiver<RecordedHttpRequest>,
+    oneshot::Receiver<()>,
+) {
+    // A `403 Forbidden` with `error="insufficient_scope"`: a valid token that
+    // lacks a required scope. Resolvable by a step-up authorization requesting
+    // the elevated `scope` from the challenge.
+    spawn_challenge_then_ok_modern_http_mcp_server(
+        "403 Forbidden",
+        r#"Bearer error="insufficient_scope", scope="repo admin""#,
+    )
+    .await
+}
+
+/// Modern-HTTP MCP mock that answers the first `tools/call` (and any call
+/// without a `Bearer fresh-token`) with `status_line` + the given
+/// `WWW-Authenticate` `challenge`, then serves `200 OK` once the fresh token
+/// is presented. Used to exercise both the `401` and `403 insufficient_scope`
+/// step-up authorization paths through one code path.
+async fn spawn_challenge_then_ok_modern_http_mcp_server(
+    status_line: &'static str,
+    challenge: &'static str,
+) -> (
+    String,
+    mpsc::UnboundedReceiver<RecordedHttpRequest>,
+    oneshot::Receiver<()>,
+) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let (request_tx, request_rx) = mpsc::unbounded_channel();
@@ -848,8 +953,8 @@ async fn spawn_auth_required_modern_http_mcp_server() -> (
                 }
                 let _ = write_http_json(
                     &mut stream,
-                    "401 Unauthorized",
-                    &[("WWW-Authenticate", r#"Bearer scope="repo""#)],
+                    status_line,
+                    &[("WWW-Authenticate", challenge)],
                     serde_json::json!({"error": "authorization required"}),
                 )
                 .await;
@@ -860,8 +965,8 @@ async fn spawn_auth_required_modern_http_mcp_server() -> (
             {
                 let _ = write_http_json(
                     &mut stream,
-                    "401 Unauthorized",
-                    &[("WWW-Authenticate", r#"Bearer scope="repo""#)],
+                    status_line,
+                    &[("WWW-Authenticate", challenge)],
                     serde_json::json!({"error": "authorization required"}),
                 )
                 .await;
