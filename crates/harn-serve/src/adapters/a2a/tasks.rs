@@ -108,6 +108,7 @@ impl A2aServer {
             tasks: self.tasks.clone(),
         });
         harn_vm::agent_events::register_sink(session_id.clone(), sink);
+        let _sink_registration = AgentEventSinkRegistration::new(session_id.clone());
 
         let result = self
             .executor
@@ -132,10 +133,6 @@ impl A2aServer {
                 auth_principal: None,
             })
             .await;
-
-        // Drop the sink so a re-used task id can't deliver to the old
-        // task's event stream.
-        harn_vm::agent_events::clear_session_sinks(&session_id);
 
         if self.is_cancelled(&task.id) {
             return;
@@ -541,5 +538,24 @@ impl A2aServer {
                 }
             }
         });
+    }
+}
+
+struct AgentEventSinkRegistration {
+    session_id: String,
+}
+
+impl AgentEventSinkRegistration {
+    fn new(session_id: String) -> Self {
+        Self { session_id }
+    }
+}
+
+impl Drop for AgentEventSinkRegistration {
+    fn drop(&mut self) {
+        // Keep the sink registered until the terminal task transition has
+        // been published. Progress events can otherwise be lost as the VM
+        // dispatch result crosses back to the transport runtime.
+        harn_vm::agent_events::clear_session_sinks(&self.session_id);
     }
 }

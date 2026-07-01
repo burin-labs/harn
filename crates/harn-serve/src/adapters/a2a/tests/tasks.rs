@@ -1,5 +1,42 @@
 use super::protocol::server_with_api_key_policy;
 use super::*;
+
+async fn collect_task_stream_until_terminal(
+    mut rx: UnboundedReceiver<JsonValue>,
+) -> Vec<JsonValue> {
+    let mut events = Vec::new();
+    loop {
+        let event = tokio::time::timeout(std::time::Duration::from_secs(2), rx.next())
+            .await
+            .unwrap_or_else(|_| {
+                panic!(
+                    "timed out waiting for stream event: {}",
+                    events_json(&events)
+                )
+            });
+        let Some(event) = event else {
+            break;
+        };
+        let terminal = event
+            .pointer("/result/status/state")
+            .and_then(JsonValue::as_str)
+            .is_some_and(is_terminal_status);
+        events.push(event);
+        if terminal {
+            break;
+        }
+    }
+    events
+}
+
+fn is_terminal_status(status: &str) -> bool {
+    matches!(status, "completed" | "failed" | "cancelled" | "rejected")
+}
+
+fn events_json(events: &[JsonValue]) -> String {
+    serde_json::to_string_pretty(events).unwrap_or_else(|_| "<unprintable events>".to_string())
+}
+
 #[tokio::test]
 async fn send_message_dispatches_to_shared_core_export() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -349,23 +386,10 @@ pub fn triage(task: string) -> string {
         .clone()
         .process_rpc(request, AuthRequest::default())
         .await;
-    let RpcOutcome::Sse(mut rx) = processed.outcome else {
+    let RpcOutcome::Sse(rx) = processed.outcome else {
         panic!("expected sse response");
     };
-    let mut events = Vec::new();
-    while let Some(event) = tokio::time::timeout(std::time::Duration::from_secs(2), rx.next())
-        .await
-        .expect("stream event")
-    {
-        let done = event
-            .pointer("/result/status/state")
-            .and_then(JsonValue::as_str)
-            == Some("completed");
-        events.push(event);
-        if done {
-            break;
-        }
-    }
+    let events = collect_task_stream_until_terminal(rx).await;
 
     let task_id = events[0]["result"]["taskId"].as_str().expect("task id");
     assert!(events.iter().any(|event| {
@@ -434,30 +458,32 @@ pub fn triage(task: string) -> string {
     );
 
     let processed = server.process_rpc(request, AuthRequest::default()).await;
-    let RpcOutcome::Sse(mut rx) = processed.outcome else {
+    let RpcOutcome::Sse(rx) = processed.outcome else {
         panic!("expected sse response");
     };
-    let mut events = Vec::new();
-    while let Some(event) = tokio::time::timeout(std::time::Duration::from_secs(2), rx.next())
-        .await
-        .expect("stream event")
-    {
-        let done = event
-            .pointer("/result/status/state")
-            .and_then(JsonValue::as_str)
-            == Some("completed");
-        events.push(event);
-        if done {
-            break;
-        }
-    }
+    let events = collect_task_stream_until_terminal(rx).await;
 
-    let progress = events
+    let progress_index = events
         .iter()
-        .find(|event| {
+        .position(|event| {
             event.pointer("/result/kind").and_then(JsonValue::as_str) == Some("status-update")
         })
-        .expect("progress status update");
+        .unwrap_or_else(|| panic!("progress status update missing: {}", events_json(&events)));
+    let completed_index = events
+        .iter()
+        .position(|event| {
+            event
+                .pointer("/result/status/state")
+                .and_then(JsonValue::as_str)
+                == Some("completed")
+        })
+        .unwrap_or_else(|| panic!("completion status update missing: {}", events_json(&events)));
+    assert!(
+        progress_index < completed_index,
+        "progress must stream before completion: {}",
+        events_json(&events)
+    );
+    let progress = &events[progress_index];
     assert_eq!(
         progress.pointer("/result/type").and_then(JsonValue::as_str),
         Some("status")
@@ -482,12 +508,6 @@ pub fn triage(task: string) -> string {
             "Agent is checking progress.\n\nPlan:\n- [x] Inspect code. (priority: high)\n- [ ] Run A2A stream. (in progress)"
         )
     );
-    assert!(events.iter().any(|event| {
-        event
-            .pointer("/result/status/state")
-            .and_then(JsonValue::as_str)
-            == Some("completed")
-    }));
 }
 
 #[test]
