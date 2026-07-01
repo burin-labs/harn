@@ -329,6 +329,23 @@ harn run --resume .harn/workers/worker_01HFEX...json --json
 resumed loop emits its final value as a JSON event when `--json` is set
 so callers can pipeline it without parsing prose output.
 
+For cross-runtime handoff, package the suspended snapshot as a session bundle
+instead of copying the raw file path by hand:
+
+```bash
+harn session checkpoint .harn/workers/worker_01HFEX...json \
+  --out checkpoint.bundle.json
+harn session import checkpoint.bundle.json \
+  --worker-snapshot-dir imported-workers \
+  --json
+harn run --resume imported-workers/worker_01HFEX...json --json
+```
+
+`session checkpoint` defaults to a local resumable bundle: it may contain
+unredacted transcript/tool payloads and should be handled like the original
+worker snapshot. Use `--sanitized` or `--replay-only` only when the bundle is
+for share-safe inspection rather than direct continuation.
+
 ## Daemon idle is a degenerate case
 
 `agent_loop(..., {daemon: true})` and the

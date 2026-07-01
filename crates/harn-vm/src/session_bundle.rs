@@ -20,8 +20,9 @@ use crate::agent_events::AgentEvent;
 use crate::event_log::sanitize_topic_component;
 use crate::orchestration::{
     derive_run_observability, new_id, now_rfc3339, AgentSessionReplayEvent, ReplayFixture,
-    RunCheckpointRecord, RunHitlQuestionRecord, RunObservabilityRecord, RunRecord,
-    RunTraceSpanRecord, RunTransitionRecord, RunVerificationOutcomeRecord, ToolCallRecord,
+    RunCheckpointRecord, RunChildRecord, RunExecutionRecord, RunHitlQuestionRecord,
+    RunObservabilityRecord, RunRecord, RunTraceSpanRecord, RunTransitionRecord,
+    RunVerificationOutcomeRecord, RunWorkerLineageRecord, ToolCallRecord,
 };
 use crate::redact::{RedactionPolicy, REDACTED_PLACEHOLDER};
 use crate::workspace_anchor::{anchor_from_transcript_metadata_json, MountedRoot, WorkspaceAnchor};
@@ -446,6 +447,7 @@ pub enum SessionBundleError {
     MissingRequired(String),
     UnsupportedSchemaVersion { found: u64, supported: u32 },
     InvalidType { path: String, expected: String },
+    UnsupportedCheckpointState { status: String },
     UnsafeSecretMarker { path: String, excerpt: String },
     MissingRunRecord,
     MissingSessionEvents { session_id: String },
@@ -466,6 +468,10 @@ impl fmt::Display for SessionBundleError {
             Self::InvalidType { path, expected } => {
                 write!(f, "session bundle field {path} must be {expected}")
             }
+            Self::UnsupportedCheckpointState { status } => write!(
+                f,
+                "worker snapshot status {status:?} is not checkpointable; suspend the worker at a turn boundary first"
+            ),
             Self::UnsafeSecretMarker { path, excerpt } => write!(
                 f,
                 "session bundle contains an unsafe unredacted secret marker at {path}: {excerpt}"
@@ -525,6 +531,28 @@ pub fn export_run_record_bundle(
     bundle = serde_json::from_value(bundle_value)
         .map_err(|error| SessionBundleError::Decode(error.to_string()))?;
     Ok(bundle)
+}
+
+pub fn export_worker_snapshot_bundle(
+    snapshot_path: &Path,
+    options: &SessionBundleExportOptions,
+) -> Result<SessionBundle, SessionBundleError> {
+    let run = run_record_from_worker_snapshot(snapshot_path)?;
+    export_run_record_bundle(&run, options)
+}
+
+pub fn run_record_from_worker_snapshot(
+    snapshot_path: &Path,
+) -> Result<RunRecord, SessionBundleError> {
+    let content = fs::read_to_string(snapshot_path).map_err(|error| {
+        SessionBundleError::Decode(format!(
+            "failed to read worker snapshot {}: {error}",
+            snapshot_path.display()
+        ))
+    })?;
+    let value: JsonValue = serde_json::from_str(&content)
+        .map_err(|error| SessionBundleError::Decode(error.to_string()))?;
+    run_record_from_worker_snapshot_value(snapshot_path, value)
 }
 
 pub fn validate_session_bundle_value(
@@ -695,6 +723,176 @@ pub fn import_run_record_value_with_materialized_worker_snapshots(
     Ok(run_record)
 }
 
+fn run_record_from_worker_snapshot_value(
+    snapshot_path: &Path,
+    value: JsonValue,
+) -> Result<RunRecord, SessionBundleError> {
+    require_worker_snapshot_marker(&value)?;
+    let status =
+        snapshot_string(&value, "status").ok_or_else(|| missing_worker_snapshot_field("status"))?;
+    if status != "suspended" {
+        return Err(SessionBundleError::UnsupportedCheckpointState { status });
+    }
+    require_worker_snapshot_object_field(&value, "config")?;
+    require_worker_snapshot_object_field(&value, "suspension")?;
+
+    let snapshot_path_string = snapshot_path.to_string_lossy().into_owned();
+    let worker_id =
+        snapshot_string(&value, "id").ok_or_else(|| missing_worker_snapshot_field("id"))?;
+    let worker_name = snapshot_string(&value, "name").unwrap_or_else(|| "worker".to_string());
+    let task = snapshot_string(&value, "task").unwrap_or_else(|| "Suspended worker".to_string());
+    let suspended_at = snapshot_pointer_string(&value, &["suspension", "suspended_at"]);
+    let started_at = snapshot_string(&value, "started_at")
+        .or_else(|| snapshot_string(&value, "created_at"))
+        .or_else(|| suspended_at.clone())
+        .unwrap_or_else(now_rfc3339);
+    let finished_at = snapshot_string(&value, "finished_at");
+    let session_id = snapshot_pointer_string(&value, &["config", "spec", "session_id"])
+        .or_else(|| snapshot_pointer_string(&value, &["audit", "session_id"]));
+    let parent_session_id =
+        snapshot_pointer_string(&value, &["config", "spec", "parent_session_id"])
+            .or_else(|| snapshot_pointer_string(&value, &["audit", "parent_session_id"]));
+    let child_run_id = snapshot_string(&value, "child_run_id");
+    let child_run_path = snapshot_string(&value, "child_run_path");
+    let execution = value
+        .get("execution")
+        .cloned()
+        .and_then(|value| serde_json::from_value::<RunExecutionRecord>(value).ok());
+
+    let child = RunChildRecord {
+        worker_id: worker_id.clone(),
+        worker_name: worker_name.clone(),
+        parent_stage_id: snapshot_string(&value, "parent_stage_id"),
+        session_id: session_id.clone(),
+        parent_session_id: parent_session_id.clone(),
+        mutation_scope: snapshot_pointer_string(&value, &["audit", "mutation_scope"]),
+        approval_policy: None,
+        task: task.clone(),
+        request: value.get("request").cloned(),
+        provenance: value.get("provenance").cloned(),
+        status: status.clone(),
+        started_at: started_at.clone(),
+        finished_at: finished_at.clone(),
+        run_id: child_run_id.clone(),
+        run_path: child_run_path.clone(),
+        snapshot_path: Some(snapshot_path_string.clone()),
+        execution,
+    };
+    let lineage = RunWorkerLineageRecord {
+        worker_id: worker_id.clone(),
+        worker_name,
+        parent_stage_id: child.parent_stage_id.clone(),
+        task: task.clone(),
+        status: status.clone(),
+        session_id,
+        parent_session_id,
+        run_id: child_run_id,
+        run_path: child_run_path,
+        snapshot_path: Some(snapshot_path_string.clone()),
+    };
+
+    let run_id = format!("checkpoint_{}", sanitize_topic_component(&worker_id));
+    let workflow_id = "worker_snapshot_checkpoint".to_string();
+    let workflow_name = Some("Worker snapshot checkpoint".to_string());
+    let checkpoint_id = format!("{run_id}_turn_boundary");
+    let checkpointed_at = suspended_at
+        .or_else(|| finished_at.clone())
+        .unwrap_or_else(|| started_at.clone());
+
+    Ok(RunRecord {
+        type_name: "run_record".to_string(),
+        id: run_id.clone(),
+        workflow_id: workflow_id.clone(),
+        workflow_name: workflow_name.clone(),
+        task,
+        status,
+        started_at,
+        finished_at,
+        checkpoints: vec![RunCheckpointRecord {
+            id: checkpoint_id,
+            ready_nodes: vec!["worker_snapshot_resume".to_string()],
+            completed_nodes: Vec::new(),
+            last_stage_id: None,
+            persisted_at: checkpointed_at.clone(),
+            reason: "suspended_worker_snapshot_turn_boundary".to_string(),
+        }],
+        child_runs: vec![child],
+        transcript: value.get("transcript").cloned(),
+        replay_fixture: Some(ReplayFixture {
+            type_name: "replay_fixture".to_string(),
+            id: format!("fixture_{run_id}"),
+            source_run_id: run_id,
+            workflow_id,
+            workflow_name,
+            created_at: checkpointed_at,
+            eval_kind: Some("worker_snapshot_checkpoint".to_string()),
+            expected_status: "suspended".to_string(),
+            ..ReplayFixture::default()
+        }),
+        observability: Some(RunObservabilityRecord {
+            schema_version: 4,
+            worker_lineage: vec![lineage],
+            ..RunObservabilityRecord::default()
+        }),
+        metadata: BTreeMap::from([
+            ("checkpoint_kind".to_string(), json!("worker_snapshot")),
+            (
+                "worker_snapshot_path".to_string(),
+                json!(snapshot_path_string),
+            ),
+        ]),
+        ..RunRecord::default()
+    })
+}
+
+fn snapshot_string(value: &JsonValue, key: &str) -> Option<String> {
+    value
+        .get(key)
+        .and_then(JsonValue::as_str)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn missing_worker_snapshot_field(field: &str) -> SessionBundleError {
+    SessionBundleError::MissingRequired(format!("$.worker_snapshot.{field}"))
+}
+
+fn require_worker_snapshot_marker(value: &JsonValue) -> Result<(), SessionBundleError> {
+    match snapshot_string(value, "_type").as_deref() {
+        Some("worker_snapshot") => Ok(()),
+        Some(_) => Err(SessionBundleError::InvalidType {
+            path: "$.worker_snapshot._type".to_string(),
+            expected: "\"worker_snapshot\"".to_string(),
+        }),
+        None => Err(missing_worker_snapshot_field("_type")),
+    }
+}
+
+fn require_worker_snapshot_object_field(
+    value: &JsonValue,
+    field: &str,
+) -> Result<(), SessionBundleError> {
+    match value.get(field) {
+        Some(JsonValue::Object(_)) => Ok(()),
+        Some(_) => Err(SessionBundleError::InvalidType {
+            path: format!("$.worker_snapshot.{field}"),
+            expected: "object".to_string(),
+        }),
+        None => Err(missing_worker_snapshot_field(field)),
+    }
+}
+
+fn snapshot_pointer_string(value: &JsonValue, path: &[&str]) -> Option<String> {
+    let mut current = value;
+    for component in path {
+        current = current.get(*component)?;
+    }
+    current
+        .as_str()
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
 pub fn materialize_worker_snapshots(
     bundle: &SessionBundle,
     out_dir: &Path,
@@ -759,6 +957,7 @@ fn apply_materialized_worker_snapshot_paths(
             .and_then(|observability| observability.get_mut("worker_lineage")),
         &paths_by_worker_id,
     );
+    rewrite_checkpoint_metadata_snapshot_path(run_record, materialized);
 }
 
 fn rewrite_worker_snapshot_paths(
@@ -781,6 +980,27 @@ fn rewrite_worker_snapshot_paths(
                 JsonValue::String((*path).to_string()),
             );
         }
+    }
+}
+
+fn rewrite_checkpoint_metadata_snapshot_path(
+    run_record: &mut JsonValue,
+    materialized: &[MaterializedWorkerSnapshot],
+) {
+    let Some(snapshot) = materialized.first() else {
+        return;
+    };
+    let Some(metadata) = run_record
+        .get_mut("metadata")
+        .and_then(JsonValue::as_object_mut)
+    else {
+        return;
+    };
+    if metadata.contains_key("worker_snapshot_path") {
+        metadata.insert(
+            "worker_snapshot_path".to_string(),
+            JsonValue::String(snapshot.path.clone()),
+        );
     }
 }
 
