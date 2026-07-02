@@ -26,6 +26,11 @@ use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::{AsyncBuiltinCtx, Vm, VmBuiltinArity, VmBuiltinMetadata};
 
+const DEFAULT_FEEDBACK_MAX_ITEMS: usize = 8;
+const HARD_FEEDBACK_MAX_ITEMS: usize = 50;
+const DEFAULT_FEEDBACK_MAX_MESSAGE_CHARS: usize = 240;
+const HARD_FEEDBACK_MAX_MESSAGE_CHARS: usize = 2_000;
+
 pub(crate) fn register_flow_builtins(vm: &mut Vm) {
     for def in MODULE_BUILTINS {
         vm.register_builtin_def(def);
@@ -221,6 +226,29 @@ fn flow_invariant_is_blocking_impl(
 fn flow_invariant_confidence_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let result = require_invariant(args, 0, "flow_invariant_confidence")?;
     Ok(VmValue::Float(result.confidence))
+}
+
+#[harn_builtin(
+    sig = "flow_invariant_feedback(report: dict, options?: dict) -> string",
+    category = "flow"
+)]
+fn flow_invariant_feedback_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let report = args
+        .first()
+        .ok_or_else(|| VmError::Runtime("flow_invariant_feedback: missing report".to_string()))?;
+    if !matches!(report, VmValue::Dict(_)) {
+        return Err(VmError::Runtime(format!(
+            "flow_invariant_feedback: report must be a dict, got {}",
+            report.type_name()
+        )));
+    }
+    let report = value_to_json(report);
+    let report = report.as_object().ok_or_else(|| {
+        VmError::Runtime("flow_invariant_feedback: report must be a dict".to_string())
+    })?;
+    let options = FlowFeedbackOptions::parse(args.get(1))?;
+    let feedback = build_flow_feedback(report, &options);
+    Ok(VmValue::String(arcstr::ArcStr::from(feedback)))
 }
 
 async fn flow_evaluate_invariants_impl(
@@ -579,6 +607,7 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &FLOW_INVARIANT_KIND_IMPL_DEF,
     &FLOW_INVARIANT_IS_BLOCKING_IMPL_DEF,
     &FLOW_INVARIANT_CONFIDENCE_IMPL_DEF,
+    &FLOW_INVARIANT_FEEDBACK_IMPL_DEF,
 ];
 
 fn serde_to_vm<T: serde::Serialize>(value: &T) -> VmValue {
@@ -678,6 +707,307 @@ fn validate_span(start: u64, end: u64, builtin: &str) -> Result<(), VmError> {
         )));
     }
     Ok(())
+}
+
+#[derive(Clone, Copy)]
+struct FlowFeedbackOptions {
+    include_allow: bool,
+    include_skipped: bool,
+    empty_if_clear: bool,
+    max_items: usize,
+    max_message_chars: usize,
+}
+
+impl Default for FlowFeedbackOptions {
+    fn default() -> Self {
+        Self {
+            include_allow: false,
+            include_skipped: false,
+            empty_if_clear: true,
+            max_items: DEFAULT_FEEDBACK_MAX_ITEMS,
+            max_message_chars: DEFAULT_FEEDBACK_MAX_MESSAGE_CHARS,
+        }
+    }
+}
+
+impl FlowFeedbackOptions {
+    fn parse(value: Option<&VmValue>) -> Result<Self, VmError> {
+        let opts = match value {
+            None | Some(VmValue::Nil) => return Ok(Self::default()),
+            Some(VmValue::Dict(map)) => map.as_ref(),
+            Some(other) => {
+                return Err(VmError::Runtime(format!(
+                    "flow_invariant_feedback: options must be a dict or nil, got {}",
+                    other.type_name()
+                )));
+            }
+        };
+        const KEYS: &[&str] = &[
+            "empty_if_clear",
+            "include_allow",
+            "include_skipped",
+            "max_items",
+            "max_message_chars",
+        ];
+        for key in opts.keys() {
+            if !KEYS.contains(&key.as_str()) {
+                return Err(VmError::Runtime(format!(
+                    "flow_invariant_feedback: unknown option key '{key}'"
+                )));
+            }
+        }
+
+        let mut parsed = Self::default();
+        parsed.include_allow =
+            feedback_bool_option(opts, "include_allow")?.unwrap_or(parsed.include_allow);
+        parsed.include_skipped =
+            feedback_bool_option(opts, "include_skipped")?.unwrap_or(parsed.include_skipped);
+        parsed.empty_if_clear =
+            feedback_bool_option(opts, "empty_if_clear")?.unwrap_or(parsed.empty_if_clear);
+        parsed.max_items = feedback_usize_option(
+            opts,
+            "max_items",
+            DEFAULT_FEEDBACK_MAX_ITEMS,
+            HARD_FEEDBACK_MAX_ITEMS,
+        )?;
+        parsed.max_message_chars = feedback_usize_option(
+            opts,
+            "max_message_chars",
+            DEFAULT_FEEDBACK_MAX_MESSAGE_CHARS,
+            HARD_FEEDBACK_MAX_MESSAGE_CHARS,
+        )?;
+        Ok(parsed)
+    }
+}
+
+fn feedback_bool_option(opts: &crate::value::DictMap, key: &str) -> Result<Option<bool>, VmError> {
+    match opts.get(key) {
+        None | Some(VmValue::Nil) => Ok(None),
+        Some(VmValue::Bool(value)) => Ok(Some(*value)),
+        Some(other) => Err(VmError::Runtime(format!(
+            "flow_invariant_feedback: option `{key}` must be bool, got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+fn feedback_usize_option(
+    opts: &crate::value::DictMap,
+    key: &str,
+    default: usize,
+    hard_max: usize,
+) -> Result<usize, VmError> {
+    match opts.get(key) {
+        None | Some(VmValue::Nil) => Ok(default),
+        Some(VmValue::Int(value)) if *value > 0 => Ok((*value as usize).min(hard_max)),
+        Some(VmValue::Int(value)) => Err(VmError::Runtime(format!(
+            "flow_invariant_feedback: option `{key}` must be > 0, got {value}"
+        ))),
+        Some(other) => Err(VmError::Runtime(format!(
+            "flow_invariant_feedback: option `{key}` must be an int, got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+fn build_flow_feedback(
+    report: &serde_json::Map<String, serde_json::Value>,
+    options: &FlowFeedbackOptions,
+) -> String {
+    let mut items = Vec::new();
+    let discovery_error = report.get("status").and_then(json_str) == Some("discovery_error");
+    if let Some(diagnostics) = report
+        .get("diagnostics")
+        .and_then(serde_json::Value::as_array)
+    {
+        for diagnostic in diagnostics {
+            if let Some(item) = diagnostic_feedback_item(diagnostic, discovery_error, options) {
+                items.push(item);
+            }
+        }
+    }
+    if let Some(records) = report.get("records").and_then(serde_json::Value::as_array) {
+        for record in records {
+            if let Some(item) = record_feedback_item(record, options) {
+                items.push(item);
+            }
+        }
+    }
+    if options.include_skipped {
+        if let Some(skipped) = report.get("skipped").and_then(serde_json::Value::as_array) {
+            for record in skipped {
+                if let Some(item) = skipped_feedback_item(record, options) {
+                    items.push(item);
+                }
+            }
+        }
+    }
+
+    if items.is_empty() {
+        if options.empty_if_clear {
+            return String::new();
+        }
+        return "Flow invariants passed.".to_string();
+    }
+
+    let mut lines = vec!["Flow invariants need attention:".to_string()];
+    let omitted = items.len().saturating_sub(options.max_items);
+    lines.extend(items.into_iter().take(options.max_items));
+    if omitted > 0 {
+        lines.push(format!("- {omitted} more item(s) omitted."));
+    }
+    lines.join("\n")
+}
+
+fn diagnostic_feedback_item(
+    diagnostic: &serde_json::Value,
+    discovery_error: bool,
+    options: &FlowFeedbackOptions,
+) -> Option<String> {
+    let severity = diagnostic
+        .get("severity")
+        .and_then(json_str)
+        .unwrap_or("diagnostic");
+    if !discovery_error && severity != "error" {
+        return None;
+    }
+    let message = diagnostic
+        .get("message")
+        .and_then(json_str)
+        .unwrap_or("unknown diagnostic");
+    Some(format!(
+        "- Diagnostic {severity}: {}",
+        feedback_compact(message, options.max_message_chars)
+    ))
+}
+
+fn record_feedback_item(
+    record: &serde_json::Value,
+    options: &FlowFeedbackOptions,
+) -> Option<String> {
+    let result = record.get("result")?;
+    let verdict = result.get("verdict")?;
+    let verdict_kind = verdict.get("kind").and_then(json_str).unwrap_or("unknown");
+    if verdict_kind == "allow" && !options.include_allow {
+        return None;
+    }
+
+    let name = record
+        .get("name")
+        .and_then(json_str)
+        .or_else(|| record.get("hash").and_then(json_str))
+        .unwrap_or("unnamed_predicate");
+    let message = match verdict_kind {
+        "allow" => "passed".to_string(),
+        "warn" => verdict
+            .get("reason")
+            .and_then(json_str)
+            .unwrap_or("warning")
+            .to_string(),
+        "block" => {
+            let error = verdict.get("error");
+            let code = error
+                .and_then(|value| value.get("code"))
+                .and_then(json_str)
+                .unwrap_or("block");
+            let detail = error
+                .and_then(|value| value.get("message"))
+                .and_then(json_str)
+                .unwrap_or("blocked");
+            format!("{code}: {detail}")
+        }
+        "require_approval" => {
+            let approver = verdict.get("approver");
+            let approver_kind = approver
+                .and_then(|value| value.get("kind"))
+                .and_then(json_str)
+                .unwrap_or("approver");
+            let approver_id = approver
+                .and_then(|value| value.get("id").or_else(|| value.get("name")))
+                .and_then(json_str)
+                .unwrap_or("unknown");
+            format!("requires {approver_kind} approval from {approver_id}")
+        }
+        other => format!("unsupported verdict {other}"),
+    };
+    let mut line = format!(
+        "- {} {}: {}",
+        feedback_label(verdict_kind),
+        name,
+        feedback_compact(&message, options.max_message_chars)
+    );
+    if let Some(remediation) = remediation_text(result, record) {
+        let remediation = feedback_compact(remediation, options.max_message_chars);
+        if !remediation.is_empty() {
+            line.push_str(" Remediation: ");
+            line.push_str(&remediation);
+        }
+    }
+    Some(line)
+}
+
+fn skipped_feedback_item(
+    record: &serde_json::Value,
+    options: &FlowFeedbackOptions,
+) -> Option<String> {
+    let name = record
+        .get("name")
+        .and_then(json_str)
+        .or_else(|| record.get("hash").and_then(json_str))
+        .unwrap_or("unnamed_predicate");
+    let reason = record.get("reason").and_then(json_str).unwrap_or("skipped");
+    Some(format!(
+        "- Skipped {}: {}",
+        name,
+        feedback_compact(reason, options.max_message_chars)
+    ))
+}
+
+fn feedback_label(verdict_kind: &str) -> &'static str {
+    match verdict_kind {
+        "allow" => "Allow",
+        "warn" => "Warn",
+        "block" => "Block",
+        "require_approval" => "RequireApproval",
+        _ => "Invariant",
+    }
+}
+
+fn remediation_text<'a>(
+    result: &'a serde_json::Value,
+    record: &'a serde_json::Value,
+) -> Option<&'a str> {
+    result
+        .get("remediation")
+        .and_then(|value| {
+            value
+                .get("description")
+                .and_then(json_str)
+                .or_else(|| json_str(value))
+        })
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            record
+                .get("raw_result")
+                .and_then(|value| value.get("remediation"))
+                .and_then(json_str)
+                .filter(|value| !value.trim().is_empty())
+        })
+}
+
+fn json_str(value: &serde_json::Value) -> Option<&str> {
+    value.as_str().filter(|text| !text.trim().is_empty())
+}
+
+fn feedback_compact(value: &str, max_chars: usize) -> String {
+    let compact = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    if compact.chars().count() <= max_chars {
+        return compact;
+    }
+    let keep = max_chars.saturating_sub(3).max(1);
+    let mut out = compact.chars().take(keep).collect::<String>();
+    out.push_str("...");
+    out
 }
 
 fn decode_evidence_item(value: &VmValue) -> Result<EvidenceItem, VmError> {
@@ -949,6 +1279,138 @@ mod tests {
             VmValue::String(s) => assert_eq!(s.as_str(), "allow"),
             other => panic!("expected string, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn flow_invariant_feedback_summarizes_non_allow_records() {
+        let vm = vm_with_flow_builtins();
+        let report = json_to_vm_value(&serde_json::json!({
+            "ok": false,
+            "status": "fail",
+            "records": [
+                {
+                    "name": "no_bad",
+                    "kind": "deterministic",
+                    "result": {
+                        "verdict": {
+                            "kind": "block",
+                            "error": {
+                                "code": "no_bad",
+                                "message": "bad sentinel text remains"
+                            }
+                        },
+                        "confidence": 1.0
+                    },
+                    "raw_result": {
+                        "remediation": "Remove bad sentinel text."
+                    }
+                },
+                {
+                    "name": "style_nit",
+                    "kind": "deterministic",
+                    "result": {
+                        "verdict": {
+                            "kind": "warn",
+                            "reason": "comment is stale"
+                        },
+                        "remediation": {
+                            "description": "Update the comment."
+                        },
+                        "confidence": 1.0
+                    }
+                },
+                {
+                    "name": "passed",
+                    "kind": "deterministic",
+                    "result": {
+                        "verdict": {"kind": "allow"},
+                        "confidence": 1.0
+                    }
+                }
+            ],
+            "skipped": []
+        }));
+        let feedback = call(&vm, "flow_invariant_feedback", &[report]);
+        let VmValue::String(text) = feedback else {
+            panic!("expected feedback string");
+        };
+
+        assert!(text.contains("Flow invariants need attention:"));
+        assert!(text.contains("- Block no_bad: no_bad: bad sentinel text remains"));
+        assert!(text.contains("Remediation: Remove bad sentinel text."));
+        assert!(text.contains("- Warn style_nit: comment is stale"));
+        assert!(text.contains("Remediation: Update the comment."));
+        assert!(!text.contains("passed"));
+    }
+
+    #[test]
+    fn flow_invariant_feedback_is_empty_when_clear_by_default() {
+        let vm = vm_with_flow_builtins();
+        let report = json_to_vm_value(&serde_json::json!({
+            "ok": true,
+            "status": "pass",
+            "records": [{
+                "name": "passed",
+                "result": {
+                    "verdict": {"kind": "allow"},
+                    "confidence": 1.0
+                }
+            }],
+            "skipped": []
+        }));
+        let feedback = call(&vm, "flow_invariant_feedback", &[report]);
+
+        match feedback {
+            VmValue::String(text) => assert_eq!(text.as_str(), ""),
+            other => panic!("expected string, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn flow_invariant_feedback_can_include_skipped_records() {
+        let vm = vm_with_flow_builtins();
+        let report = json_to_vm_value(&serde_json::json!({
+            "ok": true,
+            "status": "pass",
+            "records": [],
+            "skipped": [{
+                "name": "semantic_review",
+                "kind": "semantic",
+                "reason": "semantic predicates require an explicit include_semantic option"
+            }]
+        }));
+        let options = json_to_vm_value(&serde_json::json!({
+            "include_skipped": true,
+            "empty_if_clear": false
+        }));
+        let feedback = call(&vm, "flow_invariant_feedback", &[report, options]);
+        let VmValue::String(text) = feedback else {
+            panic!("expected feedback string");
+        };
+
+        assert!(text.contains("- Skipped semantic_review: semantic predicates require"));
+    }
+
+    #[test]
+    fn flow_invariant_feedback_summarizes_discovery_errors() {
+        let vm = vm_with_flow_builtins();
+        let report = json_to_vm_value(&serde_json::json!({
+            "ok": false,
+            "status": "discovery_error",
+            "diagnostics": [
+                {"severity": "warning", "message": "missing archivist metadata"},
+                {"severity": "error", "message": "semantic fallback is unresolved"}
+            ],
+            "records": [],
+            "skipped": []
+        }));
+        let feedback = call(&vm, "flow_invariant_feedback", &[report]);
+        let VmValue::String(text) = feedback else {
+            panic!("expected feedback string");
+        };
+
+        assert!(text.contains("- Diagnostic warning: missing archivist metadata"));
+        assert!(text.contains("- Diagnostic error: semantic fallback is unresolved"));
     }
 
     #[test]
