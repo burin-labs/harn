@@ -212,6 +212,21 @@ impl LockFile {
         })
     }
 
+    /// Whether two lockfiles resolve the same dependency set.
+    ///
+    /// Compares only the resolution content (`packages`), not the
+    /// `generator_version` / `protocol_artifact_version` provenance stamps.
+    /// Those stamps carry the CLI version that last *wrote* the file, so a
+    /// Harn release bump rewrites them even when every resolved dependency
+    /// is identical — and a frozen (`--locked` / `--frozen` / `--offline`)
+    /// install that included them in the comparison would fail on every
+    /// bump with "harn.lock would need to change" despite nothing
+    /// substantive changing. Provenance freshness stays softly enforced by
+    /// `harn package audit` (a warning, not a gate).
+    pub(crate) fn same_resolution(&self, other: &Self) -> bool {
+        self.packages == other.packages
+    }
+
     pub(crate) fn sort_entries(&mut self) {
         self.packages
             .sort_by(|left, right| left.name.cmp(&right.name));
@@ -1221,7 +1236,17 @@ pub(crate) fn install_packages_in(
     let ctx = workspace.load_manifest_context()?;
     let existing = LockFile::load(&ctx.lock_path())?;
     if ctx.manifest.dependencies.is_empty() {
-        if !frozen {
+        if frozen || offline {
+            // A lock that still pins packages the manifest no longer
+            // declares is a substantive change; surface it instead of
+            // silently succeeding against a stale lock.
+            if existing
+                .as_ref()
+                .is_some_and(|lock| !lock.packages.is_empty())
+            {
+                return Err(format!("{} would need to change", ctx.lock_path().display()).into());
+            }
+        } else {
             LockFile::default().save(&ctx.lock_path())?;
         }
         return Ok(0);
@@ -1241,7 +1266,10 @@ pub(crate) fn install_packages_in(
         offline,
     )?;
     if frozen || offline {
-        if existing.as_ref() != Some(&desired) {
+        if !existing
+            .as_ref()
+            .is_some_and(|lock| lock.same_resolution(&desired))
+        {
             return Err(format!("{} would need to change", ctx.lock_path().display()).into());
         }
     } else {
@@ -2215,6 +2243,111 @@ checksum = "{checksum}"
 
         let error = install_packages_in(workspace.env(), true, None, false).unwrap_err();
         assert!(error.to_string().contains(LOCK_FILE));
+    }
+
+    #[test]
+    fn frozen_install_tolerates_provenance_stamp_drift() {
+        let (_repo_tmp, repo, _branch) = create_git_package_repo();
+        let project_tmp = tempfile::tempdir().unwrap();
+        let root = project_tmp.path();
+        let workspace = TestWorkspace::new(root);
+        fs::create_dir_all(root.join(".git")).unwrap();
+        let git = normalize_git_url(repo.to_string_lossy().as_ref()).unwrap();
+        fs::write(
+            root.join(MANIFEST),
+            format!(
+                r#"
+    [package]
+    name = "workspace"
+    version = "0.1.0"
+
+    [dependencies]
+    acme-lib = {{ git = "{git}", rev = "v1.0.0" }}
+    "#
+            ),
+        )
+        .unwrap();
+
+        let installed = install_packages_in(workspace.env(), false, None, false).unwrap();
+        assert_eq!(installed, 1);
+
+        // Simulate a lock written by an older Harn release: identical
+        // resolution, stale provenance stamps. A release bump must not
+        // break `harn install --locked`.
+        let lock_path = root.join(LOCK_FILE);
+        let stale = fs::read_to_string(&lock_path)
+            .unwrap()
+            .replace(
+                &format!("generator_version = \"{}\"", current_generator_version()),
+                "generator_version = \"0.0.1\"",
+            )
+            .replace(
+                &format!(
+                    "protocol_artifact_version = \"{}\"",
+                    current_protocol_artifact_version()
+                ),
+                "protocol_artifact_version = \"0.0.1\"",
+            );
+        assert!(
+            stale.contains("generator_version = \"0.0.1\""),
+            "test should have rewritten the provenance stamps: {stale}"
+        );
+        fs::write(&lock_path, stale).unwrap();
+
+        let installed = install_packages_in(workspace.env(), true, None, false).unwrap();
+        assert_eq!(installed, 1);
+
+        // Frozen install must not rewrite the lock (the stale stamps stay
+        // until a non-frozen install refreshes provenance).
+        let after = fs::read_to_string(&lock_path).unwrap();
+        assert!(after.contains("generator_version = \"0.0.1\""));
+    }
+
+    #[test]
+    fn frozen_install_errors_when_manifest_dropped_all_dependencies() {
+        let (_repo_tmp, repo, _branch) = create_git_package_repo();
+        let project_tmp = tempfile::tempdir().unwrap();
+        let root = project_tmp.path();
+        let workspace = TestWorkspace::new(root);
+        fs::create_dir_all(root.join(".git")).unwrap();
+        let git = normalize_git_url(repo.to_string_lossy().as_ref()).unwrap();
+        fs::write(
+            root.join(MANIFEST),
+            format!(
+                r#"
+    [package]
+    name = "workspace"
+    version = "0.1.0"
+
+    [dependencies]
+    acme-lib = {{ git = "{git}", rev = "v1.0.0" }}
+    "#
+            ),
+        )
+        .unwrap();
+
+        install_packages_in(workspace.env(), false, None, false).unwrap();
+
+        // Manifest drops its dependencies but the stale lock still pins
+        // them: frozen mode must flag the pending lock change instead of
+        // silently succeeding.
+        fs::write(
+            root.join(MANIFEST),
+            r#"
+    [package]
+    name = "workspace"
+    version = "0.1.0"
+    "#,
+        )
+        .unwrap();
+
+        let error = install_packages_in(workspace.env(), true, None, false).unwrap_err();
+        assert!(error.to_string().contains("would need to change"));
+
+        // An empty lock (no packages) is fine in frozen mode.
+        LockFile::default().save(&root.join(LOCK_FILE)).unwrap();
+        let installed = install_packages_in(workspace.env(), true, None, false).unwrap();
+        assert_eq!(installed, 0);
     }
 
     #[test]
