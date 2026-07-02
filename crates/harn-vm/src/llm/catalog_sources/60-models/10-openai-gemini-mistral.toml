@@ -1,13 +1,23 @@
 # OpenAI ─ pricing pages: https://platform.openai.com/docs/pricing.
 
+# OpenAI section verified 2026-07-02 against the models and pricing docs
+# (platform.openai.com now redirects to developers.openai.com). Current
+# lineup: gpt-5.5 / gpt-5.5-pro flagship, the gpt-5.4 tier family
+# (base/mini/nano), and gpt-5.3-codex for agentic coding. The entire
+# GPT-4/o-series legacy exits by 2026-10-23 (announced 2026-04-22), and
+# the gpt-5 dated snapshots plus o3/o3-pro shut down 2026-12-11
+# (announced 2026-06-11).
+
 # GPT-5.5 — current OpenAI frontier (Responses + Chat Completions).
-# Reasoning model driven by `reasoning_effort`. Standard $5 / $30 per MTok
-# (cached input $0.50); short-context rates shown — long-context (>200k)
-# bills higher per OpenAI's pricing page. Accelerated serving rides the
-# `service_tier` knob: Codex exposes it as "Fast mode"
-# (service_tier = "fast", ~1.5x faster output) and the API as priority
-# processing (service_tier = "priority"); both bill at 2.5x standard.
-# Off by default.
+# Reasoning model driven by `reasoning_effort` (none/low/medium/high/
+# xhigh; reasoning tokens bill as output). Standard $5 / $30 per MTok
+# (cached input $0.50); short-context rates shown — prompts over 272k
+# input tokens bill the ENTIRE request at the long-context tier
+# ($10 in / $1 cached / $45 out per MTok) per the GPT-5.5 model page.
+# Accelerated serving rides the `service_tier` knob: Codex exposes it as
+# "Fast mode" (service_tier = "fast", ~1.5x faster output) and the API
+# as priority processing (service_tier = "priority"); both bill at 2.5x
+# standard. Off by default.
 [models."gpt-5.5"]
 name = "GPT-5.5"
 provider = "openai"
@@ -31,6 +41,53 @@ open_weight = false
 strengths = ["reasoning", "coding", "tool_use", "long_context", "agentic"]
 complementary_with = ["anthropic-claude", "google-gemini", "qwen", "deepseek", "kimi"]
 
+# GPT-5.4 tier family — the current cost ladder below gpt-5.5. All are
+# reasoning models (reasoning_effort) with vision input and cached-input
+# pricing at 0.1x. gpt-5.4-mini is the modern `mid` tier default;
+# gpt-5.4-nano is the cheapest current OpenAI model.
+[models."gpt-5.4"]
+name = "GPT-5.4"
+provider = "openai"
+context_window = 1000000
+capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 2.50, output_per_mtok = 15.00, cache_read_per_mtok = 0.25 }
+tier = "frontier"
+open_weight = false
+strengths = ["reasoning", "coding", "tool_use", "long_context", "agentic"]
+complementary_with = ["anthropic-claude", "google-gemini", "qwen", "deepseek", "kimi"]
+[models."gpt-5.4-mini"]
+name = "GPT-5.4 Mini"
+provider = "openai"
+context_window = 400000
+capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 0.75, output_per_mtok = 4.50, cache_read_per_mtok = 0.075 }
+tier = "mid"
+open_weight = false
+strengths = ["speed", "cheap", "coding", "tool_use", "summarization"]
+complementary_with = ["anthropic-claude", "google-gemini", "qwen", "deepseek", "kimi"]
+[models."gpt-5.4-nano"]
+name = "GPT-5.4 Nano"
+provider = "openai"
+context_window = 400000
+capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 0.20, output_per_mtok = 1.25, cache_read_per_mtok = 0.02 }
+tier = "small"
+open_weight = false
+strengths = ["speed", "cheap", "summarization", "tool_use"]
+
+# GPT-5.3-Codex — agentic-coding tune (released 2026-02-05). OpenAI now
+# recommends gpt-5.5 for most Codex tasks; kept for cost-sensitive
+# coding loops.
+[models."gpt-5.3-codex"]
+name = "GPT-5.3-Codex"
+provider = "openai"
+context_window = 400000
+capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 1.75, output_per_mtok = 14.00, cache_read_per_mtok = 0.175 }
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "tool_use", "agentic"]
+
 # GPT-4o retired from ChatGPT 2026-02-13; chatgpt-4o-latest removed
 # from API 2026-02-17 (Enterprise/Edu grace until 2026-04-03).
 [models."gpt-4o"]
@@ -40,7 +97,7 @@ context_window = 128000
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 2.50, output_per_mtok = 10.00, cache_read_per_mtok = 1.25 }
 deprecated = true
-deprecation_note = "API sunset 2026-02-17 per OpenAI deprecations page. Switch to gpt-5-mini for cheap routing or gpt-5 for frontier."
+deprecation_note = "API sunset 2026-02-17 per OpenAI deprecations page. Switch to gpt-5.4-mini for cheap routing or gpt-5.5 for frontier."
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "vision", "tool_use"]
@@ -50,10 +107,10 @@ provider = "openai"
 context_window = 128000
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60 }
-# Not yet deprecated as of 2026-05 — OpenAI's deprecation page lists
-# gpt-4o (Feb 17 2026 API sunset) but gpt-4o-mini has no announced
-# sunset. Still the canonical `mid` tier default until gpt-5-mini ships
-# with confirmed pricing.
+# No individually announced sunset as of 2026-07-02, but the GPT-4-era
+# legacy exits by 2026-10-23 per the 2026-04-22 deprecations
+# announcement. The `mid` tier default moved to gpt-5.4-mini.
+superseded_by = "gpt-5.4-mini"
 tier = "mid"
 open_weight = false
 strengths = ["speed", "cheap", "summarization", "tool_use"]
@@ -75,6 +132,9 @@ provider = "openai"
 context_window = 200000
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 15.00, output_per_mtok = 60.00, cache_read_per_mtok = 7.50 }
+deprecated = true
+deprecation_note = "Shutdown 2026-10-23 (announced 2026-04-22) per OpenAI deprecations page. Use gpt-5.5."
+superseded_by = "gpt-5.5"
 tier = "reasoning"
 open_weight = false
 strengths = ["reasoning"]
@@ -84,6 +144,9 @@ provider = "openai"
 context_window = 128000
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 3.00, output_per_mtok = 12.00, cache_read_per_mtok = 1.50 }
+deprecated = true
+deprecation_note = "Legacy o-series; the GPT-4/o-series legacy exits by 2026-10-23 per OpenAI deprecations page. Use gpt-5.4-mini."
+superseded_by = "gpt-5.4-mini"
 tier = "reasoning"
 open_weight = false
 strengths = ["reasoning", "cheap"]
@@ -93,6 +156,9 @@ provider = "openai"
 context_window = 200000
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 15.00, output_per_mtok = 60.00, cache_read_per_mtok = 7.50 }
+deprecated = true
+deprecation_note = "Shutdown 2026-12-11 (announced 2026-06-11) per OpenAI deprecations page. Use gpt-5.5."
+superseded_by = "gpt-5.5"
 tier = "reasoning"
 open_weight = false
 strengths = ["reasoning", "coding"]
@@ -103,38 +169,84 @@ provider = "openai"
 context_window = 200000
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 1.10, output_per_mtok = 4.40, cache_read_per_mtok = 0.55 }
-
-# Google Gemini ─ pricing: https://ai.google.dev/pricing.
-# Gemini 1.0 / 1.5 already retired. Gemini 2.0 Flash + Flash-Lite shut
-# down 2026-06-01 per the deprecations page.
+deprecated = true
+deprecation_note = "Shutdown 2026-10-23 (announced 2026-04-22) per OpenAI deprecations page. Use gpt-5.4-mini."
+superseded_by = "gpt-5.4-mini"
 tier = "reasoning"
 open_weight = false
 strengths = ["reasoning", "coding", "cheap"]
 benchmarks = { swe_bench_verified = 49.3 }
+
+# Google Gemini ─ pricing: https://ai.google.dev/gemini-api/docs/pricing,
+# verified 2026-07-02. Gemini 1.0 / 1.5 already retired; Gemini 2.0
+# Flash + Flash-Lite shut down 2026-06-01 per the deprecations page.
+# The 2.5 family remains served alongside the current 3.x lineup
+# (gemini-3.5-flash stable flagship, gemini-3.1-pro-preview,
+# gemini-3.1-flash-lite). Thinking tokens bill as output; implicit
+# caching is automatic (90% discount on cache hits), explicit caching
+# adds hourly storage.
+# NOTE: this row previously carried Flash-Lite's $0.10/$0.40 rates.
+# Gemini 2.5 Flash is $0.30 in / $2.50 out (cache read $0.03) per the
+# pricing page; the $0.10/$0.40 tier is gemini-2.5-flash-lite below.
 [models."gemini-2.5-flash"]
 name = "Gemini 2.5 Flash"
 provider = "gemini"
 context_window = 1048576
-capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.10, output_per_mtok = 0.40, cache_read_per_mtok = 0.025 }
-
-# Gemini 3.5 Flash is Google's current speed/cost frontier route for agentic
-# workflows. Google lists a 1,048,576-token input window and 65,536-token
-# output ceiling on the Gemini API model page.
+capabilities = ["tools", "vision", "streaming", "thinking"]
+pricing = { input_per_mtok = 0.30, output_per_mtok = 2.50, cache_read_per_mtok = 0.03 }
 tier = "mid"
 open_weight = false
 strengths = ["speed", "long_context", "vision", "cheap", "tool_use", "agentic"]
 complementary_with = ["anthropic-claude", "openai-gpt", "qwen", "deepseek", "kimi"]
+
+[models."gemini-2.5-flash-lite"]
+name = "Gemini 2.5 Flash-Lite"
+provider = "gemini"
+context_window = 1048576
+capabilities = ["tools", "vision", "streaming", "thinking"]
+pricing = { input_per_mtok = 0.10, output_per_mtok = 0.40, cache_read_per_mtok = 0.01 }
+tier = "small"
+open_weight = false
+strengths = ["speed", "cheap", "long_context", "summarization", "tool_use"]
+
+# Gemini 3.5 Flash is Google's current speed/cost frontier route for agentic
+# workflows. Google lists a 1,048,576-token input window and 65,536-token
+# output ceiling on the Gemini API model page.
 [models."gemini-3.5-flash"]
 name = "Gemini 3.5 Flash"
 provider = "gemini"
 context_window = 1048576
-capabilities = ["tools", "vision", "streaming", "prompt_caching"]
-pricing = { input_per_mtok = 1.50, output_per_mtok = 9.00, cache_read_per_mtok = 0.375 }
+capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 1.50, output_per_mtok = 9.00, cache_read_per_mtok = 0.15 }
 tier = "frontier"
 open_weight = false
 strengths = ["speed", "long_context", "vision", "tool_use", "agentic"]
 complementary_with = ["anthropic-claude", "openai-gpt", "qwen", "deepseek", "kimi"]
+
+# Gemini 3.1 Pro (Preview) — context-length-tiered pricing: $2 in / $12
+# out per MTok up to 200k input, $4 / $18 beyond (the catalog records
+# the <=200k tier). Paid tier only. Cache read $0.20 (<=200k) plus
+# $4.50/MTok/hr storage for explicit caches.
+[models."gemini-3.1-pro-preview"]
+name = "Gemini 3.1 Pro (Preview)"
+provider = "gemini"
+context_window = 1048576
+capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 2.00, output_per_mtok = 12.00, cache_read_per_mtok = 0.20 }
+tier = "frontier"
+open_weight = false
+strengths = ["reasoning", "coding", "long_context", "vision", "agentic"]
+complementary_with = ["anthropic-claude", "openai-gpt", "qwen", "deepseek", "kimi"]
+
+[models."gemini-3.1-flash-lite"]
+name = "Gemini 3.1 Flash-Lite"
+provider = "gemini"
+context_window = 1048576
+capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 0.25, output_per_mtok = 1.50, cache_read_per_mtok = 0.025 }
+tier = "small"
+open_weight = false
+strengths = ["speed", "cheap", "long_context", "tool_use"]
 
 # OpenRouter-routed variants of the same models — kept as distinct
 # catalog entry so the `qc_defaults.openrouter` lookup resolves to a
@@ -144,8 +256,8 @@ complementary_with = ["anthropic-claude", "openai-gpt", "qwen", "deepseek", "kim
 name = "Gemini 2.5 Flash (via OpenRouter)"
 provider = "openrouter"
 context_window = 1048576
-capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.10, output_per_mtok = 0.40, cache_read_per_mtok = 0.025 }
+capabilities = ["tools", "vision", "streaming", "thinking"]
+pricing = { input_per_mtok = 0.30, output_per_mtok = 2.50, cache_read_per_mtok = 0.03 }
 tier = "mid"
 open_weight = false
 strengths = ["speed", "long_context", "vision", "cheap", "tool_use"]
@@ -155,24 +267,29 @@ name = "Gemini 3.5 Flash (via OpenRouter)"
 provider = "openrouter"
 context_window = 1048576
 capabilities = ["tools", "vision", "streaming", "prompt_caching"]
-pricing = { input_per_mtok = 1.50, output_per_mtok = 9.00, cache_read_per_mtok = 0.375 }
+pricing = { input_per_mtok = 1.50, output_per_mtok = 9.00, cache_read_per_mtok = 0.15 }
 tier = "frontier"
 open_weight = false
 strengths = ["speed", "long_context", "vision", "tool_use", "agentic"]
 complementary_with = ["anthropic-claude", "openai-gpt", "qwen", "deepseek", "kimi"]
+# Gemini 2.5 Pro — context-length-tiered: $1.25 in / $10 out per MTok up
+# to 200k input, $2.50 / $15 beyond (the catalog records the <=200k
+# tier; the previous $5 output figure and 2M context were wrong — the
+# model page lists a 1,048,576-token window).
 [models."gemini-2.5-pro"]
 name = "Gemini 2.5 Pro"
 provider = "gemini"
-context_window = 2097152
-capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 1.25, output_per_mtok = 5.00, cache_read_per_mtok = 0.3125 }
-
-# Mistral hosted via OpenRouter.
+context_window = 1048576
+capabilities = ["tools", "vision", "streaming", "thinking"]
+pricing = { input_per_mtok = 1.25, output_per_mtok = 10.00, cache_read_per_mtok = 0.125 }
 tier = "frontier"
 open_weight = false
 strengths = ["long_context", "vision", "reasoning", "coding"]
 benchmarks = { swe_bench_verified = 63.8 }
 complementary_with = ["anthropic-claude", "openai-gpt", "qwen", "deepseek", "kimi"]
+
+# Mistral ─ pricing: https://mistral.ai/pricing/api/, verified
+# 2026-07-02. Direct rows first, then OpenRouter mirrors.
 [models."mistral-medium-3-5"]
 name = "Mistral Medium 3.5"
 provider = "mistral"
@@ -212,6 +329,43 @@ architecture = { parameter_count_b = 119.0, active_parameter_count_b = 6.5, moe 
 tier = "mid"
 open_weight = true
 strengths = ["cheap", "coding", "speed", "tool_use", "long_context"]
+
+# Codestral — Mistral's FIM/code-completion line (version 25.08; the
+# `codestral-latest` API handle currently resolves here).
+[models."codestral-2508"]
+name = "Codestral 25.08"
+provider = "mistral"
+context_window = 262144
+api_dialect = "openai_chat_compat"
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 0.30, output_per_mtok = 0.90 }
+tier = "mid"
+open_weight = false
+strengths = ["coding", "speed", "cheap"]
+
+# Devstral 2 — Mistral's agentic-coding tunes (version 25.12; the
+# `devstral-medium-latest` / `devstral-small-latest` API handles
+# currently resolve to these dated ids).
+[models."devstral-medium-2512"]
+name = "Devstral 2 Medium"
+provider = "mistral"
+context_window = 262144
+api_dialect = "openai_chat_compat"
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 0.40, output_per_mtok = 2.00 }
+tier = "mid"
+open_weight = false
+strengths = ["coding", "tool_use", "agentic"]
+[models."devstral-small-2512"]
+name = "Devstral 2 Small"
+provider = "mistral"
+context_window = 262144
+api_dialect = "openai_chat_compat"
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 0.10, output_per_mtok = 0.30 }
+tier = "small"
+open_weight = true
+strengths = ["coding", "cheap", "tool_use"]
 [models."mistralai/mistral-medium-3-5"]
 name = "Mistral Medium 3.5 (via OpenRouter)"
 provider = "openrouter"

@@ -1403,7 +1403,9 @@
         "cache_write_per_mtok": 18.75
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "Retired 2026-01-05 per Anthropic deprecations page. Use claude-opus-4-8.",
+        "superseded_by": "claude-opus-4-8"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -1664,7 +1666,7 @@
       },
       "deprecation": {
         "status": "deprecated",
-        "note": "Superseded by claude-opus-4-8. No formal sunset yet; switch when convenient.",
+        "note": "Deprecated 2026-06-05 per Anthropic deprecations page; retires 2026-08-05. Use claude-opus-4-8.",
         "superseded_by": "claude-opus-4-8"
       },
       "availability": "serverless",
@@ -1870,7 +1872,7 @@
       "name": "Claude Opus 4.6",
       "provider": "anthropic",
       "aliases": [],
-      "context_window": 200000,
+      "context_window": 1000000,
       "modalities": {
         "input": [
           "text",
@@ -1959,7 +1961,7 @@
       "name": "Claude Opus 4.7",
       "provider": "anthropic",
       "aliases": [],
-      "context_window": 200000,
+      "context_window": 1000000,
       "modalities": {
         "input": [
           "text",
@@ -2065,7 +2067,7 @@
       "aliases": [
         "opus"
       ],
-      "context_window": 200000,
+      "context_window": 1000000,
       "modalities": {
         "input": [
           "text",
@@ -2435,11 +2437,9 @@
       "name": "Claude Sonnet 4.6",
       "provider": "anthropic",
       "aliases": [
-        "frontier",
-        "sonnet",
-        "tier/frontier"
+        "sonnet46"
       ],
-      "context_window": 200000,
+      "context_window": 1000000,
       "modalities": {
         "input": [
           "text",
@@ -2492,9 +2492,7 @@
         "status": "active"
       },
       "availability": "serverless",
-      "quality_tags": [
-        "frontier"
-      ],
+      "quality_tags": [],
       "capability_tags": [
         "streaming",
         "tools",
@@ -2530,11 +2528,16 @@
       }
     },
     {
-      "id": "claude-sonnet-4-7",
-      "name": "Claude Sonnet 4.7",
+      "id": "claude-sonnet-5",
+      "name": "Claude Sonnet 5",
       "provider": "anthropic",
-      "aliases": [],
-      "context_window": 200000,
+      "aliases": [
+        "frontier",
+        "sonnet",
+        "sonnet5",
+        "tier/frontier"
+      ],
+      "context_window": 1000000,
       "modalities": {
         "input": [
           "text",
@@ -2569,25 +2572,28 @@
       },
       "reasoning": {
         "modes": [
-          "adaptive"
+          "adaptive",
+          "effort"
         ],
-        "effort_supported": false,
+        "effort_supported": true,
         "none_supported": false,
-        "interleaved_supported": false,
+        "interleaved_supported": true,
         "preserve_thinking": false
       },
       "prompt_cache": true,
       "pricing": {
-        "input_per_mtok": 3.0,
-        "output_per_mtok": 15.0,
-        "cache_read_per_mtok": 0.3,
-        "cache_write_per_mtok": 3.75
+        "input_per_mtok": 2.0,
+        "output_per_mtok": 10.0,
+        "cache_read_per_mtok": 0.2,
+        "cache_write_per_mtok": 2.5
       },
       "deprecation": {
         "status": "active"
       },
       "availability": "serverless",
-      "quality_tags": [],
+      "quality_tags": [
+        "frontier"
+      ],
       "capability_tags": [
         "streaming",
         "tools",
@@ -2603,6 +2609,13 @@
       ],
       "family": "anthropic-claude",
       "lineage": "claude-sonnet-opus",
+      "complementary_with": [
+        "openai-gpt",
+        "google-gemini",
+        "qwen",
+        "deepseek",
+        "kimi"
+      ],
       "tier": "frontier",
       "open_weight": false,
       "strengths": [
@@ -2611,10 +2624,7 @@
         "tool_use",
         "long_context",
         "agentic"
-      ],
-      "benchmarks": {
-        "swe_bench_verified": 81.0
-      }
+      ]
     },
     {
       "id": "baseten/deepseek-ai/DeepSeek-V4-Pro",
@@ -3915,6 +3925,403 @@
       ]
     },
     {
+      "id": "dashscope/qwen3-coder-next",
+      "name": "Qwen3 Coder Next (DashScope)",
+      "provider": "dashscope",
+      "aliases": [
+        "dashscope-qwen3-coder-next"
+      ],
+      "context_window": 262144,
+      "logical_model": "qwen3-coder-next",
+      "equivalence_group": "qwen3-coder-next",
+      "served_variant": "dashscope",
+      "wire_model": "qwen3-coder-next",
+      "api_dialect": "openai_chat",
+      "architecture": {
+        "parameter_count_b": 80.0,
+        "active_parameter_count_b": 3.0,
+        "moe": true,
+        "license": "Apache-2.0",
+        "source_url": "https://huggingface.co/Qwen/Qwen3-Coder-Next",
+        "last_verified": "2026-07-02"
+      },
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "delimited",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.3,
+        "output_per_mtok": 1.5,
+        "cache_read_per_mtok": 0.06,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "qwen",
+      "lineage": "qwen3",
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "cheap",
+        "long_context",
+        "agentic",
+        "tool_use"
+      ],
+      "benchmarks": {
+        "swe_bench_pro": 44.3,
+        "swe_bench_verified": 70.6
+      }
+    },
+    {
+      "id": "dashscope/qwen3-coder-plus",
+      "name": "Qwen3 Coder Plus (DashScope)",
+      "provider": "dashscope",
+      "aliases": [],
+      "context_window": 1048576,
+      "served_variant": "dashscope",
+      "wire_model": "qwen3-coder-plus",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "delimited",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 1.0,
+        "output_per_mtok": 5.0,
+        "cache_read_per_mtok": 0.2,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "qwen",
+      "lineage": "qwen3",
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "agentic",
+        "long_context",
+        "tool_use"
+      ]
+    },
+    {
+      "id": "dashscope/qwen3.5-397b-a17b",
+      "name": "Qwen3.5 397B A17B (DashScope)",
+      "provider": "dashscope",
+      "aliases": [],
+      "context_window": 262144,
+      "served_variant": "dashscope",
+      "wire_model": "qwen3.5-397b-a17b",
+      "api_dialect": "openai_chat",
+      "architecture": {
+        "parameter_count_b": 397.0,
+        "active_parameter_count_b": 17.0,
+        "moe": true,
+        "license": "Apache-2.0",
+        "source_url": "https://huggingface.co/Qwen/Qwen3.5-397B-A17B",
+        "last_verified": "2026-07-02"
+      },
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "delimited",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.6,
+        "output_per_mtok": 3.6,
+        "cache_read_per_mtok": 0.12,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "qwen",
+      "lineage": "qwen3",
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "reasoning",
+        "tool_use",
+        "long_context",
+        "vision"
+      ],
+      "benchmarks": {
+        "swe_bench_verified": 76.4
+      }
+    },
+    {
+      "id": "dashscope/qwen3.6-35b-a3b",
+      "name": "Qwen3.6 35B A3B (DashScope)",
+      "provider": "dashscope",
+      "aliases": [],
+      "context_window": 262144,
+      "logical_model": "qwen3.6-35b-a3b",
+      "equivalence_group": "qwen3.6-35b-a3b",
+      "served_variant": "dashscope",
+      "wire_model": "qwen3.6-35b-a3b",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "delimited",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": true
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.375,
+        "output_per_mtok": 2.25,
+        "cache_read_per_mtok": 0.075,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "qwen",
+      "lineage": "qwen3",
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "long_context",
+        "cheap"
+      ]
+    },
+    {
+      "id": "dashscope/qwen3.7-max",
+      "name": "Qwen3.7 Max (DashScope)",
+      "provider": "dashscope",
+      "aliases": [
+        "dashscope-qwen3.7-max"
+      ],
+      "context_window": 1000000,
+      "logical_model": "qwen3.7-max",
+      "equivalence_group": "qwen3.7-max",
+      "served_variant": "dashscope",
+      "wire_model": "qwen3.7-max",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "delimited",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 2.5,
+        "output_per_mtok": 7.5,
+        "cache_read_per_mtok": 0.5,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "qwen",
+      "lineage": "qwen3",
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "long_context",
+        "reasoning"
+      ]
+    },
+    {
       "id": "deepinfra/Qwen/Qwen3.6-35B-A3B",
       "name": "Qwen3.6 35B A3B (DeepInfra)",
       "provider": "deepinfra",
@@ -4169,6 +4576,98 @@
       ]
     },
     {
+      "id": "deepinfra/deepseek-ai/DeepSeek-V4-Flash",
+      "name": "DeepSeek V4 Flash (DeepInfra)",
+      "provider": "deepinfra",
+      "aliases": [],
+      "context_window": 1000000,
+      "logical_model": "deepseek-v4-flash",
+      "equivalence_group": "deepseek-v4-flash",
+      "served_variant": "deepinfra",
+      "wire_model": "deepseek-ai/DeepSeek-V4-Flash",
+      "api_dialect": "openai_chat",
+      "architecture": {
+        "parameter_count_b": 284.0,
+        "active_parameter_count_b": 13.0,
+        "moe": true,
+        "quantization": "fp4",
+        "license": "MIT",
+        "source_url": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash",
+        "last_verified": "2026-07-02"
+      },
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 0.09,
+        "output_per_mtok": 0.18,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "deepseek",
+      "lineage": "deepseek",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "google-gemini",
+        "qwen",
+        "kimi"
+      ],
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "reasoning",
+        "coding",
+        "tool_use",
+        "long_context",
+        "cheap"
+      ]
+    },
+    {
       "id": "deepinfra/deepseek-ai/DeepSeek-V4-Pro",
       "name": "DeepSeek V4 Pro (DeepInfra)",
       "provider": "deepinfra",
@@ -4217,8 +4716,8 @@
       },
       "prompt_cache": true,
       "pricing": {
-        "input_per_mtok": 0.5,
-        "output_per_mtok": 1.5,
+        "input_per_mtok": 1.3,
+        "output_per_mtok": 2.6,
         "cache_read_per_mtok": null,
         "cache_write_per_mtok": null
       },
@@ -4249,8 +4748,7 @@
         "reasoning",
         "coding",
         "tool_use",
-        "long_context",
-        "cheap"
+        "long_context"
       ]
     },
     {
@@ -4304,9 +4802,9 @@
       },
       "prompt_cache": true,
       "pricing": {
-        "input_per_mtok": 0.8,
-        "output_per_mtok": 3.2,
-        "cache_read_per_mtok": 0.2,
+        "input_per_mtok": 0.74,
+        "output_per_mtok": 3.5,
+        "cache_read_per_mtok": null,
         "cache_write_per_mtok": null
       },
       "deprecation": {
@@ -4849,9 +5347,9 @@
       },
       "prompt_cache": true,
       "pricing": {
-        "input_per_mtok": 0.6,
-        "output_per_mtok": 1.2,
-        "cache_read_per_mtok": null,
+        "input_per_mtok": 1.74,
+        "output_per_mtok": 3.48,
+        "cache_read_per_mtok": 0.145,
         "cache_write_per_mtok": null
       },
       "deprecation": {
@@ -5117,6 +5615,162 @@
       ]
     },
     {
+      "id": "accounts/fireworks/models/kimi-k2p7-code",
+      "name": "Kimi K2.7 Code (Fireworks)",
+      "provider": "fireworks",
+      "aliases": [],
+      "context_window": 262144,
+      "logical_model": "moonshot-kimi-k2.7-code",
+      "equivalence_group": "moonshot-kimi-k2.7-code",
+      "served_variant": "fireworks",
+      "wire_model": "accounts/fireworks/models/kimi-k2p7-code",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 0.95,
+        "output_per_mtok": 4.0,
+        "cache_read_per_mtok": 0.19,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "kimi",
+      "lineage": "kimi",
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
+        "long_context",
+        "tool_use",
+        "reasoning",
+        "vision"
+      ]
+    },
+    {
+      "id": "accounts/fireworks/models/minimax-m3",
+      "name": "MiniMax M3 (Fireworks)",
+      "provider": "fireworks",
+      "aliases": [],
+      "context_window": 524288,
+      "served_variant": "fireworks",
+      "wire_model": "accounts/fireworks/models/minimax-m3",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 0.3,
+        "output_per_mtok": 1.2,
+        "cache_read_per_mtok": 0.06,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "minimax",
+      "lineage": "minimax",
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "long_context",
+        "vision"
+      ]
+    },
+    {
       "id": "gemini-2.5-flash",
       "name": "Gemini 2.5 Flash",
       "provider": "gemini",
@@ -5163,9 +5817,9 @@
       },
       "prompt_cache": false,
       "pricing": {
-        "input_per_mtok": 0.1,
-        "output_per_mtok": 0.4,
-        "cache_read_per_mtok": 0.025,
+        "input_per_mtok": 0.3,
+        "output_per_mtok": 2.5,
+        "cache_read_per_mtok": 0.03,
         "cache_write_per_mtok": null
       },
       "deprecation": {
@@ -5205,11 +5859,91 @@
       ]
     },
     {
+      "id": "gemini-2.5-flash-lite",
+      "name": "Gemini 2.5 Flash-Lite",
+      "provider": "gemini",
+      "aliases": [],
+      "context_window": 1048576,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": true,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled",
+          "adaptive",
+          "effort"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.1,
+        "output_per_mtok": 0.4,
+        "cache_read_per_mtok": 0.01,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "audio",
+        "pdf",
+        "files",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "google-gemini",
+      "lineage": "gemini-flash",
+      "tier": "small",
+      "open_weight": false,
+      "strengths": [
+        "speed",
+        "cheap",
+        "long_context",
+        "summarization",
+        "tool_use"
+      ]
+    },
+    {
       "id": "gemini-2.5-pro",
       "name": "Gemini 2.5 Pro",
       "provider": "gemini",
       "aliases": [],
-      "context_window": 2097152,
+      "context_window": 1048576,
       "modalities": {
         "input": [
           "text",
@@ -5252,8 +5986,8 @@
       "prompt_cache": false,
       "pricing": {
         "input_per_mtok": 1.25,
-        "output_per_mtok": 5.0,
-        "cache_read_per_mtok": 0.3125,
+        "output_per_mtok": 10.0,
+        "cache_read_per_mtok": 0.125,
         "cache_write_per_mtok": null
       },
       "deprecation": {
@@ -5292,6 +6026,172 @@
       "benchmarks": {
         "swe_bench_verified": 63.8
       }
+    },
+    {
+      "id": "gemini-3.1-flash-lite",
+      "name": "Gemini 3.1 Flash-Lite",
+      "provider": "gemini",
+      "aliases": [],
+      "context_window": 1048576,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": true,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled",
+          "adaptive"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 0.25,
+        "output_per_mtok": 1.5,
+        "cache_read_per_mtok": 0.025,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "audio",
+        "pdf",
+        "files",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "google-gemini",
+      "lineage": "gemini-flash",
+      "tier": "small",
+      "open_weight": false,
+      "strengths": [
+        "speed",
+        "cheap",
+        "long_context",
+        "tool_use"
+      ]
+    },
+    {
+      "id": "gemini-3.1-pro-preview",
+      "name": "Gemini 3.1 Pro (Preview)",
+      "provider": "gemini",
+      "aliases": [],
+      "context_window": 1048576,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": true,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled",
+          "adaptive"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 2.0,
+        "output_per_mtok": 12.0,
+        "cache_read_per_mtok": 0.2,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "audio",
+        "pdf",
+        "files",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "google-gemini",
+      "lineage": "gemini-pro",
+      "complementary_with": [
+        "anthropic-claude",
+        "openai-gpt",
+        "qwen",
+        "deepseek",
+        "kimi"
+      ],
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "reasoning",
+        "coding",
+        "long_context",
+        "vision",
+        "agentic"
+      ]
     },
     {
       "id": "gemini-3.5-flash",
@@ -5341,7 +6241,7 @@
       "pricing": {
         "input_per_mtok": 1.5,
         "output_per_mtok": 9.0,
-        "cache_read_per_mtok": 0.375,
+        "cache_read_per_mtok": 0.15,
         "cache_write_per_mtok": null
       },
       "deprecation": {
@@ -5841,7 +6741,8 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "Groq retires llama-3.3-70b 2026-08-16 per console.groq.com/docs/deprecations. Use qwen/qwen3.6-27b on Groq or llama-3.1-8b-instant for the cheap tier."
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -5859,6 +6760,89 @@
         "cheap",
         "tool_use"
       ]
+    },
+    {
+      "id": "qwen/qwen3.6-27b",
+      "name": "Qwen3.6 27B (Groq)",
+      "provider": "groq",
+      "aliases": [
+        "groq-qwen3.6"
+      ],
+      "context_window": 131072,
+      "logical_model": "qwen3.6-27b",
+      "equivalence_group": "qwen3.6-27b",
+      "served_variant": "groq-lpu",
+      "wire_model": "qwen/qwen3.6-27b",
+      "api_dialect": "openai_chat",
+      "architecture": {
+        "parameter_count_b": 27.0,
+        "moe": false,
+        "license": "Apache-2.0",
+        "source_url": "https://huggingface.co/Qwen/Qwen3.6-27B",
+        "last_verified": "2026-07-02"
+      },
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.6,
+        "output_per_mtok": 3.0,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "structured_output"
+      ],
+      "family": "qwen",
+      "lineage": "qwen3",
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "speed",
+        "coding",
+        "tool_use",
+        "agentic"
+      ],
+      "benchmarks": {
+        "swe_bench_verified": 77.2
+      }
     },
     {
       "id": "qwen3.6-35b-a3b",
@@ -6787,6 +7771,12 @@
         "minimax-m3"
       ],
       "context_window": 1000000,
+      "architecture": {
+        "parameter_count_b": 427.0,
+        "moe": true,
+        "source_url": "https://huggingface.co/MiniMaxAI/MiniMax-M3",
+        "last_verified": "2026-07-02"
+      },
       "modalities": {
         "input": [
           "text",
@@ -6825,9 +7815,9 @@
       },
       "prompt_cache": true,
       "pricing": {
-        "input_per_mtok": 0.6,
-        "output_per_mtok": 2.4,
-        "cache_read_per_mtok": 0.12,
+        "input_per_mtok": 0.3,
+        "output_per_mtok": 1.2,
+        "cache_read_per_mtok": 0.06,
         "cache_write_per_mtok": null
       },
       "deprecation": {
@@ -6848,7 +7838,7 @@
       "family": "minimax",
       "lineage": "minimax",
       "tier": "frontier",
-      "open_weight": false,
+      "open_weight": true,
       "strengths": [
         "coding",
         "agentic",
@@ -6856,7 +7846,10 @@
         "reasoning",
         "long_context",
         "vision"
-      ]
+      ],
+      "benchmarks": {
+        "swe_bench_pro": 59.0
+      }
     },
     {
       "id": "MiniMax-Text-01",
@@ -6921,6 +7914,210 @@
       "open_weight": true,
       "strengths": [
         "long_context"
+      ]
+    },
+    {
+      "id": "codestral-2508",
+      "name": "Codestral 25.08",
+      "provider": "mistral",
+      "aliases": [
+        "codestral"
+      ],
+      "context_window": 262144,
+      "api_dialect": "openai_chat_compat",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.3,
+        "output_per_mtok": 0.9,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "structured_output"
+      ],
+      "family": "mistral",
+      "lineage": "mistral",
+      "tier": "mid",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "speed",
+        "cheap"
+      ]
+    },
+    {
+      "id": "devstral-medium-2512",
+      "name": "Devstral 2 Medium",
+      "provider": "mistral",
+      "aliases": [
+        "devstral-medium"
+      ],
+      "context_window": 262144,
+      "api_dialect": "openai_chat_compat",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.4,
+        "output_per_mtok": 2.0,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "structured_output"
+      ],
+      "family": "mistral",
+      "lineage": "mistral",
+      "tier": "mid",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "tool_use",
+        "agentic"
+      ]
+    },
+    {
+      "id": "devstral-small-2512",
+      "name": "Devstral 2 Small",
+      "provider": "mistral",
+      "aliases": [
+        "devstral-small"
+      ],
+      "context_window": 262144,
+      "api_dialect": "openai_chat_compat",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.1,
+        "output_per_mtok": 0.3,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "structured_output"
+      ],
+      "family": "mistral",
+      "lineage": "mistral",
+      "tier": "small",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "cheap",
+        "tool_use"
       ]
     },
     {
@@ -7444,9 +8641,9 @@
       },
       "prompt_cache": true,
       "pricing": {
-        "input_per_mtok": 0.8,
-        "output_per_mtok": 3.2,
-        "cache_read_per_mtok": 0.2,
+        "input_per_mtok": 0.95,
+        "output_per_mtok": 4.0,
+        "cache_read_per_mtok": 0.19,
         "cache_write_per_mtok": null
       },
       "deprecation": {
@@ -9178,7 +10375,7 @@
       },
       "deprecation": {
         "status": "deprecated",
-        "note": "API sunset 2026-02-17 per OpenAI deprecations page. Switch to gpt-5-mini for cheap routing or gpt-5 for frontier."
+        "note": "API sunset 2026-02-17 per OpenAI deprecations page. Switch to gpt-5.4-mini for cheap routing or gpt-5.5 for frontier."
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -9203,10 +10400,7 @@
       "id": "gpt-4o-mini",
       "name": "GPT-4o Mini",
       "provider": "openai",
-      "aliases": [
-        "mid",
-        "tier/mid"
-      ],
+      "aliases": [],
       "context_window": 128000,
       "modalities": {
         "input": [
@@ -9250,12 +10444,11 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "active",
+        "superseded_by": "gpt-5.4-mini"
       },
       "availability": "serverless",
-      "quality_tags": [
-        "balanced"
-      ],
+      "quality_tags": [],
       "capability_tags": [
         "streaming",
         "tools",
@@ -9273,6 +10466,326 @@
         "kimi"
       ],
       "tier": "mid",
+      "open_weight": false,
+      "strengths": [
+        "speed",
+        "cheap",
+        "summarization",
+        "tool_use"
+      ]
+    },
+    {
+      "id": "gpt-5.3-codex",
+      "name": "GPT-5.3-Codex",
+      "provider": "openai",
+      "aliases": [],
+      "context_window": 400000,
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "none_supported": true,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 1.75,
+        "output_per_mtok": 14.0,
+        "cache_read_per_mtok": 0.175,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "openai-gpt",
+      "lineage": "openai-gpt5",
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "tool_use",
+        "agentic"
+      ]
+    },
+    {
+      "id": "gpt-5.4",
+      "name": "GPT-5.4",
+      "provider": "openai",
+      "aliases": [],
+      "context_window": 1000000,
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": [
+          "hosted",
+          "client"
+        ]
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "none_supported": true,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 2.5,
+        "output_per_mtok": 15.0,
+        "cache_read_per_mtok": 0.25,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "tool_search",
+        "vision",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "openai-gpt",
+      "lineage": "openai-gpt5",
+      "complementary_with": [
+        "anthropic-claude",
+        "google-gemini",
+        "qwen",
+        "deepseek",
+        "kimi"
+      ],
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "reasoning",
+        "coding",
+        "tool_use",
+        "long_context",
+        "agentic"
+      ]
+    },
+    {
+      "id": "gpt-5.4-mini",
+      "name": "GPT-5.4 Mini",
+      "provider": "openai",
+      "aliases": [
+        "mid",
+        "tier/mid"
+      ],
+      "context_window": 400000,
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": [
+          "hosted",
+          "client"
+        ]
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "none_supported": true,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.75,
+        "output_per_mtok": 4.5,
+        "cache_read_per_mtok": 0.075,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [
+        "balanced"
+      ],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "tool_search",
+        "vision",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "openai-gpt",
+      "lineage": "openai-gpt5",
+      "complementary_with": [
+        "anthropic-claude",
+        "google-gemini",
+        "qwen",
+        "deepseek",
+        "kimi"
+      ],
+      "tier": "mid",
+      "open_weight": false,
+      "strengths": [
+        "speed",
+        "cheap",
+        "coding",
+        "tool_use",
+        "summarization"
+      ]
+    },
+    {
+      "id": "gpt-5.4-nano",
+      "name": "GPT-5.4 Nano",
+      "provider": "openai",
+      "aliases": [],
+      "context_window": 400000,
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": [
+          "hosted",
+          "client"
+        ]
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "none_supported": true,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.2,
+        "output_per_mtok": 1.25,
+        "cache_read_per_mtok": 0.02,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "tool_search",
+        "vision",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "openai-gpt",
+      "lineage": "openai-gpt5",
+      "tier": "small",
       "open_weight": false,
       "strengths": [
         "speed",
@@ -9510,7 +11023,9 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "Shutdown 2026-10-23 (announced 2026-04-22) per OpenAI deprecations page. Use gpt-5.5.",
+        "superseded_by": "gpt-5.5"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -9577,7 +11092,9 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "Legacy o-series; the GPT-4/o-series legacy exits by 2026-10-23 per OpenAI deprecations page. Use gpt-5.4-mini.",
+        "superseded_by": "gpt-5.4-mini"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -9645,7 +11162,9 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "Shutdown 2026-12-11 (announced 2026-06-11) per OpenAI deprecations page. Use gpt-5.5.",
+        "superseded_by": "gpt-5.5"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -9716,7 +11235,9 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "Shutdown 2026-10-23 (announced 2026-04-22) per OpenAI deprecations page. Use gpt-5.4-mini.",
+        "superseded_by": "gpt-5.4-mini"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -9744,10 +11265,7 @@
       "id": "Qwen/Qwen3.5-9B",
       "name": "Qwen3.5 9B",
       "provider": "openrouter",
-      "aliases": [
-        "small",
-        "tier/small"
-      ],
+      "aliases": [],
       "context_window": 131072,
       "modalities": {
         "input": [
@@ -9788,9 +11306,7 @@
         "status": "active"
       },
       "availability": "serverless",
-      "quality_tags": [
-        "small"
-      ],
+      "quality_tags": [],
       "capability_tags": [
         "streaming",
         "tools",
@@ -10020,7 +11536,7 @@
       "name": "Claude Sonnet 4.6 (via OpenRouter)",
       "provider": "openrouter",
       "aliases": [],
-      "context_window": 200000,
+      "context_window": 1000000,
       "modalities": {
         "input": [
           "text"
@@ -10059,6 +11575,81 @@
         "output_per_mtok": 15.0,
         "cache_read_per_mtok": 0.3,
         "cache_write_per_mtok": 3.75
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "structured_output"
+      ],
+      "family": "anthropic-claude",
+      "lineage": "claude-sonnet-opus",
+      "complementary_with": [
+        "openai-gpt",
+        "google-gemini",
+        "qwen",
+        "deepseek",
+        "kimi"
+      ],
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "reasoning",
+        "tool_use",
+        "long_context",
+        "agentic"
+      ]
+    },
+    {
+      "id": "anthropic/claude-sonnet-5",
+      "name": "Claude Sonnet 5 (via OpenRouter)",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 1000000,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "tool_use",
+      "format_preferences": {
+        "prefers_xml_scaffolding": true,
+        "prefers_markdown_scaffolding": false,
+        "structured_output_mode": "xml_tagged",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": true,
+        "thinking_block_style": "thinking_blocks"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 2.0,
+        "output_per_mtok": 10.0,
+        "cache_read_per_mtok": 0.2,
+        "cache_write_per_mtok": 2.5
       },
       "deprecation": {
         "status": "active"
@@ -10360,9 +11951,9 @@
       },
       "prompt_cache": true,
       "pricing": {
-        "input_per_mtok": 0.1,
-        "output_per_mtok": 0.4,
-        "cache_read_per_mtok": 0.025,
+        "input_per_mtok": 0.3,
+        "output_per_mtok": 2.5,
+        "cache_read_per_mtok": 0.03,
         "cache_write_per_mtok": null
       },
       "deprecation": {
@@ -10448,7 +12039,7 @@
       "pricing": {
         "input_per_mtok": 1.5,
         "output_per_mtok": 9.0,
-        "cache_read_per_mtok": 0.375,
+        "cache_read_per_mtok": 0.15,
         "cache_write_per_mtok": null
       },
       "deprecation": {
@@ -10491,7 +12082,9 @@
       "name": "Gemma 4 26B MoE (OpenRouter)",
       "provider": "openrouter",
       "aliases": [
-        "openrouter-gemma4-26b"
+        "openrouter-gemma4-26b",
+        "small",
+        "tier/small"
       ],
       "context_window": 262144,
       "modalities": {
@@ -10538,7 +12131,9 @@
         "status": "active"
       },
       "availability": "serverless",
-      "quality_tags": [],
+      "quality_tags": [
+        "small"
+      ],
       "capability_tags": [
         "streaming",
         "tools",
@@ -10947,9 +12542,9 @@
       },
       "prompt_cache": true,
       "pricing": {
-        "input_per_mtok": 0.6,
-        "output_per_mtok": 2.4,
-        "cache_read_per_mtok": 0.12,
+        "input_per_mtok": 0.3,
+        "output_per_mtok": 1.2,
+        "cache_read_per_mtok": 0.06,
         "cache_write_per_mtok": null
       },
       "deprecation": {
@@ -10970,7 +12565,7 @@
       "family": "minimax",
       "lineage": "minimax",
       "tier": "frontier",
-      "open_weight": false,
+      "open_weight": true,
       "strengths": [
         "coding",
         "agentic",
@@ -11543,6 +13138,172 @@
       ],
       "benchmarks": {
         "swe_bench_verified": 67.0
+      }
+    },
+    {
+      "id": "qwen/qwen3-coder-next",
+      "name": "Qwen3 Coder Next",
+      "provider": "openrouter",
+      "aliases": [
+        "openrouter-qwen3-coder-next",
+        "qwen3-coder-next"
+      ],
+      "context_window": 262144,
+      "architecture": {
+        "parameter_count_b": 80.0,
+        "active_parameter_count_b": 3.0,
+        "moe": true,
+        "license": "Apache-2.0",
+        "source_url": "https://huggingface.co/Qwen/Qwen3-Coder-Next",
+        "last_verified": "2026-07-02"
+      },
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "text",
+        "parity": "native_unreliable",
+        "parity_notes": "OpenRouter Qwen3-Coder Flash native tools exhausted the coding-agent fixture while text tools completed; default to Harn text tools for preset parity.",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "delimited",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.11,
+        "output_per_mtok": 0.8,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "structured_output"
+      ],
+      "family": "qwen",
+      "lineage": "qwen3",
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "cheap",
+        "long_context",
+        "agentic",
+        "tool_use"
+      ],
+      "benchmarks": {
+        "swe_bench_pro": 44.3,
+        "swe_bench_verified": 70.6
+      }
+    },
+    {
+      "id": "qwen/qwen3.5-397b-a17b",
+      "name": "Qwen3.5 397B A17B",
+      "provider": "openrouter",
+      "aliases": [
+        "openrouter-qwen3.5-397b"
+      ],
+      "context_window": 262144,
+      "architecture": {
+        "parameter_count_b": 397.0,
+        "active_parameter_count_b": 17.0,
+        "moe": true,
+        "license": "Apache-2.0",
+        "source_url": "https://huggingface.co/Qwen/Qwen3.5-397B-A17B",
+        "last_verified": "2026-07-02"
+      },
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "delimited",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": true,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.385,
+        "output_per_mtok": 2.45,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "qwen",
+      "lineage": "qwen3",
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "reasoning",
+        "tool_use",
+        "long_context",
+        "vision"
+      ],
+      "benchmarks": {
+        "swe_bench_verified": 76.4
       }
     },
     {
@@ -12728,6 +14489,83 @@
       ]
     },
     {
+      "id": "MiniMaxAI/MiniMax-M3",
+      "name": "MiniMax M3 (Together)",
+      "provider": "together",
+      "aliases": [
+        "together-minimax-m3"
+      ],
+      "context_window": 524288,
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "text",
+        "parity": "native_unreliable",
+        "parity_notes": "Family-on-host consistency pin: Together MiniMax-M2.7 native was 1/5 fidelity in the 2026-06-24 sweep; no M3-on-Together probe yet, so inherit text rather than an optimistic native pin.",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 0.3,
+        "output_per_mtok": 1.2,
+        "cache_read_per_mtok": 0.06,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "minimax",
+      "lineage": "minimax",
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "long_context",
+        "vision"
+      ]
+    },
+    {
       "id": "Qwen/Qwen2.5-7B-Instruct-Turbo",
       "name": "Qwen2.5 7B Instruct Turbo (Together)",
       "provider": "together",
@@ -13170,6 +15008,78 @@
       ]
     },
     {
+      "id": "moonshotai/Kimi-K2.7-Code",
+      "name": "Kimi K2.7 Code (Together)",
+      "provider": "together",
+      "aliases": [
+        "together-kimi-k2.7-code"
+      ],
+      "context_window": 262144,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.95,
+        "output_per_mtok": 4.0,
+        "cache_read_per_mtok": 0.19,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "kimi",
+      "lineage": "kimi",
+      "tier": "frontier",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
+        "long_context",
+        "tool_use",
+        "reasoning"
+      ]
+    },
+    {
       "id": "zai-org/GLM-5.1",
       "name": "GLM 5.1 (Together)",
       "provider": "together",
@@ -13257,7 +15167,7 @@
       "aliases": [
         "together-glm-5.2"
       ],
-      "context_window": 1048576,
+      "context_window": 262144,
       "modalities": {
         "input": [
           "text"
@@ -13503,6 +15413,72 @@
       ]
     },
     {
+      "id": "glm-4.7-flash",
+      "name": "GLM 4.7 Flash",
+      "provider": "zai",
+      "aliases": [
+        "glm-4.7-flash"
+      ],
+      "context_window": 131072,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "text",
+        "parity": "native_unreliable",
+        "parity_notes": "Family-consistency pin: GLM native channels emit `<tool_call>` markup as content (2026-06-23 Baseten GLM-5.2 probe); no zai-direct GLM-4.7 probe yet, so inherit the family verdict rather than an optimistic native pin.",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "glm",
+      "lineage": "glm",
+      "tier": "small",
+      "open_weight": true,
+      "strengths": [
+        "speed",
+        "cheap",
+        "coding",
+        "tool_use"
+      ]
+    },
+    {
       "id": "glm-5",
       "name": "GLM 5",
       "provider": "zai",
@@ -13547,8 +15523,8 @@
       },
       "prompt_cache": false,
       "pricing": {
-        "input_per_mtok": 0.98,
-        "output_per_mtok": 3.08,
+        "input_per_mtok": 1.0,
+        "output_per_mtok": 3.2,
         "cache_read_per_mtok": 0.2,
         "cache_write_per_mtok": null
       },
@@ -13767,6 +15743,11 @@
       "tool_format": "native"
     },
     {
+      "name": "codestral",
+      "model_id": "codestral-2508",
+      "provider": "mistral"
+    },
+    {
       "name": "cohere",
       "model_id": "command-a-plus-05-2026",
       "provider": "cohere"
@@ -13775,6 +15756,16 @@
       "name": "command-a-plus",
       "model_id": "command-a-plus-05-2026",
       "provider": "cohere"
+    },
+    {
+      "name": "dashscope-qwen3-coder-next",
+      "model_id": "dashscope/qwen3-coder-next",
+      "provider": "dashscope"
+    },
+    {
+      "name": "dashscope-qwen3.7-max",
+      "model_id": "dashscope/qwen3.7-max",
+      "provider": "dashscope"
     },
     {
       "name": "deepinfra-deepseek",
@@ -13826,6 +15817,16 @@
       "provider": "deepseek"
     },
     {
+      "name": "devstral-medium",
+      "model_id": "devstral-medium-2512",
+      "provider": "mistral"
+    },
+    {
+      "name": "devstral-small",
+      "model_id": "devstral-small-2512",
+      "provider": "mistral"
+    },
+    {
       "name": "devstral-small-2",
       "model_id": "devstral-small-2:24b",
       "provider": "ollama"
@@ -13837,7 +15838,7 @@
     },
     {
       "name": "frontier",
-      "model_id": "claude-sonnet-4-6",
+      "model_id": "claude-sonnet-5",
       "provider": "anthropic"
     },
     {
@@ -13855,6 +15856,11 @@
       "model_id": "glm-5.2",
       "provider": "zai",
       "tool_format": "text"
+    },
+    {
+      "name": "glm-4.7-flash",
+      "model_id": "glm-4.7-flash",
+      "provider": "zai"
     },
     {
       "name": "glm-5",
@@ -13893,6 +15899,12 @@
       "name": "grok-code-fast",
       "model_id": "grok-build-0.1",
       "provider": "xai"
+    },
+    {
+      "name": "groq-qwen3.6",
+      "model_id": "qwen/qwen3.6-27b",
+      "provider": "groq",
+      "tool_format": "native"
     },
     {
       "name": "haiku",
@@ -13996,7 +16008,7 @@
     },
     {
       "name": "mid",
-      "model_id": "gpt-4o-mini",
+      "model_id": "gpt-5.4-mini",
       "provider": "openai"
     },
     {
@@ -14192,6 +16204,16 @@
       "provider": "openrouter"
     },
     {
+      "name": "openrouter-qwen3-coder-next",
+      "model_id": "qwen/qwen3-coder-next",
+      "provider": "openrouter"
+    },
+    {
+      "name": "openrouter-qwen3.5-397b",
+      "model_id": "qwen/qwen3.5-397b-a17b",
+      "provider": "openrouter"
+    },
+    {
       "name": "openrouter-qwen3.7-max",
       "model_id": "qwen/qwen3.7-max",
       "provider": "openrouter"
@@ -14210,6 +16232,11 @@
       "name": "opus",
       "model_id": "claude-opus-4-8",
       "provider": "anthropic"
+    },
+    {
+      "name": "qwen3-coder-next",
+      "model_id": "qwen/qwen3-coder-next",
+      "provider": "openrouter"
     },
     {
       "name": "qwen3.7",
@@ -14252,12 +16279,22 @@
     },
     {
       "name": "small",
-      "model_id": "Qwen/Qwen3.5-9B",
+      "model_id": "google/gemma-4-26b-a4b-it",
       "provider": "openrouter"
     },
     {
       "name": "sonnet",
+      "model_id": "claude-sonnet-5",
+      "provider": "anthropic"
+    },
+    {
+      "name": "sonnet46",
       "model_id": "claude-sonnet-4-6",
+      "provider": "anthropic"
+    },
+    {
+      "name": "sonnet5",
+      "model_id": "claude-sonnet-5",
       "provider": "anthropic"
     },
     {
@@ -14267,17 +16304,17 @@
     },
     {
       "name": "tier/frontier",
-      "model_id": "claude-sonnet-4-6",
+      "model_id": "claude-sonnet-5",
       "provider": "anthropic"
     },
     {
       "name": "tier/mid",
-      "model_id": "gpt-4o-mini",
+      "model_id": "gpt-5.4-mini",
       "provider": "openai"
     },
     {
       "name": "tier/small",
-      "model_id": "Qwen/Qwen3.5-9B",
+      "model_id": "google/gemma-4-26b-a4b-it",
       "provider": "openrouter"
     },
     {
@@ -14306,8 +16343,18 @@
       "provider": "together"
     },
     {
+      "name": "together-kimi-k2.7-code",
+      "model_id": "moonshotai/Kimi-K2.7-Code",
+      "provider": "together"
+    },
+    {
       "name": "together-minimax-m2.7",
       "model_id": "MiniMaxAI/MiniMax-M2.7",
+      "provider": "together"
+    },
+    {
+      "name": "together-minimax-m3",
+      "model_id": "MiniMaxAI/MiniMax-M3",
       "provider": "together"
     },
     {
@@ -14321,7 +16368,7 @@
       "id": "fast",
       "label": "Fast",
       "description": "Lowest-latency general coding-agent route.",
-      "model_id": "Qwen/Qwen3.5-9B",
+      "model_id": "google/gemma-4-26b-a4b-it",
       "provider": "openrouter",
       "source": "alias:small"
     },
@@ -14329,7 +16376,7 @@
       "id": "balanced",
       "label": "Balanced",
       "description": "Default cost/quality tradeoff for routine coding-agent work.",
-      "model_id": "gpt-4o-mini",
+      "model_id": "gpt-5.4-mini",
       "provider": "openai",
       "source": "alias:mid"
     },
@@ -14337,7 +16384,7 @@
       "id": "high-reasoning",
       "label": "High reasoning",
       "description": "Frontier route for hard planning, repair, and review tasks.",
-      "model_id": "claude-sonnet-4-6",
+      "model_id": "claude-sonnet-5",
       "provider": "anthropic",
       "source": "alias:frontier"
     },
@@ -14361,16 +16408,16 @@
       "id": "vision-capable",
       "label": "Vision capable",
       "description": "A model route that accepts image input.",
-      "model_id": "gemini-2.5-pro",
-      "provider": "gemini",
+      "model_id": "gpt-5.5-pro",
+      "provider": "openai",
       "source": "catalog"
     },
     {
       "id": "long-context",
       "label": "Long context",
       "description": "Largest context-window route in the checked-in catalog.",
-      "model_id": "gemini-2.5-pro",
-      "provider": "gemini",
+      "model_id": "gpt-5.5-pro",
+      "provider": "openai",
       "source": "catalog"
     }
   ],
@@ -14378,14 +16425,15 @@
     "anthropic": "claude-haiku-4-5-20251001",
     "cohere": "command-a-plus-05-2026",
     "deepseek": "deepseek-v4-flash",
+    "gemini": "gemini-2.5-flash-lite",
     "groq": "llama-3.1-8b-instant",
-    "local": "gpt-4o",
+    "local": "gemma-4-26b-a4b-it",
     "minimax": "MiniMax-M2.5-highspeed",
     "mistral": "mistral-small-2603",
     "ollama": "llama3.2",
-    "openai": "gpt-4o-mini",
+    "openai": "gpt-5.4-nano",
     "openrouter": "google/gemini-2.5-flash",
     "xai": "grok-build-0.1",
-    "zai": "glm-5"
+    "zai": "glm-4.7-flash"
   }
 }

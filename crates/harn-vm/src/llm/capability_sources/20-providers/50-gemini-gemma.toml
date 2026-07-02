@@ -209,6 +209,46 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "reasoning_summary"
 
+# Gemini 3.1 (Pro Preview / Flash-Lite) — same surface as 3.5:
+# thinking_level control (adaptive) plus implicit/explicit caching.
+[[provider.gemini]]
+model_match = "gemini-3.1*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled", "adaptive"]
+vision_supported = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
+prompt_caching = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
+
+[[provider.gemini]]
+model_match = "models/gemini-3.1*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled", "adaptive"]
+vision_supported = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
+prompt_caching = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
+
 [[provider.gemini]]
 model_match = "gemini-*"
 native_tools = true

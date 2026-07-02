@@ -7,6 +7,15 @@
 # Short flagship aliases — these track whatever the current
 # generation is. Bump these when a successor lands.
 [aliases.sonnet]
+id = "claude-sonnet-5"
+provider = "anthropic"
+
+[aliases.sonnet5]
+id = "claude-sonnet-5"
+provider = "anthropic"
+
+# Previous Sonnet generation, kept addressable for pinned workflows.
+[aliases.sonnet46]
 id = "claude-sonnet-4-6"
 provider = "anthropic"
 
@@ -25,27 +34,33 @@ id = "claude-haiku-4-5-20251001"
 provider = "anthropic"
 
 [aliases.frontier]
-id = "claude-sonnet-4-6"
+id = "claude-sonnet-5"
 provider = "anthropic"
 
 [aliases."tier/frontier"]
-id = "claude-sonnet-4-6"
+id = "claude-sonnet-5"
 provider = "anthropic"
 
+# gpt-4o-mini's replacement per OpenAI's own deprecation guidance.
 [aliases.mid]
-id = "gpt-4o-mini"
+id = "gpt-5.4-mini"
 provider = "openai"
 
 [aliases."tier/mid"]
-id = "gpt-4o-mini"
+id = "gpt-5.4-mini"
 provider = "openai"
 
+# The small tier default stays on an open-weight host by policy (see
+# test_resolve_tier_model_default_aliases). Was Qwen/Qwen3.5-9B on
+# OpenRouter — that route went stale (Burin suppresses it); Gemma 4
+# 26B-A4B on OpenRouter is the current cheap open-weight default
+# ($0.06/$0.33, 4B active params, native tools).
 [aliases.small]
-id = "Qwen/Qwen3.5-9B"
+id = "google/gemma-4-26b-a4b-it"
 provider = "openrouter"
 
 [aliases."tier/small"]
-id = "Qwen/Qwen3.5-9B"
+id = "google/gemma-4-26b-a4b-it"
 provider = "openrouter"
 
 # Local Gemma 4 variants (vLLM / OpenAI-compat backend at `providers.local`).
@@ -504,3 +519,58 @@ provider = "ollama"
 # capability rule: native_tools = false). A `tool_format = "native"` pin here
 # would be silently half-supported — accepted by resolution but degraded to
 # the text protocol downstream — which the catalog validator rejects.
+
+# Mistral direct code routes.
+[aliases.codestral]
+id = "codestral-2508"
+provider = "mistral"
+
+[aliases."devstral-medium"]
+id = "devstral-medium-2512"
+provider = "mistral"
+
+[aliases."devstral-small"]
+id = "devstral-small-2512"
+provider = "mistral"
+
+# Current cheap open-weight coder routes.
+[aliases."qwen3-coder-next"]
+id = "qwen/qwen3-coder-next"
+provider = "openrouter"
+
+[aliases."openrouter-qwen3-coder-next"]
+id = "qwen/qwen3-coder-next"
+provider = "openrouter"
+
+[aliases."openrouter-qwen3.5-397b"]
+id = "qwen/qwen3.5-397b-a17b"
+provider = "openrouter"
+
+# Groq LPU speed route for Qwen3.6 (native tool calls, ~500 tok/s).
+[aliases."groq-qwen3.6"]
+id = "qwen/qwen3.6-27b"
+provider = "groq"
+tool_format = "native"
+
+# Z.AI free tier.
+[aliases."glm-4.7-flash"]
+id = "glm-4.7-flash"
+provider = "zai"
+
+# Together mirrors for MiniMax M3 / Kimi K2.7 Code.
+[aliases."together-minimax-m3"]
+id = "MiniMaxAI/MiniMax-M3"
+provider = "together"
+
+[aliases."together-kimi-k2.7-code"]
+id = "moonshotai/Kimi-K2.7-Code"
+provider = "together"
+
+# DashScope first-party Qwen routes.
+[aliases."dashscope-qwen3-coder-next"]
+id = "dashscope/qwen3-coder-next"
+provider = "dashscope"
+
+[aliases."dashscope-qwen3.7-max"]
+id = "dashscope/qwen3.7-max"
+provider = "dashscope"
