@@ -53,6 +53,149 @@ pub(super) fn denied_tool_result(tool_name: &str, reason: impl Into<String>) -> 
     })
 }
 
+/// Build the tool-result body for a NAME-RESOLUTION failure: the call was
+/// refused because its name is not in the session's available tool set
+/// (`DenialGate::ToolCeiling`), not because a granted capability is missing.
+/// Permission framing is actively harmful here — on a headless run the model
+/// reads "tell the user what you need permission for", starts petitioning a
+/// user that does not exist, and stalls. Keep the wording action-oriented:
+/// name the failure class, steer off a re-send, list the callable tools, and
+/// show the call shape. Genuinely permission-gated denials (capability /
+/// side-effect ceilings, approval and host rejections) keep
+/// [`denied_tool_result`].
+pub(super) fn unavailable_tool_result(
+    tool_name: &str,
+    reason: impl Into<String>,
+) -> serde_json::Value {
+    let reason = reason.into();
+    let allowed = crate::orchestration::current_allowed_tool_names();
+    let available_clause = if allowed.is_empty() {
+        String::new()
+    } else {
+        format!(" Available tools: {}.", allowed.join(", "))
+    };
+    let next_step = format!(
+        "`{tool_name}` is not one of the available tools, so re-sending this call will \
+         fail the same way. This is a tool-name mistake to correct yourself, not \
+         something to ask the user about: pick the available tool that does what you \
+         intended and call it directly as `name({{ ... }})`.{available_clause}"
+    );
+    serde_json::json!({
+        "error": "unknown_tool",
+        "tool": tool_name,
+        "reason": reason,
+        "next_step": next_step,
+    })
+}
+
+/// Detect a "wrapper-as-tool-name" call and build repair-class feedback for
+/// it: the model shipped Harn's text tool-call ENVELOPE down the native
+/// channel — a call literally named `tool_call` (or another generic wrapper
+/// name) whose arguments carry one complete text-format call, e.g. arguments
+/// of `<tool_call>\nlook({ file: "src/main.rs", intent: "read" })\n</tool_call>`.
+/// The embedded call is CORRECT; only the addressing is wrong, so the
+/// feedback must be parse-repair class (name the embedded call, show the
+/// direct invocation), never a terminal denial. Returns `None` unless the
+/// arguments parse as exactly one clean text-format call whose target is not
+/// itself a wrapper and is callable under the active policy, so anything
+/// ambiguous falls back to the unavailable-tool feedback instead.
+///
+/// Corrective feedback only — the call is NOT auto-dispatched: dispatching a
+/// repaired call would bypass the approval flow the original name was gated
+/// through.
+pub(super) fn embedded_call_repair_result(
+    tool_name: &str,
+    tool_args: &serde_json::Value,
+) -> Option<serde_json::Value> {
+    let tag = crate::llm::tools::TEXT_TOOL_CALL_TAG;
+    if !crate::llm::tools::is_generic_wrapper_name(tool_name)
+        && tool_name != crate::llm::tools::TEXT_TOOL_CALL_TAG_COMPACT
+    {
+        return None;
+    }
+    let payload = embedded_call_payload_text(tool_args)?;
+    // The text parser only recognizes calls to KNOWN tools; project the active
+    // policy's allowlist into a minimal tool catalog so the embedded call is
+    // validated against exactly the set the model may use. A ToolCeiling
+    // denial implies a non-empty allowlist (an empty list means "no ceiling"),
+    // so an empty list here means there is nothing safe to coach.
+    let allowed = crate::orchestration::current_allowed_tool_names();
+    if allowed.is_empty() {
+        return None;
+    }
+    let tools_json = serde_json::Value::Array(
+        allowed
+            .iter()
+            .map(|name| serde_json::json!({ "name": name }))
+            .collect(),
+    );
+    let tools_val = crate::stdlib::json_to_vm_value(&tools_json);
+    let parsed = crate::llm::tools::parse_text_tool_calls_with_tools(&payload, Some(&tools_val));
+    if !parsed.errors.is_empty() || parsed.calls.len() != 1 {
+        return None;
+    }
+    let call = &parsed.calls[0];
+    let inner_name = call.get("name")?.as_str()?.trim().to_string();
+    if inner_name.is_empty()
+        || crate::llm::tools::is_generic_wrapper_name(&inner_name)
+        || !allowed.iter().any(|name| name == &inner_name)
+    {
+        return None;
+    }
+    let inner_args = call
+        .get("arguments")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    let rendered_args = serde_json::to_string(&inner_args).unwrap_or_else(|_| "{ ... }".into());
+    // Echo the corrected invocation only when it is short enough to repeat
+    // verbatim; a long payload (e.g. an edit body) is coached by reference so
+    // the feedback itself does not balloon the turn.
+    let corrected_invocation = if rendered_args.chars().count() <= 400 {
+        format!("{inner_name}({rendered_args})")
+    } else {
+        format!("{inner_name}({{ ...the same arguments you already wrote... }})")
+    };
+    let reason = format!(
+        "`{tool_name}` is not a tool name — `<{tag}>` is the wrapper tag of the text \
+         tool-call format, and this call's arguments contain a complete call to \
+         `{inner_name}`."
+    );
+    let next_step = format!(
+        "Your call was understood but mis-addressed. Re-issue the embedded call directly, \
+         using `{inner_name}` as the tool name and no wrapper tags: {corrected_invocation}"
+    );
+    Some(serde_json::json!({
+        "error": "invalid_arguments",
+        "tool": tool_name,
+        "reason": reason,
+        "next_step": next_step,
+    }))
+}
+
+/// Extract the text a wrapper-named call most plausibly smuggled its real
+/// call through: a bare string argument, the streamed-arguments fallback's
+/// `{"__parse_error": "... Raw input: <raw>"}` carrier, or a single
+/// string-valued field (e.g. `{"input": "<tool_call>..."}`).
+fn embedded_call_payload_text(tool_args: &serde_json::Value) -> Option<String> {
+    match tool_args {
+        serde_json::Value::String(text) => Some(text.clone()),
+        serde_json::Value::Object(map) => {
+            if let Some(parse_error) = map.get("__parse_error").and_then(|v| v.as_str()) {
+                return parse_error
+                    .split_once("Raw input: ")
+                    .map(|(_, raw)| raw.to_string());
+            }
+            if map.len() == 1 {
+                if let Some(text) = map.values().next().and_then(|v| v.as_str()) {
+                    return Some(text.to_string());
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
 /// Build the tool-result body for a RECOVERABLE rejection — a schema /
 /// argument-validation failure or a malformed (empty) tool name. Unlike
 /// [`denied_tool_result`], this is explicitly retry-POSITIVE: the model made a
@@ -736,6 +879,159 @@ mod tests {
                 "next_step should list the allowed tool {tool}: {next}"
             );
         }
+    }
+
+    // A NAME-RESOLUTION failure (tool-ceiling denial) must never use permission
+    // framing: a headless model that reads "tell the user what you need
+    // permission for" petitions a user that does not exist and stalls. The body
+    // names the failure class, lists the callable tools, and shows the call
+    // shape instead.
+    #[test]
+    fn unavailable_tool_result_is_action_oriented_without_permission_framing() {
+        use crate::orchestration::{pop_execution_policy, push_execution_policy, CapabilityPolicy};
+
+        push_execution_policy(CapabilityPolicy {
+            tools: vec!["look".to_string(), "search".to_string(), "edit".to_string()],
+            ..Default::default()
+        });
+        let result = unavailable_tool_result("container.upload", "tool exceeds tool ceiling");
+        pop_execution_policy();
+
+        assert_eq!(result["error"], serde_json::json!("unknown_tool"));
+        let next = result["next_step"]
+            .as_str()
+            .expect("unavailable-tool result should carry a next_step string");
+        assert!(
+            !next.to_lowercase().contains("permission") && !next.contains("not permitted"),
+            "name-resolution feedback must not use permission framing: {next}"
+        );
+        assert!(
+            next.contains("Available tools:") && next.contains("look"),
+            "next_step should list the callable tools: {next}"
+        );
+        assert!(
+            next.contains("re-sending this call will fail"),
+            "next_step should steer off an identical re-send: {next}"
+        );
+    }
+
+    // A call NAMED `tool_call` whose arguments carry one valid text-format
+    // call is a wrapper-addressing slip, not an unknown tool: the repair body
+    // must name the embedded call and show the direct invocation.
+    #[test]
+    fn embedded_call_repair_names_the_inner_call() {
+        use crate::orchestration::{pop_execution_policy, push_execution_policy, CapabilityPolicy};
+
+        let args = serde_json::json!(
+            "<tool_call>\nlook({ file: \"src/main.rs\", intent: \"read\" })\n</tool_call>"
+        );
+        push_execution_policy(CapabilityPolicy {
+            tools: vec!["look".to_string(), "search".to_string()],
+            ..Default::default()
+        });
+        let result = embedded_call_repair_result("tool_call", &args);
+        pop_execution_policy();
+        let result =
+            result.expect("a wrapper carrying one valid call should yield repair feedback");
+        assert_eq!(result["error"], serde_json::json!("invalid_arguments"));
+        let reason = result["reason"].as_str().expect("reason");
+        assert!(
+            reason.contains("wrapper tag") && reason.contains("`look`"),
+            "reason should explain the wrapper slip and name the embedded call: {reason}"
+        );
+        let next = result["next_step"].as_str().expect("next_step");
+        assert!(
+            next.contains("look(") && next.contains("src/main.rs"),
+            "next_step should show the corrected direct invocation: {next}"
+        );
+        assert!(
+            !next.to_lowercase().contains("permission"),
+            "repair feedback must not use permission framing: {next}"
+        );
+    }
+
+    // The streamed-arguments fallback rewraps non-JSON arguments as
+    // `{"__parse_error": "... Raw input: <raw>"}`; the repair must see through
+    // that carrier. A single string-valued field carrier works the same way.
+    #[test]
+    fn embedded_call_repair_recovers_alternate_argument_carriers() {
+        use crate::orchestration::{pop_execution_policy, push_execution_policy, CapabilityPolicy};
+
+        push_execution_policy(CapabilityPolicy {
+            tools: vec!["look".to_string(), "search".to_string()],
+            ..Default::default()
+        });
+        let parse_error_args = serde_json::json!({
+            "__parse_error": "Could not parse streamed tool arguments as JSON or Harn \
+             text-tool arguments: JSON error: expected value; Harn text-tool error: x. \
+             Raw input: <tool_call>\nlook({ file: \"a.rs\", intent: \"read\" })\n</tool_call>"
+        });
+        let parse_error_repair = embedded_call_repair_result("tool_call", &parse_error_args);
+        let single_field_args = serde_json::json!({
+            "input": "<tool_call>\nsearch({ query: \"fn parse\" })\n</tool_call>"
+        });
+        let single_field_repair = embedded_call_repair_result("tool_call", &single_field_args);
+        pop_execution_policy();
+
+        let repaired = parse_error_repair.expect("__parse_error carrier should be recovered");
+        assert!(repaired["next_step"]
+            .as_str()
+            .expect("next_step")
+            .contains("look("));
+        let repaired =
+            single_field_repair.expect("single string-field carrier should be recovered");
+        assert!(repaired["next_step"]
+            .as_str()
+            .expect("next_step")
+            .contains("search("));
+    }
+
+    // Anything ambiguous must fall back to the unavailable-tool feedback:
+    // a non-wrapper name, more than one embedded call, unparseable text, or an
+    // embedded target outside the active policy's tool set.
+    #[test]
+    fn embedded_call_repair_rejects_ambiguous_payloads() {
+        use crate::orchestration::{pop_execution_policy, push_execution_policy, CapabilityPolicy};
+
+        let valid = serde_json::json!(
+            "<tool_call>\nlook({ file: \"a.rs\", intent: \"read\" })\n</tool_call>"
+        );
+        push_execution_policy(CapabilityPolicy {
+            tools: vec!["look".to_string()],
+            ..Default::default()
+        });
+        let non_wrapper_repair = embedded_call_repair_result("repo_browser.open_file", &valid);
+        let two_calls = serde_json::json!(
+            "<tool_call>\nlook({ file: \"a.rs\" })\n</tool_call>\n\
+             <tool_call>\nlook({ file: \"b.rs\" })\n</tool_call>"
+        );
+        let two_calls_repair = embedded_call_repair_result("tool_call", &two_calls);
+        let prose_repair =
+            embedded_call_repair_result("tool_call", &serde_json::json!("just some prose"));
+        pop_execution_policy();
+        assert!(
+            non_wrapper_repair.is_none(),
+            "a non-wrapper tool name must not trigger the repair"
+        );
+        assert!(
+            two_calls_repair.is_none(),
+            "more than one embedded call is ambiguous"
+        );
+        assert!(
+            prose_repair.is_none(),
+            "prose without a parseable call must not trigger the repair"
+        );
+
+        push_execution_policy(CapabilityPolicy {
+            tools: vec!["search".to_string()],
+            ..Default::default()
+        });
+        let repaired = embedded_call_repair_result("tool_call", &valid);
+        pop_execution_policy();
+        assert!(
+            repaired.is_none(),
+            "an embedded target outside the policy's tool set must not be coached"
+        );
     }
 
     // A RECOVERABLE schema/argument rejection must coach a retry WITH the

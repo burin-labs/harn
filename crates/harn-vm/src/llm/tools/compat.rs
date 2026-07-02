@@ -280,7 +280,7 @@ fn remap_edit_action_args(verb: &str, arguments: serde_json::Value) -> serde_jso
     serde_json::Value::Object(map)
 }
 
-fn is_generic_wrapper_name(name: &str) -> bool {
+pub(crate) fn is_generic_wrapper_name(name: &str) -> bool {
     matches!(
         name,
         "tool" | "tool.call" | "tool.exec" | "tool_call" | "function" | "function.call" | "call"

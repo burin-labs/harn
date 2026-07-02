@@ -12,7 +12,7 @@ mod ts_value_parser;
 mod type_expr;
 
 pub(crate) use collect::{collect_tool_schemas, validate_tool_args, ToolSchema};
-pub(crate) use compat::normalize_tool_call_shape;
+pub(crate) use compat::{is_generic_wrapper_name, normalize_tool_call_shape};
 pub(crate) use handle_local::{handle_tool_locally, is_vm_stdlib_short_circuit};
 #[cfg(test)]
 pub(crate) use messages::build_assistant_tool_message;
