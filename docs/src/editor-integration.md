@@ -151,9 +151,10 @@ harn lint --fix file.harn   # automatically apply safe fixes
 - Unnecessary conversions like `to_string("hi")` or `to_int(42)`
 - Prompt-injection risks, such as interpolating untrusted input into an `llm_call` system prompt
 
-**What `--fix` rewrites automatically:** `var` to `let`, boolean-comparison and
-`let`-then-`return` simplification, and removal of redundant clones, unused
-imports, unnecessary casts, and unnecessary parentheses.
+**What `--fix` rewrites automatically:** simple unused locals to the `_`
+discard binding, `var` to `let`, boolean-comparison and `let`-then-`return`
+simplification, and removal of redundant clones, unused imports, unnecessary
+casts, and unnecessary parentheses.
 
 The same fixes show up in the LSP, both as per-diagnostic quick-fixes and as a
 bulk `source.fixAll.harn` code action you can wire to `editor.codeActionsOnSave`.
