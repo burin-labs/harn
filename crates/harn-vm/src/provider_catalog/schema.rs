@@ -57,6 +57,7 @@ pub fn schema_value() -> Value {
                 "properties": {
                     "kind": {"enum": ["daemon_api", "managed_process", "external"]},
                     "command": {"type": "string", "minLength": 1},
+                    "prefix_args": {"type": "array", "items": {"type": "string"}},
                     "model_source": {"type": "string"},
                     "model_source_env": {"type": "string"},
                     "default_port": {"type": "integer", "minimum": 1, "maximum": 65535},
@@ -70,6 +71,9 @@ pub fn schema_value() -> Value {
                     "cache_type_k_arg": {"type": "string"},
                     "cache_type_v_arg": {"type": "string"},
                     "cache_ram_arg": {"type": "string"},
+                    "enable_lora_arg": {"type": "string"},
+                    "lora_modules_arg": {"type": "string"},
+                    "max_lora_rank_arg": {"type": "string"},
                     "default_args": {"type": "array", "items": {"type": "string"}},
                     "stop": {"enum": ["keep_alive_zero", "pid", "external"]},
                     "source_url": {"type": "string"},

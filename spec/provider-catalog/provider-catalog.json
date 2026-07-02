@@ -1050,6 +1050,27 @@
       ],
       "features": [],
       "caveats": [],
+      "local_runtime": {
+        "kind": "managed_process",
+        "command": "vllm",
+        "prefix_args": [
+          "serve"
+        ],
+        "model_source_env": "VLLM_MODEL",
+        "default_port": 8000,
+        "model_arg": "--model",
+        "served_model_arg": "--served-model-name",
+        "host_arg": "--host",
+        "port_arg": "--port",
+        "ctx_arg": "--max-model-len",
+        "enable_lora_arg": "--enable-lora",
+        "lora_modules_arg": "--lora-modules",
+        "max_lora_rank_arg": "--max-lora-rank",
+        "stop": "pid",
+        "source_url": "https://docs.vllm.ai/en/stable/cli/serve/",
+        "last_verified": "2026-07-02",
+        "notes": "OpenAI-compatible vLLM server. `harn local launch --lora-adapter name=path` maps to vLLM's startup LoRA module flags so the adapter appears as a request model."
+      },
       "latency_p50_ms": 800
     },
     {

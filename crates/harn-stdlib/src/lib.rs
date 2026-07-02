@@ -1012,6 +1012,10 @@ pub const STDLIB_CLI_SCRIPTS: &[StdlibCliScript] = &[
         source: include_str!("stdlib/cli/models/list.harn"),
     },
     StdlibCliScript {
+        name: "models/lora_inspect",
+        source: include_str!("stdlib/cli/models/lora_inspect.harn"),
+    },
+    StdlibCliScript {
         name: "models/recommend",
         source: include_str!("stdlib/cli/models/recommend.harn"),
     },

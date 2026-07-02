@@ -9,13 +9,13 @@ pub(crate) use super::{
     CheckOutputFormat, Cli, Command, CompletionShell, ConfigCommand, ConnectCommand,
     ConnectorCommand, CrystallizeCommand, EvalCommand, EvalToolCallsCommand, FlowArchivistCommand,
     FlowCommand, HarnessThreadingMode, LocalCommand, McpCommand, McpMockCommand,
-    MergeCaptainCommand, ModelsCommand, OrchestratorCommand, OrchestratorDeployProvider,
-    OrchestratorLogFormat, OrchestratorQueueCommand, OrchestratorTenantCommand,
-    PackageArtifactsCommand, PackageCacheCommand, PackageCommand, PackageScaffoldCommand,
-    PersonaCommand, ProjectTemplate, ProviderCapabilitiesCommand, ProviderCatalogCommand,
-    ProviderCommand, ProviderToolProbeModeArg, PublishArgs, RuleCommand, RunsCommand,
-    SessionCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand, ToolCommand, TraceCommand,
-    TriggerCommand, TrustCommand, TrustOutcomeArg, TrustTierArg,
+    MergeCaptainCommand, ModelsCommand, ModelsLoraCommand, OrchestratorCommand,
+    OrchestratorDeployProvider, OrchestratorLogFormat, OrchestratorQueueCommand,
+    OrchestratorTenantCommand, PackageArtifactsCommand, PackageCacheCommand, PackageCommand,
+    PackageScaffoldCommand, PersonaCommand, ProjectTemplate, ProviderCapabilitiesCommand,
+    ProviderCatalogCommand, ProviderCommand, ProviderToolProbeModeArg, PublishArgs, RuleCommand,
+    RunsCommand, SessionCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand, ToolCommand,
+    TraceCommand, TriggerCommand, TrustCommand, TrustOutcomeArg, TrustTierArg,
 };
 
 mod parse_cmds;

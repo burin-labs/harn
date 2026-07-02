@@ -90,6 +90,13 @@ pub(crate) struct LocalLaunchArgs {
     /// llama.cpp prompt/KV cache RAM MiB cap.
     #[arg(long = "cache-ram")]
     pub cache_ram: Option<u64>,
+    /// LoRA adapter to serve with the base model, as `name=path-or-hf-repo`.
+    /// Repeat to expose multiple adapters when the runtime supports it.
+    #[arg(long = "lora-adapter", value_name = "NAME=PATH_OR_REPO")]
+    pub lora_adapters: Vec<String>,
+    /// Maximum LoRA rank accepted by the runtime.
+    #[arg(long = "max-lora-rank")]
+    pub max_lora_rank: Option<u32>,
     /// llama.cpp reasoning mode (`on`, `off`, or `auto`).
     #[arg(long)]
     pub reasoning: Option<String>,

@@ -429,6 +429,10 @@ pub struct LocalRuntimeDef {
     /// Command Harn should execute for managed-process runtimes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
+    /// Arguments that must appear immediately after the command, before model
+    /// and server flags. Used by CLIs such as `vllm serve ...`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub prefix_args: Vec<String>,
     /// Default model source/path/repo. User overlays may set this; embedded
     /// catalog rows avoid machine-specific absolute paths except examples.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -460,6 +464,15 @@ pub struct LocalRuntimeDef {
     pub cache_type_v_arg: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_ram_arg: Option<String>,
+    /// Flag that enables adapter-aware serving for LoRA-capable runtimes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enable_lora_arg: Option<String>,
+    /// Flag that accepts one or more `name=path-or-repo` LoRA module specs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lora_modules_arg: Option<String>,
+    /// Optional rank-limit flag for runtimes that need an explicit ceiling.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_lora_rank_arg: Option<String>,
     /// Extra arguments Harn applies by default when launching this runtime.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub default_args: Vec<String>,

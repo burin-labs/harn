@@ -35,6 +35,7 @@ export interface HarnCatalogProvider {
 export interface HarnLocalRuntime {
   kind?: "daemon_api" | "managed_process" | "external"
   command?: string
+  prefix_args?: string[]
   model_source?: string
   model_source_env?: string
   default_port?: number
@@ -48,6 +49,9 @@ export interface HarnLocalRuntime {
   cache_type_k_arg?: string
   cache_type_v_arg?: string
   cache_ram_arg?: string
+  enable_lora_arg?: string
+  lora_modules_arg?: string
+  max_lora_rank_arg?: string
   default_args?: string[]
   stop?: "keep_alive_zero" | "pid" | "external"
   source_url?: string
