@@ -969,11 +969,9 @@ async fn host_agent_dispatch_tool_call(
         None
     };
 
-    if let Err(policy_denial) = enforce_dispatch_policies(
-        policy_machinery_active,
-        &tool_name,
-        &tool_args,
-    ) {
+    if let Err(policy_denial) =
+        enforce_dispatch_policies(policy_machinery_active, &tool_name, &tool_args)
+    {
         // An argument allow-list miss (e.g. a sub-agent scoped to `test/users.*`
         // that tried to edit the shared reference file) is RECOVERABLE: the tool
         // is permitted, only this path is out of scope, so coach a retry with an
