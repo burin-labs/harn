@@ -288,10 +288,9 @@ pub use self::trace::{
 ///
 /// This is deliberately **not** part of [`reset_llm_state`]: that runs from
 /// parallel unit tests where wiping the shared registry corrupts a sibling
-/// rate-limit test's counters mid-assertion. Only sequential or
-/// separate-process contexts — the CLI test runner between cases, integration
-/// test binaries, and per-job worker resets — may safely call this, which they
-/// do via [`crate::reset_thread_local_state`].
+/// rate-limit test's counters mid-assertion. Callers that need a full reset use
+/// [`crate::reset_thread_local_state`], which serializes this wipe with
+/// [`env_guard`] in test builds and performs the reset directly in production.
 pub fn reset_rate_limit_registry() {
     rate_limit::reset_rate_limit_state();
 }
