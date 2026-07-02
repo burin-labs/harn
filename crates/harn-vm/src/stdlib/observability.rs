@@ -5,6 +5,7 @@ use std::sync::atomic::Ordering;
 
 use crate::stdlib::json_to_vm_value;
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::options::{json_object_from_value, string_from_value, ErrorKind};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -153,8 +154,9 @@ fn obs_reset_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     category = "observability"
 )]
 fn obs_start_span_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let name = string_arg(args.first(), "__obs_start_span", "name")?;
-    let attrs = object_arg(args.get(1), "__obs_start_span", "attrs")?;
+    let name = string_from_value(args.first(), "__obs_start_span", "name", ErrorKind::Runtime)?;
+    let attrs =
+        json_object_from_value(args.get(1), "__obs_start_span", "attrs", ErrorKind::Runtime)?;
     let span = OBS_STATE.with(|state| {
         let mut state = state.borrow_mut();
         state.next_span_id += 1;
@@ -388,7 +390,7 @@ fn emit_instrument_from_args(
     instrument: MetricInstrument,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
-    let name = string_arg(args.first(), "__obs_metric", "name")?;
+    let name = string_from_value(args.first(), "__obs_metric", "name", ErrorKind::Runtime)?;
     let value_arg = args.get(1).cloned().unwrap_or(VmValue::Nil);
     let value_json = vm_value_to_json(&value_arg);
     if !matches!(
@@ -401,7 +403,7 @@ fn emit_instrument_from_args(
             value_arg.type_name()
         )));
     }
-    let attrs = object_arg(args.get(2), "__obs_metric", "attrs")?;
+    let attrs = json_object_from_value(args.get(2), "__obs_metric", "attrs", ErrorKind::Runtime)?;
     let emitted = emit_instrument(instrument, name, value_json, attrs)?;
     Ok(json_to_vm_value(&emitted))
 }
@@ -462,35 +464,6 @@ fn parse_config(value: &VmValue) -> Result<ObsConfig, VmError> {
         config.audit_to_pretty_stderr = *enabled;
     }
     Ok(config)
-}
-
-fn string_arg(value: Option<&VmValue>, builtin: &str, field: &str) -> Result<String, VmError> {
-    match value {
-        Some(VmValue::String(raw)) => Ok(raw.to_string()),
-        Some(other) => Err(VmError::Runtime(format!(
-            "{builtin}: {field} must be a string, got {}",
-            other.type_name()
-        ))),
-        None => Err(VmError::Runtime(format!("{builtin}: missing {field}"))),
-    }
-}
-
-fn object_arg(
-    value: Option<&VmValue>,
-    builtin: &str,
-    field: &str,
-) -> Result<serde_json::Map<String, serde_json::Value>, VmError> {
-    match value {
-        None | Some(VmValue::Nil) => Ok(serde_json::Map::new()),
-        Some(VmValue::Dict(_)) => match vm_value_to_json(value.expect("checked above")) {
-            serde_json::Value::Object(map) => Ok(map),
-            _ => unreachable!(),
-        },
-        Some(other) => Err(VmError::Runtime(format!(
-            "{builtin}: {field} must be a dict, got {}",
-            other.type_name()
-        ))),
-    }
 }
 
 fn field_string(value: Option<&VmValue>, key: &str) -> Option<String> {

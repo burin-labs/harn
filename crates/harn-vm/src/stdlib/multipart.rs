@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use sha2::{Digest, Sha256};
 
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::options::{expect_bytes_or_string_arg, expect_string_arg, ErrorKind};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -46,47 +47,6 @@ fn list_value(items: Vec<VmValue>) -> VmValue {
 
 fn nil_or_string(value: Option<String>) -> VmValue {
     value.map(VmValue::string).unwrap_or(VmValue::Nil)
-}
-
-fn expect_string<'a>(args: &'a [VmValue], index: usize, builtin: &str) -> Result<&'a str, VmError> {
-    match args.get(index) {
-        Some(VmValue::String(text)) => Ok(text.as_ref()),
-        Some(other) => Err(builtin_error(
-            builtin,
-            format!(
-                "expected string at argument {}, got {}",
-                index + 1,
-                other.type_name()
-            ),
-        )),
-        None => Err(builtin_error(
-            builtin,
-            format!("missing argument {}", index + 1),
-        )),
-    }
-}
-
-fn expect_bytes_or_string(
-    args: &[VmValue],
-    index: usize,
-    builtin: &str,
-) -> Result<Vec<u8>, VmError> {
-    match args.get(index) {
-        Some(VmValue::Bytes(bytes)) => Ok(bytes.as_ref().clone()),
-        Some(VmValue::String(text)) => Ok(text.as_bytes().to_vec()),
-        Some(other) => Err(builtin_error(
-            builtin,
-            format!(
-                "expected bytes or string at argument {}, got {}",
-                index + 1,
-                other.type_name()
-            ),
-        )),
-        None => Err(builtin_error(
-            builtin,
-            format!("missing argument {}", index + 1),
-        )),
-    }
 }
 
 fn expect_dict<'a>(
@@ -462,8 +422,8 @@ fn parsed_field_value(field: ParsedField) -> VmValue {
     category = "multipart"
 )]
 fn multipart_parse_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let body = expect_bytes_or_string(args, 0, "multipart_parse")?;
-    let content_type = expect_string(args, 1, "multipart_parse")?;
+    let body = expect_bytes_or_string_arg(args, 0, "multipart_parse", ErrorKind::Runtime)?;
+    let content_type = expect_string_arg(args, 1, "multipart_parse", ErrorKind::Runtime)?;
     let opts = optional_options(args, 2, "multipart_parse")?;
     let limits = parse_limits(opts, "multipart_parse")?;
     let boundary = boundary_from_content_type(content_type, "multipart_parse")?;

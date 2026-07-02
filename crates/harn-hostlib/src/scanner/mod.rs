@@ -21,7 +21,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use harn_vm::VmValue;
 
 use crate::error::HostlibError;
-use crate::registry::{BuiltinRegistry, HostlibCapability, RegisteredBuiltin, SyncHandler};
+use crate::registry::{BuiltinRegistry, HostlibCapability};
 use crate::tools::args::{
     build_dict, dict_arg, optional_bool, optional_int, require_string, str_value,
 };
@@ -69,20 +69,18 @@ impl HostlibCapability for ScannerCapability {
     }
 
     fn register_builtins(&self, registry: &mut BuiltinRegistry) {
-        let scan_project: SyncHandler = Arc::new(scan_project_handler);
-        registry.register(RegisteredBuiltin {
-            name: SCAN_PROJECT_BUILTIN,
-            module: "scanner",
-            method: "scan_project",
-            handler: scan_project,
-        });
-        let scan_incremental: SyncHandler = Arc::new(scan_incremental_handler);
-        registry.register(RegisteredBuiltin {
-            name: SCAN_INCREMENTAL_BUILTIN,
-            module: "scanner",
-            method: "scan_incremental",
-            handler: scan_incremental,
-        });
+        registry.register_fn(
+            "scanner",
+            SCAN_PROJECT_BUILTIN,
+            "scan_project",
+            scan_project_handler,
+        );
+        registry.register_fn(
+            "scanner",
+            SCAN_INCREMENTAL_BUILTIN,
+            "scan_incremental",
+            scan_incremental_handler,
+        );
     }
 }
 

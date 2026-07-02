@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::error::HostlibError;
-use crate::registry::{BuiltinRegistry, HostlibCapability, RegisteredBuiltin, SyncHandler};
+use crate::registry::{BuiltinRegistry, HostlibCapability};
 use crate::tools::args::{
     build_dict, dict_arg, optional_bool, optional_int, optional_string, optional_string_list,
     require_string, str_value,
@@ -48,70 +48,31 @@ impl HostlibCapability for FsCapability {
     }
 
     fn register_builtins(&self, registry: &mut BuiltinRegistry) {
-        register(registry, SET_MODE_BUILTIN, "set_mode", set_mode_builtin);
-        register(
-            registry,
-            STATUS_BUILTIN,
-            "staged_status",
-            staged_status_builtin,
-        );
-        register(
-            registry,
-            COMMIT_BUILTIN,
-            "commit_staged",
-            commit_staged_builtin,
-        );
-        register(
-            registry,
+        registry.register_fn("fs", SET_MODE_BUILTIN, "set_mode", set_mode_builtin);
+        registry.register_fn("fs", STATUS_BUILTIN, "staged_status", staged_status_builtin);
+        registry.register_fn("fs", COMMIT_BUILTIN, "commit_staged", commit_staged_builtin);
+        registry.register_fn(
+            "fs",
             DISCARD_BUILTIN,
             "discard_staged",
             discard_staged_builtin,
         );
         // `safe_text_patch` and `read_text` touch arbitrary host paths, so
         // they share the deterministic-tools gate with `tools::*` file I/O.
-        register_gated(
-            registry,
+        registry.register_gated_fn(
+            "fs",
             SAFE_TEXT_PATCH_BUILTIN,
             "safe_text_patch",
             safe_text_patch_builtin,
         );
-        register_gated(registry, READ_TEXT_BUILTIN, "read_text", read_text_builtin);
-        register(
-            registry,
+        registry.register_gated_fn("fs", READ_TEXT_BUILTIN, "read_text", read_text_builtin);
+        registry.register_fn(
+            "fs",
             EMIT_SAFE_TEXT_PATCH_RESULT_BUILTIN,
             "emit_safe_text_patch_result",
             emit_safe_text_patch_result_builtin,
         );
     }
-}
-
-fn register(
-    registry: &mut BuiltinRegistry,
-    name: &'static str,
-    method: &'static str,
-    runner: fn(&[VmValue]) -> Result<VmValue, HostlibError>,
-) {
-    let handler: SyncHandler = std::sync::Arc::new(runner);
-    registry.register(RegisteredBuiltin {
-        name,
-        module: "fs",
-        method,
-        handler,
-    });
-}
-
-fn register_gated(
-    registry: &mut BuiltinRegistry,
-    name: &'static str,
-    method: &'static str,
-    runner: fn(&[VmValue]) -> Result<VmValue, HostlibError>,
-) {
-    registry.register(RegisteredBuiltin {
-        name,
-        module: "fs",
-        method,
-        handler: crate::tools::permissions::gated_handler(name, runner),
-    });
 }
 
 /// Filesystem mode for one hostlib session.

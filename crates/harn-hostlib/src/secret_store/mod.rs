@@ -25,7 +25,7 @@ use std::sync::Arc;
 use harn_vm::VmValue;
 
 use crate::error::HostlibError;
-use crate::registry::{BuiltinRegistry, HostlibCapability, RegisteredBuiltin, SyncHandler};
+use crate::registry::{BuiltinRegistry, HostlibCapability};
 use crate::tools::args::{build_dict, dict_arg, require_string, str_value};
 
 mod file;
@@ -64,26 +64,11 @@ impl HostlibCapability for SecretStoreCapability {
     }
 
     fn register_builtins(&self, registry: &mut BuiltinRegistry) {
-        register(registry, GET_BUILTIN, "get", handle_get);
-        register(registry, SET_BUILTIN, "set", handle_set);
-        register(registry, DELETE_BUILTIN, "delete", handle_delete);
-        register(registry, LIST_BUILTIN, "list", handle_list);
+        registry.register_fn("secret_store", GET_BUILTIN, "get", handle_get);
+        registry.register_fn("secret_store", SET_BUILTIN, "set", handle_set);
+        registry.register_fn("secret_store", DELETE_BUILTIN, "delete", handle_delete);
+        registry.register_fn("secret_store", LIST_BUILTIN, "list", handle_list);
     }
-}
-
-fn register(
-    registry: &mut BuiltinRegistry,
-    name: &'static str,
-    method: &'static str,
-    runner: fn(&[VmValue]) -> Result<VmValue, HostlibError>,
-) {
-    let handler: SyncHandler = Arc::new(runner);
-    registry.register(RegisteredBuiltin {
-        name,
-        module: "secret_store",
-        method,
-        handler,
-    });
 }
 
 fn handle_get(args: &[VmValue]) -> Result<VmValue, HostlibError> {

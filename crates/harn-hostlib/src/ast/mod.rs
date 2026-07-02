@@ -30,10 +30,7 @@
 
 use std::sync::Arc;
 
-use harn_vm::VmValue;
-
 use crate::code_index::SharedIndex;
-use crate::error::HostlibError;
 use crate::registry::{BuiltinRegistry, HostlibCapability, RegisteredBuiltin, SyncHandler};
 
 mod apply_node;
@@ -185,86 +182,81 @@ impl HostlibCapability for AstCapabilityWithCodeIndex {
 }
 
 fn register_ast_builtins(registry: &mut BuiltinRegistry, code_index: Option<SharedIndex>) {
-    register(registry, "hostlib_ast_parse_file", "parse_file", parse::run);
-    register(
-        registry,
-        "hostlib_ast_symbols",
-        "symbols",
-        symbols_call::run,
-    );
-    register(registry, "hostlib_ast_outline", "outline", outline::run);
-    register(
-        registry,
+    registry.register_fn("ast", "hostlib_ast_parse_file", "parse_file", parse::run);
+    registry.register_fn("ast", "hostlib_ast_symbols", "symbols", symbols_call::run);
+    registry.register_fn("ast", "hostlib_ast_outline", "outline", outline::run);
+    registry.register_fn(
+        "ast",
         "hostlib_ast_parse_errors",
         "parse_errors",
         parse_errors::run,
     );
-    register(
-        registry,
+    registry.register_fn(
+        "ast",
         "hostlib_ast_undefined_names",
         "undefined_names",
         undefined_names::run,
     );
-    register(
-        registry,
+    registry.register_fn(
+        "ast",
         "hostlib_ast_function_body",
         "function_body",
         function_body::run_single,
     );
-    register(
-        registry,
+    registry.register_fn(
+        "ast",
         "hostlib_ast_function_bodies",
         "function_bodies",
         function_body::run_bulk,
     );
-    register(
-        registry,
+    registry.register_fn(
+        "ast",
         "hostlib_ast_extract_imports",
         "extract_imports",
         imports::run,
     );
-    register(
-        registry,
+    registry.register_fn(
+        "ast",
         "hostlib_ast_symbol_extract",
         "symbol_extract",
         mutation::run_extract,
     );
-    register(
-        registry,
+    registry.register_fn(
+        "ast",
         "hostlib_ast_symbol_delete",
         "symbol_delete",
         mutation::run_delete,
     );
-    register(
-        registry,
+    registry.register_fn(
+        "ast",
         "hostlib_ast_symbol_replace",
         "symbol_replace",
         mutation::run_replace,
     );
-    register(
-        registry,
+    registry.register_fn(
+        "ast",
         "hostlib_ast_bracket_balance",
         "bracket_balance",
         bracket_balance::run,
     );
     // These two write edited source back to disk, so they share the
     // deterministic-tools gate with `tools::*` file I/O.
-    register_gated(
-        registry,
+    registry.register_gated_fn(
+        "ast",
         "hostlib_ast_apply_node",
         "apply_node",
         apply_node::run,
     );
-    register_gated(
-        registry,
+    registry.register_gated_fn(
+        "ast",
         "hostlib_ast_insert_at_anchor",
         "insert_at_anchor",
         insert_at_anchor::run,
     );
     // Multi-file codemod runner. Writes when `dry_run: false`, so it shares
     // the deterministic-tools write gate with the other mutating builtins.
-    register_gated(
-        registry,
+    registry.register_gated_fn(
+        "ast",
         "hostlib_ast_batch_apply",
         "batch_apply",
         batch_apply::run,
@@ -273,34 +265,19 @@ fn register_ast_builtins(registry: &mut BuiltinRegistry, code_index: Option<Shar
     // Read-only structural search: shares the query machinery with
     // `apply_node` but never writes, so it carries no deterministic-tools
     // gate.
-    register(registry, "hostlib_ast_search", "search", search::run);
-    register(
-        registry,
+    registry.register_fn("ast", "hostlib_ast_search", "search", search::run);
+    registry.register_fn(
+        "ast",
         "hostlib_ast_structural_diff",
         "structural_diff",
         structural_diff::run,
     );
-    register(
-        registry,
+    registry.register_fn(
+        "ast",
         "hostlib_ast_capabilities",
         "capabilities",
         capabilities::run,
     );
-}
-
-fn register(
-    registry: &mut BuiltinRegistry,
-    name: &'static str,
-    method: &'static str,
-    runner: fn(&[VmValue]) -> Result<VmValue, HostlibError>,
-) {
-    let handler: SyncHandler = Arc::new(runner);
-    registry.register(RegisteredBuiltin {
-        name,
-        module: "ast",
-        method,
-        handler,
-    });
 }
 
 fn register_dry_run(registry: &mut BuiltinRegistry, code_index: Option<SharedIndex>) {
@@ -315,20 +292,6 @@ fn register_dry_run(registry: &mut BuiltinRegistry, code_index: Option<SharedInd
                 handler,
             });
         }
-        None => register(registry, "hostlib_ast_dry_run", "dry_run", dry_run::run),
+        None => registry.register_fn("ast", "hostlib_ast_dry_run", "dry_run", dry_run::run),
     }
-}
-
-fn register_gated(
-    registry: &mut BuiltinRegistry,
-    name: &'static str,
-    method: &'static str,
-    runner: fn(&[VmValue]) -> Result<VmValue, HostlibError>,
-) {
-    registry.register(RegisteredBuiltin {
-        name,
-        module: "ast",
-        method,
-        handler: crate::tools::permissions::gated_handler(name, runner),
-    });
 }
