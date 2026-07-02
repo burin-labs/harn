@@ -2407,9 +2407,11 @@ context_window = 1000000
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 1.25, output_per_mtok = 3.75, cache_read_per_mtok = 0.25, cache_write_per_mtok = 1.5625 }
 
-tier = "mid"
+# OpenRouter describes Max as the flagship Qwen3.7 route; keep it out of the
+# value/mid tier so price-sensitive selectors do not confuse it with Flash.
+tier = "frontier"
 open_weight = false
-strengths = ["coding", "agentic", "tool_use", "long_context", "speed"]
+strengths = ["coding", "agentic", "tool_use", "long_context", "reasoning"]
 complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
 [models."kwaipilot/kat-coder-pro-v2"]
 name = "KAT-Coder-Pro V2"
