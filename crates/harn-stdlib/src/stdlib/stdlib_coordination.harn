@@ -188,6 +188,28 @@ fn __coord_list(value) {
   return [value]
 }
 
+fn __coord_nonnegative_int(value, fallback, label) {
+  if value == nil {
+    return fallback
+  }
+  let parsed = to_int(value)
+  if parsed == nil || parsed < 0 {
+    throw "std/coordination: " + label + " must be a non-negative int"
+  }
+  return parsed
+}
+
+fn __coord_positive_int(value, fallback, label) {
+  if value == nil {
+    return fallback
+  }
+  let parsed = to_int(value)
+  if parsed == nil || parsed <= 0 {
+    throw "std/coordination: " + label + " must be a positive int"
+  }
+  return parsed
+}
+
 fn __coord_address_identifier(address) {
   if address == nil {
     return nil
@@ -279,6 +301,39 @@ fn __coord_kind_matches(kind, expected) {
     return false
   }
   return kind == lowercase(trim(__coord_string(expected)))
+}
+
+fn __coord_message_from_input(value, options) {
+  let opts = __coord_dict(options)
+  if type_of(value) == "dict" {
+    let message = value?.message ?? value
+    if type_of(message) == "dict" && trim(__coord_string(message?.id)) != "" {
+      return message
+    }
+  }
+  let id = trim(__coord_string(value))
+  if id == "" {
+    throw "std/coordination: request id is required"
+  }
+  return filter_nil({id: id, thread_id: opts?.thread_id ?? id, from: opts?.from})
+}
+
+fn __coord_wait_reply_options(request, options) {
+  let opts = __coord_dict(options)
+  let fallback_consumer = "reply." + request.id
+  let consumer_id = __coord_consumer_id(opts, fallback_consumer)
+  return filter_nil(
+    opts
+      + {
+      consumer_id: consumer_id,
+      to: opts?.to ?? opts?.recipient ?? request?.from ?? consumer_id,
+      from: opts?.response_from ?? opts?.reply_from ?? opts?.from,
+      reply_to: request.id,
+      thread_id: opts?.thread_id ?? request?.thread_id ?? request.id,
+      kind: opts?.response_kind ?? opts?.reply_kind ?? opts?.kind,
+      subject: opts?.response_subject ?? opts?.reply_subject ?? opts?.subject,
+    },
+  )
 }
 
 fn __coord_message_matches(message, options, default_to) {
@@ -387,6 +442,34 @@ fn __coord_envelope(scope, room, message, options) {
 }
 
 /**
+ * Send a durable addressed request.
+ *
+ * This is `coord_send` with request defaults: kind `request`, a stable id, and
+ * `thread_id` defaulting to the request id. Callers can then wait for replies
+ * by id without encoding a bespoke "intent_query"/"intent_verdict" protocol in
+ * message bodies or host-local mailboxes.
+ *
+ * @effects: [transcript.write]
+ * @errors: [runtime]
+ */
+pub fn coord_request(scope, room, recipient, message, options = nil) {
+  let msg = __coord_dict(message)
+  let opts = __coord_dict(options)
+  let request_id = __coord_validate_component(
+    "request id",
+    opts?.id ?? opts?.dedupe_key ?? msg?.id ?? ("coord-" + uuid_v7()),
+  )
+  return coord_send(
+    scope,
+    room,
+    recipient,
+    msg,
+    opts
+      + {id: request_id, kind: opts?.request_kind ?? "request", thread_id: opts?.thread_id ?? request_id},
+  )
+}
+
+/**
  * Append an addressed coordination message to a scoped room.
  *
  * This is a typed wrapper over `coord_post`: the message remains append-only
@@ -463,6 +546,87 @@ pub fn coord_post(scope, room, message, options = nil) {
     subject: envelope.subject,
     channel: channel,
     message: envelope,
+  }
+}
+
+/**
+ * Wait a bounded time for replies to a request.
+ *
+ * `request_or_id` may be a request receipt, a coordination message, or a raw
+ * id. The helper polls the caller's durable inbox for messages whose
+ * `reply_to` and `thread_id` match the request. It does not acknowledge by
+ * default; pass `{ack: true}` only when the room is single-purpose or the caller
+ * is intentionally advancing its consumer cursor through every scanned event.
+ *
+ * Options:
+ * - `consumer_id` / `consumer`: durable cursor owner. Defaults to
+ *   `reply.<request_id>` so acknowledging one request does not hide replies for
+ *   a different request addressed to the same agent.
+ * - `response_kind` / `reply_kind` / `kind`: optional reply kind filter.
+ * - `response_subject` / `reply_subject` / `subject`: optional reply subject
+ *   filter.
+ * - `response_from` / `reply_from` / `from`: optional responder filter.
+ * - `timeout_ms`: wall-clock budget; default 2000. Use 0 for a single scan.
+ * - `poll_interval_ms`: sleep between scans; default 50.
+ * - `ack`: advance the consumer cursor after a match.
+ *
+ * @effects: [transcript.write]
+ * @errors: [runtime]
+ */
+pub fn coord_wait_reply(scope, room, request_or_id, options = nil) {
+  let opts = __coord_dict(options)
+  let request = __coord_message_from_input(request_or_id, opts)
+  let wait_opts = __coord_wait_reply_options(request, opts)
+  let consumer_id = wait_opts.consumer_id
+  let timeout_ms = __coord_nonnegative_int(opts?.timeout_ms ?? opts?.budget_ms, 2000, "timeout_ms")
+  let poll_interval_ms = __coord_positive_int(opts?.poll_interval_ms, 50, "poll_interval_ms")
+  let started = harness.clock.monotonic_ms()
+  var last_inbox = nil
+  while true {
+    let inbox = coord_inbox(scope, room, wait_opts)
+    last_inbox = inbox
+    if len(inbox.messages) > 0 {
+      let elapsed = harness.clock.monotonic_ms() - started
+      let acked = if opts?.ack ?? false {
+        coord_ack(scope, room, consumer_id, inbox.next_cursor, opts)
+      } else {
+        nil
+      }
+      return filter_nil(
+        {
+          status: "matched",
+          matched: true,
+          timed_out: false,
+          request_id: request.id,
+          thread_id: wait_opts.thread_id,
+          consumer_id: consumer_id,
+          reply: inbox.messages[0],
+          replies: inbox.messages,
+          inbox: inbox,
+          next_cursor: inbox.next_cursor,
+          acknowledged: acked,
+          elapsed_ms: elapsed,
+        },
+      )
+    }
+    let elapsed = harness.clock.monotonic_ms() - started
+    if timeout_ms == 0 || elapsed >= timeout_ms {
+      return filter_nil(
+        {
+          status: "timeout",
+          matched: false,
+          timed_out: true,
+          request_id: request.id,
+          thread_id: wait_opts.thread_id,
+          consumer_id: consumer_id,
+          replies: [],
+          inbox: last_inbox,
+          next_cursor: last_inbox?.next_cursor,
+          elapsed_ms: elapsed,
+        },
+      )
+    }
+    sleep(poll_interval_ms)
   }
 }
 

@@ -1,0 +1,134 @@
+import { coord_cursor, coord_reply, coord_request, coord_wait_reply } from "std/coordination"
+
+pipeline default() {
+  mock_time(5000)
+  let opts = {workspace_id: "workspace-A", tenant_id: "tenant-A"}
+  let q1 = coord_request(
+    "workspace",
+    "peer-intent",
+    "agent-A",
+    {
+      subject: "intent_query",
+      body: "Do you still need these paths?",
+      from: {session_id: "agent-B"},
+      data: {paths: ["src/**"]},
+    },
+    opts + {id: "coord-request-1"},
+  )
+  let q2 = coord_request(
+    "workspace",
+    "peer-intent",
+    "agent-A",
+    {
+      subject: "intent_query",
+      body: "Do you still need these paths?",
+      from: {session_id: "agent-B"},
+      data: {paths: ["tests/**"]},
+    },
+    opts + {id: "coord-request-2"},
+  )
+  __io_println(q1.message.kind)
+  __io_println(q1.message.subject)
+  __io_println(q1.message.thread_id)
+  __io_println(q1.message.to)
+  __io_println(q1.message.from.session_id)
+  __io_println(q1.message.data.paths[0])
+  let _ = coord_reply(
+    "workspace",
+    "peer-intent",
+    q1,
+    {
+      kind: "decision",
+      subject: "not_the_verdict",
+      body: "Wrong subject.",
+      from: {session_id: "agent-A"},
+      data: {verdict: "keep"},
+    },
+    opts + {id: "coord-unrelated-reply"},
+  )
+  let _ = coord_reply(
+    "workspace",
+    "peer-intent",
+    q1,
+    {
+      kind: "decision",
+      subject: "intent_verdict",
+      body: "The paths are released.",
+      from: {session_id: "agent-A"},
+      data: {verdict: "release"},
+    },
+    opts + {id: "coord-reply-1"},
+  )
+  let _ = coord_reply(
+    "workspace",
+    "peer-intent",
+    q2,
+    {
+      kind: "decision",
+      subject: "intent_verdict",
+      body: "Still using those paths.",
+      from: {session_id: "agent-A"},
+      data: {verdict: "keep"},
+    },
+    opts + {id: "coord-reply-2"},
+  )
+  let wait1 = coord_wait_reply(
+    "workspace",
+    "peer-intent",
+    q1,
+    opts
+      + {
+      response_kind: "decision",
+      response_subject: "intent_verdict",
+      response_from: "agent-A",
+      timeout_ms: 0,
+      ack: true,
+    },
+  )
+  __io_println(wait1.status)
+  __io_println(wait1.consumer_id)
+  __io_println(wait1.reply.subject)
+  __io_println(wait1.reply.data.verdict)
+  __io_println(wait1.acknowledged.consumer_id)
+  __io_println(
+    coord_cursor("workspace", "peer-intent", "reply.coord-request-1", opts) == wait1.next_cursor,
+  )
+  let after_ack = coord_wait_reply(
+    "workspace",
+    "peer-intent",
+    q1,
+    opts
+      + {
+      response_kind: "decision",
+      response_subject: "intent_verdict",
+      response_from: "agent-A",
+      timeout_ms: 0,
+    },
+  )
+  __io_println(after_ack.status)
+  let wait2 = coord_wait_reply(
+    "workspace",
+    "peer-intent",
+    q2,
+    opts
+      + {
+      response_kind: "decision",
+      response_subject: "intent_verdict",
+      response_from: "agent-A",
+      timeout_ms: 0,
+    },
+  )
+  __io_println(wait2.status)
+  __io_println(wait2.consumer_id)
+  __io_println(wait2.reply.data.verdict)
+  let timeout = coord_wait_reply(
+    "workspace",
+    "peer-intent",
+    "coord-missing",
+    opts + {timeout_ms: 120, poll_interval_ms: 50},
+  )
+  __io_println(timeout.status)
+  __io_println(timeout.consumer_id)
+  __io_println(timeout.elapsed_ms >= 120)
+  unmock_time()
+}
