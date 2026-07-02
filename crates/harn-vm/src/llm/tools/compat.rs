@@ -246,6 +246,7 @@ fn shell_quote_arg(arg: &str) -> String {
 /// real tool and lose the symbol-level semantics. `remove_symbol` is excluded
 /// for the same symbol-tool symmetry. Both fall through unmapped.
 const EDIT_ACTION_VERBS: &[&str] = &[
+    "create",
     "replace_range",
     "replace_body",
     "insert_after",
@@ -657,6 +658,7 @@ mod tests {
     #[test]
     fn all_edit_action_verbs_map_to_edit() {
         for verb in [
+            "create",
             "replace_range",
             "replace_body",
             "insert_after",
@@ -669,6 +671,34 @@ mod tests {
             assert_eq!(name, "edit", "verb {verb} should map to edit");
             assert_eq!(mapped["action"], verb);
         }
+    }
+
+    #[test]
+    fn aliases_create_verb_to_edit_create_action() {
+        let (name, mapped) = normalize_tool_call_shape(
+            "create",
+            serde_json::json!({"path": "src/status.go", "content": "package cli\n"}),
+        );
+        assert_eq!(name, "edit");
+        assert_eq!(mapped["action"], "create");
+        assert_eq!(mapped["path"], "src/status.go");
+        assert_eq!(mapped["content"], "package cli\n");
+    }
+
+    // NEGATIVE: shell listing commands stay on `run` — the HOST owns any
+    // structured-listing ergonomics (which listing tool exists, how recursion
+    // maps onto it), so this layer must pass the command through untouched.
+    #[test]
+    fn leaves_shell_listing_run_commands_untouched() {
+        let args = serde_json::json!({"command": "ls -R"});
+        let (name, mapped) = normalize_tool_call_shape("run", args.clone());
+        assert_eq!(name, "run");
+        assert_eq!(mapped, args);
+
+        let args = serde_json::json!({"command": "tree -L 2 src"});
+        let (name, mapped) = normalize_tool_call_shape("run", args.clone());
+        assert_eq!(name, "run");
+        assert_eq!(mapped, args);
     }
 
     // NEGATIVE: `replace_symbol` is a hard-kept STANDALONE tool in Harn's default
