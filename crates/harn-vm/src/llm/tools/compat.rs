@@ -470,7 +470,21 @@ fn unwrap_generic_tool_arguments(
             Ok(value @ serde_json::Value::Object(_)) => value,
             _ => return None,
         },
-        Some(serde_json::Value::Null) | None => serde_json::Value::Object(Default::default()),
+        // No args envelope at all: cheap models (observed live: fw-gpt-oss-120b
+        // emitting `tool_call({"name":"look","intent":"read","path":"..."})`)
+        // FLATTEN the real arguments beside the inner name. Returning empty
+        // args here silently dropped them and the recovered call then died on
+        // required-parameter validation. Carry every sibling key through as
+        // the inner arguments instead.
+        Some(serde_json::Value::Null) | None => {
+            let mut flattened = object.clone();
+            flattened.remove("name");
+            flattened.remove("tool");
+            flattened.remove("args");
+            flattened.remove("arguments");
+            flattened.remove("parameters");
+            serde_json::Value::Object(flattened)
+        }
         Some(_) => return None,
     };
 
@@ -499,6 +513,27 @@ mod tests {
         assert_eq!(name, "look");
         assert_eq!(arguments["intent"], "read");
         assert_eq!(arguments["file"], "src/lib.rs");
+    }
+
+    #[test]
+    fn unwraps_generic_wrapper_with_flattened_sibling_args() {
+        // Real fw-gpt-oss-120b corpus shape: the wrapper call carries the
+        // inner name AND the real arguments flattened beside it — no `args`
+        // envelope. The siblings must ride through as the inner arguments.
+        let (name, arguments) = normalize_tool_call_shape(
+            "tool_call",
+            serde_json::json!({
+                "name": "look",
+                "intent": "read",
+                "path": "src/document.zig",
+                "reason": "view document structures"
+            }),
+        );
+
+        assert_eq!(name, "look");
+        assert_eq!(arguments["intent"], "read");
+        assert_eq!(arguments["path"], "src/document.zig");
+        assert!(arguments.get("name").is_none());
     }
 
     #[test]
