@@ -36,6 +36,7 @@ pub mod error;
 pub mod fs;
 pub mod fs_snapshot;
 pub mod fs_watch;
+pub mod host_env_custody;
 pub mod process;
 pub mod sandbox;
 pub mod scanner;
