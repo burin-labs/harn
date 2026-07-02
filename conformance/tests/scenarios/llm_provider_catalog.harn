@@ -24,7 +24,7 @@ pipeline test(task) {
   assert(len(catalog.models) >= 1, "catalog exposes model metadata")
   assert(catalog.qc_defaults.ollama != nil, "catalog exposes QC defaults")
   let mid = llm_model_info("mid")
-  assert_eq(mid.id, "gpt-4o-mini")
+  assert_eq(mid.id, "gpt-5.4-mini")
   assert_eq(mid.family, "openai-gpt")
   assert_eq(mid.lineage, "openai-legacy")
   let hosted_claude = llm_model_info("anthropic/claude-sonnet-4-6")
