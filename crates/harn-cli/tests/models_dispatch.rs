@@ -292,9 +292,12 @@ fn models_lora_inspect_human_text_includes_launch_hint() {
         "tool format: json",
         "native tools: no, preferred: unset",
         "catalog LoRA launch flags: yes",
+        "catalog LoRA rank flag: yes",
+        "max LoRA rank: 16",
         "harn local launch local-gemma4-e4b --provider vllm",
         "--model-source google/gemma-4-e4b-it",
         "--lora-adapter burin-tools=",
+        "--max-lora-rank 16",
     ] {
         assert!(
             harn.stdout.contains(fragment),
@@ -339,13 +342,24 @@ fn models_lora_inspect_json_shape_is_stable() {
         harn_value["compatibility"]["provider_supports_lora_launch"],
         serde_json::Value::Bool(true)
     );
+    assert_eq!(
+        harn_value["compatibility"]["provider_supports_lora_max_rank"],
+        serde_json::Value::Bool(true)
+    );
     assert_eq!(harn_value["tool_calling"]["native_tools"], false);
     assert_eq!(harn_value["launch"]["request_model"], "burin-tools");
+    assert_eq!(harn_value["launch"]["max_lora_rank"].as_u64(), Some(16));
     let launch = harn_value["launch"]["harn_local_launch"]
         .as_array()
         .expect("launch argv");
     assert!(
         launch.iter().any(|arg| arg == "--lora-adapter"),
+        "launch argv={launch:?}"
+    );
+    assert!(
+        launch
+            .windows(2)
+            .any(|pair| pair[0] == "--max-lora-rank" && pair[1] == "16"),
         "launch argv={launch:?}"
     );
 }

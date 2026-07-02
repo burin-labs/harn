@@ -159,7 +159,9 @@ For runtime rows that declare LoRA launch flags, `harn local launch` accepts
 repeatable `--lora-adapter NAME=PATH_OR_REPO` values and forwards them through
 the cataloged runtime shape. Use `harn models lora inspect --base <model>
 <adapter> --provider <provider>` to check local PEFT adapter metadata and print
-the corresponding Harn-managed launch command before starting the server.
+the corresponding Harn-managed launch command before starting the server. If
+the adapter config declares a rank and the provider catalog has a max-rank
+runtime flag, the generated command includes `--max-lora-rank` as well.
 
 Harn maintains local runtime risk profiles for hybrid-cache families
 (Qwen3.6, Gemma4). The profile table records preferred runtimes,
