@@ -77,3 +77,42 @@ capabilities = ["tools", "streaming"]
 tier = "small"
 open_weight = true
 strengths = ["cheap", "speed"]
+
+# OpenRouter Qwen3.6 routes. Live OpenRouter `/api/v1/models` snapshot on
+# 2026-07-02 reports tools/tool_choice, structured_outputs/response_format,
+# reasoning, text+image+video input, and the prices below. Harn's capability
+# matrix owns the runtime quirks: native tools stay enabled, reasoning is
+# disabled automatically for tool-bearing tasks, and the broken Ambient
+# OpenRouter upstream is denied through provider_route_denylist.
+[models."qwen/qwen3.6-flash"]
+name = "Qwen3.6 Flash (via OpenRouter)"
+provider = "openrouter"
+context_window = 1000000
+capabilities = ["tools", "vision", "streaming", "thinking"]
+pricing = { input_per_mtok = 0.1875, output_per_mtok = 1.125 }
+tier = "mid"
+open_weight = false
+strengths = ["speed", "cheap", "coding", "tool_use", "reasoning", "long_context"]
+
+[models."qwen/qwen3.6-plus"]
+name = "Qwen3.6 Plus (via OpenRouter)"
+provider = "openrouter"
+context_window = 1000000
+capabilities = ["tools", "vision", "streaming", "thinking"]
+pricing = { input_per_mtok = 0.325, output_per_mtok = 1.95 }
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
+benchmarks = { swe_bench_verified = 78.8 }
+
+[models."qwen/qwen3.6-35b-a3b"]
+name = "Qwen3.6 35B A3B (via OpenRouter)"
+provider = "openrouter"
+context_window = 262144
+logical_model = "qwen3.6-35b-a3b"
+equivalence_group = "qwen3.6-35b-a3b"
+capabilities = ["tools", "vision", "streaming", "thinking"]
+pricing = { input_per_mtok = 0.14, output_per_mtok = 1.00 }
+tier = "mid"
+open_weight = true
+strengths = ["cheap", "coding", "tool_use", "reasoning"]

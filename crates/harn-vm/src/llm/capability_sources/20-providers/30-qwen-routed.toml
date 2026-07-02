@@ -522,6 +522,10 @@ supports_assistant_prefill = false
 prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "inline"
+# Keep this exact Plus row aligned with the wildcard Qwen3.6 rule below. The
+# exact row matches first, so it must carry the OpenRouter Ambient denylist
+# directly rather than relying on wildcard inheritance.
+provider_route_denylist = ["Ambient"]
 
 [[provider.openrouter]]
 model_match = "qwen/qwen3.6*"

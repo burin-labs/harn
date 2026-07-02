@@ -10655,8 +10655,7 @@
       "name": "GPT-5.4 Mini",
       "provider": "openai",
       "aliases": [
-        "mid",
-        "tier/mid"
+        "openai/mid"
       ],
       "context_window": 400000,
       "modalities": {
@@ -10708,9 +10707,7 @@
         "status": "active"
       },
       "availability": "serverless",
-      "quality_tags": [
-        "balanced"
-      ],
+      "quality_tags": [],
       "capability_tags": [
         "streaming",
         "tools",
@@ -13328,6 +13325,237 @@
       }
     },
     {
+      "id": "qwen/qwen3.6-35b-a3b",
+      "name": "Qwen3.6 35B A3B (via OpenRouter)",
+      "provider": "openrouter",
+      "aliases": [
+        "openrouter-qwen3.6-35b",
+        "qwen3.6-35b"
+      ],
+      "context_window": 262144,
+      "logical_model": "qwen3.6-35b-a3b",
+      "equivalence_group": "qwen3.6-35b-a3b",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "delimited",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": true,
+        "interleaved_supported": false,
+        "preserve_thinking": true
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.14,
+        "output_per_mtok": 1.0,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "qwen",
+      "lineage": "qwen3",
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "cheap",
+        "coding",
+        "tool_use",
+        "reasoning"
+      ]
+    },
+    {
+      "id": "qwen/qwen3.6-flash",
+      "name": "Qwen3.6 Flash (via OpenRouter)",
+      "provider": "openrouter",
+      "aliases": [
+        "mid",
+        "openrouter-qwen3.6",
+        "openrouter-qwen3.6-flash",
+        "qwen3.6",
+        "qwen3.6-flash",
+        "tier/mid"
+      ],
+      "context_window": 1000000,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "delimited",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": true,
+        "interleaved_supported": false,
+        "preserve_thinking": true
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.1875,
+        "output_per_mtok": 1.125,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [
+        "balanced"
+      ],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "qwen",
+      "lineage": "qwen3",
+      "tier": "mid",
+      "open_weight": false,
+      "strengths": [
+        "speed",
+        "cheap",
+        "coding",
+        "tool_use",
+        "reasoning",
+        "long_context"
+      ]
+    },
+    {
+      "id": "qwen/qwen3.6-plus",
+      "name": "Qwen3.6 Plus (via OpenRouter)",
+      "provider": "openrouter",
+      "aliases": [
+        "openrouter-qwen3.6-plus",
+        "qwen3.6-plus"
+      ],
+      "context_window": 1000000,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "delimited",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": true,
+        "interleaved_supported": false,
+        "preserve_thinking": true
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 0.325,
+        "output_per_mtok": 1.95,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "qwen",
+      "lineage": "qwen3",
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "reasoning",
+        "long_context"
+      ],
+      "benchmarks": {
+        "swe_bench_verified": 78.8
+      }
+    },
+    {
       "id": "qwen/qwen3.7-max",
       "name": "Qwen3.7 Max",
       "provider": "openrouter",
@@ -13603,7 +13831,7 @@
         "modes": [
           "enabled"
         ],
-        "effort_supported": false,
+        "effort_supported": true,
         "none_supported": false,
         "interleaved_supported": false,
         "preserve_thinking": false
@@ -13672,7 +13900,7 @@
         "modes": [
           "enabled"
         ],
-        "effort_supported": false,
+        "effort_supported": true,
         "none_supported": false,
         "interleaved_supported": false,
         "preserve_thinking": false
@@ -13746,15 +13974,15 @@
         "modes": [
           "enabled"
         ],
-        "effort_supported": false,
+        "effort_supported": true,
         "none_supported": false,
         "interleaved_supported": false,
         "preserve_thinking": false
       },
       "prompt_cache": true,
       "pricing": {
-        "input_per_mtok": 1.2,
-        "output_per_mtok": 4.1,
+        "input_per_mtok": 0.93,
+        "output_per_mtok": 3.0,
         "cache_read_per_mtok": null,
         "cache_write_per_mtok": null
       },
@@ -13818,7 +14046,7 @@
         "modes": [
           "enabled"
         ],
-        "effort_supported": false,
+        "effort_supported": true,
         "none_supported": false,
         "interleaved_supported": false,
         "preserve_thinking": false
@@ -16029,8 +16257,8 @@
     },
     {
       "name": "mid",
-      "model_id": "gpt-5.4-mini",
-      "provider": "openai"
+      "model_id": "qwen/qwen3.6-flash",
+      "provider": "openrouter"
     },
     {
       "name": "minimax",
@@ -16199,6 +16427,11 @@
       "tool_format": "text"
     },
     {
+      "name": "openai/mid",
+      "model_id": "gpt-5.4-mini",
+      "provider": "openai"
+    },
+    {
       "name": "openrouter-gemma4-26b",
       "model_id": "google/gemma-4-26b-a4b-it",
       "provider": "openrouter"
@@ -16235,6 +16468,26 @@
       "provider": "openrouter"
     },
     {
+      "name": "openrouter-qwen3.6",
+      "model_id": "qwen/qwen3.6-flash",
+      "provider": "openrouter"
+    },
+    {
+      "name": "openrouter-qwen3.6-35b",
+      "model_id": "qwen/qwen3.6-35b-a3b",
+      "provider": "openrouter"
+    },
+    {
+      "name": "openrouter-qwen3.6-flash",
+      "model_id": "qwen/qwen3.6-flash",
+      "provider": "openrouter"
+    },
+    {
+      "name": "openrouter-qwen3.6-plus",
+      "model_id": "qwen/qwen3.6-plus",
+      "provider": "openrouter"
+    },
+    {
       "name": "openrouter-qwen3.7-max",
       "model_id": "qwen/qwen3.7-max",
       "provider": "openrouter"
@@ -16257,6 +16510,26 @@
     {
       "name": "qwen3-coder-next",
       "model_id": "qwen/qwen3-coder-next",
+      "provider": "openrouter"
+    },
+    {
+      "name": "qwen3.6",
+      "model_id": "qwen/qwen3.6-flash",
+      "provider": "openrouter"
+    },
+    {
+      "name": "qwen3.6-35b",
+      "model_id": "qwen/qwen3.6-35b-a3b",
+      "provider": "openrouter"
+    },
+    {
+      "name": "qwen3.6-flash",
+      "model_id": "qwen/qwen3.6-flash",
+      "provider": "openrouter"
+    },
+    {
+      "name": "qwen3.6-plus",
+      "model_id": "qwen/qwen3.6-plus",
       "provider": "openrouter"
     },
     {
@@ -16330,8 +16603,8 @@
     },
     {
       "name": "tier/mid",
-      "model_id": "gpt-5.4-mini",
-      "provider": "openai"
+      "model_id": "qwen/qwen3.6-flash",
+      "provider": "openrouter"
     },
     {
       "name": "tier/small",
@@ -16397,8 +16670,8 @@
       "id": "balanced",
       "label": "Balanced",
       "description": "Default cost/quality tradeoff for routine coding-agent work.",
-      "model_id": "gpt-5.4-mini",
-      "provider": "openai",
+      "model_id": "qwen/qwen3.6-flash",
+      "provider": "openrouter",
       "source": "alias:mid"
     },
     {

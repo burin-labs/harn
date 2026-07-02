@@ -2065,12 +2065,22 @@ preferred_tool_format = "native"
     #[test]
     fn openrouter_qwen36_keeps_native_and_denies_ambient_upstream() {
         reset();
-        let caps = lookup("openrouter", "qwen/qwen3.6-35b-a3b");
-        // The route-around must NOT downgrade the tool format: native stays on.
-        assert!(caps.native_tools);
-        assert_eq!(caps.preferred_tool_format.as_deref(), Some("native"));
-        // The broken Ambient upstream is denied via the data-driven denylist.
-        assert_eq!(caps.provider_route_denylist, vec!["Ambient".to_string()]);
+        for model in [
+            "qwen/qwen3.6-flash",
+            "qwen/qwen3.6-plus",
+            "qwen/qwen3.6-35b-a3b",
+        ] {
+            let caps = lookup("openrouter", model);
+            // The route-around must NOT downgrade the tool format: native stays on.
+            assert!(caps.native_tools, "{model}: native tools");
+            assert_eq!(caps.preferred_tool_format.as_deref(), Some("native"));
+            // The broken Ambient upstream is denied via the data-driven denylist.
+            assert_eq!(
+                caps.provider_route_denylist,
+                vec!["Ambient".to_string()],
+                "{model}: denylist",
+            );
+        }
     }
 
     #[test]
@@ -2581,6 +2591,17 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
                 .get("agent")
                 .map(String::as_str),
             Some("off"),
+        );
+
+        let openrouter_glm = lookup("openrouter", "z-ai/glm-5.2");
+        assert!(openrouter_glm.reasoning_effort_supported);
+        assert_eq!(
+            openrouter_glm.reasoning_effort_levels,
+            vec!["high", "xhigh", "max"]
+        );
+        assert_eq!(
+            openrouter_glm.preferred_tool_format.as_deref(),
+            Some("text")
         );
 
         let minimax = lookup("together", "MiniMaxAI/MiniMax-M2.7");
