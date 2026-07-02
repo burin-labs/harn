@@ -425,19 +425,7 @@ pub fn wait_for_signal(event: TriggerEvent) -> string {
             let event = trigger_event("issues.opened", "delivery-waitpoint-cancel");
             let event_id = event.id.0.clone();
             let binding_key = binding.binding_key();
-            crate::waitpoints::clear_test_wait_signals();
-            let (started_tx, started_rx) = oneshot::channel();
-            crate::waitpoints::install_test_wait_signal(
-                "wait-cancel",
-                crate::waitpoints::WaitpointTestSignalKind::Started,
-                started_tx,
-            );
-            let (interrupted_tx, interrupted_rx) = oneshot::channel();
-            crate::waitpoints::install_test_wait_signal(
-                "wait-cancel",
-                crate::waitpoints::WaitpointTestSignalKind::Interrupted,
-                interrupted_tx,
-            );
+            let wait_id = "wait-cancel";
 
             let run_dispatcher = dispatcher.clone();
             let handle = tokio::task::spawn_local(async move {
@@ -447,7 +435,7 @@ pub fn wait_for_signal(event: TriggerEvent) -> string {
                     .expect("dispatch completes")
             });
 
-            await_test_signal("waitpoint_wait_started", started_rx).await;
+            await_wait_event(log.clone(), wait_id, "waitpoint_wait_started").await;
             append_dispatch_cancel_request(
                 &log,
                 &DispatchCancelRequest {
@@ -471,7 +459,7 @@ pub fn wait_for_signal(event: TriggerEvent) -> string {
                 "{outcome:?}"
             );
 
-            await_test_signal("waitpoint_wait_interrupted", interrupted_rx).await;
+            await_wait_event(log.clone(), wait_id, "waitpoint_wait_interrupted").await;
         })
         .await;
 }

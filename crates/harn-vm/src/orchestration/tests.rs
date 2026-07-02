@@ -983,21 +983,31 @@ async fn save_run_record_publishes_action_graph_updates_to_event_log() {
     save_run_record(&run, Some(run_path.to_str().unwrap())).unwrap();
     run.status = "completed".to_string();
     save_run_record(&run, Some(run_path.to_str().unwrap())).unwrap();
-    let events = [
-        stream.next().await.unwrap().unwrap(),
-        stream.next().await.unwrap().unwrap(),
-    ];
+    let events = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        let mut events = Vec::new();
+        while events.len() < 2 {
+            let (_, event) = stream.next().await.unwrap().unwrap();
+            if event.kind == "action_graph_update"
+                && event.headers.get("run_id").map(String::as_str) == Some(run.id.as_str())
+            {
+                events.push(event);
+            }
+        }
+        events
+    })
+    .await
+    .expect("timed out waiting for this run's action graph events");
     assert_eq!(events.len(), 2);
     assert!(events
         .iter()
-        .all(|(_, event)| event.kind == "action_graph_update"));
-    assert!(events.iter().all(|(_, event)| {
+        .all(|event| event.kind == "action_graph_update"));
+    assert!(events.iter().all(|event| {
         event.headers.get("trace_id").map(String::as_str) == Some("trace_stream")
     }));
     assert!(events
         .iter()
-        .all(|(_, event)| event.payload["workflow_id"] == serde_json::json!("[redacted]")));
-    assert!(events.iter().any(|(_, event)| {
+        .all(|event| event.payload["workflow_id"] == serde_json::json!("[redacted]")));
+    assert!(events.iter().any(|event| {
         event.payload["observability"]["action_graph_nodes"]
             .as_array()
             .is_some_and(|nodes| {

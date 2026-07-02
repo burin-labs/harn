@@ -328,11 +328,48 @@ pub(super) fn test_cancel_requested_at() -> time::OffsetDateTime {
     time::OffsetDateTime::UNIX_EPOCH
 }
 
-pub(super) async fn await_test_signal(label: &str, rx: oneshot::Receiver<()>) {
-    tokio::time::timeout(TEST_DEFAULT_TIMEOUT, rx)
+pub(super) async fn await_wait_event(
+    log: Arc<crate::event_log::AnyEventLog>,
+    wait_id: &str,
+    kind: &str,
+) {
+    let topic =
+        Topic::new(crate::waitpoints::WAITPOINT_WAITS_TOPIC).expect("valid waitpoint waits topic");
+    let mut stream = log
+        .clone()
+        .subscribe(&topic, None)
         .await
-        .unwrap_or_else(|_| panic!("timed out waiting for {label}"))
-        .unwrap_or_else(|_| panic!("{label} sender dropped before firing"));
+        .expect("subscribe to waitpoint waits");
+    let matched = tokio::time::timeout(TEST_DEFAULT_TIMEOUT, async {
+        while let Some(item) = stream.next().await {
+            let (_, event) = item.expect("waitpoint wait event");
+            if event.kind == kind
+                && event.headers.get("wait_id").map(String::as_str) == Some(wait_id)
+            {
+                return true;
+            }
+        }
+        false
+    })
+    .await
+    .unwrap_or(false);
+    if matched {
+        return;
+    }
+
+    let events = read_topic(log.clone(), crate::waitpoints::WAITPOINT_WAITS_TOPIC).await;
+    let observed = events
+        .iter()
+        .map(|(_, event)| {
+            let observed_wait_id = event
+                .headers
+                .get("wait_id")
+                .map(String::as_str)
+                .unwrap_or("<missing>");
+            format!("{}:{observed_wait_id}", event.kind)
+        })
+        .collect::<Vec<_>>();
+    panic!("timed out waiting for {kind} for {wait_id}; observed={observed:?}");
 }
 
 pub(super) fn flatten_action_graph(
