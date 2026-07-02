@@ -590,10 +590,11 @@ fn try_emit_partial_tool_args(
     if value.is_none() && raw_partial.is_none() {
         return;
     }
+    let event_tool_name = canonical_stream_event_tool_name(tool_name);
     let event = AgentEvent::ToolCallUpdate {
         session_id: session_id.to_string(),
         tool_call_id: tool_call_id.to_string(),
-        tool_name: tool_name.to_string(),
+        tool_name: event_tool_name,
         status: ToolCallStatus::Pending,
         raw_output: None,
         error: None,
@@ -608,6 +609,11 @@ fn try_emit_partial_tool_args(
         parsing: None,
     };
     crate::llm::agent_runtime::emit_agent_event_sync(&event);
+}
+
+fn canonical_stream_event_tool_name(tool_name: &str) -> String {
+    let (name, _) = crate::llm::tools::normalize_tool_call_shape(tool_name, serde_json::json!({}));
+    name
 }
 
 async fn send_stream_request_with_ollama_warmup(
@@ -890,14 +896,16 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
                             // arg deltas so ACP clients can render
                             // "calling search_web…" with zero latency.
                             if let Some(sid) = session_id {
-                                let tool_kind =
-                                    crate::orchestration::current_tool_annotations(&name)
-                                        .map(|a| a.kind);
+                                let event_tool_name = canonical_stream_event_tool_name(&name);
+                                let tool_kind = crate::orchestration::current_tool_annotations(
+                                    &event_tool_name,
+                                )
+                                .map(|a| a.kind);
                                 crate::llm::agent_runtime::emit_agent_event_sync(
                                     &AgentEvent::ToolCall {
                                         session_id: sid.to_string(),
                                         tool_call_id: tool_call_id.clone(),
-                                        tool_name: name.clone(),
+                                        tool_name: event_tool_name,
                                         kind: tool_kind,
                                         status: ToolCallStatus::Pending,
                                         raw_input: serde_json::Value::Object(Default::default()),
@@ -1171,14 +1179,15 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
                     // below.
                     if !entry.announced && !entry.name.is_empty() {
                         if let Some(sid) = session_id {
+                            let event_tool_name = canonical_stream_event_tool_name(&entry.name);
                             let tool_kind =
-                                crate::orchestration::current_tool_annotations(&entry.name)
+                                crate::orchestration::current_tool_annotations(&event_tool_name)
                                     .map(|a| a.kind);
                             crate::llm::agent_runtime::emit_agent_event_sync(
                                 &AgentEvent::ToolCall {
                                     session_id: sid.to_string(),
                                     tool_call_id: entry.tool_call_id.clone(),
-                                    tool_name: entry.name.clone(),
+                                    tool_name: event_tool_name,
                                     kind: tool_kind,
                                     status: ToolCallStatus::Pending,
                                     raw_input: serde_json::Value::Object(Default::default()),
@@ -2434,6 +2443,75 @@ EOF
             .tool_calls
             .iter()
             .all(|call| { call["arguments"].get("__parse_error").is_none() }));
+
+        clear_session_sinks(&session_id);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn openai_stream_container_exec_argv_finalizes_to_run() {
+        // gpt-oss / Harmony can borrow Codex's native `container.exec` tool
+        // shape even when Harn advertised the canonical `run` tool. The
+        // streamed transport must keep the pending lifecycle alive while
+        // arguments are incomplete, then dispatch the final normalized Harn
+        // call once the provider finishes with tool_calls.
+        let body = concat!(
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_exec\",\"function\":{\"name\":\"container.exec\",\"arguments\":\"{\\\"cmd\\\":[\"}}]}}]}\n",
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"bash\\\",\\\"lc\\\",\"}}]}}]}\n",
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"ls -R\\\"],\\\"timeout_ms\\\":1000}\"}}]}}]}\n",
+            "data: {\"choices\":[{\"index\":0,\"finish_reason\":\"tool_calls\",\"delta\":{}}],\"usage\":{\"prompt_tokens\":4,\"completion_tokens\":7}}\n",
+            "data: [DONE]\n",
+        );
+        let session_id = fresh_session_id("oai-container-exec-argv");
+        let (result, events) = drive(body.as_bytes(), &session_id, false).await;
+
+        assert_eq!(result.stop_reason.as_deref(), Some("tool_calls"));
+
+        let announcements: Vec<&AgentEvent> = events
+            .iter()
+            .filter(|event| matches!(event, AgentEvent::ToolCall { .. }))
+            .collect();
+        assert_eq!(
+            announcements.len(),
+            1,
+            "expected one pending tool announcement, got {events:#?}"
+        );
+        match announcements[0] {
+            AgentEvent::ToolCall {
+                tool_call_id,
+                tool_name,
+                status,
+                ..
+            } => {
+                assert_eq!(tool_call_id, "call_exec");
+                assert_eq!(tool_name, "run");
+                assert_eq!(*status, ToolCallStatus::Pending);
+            }
+            _ => unreachable!(),
+        }
+
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                AgentEvent::ToolCallUpdate {
+                    tool_call_id,
+                    tool_name,
+                    status: ToolCallStatus::Pending,
+                    raw_input: Some(raw),
+                    ..
+                } if tool_call_id == "call_exec" && tool_name == "run" && raw["cmd"].is_array()
+            )),
+            "expected pending parsed argv updates while argv JSON streamed; got {events:#?}"
+        );
+
+        assert_eq!(result.tool_calls.len(), 1);
+        assert_eq!(result.tool_calls[0]["id"], "call_exec");
+        assert_eq!(result.tool_calls[0]["name"], "run");
+        assert_eq!(result.tool_calls[0]["arguments"]["command"], "ls -R");
+        assert_eq!(result.tool_calls[0]["arguments"]["timeout_ms"], 1000);
+        assert!(result.tool_calls[0]["arguments"].get("cmd").is_none());
+        assert!(result.tool_calls[0]["arguments"]
+            .get("__parse_error")
+            .is_none());
 
         clear_session_sinks(&session_id);
     }
