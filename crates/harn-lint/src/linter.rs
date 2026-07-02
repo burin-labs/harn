@@ -2089,7 +2089,10 @@ impl<'a> Linter<'a> {
             let unused: Vec<&String> = import
                 .names
                 .iter()
-                .filter(|n| !self.references.contains(*n))
+                // A name used only in type position (`import { T }` consumed
+                // by annotations of a `pub type` / struct / enum alias) is
+                // still a real use.
+                .filter(|n| !self.references.contains(*n) && !self.type_references.contains(*n))
                 .collect();
             let all_unused = unused.len() == import.names.len();
             for name in &unused {
@@ -2215,7 +2218,7 @@ impl<'a> Linter<'a> {
         }
 
         for decl in &self.type_declarations {
-            if decl.name.starts_with('_') {
+            if decl.is_pub || decl.name.starts_with('_') {
                 continue;
             }
             if !self.type_references.contains(&decl.name) {

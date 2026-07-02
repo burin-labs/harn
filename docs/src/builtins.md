@@ -297,7 +297,7 @@ log(bytes_to_hex(uploaded))
 | `abs(n)` | n: int or float | int or float | Absolute value |
 | `ceil(n)` | n: float | int | Ceiling (rounds up). Ints pass through unchanged |
 | `floor(n)` | n: float | int | Floor (rounds down). Ints pass through unchanged |
-| `round(n)` | n: float | int | Round to nearest integer. Ints pass through unchanged |
+| `round(n, digits?)` | n: float, digits: int (optional) | int or float | Round to nearest integer (halves away from zero). Ints pass through unchanged. With `digits`, rounds to that many decimal places and keeps the input type: `round(2.567, 2)` is `2.57`; negative digits round to tens/hundreds buckets (`round(1250, -2)` is `1300`) |
 | `sqrt(n)` | n: int or float | float | Square root |
 | `pow(base, exp)` | base: number, exp: number | int or float | Exponentiation. Returns int when both args are int and exp is non-negative |
 | `min(a, b)` | a: number, b: number | int or float | Minimum of two values. Returns float if either argument is float |
@@ -477,7 +477,7 @@ line-, token-, or pattern-oriented scan suffices.
 | `.last(n?)` | n: int (optional) | any or list | Last element, or last n elements |
 | `.partition(fn)` | fn: closure | list | Split into `[[truthy], [falsy]]` |
 | `.group_by(fn)` | fn: closure | dict | Group into dict keyed by fn result |
-| `.sort()` / `.sort_by(fn)` | fn: closure (optional) | list | Sort (natural or by key function) |
+| `.sort()` / `.sort_by(fn)` | fn: closure (optional) | list | Stable sort (natural or by key function). List-valued keys order lexicographically, so `xs.sort_by({ x -> [x.a, x.b] })` sorts by `a`, then `b` |
 | `.min()` / `.max()` | none | any | Minimum/maximum value |
 | `.min_by(fn)` / `.max_by(fn)` | fn: closure | any | Min/max by key function |
 | `.chunk(size)` | size: int | list | Split into chunks of size |

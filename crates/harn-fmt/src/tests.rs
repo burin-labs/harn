@@ -218,7 +218,7 @@ fn test_roundtrip_interface() {
 #[test]
 fn test_roundtrip_public_decls_and_generic_interface() {
     assert_roundtrip(
-        "pub pipeline build(task) extends base {\n  return\n}\n\npub enum Result {\n  Ok(value: string)\n}\n\npub struct Config {\n  port?: int\n}\n\ninterface Repository<T> {\n  fn map<U>(value: T, f: fn(T) -> U) -> U\n}",
+        "pub pipeline build(task) extends base {\n  return\n}\n\npub enum Result {\n  Ok(value: string)\n}\n\npub struct Config {\n  port?: int\n}\n\npub type ConfigAlias = {port: int}\n\ninterface Repository<T> {\n  fn map<U>(value: T, f: fn(T) -> U) -> U\n}",
     );
 }
 
@@ -1420,6 +1420,45 @@ fn test_statement_comment_after_inline_dict_stays_on_statement() {
     assert!(
         result.contains("let d = {x: 1}  // note"),
         "statement-level comment must stay on the statement, got:\n{result}"
+    );
+    assert_roundtrip(source);
+}
+
+#[test]
+fn test_method_chain_segment_comments_stay_in_chain() {
+    // A `//` comment sitting between the segments of a multi-line method
+    // chain used to be orphaned to the end of the program at column 0.
+    // It must stay anchored above the segment it precedes.
+    let source = "fn f() -> int {\n  let r = [1, 2, 3]\n    // keep the big ones\n    .filter({ x -> x > 1 })\n    // double them\n    .map({ x -> x * 2 })\n  return r.count()\n}\n";
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains("    // keep the big ones\n    .filter"),
+        "first chain comment must stay above its segment, got:\n{result}"
+    );
+    assert!(
+        result.contains("    // double them\n    .map"),
+        "second chain comment must stay above its segment, got:\n{result}"
+    );
+    assert!(
+        !result.trim_end().ends_with("// double them"),
+        "chain comment must not be relocated to EOF, got:\n{result}"
+    );
+    assert_roundtrip(source);
+    // Idempotence: formatting the formatted output changes nothing.
+    assert_eq!(format_source(&result).unwrap(), result);
+}
+
+#[test]
+fn test_optional_method_chain_segment_comments_stay_in_chain() {
+    let source = "fn f(xs: list?) -> int {\n  let r = xs\n    // may be nil\n    ?.count()\n  return r ?? 0\n}\n";
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains("// may be nil"),
+        "comment must survive, got:\n{result}"
+    );
+    assert!(
+        !result.trim_end().ends_with("// may be nil"),
+        "comment must not be relocated to EOF, got:\n{result}"
     );
     assert_roundtrip(source);
 }

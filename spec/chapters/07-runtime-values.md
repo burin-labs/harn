@@ -47,6 +47,20 @@ Values are equal if they have the same type and same contents, with these except
 
 ### Comparison
 
-Only `int`, `float`, and `string` support ordering (`<`, `>`, `<=`, `>=`).
-Comparison between other types returns 0 (equal).
+`int`, `float`, `decimal`, and `string` support ordering (`<`, `>`, `<=`,
+`>=`). `int` and `float` order numerically against each other; `decimal`
+orders only against `decimal`. Two compound values order structurally:
+
+- `Pair` compares `.first`, then `.second` on a tie.
+- `list` compares lexicographically, element by element; if one list is a
+  strict prefix of the other, the shorter list orders first. This is what
+  makes multi-key sorts like `xs.sort_by({ x -> [x.a, x.b] })` order by the
+  first key, then the second.
+
+An unordered element (a float `NaN`, directly or nested inside a pair or
+list) makes the whole comparison unordered: relational operators return
+`false`, while sorting-style total-order reductions (`sort`, `sort_by`,
+`min`, `max`) treat the operands as equal so a stray `NaN` cannot
+destabilize a sort. Comparison between other type combinations returns 0
+(equal).
 

@@ -6,6 +6,31 @@ use crate::helpers::*;
 use super::Formatter;
 
 impl Formatter<'_> {
+    /// Comments that sat between a multi-line chain object and its
+    /// `.method(...)` segment, rendered one per line with `pad` indentation
+    /// (empty when there are none). Claims only full-line, non-doc comments
+    /// strictly above the segment, so closure-body and trailing comments are
+    /// untouched.
+    pub(super) fn chain_segment_comments(
+        &self,
+        object: &SNode,
+        args: &[SNode],
+        node: &SNode,
+        pad: &str,
+    ) -> String {
+        let boundary = args
+            .first()
+            .map(|arg| arg.span.line)
+            .unwrap_or(node.span.end_line);
+        let mut lead = String::new();
+        for comment in self.claim_leading_comments_in_range(object.span.end_line + 1, boundary) {
+            lead.push_str(pad);
+            lead.push_str(&comment);
+            lead.push('\n');
+        }
+        lead
+    }
+
     /// Format `node` as if it sits at logical indent depth `indent`. When the
     /// node renders inline, `indent` does not show up in the output. When the
     /// node wraps onto multiple lines, its closing delimiter aligns to
@@ -159,7 +184,8 @@ impl Formatter<'_> {
                 let args_str = self.format_call_args(args, prefix_len, indent);
                 if obj_is_multiline {
                     let pad = "  ".repeat(indent + 1);
-                    format!("{obj}\n{pad}.{method}({args_str})")
+                    let lead = self.chain_segment_comments(object, args, node, &pad);
+                    format!("{obj}\n{lead}{pad}.{method}({args_str})")
                 } else {
                     format!("{obj}.{method}({args_str})")
                 }
@@ -183,7 +209,8 @@ impl Formatter<'_> {
                 let args_str = self.format_call_args(args, prefix_len, indent);
                 if obj_is_multiline {
                     let pad = "  ".repeat(indent + 1);
-                    format!("{obj}\n{pad}?.{method}({args_str})")
+                    let lead = self.chain_segment_comments(object, args, node, &pad);
+                    format!("{obj}\n{lead}{pad}?.{method}({args_str})")
                 } else {
                     format!("{obj}?.{method}({args_str})")
                 }
@@ -687,10 +714,12 @@ impl Formatter<'_> {
                 name,
                 type_params,
                 type_expr,
+                is_pub,
             } => {
+                let pub_prefix = if *is_pub { "pub " } else { "" };
                 let params = format_type_params(type_params);
                 let te = format_type_expr(type_expr);
-                format!("type {name}{params} = {te}")
+                format!("{pub_prefix}type {name}{params} = {te}")
             }
             Node::SelectExpr {
                 cases,

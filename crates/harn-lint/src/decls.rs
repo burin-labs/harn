@@ -46,4 +46,8 @@ pub(crate) struct TypeDeclaration {
     pub(crate) name: String,
     pub(crate) span: Span,
     pub(crate) kind: &'static str,
+    /// `pub` declarations are part of the module's export surface: importers
+    /// may reference them even when nothing in this file does, so the
+    /// unused-type lint skips them (mirroring `unused-function` for `pub fn`).
+    pub(crate) is_pub: bool,
 }

@@ -1,0 +1,5 @@
+type HiddenAlias = {value: int}
+
+pub fn make() -> HiddenAlias {
+  return {value: 1}
+}

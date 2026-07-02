@@ -722,7 +722,7 @@ impl Parser {
         ))
     }
 
-    pub(super) fn parse_type_decl(&mut self) -> Result<SNode, ParserError> {
+    pub(super) fn parse_type_decl_with_pub(&mut self, is_pub: bool) -> Result<SNode, ParserError> {
         let start = self.current_span();
         self.consume(&TokenKind::TypeKw, "type")?;
         let name = self.consume_identifier("type name")?;
@@ -739,6 +739,7 @@ impl Parser {
                 name,
                 type_params,
                 type_expr,
+                is_pub,
             },
             Span::merge(start, self.prev_span()),
         ))

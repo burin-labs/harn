@@ -63,6 +63,15 @@ fn push_nodes_reversed<'a>(nodes: &'a [SNode], stack: &mut Vec<&'a SNode>) {
     stack.extend(nodes.iter().rev());
 }
 
+/// Collect `node`'s immediate children without recursing. Lets callers walk
+/// selectively (e.g. stop descending at nested loops) while still relying on
+/// this module's single source of truth for each variant's children.
+pub fn immediate_children(node: &SNode) -> Vec<&SNode> {
+    let mut children = Vec::new();
+    collect_children(node, &mut children);
+    children
+}
+
 fn collect_children<'a>(node: &'a SNode, children: &mut Vec<&'a SNode>) {
     match &node.node {
         Node::AttributedDecl { attributes, inner } => {

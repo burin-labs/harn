@@ -1,0 +1,10 @@
+// `pub import` re-exports a `pub type` alias through a facade module.
+import { Wide, widen } from "pub_type_reexport_facade"
+
+fn show(w: Wide) -> string {
+  return w.label
+}
+
+pipeline default() {
+  __io_println(show(widen("via-facade")))
+}

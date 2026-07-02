@@ -74,15 +74,117 @@ fn ceil_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     }
 }
 
-#[harn_builtin(sig = "round(...args: any) -> any", category = "math")]
+#[harn_builtin(
+    sig = "round(value: number | decimal, digits?: int) -> number | decimal",
+    category = "math"
+)]
 fn round_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    match args.first().unwrap_or(&VmValue::Nil) {
-        VmValue::Float(n) => finite_float_to_i64(n.round()).map(VmValue::Int),
-        VmValue::Int(n) => Ok(VmValue::Int(*n)),
+    let digits = match args.get(1) {
+        None | Some(VmValue::Nil) => None,
+        Some(VmValue::Int(d)) => Some(*d),
+        Some(other) => {
+            return Err(VmError::TypeError(format!(
+                "round(value, digits): digits must be an integer, got {}",
+                other.type_name()
+            )))
+        }
+    };
+    match (args.first().unwrap_or(&VmValue::Nil), digits) {
+        // 1-arg form: nearest integer, halves away from zero.
+        (VmValue::Float(n), None) => finite_float_to_i64(n.round()).map(VmValue::Int),
+        (VmValue::Int(n), None) => Ok(VmValue::Int(*n)),
         // Round to a whole-unit decimal (stays exact + keeps the decimal type),
-        // rather than collapsing money to an int.
-        VmValue::Decimal(d) => Ok(VmValue::decimal(d.round())),
+        // rather than collapsing money to an int. Note: decimal keeps
+        // rust_decimal's banker's rounding for the whole-unit form.
+        (VmValue::Decimal(d), None) => Ok(VmValue::decimal(d.round())),
+        // 2-arg form: round to `digits` decimal places (negative digits round
+        // to tens / hundreds / ...). Floats stay floats and keep the 1-arg
+        // half-away-from-zero midpoint rule; ints stay ints when possible.
+        (VmValue::Float(n), Some(d)) => Ok(VmValue::Float(round_float_to_digits(*n, d))),
+        (VmValue::Int(n), Some(d)) => Ok(round_int_to_digits(*n, d)),
+        (VmValue::Decimal(x), Some(d)) => Ok(VmValue::decimal(round_decimal_to_digits(**x, d))),
         _ => Ok(VmValue::Nil),
+    }
+}
+
+/// `round(x, digits)` for floats: half-away-from-zero at the requested
+/// decimal place, implemented by scale → `f64::round` → unscale. Non-finite
+/// inputs pass through unchanged.
+fn round_float_to_digits(x: f64, digits: i64) -> f64 {
+    if !x.is_finite() {
+        return x;
+    }
+    if digits == 0 {
+        return x.round();
+    }
+    // f64 decimal exponents span roughly ±308; beyond that the scale factor
+    // is not representable, and the answer is degenerate anyway: rounding to
+    // more fractional digits than the value resolves is the identity, and
+    // rounding to a coarser bucket than the largest float magnitude is zero.
+    if digits > 308 {
+        return x;
+    }
+    if digits < -308 {
+        return 0.0 * x.signum();
+    }
+    let factor = 10f64.powi(digits as i32);
+    let scaled = x * factor;
+    if !scaled.is_finite() {
+        // Scaling overflowed (huge value, large positive `digits`): every
+        // such value is already integral well past `digits` places.
+        return x;
+    }
+    scaled.round() / factor
+}
+
+/// `round(n, digits)` for ints: identity for `digits >= 0`; negative digits
+/// round to the nearest power-of-ten bucket, halves away from zero. Uses
+/// exact i128 arithmetic; a result outside the i64 range promotes to float,
+/// matching integer arithmetic overflow behavior elsewhere.
+fn round_int_to_digits(n: i64, digits: i64) -> VmValue {
+    if digits >= 0 || n == 0 {
+        return VmValue::Int(n);
+    }
+    if digits <= -19 {
+        // 10^19 exceeds i64::MAX, so every i64 rounds to the zero bucket.
+        return VmValue::Int(0);
+    }
+    let factor = 10i128.pow((-digits) as u32);
+    let n128 = n as i128;
+    let rem = n128 % factor;
+    let base = n128 - rem;
+    let rounded = if rem.abs() * 2 >= factor {
+        base + factor * n128.signum()
+    } else {
+        base
+    };
+    match i64::try_from(rounded) {
+        Ok(v) => VmValue::Int(v),
+        Err(_) => VmValue::Float(rounded as f64),
+    }
+}
+
+/// `round(d, digits)` for decimals: keeps the decimal type and rust_decimal's
+/// banker's (midpoint-nearest-even) rounding, consistent with the 1-arg
+/// `round(decimal)` form. Negative digits round to power-of-ten buckets via
+/// exact scale/unscale.
+fn round_decimal_to_digits(x: rust_decimal::Decimal, digits: i64) -> rust_decimal::Decimal {
+    use rust_decimal::Decimal;
+    if digits >= 0 {
+        // Decimal carries at most 28 fractional digits, so any larger request
+        // is the identity; `round_dp` already treats it that way.
+        let dp = u32::try_from(digits).unwrap_or(u32::MAX).min(28);
+        return x.round_dp(dp);
+    }
+    let neg = (-digits) as u32;
+    // 96-bit decimals top out just under 8e28, so any coarser bucket is zero.
+    if neg > 28 {
+        return Decimal::ZERO;
+    }
+    let factor = Decimal::from_i128_with_scale(10i128.pow(neg), 0);
+    match x.checked_div(factor).map(|scaled| scaled.round()) {
+        Some(rounded) => rounded.checked_mul(factor).unwrap_or(x),
+        None => x,
     }
 }
 
@@ -608,6 +710,39 @@ mod tests {
         let error = call(&mut vm, "floor", vec![VmValue::Float(f64::INFINITY)])
             .expect_err("infinite float cannot become int");
         assert!(error.to_string().contains("non-finite"));
+    }
+
+    #[test]
+    fn round_digits_float_half_away_from_zero() {
+        assert_eq!(round_float_to_digits(2.567, 2), 2.57);
+        assert_eq!(round_float_to_digits(-2.567, 2), -2.57);
+        // Exactly representable midpoints round away from zero.
+        assert_eq!(round_float_to_digits(1.25, 1), 1.3);
+        assert_eq!(round_float_to_digits(-1.25, 1), -1.3);
+        // Binary-arithmetic noise just above the target still lands on it.
+        assert_eq!(round_float_to_digits(0.1 + 0.2, 2), 0.3);
+        // Negative digits round to power-of-ten buckets.
+        assert_eq!(round_float_to_digits(1234.5678, -2), 1200.0);
+        assert_eq!(round_float_to_digits(1250.0, -2), 1300.0);
+        // Extreme digit counts degrade gracefully.
+        assert_eq!(round_float_to_digits(1.5, 400), 1.5);
+        assert_eq!(round_float_to_digits(1.5, -400), 0.0);
+        assert!(round_float_to_digits(f64::NAN, 2).is_nan());
+        assert_eq!(round_float_to_digits(f64::INFINITY, 2), f64::INFINITY);
+    }
+
+    #[test]
+    fn round_digits_int_negative_buckets() {
+        assert!(matches!(round_int_to_digits(1250, -2), VmValue::Int(1300)));
+        assert!(matches!(round_int_to_digits(-1250, -2), VmValue::Int(-1300)));
+        assert!(matches!(round_int_to_digits(1249, -2), VmValue::Int(1200)));
+        assert!(matches!(round_int_to_digits(7, 3), VmValue::Int(7)));
+        assert!(matches!(round_int_to_digits(123, -19), VmValue::Int(0)));
+        // A bucket boundary past i64::MAX promotes to float instead of wrapping
+        // (i64::MAX rounds up to 9_223_400_000_000_000_000 at -14 digits).
+        assert!(
+            matches!(round_int_to_digits(i64::MAX, -14), VmValue::Float(f) if f == 9.2234e18)
+        );
     }
 
     #[test]

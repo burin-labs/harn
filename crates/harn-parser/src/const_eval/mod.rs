@@ -770,7 +770,18 @@ impl<'a> EvalCtx<'a> {
             },
             "floor" => unary_float(span, &args, |f| f.floor()),
             "ceil" => unary_float(span, &args, |f| f.ceil()),
-            "round" => unary_float(span, &args, |f| f.round()),
+            "round" => match args.as_slice() {
+                // 2-arg form mirrors the runtime builtin: round to `digits`
+                // decimal places (half away from zero); negative digits round
+                // to power-of-ten buckets; ints stay ints when they fit.
+                [ConstValue::Float(f), ConstValue::Int(digits)] => {
+                    Ok(ConstValue::Float(round_float_to_digits(*f, *digits)))
+                }
+                [ConstValue::Int(n), ConstValue::Int(digits)] => {
+                    Ok(round_int_to_digits(*n, *digits))
+                }
+                _ => unary_float(span, &args, |f| f.round()),
+            },
             "lowercase" => match args.as_slice() {
                 [ConstValue::String(s)] => Ok(ConstValue::String(s.to_lowercase())),
                 _ => Err(ConstEvalError::runtime(
@@ -946,6 +957,56 @@ fn apply_min_max(
             nums.iter().copied().fold(f64::NEG_INFINITY, f64::max)
         };
         Ok(ConstValue::Float(pick))
+    }
+}
+
+/// `round(x, digits)` for floats: half-away-from-zero at the requested
+/// decimal place. Mirrors `round_float_to_digits` in
+/// `crates/harn-vm/src/stdlib/math.rs` so const folding matches runtime.
+fn round_float_to_digits(x: f64, digits: i64) -> f64 {
+    if !x.is_finite() {
+        return x;
+    }
+    if digits == 0 {
+        return x.round();
+    }
+    if digits > 308 {
+        return x;
+    }
+    if digits < -308 {
+        return 0.0 * x.signum();
+    }
+    let factor = 10f64.powi(digits as i32);
+    let scaled = x * factor;
+    if !scaled.is_finite() {
+        return x;
+    }
+    scaled.round() / factor
+}
+
+/// `round(n, digits)` for ints. Mirrors `round_int_to_digits` in
+/// `crates/harn-vm/src/stdlib/math.rs`: identity for `digits >= 0`, negative
+/// digits round to the nearest power-of-ten bucket (halves away from zero),
+/// and an out-of-range result promotes to float.
+fn round_int_to_digits(n: i64, digits: i64) -> ConstValue {
+    if digits >= 0 || n == 0 {
+        return ConstValue::Int(n);
+    }
+    if digits <= -19 {
+        return ConstValue::Int(0);
+    }
+    let factor = 10i128.pow((-digits) as u32);
+    let n128 = n as i128;
+    let rem = n128 % factor;
+    let base = n128 - rem;
+    let rounded = if rem.abs() * 2 >= factor {
+        base + factor * n128.signum()
+    } else {
+        base
+    };
+    match i64::try_from(rounded) {
+        Ok(v) => ConstValue::Int(v),
+        Err(_) => ConstValue::Float(rounded as f64),
     }
 }
 

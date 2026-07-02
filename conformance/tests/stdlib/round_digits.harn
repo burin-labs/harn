@@ -1,0 +1,31 @@
+pipeline test(task) {
+  // 1-arg form is unchanged: nearest integer, halves away from zero.
+  log(round(2.5))
+  log(round(-2.5))
+  log(round(2.4))
+  log(round(7))
+  // 2-arg form: round floats to N decimal places (half away from zero).
+  log(round(2.567, 2))
+  log(round(2.5, 0))
+  log(round(-2.565, 1))
+  log(round(1.25, 1))
+  log(round(-1.25, 1))
+  // Values produced by binary float arithmetic round to the intended
+  // decimal (0.1 + 0.2 is 0.30000000000000004 before rounding).
+  log(round(0.1 + 0.2, 2))
+  log(round(2.675 + 0.005, 2))
+  // Negative digits round to tens / hundreds buckets — for floats and ints.
+  log(round(1234.5678, -2))
+  log(round(1250, -2))
+  log(round(-1250, -2))
+  log(round(1249, -2))
+  log(round(7, 3))
+  // Extreme digit counts degrade gracefully instead of overflowing.
+  log(round(1.5, 400))
+  log(round(1.5, -400))
+  log(round(123456789, -19))
+  // Decimal keeps the decimal type (and its banker's midpoint rule).
+  log(round(decimal("2.675"), 2))
+  log(round(decimal("2.665"), 2))
+  log(round(decimal("1250"), -2))
+}

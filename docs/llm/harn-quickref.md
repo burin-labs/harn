@@ -529,6 +529,14 @@ event.
 
 ## Module scope
 
+Mark declarations `pub` to export them from a module: `pub fn`,
+`pub pipeline`, `pub tool`, `pub skill`, `pub struct`, `pub enum`,
+`pub type`, and `pub import` (re-export). A `pub type` alias can be
+imported alongside the functions that use it —
+`import { SmartTarget, pick } from "./targets"` — and used in
+annotations or as an `llm_call_structured` schema type; non-`pub`
+type aliases stay module-private and error on import.
+
 Top-level `let` / `var` and `fn` declarations are visible inside
 functions defined in the same file:
 

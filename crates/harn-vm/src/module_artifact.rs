@@ -38,6 +38,17 @@ pub struct ModuleArtifact {
     pub init_chunk: Option<CachedChunk>,
     pub functions: BTreeMap<String, CachedCompiledFunction>,
     pub public_names: HashSet<String>,
+    /// Names of `pub type` aliases. Type aliases are erased at runtime — they
+    /// carry no value of their own — but importers may still name them in a
+    /// selective `import { T } from "..."` (for annotations and
+    /// schema-as-type use), so the loader must accept these names.
+    pub public_type_names: HashSet<String>,
+    /// JSON-Schema lowering (serialized as canonical JSON text) for each
+    /// `pub type` alias whose body can be expressed as a schema. The loader
+    /// binds the imported name to this dict so expression-position uses such
+    /// as `output_schema: ImportedAlias` see the same value a local alias
+    /// lowers to at compile time. Subset of [`public_type_names`](Self::public_type_names).
+    pub public_type_schemas: BTreeMap<String, String>,
 }
 
 /// Compile a parsed `.harn` module into the serializable artifact shape.
@@ -94,12 +105,21 @@ pub fn compile_module_artifact(
 
     let mut functions = BTreeMap::new();
     let mut public_names = HashSet::new();
+    let mut public_type_names = HashSet::new();
     for node in program {
         let inner = match &node.node {
             harn_parser::Node::AttributedDecl { inner, .. } => inner.as_ref(),
             _ => node,
         };
-        let harn_parser::Node::FnDecl {
+        if let harn_parser::Node::TypeDecl {
+            name,
+            is_pub: true,
+            ..
+        } = &inner.node
+        {
+            public_type_names.insert(name.clone());
+            continue;
+        }let harn_parser::Node::FnDecl {
             name,
             type_params,
             params,
@@ -121,11 +141,18 @@ pub fn compile_module_artifact(
         }
     }
 
+    let public_type_schemas = crate::Compiler::lower_public_type_schemas(program)
+        .into_iter()
+        .map(|(name, schema)| (name, crate::stdlib::json::vm_value_to_json(&schema)))
+        .collect();
+
     Ok(ModuleArtifact {
         imports,
         init_chunk,
         functions,
         public_names,
+        public_type_names,
+        public_type_schemas,
     })
 }
 

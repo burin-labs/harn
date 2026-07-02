@@ -653,6 +653,7 @@ module.exports = grammar({
 
     type_declaration: ($) =>
       seq(
+        optional("pub"),
         "type",
         field("name", $.identifier),
         optional($.generic_params),
