@@ -347,13 +347,20 @@ thinking_modes = ["enabled"]
 
 Provider-wide defaults can be declared under
 `[capabilities.provider_defaults.<name>]`; rule entries override those
-defaults for matching models. Each `[[capabilities.provider.<name>]]`
-entry accepts these fields:
+defaults for matching models. By default the **first matching rule wins** and
+every field it leaves unset resolves from provider / built-in defaults. A rule
+that sets `extends = true` instead contributes only the fields it names and
+lets resolution continue to later matching rules (then the `provider_family`
+chain, then defaults) to fill the rest — so an overlay can tweak one field of a
+shipped row without copying the whole row verbatim and freezing its other
+fields against catalog updates. Each `[[capabilities.provider.<name>]]` entry
+accepts these fields:
 
 | Field | Type | Purpose |
 |---|---|---|
 | `model_match` | glob string | Required. Matched against the lowercased model ID. Leading/trailing `*` or a single middle `*` supported. |
 | `version_min` | `[major, minor]` | Narrows the match to a parseable version (Anthropic / OpenAI extractors). Rules where `version_min` is set but the model ID won't parse are skipped. |
+| `extends` | bool | When true this matching rule contributes only the fields it sets and resolution continues to later matching rules and defaults for the rest (field-wise fall-through). Omitted / false keeps first-match-wins. |
 | `native_tools` | bool | Whether the provider accepts a native tool-call wire shape. |
 | `text_tool_wire_format_supported` | bool | Whether the provider/model route can use Harn's text-tool contract. Defaults to true for shipped rules unless disabled. |
 | `preferred_tool_format` | string | Optional preset default, `native` or `text`; inferred from `native_tools` when omitted. |
