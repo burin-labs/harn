@@ -77,6 +77,23 @@ Evidence items point at atoms, metadata paths, transcript spans, or external
 citations. Remediation is inert: it is input to Fixer, never an auto-apply
 instruction.
 
+When a pipeline evaluates predicates during an agent run, use
+`flow_invariant_feedback(report, opts?)` to turn the
+`flow_evaluate_invariants(...)` report into compact model-facing feedback. It
+emits non-allowing verdicts, discovery diagnostics, and optional skipped
+records without introducing a second session-injection channel:
+
+```harn,ignore
+let report = flow_evaluate_invariants("", slice, {
+  path: "invariants.harn",
+  budget_ms: 50,
+})
+let feedback = flow_invariant_feedback(report)
+if feedback != "" {
+  agent_inject_feedback(session_id, "flow_invariants", feedback)
+}
+```
+
 ## Decision 1: budget semantics under concurrency
 
 Default stance: per-slice budget envelopes with a fairness scheduler.
