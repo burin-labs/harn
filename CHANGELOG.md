@@ -8,6 +8,140 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.167
+
+### Added
+
+- Added `harn session checkpoint <worker-snapshot>` to export suspended worker
+  snapshots as local resumable session bundles without hand-building an
+  intermediate run record.
+- **Coordination:** Added channel consumer cursor/ack builtins and addressed
+  `std/coordination` inbox helpers for durable multi-agent coordination.
+- `pub type` exports a type alias from a module. Importers can name it in
+  selective imports (`import { SmartTarget, pick } from "./targets"`), use it
+  in annotations, and pass it in schema positions (`output_schema:`,
+  `schema_is`) — the loader binds the imported name to the alias's JSON-Schema
+  lowering, and `pub import` re-exports it through facades. Type aliases
+  without `pub` stay module-private and error on import, matching `pub fn` /
+  `pub struct` visibility.
+- `round(x, digits)` rounds to a number of decimal places (half away from
+  zero, matching the 1-arg form): `round(2.567, 2)` is `2.57`. Negative
+  digits round to power-of-ten buckets (`round(1250, -2)` is `1300`), ints
+  stay ints when they fit, decimals keep the decimal type, and the 2-arg form
+  const-folds in `const` initializers.
+- Added `std/command` helpers for converting provider-style argv and command
+  values into safe shell text without whitespace or quote corruption.
+- Added `std/coordination`, a durable multi-agent coordination ledger facade over Harn channels, EventLog, and memory.
+
+### Changed
+
+- **Unused-variable lint now prefers true discard locals.** Simple unused
+  Harn locals such as `_cleanup` now warn and autofix to `let _ = ...`, while
+  underscore-prefixed parameters and pattern bindings remain exempt when the
+  name carries intent (#3786).
+- Ported the seven remaining queued Bash validation checks to self-hosted Harn
+  scripts with byte-identical output parity: `lint_test_patterns`,
+  `check_docs_cli_flags`, `check_binary_size`, `check_docs_snippets`,
+  `check_docs_workflow_quickstart`, `check_docs_model_refs`, and
+  `check_site_snippets`. Each has a paired `scripts/tests/<name>_test.harn`
+  suite (104 new tests) and the `.sh` originals are deleted.
+- `normalize_tool_call_shape` now folds a top-level `create` call into `edit({action: "create"})` like the
+  other edit-action verbs, and a new negative test pins that shell listing `run` commands (`ls -R`, `tree`)
+  pass through untouched — structured-listing ergonomics belong to the host.
+- Clarified unused-binding diagnostic repair summaries to point at the `_`
+  discard binding instead of underscore-prefixed names.
+- **Unused-variable lint fixes now use the Harn discard binding (#3783).** The linter
+  and editor quick fix suggest replacing unused bindings with `_` instead of
+  inventing underscore-prefixed names, matching the language's existing discard
+  parameter and binding semantics.
+- Refreshed the bundled provider/model catalog against provider docs verified
+  2026-07-02:
+  - **Anthropic**: added Claude Sonnet 5 (direct + OpenRouter rows, intro
+    pricing through 2026-08-31) and new `sonnet5`/`sonnet46` aliases; bumped
+    the `sonnet`/`frontier` aliases to `claude-sonnet-5`; 4.6+ rows now carry
+    their 1M-token context window (the long-context beta graduated to standard
+    pricing) and `vision`; marked Claude Opus 3 retired (2026-01-05) and dated
+    the Opus 4.1 retirement (2026-08-05); removed the erroneous
+    `claude-sonnet-4-7` row (no such model — only the Opus line had a 4.7).
+  - **OpenAI**: added the GPT-5.4 tier family (base/mini/nano) and
+    GPT-5.3-Codex; deprecated o1/o1-mini/o3/o3-mini with their announced
+    shutdown dates; `mid` tier alias and the openai QC default moved off
+    gpt-4o-mini to gpt-5.4-mini / gpt-5.4-nano.
+  - **Gemini**: fixed gemini-2.5-flash pricing (it carried Flash-Lite's
+    $0.10/$0.40 rate; real rate $0.30/$2.50) and gemini-2.5-pro output/cache
+    pricing and context window; added gemini-2.5-flash-lite,
+    gemini-3.1-pro-preview, and gemini-3.1-flash-lite with capability rules;
+    `small` tier alias moved off the stale OpenRouter Qwen3.5-9B route to
+    gemini-2.5-flash-lite.
+  - **Mistral**: added Codestral 25.08 and Devstral 2 Medium/Small rows,
+    `codestral-*`/`magistral-*` inference rules, and a codestral capability
+    rule.
+  - **Open-weight hosts**: added DashScope first-party Qwen rows
+    (`dashscope/<wire-id>` keys), OpenRouter Qwen3-Coder-Next and
+    Qwen3.5-397B-A17B, Groq Qwen3.6-27B (with capability rule), Together and
+    Fireworks MiniMax M3 / Kimi K2.7-Code, DeepInfra DeepSeek V4 Flash, and
+    Z.AI GLM-4.7-Flash (free tier, now the zai QC default).
+  - **Pricing corrections**: Moonshot Kimi K2.7-Code ($0.95/$4.00),
+    DeepInfra DeepSeek V4 Pro / Kimi K2.7-Code, Fireworks DeepSeek V4 Pro,
+    Z.AI GLM-5 ($1.00/$3.20), MiniMax M3 billed rate ($0.30/$1.20 permanent
+    50%-off list) with weights now open (HF) and SWE-bench Pro 59.0.
+  - **Deprecations**: Groq llama-3.3-70b-versatile (retires 2026-08-16);
+    Together GLM-5.2 context corrected to its 262K per-host cap.
+  - QC defaults: `local` moved off the sunset hosted `gpt-4o` id to
+    `gemma-4-26b-a4b-it`; added a `gemini` QC default.
+  - Capability fragments migrated the legacy `json_schema` field to the
+    canonical `structured_output` name.
+
+### Fixed
+
+- Tool-ceiling denials no longer use permission framing: an unknown/excluded
+  tool name now gets action-oriented "not one of the available tools" feedback
+  (listing the callable tools), and a call named `tool_call` whose arguments
+  smuggle one valid text-format call gets parse-repair feedback that names the
+  embedded call and shows the direct invocation. Previously both fell into the
+  generic "tell the user what you need permission for" denial body, which sent
+  headless models into permission-request spirals with no user to ask.
+  Genuinely permission-gated denials (capability/side-effect ceilings, approval
+  and host rejections) keep the existing wording.
+- Durable rate-limit concurrency tests now pin mock time so slow release-audit
+  workers cannot expire the first queued request row mid-test.
+- `harn fmt` no longer orphans `//` comments that sit between the segments of
+  a multi-line method chain (they were relocated to the end of the program at
+  column 0). Chain-segment comments now stay anchored above the segment they
+  precede, for both `.method(...)` and `?.method(...)` chains.
+- **OpenAI-compatible native streaming tool calls.** Added regression coverage
+  ensuring streamed `container.exec` argv chunks finalize as canonical `run`
+  tool calls instead of surfacing provider-native arguments.
+- Corpus-driven text tool-call parser tolerance, grounded in 526 mined eval runs: back-to-back
+  `</tool_call><tool_call>` blocks on one line no longer shred into stray-text violations; `<invoke>` markup
+  tolerates extra `<parameter ...>` attributes (`string="true"`) instead of misdiagnosing complete calls as
+  truncated; `<function_calls>` wrapper tags are swallowed silently; an unclosed terminal
+  `<user_response>`/`<assistant_prose>` is accepted as the block body instead of killing the final answer;
+  compat aliases (`replace_range`, `bash`, ...) now fold in the bare TEXT channel like they already did
+  natively; `<|...|>` provider tokens are stripped from unresolvable tool names; and dispatch coerces
+  `"True"`→bool and JSON-array strings→list on unambiguous schema expectations. Each observed failing
+  emission shape is pinned as a conformance fixture in `tools/tests/corpus_conformance.rs`.
+- Prevent parallel test resets from wiping LLM rate-limit state while another LLM test is running.
+- **Release audit tests are deterministic under parallel load.** Harn VM
+  waitpoint and action-graph regression tests now filter persisted event-log
+  records by the run or waitpoint they created instead of depending on shared
+  topic ordering or thread-local test signals.
+- Hardened release-gate checks against parallel rate-limit state resets,
+  external nested `harn` binaries under process sandboxes, and comment-anchored
+  tree-sitter method chains.
+- Lists now compare lexicographically (element by element, shorter prefix
+  first), so multi-key sorts like `xs.sort_by({ x -> [x.a, x.b] })` order by
+  the first key then the second instead of silently comparing equal. The same
+  order backs `sort`, `min`/`max`, and the relational operators; a `NaN`
+  element keeps the pair-style "unordered" semantics.
+- Harden waitpoint replay tests against parallel `cargo test` by replacing the
+  process-wide `HARN_REPLAY` toggle with a scoped in-process replay override.
+- `while true { ... }` with no `break` binding to the loop now types as
+  `never`: a function whose tail is such a loop no longer demands an
+  unreachable trailing `return`, and statements after the loop are flagged
+  unreachable. Adding a `break` at the loop's level restores the fall-through
+  return requirement.
+
 ## v0.8.166
 
 ### Fixed
