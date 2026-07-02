@@ -866,16 +866,18 @@ provider = "openai"
 id = "gpt-5.4-mini"
 provider = "openai"
 
-# Was Qwen/Qwen3.5-9B on OpenRouter — that route went stale (Burin
-# suppresses it); Gemini 2.5 Flash-Lite is the current cheap-and-fast
-# small default.
+# The small tier default stays on an open-weight host by policy (see
+# test_resolve_tier_model_default_aliases). Was Qwen/Qwen3.5-9B on
+# OpenRouter — that route went stale (Burin suppresses it); Gemma 4
+# 26B-A4B on OpenRouter is the current cheap open-weight default
+# ($0.06/$0.33, 4B active params, native tools).
 [aliases.small]
-id = "gemini-2.5-flash-lite"
-provider = "gemini"
+id = "google/gemma-4-26b-a4b-it"
+provider = "openrouter"
 
 [aliases."tier/small"]
-id = "gemini-2.5-flash-lite"
-provider = "gemini"
+id = "google/gemma-4-26b-a4b-it"
+provider = "openrouter"
 
 # Local Gemma 4 variants (vLLM / OpenAI-compat backend at `providers.local`).
 [aliases.local-gemma4]

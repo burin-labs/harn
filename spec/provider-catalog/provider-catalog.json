@@ -5862,10 +5862,7 @@
       "id": "gemini-2.5-flash-lite",
       "name": "Gemini 2.5 Flash-Lite",
       "provider": "gemini",
-      "aliases": [
-        "small",
-        "tier/small"
-      ],
+      "aliases": [],
       "context_window": 1048576,
       "modalities": {
         "input": [
@@ -5917,9 +5914,7 @@
         "status": "active"
       },
       "availability": "serverless",
-      "quality_tags": [
-        "small"
-      ],
+      "quality_tags": [],
       "capability_tags": [
         "streaming",
         "tools",
@@ -12087,7 +12082,9 @@
       "name": "Gemma 4 26B MoE (OpenRouter)",
       "provider": "openrouter",
       "aliases": [
-        "openrouter-gemma4-26b"
+        "openrouter-gemma4-26b",
+        "small",
+        "tier/small"
       ],
       "context_window": 262144,
       "modalities": {
@@ -12134,7 +12131,9 @@
         "status": "active"
       },
       "availability": "serverless",
-      "quality_tags": [],
+      "quality_tags": [
+        "small"
+      ],
       "capability_tags": [
         "streaming",
         "tools",
@@ -16280,8 +16279,8 @@
     },
     {
       "name": "small",
-      "model_id": "gemini-2.5-flash-lite",
-      "provider": "gemini"
+      "model_id": "google/gemma-4-26b-a4b-it",
+      "provider": "openrouter"
     },
     {
       "name": "sonnet",
@@ -16315,8 +16314,8 @@
     },
     {
       "name": "tier/small",
-      "model_id": "gemini-2.5-flash-lite",
-      "provider": "gemini"
+      "model_id": "google/gemma-4-26b-a4b-it",
+      "provider": "openrouter"
     },
     {
       "name": "together-deepseek",
@@ -16369,8 +16368,8 @@
       "id": "fast",
       "label": "Fast",
       "description": "Lowest-latency general coding-agent route.",
-      "model_id": "gemini-2.5-flash-lite",
-      "provider": "gemini",
+      "model_id": "google/gemma-4-26b-a4b-it",
+      "provider": "openrouter",
       "source": "alias:small"
     },
     {
