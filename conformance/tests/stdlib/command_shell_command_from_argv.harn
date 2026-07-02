@@ -1,0 +1,15 @@
+import { shell_command_from_argv, shell_command_from_value } from "std/command"
+
+pipeline default() {
+  __io_println(shell_command_from_argv(["bash", "-lc", "ls -R"]))
+  __io_println(shell_command_from_argv(["bash", "lc", "go test ./..."]))
+  __io_println(shell_command_from_argv(["python", "-c", "print('a b')"]))
+  __io_println(shell_command_from_argv(["echo", ""]))
+  __io_println(shell_command_from_value(["sh", "-c", "printf hi"]))
+  __io_println(shell_command_from_value("  cargo test  "))
+  __io_println(shell_command_from_value({command: "  cargo nextest run  "}))
+  __io_println(shell_command_from_value({command: ["bash", "-lc", "zig build test"]}))
+  __io_println(shell_command_from_value({cmd: ["echo", "two words"]}))
+  __io_println(shell_command_from_value({argv: ["printf", "a b"], command: "ignored"}))
+  __io_println(shell_command_from_value({other: "ignored"}))
+}

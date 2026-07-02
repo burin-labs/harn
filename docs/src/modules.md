@@ -1069,6 +1069,8 @@ compact recovery context:
 | `command_last_failed_step(steps, options?)` | Return the last unrecovered failed step, or `nil` |
 | `command_step_ref(step, options?)` | Return compact agent/recovery context with command identity, status, artifacts, classification, recovery hint, and capped tail |
 | `argv_label(argv)` | Render argv parts as a stable space-separated label for logs |
+| `shell_command_from_argv(argv)` | Render argv as safe shell text, unwrapping shell wrappers such as `["bash", "-lc", "cmd"]` to the script payload |
+| `shell_command_from_value(value)` | Normalize string, argv-list, or dict-shaped provider command values into shell text using `argv`, `command`, or `cmd` fields |
 | `command_output_text(result, stream?)` | Extract stdout, stderr, combined output, tail, or failure tail from a command result |
 | `command_failure_text(result, options?)` | Render a compact failure block with status, exit code, and capped stdout/stderr |
 | `command_result_ok(stdout?, extra?)` | Build a normalized success result for tests and harness adapters |

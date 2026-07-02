@@ -1,5 +1,6 @@
 /** std/command - deterministic command steps for Harn scripts. */
 import { write_stderr, write_stdout } from "std/io"
+import { shell_quote } from "std/runtime"
 import { truncate_text } from "std/text"
 
 fn __command_options(options) {
@@ -854,6 +855,71 @@ pub fn command_step_ref(step, options = nil) -> dict {
  */
 pub fn argv_label(argv: list) -> string {
   return join((argv ?? []).map({ arg -> to_string(arg) }), " ")
+}
+
+fn __command_shell_flag_invokes_script(flag: string) -> bool {
+  return flag == "-lc" || flag == "-c" || flag == "lc" || flag == "c"
+}
+
+fn __command_shell_accepts_script_flag(shell: string) -> bool {
+  return shell == "bash"
+    || shell.ends_with("/bash")
+    || shell == "sh"
+    || shell.ends_with("/sh")
+    || shell == "zsh"
+    || shell.ends_with("/zsh")
+}
+
+/**
+ * shell_command_from_argv renders argv as shell text without corrupting
+ * whitespace or quotes. Shell wrapper argv such as ["bash", "-lc", "cmd"]
+ * returns the script payload; all other argv items are shell-quoted.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn shell_command_from_argv(argv: list) -> string {
+  let values = argv ?? []
+  if len(values) >= 3 {
+    let shell = to_string(values[0] ?? "").trim()
+    let flag = to_string(values[1] ?? "").trim()
+    if __command_shell_accepts_script_flag(shell) && __command_shell_flag_invokes_script(flag) {
+      return to_string(values[2] ?? "").trim()
+    }
+  }
+  return join(values.map({ arg -> shell_quote(arg) }), " ").trim()
+}
+
+fn __command_shell_command_from_field(value) {
+  if type_of(value) == "string" {
+    return to_string(value ?? "").trim()
+  }
+  if type_of(value) == "list" {
+    return shell_command_from_argv(value)
+  }
+  return nil
+}
+
+/**
+ * shell_command_from_value normalizes a provider-style command value. Strings
+ * pass through trimmed; argv lists use shell_command_from_argv; dict values
+ * accept `argv`, `command`, or `cmd` fields in either string or list form.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn shell_command_from_value(value) -> string {
+  let direct = __command_shell_command_from_field(value)
+  if direct != nil {
+    return direct
+  }
+  if type_of(value) == "dict" {
+    return __command_shell_command_from_field(value?.argv)
+      ?? __command_shell_command_from_field(value?.command)
+      ?? __command_shell_command_from_field(value?.cmd)
+      ?? ""
+  }
+  return ""
 }
 
 /**
