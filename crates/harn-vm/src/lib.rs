@@ -459,18 +459,72 @@ pub fn json_schema_for_typed_params(params: &[harn_parser::TypedParam]) -> serde
     serde_json::Value::Object(schema)
 }
 
-/// Reset all thread-local state that can leak between test runs.
-pub fn reset_thread_local_state() {
+fn reset_llm_state_for_thread_reset() {
     llm::reset_llm_state();
-    // `reset_thread_local_state` only runs in sequential / separate-process
-    // contexts (the CLI test runner between cases, integration-test binaries,
-    // per-job worker resets) — never from the parallel in-process unit tests
-    // that share the rate-limiter registry. So unlike `reset_llm_state`, it is
-    // safe (and necessary for test isolation) to fully wipe the registry here,
-    // clearing retry-after cooldowns that would otherwise stall a later test's
-    // LLM call under a paused clock.
+    #[cfg(test)]
+    reset_thread_local_state_test_hooks::before_llm_global_reset();
+    // This full wipe is necessary between Harn programs to clear durable
+    // cooldowns that would otherwise stall a later run under a paused clock.
     llm::reset_rate_limit_registry();
     llm_config::clear_user_overrides();
+}
+
+#[cfg(test)]
+mod reset_thread_local_state_test_hooks {
+    use std::sync::{Arc, Mutex, OnceLock};
+
+    type Hook = Arc<dyn Fn() + Send + Sync + 'static>;
+
+    static BEFORE_LLM_GLOBAL_RESET: OnceLock<Mutex<Option<Hook>>> = OnceLock::new();
+
+    fn before_llm_global_reset_hook() -> &'static Mutex<Option<Hook>> {
+        BEFORE_LLM_GLOBAL_RESET.get_or_init(|| Mutex::new(None))
+    }
+
+    pub(crate) struct HookGuard;
+
+    impl Drop for HookGuard {
+        fn drop(&mut self) {
+            let mut hook = before_llm_global_reset_hook()
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            *hook = None;
+        }
+    }
+
+    pub(crate) fn install_before_llm_global_reset(hook: Hook) -> HookGuard {
+        let mut slot = before_llm_global_reset_hook()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *slot = Some(hook);
+        HookGuard
+    }
+
+    pub(crate) fn before_llm_global_reset() {
+        let hook = before_llm_global_reset_hook()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        if let Some(hook) = hook {
+            hook();
+        }
+    }
+}
+
+/// Reset all thread-local state that can leak between test runs.
+pub fn reset_thread_local_state() {
+    #[cfg(test)]
+    {
+        // `reset_thread_local_state` is also used by in-process unit tests. It
+        // clears process-global LLM config/rate-limit state, so share the same
+        // lock used by LLM env tests; otherwise a sibling reset can erase a
+        // parked rate-limit test's registry while the test still owns a permit.
+        let _guard = llm::env_guard();
+        reset_llm_state_for_thread_reset();
+    }
+    #[cfg(not(test))]
+    reset_llm_state_for_thread_reset();
+
     http::reset_http_state();
     channels::reset_channel_state();
     event_log::reset_active_event_log();
@@ -558,6 +612,30 @@ mod reset_leak_tests {
             llm::routing::policy_registry_len(),
             0,
             "routing policy registry must be empty after reset"
+        );
+    }
+
+    #[test]
+    fn reset_holds_llm_env_guard_while_wiping_llm_globals() {
+        let observed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let observed_hook = std::sync::Arc::clone(&observed);
+        let _hook = reset_thread_local_state_test_hooks::install_before_llm_global_reset(
+            std::sync::Arc::new(move || {
+                assert!(
+                    matches!(
+                        llm::env_lock().try_lock(),
+                        Err(std::sync::TryLockError::WouldBlock)
+                    ),
+                    "reset_thread_local_state must hold env_guard before wiping LLM globals"
+                );
+                observed_hook.store(true, std::sync::atomic::Ordering::SeqCst);
+            }),
+        );
+
+        reset_thread_local_state();
+        assert!(
+            observed.load(std::sync::atomic::Ordering::SeqCst),
+            "LLM global reset hook should have run"
         );
     }
 }
