@@ -167,7 +167,10 @@ Use `harn models lora plan --base <model> --provider <provider>
 the same provider capability matrix as runtime calls, records the effective
 tool-call format, and prints a portable LoRA/QLoRA training, validation, eval,
 inspect, and launch recipe without assuming a local GPU or machine-specific
-paths.
+paths. The plan also reports the template convention to train against: native
+Gemma 4 or FunctionGemma tool templates stay distinct from Harn text/json
+`<tool_call>` adapters, so train and serving do not silently cross tool-call
+contracts.
 
 Harn maintains local runtime risk profiles for hybrid-cache families
 (Qwen3.6, Gemma4). The profile table records preferred runtimes,

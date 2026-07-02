@@ -389,6 +389,8 @@ fn models_lora_plan_human_text_includes_recipe() {
         "tool format: json (requested auto)",
         "training: qlora + peft_lora",
         "trainer: trl_sft_trainer",
+        "template: harn_text_tool_calls_json_fences",
+        "template source: Harn text tool-call parser using JSON object bodies",
         "dataset format: harn_text_tool_calls_json_fences",
         "corpus: ./lora-corpus",
         "harn eval tool-calls --planner ADAPTER_MODEL --tool-format json --dataset ./lora-corpus",
@@ -438,6 +440,18 @@ fn models_lora_plan_json_shape_is_stable() {
     assert_eq!(
         harn_value["data"]["dataset_format"],
         "messages_with_tool_calls"
+    );
+    assert_eq!(
+        harn_value["template"]["name"],
+        "gemma4_native_function_calling"
+    );
+    assert_eq!(
+        harn_value["template"]["source"],
+        "Gemma 4 tokenizer/provider native function-calling chat template"
+    );
+    assert_eq!(
+        harn_value["template"]["supervised_target"],
+        "assistant messages with native tool_calls plus paired tool role results"
     );
     let eval = harn_value["evaluation"]["eval_command"]
         .as_array()

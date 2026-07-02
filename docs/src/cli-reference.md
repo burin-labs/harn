@@ -1349,6 +1349,23 @@ a max-rank flag, the launch command includes `--max-lora-rank` so runtime
 defaults cannot silently under-provision the adapter. Remote adapter ids are
 treated as runtime-resolved and warned rather than rejected.
 
+## harn models lora plan
+
+Plan a portable LoRA or QLoRA fine-tune for a Harn model route:
+
+```bash
+harn models lora plan --base local-gemma4-e4b --provider vllm --tool-format auto --corpus ./lora-corpus
+harn models lora plan --base google/gemma-4-E4B-it --provider google --tool-format native --json
+```
+
+The plan resolves the same provider capability matrix used by agent calls,
+records the effective tool-call format, and prints a training/eval/launch
+recipe. The report includes an explicit template block so native Gemma 4 or
+FunctionGemma training stays on the model tokenizer's function-calling template,
+while Harn text/json adapters target the Harn `<tool_call>` parser convention.
+Use this before exporting a corpus so train, eval, and runtime serving all agree
+on the same tool-call contract.
+
 ## harn models recommend
 
 Recommend a starter model from the local hardware snapshot and configured cloud

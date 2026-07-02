@@ -311,6 +311,12 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
         "--dataset".to_string(),
         dataset_arg,
     ];
+    let template = template_recipe_for_route(
+        &resolved.id,
+        &resolved.family,
+        &resolved.lineage,
+        &decision.effective,
+    );
     let warnings = plan_warnings(
         &provider,
         &decision,
@@ -360,6 +366,7 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
             ],
             notes: training_notes(&decision.effective),
         },
+        template,
         data: DataRecipe {
             dataset_format: dataset_format.to_string(),
             required_columns: required_columns_for_dataset(dataset_format),
@@ -605,6 +612,129 @@ fn training_notes(tool_format: &str) -> Vec<String> {
     }
 }
 
+fn template_recipe_for_route(
+    model_id: &str,
+    family: &str,
+    lineage: &str,
+    tool_format: &str,
+) -> TemplateRecipe {
+    if tool_format == "native" && is_functiongemma_route(model_id, family, lineage) {
+        return TemplateRecipe {
+            name: "functiongemma_control_tokens".to_string(),
+            source: "FunctionGemma declaration/call/response control-token template".to_string(),
+            supervised_target: "model turn containing function-call control-token blocks"
+                .to_string(),
+            requirements: vec![
+                "render function declarations, calls, and responses with FunctionGemma control tokens"
+                    .to_string(),
+                "treat <start_function_response> as an inference stop sequence".to_string(),
+                "preserve string-value escaping with the model's escape delimiter".to_string(),
+            ],
+            stop_sequences: vec!["<start_function_response>".to_string()],
+            notes: vec![
+                "FunctionGemma is a specialized text-only function-calling model; do not mix this template with Harn <tool_call> text records"
+                    .to_string(),
+                "keep single-turn and multi-turn examples separated in eval so specialization does not hide turn-repair regressions"
+                    .to_string(),
+            ],
+        };
+    }
+    if tool_format == "native" && is_gemma4_route(model_id, family, lineage) {
+        return TemplateRecipe {
+            name: "gemma4_native_function_calling".to_string(),
+            source: "Gemma 4 tokenizer/provider native function-calling chat template".to_string(),
+            supervised_target: "assistant messages with native tool_calls plus paired tool role results"
+                .to_string(),
+            requirements: vec![
+                "use messages plus tools JSON schemas; let the tokenizer/provider render the Gemma 4 tool declaration syntax"
+                    .to_string(),
+                "train against the same native tool-call shape used at inference".to_string(),
+                "do not include Harn <tool_call> text blocks in native Gemma 4 examples".to_string(),
+            ],
+            stop_sequences: Vec::new(),
+            notes: vec![
+                "Gemma 4 has native function-calling support, but local runtimes may still be catalog-steered to Harn text/json formats"
+                    .to_string(),
+                "if the route is served through Harn text/json, prefer the Harn template plan over the native Gemma 4 template"
+                    .to_string(),
+            ],
+        };
+    }
+    match tool_format {
+        "native" => TemplateRecipe {
+            name: "native_messages_with_tools".to_string(),
+            source: "tokenizer/provider chat template with tool schemas".to_string(),
+            supervised_target: "assistant tool_calls and final assistant messages".to_string(),
+            requirements: vec![
+                "store examples as messages plus a tools column containing JSON schemas".to_string(),
+                "represent tool results as tool role messages paired to assistant tool calls".to_string(),
+                "verify the tokenizer chat template supports tool use before training".to_string(),
+            ],
+            stop_sequences: Vec::new(),
+            notes: vec![
+                "native adapters are portable only across runtimes that preserve the same chat template and tool schema rendering"
+                    .to_string(),
+            ],
+        },
+        "json" => TemplateRecipe {
+            name: "harn_text_tool_calls_json_fences".to_string(),
+            source: "Harn text tool-call parser using JSON object bodies".to_string(),
+            supervised_target: "assistant_tool_text containing <tool_call>{\"name\":...,\"arguments\":...}</tool_call>"
+                .to_string(),
+            requirements: vec![
+                "parse every assistant_tool_text example with Harn before training".to_string(),
+                "keep tool definitions in the tools column and keep serialized calls byte-stable"
+                    .to_string(),
+                "reject markdown fences or model-native tool tags inside <tool_call> blocks"
+                    .to_string(),
+            ],
+            stop_sequences: vec!["</tool_call>".to_string()],
+            notes: vec![
+                "this is the right target when the catalog steers a model to Harn's JSON text tool convention"
+                    .to_string(),
+            ],
+        },
+        "text" => TemplateRecipe {
+            name: "harn_text_tool_calls_heredoc".to_string(),
+            source: "Harn text tool-call parser using name({ ... }) and heredoc bodies".to_string(),
+            supervised_target: "assistant_tool_text containing Harn text/heredoc <tool_call> blocks"
+                .to_string(),
+            requirements: vec![
+                "parse every assistant_tool_text example with Harn before training".to_string(),
+                "preserve heredoc boundaries for multiline edit/scaffold arguments".to_string(),
+                "reject JSON object tool-call bodies unless the record declares the json lane"
+                    .to_string(),
+            ],
+            stop_sequences: vec!["</tool_call>".to_string()],
+            notes: vec![
+                "this is the most direct adapter target for Burin's text tool-calling corpus"
+                    .to_string(),
+            ],
+        },
+        _ => TemplateRecipe {
+            name: "route_validated_tool_template".to_string(),
+            source: "catalog-validated route tool-call convention".to_string(),
+            supervised_target: "assistant tool-call target selected by the effective route".to_string(),
+            requirements: vec!["resolve the effective tool format before exporting examples".to_string()],
+            stop_sequences: Vec::new(),
+            notes: vec!["keep training and inference on the same route convention".to_string()],
+        },
+    }
+}
+
+fn is_functiongemma_route(model_id: &str, family: &str, lineage: &str) -> bool {
+    route_key(model_id, family, lineage).contains("functiongemma")
+}
+
+fn is_gemma4_route(model_id: &str, family: &str, lineage: &str) -> bool {
+    let key = route_key(model_id, family, lineage);
+    key.contains("gemma-4") || key.contains("gemma4")
+}
+
+fn route_key(model_id: &str, family: &str, lineage: &str) -> String {
+    format!("{model_id} {family} {lineage}").to_ascii_lowercase()
+}
+
 fn plan_warnings(
     provider: &str,
     decision: &harn_vm::llm::capabilities::ToolFormatDecision,
@@ -705,6 +835,7 @@ struct LoraPlanReport {
     request: PlanRequest,
     tool_calling: ToolCallingReport,
     training: TrainingRecipe,
+    template: TemplateRecipe,
     data: DataRecipe,
     evaluation: EvaluationRecipe,
     launch: PlanLaunchHints,
@@ -728,6 +859,16 @@ struct TrainingRecipe {
     loss_scope: String,
     packing: String,
     target_modules: Vec<String>,
+    notes: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct TemplateRecipe {
+    name: String,
+    source: String,
+    supervised_target: String,
+    requirements: Vec<String>,
+    stop_sequences: Vec<String>,
     notes: Vec<String>,
 }
 
@@ -844,5 +985,22 @@ mod tests {
             report.compatibility.base_model_match,
             BaseModelMatch::Mismatch
         );
+    }
+
+    #[test]
+    fn lora_plan_template_selection_keeps_native_gemma4_distinct_from_harn_text() {
+        let native = template_recipe_for_route("google/gemma-4-E4B-it", "gemma4", "", "native");
+        assert_eq!(native.name, "gemma4_native_function_calling");
+        assert!(native
+            .requirements
+            .iter()
+            .any(|item| item.contains("messages plus tools JSON schemas")));
+
+        let json = template_recipe_for_route("google/gemma-4-E4B-it", "gemma4", "", "json");
+        assert_eq!(json.name, "harn_text_tool_calls_json_fences");
+        assert!(json
+            .requirements
+            .iter()
+            .any(|item| item.contains("Harn before training")));
     }
 }
