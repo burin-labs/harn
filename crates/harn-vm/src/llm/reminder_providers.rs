@@ -63,6 +63,15 @@ pub trait ReminderProvider {
     fn id(&self) -> &'static str;
     fn subscribes_to(&self) -> &'static [HookEvent];
     fn evaluate(&self, ctx: &ProviderContext) -> Option<ReminderSpec>;
+    /// Whether this provider fires by default (no explicit opt-in). The default
+    /// set is *derived* from this flag (see [`canonical_default_enabled_ids`]),
+    /// so a newly-added default-on provider is enabled automatically and can
+    /// never silently fail to fire by being forgotten in a second hand-kept
+    /// list. Opt-in-only providers override this to `false` and activate per
+    /// session via `reminders: {providers: ["<id>"]}`.
+    fn default_enabled(&self) -> bool {
+        true
+    }
 }
 
 #[derive(Clone)]
@@ -1371,6 +1380,12 @@ impl ReminderProvider for CompassAstEditsProvider {
         COMPASS_AST_EDITS_EVENTS
     }
 
+    // The burin compass ships opt-in: registered as a canonical provider but
+    // NOT enabled by default; sessions activate it via `reminders.providers`.
+    fn default_enabled(&self) -> bool {
+        false
+    }
+
     fn evaluate(&self, ctx: &ProviderContext) -> Option<ReminderSpec> {
         let mut reminder = provider_reminder(
             COMPASS_AST_EDITS_BODY.to_string(),
@@ -1441,9 +1456,9 @@ fn enabled_provider_ids(
     }
 
     // Default-enabled canonical providers. Opt-in-only providers (e.g. the
-    // burin compass) are intentionally excluded here and activate through an
-    // explicit `reminders.providers: ["<id>"]` entry handled below.
-    let mut enabled: BTreeSet<String> = canonical_provider_ids()
+    // burin compass) are excluded by `default_enabled() == false` and activate
+    // through an explicit `reminders.providers: ["<id>"]` entry handled below.
+    let mut enabled: BTreeSet<String> = canonical_default_enabled_ids()
         .into_iter()
         .map(str::to_string)
         .collect();
@@ -1469,21 +1484,22 @@ fn enabled_provider_ids(
     enabled
 }
 
-/// Ids of the canonical providers that are enabled by default. The burin
-/// compass (`COMPASS_AST_EDITS_ID`) is intentionally NOT listed: it is a
-/// registered canonical provider (see `canonical_providers`) but ships
-/// opt-in, activated per session via `reminders: {providers: [...]}`.
-fn canonical_provider_ids() -> [&'static str; 8] {
-    [
-        TOKEN_PRESSURE_ID,
-        IDLE_NUDGE_ID,
-        TOOL_OUTPUT_TRUNCATED_ID,
-        POST_COMPACT_RECAP_ID,
-        RESUME_CONTINUITY_ID,
-        PROJECT_FACTS_ID,
-        WORKSPACE_ANCHOR_ID,
-        GROUNDED_REVIEW_ID,
-    ]
+/// Ids of the canonical providers enabled by default, *derived* from the
+/// single [`canonical_providers`] array via [`ReminderProvider::default_enabled`].
+///
+/// There is deliberately no second hand-maintained id list to drift against
+/// the provider array: a new default-on provider is enabled the moment it joins
+/// `canonical_providers`, and an opt-in provider (the burin compass) is excluded
+/// by returning `default_enabled() == false`. Previously these were two separate
+/// arrays (`[_; 9]` of providers, `[_; 8]` of ids) kept in sync only by
+/// convention — a forgotten id made a provider silently never fire, and that
+/// miss was indistinguishable from the intentional opt-in case.
+fn canonical_default_enabled_ids() -> Vec<&'static str> {
+    canonical_providers()
+        .into_iter()
+        .filter(|provider| provider.default_enabled())
+        .map(|provider| provider.id())
+        .collect()
 }
 
 async fn evaluate_vm_provider(
@@ -1921,6 +1937,33 @@ mod tests {
             payload,
             options,
         }
+    }
+
+    #[test]
+    fn default_enabled_ids_are_derived_and_exclude_only_opt_in_providers() {
+        let defaults: BTreeSet<&str> = canonical_default_enabled_ids().into_iter().collect();
+        let all: BTreeSet<&str> = canonical_providers().iter().map(|p| p.id()).collect();
+
+        // The derived default set is exactly the canonical providers that are
+        // not opt-in — no separate hand-maintained list to drift.
+        for provider in canonical_providers() {
+            assert_eq!(
+                defaults.contains(provider.id()),
+                provider.default_enabled(),
+                "provider `{}` default-enabled membership must match its default_enabled() flag",
+                provider.id()
+            );
+        }
+
+        // The burin compass is the one registered-but-opt-in provider: present
+        // in the full set, absent from the default set.
+        assert!(all.contains(COMPASS_AST_EDITS_ID));
+        assert!(
+            !defaults.contains(COMPASS_AST_EDITS_ID),
+            "compass ships opt-in and must not be default-enabled"
+        );
+        // Every other canonical provider is on by default.
+        assert_eq!(defaults.len(), all.len() - 1);
     }
 
     #[test]
