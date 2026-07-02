@@ -358,11 +358,50 @@ fn test_parses_models_lora_inspect_args() {
     let ModelsCommand::Lora(args) = args.command else {
         panic!("expected models lora command");
     };
-    let ModelsLoraCommand::Inspect(args) = args.command;
+    let ModelsLoraCommand::Inspect(args) = args.command else {
+        panic!("expected models lora inspect command");
+    };
     assert_eq!(args.base_model, "local-gemma4-e4b");
     assert_eq!(args.provider.as_deref(), Some("vllm"));
     assert_eq!(args.name.as_deref(), Some("burin-tools"));
     assert_eq!(args.adapter, "./adapter");
+    assert!(args.json);
+}
+
+#[test]
+fn test_parses_models_lora_plan_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "models",
+        "lora",
+        "plan",
+        "--base",
+        "local-gemma4-e4b",
+        "--provider",
+        "vllm",
+        "--tool-format",
+        "json",
+        "--corpus",
+        "./lora-corpus",
+        "--method",
+        "lora",
+        "--json",
+    ]);
+
+    let Command::Models(args) = cli.command.unwrap() else {
+        panic!("expected models command");
+    };
+    let ModelsCommand::Lora(args) = args.command else {
+        panic!("expected models lora command");
+    };
+    let ModelsLoraCommand::Plan(args) = args.command else {
+        panic!("expected models lora plan command");
+    };
+    assert_eq!(args.base_model, "local-gemma4-e4b");
+    assert_eq!(args.provider.as_deref(), Some("vllm"));
+    assert_eq!(args.tool_format, "json");
+    assert_eq!(args.corpus.as_deref(), Some("./lora-corpus"));
+    assert_eq!(args.method, "lora");
     assert!(args.json);
 }
 

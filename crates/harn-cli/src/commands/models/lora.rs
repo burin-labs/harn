@@ -3,12 +3,14 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use crate::cli::{ModelsLoraArgs, ModelsLoraCommand, ModelsLoraInspectArgs};
+use crate::cli::{ModelsLoraArgs, ModelsLoraCommand, ModelsLoraInspectArgs, ModelsLoraPlanArgs};
 use crate::dispatch;
 use crate::env_guard::ScopedEnvVar;
 
 const LORA_INSPECT_PAYLOAD_ENV: &str = "HARN_MODELS_LORA_INSPECT_PAYLOAD_JSON";
 const LORA_INSPECT_PAYLOAD_PRETTY_ENV: &str = "HARN_MODELS_LORA_INSPECT_PAYLOAD_PRETTY";
+const LORA_PLAN_PAYLOAD_ENV: &str = "HARN_MODELS_LORA_PLAN_PAYLOAD_JSON";
+const LORA_PLAN_PAYLOAD_PRETTY_ENV: &str = "HARN_MODELS_LORA_PLAN_PAYLOAD_PRETTY";
 
 /// Serialises the dispatch path so concurrent in-process callers do not race on
 /// the env vars that carry the Rust-collected adapter/catalog facts.
@@ -17,6 +19,7 @@ static DISPATCH_LORA_INSPECT_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::
 pub(crate) async fn run(args: ModelsLoraArgs) {
     let exit_code = match args.command {
         ModelsLoraCommand::Inspect(args) => inspect(&args).await,
+        ModelsLoraCommand::Plan(args) => plan(&args).await,
     };
     if exit_code != 0 {
         std::process::exit(exit_code);
@@ -50,6 +53,42 @@ async fn inspect(args: &ModelsLoraInspectArgs) -> i32 {
     let _payload = ScopedEnvVar::set(LORA_INSPECT_PAYLOAD_ENV, &payload_json);
     let _pretty = ScopedEnvVar::set(LORA_INSPECT_PAYLOAD_PRETTY_ENV, &pretty_json);
     let outcome = dispatch::run_embedded_script("models/lora_inspect", Vec::new(), args.json).await;
+    if !outcome.stderr.is_empty() {
+        let _ = std::io::stderr().write_all(outcome.stderr.as_bytes());
+    }
+    if !outcome.stdout.is_empty() {
+        let _ = std::io::stdout().write_all(outcome.stdout.as_bytes());
+    }
+    outcome.exit_code
+}
+
+async fn plan(args: &ModelsLoraPlanArgs) -> i32 {
+    let report = match plan_report(args) {
+        Ok(report) => report,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return 1;
+        }
+    };
+    let payload_json = match serde_json::to_string(&report) {
+        Ok(json) => json,
+        Err(error) => {
+            eprintln!("error: failed to serialise LoRA plan payload: {error}");
+            return 1;
+        }
+    };
+    let pretty_json = match serde_json::to_string_pretty(&report) {
+        Ok(json) => json,
+        Err(error) => {
+            eprintln!("error: failed to render LoRA plan JSON: {error}");
+            return 1;
+        }
+    };
+
+    let _guard = DISPATCH_LORA_INSPECT_LOCK.lock().await;
+    let _payload = ScopedEnvVar::set(LORA_PLAN_PAYLOAD_ENV, &payload_json);
+    let _pretty = ScopedEnvVar::set(LORA_PLAN_PAYLOAD_PRETTY_ENV, &pretty_json);
+    let outcome = dispatch::run_embedded_script("models/lora_plan", Vec::new(), args.json).await;
     if !outcome.stderr.is_empty() {
         let _ = std::io::stderr().write_all(outcome.stderr.as_bytes());
     }
@@ -181,6 +220,166 @@ fn inspect_report(args: &ModelsLoraInspectArgs) -> Result<LoraInspectReport, Str
             request_model,
             max_lora_rank,
             harn_local_launch,
+        },
+        warnings,
+    })
+}
+
+fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
+    let method = normalize_lora_method(&args.method)?;
+    let quantization = quantization_for_method(&method).to_string();
+    let requested_tool_format = normalize_plan_tool_format(&args.tool_format)?;
+    let resolved = harn_vm::llm_config::resolve_model_info(&args.base_model);
+    let provider = args
+        .provider
+        .as_deref()
+        .map(str::trim)
+        .filter(|provider| !provider.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| resolved.provider.clone());
+    let catalog = harn_vm::llm_config::model_catalog_entry(&resolved.id);
+    let capabilities = harn_vm::llm::capabilities::lookup(&provider, &resolved.id);
+    let catalog_default_tool_format =
+        harn_vm::llm_config::default_tool_format(&resolved.id, &provider);
+    let decision = if requested_tool_format == "auto" {
+        harn_vm::llm::capabilities::ToolFormatDecision {
+            effective: catalog_default_tool_format.clone(),
+            correction: None,
+        }
+    } else {
+        harn_vm::llm::capabilities::validate_tool_format(
+            &provider,
+            &resolved.id,
+            &requested_tool_format,
+        )
+    };
+    let dataset_format = dataset_format_for_tool_format(&decision.effective);
+    let request_model = "ADAPTER_MODEL".to_string();
+    let adapter_name = "ADAPTER_NAME".to_string();
+    let adapter_ref = "ADAPTER_PATH_OR_REPO".to_string();
+    let corpus = args
+        .corpus
+        .as_ref()
+        .map(|corpus| corpus.trim().to_string())
+        .filter(|corpus| !corpus.is_empty());
+    let dataset_arg = corpus
+        .clone()
+        .unwrap_or_else(|| "conformance/tool-call-eval".to_string());
+    let inspect_command = vec![
+        "harn".to_string(),
+        "models".to_string(),
+        "lora".to_string(),
+        "inspect".to_string(),
+        "--base".to_string(),
+        args.base_model.clone(),
+        "--provider".to_string(),
+        provider.clone(),
+        "--name".to_string(),
+        adapter_name.clone(),
+        adapter_ref.clone(),
+    ];
+    let local_runtime =
+        harn_vm::llm_config::provider_config(&provider).and_then(|provider| provider.local_runtime);
+    let provider_supports_lora_launch = local_runtime
+        .as_ref()
+        .and_then(|runtime| runtime.lora_modules_arg.as_ref())
+        .is_some();
+    let launch_command = if provider_supports_lora_launch {
+        vec![
+            "harn".to_string(),
+            "local".to_string(),
+            "launch".to_string(),
+            args.base_model.clone(),
+            "--provider".to_string(),
+            provider.clone(),
+            "--model-source".to_string(),
+            resolved.id.clone(),
+            "--lora-adapter".to_string(),
+            format!("{adapter_name}={adapter_ref}"),
+        ]
+    } else {
+        Vec::new()
+    };
+    let eval_command = vec![
+        "harn".to_string(),
+        "eval".to_string(),
+        "tool-calls".to_string(),
+        "--planner".to_string(),
+        request_model.clone(),
+        "--tool-format".to_string(),
+        decision.effective.clone(),
+        "--dataset".to_string(),
+        dataset_arg,
+    ];
+    let warnings = plan_warnings(
+        &provider,
+        &decision,
+        provider_supports_lora_launch,
+        capabilities.native_tools,
+        &requested_tool_format,
+    );
+    Ok(LoraPlanReport {
+        ok: true,
+        base: BaseModelReport {
+            selector: args.base_model.clone(),
+            id: resolved.id.clone(),
+            provider,
+            resolved_alias: resolved.alias,
+            tool_format: catalog_default_tool_format,
+            tier: resolved.tier,
+            family: resolved.family,
+            lineage: resolved.lineage,
+            catalog_name: catalog.as_ref().map(|model| model.name.clone()),
+            context_window: catalog.as_ref().map(|model| model.context_window),
+        },
+        request: PlanRequest {
+            method,
+            requested_tool_format,
+            effective_tool_format: decision.effective.clone(),
+            tool_format_correction: decision.correction,
+            corpus,
+        },
+        tool_calling: ToolCallingReport {
+            native_tools: capabilities.native_tools,
+            preferred_tool_format: capabilities.preferred_tool_format,
+            text_tool_wire_format_supported: capabilities.text_tool_wire_format_supported,
+            structured_output_mode: capabilities.structured_output_mode,
+            recommended_endpoint: capabilities.recommended_endpoint,
+        },
+        training: TrainingRecipe {
+            adapter_type: "peft_lora".to_string(),
+            trainer: "trl_sft_trainer".to_string(),
+            quantization,
+            loss_scope: "assistant_tool_calls".to_string(),
+            packing: "off_by_default_for_tool_boundaries".to_string(),
+            target_modules: vec![
+                "q_proj".to_string(),
+                "k_proj".to_string(),
+                "v_proj".to_string(),
+                "o_proj".to_string(),
+            ],
+            notes: training_notes(&decision.effective),
+        },
+        data: DataRecipe {
+            dataset_format: dataset_format.to_string(),
+            required_columns: required_columns_for_dataset(dataset_format),
+            validation: validation_steps_for_dataset(dataset_format),
+        },
+        evaluation: EvaluationRecipe {
+            holdout_policy: "keep train/tune/holdout splits disjoint; never train on Harn eval fixtures"
+                .to_string(),
+            gates: vec![
+                "compare base versus adapter on identical tool-call cases".to_string(),
+                "track exact-call accuracy, parse failures, refusal false positives, latency, and cost"
+                    .to_string(),
+                "require no regression on non-tool chat smoke prompts".to_string(),
+            ],
+            eval_command,
+        },
+        launch: PlanLaunchHints {
+            inspect_command,
+            local_launch_command: launch_command,
+            request_model,
         },
         warnings,
     })
@@ -319,6 +518,121 @@ fn expand_home(value: &str) -> String {
     value.to_string()
 }
 
+fn normalize_lora_method(raw: &str) -> Result<String, String> {
+    let method = raw.trim().to_ascii_lowercase();
+    match method.as_str() {
+        "lora" | "qlora" => Ok(method),
+        _ => Err(format!(
+            "unsupported LoRA method `{raw}`; expected `qlora` or `lora`"
+        )),
+    }
+}
+
+fn normalize_plan_tool_format(raw: &str) -> Result<String, String> {
+    let tool_format = raw.trim().to_ascii_lowercase();
+    match tool_format.as_str() {
+        "auto" | "native" | "text" | "json" => Ok(tool_format),
+        _ => Err(format!(
+            "unsupported tool format `{raw}`; expected `auto`, `native`, `text`, or `json`"
+        )),
+    }
+}
+
+fn quantization_for_method(method: &str) -> &'static str {
+    match method {
+        "qlora" => "4bit_base_model",
+        "lora" => "base_model_precision",
+        _ => unreachable!("normalize_lora_method returned an unsupported method"),
+    }
+}
+
+fn dataset_format_for_tool_format(tool_format: &str) -> &'static str {
+    match tool_format {
+        "native" => "messages_with_tool_calls",
+        "json" => "harn_text_tool_calls_json_fences",
+        "text" => "harn_text_tool_calls_heredoc",
+        _ => "harn_text_tool_calls",
+    }
+}
+
+fn required_columns_for_dataset(dataset_format: &str) -> Vec<String> {
+    match dataset_format {
+        "messages_with_tool_calls" => vec!["messages".to_string(), "tools".to_string()],
+        _ => vec![
+            "messages".to_string(),
+            "tools".to_string(),
+            "assistant_tool_text".to_string(),
+        ],
+    }
+}
+
+fn validation_steps_for_dataset(dataset_format: &str) -> Vec<String> {
+    match dataset_format {
+        "messages_with_tool_calls" => vec![
+            "validate every assistant message has structured tool_calls or plain text, never both"
+                .to_string(),
+            "validate every tool role message is paired with an assistant tool call".to_string(),
+            "validate every example carries the exact tool schemas exposed at inference"
+                .to_string(),
+        ],
+        _ => vec![
+            "parse assistant_tool_text with Harn's text tool-call parser".to_string(),
+            "validate tool names and arguments against the inference tool schemas".to_string(),
+            "reject prose around tool calls unless the target parser explicitly accepts it"
+                .to_string(),
+        ],
+    }
+}
+
+fn training_notes(tool_format: &str) -> Vec<String> {
+    match tool_format {
+        "native" => vec![
+            "train chat examples in the model's native tools/messages shape".to_string(),
+            "preserve a tools/schema column so inference and training share one contract"
+                .to_string(),
+        ],
+        "json" => vec![
+            "train assistant completions to emit Harn fenced-JSON text tool calls".to_string(),
+            "keep assistant-only loss so prompts and tool results are not learned as targets"
+                .to_string(),
+        ],
+        "text" => vec![
+            "train assistant completions to emit Harn heredoc-capable text tool calls".to_string(),
+            "keep assistant-only loss so prompts and tool results are not learned as targets"
+                .to_string(),
+        ],
+        _ => vec!["train against the route's validated tool-call format".to_string()],
+    }
+}
+
+fn plan_warnings(
+    provider: &str,
+    decision: &harn_vm::llm::capabilities::ToolFormatDecision,
+    provider_supports_lora_launch: bool,
+    native_tools: bool,
+    requested_tool_format: &str,
+) -> Vec<String> {
+    let mut warnings = Vec::new();
+    if let Some(correction) = &decision.correction {
+        warnings.push(correction.clone());
+    }
+    if requested_tool_format == "native" && decision.effective != "native" {
+        warnings.push("native tool training requested but the catalog steered this route to a text-channel format".to_string());
+    }
+    if decision.effective == "native" && !native_tools {
+        warnings.push(
+            "effective tool format is native, but this route does not advertise native tools; use auto/text/json unless the serving proxy supplies native tools"
+                .to_string(),
+        );
+    }
+    if !provider_supports_lora_launch {
+        warnings.push(format!(
+            "provider {provider} does not declare local-runtime LoRA launch flags; plan still describes training and eval, but launch must be external"
+        ));
+    }
+    warnings
+}
+
 #[derive(Debug, Serialize)]
 struct LoraInspectReport {
     ok: bool,
@@ -382,6 +696,60 @@ struct LaunchHints {
     request_model: String,
     max_lora_rank: Option<u64>,
     harn_local_launch: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct LoraPlanReport {
+    ok: bool,
+    base: BaseModelReport,
+    request: PlanRequest,
+    tool_calling: ToolCallingReport,
+    training: TrainingRecipe,
+    data: DataRecipe,
+    evaluation: EvaluationRecipe,
+    launch: PlanLaunchHints,
+    warnings: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct PlanRequest {
+    method: String,
+    requested_tool_format: String,
+    effective_tool_format: String,
+    tool_format_correction: Option<String>,
+    corpus: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct TrainingRecipe {
+    adapter_type: String,
+    trainer: String,
+    quantization: String,
+    loss_scope: String,
+    packing: String,
+    target_modules: Vec<String>,
+    notes: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct DataRecipe {
+    dataset_format: String,
+    required_columns: Vec<String>,
+    validation: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct EvaluationRecipe {
+    holdout_policy: String,
+    gates: Vec<String>,
+    eval_command: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct PlanLaunchHints {
+    inspect_command: Vec<String>,
+    local_launch_command: Vec<String>,
+    request_model: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
