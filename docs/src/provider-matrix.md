@@ -391,6 +391,9 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `openrouter` | `qwen/qwen3-coder` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `qwen/qwen3-coder-next` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `qwen/qwen3.5-397b-a17b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openrouter` | `qwen/qwen3.6-35b-a3b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openrouter` | `qwen/qwen3.6-flash` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openrouter` | `qwen/qwen3.6-plus` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `qwen/qwen3.7-max` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `qwen/qwen3.7-plus` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `stepfun/step-3.7-flash` | `native` | `interchangeable` | - | - | - | - | - | `data not yet collected` |
