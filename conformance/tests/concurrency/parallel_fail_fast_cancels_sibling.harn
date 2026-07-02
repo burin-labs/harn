@@ -1,0 +1,22 @@
+pipeline test(task) {
+  // `parallel` is fail-fast: the first branch error aborts in-flight
+  // siblings, so the slow branch never reaches its atomic_set. Use
+  // `parallel settle` when every branch must run regardless of failures.
+  let survived = atomic(0)
+  try {
+    parallel 2 { i ->
+      if i == 0 {
+        throw "boom"
+      }
+      sleep(150)
+      atomic_set(survived, 1)
+      i
+    }
+  } catch (e) {
+    log("caught: " + e)
+  }
+  // Generous grace period: had the sibling survived the cancellation, it
+  // would have set the flag well within this window.
+  sleep(300)
+  log(atomic_get(survived))
+}

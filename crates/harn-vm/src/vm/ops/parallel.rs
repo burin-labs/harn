@@ -46,6 +46,11 @@ fn parallel_cap_from_value(cap_val: &VmValue, task_count: usize) -> Result<Optio
 /// in source order so callers can index by original position. A single
 /// join error fails the whole batch, mirroring the pre-cap behavior of
 /// the `Parallel*` opcodes.
+///
+/// This is the DRAINING executor: every branch runs to completion even
+/// when a sibling has already failed. It backs `parallel settle`, the
+/// run-everything form. `parallel` / `parallel each` use the fail-fast
+/// [`run_capped_ordered_fail_fast`] instead.
 async fn run_capped_ordered<F, T>(
     futures: Vec<F>,
     cap: Option<usize>,
@@ -83,6 +88,104 @@ where
         .into_iter()
         .map(|slot| slot.expect("run_capped_ordered: missing result slot"))
         .collect())
+}
+
+/// Fail-fast variant of [`run_capped_ordered`] backing `parallel` and
+/// `parallel each`: each future resolves to `Result<T, VmError>`, and the
+/// first branch failure cancels the whole fan-out. In-flight siblings are
+/// aborted (their futures are dropped at the next await point, which kills
+/// in-flight LLM/host calls and releases RAII sync permits), and queued
+/// branches are never started.
+///
+/// Structured concurrency: after the abort, the join set is still drained
+/// to completion, so no branch task outlives this call.
+///
+/// Error identity: aborting on the first completion-order failure would
+/// report a nondeterministic branch when several siblings fail near-
+/// simultaneously. While draining, any additional branch errors that had
+/// already completed before the abort landed are folded in, and the error
+/// from the LOWEST SOURCE INDEX among them is reported — the same
+/// first-by-source-order convention `scope { }` exit uses. Branches whose
+/// abort wins the race never surface an error, so a strictly-later failure
+/// cannot mask an earlier branch that was still running.
+///
+/// On failure, buffered print output from sibling branches is discarded
+/// (deterministic: the construct contributes only its error), matching how
+/// `scope { }` drops output from cancelled siblings.
+async fn run_capped_ordered_fail_fast<F, T>(
+    futures: Vec<F>,
+    cap: Option<usize>,
+    error_label: &'static str,
+) -> Result<Vec<T>, VmError>
+where
+    F: std::future::Future<Output = Result<T, VmError>> + 'static,
+    T: 'static,
+{
+    let total = futures.len();
+    if total == 0 {
+        return Ok(Vec::new());
+    }
+    let mut results: Vec<Option<T>> = (0..total).map(|_| None).collect();
+    let slot = cap.unwrap_or(total).max(1).min(total);
+    let mut pending: VecDeque<(usize, F)> = futures.into_iter().enumerate().collect();
+    let mut join_set: tokio::task::JoinSet<(usize, Result<T, VmError>)> =
+        tokio::task::JoinSet::new();
+
+    while join_set.len() < slot {
+        let Some((i, fut)) = pending.pop_front() else {
+            break;
+        };
+        join_set.spawn_local(async move { (i, fut.await) });
+    }
+
+    // Lowest-source-index error observed so far, if any.
+    let mut first_error: Option<(usize, VmError)> = None;
+    while let Some(joined) = join_set.join_next().await {
+        let observed = match joined {
+            Ok((index, Ok(value))) => {
+                results[index] = Some(value);
+                if first_error.is_none() {
+                    if let Some((i, fut)) = pending.pop_front() {
+                        join_set.spawn_local(async move { (i, fut.await) });
+                    }
+                }
+                continue;
+            }
+            Ok((index, Err(error))) => (index, error),
+            Err(join_error) => {
+                if join_error.is_cancelled() {
+                    // A sibling this loop aborted below; already accounted for.
+                    continue;
+                }
+                // Panic in a branch task: the index is lost with the payload.
+                // Rank it after every indexed error so a real branch error
+                // wins the deterministic pick.
+                (
+                    usize::MAX,
+                    VmError::Runtime(format!("{error_label}: {join_error}")),
+                )
+            }
+        };
+        if first_error
+            .as_ref()
+            .is_none_or(|(best, _)| observed.0 < *best)
+        {
+            first_error = Some(observed);
+        }
+        // Fail fast: kill in-flight siblings and stop scheduling queued
+        // branches, then keep draining `join_next` so every aborted task is
+        // joined before this returns.
+        join_set.abort_all();
+        pending.clear();
+    }
+
+    match first_error {
+        Some((_, error)) => Err(error),
+        None => Ok(results
+            .into_iter()
+            .map(|slot| slot.expect("run_capped_ordered_fail_fast: missing result slot"))
+            .collect()),
+    }
 }
 
 /// Wrap an inline concurrent subtask future (a `parallel` / `parallel_each` /
@@ -218,10 +321,11 @@ impl super::super::Vm {
             let _wait = self
                 .wait_for_graph
                 .wait_for_tasks(&self.runtime_context.task_id, task_ids)?;
-            let joined = run_capped_ordered(futures, cap, "Parallel task error").await?;
+            // Fail fast: the first branch error aborts in-flight siblings and
+            // skips queued branches; only the settle form drains everything.
+            let joined = run_capped_ordered_fail_fast(futures, cap, "Parallel task error").await?;
             let mut results = Vec::with_capacity(count);
-            for entry in joined {
-                let (val, task_output) = entry?;
+            for (val, task_output) in joined {
                 self.output.push_str(&task_output);
                 results.push(val);
             }
@@ -272,10 +376,12 @@ impl super::super::Vm {
                 let _wait = self
                     .wait_for_graph
                     .wait_for_tasks(&self.runtime_context.task_id, task_ids)?;
-                let joined = run_capped_ordered(futures, cap, "Parallel map error").await?;
+                // Fail fast, matching `parallel`: use `parallel settle` when
+                // every branch must run regardless of failures.
+                let joined =
+                    run_capped_ordered_fail_fast(futures, cap, "Parallel map error").await?;
                 let mut results = Vec::with_capacity(len);
-                for entry in joined {
-                    let (val, task_output) = entry?;
+                for (val, task_output) in joined {
                     self.output.push_str(&task_output);
                     results.push(val);
                 }

@@ -37,6 +37,15 @@ Creates `count` concurrent tasks. Each task gets an isolated interpreter with a 
 environment. The optional variable `i` is bound to the task index (0-based).
 Returns a list of results in index order.
 
+`parallel` is fail-fast: the first branch that throws cancels all
+in-flight siblings and queued branches never start; the error then
+propagates out of the construct. Cancelled siblings are still joined
+before the construct returns, so no branch task outlives it. When more
+than one branch has already failed by the time the cancellation lands,
+the error from the lowest-index branch is the one propagated, so the
+reported error is deterministic. If you need every branch to run
+regardless of failures, use `parallel settle`.
+
 ### parallel each
 
 ```harn
@@ -48,6 +57,10 @@ parallel each list { item ->
 Maps over a list concurrently. Each task gets an isolated interpreter.
 The variable is bound to the current list element.
 Returns a list of results in the original order.
+
+Errors are fail-fast with sibling cancellation, exactly like
+`parallel`. Use `parallel settle` when every branch must run regardless
+of failures.
 
 ### parallel each as stream
 
@@ -81,8 +94,12 @@ parallel settle list { item ->
 }
 ```
 
-Like `parallel each`, but never throws. Instead, it collects both
-successes and failures into a result object with fields:
+Like `parallel each`, but never throws and never cancels: a failing
+branch does not affect its siblings, so every branch runs to
+completion. `parallel settle` is the run-everything form — when you
+need every branch to run regardless of failures, use it instead of the
+fail-fast `parallel` / `parallel each`. It collects both successes and
+failures into a result object with fields:
 
 | Field | Type | Description |
 |---|---|---|

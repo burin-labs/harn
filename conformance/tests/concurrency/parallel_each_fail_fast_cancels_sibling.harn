@@ -1,0 +1,21 @@
+pipeline test(task) {
+  // `parallel each` shares `parallel`'s fail-fast semantics: an erroring
+  // branch cancels in-flight siblings and queued branches never start.
+  let survived = atomic(0)
+  try {
+    parallel each ["fail", "slow"] { item ->
+      if item == "fail" {
+        throw "each boom"
+      }
+      sleep(150)
+      atomic_set(survived, 1)
+      item
+    }
+  } catch (e) {
+    log("caught: " + e)
+  }
+  // Generous grace period: had the sibling survived the cancellation, it
+  // would have set the flag well within this window.
+  sleep(300)
+  log(atomic_get(survived))
+}
