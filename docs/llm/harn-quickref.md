@@ -306,6 +306,10 @@ let fallback = command_try(
 )
 ```
 
+- `shell_command_from_argv(argv)` renders argv as safe shell text and unwraps
+  `["bash", "-lc", "cmd"]`-style shell wrappers to the script payload.
+- `shell_command_from_value(value)` accepts string, argv-list, or dict-shaped
+  provider command values with `argv`, `command`, or `cmd` fields.
 - `command_json(spec, opts?)` parses stdout as JSON, returns `nil` for empty
   output only with `allow_empty: true`, and supports `result: "record"` for
   `{ok:false,error,step}` instead of throwing.
