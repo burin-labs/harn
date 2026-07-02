@@ -439,6 +439,44 @@ The provider files in steps 2-4 are overlays, so a starter file can set
 definition. That gives packages a stable, declarative way to ship provider
 adapters and model aliases without editing Rust-side registration code.
 
+### Field-wise catalog patches with `[patch.models]`
+
+An overlay's `[models.<id>]` table replaces the whole model row, which is
+the right tool for adding a route but the wrong one for tweaking a single
+field: copying a large baseline row verbatim freezes every other field
+against future catalog updates. `[patch.models.<id>]` instead merges just
+the named fields into the existing row:
+
+```toml
+# Only these two fields change; the rest of the baseline row
+# (name, pricing.input_per_mtok, capabilities, ...) stays live.
+[patch.models."deepinfra/openai/gpt-oss-120b"]
+stream_timeout = 1200.0
+
+[patch.models."deepinfra/openai/gpt-oss-120b".pricing]
+output_per_mtok = 2.5
+```
+
+Patch rules:
+
+- Nested tables merge recursively; scalars **and arrays** replace the base
+  value wholesale (no element-wise array merge).
+- Within one overlay, `[models.<id>]` whole-row replacement applies before
+  `[patch.models.<id>]`, so patch fields win.
+- Patches are **sticky** across layers: they re-apply after every later
+  layer's merge, including a later layer's whole-row replacement of the
+  same id. A patch means "always tweak this field", not "tweak it once".
+- A patch whose target row does not exist yet is held silently and applies
+  as soon as a later layer contributes the row.
+- A patch that produces a type-invalid row warns once and keeps the
+  unpatched row.
+
+The same schema works at every overlay layer, including `harn.toml`
+`[llm]` sections (`[llm.patch.models.<id>]`). Pair it with `[suppress]`
+(route suppression) and whole-row `[models.<id>]` replacement — the three
+tools cover field tweaks, route removal, and route addition/renames
+without forking the baseline catalog.
+
 ### ACP agent providers
 
 External ACP agents can be registered as LLM providers by declaring

@@ -633,6 +633,38 @@ fn pub_type_exports_demo_runs_end_to_end_against_bundled_tape() {
 }
 
 #[test]
+fn catalog_patch_models_demo_runs_end_to_end_against_bundled_tape() {
+    let outcome = run_demo_scenario("catalog-patch-models");
+    assert_eq!(
+        outcome.exit_code, 0,
+        "catalog-patch-models demo failed (exit {}):\nstderr:\n{}\nstdout:\n{}",
+        outcome.exit_code, outcome.stderr, outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("catalog_patch_models_receipt"),
+        "catalog-patch-models stdout missing receipt envelope:\n{}",
+        outcome.stdout
+    );
+    // The whole point: the two patched fields carry the patch values while
+    // sibling fields of the same row (and same nested pricing table) keep
+    // their baseline values.
+    assert!(
+        outcome.stdout.contains("\"patched_stream_timeout\":1200.0")
+            && outcome.stdout.contains("\"patched_output_per_mtok\":7.5"),
+        "patched fields must reflect the [patch.models] overlay:\n{}",
+        outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("\"preserved_input_per_mtok\":3.0")
+            && outcome
+                .stdout
+                .contains("\"preserved_name\":\"Patch Target (demo)\""),
+        "unpatched sibling fields must keep their baseline values:\n{}",
+        outcome.stdout
+    );
+}
+
+#[test]
 fn every_scenario_listed_has_a_passing_smoke_run() {
     // Belt-and-suspenders: if a future scenario lands in SCENARIOS but
     // someone forgets to add a per-scenario test above, this catch-all

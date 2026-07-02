@@ -156,6 +156,16 @@ Because an overlay's `[models]` entries replace whole rows, pairing a
 new row with a `[suppress]` entry for the old id also expresses a route
 rename — no post-export patching required.
 
+To adjust a single field of a baseline row without copying the whole row
+(and silently freezing its other fields against catalog updates), use a
+field-wise `[patch.models.<id>]` patch instead of a `[models.<id>]`
+replacement — see "Field-wise catalog patches" in the providers guide:
+
+```toml
+[patch.models."deepinfra/openai/gpt-oss-120b"]
+stream_timeout = 1200.0
+```
+
 Structured capability fields (`tool_support`, `modalities`,
 `reasoning`, `prompt_cache`) come from the capability matrix, not from
 `models.*.capabilities` tags (legacy, parse-only). For overlay-declared
