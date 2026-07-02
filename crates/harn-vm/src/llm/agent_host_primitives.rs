@@ -218,19 +218,51 @@ fn agent_primitive_denied_tool(
     // tool is permitted, only this argument value is out of scope) is coached
     // like a fixable-argument slip: retry with a corrected argument, not "give
     // up". Hard ceilings and true permission denials keep the don't-retry body.
+    //
+    // A `ToolCeiling` denial is a NAME-RESOLUTION failure — the name is not in
+    // the session's available tool set — so it must never use permission
+    // framing (a headless model that reads "tell the user what you need
+    // permission for" starts petitioning a user that does not exist). Two
+    // sub-cases:
+    //   - the "name" is the text-format wrapper (`tool_call`) smuggling one
+    //     valid embedded call: parse-repair feedback that names the embedded
+    //     call and shows the direct invocation;
+    //   - any other unknown/excluded name: action-oriented unavailable-tool
+    //     feedback listing the callable tools.
     let retryable_denial = denial.is_some_and(|denial| denial.retryable);
-    let mut result = if category.is_recoverable() || retryable_denial {
+    let tool_ceiling_denial =
+        denial.is_some_and(|denial| denial.gate == crate::agent_events::DenialGate::ToolCeiling);
+    let repair = if tool_ceiling_denial {
+        agent_tools::embedded_call_repair_result(tool_name, tool_args)
+    } else {
+        None
+    };
+    let repaired = repair.is_some();
+    let mut result = if let Some(repair) = repair {
+        repair
+    } else if category.is_recoverable() || retryable_denial {
         agent_tools::recoverable_tool_result(tool_name, reason.clone())
+    } else if tool_ceiling_denial {
+        agent_tools::unavailable_tool_result(tool_name, reason.clone())
     } else {
         agent_tools::denied_tool_result(tool_name, reason.clone())
     };
     // Mirror the structured denial onto the inner tool result so it rides
     // along in the transcript the model sees, and onto the envelope so a
     // host harness reading the dispatch outcome can fail or pivot early
-    // without re-parsing the rendered reason (harn#2780).
-    if let Some(denial) = denial {
+    // without re-parsing the rendered reason (harn#2780). A wrapper-repair
+    // flips `retryable` on: re-issuing WITH the correction is exactly the
+    // coached next move, so the structured record must not say "terminal".
+    let denial_json = denial.map(|denial| {
+        let mut denial = denial.clone();
+        if repaired {
+            denial.retryable = true;
+        }
+        denial.to_json()
+    });
+    if let Some(denial_json) = denial_json.clone() {
         if let Some(obj) = result.as_object_mut() {
-            obj.insert("denial".to_string(), denial.to_json());
+            obj.insert("denial".to_string(), denial_json);
         }
     }
     let rendered = agent_tools::render_tool_result(&result);
@@ -246,7 +278,7 @@ fn agent_primitive_denied_tool(
         "observation": observation,
         "error": reason,
         "error_category": category.as_str(),
-        "denial": denial.map(crate::agent_events::ToolDenial::to_json),
+        "denial": denial_json,
         "executor": null,
     })
 }
@@ -2126,6 +2158,92 @@ mod denied_tool_routing_tests {
         // The structured denial still records the precise gate + retryable flag.
         assert_eq!(envelope["denial"]["gate"], "arg_constraint");
         assert_eq!(envelope["denial"]["retryable"], true);
+    }
+
+    #[test]
+    fn tool_call_wrapper_ceiling_denial_yields_embedded_call_repair() {
+        use crate::agent_events::{DenialGate, ToolDenial};
+        // Live headless pathology: the model emitted a native call NAMED
+        // `tool_call` whose arguments carried a correct text-format call. The
+        // ceiling denial must come back as parse-repair feedback that names
+        // the embedded call — never permission vocabulary the model answers
+        // by petitioning a user that does not exist.
+        use crate::orchestration::{pop_execution_policy, push_execution_policy, CapabilityPolicy};
+        let denial = ToolDenial::terminal(
+            DenialGate::ToolCeiling,
+            None,
+            "tool 'tool_call' exceeds tool ceiling",
+        );
+        // A ToolCeiling denial implies an active policy with a non-empty tool
+        // allowlist — mirror that precondition so the embedded call validates.
+        push_execution_policy(CapabilityPolicy {
+            tools: vec!["look".to_string(), "search".to_string(), "edit".to_string()],
+            ..Default::default()
+        });
+        let envelope = agent_primitive_denied_tool(
+            "tool_call",
+            "call_8",
+            &serde_json::json!(
+                "<tool_call>\nlook({ file: \"src/main.rs\", intent: \"read\" })\n</tool_call>"
+            ),
+            denial.reason.clone(),
+            ToolCallErrorCategory::PermissionDenied,
+            Some(&denial),
+        );
+        pop_execution_policy();
+        let result = &envelope["result"];
+        assert_eq!(result["error"], serde_json::json!("invalid_arguments"));
+        let next = result["next_step"].as_str().expect("next_step");
+        assert!(
+            next.contains("look(") && next.contains("src/main.rs"),
+            "repair must show the corrected direct invocation: {next}"
+        );
+        assert!(
+            !next.to_lowercase().contains("permission") && !next.contains("Do not retry"),
+            "repair must be retry-positive with no permission framing: {next}"
+        );
+        // The structured denial keeps the precise gate but flips retryable:
+        // re-issuing WITH the correction is exactly the coached next move.
+        assert_eq!(envelope["denial"]["gate"], "tool_ceiling");
+        assert_eq!(envelope["denial"]["retryable"], true);
+        assert_eq!(result["denial"]["retryable"], true);
+        // The wire-level category is unchanged for host harnesses.
+        assert_eq!(envelope["error_category"], "permission_denied");
+    }
+
+    #[test]
+    fn unknown_tool_ceiling_denial_drops_permission_framing() {
+        use crate::agent_events::{DenialGate, ToolDenial};
+        // A plain unknown/excluded name (no embedded call to repair) gets the
+        // action-oriented unavailable-tool body: name the failure class, steer
+        // off a re-send — never "what you need permission for".
+        let denial = ToolDenial::terminal(
+            DenialGate::ToolCeiling,
+            None,
+            "tool 'repo_browser.bundle' exceeds tool ceiling",
+        );
+        let envelope = agent_primitive_denied_tool(
+            "repo_browser.bundle",
+            "call_9",
+            &serde_json::json!({ "path": "src" }),
+            denial.reason.clone(),
+            ToolCallErrorCategory::PermissionDenied,
+            Some(&denial),
+        );
+        let result = &envelope["result"];
+        assert_eq!(result["error"], serde_json::json!("unknown_tool"));
+        let next = result["next_step"].as_str().expect("next_step");
+        assert!(
+            !next.to_lowercase().contains("permission") && !next.contains("not permitted"),
+            "name-resolution denial must not use permission framing: {next}"
+        );
+        assert!(
+            next.contains("not one of the available tools"),
+            "next_step should name the failure class: {next}"
+        );
+        // Still terminal: re-sending the identical call can never succeed.
+        assert_eq!(envelope["denial"]["retryable"], false);
+        assert_eq!(envelope["error_category"], "permission_denied");
     }
 
     #[test]

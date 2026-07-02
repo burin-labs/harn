@@ -27,11 +27,11 @@ pipeline main() {
   )
   __io_println(denied?.tools?.rejected[0] == "write_note")
   let transcript = json_stringify(transcript_messages(denied?.transcript))
-  __io_println(transcript.contains("permission_denied"))
+  __io_println(!transcript.contains("permission_denied"))
+  __io_println(transcript.contains("unknown_tool"))
   __io_println(transcript.contains("write_note"))
-  // The denial is structured: the gate that refused the call and a
-  // terminal `retryable: false` ride along so a host harness can fail or
-  // pivot without re-parsing the reason prose (#2780).
+  // The visible result is name-resolution feedback, while the structured
+  // denial still carries the gate and retry metadata for host harnesses.
   __io_println(transcript.contains("tool_ceiling"))
   __io_println(transcript.contains("retryable"))
   let read_only_denied = agent_loop(
@@ -47,6 +47,7 @@ pipeline main() {
   )
   __io_println(read_only_denied?.tools?.rejected[0] == "write_note")
   let read_only_transcript = json_stringify(transcript_messages(read_only_denied?.transcript))
-  __io_println(read_only_transcript.contains("permission_denied"))
+  __io_println(!read_only_transcript.contains("permission_denied"))
+  __io_println(read_only_transcript.contains("unknown_tool"))
   __io_println(read_only_transcript.contains("write_note"))
 }
