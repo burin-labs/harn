@@ -4,7 +4,7 @@
 import "../check_binary_size.harn"
 
 fn defaults() {
-  return {target: "", harn_bin: "", budget_mb: "189.25", report_dir: ""}
+  return {target: "", harn_bin: "", budget_mb: "189.50", report_dir: ""}
 }
 
 // --- parse_args -------------------------------------------------------------
@@ -14,7 +14,7 @@ pipeline test_parse_args_defaults(task) {
   assert_eq(res.ok, true)
   assert_eq(res.opts.build_release, true)
   assert_eq(res.opts.emit_bloat, true)
-  assert_eq(res.opts.budget_mb, "189.25")
+  assert_eq(res.opts.budget_mb, "189.50")
   assert_eq(res.opts.help, false)
 }
 
@@ -69,7 +69,7 @@ pipeline test_parse_args_help(task) {
 // --- parse_budget_mb / budget_bytes_of --------------------------------------
 @test
 pipeline test_budget_parse_valid(task) {
-  assert_eq(parse_budget_mb("189.25"), 189.25)
+  assert_eq(parse_budget_mb("189.50"), 189.5)
   assert_eq(parse_budget_mb("1.2"), 1.2)
 }
 
@@ -82,7 +82,7 @@ pipeline test_budget_parse_invalid(task) {
 
 @test
 pipeline test_budget_bytes_rounding(task) {
-  assert_eq(budget_bytes_of(189.25), 198443008)
+  assert_eq(budget_bytes_of(189.5), 198705152)
   // awk printf "%.0f", 1.2 * 1024 * 1024 == 1258291
   assert_eq(budget_bytes_of(1.2), 1258291)
 }

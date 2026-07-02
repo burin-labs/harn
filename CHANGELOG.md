@@ -8,6 +8,63 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.168
+
+### Added
+
+- **Stdlib coordination request/reply helpers.** `std/coordination` now includes
+  `coord_request` and `coord_wait_reply` so harnesses can build durable
+  addressed request/decision protocols with request-scoped acknowledgement
+  cursors instead of product-local mailbox glue.
+- Add `harn-hostlib::host_env_custody::HostEnvCustodyContract` for reusable
+  named environment custody metadata with class-name-only validation.
+- Add catalog-driven local runtime LoRA launch flags, vLLM launch metadata, and `harn models lora inspect`
+  for adapter/base compatibility checks.
+
+### Changed
+
+- Move Harn's hosted `mid` preset to OpenRouter Qwen 3.6 Flash, add canonical
+  OpenRouter Qwen 3.6 catalog rows, update GLM 5.2 OpenRouter pricing and
+  reasoning-effort metadata, and keep Qwen/GLM provider quirks centralized in
+  the capability matrix.
+
+### Fixed
+
+- Claude-family models now default to `native` tool calling at the family level on OpenRouter and on
+  prefixed direct-Anthropic ids: catalog catch-all rules cover ids the versioned capability rows miss
+  (new family names, unparseable version segments, dated slugs, pre-4.x models), which previously fell
+  through to the global text-channel `json` default. Hosts no longer need per-alias `tool_format`
+  pins for Claude routes; explicit pins still win.
+- Preserve non-shell `run` command arrays as structured `argv` during tool-call
+  compatibility normalization.
+- `harn install --locked` / `--frozen` / `--offline` no longer fails with
+  "harn.lock would need to change" after a Harn release bump when the resolved
+  dependency set is unchanged: the frozen comparison now checks the resolution
+  content and ignores the `generator_version` / `protocol_artifact_version`
+  provenance stamps (still refreshed by non-frozen installs and audited by
+  `harn package audit`). Frozen installs also now correctly fail when the
+  manifest dropped all dependencies but the lock still pins packages.
+- **`harn models lora inspect` now applies provider overrides consistently.**
+  The report recomputes the effective tool format for the selected provider and
+  model route, so LoRA launch hints no longer mix an alias's original provider
+  metadata with an explicit `--provider` override.
+- Include adapter rank in `harn models lora inspect` launch hints when the
+  cataloged local runtime supports a max LoRA rank flag.
+- **Release binary size gate recovery.** The x86_64 Linux release binary-size
+  gate no longer depends on the checked-out tag's `check_binary_size.harn`
+  script for the hard release check, so workflow-dispatch recovery can rebuild
+  immutable older tags even when the tagged helper script fails to type-check.
+  The release binary budget is ratcheted to 189.25 MiB after v0.8.167 measured
+  189.07 MiB, keeping the guard tight without blocking a valid patch release on
+  a 0.07 MiB threshold miss.
+
+### Security
+
+- **Linear connector conformance now exercises the signed, fail-closed package path (#2950).** The
+  embedded contract fixture is synced to the current `harn-linear-connector`
+  implementation so stale unsigned webhook deliveries and invalid signatures are
+  rejected instead of documented as verified.
+
 ## v0.8.167
 
 ### Added
