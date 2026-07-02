@@ -3396,6 +3396,17 @@ fn transcript_with_session_metadata(transcript: VmValue, state: &SessionState) -
     VmValue::dict(next)
 }
 
+/// Materialize the externally-visible view of a session: the transcript
+/// plus session-level metadata (lineage, pinned model, scratchpad, live
+/// clients, checkpoint counts, ...).
+///
+/// `state.subscribers` (closure callbacks registered for agent-loop
+/// events) are intentionally omitted: they are ephemeral by design,
+/// owned by the current-thread agent-loop worker, and are re-registered
+/// by the host when a persisted session is reopened. Serializing them
+/// would at best persist a useless display-string — see
+/// `crate::llm::vm_value_to_json_strict` for the seams that do guard
+/// against that class of silent corruption.
 fn session_snapshot(state: &SessionState) -> VmValue {
     let transcript = transcript_with_session_metadata(state.transcript.clone(), state);
     let Some(dict) = transcript.as_dict() else {
