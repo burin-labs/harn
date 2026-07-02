@@ -34,6 +34,8 @@ pub(crate) struct ModelsLoraArgs {
 pub(crate) enum ModelsLoraCommand {
     /// Inspect a PEFT LoRA adapter directory or repo id.
     Inspect(ModelsLoraInspectArgs),
+    /// Plan a portable LoRA/QLoRA tool-calling fine-tune for a Harn model route.
+    Plan(ModelsLoraPlanArgs),
 }
 
 #[derive(Debug, Args)]
@@ -49,6 +51,28 @@ pub(crate) struct ModelsLoraInspectArgs {
     /// Provider/runtime to check against instead of inferring from the base model.
     #[arg(long)]
     pub provider: Option<String>,
+    /// Emit structured JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ModelsLoraPlanArgs {
+    /// Base model alias or provider-native id to fine-tune.
+    #[arg(long = "base", value_parser = llm_model_completion_parser(), hide_possible_values = true)]
+    pub base_model: String,
+    /// Provider/runtime to plan against instead of inferring from the base model.
+    #[arg(long)]
+    pub provider: Option<String>,
+    /// Tool-call format to train for (`auto`, `native`, `text`, or `json`).
+    #[arg(long = "tool-format", default_value = "auto")]
+    pub tool_format: String,
+    /// Corpus path or dataset id to include in the generated eval/training recipe.
+    #[arg(long, value_name = "PATH_OR_DATASET")]
+    pub corpus: Option<String>,
+    /// Adapter training method (`qlora` or `lora`).
+    #[arg(long, default_value = "qlora")]
+    pub method: String,
     /// Emit structured JSON.
     #[arg(long)]
     pub json: bool,

@@ -364,6 +364,98 @@ fn models_lora_inspect_json_shape_is_stable() {
     );
 }
 
+#[test]
+fn models_lora_plan_human_text_includes_recipe() {
+    let harn = run(
+        &[
+            "models",
+            "lora",
+            "plan",
+            "--base",
+            "local-gemma4-e4b",
+            "--provider",
+            "vllm",
+            "--tool-format",
+            "auto",
+            "--corpus",
+            "./lora-corpus",
+        ],
+        &[],
+    );
+
+    assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
+    for fragment in [
+        "LoRA plan for gemma-4-e4b-it via vllm",
+        "tool format: json (requested auto)",
+        "training: qlora + peft_lora",
+        "trainer: trl_sft_trainer",
+        "dataset format: harn_text_tool_calls_json_fences",
+        "corpus: ./lora-corpus",
+        "harn eval tool-calls --planner ADAPTER_MODEL --tool-format json --dataset ./lora-corpus",
+        "harn models lora inspect --base local-gemma4-e4b --provider vllm --name ADAPTER_NAME ADAPTER_PATH_OR_REPO",
+        "harn local launch local-gemma4-e4b --provider vllm --model-source gemma-4-e4b-it",
+    ] {
+        assert!(
+            harn.stdout.contains(fragment),
+            "harn stdout missing {fragment}: {}",
+            harn.stdout
+        );
+    }
+}
+
+#[test]
+fn models_lora_plan_json_shape_is_stable() {
+    let harn = run(
+        &[
+            "models",
+            "lora",
+            "plan",
+            "--base",
+            "local-gemma4-e4b",
+            "--provider",
+            "vllm",
+            "--tool-format",
+            "native",
+            "--method",
+            "lora",
+            "--json",
+        ],
+        &[],
+    );
+
+    assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
+    let harn_value = parse_json(&harn.stdout, "harn");
+    assert_eq!(harn_value["ok"], serde_json::Value::Bool(true));
+    assert_eq!(harn_value["base"]["id"], "gemma-4-e4b-it");
+    assert_eq!(harn_value["request"]["method"], "lora");
+    assert_eq!(harn_value["request"]["requested_tool_format"], "native");
+    assert_eq!(harn_value["request"]["effective_tool_format"], "native");
+    assert_eq!(harn_value["training"]["adapter_type"], "peft_lora");
+    assert_eq!(
+        harn_value["training"]["quantization"],
+        "base_model_precision"
+    );
+    assert_eq!(
+        harn_value["data"]["dataset_format"],
+        "messages_with_tool_calls"
+    );
+    let eval = harn_value["evaluation"]["eval_command"]
+        .as_array()
+        .expect("eval argv");
+    assert!(
+        eval.windows(2)
+            .any(|pair| pair[0] == "--tool-format" && pair[1] == "native"),
+        "eval argv={eval:?}"
+    );
+    let launch = harn_value["launch"]["local_launch_command"]
+        .as_array()
+        .expect("launch argv");
+    assert!(
+        launch.iter().any(|arg| arg == "--lora-adapter"),
+        "launch argv={launch:?}"
+    );
+}
+
 // ────────────────────────────────────────────────────────────────────────
 
 fn write_lora_adapter_fixture() -> tempfile::TempDir {

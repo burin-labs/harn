@@ -1,0 +1,191 @@
+/**
+ * `harn models lora plan` renderer.
+ *
+ * The dispatch shim resolves model aliases, provider capabilities, and catalog
+ * launch facts in Rust. This Harn source owns the portable training/eval
+ * recipe and the human/JSON presentation.
+ *
+ * Inputs (from the dispatch shim):
+ *   HARN_MODELS_LORA_PLAN_PAYLOAD_JSON   - compact report JSON.
+ *   HARN_MODELS_LORA_PLAN_PAYLOAD_PRETTY - pretty report JSON.
+ *   HARN_OUTPUT_JSON                     - "1" for JSON, else human text.
+ */
+fn __safe_string(value, fallback: string) -> string {
+  if type_of(value) == "string" {
+    return value
+  }
+  return fallback
+}
+
+fn __nonempty_string(value, fallback: string) -> string {
+  let text = __safe_string(value, "")
+  if text == "" {
+    return fallback
+  }
+  return text
+}
+
+fn __safe_dict(value) -> dict {
+  if type_of(value) == "dict" {
+    return value
+  }
+  return {}
+}
+
+fn __safe_list(value) -> list {
+  if type_of(value) == "list" {
+    return value
+  }
+  return []
+}
+
+fn __safe_bool(value, fallback: bool) -> bool {
+  if type_of(value) == "bool" {
+    return value
+  }
+  return fallback
+}
+
+fn __shell_quote(value: string) -> string {
+  if value == "" {
+    return "''"
+  }
+  if regex_match("^[A-Za-z0-9_./:=+-]+$", value) != nil {
+    return value
+  }
+  return "'" + replace(value, "'", "'\"'\"'") + "'"
+}
+
+fn __join_strings(items: list, sep: string) -> string {
+  var out = ""
+  var first = true
+  for item in items {
+    let text = __shell_quote(__safe_string(item, ""))
+    if text == "" {
+      continue
+    }
+    if !first {
+      out = out + sep
+    }
+    out = out + text
+    first = false
+  }
+  return out
+}
+
+fn __print_list(harness: Harness, label: string, items: list) {
+  if items.count == 0 {
+    return
+  }
+  harness.stdio.println("  " + label + ":")
+  for item in items {
+    let text = __safe_string(item, "")
+    if text != "" {
+      harness.stdio.println("    - " + text)
+    }
+  }
+}
+
+fn __render_command(harness: Harness, label: string, argv: list) {
+  if argv.count == 0 {
+    return
+  }
+  harness.stdio.println("  " + label + ":")
+  harness.stdio.println("    " + __join_strings(argv, " "))
+}
+
+fn __render_human(harness: Harness, report: dict) {
+  let base = __safe_dict(report["base"])
+  let request = __safe_dict(report["request"])
+  let tool_calling = __safe_dict(report["tool_calling"])
+  let training = __safe_dict(report["training"])
+  let data = __safe_dict(report["data"])
+  let evaluation = __safe_dict(report["evaluation"])
+  let launch = __safe_dict(report["launch"])
+  let warnings = __safe_list(report["warnings"])
+  let base_id = __safe_string(base["id"], "")
+  let provider = __safe_string(base["provider"], "")
+  harness.stdio.println("LoRA plan for " + base_id + " via " + provider)
+  harness.stdio.println("  base selector: " + __safe_string(base["selector"], ""))
+  harness.stdio
+    .println(
+    "  tool format: "
+      + __safe_string(request["effective_tool_format"], "")
+      + " (requested "
+      + __safe_string(request["requested_tool_format"], "auto")
+      + ")",
+  )
+  let correction = __safe_string(request["tool_format_correction"], "")
+  if correction != "" {
+    harness.stdio.println("  tool format correction: " + correction)
+  }
+  let native_tools = if __safe_bool(tool_calling["native_tools"], false) {
+    "yes"
+  } else {
+    "no"
+  }
+  harness.stdio
+    .println(
+    "  native tools: "
+      + native_tools
+      + ", preferred: "
+      + __nonempty_string(tool_calling["preferred_tool_format"], "unset"),
+  )
+  harness.stdio
+    .println(
+    "  training: "
+      + __safe_string(request["method"], "")
+      + " + "
+      + __safe_string(training["adapter_type"], ""),
+  )
+  harness.stdio.println("  trainer: " + __safe_string(training["trainer"], ""))
+  harness.stdio.println("  quantization: " + __safe_string(training["quantization"], ""))
+  harness.stdio.println("  loss scope: " + __safe_string(training["loss_scope"], ""))
+  harness.stdio.println("  packing: " + __safe_string(training["packing"], ""))
+  let corpus = __safe_string(request["corpus"], "")
+  if corpus != "" {
+    harness.stdio.println("  corpus: " + corpus)
+  }
+  harness.stdio.println("  dataset format: " + __safe_string(data["dataset_format"], ""))
+  __print_list(harness, "required columns", __safe_list(data["required_columns"]))
+  __print_list(harness, "data validation", __safe_list(data["validation"]))
+  __print_list(harness, "training notes", __safe_list(training["notes"]))
+  harness.stdio
+    .println("  holdout policy: " + __safe_string(evaluation["holdout_policy"], ""))
+  __print_list(harness, "eval gates", __safe_list(evaluation["gates"]))
+  __render_command(harness, "eval", __safe_list(evaluation["eval_command"]))
+  __render_command(harness, "inspect adapter", __safe_list(launch["inspect_command"]))
+  __render_command(harness, "local launch", __safe_list(launch["local_launch_command"]))
+  for warning in warnings {
+    let text = __safe_string(warning, "")
+    if text != "" {
+      harness.stdio.println("  warning: " + text)
+    }
+  }
+}
+
+fn main(harness: Harness) -> int {
+  let raw = harness.env.get_or("HARN_MODELS_LORA_PLAN_PAYLOAD_JSON", "")
+  if raw == "" {
+    harness.stdio.eprintln("internal error: HARN_MODELS_LORA_PLAN_PAYLOAD_JSON not set")
+    return 70
+  }
+  let report = try {
+    json_parse(raw)
+  } catch (e) {
+    harness.stdio.eprintln("internal error: failed to parse LoRA plan payload: " + to_string(e))
+    return 70
+  }
+  let ok = __safe_bool(report["ok"], false)
+  let json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
+  if json_mode {
+    let pretty = harness.env.get_or("HARN_MODELS_LORA_PLAN_PAYLOAD_PRETTY", raw)
+    harness.stdio.println(pretty)
+  } else {
+    __render_human(harness, report)
+  }
+  if ok {
+    return 0
+  }
+  return 1
+}

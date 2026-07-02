@@ -162,6 +162,12 @@ the cataloged runtime shape. Use `harn models lora inspect --base <model>
 the corresponding Harn-managed launch command before starting the server. If
 the adapter config declares a rank and the provider catalog has a max-rank
 runtime flag, the generated command includes `--max-lora-rank` as well.
+Use `harn models lora plan --base <model> --provider <provider>
+--tool-format auto --corpus <path>` before training a new adapter. It resolves
+the same provider capability matrix as runtime calls, records the effective
+tool-call format, and prints a portable LoRA/QLoRA training, validation, eval,
+inspect, and launch recipe without assuming a local GPU or machine-specific
+paths.
 
 Harn maintains local runtime risk profiles for hybrid-cache families
 (Qwen3.6, Gemma4). The profile table records preferred runtimes,
