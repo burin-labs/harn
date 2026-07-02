@@ -1646,6 +1646,157 @@ fn test_parallel_each_basic() {
 }
 
 #[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn test_parallel_fail_fast_cancels_slow_sibling() {
+    // A branch error aborts in-flight siblings: the slow branch is cancelled
+    // mid-sleep and never reaches its atomic_set, even though the pipeline
+    // keeps running well past the sibling's would-be completion time.
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let handle = tokio::task::spawn_local(async {
+                run_harn_result_async(
+                    r#"pipeline t(task) {
+let survived = atomic(0)
+try {
+  parallel 2 { i ->
+    if i == 0 {
+      throw "boom"
+    }
+    sleep(5s)
+    atomic_set(survived, 1)
+    i
+  }
+} catch (e) {
+  log("caught: " + e)
+}
+sleep(20s)
+log(atomic_get(survived))
+}"#,
+                )
+                .await
+            });
+            tokio::task::yield_now().await;
+            tokio::time::advance(Duration::from_secs(30)).await;
+            let (output, _) = handle.await.expect("join VM task").expect("run Harn");
+            assert_eq!(output.trim_end(), "[harn] caught: boom\n[harn] 0");
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn test_parallel_each_fail_fast_cancels_slow_sibling() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let handle = tokio::task::spawn_local(async {
+                run_harn_result_async(
+                    r#"pipeline t(task) {
+let survived = atomic(0)
+try {
+  parallel each ["fail", "slow"] { item ->
+    if item == "fail" {
+      throw "each boom"
+    }
+    sleep(5s)
+    atomic_set(survived, 1)
+    item
+  }
+} catch (e) {
+  log("caught: " + e)
+}
+sleep(20s)
+log(atomic_get(survived))
+}"#,
+                )
+                .await
+            });
+            tokio::task::yield_now().await;
+            tokio::time::advance(Duration::from_secs(30)).await;
+            let (output, _) = handle.await.expect("join VM task").expect("run Harn");
+            assert_eq!(output.trim_end(), "[harn] caught: each boom\n[harn] 0");
+        })
+        .await;
+}
+
+#[test]
+fn test_parallel_fail_fast_skips_unstarted_branches() {
+    // With max_concurrent: 1, the first branch's error means the queued
+    // branches are never started at all — fully deterministic, no timing.
+    let out = run_output(
+        r#"pipeline t(task) {
+let started = atomic(0)
+try {
+  parallel each [1, 2, 3] with { max_concurrent: 1 } { n ->
+    if n == 1 {
+      throw "stop"
+    }
+    atomic_add(started, 1)
+    n
+  }
+} catch (e) {
+  log(e)
+}
+log(atomic_get(started))
+}"#,
+    );
+    assert_eq!(out, "[harn] stop\n[harn] 0");
+}
+
+#[test]
+fn test_parallel_fail_fast_reports_lowest_index_error() {
+    // Both branches throw on their first poll, so both errors have settled
+    // by the time the abort lands; the reported error must deterministically
+    // be the lowest-source-index one (the `scope { }` convention), not
+    // whichever happened to join first.
+    let out = run_output(
+        r#"pipeline t(task) {
+try {
+  parallel each ["first", "second"] { word ->
+    throw word
+  }
+} catch (e) {
+  log(e)
+}
+}"#,
+    );
+    assert_eq!(out, "[harn] first");
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn test_parallel_settle_still_runs_all_branches() {
+    // `parallel settle` keeps the draining semantics: a failing branch does
+    // not cancel siblings, so both slow branches still complete.
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let handle = tokio::task::spawn_local(async {
+                run_harn_result_async(
+                    r#"pipeline t(task) {
+let completed = atomic(0)
+let outcome = parallel settle [1, 2, 3] { item ->
+  if item == 1 {
+    throw "early failure"
+  }
+  sleep(5s)
+  atomic_add(completed, 1)
+  item * 10
+}
+log(outcome.succeeded)
+log(outcome.failed)
+log(atomic_get(completed))
+}"#,
+                )
+                .await
+            });
+            tokio::task::yield_now().await;
+            tokio::time::advance(Duration::from_secs(30)).await;
+            let (output, _) = handle.await.expect("join VM task").expect("run Harn");
+            assert_eq!(output.trim_end(), "[harn] 2\n[harn] 1\n[harn] 2");
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn test_parallel_each_stream_break_cancels_remaining_work() {
     let local = tokio::task::LocalSet::new();
     local

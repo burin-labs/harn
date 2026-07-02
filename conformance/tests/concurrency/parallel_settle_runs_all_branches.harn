@@ -1,0 +1,17 @@
+pipeline test(task) {
+  // `parallel settle` is the run-everything form: a failing branch does NOT
+  // cancel siblings. Every branch still runs to completion and the outcome
+  // records each branch's settled result.
+  let completed = atomic(0)
+  let outcome = parallel settle [1, 2, 3] { item ->
+    if item == 1 {
+      throw "early failure"
+    }
+    yield_now()
+    atomic_add(completed, 1)
+    item * 10
+  }
+  log(outcome.succeeded)
+  log(outcome.failed)
+  log(atomic_get(completed))
+}

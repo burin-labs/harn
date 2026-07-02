@@ -841,10 +841,12 @@ Import `std/slug` for human-readable non-secret identifiers:
 let h = spawn { long_work() }
 let value = await(h)
 
-// parallel each: concurrent map.
+// parallel each: concurrent map. Fail-fast: the first branch error
+// cancels in-flight siblings and propagates.
 let results = parallel each paths { p -> process(p) }
 
-// parallel settle: like `each` but collects per-item Ok/Err.
+// parallel settle: like `each` but collects per-item Ok/Err and never
+// cancels — use it when every branch must run regardless of failures.
 let outcome = parallel settle paths { p -> grade(p) }
 log(outcome.succeeded)  // count
 log(outcome.failed)
@@ -852,7 +854,7 @@ for r in outcome.results {
   // r is Result.Ok(...) or Result.Err(...)
 }
 
-// parallel N: fan-out with an index.
+// parallel N: fan-out with an index. Fail-fast like `parallel each`.
 let indices = parallel 8 { i -> fetch(i) }
 
 // Cap in-flight work to avoid overwhelming downstream services.

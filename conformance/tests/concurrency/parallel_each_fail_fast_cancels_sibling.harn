@@ -1,0 +1,22 @@
+pipeline test(task) {
+  // `parallel each` shares `parallel`'s fail-fast semantics: an erroring
+  // branch cancels in-flight siblings and queued branches never start.
+  let survived = atomic(0)
+  try {
+    parallel each ["fail", "slow"] { item ->
+      if item == "fail" {
+        throw "each boom"
+      }
+      for _ in range(0, 64) {
+        yield_now()
+      }
+      atomic_set(survived, 1)
+      item
+    }
+  } catch (e) {
+    log("caught: " + e)
+  }
+  // `parallel each` drains cancelled siblings before returning; if the old
+  // run-to-completion behavior regresses, the sibling sets this flag.
+  log(atomic_get(survived))
+}

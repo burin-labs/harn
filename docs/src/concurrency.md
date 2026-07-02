@@ -96,6 +96,13 @@ let results = parallel(5) { i ->
 The variable `i` is the zero-based task index. Results are always returned
 in index order regardless of completion order.
 
+`parallel` and `parallel each` are fail-fast: the first branch that
+throws cancels all in-flight siblings (queued branches never start) and
+its error propagates out of the construct. When several branches have
+already failed by the time the cancellation lands, the lowest-index
+branch's error is the one reported. If you need every branch to run
+regardless of failures, use `parallel settle`.
+
 ## parallel each
 
 Map over a collection concurrently:
@@ -130,8 +137,9 @@ throws an aggregate error if every task throws or returns `Result.Err`.
 
 ## parallel settle
 
-Like `parallel each`, but never throws. Instead, it collects both
-successes and failures into a result object:
+Like `parallel each`, but never throws and never cancels — every branch
+runs to completion regardless of sibling failures. Instead, it collects
+both successes and failures into a result object:
 
 ```harn
 let items = [1, 2, 3]

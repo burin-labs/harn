@@ -1,0 +1,15 @@
+pipeline test(task) {
+  // The propagated error is deterministic: branch 0 fails immediately while
+  // branch 1 is still yielding, so branch 0's error is the one reported —
+  // the first failure in source order among branches that actually failed.
+  // The yielding sibling is aborted and its error never surfaces.
+  parallel each [0, 1] { n ->
+    if n == 0 {
+      throw "branch zero failed"
+    }
+    for _ in range(0, 64) {
+      yield_now()
+    }
+    throw "branch one failed"
+  }
+}
