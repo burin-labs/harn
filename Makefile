@@ -565,7 +565,7 @@ check-trigger-examples:
 
 check-docs-model-refs:
 	@echo "=== Checking docs model references track provider aliases ==="
-	@./scripts/check_docs_model_refs.sh
+	@$(HARN_CMD) run scripts/check_docs_model_refs.harn
 
 # Regenerate the diagnostic-code catalog (markdown page + JSON sidecar)
 # from the in-binary registry in crates/harn-parser/src/diagnostic_codes.rs.
@@ -603,13 +603,13 @@ check-diagnostics-catalog:
 # `harn check`. Blocks tagged ```harn,ignore are skipped.
 check-docs-snippets:
 	@echo "=== Checking docs snippets parse under harn check ==="
-	@./scripts/check_docs_snippets.sh
+	@$(HARN_CMD) run scripts/check_docs_snippets.harn
 
 # CI guard: every harn long flag in docs/src bash/sh blocks must exist in
 # the corresponding `harn ... --help` output.
 check-docs-cli-flags:
 	@echo "=== Checking docs bash/sh harn flags against --help ==="
-	@./scripts/check_docs_cli_flags.sh
+	@$(HARN_CMD) run scripts/check_docs_cli_flags.harn
 
 # CI guard: every local Markdown/HTML href under docs/src resolves to a
 # checked-in repository file. Fragments are ignored; this only catches dead
@@ -622,18 +622,18 @@ check-docs-links:
 # `harn check`.
 check-site-snippets:
 	@echo "=== Checking site snippets parse under harn check ==="
-	@./scripts/check_site_snippets.sh
+	@$(HARN_CMD) run scripts/check_site_snippets.harn
 
 # CI guard: the workflow-authoring quickstart fixtures still produce the
 # bundle digests, executed-node sequences, and connector-status shapes
 # the docs claim.
 check-docs-workflow-quickstart:
-	@./scripts/check_docs_workflow_quickstart.sh
+	@$(HARN_CMD) run scripts/check_docs_workflow_quickstart.harn
 
 # Lint test files for wall-clock polling patterns that cause flaky tests.
 # See docs/src/dev/testing.md for approved alternatives and the opt-out mechanism.
 lint-test-patterns:
-	@./scripts/lint_test_patterns.sh
+	@$(HARN_CMD) run scripts/lint_test_patterns.harn
 
 lint-diagnostic-codes:
 	@$(HARN_CMD) run scripts/check_diagnostic_codes.harn

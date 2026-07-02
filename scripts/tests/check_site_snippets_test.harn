@@ -1,0 +1,23 @@
+// Tests for scripts/check_site_snippets.harn — pure helpers only (the
+// snippet checking itself shells out to `harn check` and is covered by
+// behavior-parity runs against the repo).
+import "../check_site_snippets.harn"
+
+@test
+pipeline test_rel_path_strips_marker(task) {
+  assert_eq(
+    rel_path("/repo/./website/src/examples/hero.harn.txt"),
+    "website/src/examples/hero.harn.txt",
+  )
+}
+
+@test
+pipeline test_rel_path_passthrough(task) {
+  assert_eq(rel_path("website/src/examples/hero.harn.txt"), "website/src/examples/hero.harn.txt")
+}
+
+@test
+pipeline test_summary_line_shape(task) {
+  assert_eq(summary_line(4, 0), "site snippets: 4 checked, 0 failed")
+  assert_eq(summary_line(5, 2), "site snippets: 5 checked, 2 failed")
+}

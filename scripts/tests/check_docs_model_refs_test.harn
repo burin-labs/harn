@@ -1,0 +1,78 @@
+// Tests for scripts/check_docs_model_refs.harn — pure helpers on
+// synthetic inputs (no filesystem dependency).
+import "../check_docs_model_refs.harn"
+
+// --- is_generated -----------------------------------------------------------
+@test
+pipeline test_generated_marker_in_head(task) {
+  assert_eq(is_generated("<!-- GENERATED: do not edit -->\nbody\n"), true)
+}
+
+@test
+pipeline test_generated_marker_on_fifth_line(task) {
+  assert_eq(is_generated("1\n2\n3\n4\nGENERATED\n"), true)
+}
+
+@test
+pipeline test_generated_marker_below_head_ignored(task) {
+  // Only the first five lines count (bash `head -n 5`).
+  assert_eq(is_generated("1\n2\n3\n4\n5\nGENERATED\n"), false)
+}
+
+@test
+pipeline test_not_generated(task) {
+  assert_eq(is_generated("# Title\nplain docs\n"), false)
+}
+
+// --- stale_refs -------------------------------------------------------------
+@test
+pipeline test_stale_ref_flagged(task) {
+  let refs = stale_refs("Use claude-sonnet-4-0 today.\n", "claude-sonnet-4-6")
+  assert_eq(refs.count, 1)
+  assert_eq(refs[0].model, "claude-sonnet-4-0")
+  assert_eq(refs[0].line_no, 1)
+}
+
+@test
+pipeline test_current_alias_ok(task) {
+  assert_eq(stale_refs("Use claude-sonnet-4-6 today.\n", "claude-sonnet-4-6"), [])
+}
+
+@test
+pipeline test_allow_stale_marker_suppresses(task) {
+  let text = "old claude-sonnet-4-0 <!-- harn-doc-model-ref: allow-stale -->\n"
+  assert_eq(stale_refs(text, "claude-sonnet-4-6"), [])
+}
+
+@test
+pipeline test_multiple_refs_and_line_numbers(task) {
+  let text = "intro\nclaude-sonnet-4-0 and claude-sonnet-4-1\nfine\nclaude-sonnet-4-2\n"
+  let refs = stale_refs(text, "claude-sonnet-4-6")
+  assert_eq(refs.count, 3)
+  assert_eq(refs[0].line_no, 2)
+  assert_eq(refs[1].model, "claude-sonnet-4-1")
+  assert_eq(refs[2].line_no, 4)
+}
+
+@test
+pipeline test_bare_family_name_not_matched(task) {
+  // `claude-sonnet-4` without a dashed suffix is not a model id ref
+  // (the regex requires at least one `-<digit>...` group).
+  assert_eq(stale_refs("the claude-sonnet-4 family\n", "claude-sonnet-4-6"), [])
+}
+
+@test
+pipeline test_longest_match_taken(task) {
+  // Greedy matching consumes the full dashed id, so a dated id like
+  // claude-sonnet-4-6-20250929 is one ref, not a stale prefix + tail.
+  let refs = stale_refs("claude-sonnet-4-6-20250929\n", "claude-sonnet-4-6")
+  assert_eq(refs.count, 1)
+  assert_eq(refs[0].model, "claude-sonnet-4-6-20250929")
+}
+
+// --- rel_path ---------------------------------------------------------------
+@test
+pipeline test_rel_path_strip(task) {
+  assert_eq(rel_path("/repo/./docs/src/a.md"), "docs/src/a.md")
+  assert_eq(rel_path("docs/src/a.md"), "docs/src/a.md")
+}

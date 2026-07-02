@@ -1,0 +1,144 @@
+// Tests for scripts/check_binary_size.harn — argument parsing, budget
+// math, and report formatting (pure helpers; the build/bloat paths shell
+// out and are covered by behavior-parity runs).
+import "../check_binary_size.harn"
+
+fn defaults() {
+  return {target: "", harn_bin: "", budget_mb: "189", report_dir: ""}
+}
+
+// --- parse_args -------------------------------------------------------------
+@test
+pipeline test_parse_args_defaults(task) {
+  let res = parse_args([], defaults())
+  assert_eq(res.ok, true)
+  assert_eq(res.opts.build_release, true)
+  assert_eq(res.opts.emit_bloat, true)
+  assert_eq(res.opts.budget_mb, "189")
+  assert_eq(res.opts.help, false)
+}
+
+@test
+pipeline test_parse_args_flags(task) {
+  let res = parse_args(
+    ["--no-build", "--target", "x86_64-unknown-linux-gnu", "--skip-bloat", "--budget-mb", "50"],
+    defaults(),
+  )
+  assert_eq(res.ok, true)
+  assert_eq(res.opts.build_release, false)
+  assert_eq(res.opts.emit_bloat, false)
+  assert_eq(res.opts.target, "x86_64-unknown-linux-gnu")
+  assert_eq(res.opts.budget_mb, "50")
+}
+
+@test
+pipeline test_parse_args_bin_and_report_dir(task) {
+  let res = parse_args(["--bin", "/x/harn", "--report-dir", "out"], defaults())
+  assert_eq(res.opts.harn_bin, "/x/harn")
+  assert_eq(res.opts.report_dir, "out")
+}
+
+@test
+pipeline test_parse_args_missing_value(task) {
+  let res = parse_args(["--target"], defaults())
+  assert_eq(res.ok, false)
+  assert_eq(res.message, "error: --target requires a value")
+  assert_eq(res.show_usage, false)
+}
+
+@test
+pipeline test_parse_args_missing_path_noun(task) {
+  assert_eq(parse_args(["--bin"], defaults()).message, "error: --bin requires a path")
+  assert_eq(parse_args(["--report-dir"], defaults()).message, "error: --report-dir requires a path")
+}
+
+@test
+pipeline test_parse_args_unknown_flag_shows_usage(task) {
+  let res = parse_args(["--wat"], defaults())
+  assert_eq(res.ok, false)
+  assert_eq(res.message, "error: unknown argument: --wat")
+  assert_eq(res.show_usage, true)
+}
+
+@test
+pipeline test_parse_args_help(task) {
+  assert_eq(parse_args(["-h"], defaults()).opts.help, true)
+  assert_eq(parse_args(["--help"], defaults()).opts.help, true)
+}
+
+// --- parse_budget_mb / budget_bytes_of --------------------------------------
+@test
+pipeline test_budget_parse_valid(task) {
+  assert_eq(parse_budget_mb("189"), 189.0)
+  assert_eq(parse_budget_mb("1.2"), 1.2)
+}
+
+@test
+pipeline test_budget_parse_invalid(task) {
+  assert_eq(parse_budget_mb("0"), nil)
+  assert_eq(parse_budget_mb("-5"), nil)
+  assert_eq(parse_budget_mb("abc"), nil)
+}
+
+@test
+pipeline test_budget_bytes_rounding(task) {
+  assert_eq(budget_bytes_of(189.0), 198180864)
+  // awk printf "%.0f", 1.2 * 1024 * 1024 == 1258291
+  assert_eq(budget_bytes_of(1.2), 1258291)
+}
+
+// --- format_mib -------------------------------------------------------------
+@test
+pipeline test_format_mib_two_decimals(task) {
+  assert_eq(format_mib(1536000), "1.46")
+  assert_eq(format_mib(2097152), "2.00")
+  assert_eq(format_mib(1258291), "1.20")
+  assert_eq(format_mib(105906176), "101.00")
+}
+
+// --- default_bin_path -------------------------------------------------------
+@test
+pipeline test_default_bin_path_host(task) {
+  assert_eq(default_bin_path("/r/target", ""), "/r/target/release/harn")
+}
+
+@test
+pipeline test_default_bin_path_target_triple(task) {
+  assert_eq(
+    default_bin_path("/r/target", "x86_64-unknown-linux-gnu"),
+    "/r/target/x86_64-unknown-linux-gnu/release/harn",
+  )
+}
+
+@test
+pipeline test_default_bin_path_windows_exe(task) {
+  assert_eq(
+    default_bin_path("/r/target", "x86_64-pc-windows-msvc"),
+    "/r/target/x86_64-pc-windows-msvc/release/harn.exe",
+  )
+}
+
+// --- report_lines -----------------------------------------------------------
+@test
+pipeline test_report_lines_shape(task) {
+  let lines = report_lines("/r/target/release/harn", "", 1536000, 1258291)
+  assert_eq(
+    lines,
+    [
+      "harn binary size",
+      "================",
+      "binary: /r/target/release/harn",
+      "target: host",
+      "bytes: 1536000",
+      "mib: 1.46",
+      "budget_bytes: 1258291",
+      "budget_mib: 1.20",
+    ],
+  )
+}
+
+@test
+pipeline test_report_lines_named_target(task) {
+  let lines = report_lines("/b", "aarch64-apple-darwin", 10, 20)
+  assert_eq(lines[3], "target: aarch64-apple-darwin")
+}

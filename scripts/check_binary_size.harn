@@ -1,0 +1,321 @@
+// Build-or-check the shipped harn release binary against a size budget and,
+// unless disabled, write a cargo-bloat report for follow-up analysis.
+//
+// Ported from scripts/check_binary_size.sh — same flags, env vars, report
+// files, output shape, and exit codes (2 = usage/tooling error, 1 = missing
+// binary or budget breach). The one intentional tightening: --budget-mb
+// must be a fully numeric value (awk silently accepted trailing garbage).
+//
+// Usage:
+//   harn run scripts/check_binary_size.harn -- [options]
+//
+// Note: the `harn run` sandbox scopes filesystem access to the workspace
+// root. When HARN_BIN / CARGO_TARGET_DIR / --report-dir point outside the
+// repo, run with `harn run --no-sandbox` (CI keeps everything in-tree).
+/** The --help text (bash `usage()` heredoc, invocation line updated). */
+pub fn usage_text() -> string {
+  return """
+Usage: harn run scripts/check_binary_size.harn -- [options]
+
+Build the release harn binary with symbol stripping enabled, assert it stays
+below the configured size budget, and emit a cargo-bloat top-crates report.
+
+Options:
+  --no-build           Check an already-built release binary
+  --target TARGET      Cargo target triple to build/check
+  --bin PATH           Override the harn binary path
+  --budget-mb MB       Maximum binary size in MiB (default: 189)
+  --report-dir DIR     Directory for binary-size and cargo-bloat reports
+  --skip-bloat         Only write binary-size.txt; do not run cargo-bloat
+  -h, --help           Show this help
+
+Environment:
+  BINARY_SIZE_BUDGET_MB   Default budget in MiB
+  BINARY_SIZE_REPORT_DIR  Default report directory
+  CARGO_TARGET_DIR        Cargo target directory
+  HARN_BIN                Default harn binary path
+  HARN_RELEASE_TARGET     Default Cargo target triple
+""".trim()
+}
+
+/**
+ * Parse CLI options over env-supplied defaults. Returns
+ * `{ok: true, opts}` or `{ok: false, message, show_usage}` (unknown
+ * arguments also print the usage, missing values do not — matching the
+ * bash argument loop). `opts.help` short-circuits to the usage text.
+ */
+pub fn parse_args(args: list<string>, defaults) {
+  var opts = {
+    build_release: true,
+    emit_bloat: true,
+    target: defaults.target,
+    harn_bin: defaults.harn_bin,
+    budget_mb: defaults.budget_mb,
+    report_dir: defaults.report_dir,
+    help: false,
+  }
+  var i = 0
+  while i < args.count {
+    let a = args[i]
+    if a == "--no-build" {
+      opts = {...opts, build_release: false}
+      i = i + 1
+      continue
+    }
+    if a == "--skip-bloat" {
+      opts = {...opts, emit_bloat: false}
+      i = i + 1
+      continue
+    }
+    if a == "-h" || a == "--help" {
+      opts = {...opts, help: true}
+      i = i + 1
+      continue
+    }
+    if a == "--target" || a == "--bin" || a == "--budget-mb" || a == "--report-dir" {
+      if i + 1 >= args.count {
+        let noun = if a == "--bin" || a == "--report-dir" {
+          "path"
+        } else {
+          "value"
+        }
+        return {ok: false, message: "error: ${a} requires a ${noun}", show_usage: false}
+      }
+      let value = args[i + 1]
+      if a == "--target" {
+        opts = {...opts, target: value}
+      } else if a == "--bin" {
+        opts = {...opts, harn_bin: value}
+      } else if a == "--budget-mb" {
+        opts = {...opts, budget_mb: value}
+      } else {
+        opts = {...opts, report_dir: value}
+      }
+      i = i + 2
+      continue
+    }
+    return {ok: false, message: "error: unknown argument: ${a}", show_usage: true}
+  }
+  return {ok: true, opts: opts}
+}
+
+/**
+ * Parse and validate the MiB budget: must be a number > 0. Returns the
+ * float or nil (the awk `mb > 0` gate, minus awk's tolerance for
+ * trailing garbage).
+ */
+pub fn parse_budget_mb(raw: string) -> float? {
+  let mb = to_float(raw)
+  if mb == nil || !(mb > 0.0) {
+    return nil
+  }
+  return mb
+}
+
+/** MiB budget to bytes: awk `printf "%.0f", mb * 1024 * 1024`. */
+pub fn budget_bytes_of(mb: float) -> int {
+  return round(mb * 1024.0 * 1024.0)
+}
+
+/** Bytes to MiB with two decimals: awk `printf "%.2f", bytes / 1024 / 1024`. */
+pub fn format_mib(bytes: int) -> string {
+  let cents = round(bytes * 100.0 / 1024.0 / 1024.0)
+  let whole = cents / 100
+  let frac = cents % 100
+  let frac_str = if frac < 10 {
+    "0${frac}"
+  } else {
+    "${frac}"
+  }
+  return "${whole}.${frac_str}"
+}
+
+/** Default binary path for a target triple (`.exe` for windows/msvc). */
+pub fn default_bin_path(target_dir: string, target: string) -> string {
+  let exe_suffix = if target.contains("windows") || target.contains("msvc") {
+    ".exe"
+  } else {
+    ""
+  }
+  let target_component = if target != "" {
+    "${target}/"
+  } else {
+    ""
+  }
+  return "${target_dir}/${target_component}release/harn${exe_suffix}"
+}
+
+/** The size-report block (printed to stdout and written to binary-size.txt). */
+pub fn report_lines(harn_bin: string, target: string, actual_bytes: int, budget_bytes: int) -> list<string> {
+  return [
+    "harn binary size",
+    "================",
+    "binary: ${harn_bin}",
+    "target: ${if target != "" { target } else { "host" }}",
+    "bytes: ${actual_bytes}",
+    "mib: ${format_mib(actual_bytes)}",
+    "budget_bytes: ${budget_bytes}",
+    "budget_mib: ${format_mib(budget_bytes)}",
+  ]
+}
+
+/** Env var value or `fallback` when unset/empty. */
+fn env_or(name: string, fallback: string) -> string {
+  let v = harness.env.get(name)
+  if v == nil || v == "" {
+    return fallback
+  }
+  return v
+}
+
+/** Absolute repo root (the glob search root marker). */
+fn repo_root() -> string {
+  for g in harness.fs.glob("Cargo.toml") {
+    let idx = g.index_of("/./")
+    if idx >= 0 {
+      return g.substring(0, idx)
+    }
+  }
+  return "."
+}
+
+/** True when `cmd` resolves on PATH (bash `command -v`). */
+fn command_exists(cmd: string) -> bool {
+  let res = try {
+    harness.process.spawn_captured({cmd: "sh", args: ["-c", "command -v ${cmd}"]})
+  } catch (err) {
+    return false
+  }
+  return res.success
+}
+
+@complexity(allow)
+pipeline main(task) {
+  let defaults = {
+    target: env_or("HARN_RELEASE_TARGET", ""),
+    harn_bin: env_or("HARN_BIN", ""),
+    budget_mb: env_or("BINARY_SIZE_BUDGET_MB", "189"),
+    report_dir: env_or("BINARY_SIZE_REPORT_DIR", ""),
+  }
+  let parsed = parse_args(argv, defaults)
+  if !parsed.ok {
+    __io_eprintln(parsed.message)
+    if parsed.show_usage {
+      __io_eprintln(usage_text())
+    }
+    return 2
+  }
+  let opts = parsed.opts
+  if opts.help {
+    __io_println(usage_text())
+    return 0
+  }
+  let budget_mb = parse_budget_mb(opts.budget_mb)
+  if budget_mb == nil {
+    __io_eprintln("error: --budget-mb must be a positive number, got '${opts.budget_mb}'")
+    return 2
+  }
+  let cargo_target_dir = env_or("CARGO_TARGET_DIR", "")
+  let target_dir = if cargo_target_dir != "" {
+    cargo_target_dir
+  } else {
+    "${repo_root()}/target"
+  }
+  let target: string = opts.target
+  var target_args: list<string> = []
+  if target != "" {
+    target_args = ["--target", target]
+  }
+  var harn_bin: string = opts.harn_bin
+  if harn_bin == "" {
+    harn_bin = default_bin_path(target_dir, target)
+  }
+  var report_dir: string = opts.report_dir
+  if report_dir == "" {
+    report_dir = "${target_dir}/binary-size/${if target != "" { target } else { "host" }}"
+  }
+  let budget_bytes = budget_bytes_of(budget_mb)
+  if opts.build_release {
+    let strip = env_or("CARGO_PROFILE_RELEASE_STRIP", "symbols")
+    let build = harness.process
+      .spawn_captured(
+      {
+        cmd: "cargo",
+        args: ["build", "--release", "-p", "harn-cli", "--bin", "harn"] + target_args,
+        env: {CARGO_PROFILE_RELEASE_STRIP: strip},
+      },
+    )
+    __io_print(build.stdout)
+    __io_eprint(build.stderr)
+    if !build.success {
+      return build.exit_code
+    }
+  }
+  if !harness.fs.exists(harn_bin) {
+    __io_eprintln("error: harn binary not found at ${harn_bin}")
+    return 1
+  }
+  let actual_bytes: int = harness.fs.stat(harn_bin).size
+  let size_report = "${report_dir}/binary-size.txt"
+  let bloat_report = "${report_dir}/cargo-bloat-crates.txt"
+  harness.fs.mkdir(report_dir)
+  let report = report_lines(harn_bin, target, actual_bytes, budget_bytes).join("\n") + "\n"
+  __io_print(report)
+  harness.fs.write_text(size_report, report)
+  var size_ok = true
+  if actual_bytes > budget_bytes {
+    size_ok = false
+    __io_eprintln(
+      "error: harn binary is ${format_mib(actual_bytes)} MiB, above budget ${format_mib(budget_bytes)} MiB",
+    )
+  }
+  if opts.emit_bloat {
+    if !command_exists("cargo-bloat") {
+      __io_eprintln("error: cargo-bloat is required to produce ${bloat_report}")
+      return 2
+    }
+    /* `cargo bloat` performs its own analysis build and can relink the
+     * target binary with different metadata. Preserve the exact stripped
+     * binary whose size we checked so the script is safe to run before a
+     * packaging step. The scratch dir lives in the workspace (the runtime
+     * sandbox only permits writes inside the workspace root). */
+    let mk = harness.process
+      .spawn_captured({cmd: "mktemp", args: ["-d", "harn-binary-size.XXXXXX"]})
+    if !mk.success {
+      __io_eprintln("error: could not create temp directory")
+      return 1
+    }
+    let restore_dir = mk.stdout.trim()
+    let checked_binary = "${restore_dir}/harn"
+    harness.process.spawn_captured({cmd: "cp", args: ["-p", harn_bin, checked_binary]})
+    defer {
+      if harness.fs.exists(checked_binary) {
+        harness.process.spawn_captured({cmd: "cp", args: ["-p", checked_binary, harn_bin]})
+      }
+      harness.process.spawn_captured({cmd: "rm", args: ["-rf", restore_dir]})
+    }
+    var bloat_args = ["bloat", "--release", "--crates", "-p", "harn-cli", "--bin", "harn"]
+      + target_args
+    if cargo_target_dir != "" {
+      bloat_args = bloat_args + ["--target-dir", cargo_target_dir]
+    }
+    bloat_args = bloat_args + ["-n", "40"]
+    let bloat = harness.process.spawn_captured({cmd: "cargo", args: bloat_args})
+    __io_eprint(bloat.stderr)
+    if !bloat.success {
+      return bloat.exit_code
+    }
+    harness.fs.write_text(bloat_report, bloat.stdout)
+    let tail = "\ncargo-bloat report: ${bloat_report}\n"
+    __io_print(tail)
+    harness.fs.write_text(size_report, report + tail)
+  } else {
+    let tail = "\ncargo-bloat report: skipped\n"
+    __io_print(tail)
+    harness.fs.write_text(size_report, report + tail)
+  }
+  if !size_ok {
+    return 1
+  }
+  return 0
+}

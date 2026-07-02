@@ -3,7 +3,7 @@
 This guide takes a fresh `harn` install from "I have the binary" to
 "I can author, validate, preview, run, and supervise a portable
 workflow bundle." Every command and fixture below is checked in CI by
-`scripts/check_docs_workflow_quickstart.sh`, so the snippets below
+`scripts/check_docs_workflow_quickstart.harn`, so the snippets below
 match what you should see locally.
 
 No paid API credentials are required. The deterministic local runner
