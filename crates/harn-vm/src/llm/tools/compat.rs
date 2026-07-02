@@ -88,7 +88,40 @@ pub(crate) fn normalize_tool_call_shape(
         }
     }
 
+    // Last resort for marker-wrapper names nothing above could unwrap or
+    // infer (e.g. `<|constrain|>json` with an unrecognized argument shape):
+    // strip the `<|...|>` provider template tokens so the call fails as a
+    // clean unknown-name denial — or resolves, when the remainder is a real
+    // tool/alias — instead of leaking raw protocol tokens into the gate,
+    // denial feedback, and telemetry.
+    if is_marker_wrapper {
+        let sanitized = strip_marker_tokens(&normalized_name);
+        if !sanitized.is_empty() {
+            return resolve_semantic_alias(sanitized, arguments);
+        }
+    }
+
     (normalized_name, arguments)
+}
+
+/// Remove every `<|...|>` provider template token span from a tool name.
+/// An unterminated `<|` swallows the rest of the name (it is all marker
+/// residue). Returns the trimmed remainder, which may be empty.
+fn strip_marker_tokens(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    let mut rest = name;
+    while let Some(start) = rest.find("<|") {
+        out.push_str(&rest[..start]);
+        match rest[start..].find("|>") {
+            Some(end) => rest = &rest[start + end + 2..],
+            None => {
+                rest = "";
+                break;
+            }
+        }
+    }
+    out.push_str(rest);
+    out.trim().to_string()
 }
 
 /// Canonicalize SEMANTIC tool aliases that cheap models emit even though the
@@ -319,6 +352,103 @@ fn infer_tool_name_from_arguments(arguments: &serde_json::Value) -> Option<Strin
     None
 }
 
+/// Coerce string-typed argument values onto the shape the tool's registered
+/// schema expects, at the dispatch chokepoint every call passes through.
+///
+/// Grounded in eval-corpus runtime failures: value models deliver
+/// `overwrite: "True"` (Python spelling) where the schema says bool, and a
+/// JSON-encoded STRING (`ops: "[{...}]"`) where the schema says list — both
+/// then die in VM typed-parameter validation. Coercion is applied ONLY on an
+/// unambiguous schema expectation:
+///
+/// * bool: the param type admits booleans (and at most `null`) — a
+///   `string | bool` union stays untouched — and the value is one of the
+///   exact spellings `true`/`True`/`TRUE`/`false`/`False`/`FALSE`.
+/// * list: the param type admits arrays (and at most `null`) and the string
+///   parses cleanly as a JSON array. A string that fails to parse rides
+///   through unchanged so the precise type error still surfaces.
+pub(crate) fn coerce_args_to_schema(
+    name: &str,
+    arguments: serde_json::Value,
+    tools_val: Option<&crate::value::VmValue>,
+) -> serde_json::Value {
+    let serde_json::Value::Object(mut map) = arguments else {
+        return arguments;
+    };
+    let Some(schema) = super::collect_tool_schemas(tools_val, None)
+        .into_iter()
+        .find(|schema| schema.name == name)
+    else {
+        return serde_json::Value::Object(map);
+    };
+    for param in &schema.params {
+        let Some(value) = map.get_mut(&param.name) else {
+            continue;
+        };
+        let serde_json::Value::String(raw) = &*value else {
+            continue;
+        };
+        if type_expr_wants_bool(&param.ty) {
+            match raw.trim() {
+                "true" | "True" | "TRUE" => *value = serde_json::Value::Bool(true),
+                "false" | "False" | "FALSE" => *value = serde_json::Value::Bool(false),
+                _ => {}
+            }
+        } else if type_expr_wants_list(&param.ty) {
+            let trimmed = raw.trim();
+            if trimmed.starts_with('[') {
+                if let Ok(parsed @ serde_json::Value::Array(_)) =
+                    serde_json::from_str::<serde_json::Value>(trimmed)
+                {
+                    *value = parsed;
+                }
+            }
+        }
+    }
+    serde_json::Value::Object(map)
+}
+
+/// True when the schema type UNAMBIGUOUSLY expects a boolean: a bare bool
+/// primitive/literal, or a union whose members are all bool (plus at most
+/// `null`). A union that also admits strings is ambiguous — never coerce.
+fn type_expr_wants_bool(ty: &super::type_expr::TypeExpr) -> bool {
+    use super::type_expr::TypeExpr;
+    match ty {
+        // Pipeline VM-dict schemas keep the raw Harn spelling (`bool`);
+        // JSON-schema-derived ones use `boolean`. Accept both.
+        TypeExpr::Primitive(name) => name == "boolean" || name == "bool",
+        TypeExpr::Literal(value) => value.is_boolean(),
+        TypeExpr::Union(items) => {
+            items.iter().any(type_expr_wants_bool)
+                && items.iter().all(|item| {
+                    type_expr_wants_bool(item)
+                        || matches!(item, TypeExpr::Primitive(name) if name == "null")
+                })
+        }
+        _ => false,
+    }
+}
+
+/// True when the schema type UNAMBIGUOUSLY expects a list: an array type, or
+/// a union whose members are all arrays (plus at most `null`).
+fn type_expr_wants_list(ty: &super::type_expr::TypeExpr) -> bool {
+    use super::type_expr::TypeExpr;
+    match ty {
+        TypeExpr::Array(_) => true,
+        // Pipeline VM-dict schemas keep the raw Harn spelling (`list`);
+        // JSON-schema-derived ones use `array`. Accept both.
+        TypeExpr::Primitive(name) => name == "array" || name == "list",
+        TypeExpr::Union(items) => {
+            items.iter().any(type_expr_wants_list)
+                && items.iter().all(|item| {
+                    type_expr_wants_list(item)
+                        || matches!(item, TypeExpr::Primitive(name) if name == "null")
+                })
+        }
+        _ => false,
+    }
+}
+
 fn unwrap_generic_tool_arguments(
     arguments: &serde_json::Value,
 ) -> Option<(String, serde_json::Value)> {
@@ -402,13 +532,37 @@ mod tests {
     }
 
     #[test]
-    fn preserves_unrecognized_harmony_marker_wrapper_shape() {
+    fn sanitizes_unrecognized_harmony_marker_wrapper_name() {
+        // Nothing to unwrap or infer: the `<|...|>` provider tokens are
+        // stripped so the call fails as a clean unknown-name denial instead of
+        // leaking raw protocol tokens into the gate and telemetry.
         let arguments = serde_json::json!({"intent": "summarize", "file": "src/lib.rs"});
         let (name, normalized_arguments) =
             normalize_tool_call_shape("<|constrain|>json", arguments.clone());
 
-        assert_eq!(name, "<|constrain|>json");
+        assert_eq!(name, "json");
         assert_eq!(normalized_arguments, arguments);
+    }
+
+    #[test]
+    fn marker_wrapper_remainder_resolves_via_alias_table() {
+        // The sanitized remainder is a shell synonym: resolve it like any
+        // other alias instead of denying on the marker-wrapped name.
+        let (name, mapped) = normalize_tool_call_shape(
+            "<|constrain|>bash",
+            serde_json::json!({"script": "cargo test"}),
+        );
+        assert_eq!(name, "run");
+        assert_eq!(mapped["command"], "cargo test");
+    }
+
+    #[test]
+    fn all_marker_tokens_name_keeps_wrapper_shape() {
+        // A name that is NOTHING BUT marker tokens has no remainder to
+        // resolve; keep the wrapper name so the denial names what arrived.
+        let arguments = serde_json::json!({"payload": 1});
+        let (name, _) = normalize_tool_call_shape("<|constrain|>", arguments);
+        assert_eq!(name, "<|constrain|>");
     }
 
     #[test]

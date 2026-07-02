@@ -251,6 +251,43 @@ pub(crate) fn parse_bare_calls_in_body(
                                 }
                             }
                         } else if object_arg_start {
+                            // Corpus-tolerance: cheap models call compat
+                            // aliases as top-level TEXT tools — edit-action
+                            // verbs (`replace_range({...})`, `create({...})`)
+                            // and shell synonyms (`bash({...})`). The native
+                            // channel already folds these via
+                            // `normalize_tool_call_shape`; apply the same fold
+                            // here, but ONLY when the folded name is a
+                            // registered tool so genuine unknown names keep
+                            // their actionable diagnostic.
+                            if let Ok((arguments, consumed)) =
+                                parse_ts_call_from(&text[k..], name_str.to_string())
+                            {
+                                let (resolved_name, resolved_args) =
+                                    crate::llm::tools::normalize_tool_call_shape(
+                                        name_str, arguments,
+                                    );
+                                if resolved_name != name_str && known.contains(&resolved_name) {
+                                    calls.push(serde_json::json!({
+                                        "id": format!("tc_{}", calls.len()),
+                                        "name": resolved_name,
+                                        "arguments": resolved_args,
+                                    }));
+                                    let mut end = k + consumed;
+                                    while end < bytes.len()
+                                        && (bytes[end] == b' ' || bytes[end] == b'\t')
+                                    {
+                                        end += 1;
+                                    }
+                                    if end < bytes.len() && bytes[end] == b'>' {
+                                        end += 1;
+                                    }
+                                    call_ranges.push((j, end));
+                                    i = end;
+                                    at_line_start = bytes.get(i.saturating_sub(1)) == Some(&b'\n');
+                                    continue;
+                                }
+                            }
                             errors.push(unknown_tool_feedback(name_str, &known));
                             i = k + name_len + 1;
                             at_line_start = false;
