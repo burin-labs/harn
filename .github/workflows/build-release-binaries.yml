@@ -101,7 +101,9 @@ jobs:
       version: ${{ steps.resolve.outputs.version }}
       major_minor: ${{ steps.resolve.outputs.major_minor }}
       should_build_binaries: ${{ steps.resolve.outputs.should_build_binaries }}
+      should_finalize_release: ${{ steps.resolve.outputs.should_finalize_release }}
       should_publish_container: ${{ steps.resolve.outputs.should_publish_container }}
+      build_matrix: ${{ steps.resolve.outputs.build_matrix }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -125,7 +127,41 @@ jobs:
           REF="${INPUT_TAG:-$REF_NAME}"
           IS_RELEASE=false
           SHOULD_BUILD_BINARIES=false
+          SHOULD_FINALIZE_RELEASE=false
           SHOULD_PUBLISH_CONTAINER=false
+          FULL_BUILD_MATRIX='[
+            {
+              "target": "x86_64-apple-darwin",
+              "os": "macos-15-intel",
+              "release_codegen_units": 16,
+              "use_sccache": "false"
+            },
+            {
+              "target": "aarch64-apple-darwin",
+              "os": "macos-latest",
+              "release_codegen_units": 16,
+              "use_sccache": "false"
+            },
+            {
+              "target": "x86_64-unknown-linux-gnu",
+              "os": "ubuntu-latest",
+              "release_codegen_units": 16,
+              "use_sccache": "true"
+            },
+            {
+              "target": "aarch64-unknown-linux-gnu",
+              "os": "ubuntu-24.04-arm",
+              "release_codegen_units": 16,
+              "use_sccache": "true"
+            },
+            {
+              "target": "x86_64-pc-windows-msvc",
+              "os": "windows-latest",
+              "release_codegen_units": 16,
+              "use_sccache": "false"
+            }
+          ]'
+          BUILD_MATRIX="[]"
           if [[ -n "$INPUT_TAG" || "$REF_TYPE" == "tag" ]]; then
             IS_RELEASE=true
             if [[ ! "$REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -137,6 +173,7 @@ jobs:
             # Cron-driven warm-cache run. Always proceed — the whole point
             # is to refresh the cache against GitHub's 7-day eviction.
             SHOULD_BUILD_BINARIES=true
+            BUILD_MATRIX="$FULL_BUILD_MATRIX"
             VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
             echo "::notice::Warm-cache-only run (schedule). Building release binaries to populate the per-target Swatinem rust-cache on main. No sign/notarize/package/upload/release/container."
           elif [[ "$EVENT_NAME" == "push" && "$REF_NAME" == "main" ]]; then
@@ -152,6 +189,7 @@ jobs:
               CHANGED_KEYING_FILES="$(git diff --name-only HEAD^ HEAD -- Cargo.lock Cargo.toml '**/Cargo.toml' rust-toolchain.toml scripts/check_binary_size.harn .github/workflows/build-release-binaries.yml 2>/dev/null || true)"
               if [[ -n "$CHANGED_KEYING_FILES" ]]; then
                 SHOULD_BUILD_BINARIES=true
+                BUILD_MATRIX="$FULL_BUILD_MATRIX"
                 echo "::notice::Warm-cache-only run (push main). Keying files changed:"
                 while IFS= read -r f; do printf '::notice::  %s\n' "$f"; done <<<"$CHANGED_KEYING_FILES"
                 echo "::notice::Building release binaries to populate the per-target Swatinem rust-cache on main. No sign/notarize/package/upload/release/container."
@@ -165,37 +203,79 @@ jobs:
           MAJOR_MINOR="$(echo "$VERSION" | awk -F. '{print $1"."$2}')"
 
           if [[ "$IS_RELEASE" == "true" ]]; then
-            EXPECTED_ASSETS=(
+            EXPECTED_ARCHIVES=(
               "harn-aarch64-apple-darwin.tar.gz"
               "harn-aarch64-unknown-linux-gnu.tar.gz"
               "harn-x86_64-apple-darwin.tar.gz"
               "harn-x86_64-pc-windows-msvc.zip"
               "harn-x86_64-unknown-linux-gnu.tar.gz"
+            )
+            EXPECTED_METADATA=(
               "SHA256SUMS"
               "release-assets.json"
             )
+            EXPECTED_ASSETS=("${EXPECTED_ARCHIVES[@]}" "${EXPECTED_METADATA[@]}")
+            target_for_archive() {
+              case "$1" in
+                harn-aarch64-apple-darwin.tar.gz) echo "aarch64-apple-darwin" ;;
+                harn-aarch64-unknown-linux-gnu.tar.gz) echo "aarch64-unknown-linux-gnu" ;;
+                harn-x86_64-apple-darwin.tar.gz) echo "x86_64-apple-darwin" ;;
+                harn-x86_64-pc-windows-msvc.zip) echo "x86_64-pc-windows-msvc" ;;
+                harn-x86_64-unknown-linux-gnu.tar.gz) echo "x86_64-unknown-linux-gnu" ;;
+                *) return 1 ;;
+              esac
+            }
 
             if [[ "$FORCE_REBUILD" == "true" ]]; then
               SHOULD_BUILD_BINARIES=true
+              SHOULD_FINALIZE_RELEASE=true
               SHOULD_PUBLISH_CONTAINER=true
+              BUILD_MATRIX="$FULL_BUILD_MATRIX"
               echo "::notice::force_rebuild=true; rebuilding release binaries and re-publishing container tags for $REF."
             else
               MISSING_ASSETS=()
-              if RELEASE_ASSETS="$(gh release view "$REF" --json assets --jq '.assets[].name' 2>/dev/null)"; then
+              MISSING_ARCHIVE_TARGETS=()
+              RELEASE_PRERELEASE=false
+              if RELEASE_INFO="$(gh release view "$REF" --json assets,isPrerelease 2>/dev/null)"; then
+                RELEASE_ASSETS="$(jq -r '.assets[].name' <<<"$RELEASE_INFO")"
+                RELEASE_PRERELEASE="$(jq -r '.isPrerelease' <<<"$RELEASE_INFO")"
                 for ASSET in "${EXPECTED_ASSETS[@]}"; do
                   if ! grep -Fxq "$ASSET" <<<"$RELEASE_ASSETS"; then
                     MISSING_ASSETS+=("$ASSET")
                   fi
                 done
+                for ARCHIVE in "${EXPECTED_ARCHIVES[@]}"; do
+                  if ! grep -Fxq "$ARCHIVE" <<<"$RELEASE_ASSETS"; then
+                    MISSING_ARCHIVE_TARGETS+=("$(target_for_archive "$ARCHIVE")")
+                  fi
+                done
               else
                 MISSING_ASSETS=("${EXPECTED_ASSETS[@]}")
+                for ARCHIVE in "${EXPECTED_ARCHIVES[@]}"; do
+                  MISSING_ARCHIVE_TARGETS+=("$(target_for_archive "$ARCHIVE")")
+                done
+                RELEASE_PRERELEASE=true
               fi
 
               if (( ${#MISSING_ASSETS[@]} == 0 )); then
                 echo "::notice::All expected GitHub release assets already exist for $REF; skipping binary build matrix."
               else
-                SHOULD_BUILD_BINARIES=true
                 printf '::notice::Missing release assets for %s: %s\n' "$REF" "${MISSING_ASSETS[*]}"
+              fi
+              if (( ${#MISSING_ARCHIVE_TARGETS[@]} > 0 )); then
+                SHOULD_BUILD_BINARIES=true
+                TARGETS_JSON="$(printf '%s\n' "${MISSING_ARCHIVE_TARGETS[@]}" | jq -R . | jq -sc 'unique')"
+                BUILD_MATRIX="$(jq -c --argjson targets "$TARGETS_JSON" '[.[] | select(.target as $target | $targets | index($target))]' <<<"$FULL_BUILD_MATRIX")"
+                echo "::notice::Rebuilding only missing archive targets: ${MISSING_ARCHIVE_TARGETS[*]}"
+              fi
+              if (( ${#MISSING_ASSETS[@]} > 0 )) || [[ "$RELEASE_PRERELEASE" == "true" ]]; then
+                SHOULD_FINALIZE_RELEASE=true
+              fi
+              if (( ${#MISSING_ASSETS[@]} > 0 )) && (( ${#MISSING_ARCHIVE_TARGETS[@]} == 0 )); then
+                echo "::notice::Only release metadata is missing for $REF; skipping binary build matrix and regenerating release metadata from existing archives."
+              fi
+              if [[ "$RELEASE_PRERELEASE" == "true" ]] && (( ${#MISSING_ASSETS[@]} == 0 )); then
+                echo "::notice::Release $REF has all assets but is still marked prerelease; finalizing without rebuilding."
               fi
 
               echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin >/dev/null 2>&1 || true
@@ -214,7 +294,11 @@ jobs:
             echo "version=$VERSION"
             echo "major_minor=$MAJOR_MINOR"
             echo "should_build_binaries=$SHOULD_BUILD_BINARIES"
+            echo "should_finalize_release=$SHOULD_FINALIZE_RELEASE"
             echo "should_publish_container=$SHOULD_PUBLISH_CONTAINER"
+            echo "build_matrix<<__JSON__"
+            echo "$BUILD_MATRIX"
+            echo "__JSON__"
           } >> "$GITHUB_OUTPUT"
           {
             echo "### Release binary context"
@@ -226,7 +310,9 @@ jobs:
             echo "| Version | $VERSION |"
             echo "| Release mode | $IS_RELEASE |"
             echo "| Build binaries | $SHOULD_BUILD_BINARIES |"
+            echo "| Finalize release | $SHOULD_FINALIZE_RELEASE |"
             echo "| Publish container | $SHOULD_PUBLISH_CONTAINER |"
+            echo "| Build matrix | \`$BUILD_MATRIX\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
   # Create the GitHub release up front as a PRERELEASE placeholder so each
@@ -296,42 +382,14 @@ jobs:
       # avoidably missing archives.
       fail-fast: false
       matrix:
-        include:
-          # release_codegen_units: 16 across the board. A higher unit count
-          # parallelizes codegen, cuts wall-clock, AND lowers peak linker
-          # memory during the LTO final link — the latter is what was OOM-
-          # killing the aarch64 leg mid-link. The binary-size cost vs cgu=1
-          # is a few percent and is more than offset by `strip = symbols`
-          # (set in the Build step env below).
-          - target: x86_64-apple-darwin
-            # Build Intel artifacts on Intel hardware. Cross-building this leg
-            # on arm64 `macos-latest` repeatedly left sccache/rustc orphaned and
-            # pushed the build past 85 minutes.
-            os: macos-15-intel
-            release_codegen_units: 16
-            use_sccache: "false"
-          - target: aarch64-apple-darwin
-            os: macos-latest
-            release_codegen_units: 16
-            use_sccache: "false"
-          - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
-            release_codegen_units: 16
-            use_sccache: "true"
-          - target: aarch64-unknown-linux-gnu
-            # Build arm64 Linux NATIVELY on a free public-repo arm64 runner
-            # instead of cross-compiling on x86. The x86 cross path repeatedly
-            # lost the runner during the memory-hungry cross LTO link (empty
-            # logs, all steps null, ~60 min in) — the chronic release blocker.
-            # Native build needs no cross gcc/linker and links with far less
-            # peak memory. ubuntu-24.04-arm is free + GA for public repos.
-            os: ubuntu-24.04-arm
-            release_codegen_units: 16
-            use_sccache: "true"
-          - target: x86_64-pc-windows-msvc
-            os: windows-latest
-            release_codegen_units: 16
-            use_sccache: "false"
+        # release_codegen_units: 16 across the board. A higher unit count
+        # parallelizes codegen, cuts wall-clock, AND lowers peak linker
+        # memory during the LTO final link — the latter is what was OOM-
+        # killing the aarch64 leg mid-link. The binary-size cost vs cgu=1
+        # is a few percent and is more than offset by `strip = symbols`
+        # (set in the Build step env below). Release-recovery dispatches a
+        # subset of this matrix when only one target archive is missing.
+        include: ${{ fromJSON(needs.setup.outputs.build_matrix) }}
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -799,12 +857,18 @@ jobs:
 
   release:
     name: Create GitHub release
-    needs: [setup, build]
+    needs: [setup, prepare_release, build]
     # is_release gates out warm-cache-only events (push to main, schedule):
     # they run the build matrix to populate the cache but must not author a
-    # GitHub release. should_build_binaries gates the all-assets-present
-    # tag-push case where there's nothing to upload.
-    if: needs.setup.outputs.is_release == 'true' && needs.setup.outputs.should_build_binaries == 'true' && !cancelled() && !failure()
+    # GitHub release. should_finalize_release lets metadata-only recovery
+    # regenerate checksums/manifests from existing release archives without
+    # paying for a no-op binary matrix.
+    if: >-
+      always() &&
+      needs.setup.outputs.is_release == 'true' &&
+      needs.setup.outputs.should_finalize_release == 'true' &&
+      (needs.prepare_release.result == 'success' || needs.prepare_release.result == 'skipped') &&
+      (needs.build.result == 'success' || needs.build.result == 'skipped')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -813,11 +877,44 @@ jobs:
         with:
           ref: ${{ needs.setup.outputs.ref }}
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          path: artifacts
-          pattern: harn-*
-          merge-multiple: true
+      - name: Download release archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ needs.setup.outputs.ref }}
+        run: |
+          set -euo pipefail
+          expected=(
+            harn-aarch64-apple-darwin.tar.gz
+            harn-aarch64-unknown-linux-gnu.tar.gz
+            harn-x86_64-apple-darwin.tar.gz
+            harn-x86_64-pc-windows-msvc.zip
+            harn-x86_64-unknown-linux-gnu.tar.gz
+          )
+          mkdir -p artifacts
+          for attempt in $(seq 1 12); do
+            rm -f artifacts/*
+            gh release download "$REF" \
+              --repo "$GITHUB_REPOSITORY" \
+              --pattern 'harn-*.tar.gz' \
+              --pattern 'harn-*.zip' \
+              --dir artifacts || true
+            missing=()
+            for file in "${expected[@]}"; do
+              if [ ! -f "artifacts/$file" ]; then
+                missing+=("$file")
+              fi
+            done
+            if (( ${#missing[@]} == 0 )); then
+              exit 0
+            fi
+            if (( attempt == 12 )); then
+              printf '::error::Missing release archives after %s attempts: %s\n' "$attempt" "${missing[*]}"
+              find artifacts -maxdepth 1 -type f -print | sort
+              exit 1
+            fi
+            printf '::notice::Release archive(s) not visible yet for %s: %s; retrying download (%s/12).\n' "$REF" "${missing[*]}" "$attempt"
+            sleep 10
+          done
 
       - name: Render release notes from changelog
         # This job has no Rust toolchain (it only assembles artifacts), so
