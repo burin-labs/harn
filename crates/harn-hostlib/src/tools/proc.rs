@@ -139,7 +139,10 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
         env,
         env_mode: req.env_mode,
         use_stdin: req.stdin.is_some(),
-        configure_process_group: false,
+        // Foreground children get their own process group too, so the
+        // interrupt path below (scope cancellation / deadline expiry) can
+        // reap grandchildren with a single group signal.
+        configure_process_group: true,
     };
     let mut handle = process_handle::spawn_process(spec)
         .map_err(|e| process_error_to_hostlib(req.builtin, e))?;
@@ -177,7 +180,12 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
         })
     });
 
-    let wait_result = handle.wait_with_timeout(req.timeout);
+    // Poll `harn_vm::op_interrupt::requested` alongside the child wait so
+    // scope cancellation, `deadline` expiry, and VM drop terminate the
+    // child's process group instead of orphaning it. `background: true`
+    // spawns bypass this path (see `tools/long_running.rs`) and remain the
+    // fire-and-forget escape hatch.
+    let wait_result = handle.wait_with_timeout(req.timeout, &harn_vm::op_interrupt::requested);
     if wait_result.is_err() {
         handle.killer().kill();
     }
@@ -191,25 +199,30 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
 
     let stdout_bytes: Vec<u8> = out_rx.try_iter().flatten().collect();
     let stderr_bytes: Vec<u8> = err_rx.try_iter().flatten().collect();
-    let (status, timed_out): (Option<process_handle::ExitStatus>, bool) =
-        wait_result.map_err(|error| HostlibError::Backend {
-            builtin: req.builtin,
-            message: format!("wait failed: {error}"),
-        })?;
+    let outcome = wait_result.map_err(|error| HostlibError::Backend {
+        builtin: req.builtin,
+        message: format!("wait failed: {error}"),
+    })?;
 
     let ended_at = Some(now_rfc3339());
 
-    let exited = status.is_some();
-    let (exit_code, signal) = match status {
-        Some(s) => decode_status(s),
-        None => (-1, Some("SIGKILL".to_string())),
-    };
-    let command_status = if timed_out {
-        CommandStatus::TimedOut
-    } else if exited {
-        CommandStatus::Completed
-    } else {
-        CommandStatus::Killed
+    let (command_status, exit_code, signal, timed_out) = match outcome {
+        process_handle::WaitOutcome::Exited(status) => {
+            let (exit_code, signal) = decode_status(status);
+            (CommandStatus::Completed, exit_code, signal, false)
+        }
+        process_handle::WaitOutcome::TimedOut => (
+            CommandStatus::TimedOut,
+            -1,
+            Some("SIGKILL".to_string()),
+            true,
+        ),
+        process_handle::WaitOutcome::Interrupted => (
+            CommandStatus::Killed,
+            -1,
+            Some("SIGTERM".to_string()),
+            false,
+        ),
     };
     let artifacts = persist_artifacts(&command_id, &stdout_bytes, &stderr_bytes, None)?;
     let (stdout, stderr) = inline_output(&stdout_bytes, &stderr_bytes, req.capture);

@@ -243,6 +243,46 @@ fn run_command_kills_child_when_timeout_elapses() {
 }
 
 #[test]
+fn run_command_spawns_foreground_children_in_their_own_process_group() {
+    // The interrupt path (scope cancel / deadline / VM drop) signals the
+    // child's process group so grandchildren are reaped too — the spawn
+    // must therefore request one.
+    let (spawner, _controller, _guard) = install_mock_with(MockProcessConfig::completed(0));
+
+    let mut req = dict();
+    req.insert("argv".into(), vlist_str(&["true"]));
+    require_dict(call("hostlib_tools_run_command", req).unwrap());
+
+    let captured = spawner.captured();
+    assert_eq!(captured.len(), 1);
+    assert!(
+        captured[0].configure_process_group,
+        "foreground run_command must put its child in its own process group"
+    );
+}
+
+#[test]
+fn run_command_kills_child_when_scope_interrupt_fires() {
+    // A pre-armed cancel token (the shape scope cancellation / deadline
+    // expiry / VM drop takes by the time the builtin polls it) must kill a
+    // still-running child and report `killed` — deterministically, with no
+    // real subprocess.
+    let (_spawner, controller, _guard) = install_mock_with(MockProcessConfig::running());
+
+    let cancel = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let _interrupt = harn_vm::op_interrupt::install(Some(cancel), None);
+
+    let mut req = dict();
+    req.insert("argv".into(), vlist_str(&["sleep", "30"]));
+    let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
+
+    assert_eq!(require_str(&resp, "status"), "killed");
+    assert!(!require_bool(&resp, "timed_out"));
+    assert_eq!(require_int(&resp, "exit_code"), -1);
+    assert!(controller.was_killed(), "interrupt must kill the child");
+}
+
+#[test]
 fn run_command_surfaces_wait_errors() {
     let config = MockProcessConfig {
         wait_error: Some("wait blew up".to_string()),

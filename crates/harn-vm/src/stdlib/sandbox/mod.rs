@@ -138,8 +138,7 @@ pub(crate) trait SandboxBackend {
     ) -> Result<Output, VmError> {
         let mut command = build_std_command::<Self>(program, args, policy, profile)?;
         apply_process_config(&mut command, config);
-        command
-            .output()
+        crate::op_interrupt::capture_output_interruptible(&mut command)
             .map_err(|error| process_spawn_error(&error).unwrap_or_else(|| spawn_error(error)))
     }
 }
@@ -470,7 +469,11 @@ pub fn command_output(
             let mut command = Command::new(program);
             command.args(args);
             apply_process_config(&mut command, config);
-            command.output().map_err(|error| {
+            // Interrupt-aware `Command::output()`: puts the child in its own
+            // kill group and gracefully terminates the whole group when the
+            // invoking scope is cancelled, a deadline fires, or the VM is
+            // dropped. See `crate::op_interrupt`.
+            crate::op_interrupt::capture_output_interruptible(&mut command).map_err(|error| {
                 process_spawn_error(&error).unwrap_or_else(|| spawn_error(error))
             })?
         }

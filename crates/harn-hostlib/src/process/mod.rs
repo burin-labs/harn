@@ -12,7 +12,7 @@ pub mod real;
 
 pub use handle::{
     current_spawner, install_spawner, spawn_process, EnvMode, ExitStatus, ProcessError,
-    ProcessHandle, ProcessKiller, ProcessSpawner, SpawnSpec, SpawnerGuard,
+    ProcessHandle, ProcessKiller, ProcessSpawner, SpawnSpec, SpawnerGuard, WaitOutcome,
 };
 pub use mock::{MockHandleController, MockProcess, MockProcessConfig, MockSpawner};
 pub use real::default_spawner;

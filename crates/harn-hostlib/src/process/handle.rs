@@ -171,18 +171,36 @@ pub trait ProcessHandle: Send {
     /// Take ownership of the stderr reader.
     fn take_stderr(&mut self) -> Option<Box<dyn Read + Send>>;
 
-    /// Wait for the process to exit, optionally with a timeout. Returns
-    /// `(Some(status), false)` when the process exited cleanly,
-    /// `(None, true)` when the timeout elapsed (and the spawner killed the
-    /// child), or `(None, false)` when the wait failed for a reason other
-    /// than the timeout.
+    /// Wait for the process to exit, optionally with a timeout, while
+    /// polling `interrupt`. On timeout the spawner kills the child
+    /// (SIGKILL, historical semantics) and reports
+    /// [`WaitOutcome::TimedOut`]. When `interrupt` returns `true` (scope
+    /// cancellation, `deadline` expiry — see `harn_vm::op_interrupt`) the
+    /// spawner gracefully terminates the child's process group (SIGTERM,
+    /// then SIGKILL after `harn_vm::op_interrupt::SUBPROCESS_TERM_GRACE`)
+    /// and reports [`WaitOutcome::Interrupted`].
     fn wait_with_timeout(
         &mut self,
         timeout: Option<Duration>,
-    ) -> io::Result<(Option<ExitStatus>, bool)>;
+        interrupt: &dyn Fn() -> bool,
+    ) -> io::Result<WaitOutcome>;
 
-    /// Block until the process exits, no timeout.
+    /// Block until the process exits, no timeout, no interrupt polling.
+    /// Used by the background (`background: true`) waiter thread, whose
+    /// children deliberately outlive scope cancellation and deadlines.
     fn wait(&mut self) -> io::Result<ExitStatus>;
+}
+
+/// How a [`ProcessHandle::wait_with_timeout`] ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WaitOutcome {
+    /// The process exited on its own.
+    Exited(ExitStatus),
+    /// The timeout elapsed; the spawner killed the child (group).
+    TimedOut,
+    /// The interrupt callback fired; the spawner gracefully terminated the
+    /// child's process group.
+    Interrupted,
 }
 
 /// Kill side of a [`ProcessHandle`]. Cloneable via `Arc` so cancellation

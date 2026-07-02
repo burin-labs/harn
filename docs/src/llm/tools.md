@@ -205,7 +205,13 @@ want BM25, hybrid ranking, embeddings, or an LLM reranker for deferred tools.
 
 - `run_command` — argv-first process execution through
   `hostlib_tools_run_command`; can return an immediate progress snapshot while
-  the command continues in the background
+  the command continues in the background. Foreground commands are tied to
+  the invoking scope: on scope cancellation, `deadline` expiry, or VM drop
+  the child's whole process group is SIGTERMed and, after a short grace,
+  SIGKILLed (Unix; best-effort direct-child kill on Windows). Use
+  `background: true` for work that must outlive the scope — background
+  handles are reaped only by `cancel_handle` or session-end cleanup (see
+  [Long-running tools](../long-running-tools.md))
 - `read_command_output` — range-read stdout, stderr, or combined artifacts by
   `command_id`, `handle_id`, or artifact path
 - `read_command_output_tail` — read the last bytes of command output without

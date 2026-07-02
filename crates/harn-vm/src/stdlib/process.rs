@@ -4,7 +4,6 @@ use std::collections::BTreeMap;
 use std::io::Write as _;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use crate::orchestration::RunExecutionRecord;
@@ -577,6 +576,12 @@ struct CapturedRun {
 /// `exec_opts`/`exec_at_opts` convenience builtins. Honors cwd, an env
 /// overlay (merge or replace via `env_clear`), optional stdin, and an optional
 /// wall-clock timeout (after which the child is killed and `timed_out` is set).
+///
+/// The child runs in its own process group and the wait polls
+/// [`crate::op_interrupt::requested`], so scope cancellation, `deadline`
+/// expiry, and VM drop gracefully terminate the whole child tree
+/// (SIGTERM, grace, SIGKILL) instead of orphaning it. See
+/// `crate::op_interrupt` for the mechanism.
 fn run_captured_spawn(spec: CapturedSpawn<'_>) -> Result<CapturedRun, VmError> {
     let label = spec.label;
     let mut command = std::process::Command::new(spec.cmd);
@@ -596,6 +601,7 @@ fn run_captured_spawn(spec: CapturedSpawn<'_>) -> Result<CapturedRun, VmError> {
     } else {
         command.stdin(Stdio::null());
     }
+    crate::op_interrupt::configure_kill_group(&mut command);
 
     let started = Instant::now();
     let cmd = spec.cmd;
@@ -610,87 +616,51 @@ fn run_captured_spawn(spec: CapturedSpawn<'_>) -> Result<CapturedRun, VmError> {
         let _ = stdin.write_all(&payload);
     }
 
-    let (output, timed_out) = match spec.timeout {
-        None => match child.wait_with_output() {
-            Ok(output) => (output, false),
-            Err(error) => {
-                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                    format!("{label}: wait failed: {error}"),
-                ))));
-            }
-        },
-        Some(limit) => {
-            let deadline = started + limit;
-            let mut timed_out = false;
-            loop {
-                match child.try_wait() {
-                    Ok(Some(_)) => break,
-                    Ok(None) => {
-                        if Instant::now() >= deadline {
-                            let _ = child.kill();
-                            let _ = child.wait();
-                            timed_out = true;
-                            break;
-                        }
-                        std::thread::sleep(Duration::from_millis(10));
-                    }
-                    Err(error) => {
-                        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                            format!("{label}: poll failed: {error}"),
-                        ))));
-                    }
-                }
-            }
-            if timed_out {
-                let stdout_handle = child.stdout.take();
-                let stderr_handle = child.stderr.take();
-                let (tx_out, rx_out) = mpsc::channel::<Vec<u8>>();
-                let (tx_err, rx_err) = mpsc::channel::<Vec<u8>>();
-                if let Some(mut s) = stdout_handle {
-                    std::thread::spawn(move || {
-                        use std::io::Read as _;
-                        let mut buf = Vec::new();
-                        let _ = s.read_to_end(&mut buf);
-                        let _ = tx_out.send(buf);
-                    });
-                }
-                if let Some(mut s) = stderr_handle {
-                    std::thread::spawn(move || {
-                        use std::io::Read as _;
-                        let mut buf = Vec::new();
-                        let _ = s.read_to_end(&mut buf);
-                        let _ = tx_err.send(buf);
-                    });
-                }
-                let stdout = rx_out
-                    .recv_timeout(Duration::from_millis(100))
-                    .unwrap_or_default();
-                let stderr = rx_err
-                    .recv_timeout(Duration::from_millis(100))
-                    .unwrap_or_default();
-                (
-                    std::process::Output {
-                        status: std::process::ExitStatus::default(),
-                        stdout,
-                        stderr,
-                    },
-                    true,
-                )
-            } else {
-                match child.wait_with_output() {
-                    Ok(output) => (output, false),
-                    Err(error) => {
-                        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                            format!("{label}: wait failed: {error}"),
-                        ))));
-                    }
-                }
-            }
+    // Drain pipes on dedicated threads so >64 KB of output never deadlocks
+    // the wait loop below (which must keep polling for interrupts instead of
+    // blocking in `wait_with_output`).
+    let rx_out = child
+        .stdout
+        .take()
+        .map(crate::op_interrupt::spawn_pipe_drain);
+    let rx_err = child
+        .stderr
+        .take()
+        .map(crate::op_interrupt::spawn_pipe_drain);
+
+    let child_pid = child.id();
+    let wait_end = crate::op_interrupt::wait_child_interruptible(&mut child, spec.timeout)
+        .map_err(|error| {
+            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+                "{label}: wait failed: {error}"
+            ))))
+        })?;
+    let (status, timed_out, killed) = match wait_end {
+        crate::op_interrupt::ChildWait::Exited(status) => (status, false, false),
+        crate::op_interrupt::ChildWait::TimedOut => {
+            (std::process::ExitStatus::default(), true, true)
+        }
+        // Interrupted: the reaped status (or a synthetic fallback) is
+        // returned so the builtin completes; the VM raises the pending
+        // cancellation / deadline error at the next op boundary.
+        crate::op_interrupt::ChildWait::Interrupted(status) => {
+            (status.unwrap_or_default(), false, true)
         }
     };
 
+    let stdout = rx_out
+        .map(|rx| crate::op_interrupt::drain_captured_pipe(&rx, killed, child_pid))
+        .unwrap_or_default();
+    let stderr = rx_err
+        .map(|rx| crate::op_interrupt::drain_captured_pipe(&rx, killed, child_pid))
+        .unwrap_or_default();
+
     Ok(CapturedRun {
-        output,
+        output: std::process::Output {
+            status,
+            stdout,
+            stderr,
+        },
         timed_out,
         duration_ms: started.elapsed().as_millis() as i64,
     })
@@ -1375,5 +1345,45 @@ mod tests {
         assert!(exec_opts_impl(&args, &mut out).is_err());
         let bad = vec![VmValue::String(arcstr::ArcStr::from("not-a-list"))];
         assert!(exec_opts_impl(&bad, &mut out).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn exec_opts_interrupt_kills_child_process_group() {
+        use std::sync::atomic::AtomicBool;
+        use std::sync::Arc;
+
+        // An armed cancel token (the shape scope cancellation / deadline
+        // expiry takes by the time the wait loop polls) must terminate the
+        // child *and its grandchild* long before the command finishes.
+        let cancel = Arc::new(AtomicBool::new(false));
+        let _guard = crate::op_interrupt::install(Some(Arc::clone(&cancel)), None);
+        let flipper = {
+            let cancel = Arc::clone(&cancel);
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(200));
+                cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+            })
+        };
+
+        let started = Instant::now();
+        let args = vec![exec_opts_list(&[
+            "/bin/sh",
+            "-c",
+            // Write the group id, spawn a grandchild, then block.
+            "echo started; sleep 30 & wait",
+        ])];
+        let mut out = String::new();
+        let result = exec_opts_impl(&args, &mut out).expect("exec_opts result");
+        flipper.join().unwrap();
+
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "interrupt must preempt the 30s child, took {:?}",
+            started.elapsed()
+        );
+        let dict = result.as_dict().expect("dict");
+        assert!(matches!(dict.get("success"), Some(VmValue::Bool(false))));
+        assert!(matches!(dict.get("timed_out"), Some(VmValue::Bool(false))));
     }
 }

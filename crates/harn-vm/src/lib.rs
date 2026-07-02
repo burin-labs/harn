@@ -80,6 +80,7 @@ pub mod mcp_server;
 pub mod metadata;
 pub mod module_artifact;
 pub mod observability;
+pub mod op_interrupt;
 pub mod orchestration;
 pub mod personas;
 pub mod process_sandbox;
