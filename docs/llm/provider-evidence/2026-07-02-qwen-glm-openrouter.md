@@ -52,6 +52,13 @@ preset and the Qwen/GLM OpenRouter catalog rows.
   behavior:
   <https://github.com/QwenLM/qwen-code/issues/6007> and
   <https://github.com/coder/coder/issues/26469>.
+- microsoft/copilot-intellij-feedback#1874 reports OpenRouter/Fireworks tool
+  calls failing with provider HTTP 400 when assistant history re-sends
+  nonstandard nested `tool_calls[]` fields such as `approxNumTokens`. Harn's
+  OpenAI-compatible boundary strips those nested fields and normalizes Harn's
+  internal flat `{name, arguments}` tool-call records back to strict
+  OpenAI-compatible `{type: "function", function: ...}` history before dispatch:
+  <https://github.com/microsoft/copilot-intellij-feedback/issues/1874>.
 
 ## Live Probe
 
