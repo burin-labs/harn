@@ -192,13 +192,16 @@ pub(super) fn is_retryable_llm_error(err: &VmError) -> bool {
 }
 
 /// Whether an LLM-call failure is a transport-level *network* failure
-/// (connection refused/reset, DNS failure, dropped link, request timeout) — the
-/// ONLY failures that feed the per-route network circuit breaker.
+/// (connection refused/reset, DNS failure, dropped link, request timeout).
+/// Feeds the per-route circuit breaker together with
+/// [`is_overloaded_llm_error`].
 ///
 /// Deliberately excludes `RateLimit` (429): a 429 means the link is healthy and
 /// the provider is throttling us; that is handled by the rate limiter's cooldown
-/// and Retry-After, not by the breaker. `ServerError` (5xx) is likewise the
-/// provider's fault on a reachable link and must not trip the breaker either.
+/// and Retry-After, not by the breaker. Generic `ServerError` (500/502) is
+/// likewise the provider's fault on a reachable link and must not trip the
+/// breaker either; provider *overload* (529/503) is the one server-side class
+/// that does, via the separate overload predicate.
 pub(super) fn is_network_failure_llm_error(err: &VmError) -> bool {
     let (category, message) = match err {
         VmError::CategorizedError { category, message } => (category.clone(), message.clone()),
@@ -213,6 +216,39 @@ pub(super) fn is_network_failure_llm_error(err: &VmError) -> bool {
         reason,
         crate::llm::api::LlmErrorReason::NetworkError | crate::llm::api::LlmErrorReason::Timeout
     )
+}
+
+/// Whether an LLM-call failure says the provider itself is shedding load
+/// (HTTP 529 / 503, Anthropic `overloaded_error`). Distinct from a 429 — the
+/// client hasn't exceeded a quota — and from a generic 500/502, which is a
+/// single-request server fault. Overload is a provider-wide condition, so it
+/// feeds BOTH the per-route breaker (fail fast instead of burning the retry
+/// budget) and the shared cooldown (N parallel agents back off together
+/// instead of stampeding the overloaded provider).
+pub(super) fn is_overloaded_llm_error(err: &VmError) -> bool {
+    crate::value::error_to_category(err) == crate::value::ErrorCategory::Overloaded
+}
+
+/// Shared-cooldown duration to record for a failed call, or 0 for "no
+/// cooldown". Rate-limit (429) failures cool down for the provider's
+/// Retry-After when one was sent (there is no meaningful default — catalog
+/// rpm limits already pace the route). Overload (529/503) failures cool down
+/// for Retry-After too, but fall back to a fixed default because overload
+/// responses rarely carry the header and sibling agents must still stop
+/// hammering the provider.
+pub(super) fn shared_cooldown_ms_for_llm_error(err: &VmError) -> u64 {
+    let category = crate::value::error_to_category(err);
+    let overloaded = category == crate::value::ErrorCategory::Overloaded;
+    let rate_limited = crate::llm::api::classify_llm_error(category, &err.to_string()).reason
+        == crate::llm::api::LlmErrorReason::RateLimit;
+    if !overloaded && !rate_limited {
+        return 0;
+    }
+    extract_retry_after_ms(err).unwrap_or(if overloaded {
+        super::rate_limit::OVERLOAD_COOLDOWN_MS
+    } else {
+        0
+    })
 }
 
 /// A *thrown* provider response the agent loop should retry within the
@@ -1650,17 +1686,20 @@ pub(crate) async fn observed_llm_call(
                 let category = crate::value::error_to_category(&error);
                 let message = error.to_string();
                 let classified = super::api::classify_llm_error(category.clone(), &message);
-                if classified.reason == super::api::LlmErrorReason::RateLimit {
-                    if let Some(retry_after_ms) = extract_retry_after_ms(&error) {
-                        super::rate_limit::observe_retry_after_for_llm_call(opts, retry_after_ms);
-                    }
-                }
-                // Feed ONLY transport-level network failures (connection/DNS/
-                // timeout) to the breaker — never 429 (rate limit) or 5xx
-                // (server error on a reachable link).
+                // Shared cooldown: 429 Retry-After, plus 529/503 overload
+                // (with a default window when the provider sent no header) so
+                // sibling agents on the same route back off together.
+                super::rate_limit::observe_retry_after_for_llm_call(
+                    opts,
+                    shared_cooldown_ms_for_llm_error(&error),
+                );
+                // Feed transport-level network failures (connection/DNS/
+                // timeout) AND provider overload (529/503) to the breaker —
+                // never 429 (rate limit) or generic 5xx (single-request
+                // server fault on a reachable, healthy link).
                 super::rate_limit::observe_network_outcome_for_llm_call(
                     opts,
-                    is_network_failure_llm_error(&error),
+                    is_network_failure_llm_error(&error) || is_overloaded_llm_error(&error),
                 );
                 let retryable = is_retryable_llm_error(&error);
                 // A *thrown* unproductive completion (zero-token empty, or the
@@ -2420,6 +2459,79 @@ mod retry_tests {
             "upstream overloaded",
             ErrorCategory::Overloaded
         )));
+    }
+
+    #[test]
+    fn overloaded_errors_feed_breaker_but_network_and_server_classes_stay_distinct() {
+        // 529 / overloaded_error (the Anthropic overload shapes) must count as
+        // breaker-feeding overload...
+        assert!(is_overloaded_llm_error(&thrown(
+            "anthropic HTTP 529 [http_error]: {\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}"
+        )));
+        assert!(is_overloaded_llm_error(&categorized(
+            "upstream overloaded",
+            ErrorCategory::Overloaded
+        )));
+        // ...while 429 stays rate limiting and generic 500/502 stays a plain
+        // server error — neither may trip the breaker.
+        assert!(!is_overloaded_llm_error(&thrown(
+            "openai HTTP 429 [rate_limited]: too many requests"
+        )));
+        assert!(!is_overloaded_llm_error(&thrown(
+            "openai HTTP 500 [http_error]: internal"
+        )));
+        assert!(!is_overloaded_llm_error(&categorized(
+            "500 internal",
+            ErrorCategory::ServerError
+        )));
+        // Overload is not a *network* failure — it reaches the breaker through
+        // its own predicate, not by widening the network classifier.
+        assert!(!is_network_failure_llm_error(&categorized(
+            "upstream overloaded",
+            ErrorCategory::Overloaded
+        )));
+    }
+
+    #[test]
+    fn shared_cooldown_covers_overload_with_default_and_honors_retry_after() {
+        // Overload without Retry-After: fixed default window so sibling agents
+        // stop hammering the provider.
+        assert_eq!(
+            shared_cooldown_ms_for_llm_error(&thrown(
+                "anthropic HTTP 529 [http_error]: {\"type\":\"overloaded_error\"}"
+            )),
+            crate::llm::rate_limit::OVERLOAD_COOLDOWN_MS
+        );
+        // Overload WITH Retry-After: the provider's signal wins.
+        assert_eq!(
+            shared_cooldown_ms_for_llm_error(&thrown(
+                "anthropic HTTP 529 [http_error]: overloaded_error (retry-after: 7)"
+            )),
+            7_000
+        );
+        // 429 keeps its existing semantics: Retry-After when sent, no default.
+        assert_eq!(
+            shared_cooldown_ms_for_llm_error(&thrown(
+                "openai HTTP 429 [rate_limited]: slow down (retry-after: 3)"
+            )),
+            3_000
+        );
+        assert_eq!(
+            shared_cooldown_ms_for_llm_error(&thrown("openai HTTP 429 [rate_limited]: slow down")),
+            0
+        );
+        // Generic 500 and network failures never cool the shared route down.
+        assert_eq!(
+            shared_cooldown_ms_for_llm_error(&thrown("openai HTTP 500 [http_error]: internal")),
+            0
+        );
+        assert_eq!(
+            shared_cooldown_ms_for_llm_error(&categorized(
+                "connection reset",
+                ErrorCategory::TransientNetwork
+            )),
+            0
+        );
     }
 
     #[test]

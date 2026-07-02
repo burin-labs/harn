@@ -7,10 +7,8 @@
 
 use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult};
 use crate::llm::provider::{LlmProvider, LlmProviderChat};
-use crate::llm::providers::common::{
-    apply_provider_overrides, google_function_declaration_tools, maybe_emit_delta,
-    request_text_content, vm_err,
-};
+use crate::llm::providers::common::{apply_provider_overrides, maybe_emit_delta, vm_err};
+use crate::llm::providers::GeminiProvider;
 use crate::url_encoding::percent_encode_component;
 use crate::value::VmError;
 
@@ -37,36 +35,21 @@ struct ServiceAccountClaims<'a> {
 
 impl VertexProvider {
     pub(crate) fn build_request_body(request: &LlmRequestPayload) -> serde_json::Value {
-        let mut contents = Vec::new();
-        let mut system_parts = Vec::new();
-        if let Some(system) = request.system.as_deref() {
-            if !system.is_empty() {
-                system_parts.push(serde_json::json!({"text": system}));
-            }
-        }
-        for message in &request.messages {
-            let role = match message.get("role").and_then(|value| value.as_str()) {
-                Some("assistant") => "model",
-                Some("system") => {
-                    let text = request_text_content(message);
-                    if !text.is_empty() {
-                        system_parts.push(serde_json::json!({"text": text}));
-                    }
-                    continue;
-                }
-                _ => "user",
-            };
-            let text = request_text_content(message);
-            if text.is_empty() {
-                continue;
-            }
-            contents.push(serde_json::json!({
-                "role": role,
-                "parts": [{"text": text}],
-            }));
-        }
-        if let Some(prefill) = request.prefill.as_deref() {
-            if !prefill.is_empty() {
+        // Vertex speaks the same generateContent dialect as the Gemini API, so
+        // delegate the body shaping (multimodal parts, tool-call history,
+        // generationConfig sampling params, tools/toolConfig) to the canonical
+        // Gemini builder — mirroring how Azure delegates to the OpenAI builder.
+        // The previous hand-rolled copy here silently flattened messages to
+        // text (dropping image/pdf/audio parts and function-call history) and
+        // omitted seed/penalty/logprobs params. Only the genuinely
+        // vertex-specific envelope differences are adjusted below.
+        let mut body = GeminiProvider::build_request_body(request);
+
+        // Vertex-specific: assistant prefill is emulated with a trailing
+        // `model` turn. The shared builder never emits one (the gemini
+        // capability rows declare no prefill support).
+        if let Some(prefill) = request.prefill.as_deref().filter(|text| !text.is_empty()) {
+            if let Some(contents) = body["contents"].as_array_mut() {
                 contents.push(serde_json::json!({
                     "role": "model",
                     "parts": [{"text": prefill}],
@@ -74,63 +57,35 @@ impl VertexProvider {
             }
         }
 
-        let mut body = serde_json::json!({ "contents": contents });
-        if !system_parts.is_empty() {
-            body["systemInstruction"] = serde_json::json!({ "parts": system_parts });
+        // Vertex-specific: structured output rides `responseSchema` (the
+        // OpenAPI-subset field Vertex documents) rather than the Gemini API's
+        // `responseJsonSchema`.
+        if let Some(config) = body["generationConfig"].as_object_mut() {
+            if let Some(schema) = config.remove("responseJsonSchema") {
+                config.insert("responseSchema".to_string(), schema);
+            }
         }
-        let mut generation = serde_json::Map::new();
-        if request.max_tokens > 0 {
-            generation.insert(
-                "maxOutputTokens".to_string(),
-                serde_json::json!(request.max_tokens),
+
+        // Vertex-specific legacy mirror: callers that only set
+        // `response_format: "json"` (+ optional `json_schema`) still get a
+        // structured-output directive. The modern `output_format` wins when
+        // both are set (the shared builder already lowered it above).
+        if matches!(request.output_format, crate::llm::api::OutputFormat::Text)
+            && request.response_format.as_deref() == Some("json")
+        {
+            if !body["generationConfig"].is_object() {
+                body["generationConfig"] = serde_json::json!({});
+            }
+            let config = body["generationConfig"]
+                .as_object_mut()
+                .expect("generationConfig ensured above");
+            config.insert(
+                "responseMimeType".to_string(),
+                serde_json::json!("application/json"),
             );
-        }
-        if let Some(temp) = request.temperature {
-            generation.insert("temperature".to_string(), serde_json::json!(temp));
-        }
-        if let Some(top_p) = request.top_p {
-            generation.insert("topP".to_string(), serde_json::json!(top_p));
-        }
-        if let Some(stop) = request.stop.as_ref() {
-            generation.insert("stopSequences".to_string(), serde_json::json!(stop));
-        }
-        // The modern `output_format` is the source of truth; Vertex previously
-        // read only the legacy `response_format`/`json_schema` mirror, which is
-        // never backfilled from a nested `output_format.schema`, so a call using
-        // `output_format: {kind: "json_schema", schema}` silently produced no
-        // structured-output directive. Honor `output_format` first, falling back
-        // to the legacy mirror for callers that only set those.
-        match &request.output_format {
-            crate::llm::api::OutputFormat::JsonObject => {
-                generation.insert(
-                    "responseMimeType".to_string(),
-                    serde_json::json!("application/json"),
-                );
+            if let Some(schema) = request.json_schema.as_ref() {
+                config.insert("responseSchema".to_string(), schema.clone());
             }
-            crate::llm::api::OutputFormat::JsonSchema { schema, .. } => {
-                generation.insert(
-                    "responseMimeType".to_string(),
-                    serde_json::json!("application/json"),
-                );
-                generation.insert("responseSchema".to_string(), schema.clone());
-            }
-            crate::llm::api::OutputFormat::Text => {
-                if request.response_format.as_deref() == Some("json") {
-                    generation.insert(
-                        "responseMimeType".to_string(),
-                        serde_json::json!("application/json"),
-                    );
-                    if let Some(schema) = request.json_schema.as_ref() {
-                        generation.insert("responseSchema".to_string(), schema.clone());
-                    }
-                }
-            }
-        }
-        if !generation.is_empty() {
-            body["generationConfig"] = serde_json::Value::Object(generation);
-        }
-        if let Some(tools) = google_function_declaration_tools(request.native_tools.as_deref()) {
-            body["tools"] = tools;
         }
         body
     }
@@ -403,6 +358,101 @@ mod tests {
         assert_eq!(
             body["generationConfig"]["responseSchema"]["properties"]["answer"]["type"],
             "string"
+        );
+    }
+
+    #[test]
+    fn build_request_preserves_multimodal_parts_and_tool_history() {
+        // Regression: the hand-rolled Vertex builder flattened every message
+        // to text, silently dropping image parts and functionCall /
+        // functionResponse history. Delegating to the Gemini builder keeps
+        // them.
+        let mut request = base_request();
+        request.messages = vec![
+            json!({
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "caption"},
+                    {"type": "image", "base64": "iVBORw0KGgo=", "media_type": "image/png"}
+                ],
+            }),
+            json!({
+                "role": "assistant",
+                "content": [
+                    {"functionCall": {"id": "call_1", "name": "lookup", "args": {"q": "harn"}}}
+                ]
+            }),
+            json!({
+                "role": "tool",
+                "name": "lookup",
+                "tool_call_id": "call_1",
+                "content": "{\"result\":\"ok\"}"
+            }),
+        ];
+        let body = VertexProvider::build_request_body(&request);
+        assert_eq!(body["contents"][0]["parts"][0]["text"], "caption");
+        assert_eq!(
+            body["contents"][0]["parts"][1]["inline_data"],
+            json!({"mime_type": "image/png", "data": "iVBORw0KGgo="})
+        );
+        assert_eq!(body["contents"][1]["role"], "model");
+        assert_eq!(
+            body["contents"][1]["parts"][0]["functionCall"]["name"],
+            "lookup"
+        );
+        assert_eq!(body["contents"][2]["role"], "user");
+        assert_eq!(
+            body["contents"][2]["parts"][0]["functionResponse"],
+            json!({"id": "call_1", "name": "lookup", "response": {"result": "ok"}})
+        );
+    }
+
+    #[test]
+    fn build_request_appends_prefill_as_trailing_model_turn() {
+        let mut request = base_request();
+        request.prefill = Some("{\"answer\":".to_string());
+        let body = VertexProvider::build_request_body(&request);
+        let contents = body["contents"].as_array().expect("contents");
+        let last = contents.last().expect("at least one turn");
+        assert_eq!(last["role"], "model");
+        assert_eq!(last["parts"][0]["text"], "{\"answer\":");
+    }
+
+    #[test]
+    fn build_request_maps_sampling_params_and_tool_choice() {
+        // Inherited from the shared Gemini builder: seed / penalties and
+        // toolConfig, which the hand-rolled Vertex copy dropped.
+        let mut request = base_request();
+        request.seed = Some(7);
+        request.frequency_penalty = Some(0.25);
+        request.presence_penalty = Some(-0.5);
+        request.tool_choice = Some(json!({"type": "function", "function": {"name": "lookup"}}));
+        let body = VertexProvider::build_request_body(&request);
+        assert_eq!(body["generationConfig"]["seed"], 7);
+        assert_eq!(body["generationConfig"]["frequencyPenalty"], 0.25);
+        assert_eq!(body["generationConfig"]["presencePenalty"], -0.5);
+        assert_eq!(
+            body["toolConfig"]["functionCallingConfig"],
+            json!({"mode": "ANY", "allowedFunctionNames": ["lookup"]})
+        );
+    }
+
+    #[test]
+    fn build_request_honors_legacy_response_format_json_mirror() {
+        // Callers that only set the legacy `response_format`/`json_schema`
+        // mirror (no modern output_format) must still get the Vertex
+        // structured-output directive.
+        let mut request = base_request();
+        request.response_format = Some("json".to_string());
+        request.json_schema = Some(json!({"type": "object"}));
+        let body = VertexProvider::build_request_body(&request);
+        assert_eq!(
+            body["generationConfig"]["responseMimeType"],
+            "application/json"
+        );
+        assert_eq!(
+            body["generationConfig"]["responseSchema"],
+            json!({"type": "object"})
         );
     }
 

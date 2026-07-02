@@ -711,6 +711,34 @@ fn preview_chars(s: &str, max_chars: usize) -> String {
     s.chars().take(max_chars).collect()
 }
 
+/// Finalize the accumulated Anthropic `input_json_delta` buffer for a streamed
+/// `tool_use` block into dispatchable arguments.
+///
+/// An EMPTY buffer is a legitimate no-args call — a tool invoked with no
+/// arguments streams zero `input_json_delta` events (the `content_block_start`
+/// carries `"input": {}` and nothing follows) — so it maps to `{}`, never to a
+/// parse error. A NON-empty buffer that fails to parse (malformed or truncated
+/// accumulated JSON) must NOT silently dispatch the tool with empty arguments;
+/// it becomes the same `{"__parse_error": "... Raw input: <raw>"}` carrier the
+/// OpenAI streaming path and the non-streaming parser build, so the agent
+/// loop's recoverable invalid-arguments feedback path asks the model to
+/// re-issue the call instead of running the tool with arguments it never chose.
+fn parse_anthropic_streamed_tool_input(input_json: &str) -> serde_json::Value {
+    if input_json.trim().is_empty() {
+        return serde_json::Value::Object(Default::default());
+    }
+    match serde_json::from_str::<serde_json::Value>(input_json) {
+        Ok(value) => value,
+        Err(json_error) => serde_json::json!({
+            "__parse_error": format!(
+                "Could not parse streamed tool arguments as JSON: {}. Raw input: {}",
+                json_error,
+                preview_chars(input_json, 200)
+            )
+        }),
+    }
+}
+
 fn parse_openai_streamed_tool_argument_values(
     tool_name: &str,
     arguments: &str,
@@ -996,8 +1024,7 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
                 }
                 Some("content_block_stop") => {
                     if let Some(tool) = current_tool.take() {
-                        let args = serde_json::from_str::<serde_json::Value>(&tool.input_json)
-                            .unwrap_or(serde_json::Value::Object(Default::default()));
+                        let args = parse_anthropic_streamed_tool_input(&tool.input_json);
                         let (name, args) =
                             crate::llm::tools::normalize_tool_call_shape(&tool.name, args);
                         // Dispatch under the id already used for
@@ -2144,6 +2171,61 @@ mod streaming_tool_call_tests {
         assert!(
             first_raw.unwrap().contains("hello"),
             "raw_input_partial should carry the concatenated bytes verbatim"
+        );
+
+        clear_session_sinks(&session_id);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn anthropic_stream_no_args_tool_call_dispatches_empty_object_not_parse_error() {
+        // A tool with no arguments streams NO input_json_delta events at all:
+        // the wire sends content_block_start {"type":"tool_use","input":{}}
+        // followed directly by content_block_stop. That must finalize to `{}`,
+        // never to a `__parse_error` carrier.
+        let body = concat!(
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_c1\",\"name\":\"list_files\",\"input\":{}}}\n",
+            "data: {\"type\":\"content_block_stop\",\"index\":0}\n",
+            "data: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":2},\"delta\":{\"stop_reason\":\"tool_use\"}}\n",
+            "data: [DONE]\n",
+        );
+        let session_id = fresh_session_id("anth-no-args");
+        let (result, _) = drive(body.as_bytes(), &session_id, true).await;
+
+        assert_eq!(result.tool_calls.len(), 1);
+        assert_eq!(result.tool_calls[0]["name"], "list_files");
+        assert_eq!(result.tool_calls[0]["arguments"], serde_json::json!({}));
+
+        clear_session_sinks(&session_id);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn anthropic_stream_malformed_tool_args_surface_parse_error_not_empty_object() {
+        // Malformed/truncated accumulated tool JSON must NOT silently dispatch
+        // the tool with `{}` — it must carry the same `__parse_error` object the
+        // OpenAI streaming path builds, so the agent loop's recoverable
+        // invalid-arguments feedback path handles it.
+        let body = concat!(
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_d1\",\"name\":\"edit\"}}\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"path\\\":\\\"foo.sw\"}}\n",
+            "data: {\"type\":\"content_block_stop\",\"index\":0}\n",
+            "data: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":3},\"delta\":{\"stop_reason\":\"tool_use\"}}\n",
+            "data: [DONE]\n",
+        );
+        let session_id = fresh_session_id("anth-malformed-args");
+        let (result, _) = drive(body.as_bytes(), &session_id, true).await;
+
+        assert_eq!(result.tool_calls.len(), 1);
+        assert_eq!(result.tool_calls[0]["name"], "edit");
+        let parse_error = result.tool_calls[0]["arguments"]["__parse_error"]
+            .as_str()
+            .expect("malformed streamed tool args must dispatch a __parse_error carrier, not `{}`");
+        assert!(
+            parse_error.contains("Raw input: "),
+            "__parse_error must embed the raw bytes for the recovery path; got {parse_error:?}"
+        );
+        assert!(
+            parse_error.contains("{\"path\":\"foo.sw"),
+            "raw input preview should carry the accumulated buffer verbatim; got {parse_error:?}"
         );
 
         clear_session_sinks(&session_id);
