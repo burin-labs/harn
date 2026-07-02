@@ -58,6 +58,7 @@ jobs:
       pull-requests: read
     outputs:
       rust: ${{ steps.force.outputs.rust }}
+      release_metadata_only: ${{ steps.release_metadata.outputs.release_metadata_only }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
@@ -70,21 +71,63 @@ jobs:
               - '!docs/**'
               - '!website/**'
               - '!**/*.md'
+      - name: Detect release metadata-only PR
+        id: release_metadata
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref || '' }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref || '' }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+        run: |
+          set -euo pipefail
+          release_metadata_only=false
+
+          if [[ "$EVENT_NAME" == "pull_request" && "$PR_HEAD_REF" =~ ^release/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            changed_files="$RUNNER_TEMP/release-metadata-changed-files.txt"
+
+            if [[ -n "$PR_BASE_REF" ]]; then
+              git fetch --no-tags --depth=1 origin "$PR_BASE_REF" || true
+            fi
+            if [[ -n "$PR_BASE_SHA" ]] && ! git cat-file -e "${PR_BASE_SHA}^{commit}" 2>/dev/null; then
+              git fetch --no-tags --depth=1 origin "$PR_BASE_SHA" || true
+            fi
+
+            if [[ -n "$PR_BASE_SHA" ]] && git diff --name-only "$PR_BASE_SHA" HEAD > "$changed_files"; then
+              echo "Release PR changed files:"
+              sed 's/^/  /' "$changed_files"
+              if [[ "$(./scripts/ci_release_metadata_only.sh "$changed_files")" == "true" ]]; then
+                release_metadata_only=true
+              fi
+            else
+              echo "::notice::Could not diff release PR against its base; keeping heavy PR-head lanes enabled."
+            fi
+          fi
+
+          echo "release_metadata_only=$release_metadata_only" >> "$GITHUB_OUTPUT"
+          echo "release metadata only: $release_metadata_only"
       - name: Resolve heavy-lane gate (force on merge_group / push)
         id: force
         # `pull_request`: honour the paths filter — a docs/website/markdown-only
-        #   PR skips the heavy Linux Rust lanes for fast, cheap feedback.
+        #   PR skips the heavy Linux Rust lanes for fast, cheap feedback. A
+        #   release/vX.Y.Z PR whose diff is only release metadata also skips
+        #   those PR-head lanes because `release_harn` already ran the release
+        #   audit locally; merge_group / push below remain full backstops.
         # `merge_group` / `push`: force `rust=true` — the speculative merge
         #   commit and the post-merge backstop must run the full suite so a
         #   cross-PR interaction regression can't slip the queue.
         env:
           FORCE_ALL: ${{ github.event_name == 'merge_group' || github.event_name == 'push' }}
           F_RUST: ${{ steps.filter.outputs.rust }}
+          RELEASE_METADATA_ONLY: ${{ steps.release_metadata.outputs.release_metadata_only }}
         run: |
           set -euo pipefail
           if [ "${FORCE_ALL}" = "true" ]; then
             echo "::notice::changes: ${GITHUB_EVENT_NAME} — forcing heavy Linux Rust lanes on (merge-queue / post-merge backstop is never pruned)"
             echo "rust=true" >> "$GITHUB_OUTPUT"
+          elif [ "${RELEASE_METADATA_ONLY}" = "true" ]; then
+            echo "::notice::changes: release metadata-only PR — skipping heavy Linux Rust lanes until merge-queue / post-merge backstop"
+            echo "rust=false" >> "$GITHUB_OUTPUT"
           else
             echo "::notice::changes: ${GITHUB_EVENT_NAME} — heavy Linux Rust lanes gated by paths filter (rust=${F_RUST})"
             echo "rust=${F_RUST}" >> "$GITHUB_OUTPUT"
@@ -425,6 +468,7 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref || '' }}
           # Previous tip of the pushed ref — the diff base for `push` events.
           # Routed through env (never inlined into the script) to avoid a
           # template-injection sink, matching how BASE_SHA is handled.
@@ -461,7 +505,10 @@ jobs:
               run_windows=true
             else
               cat "$RUNNER_TEMP/windows-changed-files.txt"
-              if grep -E -q "$windows_pattern" "$RUNNER_TEMP/windows-changed-files.txt"; then
+              if [[ "$EVENT_NAME" == "pull_request" && "$PR_HEAD_REF" =~ ^release/v[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+                && [[ "$(./scripts/ci_release_metadata_only.sh "$RUNNER_TEMP/windows-changed-files.txt")" == "true" ]]; then
+                echo "windows: release metadata-only PR; skipping Windows smoke until merge-queue / post-merge backstop."
+              elif grep -E -q "$windows_pattern" "$RUNNER_TEMP/windows-changed-files.txt"; then
                 run_windows=true
               fi
             fi
@@ -599,6 +646,7 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref || '' }}
           # Previous tip of the pushed ref — the diff base for `push` events.
           # Routed through env (never inlined into the script) to avoid a
           # template-injection sink, matching how BASE_SHA is handled.
@@ -643,7 +691,10 @@ jobs:
               run_macos=true
             else
               cat "$RUNNER_TEMP/macos-changed-files.txt"
-              if grep -E -q "$macos_pattern" "$RUNNER_TEMP/macos-changed-files.txt"; then
+              if [[ "$EVENT_NAME" == "pull_request" && "$PR_HEAD_REF" =~ ^release/v[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+                && [[ "$(./scripts/ci_release_metadata_only.sh "$RUNNER_TEMP/macos-changed-files.txt")" == "true" ]]; then
+                echo "macos: release metadata-only PR; skipping macOS check until merge-queue / post-merge backstop."
+              elif grep -E -q "$macos_pattern" "$RUNNER_TEMP/macos-changed-files.txt"; then
                 run_macos=true
               fi
             fi

@@ -158,7 +158,7 @@ fi
 echo "=== Pre-push: running targeted local checks ==="
 if [ "${HARN_PREPUSH_FULL_TESTS:-0}" = "1" ] && hook_paths_match "$changed" "$HOOK_TEST_PATTERN"; then
   make test
-elif hook_paths_match "$changed" '(^Cargo\.toml$|^Cargo\.lock$|^Makefile$|^\.config/nextest\.toml$)'; then
+elif hook_paths_match "$changed" '(^Cargo\.toml$|^Cargo\.lock$|^\.config/nextest\.toml$)'; then
   cargo check --workspace --tests
 elif hook_paths_match "$changed" "$HOOK_TEST_PATTERN"; then
   hook_write_changed_cargo_packages "$changed" "$changed_packages"

@@ -44,7 +44,7 @@ fi
 # Track whether the python prompt-prose ratchet has already run in this
 # hook, so the ratchet and clippy blocks don't pay for it twice when both
 # patterns match (the common case for a Rust crate edit that also
-# touches scripts/ or Makefile). Whichever block runs first sets the flag.
+# touches scripts). Whichever block runs first sets the flag.
 prompt_prose_done=0
 
 # ---------------------------------------------------------------------------
@@ -187,7 +187,7 @@ if hook_paths_match "$changed" "$HOOK_RUST_PATTERN"; then
   fi
 
   hook_write_changed_cargo_packages "$changed" "$changed_packages"
-  if hook_paths_match "$changed" '(^Cargo\.toml$|^Cargo\.lock$|^Makefile$)'; then
+  if hook_paths_match "$changed" '(^Cargo\.toml$|^Cargo\.lock$)'; then
     echo "=== Pre-commit: running clippy on full workspace (workspace-scope change) ==="
     cargo clippy --workspace -- -D warnings
   elif [ -s "$changed_packages" ]; then
