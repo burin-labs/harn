@@ -29,8 +29,9 @@ impl LlmProviderChat for GeminiProvider {
 }
 
 // Per-model Gemini thinking quirks are read from the capability matrix
-// (capabilities.toml `[[provider.gemini]]` rows) instead of hard-coded
-// `model.contains(...)` branches here:
+// (capabilities.toml `[[provider.gemini]]` rows — or `[[provider.vertex]]`
+// rows when the Vertex provider delegates its body shaping here) instead of
+// hard-coded `model.contains(...)` branches:
 //   * thinking-config support  -> the row declares effort in `thinking_modes`
 //     (only the gemini-2.5* rows do; gemma / older gemini do not).
 //   * can disable thinking     -> `reasoning_disable_supported` (Flash true,
@@ -115,6 +116,7 @@ impl GeminiProvider {
         if !system_parts.is_empty() {
             body["systemInstruction"] = serde_json::json!({ "parts": system_parts });
         }
+        let caps = crate::llm::capabilities::lookup(&opts.provider, &opts.model);
         let mut generation_config = serde_json::Map::new();
         if opts.max_tokens > 0 {
             generation_config.insert(
@@ -134,7 +136,30 @@ impl GeminiProvider {
         if let Some(stop) = &opts.stop {
             generation_config.insert("stopSequences".to_string(), serde_json::json!(stop));
         }
-        let caps = crate::llm::capabilities::lookup("gemini", &opts.model);
+        if let Some(seed) = opts.seed.filter(|_| caps.seed_supported) {
+            generation_config.insert("seed".to_string(), serde_json::json!(seed));
+        }
+        if let Some(fp) = opts
+            .frequency_penalty
+            .filter(|_| caps.frequency_penalty_supported)
+        {
+            generation_config.insert("frequencyPenalty".to_string(), serde_json::json!(fp));
+        }
+        if let Some(pp) = opts
+            .presence_penalty
+            .filter(|_| caps.presence_penalty_supported)
+        {
+            generation_config.insert("presencePenalty".to_string(), serde_json::json!(pp));
+        }
+        // No capability flag exists for logprobs (mirroring openai_compat,
+        // which gates on the payload field alone); Gemini generationConfig
+        // spells the pair responseLogprobs (enable) + logprobs (top-K count).
+        if opts.logprobs {
+            generation_config.insert("responseLogprobs".to_string(), serde_json::json!(true));
+            if let Some(top_logprobs) = opts.top_logprobs.filter(|value| *value > 0) {
+                generation_config.insert("logprobs".to_string(), serde_json::json!(top_logprobs));
+            }
+        }
         if let Some(budget) = gemini_thinking_budget(&caps, &opts.thinking) {
             generation_config.insert(
                 "thinkingConfig".to_string(),
@@ -797,6 +822,43 @@ mod tests {
         assert!(legacy["generationConfig"]
             .as_object()
             .is_some_and(|config| !config.contains_key("thinkingConfig")));
+    }
+
+    #[test]
+    fn gemini_sampling_params_map_to_generation_config() {
+        // Regression: seed / frequency_penalty / presence_penalty / logprobs
+        // were silently dropped by the Gemini request lowering even though the
+        // payload carries them and generationConfig supports them.
+        let mut payload = text_payload("gemini-2.5-flash", ThinkingConfig::Disabled);
+        payload.seed = Some(42);
+        payload.frequency_penalty = Some(0.5);
+        payload.presence_penalty = Some(-0.25);
+        payload.logprobs = true;
+        payload.top_logprobs = Some(3);
+
+        let body = GeminiProvider::build_request_body(&payload);
+        let config = &body["generationConfig"];
+        assert_eq!(config["seed"], 42);
+        assert_eq!(config["frequencyPenalty"], 0.5);
+        assert_eq!(config["presencePenalty"], -0.25);
+        assert_eq!(config["responseLogprobs"], true);
+        assert_eq!(config["logprobs"], 3);
+
+        // Unset fields stay omitted (no nulls on the wire).
+        let bare = GeminiProvider::build_request_body(&text_payload(
+            "gemini-2.5-flash",
+            ThinkingConfig::Disabled,
+        ));
+        let bare_config = bare["generationConfig"].as_object().expect("config");
+        for key in [
+            "seed",
+            "frequencyPenalty",
+            "presencePenalty",
+            "responseLogprobs",
+            "logprobs",
+        ] {
+            assert!(!bare_config.contains_key(key), "{key} must stay omitted");
+        }
     }
 
     #[test]

@@ -52,14 +52,23 @@ const WINDOW_SECS: u64 = 60;
 const RATE_LIMIT_ENV_FIELD_SUFFIXES: [&str; 5] =
     ["_RPM", "_TPM", "_INPUT_TPM", "_OUTPUT_TPM", "_CONCURRENCY"];
 
-/// Consecutive NetworkError/Timeout failures on one route that trip the
-/// network-only circuit breaker open. Distinct from 429 handling, which uses
-/// `cooldown_until_ms` + provider Retry-After and never feeds the breaker.
+/// Consecutive NetworkError/Timeout (or provider-overload 529/503) failures on
+/// one route that trip the circuit breaker open. Distinct from 429 handling,
+/// which uses `cooldown_until_ms` + provider Retry-After and never feeds the
+/// breaker.
 const NETWORK_BREAKER_FAILURE_THRESHOLD: u32 = 4;
 /// How long the breaker stays open (fail-fast) before allowing a half-open probe.
 /// Short on purpose: a laptop reconnect or DNS recovery should be retried soon,
 /// we only want to stop burning the per-call retry budget while the link is down.
 const NETWORK_BREAKER_OPEN_MS: u64 = 5_000;
+/// Default shared-cooldown window recorded on a provider-overload failure
+/// (HTTP 529/503, Anthropic `overloaded_error`) when the response carried no
+/// Retry-After header — overload responses rarely do. Recording it in the
+/// route limiter makes N parallel agents back off together instead of
+/// stampeding a provider that is already shedding load. Kept as short as the
+/// breaker window: overload recovers on the provider's schedule and we only
+/// need to break the herd, not idle the route.
+pub(crate) const OVERLOAD_COOLDOWN_MS: u64 = 5_000;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct RateLimitRequest {
@@ -226,14 +235,18 @@ impl SlidingWindow {
     }
 }
 
-/// Per-process, network-only circuit breaker for one route.
+/// Per-process circuit breaker for one route.
 ///
-/// Opens ONLY on sustained `NetworkError`/`Timeout` (laptop disconnect, DNS
-/// failure, dropped link) — never on 429, which the rate limiter already handles
-/// via `cooldown_until_ms` + provider Retry-After. While open it fails fast so a
-/// call does not burn its whole retry budget against a dead link; after a short
-/// window it half-opens to admit a single probe, then closes on success or
-/// re-opens on another network failure.
+/// Opens on sustained `NetworkError`/`Timeout` (laptop disconnect, DNS
+/// failure, dropped link) and on sustained provider overload (HTTP 529/503 /
+/// `overloaded_error` — the provider is shedding load, so continuing to call
+/// it only deepens the overload) — never on 429, which the rate limiter
+/// already handles via `cooldown_until_ms` + provider Retry-After, and never
+/// on generic 500/502 (a single-request fault on a healthy link). While open
+/// it fails fast so a call does not burn its whole retry budget against a
+/// dead link or an overloaded provider; after a short window it half-opens to
+/// admit a single probe, then closes on success or re-opens on another
+/// qualifying failure.
 ///
 /// Network reachability is a property of THIS process, so the breaker is
 /// per-process state (not shared via the durable rate-limit DB). It is distinct
@@ -974,8 +987,8 @@ fn breaker_open_error(provider: &str, model: &str, remaining: Duration) -> crate
     };
     crate::value::VmError::CategorizedError {
         message: format!(
-            "network circuit breaker open for '{route}': sustained network failures; \
-             failing fast for {}ms (a half-open probe will follow)",
+            "network circuit breaker open for '{route}': sustained network failures or \
+             provider overload; failing fast for {}ms (a half-open probe will follow)",
             remaining.as_millis()
         ),
         category: crate::value::ErrorCategory::TransientNetwork,
@@ -1016,11 +1029,13 @@ pub(crate) fn check_network_breaker_for_llm_call(
     }
 }
 
-/// Feed a completed LLM-call outcome to the route's network breaker.
+/// Feed a completed LLM-call outcome to the route's circuit breaker.
 ///
 /// `network_failure == true` ONLY for transport-level `NetworkError`/`Timeout`
-/// (never 429 — that is rate limiting, not unreachability). A success closes the
-/// breaker; a network failure increments toward / re-opens it.
+/// or provider overload (529/503 — the provider is shedding load and must not
+/// be hammered), never 429 (that is rate limiting, not unreachability) and
+/// never generic 500/502. A success closes the breaker; a qualifying failure
+/// increments toward / re-opens it.
 pub(crate) fn observe_network_outcome_for_llm_call(
     opts: &super::api::LlmCallOptions,
     network_failure: bool,

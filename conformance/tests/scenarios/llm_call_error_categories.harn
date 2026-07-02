@@ -10,7 +10,6 @@ pipeline default(task) {
   let categories = [
     "rate_limit",
     "timeout",
-    "overloaded",
     "server_error",
     "transient_network",
     "schema_validation",
@@ -22,13 +21,15 @@ pipeline default(task) {
     "tool_rejected",
     "cancelled",
     "generic",
+    "overloaded",
   ]
   for category in categories {
+    let model = "mock-" + category
     with_llm_script(
       [{error: {category: category, message: "synthetic-" + category}}],
       { ->
         try {
-          llm_call("probe", nil, {provider: "mock", model: "mock-model", llm_retries: 0})
+          llm_call("probe", nil, {provider: "mock", model: model, llm_retries: 0})
         } catch (e) {
           __io_println(
             category + " thrown=" + e.category + " msg=" + e.message + " provider=" + e.provider
@@ -41,7 +42,7 @@ pipeline default(task) {
     with_llm_script(
       [{error: {category: category, message: "safe-" + category}}],
       { ->
-        let r = llm_call_safe("probe", nil, {provider: "mock", model: "mock-model", llm_retries: 0})
+        let r = llm_call_safe("probe", nil, {provider: "mock", model: model, llm_retries: 0})
         __io_println(
           category + " safe=" + r.error.category + " msg=" + r.error.message + " ok="
             + to_string(r.ok),
