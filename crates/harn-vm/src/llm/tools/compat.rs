@@ -208,7 +208,7 @@ fn is_shell_alias(name: &str) -> bool {
     )
 }
 
-/// Move a command-shaped argument (`script` / `cmd`) onto `command` so the
+/// Move a command-shaped argument (`script` / `cmd`) onto `command`/`argv` so the
 /// remapped `run` call passes arg validation. Leaves an already-`command`-shaped
 /// or unrecognized object untouched.
 fn remap_command_args(arguments: serde_json::Value) -> serde_json::Value {
@@ -216,56 +216,62 @@ fn remap_command_args(arguments: serde_json::Value) -> serde_json::Value {
         return arguments;
     };
     if let Some(value) = map.remove("command") {
-        map.insert("command".to_string(), normalize_command_value(value));
+        insert_normalized_run_command_arg(&mut map, value);
         return serde_json::Value::Object(map);
     }
     for key in ["script", "cmd"] {
         if let Some(value) = map.remove(key) {
-            map.insert("command".to_string(), normalize_command_value(value));
+            insert_normalized_run_command_arg(&mut map, value);
             break;
         }
     }
     serde_json::Value::Object(map)
 }
 
-fn normalize_command_value(value: serde_json::Value) -> serde_json::Value {
+enum NormalizedRunCommandArg {
+    Command(serde_json::Value),
+    Argv(serde_json::Value),
+}
+
+fn insert_normalized_run_command_arg(
+    map: &mut serde_json::Map<String, serde_json::Value>,
+    value: serde_json::Value,
+) {
+    match normalize_command_value(value) {
+        NormalizedRunCommandArg::Command(value) => {
+            map.insert("command".to_string(), value);
+        }
+        NormalizedRunCommandArg::Argv(value) => {
+            map.insert("argv".to_string(), value);
+        }
+    }
+}
+
+fn normalize_command_value(value: serde_json::Value) -> NormalizedRunCommandArg {
     let serde_json::Value::Array(items) = value else {
-        return value;
+        return NormalizedRunCommandArg::Command(value);
     };
     let Some(argv) = items
         .iter()
         .map(serde_json::Value::as_str)
+        .map(|value| value.map(str::to_string))
         .collect::<Option<Vec<_>>>()
     else {
-        return serde_json::Value::Array(items);
+        return NormalizedRunCommandArg::Command(serde_json::Value::Array(items));
     };
-    if argv.len() == 3 && is_shell_argv_prefix(argv[0], argv[1]) {
-        return serde_json::Value::String(argv[2].to_string());
+    if argv.len() == 3 && is_shell_argv_prefix(argv[0].as_str(), argv[1].as_str()) {
+        return NormalizedRunCommandArg::Command(serde_json::Value::String(argv[2].clone()));
     }
-    serde_json::Value::String(
+    NormalizedRunCommandArg::Argv(serde_json::Value::Array(
         argv.into_iter()
-            .map(shell_quote_arg)
-            .collect::<Vec<_>>()
-            .join(" "),
-    )
+            .map(serde_json::Value::String)
+            .collect::<Vec<_>>(),
+    ))
 }
 
 fn is_shell_argv_prefix(binary: &str, flag: &str) -> bool {
     matches!(binary, "bash" | "sh" | "/bin/bash" | "/bin/sh")
         && matches!(flag, "-lc" | "-c" | "lc" | "c")
-}
-
-fn shell_quote_arg(arg: &str) -> String {
-    if arg.is_empty() {
-        return "''".to_string();
-    }
-    if arg
-        .bytes()
-        .all(|byte| matches!(byte, b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'_' | b'-' | b'.' | b'/' | b':' | b'+' | b'=' | b',' | b'@' | b'%'))
-    {
-        return arg.to_string();
-    }
-    format!("'{}'", arg.replace('\'', "'\"'\"'"))
 }
 
 /// Edit-action verbs that exist ONLY as `edit({ action: <verb> })` enum values,
@@ -760,13 +766,17 @@ mod tests {
     }
 
     #[test]
-    fn aliases_container_exec_general_argv_with_shell_quoting() {
+    fn aliases_container_exec_general_argv_to_structured_argv() {
         let (name, mapped) = normalize_tool_call_shape(
             "container.exec",
             serde_json::json!({"cmd": ["git", "commit", "-m", "fix tool calls"]}),
         );
         assert_eq!(name, "run");
-        assert_eq!(mapped["command"], "git commit -m 'fix tool calls'");
+        assert_eq!(
+            mapped["argv"],
+            serde_json::json!(["git", "commit", "-m", "fix tool calls"])
+        );
+        assert!(mapped.get("command").is_none());
     }
 
     #[test]
@@ -777,6 +787,20 @@ mod tests {
         );
         assert_eq!(name, "run");
         assert_eq!(mapped["command"], "ls -R");
+    }
+
+    #[test]
+    fn normalizes_canonical_run_general_argv_to_structured_argv() {
+        let (name, mapped) = normalize_tool_call_shape(
+            "run",
+            serde_json::json!({"command": ["python3", "-c", "print('a b')"]}),
+        );
+        assert_eq!(name, "run");
+        assert_eq!(
+            mapped["argv"],
+            serde_json::json!(["python3", "-c", "print('a b')"])
+        );
+        assert!(mapped.get("command").is_none());
     }
 
     #[test]
@@ -792,13 +816,17 @@ mod tests {
     }
 
     #[test]
-    fn normalizes_namespaced_run_argv_command_string() {
+    fn normalizes_namespaced_run_general_argv_to_structured_argv() {
         let (name, mapped) = normalize_tool_call_shape(
             "functions.run",
             serde_json::json!({"command": ["git", "status", "--short"]}),
         );
         assert_eq!(name, "run");
-        assert_eq!(mapped["command"], "git status --short");
+        assert_eq!(
+            mapped["argv"],
+            serde_json::json!(["git", "status", "--short"])
+        );
+        assert!(mapped.get("command").is_none());
     }
 
     #[test]
