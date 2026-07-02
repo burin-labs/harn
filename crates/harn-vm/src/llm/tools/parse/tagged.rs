@@ -59,6 +59,13 @@ pub(crate) fn parse_text_tool_calls_with_tools(
 
     let mut cursor = 0usize;
     let bytes = src.as_bytes();
+    // Byte position just past the most recently consumed top-level block.
+    // A tag that follows a consumed block with only whitespace between them
+    // is structurally top-level even mid-line: value models chain blocks as
+    // `...</tool_call><tool_call>...` on one line, and without this the
+    // second open tag fails the line-start check and is shredded into a
+    // "stray text" violation (observed at scale in the eval corpus).
+    let mut last_block_end = 0usize;
 
     while cursor < bytes.len() {
         while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
@@ -67,6 +74,9 @@ pub(crate) fn parse_text_tool_calls_with_tools(
         if cursor >= bytes.len() {
             break;
         }
+        let adjacent_to_block = last_block_end > 0
+            && cursor >= last_block_end
+            && src[last_block_end..cursor].chars().all(char::is_whitespace);
 
         // Skip past `<<TAG ... TAG` heredoc bodies inline so a bare
         // `name({ key: <<EOF ... EOF })` survives the chunker.
@@ -94,7 +104,9 @@ pub(crate) fn parse_text_tool_calls_with_tools(
             continue;
         }
 
-        if !is_top_level_tag_position(src, cursor) || inside_markdown_fence(src, cursor) {
+        if (!adjacent_to_block && !is_top_level_tag_position(src, cursor))
+            || inside_markdown_fence(src, cursor)
+        {
             let start = cursor;
             while cursor < bytes.len() && bytes[cursor] != b'\n' {
                 cursor += 1;
@@ -153,6 +165,7 @@ pub(crate) fn parse_text_tool_calls_with_tools(
                     calls.push(call);
                 }
                 cursor = after;
+                last_block_end = after;
                 continue;
             }
             match parse_single_tool_call(body, tools_val) {
@@ -173,6 +186,7 @@ pub(crate) fn parse_text_tool_calls_with_tools(
                 Err(msg) => errors.push(msg),
             }
             cursor = after;
+            last_block_end = after;
         } else if let Some(open_len) = unclosed_tool_call_open(src, cursor) {
             // A `<tool_call>` open tag with no matching `</tool_call>` anywhere
             // ahead. This is the signature of an output truncated mid-tool-call
@@ -303,6 +317,7 @@ pub(crate) fn parse_text_tool_calls_with_tools(
                 canonical_parts.push(format!("<assistant_prose>\n{trimmed}\n</assistant_prose>"));
             }
             cursor = after;
+            last_block_end = after;
         } else if let Some((body, after)) = match_block(src, cursor, "user_response")
             .or_else(|| match_block(src, cursor, "userresponse"))
         {
@@ -312,6 +327,7 @@ pub(crate) fn parse_text_tool_calls_with_tools(
                 canonical_parts.push(format!("<user_response>\n{trimmed}\n</user_response>"));
             }
             cursor = after;
+            last_block_end = after;
         } else if let Some((body, after)) = match_block(src, cursor, "done") {
             let trimmed = body.trim();
             if trimmed.is_empty() {
@@ -325,6 +341,7 @@ pub(crate) fn parse_text_tool_calls_with_tools(
                 canonical_parts.push(format!("<done>{trimmed}</done>"));
             }
             cursor = after;
+            last_block_end = after;
         } else if let Some((call, after_call)) =
             try_parse_angle_wrapped_call(src, cursor, tools_val)
         {
@@ -349,6 +366,7 @@ pub(crate) fn parse_text_tool_calls_with_tools(
                  subsequent turns."
             ));
             cursor = after_call;
+            last_block_end = after_call;
         } else if let Some(outcome) = try_parse_top_level_function_markup(src, cursor, tools_val) {
             // Chat-template function markup with no `<tool_call>` wrapper
             // (#3220): `<function=edit><parameter=...>...</parameter></function>`
@@ -376,10 +394,12 @@ pub(crate) fn parse_text_tool_calls_with_tools(
                          subsequent turns."
                     ));
                     cursor = after;
+                    last_block_end = after;
                 }
                 Err((msg, after)) => {
                     errors.push(msg);
                     cursor = after;
+                    last_block_end = after;
                 }
             }
         } else if let Some(skip) = stray_tool_call_close_len(src, cursor) {
@@ -389,6 +409,16 @@ pub(crate) fn parse_text_tool_calls_with_tools(
             // no work, so swallow it silently rather than raising a noisy
             // "unknown top-level tag" violation.
             cursor += skip;
+            last_block_end = cursor;
+        } else if let Some(skip) = function_calls_wrapper_len(src, cursor) {
+            // `<function_calls>` / `</function_calls>` — the chat-template
+            // wrapper vocabulary some templates emit around `<invoke ...>`
+            // markup. The inner `<invoke>` block is parsed by the markup path
+            // above; the wrapper tags themselves carry no content, so swallow
+            // them silently instead of raising two "unknown top-level tag"
+            // violations around an otherwise-recovered call.
+            cursor += skip;
+            last_block_end = cursor;
         } else {
             // Unclosed/unknown tag — skip to end of line or `>`.
             let start = cursor;
@@ -401,6 +431,33 @@ pub(crate) fn parse_text_tool_calls_with_tools(
             }
             let fragment = &src[start..end];
             if let Some(tag) = known_top_level_open_tag(fragment) {
+                // An unclosed `<user_response>` / `<assistant_prose>` whose
+                // remainder carries no other block is the terminal-answer
+                // shape: the model wrote its final prose, ended the turn, and
+                // simply omitted the redundant close tag (observed at scale in
+                // the eval corpus, where the whole turn was then rejected as a
+                // parse failure). The text is complete — accept it as the
+                // block's body instead of killing the answer. A remainder that
+                // still contains another top-level block keeps the strict
+                // violation: swallowing to EOF there would eat real calls.
+                if matches!(tag, "assistant_prose" | "user_response")
+                    && !remainder_has_top_level_block(&src[end..])
+                {
+                    let body = src[end..].trim();
+                    if !body.is_empty() {
+                        if tag == "user_response" {
+                            user_response_parts.push(body.to_string());
+                            canonical_parts
+                                .push(format!("<user_response>\n{body}\n</user_response>"));
+                        } else {
+                            assistant_prose_parts.push(body.to_string());
+                            canonical_parts
+                                .push(format!("<assistant_prose>\n{body}\n</assistant_prose>"));
+                        }
+                    }
+                    cursor = bytes.len();
+                    continue;
+                }
                 violations.push(format!(
                     "Unclosed <{tag}> block. Close it with </{tag}> or remove it; only \
                      <tool_call>, <assistant_prose>, <user_response>, and <done> are accepted.",
@@ -940,6 +997,42 @@ fn stray_tool_call_close_len(src: &str, cursor: usize) -> Option<usize> {
     None
 }
 
+/// If `cursor` sits on a bare `<function_calls>` / `</function_calls>` wrapper
+/// tag — the chat-template vocabulary some templates emit around `<invoke ...>`
+/// markup — return the tag's byte length so the scanner can skip it silently.
+/// The wrapper carries no content of its own; the inner `<invoke>` block is
+/// handled by the function-markup path.
+fn function_calls_wrapper_len(src: &str, cursor: usize) -> Option<usize> {
+    let rest = &src[cursor..];
+    for tag in ["<function_calls>", "</function_calls>"] {
+        if rest.starts_with(tag) {
+            return Some(tag.len());
+        }
+    }
+    None
+}
+
+/// True when `remainder` still contains another top-level block opener — a
+/// `<tool_call>`, `<done>`, a response tag, or chat-template function markup.
+/// Used to gate the unclosed-terminal-response recovery: only a remainder with
+/// NO further block may be absorbed as the unclosed tag's body.
+fn remainder_has_top_level_block(remainder: &str) -> bool {
+    const BLOCK_OPENERS: &[&str] = &[
+        "<tool_call>",
+        "<toolcall>",
+        "<done>",
+        "<assistant_prose>",
+        "<assistantprose>",
+        "<user_response>",
+        "<userresponse>",
+        FUNCTION_MARKUP_OPEN,
+        INVOKE_MARKUP_OPEN,
+    ];
+    BLOCK_OPENERS
+        .iter()
+        .any(|opener| remainder.contains(opener))
+}
+
 /// Recover a single COMPLETE bare `name({ ... })` call from the body of an
 /// unclosed `<tool_call>` wrapper (#A2a). Value models emit a structurally
 /// complete call — heredoc sentinel-closed, the call's `)` balanced — and
@@ -1448,8 +1541,13 @@ fn parse_function_markup_body(
                 .collect()
         })
         .unwrap_or_default();
+    // The attribute spelling tolerates extra attributes after `name="..."`
+    // (e.g. `<parameter name="file" string="true">`, the DSML-influenced shape
+    // value models emit): requiring `>` right after the name silently failed
+    // the match, and the complete call was then misdiagnosed as TRUNCATED —
+    // the single largest full-turn parse-kill class in the eval corpus.
     let param_re = regex::Regex::new(
-        r#"(?s)<parameter(?:=([A-Za-z0-9_][A-Za-z0-9_.-]*)|\s+name="([^"]+)")\s*>(.*?)</parameter>"#,
+        r#"(?s)<parameter(?:=([A-Za-z0-9_][A-Za-z0-9_.-]*)|\s+name="([^"]+)"(?:\s+[A-Za-z_][A-Za-z0-9_.-]*="[^"]*")*)\s*>(.*?)</parameter>"#,
     )
     .expect("valid function-markup parameter regex");
     let mut args = serde_json::Map::new();

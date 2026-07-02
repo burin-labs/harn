@@ -872,7 +872,7 @@ async fn host_agent_dispatch_tool_call(
             return Ok(json_to_vm_value(&denied));
         }
     };
-    let mut tool_args = tools::normalize_tool_args(&tool_name, &raw_args);
+    let mut tool_args = tools::normalize_tool_args(&tool_name, &raw_args, tools);
     let session_id = agent_primitive_option_str(options, "session_id")
         .or_else(current_agent_session_id)
         .unwrap_or_else(|| format!("agent_primitive_session_{}", uuid::Uuid::now_v7()));

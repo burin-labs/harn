@@ -692,7 +692,11 @@ fn tagged_parser_accepts_user_response_tag() {
 #[test]
 fn tagged_parser_reports_unclosed_user_response_as_unclosed_not_unknown() {
     let tools = sample_tool_registry();
-    let text = "<user_response>Visible answer without a close tag.";
+    // A trailing <done> block keeps this NON-terminal: an unclosed response
+    // tag whose remainder still carries another top-level block keeps the
+    // strict violation (the terminal shape — nothing after the prose — is now
+    // accepted as the block body; see corpus_conformance).
+    let text = "<user_response>Visible answer without a close tag.\n<done>##DONE##</done>";
     let result = parse_text_tool_calls_with_tools(text, Some(&tools));
     assert!(
         result
