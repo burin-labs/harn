@@ -2,6 +2,12 @@ use super::*;
 
 const MCP_AUTH_COMPLETION_TIMEOUT: std::time::Duration = std::time::Duration::from_mins(10);
 
+/// Upper bound on a single line read from an MCP stdio server, and on the
+/// messages buffered while a request write is in flight. `read_line` grows its
+/// buffer without bound, so a misbehaving server streaming an endless line
+/// could otherwise OOM the host.
+const MCP_STDIO_MAX_LINE_BYTES: usize = 64 * 1024 * 1024;
+
 pub(crate) async fn stdio_call_raw(
     inner: &mut StdioMcpClientInner,
     server_name: &str,
@@ -23,8 +29,21 @@ pub(crate) async fn stdio_call_raw(
             ),
         });
 
-        write_stdio_json(&mut inner.stdin, &request).await?;
-        let msg = read_stdio_response(inner, server_name, method, id).await?;
+        let line = serde_json::to_string(&request)
+            .map_err(|e| VmError::Runtime(format!("MCP serialization error: {e}")))?;
+        let StdioMcpClientInner { stdin, reader, .. } = &mut *inner;
+        let (drained, partial) = tokio::time::timeout(
+            MCP_TIMEOUT,
+            write_line_draining(stdin, reader, line.as_bytes()),
+        )
+        .await
+        .map_err(|_| {
+            VmError::Runtime(format!(
+                "MCP: server did not accept '{method}' within {}s",
+                MCP_TIMEOUT.as_secs()
+            ))
+        })??;
+        let msg = read_stdio_response(inner, server_name, method, id, drained, partial).await?;
         if maybe_retry_unsupported_protocol(inner.protocol_mode, &mut inner.protocol_version, &msg)
         {
             continue;
@@ -35,6 +54,108 @@ pub(crate) async fn stdio_call_raw(
     Err(VmError::Runtime(
         "MCP request failed after protocol-version retry".into(),
     ))
+}
+
+/// Read one `\n`-terminated line into `buf` (which may already hold a partial
+/// line from a previous cancelled call), enforcing `max_bytes` on the total
+/// line length. Returns the number of bytes appended; `0` means EOF. The
+/// future is cancel-safe: consumed bytes are always in `buf`, so a caller may
+/// drop it at an await point and resume later with the same `buf`.
+pub(crate) async fn read_line_capped<R: tokio::io::AsyncBufRead + Unpin>(
+    reader: &mut R,
+    buf: &mut Vec<u8>,
+    max_bytes: usize,
+) -> Result<usize, VmError> {
+    let start_len = buf.len();
+    loop {
+        let available = reader
+            .fill_buf()
+            .await
+            .map_err(|e| VmError::Runtime(format!("MCP read error: {e}")))?;
+        if available.is_empty() {
+            return Ok(buf.len() - start_len);
+        }
+        let newline = available.iter().position(|&b| b == b'\n');
+        let take = newline.map_or(available.len(), |index| index + 1);
+        if buf.len().saturating_add(take) > max_bytes {
+            return Err(VmError::Runtime(format!(
+                "MCP protocol error: server sent a line exceeding the {} MiB limit",
+                max_bytes / (1024 * 1024)
+            )));
+        }
+        buf.extend_from_slice(&available[..take]);
+        reader.consume(take);
+        if newline.is_some() {
+            return Ok(buf.len() - start_len);
+        }
+    }
+}
+
+/// Write one JSON-RPC line while concurrently draining lines the server
+/// emits. Writing and then reading on the same task can deadlock once both
+/// pipe buffers fill: the server blocks writing stdout (nobody is reading it)
+/// while we block writing a large request to stdin (the server is not reading
+/// it until it can flush stdout). Draining keeps the server's stdout moving so
+/// our write always completes.
+///
+/// Returns the drained messages — dispatched by the caller once the write has
+/// finished, preserving the old strictly-sequential semantics — plus any
+/// trailing partial line to resume reading from.
+pub(crate) async fn write_line_draining<W, R>(
+    stdin: &mut W,
+    reader: &mut R,
+    line: &[u8],
+) -> Result<(Vec<serde_json::Value>, Vec<u8>), VmError>
+where
+    W: tokio::io::AsyncWrite + Unpin,
+    R: tokio::io::AsyncBufRead + Unpin,
+{
+    let write = async {
+        stdin.write_all(line).await?;
+        stdin.write_all(b"\n").await?;
+        stdin.flush().await
+    };
+    tokio::pin!(write);
+
+    let mut drained = Vec::new();
+    let mut drained_bytes = 0usize;
+    let mut line_buf: Vec<u8> = Vec::new();
+    let mut reader_eof = false;
+    loop {
+        tokio::select! {
+            result = &mut write => {
+                result.map_err(|e| VmError::Runtime(format!("MCP write error: {e}")))?;
+                return Ok((drained, line_buf));
+            }
+            result = read_line_capped(reader, &mut line_buf, MCP_STDIO_MAX_LINE_BYTES), if !reader_eof => {
+                let bytes_read = result?;
+                if bytes_read == 0 {
+                    // Server closed stdout. Keep driving the write: if the
+                    // server is gone it fails with a broken pipe, and the
+                    // caller surfaces the closed stream when it reads the
+                    // response.
+                    reader_eof = true;
+                    continue;
+                }
+                drained_bytes = drained_bytes.saturating_add(bytes_read);
+                if drained_bytes > MCP_STDIO_MAX_LINE_BYTES {
+                    return Err(VmError::Runtime(format!(
+                        "MCP protocol error: server flooded more than {} MiB while a request write was in flight",
+                        MCP_STDIO_MAX_LINE_BYTES / (1024 * 1024)
+                    )));
+                }
+                let text = std::str::from_utf8(&line_buf)
+                    .map_err(|e| VmError::Runtime(format!("MCP read error: {e}")))?;
+                let trimmed = text.trim();
+                if !trimmed.is_empty() {
+                    if let Ok(msg) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                        drained.push(msg);
+                    }
+                }
+                line_buf.clear();
+            }
+        }
+    }
 }
 
 pub(crate) async fn write_stdio_json(
@@ -62,51 +183,88 @@ pub(crate) async fn read_stdio_response(
     server_name: &str,
     method: &str,
     id: u64,
+    drained: Vec<serde_json::Value>,
+    mut line_buf: Vec<u8>,
 ) -> Result<serde_json::Value, VmError> {
-    let mut line_buf = String::new();
+    // Messages drained while the request write was in flight come first, in
+    // arrival order.
+    for msg in drained {
+        if let Some(response) = dispatch_stdio_message(inner, server_name, id, msg).await? {
+            return Ok(response);
+        }
+    }
     loop {
-        line_buf.clear();
-        let bytes_read = tokio::time::timeout(MCP_TIMEOUT, inner.reader.read_line(&mut line_buf))
-            .await
-            .map_err(|_| {
-                VmError::Runtime(format!(
-                    "MCP: server did not respond to '{method}' within {}s",
-                    MCP_TIMEOUT.as_secs()
-                ))
-            })?
-            .map_err(|e| VmError::Runtime(format!("MCP read error: {e}")))?;
+        // `line_buf` may still hold a partial line left over from the write
+        // drain; the first read resumes it.
+        let bytes_read = tokio::time::timeout(
+            MCP_TIMEOUT,
+            read_line_capped(&mut inner.reader, &mut line_buf, MCP_STDIO_MAX_LINE_BYTES),
+        )
+        .await
+        .map_err(|_| {
+            VmError::Runtime(format!(
+                "MCP: server did not respond to '{method}' within {}s",
+                MCP_TIMEOUT.as_secs()
+            ))
+        })??;
 
         if bytes_read == 0 {
             return Err(VmError::Runtime("MCP: server closed connection".into()));
         }
 
-        let trimmed = line_buf.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-
-        let msg: serde_json::Value = match serde_json::from_str(trimmed) {
-            Ok(v) => v,
-            Err(_) => continue,
+        let msg = {
+            let text = std::str::from_utf8(&line_buf)
+                .map_err(|e| VmError::Runtime(format!("MCP read error: {e}")))?;
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                serde_json::from_str::<serde_json::Value>(trimmed).ok()
+            }
         };
-
-        if msg.get("id").is_none() {
-            let _ = handle_inbound_client_request(server_name, &msg).await;
+        line_buf.clear();
+        let Some(msg) = msg else {
             continue;
-        }
-
-        if msg["id"].as_u64() == Some(id)
-            && (msg.get("result").is_some() || msg.get("error").is_some())
-        {
-            return Ok(msg);
-        }
-
-        let response = match handle_inbound_client_request(server_name, &msg).await {
-            Some(response) => response,
-            None => continue,
         };
-        write_stdio_json(&mut inner.stdin, &response).await?;
+        if let Some(response) = dispatch_stdio_message(inner, server_name, id, msg).await? {
+            return Ok(response);
+        }
     }
+}
+
+/// Route one inbound stdio message while waiting for the response to request
+/// `id`: returns `Ok(Some(response))` when the message is that response,
+/// otherwise handles it (notification relay, server-to-client request) and
+/// returns `Ok(None)`.
+async fn dispatch_stdio_message(
+    inner: &mut StdioMcpClientInner,
+    server_name: &str,
+    id: u64,
+    msg: serde_json::Value,
+) -> Result<Option<serde_json::Value>, VmError> {
+    if msg.get("id").is_none() {
+        let _ = handle_inbound_client_request(server_name, &msg).await;
+        return Ok(None);
+    }
+
+    if msg["id"].as_u64() == Some(id) && (msg.get("result").is_some() || msg.get("error").is_some())
+    {
+        return Ok(Some(msg));
+    }
+
+    if let Some(response) = handle_inbound_client_request(server_name, &msg).await {
+        // Bound the write: responses to server-to-client requests are small,
+        // but a wedged pipe must surface as an error, not an eternal hang.
+        tokio::time::timeout(MCP_TIMEOUT, write_stdio_json(&mut inner.stdin, &response))
+            .await
+            .map_err(|_| {
+                VmError::Runtime(format!(
+                    "MCP: server did not accept a client response within {}s",
+                    MCP_TIMEOUT.as_secs()
+                ))
+            })??;
+    }
+    Ok(None)
 }
 
 /// Handle a server-to-client request that arrived on the stream while
@@ -162,23 +320,20 @@ pub(crate) async fn stdio_notify(
         ),
     });
 
-    let line = serde_json::to_string(&notification)
-        .map_err(|e| VmError::Runtime(format!("MCP serialization error: {e}")))?;
-    inner
-        .stdin
-        .write_all(line.as_bytes())
-        .await
-        .map_err(|e| VmError::Runtime(format!("MCP write error: {e}")))?;
-    inner
-        .stdin
-        .write_all(b"\n")
-        .await
-        .map_err(|e| VmError::Runtime(format!("MCP write error: {e}")))?;
-    inner
-        .stdin
-        .flush()
-        .await
-        .map_err(|e| VmError::Runtime(format!("MCP flush error: {e}")))?;
+    // Notifications are small (they fit the pipe buffer without needing the
+    // server to drain it), so a plain bounded write suffices here — no
+    // concurrent drain like `stdio_call_raw` requests get.
+    tokio::time::timeout(
+        MCP_TIMEOUT,
+        write_stdio_json(&mut inner.stdin, &notification),
+    )
+    .await
+    .map_err(|_| {
+        VmError::Runtime(format!(
+            "MCP: server did not accept '{method}' within {}s",
+            MCP_TIMEOUT.as_secs()
+        ))
+    })??;
     Ok(())
 }
 

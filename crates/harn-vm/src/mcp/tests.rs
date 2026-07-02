@@ -1743,3 +1743,101 @@ async fn handle_inbound_routes_sampling_to_dispatcher() {
         serde_json::json!("mcp.samplingDeclined")
     );
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn stdio_read_line_capped_reads_lines_and_reports_eof() {
+    let data: &[u8] = b"{\"a\":1}\npartial";
+    let mut reader = BufReader::new(data);
+    let mut buf = Vec::new();
+
+    let bytes_read = read_line_capped(&mut reader, &mut buf, 1024).await.unwrap();
+    assert_eq!(bytes_read, 8);
+    assert_eq!(buf, b"{\"a\":1}\n");
+
+    // A final unterminated line is returned at EOF, like `read_line`.
+    buf.clear();
+    let bytes_read = read_line_capped(&mut reader, &mut buf, 1024).await.unwrap();
+    assert_eq!(bytes_read, 7);
+    assert_eq!(buf, b"partial");
+
+    buf.clear();
+    let bytes_read = read_line_capped(&mut reader, &mut buf, 1024).await.unwrap();
+    assert_eq!(bytes_read, 0, "EOF must read zero bytes");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn stdio_read_line_capped_rejects_oversized_line() {
+    // An endless line (no newline) must produce a protocol error at the cap
+    // instead of growing the buffer without bound.
+    let data = vec![b'x'; 2 * 1024 * 1024];
+    let mut reader = BufReader::new(&data[..]);
+    let mut buf = Vec::new();
+    let error = read_line_capped(&mut reader, &mut buf, 1024 * 1024)
+        .await
+        .unwrap_err();
+    let message = format!("{error:?}");
+    assert!(message.contains("exceeding the 1 MiB limit"), "{message}");
+    assert!(buf.len() <= 1024 * 1024, "buffer must stay within the cap");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn stdio_write_drains_server_flood_instead_of_deadlocking() {
+    // Both directions get a small 8 KiB buffer, standing in for OS pipe
+    // buffers. The server floods far more than that down its stdout *before*
+    // reading the client's oversized request: writing the request and only
+    // then reading (the old sequential behavior) deadlocks, because each side
+    // is blocked on a full pipe the other side is not draining.
+    let (client_io, server_io) = tokio::io::duplex(8 * 1024);
+    let (client_read, mut client_write) = tokio::io::split(client_io);
+    let (server_read, mut server_write) = tokio::io::split(server_io);
+
+    let request_line = format!(
+        r#"{{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{{"blob":"{}"}}}}"#,
+        "x".repeat(512 * 1024)
+    );
+    let expected_request_len = request_line.len() + 1;
+
+    let server = tokio::spawn(async move {
+        let note = format!(
+            "{}\n",
+            serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "notifications/progress",
+                "params": {"progressToken": "t", "progress": 1},
+            })
+        );
+        for _ in 0..2_000 {
+            server_write.write_all(note.as_bytes()).await.unwrap();
+        }
+        let mut reader = BufReader::new(server_read);
+        let mut request = Vec::new();
+        reader.read_until(b'\n', &mut request).await.unwrap();
+        request.len()
+    });
+
+    let mut reader = BufReader::new(client_read);
+    let (drained, partial) = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        write_line_draining(&mut client_write, &mut reader, request_line.as_bytes()),
+    )
+    .await
+    .expect("request write must not deadlock against a flooding server")
+    .unwrap();
+
+    assert!(
+        !drained.is_empty(),
+        "the flood must have been drained while writing"
+    );
+    assert!(drained
+        .iter()
+        .all(|msg| msg["method"] == serde_json::json!("notifications/progress")));
+    assert!(
+        partial.is_empty() || !partial.contains(&b'\n'),
+        "any leftover must be a single partial line"
+    );
+    let request_len = server.await.unwrap();
+    assert_eq!(
+        request_len, expected_request_len,
+        "server must receive the complete request line"
+    );
+}
