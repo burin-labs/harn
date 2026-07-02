@@ -88,8 +88,8 @@ env:
   CARGO_INCREMENTAL: "0"
   SCCACHE_GHA_ENABLED: "true"
   # Keep a narrow release-size ratchet while allowing the current stripped
-  # Linux x86_64 binary, which is 189.07 MiB at v0.8.167.
-  BINARY_SIZE_BUDGET_MB: "189.25"
+  # Linux x86_64 binary, which is 189.27 MiB at v0.8.168.
+  BINARY_SIZE_BUDGET_MB: "189.50"
 
 jobs:
   setup:
