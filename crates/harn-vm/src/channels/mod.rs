@@ -9,7 +9,7 @@ use time::format_description::well_known::Rfc3339;
 
 use crate::event_log::{
     active_event_log, install_memory_for_current_thread, sanitize_topic_component, AnyEventLog,
-    EventId, EventLog, LogEvent, Topic,
+    ConsumerId, EventId, EventLog, LogEvent, Topic,
 };
 use crate::llm::vm_value_to_json;
 use crate::runtime_limits::RuntimeLimits;
@@ -519,6 +519,53 @@ pub(crate) async fn channel_subscribe_from_vm(
         receiver: Arc::new(tokio::sync::Mutex::new(rx)),
         cancel: None,
     }))
+}
+
+pub(crate) async fn channel_consumer_cursor_from_vm(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let name = required_string(args.first(), "channel_consumer_cursor", "name")?;
+    let consumer = required_consumer_id(args.get(1), "channel_consumer_cursor")?;
+    let options = parse_options(args.get(2), "channel_consumer_cursor")?;
+    let context = ChannelContext::current(ctx);
+    let resolved = resolve_channel(&name, &options, &context)?;
+    let cursor = log_for_scope(resolved.scope)
+        .consumer_cursor(&resolved.topic, &consumer)
+        .await
+        .map_err(channel_log_error)?;
+    match cursor {
+        Some(event_id) => Ok(VmValue::Int(event_id_to_i64(
+            event_id,
+            "channel_consumer_cursor",
+        )?)),
+        None => Ok(VmValue::Nil),
+    }
+}
+
+pub(crate) async fn channel_ack_from_vm(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let name = required_string(args.first(), "channel_ack", "name")?;
+    let consumer = required_consumer_id(args.get(1), "channel_ack")?;
+    let cursor = required_event_id(args.get(2), "channel_ack", "cursor")?;
+    let options = parse_options(args.get(3), "channel_ack")?;
+    let context = ChannelContext::current(ctx);
+    let resolved = resolve_channel(&name, &options, &context)?;
+    log_for_scope(resolved.scope)
+        .ack(&resolved.topic, &consumer, cursor)
+        .await
+        .map_err(channel_log_error)?;
+    Ok(crate::stdlib::json_to_vm_value(&serde_json::json!({
+        "name": name,
+        "name_resolved": resolved.resolved_name,
+        "scope": resolved.scope.as_str(),
+        "scope_id": resolved.scope_id,
+        "topic": resolved.topic.as_str(),
+        "consumer_id": consumer.as_str(),
+        "cursor": cursor,
+    })))
 }
 
 impl ChannelContext {
@@ -1324,6 +1371,30 @@ fn required_string(value: Option<&VmValue>, builtin: &str, name: &str) -> Result
         ))),
         None => Err(VmError::TypeError(format!("{builtin}: missing {name}"))),
     }
+}
+
+fn required_consumer_id(value: Option<&VmValue>, builtin: &str) -> Result<ConsumerId, VmError> {
+    ConsumerId::new(required_string(value, builtin, "consumer_id")?).map_err(channel_log_error)
+}
+
+fn required_event_id(
+    value: Option<&VmValue>,
+    builtin: &str,
+    name: &str,
+) -> Result<EventId, VmError> {
+    match value {
+        Some(VmValue::Int(value)) if *value >= 0 => Ok(*value as EventId),
+        Some(other) => Err(VmError::TypeError(format!(
+            "{builtin}: {name} must be a non-negative int, got {}",
+            other.type_name()
+        ))),
+        None => Err(VmError::TypeError(format!("{builtin}: missing {name}"))),
+    }
+}
+
+fn event_id_to_i64(value: EventId, builtin: &str) -> Result<i64, VmError> {
+    i64::try_from(value)
+        .map_err(|_| VmError::Runtime(format!("{builtin}: event id {value} exceeds int range")))
 }
 
 fn option_string(

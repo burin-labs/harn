@@ -45,6 +45,30 @@ async fn channel_subscribe_impl(
 }
 
 #[harn_builtin(
+    sig = "channel_consumer_cursor(name: string, consumer_id: string, options?: dict) -> int?",
+    kind = "async",
+    category = "channels"
+)]
+async fn channel_consumer_cursor_impl(
+    ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    crate::channels::channel_consumer_cursor_from_vm(Some(&ctx), args).await
+}
+
+#[harn_builtin(
+    sig = "channel_ack(name: string, consumer_id: string, cursor: int, options?: dict) -> dict",
+    kind = "async",
+    category = "channels"
+)]
+async fn channel_ack_impl(
+    ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    crate::channels::channel_ack_from_vm(Some(&ctx), args).await
+}
+
+#[harn_builtin(
     sig = "flush_trigger_aggregations() -> nil",
     kind = "async",
     category = "channels"
@@ -63,5 +87,7 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &EMIT_CHANNEL_IMPL_DEF,
     &CHANNEL_EVENTS_IMPL_DEF,
     &CHANNEL_SUBSCRIBE_IMPL_DEF,
+    &CHANNEL_CONSUMER_CURSOR_IMPL_DEF,
+    &CHANNEL_ACK_IMPL_DEF,
     &FLUSH_TRIGGER_AGGREGATIONS_IMPL_DEF,
 ];

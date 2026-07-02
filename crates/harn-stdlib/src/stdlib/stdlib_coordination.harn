@@ -188,6 +188,122 @@ fn __coord_list(value) {
   return [value]
 }
 
+fn __coord_address_identifier(address) {
+  if address == nil {
+    return nil
+  }
+  if type_of(address) == "string" {
+    return address
+  }
+  if type_of(address) == "dict" {
+    return address?.session_id
+      ?? address?.root_session_id
+      ?? address?.agent
+      ?? address?.worker_id
+      ?? address?.run_id
+      ?? address?.task_id
+      ?? address?.root_task_id
+  }
+  return nil
+}
+
+fn __coord_consumer_id(options, fallback = nil) {
+  let opts = __coord_dict(options)
+  let ctx = __coord_ctx()
+  let address_id = __coord_address_identifier(opts?.to ?? opts?.recipient)
+  return __coord_validate_component(
+    "consumer id",
+    opts?.consumer_id
+      ?? opts?.consumer
+      ?? fallback
+      ?? address_id
+      ?? opts?.session_id
+      ?? ctx?.agent_session_id
+      ?? ctx?.worker_id
+      ?? ctx?.run_id
+      ?? "default",
+  )
+}
+
+fn __coord_text_matches(value, expected) {
+  let needle = trim(__coord_string(expected))
+  if needle == "" {
+    return true
+  }
+  if type_of(value) == "list" {
+    for item in value {
+      if __coord_text_matches(item, needle) {
+        return true
+      }
+    }
+    return false
+  }
+  return trim(__coord_string(value)) == needle
+}
+
+fn __coord_address_matches(address, expected) {
+  let needle = trim(__coord_string(__coord_address_identifier(expected) ?? expected))
+  if needle == "" {
+    return true
+  }
+  if type_of(address) == "string" {
+    return trim(address) == needle
+  }
+  if type_of(address) == "dict" {
+    return __coord_text_matches(
+      [
+        address?.session_id,
+        address?.root_session_id,
+        address?.agent,
+        address?.worker_id,
+        address?.run_id,
+        address?.task_id,
+        address?.root_task_id,
+      ],
+      needle,
+    )
+  }
+  return false
+}
+
+fn __coord_kind_matches(kind, expected) {
+  if expected == nil || trim(__coord_string(expected)) == "" {
+    return true
+  }
+  if type_of(expected) == "list" {
+    for item in expected {
+      if kind == lowercase(trim(__coord_string(item))) {
+        return true
+      }
+    }
+    return false
+  }
+  return kind == lowercase(trim(__coord_string(expected)))
+}
+
+fn __coord_message_matches(message, options, default_to) {
+  let opts = __coord_dict(options)
+  if !__coord_kind_matches(message?.kind, opts?.kind) {
+    return false
+  }
+  if !__coord_address_matches(message?.to, opts?.to ?? opts?.recipient ?? default_to) {
+    return false
+  }
+  if opts?.from != nil && !__coord_address_matches(message?.from, opts?.from) {
+    return false
+  }
+  if opts?.reply_to != nil && !__coord_text_matches(message?.reply_to, opts?.reply_to) {
+    return false
+  }
+  if opts?.thread_id != nil && !__coord_text_matches(message?.thread_id, opts?.thread_id) {
+    return false
+  }
+  if opts?.subject != nil && !__coord_text_matches(message?.subject, opts?.subject) {
+    return false
+  }
+  return true
+}
+
 fn __coord_kind(message, options) {
   let kind = lowercase(trim(__coord_string(options?.kind ?? message?.kind ?? "status")))
   if !contains(__COORD_KINDS, kind) {
@@ -260,10 +376,58 @@ fn __coord_envelope(scope, room, message, options) {
       data: opts?.data ?? msg?.data ?? msg?.payload,
       refs: __coord_list(opts?.refs ?? msg?.refs),
       related_ids: __coord_list(opts?.related_ids ?? msg?.related_ids),
+      reply_to: opts?.reply_to ?? msg?.reply_to,
+      thread_id: opts?.thread_id ?? msg?.thread_id,
       dedupe_key: opts?.dedupe_key,
       created_at: opts?.created_at ?? msg?.created_at ?? date_iso(),
       ttl: opts?.ttl ?? msg?.ttl,
       privacy: opts?.privacy ?? msg?.privacy,
+    },
+  )
+}
+
+/**
+ * Append an addressed coordination message to a scoped room.
+ *
+ * This is a typed wrapper over `coord_post`: the message remains append-only
+ * channel data, while the `to` field lets consumers build non-destructive
+ * inboxes with explicit cursor/ack semantics.
+ *
+ * @effects: [transcript.write]
+ * @errors: [runtime]
+ */
+pub fn coord_send(scope, room, recipient, message, options = nil) {
+  let opts = __coord_dict(options)
+  return coord_post(scope, room, message, opts + {to: recipient})
+}
+
+/**
+ * Reply to a coordination message or receipt.
+ *
+ * `reply_to` is first-class envelope metadata; `related_ids` also includes the
+ * parent id so consumers that group by relationship do not need to inspect
+ * message bodies.
+ *
+ * @effects: [transcript.write]
+ * @errors: [runtime]
+ */
+pub fn coord_reply(scope, room, original, message, options = nil) {
+  let opts = __coord_dict(options)
+  let parent = original?.message ?? original
+  if type_of(parent) != "dict" || trim(__coord_string(parent?.id)) == "" {
+    throw "std/coordination: coord_reply expects a coordination message or receipt"
+  }
+  let related = __coord_list(opts?.related_ids ?? message?.related_ids) + [parent.id]
+  return coord_post(
+    scope,
+    room,
+    message,
+    opts
+      + {
+      to: opts?.to ?? parent?.from,
+      reply_to: parent.id,
+      thread_id: opts?.thread_id ?? parent?.thread_id ?? parent.id,
+      related_ids: related,
     },
   )
 }
@@ -299,6 +463,93 @@ pub fn coord_post(scope, room, message, options = nil) {
     subject: envelope.subject,
     channel: channel,
     message: envelope,
+  }
+}
+
+/**
+ * Read the last acknowledged cursor for a coordination room consumer.
+ *
+ * Returns `nil` when the consumer has not acknowledged this room yet. Cursor
+ * reads are explicit so inbox consumption can be durable without deleting
+ * messages for other agents.
+ *
+ * @effects: []
+ * @errors: [runtime]
+ */
+pub fn coord_cursor(scope, room, consumer_id, options = nil) {
+  let opts = __coord_dict(options)
+  let resolution = __coord_resolution(scope, room, opts)
+  return channel_consumer_cursor(
+    resolution.channel_name,
+    __coord_consumer_id(opts, consumer_id),
+    __coord_channel_options(resolution, opts),
+  )
+}
+
+/**
+ * Acknowledge a coordination room through `cursor` for one consumer.
+ *
+ * This never removes messages. It only advances the caller's durable consumer
+ * cursor on the underlying channel/event log.
+ *
+ * @effects: [transcript.write]
+ * @errors: [runtime]
+ */
+pub fn coord_ack(scope, room, consumer_id, cursor, options = nil) {
+  let opts = __coord_dict(options)
+  let resolution = __coord_resolution(scope, room, opts)
+  return channel_ack(
+    resolution.channel_name,
+    __coord_consumer_id(opts, consumer_id),
+    cursor,
+    __coord_channel_options(resolution, opts),
+  )
+}
+
+/**
+ * Read addressed coordination messages for a consumer without acknowledging.
+ *
+ * Options:
+ * - `consumer_id` / `consumer`: explicit durable cursor owner.
+ * - `to` / `recipient`: address filter; defaults to the consumer id.
+ * - `from`, `kind`, `reply_to`, `thread_id`, `subject`: optional filters.
+ * - `from_cursor` / `cursor`: override the consumer cursor for this read.
+ * - `include_events`: keep channel event wrappers beside each message.
+ *
+ * The returned `next_cursor` is the high-water cursor scanned, not an implicit
+ * ack. Call `coord_ack(...)` explicitly after processing messages.
+ *
+ * @effects: []
+ * @errors: [runtime]
+ */
+pub fn coord_inbox(scope, room, options = nil) {
+  let opts = __coord_dict(options)
+  let consumer_id = __coord_consumer_id(opts)
+  let from_cursor = opts?.from_cursor ?? opts?.cursor ?? coord_cursor(scope, room, consumer_id, opts)
+  let scanned = coord_read(scope, room, filter_nil(opts + {include_events: true, from_cursor: from_cursor}))
+  var messages = []
+  var last_scanned_cursor = from_cursor
+  for item in scanned {
+    let event = item?.event ?? {}
+    let message = item?.message ?? item
+    if event?.cursor != nil {
+      last_scanned_cursor = event.cursor
+    }
+    if __coord_message_matches(message, opts, consumer_id) {
+      if opts?.include_events ?? false {
+        messages = messages + [item]
+      } else {
+        messages = messages + [message]
+      }
+    }
+  }
+  return {
+    consumer_id: consumer_id,
+    from_cursor: from_cursor,
+    last_scanned_cursor: last_scanned_cursor,
+    next_cursor: last_scanned_cursor,
+    scanned: len(scanned),
+    messages: messages,
   }
 }
 

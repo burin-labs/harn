@@ -2296,6 +2296,8 @@ scope resolution as `emit_channel(...)`. This matters for session channels:
 `channel_subscribe("worker.ready", {scope: "session", session_id: "sess-1"})`
 observes the in-process session channel log, while raw `event_log.subscribe(...)`
 only sees the active EventLog backend.
+Use `channel_consumer_cursor(...)` and `channel_ack(...)` for durable consumers
+that need a high-water cursor without deleting shared channel events.
 
 ### Coordination ledger (`std/coordination`)
 
@@ -2306,7 +2308,15 @@ module wraps `emit_channel(...)`, `channel_events(...)`, `event_log.subscribe`,
 `harn.coordination.message.v1` envelope.
 
 ```harn
-import { coord_post, coord_read, coord_subscribe, coord_remember } from "std/coordination"
+import {
+  coord_ack,
+  coord_inbox,
+  coord_post,
+  coord_read,
+  coord_remember,
+  coord_send,
+  coord_subscribe,
+} from "std/coordination"
 
 let receipt = coord_post(
   "session",
@@ -2317,15 +2327,24 @@ let receipt = coord_post(
 let messages = coord_read("session", "release", {session_id: "agent-session-1"})
 let stream = coord_subscribe("session", "release", {session_id: "agent-session-1"})
 let memory_receipt = coord_remember(receipt, {namespace: "coordination/release"})
+let request = coord_send("workspace", "release", "build-agent", {
+  kind: "request",
+  subject: "verify release",
+  body: "Please audit the new patch release.",
+})
+let inbox = coord_inbox("workspace", "release", {consumer_id: "build-agent"})
+coord_ack("workspace", "release", "build-agent", inbox.next_cursor)
 ```
 
 Scopes are `session`, `pipeline`, `tenant`, `workspace`, and `task`.
 `workspace` stores under the active tenant namespace and includes
 `workspace_id` in the channel name. `task` stores on the current session channel
 and includes `task_id` in the channel name. Message kinds are `status`, `claim`,
-`handoff`, `blocker`, `decision`, `request`, and `fact`. `coord_post` only
-writes the ledger; `coord_remember` is explicit opt-in when a coordination
-message should become recallable memory.
+`handoff`, `blocker`, `decision`, `request`, and `fact`. `coord_send` and
+`coord_reply` add addressing and thread metadata; `coord_inbox` scans addressed
+messages without acknowledging; `coord_ack` advances the consumer cursor after
+processing. `coord_post` only writes the ledger; `coord_remember` is explicit
+opt-in when a coordination message should become recallable memory.
 
 Subscribe to channel emits with a `channel.emit` trigger (provider
 `channel`). `match.events` accepts `"channel:<name>"` selectors:
