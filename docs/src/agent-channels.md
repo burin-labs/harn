@@ -22,6 +22,7 @@ narrowest one that fits.
 | Hand off a request to one specific agent | Handoffs (`handoff(...)`, `@handoff`) | Single producer, single typed receiver. No fan-out, no buffering. |
 | React to an external system (GitHub, Slack, cron, Kafka) | Triggers with a provider source | The trigger system already owns signature checks, dedupe, replay, and DLQ for external traffic. |
 | Park one running agent until a specific external event arrives | Suspend/resume with `agent_await_resumption(reason, conditions)` | The waiting agent keeps its transcript; you only need a resume condition, not a long-lived subscriber. |
+| Let agents share claims, blockers, handoffs, and decisions without user-visible chatter | Coordination ledger (`std/coordination`) | Stable coordination envelopes on top of channels, plus opt-in memory recall. |
 | Emit a typed event to N subscribers — including triggers that may not exist yet | **Channels** (`emit_channel(...)` + `channel.emit` trigger) | One producer, many consumers, durable journal, replay-compatible. |
 | Inject a periodic prompt into a running agent loop | **Channels + `batch` + `ReminderInject`** | Aggregate N emits into one reminder, dropped onto the target session at its next turn boundary. |
 
@@ -126,8 +127,44 @@ for event in events {
 
 `from_cursor` (or `cursor`) resumes after a specific event id; `limit`
 caps the returned size. This is **not** a subscription — for live
-delivery, register a trigger (next section) or subscribe to the
-EventLog topic directly with `event_log.subscribe`.
+delivery, register a trigger (next section) or call
+`channel_subscribe(name, options?)`. Use `channel_subscribe` instead of raw
+`event_log.subscribe` when code needs channel scope resolution; session-scoped
+channels use an in-process session channel log that raw EventLog subscriptions
+do not read.
+
+### Coordination Ledger
+
+For multi-agent coordination, prefer `std/coordination` over raw channel
+envelopes. It stores a stable `harn.coordination.message.v1` payload with
+`scope`, `scope_id`, `room`, `kind`, actor metadata, refs, subject/body, and
+optional structured data:
+
+```harn,ignore
+import { coord_post, coord_read, coord_subscribe, coord_remember } from "std/coordination"
+
+let receipt = coord_post(
+  "session",
+  "release",
+  {kind: "claim", subject: "release ownership", body: "Codex-2 owns v0.8.167"},
+  {id: "release-claim", session_id: "agent-session-1"},
+)
+
+let messages = coord_read("session", "release", {session_id: "agent-session-1"})
+let stream = coord_subscribe("session", "release", {session_id: "agent-session-1"})
+let memory_receipt = coord_remember(receipt, {namespace: "coordination/release"})
+```
+
+`coord_post` is append-only and idempotent when `options.id` or
+`options.dedupe_key` is set. `coord_read` returns normalized messages, while
+`coord_subscribe` returns channel event rows whose coordination message is at
+`entry.payload`. `coord_remember` is intentionally separate so a coordination
+message becomes recallable memory only when the caller opts in.
+
+Coordination scopes are `session`, `pipeline`, `tenant`, `workspace`, and
+`task`. `workspace` maps to the active tenant namespace and embeds the
+workspace id in the channel name. `task` maps to the current session channel and
+includes the task id in the channel name.
 
 ## Subscribe via triggers
 

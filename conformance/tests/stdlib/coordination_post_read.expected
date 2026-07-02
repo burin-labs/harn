@@ -1,0 +1,16 @@
+harn.coordination.receipt.v1
+coord-release-1
+claim
+session
+coord-session
+session:coord-session:coord.session.release
+false
+1
+harn.coordination.message.v1
+claim
+codex-2
+harn
+harn#3792
+true
+true
+release ownership
