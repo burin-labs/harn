@@ -1,1 +1,0 @@
-- Added `std/coordination`, a durable multi-agent coordination ledger facade over Harn channels, EventLog, and memory.
