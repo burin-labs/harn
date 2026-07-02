@@ -1344,8 +1344,10 @@ harn models lora inspect --base local-gemma4-e4b --provider vllm --name tools or
 The report checks local `adapter_config.json` metadata when present, compares
 `base_model_name_or_path` with the resolved Harn model id, shows the route's
 tool-calling capability metadata, and prints the matching `harn local launch`
-command. Remote adapter ids are treated as runtime-resolved and warned rather
-than rejected.
+command. When local metadata declares a LoRA rank and the cataloged runtime has
+a max-rank flag, the launch command includes `--max-lora-rank` so runtime
+defaults cannot silently under-provision the adapter. Remote adapter ids are
+treated as runtime-resolved and warned rather than rejected.
 
 ## harn models recommend
 

@@ -78,6 +78,10 @@ fn inspect_report(args: &ModelsLoraInspectArgs) -> Result<LoraInspectReport, Str
         .as_ref()
         .and_then(|runtime| runtime.lora_modules_arg.as_ref())
         .is_some();
+    let provider_supports_lora_max_rank = local_runtime
+        .as_ref()
+        .and_then(|runtime| runtime.max_lora_rank_arg.as_ref())
+        .is_some();
     let base_model_match =
         base_model_match(adapter.base_model_name_or_path.as_deref(), &resolved.id);
     let mut warnings = Vec::new();
@@ -111,6 +115,11 @@ fn inspect_report(args: &ModelsLoraInspectArgs) -> Result<LoraInspectReport, Str
             "provider {provider} does not declare local-runtime LoRA launch flags"
         ));
     }
+    if adapter.rank.is_some() && provider_supports_lora_launch && !provider_supports_lora_max_rank {
+        warnings.push(format!(
+            "adapter rank is known but provider {provider} does not declare a max LoRA rank flag"
+        ));
+    }
     let ok = warnings.iter().all(|warning| {
         !warning.starts_with("local adapter exists")
             && !warning.starts_with("adapter_config.json peft_type")
@@ -123,6 +132,24 @@ fn inspect_report(args: &ModelsLoraInspectArgs) -> Result<LoraInspectReport, Str
         .unwrap_or_else(|| resolved.id.clone());
     let lora_spec = format!("{}={}", adapter.name, adapter.input);
     let launch_provider = provider.clone();
+    let max_lora_rank = adapter
+        .rank
+        .filter(|_| provider_supports_lora_launch && provider_supports_lora_max_rank);
+    let mut harn_local_launch = vec![
+        "harn".to_string(),
+        "local".to_string(),
+        "launch".to_string(),
+        args.base_model.clone(),
+        "--provider".to_string(),
+        launch_provider,
+        "--model-source".to_string(),
+        model_source,
+        "--lora-adapter".to_string(),
+        lora_spec,
+    ];
+    if let Some(rank) = max_lora_rank {
+        harn_local_launch.extend(["--max-lora-rank".to_string(), rank.to_string()]);
+    }
     Ok(LoraInspectReport {
         ok,
         base: BaseModelReport {
@@ -141,6 +168,7 @@ fn inspect_report(args: &ModelsLoraInspectArgs) -> Result<LoraInspectReport, Str
         compatibility: CompatibilityReport {
             base_model_match,
             provider_supports_lora_launch,
+            provider_supports_lora_max_rank,
         },
         tool_calling: ToolCallingReport {
             native_tools: capabilities.native_tools,
@@ -151,18 +179,8 @@ fn inspect_report(args: &ModelsLoraInspectArgs) -> Result<LoraInspectReport, Str
         },
         launch: LaunchHints {
             request_model,
-            harn_local_launch: vec![
-                "harn".to_string(),
-                "local".to_string(),
-                "launch".to_string(),
-                args.base_model.clone(),
-                "--provider".to_string(),
-                launch_provider,
-                "--model-source".to_string(),
-                model_source,
-                "--lora-adapter".to_string(),
-                lora_spec,
-            ],
+            max_lora_rank,
+            harn_local_launch,
         },
         warnings,
     })
@@ -347,6 +365,7 @@ struct AdapterReport {
 struct CompatibilityReport {
     base_model_match: BaseModelMatch,
     provider_supports_lora_launch: bool,
+    provider_supports_lora_max_rank: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -361,6 +380,7 @@ struct ToolCallingReport {
 #[derive(Debug, Serialize)]
 struct LaunchHints {
     request_model: String,
+    max_lora_rank: Option<u64>,
     harn_local_launch: Vec<String>,
 }
 
@@ -415,12 +435,19 @@ mod tests {
             BaseModelMatch::Suffix
         );
         assert!(report.compatibility.provider_supports_lora_launch);
+        assert!(report.compatibility.provider_supports_lora_max_rank);
         assert_eq!(report.launch.request_model, "burin-tools");
+        assert_eq!(report.launch.max_lora_rank, Some(16));
         assert!(report
             .launch
             .harn_local_launch
             .iter()
             .any(|arg| arg == "--lora-adapter"));
+        assert!(report
+            .launch
+            .harn_local_launch
+            .windows(2)
+            .any(|pair| pair == ["--max-lora-rank", "16"]));
     }
 
     #[test]

@@ -47,6 +47,13 @@ fn __safe_bool(value, fallback: bool) -> bool {
   return fallback
 }
 
+fn __safe_int_string(value, fallback: string) -> string {
+  if type_of(value) == "int" {
+    return to_string(value)
+  }
+  return fallback
+}
+
 fn __join_strings(items: list, sep: string) -> string {
   var out = ""
   var first = true
@@ -125,6 +132,16 @@ fn __render_human(harness: Harness, report: dict) {
     "no"
   }
   harness.stdio.println("  catalog LoRA launch flags: " + launch_supported)
+  let rank_supported = if __safe_bool(compatibility["provider_supports_lora_max_rank"], false) {
+    "yes"
+  } else {
+    "no"
+  }
+  harness.stdio.println("  catalog LoRA rank flag: " + rank_supported)
+  let max_rank = __safe_int_string(launch["max_lora_rank"], "")
+  if max_rank != "" {
+    harness.stdio.println("  max LoRA rank: " + max_rank)
+  }
   for warning in warnings {
     let text = __safe_string(warning, "")
     if text != "" {
