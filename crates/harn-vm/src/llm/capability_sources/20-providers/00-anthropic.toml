@@ -589,3 +589,29 @@ supports_assistant_prefill = true
 prefers_role_developer = false
 prefers_xml_tools = true
 thinking_block_style = "thinking_blocks"
+
+# Prefixed-id catch-all mirroring the `claude-*` row above. Hosts sometimes
+# hand this route an OpenRouter-style `anthropic/claude-...` id; the versioned
+# prefix rows above only match known families with parseable versions, so
+# without this row a new family name or unparseable version segment falls
+# through to the global text-channel `json` default even though every Claude
+# on the direct Anthropic route speaks first-class native tool calling.
+[[provider.anthropic]]
+model_match = "anthropic/claude-*"
+native_tools = true
+preferred_tool_format = "native"
+prompt_caching = true
+vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
+structured_output = "tool_use"
+thinking_modes = ["enabled"]
+vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = true
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
