@@ -20,6 +20,248 @@ fn vm_dict(pairs: Vec<(&str, VmValue)>) -> VmValue {
     )
 }
 
+fn vm_closure(name: &str) -> VmValue {
+    VmValue::Closure(Arc::new(crate::value::VmClosure {
+        func: Arc::new(crate::chunk::CompiledFunction {
+            name: name.to_string(),
+            type_params: Vec::new(),
+            nominal_type_names: Vec::new(),
+            params: Vec::new(),
+            default_start: None,
+            chunk: Arc::new(crate::chunk::Chunk::new()),
+            is_generator: false,
+            is_stream: false,
+            has_rest_param: false,
+            has_runtime_type_checks: false,
+        }),
+        env: crate::value::VmEnv::new(),
+        source_dir: None,
+        module_functions: None,
+        module_state: None,
+    }))
+}
+
+/// Minimal `WorkerState` for persistence tests; only `config` and
+/// `snapshot_path` vary per test.
+fn minimal_worker_state(config: WorkerConfig, snapshot_path: String) -> WorkerState {
+    WorkerState {
+        id: "worker_test".to_string(),
+        name: "worker".to_string(),
+        task: "task".to_string(),
+        status: "completed".to_string(),
+        created_at: "created".to_string(),
+        started_at: "started".to_string(),
+        finished_at: None,
+        awaiting_started_at: None,
+        awaiting_since: None,
+        mode: "workflow".to_string(),
+        history: Vec::new(),
+        config,
+        handle: None,
+        cancel_token: Arc::new(AtomicBool::new(false)),
+        suspend_signal: Arc::new(AtomicBool::new(false)),
+        suspension: None,
+        request: WorkerRequestRecord::default(),
+        latest_payload: None,
+        latest_error: None,
+        transcript: None,
+        artifacts: Vec::new(),
+        parent_worker_id: None,
+        parent_stage_id: None,
+        child_run_id: None,
+        child_run_path: None,
+        carry_policy: WorkerCarryPolicy {
+            artifact_mode: "inherit".to_string(),
+            transcript_mode: "inherit".to_string(),
+            context_policy: ContextPolicy::default(),
+            resume_workflow: true,
+            persist_state: true,
+            retriggerable: false,
+            policy: None,
+        },
+        execution: WorkerExecutionProfile::default(),
+        snapshot_path,
+        audit: MutationSessionRecord::default().normalize(),
+    }
+}
+
+fn temp_snapshot_path() -> (std::path::PathBuf, String) {
+    let dir = std::env::temp_dir().join(format!("harn-worker-test-{}", uuid::Uuid::now_v7()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("worker_test.json").to_string_lossy().into_owned();
+    (dir, path)
+}
+
+#[test]
+fn persist_worker_snapshot_rejects_closure_in_workflow_options() {
+    // A closure in user-provided workflow options used to persist as a
+    // display-string and rehydrate as a plain string — a latent type error
+    // with zero signal at save time. The strict serializer must fail loud
+    // at the persist seam and name the offending path.
+    let (dir, snapshot_path) = temp_snapshot_path();
+    let options = crate::value::DictMap::from_iter([
+        ("custom_compactor".to_string(), vm_closure("compact")),
+        ("model".to_string(), vm_string("haiku")),
+    ]);
+    let state = minimal_worker_state(
+        WorkerConfig::Workflow {
+            graph: Box::new(crate::orchestration::WorkflowGraph::default()),
+            artifacts: Vec::new(),
+            options,
+        },
+        snapshot_path.clone(),
+    );
+
+    let err = match super::config::persist_worker_state_snapshot(&state) {
+        Ok(()) => panic!("expected persist to reject the closure"),
+        Err(err) => err,
+    };
+    match err {
+        VmError::Runtime(message) => assert!(
+            message.contains("options.custom_compactor: closure is not serializable"),
+            "got: {message}"
+        ),
+        other => panic!("expected Runtime error, got {other:?}"),
+    }
+    // Fail loud means fail before writing: no partial snapshot on disk.
+    assert!(!std::path::Path::new(&snapshot_path).exists());
+
+    // Nested values get the full path annotation.
+    let options = crate::value::DictMap::from_iter([(
+        "hooks".to_string(),
+        VmValue::List(Arc::new(vec![vm_closure("hook")])),
+    )]);
+    let state = minimal_worker_state(
+        WorkerConfig::Workflow {
+            graph: Box::new(crate::orchestration::WorkflowGraph::default()),
+            artifacts: Vec::new(),
+            options,
+        },
+        snapshot_path,
+    );
+    let err = super::config::persist_worker_state_snapshot(&state).unwrap_err();
+    match err {
+        VmError::Runtime(message) => assert!(
+            message.contains("options.hooks[0]: closure is not serializable"),
+            "got: {message}"
+        ),
+        other => panic!("expected Runtime error, got {other:?}"),
+    }
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn persist_worker_snapshot_strips_closures_from_sub_agent_options_with_warning() {
+    // The top-level agent suspend path persists the *live* agent-loop
+    // options, which legitimately carry callback closures (tool_caller,
+    // tool handlers, custom compactors). Hard-erroring would break every
+    // suspend that uses callbacks, so the persist seam strips them and
+    // keeps the serializable siblings.
+    let (dir, snapshot_path) = temp_snapshot_path();
+    let options = crate::value::DictMap::from_iter([
+        ("_tool_caller".to_string(), vm_closure("tool_caller")),
+        ("max_iterations".to_string(), VmValue::Int(7)),
+    ]);
+    let state = minimal_worker_state(
+        WorkerConfig::SubAgent {
+            spec: Box::new(SubAgentRunSpec {
+                name: "top-level-agent".to_string(),
+                task: "task".to_string(),
+                system: None,
+                options,
+                returns_schema: None,
+                session_id: "session_1".to_string(),
+                parent_session_id: None,
+                reminder_propagation: Vec::new(),
+                workspace_anchor: None,
+            }),
+        },
+        snapshot_path.clone(),
+    );
+
+    super::config::persist_worker_state_snapshot(&state).unwrap();
+    let contents = std::fs::read_to_string(&snapshot_path).unwrap();
+    let payload: serde_json::Value = serde_json::from_str(&contents).unwrap();
+    let spec_options = &payload["config"]["spec"]["options"];
+    assert!(
+        spec_options.get("_tool_caller").is_none(),
+        "closure option must be stripped, got: {spec_options}"
+    );
+    assert_eq!(spec_options["max_iterations"], serde_json::json!(7));
+
+    // The stripped snapshot still rehydrates.
+    let loaded = super::config::load_worker_state_snapshot(&snapshot_path).unwrap();
+    match loaded.config {
+        WorkerConfig::SubAgent { spec } => {
+            assert!(spec.options.get("_tool_caller").is_none());
+            assert!(matches!(
+                spec.options.get("max_iterations"),
+                Some(VmValue::Int(7))
+            ));
+        }
+        _ => panic!("expected sub-agent config"),
+    }
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn persist_worker_snapshot_redacts_secrets_and_round_trips_normal_options() {
+    let (dir, snapshot_path) = temp_snapshot_path();
+    // Placeholder values (not realistic secret shapes, to avoid tripping
+    // push-protection scanners): redaction here fires on the sensitive field
+    // NAMES `api_key` / `Authorization`, not on the value patterns. Token
+    // value-pattern coverage (sk_live_/ghp_/AKIA/Bearer) lives in the
+    // `redact` module's own tests.
+    let secret = "fake-api-key-value-for-test";
+    let bearer = "Bearer fake-bearer-token-for-test";
+    let options = crate::value::DictMap::from_iter([
+        ("api_key".to_string(), vm_string(secret)),
+        (
+            "headers".to_string(),
+            vm_dict(vec![("Authorization", vm_string(bearer))]),
+        ),
+        ("endpoint".to_string(), vm_string("https://example.com/v1")),
+        ("retries".to_string(), VmValue::Int(3)),
+    ]);
+    let state = minimal_worker_state(
+        WorkerConfig::Workflow {
+            graph: Box::new(crate::orchestration::WorkflowGraph::default()),
+            artifacts: Vec::new(),
+            options,
+        },
+        snapshot_path.clone(),
+    );
+
+    super::config::persist_worker_state_snapshot(&state).unwrap();
+    let contents = std::fs::read_to_string(&snapshot_path).unwrap();
+    assert!(
+        !contents.contains(secret),
+        "persisted snapshot must not contain the raw api key"
+    );
+    assert!(
+        !contents.contains("fake-bearer-token-for-test"),
+        "persisted snapshot must not contain the bearer token"
+    );
+    assert!(contents.contains(crate::redact::REDACTED_PLACEHOLDER));
+
+    // Non-secret values survive the round trip unchanged.
+    let loaded = super::config::load_worker_state_snapshot(&snapshot_path).unwrap();
+    match loaded.config {
+        WorkerConfig::Workflow { options, .. } => {
+            assert!(matches!(
+                options.get("endpoint"),
+                Some(VmValue::String(url)) if url.as_str() == "https://example.com/v1"
+            ));
+            assert!(matches!(options.get("retries"), Some(VmValue::Int(3))));
+        }
+        _ => panic!("expected workflow config"),
+    }
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 fn uuid_v7_at_ms(ms: u64) -> String {
     format!(
         "{:08x}-{:04x}-7000-8000-000000000000",

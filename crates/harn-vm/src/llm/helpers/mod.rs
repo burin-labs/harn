@@ -87,6 +87,70 @@ pub fn vm_value_to_json(val: &VmValue) -> serde_json::Value {
     }
 }
 
+/// Strict variant of [`vm_value_to_json`] for durable persistence seams
+/// (worker snapshots, session state written to disk).
+///
+/// [`vm_value_to_json`] serves display/debug paths, so it stringifies
+/// runtime-only values — closures, task handles, channels, streams — via
+/// `display()`. That is fine for a log line, but at a persistence seam it
+/// silently corrupts state: the value rehydrates as a plain string and only
+/// fails much later, far from the save that dropped the data. This variant
+/// refuses those values with a path-annotated error such as
+/// `options.custom_compactor: closure is not serializable` so the caller can
+/// fail loud (or strip-and-warn) at save time.
+///
+/// Data-shaped values without a native JSON form (durations, enum variants,
+/// sets, ranges, pairs) keep the lenient `display()` encoding — they
+/// round-trip as readable strings today and erroring on them would break
+/// existing snapshots for no safety gain.
+pub fn vm_value_to_json_strict(val: &VmValue, path: &str) -> Result<serde_json::Value, String> {
+    match val {
+        VmValue::List(list) => {
+            let mut items = Vec::with_capacity(list.len());
+            for (index, item) in list.iter().enumerate() {
+                items.push(vm_value_to_json_strict(item, &format!("{path}[{index}]"))?);
+            }
+            Ok(serde_json::Value::Array(items))
+        }
+        VmValue::Dict(dict) => vm_value_dict_to_json_strict(dict, path),
+        VmValue::StructInstance(_) => {
+            vm_value_dict_to_json_strict(&val.struct_fields_map().unwrap_or_default(), path)
+        }
+        VmValue::Closure(_)
+        | VmValue::BuiltinRef(_)
+        | VmValue::BuiltinRefId(_)
+        | VmValue::TaskHandle(_)
+        | VmValue::Channel(_)
+        | VmValue::Atomic(_)
+        | VmValue::Rng(_)
+        | VmValue::SyncPermit(_)
+        | VmValue::McpClient(_)
+        | VmValue::Generator(_)
+        | VmValue::Stream(_)
+        | VmValue::Iter(_)
+        | VmValue::Harness(_) => {
+            Err(format!("{path}: {} is not serializable", val.type_name()))
+        }
+        other => Ok(vm_value_to_json(other)),
+    }
+}
+
+/// Dict walker for [`vm_value_to_json_strict`]; extends the error path with
+/// each key (`options.hooks[0].callback`) as it recurses.
+pub(crate) fn vm_value_dict_to_json_strict(
+    dict: &crate::value::DictMap,
+    path: &str,
+) -> Result<serde_json::Value, String> {
+    let mut map = serde_json::Map::new();
+    for (k, v) in dict {
+        map.insert(
+            k.to_string(),
+            vm_value_to_json_strict(v, &format!("{path}.{k}"))?,
+        );
+    }
+    Ok(serde_json::Value::Object(map))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

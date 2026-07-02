@@ -20,49 +20,94 @@ use crate::value::{VmError, VmValue};
 const SPAWN_AGENT_FN: &str = "spawn_agent";
 const WORKER_SNAPSHOT_CONFIG: &str = "worker snapshot config";
 
-fn worker_config_to_json(config: &WorkerConfig) -> serde_json::Value {
+fn worker_config_to_json(config: &WorkerConfig) -> Result<serde_json::Value, VmError> {
     match config {
         WorkerConfig::Workflow {
             graph,
             artifacts,
             options,
-        } => serde_json::json!({
-            "mode": "workflow",
-            "graph": graph,
-            "artifacts": artifacts,
-            "options": options.iter().map(|(key, value)| (key.clone(), crate::llm::vm_value_to_json(value))).collect::<std::collections::BTreeMap<_, _>>(),
-        }),
+        } => {
+            // Workflow options are user-provided data destined for
+            // `std/workflow/execute`, which already round-trips them
+            // through JSON on the resume path — a closure or handle in
+            // here was never going to survive persistence. Fail loud at
+            // save time (with the offending path) instead of writing a
+            // display-string that rehydrates as a plain string and
+            // explodes as a type error long after resume.
+            let options =
+                crate::llm::helpers::vm_value_dict_to_json_strict(options, "options")
+                    .map_err(|error| {
+                        VmError::Runtime(format!("worker snapshot: {error}"))
+                    })?;
+            Ok(serde_json::json!({
+                "mode": "workflow",
+                "graph": graph,
+                "artifacts": artifacts,
+                "options": options,
+            }))
+        }
         WorkerConfig::Stage {
             node,
             artifacts,
             transcript,
-        } => serde_json::json!({
+        } => Ok(serde_json::json!({
             "mode": "stage",
             "node": node,
             "artifacts": artifacts,
             "transcript": transcript.as_ref().map(crate::llm::vm_value_to_json),
-        }),
-        WorkerConfig::SubAgent { spec } => serde_json::json!({
+        })),
+        WorkerConfig::SubAgent { spec } => Ok(serde_json::json!({
             "mode": "sub_agent",
-            "spec": sub_agent_spec_to_json(spec),
-        }),
+            "spec": sub_agent_spec_to_json(spec)?,
+        })),
     }
 }
 
-fn sub_agent_spec_to_json(spec: &SubAgentRunSpec) -> serde_json::Value {
-    serde_json::json!({
+fn sub_agent_spec_to_json(spec: &SubAgentRunSpec) -> Result<serde_json::Value, VmError> {
+    // Sub-agent specs are persisted from *live* agent-loop options: the
+    // top-level suspend path (`__host_top_level_agent_suspend`) hands the
+    // in-flight `opts` dict over wholesale, and those legitimately carry
+    // closures (`tool_caller` / `_tool_caller` middleware, tool handlers,
+    // custom compactors). Hard-erroring here would break every top-level
+    // suspend that uses callbacks, so instead we strip the non-serializable
+    // entries at save time and emit a WARN naming each dropped path. The
+    // callbacks were never going to survive the process exit anyway; the
+    // resume path re-binds them from the live agent-loop configuration.
+    let mut options = serde_json::Map::new();
+    for (key, value) in spec.options.iter() {
+        match crate::llm::vm_value_to_json_strict(value, &format!("spec.options.{key}")) {
+            Ok(json) => {
+                options.insert(key.to_string(), json);
+            }
+            Err(error) => {
+                crate::events::emit_log(
+                    crate::events::EventLevel::Warn,
+                    "agents",
+                    &format!(
+                        "worker snapshot for sub-agent '{}': dropping non-serializable \
+                         option ({error}); live callbacks cannot survive persistence and \
+                         are re-bound from the agent-loop configuration on resume",
+                        spec.name
+                    ),
+                    std::collections::BTreeMap::new(),
+                );
+            }
+        }
+    }
+    // `returns_schema` is pure data (a schema literal); a closure in it is
+    // a caller bug, so the strict error propagates instead of stripping.
+    let returns_schema = spec
+        .returns_schema
+        .as_ref()
+        .map(|schema| crate::llm::vm_value_to_json_strict(schema, "spec.returns_schema"))
+        .transpose()
+        .map_err(|error| VmError::Runtime(format!("worker snapshot: {error}")))?;
+    Ok(serde_json::json!({
         "name": &spec.name,
         "task": &spec.task,
         "system": &spec.system,
-        "options": spec
-            .options
-            .iter()
-            .map(|(key, value)| (key.clone(), crate::llm::vm_value_to_json(value)))
-            .collect::<std::collections::BTreeMap<_, _>>(),
-        "returns_schema": spec
-            .returns_schema
-            .as_ref()
-            .map(crate::llm::vm_value_to_json),
+        "options": options,
+        "returns_schema": returns_schema,
         "session_id": &spec.session_id,
         "parent_session_id": &spec.parent_session_id,
         "reminder_propagation": &spec.reminder_propagation,
@@ -70,7 +115,7 @@ fn sub_agent_spec_to_json(spec: &SubAgentRunSpec) -> serde_json::Value {
             .workspace_anchor
             .as_ref()
             .map(crate::workspace_anchor::WorkspaceAnchor::to_json),
-    })
+    }))
 }
 
 fn sub_agent_spec_from_json(value: &serde_json::Value) -> Result<SubAgentRunSpec, VmError> {
@@ -232,7 +277,7 @@ fn worker_config_from_json(value: &serde_json::Value) -> Result<WorkerConfig, Vm
 }
 
 pub(in super::super) fn persist_worker_state_snapshot(state: &WorkerState) -> Result<(), VmError> {
-    let payload = serde_json::json!({
+    let mut payload = serde_json::json!({
         "_type": "worker_snapshot",
         "id": state.id,
         "name": state.name,
@@ -244,7 +289,7 @@ pub(in super::super) fn persist_worker_state_snapshot(state: &WorkerState) -> Re
         "awaiting_started_at": state.awaiting_started_at,
         "mode": state.mode,
         "history": state.history,
-        "config": worker_config_to_json(&state.config),
+        "config": worker_config_to_json(&state.config)?,
         "request": state.request,
         "latest_payload": state.latest_payload,
         "latest_error": state.latest_error,
@@ -268,6 +313,12 @@ pub(in super::super) fn persist_worker_state_snapshot(state: &WorkerState) -> Re
         "audit": state.audit,
         "suspension": state.suspension,
     });
+    // Worker snapshots land on disk verbatim, and both `options` and the
+    // transcript routinely carry user-supplied headers/tokens. Scrub with
+    // the same unified redaction policy every other persistence surface
+    // (receipts, event logs, portal JSON) already uses so a secret cannot
+    // leak through this file when it is redacted everywhere else.
+    crate::redact::current_policy().redact_json_in_place(&mut payload);
     let path = PathBuf::from(&state.snapshot_path);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)

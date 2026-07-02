@@ -270,7 +270,7 @@ pub use self::healthcheck::{
 pub(crate) use self::helpers::extract_llm_options;
 pub use self::helpers::no_credentials_message;
 pub use self::helpers::resolve_api_key;
-pub use self::helpers::vm_value_to_json;
+pub use self::helpers::{vm_value_to_json, vm_value_to_json_strict};
 pub use self::jsonl::{load_llm_mocks_jsonl, parse_llm_mock_value, serialize_llm_mock};
 pub use self::mock::{
     clear_cli_llm_mock_mode, enable_cli_llm_mock_recording, install_cli_llm_mocks, set_replay_mode,
