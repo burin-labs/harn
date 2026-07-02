@@ -924,6 +924,20 @@ fn __emit_synthetic_tool_lifecycle_finish(call, result, tools, options) {
   __emit_tool_lifecycle_finish(envelope, result)
 }
 
+// Errors that must propagate out of the loop instead of being folded into a
+// tool observation and marched past to a `done`/`stuck` status:
+//   - `cancelled`: cooperative shutdown; the caller is tearing the run down.
+//   - `internal`:  an engine/wiring bug (e.g. an undefined builtin, corrupt
+//                  bytecode). No retry or model reasoning fixes it, and
+//                  swallowing it as a tool error is exactly how a mis-wired
+//                  builtin ships silently inert.
+// Every tool/classifier catch site re-raises through this predicate so the
+// outer `agent_loop` wrapper surfaces the fault loudly.
+fn __agent_error_must_propagate(err) -> bool {
+  let category = error_category(err)
+  return category == "cancelled" || category == "internal"
+}
+
 fn __invoke_tool(call, tools, options) {
   let caller = options?._tool_caller
   let envelope = __tool_envelope(call, tools, options)
@@ -943,7 +957,7 @@ fn __invoke_tool(call, tools, options) {
   }
   if is_err(outcome) {
     let err = unwrap_err(outcome)
-    if error_category(err) == "cancelled" {
+    if __agent_error_must_propagate(err) {
       throw err
     }
     __maybe_emit_tool_audit(
@@ -2037,10 +2051,11 @@ fn __dispatch_tool_calls_with_middleware(tool_calls, tools, options, cap) {
       results = results.push(unwrap(r))
     } else {
       // `__invoke_tool` traps its own middleware exceptions, so a thrown
-      // value here is a VM-level bug (e.g. parallel-task plumbing). Surface
-      // it as a synthetic error result rather than tear down the loop.
+      // value here is a VM-level bug (e.g. parallel-task plumbing). Surface a
+      // recoverable one as a synthetic error result rather than tear down the
+      // loop — but a cancellation or an internal engine bug must propagate.
       let err = unwrap_err(r)
-      if error_category(err) == "cancelled" {
+      if __agent_error_must_propagate(err) {
         throw err
       }
       results = results
@@ -3050,7 +3065,10 @@ fn __run_pre_turn_scope_classifier(classifier, session, message, turn_opts, iter
   }
   let verdict = if is_err(outcome) {
     let err = unwrap_err(outcome)
-    if error_category(err) == "cancelled" {
+    // Cancellation and internal engine bugs propagate; only a genuine
+    // classifier failure fails open (never let a mis-wired builtin quietly
+    // disable the scope gate).
+    if __agent_error_must_propagate(err) {
       throw err
     }
     __scope_classifier_fail_open(session.session_id, iteration, err)

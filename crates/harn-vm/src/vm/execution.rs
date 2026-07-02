@@ -196,10 +196,7 @@ impl Vm {
 
     /// Convert a VmError into either a handled exception (returning Ok) or a propagated error.
     pub(crate) fn handle_error(&mut self, error: VmError) -> Result<Option<VmValue>, VmError> {
-        let thrown_value = match &error {
-            VmError::Thrown(v) => v.clone(),
-            other => VmValue::String(arcstr::ArcStr::from(other.to_string())),
-        };
+        let thrown_value = error.thrown_value();
 
         if let Some(handler) = self.exception_handlers.pop() {
             if let Some(error_type) = handler.error_type.as_deref() {

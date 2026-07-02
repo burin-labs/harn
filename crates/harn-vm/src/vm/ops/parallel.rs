@@ -494,10 +494,14 @@ impl super::super::Vm {
                         }
                         Err(e) => {
                             failed += 1;
+                            // Preserve the structured error value (matching
+                            // `try`/`catch` via `handle_error`) so a categorized
+                            // error thrown in a settle branch keeps its category
+                            // instead of collapsing to a `to_string()` blob.
                             results.push(VmValue::enum_variant(
                                 "Result",
                                 "Err",
-                                vec![VmValue::String(arcstr::ArcStr::from(e.to_string()))],
+                                vec![e.thrown_value()],
                             ));
                         }
                     }
