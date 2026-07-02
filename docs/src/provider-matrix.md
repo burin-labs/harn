@@ -35,6 +35,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `anthropic` | `anthropic/claude-sonnet-*` | `>=4.6` | `enabled` | yes | yes | yes | no | yes | yes | `tool_use` | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
 | `anthropic` | `anthropic/claude-sonnet-*` | `>=4.0` | `enabled` | yes | yes | yes | no | yes | yes | `tool_use` | `xml` | `xml_tagged` | yes | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
 | `anthropic` | `claude-*` | `any` | `enabled` | yes | yes | yes | no | yes | yes | `tool_use` | `xml` | `xml_tagged` | yes | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
+| `anthropic` | `anthropic/claude-*` | `any` | `enabled` | yes | yes | yes | no | yes | yes | `tool_use` | `xml` | `xml_tagged` | yes | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
 | `atlas` | `*` | `any` | no | no | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `azure_openai` | `gpt-*` | `any` | no | no | no | no | no | yes | no | no | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `azure_openai` | `o1*` | `any` | no | no | no | no | no | yes | no | no | `markdown` | `native_json` | no | `developer` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
@@ -167,6 +168,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `openrouter` | `anthropic/claude-sonnet-*` | `>=4.6` | no | no | no | no | no | yes | no | `tool_use` | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
 | `openrouter` | `anthropic/claude-opus-*` | `>=4.7` | no | no | no | no | no | yes | no | `tool_use` | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
 | `openrouter` | `anthropic/claude-opus-*` | `>=4.6` | no | no | no | no | no | yes | no | `tool_use` | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
+| `openrouter` | `anthropic/claude-*` | `any` | no | no | no | no | no | yes | no | `tool_use` | `xml` | `xml_tagged` | yes | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
 | `openrouter` | `qwen/qwen3.7-plus` | `any` | `enabled` | yes | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `openrouter` | `qwen/qwen3.7-max` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `openrouter` | `qwen/qwen3.6-plus` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |

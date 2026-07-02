@@ -895,6 +895,32 @@ prefers_role_developer = false
 prefers_xml_tools = true
 thinking_block_style = "thinking_blocks"
 
+# Prefixed-id catch-all mirroring the `claude-*` row above. Hosts sometimes
+# hand this route an OpenRouter-style `anthropic/claude-...` id; the versioned
+# prefix rows above only match known families with parseable versions, so
+# without this row a new family name or unparseable version segment falls
+# through to the global text-channel `json` default even though every Claude
+# on the direct Anthropic route speaks first-class native tool calling.
+[[provider.anthropic]]
+model_match = "anthropic/claude-*"
+native_tools = true
+preferred_tool_format = "native"
+prompt_caching = true
+vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
+structured_output = "tool_use"
+thinking_modes = ["enabled"]
+vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = true
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
+
 # --- source: 20-providers/10-openai.toml ---
 # ---------- OpenAI family -----------------------------------------------------
 #
@@ -2092,6 +2118,29 @@ prefers_xml_scaffolding = true
 prefers_markdown_scaffolding = false
 structured_output_mode = "xml_tagged"
 supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
+
+# Family-level catch-all: every Claude that OpenRouter serves round-trips
+# first-class native tool calls, so an `anthropic/claude-*` id the versioned
+# rows above don't match (a new family name, an unparseable version segment,
+# a dated slug, or a pre-4.x model) still defaults to `native` instead of
+# falling through to the global text-channel `json` default. This mirrors the
+# direct-Anthropic `claude-*` catch-all and Bedrock's `*claude*` fallback;
+# host alias tables previously compensated with per-alias `tool_format` pins.
+[[provider.openrouter]]
+model_match = "anthropic/claude-*"
+native_tools = true
+preferred_tool_format = "native"
+prompt_caching = true
+cache_breakpoint_style = "top_level"
+structured_output = "tool_use"
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = true
 prefers_role_developer = false
 prefers_xml_tools = true
 thinking_block_style = "thinking_blocks"

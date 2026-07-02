@@ -3739,6 +3739,73 @@ mod tests {
     }
 
     #[test]
+    fn test_claude_family_defaults_native_without_host_pin() {
+        reset_overrides();
+
+        // Unpinned claude-family routes on first-class tool-calling providers
+        // resolve `native` from the capability matrix alone — no host alias
+        // pin required. The openrouter rows exercise the family-level
+        // catch-all: a dated slug, an unparseable version segment, and a new
+        // family name have no versioned rule and previously fell through to
+        // the global text-channel `json` default.
+        for (model, provider) in [
+            ("claude-sonnet-4-6", "anthropic"),
+            ("claude-sonnet-5", "anthropic"),
+            ("anthropic/claude-nova-1", "anthropic"),
+            ("anthropic/claude-sonnet-4.6", "openrouter"),
+            ("anthropic/claude-sonnet-5", "openrouter"),
+            ("anthropic/claude-opus-4-5-20251101", "openrouter"),
+            ("anthropic/claude-sonnet-next", "openrouter"),
+            ("anthropic/claude-nova-1", "openrouter"),
+            ("anthropic.claude-sonnet-4-6", "bedrock"),
+        ] {
+            assert_eq!(
+                default_tool_format(model, provider),
+                "native",
+                "{provider}:{model} must default native without a host pin"
+            );
+        }
+
+        // An unpinned host alias resolves native end-to-end through
+        // `resolve_model_info` (alias -> id -> capability matrix -> dialect
+        // guard) — the exact seam hosts consume via `llm_resolve_model`.
+        let overlay = parse_config_toml(
+            "[aliases.probe-sonnet]\nid = \"claude-sonnet-4-6\"\nprovider = \"anthropic\"\n",
+        )
+        .expect("overlay parses");
+        set_user_overrides(Some(overlay));
+        let resolved = resolve_model_info("probe-sonnet");
+        assert_eq!(resolved.provider, "anthropic");
+        assert_eq!(
+            resolved.tool_format, "native",
+            "an unpinned claude alias must inherit the family-level native default"
+        );
+        clear_user_overrides();
+
+        // An explicit host pin still wins over the family default: a
+        // text-channel `json` pin on a native-capable claude route survives
+        // resolution (the dialect guard only corrects known-broken combos).
+        let overlay = parse_config_toml(
+            "[aliases.probe-sonnet-json]\nid = \"claude-sonnet-4-6\"\nprovider = \"anthropic\"\ntool_format = \"json\"\n",
+        )
+        .expect("overlay parses");
+        set_user_overrides(Some(overlay));
+        let pinned = resolve_model_info("probe-sonnet-json");
+        assert_eq!(
+            pinned.tool_format, "json",
+            "an explicit host pin must win over the claude family default"
+        );
+        clear_user_overrides();
+
+        // Non-claude models keep the global text-channel `json` default —
+        // the catch-all is family-scoped, not a provider-wide flip.
+        assert_eq!(
+            default_tool_format("mystery-model-xyz", "openrouter"),
+            "json"
+        );
+    }
+
+    #[test]
     fn test_user_overrides_add_model_catalog_pricing_and_qc_defaults() {
         reset_overrides();
         let mut overlay = ProvidersConfig::default();
