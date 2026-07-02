@@ -621,6 +621,12 @@ category = "logical_task"
 plan = "task_local_or_explicit"
 
 [[thread_local]]
+path = "src/stdlib/waitpoints.rs"
+statics = ["WAITPOINT_TEST_REPLAY_OVERRIDE"]
+category = "thread_private"
+plan = "thread_private_test"
+
+[[thread_local]]
 path = "src/stdlib/workflow/state.rs"
 statics = ["WORKFLOW_RUN_STATES"]
 category = "runtime_registry"
