@@ -44,6 +44,9 @@ fn copy_demo_assets(src: &Path, dst: &Path) {
     fs::create_dir_all(dst).expect("create isolated demo asset dir");
     for entry in fs::read_dir(src).expect("read demo asset dir") {
         let entry = entry.expect("read demo asset entry");
+        if entry.file_name() == std::ffi::OsStr::new(".harn") {
+            continue;
+        }
         let source = entry.path();
         let target = dst.join(entry.file_name());
         if source.is_dir() {
