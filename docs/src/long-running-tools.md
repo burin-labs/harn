@@ -26,6 +26,25 @@ itself; completion feedback and cancellation remain hostlib/agent-loop
 responsibilities. A dedicated Harn-facing background wait primitive can be added
 later if scripts need that lifecycle without involving an agent loop.
 
+## Process lifecycle
+
+Foreground command tools (`run_command` without `background`, plus
+`run_test`, `run_build_command`, `manage_packages`, and the VM-side
+`process.exec` / `shell` / `exec_opts` builtins) tie their subprocess to
+the invoking scope. The child runs in its own process group; when the
+invoking scope is cancelled, a `deadline` expires, or the VM is dropped,
+the whole group — grandchildren included — receives SIGTERM and, after a
+2-second grace period, SIGKILL. The tool response reports
+`status: "killed"`, and the pipeline observes the usual cancellation or
+`Deadline exceeded` error. Group semantics are Unix-first; on Windows the
+runtime kills the direct child (best effort) instead.
+
+Work that must outlive the invoking scope belongs in a background handle:
+`background: true` (or legacy `long_running: true`) children are exempt
+from scope cancellation and deadlines. They are owned by the handle store
+and die only through `tools.cancel_handle` or agent-session-end cleanup,
+as described below.
+
 ## Handle envelope
 
 A long-running call returns immediately with a handle envelope:

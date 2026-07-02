@@ -11,6 +11,7 @@ use harn_vm::process_sandbox;
 
 use super::handle::{
     EnvMode, ExitStatus, ProcessError, ProcessHandle, ProcessKiller, ProcessSpawner, SpawnSpec,
+    WaitOutcome,
 };
 
 /// Spawner that produces real OS processes via `std::process::Command`.
@@ -209,21 +210,25 @@ impl ProcessHandle for RealProcess {
     fn wait_with_timeout(
         &mut self,
         timeout: Option<Duration>,
-    ) -> io::Result<(Option<ExitStatus>, bool)> {
+        interrupt: &dyn Fn() -> bool,
+    ) -> io::Result<WaitOutcome> {
+        let killer = Arc::clone(&self.killer);
         let Some(child) = self.child.as_mut() else {
-            return Ok((None, false));
+            return Err(io::Error::other("child already reaped"));
         };
-        let Some(timeout) = timeout else {
-            let status = child.wait()?;
-            return Ok((Some(decode_status(status)), false));
-        };
-        let start = Instant::now();
+        let deadline = timeout.map(|timeout| Instant::now() + timeout);
         loop {
             match child.try_wait()? {
-                Some(status) => return Ok((Some(decode_status(status)), false)),
+                Some(status) => return Ok(WaitOutcome::Exited(decode_status(status))),
                 None => {
-                    let elapsed = start.elapsed();
-                    if elapsed >= timeout {
+                    if interrupt() {
+                        // Scope cancellation / deadline expiry: graceful
+                        // group termination (SIGTERM, grace, SIGKILL) shared
+                        // with the VM-side `process.*` builtins.
+                        harn_vm::op_interrupt::terminate_child_group(child);
+                        return Ok(WaitOutcome::Interrupted);
+                    }
+                    if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
                         // `killer.kill()` kills the whole process group on Unix
                         // (negative pid) to reap grandchildren. That path is a
                         // no-op on non-Unix targets, where `kill_pid_or_group`
@@ -231,13 +236,16 @@ impl ProcessHandle for RealProcess {
                         // handle directly (TerminateProcess on Windows) to
                         // guarantee the subsequent `child.wait()` cannot block
                         // forever on a timed-out process.
-                        self.killer.kill();
+                        killer.kill();
                         let _ = child.kill();
                         let _ = child.wait();
-                        return Ok((None, true));
+                        return Ok(WaitOutcome::TimedOut);
                     }
-                    let remaining = timeout.checked_sub(elapsed).unwrap_or_default();
-                    thread::sleep(remaining.min(Duration::from_millis(20)));
+                    let sleep = deadline
+                        .map(|deadline| deadline.saturating_duration_since(Instant::now()))
+                        .unwrap_or(Duration::MAX)
+                        .min(Duration::from_millis(20));
+                    thread::sleep(sleep);
                 }
             }
         }

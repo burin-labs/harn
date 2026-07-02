@@ -12,7 +12,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 use super::handle::{
-    ExitStatus, ProcessError, ProcessHandle, ProcessKiller, ProcessSpawner, SpawnSpec,
+    ExitStatus, ProcessError, ProcessHandle, ProcessKiller, ProcessSpawner, SpawnSpec, WaitOutcome,
 };
 
 /// Behaviour to script for a single mocked spawn.
@@ -392,26 +392,31 @@ impl ProcessHandle for MockProcess {
     fn wait_with_timeout(
         &mut self,
         timeout: Option<Duration>,
-    ) -> io::Result<(Option<ExitStatus>, bool)> {
+        interrupt: &dyn Fn() -> bool,
+    ) -> io::Result<WaitOutcome> {
         if let Some(error) = self.state.wait_error.as_ref() {
             return Err(io::Error::other(error.clone()));
         }
         if self.state.force_timeout {
             self.state.record_kill();
-            return Ok((None, true));
+            return Ok(WaitOutcome::TimedOut);
         }
-        let Some(timeout) = timeout else {
-            let outcome = self
-                .state
-                .wait_for_exit(None)
-                .expect("wait without timeout returned None");
-            return Ok((Some(outcome.status), false));
-        };
-        match self.state.wait_for_exit(Some(timeout)) {
-            Some(outcome) => Ok((Some(outcome.status), false)),
-            None => {
+        // Wait in short condvar slices so the interrupt callback is observed
+        // (mirrors the real spawner's ~20ms `try_wait` poll loop) while
+        // remaining deterministic: nothing here depends on how many slices
+        // elapse, only on which condition fires first.
+        let deadline = timeout.map(|timeout| std::time::Instant::now() + timeout);
+        loop {
+            if let Some(outcome) = self.state.wait_for_exit(Some(Duration::from_millis(5))) {
+                return Ok(WaitOutcome::Exited(outcome.status));
+            }
+            if interrupt() {
                 self.state.record_kill();
-                Ok((None, true))
+                return Ok(WaitOutcome::Interrupted);
+            }
+            if deadline.is_some_and(|deadline| std::time::Instant::now() >= deadline) {
+                self.state.record_kill();
+                return Ok(WaitOutcome::TimedOut);
             }
         }
     }

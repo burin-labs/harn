@@ -291,6 +291,12 @@ category = "logical_task"
 plan = "task_local_or_explicit"
 
 [[thread_local]]
+path = "src/op_interrupt.rs"
+statics = ["CURRENT"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
 path = "src/orchestration/command_policy.rs"
 statics = ["COMMAND_POLICY_STACK", "COMMAND_POLICY_HOOK_DEPTH"]
 category = "logical_task"

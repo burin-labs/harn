@@ -282,3 +282,146 @@ fn real_run_command_respects_a_caller_pinned_tmpdir() {
          expected: {expected_line}\nchild env:\n{child_env}"
     );
 }
+
+// --- Subprocess lifecycle: cancel/deadline interrupts kill the child group ---
+
+/// `kill(pid, 0)` probe: returns true while the target (or, for a negative
+/// pid, any member of the group) still exists.
+fn unix_process_exists(pid: i64) -> bool {
+    extern "C" {
+        fn kill(pid: i32, sig: i32) -> i32;
+    }
+    unsafe { kill(pid as i32, 0) == 0 }
+}
+
+fn wait_for_group_death(pgid: i64, timeout: std::time::Duration) -> bool {
+    let deadline = std::time::Instant::now() + timeout;
+    while std::time::Instant::now() < deadline {
+        if !unix_process_exists(-pgid) {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    !unix_process_exists(-pgid)
+}
+
+/// Flip an installed cancel token after `delay` from a helper thread,
+/// simulating a host abort / scope cancellation firing while the foreground
+/// `run_command` blocks on its child.
+fn flip_after(
+    cancel: &Arc<std::sync::atomic::AtomicBool>,
+    delay: std::time::Duration,
+) -> std::thread::JoinHandle<()> {
+    let cancel = Arc::clone(cancel);
+    std::thread::spawn(move || {
+        std::thread::sleep(delay);
+        cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+    })
+}
+
+#[test]
+fn real_run_command_interrupt_kills_the_whole_process_group() {
+    // A child that spawns its own grandchild: the direct `sh` exits on
+    // SIGTERM, but the backgrounded `sleep 30` must also die — that's what
+    // the process-group signal is for.
+    let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let _guard = harn_vm::op_interrupt::install(Some(Arc::clone(&cancel)), None);
+    let flipper = flip_after(&cancel, std::time::Duration::from_millis(300));
+
+    let started = std::time::Instant::now();
+    let mut req = dict();
+    req.insert(
+        "argv".into(),
+        vlist_str(&["sh", "-c", "sleep 30 & echo started; wait"]),
+    );
+    let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
+    flipper.join().unwrap();
+
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(10),
+        "interrupt must preempt the 30s child, took {:?}",
+        started.elapsed()
+    );
+    assert_eq!(require_str(&resp, "status"), "killed");
+    assert!(!require_bool(&resp, "timed_out"));
+    assert_eq!(require_str(&resp, "stdout").trim(), "started");
+
+    let pgid = require_int(&resp, "process_group_id");
+    assert!(pgid > 0, "foreground spawn should report its process group");
+    assert!(
+        wait_for_group_death(pgid, std::time::Duration::from_secs(5)),
+        "process group {pgid} (incl. the sleep grandchild) must be gone"
+    );
+}
+
+#[test]
+fn real_run_command_sigterm_immune_child_is_sigkilled_after_grace() {
+    // A child that ignores SIGTERM (and keeps respawning short sleeps so the
+    // shell itself is the survivor) must be SIGKILLed once the grace period
+    // elapses.
+    let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let _guard = harn_vm::op_interrupt::install(Some(Arc::clone(&cancel)), None);
+    let flipper = flip_after(&cancel, std::time::Duration::from_millis(100));
+
+    let started = std::time::Instant::now();
+    let mut req = dict();
+    req.insert(
+        "argv".into(),
+        vlist_str(&["sh", "-c", "trap '' TERM; while :; do sleep 0.2; done"]),
+    );
+    let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
+    flipper.join().unwrap();
+
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed >= harn_vm::op_interrupt::SUBPROCESS_TERM_GRACE,
+        "a SIGTERM-immune child should survive until the grace elapses, died after {elapsed:?}"
+    );
+    assert!(
+        elapsed < std::time::Duration::from_secs(10),
+        "SIGKILL escalation must fire shortly after the grace, took {elapsed:?}"
+    );
+    assert_eq!(require_str(&resp, "status"), "killed");
+
+    let pgid = require_int(&resp, "process_group_id");
+    assert!(
+        wait_for_group_death(pgid, std::time::Duration::from_secs(5)),
+        "process group {pgid} must be gone after SIGKILL escalation"
+    );
+}
+
+#[test]
+fn real_run_command_background_child_survives_interrupt() {
+    // `background: true` is the fire-and-forget escape hatch: its child is
+    // owned by the long-running handle store (killed via `cancel_handle` or
+    // the agent-session-end hook), NOT by the invoking scope's cancellation.
+    let cancel = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let _guard = harn_vm::op_interrupt::install(Some(cancel), None);
+
+    let mut req = dict();
+    req.insert("argv".into(), vlist_str(&["sleep", "30"]));
+    req.insert("background".into(), VmValue::Bool(true));
+    let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
+    assert_eq!(require_str(&resp, "status"), "running");
+    let pid = require_int(&resp, "pid");
+    let handle_id = require_str(&resp, "handle_id");
+
+    // Even with the interrupt already requested, the background child stays
+    // alive for a comfortable observation window.
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    assert!(
+        unix_process_exists(pid),
+        "background child {pid} must survive scope interrupts"
+    );
+
+    // Clean up so the sleep doesn't outlive the test binary.
+    let mut cancel_req = dict();
+    cancel_req.insert("handle_id".into(), vstr(&handle_id));
+    let cancel_resp = require_dict(call("hostlib_tools_cancel_handle", cancel_req).unwrap());
+    assert!(require_bool(&cancel_resp, "cancelled"));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while unix_process_exists(pid) && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    assert!(!unix_process_exists(pid), "cancel_handle must reap {pid}");
+}

@@ -438,6 +438,29 @@ impl Vm {
         self.call_builtin_impl(name, args, Some(id)).await
     }
 
+    /// Install the thread-local [`crate::op_interrupt`] context for the
+    /// duration of a sync builtin call, so blocking builtins (subprocess
+    /// waits in particular) can observe scope cancellation and `deadline`
+    /// expiry that the async `tokio::select!` wrapper cannot deliver while
+    /// the op future is stuck inside a synchronous handler. Returns `None`
+    /// (no thread-local traffic) when nothing is armed.
+    fn sync_builtin_interrupt_guard(&self) -> Option<crate::op_interrupt::OpInterruptGuard> {
+        // Mirror `execution.rs::next_deadline`: innermost scope deadline,
+        // tightened by the interrupt-handler deadline when that is sooner.
+        let scope_deadline = self.deadlines.last().map(|(deadline, _)| *deadline);
+        let deadline = match (scope_deadline, self.interrupt_handler_deadline) {
+            (Some(scope), Some(interrupt)) => Some(scope.min(interrupt)),
+            (scope, interrupt) => scope.or(interrupt),
+        };
+        if self.cancel_token.is_none() && deadline.is_none() {
+            return None;
+        }
+        Some(crate::op_interrupt::install(
+            self.cancel_token.clone(),
+            deadline,
+        ))
+    }
+
     pub(crate) fn try_call_sync_builtin_id_or_name_args(
         &mut self,
         direct_id: Option<BuiltinId>,
@@ -460,6 +483,7 @@ impl Vm {
             return Some(Err(error));
         }
 
+        let _interrupt = self.sync_builtin_interrupt_guard();
         Some(args.with_slice(|slice| builtin(slice, &mut self.output)))
     }
 
@@ -487,12 +511,12 @@ impl Vm {
 
         let _span =
             Self::builtin_span_kind(name).map(|kind| ScopeSpan::new(kind, name.to_string()));
-        let args = &self.stack[args_start..];
-        if let Err(error) = self.validate_sync_builtin_args(name, args) {
+        if let Err(error) = self.validate_sync_builtin_args(name, &self.stack[args_start..]) {
             return Some(Err(error));
         }
 
-        Some(builtin(args, &mut self.output))
+        let _interrupt = self.sync_builtin_interrupt_guard();
+        Some(builtin(&self.stack[args_start..], &mut self.output))
     }
 
     async fn call_builtin_impl(
@@ -581,7 +605,10 @@ impl Vm {
         args: Vec<VmValue>,
     ) -> Result<VmValue, VmError> {
         let result = match dispatch {
-            VmBuiltinDispatch::Sync(builtin) => builtin(&args, &mut self.output),
+            VmBuiltinDispatch::Sync(builtin) => {
+                let _interrupt = self.sync_builtin_interrupt_guard();
+                builtin(&args, &mut self.output)
+            }
             VmBuiltinDispatch::Async(async_builtin) => {
                 // Bind a fresh child VM as the async-builtin context for the
                 // duration of this future, threading the explicit ctx handle

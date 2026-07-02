@@ -2036,6 +2036,30 @@ try {
     assert_eq!(out, "[harn] caught");
 }
 
+#[cfg(unix)]
+#[test]
+fn test_deadline_kills_blocking_exec_subprocess() {
+    // Regression for the subprocess-lifecycle gap: `exec` is a *sync*
+    // builtin, so the deadline `tokio::select!` cannot preempt it while it
+    // blocks on the child. The cooperative `op_interrupt` context must kill
+    // the child (group) at the deadline instead of letting the 30s sleep
+    // run to completion and orphaning it.
+    let started = std::time::Instant::now();
+    let result = run_harn_result(
+        r#"pipeline t(task) {
+deadline 500ms {
+  exec("sh", "-c", "sleep 30")
+}
+}"#,
+    );
+    assert!(result.is_err(), "deadline must fire: {result:?}");
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(10),
+        "deadline must preempt the blocking 30s exec, took {:?}",
+        started.elapsed()
+    );
+}
+
 #[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn test_deadline_interrupts_async_sleep_without_wall_clock() {
     let local = tokio::task::LocalSet::new();

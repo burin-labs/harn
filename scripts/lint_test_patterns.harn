@@ -27,7 +27,12 @@
 
 // std::thread::sleep in test files
 // Legitimate uses: waiting on real subprocess I/O that cannot be time-paused.
-let THREAD_SLEEP_ALLOWLIST: list<string> = ["crates/harn-hostlib/tests/process_tools.rs"]
+let THREAD_SLEEP_ALLOWLIST: list<string> = [
+  "crates/harn-hostlib/tests/process_tools.rs",
+  // Real subprocess lifecycle e2e: probes OS process-group death and
+  // `background: true` survival, so the waits observe host process state.
+  "crates/harn-hostlib/tests/process_tools_e2e.rs",
+]
 
 // tokio::time::sleep in test files (outside start_paused = true tests).
 // Legitimate uses:
@@ -47,7 +52,11 @@ let TOKIO_SLEEP_ALLOWLIST: list<string> = [
 
 // Wall-clock `Instant::now() < deadline` comparisons inside any loop or
 // guard.
-let INSTANT_NOW_DEADLINE_ALLOWLIST: list<string> = []
+let INSTANT_NOW_DEADLINE_ALLOWLIST: list<string> = [
+  // Real subprocess lifecycle e2e: bounded probes wait on OS process-group
+  // disappearance after SIGTERM/SIGKILL and cannot run on a virtual clock.
+  "crates/harn-hostlib/tests/process_tools_e2e.rs",
+]
 
 // SystemTime::now() in test files — use injected clock / MockClock instead.
 // Remaining entries: legitimate fixture-setup uses against real OS time
@@ -227,6 +236,11 @@ let NON_TEST_WALL_CLOCK_ALLOWLIST: list<string> = [
   // paired `agent_inbox::wait_async` is the clock-aware variant used
   // by everything else.
   "crates/harn-vm/src/orchestration/agent_inbox.rs",
+  // `op_interrupt` is the sync-builtin interrupt bridge: it observes host
+  // cancellation/deadline while a real child process blocks the VM thread.
+  // Virtual time cannot decide whether an OS subprocess has exited or whether
+  // SIGTERM grace has elapsed.
+  "crates/harn-vm/src/op_interrupt.rs",
   "crates/harn-vm/src/llm/api/partial_tool_args.rs",
   "crates/harn-vm/src/llm/api/transport.rs",
   "crates/harn-vm/src/llm/autonomy_budget.rs",
