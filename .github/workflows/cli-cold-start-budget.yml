@@ -48,6 +48,11 @@ env:
 jobs:
   cold-start-budget:
     name: Cold-start budget
+    # Release PRs always touch Cargo.toml for the version bump, but that does
+    # not change release-profile cold-start behavior. The release binary matrix
+    # is already building official artifacts, so this advisory budget lane adds
+    # noise and ~20 minutes of extra PR rollup latency on every release.
+    if: github.event_name != 'pull_request' || !startsWith(github.head_ref, 'release/v')
     # This advisory workflow can run on GitHub-hosted runners before it is part
     # of the required CI aggregate. Keep an explicit ceiling so a wedged release
     # build does not burn the platform default timeout after the PR has moved on.
