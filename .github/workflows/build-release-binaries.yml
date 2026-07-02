@@ -289,7 +289,11 @@ jobs:
     # fail loudly so the release queue does not burn hours silently.
     timeout-minutes: 150
     strategy:
-      fail-fast: true
+      # Release artifacts are uploaded incrementally per target. If one leg
+      # fails (for example a size-budget ratchet or platform-specific signer
+      # outage), keep the other legs running so the release is not left with
+      # avoidably missing archives.
+      fail-fast: false
       matrix:
         include:
           # release_codegen_units: 16 across the board. A higher unit count
