@@ -1,0 +1,163 @@
+/**
+ * `harn models lora inspect` renderer.
+ *
+ * The dispatch shim reads adapter files, provider catalog metadata, and model
+ * capability tables in Rust because those host surfaces are not script
+ * builtins yet. It hands this script a single JSON report; this Harn source
+ * owns the user-facing text and JSON passthrough.
+ *
+ * Inputs (from the dispatch shim):
+ *   HARN_MODELS_LORA_INSPECT_PAYLOAD_JSON   — compact report JSON.
+ *   HARN_MODELS_LORA_INSPECT_PAYLOAD_PRETTY — pretty report JSON.
+ *   HARN_OUTPUT_JSON                        — "1" for JSON, else human text.
+ */
+fn __safe_string(value, fallback: string) -> string {
+  if type_of(value) == "string" {
+    return value
+  }
+  return fallback
+}
+
+fn __nonempty_string(value, fallback: string) -> string {
+  let text = __safe_string(value, "")
+  if text == "" {
+    return fallback
+  }
+  return text
+}
+
+fn __safe_dict(value) -> dict {
+  if type_of(value) == "dict" {
+    return value
+  }
+  return {}
+}
+
+fn __safe_list(value) -> list {
+  if type_of(value) == "list" {
+    return value
+  }
+  return []
+}
+
+fn __safe_bool(value, fallback: bool) -> bool {
+  if type_of(value) == "bool" {
+    return value
+  }
+  return fallback
+}
+
+fn __join_strings(items: list, sep: string) -> string {
+  var out = ""
+  var first = true
+  for item in items {
+    let text = __shell_quote(__safe_string(item, ""))
+    if text == "" {
+      continue
+    }
+    if !first {
+      out = out + sep
+    }
+    out = out + text
+    first = false
+  }
+  return out
+}
+
+fn __shell_quote(value: string) -> string {
+  if value == "" {
+    return "''"
+  }
+  if regex_match("^[A-Za-z0-9_./:=+-]+$", value) != nil {
+    return value
+  }
+  return "'" + replace(value, "'", "'\"'\"'") + "'"
+}
+
+fn __base_match_label(value: string) -> string {
+  if value == "exact" {
+    return "exact"
+  }
+  if value == "suffix" {
+    return "same basename"
+  }
+  if value == "mismatch" {
+    return "mismatch"
+  }
+  return "unknown"
+}
+
+fn __render_human(harness: Harness, report: dict) {
+  let base = __safe_dict(report["base"])
+  let adapter = __safe_dict(report["adapter"])
+  let compatibility = __safe_dict(report["compatibility"])
+  let launch = __safe_dict(report["launch"])
+  let tool_calling = __safe_dict(report["tool_calling"])
+  let warnings = __safe_list(report["warnings"])
+  let adapter_name = __safe_string(adapter["name"], "lora-adapter")
+  let base_id = __safe_string(base["id"], "")
+  let provider = __safe_string(base["provider"], "")
+  harness.stdio.println(adapter_name + " -> " + base_id + " via " + provider)
+  harness.stdio.println("  adapter: " + __safe_string(adapter["input"], ""))
+  harness.stdio
+    .println(
+    "  base match: "
+      + __base_match_label(__safe_string(compatibility["base_model_match"], "unknown")),
+  )
+  harness.stdio.println("  tool format: " + __safe_string(base["tool_format"], ""))
+  harness.stdio
+    .println("  request model: " + __safe_string(launch["request_model"], adapter_name))
+  let native_tools = if __safe_bool(tool_calling["native_tools"], false) {
+    "yes"
+  } else {
+    "no"
+  }
+  harness.stdio
+    .println(
+    "  native tools: "
+      + native_tools
+      + ", preferred: "
+      + __nonempty_string(tool_calling["preferred_tool_format"], "unset"),
+  )
+  let launch_supported = if __safe_bool(compatibility["provider_supports_lora_launch"], false) {
+    "yes"
+  } else {
+    "no"
+  }
+  harness.stdio.println("  catalog LoRA launch flags: " + launch_supported)
+  for warning in warnings {
+    let text = __safe_string(warning, "")
+    if text != "" {
+      harness.stdio.println("  warning: " + text)
+    }
+  }
+  harness.stdio.println("  launch:")
+  harness.stdio.println("    " + __join_strings(__safe_list(launch["harn_local_launch"]), " "))
+}
+
+fn main(harness: Harness) -> int {
+  let raw = harness.env.get_or("HARN_MODELS_LORA_INSPECT_PAYLOAD_JSON", "")
+  if raw == "" {
+    harness.stdio
+      .eprintln("internal error: HARN_MODELS_LORA_INSPECT_PAYLOAD_JSON not set by dispatch shim")
+    return 70
+  }
+  let report = try {
+    json_parse(raw)
+  } catch (e) {
+    harness.stdio.eprintln("internal error: failed to parse LoRA inspect payload: " + to_string(e))
+    return 70
+  }
+  let ok = __safe_bool(report["ok"], false)
+  let json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
+  if json_mode {
+    let pretty = harness.env.get_or("HARN_MODELS_LORA_INSPECT_PAYLOAD_PRETTY", raw)
+    harness.stdio.println(pretty)
+  } else {
+    __render_human(harness, report)
+  }
+  if ok {
+    return 0
+  }
+  return 1
+}

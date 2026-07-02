@@ -335,6 +335,37 @@ fn test_parses_models_test_args() {
     assert!(args.json);
 }
 
+#[test]
+fn test_parses_models_lora_inspect_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "models",
+        "lora",
+        "inspect",
+        "--base",
+        "local-gemma4-e4b",
+        "--provider",
+        "vllm",
+        "--name",
+        "burin-tools",
+        "--json",
+        "./adapter",
+    ]);
+
+    let Command::Models(args) = cli.command.unwrap() else {
+        panic!("expected models command");
+    };
+    let ModelsCommand::Lora(args) = args.command else {
+        panic!("expected models lora command");
+    };
+    let ModelsLoraCommand::Inspect(args) = args.command;
+    assert_eq!(args.base_model, "local-gemma4-e4b");
+    assert_eq!(args.provider.as_deref(), Some("vllm"));
+    assert_eq!(args.name.as_deref(), Some("burin-tools"));
+    assert_eq!(args.adapter, "./adapter");
+    assert!(args.json);
+}
+
 fn parse_provider_catalog(args: &[&str]) -> ProviderCatalogCommand {
     let mut argv = vec!["harn", "provider", "catalog"];
     argv.extend_from_slice(args);

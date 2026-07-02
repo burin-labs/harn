@@ -55,6 +55,7 @@ family-level guidance, endpoint notes, and downstream JSON support data.
 | Local server | `LOCAL_LLM_BASE_URL` | `LOCAL_LLM_MODEL` or explicit `model` |
 | llama.cpp server | `LLAMACPP_BASE_URL` | explicit `model` from `/v1/models` |
 | MLX OpenAI-compatible server | `MLX_BASE_URL` | `MLX_MODEL_ID` or `mlx-qwen3.6` |
+| vLLM OpenAI-compatible server | `VLLM_BASE_URL` | explicit `model` from `/v1/models` |
 
 Baseten Model APIs use `https://inference.baseten.co/v1`. The built-in catalog
 includes current Baseten rows for GLM 5.2, Kimi K2.7 Code, DeepSeek V4 Pro,
@@ -116,6 +117,8 @@ harn local status
 harn local launch devstral-small-2:24b --provider ollama
 harn local launch local-qwen3.6 --provider llamacpp --model-source ~/models/qwen3.6/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf --ctx 8192
 harn local launch mlx-qwen3.6 --provider mlx --model-source unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit
+harn local launch local-gemma4-e4b --provider vllm \
+  --model-source google/gemma-4-e4b-it --lora-adapter tools=org/tools-lora
 
 # Warm a model on its provider, evict conflicting local runtimes
 # (drains Ollama's loaded set, stops tracked llama.cpp/MLX PIDs), and
@@ -147,10 +150,16 @@ catalog estimate is too conservative for your runtime build.
 
 Local runtime launch mechanics live in the provider catalog under
 `[providers.<id>.local_runtime]`, not in CLI-only code. The bundled rows cover
-Ollama's daemon API, llama.cpp's `llama-server`, and MLX-LM's
-`mlx_lm.server`; user or project provider overlays can change command names,
-default ports, arg names, and model-source environment variables for local
-runtime versions or platform-specific installs.
+Ollama's daemon API, llama.cpp's `llama-server`, MLX-LM's `mlx_lm.server`, and
+vLLM's `vllm serve`; user or project provider overlays can change command names,
+default ports, arg names, prefix args, model-source environment variables, and
+LoRA flag names for local runtime versions or platform-specific installs.
+
+For runtime rows that declare LoRA launch flags, `harn local launch` accepts
+repeatable `--lora-adapter NAME=PATH_OR_REPO` values and forwards them through
+the cataloged runtime shape. Use `harn models lora inspect --base <model>
+<adapter> --provider <provider>` to check local PEFT adapter metadata and print
+the corresponding Harn-managed launch command before starting the server.
 
 Harn maintains local runtime risk profiles for hybrid-cache families
 (Qwen3.6, Gemma4). The profile table records preferred runtimes,

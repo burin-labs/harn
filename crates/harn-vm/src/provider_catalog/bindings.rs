@@ -64,6 +64,7 @@ export interface HarnCatalogProvider {
 export interface HarnLocalRuntime {
   kind?: "daemon_api" | "managed_process" | "external"
   command?: string
+  prefix_args?: string[]
   model_source?: string
   model_source_env?: string
   default_port?: number
@@ -77,6 +78,9 @@ export interface HarnLocalRuntime {
   cache_type_k_arg?: string
   cache_type_v_arg?: string
   cache_ram_arg?: string
+  enable_lora_arg?: string
+  lora_modules_arg?: string
+  max_lora_rank_arg?: string
   default_args?: string[]
   stop?: "keep_alive_zero" | "pid" | "external"
   source_url?: string
@@ -348,6 +352,7 @@ public struct HarnProviderHealthcheck: Codable, Sendable, Equatable {
 public struct HarnLocalRuntime: Codable, Sendable, Equatable {
     public let kind: String?
     public let command: String?
+    public let prefixArgs: [String]?
     public let modelSource: String?
     public let modelSourceEnv: String?
     public let defaultPort: Int?
@@ -361,6 +366,9 @@ public struct HarnLocalRuntime: Codable, Sendable, Equatable {
     public let cacheTypeKArg: String?
     public let cacheTypeVArg: String?
     public let cacheRamArg: String?
+    public let enableLoraArg: String?
+    public let loraModulesArg: String?
+    public let maxLoraRankArg: String?
     public let defaultArgs: [String]?
     public let stop: String?
     public let sourceURL: String?
@@ -370,6 +378,7 @@ public struct HarnLocalRuntime: Codable, Sendable, Equatable {
     enum CodingKeys: String, CodingKey {
         case kind
         case command
+        case prefixArgs = "prefix_args"
         case modelSource = "model_source"
         case modelSourceEnv = "model_source_env"
         case defaultPort = "default_port"
@@ -383,6 +392,9 @@ public struct HarnLocalRuntime: Codable, Sendable, Equatable {
         case cacheTypeKArg = "cache_type_k_arg"
         case cacheTypeVArg = "cache_type_v_arg"
         case cacheRamArg = "cache_ram_arg"
+        case enableLoraArg = "enable_lora_arg"
+        case loraModulesArg = "lora_modules_arg"
+        case maxLoraRankArg = "max_lora_rank_arg"
         case defaultArgs = "default_args"
         case stop
         case sourceURL = "source_url"

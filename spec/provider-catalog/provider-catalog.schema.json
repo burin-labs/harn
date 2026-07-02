@@ -366,6 +366,9 @@
           "minimum": 1,
           "type": "integer"
         },
+        "enable_lora_arg": {
+          "type": "string"
+        },
         "gpu_layers_arg": {
           "type": "string"
         },
@@ -380,6 +383,12 @@
           ]
         },
         "last_verified": {
+          "type": "string"
+        },
+        "lora_modules_arg": {
+          "type": "string"
+        },
+        "max_lora_rank_arg": {
           "type": "string"
         },
         "model_arg": {
@@ -399,6 +408,12 @@
         },
         "port_arg": {
           "type": "string"
+        },
+        "prefix_args": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
         "served_model_arg": {
           "type": "string"

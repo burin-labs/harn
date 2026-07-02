@@ -12,6 +12,8 @@ pub(crate) struct ModelsArgs {
 pub(crate) enum ModelsCommand {
     /// Print resolved metadata for a model alias or model id as JSON.
     Info(ModelInfoArgs),
+    /// Inspect LoRA adapter metadata and compatibility with a Harn model route.
+    Lora(ModelsLoraArgs),
     /// List models grouped by provider.
     List(ModelsListArgs),
     /// Pull an Ollama model or print setup steps for a known local runtime.
@@ -20,6 +22,36 @@ pub(crate) enum ModelsCommand {
     Recommend(ModelRecommendArgs),
     /// Round-trip a small prompt through a model and report timing, tokens, and cost.
     Test(ModelsTestArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ModelsLoraArgs {
+    #[command(subcommand)]
+    pub command: ModelsLoraCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum ModelsLoraCommand {
+    /// Inspect a PEFT LoRA adapter directory or repo id.
+    Inspect(ModelsLoraInspectArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ModelsLoraInspectArgs {
+    /// Base model alias or provider-native id the adapter will attach to.
+    #[arg(long = "base", value_parser = llm_model_completion_parser(), hide_possible_values = true)]
+    pub base_model: String,
+    /// Adapter directory or Hugging Face repo id.
+    pub adapter: String,
+    /// Request model name to expose for the adapter. Defaults to the adapter directory/repo basename.
+    #[arg(long)]
+    pub name: Option<String>,
+    /// Provider/runtime to check against instead of inferring from the base model.
+    #[arg(long)]
+    pub provider: Option<String>,
+    /// Emit structured JSON.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]

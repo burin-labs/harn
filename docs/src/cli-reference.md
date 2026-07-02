@@ -1270,10 +1270,12 @@ Bring a local model up through Harn's provider catalog:
 harn local launch devstral-small-2:24b --provider ollama --json
 harn local launch local-qwen3.6 --provider llamacpp --model-source ~/models/qwen3.6/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf --ctx 8192
 harn local launch mlx-qwen3.6 --provider mlx --model-source unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit
+harn local launch local-gemma4-e4b --provider vllm \
+  --model-source google/gemma-4-e4b-it --lora-adapter tools=org/tools-lora
 ```
 
 Ollama launch warms the daemon and persists the active selection. llama.cpp
-and MLX launch the cataloged server command, record a PID/log under
+MLX, and vLLM launch the cataloged server command, record a PID/log under
 `<state_root>/local/`, wait for `/v1/models`, and then let `harn local stop`
 clean up the process. Provider mechanics are data-driven from
 `[providers.<id>.local_runtime]` in the generated provider catalog, so local
@@ -1282,6 +1284,9 @@ When a model row includes `[models.<id>.local_memory]`, launch preflights the
 requested context against current available RAM and returns a `memory_plan` in
 JSON mode. Use a smaller `--ctx` or free RAM when the guard trips; pass
 `--allow-memory-risk` only to override an intentionally conservative estimate.
+For runtimes whose catalog row declares LoRA launch flags, repeat
+`--lora-adapter NAME=PATH_OR_REPO` to expose startup adapters; when exactly one
+adapter is loaded, Harn records that adapter name as the selected request model.
 
 ## harn local profile
 
@@ -1326,6 +1331,21 @@ harn models info --warm --keep-alive 30m llama3.2
 Ollama readiness failures use stable `readiness.status` values, including
 `daemon_down`, `bad_status`, `invalid_response`, `model_missing`, and
 `warmup_failed`. `--verify` and `--warm` exit non-zero when readiness fails.
+
+## harn models lora inspect
+
+Inspect a PEFT LoRA adapter directory or repo id against a Harn model route:
+
+```bash
+harn models lora inspect --base local-gemma4-e4b --provider vllm ./tools-lora
+harn models lora inspect --base local-gemma4-e4b --provider vllm --name tools org/tools-lora --json
+```
+
+The report checks local `adapter_config.json` metadata when present, compares
+`base_model_name_or_path` with the resolved Harn model id, shows the route's
+tool-calling capability metadata, and prints the matching `harn local launch`
+command. Remote adapter ids are treated as runtime-resolved and warned rather
+than rejected.
 
 ## harn models recommend
 

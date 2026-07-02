@@ -30,13 +30,19 @@ const BYTES_PER_GIB: f64 = 1024.0 * 1024.0 * 1024.0;
 #[derive(Debug, Serialize)]
 struct LaunchResult {
     provider: String,
+    /// Base model loaded by the runtime.
     model: String,
+    /// Model id callers should put in request payloads. For a single LoRA
+    /// adapter this is the adapter name; otherwise it is the base model.
+    selected_model: String,
     alias: Option<String>,
     base_url: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pid: Option<u32>,
     command: String,
     args: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    lora_adapters: Vec<LoraAdapterSpec>,
     #[serde(skip_serializing_if = "Option::is_none")]
     log_path: Option<String>,
     readiness: serde_json::Value,
@@ -80,6 +86,18 @@ struct ManagedLaunchPlan {
     port: u16,
     ctx: u64,
     memory_plan: Option<LaunchMemoryPlan>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct LoraAdapterSpec {
+    name: String,
+    path: String,
+}
+
+impl LoraAdapterSpec {
+    fn module_spec(&self) -> String {
+        format!("{}={}", self.name, self.path)
+    }
 }
 
 pub(crate) async fn run(args: LocalLaunchArgs, base_dir: &Path) -> Result<(), String> {
@@ -184,12 +202,14 @@ async fn launch_daemon(
     write_selection(base_dir, &selection)?;
     let result = LaunchResult {
         provider,
+        selected_model: resolved.id.clone(),
         model: resolved.id,
         alias: resolved.alias,
         base_url,
         pid: None,
         command: "ollama-api".to_string(),
         args: Vec::new(),
+        lora_adapters: Vec::new(),
         log_path: None,
         readiness,
         rechecked,
@@ -230,7 +250,9 @@ async fn launch_managed_process(
         &plan.host,
         plan.port,
         plan.ctx,
-    );
+    )?;
+    let lora_adapters = parse_lora_adapter_specs(&args.lora_adapters)?;
+    let selected_model = selected_request_model(&resolved.id, &lora_adapters);
     let log_path = args
         .log
         .clone()
@@ -241,7 +263,7 @@ async fn launch_managed_process(
     let record = PidRecord {
         provider: plan.provider.clone(),
         pid,
-        model: resolved.id.clone(),
+        model: selected_model.clone(),
         base_url: plan.base_url.clone(),
         command: command.clone(),
         args: launch_args.clone(),
@@ -252,7 +274,7 @@ async fn launch_managed_process(
     let (readiness, rechecked) = wait_for_readiness(
         &mut child,
         &plan.provider,
-        &resolved.id,
+        &selected_model,
         &plan.base_url,
         args.timeout_secs,
     )
@@ -260,7 +282,7 @@ async fn launch_managed_process(
 
     let selection = LocalSelection::now(
         plan.provider.clone(),
-        resolved.id.clone(),
+        selected_model.clone(),
         resolved.alias.clone(),
         plan.base_url.clone(),
         Some(plan.ctx),
@@ -271,11 +293,13 @@ async fn launch_managed_process(
     let result = LaunchResult {
         provider: plan.provider,
         model: resolved.id,
+        selected_model,
         alias: resolved.alias,
         base_url: plan.base_url,
         pid: Some(pid),
         command,
         args: launch_args,
+        lora_adapters,
         log_path: Some(log_path.display().to_string()),
         readiness,
         rechecked,
@@ -475,8 +499,9 @@ fn build_managed_args(
     host: &str,
     port: u16,
     ctx: u64,
-) -> Vec<String> {
+) -> Result<Vec<String>, String> {
     let mut out = Vec::new();
+    out.extend(runtime.prefix_args.iter().cloned());
     push_arg(&mut out, runtime.model_arg.as_deref(), model_source);
     push_arg(&mut out, runtime.served_model_arg.as_deref(), model_id);
     push_arg(&mut out, runtime.host_arg.as_deref(), host);
@@ -527,6 +552,7 @@ fn build_managed_args(
     if args.metrics {
         explicit.push("--metrics".to_string());
     }
+    explicit.extend(build_lora_args(args, runtime)?);
 
     let explicit_keys: std::collections::HashSet<&str> = explicit
         .iter()
@@ -536,7 +562,68 @@ fn build_managed_args(
     out.extend(filter_default_args(&runtime.default_args, &explicit_keys));
     out.extend(explicit);
     out.extend(args.server_args.iter().cloned());
-    out
+    Ok(out)
+}
+
+fn build_lora_args(
+    args: &LocalLaunchArgs,
+    runtime: &LocalRuntimeDef,
+) -> Result<Vec<String>, String> {
+    if args.lora_adapters.is_empty() && args.max_lora_rank.is_none() {
+        return Ok(Vec::new());
+    }
+    let mut out = Vec::new();
+    let specs = parse_lora_adapter_specs(&args.lora_adapters)?;
+    if !specs.is_empty() {
+        let modules_arg = runtime.lora_modules_arg.as_deref().ok_or_else(|| {
+            "this local runtime does not declare a LoRA modules argument; \
+             use --server-arg for provider-specific flags or add the runtime flag to the catalog"
+                .to_string()
+        })?;
+        if let Some(enable_arg) = runtime.enable_lora_arg.as_deref() {
+            out.push(enable_arg.to_string());
+        }
+        out.push(modules_arg.to_string());
+        out.extend(specs.iter().map(LoraAdapterSpec::module_spec));
+    }
+    if let Some(rank) = args.max_lora_rank {
+        let rank_arg = runtime.max_lora_rank_arg.as_deref().ok_or_else(|| {
+            "this local runtime does not declare a max LoRA rank argument".to_string()
+        })?;
+        push_arg(&mut out, Some(rank_arg), rank.to_string());
+    }
+    Ok(out)
+}
+
+fn parse_lora_adapter_specs(raw: &[String]) -> Result<Vec<LoraAdapterSpec>, String> {
+    raw.iter()
+        .map(|spec| parse_lora_adapter_spec(spec))
+        .collect()
+}
+
+fn parse_lora_adapter_spec(raw: &str) -> Result<LoraAdapterSpec, String> {
+    let (name, path) = raw
+        .split_once('=')
+        .ok_or_else(|| format!("invalid --lora-adapter `{raw}`; expected NAME=PATH_OR_REPO"))?;
+    let name = name.trim();
+    let path = path.trim();
+    if name.is_empty() || path.is_empty() {
+        return Err(format!(
+            "invalid --lora-adapter `{raw}`; both adapter name and path are required"
+        ));
+    }
+    Ok(LoraAdapterSpec {
+        name: name.to_string(),
+        path: expand_home(path),
+    })
+}
+
+fn selected_request_model(base_model: &str, adapters: &[LoraAdapterSpec]) -> String {
+    if adapters.len() == 1 {
+        adapters[0].name.clone()
+    } else {
+        base_model.to_string()
+    }
 }
 
 /// Drop any `--flag` (and its following value, if any) from `default_args`
@@ -736,6 +823,8 @@ mod tests {
             cache_type_k: Some("q8_0".to_string()),
             cache_type_v: Some("q8_0".to_string()),
             cache_ram: Some(0),
+            lora_adapters: Vec::new(),
+            max_lora_rank: None,
             reasoning: Some("off".to_string()),
             reasoning_format: Some("deepseek".to_string()),
             flash_attn: Some("on".to_string()),
@@ -779,7 +868,8 @@ mod tests {
             "127.0.0.1",
             8001,
             8192,
-        );
+        )
+        .expect("managed args");
         assert!(built
             .windows(2)
             .any(|pair| pair == ["--model", "/models/qwen.gguf"]));
@@ -828,7 +918,8 @@ mod tests {
             "127.0.0.1",
             8001,
             8192,
-        );
+        )
+        .expect("managed args");
 
         for flag in [
             "--jinja",
@@ -870,7 +961,8 @@ mod tests {
             "127.0.0.1",
             8001,
             8192,
-        );
+        )
+        .expect("managed args");
 
         assert!(!built.iter().any(|arg| arg == "--flash-attn=off"));
         assert!(!built.iter().any(|arg| arg == "--reasoning-format=none"));
@@ -880,6 +972,54 @@ mod tests {
         assert!(built
             .windows(2)
             .any(|pair| pair == ["--reasoning-format", "deepseek"]));
+    }
+
+    #[test]
+    fn build_managed_args_maps_lora_adapters_through_runtime_shape() {
+        let mut runtime = runtime();
+        runtime.prefix_args = vec!["serve".to_string()];
+        runtime.model_arg = Some("--model".to_string());
+        runtime.served_model_arg = Some("--served-model-name".to_string());
+        runtime.enable_lora_arg = Some("--enable-lora".to_string());
+        runtime.lora_modules_arg = Some("--lora-modules".to_string());
+        runtime.max_lora_rank_arg = Some("--max-lora-rank".to_string());
+
+        let mut args = cli_args();
+        args.lora_adapters = vec![
+            "burin-tools=~/adapters/burin-tools".to_string(),
+            "sql=hf-user/sql-lora".to_string(),
+        ];
+        args.max_lora_rank = Some(64);
+
+        let built = build_managed_args(
+            &args,
+            &runtime,
+            "google/gemma-4-e4b-it",
+            "gemma-4-e4b-it",
+            "127.0.0.1",
+            8000,
+            8192,
+        )
+        .expect("managed args");
+
+        assert_eq!(built.first().map(String::as_str), Some("serve"));
+        assert!(built
+            .windows(2)
+            .any(|pair| pair == ["--model", "google/gemma-4-e4b-it"]));
+        assert!(built.contains(&"--enable-lora".to_string()));
+        let modules_idx = built
+            .iter()
+            .position(|arg| arg == "--lora-modules")
+            .expect("lora modules flag");
+        let expected_home_spec = format!(
+            "burin-tools={}/adapters/burin-tools",
+            std::env::var("HOME").unwrap_or_else(|_| "~".to_string())
+        );
+        assert_eq!(built[modules_idx + 1], expected_home_spec);
+        assert_eq!(built[modules_idx + 2], "sql=hf-user/sql-lora");
+        assert!(built
+            .windows(2)
+            .any(|pair| pair == ["--max-lora-rank", "64"]));
     }
 
     #[test]

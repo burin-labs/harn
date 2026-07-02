@@ -338,6 +338,10 @@ fn test_parses_local_launch_args() {
         "q8_0",
         "--cache-ram",
         "0",
+        "--lora-adapter",
+        "burin-tools=/adapters/burin-tools",
+        "--max-lora-rank",
+        "64",
         "--reasoning",
         "off",
         "--reasoning-format",
@@ -373,6 +377,11 @@ fn test_parses_local_launch_args() {
     assert_eq!(args.cache_type_k.as_deref(), Some("q8_0"));
     assert_eq!(args.cache_type_v.as_deref(), Some("q8_0"));
     assert_eq!(args.cache_ram, Some(0));
+    assert_eq!(
+        args.lora_adapters,
+        vec!["burin-tools=/adapters/burin-tools".to_string()]
+    );
+    assert_eq!(args.max_lora_rank, Some(64));
     assert_eq!(args.reasoning.as_deref(), Some("off"));
     assert_eq!(args.reasoning_format.as_deref(), Some("deepseek"));
     assert_eq!(args.flash_attn.as_deref(), Some("on"));
