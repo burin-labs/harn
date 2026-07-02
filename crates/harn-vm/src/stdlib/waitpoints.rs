@@ -32,6 +32,11 @@ thread_local! {
     static WAITPOINT_WAIT_SEQUENCE: RefCell<SequenceState> = RefCell::new(SequenceState::default());
 }
 
+#[cfg(test)]
+thread_local! {
+    static WAITPOINT_TEST_REPLAY_OVERRIDE: RefCell<Option<bool>> = const { RefCell::new(None) };
+}
+
 #[derive(Default)]
 struct SequenceState {
     instance_key: String,
@@ -133,6 +138,10 @@ pub(crate) fn reset_waitpoint_state() {
     });
     WAITPOINT_WAIT_SEQUENCE.with(|slot| {
         *slot.borrow_mut() = SequenceState::default();
+    });
+    #[cfg(test)]
+    WAITPOINT_TEST_REPLAY_OVERRIDE.with(|slot| {
+        *slot.borrow_mut() = None;
     });
 }
 
@@ -570,9 +579,41 @@ fn cancelled_vm_error() -> VmError {
 }
 
 fn is_replay() -> bool {
-    std::env::var("HARN_REPLAY")
-        .ok()
-        .is_some_and(|value| !value.trim().is_empty() && value != "0")
+    crate::triggers::dispatcher::current_dispatch_is_replay()
+        || test_replay_override()
+        || std::env::var("HARN_REPLAY")
+            .ok()
+            .is_some_and(|value| !value.trim().is_empty() && value != "0")
+}
+
+#[cfg(test)]
+fn test_replay_override() -> bool {
+    WAITPOINT_TEST_REPLAY_OVERRIDE.with(|slot| slot.borrow().unwrap_or(false))
+}
+
+#[cfg(not(test))]
+fn test_replay_override() -> bool {
+    false
+}
+
+#[cfg(test)]
+struct TestReplayOverrideGuard {
+    previous: Option<bool>,
+}
+
+#[cfg(test)]
+impl Drop for TestReplayOverrideGuard {
+    fn drop(&mut self) {
+        WAITPOINT_TEST_REPLAY_OVERRIDE.with(|slot| {
+            *slot.borrow_mut() = self.previous;
+        });
+    }
+}
+
+#[cfg(test)]
+fn install_test_replay_override(value: bool) -> TestReplayOverrideGuard {
+    let previous = WAITPOINT_TEST_REPLAY_OVERRIDE.with(|slot| slot.borrow_mut().replace(value));
+    TestReplayOverrideGuard { previous }
 }
 
 fn now_rfc3339() -> String {
@@ -659,11 +700,10 @@ pipeline test(task) {
                     ]
                 );
 
-                std::env::set_var("HARN_REPLAY", "1");
+                let _replay_override = install_test_replay_override(true);
                 let replay = execute_waitpoint_script(dir.path(), source)
                     .await
                     .expect("replay waitpoint script succeeds");
-                std::env::remove_var("HARN_REPLAY");
 
                 assert_eq!(replay.0, output);
                 assert_eq!(replay.1, wait_events);
