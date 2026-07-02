@@ -42,6 +42,48 @@ pub struct ProvidersConfig {
     pub model_roles: BTreeMap<String, BTreeMap<String, toml::Value>>,
     #[serde(default)]
     pub suppress: SuppressDef,
+    #[serde(default)]
+    pub patch: PatchDef,
+}
+
+/// Field-wise catalog patches applied on top of merged model rows.
+///
+/// Overlays have three complementary tools for adjusting the baseline
+/// catalog, from coarsest to finest:
+///
+/// 1. **Whole-row replace** — `[models.<id>]` replaces the entire model row.
+///    Use it to add a new route or when the overlay intentionally owns every
+///    field of the row.
+/// 2. **Field patch** — `[patch.models.<id>]` merges individual fields into
+///    the existing row, leaving every unmentioned field at its baseline
+///    value. Use it to tweak one knob (a `stream_timeout`, one pricing rate)
+///    without copying the row verbatim and silently freezing the rest of its
+///    fields against upstream catalog updates.
+/// 3. **Route suppression** — `[suppress]` hides baseline routes from the
+///    exported/served artifact entirely (see [`SuppressDef`]).
+///
+/// Patch semantics:
+/// - Nested tables merge recursively; scalars **and arrays** replace the
+///   base value wholesale (there is deliberately no per-element array merge).
+/// - Within a single overlay, `[models.<id>]` whole-row replacement applies
+///   BEFORE `[patch.models.<id>]`, so patch fields win over the same
+///   overlay's whole-row fields.
+/// - Patches are STICKY across layers: once accumulated, a patch re-applies
+///   after every later layer's merge, including a later layer's whole-row
+///   replacement of the same id. A patch means "always tweak this field",
+///   not "tweak it once".
+/// - A patch whose target row does not exist yet stays in the accumulator
+///   silently and applies as soon as a later layer contributes the row;
+///   [`ProvidersConfig::dangling_model_patches`] reports the leftovers for
+///   doctor/export validation.
+/// - A patch that produces a type-invalid row warns once per process and
+///   keeps the unpatched row.
+#[derive(Debug, Clone, Deserialize, Default, PartialEq)]
+pub struct PatchDef {
+    /// `[patch.models.<id>]` tables: partial `ModelDef` field sets merged
+    /// field-wise into the model row with the same catalog id.
+    #[serde(default)]
+    pub models: BTreeMap<String, toml::Value>,
 }
 
 /// Routes hidden from the exported/served provider catalog artifact.
@@ -53,9 +95,11 @@ pub struct ProvidersConfig {
 /// row, its aliases, and any recommendation variant derived from it, but does
 /// not block runtime resolution of an explicitly requested model id.
 ///
-/// Combined with the overlay's whole-row `models` replacement, this also
-/// expresses route renames: define the row under the new id and suppress the
-/// old one.
+/// This is one of three overlay tools (see [`PatchDef`] for the full set):
+/// whole-row `[models.<id>]` replacement, field-wise `[patch.models.<id>]`
+/// patches, and `[suppress]` route suppression. Combined with whole-row
+/// `models` replacement, suppression also expresses route renames: define
+/// the row under the new id and suppress the old one.
 #[derive(Debug, Clone, Deserialize, Default, PartialEq, Eq)]
 pub struct SuppressDef {
     /// `"provider:model_id"` selectors. Split on the FIRST colon only —
@@ -79,7 +123,22 @@ impl ProvidersConfig {
             && self.model_defaults.is_empty()
             && self.model_roles.is_empty()
             && self.suppress.routes.is_empty()
+            && self.patch.models.is_empty()
             && self.tier_defaults.default == default_mid()
+    }
+
+    /// `[patch.models]` ids with no matching model row in the merged config.
+    ///
+    /// Dangling patches are not an error at merge time — the row may arrive
+    /// from a later layer — but doctor/export surfaces can report leftovers
+    /// so a typo'd id doesn't silently patch nothing.
+    pub fn dangling_model_patches(&self) -> Vec<&str> {
+        self.patch
+            .models
+            .keys()
+            .filter(|id| !self.models.contains_key(*id))
+            .map(String::as_str)
+            .collect()
     }
 
     pub fn merge_from(&mut self, overlay: &ProvidersConfig) {
@@ -96,6 +155,32 @@ impl ProvidersConfig {
             .extend(overlay.alias_tool_calling.clone());
         self.models.extend(overlay.models.clone());
         self.qc_defaults.extend(overlay.qc_defaults.clone());
+
+        // `[patch.models]` field-wise patches. Two deliberate ordering rules
+        // (see [`PatchDef`]):
+        //   1. Within one overlay, the whole-row `models` replacement above
+        //      lands first, then patches — so `[patch.models.X]` fields win
+        //      over the same overlay's `[models.X]` row.
+        //   2. Patches are sticky: the accumulator re-applies after EVERY
+        //      layer's merge, so a later layer's whole-row replacement still
+        //      gets earlier layers' field tweaks re-applied on top. A patch
+        //      means "always tweak this field", not "tweak it once".
+        // Per-id patches from later layers deep-merge into the accumulator
+        // (later layer wins per field), so two layers patching different
+        // fields of the same row both stay sticky.
+        // Short-circuit when no layer has contributed a patch so existing
+        // patch-free configs pay nothing here.
+        if !overlay.patch.models.is_empty() || !self.patch.models.is_empty() {
+            for (id, patch) in &overlay.patch.models {
+                match self.patch.models.get_mut(id) {
+                    Some(existing) => deep_merge_toml(existing, patch),
+                    None => {
+                        self.patch.models.insert(id.clone(), patch.clone());
+                    }
+                }
+            }
+            apply_model_patches(&mut self.models, &self.patch.models);
+        }
 
         if overlay.default_provider.is_some() {
             self.default_provider = overlay.default_provider.clone();
@@ -137,6 +222,74 @@ impl ProvidersConfig {
             }
         }
     }
+}
+
+/// Recursively merge `overlay` into `base`. Tables merge key-by-key; every
+/// other value shape — scalars AND arrays — replaces the base value
+/// wholesale. Replacing arrays instead of merging them is the documented
+/// convention: there is no sane universal element-wise merge for lists like
+/// `capabilities` or `strengths`, so a patch that names an array owns it.
+fn deep_merge_toml(base: &mut toml::Value, overlay: &toml::Value) {
+    match (base, overlay) {
+        (toml::Value::Table(base_table), toml::Value::Table(overlay_table)) => {
+            for (key, overlay_value) in overlay_table {
+                match base_table.get_mut(key) {
+                    Some(base_value) => deep_merge_toml(base_value, overlay_value),
+                    None => {
+                        base_table.insert(key.clone(), overlay_value.clone());
+                    }
+                }
+            }
+        }
+        (base_slot, overlay_value) => *base_slot = overlay_value.clone(),
+    }
+}
+
+/// True once a type-invalid `[patch.models]` entry has been reported.
+/// Patches re-apply on every layer merge (stickiness), so an unconditional
+/// eprintln would repeat the same diagnostic once per layer per process.
+static MODEL_PATCH_TYPE_ERROR_WARNED: AtomicBool = AtomicBool::new(false);
+
+/// Apply every accumulated `[patch.models]` entry to its matching model row.
+///
+/// Patch application is `ModelDef -> toml::Value -> deep merge -> ModelDef`,
+/// so a patch can only express states the row schema can represent. Ids with
+/// no matching row are skipped (see
+/// [`ProvidersConfig::dangling_model_patches`]). A patch that produces a
+/// type-invalid row warns once (matching the `read_external_config` eprintln
+/// precedent) and keeps the unpatched row, so one bad overlay field can't
+/// take out the whole catalog entry.
+fn apply_model_patches(
+    models: &mut BTreeMap<String, ModelDef>,
+    patches: &BTreeMap<String, toml::Value>,
+) {
+    for (id, patch) in patches {
+        let Some(base) = models.get(id) else {
+            continue;
+        };
+        match patched_model_row(base, patch) {
+            Ok(patched) => {
+                models.insert(id.clone(), patched);
+            }
+            Err(error) => {
+                if !MODEL_PATCH_TYPE_ERROR_WARNED.swap(true, Ordering::Relaxed) {
+                    eprintln!(
+                        "[llm_config] invalid [patch.models.\"{id}\"] overlay \
+                         (keeping the unpatched row): {error}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Produce the patched version of one model row, or a description of why the
+/// patch does not typecheck against the row schema.
+fn patched_model_row(base: &ModelDef, patch: &toml::Value) -> Result<ModelDef, String> {
+    let mut value = toml::Value::try_from(base)
+        .map_err(|error| format!("serialize base row for patching: {error}"))?;
+    deep_merge_toml(&mut value, patch);
+    ModelDef::deserialize(value).map_err(|error| error.to_string())
 }
 
 #[derive(Debug, Clone)]
@@ -1139,7 +1292,10 @@ pub fn load_config() -> &'static ProvidersConfig {
 
 fn read_external_config(path: &str, verbose: bool) -> Option<ProvidersConfig> {
     match std::fs::read_to_string(path) {
-        Ok(content) => match toml::from_str::<ProvidersConfig>(&content) {
+        // Single parse entry point (`parse_config_toml`) so every overlay
+        // layer — `HARN_PROVIDERS_CONFIG`, the home file, `[llm]` manifest
+        // sections — honors the same schema, including `[patch.models]`.
+        Ok(content) => match parse_config_toml(&content) {
             Ok(config) => {
                 if verbose {
                     eprintln!(
@@ -2887,6 +3043,237 @@ mod tests {
             ],
             "merge appends new selectors without duplicating existing ones"
         );
+    }
+
+    /// Base config for the `[patch.models]` tests: one fully-populated row.
+    const PATCH_BASE_TOML: &str = r#"
+[models."demo/patch-target"]
+name = "Patch Target"
+provider = "demo"
+context_window = 128000
+stream_timeout = 300.0
+capabilities = ["tools", "vision"]
+strengths = ["coding"]
+
+[models."demo/patch-target".pricing]
+input_per_mtok = 1.0
+output_per_mtok = 5.0
+"#;
+
+    fn patch_base() -> ProvidersConfig {
+        parse_config_toml(PATCH_BASE_TOML).expect("patch base parses")
+    }
+
+    fn patched_row(config: &ProvidersConfig) -> &ModelDef {
+        config
+            .models
+            .get("demo/patch-target")
+            .expect("patch target row present")
+    }
+
+    #[test]
+    fn patch_models_scalar_and_nested_field_preserve_siblings() {
+        let mut base = patch_base();
+        let overlay = parse_config_toml(
+            "[patch.models.\"demo/patch-target\"]\nstream_timeout = 1200.0\n\
+             [patch.models.\"demo/patch-target\".pricing]\noutput_per_mtok = 2.5\n",
+        )
+        .expect("patch overlay parses");
+        assert!(!overlay.is_empty(), "a patch-only overlay is not empty");
+        base.merge_from(&overlay);
+        let row = patched_row(&base);
+        assert_eq!(row.stream_timeout, Some(1200.0), "patched scalar applies");
+        assert_eq!(row.name, "Patch Target", "unpatched scalar is intact");
+        assert_eq!(row.context_window, 128000, "unpatched scalar is intact");
+        assert_eq!(
+            row.capabilities,
+            vec!["tools".to_string(), "vision".to_string()],
+            "unpatched array is intact"
+        );
+        let pricing = row.pricing.as_ref().expect("pricing survives the patch");
+        assert_eq!(pricing.output_per_mtok, 2.5, "patched nested field applies");
+        assert_eq!(
+            pricing.input_per_mtok, 1.0,
+            "sibling nested field is preserved by the deep merge"
+        );
+        assert!(base.dangling_model_patches().is_empty());
+    }
+
+    #[test]
+    fn patch_models_array_replaces_wholesale() {
+        let mut base = patch_base();
+        let overlay =
+            parse_config_toml("[patch.models.\"demo/patch-target\"]\ncapabilities = [\"tools\"]\n")
+                .expect("patch overlay parses");
+        base.merge_from(&overlay);
+        let row = patched_row(&base);
+        assert_eq!(
+            row.capabilities,
+            vec!["tools".to_string()],
+            "arrays replace wholesale — no element-wise merge"
+        );
+        assert_eq!(
+            row.strengths,
+            vec!["coding".to_string()],
+            "arrays the patch does not name are intact"
+        );
+    }
+
+    #[test]
+    fn patch_models_wins_over_whole_row_in_same_overlay() {
+        let mut base = patch_base();
+        let overlay = parse_config_toml(
+            "[models.\"demo/patch-target\"]\n\
+             name = \"Replaced Row\"\nprovider = \"demo\"\ncontext_window = 64000\n\
+             stream_timeout = 600.0\n\
+             [patch.models.\"demo/patch-target\"]\nstream_timeout = 1200.0\n",
+        )
+        .expect("overlay parses");
+        base.merge_from(&overlay);
+        let row = patched_row(&base);
+        assert_eq!(
+            row.name, "Replaced Row",
+            "the whole-row replacement lands first"
+        );
+        assert_eq!(row.context_window, 64000);
+        assert_eq!(
+            row.stream_timeout,
+            Some(1200.0),
+            "the same overlay's patch fields win over its whole-row fields"
+        );
+    }
+
+    #[test]
+    fn patch_models_chained_layers_accumulate_and_later_wins() {
+        let mut base = patch_base();
+        let layer1 =
+            parse_config_toml("[patch.models.\"demo/patch-target\"]\nstream_timeout = 900.0\n")
+                .expect("layer1 parses");
+        let layer2 = parse_config_toml(
+            "[patch.models.\"demo/patch-target\".pricing]\noutput_per_mtok = 2.5\n",
+        )
+        .expect("layer2 parses");
+        base.merge_from(&layer1);
+        base.merge_from(&layer2);
+        let row = patched_row(&base);
+        assert_eq!(
+            row.stream_timeout,
+            Some(900.0),
+            "layer1's field patch survives layer2 patching a different field"
+        );
+        assert_eq!(
+            row.pricing
+                .as_ref()
+                .expect("pricing present")
+                .output_per_mtok,
+            2.5,
+            "layer2's field patch applies"
+        );
+
+        let layer3 =
+            parse_config_toml("[patch.models.\"demo/patch-target\"]\nstream_timeout = 1200.0\n")
+                .expect("layer3 parses");
+        base.merge_from(&layer3);
+        assert_eq!(
+            patched_row(&base).stream_timeout,
+            Some(1200.0),
+            "for the same field, the later layer's patch wins"
+        );
+    }
+
+    #[test]
+    fn patch_models_sticky_across_later_whole_row_replacement() {
+        let mut base = patch_base();
+        let patch_layer =
+            parse_config_toml("[patch.models.\"demo/patch-target\"]\nstream_timeout = 1200.0\n")
+                .expect("patch layer parses");
+        base.merge_from(&patch_layer);
+        // A later layer replaces the whole row (e.g. a hosted runtime-catalog
+        // refresh re-ships the baseline). The accumulated patch re-applies:
+        // patches mean "always tweak this field", not "tweak it once".
+        let replacement_layer = parse_config_toml(
+            "[models.\"demo/patch-target\"]\n\
+             name = \"Refreshed Row\"\nprovider = \"demo\"\ncontext_window = 256000\n\
+             stream_timeout = 300.0\n",
+        )
+        .expect("replacement layer parses");
+        base.merge_from(&replacement_layer);
+        let row = patched_row(&base);
+        assert_eq!(row.name, "Refreshed Row", "the whole-row refresh lands");
+        assert_eq!(row.context_window, 256000);
+        assert_eq!(
+            row.stream_timeout,
+            Some(1200.0),
+            "the sticky patch re-applies on top of the refreshed row"
+        );
+    }
+
+    #[test]
+    fn patch_models_dangling_patch_reports_and_applies_when_row_arrives() {
+        let mut base = patch_base();
+        let dangling =
+            parse_config_toml("[patch.models.\"demo/not-yet-cataloged\"]\nstream_timeout = 42.0\n")
+                .expect("dangling patch parses");
+        base.merge_from(&dangling);
+        assert_eq!(
+            base.dangling_model_patches(),
+            vec!["demo/not-yet-cataloged"],
+            "a patch with no matching row is reported, not dropped"
+        );
+        assert_eq!(
+            patched_row(&base).stream_timeout,
+            Some(300.0),
+            "existing rows are untouched by a dangling patch"
+        );
+
+        // The row arrives from a LATER layer; the accumulated patch applies.
+        let late_row = parse_config_toml(
+            "[models.\"demo/not-yet-cataloged\"]\n\
+             name = \"Late Arrival\"\nprovider = \"demo\"\ncontext_window = 8192\n",
+        )
+        .expect("late row parses");
+        base.merge_from(&late_row);
+        assert!(base.dangling_model_patches().is_empty());
+        let row = base
+            .models
+            .get("demo/not-yet-cataloged")
+            .expect("late row present");
+        assert_eq!(row.stream_timeout, Some(42.0), "the held patch applied");
+        assert_eq!(row.name, "Late Arrival");
+    }
+
+    #[test]
+    fn patch_models_type_error_keeps_unpatched_row() {
+        let mut base = patch_base();
+        let bad =
+            parse_config_toml("[patch.models.\"demo/patch-target\"]\nstream_timeout = \"soon\"\n")
+                .expect("the patch overlay itself is valid TOML");
+        base.merge_from(&bad);
+        let row = patched_row(&base);
+        assert_eq!(
+            row.stream_timeout,
+            Some(300.0),
+            "a type-invalid patch keeps the unpatched row"
+        );
+        assert_eq!(row.name, "Patch Target", "the rest of the row is intact");
+    }
+
+    #[test]
+    fn model_rows_roundtrip_through_toml_value_for_patching() {
+        // Patch application is `ModelDef -> toml::Value -> deep merge ->
+        // ModelDef`. This property test guards the serialization leg: every
+        // embedded catalog row must survive the round trip unchanged (a
+        // missing `Serialize` derive or asymmetric serde attribute on a
+        // nested def would corrupt rows the first time they are patched).
+        let config = default_config();
+        assert!(!config.models.is_empty());
+        for (id, row) in &config.models {
+            let value = toml::Value::try_from(row)
+                .unwrap_or_else(|error| panic!("serialize model row {id}: {error}"));
+            let roundtripped = ModelDef::deserialize(value)
+                .unwrap_or_else(|error| panic!("deserialize model row {id}: {error}"));
+            assert_eq!(&roundtripped, row, "model row {id} must round-trip");
+        }
     }
 
     #[test]

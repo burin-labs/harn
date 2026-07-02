@@ -1,0 +1,41 @@
+/**
+ * catalog-patch-models demo: field-wise `[patch.models]` overlay patches.
+ *
+ * The sibling `harn.toml` contributes a demo catalog row via `[llm.models]`
+ * and then patches exactly two of its fields via `[llm.patch.models]`:
+ * `stream_timeout` (300.0 -> 1200.0) and `pricing.output_per_mtok`
+ * (15.0 -> 7.5). This script reads the effective catalog back through
+ * `llm_model_info` and asserts the patch semantics end-to-end:
+ *
+ *   - the two patched fields carry the patch values (patch fields win over
+ *     the same overlay's whole-row `[models]` table), and
+ *   - every unpatched field — name, context window, the sibling
+ *     `pricing.input_per_mtok` under the same nested table — keeps its
+ *     baseline value.
+ *
+ * Why this primitive exists: without field patches, adjusting a single
+ * knob on a baseline catalog row (a stream timeout, one pricing rate)
+ * required copying the entire row into the overlay verbatim, silently
+ * freezing every other field against upstream catalog updates. Fully
+ * offline — no LLM calls, no network.
+ */
+pipeline default(_task) {
+  let info = llm_model_info("demo/patch-target")
+  let row = info.catalog
+  assert_eq(row.stream_timeout, 1200.0)
+  assert_eq(row.pricing.output_per_mtok, 7.5)
+  assert_eq(row.name, "Patch Target (demo)")
+  assert_eq(row.context_window, 200000)
+  assert_eq(row.pricing.input_per_mtok, 3.0)
+  let receipt = {
+    receipt_kind: "catalog_patch_models_receipt",
+    patched_stream_timeout: row.stream_timeout,
+    patched_output_per_mtok: row.pricing.output_per_mtok,
+    preserved_name: row.name,
+    preserved_context_window: row.context_window,
+    preserved_input_per_mtok: row.pricing.input_per_mtok,
+  }
+  __io_println("=== catalog-patch-models receipt ===")
+  __io_println(json_stringify(receipt))
+  return receipt
+}

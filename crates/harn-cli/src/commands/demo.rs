@@ -271,6 +271,19 @@ const SCENARIOS: &[Scenario] = &[
         script: include_str!("../../assets/demo/pub-type-exports/scenario.harn"),
         tape: include_str!("../../assets/demo/pub-type-exports/tape.jsonl"),
     },
+    Scenario {
+        id: "catalog-patch-models",
+        title: "[patch.models] tweaks one catalog field without copying the row",
+        description: "A sibling harn.toml contributes a demo catalog row and a field-wise \
+                      `[llm.patch.models]` patch for two of its fields (stream_timeout and \
+                      pricing.output_per_mtok). The scenario reads the effective catalog back \
+                      via `llm_model_info` and asserts the patched fields carry the patch \
+                      values while every unpatched sibling field keeps its baseline — the \
+                      alternative used to be copying the whole row verbatim and freezing it \
+                      against catalog updates. Fully offline — no LLM calls.",
+        script: include_str!("../../assets/demo/catalog-patch-models/scenario.harn"),
+        tape: include_str!("../../assets/demo/catalog-patch-models/tape.jsonl"),
+    },
 ];
 
 #[derive(Clone, Copy)]
