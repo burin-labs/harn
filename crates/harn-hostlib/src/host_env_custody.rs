@@ -10,6 +10,7 @@ use std::collections::BTreeSet;
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 
 /// Canonical custody mode for a host-held named environment palette.
 pub const HOST_ENV_CUSTODY_MODE_NAMED_ENV_PALETTE: &str = "named_env_palette";
@@ -19,6 +20,8 @@ pub const HOST_ENV_CUSTODY_WIRE_CLASS_NAMES_ONLY: &str = "class_names_only";
 pub const HOST_ENV_CUSTODY_HOST_VALUES_ONLY: &str = "host_values_only";
 /// Sandbox policy stating that secret values are never sandbox-visible.
 pub const HOST_ENV_CUSTODY_SANDBOX_NO_SECRET_VALUES: &str = "no_secret_values";
+/// Metadata object key carrying a [`HostEnvCustodyContract`].
+pub const HOST_ENV_CUSTODY_METADATA_KEY: &str = "host_env_custody";
 
 /// Serializable contract for a host-resolved named environment palette.
 ///
@@ -100,6 +103,56 @@ impl HostEnvCustodyContract {
     }
 }
 
+/// Return a metadata object containing one normalized host-env custody contract.
+pub fn host_env_custody_metadata(
+    contract: HostEnvCustodyContract,
+) -> Result<Value, HostEnvCustodyError> {
+    let mut metadata = Map::new();
+    metadata.insert(
+        HOST_ENV_CUSTODY_METADATA_KEY.to_string(),
+        host_env_custody_value(contract)?,
+    );
+    Ok(Value::Object(metadata))
+}
+
+/// Normalize a JSON metadata object containing optional host-env custody data.
+///
+/// The input must be a JSON object. If the `host_env_custody` key is absent,
+/// the object is returned unchanged. If present, the value must deserialize to a
+/// [`HostEnvCustodyContract`] and is replaced with its canonical normalized
+/// form.
+pub fn normalize_host_env_custody_metadata(
+    mut metadata: Value,
+) -> Result<Value, HostEnvCustodyError> {
+    let Value::Object(object) = &mut metadata else {
+        return Err(HostEnvCustodyError::new(
+            "host_env_custody metadata envelope must be a JSON object",
+        ));
+    };
+    normalize_host_env_custody_metadata_object(object)?;
+    Ok(metadata)
+}
+
+/// Normalize optional host-env custody data inside an existing metadata object.
+pub fn normalize_host_env_custody_metadata_object(
+    metadata: &mut Map<String, Value>,
+) -> Result<(), HostEnvCustodyError> {
+    let Some(value) = metadata.get(HOST_ENV_CUSTODY_METADATA_KEY) else {
+        return Ok(());
+    };
+    let custody: HostEnvCustodyContract =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            HostEnvCustodyError::new(format!(
+                "metadata.host_env_custody must be a host env custody contract: {error}"
+            ))
+        })?;
+    metadata.insert(
+        HOST_ENV_CUSTODY_METADATA_KEY.to_string(),
+        host_env_custody_value(custody)?,
+    );
+    Ok(())
+}
+
 /// Error returned when a custody contract is not class-name-only metadata.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct HostEnvCustodyError {
@@ -138,6 +191,17 @@ fn validate_literal(
     Err(HostEnvCustodyError::new(format!(
         "{field} must be `{expected}`"
     )))
+}
+
+fn host_env_custody_value(contract: HostEnvCustodyContract) -> Result<Value, HostEnvCustodyError> {
+    let custody = contract.normalized().map_err(|error| {
+        HostEnvCustodyError::new(format!("metadata.host_env_custody invalid: {error}"))
+    })?;
+    serde_json::to_value(custody).map_err(|error| {
+        HostEnvCustodyError::new(format!(
+            "metadata.host_env_custody could not be serialized: {error}"
+        ))
+    })
 }
 
 fn normalize_env_classes(
@@ -280,6 +344,97 @@ mod tests {
         assert!(
             error.to_string().contains("unknown field `token`"),
             "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn host_env_custody_metadata_normalizes_optional_contract() {
+        let metadata = normalize_host_env_custody_metadata(json!({
+            "claim_kind": "worker_interactive",
+            "host_env_custody": {
+                "orchestrator_issued_host_env_classes": [
+                    " model.provider ",
+                    "github.scoped",
+                    "github.scoped"
+                ],
+                "host_held_env_classes": [" customer.registry "],
+                "sandbox_visible_env_classes": ["verify", "agent"]
+            }
+        }))
+        .expect("metadata");
+
+        assert_eq!(metadata["claim_kind"], json!("worker_interactive"));
+        assert_eq!(
+            metadata["host_env_custody"],
+            json!({
+                "mode": "named_env_palette",
+                "orchestrator_issued_host_env_classes": ["github.scoped", "model.provider"],
+                "host_held_env_classes": ["customer.registry"],
+                "sandbox_visible_env_classes": ["agent", "verify"],
+                "wire_value_policy": "class_names_only",
+                "host_value_policy": "host_values_only",
+                "sandbox_value_policy": "no_secret_values"
+            })
+        );
+    }
+
+    #[test]
+    fn host_env_custody_metadata_without_contract_is_noop() {
+        let metadata = json!({"claim_kind": "worker_interactive"});
+
+        assert_eq!(
+            normalize_host_env_custody_metadata(metadata.clone()).expect("metadata"),
+            metadata
+        );
+    }
+
+    #[test]
+    fn host_env_custody_metadata_rejects_non_object_envelope() {
+        let error =
+            normalize_host_env_custody_metadata(json!(["not", "metadata"])).expect_err("object");
+
+        assert_eq!(
+            error.message(),
+            "host_env_custody metadata envelope must be a JSON object"
+        );
+    }
+
+    #[test]
+    fn host_env_custody_metadata_rejects_invalid_contract() {
+        let error = normalize_host_env_custody_metadata(json!({
+            "host_env_custody": {
+                "orchestrator_issued_host_env_classes": ["sk-test"]
+            }
+        }))
+        .expect_err("credential value rejected");
+
+        assert_eq!(
+            error.message(),
+            "metadata.host_env_custody invalid: host_env_custody.orchestrator_issued_host_env_classes entries must be env_class names, not credential values"
+        );
+    }
+
+    #[test]
+    fn host_env_custody_metadata_constructor_normalizes_contract() {
+        let metadata = host_env_custody_metadata(HostEnvCustodyContract {
+            host_held_env_classes: vec![" customer.registry ".to_string(), "agent".to_string()],
+            ..HostEnvCustodyContract::default()
+        })
+        .expect("metadata");
+
+        assert_eq!(
+            metadata,
+            json!({
+                "host_env_custody": {
+                    "mode": "named_env_palette",
+                    "orchestrator_issued_host_env_classes": [],
+                    "host_held_env_classes": ["agent", "customer.registry"],
+                    "sandbox_visible_env_classes": [],
+                    "wire_value_policy": "class_names_only",
+                    "host_value_policy": "host_values_only",
+                    "sandbox_value_policy": "no_secret_values"
+                }
+            })
         );
     }
 }
