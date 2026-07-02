@@ -4,9 +4,10 @@ use crate::agent_events::AgentEvent;
 
 use super::{
     agent_turn_made_no_llm_call, assistant_message_from_llm_result, build_agent_event,
-    canonical_acp_stop_reason, canonical_provider_stop_reason, initial_user_content,
-    is_length_truncation, last_assistant_text, synthesize_orphan_tool_results,
-    text_has_tool_call_prefix, tool_result_message_for_provider,
+    canonical_acp_stop_reason, canonical_provider_stop_reason, dict_get, initial_user_content,
+    is_length_truncation, last_assistant_text, list_items, pair_orphaned_tool_use,
+    reset_agent_session_host_state, seed_host_session_provider_model,
+    synthesize_orphan_tool_results, text_has_tool_call_prefix, tool_result_message_for_provider,
     truncated_tool_call_should_continue, vm_to_json,
 };
 
@@ -311,20 +312,49 @@ fn orphaned_tool_use_ids(messages: &[serde_json::Value]) -> Vec<String> {
     orphans
 }
 
-/// REPRO of the escalation-orphan HTTP 400. When a text-format primary escalates
-/// to a native (Anthropic) model, the escalated model emits a real `tool_use`
-/// block; the loop then declines to dispatch it (native-fallback reject /
-/// no-progress inject) and appends a bare user-feedback message. Before the fix
-/// that left the `tool_use` orphaned -> Anthropic 400 -> run death. This proves
-/// the orphan exists on the raw record+inject sequence and that
-/// `synthesize_orphan_tool_results` (the shared repair the loop now calls before
-/// every such inject) restores pairing.
+/// REPRO of the escalation-orphan HTTP 400, driven through the REAL production
+/// entrypoint (`pair_orphaned_tool_use`), not the hardcoded-native helper.
+///
+/// The bug: `pair_orphaned_tool_use` sourced its synthesis format from the
+/// SESSION-locked `tool_format`. On a text-primary run that lock is pinned to
+/// `"text"` at session init (`claim_tool_format`) and is never re-claimed on
+/// escalation. So when the escalated Anthropic model emits a real native
+/// `tool_use` block and the loop declines to dispatch it,
+/// `tool_result_message_for_provider` took its text-channel branch and emitted a
+/// bare `role:"user"` message — leaving the native `tool_use` block orphaned and
+/// re-triggering the exact Anthropic 400 the #3833 repair was supposed to
+/// prevent. The masking test proved only that the synthesizer *can* pair when
+/// handed `"native"`; it never exercised the session-locked production path.
+///
+/// This test locks the session to `text`, records the escalated Anthropic turn
+/// through the real record path, then calls `pair_orphaned_tool_use`. It MUST
+/// fail on pre-fix main (synthesized `role:"user"`, still orphaned) and pass
+/// after the fix (native `tool_result` + `tool_use_id`).
 #[test]
-fn escalation_orphaned_tool_use_is_repaired_before_feedback_inject() {
-    // The escalated Anthropic turn, persisted exactly as the loop records it.
+fn escalation_orphaned_tool_use_repaired_via_production_path_on_text_locked_session() {
+    reset_agent_session_host_state();
+    let session_id = crate::agent_sessions::open_or_create(Some(
+        "orphan-repair-text-lock-anthropic".to_string(),
+    ));
+    // PRIMARY model was text-format: the session lock is pinned to `text` and is
+    // never re-claimed when the run escalates to a native model.
+    crate::agent_sessions::claim_tool_format(&session_id, "text")
+        .expect("primary text lock claims");
+
+    // The escalated turn ran on anthropic/sonnet — `pair_orphaned_tool_use`
+    // reads provider/model from the host session store.
+    seed_host_session_provider_model(&session_id, "anthropic", "claude-sonnet-4-5");
+
+    // Seed the transcript: user task, then the escalated Anthropic assistant turn
+    // carrying a real native `tool_use` block, recorded exactly as the loop does.
+    crate::agent_sessions::inject_message(
+        &session_id,
+        crate::stdlib::json_to_vm_value(&json!({"role": "user", "content": "fix auth"})),
+    )
+    .expect("user turn injects");
     let llm_result = crate::stdlib::json_to_vm_value(&json!({
         "provider": "anthropic",
-        "model": "claude-opus-4-8",
+        "model": "claude-sonnet-4-5",
         "text": "I'll apply the fix.",
         "_agent_tool_format": "native",
         "native_tool_calls": [{
@@ -333,54 +363,217 @@ fn escalation_orphaned_tool_use_is_repaired_before_feedback_inject() {
             "arguments": {"path": "auth.go", "body": "package auth"}
         }],
     }));
-    let assistant = vm_to_json(&assistant_message_from_llm_result(&llm_result));
-    // Sanity: this really did persist as an Anthropic tool_use block.
-    assert_eq!(assistant["content"][1]["type"], "tool_use");
-    assert_eq!(assistant["content"][1]["id"], "tc_0");
+    let assistant = assistant_message_from_llm_result(&llm_result);
+    // Sanity: this really persisted as an Anthropic tool_use block.
+    let assistant_json = vm_to_json(&assistant);
+    assert_eq!(assistant_json["content"][1]["type"], "tool_use");
+    assert_eq!(assistant_json["content"][1]["id"], "tc_0");
+    crate::agent_sessions::inject_message(&session_id, assistant).expect("assistant turn injects");
 
-    // The corrective feedback the loop would have injected as a bare user turn.
+    // The loop declines to dispatch and is about to inject bare user feedback.
+    // Repair first, through the REAL entrypoint (session-locked to `text`).
     let feedback = "Emit your tool call as a native tool_use block, not text.";
-    let feedback_msg = json!({"role": "user", "content": feedback});
+    let repaired = pair_orphaned_tool_use(&session_id, feedback);
+    assert_eq!(repaired, 1, "exactly one orphan must be repaired");
 
-    // BEFORE the fix: assistant(tool_use) immediately followed by the user
-    // feedback message -> the tool_use is orphaned -> provider 400.
-    let orphaned_sequence = vec![
-        json!({"role": "user", "content": "fix auth"}),
-        assistant.clone(),
-        feedback_msg.clone(),
-    ];
+    // The synthesized message MUST be a native Anthropic tool_result, NOT the
+    // text-channel `role:"user"` echo — otherwise the native tool_use stays
+    // orphaned and the provider 400 fires anyway.
+    let transcript = crate::agent_sessions::transcript(&session_id).expect("transcript");
+    let messages = list_items(
+        &dict_get(&transcript, "messages")
+            .cloned()
+            .unwrap_or(crate::value::VmValue::Nil),
+    );
+    let last = vm_to_json(messages.last().expect("a synthesized trailing message"));
     assert_eq!(
-        orphaned_tool_use_ids(&orphaned_sequence),
-        vec!["tc_0".to_string()],
-        "repro precondition: the escalation tool_use must be orphaned pre-fix"
+        last["role"], "tool_result",
+        "orphan repair must ride the native tool_result role, not role:\"user\" \
+         (the session text-lock must NOT leak into orphan synthesis)"
     );
+    assert_eq!(last["tool_use_id"], "tc_0");
+    assert_eq!(last["content"], feedback);
 
-    // AFTER the fix: the shared repair synthesizes a tool_result for the orphan
-    // (carrying the same corrective text), THEN the feedback lands.
-    let assistant_vm = crate::stdlib::json_to_vm_value(&assistant);
-    let synthetic = synthesize_orphan_tool_results(
-        &assistant_vm,
-        "anthropic",
-        "claude-opus-4-8",
-        "native",
-        feedback,
-        &std::collections::BTreeSet::new(),
-    );
-    assert_eq!(synthetic.len(), 1, "one orphan must be repaired");
-    let synthetic_json: Vec<serde_json::Value> = synthetic.iter().map(vm_to_json).collect();
-    assert_eq!(synthetic_json[0]["role"], "tool_result");
-    assert_eq!(synthetic_json[0]["tool_use_id"], "tc_0");
-    assert_eq!(synthetic_json[0]["content"], feedback);
-
-    let repaired_sequence = vec![
-        json!({"role": "user", "content": "fix auth"}),
-        assistant,
-        synthetic_json[0].clone(),
-        feedback_msg,
-    ];
+    // And the transcript now has no orphaned tool_use ids -> provider-valid.
+    let messages_json: Vec<serde_json::Value> = messages.iter().map(vm_to_json).collect();
     assert!(
-        orphaned_tool_use_ids(&repaired_sequence).is_empty(),
+        orphaned_tool_use_ids(&messages_json).is_empty(),
         "after repair the tool_use must be paired -> provider-valid"
+    );
+}
+
+/// The openai-compat escalation shape (top-level `tool_calls`,
+/// `tool`/`tool_call_id` result role) must also repair through the production
+/// path when the session is text-locked.
+#[test]
+fn escalation_orphan_repaired_via_production_path_openai_shape() {
+    reset_agent_session_host_state();
+    let session_id =
+        crate::agent_sessions::open_or_create(Some("orphan-repair-text-lock-openai".to_string()));
+    crate::agent_sessions::claim_tool_format(&session_id, "text").expect("text lock claims");
+    seed_host_session_provider_model(&session_id, "local", "Qwen/Qwen3.6-35B-A3B");
+
+    crate::agent_sessions::inject_message(
+        &session_id,
+        crate::stdlib::json_to_vm_value(&json!({"role": "user", "content": "read main.rs"})),
+    )
+    .expect("user turn injects");
+    let llm_result = crate::stdlib::json_to_vm_value(&json!({
+        "provider": "local",
+        "model": "Qwen/Qwen3.6-35B-A3B",
+        "text": "",
+        "_agent_tool_format": "native",
+        "native_tool_calls": [{
+            "id": "call_9",
+            "name": "read",
+            "arguments": {"path": "main.rs"}
+        }],
+    }));
+    crate::agent_sessions::inject_message(
+        &session_id,
+        assistant_message_from_llm_result(&llm_result),
+    )
+    .expect("assistant turn injects");
+
+    let repaired = pair_orphaned_tool_use(&session_id, "nudge");
+    assert_eq!(repaired, 1);
+
+    let transcript = crate::agent_sessions::transcript(&session_id).expect("transcript");
+    let messages = list_items(
+        &dict_get(&transcript, "messages")
+            .cloned()
+            .unwrap_or(crate::value::VmValue::Nil),
+    );
+    let last = vm_to_json(messages.last().expect("a synthesized trailing message"));
+    assert_eq!(
+        last["role"], "tool",
+        "openai-shape orphan repair must ride the native `tool` role"
+    );
+    assert_eq!(last["name"], "read");
+    assert_eq!(last["tool_call_id"], "call_9");
+    assert_eq!(last["content"], "nudge");
+}
+
+/// The DISPATCHED escalation path (`record_tool_results`) had the SAME latent
+/// text-lock bug as the orphan-repair path: it recorded a dispatched result
+/// using the session-locked `tool_format`, which stays `"text"` on a
+/// text-primary run even after escalating to a native model. So a native
+/// escalated tool call that WAS dispatched got its result recorded as a bare
+/// `role:"user"` message — leaving the assistant's native `tool_use` block
+/// orphaned and re-triggering the Anthropic 400 on the SUCCESSFUL-dispatch path.
+///
+/// This exercises the real `record_tool_results` builtin against a text-locked
+/// session whose trailing assistant turn carries a native anthropic `tool_use`
+/// block, and asserts the recorded result rides the native `tool_result` role.
+#[test]
+fn dispatched_escalation_result_records_native_role_on_text_locked_session() {
+    reset_agent_session_host_state();
+    let session_id =
+        crate::agent_sessions::open_or_create(Some("record-native-under-text-lock".to_string()));
+    crate::agent_sessions::claim_tool_format(&session_id, "text").expect("text lock claims");
+    seed_host_session_provider_model(&session_id, "anthropic", "claude-sonnet-4-5");
+
+    crate::agent_sessions::inject_message(
+        &session_id,
+        crate::stdlib::json_to_vm_value(&json!({"role": "user", "content": "read main"})),
+    )
+    .expect("user turn injects");
+    // Escalated native assistant turn carrying a real anthropic tool_use block.
+    let llm_result = crate::stdlib::json_to_vm_value(&json!({
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-5",
+        "text": "",
+        "_agent_tool_format": "native",
+        "native_tool_calls": [{"id": "tc_0", "name": "read", "arguments": {"path": "main.rs"}}],
+    }));
+    crate::agent_sessions::inject_message(
+        &session_id,
+        assistant_message_from_llm_result(&llm_result),
+    )
+    .expect("assistant turn injects");
+
+    // Dispatch result for the native call, shaped as agent_dispatch_tool_batch
+    // returns it (a flat list with tool_use_id).
+    let dispatch = crate::stdlib::json_to_vm_value(&json!([{
+        "tool_name": "read",
+        "tool_use_id": "tc_0",
+        "ok": true,
+        "observation": "file contents",
+    }]));
+    super::record_tool_results_for_test(&session_id, dispatch);
+
+    let transcript = crate::agent_sessions::transcript(&session_id).expect("transcript");
+    let messages = list_items(
+        &dict_get(&transcript, "messages")
+            .cloned()
+            .unwrap_or(crate::value::VmValue::Nil),
+    );
+    let last = vm_to_json(messages.last().expect("a recorded result message"));
+    assert_eq!(
+        last["role"], "tool_result",
+        "a dispatched native escalation result must ride the native tool_result role, \
+         not role:\"user\" (the session text-lock must NOT leak into the record path)"
+    );
+    assert_eq!(last["tool_use_id"], "tc_0");
+
+    let messages_json: Vec<serde_json::Value> = messages.iter().map(vm_to_json).collect();
+    assert!(
+        orphaned_tool_use_ids(&messages_json).is_empty(),
+        "the dispatched native tool_use must be paired -> provider-valid"
+    );
+}
+
+/// REGRESSION GUARD for the record path: a homogeneous text-channel run keeps
+/// its calls inline in `content`, so the trailing assistant turn carries NO
+/// structured block. `record_tool_results` must keep recording results on the
+/// text-channel `role:"user"` echo — the native-format override must NOT fire.
+#[test]
+fn dispatched_text_channel_result_stays_user_echo() {
+    reset_agent_session_host_state();
+    let session_id =
+        crate::agent_sessions::open_or_create(Some("record-text-homogeneous".to_string()));
+    crate::agent_sessions::claim_tool_format(&session_id, "text").expect("text lock claims");
+    seed_host_session_provider_model(&session_id, "moonshot", "moonshot/kimi-k2.7-code-highspeed");
+
+    crate::agent_sessions::inject_message(
+        &session_id,
+        crate::stdlib::json_to_vm_value(&json!({"role": "user", "content": "read main"})),
+    )
+    .expect("user turn injects");
+    // Text-channel assistant turn: the call is inline in `content`, no structured
+    // block persists.
+    let llm_result = crate::stdlib::json_to_vm_value(&json!({
+        "provider": "moonshot",
+        "model": "moonshot/kimi-k2.7-code-highspeed",
+        "text": "read({ path: \"main.rs\" })",
+        "_agent_tool_format": "text",
+        "native_tool_calls": [],
+        "tool_calls": [{"id": "tc_0", "name": "read", "arguments": {"path": "main.rs"}}],
+    }));
+    crate::agent_sessions::inject_message(
+        &session_id,
+        assistant_message_from_llm_result(&llm_result),
+    )
+    .expect("assistant turn injects");
+
+    let dispatch = crate::stdlib::json_to_vm_value(&json!([{
+        "tool_name": "read",
+        "tool_call_id": "tc_0",
+        "ok": true,
+        "observation": "file contents",
+    }]));
+    super::record_tool_results_for_test(&session_id, dispatch);
+
+    let transcript = crate::agent_sessions::transcript(&session_id).expect("transcript");
+    let messages = list_items(
+        &dict_get(&transcript, "messages")
+            .cloned()
+            .unwrap_or(crate::value::VmValue::Nil),
+    );
+    let last = vm_to_json(messages.last().expect("a recorded result message"));
+    assert_eq!(
+        last["role"], "user",
+        "homogeneous text-channel results must stay on the user echo (no native override)"
     );
 }
 
@@ -405,7 +598,6 @@ fn orphan_repair_covers_openai_wire_shape() {
         &assistant,
         "local",
         "Qwen/Qwen3.6-35B-A3B",
-        "native",
         "nudge",
         &std::collections::BTreeSet::new(),
     );
@@ -441,7 +633,6 @@ fn orphan_repair_is_noop_for_text_format_runs() {
         &assistant,
         "moonshot",
         "moonshot/kimi-k2.7-code-highspeed",
-        "text",
         "nudge",
         &std::collections::BTreeSet::new(),
     );
@@ -469,7 +660,6 @@ fn orphan_repair_skips_already_paired_blocks() {
         &assistant,
         "anthropic",
         "claude-opus-4-8",
-        "native",
         "nudge",
         &paired,
     );

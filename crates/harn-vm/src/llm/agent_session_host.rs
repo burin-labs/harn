@@ -131,6 +131,46 @@ pub(crate) fn reset_agent_session_host_state() {
     AGENT_HOST_SESSIONS.with(|sessions| sessions.borrow_mut().clear());
 }
 
+/// Seed a minimal host session carrying just the `last_provider`/`last_model`
+/// facts that `pair_orphaned_tool_use` reads. Test-only: lets a repro exercise
+/// the real production entrypoint (which sources provider/model from the host
+/// store) without standing up a full `agent_loop`.
+#[cfg(test)]
+pub(crate) fn seed_host_session_provider_model(session_id: &str, provider: &str, model: &str) {
+    let session = AgentHostSession {
+        session_id: session_id.to_string(),
+        task: String::new(),
+        tokens_used: 0,
+        cost_used: 0.0,
+        input_tokens: 0,
+        output_tokens: 0,
+        active_skills: Vec::new(),
+        tool_calls: Vec::new(),
+        successful_tools: Vec::new(),
+        rejected_tools: Vec::new(),
+        tool_mode: String::new(),
+        last_provider: Some(provider.to_string()),
+        last_model: Some(model.to_string()),
+        pushed_transcript_dir: false,
+        started_at: now_id(),
+        max_iterations: 0,
+        daemon_state: None,
+        daemon_snapshot_path: None,
+        resumed_iterations: 0,
+        daemon_watch_state: std::collections::BTreeMap::new(),
+        daemon_idle_backoff_ms: 100,
+        host_bridge: None,
+        last_llm_stop_reason: None,
+        taint: Vec::new(),
+        nested_policy_guard: None,
+    };
+    AGENT_HOST_SESSIONS.with(|sessions| {
+        sessions
+            .borrow_mut()
+            .insert(session_id.to_string(), session);
+    });
+}
+
 fn with_session<R>(
     session_id: &str,
     label: &str,
@@ -1186,11 +1226,23 @@ fn paired_tool_result_ids(messages: &[VmValue]) -> std::collections::BTreeSet<St
 /// observation. Blocks whose id already has a paired result (`already_paired`)
 /// are skipped. Returns the messages to append, in block order. Pure over its
 /// inputs so the invariant is unit-testable without a live session.
+///
+/// A block reaching this function came from `assistant_tool_use_blocks`, which
+/// only yields provider-native `tool_use`/`tool_call` structures — text/json
+/// channels carry their calls inline in `content` and produce NO structured
+/// blocks. So an orphaned block here is native *by definition*, and its result
+/// MUST be synthesized in the provider's native shape (anthropic
+/// `tool_result`+`tool_use_id`, openai `tool`+`tool_call_id`) regardless of the
+/// session's tool_format lock. That lock is pinned to the PRIMARY model's format
+/// at session init (`claim_tool_format`) and never re-claimed on escalation, so
+/// on a text-primary run it stays `"text"` for the whole run — passing it here
+/// would (mis)route the synthesis through the text-channel `role:"user"` echo,
+/// leaving the native `tool_use` block orphaned and re-triggering the exact
+/// Anthropic 400 this repair exists to prevent. Force `"native"` instead.
 fn synthesize_orphan_tool_results(
     last_assistant: &VmValue,
     provider: &str,
     model: &str,
-    tool_format: &str,
     feedback: &str,
     already_paired: &std::collections::BTreeSet<String>,
 ) -> Vec<VmValue> {
@@ -1202,13 +1254,45 @@ fn synthesize_orphan_tool_results(
         out.push(tool_result_message_for_provider(
             provider,
             model,
-            tool_format,
+            // The orphaned block is a structured native tool_use; its result
+            // must ride the provider's native tool-result role, not the
+            // session-locked (possibly `text`) channel.
+            "native",
             &block.name,
             &block.id,
             feedback,
         ));
     }
     out
+}
+
+/// True when the trailing message in the session transcript is an assistant
+/// turn carrying at least one structured provider-native `tool_use`/`tool_call`
+/// block (as opposed to a text-channel turn that keeps its calls inline in a
+/// plain-string `content`). Used by `record_tool_results` to decide whether a
+/// dispatched result must ride the provider's native tool-result role even when
+/// the session is text-locked (the escalation case), staying a no-op for
+/// homogeneous text-channel runs.
+fn trailing_assistant_has_native_tool_use(session_id: &str) -> bool {
+    let Some(transcript) = crate::agent_sessions::transcript(session_id) else {
+        return false;
+    };
+    let messages = list_items(
+        &dict_get(&transcript, "messages")
+            .cloned()
+            .unwrap_or(VmValue::Nil),
+    );
+    let Some(last) = messages.last() else {
+        return false;
+    };
+    if dict_get(last, "role")
+        .map(|v| v.display())
+        .unwrap_or_default()
+        != "assistant"
+    {
+        return false;
+    }
+    !assistant_tool_use_blocks(last).is_empty()
 }
 
 /// Repair the transcript invariant that every assistant `tool_use`/`tool_call`
@@ -1254,16 +1338,9 @@ pub(crate) fn pair_orphaned_tool_use(session_id: &str, feedback: &str) -> usize 
         ))
     })
     .unwrap_or_default();
-    let tool_format = crate::agent_sessions::tool_format(session_id).unwrap_or_default();
     let already_paired = paired_tool_result_ids(&messages);
-    let synthetic = synthesize_orphan_tool_results(
-        last,
-        &provider,
-        &model,
-        &tool_format,
-        feedback,
-        &already_paired,
-    );
+    let synthetic =
+        synthesize_orphan_tool_results(last, &provider, &model, feedback, &already_paired);
     let mut repaired = 0;
     for message in synthetic {
         if crate::agent_sessions::inject_message(session_id, message).is_ok() {
@@ -1305,6 +1382,17 @@ fn plan_artifact_from_result(result: &VmValue) -> Option<serde_json::Value> {
     ))
 }
 
+/// Test seam: invoke the real `record_tool_results` builtin logic against a
+/// session with a `dispatch` payload, so a repro can drive the production record
+/// path without a live agent loop.
+#[cfg(test)]
+pub(crate) fn record_tool_results_for_test(session_id: &str, dispatch: VmValue) {
+    let args = [VmValue::string(session_id), dispatch];
+    let mut out = String::new();
+    host_agent_session_record_tool_results_builtin(&args, &mut out)
+        .expect("record_tool_results builtin succeeds");
+}
+
 /// Append per-tool observation messages from a dispatch result.
 #[harn_builtin(
     sig = "__host_agent_session_record_tool_results(session_id: string, dispatch: dict) -> nil",
@@ -1325,7 +1413,25 @@ fn host_agent_session_record_tool_results_builtin(
             ))
         })
         .unwrap_or_default();
-    let tool_format = crate::agent_sessions::tool_format(&session_id).unwrap_or_default();
+    // The session `tool_format` lock is pinned to the PRIMARY model's format at
+    // session init and is never re-claimed on escalation. But the trailing
+    // assistant turn we are answering may have been produced by an escalated
+    // NATIVE model whose calls persisted as structured `tool_use`/`tool_call`
+    // blocks. A structured native block MUST get its tool-result on the
+    // provider's native role (`tool_result`/`tool`) — routing it through the
+    // session-locked text channel (`role:"user"`) would leave the native block
+    // orphaned and trip the same non-retryable Anthropic 400 the orphan repair
+    // guards against. So derive the format from the turn being answered:
+    // `"native"` when the assistant turn carries structured tool-call blocks,
+    // otherwise the session lock (homogeneous text-channel runs keep their calls
+    // inline in `content` and carry no structured block, so they stay on the
+    // text echo — unchanged).
+    let session_tool_format = crate::agent_sessions::tool_format(&session_id).unwrap_or_default();
+    let tool_format = if trailing_assistant_has_native_tool_use(&session_id) {
+        "native".to_string()
+    } else {
+        session_tool_format
+    };
     // dispatch may be either a flat list of results (as returned by
     // agent_dispatch_tool_batch) or a dict with a `results` key (legacy
     // shape some callers still synthesize). Handle both.
