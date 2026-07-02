@@ -84,7 +84,7 @@ const OAUTH_HTTP_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::fro
 /// one bounded token request ([`OAUTH_HTTP_TIMEOUT`]) plus storage IO, so
 /// waiting longer means the holder is wedged; failing fast with a clear error
 /// beats silently blocking every later 401 recovery behind it.
-const OAUTH_REFRESH_LOCK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+const OAUTH_REFRESH_LOCK_TIMEOUT: std::time::Duration = std::time::Duration::from_mins(1);
 
 const TOKEN_EXCHANGE_GRANT_TYPE: &str = "urn:ietf:params:oauth:grant-type:token-exchange";
 const TOKEN_TYPE_PREFIX: &str = "urn:ietf:params:oauth:token-type:";
