@@ -114,12 +114,12 @@ pub fn parse_budget_mb(raw: string) -> float? {
 
 /** MiB budget to bytes: awk `printf "%.0f", mb * 1024 * 1024`. */
 pub fn budget_bytes_of(mb: float) -> int {
-  return round(mb * 1024.0 * 1024.0)
+  return to_int(round(mb * 1024.0 * 1024.0)) ?? 0
 }
 
 /** Bytes to MiB with two decimals: awk `printf "%.2f", bytes / 1024 / 1024`. */
 pub fn format_mib(bytes: int) -> string {
-  let cents = round(bytes * 100.0 / 1024.0 / 1024.0)
+  let cents = to_int(round(bytes * 100.0 / 1024.0 / 1024.0)) ?? 0
   let whole = cents / 100
   let frac = cents % 100
   let frac_str = if frac < 10 {

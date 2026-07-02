@@ -594,7 +594,41 @@ jobs:
         env:
           BINARY_SIZE_REPORT_DIR: dist/binary-size-${{ matrix.target }}
           HARN_RELEASE_TARGET: ${{ matrix.target }}
-        run: ./target/"$HARN_RELEASE_TARGET"/release/harn run scripts/check_binary_size.harn -- --no-build --target "$HARN_RELEASE_TARGET" --skip-bloat
+        run: |
+          set -euo pipefail
+          harn_bin="target/${HARN_RELEASE_TARGET}/release/harn"
+          if [[ ! -f "$harn_bin" ]]; then
+            echo "::error::harn binary not found at $harn_bin"
+            exit 1
+          fi
+          if [[ ! "${BINARY_SIZE_BUDGET_MB}" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+            echo "::error::BINARY_SIZE_BUDGET_MB must be a positive number, got '${BINARY_SIZE_BUDGET_MB}'"
+            exit 2
+          fi
+          budget_bytes="$(awk -v mb="$BINARY_SIZE_BUDGET_MB" 'BEGIN { if (mb <= 0) exit 2; printf "%.0f\n", mb * 1024 * 1024 }')" || {
+            echo "::error::BINARY_SIZE_BUDGET_MB must be a positive number, got '${BINARY_SIZE_BUDGET_MB}'"
+            exit 2
+          }
+          actual_bytes="$(wc -c < "$harn_bin" | tr -d '[:space:]')"
+          format_mib() {
+            awk -v bytes="$1" 'BEGIN { printf "%.2f", bytes / 1024 / 1024 }'
+          }
+          mkdir -p "$BINARY_SIZE_REPORT_DIR"
+          {
+            echo "harn binary size"
+            echo "================"
+            echo "binary: $harn_bin"
+            echo "target: $HARN_RELEASE_TARGET"
+            echo "bytes: $actual_bytes"
+            echo "mib: $(format_mib "$actual_bytes")"
+            echo "budget_bytes: $budget_bytes"
+            echo "budget_mib: $(format_mib "$budget_bytes")"
+            echo "cargo-bloat report: skipped"
+          } | tee "$BINARY_SIZE_REPORT_DIR/binary-size.txt"
+          if (( actual_bytes > budget_bytes )); then
+            echo "::error::harn binary is $(format_mib "$actual_bytes") MiB, above budget $(format_mib "$budget_bytes") MiB"
+            exit 1
+          fi
 
       - name: Generate cargo-bloat report (warm only)
         if: matrix.target == 'x86_64-unknown-linux-gnu' && needs.setup.outputs.is_release != 'true'
