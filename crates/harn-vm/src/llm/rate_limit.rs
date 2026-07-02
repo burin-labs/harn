@@ -552,9 +552,7 @@ fn install_legacy_env_provider_overrides(limiters: &mut HashMap<String, RouteLim
     }
 }
 
-/// Load rate limits from provider/model config and environment variables.
-/// Safe to call multiple times (replaces existing config-derived entries).
-pub(crate) fn init_from_config() {
+fn config_limiters_from_effective_config() -> HashMap<String, RouteLimiter> {
     let config = crate::llm_config::effective_config();
     let mut limiters = HashMap::new();
     for (name, provider) in &config.providers {
@@ -578,6 +576,13 @@ pub(crate) fn init_from_config() {
         insert_limiter(&mut limiters, model_key(&model.provider, model_id), limits);
     }
     install_legacy_env_provider_overrides(&mut limiters);
+    limiters
+}
+
+/// Load rate limits from provider/model config and environment variables.
+/// Safe to call multiple times (replaces existing config-derived entries).
+pub(crate) fn init_from_config() {
+    let mut limiters = config_limiters_from_effective_config();
     for (provider, limits) in runtime_overrides()
         .lock()
         .expect("rate limiter runtime override mutex poisoned")
@@ -1068,29 +1073,42 @@ pub(crate) fn reset_rate_limit_state() {
         .clear();
 }
 
-/// Reset rate-limit state only if a runtime override (via `llm_rate_limit`)
-/// was actually installed — the one piece of rate-limit state a test run can
-/// leak into the next.
+/// Reset runtime overrides (via `llm_rate_limit`) without wiping unrelated
+/// process-global rate-limit state.
 ///
 /// `reset_llm_state` used to call [`reset_rate_limit_state`] unconditionally,
 /// but the limiter registry is *process-global*, and `reset_thread_local_state`
 /// runs from ~150 test setups in parallel — each call wiped the usage counters
-/// that concurrently running rate-limit tests were asserting on. With this
-/// guard, the common no-override case leaves the global registry untouched;
-/// the wipe (and lazy re-init from config) only happens when there is
-/// genuinely something to clean up.
+/// that concurrently running rate-limit tests were asserting on. Runtime
+/// overrides are also process-global, so clearing them must surgically restore
+/// only the providers they shadowed. Otherwise an unrelated `llm_rate_limit`
+/// cleanup can erase a sibling route's request window while that sibling still
+/// holds a concurrency permit.
 pub(crate) fn reset_runtime_rate_limit_overrides() {
-    let mut overrides = runtime_overrides()
-        .lock()
-        .expect("rate limiter runtime override mutex poisoned");
-    if overrides.is_empty() {
-        return;
-    }
-    overrides.clear();
-    drop(overrides);
+    let cleared_provider_keys = {
+        let mut overrides = runtime_overrides()
+            .lock()
+            .expect("rate limiter runtime override mutex poisoned");
+        if overrides.is_empty() {
+            return;
+        }
+        let keys = overrides
+            .keys()
+            .map(|provider| provider_key(provider))
+            .collect::<Vec<_>>();
+        overrides.clear();
+        keys
+    };
+
+    let mut config_limiters = config_limiters_from_effective_config();
     let mut registry = registry().lock().expect("rate limiter mutex poisoned");
-    registry.limiters.clear();
-    registry.initialized_from_config = false;
+    for key in cleared_provider_keys {
+        if let Some(limiter) = config_limiters.remove(&key) {
+            registry.limiters.insert(key, limiter);
+        } else {
+            registry.limiters.remove(&key);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1613,6 +1631,57 @@ mod tests {
             "config limiters must survive an override-only reset"
         );
         drop(registry);
+
+        reset_test_rate_limit_state();
+    }
+
+    #[test]
+    fn runtime_override_reset_preserves_unrelated_provider_usage() {
+        let _guard = crate::llm::env_guard();
+        let _durable_disabled = EnvVarGuard::set_value(DURABLE_RATE_LIMIT_ENABLED_ENV, "0");
+        reset_test_rate_limit_state();
+        install_concurrency_overlay();
+        init_from_config();
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .expect("current-thread runtime");
+
+        runtime.block_on(async {
+            let first = acquire_permit("queue").await.expect("first permit");
+            assert_eq!(provider_request_usage("queue"), 1);
+
+            let limits = crate::llm_config::RateLimitsDef {
+                rpm: Some(1),
+                ..Default::default()
+            };
+            set_rate_limits("runtime-only-provider", limits);
+            reset_runtime_rate_limit_overrides();
+
+            assert_eq!(
+                provider_request_usage("queue"),
+                1,
+                "clearing an unrelated runtime override must not wipe queued provider usage"
+            );
+
+            let mut second = tokio::spawn(async { acquire_permit("queue").await });
+            assert!(
+                tokio::time::timeout(std::time::Duration::from_millis(100), &mut second)
+                    .await
+                    .is_err(),
+                "second acquire should remain queued behind the held concurrency permit"
+            );
+
+            drop(first);
+            let second = tokio::time::timeout(std::time::Duration::from_secs(2), second)
+                .await
+                .expect("second task should acquire after first permit drops")
+                .expect("second task completed")
+                .expect("second permit");
+            assert_eq!(provider_request_usage("queue"), 2);
+            drop(second);
+        });
 
         reset_test_rate_limit_state();
     }

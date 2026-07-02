@@ -16,8 +16,14 @@ pipeline default() {
   harness.fs.mkdir(root)
   let script = path_join(root, "child.harn")
   harness.fs.write_text(script, "__io_println(\"child ok\")\n")
+  let harn_bin_dir = dirname(harn_bin)
   let result = with_execution_policy(
-    {sandbox_profile: "worktree", workspace_roots: [repo_root, root], side_effect_level: "process_exec"},
+    {
+      sandbox_profile: "worktree",
+      workspace_roots: [repo_root, root],
+      side_effect_level: "process_exec",
+      process_sandbox: {read_roots: [harn_bin_dir]},
+    },
     { -> return command_run([harn_bin, "check", script], {cwd: root, capture: {max_inline_bytes: 200000}}) },
   )
   __io_println(result.success)

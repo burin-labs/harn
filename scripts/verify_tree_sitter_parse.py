@@ -15,9 +15,11 @@ _NATIVE_LIB = GRAMMAR_DIR / ("harn.dylib" if sys.platform == "darwin" else "harn
 _LIB_CANDIDATES = [_NATIVE_LIB, GRAMMAR_DIR / "harn.dylib", GRAMMAR_DIR / "harn.so"]
 LIB_PATH = _NATIVE_LIB
 CLI = GRAMMAR_DIR / "scripts" / "tree-sitter-cli.sh"
-GRAMMAR_SOURCES = [
+GENERATED_PARSER_SOURCES = [
     GRAMMAR_DIR / "grammar.js",
     GRAMMAR_DIR / "grammar" / "keywords.js",
+]
+NATIVE_SOURCES = [
     GRAMMAR_DIR / "src" / "parser.c",
     GRAMMAR_DIR / "src" / "scanner.c",
 ]
@@ -34,18 +36,37 @@ def ensure_compiled_library() -> int:
         print(f"error: missing tree-sitter CLI wrapper at {CLI}", file=sys.stderr)
         return 1
 
-    source_mtime = max(
-        path.stat().st_mtime for path in GRAMMAR_SOURCES if path.exists()
+    parser_sources_mtime = max(
+        path.stat().st_mtime for path in GENERATED_PARSER_SOURCES if path.exists()
     )
+    parser_c = GRAMMAR_DIR / "src" / "parser.c"
+    needs_generate = (
+        not parser_c.exists() or parser_c.stat().st_mtime < parser_sources_mtime
+    )
+    if needs_generate:
+        result = subprocess.run(
+            [str(CLI), "generate"],
+            cwd=GRAMMAR_DIR,
+            text=True,
+            capture_output=True,
+        )
+        if result.returncode != 0:
+            print("error: failed to regenerate tree-sitter parser", file=sys.stderr)
+            if result.stdout:
+                print(result.stdout, file=sys.stderr, end="")
+            if result.stderr:
+                print(result.stderr, file=sys.stderr, end="")
+            return result.returncode
+
+    source_mtime = max(path.stat().st_mtime for path in NATIVE_SOURCES if path.exists())
     needs_build = not _NATIVE_LIB.exists()
     if not needs_build:
         needs_build = _NATIVE_LIB.stat().st_mtime < source_mtime
-
     if not needs_build:
         return 0
 
     result = subprocess.run(
-        ["npm", "run", "build"],
+        [str(CLI), "build"],
         cwd=GRAMMAR_DIR,
         text=True,
         capture_output=True,

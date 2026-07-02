@@ -33,6 +33,107 @@ static bool is_ignored_separator_target(int32_t lookahead) {
   }
 }
 
+static void skip_horizontal_space(TSLexer *lexer) {
+  while (lexer->lookahead == ' ' || lexer->lookahead == '\t') {
+    lexer->advance(lexer, true);
+  }
+}
+
+static bool consume_comment(TSLexer *lexer) {
+  if (lexer->lookahead != '/') {
+    return false;
+  }
+  lexer->advance(lexer, true);
+
+  if (lexer->lookahead == '/') {
+    lexer->advance(lexer, true);
+    while (lexer->lookahead != 0 && lexer->lookahead != '\n' && lexer->lookahead != '\r') {
+      lexer->advance(lexer, true);
+    }
+    return true;
+  }
+
+  if (lexer->lookahead != '*') {
+    return false;
+  }
+
+  lexer->advance(lexer, true);
+  uint16_t depth = 1;
+  while (depth > 0 && lexer->lookahead != 0) {
+    if (lexer->lookahead == '/') {
+      lexer->advance(lexer, true);
+      if (lexer->lookahead == '*') {
+        lexer->advance(lexer, true);
+        depth++;
+      }
+      continue;
+    }
+    if (lexer->lookahead == '*') {
+      lexer->advance(lexer, true);
+      if (lexer->lookahead == '/') {
+        lexer->advance(lexer, true);
+        depth--;
+      }
+      continue;
+    }
+    lexer->advance(lexer, true);
+  }
+
+  return true;
+}
+
+static bool consume_newline_run(TSLexer *lexer, uint16_t *indent) {
+  bool saw_newline = false;
+  *indent = 0;
+  while (true) {
+    if (lexer->lookahead == '\r') {
+      saw_newline = true;
+      *indent = 0;
+      lexer->advance(lexer, true);
+      if (lexer->lookahead == '\n') {
+        lexer->advance(lexer, true);
+      }
+      continue;
+    }
+    if (lexer->lookahead == '\n') {
+      saw_newline = true;
+      *indent = 0;
+      lexer->advance(lexer, true);
+      continue;
+    }
+    if ((lexer->lookahead == ' ' || lexer->lookahead == '\t') && saw_newline) {
+      *indent += lexer->lookahead == '\t' ? 2 : 1;
+      lexer->advance(lexer, true);
+      continue;
+    }
+    break;
+  }
+  return saw_newline;
+}
+
+static bool comment_line_continues_expression(TSLexer *lexer) {
+  if (!consume_comment(lexer)) {
+    return false;
+  }
+
+  skip_horizontal_space(lexer);
+  uint16_t indent = 0;
+  if (!consume_newline_run(lexer, &indent)) {
+    return false;
+  }
+
+  skip_horizontal_space(lexer);
+  while (consume_comment(lexer)) {
+    skip_horizontal_space(lexer);
+    if (!consume_newline_run(lexer, &indent)) {
+      return false;
+    }
+    skip_horizontal_space(lexer);
+  }
+
+  return is_ignored_separator_target(lexer->lookahead);
+}
+
 void *tree_sitter_harn_external_scanner_create(void) {
   ScannerState *state = ts_calloc(1, sizeof(ScannerState));
   return state;
@@ -62,8 +163,9 @@ void tree_sitter_harn_external_scanner_deserialize(void *payload, const char *bu
   if (len > 64) {
     len = 64;
   }
-  if (length < 1 + (len * 2)) {
-    len = (length - 1) / 2;
+  unsigned required = 1u + ((unsigned)len * 2u);
+  if (length < required) {
+    len = (uint8_t)((length - 1u) / 2u);
   }
   state->len = len;
   for (uint8_t i = 0; i < state->len; i++) {
@@ -80,38 +182,16 @@ bool tree_sitter_harn_external_scanner_scan(void *payload, TSLexer *lexer, const
     return false;
   }
 
-  bool saw_newline = false;
   uint16_t indent = 0;
-
-  while (true) {
-    if (lexer->lookahead == '\r') {
-      saw_newline = true;
-      indent = 0;
-      lexer->advance(lexer, true);
-      if (lexer->lookahead == '\n') {
-        lexer->advance(lexer, true);
-      }
-      continue;
-    }
-    if (lexer->lookahead == '\n') {
-      saw_newline = true;
-      indent = 0;
-      lexer->advance(lexer, true);
-      continue;
-    }
-    if ((lexer->lookahead == ' ' || lexer->lookahead == '\t') && saw_newline) {
-      indent += lexer->lookahead == '\t' ? 2 : 1;
-      lexer->advance(lexer, true);
-      continue;
-    }
-    break;
-  }
+  bool saw_newline = consume_newline_run(lexer, &indent);
 
   if (!saw_newline) {
     return false;
   }
 
-  if (is_ignored_separator_target(lexer->lookahead)) {
+  lexer->mark_end(lexer);
+
+  if (comment_line_continues_expression(lexer) || is_ignored_separator_target(lexer->lookahead)) {
     return false;
   }
 
