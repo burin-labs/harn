@@ -56,6 +56,7 @@ import {
   agent_session_init,
   agent_session_inject_feedback,
   agent_session_messages,
+  agent_session_pair_orphaned_tool_use,
   agent_session_pop_last_assistant,
   agent_session_record_assistant,
   agent_session_record_tool_results,
@@ -1153,6 +1154,27 @@ fn __native_fallback_feedback(policy, fallback_index) {
   return native_tool_contract_feedback_prompt({policy: policy, fallback_index: fallback_index})
 }
 
+/**
+ * Inject corrective feedback after an assistant turn whose tool_use/tool-call
+ * blocks the loop DECLINED to dispatch (native-format fallback reject, all
+ * tool calls blank-name-dropped, parse-error with nothing dispatchable). A
+ * provider-native `tool_use` block that is not immediately followed by a
+ * matching `tool_result` is a hard protocol violation on Anthropic (a
+ * non-retryable HTTP 400 that kills the run) — so before appending the user-
+ * role feedback we first synthesize a `tool_result` for every orphaned block,
+ * carrying the SAME corrective text as the observation. The model still sees the
+ * steering, but pairing stays intact.
+ *
+ * `agent_session_pair_orphaned_tool_use` is a strict no-op when the trailing
+ * turn carries no structured tool_use (the common homogeneous text-format case
+ * keeps calls inline in `content`), so passing runs are unaffected — the pairing
+ * repair only fires on the exact escalation/native-fallback shape that orphans.
+ */
+fn __inject_feedback_with_tool_repair(session_id, kind, content) {
+  let _ = agent_session_pair_orphaned_tool_use(session_id, content)
+  agent_session_inject_feedback(session_id, kind, content)
+}
+
 fn __parse_feedback_tool_annotations(entry) {
   return __tool_entry_annotations(entry)
 }
@@ -1235,7 +1257,7 @@ fn __maybe_inject_parse_error_feedback(session_id, parsed, tool_calls, turn_opts
     },
     turn_opts,
   )
-  agent_session_inject_feedback(session_id, "parse_guidance", feedback)
+  __inject_feedback_with_tool_repair(session_id, "parse_guidance", feedback)
   agent_emit_event(
     session_id,
     "tool_parse_error_feedback",
@@ -1296,7 +1318,7 @@ fn __maybe_inject_blank_name_feedback(session_id, llm_result, parsed, dispatched
     },
     turn_opts,
   )
-  agent_session_inject_feedback(session_id, "parse_guidance", feedback)
+  __inject_feedback_with_tool_repair(session_id, "parse_guidance", feedback)
   agent_emit_event(
     session_id,
     "tool_call_blank_name_dropped",
@@ -1343,7 +1365,7 @@ fn __detect_native_fallback(
     },
   )
   if !accepted {
-    agent_session_inject_feedback(
+    __inject_feedback_with_tool_repair(
       session_id,
       "native_tool_contract",
       __native_fallback_feedback(policy, new_index),
@@ -3540,7 +3562,7 @@ fn __agent_loop_run(message, session, initial_opts) {
           }
           if is_err(await_result) {
             let await_error = unwrap_err(await_result)
-            agent_session_inject_feedback(
+            __inject_feedback_with_tool_repair(
               session.session_id,
               "agent_await_resumption",
               __agent_loop_invalid_await_resumption_feedback(await_error),
@@ -3714,6 +3736,7 @@ fn __agent_loop_run(message, session, initial_opts) {
               done_judge_vetoes = done_judge_vetoes + 1
             }
             if stall_observation.feedback_deferred {
+              let _ = agent_session_pair_orphaned_tool_use(session.session_id, stall_warning)
               stall_state = agent_stall_inject_feedback(
                 session.session_id,
                 stall_warning,
@@ -3800,7 +3823,11 @@ fn __agent_loop_run(message, session, initial_opts) {
             }
             let critique = step_verdict?.feedback ?? step_verdict?.critique ?? ""
             if critique != "" {
-              agent_session_inject_feedback(session.session_id, "step_judge", critique)
+              if on_veto == "replace" {
+                agent_session_inject_feedback(session.session_id, "step_judge", critique)
+              } else {
+                __inject_feedback_with_tool_repair(session.session_id, "step_judge", critique)
+              }
             }
             let step_totals = agent_session_record_usage(session.session_id, llm_result, turn_llm_opts, iteration_index + 1)
             agent_emit_event(
@@ -4138,7 +4165,7 @@ fn __agent_loop_run(message, session, initial_opts) {
             let has_tools = len(opts?.tools?.tools ?? []) > 0
             let tool_mode = agent_tool_call_paradigm(turn_opts).kind
             let made_tool_calls = tool_count > 0
-            agent_session_inject_feedback(
+            __inject_feedback_with_tool_repair(
               session.session_id,
               "no_progress_streak",
               __progress_nudge_text(turns_since_progress, has_tools, tool_mode, made_tool_calls),
@@ -4422,6 +4449,16 @@ fn __agent_loop_run(message, session, initial_opts) {
   return unwrap(run)
 }
 
+// The invalid `agent_await_resumption` call was never dispatched, so
+// if the model emitted it as a native tool_use block the feedback
+// inject would orphan it; repair pairing first.
+// Guard the same orphan invariant: if this stalled turn carried an
+// undispatched native tool_use, pair it before the stall feedback
+// lands. No-op (returns 0) for the common text-only stall.
+// `replace` already discarded the vetoed assistant turn (and any
+// tool_use it carried); a non-replace veto keeps the turn, so the
+// critique inject must repair pairing first or a native tool_use
+// on this turn is orphaned before the next provider call.
 // Reserved terminal-verify guard (default OFF). `terminal_write_unverified`
 // tracks whether the transcript has a source write that no passing
 // verification has cleared; `terminal_verify_reserve_remaining` is the

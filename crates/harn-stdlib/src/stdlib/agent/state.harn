@@ -56,6 +56,25 @@ pub fn agent_session_record_tool_results(session_id, dispatch) {
   return __host_agent_session_record_tool_results(session_id, dispatch)
 }
 
+/**
+ * agent_session_pair_orphaned_tool_use. Repair the transcript invariant that
+ * every assistant `tool_use`/`tool_call` block is immediately followed by a
+ * matching `tool_result` before the next provider request. Synthesizes a
+ * tool_result (carrying `feedback` as the observation) for each orphaned block
+ * on the trailing assistant turn. Returns the number of blocks repaired; `0` is
+ * a strict no-op (trailing message is not an assistant turn, carries no
+ * structured tool calls — e.g. a homogeneous text-format run — or every block
+ * already has a paired result). Called by the agent loop at every inject site
+ * that declines to dispatch an assistant turn's tool calls.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_session_pair_orphaned_tool_use(session_id, feedback) {
+  return __host_agent_session_pair_orphaned_tool_use(session_id, feedback)
+}
+
 fn __agent_usage_int(value) {
   if type_of(value) == "int" {
     return value

@@ -1085,6 +1085,194 @@ fn tool_result_message_for_provider(
     VmValue::dict(msg)
 }
 
+/// The `(id, name)` of one provider-native tool-call block carried on an
+/// assistant message, recovered across the three wire shapes the transcript
+/// builder emits (`build_assistant_tool_message`):
+///
+///   - Anthropic: `content` is a list of blocks; `{type: "tool_use", id, name}`.
+///   - OpenAI / Ollama: a top-level `tool_calls` list of
+///     `{id, function: {name}}`.
+///   - Gemini: `content` list of `{functionCall: {name, id?}}` (id optional).
+struct AssistantToolUse {
+    id: String,
+    name: String,
+}
+
+/// Extract every provider-native tool-call block declared on an assistant
+/// message, regardless of the provider wire shape it was persisted in. Text-
+/// channel turns keep their calls inline in `content` (a plain string), so they
+/// carry no structured blocks and yield an empty list — which is exactly why the
+/// repair below is a no-op for homogeneous text-format runs.
+fn assistant_tool_use_blocks(message: &VmValue) -> Vec<AssistantToolUse> {
+    let mut blocks = Vec::new();
+    // OpenAI / Ollama: top-level `tool_calls`.
+    for call in list_items(
+        &dict_get(message, "tool_calls")
+            .cloned()
+            .unwrap_or(VmValue::Nil),
+    ) {
+        let id = dict_get(&call, "id")
+            .map(|v| v.display())
+            .unwrap_or_default();
+        let name = dict_get(&call, "name")
+            .map(|v| v.display())
+            .or_else(|| {
+                dict_get(&call, "function").and_then(|f| dict_get(f, "name").map(|v| v.display()))
+            })
+            .unwrap_or_default();
+        blocks.push(AssistantToolUse { id, name });
+    }
+    // Anthropic / Gemini: structured `content` blocks.
+    if let Some(content) = dict_get(message, "content") {
+        for block in list_items(content) {
+            // Anthropic `tool_use`.
+            let block_type = dict_get(&block, "type")
+                .map(|v| v.display())
+                .unwrap_or_default();
+            if block_type == "tool_use" {
+                let id = dict_get(&block, "id")
+                    .map(|v| v.display())
+                    .unwrap_or_default();
+                let name = dict_get(&block, "name")
+                    .map(|v| v.display())
+                    .unwrap_or_default();
+                blocks.push(AssistantToolUse { id, name });
+                continue;
+            }
+            // Gemini `functionCall` part (id is optional on this wire).
+            if let Some(function_call) = dict_get(&block, "functionCall") {
+                let id = dict_get(function_call, "id")
+                    .map(|v| v.display())
+                    .unwrap_or_default();
+                let name = dict_get(function_call, "name")
+                    .map(|v| v.display())
+                    .unwrap_or_default();
+                blocks.push(AssistantToolUse { id, name });
+            }
+        }
+    }
+    blocks
+}
+
+/// The set of `tool_use`/`tool_call` ids that ALREADY have a paired tool-result
+/// message somewhere in the transcript. Used so the repair only synthesizes a
+/// result for a genuinely orphaned block and stays a no-op when the loop already
+/// dispatched (and recorded) the call. Covers both provider tool-result roles
+/// (`tool_result`/`tool_use_id`, `tool`/`tool_call_id`) and the text-channel
+/// `user` echo (which carries no id, so it never satisfies a native id — correct,
+/// since a native tool_use ALWAYS needs a real tool-result role).
+fn paired_tool_result_ids(messages: &[VmValue]) -> std::collections::BTreeSet<String> {
+    let mut ids = std::collections::BTreeSet::new();
+    for message in messages {
+        let role = dict_get(message, "role")
+            .map(|v| v.display())
+            .unwrap_or_default();
+        if role != "tool_result" && role != "tool" {
+            continue;
+        }
+        let id = dict_get(message, "tool_use_id")
+            .or_else(|| dict_get(message, "tool_call_id"))
+            .map(|v| v.display())
+            .unwrap_or_default();
+        if !id.is_empty() {
+            ids.insert(id);
+        }
+    }
+    ids
+}
+
+/// Synthesize a provider-valid tool-result message for each orphaned
+/// `tool_use`/`tool_call` block on `last_assistant`, carrying `feedback` as the
+/// observation. Blocks whose id already has a paired result (`already_paired`)
+/// are skipped. Returns the messages to append, in block order. Pure over its
+/// inputs so the invariant is unit-testable without a live session.
+fn synthesize_orphan_tool_results(
+    last_assistant: &VmValue,
+    provider: &str,
+    model: &str,
+    tool_format: &str,
+    feedback: &str,
+    already_paired: &std::collections::BTreeSet<String>,
+) -> Vec<VmValue> {
+    let mut out = Vec::new();
+    for block in assistant_tool_use_blocks(last_assistant) {
+        if !block.id.is_empty() && already_paired.contains(&block.id) {
+            continue;
+        }
+        out.push(tool_result_message_for_provider(
+            provider,
+            model,
+            tool_format,
+            &block.name,
+            &block.id,
+            feedback,
+        ));
+    }
+    out
+}
+
+/// Repair the transcript invariant that every assistant `tool_use`/`tool_call`
+/// block is immediately followed by a matching `tool_result` before the next
+/// provider request. The agent loop calls this at every inject site that
+/// DECLINES to dispatch an assistant turn's tool calls (native-format fallback
+/// reject, all-blank-name drop, parse-error, no-progress nudge) and would
+/// otherwise append a bare user-feedback message after an orphaned `tool_use` —
+/// which Anthropic rejects with a non-retryable HTTP 400 ("tool_use ids were
+/// found without tool_result blocks immediately after"), killing the run.
+///
+/// The synthesized tool-result carries `feedback` as its observation, so the
+/// model still sees the same corrective steering it would have gotten from the
+/// user message — just delivered in a provider-valid tool-result envelope that
+/// keeps pairing intact.
+///
+/// Returns the number of orphaned blocks repaired. `0` when the trailing message
+/// is not an assistant turn, carries no structured tool_use (e.g. a homogeneous
+/// text-format run keeps calls inline in `content`), or every block already has
+/// a paired result — so this is a strict no-op for runs that already converge.
+pub(crate) fn pair_orphaned_tool_use(session_id: &str, feedback: &str) -> usize {
+    let Some(transcript) = crate::agent_sessions::transcript(session_id) else {
+        return 0;
+    };
+    let messages = list_items(
+        &dict_get(&transcript, "messages")
+            .cloned()
+            .unwrap_or(VmValue::Nil),
+    );
+    let Some(last) = messages.last() else {
+        return 0;
+    };
+    let role = dict_get(last, "role")
+        .map(|v| v.display())
+        .unwrap_or_default();
+    if role != "assistant" {
+        return 0;
+    }
+    let (provider, model) = with_session(session_id, "pair_orphaned_tool_use", |session| {
+        Ok((
+            session.last_provider.clone().unwrap_or_default(),
+            session.last_model.clone().unwrap_or_default(),
+        ))
+    })
+    .unwrap_or_default();
+    let tool_format = crate::agent_sessions::tool_format(session_id).unwrap_or_default();
+    let already_paired = paired_tool_result_ids(&messages);
+    let synthetic = synthesize_orphan_tool_results(
+        last,
+        &provider,
+        &model,
+        &tool_format,
+        feedback,
+        &already_paired,
+    );
+    let mut repaired = 0;
+    for message in synthetic {
+        if crate::agent_sessions::inject_message(session_id, message).is_ok() {
+            repaired += 1;
+        }
+    }
+    repaired
+}
+
 /// Recover the plan artifact from a dispatched emit_plan/update_plan result.
 ///
 /// The local short-circuit handler (`handle_tool_locally`) returns the
@@ -1277,6 +1465,26 @@ fn host_agent_session_record_tool_results_builtin(
         Ok(())
     });
     Ok(VmValue::Nil)
+}
+
+/// Synthesize a matching tool-result for each orphaned `tool_use`/`tool_call`
+/// block on the trailing assistant turn, carrying `feedback` as the observation,
+/// so a subsequent user-feedback inject never leaves the block unpaired. Returns
+/// the number of blocks repaired (`0` = no-op: not an assistant turn, no
+/// structured tool calls, or already paired). See `pair_orphaned_tool_use`.
+#[harn_builtin(
+    sig = "__host_agent_session_pair_orphaned_tool_use(session_id: string, feedback: string) -> int",
+    category = "agent.host",
+    runtime_only = true
+)]
+fn host_agent_session_pair_orphaned_tool_use_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let session_id = args.first().map(|v| v.display()).unwrap_or_default();
+    let feedback = args.get(1).map(|v| v.display()).unwrap_or_default();
+    let repaired = pair_orphaned_tool_use(&session_id, &feedback);
+    Ok(VmValue::Int(repaired as i64))
 }
 
 /// Accumulate token + cost usage from an llm_call result, return totals.
@@ -3447,6 +3655,7 @@ const HOST_SESSION_BUILTINS: &[&VmBuiltinDef] = &[
     &HOST_AGENT_SESSION_RECORD_ASSISTANT_BUILTIN_DEF,
     &HOST_AGENT_SESSION_POP_LAST_ASSISTANT_BUILTIN_DEF,
     &HOST_AGENT_SESSION_RECORD_TOOL_RESULTS_BUILTIN_DEF,
+    &HOST_AGENT_SESSION_PAIR_ORPHANED_TOOL_USE_BUILTIN_DEF,
     &HOST_AGENT_SESSION_RECORD_USAGE_BUILTIN_DEF,
     &HOST_AGENT_SESSION_DRAIN_FEEDBACK_BUILTIN_DEF,
     &HOST_AGENT_SESSION_TOTALS_BUILTIN_DEF,
