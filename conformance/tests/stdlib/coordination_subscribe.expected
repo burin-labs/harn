@@ -1,0 +1,7 @@
+task
+task-1
+session:sess-1:coord.task.task-1.handoff
+channel.emit
+harn.coordination.message.v1
+decision
+proceed

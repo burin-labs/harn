@@ -1,0 +1,19 @@
+import { coord_post, coord_subscribe } from "std/coordination"
+
+pipeline default() {
+  let stream = coord_subscribe("task", "handoff", {task_id: "task-1", session_id: "sess-1"})
+  let receipt = coord_post(
+    "task",
+    "handoff",
+    {kind: "decision", subject: "proceed", body: "Proceed with non-overlapping work."},
+    {id: "coord-task-1", task_id: "task-1", session_id: "sess-1"},
+  )
+  let entry = stream.next().value
+  __io_println(receipt.scope)
+  __io_println(receipt.scope_id)
+  __io_println(receipt.channel.name_resolved)
+  __io_println(entry.kind)
+  __io_println(entry.payload.schema)
+  __io_println(entry.payload.kind)
+  __io_println(entry.payload.subject)
+}

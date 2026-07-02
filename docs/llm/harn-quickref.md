@@ -2283,6 +2283,42 @@ Each stored event includes `id`, fully resolved `name`, `payload`,
 original `event_id`. Use `channel_events(name, options?)` for tests and local
 inspection.
 
+Use `channel_subscribe(name, options?)` for live readers that need the same
+scope resolution as `emit_channel(...)`. This matters for session channels:
+`channel_subscribe("worker.ready", {scope: "session", session_id: "sess-1"})`
+observes the in-process session channel log, while raw `event_log.subscribe(...)`
+only sees the active EventLog backend.
+
+### Coordination ledger (`std/coordination`)
+
+Use `std/coordination` when agents need a durable, replayable coordination
+room instead of a host-local mailbox or assistant-visible prose protocol. The
+module wraps `emit_channel(...)`, `channel_events(...)`, `event_log.subscribe`,
+`channel_subscribe(...)`, and `std/memory` with a stable
+`harn.coordination.message.v1` envelope.
+
+```harn
+import { coord_post, coord_read, coord_subscribe, coord_remember } from "std/coordination"
+
+let receipt = coord_post(
+  "session",
+  "release",
+  {kind: "claim", subject: "release ownership", body: "Codex-2 owns v0.8.167"},
+  {id: "release-claim", session_id: "agent-session-1"},
+)
+let messages = coord_read("session", "release", {session_id: "agent-session-1"})
+let stream = coord_subscribe("session", "release", {session_id: "agent-session-1"})
+let memory_receipt = coord_remember(receipt, {namespace: "coordination/release"})
+```
+
+Scopes are `session`, `pipeline`, `tenant`, `workspace`, and `task`.
+`workspace` stores under the active tenant namespace and includes
+`workspace_id` in the channel name. `task` stores on the current session channel
+and includes `task_id` in the channel name. Message kinds are `status`, `claim`,
+`handoff`, `blocker`, `decision`, `request`, and `fact`. `coord_post` only
+writes the ledger; `coord_remember` is explicit opt-in when a coordination
+message should become recallable memory.
+
 Subscribe to channel emits with a `channel.emit` trigger (provider
 `channel`). `match.events` accepts `"channel:<name>"` selectors:
 

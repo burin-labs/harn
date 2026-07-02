@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, OnceLock};
 
+use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use time::format_description::well_known::Rfc3339;
@@ -13,7 +15,7 @@ use crate::llm::vm_value_to_json;
 use crate::runtime_limits::RuntimeLimits;
 use crate::triggers::event::{ChannelEventPayload, KnownProviderPayload};
 use crate::triggers::{ProviderId, ProviderPayload, SignatureStatus, TenantId, TriggerEvent};
-use crate::value::{VmError, VmValue};
+use crate::value::{VmError, VmStream, VmValue};
 
 const CHANNEL_QUEUE_DEPTH: usize = RuntimeLimits::DEFAULT.default_event_log_queue_depth;
 const CHANNEL_EVENT_KIND: &str = "channel.emit";
@@ -484,6 +486,39 @@ pub(crate) async fn channel_events_from_vm(
     Ok(crate::stdlib::json_to_vm_value(&serde_json::Value::Array(
         values,
     )))
+}
+
+pub(crate) async fn channel_subscribe_from_vm(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let name = required_string(args.first(), "channel_subscribe", "name")?;
+    let options = parse_options(args.get(1), "channel_subscribe")?;
+    let context = ChannelContext::current(ctx);
+    let resolved = resolve_channel(&name, &options, &context)?;
+    let topic = resolved.topic.clone();
+    let mut events = log_for_scope(resolved.scope)
+        .subscribe(&topic, options.from_cursor)
+        .await
+        .map_err(channel_log_error)?;
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<VmValue, VmError>>(1);
+    tokio::task::spawn_local(async move {
+        while let Some(next) = events.next().await {
+            let value = match next {
+                Ok((event_id, event)) => event_value(&topic, event_id, event)
+                    .map(|value| crate::stdlib::json_to_vm_value(&value)),
+                Err(error) => Err(channel_log_error(error)),
+            };
+            if tx.send(value).await.is_err() {
+                return;
+            }
+        }
+    });
+    Ok(VmValue::stream(VmStream {
+        done: Arc::new(AtomicBool::new(false)),
+        receiver: Arc::new(tokio::sync::Mutex::new(rx)),
+        cancel: None,
+    }))
 }
 
 impl ChannelContext {

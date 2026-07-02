@@ -1,0 +1,42 @@
+import { coord_post, coord_read } from "std/coordination"
+
+pipeline default() {
+  mock_time(2000)
+  let receipt = coord_post(
+    "session",
+    "release",
+    {
+      kind: "claim",
+      subject: "release ownership",
+      body: "Codex-2 owns the Harn release lane.",
+      data: {repo: "harn"},
+      from: {agent: "codex-2"},
+      refs: [{kind: "pr", ref: "harn#3792"}],
+    },
+    {id: "coord-release-1", session_id: "coord-session"},
+  )
+  let messages = coord_read("session", "release", {session_id: "coord-session"})
+  __io_println(receipt.schema)
+  __io_println(receipt.id)
+  __io_println(receipt.kind)
+  __io_println(receipt.scope)
+  __io_println(receipt.scope_id)
+  __io_println(receipt.channel.name_resolved)
+  __io_println(receipt.duplicate)
+  __io_println(len(messages))
+  __io_println(messages[0].schema)
+  __io_println(messages[0].kind)
+  __io_println(messages[0].from.agent)
+  __io_println(messages[0].data.repo)
+  __io_println(messages[0].refs[0].ref)
+  let duplicate = coord_post(
+    "session",
+    "release",
+    {kind: "claim", subject: "ignored duplicate"},
+    {id: "coord-release-1", session_id: "coord-session"},
+  )
+  __io_println(duplicate.event_id == receipt.event_id)
+  __io_println(duplicate.duplicate)
+  __io_println(coord_read("session", "release", {session_id: "coord-session"})[0].subject)
+  unmock_time()
+}

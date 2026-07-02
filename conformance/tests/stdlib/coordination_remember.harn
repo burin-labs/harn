@@ -1,0 +1,17 @@
+import { coord_post, coord_remember } from "std/coordination"
+import { memory_recall } from "std/memory"
+
+pipeline default() {
+  let receipt = coord_post(
+    "tenant",
+    "facts",
+    {kind: "fact", subject: "release published", body: "Harn release assets are published."},
+    {id: "coord-fact-1"},
+  )
+  let remembered = coord_remember(receipt, {namespace: "coordination-test", tags: ["coordination", "release"]})
+  let hits = memory_recall("coordination-test", "release assets", 3)
+  __io_println(remembered.namespace)
+  __io_println(remembered.key)
+  __io_println(len(hits) > 0)
+  __io_println(hits[0].value.subject)
+}

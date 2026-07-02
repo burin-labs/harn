@@ -1,0 +1,15 @@
+pipeline default() {
+  let stream = channel_subscribe("agent.done", {scope: "session", session_id: "sess-sub"})
+  let receipt = emit_channel(
+    "agent.done",
+    {n: 1},
+    {scope: "session", session_id: "sess-sub", id: "channel-subscribe-1"},
+  )
+  let entry = stream.next().value
+  __io_println(receipt.name_resolved)
+  __io_println(entry.kind)
+  __io_println(entry.name_resolved)
+  __io_println(entry.payload.n)
+  __io_println(entry.session_id)
+  __io_println(entry.topic)
+}
