@@ -1,0 +1,258 @@
+import { call } from "../src/lib.harn"
+
+fn recorded_header(headers, name) {
+  let wanted = lowercase(name)
+  for entry in headers ?? {} {
+    if lowercase(entry.key) == wanted {
+      return entry.value
+    }
+  }
+  return nil
+}
+
+pipeline test(task) {
+  egress_policy({allow: ["api.linear.app"], default: "deny"})
+  http_mock_clear()
+  http_mock(
+    "POST",
+    "https://api.linear.app/graphql",
+    {
+      responses: [
+        {
+          status: 200,
+          headers: {
+            "x-complexity": "12",
+            "x-ratelimit-requests-limit": "1500",
+            "x-ratelimit-requests-remaining": "1499",
+          },
+          body: "{\"data\":{\"viewer\":{\"id\":\"usr_1\"}}}",
+        },
+        {
+          status: 200,
+          body: "{\"errors\":[{\"message\":\"Invalid token\",\"path\":[\"viewer\"],\"extensions\":{\"code\":\"AUTHENTICATION_ERROR\"}}]}",
+        },
+        {
+          status: 200,
+          headers: {"x-complexity": "48", "x-ratelimit-requests-remaining": "49"},
+          body: "{\"data\":{\"issues\":{\"nodes\":[{\"id\":\"iss_1\",\"identifier\":\"ENG-1\",\"title\":\"Connector issue\"}],\"pageInfo\":{\"hasNextPage\":true,\"endCursor\":\"cursor-1\"}}}}",
+        },
+        {
+          status: 200,
+          body: "{\"data\":{\"issueUpdate\":{\"success\":true,\"issue\":{\"id\":\"iss_1\",\"identifier\":\"ENG-1\",\"title\":\"Updated\"}}}}",
+        },
+        {
+          status: 200,
+          body: "{\"data\":{\"commentCreate\":{\"success\":true,\"comment\":{\"id\":\"com_1\",\"body\":\"Looks good\",\"issue\":{\"id\":\"iss_1\",\"identifier\":\"ENG-1\"}}}}}",
+        },
+        {
+          status: 200,
+          body: "{\"errors\":[{\"message\":\"Unknown argument \\\"query\\\" on field \\\"searchIssues\\\"\",\"extensions\":{\"code\":\"GRAPHQL_VALIDATION_FAILED\"}}]}",
+        },
+        {
+          status: 200,
+          body: "{\"data\":{\"searchIssues\":{\"nodes\":[{\"id\":\"iss_2\",\"identifier\":\"ENG-2\",\"title\":\"Search hit\"}],\"pageInfo\":{\"hasNextPage\":false,\"endCursor\":null}}}}",
+        },
+        {
+          status: 200,
+          body: "{\"data\":{\"viewer\":{\"id\":\"usr_partial\"}},\"errors\":[{\"message\":\"field failed\",\"path\":[\"viewer\",\"name\"],\"extensions\":{\"code\":\"INTERNAL_ERROR\"}}]}",
+        },
+        {
+          status: 400,
+          headers: {"x-ratelimit-requests-reset": "1776859300"},
+          body: "{\"errors\":[{\"message\":\"rate limit exceeded\",\"extensions\":{\"code\":\"RATELIMITED\"}}]}",
+        },
+        {
+          status: 200,
+          headers: {"x-complexity": "not-a-number"},
+          body: "{\"data\":{\"viewer\":{\"id\":\"usr_3\"}}}",
+        },
+        {status: 200, body: "{\"data\":{\"viewer\":{\"id\":\"usr_api_token\"}}}"},
+        {status: 200, body: "{\"data\":{\"viewer\":{\"id\":\"usr_slash_token\"}}}"},
+      ],
+    },
+  )
+  let ok = call(
+    "graphql",
+    {
+      api_base_url: "https://api.linear.app/graphql",
+      api_key: "lin_api_key",
+      query: "query Viewer { viewer { id } }",
+    },
+  )
+  assert_eq(ok.data.viewer.id, "usr_1")
+  assert_eq(ok.meta.observed_complexity, 12)
+  assert_eq(ok.meta.rate_limit.requests_limit, 1500)
+  let calls = http_mock_calls()
+  let first_auth = recorded_header(calls[0].headers, "authorization")
+  assert(first_auth == "lin_api_key" || first_auth == "[redacted]")
+  let sent = json_parse(calls[0].body)
+  assert_eq(sent["query"], "query Viewer { viewer { id } }")
+  let failed = try {
+    call(
+      "graphql",
+      {
+        api_base_url: "https://api.linear.app/graphql",
+        access_token: "oauth-token",
+        query: "query Viewer { viewer { id } }",
+      },
+    )
+  }
+  assert(is_err(failed))
+  let error = unwrap_err(failed)
+  assert_eq(error.code, "graphql_error")
+  assert_eq(error.errors[0].message, "Invalid token")
+  assert_eq(error.errors[0].extensions.code, "AUTHENTICATION_ERROR")
+  let issues = call(
+    "list_issues",
+    {
+      api_base_url: "https://api.linear.app/graphql",
+      access_token: "oauth-token",
+      filter: {priority: {lte: 2}},
+      first: 10,
+      after: "cursor-0",
+    },
+  )
+  assert_eq(issues.nodes[0].identifier, "ENG-1")
+  assert_eq(issues.pageInfo.hasNextPage, true)
+  assert_eq(issues.page.has_next_page, true)
+  assert_eq(issues.meta.observed_complexity, 48)
+  assert_eq(issues.meta.rate_limit.requests_remaining, 49)
+  let updated = call(
+    "update_issue",
+    {
+      api_base_url: "https://api.linear.app/graphql",
+      access_token: "oauth-token",
+      id: "iss_1",
+      changes: {title: "Updated"},
+    },
+  )
+  assert_eq(updated.success, true)
+  assert_eq(updated.issue.title, "Updated")
+  let comment = call(
+    "create_comment",
+    {
+      api_base_url: "https://api.linear.app/graphql",
+      access_token: "oauth-token",
+      issue_id: "iss_1",
+      body: "Looks good",
+    },
+  )
+  assert_eq(comment.comment.id, "com_1")
+  let search = call(
+    "search",
+    {
+      api_base_url: "https://api.linear.app/graphql",
+      access_token: "oauth-token",
+      query: "connector",
+      first: 5,
+    },
+  )
+  assert_eq(search.nodes[0].identifier, "ENG-2")
+  let partial = try {
+    call(
+      "graphql",
+      {
+        api_base_url: "https://api.linear.app/graphql",
+        access_token: "oauth-token",
+        query: "query Viewer { viewer { id name } }",
+      },
+    )
+  }
+  assert(is_err(partial))
+  let partial_error = unwrap_err(partial)
+  assert_eq(partial_error.code, "graphql_error")
+  assert_eq(partial_error.data.viewer.id, "usr_partial")
+  let limited = try {
+    call(
+      "graphql",
+      {
+        api_base_url: "https://api.linear.app/graphql",
+        access_token: "oauth-token",
+        query: "query Viewer { viewer { id } }",
+      },
+    )
+  }
+  assert(is_err(limited))
+  let limited_error = unwrap_err(limited)
+  assert_eq(limited_error.code, "rate_limited")
+  assert_eq(limited_error.status, 400)
+  assert_eq(limited_error.meta.rate_limit.requests_reset, 1776859300)
+  let all_calls = http_mock_calls()
+  let oauth_auth = recorded_header(all_calls[1].headers, "authorization")
+  assert(oauth_auth == "Bearer oauth-token" || oauth_auth == "[redacted]")
+  let list_request = json_parse(all_calls[2].body)
+  let update_request = json_parse(all_calls[3].body)
+  let comment_request = json_parse(all_calls[4].body)
+  let search_request = json_parse(all_calls[5].body)
+  let search_fallback_request = json_parse(all_calls[6].body)
+  assert(contains(list_request.query, "issues("))
+  assert_eq(list_request.operationName, "HarnLinearListIssues")
+  assert(contains(update_request.query, "issueUpdate"))
+  assert(contains(comment_request.query, "commentCreate"))
+  assert(contains(search_request.query, "searchIssues"))
+  assert_eq(search_fallback_request.variables.term, "connector")
+  let malformed_header = call(
+    "graphql",
+    {
+      api_base_url: "https://api.linear.app/graphql",
+      api_key: "lin_api_key",
+      query: "query Viewer { viewer { id } }",
+    },
+  )
+  assert_eq(malformed_header.data.viewer.id, "usr_3")
+  assert_eq(malformed_header.meta.observed_complexity, 0)
+  let api_token = call(
+    "graphql",
+    {
+      api_base_url: "https://api.linear.app/graphql",
+      api_token: "lin_api_token",
+      query: "query Viewer { viewer { id } }",
+    },
+  )
+  assert_eq(api_token.data.viewer.id, "usr_api_token")
+  let api_token_calls = http_mock_calls()
+  let api_token_auth = recorded_header(api_token_calls[len(api_token_calls) - 1].headers, "authorization")
+  assert(api_token_auth == "lin_api_token" || api_token_auth == "[redacted]")
+  let slash_token = call(
+    "graphql",
+    {
+      api_base_url: "https://api.linear.app/graphql",
+      access_token: "oauth/with/slash",
+      query: "query Viewer { viewer { id } }",
+    },
+  )
+  assert_eq(slash_token.data.viewer.id, "usr_slash_token")
+  let slash_token_calls = http_mock_calls()
+  let slash_token_auth = recorded_header(slash_token_calls[len(slash_token_calls) - 1].headers, "authorization")
+  assert(slash_token_auth == "Bearer oauth/with/slash" || slash_token_auth == "[redacted]")
+  // F8: api_base_url is validated before any HTTP attempt. Non-URL inputs
+  // are rejected with `invalid_api_base_url`; non-allowlisted hosts are
+  // rejected with `disallowed_api_base_url` so OAuth tokens / API keys
+  // cannot reach attacker-controlled origins.
+  let invalid_url = try {
+    call(
+      "graphql",
+      {api_base_url: "not-a-url", api_key: "lin_api_key", query: "query Viewer { viewer { id } }"},
+    )
+  }
+  assert(is_err(invalid_url))
+  assert_eq(unwrap_err(invalid_url).code, "invalid_api_base_url")
+  let disallowed_host = try {
+    call(
+      "graphql",
+      {
+        api_base_url: "https://evil.example/graphql",
+        api_key: "lin_api_key",
+        query: "query Viewer { viewer { id } }",
+      },
+    )
+  }
+  assert(is_err(disallowed_host))
+  assert_eq(unwrap_err(disallowed_host).code, "disallowed_api_base_url")
+  // F9: secret refs that aren't in the linear/ namespace are rejected.
+  let bad_secret = try {
+    call("graphql", {api_key_secret: "evil/api-token", query: "query Viewer { viewer { id } }"})
+  }
+  assert(is_err(bad_secret))
+  assert_eq(unwrap_err(bad_secret).code, "invalid_secret_ref")
+}

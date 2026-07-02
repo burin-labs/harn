@@ -1,0 +1,1 @@
+{"action":"update","type":"Issue","organizationId":"org_123","webhookTimestamp":1776859200000,"webhookId":"wh_1","actor":{"id":"usr_1","name":"Ada"},"data":{"id":"ISS-1","title":"Fix connector","priority":1},"updatedFrom":{"title":"Old"}}

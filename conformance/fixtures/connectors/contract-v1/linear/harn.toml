@@ -1,45 +1,154 @@
 [package]
 name = "harn-linear-connector"
-version = "0.1.0"
+version = "0.0.0"
+description = "Pure-Harn Linear connector: webhook verification, replay-window enforcement, GraphQL dispatch."
+license = "MIT OR Apache-2.0"
 repository = "https://github.com/burin-labs/harn-linear-connector"
+
+[exports]
+default = "src/lib.harn"
 
 [[providers]]
 id = "linear"
-connector = { harn = "./lib.harn" }
+connector = { harn = "src/lib.harn" }
 capabilities = ["webhook", "oauth", "rate_limit", "pagination", "graphql"]
 
 [providers.setup]
 auth_type = "oauth2"
 flow = "browser"
 required_scopes = ["read", "write"]
-setup_command = ["harn", "connect", "linear", "--client-id", "<client-id>", "--client-secret", "<client-secret>"]
+required_secrets = ["linear/api-token", "linear/webhook-secret"]
+setup_command = ["harn", "connect", "linear"]
 validation_command = ["harn", "connect", "status", "--connector", "linear", "--json"]
 
 [[providers.setup.health_checks]]
-id = "credentials"
-kind = "command"
-command = ["harn", "connect", "status", "--connector", "linear", "--json"]
+id = "api-token"
+kind = "secret"
+secret = "linear/api-token"
+
+[[providers.setup.health_checks]]
+id = "webhook-secret"
+kind = "secret"
+secret = "linear/webhook-secret"
 
 [providers.setup.recovery]
-missing_auth = "Run `harn connect linear` with the Linear OAuth client credentials."
-expired_credentials = "Refresh the Linear OAuth token or reconnect the workspace."
-revoked_credentials = "Remove stale Linear credentials with `harn connect --revoke linear`, then reconnect."
-missing_scopes = "Reconnect Linear with the scopes listed in required_scopes."
-inaccessible_resource = "Confirm the Linear token can access the target workspace, team, or project."
-transient_provider_outage = "Retry after Linear or the local credential backend is reachable."
+missing_auth = "Store linear/api-token and linear/webhook-secret before enabling Linear bindings."
+expired_credentials = "Refresh the OAuth token or rotate the API key, then rerun Linear validation."
+revoked_credentials = "Replace linear/api-token with an active Linear OAuth token or API key."
+missing_scopes = "Grant read or write scopes required by the configured Linear GraphQL operations."
+inaccessible_resource = "Confirm the token can access the target Linear workspace and resources."
+transient_provider_outage = "Retry after Linear API and webhook delivery endpoints are healthy."
 
 [connector_contract]
 version = 1
 
+# Security: after the 2026-05-23 F10 fix the Linear connector ignores any
+# caller-supplied `raw.received_at` and verifies request freshness against
+# the trusted clock with a 60-second replay window (capped at 600s, F4).
+# The static signed-fixture bodies below therefore now demonstrate the
+# replay-window rejection — happy-path normalize_inbound behaviour is
+# exercised by `tests/normalize_smoke.harn`, which rewrites each fixture's
+# webhookTimestamp to a fresh value at run time and signs over the
+# refreshed bytes so the connector accepts them within the window.
+
 [[connector_contract.fixtures]]
 provider = "linear"
-name = "issue update webhook"
+name = "issue update rejects stale signature"
 kind = "webhook"
-headers = { "Linear-Delivery" = "delivery-linear-1", "content-type" = "application/json" }
-body_json = { id = "lin-evt-1", type = "Issue", action = "update", organizationId = "org-1", webhookTimestamp = 1715000000000, webhookId = "wh-1", data = { id = "ISS-1", title = "Contract fixture" }, updatedFrom = { title = "Old title" } }
-expect_type = "event"
-expect_kind = "issue.update"
-expect_dedupe_key = "delivery-linear-1"
-expect_signature_state = "verified"
-expect_payload_contains = { provider = "linear", event = "issue", action = "update", delivery_id = "delivery-linear-1", organization_id = "org-1", webhook_id = "wh-1", issue = { id = "ISS-1", title = "Contract fixture" } }
-expect_event_count = 1
+headers = { "content-type" = "application/json", "linear-signature" = "93298f60718be962cefea14569c23019c3b76e541caf93979f6d5b9d0c67a83e", "linear-delivery" = "delivery-contract-issue" }
+body = "{\"action\":\"update\",\"type\":\"Issue\",\"organizationId\":\"org_123\",\"webhookTimestamp\":1776859200000,\"webhookId\":\"wh_contract_issue\",\"actor\":{\"id\":\"usr_1\",\"name\":\"Ada\"},\"data\":{\"id\":\"ISS-1\",\"title\":\"Contract fixture\"},\"updatedFrom\":{\"title\":\"Old title\"}}"
+expect_type = "reject"
+expect_response_status = 401
+expect_event_count = 0
+
+[[connector_contract.fixtures]]
+provider = "linear"
+name = "comment create rejects stale signature"
+kind = "webhook"
+headers = { "content-type" = "application/json", "linear-signature" = "94e829e779afd1958e8acc82692b978336aa85c6d8578711106f4d508bf40183", "linear-delivery" = "delivery-contract-comment" }
+body = "{\"action\":\"create\",\"type\":\"Comment\",\"organizationId\":\"org_123\",\"webhookTimestamp\":1776859200000,\"webhookId\":\"wh_contract_comment\",\"actor\":{\"id\":\"usr_1\",\"name\":\"Ada\"},\"data\":{\"id\":\"COM-1\",\"body\":\"Looks good\",\"issue\":{\"id\":\"ISS-1\"}}}"
+expect_type = "reject"
+expect_response_status = 401
+expect_event_count = 0
+
+[[connector_contract.fixtures]]
+provider = "linear"
+name = "issue label rejects stale signature"
+kind = "webhook"
+headers = { "content-type" = "application/json", "linear-signature" = "2769efde0253df7942be7ca5099b3c78226586365570aaecd2b6a8e6356946b6", "linear-delivery" = "delivery-contract-label" }
+body = "{\"action\":\"update\",\"type\":\"IssueLabel\",\"organizationId\":\"org_123\",\"webhookTimestamp\":1776859200000,\"webhookId\":\"wh_label\",\"actor\":{\"id\":\"usr_1\",\"name\":\"Ada\"},\"data\":{\"id\":\"LBL-1\",\"name\":\"bug\"}}"
+expect_type = "reject"
+expect_response_status = 401
+expect_event_count = 0
+
+[[connector_contract.fixtures]]
+provider = "linear"
+name = "project rejects stale signature"
+kind = "webhook"
+headers = { "content-type" = "application/json", "linear-signature" = "6d46939428a0eb36e5239197f91c7ecb7c0f44c495bd638001a75d16bef07014", "linear-delivery" = "delivery-contract-project" }
+body = "{\"action\":\"update\",\"type\":\"Project\",\"organizationId\":\"org_123\",\"webhookTimestamp\":1776859200000,\"webhookId\":\"wh_project\",\"actor\":{\"id\":\"usr_1\",\"name\":\"Ada\"},\"data\":{\"id\":\"PRJ-1\",\"name\":\"Linear MVP\"}}"
+expect_type = "reject"
+expect_response_status = 401
+expect_event_count = 0
+
+[[connector_contract.fixtures]]
+provider = "linear"
+name = "cycle rejects stale signature"
+kind = "webhook"
+headers = { "content-type" = "application/json", "linear-signature" = "b86ef446dd2b685048c3699a522b56c39ca8aafc49c8204c155bc4e04b88f539", "linear-delivery" = "delivery-contract-cycle" }
+body = "{\"action\":\"update\",\"type\":\"Cycle\",\"organizationId\":\"org_123\",\"webhookTimestamp\":1776859200000,\"webhookId\":\"wh_cycle\",\"actor\":{\"id\":\"usr_1\",\"name\":\"Ada\"},\"data\":{\"id\":\"CYC-1\",\"name\":\"Cycle 1\"}}"
+expect_type = "reject"
+expect_response_status = 401
+expect_event_count = 0
+
+[[connector_contract.fixtures]]
+provider = "linear"
+name = "customer rejects stale signature"
+kind = "webhook"
+headers = { "content-type" = "application/json", "linear-signature" = "3ccebcafe21717a6c8ffedbe9e6b16220cede6bc2e4dba63691cc8da6596dead", "linear-delivery" = "delivery-contract-customer" }
+body = "{\"action\":\"update\",\"type\":\"Customer\",\"organizationId\":\"org_123\",\"webhookTimestamp\":1776859200000,\"webhookId\":\"wh_customer\",\"actor\":{\"id\":\"usr_1\",\"name\":\"Ada\"},\"data\":{\"id\":\"CUS-1\",\"name\":\"Acme\"}}"
+expect_type = "reject"
+expect_response_status = 401
+expect_event_count = 0
+
+[[connector_contract.fixtures]]
+provider = "linear"
+name = "customer request rejects stale signature"
+kind = "webhook"
+headers = { "content-type" = "application/json", "linear-signature" = "937a03553fda1363a9299ff60af9981e53d452caea3683a3afdde9ac8ef7e627", "linear-delivery" = "delivery-contract-customer-request" }
+body = "{\"action\":\"create\",\"type\":\"CustomerRequest\",\"organizationId\":\"org_123\",\"webhookTimestamp\":1776859200000,\"webhookId\":\"wh_customer_request\",\"actor\":{\"id\":\"usr_1\",\"name\":\"Ada\"},\"data\":{\"id\":\"REQ-1\",\"title\":\"Need this shipped\"}}"
+expect_type = "reject"
+expect_response_status = 401
+expect_event_count = 0
+
+[[connector_contract.fixtures]]
+provider = "linear"
+name = "harn-cloud managed ingress rejects stale signature"
+kind = "webhook"
+headers = { "content-type" = "application/json", "linear-signature" = "93298f60718be962cefea14569c23019c3b76e541caf93979f6d5b9d0c67a83e", "linear-delivery" = "delivery-cloud-issue" }
+metadata = { tenant_slug = "acme", trigger_id = "linear", binding_id = "linear", provider = "linear", package = { name = "harn-linear-connector", version = "git:main" }, signature_status = "verified", secret_ids = { signing_secret = "linear.webhook.secret" }, sandbox = { tenant_id = "tenant-acme", egress_allowlist = ["api.linear.app"] } }
+body = "{\"action\":\"update\",\"type\":\"Issue\",\"organizationId\":\"org_123\",\"webhookTimestamp\":1776859200000,\"webhookId\":\"wh_contract_issue\",\"actor\":{\"id\":\"usr_1\",\"name\":\"Ada\"},\"data\":{\"id\":\"ISS-1\",\"title\":\"Contract fixture\"},\"updatedFrom\":{\"title\":\"Old title\"}}"
+expect_type = "reject"
+expect_response_status = 401
+expect_event_count = 0
+
+[[connector_contract.fixtures]]
+provider = "linear"
+name = "unsupported action"
+kind = "webhook"
+headers = { "content-type" = "application/json", "linear-signature" = "106ec93bca57d43fc381bacf93e4cd0a9e2aed183dab457d69d0d5669f60238f", "linear-delivery" = "delivery-contract-unsupported" }
+body = "{\"action\":\"archive\",\"type\":\"Issue\",\"organizationId\":\"org_123\",\"webhookTimestamp\":1776859200000,\"webhookId\":\"wh_contract_unsupported\",\"actor\":{\"id\":\"usr_1\",\"name\":\"Ada\"},\"data\":{\"id\":\"ISS-2\",\"title\":\"Unsupported\"}}"
+expect_type = "reject"
+expect_event_count = 0
+
+[[connector_contract.fixtures]]
+provider = "linear"
+name = "invalid signature"
+kind = "webhook"
+headers = { "content-type" = "application/json", "linear-signature" = "0000000000000000000000000000000000000000000000000000000000000000", "linear-delivery" = "delivery-contract-invalid" }
+body = "{\"action\":\"update\",\"type\":\"Issue\",\"organizationId\":\"org_123\",\"webhookTimestamp\":1776859200000,\"webhookId\":\"wh_contract_issue\",\"actor\":{\"id\":\"usr_1\",\"name\":\"Ada\"},\"data\":{\"id\":\"ISS-1\",\"title\":\"Contract fixture\"},\"updatedFrom\":{\"title\":\"Old title\"}}"
+expect_type = "reject"
+expect_event_count = 0
+
+# Harn-side package dependencies live here.
+[dependencies]

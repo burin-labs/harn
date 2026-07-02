@@ -1,0 +1,813 @@
+import {
+  connector_http_header,
+  connector_http_json,
+  verify_hmac_signature,
+} from "std/connectors/shared"
+import {
+  graphql_auth_headers,
+  graphql_extract,
+  graphql_normalize_response,
+  graphql_operation,
+  graphql_page_info,
+  graphql_request_body,
+} from "std/graphql"
+import { merge } from "std/json"
+
+var connector_state = {ctx: nil, bindings: []}
+
+fn __default_signing_secret_id() {
+  return "linear/webhook-secret"
+}
+
+fn __default_api_base_url() {
+  return "https://api.linear.app/graphql"
+}
+
+/**
+ * Hosts permitted for outbound Linear GraphQL calls. Caller-supplied
+ * `api_base_url` overrides are validated against this allowlist (F8) so
+ * OAuth tokens / API keys can never be shipped to attacker-controlled
+ * hosts.
+ */
+fn __allowed_api_hosts() {
+  return ["api.linear.app"]
+}
+
+fn __extract_host(url) {
+  let trimmed = trim(to_string(url ?? ""))
+  if trimmed == "" {
+    return nil
+  }
+  let lower = lowercase(trimmed)
+  var rest = nil
+  if lower.starts_with("https://") {
+    rest = trimmed[8:len(trimmed)]
+  } else if lower.starts_with("http://") {
+    rest = trimmed[7:len(trimmed)]
+  } else {
+    return nil
+  }
+  let at_idx = rest.index_of("@")
+  if at_idx != nil && at_idx >= 0 {
+    rest = rest[at_idx + 1:len(rest)]
+  }
+  var end = len(rest)
+  for ch in ["/", "?", "#"] {
+    let idx = rest.index_of(ch)
+    if idx != nil && idx >= 0 && idx < end {
+      end = idx
+    }
+  }
+  var host = rest[0:end]
+  let colon_idx = host.index_of(":")
+  if colon_idx != nil && colon_idx >= 0 {
+    host = host[0:colon_idx]
+  }
+  return lowercase(host)
+}
+
+fn __validate_api_base_url(url) {
+  let default_url = __default_api_base_url()
+  if url == nil {
+    return default_url
+  }
+  let text = trim(to_string(url))
+  if text == "" || text == default_url {
+    return default_url
+  }
+  let host = __extract_host(text)
+  if host == nil {
+    throw {code: "invalid_api_base_url", message: "linear api_base_url must be an absolute http(s) URL"}
+  }
+  if !contains(__allowed_api_hosts(), host) {
+    throw {
+      code: "disallowed_api_base_url",
+      message: "linear api_base_url host `" + host + "` is not in the allowlist",
+    }
+  }
+  return text
+}
+
+fn __complexity_warning_threshold() {
+  return 5000
+}
+
+fn __list_issues_query() {
+  return "query HarnLinearListIssues($filter: IssueFilter, $first: Int, $after: String, $includeArchived: Boolean) { issues(filter: $filter, first: $first, after: $after, includeArchived: $includeArchived) { nodes { id identifier title priority estimate dueDate url createdAt updatedAt state { id name type } team { id key name } assignee { id name email } project { id name } cycle { id name } labels { nodes { id name } } } pageInfo { hasNextPage endCursor } } }"
+}
+
+fn __update_issue_query() {
+  return "mutation HarnLinearUpdateIssue($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success issue { id identifier title priority estimate dueDate url updatedAt state { id name type } assignee { id name email } project { id name } cycle { id name } labels { nodes { id name } } } } }"
+}
+
+fn __create_comment_query() {
+  return "mutation HarnLinearCreateComment($input: CommentCreateInput!) { commentCreate(input: $input) { success comment { id body url createdAt user { id name } issue { id identifier title } } } }"
+}
+
+fn __search_issues_query() {
+  return "query HarnLinearSearchIssues($query: String!, $first: Int) { searchIssues(query: $query, first: $first) { nodes { id identifier title url priority state { id name type } team { id key name } } pageInfo { hasNextPage endCursor } } }"
+}
+
+fn __search_issues_term_query() {
+  return "query HarnLinearSearchIssues($term: String!, $first: Int) { searchIssues(term: $term, first: $first) { nodes { id identifier title url priority state { id name type } team { id key name } } pageInfo { hasNextPage endCursor } } }"
+}
+
+fn __header(headers, name) {
+  return connector_http_header(headers ?? {}, name)
+}
+
+fn __binding_for_raw(raw) {
+  let binding_id = raw?.binding_id ?? raw?.metadata?.binding_id
+  if binding_id != nil {
+    for binding in connector_state.bindings {
+      if binding.id == binding_id || binding.binding_id == binding_id {
+        return binding
+      }
+    }
+  }
+  if len(connector_state.bindings) == 1 {
+    return connector_state.bindings[0]
+  }
+  return {config: {}}
+}
+
+fn __binding_config(raw) {
+  return raw?.config ?? raw?.metadata?.config ?? __binding_for_raw(raw)?.config ?? {}
+}
+
+/**
+ * F9: only allow secret references that live under the `linear/` namespace.
+ * A raw value like `othertenant/api-token` could otherwise cross-tenant
+ * leak if the secret backend doesn't enforce isolation.
+ */
+fn __is_allowed_secret_id(value) {
+  let raw = trim(to_string(value ?? ""))
+  if raw == "" {
+    return false
+  }
+  return raw.starts_with("linear/")
+}
+
+fn __secret_ref(value, fallback_id) {
+  let raw = trim(to_string(value ?? ""))
+  if raw == "" {
+    return secret_get(fallback_id)
+  }
+  if !__is_allowed_secret_id(raw) {
+    throw {code: "invalid_secret_ref", message: "linear connector secret refs must start with `linear/`"}
+  }
+  return secret_get(raw)
+}
+
+fn __auth_token(literal, secret_ref, fallback_id) {
+  let raw = trim(to_string(literal ?? ""))
+  if raw != "" {
+    return raw
+  }
+  return __secret_ref(secret_ref, fallback_id)
+}
+
+fn __secret_id_candidate(value, fallback_name) {
+  let raw = trim(to_string(value ?? ""))
+  if raw == "" {
+    return nil
+  }
+  if contains(raw, "/") {
+    // F9: only honor caller-supplied secret IDs in our own namespace.
+    if !__is_allowed_secret_id(raw) {
+      throw {code: "invalid_secret_ref", message: "linear connector secret refs must start with `linear/`"}
+    }
+    return raw
+  }
+  return "linear/" + fallback_name
+}
+
+fn __secret_get_optional(secret_id) {
+  if secret_id == nil {
+    return nil
+  }
+  let value = try {
+    secret_get(secret_id)
+  }
+  if is_ok(value) {
+    return unwrap(value)
+  }
+  return nil
+}
+
+fn __secret_ref_with_alias(value, fallback_name, fallback_id) {
+  let candidate = __secret_id_candidate(value, fallback_name)
+  if candidate != nil {
+    return __secret_get_optional(candidate)
+  }
+  return __secret_get_optional(fallback_id)
+}
+
+fn __metadata_secret_alias(raw, name) {
+  let alias = raw?.metadata?.secret_ids?[name] ?? raw?.metadata?.config?.secret_ids?[name]
+    ?? raw?.config?.secret_ids?[name]
+  return __secret_get_optional(__secret_id_candidate(alias, name))
+}
+
+fn __signing_secret(raw) {
+  let metadata_alias = __metadata_secret_alias(raw, "signing_secret")
+  if metadata_alias != nil {
+    return metadata_alias
+  }
+  let config = __binding_config(raw)
+  let literal = raw?.signing_secret ?? raw?.metadata?.signing_secret ?? config?.signing_secret
+  if literal != nil && trim(to_string(literal)) != "" {
+    return to_string(literal)
+  }
+  return __secret_ref_with_alias(
+    config?.secrets?.signing_secret ?? config?.secret_ids?.signing_secret,
+    "signing_secret",
+    __default_signing_secret_id(),
+  )
+}
+
+fn __unix_ms(value) {
+  if type_of(value) == "string" {
+    return to_int(value)
+  }
+  return to_int(value)
+}
+
+fn __reject(status, code, message) {
+  return {
+    type: "reject",
+    status: status,
+    headers: {"content-type": "application/json"},
+    body: json_stringify({error: code, message: message}),
+  }
+}
+
+fn __metrics_inc(name, amount = 1) {
+  let _ = try {
+    metrics_inc(name, amount)
+  }
+  return nil
+}
+
+fn __normalize_resource(raw_type) {
+  let value = lowercase(to_string(raw_type ?? ""))
+  if value == "issue" {
+    return "issue"
+  }
+  if value == "comment" || value == "issuecomment" || value == "issue_comment" {
+    return "comment"
+  }
+  if value == "issuelabel" || value == "issue_label" {
+    return "issue_label"
+  }
+  if value == "project" || value == "projectupdate" || value == "project_update" {
+    return "project"
+  }
+  if value == "cycle" {
+    return "cycle"
+  }
+  if value == "customer" {
+    return "customer"
+  }
+  if value == "customerrequest" || value == "customer_request" {
+    return "customer_request"
+  }
+  if value == "" {
+    return "other"
+  }
+  return value
+}
+
+fn __valid_action(action) {
+  return action == "create" || action == "update" || action == "remove"
+}
+
+fn __dedupe_key(raw, body) {
+  // F3: prefer the signed-body webhookId over the linear-delivery header so
+  // attackers cannot bypass dedupe by replaying captured (body, signature)
+  // pairs while rotating the header.
+  if body?.webhookId != nil {
+    return "linear:" + body.webhookId
+  }
+  let delivery = __header(raw.headers, "linear-delivery")
+  if delivery != nil && delivery != "" {
+    return "linear:" + delivery
+  }
+  return "linear:sha256:" + sha256(raw.body_text ?? json_stringify(body))
+}
+
+/**
+ * Cap on the replay-window override callers may configure. Bindings that
+ * try to widen the window beyond this value are rejected at activation;
+ * legacy callers that fall through to the default get LINEAR_REPLAY_WINDOW_DEFAULT_SECS.
+ */
+fn __replay_window_max_secs() {
+  return 600
+}
+
+fn __replay_window_default_secs() {
+  return 60
+}
+
+fn __verify(raw, body) {
+  if body?.webhookTimestamp == nil {
+    return __reject(400, "missing_webhook_timestamp", "Linear webhookTimestamp is required")
+  }
+  let timestamp_ms = __unix_ms(body.webhookTimestamp)
+  if timestamp_ms == nil {
+    return __reject(
+      400,
+      "invalid_webhook_timestamp",
+      "Linear webhookTimestamp must be a Unix millisecond timestamp",
+    )
+  }
+  // F1: refuse to HMAC-verify against a re-serialized body — Linear signs the
+  // raw bytes and JSON re-encoding (key ordering, whitespace, escaping) won't
+  // round-trip. If the host stripped raw.body_text, we cannot prove integrity.
+  let body_text = raw?.body_text
+  if body_text == nil || to_string(body_text) == "" {
+    return __reject(
+      400,
+      "missing_body_text",
+      "Linear connector requires raw.body_text to HMAC-verify against the bytes Linear signed",
+    )
+  }
+  // F10: trust the clock, not the envelope. raw.received_at is host-supplied
+  // and can be plumbed from an attacker-controllable field; deriving `now`
+  // from date_now() keeps the replay window meaningful for hostile callers.
+  let received_ms = to_int(date_now().timestamp * 1000)
+  let age_ms = if received_ms >= timestamp_ms {
+    received_ms - timestamp_ms
+  } else {
+    timestamp_ms - received_ms
+  }
+  let config = __binding_config(raw)
+  // F4: cap caller-supplied replay window at __replay_window_max_secs() — a
+  // 24h window defeats the freshness check. Default unchanged at 60s.
+  let raw_window = config?.replay_window_secs ?? config?.security?.replay_window_secs
+    ?? __replay_window_default_secs()
+  let raw_grace = config?.replay_grace_secs ?? config?.security?.replay_grace_secs ?? 0
+  let max = __replay_window_max_secs()
+  let replay_window_secs = if raw_window > max {
+    max
+  } else {
+    raw_window
+  }
+  let replay_grace_secs = if raw_grace > max {
+    max
+  } else {
+    raw_grace
+  }
+  if age_ms > (replay_window_secs + replay_grace_secs) * 1000 {
+    __metrics_inc("linear_webhook_replay_rejections", 1)
+    return __reject(401, "timestamp_out_of_window", "Linear webhookTimestamp is outside the replay window")
+  }
+  let signature = __header(raw.headers, "linear-signature")
+  if signature == nil || trim(signature) == "" {
+    return __reject(401, "missing_signature", "linear-signature header is required")
+  }
+  // F2: explicit missing_secret guard before hmac so we never compute
+  // hmac_sha256(nil, body). Mirrors Slack's `slack/signing_secret` check.
+  let secret = __signing_secret(raw)
+  if secret == nil || trim(to_string(secret)) == "" {
+    return __reject(
+      401,
+      "missing_secret",
+      "Linear signing secret is not configured; set linear/webhook-secret or binding.config.signing_secret",
+    )
+  }
+  if !verify_hmac_signature(body_text, signature, secret, "sha256") {
+    return __reject(401, "invalid_signature", "linear-signature did not match the raw request body")
+  }
+  return nil
+}
+
+fn __event(raw, body) {
+  let resource = __normalize_resource(body?.type ?? __header(raw.headers, "linear-event"))
+  let action = body?.action ?? "update"
+  if !__valid_action(action) {
+    return __reject(400, "unsupported_action", "Linear action '" + to_string(action) + "' is not supported")
+  }
+  let kind = "linear." + resource + "." + action
+  return {
+    type: "event",
+    event: {
+      kind: kind,
+      dedupe_key: __dedupe_key(raw, body),
+      occurred_at: raw?.occurred_at ?? raw?.received_at,
+      tenant_id: raw?.tenant_id,
+      headers: raw?.headers ?? {},
+      signature_status: {state: "verified"},
+      payload: body,
+    },
+  }
+}
+
+fn __auth_config(args) {
+  let config = args ?? {}
+  if config?.api_token != nil || config?.api_token_secret != nil {
+    return {token: __auth_token(config?.api_token, config?.api_token_secret, "linear/api-token"), oauth: false}
+  }
+  if config?.access_token != nil || config?.access_token_secret != nil {
+    return {
+      token: __auth_token(config?.access_token, config?.access_token_secret, "linear/access-token"),
+      oauth: true,
+    }
+  }
+  if config?.api_key != nil || config?.api_key_secret != nil {
+    return {token: __auth_token(config?.api_key, config?.api_key_secret, "linear/api-key"), oauth: false}
+  }
+  for binding in connector_state.bindings {
+    let binding_config = binding?.config ?? {}
+    let secrets = binding_config?.secrets ?? {}
+    if secrets?.api_token != nil || binding_config?.api_token != nil {
+      return {
+        token: __auth_token(binding_config?.api_token, secrets?.api_token, "linear/api-token"),
+        oauth: false,
+      }
+    }
+    if secrets?.access_token != nil || binding_config?.access_token != nil {
+      return {
+        token: __auth_token(binding_config?.access_token, secrets?.access_token, "linear/access-token"),
+        oauth: true,
+      }
+    }
+    if secrets?.api_key != nil || binding_config?.api_key != nil {
+      return {token: __auth_token(binding_config?.api_key, secrets?.api_key, "linear/api-key"), oauth: false}
+    }
+  }
+  throw {
+    message: "linear connector requires api_token, api_token_secret, access_token, access_token_secret, api_key, or api_key_secret",
+    code: "missing_auth",
+  }
+}
+
+fn __graphql_error_codes(errors) {
+  return (errors ?? []).map({ error -> to_string(error?.extensions?.code ?? "") })
+}
+
+fn __has_graphql_error_code(errors, wanted) {
+  for code in __graphql_error_codes(errors) {
+    if lowercase(code) == lowercase(wanted) {
+      return true
+    }
+  }
+  return false
+}
+
+fn __graphql_error_message(status, errors) {
+  if len(errors ?? []) == 0 {
+    return "linear GraphQL request failed with status " + to_string(status)
+  }
+  return "linear GraphQL request failed with status " + to_string(status) + ": "
+    + to_string(errors[0]?.message ?? "Linear GraphQL error")
+}
+
+fn __rate_limited(status, errors) {
+  return status == 429 || (status == 400 && __has_graphql_error_code(errors, "RATELIMITED"))
+}
+
+fn __int_header(headers, name) {
+  let value = connector_http_header(headers ?? {}, name)
+  if value == nil || trim(to_string(value)) == "" {
+    return nil
+  }
+  let parsed = try {
+    to_int(value)
+  }
+  if is_ok(parsed) {
+    return unwrap(parsed)
+  }
+  return nil
+}
+
+fn __complexity_estimate(query, variables) {
+  if query == nil || trim(query) == "" {
+    return nil
+  }
+  let requested = variables?.first
+  if requested != nil && contains(query, "nodes") {
+    return to_int(requested) + 1
+  }
+  if contains(query, "first: 10") {
+    return 14
+  }
+  if contains(query, "nodes") {
+    return 51
+  }
+  return 2
+}
+
+fn __graphql_meta(headers, query, variables = nil) {
+  let estimate = __complexity_estimate(query, variables ?? {})
+  let observed = __int_header(headers, "x-complexity")
+  let complexity = observed ?? estimate ?? 0
+  return {
+    complexity_estimate: estimate,
+    observed_complexity: observed ?? 0,
+    complexity_warning: complexity >= __complexity_warning_threshold(),
+    rate_limit: {
+      requests_limit: __int_header(headers, "x-ratelimit-requests-limit"),
+      requests_remaining: __int_header(headers, "x-ratelimit-requests-remaining"),
+      requests_reset: __int_header(headers, "x-ratelimit-requests-reset"),
+      complexity_limit: __int_header(headers, "x-ratelimit-complexity-limit"),
+      complexity_remaining: __int_header(headers, "x-ratelimit-complexity-remaining"),
+      complexity_reset: __int_header(headers, "x-ratelimit-complexity-reset"),
+    },
+  }
+}
+
+fn __meta_with_complexity(meta, header_meta) {
+  return merge(
+    meta ?? {},
+    {
+      observed_complexity: header_meta.observed_complexity,
+      complexity_estimate: header_meta.complexity_estimate,
+      complexity_warning: header_meta.complexity_warning,
+    },
+  )
+}
+
+fn __missing_http_response(response) {
+  return !(response?.ok ?? false) && response?.status == nil && response?.body == nil
+}
+
+fn __required_string(args, field) {
+  let value = args?[field]
+  if value == nil || trim(to_string(value)) == "" {
+    throw {message: "linear " + field + " is required", code: "invalid_args", field: field}
+  }
+  return to_string(value)
+}
+
+fn __graphql(args) {
+  let query = args?.query
+  if query == nil || trim(query) == "" {
+    throw {message: "graphql requires query", code: "invalid_args"}
+  }
+  let auth = __auth_config(args)
+  let authorization = if auth.oauth {
+    "Bearer " + auth.token
+  } else {
+    auth.token
+  }
+  let request = graphql_request_body(
+    query,
+    args?.variables ?? {},
+    {operation_name: args?.operation_name ?? args?.operationName},
+  )
+  let api_base_url = __validate_api_base_url(args?.api_base_url)
+  let response = connector_http_json(
+    "POST",
+    api_base_url,
+    {
+      provider: "linear",
+      operation: request.operationName ?? "graphql",
+      headers: graphql_auth_headers({authorization: authorization}, {"User-Agent": "harn-linear-connector"}),
+      body: json_stringify(request),
+    },
+  )
+  let header_meta = __graphql_meta(response?.headers ?? {}, query, request.variables)
+  if __missing_http_response(response) {
+    throw {
+      message: to_string(response?.error?.message ?? "linear GraphQL request failed before receiving a response"),
+      code: "http_error",
+      status: response?.status,
+      category: response?.category ?? response?.error?.category,
+      retryable: response?.retryable ?? response?.error?.retryable,
+      errors: [],
+      data: nil,
+      meta: __meta_with_complexity({}, header_meta),
+    }
+  }
+  let envelope = graphql_normalize_response(response, {operation_name: request.operationName})
+  let merged_meta = __meta_with_complexity(envelope.meta, header_meta)
+  if !envelope.ok {
+    let errors = envelope.errors
+    let code = if __rate_limited(envelope.meta.status, errors) {
+      "rate_limited"
+    } else if len(errors) > 0 {
+      "graphql_error"
+    } else {
+      "http_error"
+    }
+    throw {
+      message: __graphql_error_message(envelope.meta.status, errors),
+      code: code,
+      status: envelope.meta.status,
+      errors: errors,
+      data: envelope.data,
+      meta: merged_meta,
+    }
+  }
+  return merge(envelope, {meta: merged_meta})
+}
+
+fn __operation(name, document, options = nil) {
+  return graphql_operation(name, document, options)
+}
+
+fn __execute(operation, variables, args) {
+  let envelope = __graphql(
+    (args ?? {})
+      + {
+      query: operation.document,
+      variables: variables,
+      operation_name: operation.operation_name ?? operation.name,
+    },
+  )
+  let result = if operation.root_field != nil {
+    graphql_extract(envelope, operation.root_field, operation.result_schema)
+  } else {
+    envelope.data
+  }
+  let shaped_result = if type_of(result) == "dict" {
+    merge(result, {meta: envelope.meta})
+  } else {
+    result
+  }
+  return {
+    ok: envelope.ok,
+    partial: envelope.partial,
+    data: envelope.data,
+    errors: envelope.errors,
+    extensions: envelope.extensions,
+    meta: envelope.meta,
+    result: shaped_result,
+  }
+}
+
+fn __list_issues_operation() {
+  return __operation("HarnLinearListIssues", __list_issues_query(), {root_field: "issues"})
+}
+
+fn __update_issue_operation() {
+  return __operation("HarnLinearUpdateIssue", __update_issue_query(), {root_field: "issueUpdate"})
+}
+
+fn __create_comment_operation() {
+  return __operation("HarnLinearCreateComment", __create_comment_query(), {root_field: "commentCreate"})
+}
+
+fn __search_operation(use_term = false) {
+  let document = if use_term {
+    __search_issues_term_query()
+  } else {
+    __search_issues_query()
+  }
+  return __operation("HarnLinearSearchIssues", document, {root_field: "searchIssues"})
+}
+
+fn __list_issues(args) {
+  let connection = __execute(
+    __list_issues_operation(),
+    {
+      filter: args?.filter,
+      first: args?.first,
+      after: args?.after,
+      includeArchived: args?.include_archived ?? args?.includeArchived ?? false,
+    },
+    args,
+  ).result
+  return merge(connection, {page: graphql_page_info(connection)})
+}
+
+fn __update_issue(args) {
+  return __execute(
+    __update_issue_operation(),
+    {id: __required_string(args, "id"), input: args?.changes ?? {}},
+    args,
+  ).result
+}
+
+fn __create_comment(args) {
+  return __execute(
+    __create_comment_operation(),
+    {input: {issueId: __required_string(args, "issue_id"), body: __required_string(args, "body")}},
+    args,
+  ).result
+}
+
+fn __search(args) {
+  let first = args?.first ?? 10
+  let query = __required_string(args, "query")
+  let primary = try {
+    __execute(__search_operation(false), {query: query, first: first}, args).result
+  }
+  if is_ok(primary) {
+    return unwrap(primary)
+  }
+  let err = unwrap_err(primary)
+  if !contains(to_string(err?.message ?? ""), "Unknown argument")
+    && !__has_graphql_error_code(err?.errors, "GRAPHQL_VALIDATION_FAILED") {
+    throw err
+  }
+  return __execute(__search_operation(true), {term: query, first: first}, args).result
+}
+
+/** Return the Harn provider id for this connector. */
+pub fn provider_id() {
+  return "linear"
+}
+
+/** Return trigger kinds implemented by this connector. */
+pub fn kinds() {
+  return ["webhook"]
+}
+
+/** Return the canonical Harn payload schema descriptor for Linear events. */
+pub fn payload_schema() {
+  return {
+    harn_schema_name: "LinearEventPayload",
+    json_schema: {
+      type: "object",
+      required: ["type", "action", "data"],
+      additionalProperties: true,
+      properties: {
+        type: {type: "string"},
+        action: {type: "string", enum: ["create", "update", "remove"]},
+        organizationId: {type: "string"},
+        webhookTimestamp: {type: ["integer", "number", "string"]},
+        webhookId: {type: "string"},
+        actor: {type: "object", additionalProperties: true},
+        data: {type: "object", additionalProperties: true},
+        updatedFrom: {type: "object", additionalProperties: true},
+      },
+    },
+  }
+}
+
+/** Initialize connector process state. */
+pub fn init(ctx) {
+  connector_state.ctx = ctx
+  return nil
+}
+
+/** Activate Linear trigger bindings for inbound and outbound configuration. */
+pub fn activate(bindings) {
+  let resolved = bindings ?? []
+  // F4: reject bindings that try to widen the replay window beyond
+  // __replay_window_max_secs(). A configured 24h window is a sharp edge
+  // (canonical OTP-lifetime mistake) that defeats the freshness check.
+  let max = __replay_window_max_secs()
+  for binding in resolved {
+    let cfg = binding?.config ?? {}
+    let window = cfg?.replay_window_secs ?? cfg?.security?.replay_window_secs
+    let grace = cfg?.replay_grace_secs ?? cfg?.security?.replay_grace_secs
+    if window != nil && to_int(window) > max {
+      throw {
+        code: "replay_window_too_large",
+        message: "linear binding replay_window_secs " + to_string(window) + " exceeds maximum "
+          + to_string(max),
+      }
+    }
+    if grace != nil && to_int(grace) > max {
+      throw {
+        code: "replay_window_too_large",
+        message: "linear binding replay_grace_secs " + to_string(grace) + " exceeds maximum "
+          + to_string(max),
+      }
+    }
+  }
+  connector_state.bindings = resolved
+  __metrics_inc("linear_connector_activations", len(connector_state.bindings))
+  return nil
+}
+
+/** Clear connector state during shutdown. */
+pub fn shutdown() {
+  connector_state.bindings = []
+  connector_state.ctx = nil
+  __metrics_inc("linear_connector_shutdown", 1)
+  return nil
+}
+
+/** Verify and normalize one Linear inbound webhook into NormalizeResult v1. */
+pub fn normalize_inbound(raw) {
+  let body = raw.body_json ?? json_parse(raw.body_text ?? "{}")
+  let rejection = __verify(raw, body)
+  if rejection != nil {
+    return rejection
+  }
+  return __event(raw, body)
+}
+
+/** Dispatch outbound Linear connector methods. */
+pub fn call(method, args) {
+  if method == "graphql" {
+    return __graphql(args ?? {})
+  }
+  if method == "list_issues" {
+    return __list_issues(args ?? {})
+  }
+  if method == "update_issue" {
+    return __update_issue(args ?? {})
+  }
+  if method == "create_comment" {
+    return __create_comment((args ?? {}) + {issue_id: args?.issue_id ?? args?.issueId})
+  }
+  if method == "search" {
+    return __search(args ?? {})
+  }
+  throw "method_not_found:" + method
+}
