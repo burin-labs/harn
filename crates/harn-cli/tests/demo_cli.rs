@@ -77,6 +77,30 @@ where
     handle.join().expect("runtime thread completed")
 }
 
+#[test]
+fn demo_asset_copy_ignores_harn_state_dirs() {
+    let source = tempfile::TempDir::new().expect("create source dir");
+    let target = tempfile::TempDir::new().expect("create target dir");
+    fs::write(source.path().join("scenario.harn"), "").expect("write scenario");
+    fs::create_dir_all(source.path().join(".harn/metadata/classification"))
+        .expect("write leaked state dir");
+    fs::write(
+        source
+            .path()
+            .join(".harn/metadata/classification/entries.json"),
+        r#"{"entries":[]}"#,
+    )
+    .expect("write leaked state");
+
+    copy_demo_assets(source.path(), target.path());
+
+    assert!(target.path().join("scenario.harn").is_file());
+    assert!(
+        !target.path().join(".harn").exists(),
+        "demo test fixture copy must not import runtime state"
+    );
+}
+
 fn run_demo_scenario(id: &str) -> RunOutcome {
     let assets = PathBuf::from(MANIFEST_DIR).join("assets/demo").join(id);
     assert!(

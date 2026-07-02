@@ -21,6 +21,9 @@ done
 
 metadata="$(cargo metadata --format-version 1 --no-deps)"
 target_dir="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])' <<<"$metadata")"
+package_check_target_dir="${HARN_PACKAGE_VERIFY_TARGET_DIR:-$target_dir/package-check-target}"
+mkdir -p "$package_check_target_dir"
+export CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-0}"
 stdlib_version="$(
   python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"] == "harn-stdlib"))' \
     <<<"$metadata"
@@ -168,7 +171,7 @@ PY
 )
 
 echo "=== Package harn-stdlib ==="
-cargo package -p harn-stdlib --allow-dirty "${local_harn_patches[@]}"
+cargo package -p harn-stdlib --allow-dirty --no-verify "${local_harn_patches[@]}"
 
 stdlib_crate="$target_dir/package/harn-stdlib-$stdlib_version.crate"
 if [[ ! -f "$stdlib_crate" ]]; then
@@ -203,7 +206,8 @@ if grep -RE '\.\./harn-(vm|modules)' "$stdlib_pkg/src" >/dev/null; then
 fi
 
 echo "=== Check extracted harn-stdlib package ==="
-CARGO_TARGET_DIR="$tmp/target-stdlib" cargo check --manifest-path "$stdlib_pkg/Cargo.toml"
+CARGO_TARGET_DIR="$package_check_target_dir" \
+  cargo check --manifest-path "$stdlib_pkg/Cargo.toml"
 
 echo "=== Package harn-modules ==="
 cargo package -p harn-modules --allow-dirty --no-verify "${local_harn_patches[@]}"
@@ -231,7 +235,7 @@ if grep -RE '\.\./harn-(vm|stdlib)' "$modules_pkg/src" >/dev/null; then
 fi
 
 echo "=== Check extracted harn-modules package ==="
-CARGO_TARGET_DIR="$tmp/target-modules" \
+CARGO_TARGET_DIR="$package_check_target_dir" \
   cargo check --manifest-path "$modules_pkg/Cargo.toml" "${local_harn_patches[@]}"
 
 # `harn-hostlib` is a workspace path dep of `harn-cli`. Verifying it
@@ -251,15 +255,19 @@ extract_package harn-vm "$vm_version"
 vm_pkg="$tmp/harn-vm-$vm_version"
 
 echo "=== Check extracted harn-vm package ==="
-CARGO_TARGET_DIR="$tmp/target-vm" \
+CARGO_TARGET_DIR="$package_check_target_dir" \
   cargo check --manifest-path "$vm_pkg/Cargo.toml" "${local_harn_patches[@]}"
 
 echo "=== Package harn-cli ==="
-if [[ "$VERIFY_CLI" -eq 1 ]]; then
+if [[ "${HARN_BOOTSTRAP_NEW_CRATES:-0}" == "1" ]]; then
+  echo "=== HARN_BOOTSTRAP_NEW_CRATES=1: skipping harn-cli package check ==="
+elif [[ "$VERIFY_CLI" -eq 1 ]]; then
   cargo package -p harn-cli --allow-dirty "${local_harn_patches[@]}"
 else
   cargo package -p harn-cli --allow-dirty --no-verify "${local_harn_patches[@]}"
 fi
-extract_package harn-cli "$(package_version harn-cli)"
+if [[ "${HARN_BOOTSTRAP_NEW_CRATES:-0}" != "1" ]]; then
+  extract_package harn-cli "$(package_version harn-cli)"
+fi
 
 echo "Package verification complete"

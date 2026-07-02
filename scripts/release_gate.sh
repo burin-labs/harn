@@ -239,23 +239,19 @@ run_smoke_audit() {
 
 cmd_audit() {
   echo "=== Parallel release audit ==="
+  export CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-0}"
   local audit_started
   audit_started="$(date +%s)"
 
-  # Serial warm prebuild before spawning the parallel lanes. The 3
-  # cargo-using lanes (rust-audit runs clippy + nextest; harn-audit
-  # runs clippy + nextest; package-audit runs cargo package/check; the
-  # Harn/script lanes use the exported HARN_BIN below) otherwise race for the
-  # same `.cargo-lock` and repeatedly invalidate each other's incremental
-  # artifacts. Historically the harn lint phase alone stretched to ~12 min cold
-  # because it was waiting on the shared target dir while rust-audit's nextest
-  # held the lock; warm-state it runs in ~1.5 s. One serial build up front lets
-  # every downstream lane hit a populated target/debug without re-entering
-  # Cargo for plain Harn CLI invocations.
+  # Serial warm prebuild before spawning the parallel lanes. The Harn/script
+  # lanes only need a runnable CLI; rust-audit still owns the full clippy +
+  # nextest coverage, and package-audit still owns extracted crate checks. Build
+  # the CLI binary once up front so those lanes do not race rust-audit for a
+  # plain Harn invocation, without front-loading a duplicate workspace build.
   local prebuild_started prebuild_elapsed
   prebuild_started="$(date +%s)"
-  echo ">>> warm-prebuild (cargo build --workspace --all-targets)"
-  if ! cargo build --workspace --all-targets --quiet; then
+  echo ">>> warm-prebuild (cargo build -p harn-cli --bin harn)"
+  if ! cargo build -p harn-cli --bin harn --quiet; then
     echo "error: warm prebuild failed; rerun without --quiet for details"
     exit 1
   fi
@@ -273,6 +269,7 @@ cmd_audit() {
 
   local tmp
   tmp="$(mktemp -d)"
+  echo "audit lane log dir: $tmp"
   local -a steps=()
   local -a pids=()
 
@@ -297,13 +294,22 @@ cmd_audit() {
     return "$rc"
   }
 
-  run_step rust-audit run_rust_audit & steps+=("rust-audit") pids+=("$!")
-  run_step harn-audit run_harn_audit & steps+=("harn-audit") pids+=("$!")
-  run_step docs-audit run_docs_audit & steps+=("docs-audit") pids+=("$!")
-  run_step grammar-audit run_grammar_audit & steps+=("grammar-audit") pids+=("$!")
-  run_step security-audit run_security_audit & steps+=("security-audit") pids+=("$!")
-  run_step package-audit ./scripts/verify_crate_packages.sh & steps+=("package-audit") pids+=("$!")
-  run_step smoke-audit run_smoke_audit & steps+=("smoke-audit") pids+=("$!")
+  launch_step() {
+    local name="$1"
+    shift
+    printf 'log: %-15s (%s)\n' "$name" "$tmp/$name.log"
+    run_step "$name" "$@" &
+    steps+=("$name")
+    pids+=("$!")
+  }
+
+  launch_step rust-audit run_rust_audit
+  launch_step harn-audit run_harn_audit
+  launch_step docs-audit run_docs_audit
+  launch_step grammar-audit run_grammar_audit
+  launch_step security-audit run_security_audit
+  launch_step package-audit ./scripts/verify_crate_packages.sh
+  launch_step smoke-audit run_smoke_audit
 
   local failed=0
   local idx
