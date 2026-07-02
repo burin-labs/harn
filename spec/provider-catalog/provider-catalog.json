@@ -5704,35 +5704,40 @@
       "api_dialect": "openai_chat",
       "modalities": {
         "input": [
-          "text"
+          "text",
+          "image"
         ],
         "output": [
           "text"
         ]
       },
       "tool_support": {
-        "native": false,
+        "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
-      "structured_output": "none",
+      "structured_output": "native",
       "format_preferences": {
         "prefers_xml_scaffolding": false,
-        "prefers_markdown_scaffolding": false,
-        "structured_output_mode": "none",
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
         "prefers_xml_tools": false,
-        "thinking_block_style": "none"
+        "thinking_block_style": "inline"
       },
       "reasoning": {
-        "modes": [],
+        "modes": [
+          "enabled"
+        ],
         "effort_supported": false,
         "none_supported": false,
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "pricing": {
         "input_per_mtok": 0.3,
         "output_per_mtok": 1.2,
@@ -5746,7 +5751,11 @@
       "quality_tags": [],
       "capability_tags": [
         "streaming",
-        "tools"
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
       ],
       "family": "minimax",
       "lineage": "minimax",
@@ -14490,35 +14499,41 @@
       "context_window": 524288,
       "modalities": {
         "input": [
-          "text"
+          "text",
+          "image"
         ],
         "output": [
           "text"
         ]
       },
       "tool_support": {
-        "native": false,
+        "native": true,
         "text": true,
+        "preferred_format": "text",
+        "parity": "native_unreliable",
+        "parity_notes": "Family-on-host consistency pin: Together MiniMax-M2.7 native was 1/5 fidelity in the 2026-06-24 sweep; no M3-on-Together probe yet, so inherit text rather than an optimistic native pin.",
         "tool_search": []
       },
-      "structured_output": "none",
+      "structured_output": "native",
       "format_preferences": {
         "prefers_xml_scaffolding": false,
-        "prefers_markdown_scaffolding": false,
-        "structured_output_mode": "none",
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
         "prefers_xml_tools": false,
-        "thinking_block_style": "none"
+        "thinking_block_style": "inline"
       },
       "reasoning": {
-        "modes": [],
+        "modes": [
+          "enabled"
+        ],
         "effort_supported": false,
         "none_supported": false,
         "interleaved_supported": false,
         "preserve_thinking": false
       },
-      "prompt_cache": false,
+      "prompt_cache": true,
       "pricing": {
         "input_per_mtok": 0.3,
         "output_per_mtok": 1.2,
@@ -14532,7 +14547,11 @@
       "quality_tags": [],
       "capability_tags": [
         "streaming",
-        "tools"
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
       ],
       "family": "minimax",
       "lineage": "minimax",
@@ -15411,34 +15430,33 @@
         ]
       },
       "tool_support": {
-        "native": false,
+        "native": true,
         "text": true,
+        "preferred_format": "text",
+        "parity": "native_unreliable",
+        "parity_notes": "Family-consistency pin: GLM native channels emit `<tool_call>` markup as content (2026-06-23 Baseten GLM-5.2 probe); no zai-direct GLM-4.7 probe yet, so inherit the family verdict rather than an optimistic native pin.",
         "tool_search": []
       },
-      "structured_output": "none",
+      "structured_output": "native",
       "format_preferences": {
         "prefers_xml_scaffolding": false,
-        "prefers_markdown_scaffolding": false,
-        "structured_output_mode": "none",
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
         "prefers_xml_tools": false,
-        "thinking_block_style": "none"
+        "thinking_block_style": "inline"
       },
       "reasoning": {
-        "modes": [],
+        "modes": [
+          "enabled"
+        ],
         "effort_supported": false,
         "none_supported": false,
         "interleaved_supported": false,
         "preserve_thinking": false
       },
       "prompt_cache": false,
-      "pricing": {
-        "input_per_mtok": 0.0,
-        "output_per_mtok": 0.0,
-        "cache_read_per_mtok": null,
-        "cache_write_per_mtok": null
-      },
       "deprecation": {
         "status": "active"
       },
@@ -15446,7 +15464,9 @@
       "quality_tags": [],
       "capability_tags": [
         "streaming",
-        "tools"
+        "tools",
+        "thinking",
+        "structured_output"
       ],
       "family": "glm",
       "lineage": "glm",
@@ -16381,8 +16401,8 @@
       "id": "cheap",
       "label": "Cheap",
       "description": "Lowest known hosted input+output token price.",
-      "model_id": "glm-4.7-flash",
-      "provider": "zai",
+      "model_id": "llama-3.1-8b-instant",
+      "provider": "groq",
       "source": "catalog"
     },
     {

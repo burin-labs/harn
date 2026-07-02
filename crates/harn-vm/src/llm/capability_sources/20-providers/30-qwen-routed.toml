@@ -178,6 +178,32 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "inline"
 
+# MiniMax M3 on Fireworks — un-probed route. Fireworks' probed
+# open-weight routes (kimi-k2p*, deepseek-v4*) serve clean OpenAI-shape
+# native tool_calls (only the gpt-oss/Harmony and glm-5p markup families
+# are pinned off native there), and NVIDIA serves M3 natively, so prefer
+# native with an explicit unknown-parity verdict until a forced-format
+# probe upgrades or refutes it.
+[[provider.fireworks]]
+model_match = "accounts/fireworks/models/minimax-m3*"
+native_tools = true
+preferred_tool_format = "native"
+tool_mode_parity = "unknown"
+structured_output = "native"
+thinking_modes = ["enabled"]
+prompt_caching = true
+vision = true
+vision_supported = true
+reasoning_text_promotable = false
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
 [[provider.fireworks]]
 model_match = "*qwen3.6*"
 native_tools = true

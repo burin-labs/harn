@@ -46,7 +46,7 @@ No benchmark summary is baked into this checked-in page. To layer local empirica
 | `Vertex` | Gemini generateContent | `vertex:gemini-*` | `native` | yes | yes | `none` / `native_json` | none | no | `provider_default` | `not_recorded` |
 | `Vllm` | OpenAI-compatible chat completions | `vllm` | `text` | no | yes | `none` / `none` | none | no | `local_zero_cost` | `not_recorded` |
 | `Xai` | OpenAI-compatible chat completions | `xai:grok-build-0.1` | `native` | yes | yes | `native` / `native_json` | `adaptive` | yes | `high` | `not_recorded` |
-| `Zai` | OpenAI-compatible chat completions | `zai:glm-4.7-flash` | `text` | no | yes | `none` / `none` | none | no | `high` | `not_recorded` |
+| `Zai` | OpenAI-compatible chat completions | `zai:glm-4.7-flash` | `text` | yes | yes | `native` / `native_json` | `enabled` | no | `provider_default` | `not_recorded` |
 
 ## Recommended options
 
@@ -313,3 +313,21 @@ structured_output_mode = "native_json"
 Caveats:
 
 - 2026-06-24 Harn agent-loop (gpt-oss-120b, zig-feat, tool grounding present): SambaNova native ended with a provider/tool-protocol failure (Harmony empty tool_calls / reasoning-channel-only class). Text/heredoc is the clean pay-per-token channel. See vLLM #22578/#44216, SGLang #8976/#10738, openai/harmony #68.
+
+### Zai
+
+- catalog provider: `zai`
+- recommended route: `zai:glm-4.7-flash` (`glm-4.7-flash`)
+- endpoint style: OpenAI-compatible chat completions
+- recommended Harn options:
+
+```toml
+provider = "zai"
+model = "glm-4.7-flash"
+tool_format = "text"
+structured_output_mode = "native_json"
+```
+
+Caveats:
+
+- Family-consistency pin: GLM native channels emit `<tool_call>` markup as content (2026-06-23 Baseten GLM-5.2 probe); no zai-direct GLM-4.7 probe yet, so inherit the family verdict rather than an optimistic native pin.

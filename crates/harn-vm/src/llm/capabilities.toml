@@ -1823,6 +1823,32 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "inline"
 
+# MiniMax M3 on Fireworks — un-probed route. Fireworks' probed
+# open-weight routes (kimi-k2p*, deepseek-v4*) serve clean OpenAI-shape
+# native tool_calls (only the gpt-oss/Harmony and glm-5p markup families
+# are pinned off native there), and NVIDIA serves M3 natively, so prefer
+# native with an explicit unknown-parity verdict until a forced-format
+# probe upgrades or refutes it.
+[[provider.fireworks]]
+model_match = "accounts/fireworks/models/minimax-m3*"
+native_tools = true
+preferred_tool_format = "native"
+tool_mode_parity = "unknown"
+structured_output = "native"
+thinking_modes = ["enabled"]
+prompt_caching = true
+vision = true
+vision_supported = true
+reasoning_text_promotable = false
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
 [[provider.fireworks]]
 model_match = "*qwen3.6*"
 native_tools = true
@@ -3954,6 +3980,31 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "inline"
 
+# MiniMax M3 on Together — un-probed route. Host precedent says caution:
+# the probed Together MiniMax-M2.7 route mis-serves the native channel
+# (see the m2.7 rule below), so M3 inherits the text pin as a
+# family-on-host consistency verdict until a forced-format probe on this
+# route says otherwise.
+[[provider.together]]
+model_match = "minimaxai/minimax-m3*"
+native_tools = true
+preferred_tool_format = "text"
+tool_mode_parity = "native_unreliable"
+tool_mode_parity_notes = "Family-on-host consistency pin: Together MiniMax-M2.7 native was 1/5 fidelity in the 2026-06-24 sweep; no M3-on-Together probe yet, so inherit text rather than an optimistic native pin."
+structured_output = "native"
+thinking_modes = ["enabled"]
+prompt_caching = true
+honors_chat_template_kwargs = false
+reasoning_text_promotable = false
+vision_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
 # probed 2026-06-24 (docs/eval/provider-tool-mode-sweep-2026-06-24.md, N=5,
 # forced-format single-tool authoring of a backslash-heavy Zig body): heredoc
 # text beat fenced-JSON on BOTH dispatch (4/5 vs 3/5) and fidelity (4/5 vs 2/5);
@@ -4665,6 +4716,29 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "inline"
 prompt_caching = true
+
+# GLM-4.7 family (incl. the free glm-4.7-flash tier) — same wire format
+# and `<tool_call>` markup lineage as GLM-5; pinned text for family
+# consistency (mirrors the NVIDIA glm-5 family-consistency gate) until a
+# clean zai-direct native probe says otherwise. Without this rule the
+# catalogued glm-4.7-flash row would fall through to the OpenAI-family
+# gpt-* rules and resolve empty capabilities.
+[[provider.zai]]
+model_match = "glm-4*"
+native_tools = true
+preferred_tool_format = "text"
+tool_mode_parity = "native_unreliable"
+tool_mode_parity_notes = "Family-consistency pin: GLM native channels emit `<tool_call>` markup as content (2026-06-23 Baseten GLM-5.2 probe); no zai-direct GLM-4.7 probe yet, so inherit the family verdict rather than an optimistic native pin."
+structured_output = "native"
+thinking_modes = ["enabled"]
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
 
 [[provider.zai]]
 model_match = "glm-5*"

@@ -2697,13 +2697,16 @@ open_weight = true
 strengths = ["coding", "agentic", "tool_use"]
 
 # GLM-4.7-Flash — Z.AI's free API tier (31B dense). Zero-cost route for
-# healthcheck/QC probes and cheap background tasks.
+# healthcheck/QC probes and cheap background tasks. Pricing is OMITTED
+# (the unbilled-route convention, like local models) rather than listed
+# as $0/$0: a literal zero rate would win every price-capped selection
+# (complementary reviewer, cheapest-route) and make cost-fallback paths
+# unreachable, which misrepresents a rate-limited free tier.
 [models."glm-4.7-flash"]
 name = "GLM 4.7 Flash"
 provider = "zai"
 context_window = 131072
 capabilities = ["tools", "streaming", "thinking"]
-pricing = { input_per_mtok = 0.00, output_per_mtok = 0.00 }
 tier = "small"
 open_weight = true
 strengths = ["speed", "cheap", "coding", "tool_use"]
