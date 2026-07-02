@@ -33,7 +33,6 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use async_trait::async_trait;
 use base64::Engine;
-use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::sync::{broadcast, Mutex as AsyncMutex};
@@ -70,10 +69,57 @@ const TOKEN_REFRESH_SKEW_SECS: i64 = 5 * 60;
 const MAX_PENDING_FLOWS: usize = 32;
 
 const AUTH_COMPLETION_CHANNEL_CAPACITY: usize = 64;
+
+/// Overall timeout for OAuth control-plane HTTP requests (code exchange,
+/// refresh, discovery, dynamic registration, token exchange). reqwest's
+/// default is *no* timeout, so a token endpoint that accepts TCP but never
+/// responds would otherwise wedge the request — and, on the refresh path, the
+/// single-flight refresh lock — forever. The connect timeout matches the llm
+/// transport clients; 30s overall is generous for short control-plane calls.
+const OAUTH_HTTP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+const OAUTH_HTTP_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Upper bound on waiting for the single-flight refresh locks (the in-process
+/// mutex and the cross-process file lock). A healthy holder finishes within
+/// one bounded token request ([`OAUTH_HTTP_TIMEOUT`]) plus storage IO, so
+/// waiting longer means the holder is wedged; failing fast with a clear error
+/// beats silently blocking every later 401 recovery behind it.
+const OAUTH_REFRESH_LOCK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
 const TOKEN_EXCHANGE_GRANT_TYPE: &str = "urn:ietf:params:oauth:grant-type:token-exchange";
 const TOKEN_TYPE_PREFIX: &str = "urn:ietf:params:oauth:token-type:";
 const TOKEN_TYPE_ACCESS_TOKEN: &str = "urn:ietf:params:oauth:token-type:access_token";
 const TOKEN_TYPE_JWT: &str = "urn:ietf:params:oauth:token-type:jwt";
+
+/// Test hook: shrinks [`OAUTH_HTTP_TIMEOUT`] (milliseconds) so stalled-endpoint
+/// tests stay fast. `0` means "use the production timeout".
+#[cfg(test)]
+static OAUTH_HTTP_TIMEOUT_OVERRIDE_MS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
+fn oauth_http_timeout() -> std::time::Duration {
+    #[cfg(test)]
+    {
+        let ms = OAUTH_HTTP_TIMEOUT_OVERRIDE_MS.load(std::sync::atomic::Ordering::Relaxed);
+        if ms > 0 {
+            return std::time::Duration::from_millis(ms);
+        }
+    }
+    OAUTH_HTTP_TIMEOUT
+}
+
+/// HTTP client for OAuth endpoints. Never use a bare `reqwest::Client::new()`
+/// in this module: it has no request timeout, and every OAuth call site here
+/// either runs under (or feeds) the single-flight refresh lock or blocks an
+/// interactive authorization, so an unbounded request wedges MCP auth
+/// process-wide.
+fn oauth_http_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .connect_timeout(OAUTH_HTTP_CONNECT_TIMEOUT)
+        .timeout(oauth_http_timeout())
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new())
+}
 
 /// Per-MCP-server opt-in for exchanging the stored subject bearer for a
 /// delegated request bearer before outbound HTTP MCP calls.
@@ -427,7 +473,7 @@ pub async fn complete_authorization(
         issuer,
     )?;
 
-    let client = reqwest::Client::new();
+    let client = oauth_http_client();
     let form = authorization_code_token_form(OAuthAuthorizationCodeTokenForm {
         client_id: &flow.client_id,
         redirect_uri: &flow.redirect_uri,
@@ -637,7 +683,7 @@ pub(crate) async fn wait_for_authorization_completion(
 
 /// Discover the OAuth authorization server protecting an MCP server URL.
 pub async fn discover(server_url: &str) -> Result<McpOAuthDiscovery, String> {
-    let client = reqwest::Client::new();
+    let client = oauth_http_client();
     discover_mcp_oauth(&client, server_url)
         .await
         .map_err(|error| error.to_string())
@@ -748,7 +794,7 @@ async fn dynamic_client_registration(
     redirect_uri: &str,
     scopes: Option<&str>,
 ) -> Result<OAuthDynamicClientRegistrationResponse, String> {
-    let client = reqwest::Client::new();
+    let client = oauth_http_client();
     let body = dynamic_client_registration_body("Harn", [redirect_uri], scopes);
     let response = client
         .post(registration_endpoint)
@@ -786,7 +832,7 @@ async fn refresh_token(
     })?;
     let resource =
         canonical_resource_indicator(&token.resource).unwrap_or_else(|_| token.resource.clone());
-    let client = reqwest::Client::new();
+    let client = oauth_http_client();
     let form = refresh_token_form(OAuthRefreshTokenForm {
         client_id: &token.client_id,
         refresh_token: &refresh_token,
@@ -918,7 +964,7 @@ async fn exchange_bearer_for_actor_chain_with_endpoint(
         return Ok(None);
     };
     validate_token_endpoint_auth_method(client_auth.token_endpoint_auth_method)?;
-    let client = reqwest::Client::new();
+    let client = oauth_http_client();
     let response = send_token_exchange_request(&client, token_endpoint, &form, client_auth).await?;
     let status = response.status();
     if !status.is_success() {
@@ -1225,9 +1271,16 @@ struct OAuthRefreshLockGuard {
     file: File,
 }
 
+impl std::fmt::Debug for OAuthRefreshLockGuard {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OAuthRefreshLockGuard")
+            .finish_non_exhaustive()
+    }
+}
+
 impl Drop for OAuthRefreshLockGuard {
     fn drop(&mut self) {
-        let _ = self.file.unlock();
+        let _ = fs2::FileExt::unlock(&self.file);
     }
 }
 
@@ -1235,11 +1288,40 @@ async fn acquire_oauth_refresh_lock(
     key: &OAuthTokenStoreKey,
     lock_dir_override: Option<&Path>,
 ) -> Result<OAuthRefreshLockGuard, String> {
+    acquire_oauth_refresh_lock_with_timeout(key, lock_dir_override, OAUTH_REFRESH_LOCK_TIMEOUT)
+        .await
+}
+
+/// Acquire the single-flight refresh locks with a bounded wait. Both phases
+/// are time-limited so one wedged refresher (in this process or another) can
+/// only ever delay — never permanently block — later 401 recovery:
+///
+/// 1. The in-process async mutex is awaited under `tokio::time::timeout`.
+/// 2. The cross-process file lock uses a non-blocking `try_lock_exclusive`
+///    with retry/backoff instead of a blocking `lock_exclusive`, which would
+///    otherwise pin a `spawn_blocking` thread indefinitely while another
+///    *process* holds the lock.
+async fn acquire_oauth_refresh_lock_with_timeout(
+    key: &OAuthTokenStoreKey,
+    lock_dir_override: Option<&Path>,
+    lock_timeout: std::time::Duration,
+) -> Result<OAuthRefreshLockGuard, String> {
     let mutex = oauth_refresh_mutex(key);
-    let async_guard = mutex.lock_owned().await;
+    let async_guard = tokio::time::timeout(lock_timeout, mutex.lock_owned())
+        .await
+        .map_err(|_| {
+            format!(
+                "Timed out after {}s waiting for the in-process OAuth refresh lock for `{}`; \
+                 a concurrent refresh of this token appears to be stuck (most likely a \
+                 token-endpoint request that never completed)",
+                lock_timeout.as_secs(),
+                key.account()
+            )
+        })?;
     let lock_path = oauth_refresh_lock_path(key, lock_dir_override);
+    let open_path = lock_path.clone();
     let file = tokio::task::spawn_blocking(move || {
-        if let Some(parent) = lock_path.parent() {
+        if let Some(parent) = open_path.parent() {
             fs::create_dir_all(parent).map_err(|error| {
                 format!(
                     "Failed to create OAuth token lock directory `{}`: {error}",
@@ -1247,28 +1329,50 @@ async fn acquire_oauth_refresh_lock(
                 )
             })?;
         }
-        let file = OpenOptions::new()
+        OpenOptions::new()
             .create(true)
             .truncate(false)
             .read(true)
             .write(true)
-            .open(&lock_path)
+            .open(&open_path)
             .map_err(|error| {
                 format!(
                     "Failed to open OAuth token lock `{}`: {error}",
-                    lock_path.display()
+                    open_path.display()
                 )
-            })?;
-        file.lock_exclusive().map_err(|error| {
-            format!(
-                "Failed to acquire OAuth token lock `{}`: {error}",
-                lock_path.display()
-            )
-        })?;
-        Ok::<File, String>(file)
+            })
     })
     .await
     .map_err(|error| format!("OAuth token lock task failed: {error}"))??;
+
+    let deadline = tokio::time::Instant::now() + lock_timeout;
+    let mut backoff = std::time::Duration::from_millis(25);
+    loop {
+        match fs2::FileExt::try_lock_exclusive(&file) {
+            Ok(()) => break,
+            Err(error)
+                if error.kind() == std::io::ErrorKind::WouldBlock
+                    || error.raw_os_error() == fs2::lock_contended_error().raw_os_error() =>
+            {
+                if tokio::time::Instant::now() >= deadline {
+                    return Err(format!(
+                        "Timed out after {}s waiting for the cross-process OAuth refresh lock \
+                         `{}`; another harn process refreshing this token appears to be stuck",
+                        lock_timeout.as_secs(),
+                        lock_path.display()
+                    ));
+                }
+                tokio::time::sleep(backoff).await;
+                backoff = (backoff * 2).min(std::time::Duration::from_millis(500));
+            }
+            Err(error) => {
+                return Err(format!(
+                    "Failed to acquire OAuth token lock `{}`: {error}",
+                    lock_path.display()
+                ));
+            }
+        }
+    }
     Ok(OAuthRefreshLockGuard {
         _async_guard: async_guard,
         file,
@@ -2059,5 +2163,163 @@ mod tests {
             .unwrap()
             .is_none());
         server.await.unwrap();
+    }
+
+    /// Restores the production OAuth HTTP timeout when dropped, even if the
+    /// test panics.
+    struct HttpTimeoutOverride;
+
+    impl HttpTimeoutOverride {
+        fn set(ms: u64) -> Self {
+            OAUTH_HTTP_TIMEOUT_OVERRIDE_MS.store(ms, Ordering::SeqCst);
+            Self
+        }
+    }
+
+    impl Drop for HttpTimeoutOverride {
+        fn drop(&mut self) {
+            OAUTH_HTTP_TIMEOUT_OVERRIDE_MS.store(0, Ordering::SeqCst);
+        }
+    }
+
+    /// A token endpoint that accepts TCP connections but never responds must
+    /// produce a timeout error — not hang the refresh (and the single-flight
+    /// refresh lock behind it) forever.
+    #[tokio::test]
+    async fn refresh_times_out_when_token_endpoint_stalls() {
+        // Accept and hold connections without ever reading or responding. The
+        // thread parks on `accept` and is reclaimed at process exit.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let token_endpoint_url = format!("http://{}/token", listener.local_addr().unwrap());
+        std::thread::spawn(move || {
+            let mut held = Vec::new();
+            while let Ok((stream, _)) = listener.accept() {
+                held.push(stream);
+            }
+        });
+
+        let _timeout = HttpTimeoutOverride::set(1_000);
+
+        let store = MemoryStore::default();
+        let stale = StoredMcpToken {
+            access_token: "access-old".to_string(),
+            refresh_token: Some("refresh-old".to_string()),
+            expires_at_unix: Some(current_unix_timestamp().saturating_sub(1)),
+            token_endpoint: token_endpoint_url.clone(),
+            client_id: "client-a".to_string(),
+            client_secret: None,
+            token_endpoint_auth_method: "none".to_string(),
+            issuer: "https://auth.example".to_string(),
+            resource: "https://mcp.example/stalled".to_string(),
+            scopes: None,
+            token_response_extra: None,
+        };
+        store.save_token(&stale).await.unwrap();
+        let mut discovery = test_discovery();
+        discovery.authorization_server_metadata.token_endpoint = token_endpoint_url;
+        let lock_dir = tempfile::tempdir().unwrap();
+
+        let error = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            refresh_stored_token_with_store(
+                &store,
+                &stale,
+                &discovery,
+                Some(lock_dir.path().into()),
+            ),
+        )
+        .await
+        .expect("refresh against a stalled token endpoint must time out, not hang")
+        .unwrap_err();
+        assert!(error.contains("Token request failed"), "{error}");
+
+        // The failed refresh must release the single-flight lock so later 401
+        // recovery is not blocked behind the wedged attempt.
+        let key = OAuthTokenStoreKey::from_token(&stale);
+        let guard = tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            acquire_oauth_refresh_lock(&key, Some(lock_dir.path())),
+        )
+        .await
+        .expect("refresh lock must be released after a timed-out refresh")
+        .unwrap();
+        drop(guard);
+        // The stored token must survive a transient timeout (unlike
+        // invalid_grant, which deletes it).
+        assert!(store.load_token(&key).await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn refresh_lock_times_out_when_in_process_holder_is_wedged() {
+        let key = OAuthTokenStoreKey::new(
+            "https://mcp.example/wedged-mutex",
+            "https://auth.example",
+            "client-a",
+        );
+        let lock_dir = tempfile::tempdir().unwrap();
+        let held = oauth_refresh_mutex(&key).lock_owned().await;
+
+        let error = acquire_oauth_refresh_lock_with_timeout(
+            &key,
+            Some(lock_dir.path()),
+            std::time::Duration::from_millis(200),
+        )
+        .await
+        .unwrap_err();
+        assert!(error.contains("in-process OAuth refresh lock"), "{error}");
+        assert!(error.contains("stuck"), "{error}");
+
+        drop(held);
+        let _guard = acquire_oauth_refresh_lock_with_timeout(
+            &key,
+            Some(lock_dir.path()),
+            std::time::Duration::from_millis(200),
+        )
+        .await
+        .expect("lock must be acquirable once the holder releases it");
+    }
+
+    #[tokio::test]
+    async fn refresh_lock_times_out_when_cross_process_holder_is_wedged() {
+        let key = OAuthTokenStoreKey::new(
+            "https://mcp.example/wedged-file",
+            "https://auth.example",
+            "client-a",
+        );
+        let lock_dir = tempfile::tempdir().unwrap();
+        let lock_path = oauth_refresh_lock_path(&key, Some(lock_dir.path()));
+
+        // Hold the file lock on a separate descriptor, standing in for a
+        // wedged *other process* (flock contention is per open file
+        // description, so this contends exactly like another process would).
+        let holder = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(&lock_path)
+            .unwrap();
+        fs2::FileExt::lock_exclusive(&holder).unwrap();
+
+        let error = acquire_oauth_refresh_lock_with_timeout(
+            &key,
+            Some(lock_dir.path()),
+            std::time::Duration::from_millis(300),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            error.contains("cross-process OAuth refresh lock"),
+            "{error}"
+        );
+
+        fs2::FileExt::unlock(&holder).unwrap();
+        let _guard = acquire_oauth_refresh_lock_with_timeout(
+            &key,
+            Some(lock_dir.path()),
+            std::time::Duration::from_millis(300),
+        )
+        .await
+        .expect("lock must be acquirable once the holder releases it");
     }
 }
