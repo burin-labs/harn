@@ -9,6 +9,7 @@
 //! the actual smoke-test for test) and hand a JSON payload across the
 //! dispatch wedge to the script for formatting.
 
+use std::fs;
 use std::process::{Command, Output};
 
 fn harn_binary() -> &'static str {
@@ -262,7 +263,112 @@ fn models_test_failure_json_envelope_is_stable() {
     );
 }
 
+// - models lora inspect ---------------------------------------------------
+
+#[test]
+fn models_lora_inspect_human_text_includes_launch_hint() {
+    let adapter = write_lora_adapter_fixture();
+    let adapter_path = adapter.path().display().to_string();
+    let harn = run(
+        &[
+            "models",
+            "lora",
+            "inspect",
+            "--base",
+            "local-gemma4-e4b",
+            "--provider",
+            "vllm",
+            "--name",
+            "burin-tools",
+            &adapter_path,
+        ],
+        &[],
+    );
+
+    assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
+    for fragment in [
+        "burin-tools -> gemma-4-e4b-it via vllm",
+        "base match: same basename",
+        "tool format: json",
+        "native tools: no, preferred: unset",
+        "catalog LoRA launch flags: yes",
+        "harn local launch local-gemma4-e4b --provider vllm",
+        "--model-source google/gemma-4-e4b-it",
+        "--lora-adapter burin-tools=",
+    ] {
+        assert!(
+            harn.stdout.contains(fragment),
+            "harn stdout missing {fragment}: {}",
+            harn.stdout
+        );
+    }
+}
+
+#[test]
+fn models_lora_inspect_json_shape_is_stable() {
+    let adapter = write_lora_adapter_fixture();
+    let adapter_path = adapter.path().display().to_string();
+    let harn = run(
+        &[
+            "models",
+            "lora",
+            "inspect",
+            "--base",
+            "local-gemma4-e4b",
+            "--provider",
+            "vllm",
+            "--name",
+            "burin-tools",
+            "--json",
+            &adapter_path,
+        ],
+        &[],
+    );
+
+    assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
+    let harn_value = parse_json(&harn.stdout, "harn");
+    assert_eq!(harn_value["ok"], serde_json::Value::Bool(true));
+    assert_eq!(harn_value["base"]["selector"], "local-gemma4-e4b");
+    assert_eq!(harn_value["base"]["id"], "gemma-4-e4b-it");
+    assert_eq!(harn_value["base"]["provider"], "vllm");
+    assert_eq!(harn_value["base"]["tool_format"], "json");
+    assert_eq!(harn_value["adapter"]["name"], "burin-tools");
+    assert_eq!(harn_value["adapter"]["peft_type"], "LORA");
+    assert_eq!(harn_value["compatibility"]["base_model_match"], "suffix");
+    assert_eq!(
+        harn_value["compatibility"]["provider_supports_lora_launch"],
+        serde_json::Value::Bool(true)
+    );
+    assert_eq!(harn_value["tool_calling"]["native_tools"], false);
+    assert_eq!(harn_value["launch"]["request_model"], "burin-tools");
+    let launch = harn_value["launch"]["harn_local_launch"]
+        .as_array()
+        .expect("launch argv");
+    assert!(
+        launch.iter().any(|arg| arg == "--lora-adapter"),
+        "launch argv={launch:?}"
+    );
+}
+
 // ────────────────────────────────────────────────────────────────────────
+
+fn write_lora_adapter_fixture() -> tempfile::TempDir {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    fs::write(tmp.path().join("adapter_model.safetensors"), b"stub").expect("adapter weights");
+    fs::write(
+        tmp.path().join("adapter_config.json"),
+        r#"{
+            "peft_type": "LORA",
+            "base_model_name_or_path": "google/gemma-4-e4b-it",
+            "task_type": "CAUSAL_LM",
+            "r": 16,
+            "lora_alpha": 32,
+            "target_modules": ["q_proj", "v_proj"]
+        }"#,
+    )
+    .expect("adapter config");
+    tmp
+}
 
 fn run_with_clean_env(argv: &[&str], env: &[(&str, &str)]) -> SubprocessOutcome {
     let mut cmd = Command::new(harn_binary());
