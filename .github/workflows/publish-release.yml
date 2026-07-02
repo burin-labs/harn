@@ -258,38 +258,57 @@ jobs:
             # Self-heal when that prior tag-push run didn't actually
             # land everything (e.g. cancelled by concurrency policy as
             # in the v0.8.47 incident, or the App-token publish step
-            # errored). If the GitHub release for $LATEST_TAG has fewer
-            # than the expected assets, force DRIFT=true so the publish
-            # job re-fires. release_ship.sh's per-crate publish is
-            # already idempotent — it skips crates already on crates.io
-            # — so re-running is a no-op for crates that landed and a
-            # recovery for those that didn't.
+            # errored). If the GitHub release for $LATEST_TAG is missing
+            # any expected archive, checksum sidecar, or asset manifest,
+            # force DRIFT=true so the publish job re-fires.
+            # release_ship.sh's per-crate publish is already idempotent
+            # — it skips crates already on crates.io — so re-running is a
+            # no-op for crates that landed and a recovery for those that
+            # didn't.
             if [[ "$EVENT_NAME" == "push" ]]; then
-              # Distinguish a genuine low asset count (recover) from a transient
-              # or eventually-consistent query failure. The old `|| echo 0`
-              # collapsed "gh could not answer" into "0 assets", forcing
+              # Distinguish a genuine incomplete asset set (recover) from a
+              # transient or eventually-consistent query failure. The old
+              # `|| echo 0` collapsed "gh could not answer" into "0 assets", forcing
               # DRIFT=true → a doomed `release_ship.sh --finalize` from main HEAD
               # when the tag is an older (squash-orphaned) commit. That produced
               # a spurious red X on a routine main push right after the tag-first
               # publish (harn#2964: a `gh release view` raced the release becoming
-              # visible). Retry briefly; only force a re-publish on a *confirmed*
-              # low count, and on a persistent query failure assume the tag-first
+              # visible). Retry briefly; only force a re-publish on a confirmed
+              # missing asset, and on a persistent query failure assume the tag-first
               # publish already shipped (crates.io is the source of truth) and skip.
-              ASSET_COUNT=""
+              RELEASE_ASSETS="__query_failed__"
               for _ in 1 2 3; do
-                if ASSET_COUNT="$(gh release view "$LATEST_TAG" --json assets --jq '.assets | length' 2>/dev/null)"; then
+                if RELEASE_ASSETS="$(gh release view "$LATEST_TAG" --json assets --jq '.assets[].name' 2>/dev/null)"; then
                   break
                 fi
-                ASSET_COUNT=""
+                RELEASE_ASSETS="__query_failed__"
                 sleep 5
               done
-              if [[ -z "$ASSET_COUNT" ]]; then
+              if [[ "$RELEASE_ASSETS" == "__query_failed__" ]]; then
                 echo "::notice::Could not read $LATEST_TAG release assets after retries; assuming the tag-first publish already shipped and skipping (avoids a spurious finalize from main HEAD)."
-              elif (( ASSET_COUNT >= 5 )); then
-                echo "::notice::$LATEST_TAG already published — $ASSET_COUNT assets on https://github.com/$GITHUB_REPOSITORY/releases/tag/$LATEST_TAG. Publish job will skip; this is the intended behavior under tag-first publishing."
               else
-                DRIFT=true
-                echo "::warning::$LATEST_TAG only has $ASSET_COUNT release assets (expected ≥5). Treating as drift and re-publishing from $LATEST_TAG to recover; release_ship.sh's per-crate publish is idempotent."
+                EXPECTED_ASSETS=(
+                  "harn-aarch64-apple-darwin.tar.gz"
+                  "harn-aarch64-unknown-linux-gnu.tar.gz"
+                  "harn-x86_64-apple-darwin.tar.gz"
+                  "harn-x86_64-pc-windows-msvc.zip"
+                  "harn-x86_64-unknown-linux-gnu.tar.gz"
+                  "SHA256SUMS"
+                  "release-assets.json"
+                )
+                MISSING_ASSETS=()
+                for ASSET in "${EXPECTED_ASSETS[@]}"; do
+                  if ! grep -Fxq "$ASSET" <<<"$RELEASE_ASSETS"; then
+                    MISSING_ASSETS+=("$ASSET")
+                  fi
+                done
+
+                if (( ${#MISSING_ASSETS[@]} == 0 )); then
+                  echo "::notice::$LATEST_TAG already published with all expected assets on https://github.com/$GITHUB_REPOSITORY/releases/tag/$LATEST_TAG. Publish job will skip; this is the intended behavior under tag-first publishing."
+                else
+                  DRIFT=true
+                  printf '::warning::%s is missing release assets: %s. Treating as drift and re-publishing from %s to recover; release_ship.sh'\''s per-crate publish is idempotent.\n' "$LATEST_TAG" "${MISSING_ASSETS[*]}" "$LATEST_TAG"
+                fi
               fi
             else
               echo "::notice::Cargo.toml=$CARGO_VERSION matches latest tag $LATEST_TAG → no-op."
