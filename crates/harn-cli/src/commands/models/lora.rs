@@ -70,6 +70,7 @@ fn inspect_report(args: &ModelsLoraInspectArgs) -> Result<LoraInspectReport, Str
         .unwrap_or_else(|| resolved.provider.clone());
     let catalog = harn_vm::llm_config::model_catalog_entry(&resolved.id);
     let capabilities = harn_vm::llm::capabilities::lookup(&provider, &resolved.id);
+    let tool_format = harn_vm::llm_config::default_tool_format(&resolved.id, &provider);
     let adapter = inspect_adapter(&args.adapter, args.name.as_deref())?;
     let local_runtime =
         harn_vm::llm_config::provider_config(&provider).and_then(|provider| provider.local_runtime);
@@ -129,7 +130,7 @@ fn inspect_report(args: &ModelsLoraInspectArgs) -> Result<LoraInspectReport, Str
             id: resolved.id.clone(),
             provider,
             resolved_alias: resolved.alias,
-            tool_format: resolved.tool_format,
+            tool_format,
             tier: resolved.tier,
             family: resolved.family,
             lineage: resolved.lineage,
@@ -407,6 +408,8 @@ mod tests {
         assert!(report.ok, "{:?}", report.warnings);
         assert_eq!(report.adapter.peft_type.as_deref(), Some("LORA"));
         assert_eq!(report.adapter.rank, Some(16));
+        assert_eq!(report.base.tool_format, "json");
+        assert!(!report.tool_calling.native_tools);
         assert_eq!(
             report.compatibility.base_model_match,
             BaseModelMatch::Suffix
