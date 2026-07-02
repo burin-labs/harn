@@ -5,8 +5,9 @@ use crate::agent_events::AgentEvent;
 use super::{
     agent_turn_made_no_llm_call, assistant_message_from_llm_result, build_agent_event,
     canonical_acp_stop_reason, canonical_provider_stop_reason, initial_user_content,
-    is_length_truncation, last_assistant_text, text_has_tool_call_prefix,
-    tool_result_message_for_provider, truncated_tool_call_should_continue, vm_to_json,
+    is_length_truncation, last_assistant_text, synthesize_orphan_tool_results,
+    text_has_tool_call_prefix, tool_result_message_for_provider,
+    truncated_tool_call_should_continue, vm_to_json,
 };
 
 #[test]
@@ -253,6 +254,229 @@ fn tool_results_replay_with_provider_appropriate_ids() {
     assert_eq!(text_mode["role"], "user");
     assert!(text_mode.get("tool_call_id").is_none());
     assert!(text_mode.get("tool_use_id").is_none());
+}
+
+/// Anthropic's Messages API rejects (non-retryable HTTP 400) any request in
+/// which an assistant `tool_use` block is not immediately followed by a
+/// `tool_result` carrying the same id. This mirrors that wire check over the
+/// persisted transcript so the repro tests assert the exact failure the run hit.
+/// Returns the ids of orphaned `tool_use` blocks (empty = provider-valid).
+fn orphaned_tool_use_ids(messages: &[serde_json::Value]) -> Vec<String> {
+    let mut orphans = Vec::new();
+    for (idx, message) in messages.iter().enumerate() {
+        if message.get("role").and_then(|v| v.as_str()) != Some("assistant") {
+            continue;
+        }
+        // Collect this assistant turn's native tool-call ids (Anthropic content
+        // blocks + OpenAI top-level tool_calls).
+        let mut ids: Vec<String> = Vec::new();
+        if let Some(blocks) = message.get("content").and_then(|v| v.as_array()) {
+            for block in blocks {
+                if block.get("type").and_then(|v| v.as_str()) == Some("tool_use") {
+                    if let Some(id) = block.get("id").and_then(|v| v.as_str()) {
+                        ids.push(id.to_string());
+                    }
+                }
+            }
+        }
+        if let Some(calls) = message.get("tool_calls").and_then(|v| v.as_array()) {
+            for call in calls {
+                if let Some(id) = call.get("id").and_then(|v| v.as_str()) {
+                    ids.push(id.to_string());
+                }
+            }
+        }
+        if ids.is_empty() {
+            continue;
+        }
+        // The paired result must be the IMMEDIATELY following message(s).
+        let next = messages.get(idx + 1);
+        let paired_id = next.and_then(|m| {
+            let role = m.get("role").and_then(|v| v.as_str());
+            if role == Some("tool_result") || role == Some("tool") {
+                m.get("tool_use_id")
+                    .or_else(|| m.get("tool_call_id"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+            } else {
+                None
+            }
+        });
+        for id in ids {
+            if paired_id.as_deref() != Some(id.as_str()) {
+                orphans.push(id);
+            }
+        }
+    }
+    orphans
+}
+
+/// REPRO of the escalation-orphan HTTP 400. When a text-format primary escalates
+/// to a native (Anthropic) model, the escalated model emits a real `tool_use`
+/// block; the loop then declines to dispatch it (native-fallback reject /
+/// no-progress inject) and appends a bare user-feedback message. Before the fix
+/// that left the `tool_use` orphaned -> Anthropic 400 -> run death. This proves
+/// the orphan exists on the raw record+inject sequence and that
+/// `synthesize_orphan_tool_results` (the shared repair the loop now calls before
+/// every such inject) restores pairing.
+#[test]
+fn escalation_orphaned_tool_use_is_repaired_before_feedback_inject() {
+    // The escalated Anthropic turn, persisted exactly as the loop records it.
+    let llm_result = crate::stdlib::json_to_vm_value(&json!({
+        "provider": "anthropic",
+        "model": "claude-opus-4-8",
+        "text": "I'll apply the fix.",
+        "_agent_tool_format": "native",
+        "native_tool_calls": [{
+            "id": "tc_0",
+            "name": "edit",
+            "arguments": {"path": "auth.go", "body": "package auth"}
+        }],
+    }));
+    let assistant = vm_to_json(&assistant_message_from_llm_result(&llm_result));
+    // Sanity: this really did persist as an Anthropic tool_use block.
+    assert_eq!(assistant["content"][1]["type"], "tool_use");
+    assert_eq!(assistant["content"][1]["id"], "tc_0");
+
+    // The corrective feedback the loop would have injected as a bare user turn.
+    let feedback = "Emit your tool call as a native tool_use block, not text.";
+    let feedback_msg = json!({"role": "user", "content": feedback});
+
+    // BEFORE the fix: assistant(tool_use) immediately followed by the user
+    // feedback message -> the tool_use is orphaned -> provider 400.
+    let orphaned_sequence = vec![
+        json!({"role": "user", "content": "fix auth"}),
+        assistant.clone(),
+        feedback_msg.clone(),
+    ];
+    assert_eq!(
+        orphaned_tool_use_ids(&orphaned_sequence),
+        vec!["tc_0".to_string()],
+        "repro precondition: the escalation tool_use must be orphaned pre-fix"
+    );
+
+    // AFTER the fix: the shared repair synthesizes a tool_result for the orphan
+    // (carrying the same corrective text), THEN the feedback lands.
+    let assistant_vm = crate::stdlib::json_to_vm_value(&assistant);
+    let synthetic = synthesize_orphan_tool_results(
+        &assistant_vm,
+        "anthropic",
+        "claude-opus-4-8",
+        "native",
+        feedback,
+        &std::collections::BTreeSet::new(),
+    );
+    assert_eq!(synthetic.len(), 1, "one orphan must be repaired");
+    let synthetic_json: Vec<serde_json::Value> = synthetic.iter().map(vm_to_json).collect();
+    assert_eq!(synthetic_json[0]["role"], "tool_result");
+    assert_eq!(synthetic_json[0]["tool_use_id"], "tc_0");
+    assert_eq!(synthetic_json[0]["content"], feedback);
+
+    let repaired_sequence = vec![
+        json!({"role": "user", "content": "fix auth"}),
+        assistant,
+        synthetic_json[0].clone(),
+        feedback_msg,
+    ];
+    assert!(
+        orphaned_tool_use_ids(&repaired_sequence).is_empty(),
+        "after repair the tool_use must be paired -> provider-valid"
+    );
+}
+
+/// The repair covers the OpenAI-compatible wire shape too (top-level
+/// `tool_calls`, `tool`/`tool_call_id` result role) — escalation targets aren't
+/// only Anthropic.
+#[test]
+fn orphan_repair_covers_openai_wire_shape() {
+    let llm_result = crate::stdlib::json_to_vm_value(&json!({
+        "provider": "local",
+        "model": "Qwen/Qwen3.6-35B-A3B",
+        "text": "",
+        "_agent_tool_format": "native",
+        "native_tool_calls": [{
+            "id": "call_9",
+            "name": "read",
+            "arguments": {"path": "main.rs"}
+        }],
+    }));
+    let assistant = assistant_message_from_llm_result(&llm_result);
+    let synthetic = synthesize_orphan_tool_results(
+        &assistant,
+        "local",
+        "Qwen/Qwen3.6-35B-A3B",
+        "native",
+        "nudge",
+        &std::collections::BTreeSet::new(),
+    );
+    assert_eq!(synthetic.len(), 1);
+    let msg = vm_to_json(&synthetic[0]);
+    assert_eq!(msg["role"], "tool");
+    assert_eq!(msg["name"], "read");
+    assert_eq!(msg["tool_call_id"], "call_9");
+    assert_eq!(msg["content"], "nudge");
+}
+
+/// REGRESSION GUARD: a homogeneous text-format run keeps its tool calls inline
+/// in `content` (a plain string), so the assistant message carries NO structured
+/// tool_use block. The repair must synthesize nothing — proving passing runs are
+/// untouched.
+#[test]
+fn orphan_repair_is_noop_for_text_format_runs() {
+    let llm_result = crate::stdlib::json_to_vm_value(&json!({
+        "provider": "moonshot",
+        "model": "moonshot/kimi-k2.7-code-highspeed",
+        "text": "read({ path: \"main.rs\" })",
+        "_agent_tool_format": "text",
+        "native_tool_calls": [],
+        "tool_calls": [{"id": "tc_0", "name": "read", "arguments": {"path": "main.rs"}}],
+    }));
+    let assistant = assistant_message_from_llm_result(&llm_result);
+    // Precondition: text-format history keeps the call inline, no structured block.
+    let assistant_json = vm_to_json(&assistant);
+    assert!(assistant_json.get("tool_calls").is_none());
+    assert!(assistant_json["content"].is_string());
+
+    let synthetic = synthesize_orphan_tool_results(
+        &assistant,
+        "moonshot",
+        "moonshot/kimi-k2.7-code-highspeed",
+        "text",
+        "nudge",
+        &std::collections::BTreeSet::new(),
+    );
+    assert!(
+        synthetic.is_empty(),
+        "text-format runs carry no structured tool_use; nothing to repair"
+    );
+}
+
+/// REGRESSION GUARD: a block whose id ALREADY has a paired tool_result (the loop
+/// dispatched it normally) must not get a second, synthetic result.
+#[test]
+fn orphan_repair_skips_already_paired_blocks() {
+    let llm_result = crate::stdlib::json_to_vm_value(&json!({
+        "provider": "anthropic",
+        "model": "claude-opus-4-8",
+        "text": "",
+        "_agent_tool_format": "native",
+        "native_tool_calls": [{"id": "tc_0", "name": "read", "arguments": {"path": "a"}}],
+    }));
+    let assistant = assistant_message_from_llm_result(&llm_result);
+    let mut paired = std::collections::BTreeSet::new();
+    paired.insert("tc_0".to_string());
+    let synthetic = synthesize_orphan_tool_results(
+        &assistant,
+        "anthropic",
+        "claude-opus-4-8",
+        "native",
+        "nudge",
+        &paired,
+    );
+    assert!(
+        synthetic.is_empty(),
+        "an already-dispatched block must not be double-paired"
+    );
 }
 
 #[test]
