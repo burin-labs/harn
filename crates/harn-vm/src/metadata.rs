@@ -25,8 +25,8 @@ const NAMESPACE_ENTRIES_FILE: &str = "entries.json";
 /// directory entries (inherited via [`MetadataState::resolve`]) and file
 /// entries (exact-path only via [`MetadataState::file_namespace`]).
 #[derive(Clone, Default)]
-struct PathMetadata {
-    namespaces: BTreeMap<Namespace, BTreeMap<FieldKey, serde_json::Value>>,
+pub(crate) struct PathMetadata {
+    pub(crate) namespaces: BTreeMap<Namespace, BTreeMap<FieldKey, serde_json::Value>>,
 }
 
 type DirectoryMetadata = PathMetadata;
@@ -61,7 +61,7 @@ impl FilesystemMetadataBackend {
 
 /// The full metadata store: directory entries (hierarchical) plus file
 /// entries (exact-path).
-struct MetadataState {
+pub(crate) struct MetadataState {
     entries: BTreeMap<String, PathMetadata>,
     files: BTreeMap<String, PathMetadata>,
     base_dir: PathBuf,
@@ -71,7 +71,7 @@ struct MetadataState {
 }
 
 impl MetadataState {
-    fn new(base_dir: &Path) -> Self {
+    pub(crate) fn new(base_dir: &Path) -> Self {
         Self {
             entries: BTreeMap::new(),
             files: BTreeMap::new(),
@@ -127,7 +127,7 @@ impl MetadataState {
     }
 
     /// Get a specific namespace for a resolved directory.
-    fn get_namespace(
+    pub(crate) fn get_namespace(
         &mut self,
         directory: &str,
         namespace: &str,
@@ -136,7 +136,7 @@ impl MetadataState {
         resolved.namespaces.get(namespace).cloned()
     }
 
-    fn local_directory(&mut self, directory: &str) -> DirectoryMetadata {
+    pub(crate) fn local_directory(&mut self, directory: &str) -> DirectoryMetadata {
         self.ensure_loaded();
         self.entries.get(directory).cloned().unwrap_or_default()
     }
@@ -165,7 +165,7 @@ impl MetadataState {
         lineage
     }
 
-    fn origin_directory(
+    pub(crate) fn origin_directory(
         &mut self,
         directory: &str,
         namespace: &str,
@@ -214,6 +214,22 @@ impl MetadataState {
         self.dirty = true;
     }
 
+    /// Replace a namespace at a directory wholesale. Unlike
+    /// [`Self::set_namespace`] (which merges per key), keys absent from
+    /// `data` are dropped — required for record-set writers whose payload
+    /// is one atomic document, not a key-value accumulation.
+    pub(crate) fn replace_namespace(
+        &mut self,
+        directory: &str,
+        namespace: &str,
+        data: BTreeMap<FieldKey, serde_json::Value>,
+    ) {
+        self.ensure_loaded();
+        let meta = self.entries.entry(directory.to_string()).or_default();
+        meta.namespaces.insert(namespace.to_string(), data);
+        self.dirty = true;
+    }
+
     /// Look up file metadata at an exact normalized path. File entries do
     /// not inherit from parent directories.
     fn file_namespace(
@@ -249,7 +265,7 @@ impl MetadataState {
     }
 
     /// Save all metadata back to sharded JSON files.
-    fn save(&mut self) -> Result<(), String> {
+    pub(crate) fn save(&mut self) -> Result<(), String> {
         if !self.dirty {
             return Ok(());
         }
@@ -366,7 +382,7 @@ impl MetadataBackend for FilesystemMetadataBackend {
 }
 
 /// ISO 8601 timestamp (e.g. `2026-03-29T14:00:00Z`) without a chrono dependency.
-fn chrono_now_iso() -> String {
+pub(crate) fn chrono_now_iso() -> String {
     let now = std::time::SystemTime::now();
     let secs = now
         .duration_since(std::time::UNIX_EPOCH)
@@ -530,7 +546,7 @@ fn namespace_path_component(namespace: &str) -> String {
 
 use crate::value::vm_to_storage_json as vm_to_json;
 
-fn json_to_vm(jv: &serde_json::Value) -> VmValue {
+pub(crate) fn json_to_vm(jv: &serde_json::Value) -> VmValue {
     match jv {
         serde_json::Value::Null => VmValue::Nil,
         serde_json::Value::Bool(b) => VmValue::Bool(*b),
@@ -724,6 +740,12 @@ pub fn register_metadata_builtins(vm: &mut Vm, base_dir: &Path) {
     for def in MODULE_BUILTINS {
         vm.register_builtin_def(def);
     }
+    // The verification profile store persists through this metadata
+    // state, so its builtins register (and become available) exactly
+    // when the metadata surface does.
+    for def in crate::verification::MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
 }
 
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
@@ -752,7 +774,7 @@ thread_local! {
     static METADATA_STATE: RefCell<Option<MetadataState>> = const { RefCell::new(None) };
 }
 
-fn with_state<R>(
+pub(crate) fn with_state<R>(
     fn_name: &'static str,
     f: impl FnOnce(&mut MetadataState) -> Result<R, VmError>,
 ) -> Result<R, VmError> {

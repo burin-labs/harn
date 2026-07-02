@@ -569,6 +569,26 @@ pub(crate) const BUILTINS: &[(&str, &str)] = &[
         "path_metadata_entries(namespace?, opts?) -> list",
     ),
     (
+        "verification_profiles_get",
+        "verification_profiles_get(dir?) -> dict",
+    ),
+    (
+        "verification_profiles_set",
+        "verification_profiles_set(record_set, dir?) -> nil",
+    ),
+    (
+        "verification_profile_resolve",
+        "verification_profile_resolve(query, dir?) -> dict",
+    ),
+    (
+        "verification_profile_record_run",
+        "verification_profile_record_run(row_id, observation, dir?) -> dict",
+    ),
+    (
+        "verification_diagnostic_classify",
+        "verification_diagnostic_classify(envelope, current_hashes) -> dict",
+    ),
+    (
         "compute_content_hash",
         "compute_content_hash(dir) -> string",
     ),
@@ -970,6 +990,11 @@ pub(crate) fn builtin_doc(name: &str) -> Option<String> {
         "path_metadata_get" => "**path_metadata_get(path, namespace?, opts?)** → dict | nil — Read metadata at an exact path. Files don't inherit; pass `{kind: \"dir\"}` for hierarchical directory resolution.",
         "path_metadata_set" => "**path_metadata_set(path, namespace, data, opts?)** → nil — Write metadata at an exact path. Defaults to `{kind: \"file\"}`; pass `{kind: \"dir\"}` to mirror `metadata_set`.",
         "path_metadata_entries" => "**path_metadata_entries(namespace?, opts?)** → list — List stored file entries (or `{kind: \"dir\"}`/`{kind: \"all\"}`) keyed by normalized relative path.",
+        "verification_profiles_get" => "**verification_profiles_get(dir?)** → dict | nil — Read the verification profile record set (`schemaVersion`, `rows`, unknown fields preserved) with hierarchical directory resolution.",
+        "verification_profiles_set" => "**verification_profiles_set(record_set, dir?)** → nil — Replace and persist the verification profile record set. Validates `schemaVersion`/`rows`; round-trips unknown fields.",
+        "verification_profile_resolve" => "**verification_profile_resolve(query, dir?)** → dict | nil — Most-specific matching profile row for `{repo?, path?, language?, task?}` (task > language > dir glob > repo).",
+        "verification_profile_record_run" => "**verification_profile_record_run(row_id, observation, dir?)** → dict | nil — Fold `{durationMs?, warm?, at?, exit?, failureSignature?, snapshot?}` into a row's timings/lastRun and persist.",
+        "verification_diagnostic_classify" => "**verification_diagnostic_classify(envelope, current_hashes)** → dict — Classify a diagnostic `{rung, rowId?, at, snapshot}` as `bound_fresh`/`bound_stale`/`unbound`; only `bound_fresh` may feed gates.",
         "metadata_save" => "**metadata_save()** → nil — Flush metadata to .harn/metadata/ files",
         "metadata_stale" => "**metadata_stale(project)** → dict — Check for stale metadata: {any_stale, tier1, tier2}",
         "metadata_status" => "**metadata_status(namespace?)** → dict — Summarize metadata directories, namespaces, missing hashes, and stale state",

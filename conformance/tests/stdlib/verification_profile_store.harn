@@ -1,0 +1,65 @@
+pipeline test(task) {
+  // Empty store: reads and resolution return nil without erroring.
+  assert_eq(verification_profiles_get(), nil)
+  assert_eq(verification_profile_resolve({path: "src/a.tx"}), nil)
+  // Selector values are data: "toolchainx" is a synthetic language that
+  // exists only in these rows, so nothing below can lean on a hardcoded
+  // language list.
+  verification_profiles_set(
+    {
+      vendorExt: {keep: true},
+      rows: [
+        {id: "any/full", scope: {}, check: {rung: "R4"}, futureField: "kept"},
+        {id: "tx/file", scope: {dir: "src/**", language: "toolchainx"}, check: {rung: "R2"}},
+        {id: "tx/edit", scope: {language: "toolchainx", task: "post_edit"}, check: {rung: "R0"}},
+      ],
+    },
+  )
+  let stored = verification_profiles_get()
+  // schemaVersion is stamped when omitted; unknown fields round-trip.
+  assert_eq(stored.schemaVersion, 1)
+  assert_eq(stored.vendorExt.keep, true)
+  assert_eq(len(stored.rows), 3)
+  assert_eq(stored.rows[0].futureField, "kept")
+  // Most-specific wins: task kind outranks dir glob + language.
+  let edit_row = verification_profile_resolve({path: "src/a.tx", language: "toolchainx", task: "post_edit"})
+  assert_eq(edit_row.id, "tx/edit")
+  let file_row = verification_profile_resolve({path: "src/a.tx", language: "toolchainx"})
+  assert_eq(file_row.id, "tx/file")
+  // The unscoped row is the fallback for everything else.
+  let fallback = verification_profile_resolve({path: "docs/readme.md"})
+  assert_eq(fallback.id, "any/full")
+  // One observation updates timing percentiles and the lastRun binding.
+  let updated = verification_profile_record_run(
+    "tx/file",
+    {
+      durationMs: 120,
+      warm: true,
+      exit: 1,
+      failureSignature: "expected ';' after statement",
+      snapshot: {"src/a.tx": "hash1"},
+    },
+  )
+  assert_eq(updated.timings.warmMs.p50, 120)
+  assert_eq(updated.timings.samples, 1)
+  assert_eq(updated.lastRun.exit, 1)
+  assert_eq(updated.check.rung, "R2")
+  // Unknown row id: nil, not an error.
+  assert_eq(verification_profile_record_run("missing", {durationMs: 5}), nil)
+  // Stale-diagnostic contract: a bound diagnostic is fresh only while the
+  // snapshot still matches the current hashes.
+  let envelope = {rung: "R2", rowId: "tx/file", at: updated.lastRun.at, snapshot: {"src/a.tx": "hash1"}}
+  let fresh = verification_diagnostic_classify(envelope, {"src/a.tx": "hash1"})
+  assert_eq(fresh.status, "bound_fresh")
+  assert_eq(fresh.feedsGates, true)
+  let stale = verification_diagnostic_classify(envelope, {"src/a.tx": "hash2"})
+  assert_eq(stale.status, "bound_stale")
+  assert_eq(stale.feedsGates, false)
+  assert_eq(stale.staleFiles[0], "src/a.tx")
+  // Unbound diagnostics are advisory-only and never feed gates.
+  let unbound = verification_diagnostic_classify({rung: "R2"}, {})
+  assert_eq(unbound.status, "unbound")
+  assert_eq(unbound.advisory, true)
+  assert_eq(unbound.feedsGates, false)
+  log("verification profile store ok")
+}

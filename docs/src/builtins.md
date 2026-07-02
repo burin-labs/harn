@@ -2155,6 +2155,32 @@ without a `files` section load unchanged.
 | `path_metadata_entries(namespace?, opts?)` | namespace: string, opts: `{kind?: "file"\|"dir"\|"all"}` | list | List stored entries keyed by normalized relative path. Defaults to files only. |
 | `scan_directory(path?, pattern_or_options?, options?)` | path: string, pattern: string or options: dict | list | Enumerate files and directories with optional `pattern`, `max_depth`, `include_hidden`, `include_dirs`, `include_files` |
 
+## Verification profiles
+
+A verification profile record set is a versioned (`schemaVersion: 1`) list of
+check rows keyed by scope selectors (`scope.repo` exact, `scope.dir` glob,
+`scope.language` case-insensitive, `scope.task` exact), resolved
+most-specific-wins with task > language > dir glob > repo. Rows carry the
+check command template, timing percentiles, the last run's outcome with its
+file→hash snapshot binding, toolchain identity, trust level, and resource
+class — all as data; no language or toolchain is hardcoded. Unknown fields
+round-trip untouched. The set persists through the project metadata store
+under the `verification-profiles` namespace.
+
+The stale-diagnostic contract classifies a diagnostic envelope
+`{rung, rowId?, at, snapshot}` against current file hashes: `bound_fresh`
+(may feed no-progress detectors, escalation streaks, verifier signatures,
+and completion gates), `bound_stale` (an edit superseded the snapshot;
+advisory only), or `unbound` (no binding; advisory only).
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `verification_profiles_get(dir?)` | dir: string | dict \| nil | Read the record set with hierarchical directory resolution |
+| `verification_profiles_set(record_set, dir?)` | record_set: dict, dir: string | nil | Replace and persist the record set; validates `schemaVersion`/`rows`, preserves unknown fields |
+| `verification_profile_resolve(query, dir?)` | query: `{repo?, path?, language?, task?}`, dir: string | dict \| nil | Most-specific matching row, or nil when none applies |
+| `verification_profile_record_run(row_id, observation, dir?)` | row_id: string, observation: `{durationMs?, warm?, at?, exit?, failureSignature?, snapshot?}`, dir: string | dict \| nil | Fold one run into a row's timing percentiles and `lastRun`, persist, return the updated row |
+| `verification_diagnostic_classify(envelope, current_hashes)` | envelope: dict \| nil, current_hashes: dict | dict | Classify the envelope: `{status, staleFiles, feedsGates, advisory, reason, rung?, rowId?}` |
+
 ## Project introspection
 
 | Function | Parameters | Returns | Description |
