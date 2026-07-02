@@ -336,7 +336,10 @@ mod tests {
 
     #[test]
     fn deadline_trips_requested() {
-        let _guard = install(None, Some(Instant::now() - Duration::from_millis(1)));
+        let expired = Instant::now()
+            .checked_sub(Duration::from_millis(1))
+            .expect("monotonic clock supports a 1ms test lookback");
+        let _guard = install(None, Some(expired));
         assert!(requested());
     }
 
