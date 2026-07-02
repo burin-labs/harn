@@ -29,9 +29,9 @@ use std::collections::BTreeMap;
 use std::sync::OnceLock;
 use std::time::Instant;
 
-use crate::llm::helpers::vm_value_to_json;
 use crate::stdlib::json_to_vm_value;
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::options::{json_object_from_value, string_from_value, ErrorKind};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -81,8 +81,13 @@ pub(crate) fn register_timing_builtins(vm: &mut Vm) {
     category = "timing"
 )]
 fn timing_start_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let name = string_arg(args.first(), "__timing_start", "name")?;
-    let attrs = object_arg(args.get(1), "__timing_start", "attributes")?;
+    let name = string_from_value(args.first(), "__timing_start", "name", ErrorKind::Runtime)?;
+    let attrs = json_object_from_value(
+        args.get(1),
+        "__timing_start",
+        "attributes",
+        ErrorKind::Runtime,
+    )?;
     let attrs_btree = json_map_to_btree(&attrs);
     let (span_id, trace_id, parent_id, start_unix_ms) =
         crate::tracing::span_start_user_timing(name.clone(), attrs_btree);
@@ -125,8 +130,13 @@ fn timing_now_monotonic_ms_impl(_args: &[VmValue], _out: &mut String) -> Result<
 )]
 fn timing_event_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let span_id = handle_span_id(args.first(), "__timing_event")?;
-    let name = string_arg(args.get(1), "__timing_event", "name")?;
-    let attrs = object_arg(args.get(2), "__timing_event", "attributes")?;
+    let name = string_from_value(args.get(1), "__timing_event", "name", ErrorKind::Runtime)?;
+    let attrs = json_object_from_value(
+        args.get(2),
+        "__timing_event",
+        "attributes",
+        ErrorKind::Runtime,
+    )?;
     let attached = crate::tracing::span_record_event(span_id, name, json_map_to_btree(&attrs));
     Ok(VmValue::Bool(attached))
 }
@@ -138,7 +148,12 @@ fn timing_event_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 fn timing_end_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let span_id = handle_span_id(args.first(), "__timing_end")?;
     let handle_trace_id = handle_trace_id(args.first());
-    let final_attrs = object_arg(args.get(1), "__timing_end", "final_attributes")?;
+    let final_attrs = json_object_from_value(
+        args.get(1),
+        "__timing_end",
+        "final_attributes",
+        ErrorKind::Runtime,
+    )?;
 
     // Idempotency: if this handle was already closed under the same
     // trace, return the cached result instead of mutating the span
@@ -281,38 +296,6 @@ fn attributes_from_metadata(metadata: &BTreeMap<String, serde_json::Value>) -> s
             .map(|(key, value)| (key.clone(), value.clone()))
             .collect(),
     )
-}
-
-fn string_arg(value: Option<&VmValue>, builtin: &str, field: &str) -> Result<String, VmError> {
-    match value {
-        Some(VmValue::String(raw)) => Ok(raw.to_string()),
-        Some(other) => Err(VmError::Runtime(format!(
-            "{builtin}: {field} must be a string, got {}",
-            other.type_name()
-        ))),
-        None => Err(VmError::Runtime(format!("{builtin}: missing {field}"))),
-    }
-}
-
-fn object_arg(
-    value: Option<&VmValue>,
-    builtin: &str,
-    field: &str,
-) -> Result<serde_json::Map<String, serde_json::Value>, VmError> {
-    match value {
-        None | Some(VmValue::Nil) => Ok(serde_json::Map::new()),
-        Some(VmValue::Dict(_)) => {
-            let json = vm_value_to_json(value.expect("checked above"));
-            match json {
-                serde_json::Value::Object(map) => Ok(map),
-                _ => unreachable!("Dict converts to Object"),
-            }
-        }
-        Some(other) => Err(VmError::Runtime(format!(
-            "{builtin}: {field} must be a dict, got {}",
-            other.type_name()
-        ))),
-    }
 }
 
 fn handle_trace_id(value: Option<&VmValue>) -> Option<String> {

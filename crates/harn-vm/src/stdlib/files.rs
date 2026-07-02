@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use sha2::{Digest, Sha256};
 
+use crate::stdlib::options::{expect_string_arg, ErrorKind};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -24,21 +25,6 @@ static FILE_UPLOAD_CACHE: LazyLock<Mutex<BTreeMap<UploadCacheKey, String>>> =
 
 fn runtime_error(message: impl Into<String>) -> VmError {
     VmError::Runtime(message.into())
-}
-
-fn expect_string(args: &[VmValue], index: usize, builtin: &str) -> Result<String, VmError> {
-    match args.get(index) {
-        Some(VmValue::String(value)) => Ok(value.to_string()),
-        Some(other) => Err(runtime_error(format!(
-            "{builtin}: expected string at argument {}, got {}",
-            index + 1,
-            other.type_name()
-        ))),
-        None => Err(runtime_error(format!(
-            "{builtin}: missing argument {}",
-            index + 1
-        ))),
-    }
 }
 
 fn resolve_upload_path(path: &str) -> PathBuf {
@@ -299,8 +285,9 @@ async fn upload_file(path: String, provider: String) -> Result<String, VmError> 
 
 pub(crate) fn register_file_builtins(vm: &mut Vm) {
     vm.register_async_builtin("__files_upload", |_ctx, args| async move {
-        let path = expect_string(&args, 0, "__files_upload")?;
-        let provider = expect_string(&args, 1, "__files_upload")?;
+        let path = expect_string_arg(&args, 0, "__files_upload", ErrorKind::Runtime)?.to_string();
+        let provider =
+            expect_string_arg(&args, 1, "__files_upload", ErrorKind::Runtime)?.to_string();
         let file_id = upload_file(path, provider).await?;
         Ok(VmValue::String(arcstr::ArcStr::from(file_id)))
     });

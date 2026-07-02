@@ -35,12 +35,11 @@
 //! opt-in model keeps the deterministic-tool surface sandbox-friendly.
 
 use harn_vm::VmDictExt;
-use std::sync::Arc;
 
 use harn_vm::VmValue;
 
 use crate::error::HostlibError;
-use crate::registry::{BuiltinRegistry, HostlibCapability, RegisteredBuiltin, SyncHandler};
+use crate::registry::{BuiltinRegistry, HostlibCapability};
 
 pub(crate) mod args;
 mod cancel_handle;
@@ -80,83 +79,83 @@ impl HostlibCapability for ToolsCapability {
         // tool handles are killed when the agent-loop session ends.
         long_running::register_cleanup_hook();
 
-        register_gated(registry, "hostlib_tools_search", "search", search::run);
-        register_gated(
-            registry,
+        registry.register_gated_fn("tools", "hostlib_tools_search", "search", search::run);
+        registry.register_gated_fn(
+            "tools",
             "hostlib_tools_read_file",
             "read_file",
             file_io::read_file,
         );
-        register_gated(
-            registry,
+        registry.register_gated_fn(
+            "tools",
             "hostlib_tools_write_file",
             "write_file",
             file_io::write_file,
         );
-        register_gated(
-            registry,
+        registry.register_gated_fn(
+            "tools",
             "hostlib_tools_delete_file",
             "delete_file",
             file_io::delete_file,
         );
-        register_gated(
-            registry,
+        registry.register_gated_fn(
+            "tools",
             "hostlib_tools_list_directory",
             "list_directory",
             file_io::list_directory,
         );
-        register_gated(
-            registry,
+        registry.register_gated_fn(
+            "tools",
             "hostlib_tools_get_file_outline",
             "get_file_outline",
             outline::run,
         );
-        register_gated(registry, "hostlib_tools_git", "git", git::run);
+        registry.register_gated_fn("tools", "hostlib_tools_git", "git", git::run);
 
-        register_gated(
-            registry,
+        registry.register_gated_fn(
+            "tools",
             "hostlib_tools_run_command",
             "run_command",
             run_command::handle,
         );
-        register_gated(
-            registry,
+        registry.register_gated_fn(
+            "tools",
             read_command_output::NAME,
             "read_command_output",
             read_command_output::handle,
         );
-        register_gated(
-            registry,
+        registry.register_gated_fn(
+            "tools",
             wait_command::NAME,
             "wait_command",
             wait_command::handle,
         );
-        register_gated(
-            registry,
+        registry.register_gated_fn(
+            "tools",
             "hostlib_tools_run_test",
             "run_test",
             run_test::handle,
         );
-        register_gated(
-            registry,
+        registry.register_gated_fn(
+            "tools",
             "hostlib_tools_run_build_command",
             "run_build_command",
             run_build_command::handle,
         );
-        register_gated(
-            registry,
+        registry.register_gated_fn(
+            "tools",
             "hostlib_tools_inspect_test_results",
             "inspect_test_results",
             inspect_test_results::handle,
         );
-        register_gated(
-            registry,
+        registry.register_gated_fn(
+            "tools",
             "hostlib_tools_manage_packages",
             "manage_packages",
             manage_packages::handle,
         );
-        register_gated(
-            registry,
+        registry.register_gated_fn(
+            "tools",
             cancel_handle::NAME,
             "cancel_handle",
             cancel_handle::handle,
@@ -164,30 +163,8 @@ impl HostlibCapability for ToolsCapability {
 
         // The opt-in builtin lives in the `tools` module so embedders that
         // don't compose `ToolsCapability` don't accidentally expose it.
-        let handler: SyncHandler = Arc::new(handle_enable);
-        registry.register(RegisteredBuiltin {
-            name: "hostlib_enable",
-            module: "tools",
-            method: "enable",
-            handler,
-        });
+        registry.register_fn("tools", "hostlib_enable", "enable", handle_enable);
     }
-}
-
-/// Register a builtin whose handler runs only when the deterministic-tools
-/// feature has been enabled on the current thread.
-fn register_gated(
-    registry: &mut BuiltinRegistry,
-    name: &'static str,
-    method: &'static str,
-    runner: fn(&[VmValue]) -> Result<VmValue, HostlibError>,
-) {
-    registry.register(RegisteredBuiltin {
-        name,
-        module: "tools",
-        method,
-        handler: permissions::gated_handler(name, runner),
-    });
 }
 
 /// Implementation of the `hostlib_enable` builtin. Accepts either a bare

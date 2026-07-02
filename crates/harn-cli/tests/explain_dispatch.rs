@@ -52,8 +52,48 @@ fn single_code_json_renders_canonical_envelope() {
     assert_eq!(harn_value["schemaVersion"], 1);
     assert_eq!(harn_value["code"], "HARN-TYP-014");
     assert_eq!(harn_value["category"], "TYP");
+    assert_eq!(harn_value["apiStability"], "stable");
     assert!(harn_value["summary"].is_string());
     assert!(harn_value["body"].is_string());
+    let related: Vec<&str> = harn_value["related"]
+        .as_array()
+        .expect("related is an array")
+        .iter()
+        .map(|v| v.as_str().expect("related entries are code strings"))
+        .collect();
+    assert!(
+        related.contains(&"HARN-TYP-013"),
+        "related should list HARN-TYP-013, got: {related:?}"
+    );
+}
+
+#[test]
+fn single_code_json_surfaces_repair_when_registered() {
+    // HARN-OWN-001 (immutable assignment) is mapped to
+    // `bindings/make-mutable` / scope-local in the registry. The envelope
+    // must surface that so IDE clients and agents can dispatch on safety
+    // without parsing prose.
+    let harn = run_explain(&["HARN-OWN-001", "--json"], &[]);
+    assert_eq!(harn.exit_code, 0, "stderr={}", harn.stderr);
+    let value: serde_json::Value = serde_json::from_str(&harn.stdout).expect("harn JSON parses");
+    let repairs = value["repairs"]
+        .as_array()
+        .expect("repairs should always be an array");
+    assert_eq!(repairs.len(), 1, "expected one registered repair");
+    assert_eq!(repairs[0]["id"], "bindings/make-mutable");
+    assert_eq!(repairs[0]["safety"], "scope-local");
+}
+
+#[test]
+fn single_code_json_repairs_empty_when_no_template_registered() {
+    // Parser errors don't have a registered repair shape (they're
+    // diagnose-only). Envelope `repairs` should still be an empty array,
+    // not absent — the schema contract is that the field exists for
+    // every code.
+    let harn = run_explain(&["HARN-PAR-001", "--json"], &[]);
+    assert_eq!(harn.exit_code, 0, "stderr={}", harn.stderr);
+    let value: serde_json::Value = serde_json::from_str(&harn.stdout).expect("harn JSON parses");
+    assert_eq!(value["repairs"], serde_json::json!([]));
 }
 
 #[test]

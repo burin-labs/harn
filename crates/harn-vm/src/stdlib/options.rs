@@ -159,6 +159,146 @@ pub(crate) fn required_int_arg(
         .ok_or_else(|| fn_err(fn_name, kind, format_args!("`{arg_name}` must be an int")))
 }
 
+fn missing_argument(fn_name: &'static str, idx: usize, kind: ErrorKind) -> VmError {
+    fn_err(fn_name, kind, format_args!("missing argument {}", idx + 1))
+}
+
+/// Require a positional string argument, returned as-is (no trimming;
+/// empty strings are allowed). Errors use the positional
+/// "expected string at argument N" wording shared by the byte/string
+/// builtin families (`bytes`, `files`, `multipart`).
+pub(crate) fn expect_string_arg<'a>(
+    args: &'a [VmValue],
+    idx: usize,
+    fn_name: &'static str,
+    kind: ErrorKind,
+) -> Result<&'a str, VmError> {
+    match args.get(idx) {
+        Some(VmValue::String(text)) => Ok(text.as_ref()),
+        Some(other) => Err(fn_err(
+            fn_name,
+            kind,
+            format_args!(
+                "expected string at argument {}, got {}",
+                idx + 1,
+                other.type_name()
+            ),
+        )),
+        None => Err(missing_argument(fn_name, idx, kind)),
+    }
+}
+
+/// Require a positional bytes argument.
+pub(crate) fn expect_bytes_arg<'a>(
+    args: &'a [VmValue],
+    idx: usize,
+    fn_name: &'static str,
+    kind: ErrorKind,
+) -> Result<&'a [u8], VmError> {
+    match args.get(idx) {
+        Some(VmValue::Bytes(bytes)) => Ok(bytes.as_slice()),
+        Some(other) => Err(fn_err(
+            fn_name,
+            kind,
+            format_args!(
+                "expected bytes at argument {}, got {}",
+                idx + 1,
+                other.type_name()
+            ),
+        )),
+        None => Err(missing_argument(fn_name, idx, kind)),
+    }
+}
+
+/// Require a positional int argument (no float coercion).
+pub(crate) fn expect_int_arg(
+    args: &[VmValue],
+    idx: usize,
+    fn_name: &'static str,
+    kind: ErrorKind,
+) -> Result<i64, VmError> {
+    match args.get(idx) {
+        Some(VmValue::Int(value)) => Ok(*value),
+        Some(other) => Err(fn_err(
+            fn_name,
+            kind,
+            format_args!(
+                "expected int at argument {}, got {}",
+                idx + 1,
+                other.type_name()
+            ),
+        )),
+        None => Err(missing_argument(fn_name, idx, kind)),
+    }
+}
+
+/// Require a positional argument that is either bytes or a string; strings
+/// are converted to their UTF-8 bytes.
+pub(crate) fn expect_bytes_or_string_arg(
+    args: &[VmValue],
+    idx: usize,
+    fn_name: &'static str,
+    kind: ErrorKind,
+) -> Result<Vec<u8>, VmError> {
+    match args.get(idx) {
+        Some(VmValue::Bytes(bytes)) => Ok(bytes.as_ref().clone()),
+        Some(VmValue::String(text)) => Ok(text.as_bytes().to_vec()),
+        Some(other) => Err(fn_err(
+            fn_name,
+            kind,
+            format_args!(
+                "expected bytes or string at argument {}, got {}",
+                idx + 1,
+                other.type_name()
+            ),
+        )),
+        None => Err(missing_argument(fn_name, idx, kind)),
+    }
+}
+
+/// Require an already-fetched value (positional or dict field) to be a
+/// string. No trimming; `Nil` is rejected. Errors use the
+/// "{field} must be a string" / "missing {field}" wording shared by the
+/// observability and timing builtins.
+pub(crate) fn string_from_value(
+    value: Option<&VmValue>,
+    fn_name: &'static str,
+    field: &str,
+    kind: ErrorKind,
+) -> Result<String, VmError> {
+    match value {
+        Some(VmValue::String(raw)) => Ok(raw.to_string()),
+        Some(other) => Err(fn_err(
+            fn_name,
+            kind,
+            format_args!("{field} must be a string, got {}", other.type_name()),
+        )),
+        None => Err(fn_err(fn_name, kind, format_args!("missing {field}"))),
+    }
+}
+
+/// Coerce an optional dict value to a JSON object. Missing / `Nil` becomes
+/// an empty object; any other non-dict value is an error.
+pub(crate) fn json_object_from_value(
+    value: Option<&VmValue>,
+    fn_name: &'static str,
+    field: &str,
+    kind: ErrorKind,
+) -> Result<serde_json::Map<String, serde_json::Value>, VmError> {
+    match value {
+        None | Some(VmValue::Nil) => Ok(serde_json::Map::new()),
+        Some(value @ VmValue::Dict(_)) => match crate::llm::helpers::vm_value_to_json(value) {
+            serde_json::Value::Object(map) => Ok(map),
+            _ => unreachable!("Dict converts to Object"),
+        },
+        Some(other) => Err(fn_err(
+            fn_name,
+            kind,
+            format_args!("{field} must be a dict, got {}", other.type_name()),
+        )),
+    }
+}
+
 /// Coerce a Harn duration-like value to non-negative milliseconds.
 ///
 /// Several stdlib modules accept either a `duration`, an integer millisecond

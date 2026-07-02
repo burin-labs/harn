@@ -76,6 +76,43 @@ impl BuiltinRegistry {
         });
     }
 
+    /// Convenience: register a stateless builtin backed by a plain fn
+    /// pointer. This is the shape almost every capability module uses;
+    /// keeping it here avoids each module hand-rolling its own copy.
+    pub(crate) fn register_fn(
+        &mut self,
+        module: &'static str,
+        name: &'static str,
+        method: &'static str,
+        runner: fn(&[VmValue]) -> Result<VmValue, HostlibError>,
+    ) {
+        let handler: SyncHandler = Arc::new(runner);
+        self.register(RegisteredBuiltin {
+            name,
+            module,
+            method,
+            handler,
+        });
+    }
+
+    /// Like [`Self::register_fn`], but wraps the handler in the shared
+    /// deterministic-tools permission gate
+    /// ([`crate::tools::permissions::gated_handler`]).
+    pub(crate) fn register_gated_fn(
+        &mut self,
+        module: &'static str,
+        name: &'static str,
+        method: &'static str,
+        runner: fn(&[VmValue]) -> Result<VmValue, HostlibError>,
+    ) {
+        self.register(RegisteredBuiltin {
+            name,
+            module,
+            method,
+            handler: crate::tools::permissions::gated_handler(name, runner),
+        });
+    }
+
     /// Iterate over every registered builtin.
     pub fn iter(&self) -> impl Iterator<Item = &RegisteredBuiltin> {
         self.builtins.iter()

@@ -40,7 +40,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::error::HostlibError;
-use crate::registry::{BuiltinRegistry, HostlibCapability, RegisteredBuiltin, SyncHandler};
+use crate::registry::{BuiltinRegistry, HostlibCapability};
 use crate::tools::args::{
     build_dict, dict_arg, optional_string, optional_string_list, require_string, str_value,
 };
@@ -71,36 +71,11 @@ impl HostlibCapability for FsSnapshotCapability {
     }
 
     fn register_builtins(&self, registry: &mut BuiltinRegistry) {
-        register(registry, SNAPSHOT_BUILTIN, "snapshot", snapshot_builtin);
-        register(registry, RESTORE_BUILTIN, "restore", restore_builtin);
-        register(
-            registry,
-            LIST_BUILTIN,
-            "list_snapshots",
-            list_snapshots_builtin,
-        );
-        register(
-            registry,
-            DROP_BUILTIN,
-            "drop_snapshot",
-            drop_snapshot_builtin,
-        );
+        registry.register_fn("fs", SNAPSHOT_BUILTIN, "snapshot", snapshot_builtin);
+        registry.register_fn("fs", RESTORE_BUILTIN, "restore", restore_builtin);
+        registry.register_fn("fs", LIST_BUILTIN, "list_snapshots", list_snapshots_builtin);
+        registry.register_fn("fs", DROP_BUILTIN, "drop_snapshot", drop_snapshot_builtin);
     }
-}
-
-fn register(
-    registry: &mut BuiltinRegistry,
-    name: &'static str,
-    method: &'static str,
-    runner: fn(&[VmValue]) -> Result<VmValue, HostlibError>,
-) {
-    let handler: SyncHandler = std::sync::Arc::new(runner);
-    registry.register(RegisteredBuiltin {
-        name,
-        module: "fs",
-        method,
-        handler,
-    });
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
