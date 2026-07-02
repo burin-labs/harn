@@ -452,6 +452,33 @@ fn deny_tool_call_value(
     ))
 }
 
+/// Shared base `tool_result` shape for a call that never produced a real
+/// tool outcome. Extended by [`agent_primitive_cancelled_tool`] (preempted
+/// in-flight) and [`agent_primitive_undispatched_tool`] (never dispatched at
+/// all) so every non-dispatch path records the same transcript shape.
+fn agent_primitive_unexecuted_tool_base(
+    tool_name: &str,
+    tool_call_id: &str,
+    tool_args: &serde_json::Value,
+    status: &str,
+    rendered: String,
+    observation: String,
+    error_message: String,
+) -> serde_json::Value {
+    serde_json::json!({
+        "ok": false,
+        "status": status,
+        "tool_name": tool_name,
+        "tool_call_id": tool_call_id,
+        "arguments": tool_args,
+        "result": serde_json::Value::Null,
+        "rendered_result": rendered,
+        "observation": observation,
+        "error": error_message,
+        "error_category": crate::agent_events::ToolCallErrorCategory::Cancelled.as_str(),
+    })
+}
+
 /// Build the `tool_result` shape used when a call was preempted by
 /// `cancel_in_flight_tool_call`. Distinct from `agent_primitive_denied_tool`
 /// so the model can tell "user stopped me mid-run" from "the tool errored".
@@ -483,23 +510,141 @@ fn agent_primitive_cancelled_tool(
     } else {
         format!("tool call cancelled in-flight: {reason}")
     };
-    serde_json::json!({
-        "ok": false,
-        "status": "cancelled",
-        "tool_name": tool_name,
-        "tool_call_id": tool_call_id,
-        "arguments": tool_args,
-        "result": serde_json::Value::Null,
-        "rendered_result": rendered,
-        "observation": observation,
-        "error": error_message,
-        "error_category": crate::agent_events::ToolCallErrorCategory::Cancelled.as_str(),
-        "executor": executor,
-        "approval": approval_status,
-        "execution_duration_ms": execution_duration_ms,
-        "cancelled": true,
-        "cancellation_reason": reason,
-    })
+    let mut result = agent_primitive_unexecuted_tool_base(
+        tool_name,
+        tool_call_id,
+        tool_args,
+        "cancelled",
+        rendered,
+        observation,
+        error_message,
+    );
+    if let Some(obj) = result.as_object_mut() {
+        obj.insert(
+            "executor".to_string(),
+            executor.unwrap_or(serde_json::Value::Null),
+        );
+        obj.insert("approval".to_string(), serde_json::json!(approval_status));
+        obj.insert(
+            "execution_duration_ms".to_string(),
+            serde_json::json!(execution_duration_ms),
+        );
+        obj.insert("cancelled".to_string(), serde_json::Value::Bool(true));
+        obj.insert("cancellation_reason".to_string(), serde_json::json!(reason));
+    }
+    result
+}
+
+/// Build the `tool_result` shape for a call that was persisted as part of an
+/// assistant tool_use turn but will never be dispatched — a pre-dispatch
+/// interrupt (`status: "interrupted"`), an `agent_await_resumption`
+/// suspension (`status: "awaiting_resumption"`), or a sibling call skipped by
+/// either (`status: "skipped"`). Mirrors the cancelled-tool shape so hosts
+/// and transcripts see one consistent "no real outcome" record.
+fn agent_primitive_undispatched_tool(
+    tool_name: &str,
+    tool_call_id: &str,
+    tool_args: &serde_json::Value,
+    status: &str,
+    reason: &str,
+) -> serde_json::Value {
+    let rendered = if reason.is_empty() {
+        format!("[not dispatched ({status}): {tool_name}]")
+    } else {
+        format!("[not dispatched ({status}): {tool_name}] {reason}")
+    };
+    let observation = format!(
+        "[call to {name} was not dispatched: {status}]\n{reason}\n[end of {name} non-dispatch notice]\n",
+        name = tool_name,
+        reason = if reason.is_empty() {
+            "the call was never executed"
+        } else {
+            reason
+        },
+    );
+    let error_message = if reason.is_empty() {
+        format!("tool call not dispatched ({status}): {tool_name}")
+    } else {
+        format!("tool call not dispatched ({status}): {reason}")
+    };
+    let mut result = agent_primitive_unexecuted_tool_base(
+        tool_name,
+        tool_call_id,
+        tool_args,
+        status,
+        rendered,
+        observation,
+        error_message,
+    );
+    if let Some(obj) = result.as_object_mut() {
+        obj.insert("dispatched".to_string(), serde_json::Value::Bool(false));
+        obj.insert("skip_reason".to_string(), serde_json::json!(reason));
+    }
+    result
+}
+
+/// Synthesize placeholder tool_results for calls that were persisted as an
+/// assistant tool_use turn but will never be dispatched (pre-dispatch
+/// interrupt, `agent_await_resumption` suspension). Recording these keeps
+/// the transcript well-formed: Anthropic rejects any assistant `tool_use`
+/// block without an adjacent `tool_result` on the next call (HTTP 400),
+/// which otherwise breaks interrupted or resumed sessions.
+#[harn_builtin(
+    sig = "__host_agent_undispatched_tool_results(tool_calls: list, status: string, reason: string) -> list",
+    category = "agent.host",
+    runtime_only = true
+)]
+fn host_agent_undispatched_tool_results_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let calls: Vec<VmValue> = match args.first() {
+        Some(VmValue::List(items)) => (**items).clone(),
+        Some(VmValue::Nil) | None => Vec::new(),
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "__host_agent_undispatched_tool_results(tool_calls, status, reason): tool_calls must be a list; got {}",
+                other.type_name()
+            )))
+        }
+    };
+    let status = match args.get(1) {
+        Some(VmValue::String(text)) if !text.is_empty() => text.to_string(),
+        _ => "skipped".to_string(),
+    };
+    let reason = match args.get(2) {
+        Some(VmValue::String(text)) => text.to_string(),
+        _ => String::new(),
+    };
+    let json_str = |call: &serde_json::Value, primary: &str, fallback: &str| -> String {
+        call.get(primary)
+            .or_else(|| call.get(fallback))
+            .and_then(|value| match value {
+                serde_json::Value::String(text) => Some(text.clone()),
+                serde_json::Value::Null => None,
+                // Text-channel call records may carry numeric ids.
+                other => Some(other.to_string()),
+            })
+            .unwrap_or_default()
+    };
+    let results: Vec<VmValue> = calls
+        .iter()
+        .map(|call| {
+            let call_json = helpers::vm_value_to_json(call);
+            let name = json_str(&call_json, "name", "tool_name");
+            let id = json_str(&call_json, "id", "tool_call_id");
+            let tool_args = call_json
+                .get("arguments")
+                .or_else(|| call_json.get("tool_args"))
+                .filter(|value| value.is_object())
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!({}));
+            json_to_vm_value(&agent_primitive_undispatched_tool(
+                &name, &id, &tool_args, &status, &reason,
+            ))
+        })
+        .collect();
+    Ok(VmValue::List(Arc::new(results)))
 }
 
 fn attach_hook_reminder_audit(

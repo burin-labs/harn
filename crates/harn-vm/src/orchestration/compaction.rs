@@ -540,6 +540,57 @@ fn find_prev_user_boundary(messages: &[serde_json::Value], start: usize) -> Opti
         .find(|idx| messages[*idx].get("role").and_then(|value| value.as_str()) == Some("user"))
 }
 
+/// True when the message carries a tool result: the OpenAI durable shape
+/// (`role: "tool"`), the Anthropic durable shape (`role: "tool_result"`), or
+/// a user message whose content blocks include a `tool_result`. Text-channel
+/// results are ordinary user strings and intentionally don't match — they
+/// have no provider-level pairing to protect.
+fn is_tool_result_message(message: &serde_json::Value) -> bool {
+    match message.get("role").and_then(|role| role.as_str()) {
+        Some("tool") | Some("tool_result") => true,
+        Some("user") => message
+            .get("content")
+            .and_then(|content| content.as_array())
+            .is_some_and(|blocks| {
+                blocks.iter().any(|block| {
+                    block.get("type").and_then(|value| value.as_str()) == Some("tool_result")
+                })
+            }),
+        _ => false,
+    }
+}
+
+/// A compaction split must never land between an assistant tool-use message
+/// and its tool_result message(s): a kept window that begins with a
+/// tool_result whose request was drained is rejected by providers as an
+/// orphaned result. Results always immediately follow their request, so a
+/// split index is unsafe exactly when it points AT a tool-result message.
+/// Walk backward to the message that initiated the result run (keeping the
+/// request together with its results); when that would consume the whole
+/// compactable window, walk forward past the run instead so compaction still
+/// makes progress.
+fn snap_split_off_tool_results(
+    messages: &[serde_json::Value],
+    split_at: usize,
+    compact_start: usize,
+) -> usize {
+    if split_at >= messages.len() || !is_tool_result_message(&messages[split_at]) {
+        return split_at;
+    }
+    let mut backward = split_at;
+    while backward > compact_start && is_tool_result_message(&messages[backward]) {
+        backward -= 1;
+    }
+    if backward > compact_start {
+        return backward;
+    }
+    let mut forward = split_at;
+    while forward < messages.len() && is_tool_result_message(&messages[forward]) {
+        forward += 1;
+    }
+    forward
+}
+
 /// True when `trimmed` (an already-trimmed line) begins with `file:line` —
 /// a colon immediately followed by a digit, with no whitespace before the
 /// colon. Used as a strong signal that a line carries a located diagnostic.
@@ -1365,6 +1416,11 @@ pub(crate) async fn auto_compact_messages_with_result_with_ctx(
             split_at = boundary;
         }
     }
+    // The naive fallback (and, in tool-heavy transcripts with no interior
+    // user boundary, the volatile-start correction too) can still leave the
+    // split pointing at a tool_result whose tool_use request would be
+    // drained. Final pass: snap off any request/result pair.
+    split_at = snap_split_off_tool_results(messages, split_at, compact_start);
     if split_at <= compact_start {
         return Ok(None);
     }
@@ -1713,6 +1769,115 @@ mod tests {
         assert_eq!(messages[2]["tool_calls"][0]["id"], "call_1");
         assert_eq!(messages[3]["role"], "tool");
         assert_eq!(messages[3]["tool_call_id"], "call_1");
+    }
+
+    /// Regression (transcript integrity): a tool-heavy transcript whose only
+    /// user message is the pinned head has no interior user boundary, so the
+    /// split falls back to the naive `len - keep_last` index — which can land
+    /// BETWEEN an assistant tool_use message and its tool_result, orphaning
+    /// the result at the kept-window head. The split must snap to the start
+    /// of the request/result pair instead.
+    #[test]
+    fn auto_compact_never_splits_assistant_tool_use_from_its_result() {
+        let tool_call = |id: &str| {
+            serde_json::json!({
+                "id": id,
+                "type": "function",
+                "function": {"name": "run", "arguments": "{}"}
+            })
+        };
+        let mut messages = vec![
+            serde_json::json!({"role": "user", "content": "task"}),
+            serde_json::json!({"role": "assistant", "content": "", "tool_calls": [tool_call("c0")]}),
+            serde_json::json!({"role": "tool", "tool_call_id": "c0", "content": "r0"}),
+            serde_json::json!({"role": "assistant", "content": "", "tool_calls": [tool_call("c1")]}),
+            serde_json::json!({"role": "tool", "tool_call_id": "c1", "content": "r1"}),
+            serde_json::json!({"role": "assistant", "content": "", "tool_calls": [tool_call("c2")]}),
+            serde_json::json!({"role": "tool", "tool_call_id": "c2", "content": "r2"}),
+        ];
+        // keep_last: 3 puts the naive split at index 4 — the tool_result for
+        // c1 — exactly mid-pair.
+        let config = AutoCompactConfig {
+            token_threshold: 1,
+            keep_first: 0,
+            keep_last: 3,
+            ..Default::default()
+        };
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        let summary = runtime
+            .block_on(auto_compact_messages(&mut messages, &config, None))
+            .expect("compaction succeeds");
+        assert!(summary.is_some(), "compaction should trigger");
+
+        // Kept window: summary, then the INTACT c1 pair, then the c2 pair.
+        assert_eq!(messages[0]["role"], "user", "summary head");
+        assert_eq!(messages[1]["role"], "assistant");
+        assert_eq!(messages[1]["tool_calls"][0]["id"], "c1");
+        assert_eq!(messages[2]["role"], "tool");
+        assert_eq!(messages[2]["tool_call_id"], "c1");
+        assert_eq!(messages[3]["tool_calls"][0]["id"], "c2");
+        assert_eq!(messages[4]["tool_call_id"], "c2");
+        // No kept tool_result may reference a drained (missing) request.
+        for (idx, message) in messages.iter().enumerate() {
+            if message["role"] == "tool" {
+                let id = message["tool_call_id"].as_str().expect("tool_call_id");
+                let paired = messages[..idx].iter().any(|prev| {
+                    prev["tool_calls"]
+                        .as_array()
+                        .is_some_and(|calls| calls.iter().any(|call| call["id"] == id))
+                });
+                assert!(paired, "tool_result {id} orphaned in kept window");
+            }
+        }
+    }
+
+    #[test]
+    fn snap_split_off_tool_results_handles_all_result_shapes() {
+        // A split pointing at any tool-result shape walks back to the
+        // request that initiated the run. OpenAI durable shape
+        // (`role: "tool"`):
+        let openai = vec![
+            serde_json::json!({"role": "user", "content": "task"}),
+            serde_json::json!({"role": "assistant", "content": "", "tool_calls": []}),
+            serde_json::json!({"role": "tool", "tool_call_id": "c0", "content": "r0"}),
+        ];
+        assert_eq!(snap_split_off_tool_results(&openai, 2, 0), 1);
+        // Anthropic durable shape (`role: "tool_result"`).
+        let anthropic = vec![
+            serde_json::json!({"role": "user", "content": "task"}),
+            serde_json::json!({"role": "assistant", "content": ""}),
+            serde_json::json!({"role": "tool_result", "tool_use_id": "c0", "content": "r0"}),
+        ];
+        assert_eq!(snap_split_off_tool_results(&anthropic, 2, 0), 1);
+        // User message carrying tool_result blocks.
+        let user_blocks = vec![
+            serde_json::json!({"role": "user", "content": "task"}),
+            serde_json::json!({"role": "assistant", "content": ""}),
+            serde_json::json!({
+                "role": "user",
+                "content": [{"type": "tool_result", "tool_use_id": "c0", "content": "r0"}],
+            }),
+        ];
+        assert_eq!(snap_split_off_tool_results(&user_blocks, 2, 0), 1);
+        // Plain user text is a safe boundary — untouched.
+        let text = vec![
+            serde_json::json!({"role": "assistant", "content": ""}),
+            serde_json::json!({"role": "user", "content": "plain"}),
+        ];
+        assert_eq!(snap_split_off_tool_results(&text, 1, 0), 1);
+        // Backward walk pinned at compact_start: fall forward past the run
+        // so compaction still makes progress (the whole pair is drained
+        // together rather than split).
+        let pinned = vec![
+            serde_json::json!({"role": "tool", "tool_call_id": "c0", "content": "r0"}),
+            serde_json::json!({"role": "tool", "tool_call_id": "c1", "content": "r1"}),
+            serde_json::json!({"role": "assistant", "content": "done"}),
+        ];
+        assert_eq!(snap_split_off_tool_results(&pinned, 1, 0), 2);
     }
 
     #[test]

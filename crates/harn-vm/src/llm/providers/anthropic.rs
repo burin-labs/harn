@@ -515,6 +515,33 @@ fn enforce_tool_result_adjacency(messages: Vec<serde_json::Value>) -> Vec<serde_
         }
 
         normalized.extend(results);
+        if !pending_ids.is_empty() {
+            // Backfill: any tool_use id that never received a tool_result —
+            // a skip path that persisted the assistant turn but never closed
+            // out its calls (pre-dispatch interrupt, suspension, a future
+            // path we haven't met yet) — would make Anthropic reject the
+            // WHOLE request with HTTP 400 "tool_use ids were found without
+            // tool_result blocks". Synthesize a placeholder result per
+            // orphaned id so the transcript degrades gracefully instead.
+            // Ids are sorted so the egress body stays deterministic.
+            let mut missing: Vec<String> = pending_ids.into_iter().collect();
+            missing.sort_unstable();
+            let placeholders: Vec<serde_json::Value> = missing
+                .into_iter()
+                .map(|id| {
+                    serde_json::json!({
+                        "type": "tool_result",
+                        "tool_use_id": id,
+                        "content": "result unavailable (interrupted before dispatch)",
+                        "is_error": true,
+                    })
+                })
+                .collect();
+            normalized.push(serde_json::json!({
+                "role": "user",
+                "content": placeholders,
+            }));
+        }
         normalized.extend(deferred);
     }
     normalized
@@ -1028,6 +1055,113 @@ mod tests {
                 "text": "<runtime_feedback>late reminder</runtime_feedback>",
             })
         );
+    }
+
+    #[test]
+    fn orphaned_tool_use_gets_placeholder_tool_result_backfill() {
+        // A transcript that ends on an assistant tool_use with no recorded
+        // tool_result (e.g. an interrupt/suspend path that failed to close
+        // out its calls) must not 400 the whole session: the egress
+        // normalizer backfills a placeholder result.
+        let mut opts = base_payload();
+        opts.messages = vec![
+            serde_json::json!({"role": "user", "content": "do the thing"}),
+            serde_json::json!({
+                "role": "assistant",
+                "content": [{
+                    "type": "tool_use",
+                    "id": "toolu_orphan",
+                    "name": "run",
+                    "input": {},
+                }],
+            }),
+        ];
+
+        let body = AnthropicProvider::build_request_body(&opts);
+        let messages = body["messages"].as_array().expect("messages array");
+
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[2]["role"], "user");
+        assert_eq!(
+            messages[2]["content"][0],
+            serde_json::json!({
+                "type": "tool_result",
+                "tool_use_id": "toolu_orphan",
+                "content": "result unavailable (interrupted before dispatch)",
+                "is_error": true,
+            })
+        );
+    }
+
+    #[test]
+    fn orphaned_tool_use_backfill_lands_before_deferred_user_text() {
+        // An orphaned tool_use followed by injected user feedback: the
+        // placeholder result must sit ADJACENT to the assistant turn, with
+        // the deferred user text after it — the same ordering contract the
+        // real-result reorder path guarantees.
+        let mut opts = base_payload();
+        opts.messages = vec![
+            serde_json::json!({
+                "role": "assistant",
+                "content": [{
+                    "type": "tool_use",
+                    "id": "toolu_orphan",
+                    "name": "run",
+                    "input": {},
+                }],
+            }),
+            serde_json::json!({
+                "role": "user",
+                "content": [{"type": "text", "text": "STOP — user interrupted"}],
+            }),
+        ];
+
+        let body = AnthropicProvider::build_request_body(&opts);
+        let messages = body["messages"].as_array().expect("messages array");
+
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[1]["content"][0]["type"], "tool_result");
+        assert_eq!(messages[1]["content"][0]["tool_use_id"], "toolu_orphan");
+        assert_eq!(
+            messages[2]["content"][0],
+            serde_json::json!({"type": "text", "text": "STOP — user interrupted"})
+        );
+    }
+
+    #[test]
+    fn partially_orphaned_tool_use_backfills_only_missing_ids() {
+        // Two parallel tool_use blocks, only one real result: the backfill
+        // must cover exactly the missing id (sorted, deterministic) and
+        // leave the real result untouched.
+        let mut opts = base_payload();
+        opts.messages = vec![
+            serde_json::json!({
+                "role": "assistant",
+                "content": [
+                    {"type": "tool_use", "id": "toolu_b", "name": "run", "input": {}},
+                    {"type": "tool_use", "id": "toolu_a", "name": "read", "input": {}},
+                ],
+            }),
+            serde_json::json!({
+                "role": "user",
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_a",
+                    "content": "file text",
+                }],
+            }),
+        ];
+
+        let body = AnthropicProvider::build_request_body(&opts);
+        let messages = body["messages"].as_array().expect("messages array");
+
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[1]["content"][0]["tool_use_id"], "toolu_a");
+        assert_eq!(messages[1]["content"][0]["content"], "file text");
+        let backfill = messages[2]["content"].as_array().expect("backfill blocks");
+        assert_eq!(backfill.len(), 1);
+        assert_eq!(backfill[0]["tool_use_id"], "toolu_b");
+        assert_eq!(backfill[0]["is_error"], true);
     }
 
     #[test]

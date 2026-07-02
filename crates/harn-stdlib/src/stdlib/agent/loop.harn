@@ -60,6 +60,7 @@ import {
   agent_session_pop_last_assistant,
   agent_session_record_assistant,
   agent_session_record_tool_results,
+  agent_session_record_undispatched_tool_results,
   agent_session_record_usage,
   agent_session_totals,
 } from "std/agent/state"
@@ -1047,8 +1048,41 @@ fn __agent_await_resumption_args(call) {
   return agent_await_resumption(args?.reason ?? "", args?.conditions ?? nil, args?.resume_by ?? nil)
 }
 
-fn __agent_loop_await_resumption(session, iteration, call, opts) {
-  let parsed = __agent_await_resumption_args(call)
+/**
+ * Close out the persisted tool_use turn before suspension. The awaiting call
+ * gets an `awaiting_resumption` placeholder tool_result and any parallel
+ * siblings are recorded as `skipped` — default resume keeps the transcript,
+ * and Anthropic rejects any assistant tool_use with no adjacent tool_result
+ * (HTTP 400 on the first post-resume LLM call).
+ */
+fn __agent_loop_record_await_tool_results(session, await_call, tool_calls, reason) {
+  let await_reason = if type_of(reason) == "string" && reason != "" {
+    "agent suspended awaiting resumption: " + reason
+  } else {
+    "agent suspended awaiting resumption"
+  }
+  agent_session_record_undispatched_tool_results(
+    session.session_id,
+    [await_call],
+    "awaiting_resumption",
+    await_reason,
+  )
+  let await_id = to_string(await_call?.id ?? await_call?.tool_call_id ?? "")
+  var siblings = []
+  for call in tool_calls ?? [] {
+    if to_string(call?.id ?? call?.tool_call_id ?? "") != await_id {
+      siblings = siblings.push(call)
+    }
+  }
+  agent_session_record_undispatched_tool_results(
+    session.session_id,
+    siblings,
+    "skipped",
+    "not dispatched: the agent suspended (agent_await_resumption) before this call ran",
+  )
+}
+
+fn __agent_loop_await_resumption(session, iteration, call, parsed, opts) {
   let worker = __agent_loop_current_worker()
   if worker == nil {
     return __agent_loop_await_resumption_top_level(session, iteration, call, parsed, opts)
@@ -3557,11 +3591,29 @@ fn __agent_loop_run(message, session, initial_opts) {
         let had_parse_errors = had_parse_errors_base || had_blank_name_drop
         let await_call = __agent_await_resumption_call(tool_calls)
         if await_call != nil {
-          let await_result = try {
-            __agent_loop_await_resumption(session, iteration, await_call, opts)
+          let await_parsed = try {
+            __agent_await_resumption_args(await_call)
+          }
+          if !is_err(await_parsed) {
+            __agent_loop_record_await_tool_results(session, await_call, tool_calls, unwrap(await_parsed).reason)
+          }
+          let await_result = if is_err(await_parsed) {
+            await_parsed
+          } else {
+            try {
+              __agent_loop_await_resumption(session, iteration, await_call, unwrap(await_parsed), opts)
+            }
           }
           if is_err(await_result) {
             let await_error = unwrap_err(await_result)
+            if is_err(await_parsed) {
+              agent_session_record_undispatched_tool_results(
+                session.session_id,
+                tool_calls,
+                "skipped",
+                "not dispatched: the agent_await_resumption call in this turn was invalid",
+              )
+            }
             __inject_feedback_with_tool_repair(
               session.session_id,
               "agent_await_resumption",
@@ -3874,6 +3926,12 @@ fn __agent_loop_run(message, session, initial_opts) {
         }
         let pre_dispatch_checkpoint = __agent_loop_checkpoint(session.session_id, "pre_tool_dispatch", {iteration: iteration_index + 1})
         if pre_dispatch_checkpoint.dispatch_skipped {
+          agent_session_record_undispatched_tool_results(
+            session.session_id,
+            tool_calls,
+            "interrupted",
+            "a user interrupt arrived before this tool call was dispatched",
+          )
           let tool_count_skipped = len(tool_calls)
           let totals_skipped = agent_session_record_usage(session.session_id, llm_result, turn_llm_opts, iteration_index + 1)
           agent_emit_event(
