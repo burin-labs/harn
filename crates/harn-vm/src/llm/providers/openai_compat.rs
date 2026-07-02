@@ -855,6 +855,9 @@ fn sanitize_openai_message_for_request(message: &mut serde_json::Value, remap_to
             crate::llm::content::openai_content(&content),
         );
     }
+    if let Some(tool_calls) = object.get_mut("tool_calls") {
+        sanitize_openai_tool_calls_for_request(tool_calls);
+    }
 }
 
 fn openai_message_key_allowed(role: Option<&str>, key: &str) -> bool {
@@ -862,6 +865,69 @@ fn openai_message_key_allowed(role: Option<&str>, key: &str) -> bool {
         || (key == "tool_calls" && role == Some("assistant"))
         || (key == "reasoning_content" && role == Some("assistant"))
         || (key == "tool_call_id" && role == Some("tool"))
+}
+
+fn sanitize_openai_tool_calls_for_request(tool_calls: &mut serde_json::Value) {
+    let Some(calls) = tool_calls.as_array_mut() else {
+        return;
+    };
+    for call in calls {
+        *call = normalize_openai_tool_call_for_request(call);
+    }
+}
+
+fn normalize_openai_tool_call_for_request(call: &serde_json::Value) -> serde_json::Value {
+    let Some(object) = call.as_object() else {
+        return call.clone();
+    };
+
+    let mut normalized = serde_json::Map::new();
+    if let Some(id) = object.get("id").cloned() {
+        normalized.insert("id".to_string(), id);
+    }
+    normalized.insert(
+        "type".to_string(),
+        serde_json::Value::String("function".to_string()),
+    );
+
+    let function = object
+        .get("function")
+        .and_then(serde_json::Value::as_object);
+    let name = function
+        .and_then(|function| function.get("name"))
+        .or_else(|| object.get("name"));
+    let arguments = function
+        .and_then(|function| function.get("arguments"))
+        .or_else(|| object.get("arguments"));
+
+    if name.is_some() || arguments.is_some() {
+        let mut normalized_function = serde_json::Map::new();
+        if let Some(name) = name.cloned() {
+            normalized_function.insert("name".to_string(), name);
+        }
+        if let Some(arguments) = arguments {
+            normalized_function.insert(
+                "arguments".to_string(),
+                openai_tool_arguments_string(arguments),
+            );
+        }
+        normalized.insert(
+            "function".to_string(),
+            serde_json::Value::Object(normalized_function),
+        );
+    }
+
+    serde_json::Value::Object(normalized)
+}
+
+fn openai_tool_arguments_string(arguments: &serde_json::Value) -> serde_json::Value {
+    match arguments {
+        serde_json::Value::String(_) => arguments.clone(),
+        serde_json::Value::Null => serde_json::Value::String("{}".to_string()),
+        other => serde_json::Value::String(
+            serde_json::to_string(other).unwrap_or_else(|_| "{}".to_string()),
+        ),
+    }
 }
 
 fn normalize_tool_choice_for_capabilities(
@@ -2313,7 +2379,22 @@ thinking_modes = ["enabled"]
                 "tool_calls": [{
                     "id": "call_001",
                     "type": "function",
-                    "function": {"name": "read", "arguments": "{\"path\":\"main.rs\"}"},
+                    "function": {
+                        "name": "read",
+                        "arguments": "{\"path\":\"main.rs\"}",
+                        "approxNumTokens": 0,
+                    },
+                    "name": "wrong_top_level_name",
+                    "arguments": {"ignored": true},
+                    "approxNumTokens": 0,
+                    "is_risky": "false",
+                    "index": 0,
+                }, {
+                    "id": "call_002",
+                    "type": "burin-internal",
+                    "name": "write",
+                    "arguments": {"path": "main.rs"},
+                    "approxNumTokens": 0,
                 }],
             }),
             json!({
@@ -2356,7 +2437,37 @@ thinking_modes = ["enabled"]
             assistant["reasoning_content"],
             "fireworks echoes this allowed field"
         );
-        assert_eq!(assistant["tool_calls"][0]["id"], "call_001");
+        let first_call = &assistant["tool_calls"][0];
+        assert_eq!(first_call["id"], "call_001");
+        assert_eq!(first_call["type"], "function");
+        assert_eq!(first_call["function"]["name"], "read");
+        assert_eq!(
+            first_call["function"]["arguments"],
+            "{\"path\":\"main.rs\"}"
+        );
+        for key in ["approxNumTokens", "is_risky", "index", "name", "arguments"] {
+            assert!(
+                first_call.get(key).is_none(),
+                "outgoing tool_call must not carry `{key}`: {first_call}"
+            );
+        }
+        assert!(
+            first_call["function"].get("approxNumTokens").is_none(),
+            "outgoing tool_call function must not carry provider-private fields: {first_call}"
+        );
+
+        let second_call = &assistant["tool_calls"][1];
+        assert_eq!(second_call["id"], "call_002");
+        assert_eq!(second_call["type"], "function");
+        assert_eq!(second_call["function"]["name"], "write");
+        assert_eq!(
+            second_call["function"]["arguments"],
+            "{\"path\":\"main.rs\"}"
+        );
+        assert!(
+            second_call.get("approxNumTokens").is_none(),
+            "flat Harn tool-call history must be normalized to OpenAI shape: {second_call}"
+        );
 
         let tool = &messages[2];
         assert_eq!(tool["role"], "tool");
