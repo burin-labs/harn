@@ -373,3 +373,68 @@ fn linkme_distributed_slice_populates_with_all_builtins() {
         "linkme slice and manual aggregator out of sync: linkme={linkme_count}, manual={manual_count}"
     );
 }
+
+/// Shift-left guard for the "declared but never installed" builtin footgun.
+///
+/// `#[harn_builtin]` auto-adds every annotated fn to the linkme
+/// `ALL_BUILTIN_DEFS` slice, but *installing* it onto a live VM still runs
+/// through hand-maintained `register_*` functions (the
+/// `LLM_RUNTIME_PRIMITIVE_BUILTINS` array in `crates/harn-vm/src/llm/mod.rs`,
+/// `register_agent_session_host_primitives`, the per-module
+/// `register_*_builtins`, …). A def can therefore sit in `ALL_BUILTIN_DEFS` —
+/// and satisfy every parser-alignment test above — yet never be wired into the
+/// runtime dispatch table. Calling it then throws `Undefined builtin: X`, which
+/// the agent loop's outer `try {}` swallows, leaving the feature silently inert
+/// while its status still reports "done".
+///
+/// That is exactly how `__host_agent_undispatched_tool_results` shipped broken
+/// (fixed in #3835): the def existed, the parser knew its name (it even sat in
+/// `RUNTIME_ONLY_EXCEPTIONS` above), but it was missing from
+/// `LLM_RUNTIME_PRIMITIVE_BUILTINS`, so no live VM could dispatch it. None of
+/// the pre-existing alignment tests model runtime *installation* — they align
+/// the parser registry against `stdlib_builtin_names()`, which is itself
+/// derived from an already-installed probe VM, so a never-installed def is
+/// invisible to them. This test closes that gap by walking `ALL_BUILTIN_DEFS`
+/// (the macro's own source of truth) against the installed set.
+#[test]
+fn every_runtime_handler_builtin_is_installed_on_a_full_vm() {
+    use harn_vm::stdlib::macros::VmBuiltinHandler;
+
+    // `stdlib_builtin_names()` is derived from a fully-configured stdlib VM
+    // (core + io + agent + llm), i.e. the exact production registration path.
+    let installed: BTreeSet<String> = harn_vm::stdlib::stdlib_builtin_names()
+        .into_iter()
+        .collect();
+
+    let mut missing: Vec<String> = Vec::new();
+    for def in harn_vm::stdlib::macros::ALL_BUILTIN_DEFS.iter() {
+        // Only defs with a real runtime handler are meant to be dispatchable.
+        // Parser-only defs (`VmBuiltinHandler::None`, always `parser_only`)
+        // resolve via method dispatch / opcodes and are never installed.
+        let has_runtime_handler = matches!(
+            def.handler,
+            VmBuiltinHandler::Sync(_) | VmBuiltinHandler::Async(_)
+        );
+        if !has_runtime_handler {
+            continue;
+        }
+        for name in std::iter::once(def.sig.name).chain(def.aliases.iter().copied()) {
+            if !installed.contains(name) {
+                missing.push(name.to_string());
+            }
+        }
+    }
+    missing.sort();
+    missing.dedup();
+
+    assert!(
+        missing.is_empty(),
+        "These `#[harn_builtin]` defs carry a runtime handler and land in \
+         `ALL_BUILTIN_DEFS`, but are NOT installed on a fully-configured stdlib \
+         VM — every call throws `Undefined builtin` at runtime (silently \
+         swallowed by the agent loop's outer `try`). Wire each into the matching \
+         `register_*` function — e.g. add its `_DEF` to \
+         `LLM_RUNTIME_PRIMITIVE_BUILTINS` in `crates/harn-vm/src/llm/mod.rs`:\n  \
+         {missing:#?}",
+    );
+}
