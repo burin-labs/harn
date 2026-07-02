@@ -8,6 +8,111 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.8.169
+
+### Added
+
+- Verification profile store: `verification_profiles_get`/`verification_profiles_set`
+  persist a versioned (`schemaVersion: 1`) record set of check rows through the
+  hierarchical project metadata store, `verification_profile_resolve` picks the
+  most-specific row for a `{repo?, path?, language?, task?}` scope query, and
+  `verification_profile_record_run` folds run observations into per-row timing
+  percentiles and the `lastRun` file→hash snapshot binding. Rows are pure data
+  (no hardcoded languages/toolchains) and unknown fields round-trip untouched.
+- Stale-diagnostic contract primitive: `verification_diagnostic_classify`
+  classifies a diagnostic envelope `{rung, rowId?, at, snapshot}` against
+  current file hashes as `bound_fresh` / `bound_stale` / `unbound`; only
+  `bound_fresh` diagnostics may feed no-progress detectors, escalation streaks,
+  verifier signatures, or completion gates.
+- **`[patch.models]` field-wise catalog overlay patches.** Provider config
+  overlays can now tweak individual model-row fields
+  (`[patch.models."<id>"] stream_timeout = 1200.0`) instead of copying the
+  whole baseline row verbatim and freezing its other fields against catalog
+  updates. Tables merge recursively, scalars and arrays replace, patches win
+  over same-overlay whole-row replacement, and they stay sticky across later
+  layers' whole-row refreshes. Works at every overlay layer, including
+  `harn.toml` `[llm.patch.models]`; dangling patches are held until the row
+  arrives and reported via `dangling_model_patches()`.
+- Added harn-hostlib helpers for normalized host-env custody metadata envelopes.
+- Added `harn models lora plan` to emit portable LoRA/QLoRA tool-calling
+  training, validation, eval, inspect, and launch recipes from Harn's provider
+  capability matrix.
+
+### Changed
+
+- Internal cleanup: collapsed the per-module copy-paste hostlib builtin
+  registration helpers into shared `BuiltinRegistry::register_fn` /
+  `register_gated_fn`, migrated hand-rolled stdlib argument helpers
+  (`bytes`, `files`, `multipart`, `observability`, `timing`) onto the
+  canonical `stdlib/options.rs` layer, and deleted dead test-only Rust
+  twins of the self-hosted `trace import` / `explain` CLI handlers
+  (their coverage now exercises the shipping `.harn` scripts
+  end-to-end). No user-facing behavior or error-message changes.
+- Documented the online source and public issue cross-references behind the
+  Qwen/GLM OpenRouter provider evidence.
+- Correct Qwen 3.7 Max OpenRouter catalog tiering and document the live model
+  metadata/probe evidence behind the Qwen hosted presets.
+
+### Fixed
+
+- **MCP client robustness: no more unbounded hangs.** All MCP OAuth HTTP
+  requests (token exchange, refresh, discovery, dynamic registration) now use
+  a client with a 30s request timeout and a 10s connect timeout — a token
+  endpoint that accepts TCP but never responds can no longer wedge a refresh
+  (and the single-flight refresh lock behind it) forever. The refresh lock
+  itself is also bounded: the in-process mutex wait times out with a clear
+  error naming the stuck holder, and the cross-process file lock uses a
+  non-blocking try-lock with backoff instead of pinning a blocking thread
+  indefinitely. On the stdio transport, response lines are capped at 64 MiB
+  (protocol error instead of unbounded memory growth), and request writes now
+  drain server output concurrently so a large request racing a flood of
+  server notifications can no longer deadlock on full pipe buffers.
+- **Worker snapshots no longer silently corrupt non-serializable values or
+  persist secrets verbatim.** A new strict persistence serializer
+  (`vm_value_to_json_strict`) rejects closures, channels, and other
+  runtime-only handles at save time with a path-annotated error (e.g.
+  `options.custom_compactor: closure is not serializable`) instead of
+  writing a display-string that rehydrates as a plain string and fails long
+  after resume. Workflow worker options fail loud; live sub-agent suspend
+  options (which legitimately carry callbacks like `tool_caller`) strip the
+  offending entry with a WARN event naming the dropped path. Every persisted
+  worker snapshot is now scrubbed with the unified redaction policy, so
+  `Authorization`/api-key-shaped fields and high-confidence token patterns in
+  options, headers, and transcripts land on disk as `[redacted]`.
+- **Pre-commit release-workflow edits no longer compile Harn unnecessarily.**
+  The generated-artifact registry hook now runs for the registry, Makefile,
+  CI workflow, and hook surfaces it actually audits, rather than every
+  workflow file.
+- **Anthropic streaming no longer dispatches tools with silently-empty
+  arguments.** When accumulated streamed tool-argument JSON is malformed or
+  truncated, the finalizer now emits the same recoverable `__parse_error`
+  carrier the OpenAI paths build (the agent loop asks the model to re-issue the
+  call) instead of running the tool with `{}`. A genuinely argument-less tool
+  call still maps to `{}`.
+- **Gemini request lowering stops dropping sampling params.** `seed`,
+  `frequency_penalty`, `presence_penalty`, and `logprobs`/`top_logprobs` now
+  map into `generationConfig` (capability-gated, matching the OpenAI-compat
+  builder).
+- **Provider overload (HTTP 529/503, `overloaded_error`) now feeds the
+  per-route circuit breaker and the shared cooldown**, so parallel agents back
+  off together instead of hammering an overloaded provider. Overload responses
+  without a Retry-After header get a default 5s shared cooldown; 429 and
+  generic 500/502 semantics are unchanged.
+- **Vertex requests now delegate body shaping to the Gemini builder** (as
+  Azure delegates to the OpenAI builder), fixing dropped multimodal parts and
+  tool-call history and inheriting the sampling-param fix, while preserving
+  Vertex-specific auth, model routing, `responseSchema` naming, prefill
+  emulation, and the legacy `response_format: "json"` mirror.
+- **Release binary builds no longer cancel healthy platform legs.** The
+  release-binary workflow now lets every target finish even when one target
+  fails, preserving incrementally uploaded archives and making recovery reruns
+  fill only the genuinely missing assets. Recovery skip checks, publish
+  self-healing, and release smoke now also require `SHA256SUMS`, so a release
+  missing its checksum sidecar is not treated as complete.
+- Release binary recovery now rebuilds only missing platform archives, regenerates
+  missing release metadata without rebuilding binaries, and finalizes complete
+  prereleases without rerunning the five-target matrix.
+
 ## v0.8.168
 
 ### Added
