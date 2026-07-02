@@ -8,15 +8,16 @@ pipeline test(task) {
       if i == 0 {
         throw "boom"
       }
-      sleep(150)
+      for _ in range(0, 64) {
+        yield_now()
+      }
       atomic_set(survived, 1)
       i
     }
   } catch (e) {
     log("caught: " + e)
   }
-  // Generous grace period: had the sibling survived the cancellation, it
-  // would have set the flag well within this window.
-  sleep(300)
+  // `parallel` drains cancelled siblings before returning; if the old
+  // run-to-completion behavior regresses, the sibling sets this flag.
   log(atomic_get(survived))
 }

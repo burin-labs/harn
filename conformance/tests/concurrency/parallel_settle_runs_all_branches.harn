@@ -7,7 +7,7 @@ pipeline test(task) {
     if item == 1 {
       throw "early failure"
     }
-    sleep(50)
+    yield_now()
     atomic_add(completed, 1)
     item * 10
   }
