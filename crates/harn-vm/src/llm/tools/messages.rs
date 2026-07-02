@@ -164,12 +164,12 @@ pub(crate) fn build_assistant_response_message(
 /// channels alike.
 pub(crate) fn normalize_tool_args(
     name: &str,
-    args: &serde_json::Value,
+    args: serde_json::Value,
     tools: Option<&crate::value::VmValue>,
 ) -> serde_json::Value {
-    let mut obj = match args.as_object() {
-        Some(o) => o.clone(),
-        None => return args.clone(),
+    let mut obj = match args {
+        serde_json::Value::Object(obj) => obj,
+        other => return other,
     };
 
     if let Some(annotations) = crate::orchestration::current_tool_annotations(name) {
