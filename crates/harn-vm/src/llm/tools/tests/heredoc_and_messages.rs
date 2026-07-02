@@ -746,7 +746,7 @@ fn native_json_fallback_ignores_prose_json_with_bare_name() {
 fn normalize_tool_args_coerces_integer_like_string_fields() {
     let normalized = normalize_tool_args(
         "edit",
-        &json!({
+        json!({
             "action": "replace_range",
             "path": "tests/unit/test_example.py",
             "range_start": "1",
@@ -1674,7 +1674,7 @@ fn normalize_strips_native_json_leaked_heredoc_content() {
         "range_end": 129,
         "content": format!("<<EOF\n{body}\nEOF"),
     });
-    let normalized = normalize_tool_args("edit", &args, None);
+    let normalized = normalize_tool_args("edit", args, None);
     let content = normalized["content"].as_str().unwrap();
     assert_eq!(
         content, body,
@@ -1690,7 +1690,7 @@ fn normalize_strips_native_json_leaked_heredoc_content() {
 fn normalize_strips_native_json_leaked_heredoc_with_trailing_whitespace() {
     let body = "const x = 1;";
     let args = json!({ "content": format!("  <<EOF\n{body}\nEOF\n  ") });
-    let normalized = normalize_tool_args("edit", &args, None);
+    let normalized = normalize_tool_args("edit", args, None);
     assert_eq!(normalized["content"].as_str().unwrap(), body);
 }
 
@@ -1705,7 +1705,7 @@ fn normalize_strips_leaked_heredoc_in_nested_ops_new_body() {
             { "op": "replace_body", "function_name": "f", "new_body": format!("<<EOF\n{body}\nEOF") }
         ],
     });
-    let normalized = normalize_tool_args("edit", &args, None);
+    let normalized = normalize_tool_args("edit", args, None);
     let nb = normalized["ops"][0]["new_body"].as_str().unwrap();
     assert_eq!(nb, body, "nested leaked heredoc must be stripped: {nb:?}");
 }
@@ -1717,7 +1717,7 @@ fn normalize_preserves_content_that_merely_contains_double_angle() {
     // that is ENTIRELY one heredoc.
     let body = "pub fn f(a: u32) u32 {\n    return a << 2;\n}";
     let args = json!({ "action": "create", "path": "a.zig", "content": body });
-    let normalized = normalize_tool_args("edit", &args, None);
+    let normalized = normalize_tool_args("edit", args, None);
     assert_eq!(
         normalized["content"].as_str().unwrap(),
         body,
@@ -1732,7 +1732,7 @@ fn normalize_preserves_partial_heredoc_wrap_with_trailing_content() {
     // the value untouched.
     let value = "<<EOF\nbody line\nEOF\nORPHAN TRAILING CONTENT";
     let args = json!({ "content": value });
-    let normalized = normalize_tool_args("edit", &args, None);
+    let normalized = normalize_tool_args("edit", args, None);
     assert_eq!(
         normalized["content"].as_str().unwrap(),
         value,
@@ -1766,7 +1766,7 @@ fn normalize_strips_function_markup_leaked_heredoc_via_full_parse() {
         "function-markup keeps the param value verbatim: {raw:?}"
     );
     // ...and the dispatch normalizer strips the leaked wrapper.
-    let normalized = normalize_tool_args("edit", &result.calls[0]["arguments"], None);
+    let normalized = normalize_tool_args("edit", result.calls[0]["arguments"].clone(), None);
     assert_eq!(
         normalized["content"].as_str().unwrap(),
         body,
@@ -1782,7 +1782,7 @@ fn normalize_preserves_markdown_fenced_content() {
     // generalize to other delimiter-bearing content classes.
     let body = "# Title\n\n```rust\nfn main() {}\n```\nDone.";
     let args = json!({ "action": "create", "path": "README.md", "content": body });
-    let normalized = normalize_tool_args("edit", &args, None);
+    let normalized = normalize_tool_args("edit", args, None);
     assert_eq!(
         normalized["content"].as_str().unwrap(),
         body,
@@ -1800,6 +1800,6 @@ fn normalize_preserves_legit_file_that_is_entirely_a_bash_heredoc() {
     // future change is a conscious decision, not an accident.
     let body = "echo hello\necho world";
     let args = json!({ "content": format!("<<SH\n{body}\nSH") });
-    let normalized = normalize_tool_args("edit", &args, None);
+    let normalized = normalize_tool_args("edit", args, None);
     assert_eq!(normalized["content"].as_str().unwrap(), body);
 }

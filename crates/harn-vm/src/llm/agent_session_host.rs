@@ -3489,6 +3489,24 @@ pub(crate) fn install_session_policy_guard(
     }
 }
 
+/// The exact option keys [`install_session_policies_inner`] reads. Kept
+/// adjacent to that function so the list cannot drift: any new policy-shaped
+/// option MUST be added here, otherwise the tool-dispatch fast path would
+/// skip installing it.
+const SESSION_POLICY_OPTION_KEYS: [&str; 4] =
+    ["policy", "approval_policy", "command_policy", "permissions"];
+
+/// Whether `opts_map` carries any policy/permission-shaped key that
+/// [`install_session_policy_guard`] would act on. Presence is checked, not
+/// validity: a key that is present but nil/invalid still routes the caller
+/// through the guard (which no-ops or errors exactly as before), so the fast
+/// path only ever skips a provable no-op.
+pub(crate) fn options_request_session_policies(opts_map: &crate::value::DictMap) -> bool {
+    SESSION_POLICY_OPTION_KEYS
+        .iter()
+        .any(|key| opts_map.get(*key).is_some())
+}
+
 fn install_session_policies_inner(
     opts_map: &crate::value::DictMap,
     installed: &mut InstalledPolicies,

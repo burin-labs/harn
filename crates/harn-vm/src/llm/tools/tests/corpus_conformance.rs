@@ -387,7 +387,7 @@ fn corpus_bool_string_coerces_when_schema_expects_bool() {
     ] {
         let normalized = normalize_tool_args(
             "edit",
-            &json!({"action": "create", "path": "a.zig", "overwrite": raw}),
+            json!({"action": "create", "path": "a.zig", "overwrite": raw}),
             Some(&tools),
         );
         assert_eq!(
@@ -404,7 +404,7 @@ fn corpus_bool_coercion_is_conservative() {
     let tools = corpus_tool_registry();
     let normalized = normalize_tool_args(
         "edit",
-        &json!({"overwrite": "yes", "action": "true"}),
+        json!({"overwrite": "yes", "action": "true"}),
         Some(&tools),
     );
     // "yes" is not an unambiguous bool spelling.
@@ -420,7 +420,7 @@ fn corpus_json_array_string_coerces_when_schema_expects_list() {
     let tools = corpus_tool_registry();
     let normalized = normalize_tool_args(
         "edit",
-        &json!({"ops": "[{\"op\": \"replace_range\", \"range_start\": 3}]"}),
+        json!({"ops": "[{\"op\": \"replace_range\", \"range_start\": 3}]"}),
         Some(&tools),
     );
     assert_eq!(
@@ -436,6 +436,6 @@ fn corpus_json_array_string_coerces_when_schema_expects_list() {
 fn corpus_malformed_array_string_is_not_coerced() {
     let tools = corpus_tool_registry();
     let malformed = "[{\"call_id\": \"1\",tool\": \"look\"";
-    let normalized = normalize_tool_args("edit", &json!({"ops": malformed}), Some(&tools));
+    let normalized = normalize_tool_args("edit", json!({"ops": malformed}), Some(&tools));
     assert_eq!(normalized["ops"], json!(malformed));
 }

@@ -235,6 +235,21 @@ pub(crate) fn current_dynamic_permission_policies() -> Vec<DynamicPermissionPoli
     DYNAMIC_PERMISSION_STACK.with(|stack| stack.borrow().clone())
 }
 
+/// O(1) probe for whether any dynamic-permission scope is active on this
+/// thread/task, without cloning the policy vec. Used by the tool-dispatch
+/// fast path: when no scope is installed, [`check_dynamic_permission`] is a
+/// provable no-op (it returns `Ok(None)` before ever consulting grants).
+pub(crate) fn dynamic_permission_policy_active() -> bool {
+    DYNAMIC_PERMISSION_STACK.with(|stack| !stack.borrow().is_empty())
+}
+
+/// Whether any session-scoped permission grants are cached for `session_id`.
+/// Cheap map probe used by the tool-dispatch fast-path gate alongside
+/// [`dynamic_permission_policy_active`].
+pub(crate) fn session_has_grants(session_id: &str) -> bool {
+    SESSION_PERMISSION_GRANTS.with(|store| store.borrow().contains_key(session_id))
+}
+
 pub(crate) fn parse_dynamic_permission_policy(
     value: Option<&VmValue>,
     label: &str,

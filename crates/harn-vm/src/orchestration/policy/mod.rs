@@ -64,6 +64,14 @@ pub fn current_execution_policy() -> Option<CapabilityPolicy> {
     EXECUTION_POLICY_STACK.with(|stack| stack.borrow().last().cloned())
 }
 
+/// O(1) probe for whether any execution policy scope is active on this
+/// thread/task. Lets hot paths (tool dispatch) skip policy enforcement
+/// entirely without paying the `CapabilityPolicy` clone that
+/// [`current_execution_policy`] performs.
+pub fn execution_policy_active() -> bool {
+    EXECUTION_POLICY_STACK.with(|stack| !stack.borrow().is_empty())
+}
+
 pub fn push_approval_policy(policy: ToolApprovalPolicy) {
     EXECUTION_APPROVAL_POLICY_STACK.with(|stack| stack.borrow_mut().push(policy));
 }

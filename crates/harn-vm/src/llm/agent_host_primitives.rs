@@ -341,6 +341,31 @@ fn empty_args_cause_named_feedback(
     }
 }
 
+/// Execution-policy gate for one tool dispatch: the tool/capability/
+/// side-effect ceilings plus the per-tool argument allow-lists.
+///
+/// `policy_machinery_active` is the dispatch fast-path gate (see
+/// `host_agent_dispatch_tool_call`): when false, no execution-policy scope is
+/// installed, so `enforce_current_policy_for_tool` would return `Ok(())`
+/// unconditionally and `enforce_tool_arg_constraints` would iterate the empty
+/// constraint list of `CapabilityPolicy::default()` — skipping both is
+/// behavior-preserving and avoids building that default policy per call.
+fn enforce_dispatch_policies(
+    policy_machinery_active: bool,
+    tool_name: &str,
+    tool_args: &serde_json::Value,
+) -> Result<(), crate::orchestration::PolicyDenial> {
+    if !policy_machinery_active {
+        return Ok(());
+    }
+    crate::orchestration::enforce_current_policy_for_tool(tool_name)?;
+    crate::orchestration::enforce_tool_arg_constraints(
+        &crate::orchestration::current_execution_policy().unwrap_or_default(),
+        tool_name,
+        tool_args,
+    )
+}
+
 /// Append a `PermissionDeny` transcript event that carries the structured
 /// [`crate::agent_events::ToolDenial`] alongside the human-readable reason.
 /// Silent no-op for sessions that were never opened.
@@ -877,10 +902,15 @@ async fn host_agent_dispatch_tool_call(
             _ => None,
         })
         .unwrap_or_default();
-    let raw_args = call
-        .get("arguments")
-        .map(helpers::vm_value_to_json)
-        .unwrap_or(serde_json::Value::Null);
+    // The JSON form of the arguments is built lazily per consumer: the
+    // named path needs it once (feeding `normalize_tool_args`, which takes
+    // ownership so the object is not deep-cloned a second time), while the
+    // denial/feedback paths re-derive it from `call` only when they fire.
+    let raw_args_json = || {
+        call.get("arguments")
+            .map(helpers::vm_value_to_json)
+            .unwrap_or(serde_json::Value::Null)
+    };
     let mut tool_name = match call.get("name") {
         Some(VmValue::String(name)) if !name.trim().is_empty() => name.to_string(),
         // An empty/missing/non-string tool name is a recoverable parse slip,
@@ -894,7 +924,7 @@ async fn host_agent_dispatch_tool_call(
             let denied = agent_primitive_denied_tool(
                 "<unnamed>",
                 &tool_id,
-                &raw_args,
+                &raw_args_json(),
                 "Tool call is missing a name. Emit one tool call per turn as \
                  `name({ ... })` using a non-empty tool name from the allowed \
                  list, then retry.",
@@ -904,7 +934,7 @@ async fn host_agent_dispatch_tool_call(
             return Ok(json_to_vm_value(&denied));
         }
     };
-    let mut tool_args = tools::normalize_tool_args(&tool_name, &raw_args, tools);
+    let mut tool_args = tools::normalize_tool_args(&tool_name, raw_args_json(), tools);
     let session_id = agent_primitive_option_str(options, "session_id")
         .or_else(current_agent_session_id)
         .unwrap_or_else(|| format!("agent_primitive_session_{}", uuid::Uuid::now_v7()));
@@ -915,16 +945,32 @@ async fn host_agent_dispatch_tool_call(
         .unwrap_or(1000)
         .max(1) as u64;
     let bridge = current_host_bridge();
-    let _policy_guard = agent_session_host::install_session_policy_guard(options)?;
+    // Happy-path fast path: when NO policy/permission machinery is
+    // configured, the three blocks below — session policy guard install,
+    // execution-policy enforcement, and the dynamic-permission check — are
+    // provable no-ops, and together they dominate the diffuse per-dispatch
+    // overhead (guard key parsing, a `CapabilityPolicy::default()` per call,
+    // a boxed permission future plus grant-map churn per call). Skip them
+    // outright. The gate is deliberately conservative and O(1):
+    // - any policy-shaped option key (even nil/invalid) → slow path, so the
+    //   guard still validates/errors exactly as before;
+    // - any ambient execution-policy scope (e.g. an enclosing sub-agent
+    //   ceiling) → slow path;
+    // - any dynamic-permission scope or cached session grant → slow path.
+    // Approval policies, the trifecta gate, pre/post tool hooks, compass
+    // routing, and schema validation are NOT gated here and run unchanged.
+    let policy_machinery_active = agent_session_host::options_request_session_policies(options)
+        || crate::orchestration::execution_policy_active()
+        || permissions::dynamic_permission_policy_active()
+        || permissions::session_has_grants(&session_id);
+    let _policy_guard = if policy_machinery_active {
+        Some(agent_session_host::install_session_policy_guard(options)?)
+    } else {
+        None
+    };
 
-    if let Err(policy_denial) = crate::orchestration::enforce_current_policy_for_tool(&tool_name)
-        .and_then(|_| {
-            crate::orchestration::enforce_tool_arg_constraints(
-                &crate::orchestration::current_execution_policy().unwrap_or_default(),
-                &tool_name,
-                &tool_args,
-            )
-        })
+    if let Err(policy_denial) =
+        enforce_dispatch_policies(policy_machinery_active, &tool_name, &tool_args)
     {
         // An argument allow-list miss (e.g. a sub-agent scoped to `test/users.*`
         // that tried to edit the shared reference file) is RECOVERABLE: the tool
@@ -955,20 +1001,31 @@ async fn host_agent_dispatch_tool_call(
         ));
     }
 
-    let mut permission_grants = permissions::take_session_grants(&session_id);
-    // Box the permission-check future: this tool-dispatch async fn sits right at
-    // Clippy's `large_stack_frames` threshold, so moving this sizable nested
-    // future to the heap keeps the frame comfortably under it (matches the
-    // `Box::pin` treatment of the reminder-provider futures below).
-    let permission_outcome = Box::pin(permissions::check_dynamic_permission(
-        Some(&ctx),
-        &mut permission_grants,
-        &tool_name,
-        &tool_args,
-        &session_id,
-    ))
-    .await?;
-    permissions::store_session_grants(&session_id, permission_grants);
+    // Fast path: with no dynamic-permission scope installed (and none
+    // installable — policy-shaped options force `policy_machinery_active`),
+    // `check_dynamic_permission` returns `Ok(None)` before ever reading the
+    // grants it is handed, so the take/check/store round-trip below is a
+    // provable no-op. Skipping it saves a boxed future allocation plus two
+    // grant-map operations (including a `String` key allocation) per call.
+    let permission_outcome = if policy_machinery_active {
+        let mut permission_grants = permissions::take_session_grants(&session_id);
+        // Box the permission-check future: this tool-dispatch async fn sits right at
+        // Clippy's `large_stack_frames` threshold, so moving this sizable nested
+        // future to the heap keeps the frame comfortably under it (matches the
+        // `Box::pin` treatment of the reminder-provider futures below).
+        let permission_outcome = Box::pin(permissions::check_dynamic_permission(
+            Some(&ctx),
+            &mut permission_grants,
+            &tool_name,
+            &tool_args,
+            &session_id,
+        ))
+        .await?;
+        permissions::store_session_grants(&session_id, permission_grants);
+        permission_outcome
+    } else {
+        None
+    };
     if let Some(permission) = permission_outcome {
         match permission {
             permissions::PermissionCheck::Granted { reason, escalated } => {
@@ -1329,7 +1386,9 @@ async fn host_agent_dispatch_tool_call(
         let turn_stop_reason = agent_primitive_option_str(options, "_stop_reason");
         let cause_named = empty_args_cause_named_feedback(
             &tool_name,
-            &raw_args,
+            // Re-derive the pre-normalization JSON args lazily: this failure
+            // path is the only late consumer, and `call` is still in scope.
+            &raw_args_json(),
             turn_stop_reason.as_deref().filter(|s| !s.is_empty()),
         );
         let (message, cause) = match cause_named {
