@@ -341,6 +341,24 @@ fn generated_catalog_derives_quality_tags_from_routes() {
 }
 
 #[test]
+fn generated_catalog_keeps_qwen37_max_frontier_tier() {
+    let catalog = artifact();
+    let max = catalog
+        .models
+        .iter()
+        .find(|model| model.id == "qwen/qwen3.7-max" && model.provider == "openrouter")
+        .expect("OpenRouter Qwen 3.7 Max is exported");
+    assert_eq!(max.tier, "frontier");
+    assert!(
+        max.strengths.iter().any(|tag| tag == "reasoning"),
+        "Qwen 3.7 Max should keep the flagship reasoning profile"
+    );
+    let pricing = max.pricing.as_ref().expect("Qwen 3.7 Max has pricing");
+    assert_eq!(pricing.input_per_mtok, 1.25);
+    assert_eq!(pricing.output_per_mtok, 3.75);
+}
+
+#[test]
 fn validation_rejects_missing_required_metadata() {
     let mut catalog = artifact();
     catalog.providers[0].display_name.clear();

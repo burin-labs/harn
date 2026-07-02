@@ -13627,14 +13627,14 @@
         "qwen",
         "deepseek"
       ],
-      "tier": "mid",
+      "tier": "frontier",
       "open_weight": false,
       "strengths": [
         "coding",
         "agentic",
         "tool_use",
         "long_context",
-        "speed"
+        "reasoning"
       ]
     },
     {
