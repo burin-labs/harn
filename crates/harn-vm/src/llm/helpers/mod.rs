@@ -128,9 +128,7 @@ pub fn vm_value_to_json_strict(val: &VmValue, path: &str) -> Result<serde_json::
         | VmValue::Generator(_)
         | VmValue::Stream(_)
         | VmValue::Iter(_)
-        | VmValue::Harness(_) => {
-            Err(format!("{path}: {} is not serializable", val.type_name()))
-        }
+        | VmValue::Harness(_) => Err(format!("{path}: {} is not serializable", val.type_name())),
         other => Ok(vm_value_to_json(other)),
     }
 }

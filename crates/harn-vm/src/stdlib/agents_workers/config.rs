@@ -34,11 +34,8 @@ fn worker_config_to_json(config: &WorkerConfig) -> Result<serde_json::Value, VmE
             // save time (with the offending path) instead of writing a
             // display-string that rehydrates as a plain string and
             // explodes as a type error long after resume.
-            let options =
-                crate::llm::helpers::vm_value_dict_to_json_strict(options, "options")
-                    .map_err(|error| {
-                        VmError::Runtime(format!("worker snapshot: {error}"))
-                    })?;
+            let options = crate::llm::helpers::vm_value_dict_to_json_strict(options, "options")
+                .map_err(|error| VmError::Runtime(format!("worker snapshot: {error}")))?;
             Ok(serde_json::json!({
                 "mode": "workflow",
                 "graph": graph,
