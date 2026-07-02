@@ -146,6 +146,7 @@ pub mod clock_mock {
 
 pub mod typecheck;
 pub mod value;
+pub mod verification;
 pub mod visible_text;
 mod vm;
 pub(crate) mod wait_for_graph;
