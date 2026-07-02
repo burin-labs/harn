@@ -397,7 +397,10 @@ fn try_compare_orders_lists_lexicographically() {
         try_compare_values(&list(vec![i(1)]), &list(vec![i(1), i(0)])),
         Some(-1)
     );
-    assert_eq!(try_compare_values(&list(vec![]), &list(vec![i(0)])), Some(-1));
+    assert_eq!(
+        try_compare_values(&list(vec![]), &list(vec![i(0)])),
+        Some(-1)
+    );
     // Strings order per element too.
     assert_eq!(
         try_compare_values(&list(vec![s("a"), s("b")]), &list(vec![s("a"), s("c")])),

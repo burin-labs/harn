@@ -236,10 +236,7 @@ impl Vm {
             .iter()
             .filter_map(|(name, json)| {
                 let parsed = serde_json::from_str::<serde_json::Value>(json).ok()?;
-                Some((
-                    name.clone(),
-                    crate::schema::json_to_vm_value(&parsed),
-                ))
+                Some((name.clone(), crate::schema::json_to_vm_value(&parsed)))
             })
             .collect();
 
@@ -353,8 +350,7 @@ impl Vm {
             // the old footgun where adding the first `pub` silently turned every
             // other (previously importable) function private to callers.
             for name in names {
-                if !loaded.public_names.contains(name) && !loaded.public_type_names.contains(name)
-                {
+                if !loaded.public_names.contains(name) && !loaded.public_type_names.contains(name) {
                     let hint = if loaded.functions.contains_key(name) {
                         " — it is defined there but not `pub`; mark it `pub` to export it"
                     } else {

@@ -185,7 +185,7 @@ export ANTHROPIC_API_KEY=sk-ant-...
 let response = llm_call(
   "Explain quicksort in two sentences.",
   "You are a computer science tutor.",
-  {provider: "anthropic", model: "claude-sonnet-4-6"}
+  {provider: "anthropic", model: "claude-sonnet-5"}
 )
 log(response)
 ```

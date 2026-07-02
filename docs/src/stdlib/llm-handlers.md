@@ -146,7 +146,7 @@ import {agent_stack, agent_stack_audit_line} from "std/agent/stack"
 
 let stack = agent_stack({
   role: "planner",
-  defaults: {provider: "anthropic", model: "claude-sonnet-4-6", task: "agent"},
+  defaults: {provider: "anthropic", model: "claude-sonnet-5", task: "agent"},
   retry: {max_attempts: 3},
   logging: true,
   budget: {max_calls: 40},
@@ -309,7 +309,7 @@ let caller = with_retry(default_llm_caller(), {max_attempts: 3})
 let envelope = caller({
   prompt: "hello",
   system: nil,
-  opts: {provider: "auto", model: "claude-sonnet-4-6"},
+  opts: {provider: "auto", model: "claude-sonnet-5"},
   turn: {iteration: 0, session_id: "", attempt: 1},
 })
 if envelope.ok { log(envelope.value.text) }
@@ -425,7 +425,7 @@ import {recommend_max_output_tokens, fits_in_context} from "std/llm/budget"
 let max_out = recommend_max_output_tokens({
   prompt: long_text,
   system: sys,
-  model: "claude-sonnet-4-6",
+  model: "claude-sonnet-5",
   task_kind: "summarize",
 })
 
@@ -481,7 +481,7 @@ GPT-5/5.5/4o/4.1, Gemini 2.5 Pro/Flash, Ollama Qwen3/Llama 3.x.
 ```harn,ignore
 import {pack_agent} from "std/llm/defaults"
 
-let opts = pack_agent("claude-sonnet-4-6", {
+let opts = pack_agent("claude-sonnet-5", {
   thinking: "medium",
   effort: "quality",
 })

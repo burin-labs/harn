@@ -3771,7 +3771,7 @@ import {agent_stack, agent_stack_audit_line} from "std/agent/stack"
 
 let stack = agent_stack({
   role: "planner",
-  defaults: {provider: "anthropic", model: "claude-sonnet-4-6", task: "agent"},
+  defaults: {provider: "anthropic", model: "claude-sonnet-5", task: "agent"},
   retry: {max_attempts: 3},
   logging: true,
   budget: {max_calls: 40},

@@ -943,7 +943,7 @@ it; Harn keeps `modes` available for clients still on `session/set_mode`.
       "currentValue": "@inherit",
       "options": [
         { "value": "@inherit",         "name": "Inherit ambient default", "description": "..." },
-        { "value": "claude-sonnet-4-6", "name": "claude-sonnet-4-6 (anthropic/claude-sonnet-4-6)", "description": "tier: frontier" }
+        { "value": "claude-sonnet-5", "name": "claude-sonnet-5 (anthropic/claude-sonnet-5)", "description": "tier: frontier" }
       ]
     },
     {
@@ -1064,14 +1064,14 @@ pricing instead of vendoring picker rows.
   "params": {
     "sessionId": "sess_abc",
     "configId": "model",
-    "value": "claude-sonnet-4-6"
+    "value": "claude-sonnet-5"
   }
 }
 ```
 
 Accepted selector forms:
 
-- a known alias from the llm.toml catalog (e.g. `claude-sonnet-4-6`)
+- a known alias from the llm.toml catalog (e.g. `claude-sonnet-5`)
 - an explicit `provider:model` or `provider/model` pair where the
   provider is in `providers.toml`
 - a model id present in the catalog (`model_catalog_entry`)

@@ -605,6 +605,34 @@ fn prompt_guidance_demo_runs_end_to_end_against_bundled_tape() {
 }
 
 #[test]
+fn pub_type_exports_demo_runs_end_to_end_against_bundled_tape() {
+    let outcome = run_demo_scenario("pub-type-exports");
+    assert_eq!(
+        outcome.exit_code, 0,
+        "pub-type-exports demo failed (exit {}):\nstderr:\n{}\nstdout:\n{}",
+        outcome.exit_code, outcome.stderr, outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("pub_type_exports_receipt"),
+        "pub-type-exports stdout missing receipt envelope:\n{}",
+        outcome.stdout
+    );
+    // The whole point: the alias exported from verdicts.harn drives both the
+    // hand-written annotation and the schema-validated LLM result.
+    assert!(
+        outcome.stdout.contains("\"annotation_verdict\":\"pass\"")
+            && outcome.stdout.contains("\"llm_verdict\":\"pass\""),
+        "both the annotated and schema-validated reports must bind the imported alias:\n{}",
+        outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("verdicts.harn#GradeReport"),
+        "receipt must name the exporting module as the schema source:\n{}",
+        outcome.stdout
+    );
+}
+
+#[test]
 fn every_scenario_listed_has_a_passing_smoke_run() {
     // Belt-and-suspenders: if a future scenario lands in SCENARIOS but
     // someone forgets to add a per-scenario test above, this catch-all

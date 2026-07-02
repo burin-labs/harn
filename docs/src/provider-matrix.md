@@ -252,7 +252,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `anthropic` | `claude-sonnet-4-20250514` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `anthropic` | `claude-sonnet-4-5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `anthropic` | `claude-sonnet-4-5-20250929` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `anthropic` | `claude-sonnet-4-6` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `anthropic` | `claude-sonnet-5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `anthropic` | `claude-sonnet-5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `baseten` | `baseten/deepseek-ai/DeepSeek-V4-Pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `baseten` | `baseten/moonshotai/Kimi-K2.5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
@@ -368,7 +368,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `openrouter` | `anthropic/claude-fable-5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `anthropic/claude-haiku-4-5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `anthropic/claude-opus-4.8` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `openrouter` | `anthropic/claude-sonnet-4-6` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openrouter` | `anthropic/claude-sonnet-5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `anthropic/claude-sonnet-5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `deepseek/deepseek-v3.2` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `deepseek/deepseek-v4-flash` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |

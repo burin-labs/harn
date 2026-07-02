@@ -516,7 +516,7 @@ pipelines can dispatch on cache state without a separate flag.
       { "name": "run_main", "duration_ms": 1200, "events": 14 }
     ],
     "llm_calls": [
-      { "model": "claude-sonnet-4-6", "latency_ms": 850, "tokens": 1500 }
+      { "model": "claude-sonnet-5", "latency_ms": 850, "tokens": 1500 }
     ],
     "tool_calls": [{ "name": "mcp_call", "latency_ms": 200 }],
     "totals": {

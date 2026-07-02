@@ -112,14 +112,13 @@ pub fn compile_module_artifact(
             _ => node,
         };
         if let harn_parser::Node::TypeDecl {
-            name,
-            is_pub: true,
-            ..
+            name, is_pub: true, ..
         } = &inner.node
         {
             public_type_names.insert(name.clone());
             continue;
-        }let harn_parser::Node::FnDecl {
+        }
+        let harn_parser::Node::FnDecl {
             name,
             type_params,
             params,
