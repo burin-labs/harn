@@ -36,6 +36,21 @@ prefers_xml_tools = false
 thinking_block_style = "none"
 
 [[provider.mistral]]
+model_match = "codestral-*"
+native_tools = true
+preferred_tool_format = "native"
+recommended_endpoint = "/chat/completions"
+text_tool_wire_format_supported = true
+structured_output = "native"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
+
+[[provider.mistral]]
 model_match = "devstral-*"
 native_tools = true
 preferred_tool_format = "native"
@@ -125,6 +140,23 @@ supports_assistant_prefill = false
 prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "reasoning_summary"
+
+# Qwen 3.6 on Groq speaks clean OpenAI-shape native tool calls (Groq
+# parses the Qwen tool format server-side); no reported parity issues.
+[[provider.groq]]
+model_match = "qwen/qwen3.6*"
+native_tools = true
+preferred_tool_format = "native"
+recommended_endpoint = "/chat/completions"
+text_tool_wire_format_supported = true
+structured_output = "native"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
 
 [[provider.groq]]
 model_match = "llama-*"

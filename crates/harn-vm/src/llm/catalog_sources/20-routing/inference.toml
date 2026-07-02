@@ -56,6 +56,14 @@ pattern = "devstral-*"
 provider = "mistral"
 
 [[inference_rules]]
+pattern = "codestral-*"
+provider = "mistral"
+
+[[inference_rules]]
+pattern = "magistral-*"
+provider = "mistral"
+
+[[inference_rules]]
 pattern = "command-*"
 provider = "cohere"
 
@@ -81,6 +89,12 @@ provider = "cerebras"
 [[inference_rules]]
 pattern = "baseten/*"
 provider = "baseten"
+
+# DashScope catalog rows carry `dashscope/<model>` ids for the same reason
+# (the bare `qwen3.6-35b-a3b` id belongs to the llamacpp route).
+[[inference_rules]]
+pattern = "dashscope/*"
+provider = "dashscope"
 
 # MiniMax — released-name canonical IDs (capital-M) sit on the direct
 # API. OpenRouter mirrors the same family under `minimax/*` slugs; that

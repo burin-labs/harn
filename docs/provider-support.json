@@ -388,13 +388,14 @@
         "DASHSCOPE_API_KEY"
       ],
       "recommended": {
-        "selector": "dashscope:qwen3.6*",
+        "selector": "dashscope:dashscope/qwen3-coder-next",
         "provider": "dashscope",
-        "model": "qwen3.6*",
-        "display_name": null,
+        "model": "dashscope/qwen3-coder-next",
+        "display_name": "Qwen3 Coder Next (DashScope)",
         "tool_format": "native",
         "harn_options": [
           "provider = \"dashscope\"",
+          "model = \"dashscope/qwen3-coder-next\"",
           "tool_format = \"native\"",
           "structured_output_mode = \"delimited\""
         ]
@@ -411,8 +412,8 @@
           "disable_directive:/no_think",
           "enabled"
         ],
-        "prompt_or_context_cache": false,
-        "usage_accounting_confidence": "provider_default"
+        "prompt_or_context_cache": true,
+        "usage_accounting_confidence": "high"
       },
       "empirical": {
         "status": "not_recorded",
@@ -441,30 +442,30 @@
         "DEEPINFRA_TOKEN"
       ],
       "recommended": {
-        "selector": "deepinfra:deepinfra/Qwen/Qwen3.6-35B-A3B",
+        "selector": "deepinfra:deepinfra/deepseek-ai/DeepSeek-V4-Flash",
         "provider": "deepinfra",
-        "model": "deepinfra/Qwen/Qwen3.6-35B-A3B",
-        "display_name": "Qwen3.6 35B A3B (DeepInfra)",
-        "tool_format": "text",
+        "model": "deepinfra/deepseek-ai/DeepSeek-V4-Flash",
+        "display_name": "DeepSeek V4 Flash (DeepInfra)",
+        "tool_format": "native",
         "harn_options": [
           "provider = \"deepinfra\"",
-          "model = \"deepinfra/Qwen/Qwen3.6-35B-A3B\"",
-          "tool_format = \"text\"",
+          "model = \"deepinfra/deepseek-ai/DeepSeek-V4-Flash\"",
+          "tool_format = \"native\"",
           "structured_output_mode = \"native_json\""
         ]
       },
       "capabilities": {
         "native_tools": true,
         "text_tools": true,
-        "preferred_tool_format": "text",
-        "tool_mode_parity": "native_unreliable",
+        "preferred_tool_format": "native",
+        "tool_mode_parity": "unknown",
         "structured_output_transport": "native",
         "structured_output_mode": "native_json",
         "streaming": true,
         "reasoning_knobs": [
           "enabled"
         ],
-        "prompt_or_context_cache": false,
+        "prompt_or_context_cache": true,
         "usage_accounting_confidence": "high"
       },
       "empirical": {
@@ -479,9 +480,7 @@
         "evidence": []
       },
       "notes": [],
-      "caveats": [
-        "2026-06-24 forced-format sweep (N=5): DeepInfra Qwen3.6-35B-A3B native bills empty completions (1/5) and fenced-JSON is flaky (2/5); heredoc text carried a backslash-heavy Zig body byte-clean 5/5."
-      ],
+      "caveats": [],
       "mcp_notes": [],
       "local_setup_notes": []
     },
@@ -1852,30 +1851,26 @@
         "ZHIPU_API_KEY"
       ],
       "recommended": {
-        "selector": "zai:glm-5",
+        "selector": "zai:glm-4.7-flash",
         "provider": "zai",
-        "model": "glm-5",
-        "display_name": "GLM 5",
+        "model": "glm-4.7-flash",
+        "display_name": "GLM 4.7 Flash",
         "tool_format": "text",
         "harn_options": [
           "provider = \"zai\"",
-          "model = \"glm-5\"",
-          "tool_format = \"text\"",
-          "structured_output_mode = \"native_json\""
+          "model = \"glm-4.7-flash\""
         ]
       },
       "capabilities": {
-        "native_tools": true,
+        "native_tools": false,
         "text_tools": true,
-        "preferred_tool_format": "text",
-        "tool_mode_parity": "native_unreliable",
-        "structured_output_transport": "native",
-        "structured_output_mode": "native_json",
+        "preferred_tool_format": "auto",
+        "tool_mode_parity": "unknown",
+        "structured_output_transport": "none",
+        "structured_output_mode": "none",
         "streaming": true,
-        "reasoning_knobs": [
-          "enabled"
-        ],
-        "prompt_or_context_cache": true,
+        "reasoning_knobs": [],
+        "prompt_or_context_cache": false,
         "usage_accounting_confidence": "high"
       },
       "empirical": {
@@ -1890,9 +1885,7 @@
         "evidence": []
       },
       "notes": [],
-      "caveats": [
-        "GLM-5.x native channel emits `<tool_call><arg_key>...` markup as content instead of OpenAI message.tool_calls (2026-06-23 live Baseten probe, see 39-baseten.toml); heredoc text tools parse cleanly. Same family pinned native_unreliable on Fireworks (glm-5p*) and DeepInfra (*glm-5*)."
-      ],
+      "caveats": [],
       "mcp_notes": [],
       "local_setup_notes": []
     }

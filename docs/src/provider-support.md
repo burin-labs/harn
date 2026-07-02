@@ -18,8 +18,8 @@ No benchmark summary is baked into this checked-in page. To layer local empirica
 | `Bedrock` | AWS Bedrock Converse | `bedrock:anthropic.claude-*` | `native` | yes | yes | `none` / `xml_tagged` | none | no | `provider_default` | `not_recorded` |
 | `Cerebras` | OpenAI-compatible chat completions | `cerebras/gpt-oss-120b` | `native` | yes | yes | `native` / `native_json` | `effort,reasoning_effort` | no | `high` | `not_recorded` |
 | `Cohere` | OpenAI-compatible chat completions | `cohere:command-a-plus-05-2026` | `native` | yes | yes | `native` / `native_json` | `adaptive` | no | `high` | `not_recorded` |
-| `Dashscope` | OpenAI-compatible chat completions | `dashscope:qwen3.6*` | `native` | yes | yes | `native` / `delimited` | `disable_directive:/no_think,enabled` | no | `provider_default` | `not_recorded` |
-| `Deepinfra` | OpenAI-compatible chat completions | `deepinfra:deepinfra/Qwen/Qwen3.6-35B-A3B` | `text` | yes | yes | `native` / `native_json` | `enabled` | no | `high` | `not_recorded` |
+| `Dashscope` | OpenAI-compatible chat completions | `dashscope:dashscope/qwen3-coder-next` | `native` | yes | yes | `native` / `delimited` | `disable_directive:/no_think,enabled` | yes | `high` | `not_recorded` |
+| `Deepinfra` | OpenAI-compatible chat completions | `deepinfra:deepinfra/deepseek-ai/DeepSeek-V4-Flash` | `native` | yes | yes | `native` / `native_json` | `enabled` | yes | `high` | `not_recorded` |
 | `Deepseek` | OpenAI-compatible chat completions | `deepseek:deepseek-v4-flash` | `native` | yes | yes | `native` / `native_json` | `enabled` | yes | `high` | `not_recorded` |
 | `Fireworks` | OpenAI-compatible chat completions | `fireworks:accounts/fireworks/models/gpt-oss-120b` | `text` | no | yes | `none` / `native_json` | `effort,reasoning_effort` | no | `high` | `not_recorded` |
 | `Flexai` | OpenAI-compatible chat completions | `flexai` | `text` | no | yes | `none` / `none` | none | no | `provider_default` | `not_recorded` |
@@ -46,7 +46,7 @@ No benchmark summary is baked into this checked-in page. To layer local empirica
 | `Vertex` | Gemini generateContent | `vertex:gemini-*` | `native` | yes | yes | `none` / `native_json` | none | no | `provider_default` | `not_recorded` |
 | `Vllm` | OpenAI-compatible chat completions | `vllm` | `text` | no | yes | `none` / `none` | none | no | `local_zero_cost` | `not_recorded` |
 | `Xai` | OpenAI-compatible chat completions | `xai:grok-build-0.1` | `native` | yes | yes | `native` / `native_json` | `adaptive` | yes | `high` | `not_recorded` |
-| `Zai` | OpenAI-compatible chat completions | `zai:glm-5` | `text` | yes | yes | `native` / `native_json` | `enabled` | yes | `high` | `not_recorded` |
+| `Zai` | OpenAI-compatible chat completions | `zai:glm-4.7-flash` | `text` | no | yes | `none` / `none` | none | no | `high` | `not_recorded` |
 
 ## Recommended options
 
@@ -103,24 +103,6 @@ Caveats:
 MCP notes:
 
 - MCP tools are normalized through Harn tool definitions before they become OpenAI-compatible Cerebras tool schemas.
-
-### Deepinfra
-
-- catalog provider: `deepinfra`
-- recommended route: `deepinfra:deepinfra/Qwen/Qwen3.6-35B-A3B` (`deepinfra/Qwen/Qwen3.6-35B-A3B`)
-- endpoint style: OpenAI-compatible chat completions
-- recommended Harn options:
-
-```toml
-provider = "deepinfra"
-model = "deepinfra/Qwen/Qwen3.6-35B-A3B"
-tool_format = "text"
-structured_output_mode = "native_json"
-```
-
-Caveats:
-
-- 2026-06-24 forced-format sweep (N=5): DeepInfra Qwen3.6-35B-A3B native bills empty completions (1/5) and fenced-JSON is flaky (2/5); heredoc text carried a backslash-heavy Zig body byte-clean 5/5.
 
 ### Gemini API
 
@@ -331,21 +313,3 @@ structured_output_mode = "native_json"
 Caveats:
 
 - 2026-06-24 Harn agent-loop (gpt-oss-120b, zig-feat, tool grounding present): SambaNova native ended with a provider/tool-protocol failure (Harmony empty tool_calls / reasoning-channel-only class). Text/heredoc is the clean pay-per-token channel. See vLLM #22578/#44216, SGLang #8976/#10738, openai/harmony #68.
-
-### Zai
-
-- catalog provider: `zai`
-- recommended route: `zai:glm-5` (`glm-5`)
-- endpoint style: OpenAI-compatible chat completions
-- recommended Harn options:
-
-```toml
-provider = "zai"
-model = "glm-5"
-tool_format = "text"
-structured_output_mode = "native_json"
-```
-
-Caveats:
-
-- GLM-5.x native channel emits `<tool_call><arg_key>...` markup as content instead of OpenAI message.tool_calls (2026-06-23 live Baseten probe, see 39-baseten.toml); heredoc text tools parse cleanly. Same family pinned native_unreliable on Fireworks (glm-5p*) and DeepInfra (*glm-5*).

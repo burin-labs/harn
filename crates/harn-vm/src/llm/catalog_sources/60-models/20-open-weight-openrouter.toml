@@ -8,6 +8,41 @@ context_window = 262144
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 0.22, output_per_mtok = 1.80 }
 availability = "serverless"
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "long_context", "agentic", "tool_use"]
+benchmarks = { swe_bench_verified = 67.0 }
+
+# Qwen3-Coder-Next — 80B/3B MoE non-thinking coder (Apache-2.0), trained
+# against 21 tool schemas (92.7% schema-following per the tech report).
+# OpenRouter serverless rate verified 2026-07-02.
+[models."qwen/qwen3-coder-next"]
+name = "Qwen3 Coder Next"
+provider = "openrouter"
+context_window = 262144
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 0.11, output_per_mtok = 0.80 }
+availability = "serverless"
+architecture = { parameter_count_b = 80.0, active_parameter_count_b = 3.0, moe = true, license = "Apache-2.0", source_url = "https://huggingface.co/Qwen/Qwen3-Coder-Next", last_verified = "2026-07-02" }
+benchmarks = { swe_bench_verified = 70.6, swe_bench_pro = 44.3 }
+tier = "mid"
+open_weight = true
+strengths = ["coding", "cheap", "long_context", "agentic", "tool_use"]
+
+# Qwen3.5-397B-A17B — the open-tier Qwen flagship (native VLM MoE).
+# OpenRouter serverless rate verified 2026-07-02.
+[models."qwen/qwen3.5-397b-a17b"]
+name = "Qwen3.5 397B A17B"
+provider = "openrouter"
+context_window = 262144
+capabilities = ["tools", "vision", "streaming", "thinking"]
+pricing = { input_per_mtok = 0.385, output_per_mtok = 2.45 }
+availability = "serverless"
+architecture = { parameter_count_b = 397.0, active_parameter_count_b = 17.0, moe = true, license = "Apache-2.0", source_url = "https://huggingface.co/Qwen/Qwen3.5-397B-A17B", last_verified = "2026-07-02" }
+benchmarks = { swe_bench_verified = 76.4 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "reasoning", "tool_use", "long_context", "vision"]
 
 # Together lists Qwen3-Coder-Next-FP8 in GET /v1/models alongside its
 # serverless catalog, but normal chat-completion calls fail with
@@ -15,10 +50,6 @@ availability = "serverless"
 # endpoint. Carry the catalog row so price/route metadata is preserved,
 # but mark `availability = "dedicated"` so hosts don't surface it as a
 # one-click serverless option.
-tier = "frontier"
-open_weight = true
-strengths = ["coding", "long_context", "agentic", "tool_use"]
-benchmarks = { swe_bench_verified = 67.0 }
 [models."Qwen/Qwen3-Coder-Next-FP8"]
 name = "Qwen3 Coder Next FP8 (Together, dedicated)"
 provider = "together"

@@ -131,7 +131,9 @@ served_variant = "fireworks"
 wire_model = "accounts/fireworks/models/deepseek-v4-pro"
 api_dialect = "openai_chat"
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.60, output_per_mtok = 1.20 }
+# Fireworks serverless rate verified 2026-07-02: $1.74/$3.48 (cached
+# input $0.145). The prior 0.60/1.20 figures matched no published tier.
+pricing = { input_per_mtok = 1.74, output_per_mtok = 3.48, cache_read_per_mtok = 0.145 }
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
@@ -151,6 +153,40 @@ tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
 
+[models."accounts/fireworks/models/kimi-k2p7-code"]
+name = "Kimi K2.7 Code (Fireworks)"
+provider = "fireworks"
+context_window = 262144
+logical_model = "moonshot-kimi-k2.7-code"
+equivalence_group = "moonshot-kimi-k2.7-code"
+served_variant = "fireworks"
+wire_model = "accounts/fireworks/models/kimi-k2p7-code"
+api_dialect = "openai_chat"
+capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"]
+# Base serverless tier verified 2026-07-02; Fireworks also sells
+# Priority/Fast tiers up to $1.90/$8.00 that this rate card omits.
+pricing = { input_per_mtok = 0.95, output_per_mtok = 4.00, cache_read_per_mtok = 0.19 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
+
+[models."accounts/fireworks/models/minimax-m3"]
+name = "MiniMax M3 (Fireworks)"
+provider = "fireworks"
+context_window = 524288
+served_variant = "fireworks"
+wire_model = "accounts/fireworks/models/minimax-m3"
+api_dialect = "openai_chat"
+capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.30, output_per_mtok = 1.20, cache_read_per_mtok = 0.06 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context", "vision"]
+
+# Groq retires llama-3.3-70b 2026-08-16 per console.groq.com/docs/
+# deprecations (verified 2026-07-02); llama-4-scout and qwen3-32b go
+# 2026-07-17. qwen/qwen3.6-27b below is the current Groq speed route
+# for agentic coding.
 [models."llama-3.3-70b-versatile"]
 name = "Llama 3.3 70B Versatile (Groq)"
 provider = "groq"
@@ -163,9 +199,31 @@ capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 0.59, output_per_mtok = 0.79 }
 rate_limits = { rpm = 1000, tpm = 300000, tier = "developer", source_url = "https://console.groq.com/docs/models", last_verified = "2026-06-05" }
 architecture = { parameter_count_b = 70.0, moe = false, license = "Llama 3.3 Community", source_url = "https://console.groq.com/docs/models", last_verified = "2026-06-05" }
+deprecated = true
+deprecation_note = "Groq retires llama-3.3-70b 2026-08-16 per console.groq.com/docs/deprecations. Use qwen/qwen3.6-27b on Groq or llama-3.1-8b-instant for the cheap tier."
 tier = "mid"
 open_weight = true
 strengths = ["speed", "cheap", "tool_use"]
+
+[models."qwen/qwen3.6-27b"]
+name = "Qwen3.6 27B (Groq)"
+provider = "groq"
+context_window = 131072
+logical_model = "qwen3.6-27b"
+equivalence_group = "qwen3.6-27b"
+served_variant = "groq-lpu"
+wire_model = "qwen/qwen3.6-27b"
+api_dialect = "openai_chat"
+capabilities = ["tools", "streaming", "thinking"]
+# ~500 output tok/s on Groq LPUs; rate verified 2026-07-02 on
+# groq.com/pricing. Dense 27B, hybrid Gated DeltaNet+Attention; SWE-bench
+# Verified 77.2 per the Qwen3.6-27B model card.
+pricing = { input_per_mtok = 0.60, output_per_mtok = 3.00 }
+architecture = { parameter_count_b = 27.0, moe = false, license = "Apache-2.0", source_url = "https://huggingface.co/Qwen/Qwen3.6-27B", last_verified = "2026-07-02" }
+benchmarks = { swe_bench_verified = 77.2 }
+tier = "mid"
+open_weight = true
+strengths = ["speed", "coding", "tool_use", "agentic"]
 
 [models."llama-3.1-8b-instant"]
 name = "Llama 3.1 8B Instant (Groq)"

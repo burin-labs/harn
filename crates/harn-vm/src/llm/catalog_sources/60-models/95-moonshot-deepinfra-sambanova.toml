@@ -39,12 +39,17 @@ served_variant = "moonshot-direct"
 api_dialect = "openai_chat"
 context_window = 262144
 capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.80, output_per_mtok = 3.20, cache_read_per_mtok = 0.20 }
+# First-party tariff verified 2026-07-02: $0.95 / $4.00 per MTok
+# (cache hit $0.19), matching the Fireworks/Baseten/Together list rate
+# for the same weights. The prior 0.80/3.20 row was stale.
+pricing = { input_per_mtok = 0.95, output_per_mtok = 4.00, cache_read_per_mtok = 0.19 }
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
 complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
 
+# Highspeed tariff not published on the per-model pricing page as of
+# 2026-07-02; the row below keeps the last-known figures.
 [models."moonshot/kimi-k2.7-code-highspeed"]
 name = "Kimi K2.7 Code Highspeed (Moonshot direct)"
 provider = "moonshot"
@@ -72,8 +77,31 @@ served_variant = "deepinfra"
 api_dialect = "openai_chat"
 context_window = 163840
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.50, output_per_mtok = 1.50 }
+# DeepInfra catalog rate verified 2026-07-02 (fp4 serving): $1.30/$2.60.
+# The prior 0.50/1.50 figures matched no published DeepInfra tariff.
+pricing = { input_per_mtok = 1.30, output_per_mtok = 2.60 }
 tier = "frontier"
+open_weight = true
+strengths = ["reasoning", "coding", "tool_use", "long_context"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "kimi"]
+
+# DeepSeek V4 Flash on DeepInfra — the budget 1M-context agent route
+# (fp4). Catalog rate verified 2026-07-02: $0.09/$0.18 vs $0.14/$0.28
+# first-party.
+[models."deepinfra/deepseek-ai/DeepSeek-V4-Flash"]
+name = "DeepSeek V4 Flash (DeepInfra)"
+provider = "deepinfra"
+wire_model = "deepseek-ai/DeepSeek-V4-Flash"
+logical_model = "deepseek-v4-flash"
+equivalence_group = "deepseek-v4-flash"
+served_variant = "deepinfra"
+api_dialect = "openai_chat"
+context_window = 1000000
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.09, output_per_mtok = 0.18 }
+architecture = { parameter_count_b = 284.0, active_parameter_count_b = 13.0, moe = true, quantization = "fp4", license = "MIT", source_url = "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash", last_verified = "2026-07-02" }
+# tier matches the deepseek-v4-flash equivalence group (mid across hosts).
+tier = "mid"
 open_weight = true
 strengths = ["reasoning", "coding", "tool_use", "long_context", "cheap"]
 complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "kimi"]
@@ -158,7 +186,9 @@ served_variant = "deepinfra"
 api_dialect = "openai_chat"
 context_window = 262144
 capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.80, output_per_mtok = 3.20, cache_read_per_mtok = 0.20 }
+# DeepInfra undercuts the first-party $0.95/$4.00 list; verified
+# 2026-07-02 (int4-native weights).
+pricing = { input_per_mtok = 0.74, output_per_mtok = 3.50 }
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]

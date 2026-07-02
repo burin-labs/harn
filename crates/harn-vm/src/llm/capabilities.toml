@@ -1124,7 +1124,7 @@ model_match = "openai/gpt-*"
 version_min = [5, 1]
 native_tools = true
 preferred_tool_format = "native"
-json_schema = "native"
+structured_output = "native"
 thinking_modes = ["effort"]
 reasoning_effort_supported = true
 reasoning_none_supported = true
@@ -1141,7 +1141,7 @@ model_match = "openai/gpt-*"
 version_min = [5, 0]
 native_tools = true
 preferred_tool_format = "native"
-json_schema = "native"
+structured_output = "native"
 thinking_modes = ["effort"]
 reasoning_effort_supported = true
 prefers_xml_scaffolding = false
@@ -1169,7 +1169,7 @@ thinking_block_style = "none"
 model_match = "openai/o1*"
 native_tools = true
 preferred_tool_format = "native"
-json_schema = "native"
+structured_output = "native"
 thinking_modes = ["effort"]
 requires_completion_tokens = true
 reasoning_effort_supported = true
@@ -1185,7 +1185,7 @@ thinking_block_style = "reasoning_summary"
 model_match = "openai/o3*"
 native_tools = true
 preferred_tool_format = "native"
-json_schema = "native"
+structured_output = "native"
 thinking_modes = ["effort"]
 requires_completion_tokens = true
 reasoning_effort_supported = true
@@ -1201,7 +1201,7 @@ thinking_block_style = "reasoning_summary"
 model_match = "openai/o4*"
 native_tools = true
 preferred_tool_format = "native"
-json_schema = "native"
+structured_output = "native"
 thinking_modes = ["effort"]
 vision_supported = true
 requires_completion_tokens = true
@@ -1651,6 +1651,50 @@ thinking_block_style = "inline"
 # The sibling fallthrough to `[[provider.openai]]` would match the gpt-*
 # rules (which don't apply) so we declare Qwen explicitly here to prevent
 # a silent fallthrough to empty capabilities.
+
+# Catalog rows key DashScope models as `dashscope/<wire-id>` (collision
+# safety with same-named routes elsewhere), so each rule below needs a
+# prefixed twin — capability matching sees the catalog id, not the wire
+# id.
+[[provider.dashscope]]
+model_match = "dashscope/qwen3.6*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
+preserve_thinking = true
+server_parser = "none"
+honors_chat_template_kwargs = true
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
+thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.dashscope]]
+model_match = "dashscope/qwen*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+server_parser = "none"
+honors_chat_template_kwargs = true
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
+thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
 
 [[provider.dashscope]]
 model_match = "qwen3.6*"
@@ -3677,6 +3721,46 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "reasoning_summary"
 
+# Gemini 3.1 (Pro Preview / Flash-Lite) — same surface as 3.5:
+# thinking_level control (adaptive) plus implicit/explicit caching.
+[[provider.gemini]]
+model_match = "gemini-3.1*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled", "adaptive"]
+vision_supported = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
+prompt_caching = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
+
+[[provider.gemini]]
+model_match = "models/gemini-3.1*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled", "adaptive"]
+vision_supported = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
+prompt_caching = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
+
 [[provider.gemini]]
 model_match = "gemini-*"
 native_tools = true
@@ -3962,6 +4046,21 @@ prefers_xml_tools = false
 thinking_block_style = "none"
 
 [[provider.mistral]]
+model_match = "codestral-*"
+native_tools = true
+preferred_tool_format = "native"
+recommended_endpoint = "/chat/completions"
+text_tool_wire_format_supported = true
+structured_output = "native"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
+
+[[provider.mistral]]
 model_match = "devstral-*"
 native_tools = true
 preferred_tool_format = "native"
@@ -4051,6 +4150,23 @@ supports_assistant_prefill = false
 prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "reasoning_summary"
+
+# Qwen 3.6 on Groq speaks clean OpenAI-shape native tool calls (Groq
+# parses the Qwen tool format server-side); no reported parity issues.
+[[provider.groq]]
+model_match = "qwen/qwen3.6*"
+native_tools = true
+preferred_tool_format = "native"
+recommended_endpoint = "/chat/completions"
+text_tool_wire_format_supported = true
+structured_output = "native"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
 
 [[provider.groq]]
 model_match = "llama-*"

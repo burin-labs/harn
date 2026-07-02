@@ -54,6 +54,8 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `cerebras` | `llama-*` | `any` | no | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `cerebras` | `qwen-*` | `any` | no | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `cohere` | `command-*` | `any` | `adaptive` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
+| `dashscope` | `dashscope/qwen3.6*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
+| `dashscope` | `dashscope/qwen*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `dashscope` | `qwen3.6*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `dashscope` | `qwen*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `deepinfra` | `*deepseek*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
@@ -83,9 +85,12 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `gemini` | `models/gemini-2.5*` | `any` | `enabled,adaptive,effort` | yes | yes | yes | no | yes | yes | `native` | `xml,markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
 | `gemini` | `gemini-3.5*` | `any` | `enabled,adaptive` | yes | yes | yes | no | yes | yes | `native` | `xml,markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `gemini` | `models/gemini-3.5*` | `any` | `enabled,adaptive` | yes | yes | yes | no | yes | yes | `native` | `xml,markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
+| `gemini` | `gemini-3.1*` | `any` | `enabled,adaptive` | yes | yes | yes | no | yes | yes | `native` | `xml,markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
+| `gemini` | `models/gemini-3.1*` | `any` | `enabled,adaptive` | yes | yes | yes | no | yes | yes | `native` | `xml,markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `gemini` | `gemini-*` | `any` | no | yes | yes | yes | no | yes | yes | `native` | `xml,markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `gemini` | `models/gemini-*` | `any` | no | yes | yes | yes | no | yes | yes | `native` | `xml,markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `groq` | `*gpt-oss-*` | `any` | `effort` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
+| `groq` | `qwen/qwen3.6*` | `any` | no | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `groq` | `llama-*` | `any` | no | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `huggingface` | `qwen/qwen3.6*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `huggingface` | `qwen/qwen3-coder*` | `any` | no | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
@@ -106,6 +111,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `minimax` | `minimax-text-*` | `any` | no | no | no | no | no | yes | no | `delimited` | `markdown` | `delimited` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `mistral` | `mistral-medium-3-5*` | `any` | `effort` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
 | `mistral` | `mistral-*` | `any` | no | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
+| `mistral` | `codestral-*` | `any` | no | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `mistral` | `devstral-*` | `any` | no | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `mlx` | `*qwen3.6*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `mlx` | `*qwen3*` | `any` | `enabled` | yes | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
@@ -244,7 +250,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `anthropic` | `claude-sonnet-4-5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `anthropic` | `claude-sonnet-4-5-20250929` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `anthropic` | `claude-sonnet-4-6` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `anthropic` | `claude-sonnet-4-7` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `anthropic` | `claude-sonnet-5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `baseten` | `baseten/deepseek-ai/DeepSeek-V4-Pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `baseten` | `baseten/moonshotai/Kimi-K2.5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `baseten` | `baseten/moonshotai/Kimi-K2.6` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
@@ -260,9 +266,15 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `cerebras` | `llama-3.3-70b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `cerebras` | `zai-glm-4.7` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `cohere` | `command-a-plus-05-2026` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `dashscope` | `dashscope/qwen3-coder-next` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `dashscope` | `dashscope/qwen3-coder-plus` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `dashscope` | `dashscope/qwen3.5-397b-a17b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `dashscope` | `dashscope/qwen3.6-35b-a3b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `dashscope` | `dashscope/qwen3.7-max` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `deepinfra` | `deepinfra/Qwen/Qwen3.6-35B-A3B` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
 | `deepinfra` | `deepinfra/Qwen/Qwen3.7-Max` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `deepinfra` | `deepinfra/deepseek-ai/DeepSeek-V3.2` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `deepinfra` | `deepinfra/deepseek-ai/DeepSeek-V4-Flash` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `deepinfra` | `deepinfra/deepseek-ai/DeepSeek-V4-Pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `deepinfra` | `deepinfra/moonshotai/Kimi-K2.7-Code` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `deepinfra` | `deepinfra/openai/gpt-oss-120b` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
@@ -275,8 +287,13 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `fireworks` | `accounts/fireworks/models/glm-5p2` | `json` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
 | `fireworks` | `accounts/fireworks/models/gpt-oss-120b` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
 | `fireworks` | `accounts/fireworks/models/kimi-k2p6` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `fireworks` | `accounts/fireworks/models/kimi-k2p7-code` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `fireworks` | `accounts/fireworks/models/minimax-m3` | `text` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `gemini` | `gemini-2.5-flash` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `gemini` | `gemini-2.5-flash-lite` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `gemini` | `gemini-2.5-pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `gemini` | `gemini-3.1-flash-lite` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `gemini` | `gemini-3.1-pro-preview` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `gemini` | `gemini-3.5-flash` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `gemini` | `models/gemma-4-26b-a4b-it` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `gemini` | `models/gemma-4-31b-it` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
@@ -284,6 +301,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `groq` | `groq/openai/gpt-oss-20b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `groq` | `llama-3.1-8b-instant` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `groq` | `llama-3.3-70b-versatile` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `groq` | `qwen/qwen3.6-27b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `llamacpp` | `qwen3.6-35b-a3b` | `json` | `text_only` | - | - | - | - | - | `data not yet collected` |
 | `llamacpp` | `qwen3.6-35b-a3b-ud-q4-k-xl` | `native` | `native` | - | - | - | - | - | `data not yet collected` |
 | `llamacpp` | `qwen3.6-35b-a3b-ud-q5-k-xl` | `json` | `text_only` | - | - | - | - | - | `data not yet collected` |
@@ -299,6 +317,9 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `minimax` | `MiniMax-M2.7-highspeed` | `json` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
 | `minimax` | `MiniMax-M3` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `minimax` | `MiniMax-Text-01` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `mistral` | `codestral-2508` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `mistral` | `devstral-medium-2512` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `mistral` | `devstral-small-2512` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `mistral` | `mistral-large-2512` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `mistral` | `mistral-medium-3-5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `mistral` | `mistral-small-2603` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
@@ -330,6 +351,10 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `openai` | `gpt-4-turbo` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openai` | `gpt-4o` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openai` | `gpt-4o-mini` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openai` | `gpt-5.3-codex` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openai` | `gpt-5.4` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openai` | `gpt-5.4-mini` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openai` | `gpt-5.4-nano` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openai` | `gpt-5.5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openai` | `gpt-5.5-pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openai` | `o1` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
@@ -341,6 +366,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `openrouter` | `anthropic/claude-haiku-4-5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `anthropic/claude-opus-4.8` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `anthropic/claude-sonnet-4-6` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openrouter` | `anthropic/claude-sonnet-5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `deepseek/deepseek-v3.2` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `deepseek/deepseek-v4-flash` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `deepseek/deepseek-v4-pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
@@ -360,6 +386,8 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `openrouter` | `moonshotai/kimi-k2.7-code` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `openai/gpt-oss-120b` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `qwen/qwen3-coder` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
+| `openrouter` | `qwen/qwen3-coder-next` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
+| `openrouter` | `qwen/qwen3.5-397b-a17b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `qwen/qwen3.7-max` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `qwen/qwen3.7-plus` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `stepfun/step-3.7-flash` | `native` | `interchangeable` | - | - | - | - | - | `data not yet collected` |
@@ -375,16 +403,19 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `sambanova` | `sambanova/gemma-4-31B-it` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `sambanova` | `sambanova/gpt-oss-120b` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
 | `together` | `MiniMaxAI/MiniMax-M2.7` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
+| `together` | `MiniMaxAI/MiniMax-M3` | `text` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `together` | `Qwen/Qwen2.5-7B-Instruct-Turbo` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `together` | `Qwen/Qwen3-Coder-Next-FP8` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `together` | `Qwen/Qwen3.7-Max` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `together` | `deepseek-ai/DeepSeek-V4-Pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `together` | `google/gemma-4-31B-it` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `together` | `meta-llama/Llama-3.3-70B-Instruct-Turbo` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `together` | `moonshotai/Kimi-K2.7-Code` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `together` | `zai-org/GLM-5.1` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
 | `together` | `zai-org/GLM-5.2` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
 | `xai` | `grok-4.3` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `xai` | `grok-build-0.1` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `zai` | `glm-4.7-flash` | `text` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `zai` | `glm-5` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
 | `zai` | `glm-5.1` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
 | `zai` | `glm-5.2` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |

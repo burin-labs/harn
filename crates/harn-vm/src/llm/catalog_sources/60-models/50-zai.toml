@@ -6,10 +6,24 @@ name = "GLM 5"
 provider = "zai"
 context_window = 202752
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 0.98, output_per_mtok = 3.08, cache_read_per_mtok = 0.20 }
+# docs.z.ai pricing verified 2026-07-02: $1.00 / $3.20 per MTok (cache
+# hit $0.20). The prior 0.98/3.08 figures matched no published tier.
+pricing = { input_per_mtok = 1.00, output_per_mtok = 3.20, cache_read_per_mtok = 0.20 }
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use"]
+
+# GLM-4.7-Flash — Z.AI's free API tier (31B dense). Zero-cost route for
+# healthcheck/QC probes and cheap background tasks.
+[models."glm-4.7-flash"]
+name = "GLM 4.7 Flash"
+provider = "zai"
+context_window = 131072
+capabilities = ["tools", "streaming", "thinking"]
+pricing = { input_per_mtok = 0.00, output_per_mtok = 0.00 }
+tier = "small"
+open_weight = true
+strengths = ["speed", "cheap", "coding", "tool_use"]
 [models."glm-5.1"]
 name = "GLM 5.1"
 provider = "zai"
