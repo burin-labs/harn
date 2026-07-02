@@ -270,6 +270,7 @@ pub enum Node {
         name: String,
         type_params: Vec<TypeParam>,
         type_expr: TypeExpr,
+        is_pub: bool,
     },
     SpawnExpr {
         body: Vec<SNode>,

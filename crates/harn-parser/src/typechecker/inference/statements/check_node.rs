@@ -629,6 +629,7 @@ impl TypeChecker {
                 name,
                 type_params,
                 type_expr,
+                ..
             } => {
                 scope.type_aliases.insert(
                     name.clone(),

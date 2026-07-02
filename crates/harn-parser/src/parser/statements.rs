@@ -70,7 +70,7 @@ impl Parser {
                 self.advance(); // consume 'pub'
                 let tok = self.current().ok_or_else(|| ParserError::UnexpectedEof {
                     expected:
-                        "fn, tool, skill, eval_pack, struct, enum, pipeline, or import after pub"
+                        "fn, tool, skill, eval_pack, struct, enum, type, pipeline, or import after pub"
                             .into(),
                     span: self.prev_span(),
                 })?;
@@ -88,12 +88,13 @@ impl Parser {
                     TokenKind::Enum => self.parse_enum_decl_with_pub(true),
                     TokenKind::Struct => self.parse_struct_decl_with_pub(true),
                     TokenKind::Import => self.parse_import_with_pub(true),
+                    TokenKind::TypeKw => self.parse_type_decl_with_pub(true),
                     _ => Err(self.error(
-                        "fn, tool, skill, eval_pack, struct, enum, pipeline, or import after pub",
+                        "fn, tool, skill, eval_pack, struct, enum, type, pipeline, or import after pub",
                     )),
                 }
             }
-            TokenKind::TypeKw => self.parse_type_decl(),
+            TokenKind::TypeKw => self.parse_type_decl_with_pub(false),
             TokenKind::Enum => self.parse_enum_decl(),
             TokenKind::Struct => self.parse_struct_decl(),
             TokenKind::Interface => self.parse_interface_decl(),

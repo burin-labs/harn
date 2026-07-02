@@ -27,6 +27,9 @@ Expressions that infer to `never`:
 - `break` and `continue`
 - A block where every control path exits
 - An `if`/`else` where both branches infer to `never`
+- `while true { ... }` whose body contains no `break` binding to that loop
+  (a `break` inside a nested loop binds the inner loop and does not count),
+  so a function whose tail is such a loop needs no trailing `return`
 - Calls to `unreachable()`
 
 `never` is removed from union types: `never | string` simplifies to

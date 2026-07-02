@@ -256,3 +256,31 @@ interface Repository<T> {
             (identifier))))
       (type_annotation
         (identifier)))))
+
+==================
+Public Type Alias
+==================
+
+pub type SmartTarget = {name: string, score: int}
+
+type Private = int
+
+---
+
+(source_file
+  (type_declaration
+    name: (identifier)
+    type: (type_annotation
+      (shape_type
+        (shape_field
+          name: (identifier)
+          type: (type_annotation
+            (identifier)))
+        (shape_field
+          name: (identifier)
+          type: (type_annotation
+            (identifier))))))
+  (type_declaration
+    name: (identifier)
+    type: (type_annotation
+      (identifier))))

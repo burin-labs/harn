@@ -104,6 +104,7 @@ impl Compiler {
                 name,
                 type_expr,
                 type_params: _,
+                is_pub: _,
             } = &sn.node
             {
                 self.type_aliases.insert(name.clone(), type_expr.clone());
@@ -182,6 +183,32 @@ impl Compiler {
         let ty = self.type_aliases.get(name)?;
         let expanded = self.expand_alias(ty);
         Self::type_expr_to_schema_value(&expanded)
+    }
+
+    /// Lower every `pub type` alias in `program` to its JSON-Schema VmValue.
+    /// Used by the module artifact so importers get the same schema value in
+    /// expression position (`output_schema: ImportedAlias`) that a local
+    /// alias would lower to at compile time. Aliases whose bodies cannot be
+    /// expressed as a JSON schema (function types, streams, ...) are omitted:
+    /// they stay importable for annotations, just not as runtime schemas.
+    pub fn lower_public_type_schemas(
+        program: &[SNode],
+    ) -> std::collections::BTreeMap<String, VmValue> {
+        let mut compiler = Compiler::new();
+        compiler.collect_type_aliases(program);
+        let mut schemas = std::collections::BTreeMap::new();
+        for sn in program {
+            let inner = peel_node(sn);
+            if let Node::TypeDecl {
+                name, is_pub: true, ..
+            } = inner
+            {
+                if let Some(schema) = compiler.schema_value_for_alias(name) {
+                    schemas.insert(name.clone(), schema);
+                }
+            }
+        }
+        schemas
     }
 
     /// Schema-guard builtins that accept a schema as their second argument.

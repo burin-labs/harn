@@ -1,0 +1,28 @@
+pipeline test(task) {
+  // Multi-key sort: list-valued keys order lexicographically (element by
+  // element), so `sort_by` with `[primary, secondary]` works without
+  // falling back to nested `pair(...)` keys.
+  let xs = [
+    {a: 2, b: 1, tag: "e"},
+    {a: 1, b: 2, tag: "c"},
+    {a: 1, b: 1, tag: "a"},
+    {a: 1, b: 1, tag: "b"},
+    {a: 2, b: 0, tag: "d"},
+  ]
+  let ordered = xs.sort_by({ x -> [x.a, x.b] })
+  // Stability: the two [1, 1] keys keep their input order (a before b).
+  log(ordered.map({ x -> x.tag }).join(""))
+  // Mixed string + int keys.
+  let people = [{name: "bo", age: 30}, {name: "al", age: 25}, {name: "al", age: 20}]
+  let by_name_age = people.sort_by({ p -> [p.name, p.age] })
+  log(by_name_age.map({ p -> "${p.name}:${p.age}" }).join(","))
+  // Nested list keys compare recursively.
+  log([[2, [1]], [1, [9]], [1, [2]]].sort())
+  // A strict prefix sorts before the longer list.
+  log([[1, 0], [1], []].sort())
+  // Relational operators share the same lexicographic list order.
+  log([1, 2] < [1, 3])
+  log([1, 2] < [1, 2])
+  log([1, 2] <= [1, 2])
+  log([2] > [1, 9])
+}

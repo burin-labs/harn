@@ -1178,13 +1178,19 @@ impl<'a> Linter<'a> {
                 self.lint_node(operand);
             }
 
-            Node::StructDecl { name, fields, .. } => {
+            Node::StructDecl {
+                name,
+                fields,
+                is_pub,
+                ..
+            } => {
                 self.lint_type_name("struct", name, snode.span);
                 self.known_functions.insert(name.clone());
                 self.type_declarations.push(TypeDeclaration {
                     name: name.clone(),
                     span: snode.span,
                     kind: "struct",
+                    is_pub: *is_pub,
                 });
                 for field in fields {
                     if let Some(type_expr) = &field.type_expr {
@@ -1192,13 +1198,19 @@ impl<'a> Linter<'a> {
                     }
                 }
             }
-            Node::EnumDecl { name, variants, .. } => {
+            Node::EnumDecl {
+                name,
+                variants,
+                is_pub,
+                ..
+            } => {
                 self.lint_type_name("enum", name, snode.span);
                 self.known_functions.insert(name.clone());
                 self.type_declarations.push(TypeDeclaration {
                     name: name.clone(),
                     span: snode.span,
                     kind: "enum",
+                    is_pub: *is_pub,
                 });
                 for variant in variants {
                     self.record_param_type_references(&variant.fields);
@@ -1233,6 +1245,7 @@ impl<'a> Linter<'a> {
                     name: name.clone(),
                     span: snode.span,
                     kind: "interface",
+                    is_pub: false,
                 });
                 for (_, default_type) in associated_types {
                     if let Some(type_expr) = default_type {
@@ -1251,12 +1264,14 @@ impl<'a> Linter<'a> {
                 name,
                 type_params: _,
                 type_expr,
+                is_pub,
             } => {
                 self.lint_type_name("type", name, snode.span);
                 self.type_declarations.push(TypeDeclaration {
                     name: name.clone(),
                     span: snode.span,
                     kind: "type",
+                    is_pub: *is_pub,
                 });
                 self.record_type_expr_references(type_expr);
             }

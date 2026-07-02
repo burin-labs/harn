@@ -345,8 +345,8 @@ pub fn compare_values(a: &VmValue, b: &VmValue) -> i32 {
 
 /// Ordered comparison for relational operators. Returns `None` when the two
 /// values are *unordered* — i.e. a floating-point NaN is involved (directly, via
-/// an int/float mix, or nested inside a pair). Callers implementing `<`, `>`,
-/// `<=`, `>=` must treat `None` as "comparison is false".
+/// an int/float mix, or nested inside a pair or list). Callers implementing
+/// `<`, `>`, `<=`, `>=` must treat `None` as "comparison is false".
 pub fn try_compare_values(a: &VmValue, b: &VmValue) -> Option<i32> {
     match (a, b) {
         (VmValue::Int(x), VmValue::Int(y)) => Some(x.cmp(y) as i32),
@@ -369,6 +369,19 @@ pub fn try_compare_values(a: &VmValue, b: &VmValue) -> Option<i32> {
             } else {
                 try_compare_values(&x.1, &y.1)
             }
+        }),
+        // Lists order lexicographically, element by element, with a length
+        // tiebreak (a strict prefix sorts first). This is what makes
+        // multi-key sorts like `xs.sort_by({ x -> [x.a, x.b] })` work.
+        // Unordered elements (NaN) propagate `None` exactly like `Pair`.
+        (VmValue::List(x), VmValue::List(y)) => guard_recursion(|| {
+            for (item_a, item_b) in x.iter().zip(y.iter()) {
+                let c = try_compare_values(item_a, item_b)?;
+                if c != 0 {
+                    return Some(c);
+                }
+            }
+            Some(x.len().cmp(&y.len()) as i32)
         }),
         _ => Some(0),
     }

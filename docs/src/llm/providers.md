@@ -33,7 +33,7 @@ family-level guidance, endpoint notes, and downstream JSON support data.
 
 | Provider | Environment variable | Default model |
 |---|---|---|
-| Anthropic (default) | `ANTHROPIC_API_KEY` | `claude-sonnet-4-6` |
+| Anthropic (default) | `ANTHROPIC_API_KEY` | `claude-sonnet-5` |
 | OpenAI | `OPENAI_API_KEY` | `gpt-4o` |
 | OpenRouter | `OPENROUTER_API_KEY` | `anthropic/claude-sonnet-4.6` |
 | Baseten Model APIs | `BASETEN_API_KEY` | `baseten-glm-5.2` or explicit `baseten/<wire-id>` |
@@ -621,7 +621,7 @@ Set the model explicitly or via environment:
 
 ```harn
 // In code
-llm_call("...", nil, {model: "claude-sonnet-4-6"})
+llm_call("...", nil, {model: "claude-sonnet-5"})
 
 // Or via environment
 // export HARN_LLM_MODEL=gpt-4o

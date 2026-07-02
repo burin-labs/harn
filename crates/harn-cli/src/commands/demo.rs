@@ -257,6 +257,20 @@ const SCENARIOS: &[Scenario] = &[
         script: include_str!("../../assets/demo/destructure-with-defaults/scenario.harn"),
         tape: include_str!("../../assets/demo/destructure-with-defaults/tape.jsonl"),
     },
+    Scenario {
+        id: "pub-type-exports",
+        title: "`pub type` shares one alias across modules, annotations, and output_schema",
+        description: "Export a type alias from one module and consume it from another: the \
+                      imported alias drives a plain annotation, an exhaustive `match` over its \
+                      literal union, and schema-as-type on `llm_call` \
+                      (`output_schema: GradeReport`) — the compiler lowers the exported alias to \
+                      JSON Schema and the validated result narrows back to it. Before `pub type`, \
+                      every consumer re-declared shared wire shapes because aliases were \
+                      module-private. Offline — the single LLM call replays from the bundled \
+                      tape.",
+        script: include_str!("../../assets/demo/pub-type-exports/scenario.harn"),
+        tape: include_str!("../../assets/demo/pub-type-exports/tape.jsonl"),
+    },
 ];
 
 #[derive(Clone, Copy)]

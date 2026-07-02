@@ -355,7 +355,7 @@ statement_sep      ::= NEWLINE+ | ';' NEWLINE*
 fn_decl            ::= ['pub'] 'fn' IDENTIFIER [generic_params]
                        '(' fn_param_list ')' ['->' type_expr]
                        [where_clause] '{' block '}'
-type_decl          ::= 'type' IDENTIFIER '=' type_expr
+type_decl          ::= ['pub'] 'type' IDENTIFIER [generic_params] '=' type_expr
 enum_decl          ::= ['pub'] 'enum' IDENTIFIER [generic_params] '{'
                        (enum_variant | ',' | NEWLINE)* '}'
 enum_variant       ::= IDENTIFIER ['(' fn_param_list ')']
@@ -1180,8 +1180,22 @@ Values are equal if they have the same type and same contents, with these except
 
 ### Comparison
 
-Only `int`, `float`, and `string` support ordering (`<`, `>`, `<=`, `>=`).
-Comparison between other types returns 0 (equal).
+`int`, `float`, `decimal`, and `string` support ordering (`<`, `>`, `<=`,
+`>=`). `int` and `float` order numerically against each other; `decimal`
+orders only against `decimal`. Two compound values order structurally:
+
+- `Pair` compares `.first`, then `.second` on a tie.
+- `list` compares lexicographically, element by element; if one list is a
+  strict prefix of the other, the shorter list orders first. This is what
+  makes multi-key sorts like `xs.sort_by({ x -> [x.a, x.b] })` order by the
+  first key, then the second.
+
+An unordered element (a float `NaN`, directly or nested inside a pair or
+list) makes the whole comparison unordered: relational operators return
+`false`, while sorting-style total-order reductions (`sort`, `sort_by`,
+`min`, `max`) treat the operands as equal so a stray `NaN` cannot
+destabilize a sort. Comparison between other type combinations returns 0
+(equal).
 
 ## Binary operator semantics
 
@@ -1334,6 +1348,12 @@ while condition {
 ```
 
 Maximum 10,000 iterations (safety limit). Condition is re-evaluated each iteration.
+
+A `while true { ... }` whose body contains no `break` binding to that loop
+types as `never` (see [The `never` type](#the-never-type)): control can only
+leave it through `return`/`throw`, so a function whose tail is such a loop
+does not need a trailing `return`, and statements after the loop are flagged
+unreachable.
 
 ### match
 
@@ -3980,6 +4000,9 @@ Expressions that infer to `never`:
 - `break` and `continue`
 - A block where every control path exits
 - An `if`/`else` where both branches infer to `never`
+- `while true { ... }` whose body contains no `break` binding to that loop
+  (a `break` inside a nested loop binds the inner loop and does not count),
+  so a function whose tail is such a loop needs no trailing `return`
 - Calls to `unreachable()`
 
 `never` is removed from union types: `never | string` simplifies to

@@ -243,7 +243,7 @@ run_step "harn run tests/smoke/hello.harn" "$HARN" run tests/smoke/hello.harn
 # Step 8: documented quickstart. Runs the literal first script from
 # docs/src/getting-started.md — the `fn main(harness: Harness)` entry
 # point plus a `harness.stdio.println` host call. CI only *typechecks*
-# that snippet (scripts/check_docs_snippets.sh runs `harn check`); running
+# that snippet (scripts/check_docs_snippets.harn runs `harn check`); running
 # it here freezes the documented first-run experience end-to-end against
 # the released binary and exercises the capability-aware entry path that
 # the `pipeline default()` hello fixture does not.

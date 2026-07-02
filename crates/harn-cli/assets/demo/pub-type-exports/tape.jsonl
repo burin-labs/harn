@@ -1,0 +1,1 @@
+{"match":"*[pub_type_exports]*","consume_match":true,"text":"{\"verdict\":\"pass\",\"score\":88,\"summary\":\"Adds regression coverage for the exported-alias path.\"}","model":"demo-tape","provider":"mock","input_tokens":42,"output_tokens":24}

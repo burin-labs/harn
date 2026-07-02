@@ -303,7 +303,6 @@ fn __command_stream_flush(locator, source: string, offset: int, length: int, opt
       return current
     }
   }
-  return current
 }
 
 fn __command_stream_read_inline(locator, source: string, options) -> string {
@@ -385,7 +384,6 @@ pub fn command_run_streaming(spec, options = nil) -> dict {
       return __command_stream_timeout_result(start, elapsed_after_wait, opts)
     }
   }
-  return start
 }
 
 fn __command_locator(locator, options) {

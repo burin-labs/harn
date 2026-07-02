@@ -283,6 +283,42 @@ impl Formatter<'_> {
         }
     }
 
+    /// Claim full-line, non-doc comments on lines `[from, to)` that have not
+    /// been emitted yet, returning each rendered verbatim (`// text` /
+    /// `/* text */`). Used by the multi-line method-chain formatter so a
+    /// comment sitting between chain segments stays anchored above the
+    /// segment below it instead of being orphaned to the end of the program.
+    pub(super) fn claim_leading_comments_in_range(&self, from: usize, to: usize) -> Vec<String> {
+        let lines: Vec<usize> = {
+            let emitted = self.emitted_lines.borrow();
+            self.comments
+                .keys()
+                .filter(|&&l| l >= from && l < to && !emitted.contains(&l))
+                .copied()
+                .collect()
+        };
+        let mut out = Vec::new();
+        for line in lines {
+            let Some(cs) = self.comments.get(&line) else {
+                continue;
+            };
+            // Doc comments never belong mid-chain; leave them for the
+            // standalone block renderer.
+            if cs.iter().any(|c| c.is_doc) {
+                continue;
+            }
+            self.emitted_lines.borrow_mut().insert(line);
+            for c in cs {
+                if c.is_block {
+                    out.push(format!("/*{}*/", c.text));
+                } else {
+                    out.push(format!("//{}", c.text));
+                }
+            }
+        }
+        out
+    }
+
     /// If `line` has at least one trailing (same-line) non-doc comment, mark
     /// the line emitted and return a formatted suffix like `// foo` or
     /// `/* foo */` (without leading whitespace). Returns `None` for empty,

@@ -372,6 +372,58 @@ fn try_compare_reports_nan_as_unordered() {
     assert_eq!(compare_values(&nan, &VmValue::Float(5.0)), 0);
 }
 
+#[test]
+fn try_compare_orders_lists_lexicographically() {
+    let s = |v: &str| VmValue::string(v);
+    // First differing element decides.
+    assert_eq!(
+        try_compare_values(&list(vec![i(1), i(2)]), &list(vec![i(1), i(3)])),
+        Some(-1)
+    );
+    assert_eq!(
+        try_compare_values(&list(vec![i(2)]), &list(vec![i(1), i(9)])),
+        Some(1)
+    );
+    // Equal contents compare equal; mixed int/float coerces per element.
+    assert_eq!(
+        try_compare_values(
+            &list(vec![i(1), VmValue::Float(2.0)]),
+            &list(vec![VmValue::Float(1.0), i(2)])
+        ),
+        Some(0)
+    );
+    // A strict prefix sorts before the longer list.
+    assert_eq!(
+        try_compare_values(&list(vec![i(1)]), &list(vec![i(1), i(0)])),
+        Some(-1)
+    );
+    assert_eq!(
+        try_compare_values(&list(vec![]), &list(vec![i(0)])),
+        Some(-1)
+    );
+    // Strings order per element too.
+    assert_eq!(
+        try_compare_values(&list(vec![s("a"), s("b")]), &list(vec![s("a"), s("c")])),
+        Some(-1)
+    );
+    // Nested lists recurse.
+    assert_eq!(
+        try_compare_values(
+            &list(vec![i(1), list(vec![i(2), i(3)])]),
+            &list(vec![i(1), list(vec![i(2), i(4)])])
+        ),
+        Some(-1)
+    );
+    // NaN inside a list propagates "unordered", matching Pair semantics …
+    let nan = VmValue::Float(f64::NAN);
+    assert_eq!(
+        try_compare_values(&list(vec![nan.clone()]), &list(vec![i(1)])),
+        None
+    );
+    // … and the total-order wrapper falls back to 0 for sort stability.
+    assert_eq!(compare_values(&list(vec![nan]), &list(vec![i(1)])), 0);
+}
+
 // --- Deeply nested value recursion guards -------------------------------
 //
 // A Harn script can build a value nested far deeper than the native call

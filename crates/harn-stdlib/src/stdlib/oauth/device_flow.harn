@@ -334,7 +334,6 @@ fn __poll_until_done(
     sleep(interval_seconds * 1000)
     elapsed_seconds = elapsed_seconds + interval_seconds
   }
-  throw "std/oauth/device_flow: unreachable polling exit"
 }
 
 /**

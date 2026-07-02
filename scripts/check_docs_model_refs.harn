@@ -1,0 +1,109 @@
+// Verify docs model references track the provider alias catalog.
+//
+// Ported from scripts/check_docs_model_refs.sh: every `claude-sonnet-4-*`
+// model id mentioned in docs/src or docs/llm must match the current
+// `aliases.sonnet` id in crates/harn-vm/src/llm/providers.toml, unless the
+// line carries an inline `harn-doc-model-ref: allow-stale` marker or the
+// file is generated (a GENERATED marker in its first five lines).
+//
+// Usage:
+//   harn run scripts/check_docs_model_refs.harn   # exit 1 on stale refs
+let PROVIDERS_TOML = "crates/harn-vm/src/llm/providers.toml"
+
+let SONNET_REF_RE = r"claude-sonnet-4(-[0-9][0-9A-Za-z]*)+"
+
+let ALLOW_STALE = "harn-doc-model-ref: allow-stale"
+
+/**
+ * True when a file's first five lines carry a GENERATED marker — such
+ * files mirror another source of truth and are skipped (the bash
+ * `head -n 5 | grep -q GENERATED`).
+ */
+pub fn is_generated(text: string) -> bool {
+  var i = 0
+  for line in text.lines() {
+    if i >= 5 {
+      break
+    }
+    if line.contains("GENERATED") {
+      return true
+    }
+    i = i + 1
+  }
+  return false
+}
+
+/**
+ * All stale sonnet references in `text`: `{model, line_no, line}` records
+ * for every `claude-sonnet-4-*` match that differs from `sonnet_model`
+ * and whose line lacks the allow-stale marker. Pure so tests can drive it.
+ */
+pub fn stale_refs(text: string, sonnet_model: string) -> list {
+  let ms = regex_captures(SONNET_REF_RE, text)
+  if ms.count == 0 {
+    return []
+  }
+  let lines = text.lines()
+  var out: list = []
+  for m in ms {
+    if m.match == sonnet_model {
+      continue
+    }
+    let line = lines[m.line - 1]
+    if line.contains(ALLOW_STALE) {
+      continue
+    }
+    out = out + [{model: m.match, line_no: m.line, line: line}]
+  }
+  return out
+}
+
+/** Repo-relative form of a glob result (strip the `/./` marker). */
+pub fn rel_path(path: string) -> string {
+  let idx = path.index_of("/./")
+  if idx >= 0 {
+    return path.substring(idx + 3, path.len())
+  }
+  return path
+}
+
+pipeline main(task) {
+  let parsed = try {
+    toml_parse(harness.fs.read_text(PROVIDERS_TOML))
+  } catch (err) {
+    nil
+  }
+  let sonnet_model = parsed?.aliases?.sonnet?.id ?? ""
+  if sonnet_model == "" {
+    __io_eprintln("error: could not resolve aliases.sonnet from ${PROVIDERS_TOML}")
+    return 1
+  }
+  var files: list<string> = []
+  for g in harness.fs.glob("docs/src/**/*.md") {
+    files = files + [rel_path(g)]
+  }
+  for g in harness.fs.glob("docs/llm/**/*.md") {
+    files = files + [rel_path(g)]
+  }
+  var failures = 0
+  for file in files.sort() {
+    let text = harness.fs.read_text(file)
+    if is_generated(text) {
+      continue
+    }
+    for ref in stale_refs(text, sonnet_model) {
+      __io_eprintln(
+        "error: ${file}:${ref.line_no} references ${ref.model}, but aliases.sonnet is ${sonnet_model}",
+      )
+      __io_eprintln(
+        "       update the docs example or add harn-doc-model-ref: allow-stale if this is intentionally historical.",
+      )
+      failures = failures + 1
+    }
+  }
+  if failures > 0 {
+    return 1
+  }
+  __io_println("docs model refs OK: aliases.sonnet = ${sonnet_model}")
+  return 0
+}

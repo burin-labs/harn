@@ -1,0 +1,5 @@
+pub type Wide = {label: string}
+
+pub fn widen(label: string) -> Wide {
+  return {label: label}
+}

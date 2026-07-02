@@ -36,6 +36,12 @@ while condition {
 
 Maximum 10,000 iterations (safety limit). Condition is re-evaluated each iteration.
 
+A `while true { ... }` whose body contains no `break` binding to that loop
+types as `never` (see [The `never` type](#the-never-type)): control can only
+leave it through `return`/`throw`, so a function whose tail is such a loop
+does not need a trailing `return`, and statements after the loop are flagged
+unreachable.
+
 ### match
 
 `match` is an expression. It can be used as a standalone statement or in

@@ -149,14 +149,14 @@ jobs:
               # changed something that rotates Swatinem's exact cache key.
               # For non-keying pushes the previous warm cache is still good
               # and a rebuild adds no signal.
-              CHANGED_KEYING_FILES="$(git diff --name-only HEAD^ HEAD -- Cargo.lock Cargo.toml '**/Cargo.toml' rust-toolchain.toml scripts/check_binary_size.sh .github/workflows/build-release-binaries.yml 2>/dev/null || true)"
+              CHANGED_KEYING_FILES="$(git diff --name-only HEAD^ HEAD -- Cargo.lock Cargo.toml '**/Cargo.toml' rust-toolchain.toml scripts/check_binary_size.harn .github/workflows/build-release-binaries.yml 2>/dev/null || true)"
               if [[ -n "$CHANGED_KEYING_FILES" ]]; then
                 SHOULD_BUILD_BINARIES=true
                 echo "::notice::Warm-cache-only run (push main). Keying files changed:"
                 while IFS= read -r f; do printf '::notice::  %s\n' "$f"; done <<<"$CHANGED_KEYING_FILES"
                 echo "::notice::Building release binaries to populate the per-target Swatinem rust-cache on main. No sign/notarize/package/upload/release/container."
               else
-                echo "::notice::Push to main did not change Cargo.lock / Cargo.toml / **/Cargo.toml / rust-toolchain.toml / scripts/check_binary_size.sh / build-release-binaries.yml — existing warm cache still keys cleanly. Skipping build matrix."
+                echo "::notice::Push to main did not change Cargo.lock / Cargo.toml / **/Cargo.toml / rust-toolchain.toml / scripts/check_binary_size.harn / build-release-binaries.yml — existing warm cache still keys cleanly. Skipping build matrix."
               fi
             fi
           else
@@ -594,7 +594,7 @@ jobs:
         env:
           BINARY_SIZE_REPORT_DIR: dist/binary-size-${{ matrix.target }}
           HARN_RELEASE_TARGET: ${{ matrix.target }}
-        run: ./scripts/check_binary_size.sh --no-build --target "$HARN_RELEASE_TARGET" --skip-bloat
+        run: ./target/"$HARN_RELEASE_TARGET"/release/harn run scripts/check_binary_size.harn -- --no-build --target "$HARN_RELEASE_TARGET" --skip-bloat
 
       - name: Generate cargo-bloat report (warm only)
         if: matrix.target == 'x86_64-unknown-linux-gnu' && needs.setup.outputs.is_release != 'true'
@@ -603,7 +603,7 @@ jobs:
         env:
           BINARY_SIZE_REPORT_DIR: dist/binary-size-${{ matrix.target }}
           HARN_RELEASE_TARGET: ${{ matrix.target }}
-        run: ./scripts/check_binary_size.sh --no-build --target "$HARN_RELEASE_TARGET"
+        run: ./target/"$HARN_RELEASE_TARGET"/release/harn run scripts/check_binary_size.harn -- --no-build --target "$HARN_RELEASE_TARGET"
 
       - name: Upload binary-size report
         if: always() && matrix.target == 'x86_64-unknown-linux-gnu'

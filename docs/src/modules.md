@@ -1602,6 +1602,32 @@ import { extract_paths, parse_cells } from "std/text"
 import std::personas::prelude::{verify_then_act}
 ```
 
+### Exporting type aliases
+
+`pub type` exports a type alias so importers can use it in annotations
+and schema-as-type positions alongside the functions that produce it:
+
+```harn,ignore
+// targets.harn
+pub type SmartTarget = {name: string, score: int}
+
+pub fn pick(name: string) -> SmartTarget {
+  return {name: name, score: 1}
+}
+```
+
+```harn,ignore
+import { SmartTarget, pick } from "./targets"
+
+fn describe(t: SmartTarget) -> string {
+  return t.name
+}
+```
+
+Type aliases are erased at runtime — the imported name carries no value,
+but the type checker resolves it across the module boundary. A type alias
+without `pub` stays module-private; importing it is an error.
+
 ### Public re-exports
 
 A facade module can re-publish symbols from other modules as part of its

@@ -941,7 +941,7 @@ retry 3 {
       max_iterations: 30,
       max_nudges: 5,
       provider: "anthropic",
-      model: "claude-sonnet-4-6"
+      model: "claude-sonnet-5"
     }
   )
   log(result.text)

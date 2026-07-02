@@ -1,0 +1,214 @@
+// Verify every ```harn fenced code block in docs/src/*.md parses cleanly
+// via `harn check`. Used to enforce "copy/paste runnable" snippets: readers
+// should be able to lift any block verbatim into a .harn file and have it
+// at least type-check.
+//
+// Blocks tagged ```harn,ignore are skipped — use that for intentional
+// partial fragments (grammar demos in language-spec.md, etc.).
+//
+// Ported from scripts/check_docs_snippets.sh — same fence state machine
+// (exact ```harn / ```harn,ignore info strings, unclosed-fence detection),
+// same FAIL output shape, same summary line and exit codes.
+//
+// Usage:
+//   harn run scripts/check_docs_snippets.harn
+let DOCS_GLOB = "docs/src/**/*.md"
+
+/**
+ * Walk `text` with the fence state machine and return the block events in
+ * source order:
+ *   {kind: "unclosed", open_line}      — a ```harn fence that never closed
+ *                                        before the next fence / EOF;
+ *   {kind: "skip", idx}                — a ```harn,ignore block;
+ *   {kind: "block", idx, content}      — a checkable ```harn block body
+ *                                        (lines joined, trailing newline).
+ * `idx` counts harn fences per file, 1-based. Pure so tests can drive it.
+ */
+pub fn extract_blocks(text: string) -> list {
+  var events: list = []
+  var in_block = false
+  var skip = false
+  var idx = 0
+  var open_line = 0
+  var body: list<string> = []
+  var line_no = 0
+  for line in text.lines() {
+    line_no = line_no + 1
+    if line == "```harn" || line == "```harn,ignore" {
+      if in_block {
+        // Nested or unclosed fence — markdown is malformed. Surface the
+        // line where the previous fence opened so the author can find it.
+        events = events + [{kind: "unclosed", open_line: open_line}]
+      }
+      in_block = true
+      skip = line == "```harn,ignore"
+      idx = idx + 1
+      open_line = line_no
+      body = []
+      if skip {
+        events = events + [{kind: "skip", idx: idx}]
+      }
+      continue
+    }
+    if line.starts_with("```") && in_block {
+      in_block = false
+      if !skip {
+        events = events + [{kind: "block", idx: idx, content: body.join("\n") + "\n"}]
+      }
+      continue
+    }
+    if in_block && !skip {
+      body = body + [line]
+    }
+  }
+  if in_block {
+    events = events + [{kind: "unclosed", open_line: open_line}]
+  }
+  return events
+}
+
+/** Repo-relative form of a glob result (strip the `/./` marker). */
+pub fn rel_path(path: string) -> string {
+  let idx = path.index_of("/./")
+  if idx >= 0 {
+    return path.substring(idx + 3, path.len())
+  }
+  return path
+}
+
+/** The trailing path component of `p` without a final `.md` suffix. */
+pub fn md_base_name(p: string) -> string {
+  var slash = -1
+  var i = 0
+  let n = p.len()
+  while i < n {
+    if p.char_at(i) == "/" {
+      slash = i
+    }
+    i = i + 1
+  }
+  var name = p.substring(slash + 1, n)
+  if name.ends_with(".md") {
+    name = name.substring(0, name.len() - 3)
+  }
+  return name
+}
+
+/** Prefix every line of `output` with `      | ` (the failure indent). */
+pub fn indent_output(output: string) -> list<string> {
+  var out: list<string> = []
+  for line in output.lines() {
+    out = out + ["      | " + line]
+  }
+  return out
+}
+
+/**
+ * Resolve the harn binary used to type-check snippets: $HARN_BIN wins,
+ * else the workspace target dir's debug build (building it quietly when
+ * missing) — the same ladder as the bash original.
+ */
+fn resolve_harn_bin() -> string {
+  let env_bin = harness.env.get("HARN_BIN")
+  if env_bin != nil && env_bin != "" {
+    return env_bin
+  }
+  var target_dir = ""
+  let meta = harness.process
+    .spawn_captured({cmd: "cargo", args: ["metadata", "--no-deps", "--format-version", "1"]})
+  if meta.success {
+    let parsed = try {
+      json_parse(meta.stdout)
+    } catch (err) {
+      nil
+    }
+    target_dir = parsed?.target_directory ?? ""
+  }
+  if target_dir == "" {
+    target_dir = harness.env.get("CARGO_TARGET_DIR") ?? ""
+  }
+  if target_dir == "" {
+    target_dir = "target"
+  }
+  let bin = "${target_dir}/debug/harn"
+  if !harness.fs.exists(bin) {
+    __io_eprintln("building harn-cli (set HARN_BIN to skip)...")
+    let build = harness.process
+      .spawn_captured({cmd: "cargo", args: ["build", "-q", "-p", "harn-cli"]})
+    if !build.success {
+      __io_eprint(build.stderr)
+      throw "cargo build -p harn-cli failed"
+    }
+  }
+  return bin
+}
+
+pipeline main(task) {
+  let harn_bin = resolve_harn_bin()
+  var md_files: list<string> = []
+  for g in harness.fs.glob(DOCS_GLOB) {
+    md_files = md_files + [rel_path(g)]
+  }
+  md_files = md_files.sort()
+  /* The runtime sandbox only permits writes inside the workspace root, so
+   * the snippet scratch directory lives there (removed afterward) rather
+   * than under the system temp dir the bash version used. */
+  let mk = harness.process
+    .spawn_captured({cmd: "mktemp", args: ["-d", "harn-docs-snippets-XXXXXX"]})
+  if !mk.success {
+    __io_eprintln("error: could not create temp directory")
+    return 1
+  }
+  let tmp_dir = mk.stdout.trim()
+  defer {
+    harness.process.spawn_captured({cmd: "rm", args: ["-rf", tmp_dir]})
+  }
+  var checked = 0
+  var skipped = 0
+  var failures = 0
+  var file_no = 0
+  for md_file in md_files {
+    file_no = file_no + 1
+    // Unlike the bash version, the temp prefix carries a per-file counter
+    // so same-named docs (index.md, README.md) cannot collide.
+    let prefix = "${tmp_dir}/${file_no}_${md_base_name(md_file)}"
+    for event in extract_blocks(harness.fs.read_text(md_file)) {
+      if event.kind == "unclosed" {
+        failures = failures + 1
+        __io_println("")
+        __io_println("FAIL: ${md_file} (unclosed ```harn fence opened at line ${event.open_line})")
+        __io_println("      hint: the next fenced block opens before this one closes.")
+        continue
+      }
+      if event.kind == "skip" {
+        skipped = skipped + 1
+        continue
+      }
+      checked = checked + 1
+      let block_path = "${prefix}_${event.idx}.harn"
+      harness.fs.write_text(block_path, event.content)
+      let res = harness.process.spawn_captured({cmd: harn_bin, args: ["check", block_path]})
+      if !res.success {
+        failures = failures + 1
+        __io_println("")
+        __io_println("FAIL: ${md_file} (harn block #${event.idx})")
+        __io_println("      temp file: ${block_path}")
+        for line in indent_output(res.stdout + res.stderr) {
+          __io_println(line)
+        }
+      }
+    }
+  }
+  __io_println("")
+  __io_println(
+    "docs snippets: ${checked} checked, ${skipped} skipped (harn,ignore), ${failures} failed",
+  )
+  if failures > 0 {
+    __io_println("")
+    __io_println("hint: snippets must parse under `harn check`. Wrap bare statements")
+    __io_println("      in `pipeline default() { ... }`, inline any referenced helpers,")
+    __io_println("      or tag the block as ```harn,ignore if it's an intentional fragment.")
+    return 1
+  }
+  return 0
+}

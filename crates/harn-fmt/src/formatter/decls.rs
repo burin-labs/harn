@@ -514,12 +514,18 @@ impl Formatter<'_> {
                 name,
                 type_params,
                 type_expr,
+                is_pub,
             } => {
+                let pub_prefix = if *is_pub { "pub " } else { "" };
                 let params = format_type_params(type_params);
-                let prefix =
-                    self.indent * 2 + "type ".len() + name.len() + params.len() + " = ".len();
+                let prefix = self.indent * 2
+                    + pub_prefix.len()
+                    + "type ".len()
+                    + name.len()
+                    + params.len()
+                    + " = ".len();
                 let te = format_type_expr_wrapped(type_expr, self.indent, prefix, self.line_width);
-                self.writeln(&format!("type {name}{params} = {te}"));
+                self.writeln(&format!("{pub_prefix}type {name}{params} = {te}"));
             }
             Node::Block(stmts) => {
                 self.writeln("{");

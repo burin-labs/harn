@@ -177,8 +177,8 @@ run_docs_audit() {
   else
     echo "warning: npm (Node.js) not installed; skipping docs site build"
   fi
-  time_phase "docs model refs" ./scripts/check_docs_model_refs.sh
-  time_phase "docs snippets" ./scripts/check_docs_snippets.sh
+  time_phase "docs model refs" harn_cmd run scripts/check_docs_model_refs.harn
+  time_phase "docs snippets" harn_cmd run scripts/check_docs_snippets.harn
 }
 
 run_grammar_audit() {

@@ -1,0 +1,185 @@
+// Tests for scripts/lint_test_patterns.harn — exercise the pure pub fns
+// (path classification + grep-equivalent pattern scans) on synthetic
+// inputs, no filesystem dependency.
+import "../lint_test_patterns.harn"
+
+// --- rel_path / base_name ---------------------------------------------------
+@test
+pipeline test_rel_path_strips_glob_marker(task) {
+  assert_eq(rel_path("/repo/./crates/x/tests/a.rs"), "crates/x/tests/a.rs")
+}
+
+@test
+pipeline test_rel_path_passthrough(task) {
+  assert_eq(rel_path("crates/x/tests/a.rs"), "crates/x/tests/a.rs")
+}
+
+@test
+pipeline test_base_name(task) {
+  assert_eq(base_name("crates/x/src/tests.rs"), "tests.rs")
+  assert_eq(base_name("plain.rs"), "plain.rs")
+}
+
+// --- is_test_rs_path --------------------------------------------------------
+@test
+pipeline test_test_path_under_tests_dir(task) {
+  assert_eq(is_test_rs_path("crates/harn-cli/tests/foo.rs"), true)
+  assert_eq(is_test_rs_path("crates/harn-cli/tests/nested/deep.rs"), true)
+}
+
+@test
+pipeline test_test_path_inline_module_names(task) {
+  assert_eq(is_test_rs_path("crates/harn-vm/src/tests.rs"), true)
+  assert_eq(is_test_rs_path("crates/harn-vm/src/tests_parse.rs"), true)
+  assert_eq(is_test_rs_path("crates/harn-vm/src/agent_sessions_tests.rs"), true)
+}
+
+@test
+pipeline test_test_path_rejects_runtime_and_non_rs(task) {
+  assert_eq(is_test_rs_path("crates/harn-vm/src/lib.rs"), false)
+  // Inline test-module names only count under a src/ directory.
+  assert_eq(is_test_rs_path("crates/harn-vm/benches/tests.rs"), false)
+  assert_eq(is_test_rs_path("crates/harn-vm/src/tests.txt"), false)
+}
+
+// --- is_runtime_rs_path -----------------------------------------------------
+@test
+pipeline test_runtime_path_accepts_vm_and_cli_src(task) {
+  assert_eq(is_runtime_rs_path("crates/harn-vm/src/llm/mod.rs"), true)
+  assert_eq(is_runtime_rs_path("crates/harn-cli/src/commands/run/mod.rs"), true)
+}
+
+@test
+pipeline test_runtime_path_excludes_tests(task) {
+  assert_eq(is_runtime_rs_path("crates/harn-vm/src/http/tests.rs"), false)
+  assert_eq(is_runtime_rs_path("crates/harn-vm/src/cli/tests/mod.rs"), false)
+  assert_eq(is_runtime_rs_path("crates/harn-vm/src/agent_sessions_tests.rs"), false)
+  assert_eq(is_runtime_rs_path("crates/harn-vm/src/tests_parse.rs"), false)
+}
+
+@test
+pipeline test_runtime_path_excludes_other_crates(task) {
+  assert_eq(is_runtime_rs_path("crates/harn-hostlib/src/lib.rs"), false)
+}
+
+// --- is_e2e_subprocess_path -------------------------------------------------
+@test
+pipeline test_e2e_exact_entry(task) {
+  assert_eq(is_e2e_subprocess_path("crates/harn-cli/tests/orchestrator_cli.rs"), true)
+}
+
+@test
+pipeline test_e2e_orchestrator_http_prefix(task) {
+  assert_eq(is_e2e_subprocess_path("crates/harn-cli/tests/orchestrator_http/support.rs"), true)
+  assert_eq(is_e2e_subprocess_path("crates/harn-cli/tests/orchestrator_http/deep/x.rs"), true)
+}
+
+@test
+pipeline test_e2e_non_member(task) {
+  assert_eq(is_e2e_subprocess_path("crates/harn-cli/tests/other_cli.rs"), false)
+}
+
+// --- find_hits: one hit per matching line, 1-based numbering ----------------
+@test
+pipeline test_find_hits_basic(task) {
+  let text = "ok line\nstd::thread::sleep(x);\nok\nthread::sleep(Duration::from_millis(1));\n"
+  let hits = find_hits(text, thread_sleep_pattern())
+  assert_eq(hits.count, 2)
+  assert_eq(hits[0].line_no, 2)
+  assert_eq(hits[0].text, "std::thread::sleep(x);")
+  assert_eq(hits[1].line_no, 4)
+}
+
+@test
+pipeline test_find_hits_dedupes_same_line(task) {
+  // grep -n prints a line once even when it holds two matches.
+  let text = "SystemTime::now(); SystemTime::now();\n"
+  assert_eq(find_hits(text, system_time_pattern()).count, 1)
+}
+
+@test
+pipeline test_find_hits_no_match(task) {
+  assert_eq(find_hits("nothing here\n", tokio_sleep_pattern()), [])
+}
+
+// --- individual patterns ----------------------------------------------------
+@test
+pipeline test_instant_deadline_pattern(task) {
+  assert_eq(find_hits("while Instant::now() < deadline {}\n", instant_deadline_pattern()).count, 1)
+  assert_eq(find_hits("while Instant::now()  >= deadline {}\n", instant_deadline_pattern()).count, 1)
+  // A bare read (no comparison) is the non-test-pattern form.
+  assert_eq(find_hits("let t = Instant::now();\n", instant_deadline_pattern()).count, 0)
+}
+
+@test
+pipeline test_recv_timeout_pattern(task) {
+  assert_eq(
+    find_hits("rx.recv_timeout(Duration::from_millis(10))\n", recv_timeout_pattern()).count,
+    1,
+  )
+  assert_eq(
+    find_hits("rx.recv_timeout(Duration::from_micros(10))\n", recv_timeout_pattern()).count,
+    1,
+  )
+  assert_eq(find_hits("rx.recv_timeout(Duration::from_secs(1))\n", recv_timeout_pattern()).count, 0)
+}
+
+@test
+pipeline test_harn_command_does_not_match_e2e_variant(task) {
+  assert_eq(find_hits("harn_e2e_command(args)\n", harn_command_pattern()).count, 0)
+  assert_eq(find_hits("harn_command(args)\n", harn_command_pattern()).count, 1)
+}
+
+@test
+pipeline test_wait_helper_pattern_line_anchored(task) {
+  assert_eq(find_hits("fn wait_for_log_line() {}\n", wait_helper_pattern()).count, 1)
+  // Indented (nested) definitions are not caught — same as the bash `^fn`.
+  assert_eq(find_hits("  fn wait_for_log_line() {}\n", wait_helper_pattern()).count, 0)
+  // Anchor works mid-file, not just on the first line.
+  assert_eq(find_hits("x\nfn wait_for_exit() {}\n", wait_helper_pattern())[0].line_no, 2)
+}
+
+@test
+pipeline test_literal_sleep_pattern(task) {
+  // Line-start, post-punctuation, and `time.sleep` forms all count.
+  assert_eq(find_hits("sleep(500)\n", literal_sleep_pattern()).count, 1)
+  assert_eq(find_hits("x = sleep(5)\n", literal_sleep_pattern()).count, 1)
+  assert_eq(find_hits("time.sleep(3)\n", literal_sleep_pattern()).count, 1)
+}
+
+@test
+pipeline test_literal_sleep_pattern_rejections(task) {
+  // Identifier prefixes and non-literal args are not violations.
+  assert_eq(find_hits("my_sleep(4)\n", literal_sleep_pattern()).count, 0)
+  assert_eq(find_hits("xsleep(4)\n", literal_sleep_pattern()).count, 0)
+  assert_eq(find_hits("sleep(ms)\n", literal_sleep_pattern()).count, 0)
+}
+
+@test
+pipeline test_literal_sleep_line_attribution(task) {
+  // A hit at line start must not be attributed to the previous line via
+  // its trailing newline (the multiline-scan pitfall).
+  let hits = find_hits("first line\nsleep(500)\ntime.sleep(3)\n", literal_sleep_pattern())
+  assert_eq(hits.count, 2)
+  assert_eq(hits[0].line_no, 2)
+  assert_eq(hits[1].line_no, 3)
+}
+
+@test
+pipeline test_wall_clock_pattern(task) {
+  let text = "a Instant::now() b\nchrono::Utc::now()\nOffsetDateTime::now_utc()\nfine\n"
+  assert_eq(find_hits(text, wall_clock_pattern()).count, 3)
+}
+
+// --- has_mock_time ----------------------------------------------------------
+@test
+pipeline test_has_mock_time_indented(task) {
+  assert_eq(has_mock_time("pipeline t(task) {\n  mock_time(0)\n}\n"), true)
+}
+
+@test
+pipeline test_has_mock_time_requires_line_start(task) {
+  // Only leading whitespace may precede the call (grep ^[[:space:]]*).
+  assert_eq(has_mock_time("let x = mock_time(0)\n"), false)
+  assert_eq(has_mock_time("no mocks here\n"), false)
+}

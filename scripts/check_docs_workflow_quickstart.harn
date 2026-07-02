@@ -1,0 +1,220 @@
+// Verify the workflow-authoring quickstart fixtures still produce the
+// output the docs page promises. The quickstart at
+// `docs/src/workflow-authoring-quickstart.md` shows readers exact bundle
+// digests, executed-node sequences, and connector-status shapes; those
+// claims must stay true on every commit so the copy-paste path does not
+// rot.
+//
+// We hit three surfaces:
+//   * `harn workflow validate --json`       — pinned graph_digest
+//   * `harn workflow run --json`            — executed_nodes + status
+//   * `harn connect status / setup-plan --json` — shape from the
+//                                            docs/fixtures/connect-demo
+//                                            manifest
+//
+// Ported from scripts/check_docs_workflow_quickstart.sh — same assertions,
+// same FAIL output, exits non-zero on the first mismatch.
+//
+// Usage:
+//   harn run scripts/check_docs_workflow_quickstart.harn
+let MIN_BUNDLE = "docs/fixtures/workflow-bundles/quickstart-minimal.bundle.json"
+
+let AGENT_BUNDLE = "docs/fixtures/workflow-bundles/quickstart-agentic.bundle.json"
+
+let DEMO_DIR = "docs/fixtures/connect-demo"
+
+// Pinned digest in the docs page — bump both together if the canonical
+// graph encoding intentionally changes.
+let EXPECTED_MIN_DIGEST = "sha256:d89f161d9fe0739394db76ee48c4e0887b2bc2abba43060cb22826c388b90c2e"
+
+/**
+ * Navigate a dotted JSON path with optional `[idx]` suffixes (the shape
+ * the bash helper's inline python accepted: `executed_nodes[0].node_id`,
+ * `valid`, `connectors[0].id`). Throws on a missing key/index so the
+ * caller can surface the failure. Pure for tests.
+ */
+pub fn json_path_get(doc, path: string) {
+  var node = doc
+  if path == "" {
+    return node
+  }
+  for part in path.split(".") {
+    if part.ends_with("]") {
+      let open = part.index_of("[")
+      let name = part.substring(0, open)
+      let idx = to_int(part.substring(open + 1, part.len() - 1))
+      if name != "" {
+        node = node[name]
+      }
+      node = node[idx]
+    } else {
+      node = node[part]
+    }
+  }
+  return node
+}
+
+/**
+ * Compare the JSON encoding of the value at `path` in `doc` against the
+ * expected JSON literal, returning `{ok, actual}` — `actual` is the JSON
+ * encoding (or an error note when the path is missing).
+ */
+pub fn json_path_check(doc, path: string, expected: string) {
+  let value = try {
+    json_path_get(doc, path)
+  } catch (err) {
+    return {ok: false, actual: "<missing path: ${err}>"}
+  }
+  let actual = json_stringify(value)
+  return {ok: actual == expected, actual: actual}
+}
+
+/** Assert one JSON-path expectation, exiting 1 with the FAIL block on mismatch. */
+fn expect_json_path(label: string, doc, path: string, expected: string) {
+  let res = json_path_check(doc, path, expected)
+  if !res.ok {
+    __io_eprintln("FAIL: ${label}")
+    __io_eprintln("  path:     ${path}")
+    __io_eprintln("  expected: ${expected}")
+    __io_eprintln("  actual:   ${res.actual}")
+    exit(1)
+  }
+}
+
+/**
+ * Resolve the harn binary under test: $HARN_BIN wins, else the workspace
+ * target dir's debug build (building it quietly when missing) — the same
+ * ladder as the bash original.
+ */
+fn resolve_harn_bin() -> string {
+  let env_bin = harness.env.get("HARN_BIN")
+  if env_bin != nil && env_bin != "" {
+    return env_bin
+  }
+  var target_dir = ""
+  let meta = harness.process
+    .spawn_captured({cmd: "cargo", args: ["metadata", "--no-deps", "--format-version", "1"]})
+  if meta.success {
+    let parsed = try {
+      json_parse(meta.stdout)
+    } catch (err) {
+      nil
+    }
+    target_dir = parsed?.target_directory ?? ""
+  }
+  if target_dir == "" {
+    target_dir = harness.env.get("CARGO_TARGET_DIR") ?? ""
+  }
+  if target_dir == "" {
+    target_dir = "target"
+  }
+  let bin = "${target_dir}/debug/harn"
+  if !harness.fs.exists(bin) {
+    __io_eprintln("building harn-cli (set HARN_BIN to skip)...")
+    let build = harness.process
+      .spawn_captured({cmd: "cargo", args: ["build", "-q", "-p", "harn-cli"]})
+    if !build.success {
+      __io_eprint(build.stderr)
+      throw "cargo build -p harn-cli failed"
+    }
+  }
+  return bin
+}
+
+/**
+ * Run `harn <args>` (optionally in `cwd`), pass its stderr through, and
+ * return the parsed JSON stdout. Exits with the child's code on failure
+ * (the bash `set -e` behavior).
+ */
+fn harn_json(harn_bin: string, args: list<string>, cwd: string?) {
+  var spec = {cmd: harn_bin, args: args}
+  if cwd != nil {
+    spec = {...spec, cwd: cwd}
+  }
+  let res = harness.process.spawn_captured(spec)
+  __io_eprint(res.stderr)
+  if !res.success {
+    __io_eprintln("error: ${harn_bin} ${args.join(" ")} failed (exit ${res.exit_code})")
+    exit(res.exit_code)
+  }
+  return json_parse(res.stdout)
+}
+
+pipeline main(task) {
+  let harn_bin = resolve_harn_bin()
+  __io_println("=== Checking workflow quickstart fixtures ===")
+  // --- 1. Minimal bundle ---
+  var validate = harn_json(harn_bin, ["workflow", "validate", "--bundle", MIN_BUNDLE, "--json"], nil)
+  expect_json_path("minimal validate.valid", validate, "valid", "true")
+  expect_json_path("minimal validate.bundle_id", validate, "bundle_id", "\"quickstart-minimal\"")
+  expect_json_path(
+    "minimal validate.workflow_id",
+    validate,
+    "workflow_id",
+    "\"quickstart_minimal_workflow\"",
+  )
+  expect_json_path("minimal validate.errors empty", validate, "errors", "[]")
+  let min_digest: string = validate.graph_digest
+  var run = harn_json(harn_bin, ["workflow", "run", "--bundle", MIN_BUNDLE, "--json"], nil)
+  expect_json_path("minimal run.status", run, "status", "\"completed\"")
+  expect_json_path(
+    "minimal run.run_id (pinned)",
+    run,
+    "run_id",
+    "\"bundle_run_quickstart_minimal_fixture\"",
+  )
+  expect_json_path("minimal run.trigger_id", run, "trigger_id", "\"manual-start\"")
+  expect_json_path("minimal run.executed_nodes[0]", run, "executed_nodes[0].node_id", "\"summarize\"")
+  expect_json_path("minimal run.executed_nodes[1]", run, "executed_nodes[1].node_id", "\"notify\"")
+  expect_json_path("minimal run.graph_digest", run, "graph_digest", "\"${min_digest}\"")
+  if min_digest != EXPECTED_MIN_DIGEST {
+    __io_eprintln("FAIL: minimal bundle graph_digest drifted from the value pinned in")
+    __io_eprintln("      docs/src/workflow-authoring-quickstart.md")
+    __io_eprintln("  expected: ${EXPECTED_MIN_DIGEST}")
+    __io_eprintln("  actual:   ${min_digest}")
+    __io_eprintln("  fix:      update both the docs page and this script if the change is intentional")
+    return 1
+  }
+  // --- 2. Agentic bundle ---
+  validate = harn_json(harn_bin, ["workflow", "validate", "--bundle", AGENT_BUNDLE, "--json"], nil)
+  expect_json_path("agentic validate.valid", validate, "valid", "true")
+  expect_json_path("agentic validate.bundle_id", validate, "bundle_id", "\"quickstart-agentic\"")
+  expect_json_path("agentic validate.errors empty", validate, "errors", "[]")
+  run = harn_json(harn_bin, ["workflow", "run", "--bundle", AGENT_BUNDLE, "--json"], nil)
+  expect_json_path("agentic run.status", run, "status", "\"completed\"")
+  expect_json_path("agentic run.trigger_id", run, "trigger_id", "\"github-pr-opened\"")
+  expect_json_path("agentic run.executed_nodes[1]", run, "executed_nodes[1].node_id", "\"review\"")
+  expect_json_path("agentic run.review.kind", run, "executed_nodes[1].kind", "\"agent\"")
+  expect_json_path(
+    "agentic run.review.capsule",
+    run,
+    "executed_nodes[1].prompt_capsule",
+    "\"draft-review\"",
+  )
+  // Agentic bundle must continue to declare exactly one connector
+  // requirement; the docs walkthrough relies on this.
+  expect_json_path("agentic run.connectors[0]", run, "connectors[0].id", "\"github\"")
+  // --- 3. Connect demo manifest ---
+  let status = harn_json(harn_bin, ["connect", "status", "--json"], DEMO_DIR)
+  expect_json_path("demo status.connectors[0].id", status, "connectors[0].id", "\"demo\"")
+  expect_json_path("demo status.connectors[0].installed", status, "connectors[0].installed", "true")
+  expect_json_path("demo status.connectors[0].usable", status, "connectors[0].usable", "false")
+  expect_json_path(
+    "demo status.connectors[0].status",
+    status,
+    "connectors[0].status",
+    "\"missing_auth\"",
+  )
+  expect_json_path(
+    "demo status.connectors[0].auth_type",
+    status,
+    "connectors[0].auth_type",
+    "\"api-key\"",
+  )
+  let plan = harn_json(harn_bin, ["connect", "setup-plan", "--connector", "demo", "--json"], DEMO_DIR)
+  expect_json_path("demo setup-plan.connector", plan, "connector", "\"demo\"")
+  expect_json_path("demo setup-plan.auth_type", plan, "auth_type", "\"api-key\"")
+  expect_json_path("demo setup-plan.steps[0].id", plan, "steps[0].id", "\"authorize\"")
+  __io_println("    Workflow quickstart fixtures OK.")
+  return 0
+}

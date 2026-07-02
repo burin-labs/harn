@@ -529,6 +529,14 @@ event.
 
 ## Module scope
 
+Mark declarations `pub` to export them from a module: `pub fn`,
+`pub pipeline`, `pub tool`, `pub skill`, `pub struct`, `pub enum`,
+`pub type`, and `pub import` (re-export). A `pub type` alias can be
+imported alongside the functions that use it —
+`import { SmartTarget, pick } from "./targets"` — and used in
+annotations or as an `llm_call_structured` schema type; non-`pub`
+type aliases stay module-private and error on import.
+
 Top-level `let` / `var` and `fn` declarations are visible inside
 functions defined in the same file:
 
@@ -3799,7 +3807,7 @@ import {agent_stack, agent_stack_audit_line} from "std/agent/stack"
 
 let stack = agent_stack({
   role: "planner",
-  defaults: {provider: "anthropic", model: "claude-sonnet-4-6", task: "agent"},
+  defaults: {provider: "anthropic", model: "claude-sonnet-5", task: "agent"},
   retry: {max_attempts: 3},
   logging: true,
   budget: {max_calls: 40},

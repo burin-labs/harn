@@ -1,0 +1,59 @@
+/**
+ * pub-type-exports demo: one shared `pub type` alias drives an annotation,
+ * an exhaustive `match` over its literal union, and `output_schema` on an
+ * `llm_call` — across a module boundary.
+ *
+ * Until `pub type`, aliases were module-private: every consumer of a shared
+ * wire shape re-declared it (or fell back to untyped dicts) because the
+ * alias could not be exported. Now the shape lives once in `verdicts.harn`
+ * and importers get:
+ *
+ *   - the plain annotation (`let manual: GradeReport = {...}`),
+ *   - exhaustive `match` coverage over the `Verdict` literal union, and
+ *   - schema-as-type on `llm_call` (`output_schema: GradeReport`), with the
+ *     imported alias lowered to JSON Schema at compile time and the
+ *     validated result narrowing back to it.
+ *
+ * Fully offline — the single LLM call replays from the bundled tape.
+ */
+import { GradeReport, Verdict, describe } from "./verdicts"
+
+/** Exhaustive match over the imported literal union — no `_` arm needed. */
+fn verdict_label(v: Verdict) -> string {
+  match v {
+    "pass" -> { return "PASS" }
+    "fail" -> { return "FAIL" }
+    "unclear" -> { return "UNCLEAR" }
+  }
+}
+
+pipeline default(_task) {
+  __io_println("=== pub-type-exports demo ===")
+  __io_println("")
+  // 1. The imported alias as a plain annotation.
+  let manual: GradeReport = {verdict: "pass", score: 92, summary: "hand-written report bound against the imported alias"}
+  __io_println("annotation:  [" + verdict_label(manual.verdict) + "] " + describe(manual))
+  __io_println("")
+  // 2. The imported alias as `output_schema`: the compiler lowers
+  //    GradeReport to JSON Schema, the validator enforces it, and the
+  //    parsed result narrows to the alias' shape.
+  let graded = llm_call(
+    "[pub_type_exports] Grade this patch: adds regression tests for module exports.",
+    "You are a strict grader. Reply with JSON only.",
+    {output_schema: GradeReport, output_validation: "error"},
+  )
+  let report: GradeReport = graded.data
+  __io_println(
+    "llm_call(output_schema: GradeReport):  [" + verdict_label(report.verdict) + "] "
+      + describe(report),
+  )
+  __io_println("")
+  let receipt = {
+    kind: "pub_type_exports_receipt",
+    annotation_verdict: manual.verdict,
+    llm_verdict: report.verdict,
+    llm_score: report.score,
+    schema_source: "verdicts.harn#GradeReport",
+  }
+  __io_println(json_stringify(receipt))
+}

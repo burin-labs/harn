@@ -38,6 +38,13 @@ fn stdlib_module_artifact_cache_ptr(module: &str, source: &str) -> Option<usize>
 pub(crate) struct LoadedModule {
     pub(crate) functions: BTreeMap<String, Arc<VmClosure>>,
     pub(crate) public_names: HashSet<String>,
+    /// Names of `pub type` aliases (and re-exported ones). Erased at runtime:
+    /// selective imports may name them, but they bind no value of their own.
+    pub(crate) public_type_names: HashSet<String>,
+    /// Decoded JSON-Schema dict for each `pub type` alias that lowers to a
+    /// schema. Importers bind the alias name to this value so
+    /// expression-position uses (`output_schema: ImportedAlias`) work.
+    pub(crate) public_type_schemas: BTreeMap<String, VmValue>,
     pub(crate) _module_functions: crate::value::ModuleFunctionRegistry,
     pub(crate) _module_state: crate::value::ModuleState,
 }
@@ -223,6 +230,15 @@ impl Vm {
             Arc::new(crate::value::VmMutex::new(BTreeMap::new()));
         let mut functions: BTreeMap<String, Arc<VmClosure>> = BTreeMap::new();
         let mut public_names = artifact.public_names.clone();
+        let mut public_type_names = artifact.public_type_names.clone();
+        let mut public_type_schemas: BTreeMap<String, VmValue> = artifact
+            .public_type_schemas
+            .iter()
+            .filter_map(|(name, json)| {
+                let parsed = serde_json::from_str::<serde_json::Value>(json).ok()?;
+                Some((name.clone(), crate::schema::json_to_vm_value(&parsed)))
+            })
+            .collect();
 
         for (name, compiled) in &artifact.functions {
             let closure = Arc::new(VmClosure {
@@ -267,11 +283,27 @@ impl Vm {
             let names_to_reexport: Vec<String> = match &import.selected_names {
                 Some(names) => names.clone(),
                 // A wildcard `pub import` re-exports exactly the target's `pub`
-                // surface. A module with no `pub` functions exports nothing.
-                None => loaded.public_names.iter().cloned().collect(),
+                // surface (functions and erased `pub type` aliases). A module
+                // with no `pub` declarations exports nothing.
+                None => loaded
+                    .public_names
+                    .iter()
+                    .chain(loaded.public_type_names.iter())
+                    .cloned()
+                    .collect(),
             };
             for name in names_to_reexport {
                 let Some(closure) = loaded.functions.get(&name) else {
+                    // `pub type` aliases are erased at runtime: re-export the
+                    // name (and its schema lowering, when present) for
+                    // importers, with no closure to bind.
+                    if loaded.public_type_names.contains(&name) {
+                        if let Some(schema) = loaded.public_type_schemas.get(&name) {
+                            public_type_schemas.insert(name.clone(), schema.clone());
+                        }
+                        public_type_names.insert(name);
+                        continue;
+                    }
                     return Err(VmError::Runtime(format!(
                         "Re-export error: '{name}' is not exported by '{}'",
                         import.path
@@ -297,6 +329,8 @@ impl Vm {
         Ok(LoadedModule {
             functions,
             public_names,
+            public_type_names,
+            public_type_schemas,
             _module_functions: registry,
             _module_state: module_state,
         })
@@ -316,7 +350,7 @@ impl Vm {
             // the old footgun where adding the first `pub` silently turned every
             // other (previously importable) function private to callers.
             for name in names {
-                if !loaded.public_names.contains(name) {
+                if !loaded.public_names.contains(name) && !loaded.public_type_names.contains(name) {
                     let hint = if loaded.functions.contains_key(name) {
                         " — it is defined there but not `pub`; mark it `pub` to export it"
                     } else {
@@ -329,11 +363,28 @@ impl Vm {
             }
             names.to_vec()
         } else {
-            // Wildcard import brings in exactly the module's `pub` surface.
-            loaded.public_names.iter().cloned().collect()
+            // Wildcard import brings in exactly the module's `pub` surface,
+            // including erased `pub type` aliases.
+            loaded
+                .public_names
+                .iter()
+                .chain(loaded.public_type_names.iter())
+                .cloned()
+                .collect()
         };
 
         for name in export_names {
+            // `pub type` aliases are erased at runtime: the import is valid
+            // (the type checker consumed it). When the alias lowers to a JSON
+            // schema, bind the name to that dict so expression-position uses
+            // (`output_schema: ImportedAlias`, `schema_is(x, ImportedAlias)`)
+            // behave like a locally declared alias; otherwise bind nothing.
+            if loaded.public_type_names.contains(&name) && !loaded.functions.contains_key(&name) {
+                if let Some(schema) = loaded.public_type_schemas.get(&name) {
+                    self.env.define(&name, schema.clone(), false)?;
+                }
+                continue;
+            }
             let Some(closure) = loaded.functions.get(&name) else {
                 return Err(VmError::Runtime(format!(
                     "Import error: '{name}' is not defined in {module_name}"

@@ -176,7 +176,7 @@ from langchain_anthropic import ChatAnthropic
 from tenacity import retry, stop_after_attempt
 import aiohttp
 
-llm = ChatAnthropic(model="claude-sonnet-4-6")
+llm = ChatAnthropic(model="claude-sonnet-5")
 
 @retry(stop=stop_after_attempt(3))
 async def summarize(url):

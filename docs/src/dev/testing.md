@@ -14,7 +14,7 @@ test suite. Before that work, many unit and integration tests used patterns like
 jitter and system load, and were the primary source of intermittent failures on
 CI and slow developer machines.
 
-The lint at `scripts/lint_test_patterns.sh` (run by `make lint-test-patterns`)
+The lint at `scripts/lint_test_patterns.harn` (run by `make lint-test-patterns`)
 enforces that new test code does not reintroduce these patterns.
 
 [#1057]: https://github.com/burin-labs/harn/issues/1057
@@ -72,7 +72,7 @@ For runtime code that needs `tokio::time::sleep` directly (e.g. `timeout`),
 combine `PausedClock` with `tokio::time::pause()` so both surfaces freeze
 together.
 
-The lint at `scripts/lint_test_patterns.sh` forbids new wall-clock reads in
+The lint at `scripts/lint_test_patterns.harn` forbids new wall-clock reads in
 non-test files under `crates/harn-vm/src/` and `crates/harn-cli/src/` outside
 the explicit `NON_TEST_WALL_CLOCK_ALLOWLIST`. The allowlist freezes existing
 sites as gradual cleanup; new files must accept `Arc<dyn Clock>` instead of
@@ -255,7 +255,7 @@ trigger dispatcher and vice versa.
 Fixtures that genuinely need wall-clock time (real subprocess I/O,
 real socket-bound servers, scheduler tests timing real backoffs) are
 exempt via `CONFORMANCE_REAL_TIME_ALLOWLIST` in
-`scripts/lint_test_patterns.sh`. The lint catches new fixtures that
+`scripts/lint_test_patterns.harn`. The lint catches new fixtures that
 sleep on a literal duration without either entering a `mock_time(...)`
 block or being added to the allowlist with reviewer justification.
 
@@ -288,7 +288,7 @@ has no deterministic equivalent — you have two options:
    in files named `*_e2e.rs` or under `tests/` directories that are not part
    of the fast nextest run.
 
-2. **Add the file to the per-pattern allowlist in `scripts/lint_test_patterns.sh`.**
+2. **Add the file to the per-pattern allowlist in `scripts/lint_test_patterns.harn`.**
    Open a PR that adds your file to the appropriate array (`THREAD_SLEEP_ALLOWLIST`,
    `TOKIO_SLEEP_ALLOWLIST`, etc.), includes a one-line comment in the array entry
    explaining why the opt-out is justified, and gets a second reviewer sign-off.

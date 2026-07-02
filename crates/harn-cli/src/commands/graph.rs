@@ -548,6 +548,7 @@ fn collect_public_symbol(
             name,
             type_params,
             type_expr,
+            ..
         } if exports.contains(name) => out.push(GraphSymbol {
             name: name.clone(),
             kind: "type".to_string(),

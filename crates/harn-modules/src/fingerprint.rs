@@ -172,11 +172,14 @@ fn canonicalize_top_level(snode: &SNode) -> Option<String> {
             name,
             type_params,
             type_expr,
-        } => Some(format!(
-            "type:{name}{generics}={ty}",
-            generics = format_type_params(type_params),
-            ty = format_type_expr(type_expr),
-        )),
+            is_pub,
+        } => is_pub.then(|| {
+            format!(
+                "type:{name}{generics}={ty}",
+                generics = format_type_params(type_params),
+                ty = format_type_expr(type_expr),
+            )
+        }),
         Node::ImportDecl { path, is_pub } => is_pub.then(|| format!("pub_import_wildcard:{path}")),
         Node::SelectiveImport {
             names,

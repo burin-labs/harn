@@ -610,32 +610,26 @@ impl ModuleGraph {
                 .or_else(|| self.modules.get(&normalize_path(import_path)))?;
             let names_to_collect: Vec<String> = match &import.selective_names {
                 None => imported.exports.iter().cloned().collect(),
-                Some(selective) => {
-                    // A selectively imported fn whose signature references a
-                    // type alias declared in the same module ("options:
-                    // PickKeysOptions") needs that alias visible at the call
-                    // site too — otherwise the caller sees only a phantom
-                    // `Named("PickKeysOptions")` and skips contract checks.
-                    // Pull every exported type alias / struct / enum /
-                    // interface from the same module into scope to keep the
-                    // selective-import contract honest.
-                    let mut names: Vec<String> = selective.iter().cloned().collect();
-                    for ty_decl in &imported.type_declarations {
-                        if let Some(name) = type_decl_name(ty_decl) {
-                            if imported.own_exports.contains(name)
-                                && !names.iter().any(|n| n == name)
-                            {
-                                names.push(name.to_string());
-                            }
-                        }
-                    }
-                    names
-                }
+                Some(selective) => selective.iter().cloned().collect(),
             };
             for name in &names_to_collect {
                 let mut visited = HashSet::new();
                 if let Some(decl) = self.find_exported_type_decl(import_path, name, &mut visited) {
                     decls.push(decl);
+                }
+            }
+            // Every type alias / struct / enum / interface declared in the
+            // imported module is visible to the *typechecker*, `pub` or not:
+            // an imported fn's signature may reference a module-private alias
+            // ("options: PickKeysOptions"), and without its definition the
+            // caller sees only a phantom `Named(...)` and skips contract
+            // checks. This visibility is typing-only — name-level import
+            // privacy is still enforced by `non_exported_selective_imports`
+            // and the runtime loader, which reject importing a non-`pub`
+            // type by name.
+            for ty_decl in &imported.type_declarations {
+                if type_decl_name(ty_decl).is_some() {
+                    decls.push(ty_decl.clone());
                 }
             }
         }
@@ -1073,8 +1067,10 @@ fn collect_module_info(file: &Path, snode: &SNode, module: &mut ModuleInfo) {
                 decl_site(file, snode.span, name, DefKind::Interface),
             );
         }
-        Node::TypeDecl { name, .. } => {
-            module.own_exports.insert(name.clone());
+        Node::TypeDecl { name, is_pub, .. } => {
+            if *is_pub {
+                module.own_exports.insert(name.clone());
+            }
             module.declarations.insert(
                 name.clone(),
                 decl_site(file, snode.span, name, DefKind::Type),

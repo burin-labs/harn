@@ -1,0 +1,7 @@
+// A `type` alias without `pub` stays module-private: importing it by name
+// is rejected, matching pub fn / pub struct visibility rules.
+import { HiddenAlias, make } from "pub_type_private_rejected_lib"
+
+pipeline default() {
+  __io_println(make().value)
+}

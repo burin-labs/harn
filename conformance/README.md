@@ -140,7 +140,7 @@ resolution, log-wait predicates, etc.). Import it from a direct
 subdirectory with `import "../_common"`, or from a second-level
 subdirectory with `import "../../_common"`.
 
-The `CONFORMANCE_HELPER_ALLOWLIST` in `scripts/lint_test_patterns.sh`
+The `CONFORMANCE_HELPER_ALLOWLIST` in `scripts/lint_test_patterns.harn`
 keeps copy-pasted variants of these helpers out of the suite — adding
 your own `wait_for_listener_url` is a lint failure.
 

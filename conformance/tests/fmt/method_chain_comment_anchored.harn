@@ -1,0 +1,11 @@
+pipeline default() {
+  // A `//` comment between segments of a multi-line method chain must stay
+  // anchored above its segment (fmt --check runs on this file via
+  // `make fmt-harn`), and the chain must still evaluate correctly.
+  let doubled_big = [1, 2, 3]
+    // keep the big ones
+    .filter({ x -> x > 1 })
+    // double them
+    .map({ x -> x * 2 })
+  __io_println(doubled_big.join(","))
+}

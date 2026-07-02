@@ -1,0 +1,25 @@
+import { llm_text, with_llm_script } from "std/testing"
+// `pub type` exports a type alias: importers can name it in a selective
+// import, use it in annotations, and lower it as an output schema.
+import { SmartTarget, pick } from "pub_type_import_lib"
+
+fn describe(t: SmartTarget) -> string {
+  return "${t.name}:${t.score}"
+}
+
+pipeline default() {
+  let chosen: SmartTarget = pick("alpha")
+  __io_println(describe(chosen))
+  // Imported alias works as an `output_schema` type (schema-as-type lowering).
+  with_llm_script(
+    [llm_text("{\"name\": \"beta\", \"score\": 3}")],
+    { ->
+      let r = llm_call(
+        "Pick a target",
+        nil,
+        {provider: "mock", output_schema: SmartTarget, output_validation: "error", response_format: "json"},
+      )
+      __io_println(describe(r.data))
+    },
+  )
+}

@@ -25,6 +25,13 @@ It is a living tracker, not a spec. When you port a script, move its row to
 | `build_release_assets_manifest.harn` | `release_gate.sh` + `build-release-binaries.yml` | Release-asset manifest; byte-identical JSON vs Python `json.dumps(sort_keys)`. |
 | `backfill_stdlib_metadata.harn` | manual tool | Stdlib-metadata backfill (mutating); verified `diff -r`-identical mutation + idempotent (re-run = no-op). |
 | `check_vm_rss_soak.harn` | `make check-vm-rss-soak` (ci.yml) | Spawns `harn bench --profile-json`, checks tail RSS growth; analysis logic parity-tested (RSS magnitude is inherently nondeterministic). |
+| `lint_test_patterns.harn` | `make lint-test-patterns` | Wall-clock/deflake test lint; whole-file `regex_captures` scans (per-line VM loops were ~50x slower); output byte-identical to the bash original on clean + injected-violation runs. |
+| `check_docs_cli_flags.harn` | `make check-docs-cli-flags` | Docs bash/sh `harn` flag audit; hand-rolled POSIX-shlex tokenizer + `--help` caches threaded through state records (dicts are value-typed); parity-verified incl. parse-error/missing-flag output. |
+| `check_binary_size.harn` | `build-release-binaries.yml` (invokes the just-built linux-x64 release binary) | Size budget + cargo-bloat report; parity-verified on `--no-build` pass/fail/usage/missing-bloat paths. Sandbox note: out-of-tree HARN_BIN/CARGO_TARGET_DIR needs `--no-sandbox`. |
+| `check_docs_snippets.harn` | `make check-docs-snippets` + `release_gate.sh` | ```` ```harn ```` fence extraction + per-block `harn check`; byte-identical clean run (663 checked / 312 skipped) and failure output. |
+| `check_docs_workflow_quickstart.harn` | `make check-docs-workflow-quickstart` | Pinned digest / executed-node / connector-shape assertions via `spawn_captured` (+`cwd` for the connect demo); parity-verified incl. digest-drift failure. |
+| `check_docs_model_refs.harn` | `make check-docs-model-refs` + `release_gate.sh` | `toml_parse` of `aliases.sonnet` replaces the awk section scan; `regex_captures` line numbers replace `rg -n -o`. |
+| `check_site_snippets.harn` | `make check-site-snippets` | Site + demo-gallery snippet `harn check`; child stdout/stderr streamed through. |
 
 Each ported script has a paired `scripts/tests/<name>_test.harn` exercising its
 pure helpers, run by `make test-harn-scripts`.
@@ -35,7 +42,6 @@ pure helpers, run by `make test-harn-scripts`.
 | --- | --- | --- |
 | `check_changelog_no_retroactive_edits.py` | deferred → re-port | Ported + parity-verified, but was ~13s on the 472 KB CHANGELOG (O(n²) list build). Unblocked by the O(1)-accumulator fix; re-port once that's on `main` so its pre-push-hook run is fast. |
 | `check_rust_prompt_prose.py` | deferred → re-port | Same: ported + parity-verified but >49s scanning protected Rust files. Re-port post-O(1)-fix. |
-| Bash `check_*.sh` (`check_binary_size`, `check_docs_cli_flags`, `check_docs_snippets`, `lint_test_patterns`, …) | queued | Portable validation logic; lower priority than the Python checks. |
 
 ## Kept in Python — toolchain reason
 
@@ -126,6 +132,35 @@ Not bugs — documented so future ports plan around them:
   Python `str.isspace()` for source-legal bytes) rather than escape sequences.
 - **List slicing is `.slice(start, end)`** (not `.substring`, which is
   string-only).
+
+### Round-3 notes (bash `check_*.sh` cutover)
+
+Surfaced by the batch-3 ports (`lint_test_patterns`, `check_docs_cli_flags`,
+`check_binary_size`, `check_docs_snippets`, `check_docs_workflow_quickstart`,
+`check_docs_model_refs`, `check_site_snippets`):
+
+- **Per-line VM scanning is ~50x slower than whole-file regex.** A
+  closure-per-line `contains` loop over the 750 kLOC test corpus ran >2 min;
+  one `regex_captures(pattern, whole_file, "m")` per pattern per file (then
+  deduping on `m.line`, like `grep -n`) brought `lint_test_patterns` to ~8s —
+  faster than the bash original (~22s).
+- **Multiline scans can misattribute line numbers.** In a whole-file scan, a
+  grep ERE like `(^|[^_a-zA-Z])sleep\(` lets the negated class match the
+  *previous line's trailing newline*, so `m.line` points one line up. Exclude
+  `\n` from negated classes (`[^_a-zA-Z\n]`) when porting line-based greps.
+- **Block comments nest.** A `/** ... */` doc comment containing a glob like
+  `crates/**` ends up with a `/**` opener inside it and eats the rest of the
+  file ("Unterminated block comment"). Avoid `/*` sequences in doc prose.
+- **`harness.fs.glob` matches directories too.** `find -type f` ports need a
+  `harness.fs.stat(p).is_file` gate (a directory literally named `.harn`
+  matches `**/*.harn` via an empty `*`).
+- **Dicts/lists are value-typed across `fn` boundaries**, so memo caches
+  (e.g. `--help` output keyed by subcommand path) must be threaded through
+  helper returns (`{state, value}`) rather than mutated in place.
+- **The `harn run` sandbox scopes fs builtins to the workspace root.**
+  Scripts that may be pointed at out-of-tree paths (`check_binary_size.harn`
+  with a redirected `CARGO_TARGET_DIR`) need callers to pass `--no-sandbox`;
+  in-tree CI usage needs nothing.
 
 ### Round-2 stdlib groundwork (to keep complex ports DRY)
 
