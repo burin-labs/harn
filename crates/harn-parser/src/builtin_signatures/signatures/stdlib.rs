@@ -267,13 +267,23 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     ),
     BuiltinSignature::simple("e", &[], TY_FLOAT),
     BuiltinSignature::simple(
-        "emit_channel",
+        "channel_ack",
         &[
             Param::new("name", TY_STRING),
-            Param::new("payload", TY_ANY),
+            Param::new("consumer_id", TY_STRING),
+            Param::new("cursor", TY_INT),
             Param::optional("options", TY_DICT_OR_NIL),
         ],
         TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "channel_consumer_cursor",
+        &[
+            Param::new("name", TY_STRING),
+            Param::new("consumer_id", TY_STRING),
+            Param::optional("options", TY_DICT_OR_NIL),
+        ],
+        Ty::Union(&[TY_INT, TY_NIL]),
     ),
     BuiltinSignature::simple(
         "channel_events",
@@ -282,6 +292,15 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
             Param::optional("options", TY_DICT_OR_NIL),
         ],
         TY_LIST,
+    ),
+    BuiltinSignature::simple(
+        "emit_channel",
+        &[
+            Param::new("name", TY_STRING),
+            Param::new("payload", TY_ANY),
+            Param::optional("options", TY_DICT_OR_NIL),
+        ],
+        TY_DICT,
     ),
     BuiltinSignature::simple("flush_trigger_aggregations", &[], TY_NIL),
     BuiltinSignature::simple(

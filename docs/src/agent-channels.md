@@ -132,6 +132,9 @@ delivery, register a trigger (next section) or call
 `event_log.subscribe` when code needs channel scope resolution; session-scoped
 channels use an in-process session channel log that raw EventLog subscriptions
 do not read.
+Use `channel_consumer_cursor(...)` and `channel_ack(...)` when a durable
+consumer needs to remember its processed high-water cursor without removing
+events from the shared journal.
 
 ### Coordination Ledger
 
@@ -141,7 +144,15 @@ envelopes. It stores a stable `harn.coordination.message.v1` payload with
 optional structured data:
 
 ```harn,ignore
-import { coord_post, coord_read, coord_subscribe, coord_remember } from "std/coordination"
+import {
+  coord_ack,
+  coord_inbox,
+  coord_post,
+  coord_read,
+  coord_remember,
+  coord_send,
+  coord_subscribe,
+} from "std/coordination"
 
 let receipt = coord_post(
   "session",
@@ -153,13 +164,24 @@ let receipt = coord_post(
 let messages = coord_read("session", "release", {session_id: "agent-session-1"})
 let stream = coord_subscribe("session", "release", {session_id: "agent-session-1"})
 let memory_receipt = coord_remember(receipt, {namespace: "coordination/release"})
+let request = coord_send("workspace", "release", "build-agent", {
+  kind: "request",
+  subject: "verify release",
+  body: "Please audit the new patch release.",
+})
+let inbox = coord_inbox("workspace", "release", {consumer_id: "build-agent"})
+coord_ack("workspace", "release", "build-agent", inbox.next_cursor)
 ```
 
 `coord_post` is append-only and idempotent when `options.id` or
 `options.dedupe_key` is set. `coord_read` returns normalized messages, while
 `coord_subscribe` returns channel event rows whose coordination message is at
-`entry.payload`. `coord_remember` is intentionally separate so a coordination
-message becomes recallable memory only when the caller opts in.
+`entry.payload`. `coord_send` and `coord_reply` add first-class addressing and
+thread metadata. `coord_inbox` reads addressed messages for one durable
+consumer without acknowledging them; `coord_ack` advances that consumer's
+high-water cursor after processing. `coord_remember` is intentionally separate
+so a coordination message becomes recallable memory only when the caller opts
+in.
 
 Coordination scopes are `session`, `pipeline`, `tenant`, `workspace`, and
 `task`. `workspace` maps to the active tenant namespace and embeds the
