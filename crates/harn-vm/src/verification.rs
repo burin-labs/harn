@@ -632,13 +632,14 @@ mod tests {
     use super::*;
     use crate::metadata::MetadataState;
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEMP_PATH_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     fn temp_path(name: &str) -> PathBuf {
-        let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
-        std::env::temp_dir().join(format!("harn-verification-{name}-{unique}"))
+        let unique = TEMP_PATH_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let pid = std::process::id();
+        std::env::temp_dir().join(format!("harn-verification-{name}-{pid}-{unique}"))
     }
 
     fn query(path: &str, language: &str, task: &str) -> ScopeQuery {
