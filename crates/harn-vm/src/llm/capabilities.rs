@@ -36,7 +36,10 @@ const BUILTIN_PROVIDERS_TOML: &str = include_str!("providers.toml");
 /// construct one directly when wiring harn.toml overrides.
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct CapabilitiesFile {
-    /// Per-provider ordered rule lists. First matching rule wins.
+    /// Per-provider ordered rule lists. The first matching rule wins; a
+    /// matching rule with `extends = true` contributes only the fields it
+    /// sets and lets resolution continue to later matching rules (see
+    /// [`ProviderRule::extends`]).
     #[serde(default)]
     pub provider: BTreeMap<String, Vec<ProviderRule>>,
     /// Per-provider defaults applied to every matching row and to
@@ -175,6 +178,16 @@ pub struct ProviderRule {
     /// given model are skipped, not merged.
     #[serde(default)]
     pub version_min: Option<Vec<u32>>,
+    /// Per-rule fall-through. A matching rule with `extends = true`
+    /// contributes ONLY the fields it explicitly sets; resolution then
+    /// continues to later matching rules (user rules before built-in rules,
+    /// then the `provider_family` chain) and ultimately to provider /
+    /// built-in defaults to fill the rest. A matching rule without
+    /// `extends` (or with `extends = false`) terminates resolution exactly
+    /// as before this flag existed. This lets an overlay tweak one field of
+    /// a shipped row without copying the whole row verbatim (which drifts).
+    #[serde(default)]
+    pub extends: bool,
     #[serde(default)]
     pub native_tools: Option<bool>,
     /// Message/request/response wire format used by shared helpers.
@@ -517,6 +530,240 @@ pub struct ProviderRule {
     pub serving_precision: Option<String>,
 }
 
+impl ProviderRule {
+    /// Fill every capability field that `self` (the accumulated `extends`
+    /// fall-through chain so far) has NOT explicitly set from `other`, a
+    /// later matching rule with lower precedence. "Explicitly set" is the
+    /// serde `Option` raw-deserialization state — never inferred from a
+    /// field's value equaling the default.
+    ///
+    /// The destructure of `other` is deliberately exhaustive (no `..`
+    /// catch-all): adding a new capability field to [`ProviderRule`] fails
+    /// to compile here until the merge handles it.
+    fn fill_missing_from(&mut self, other: &ProviderRule) {
+        let ProviderRule {
+            // Rule-matching metadata, not capability payload: the merged
+            // chain keeps the first (highest-precedence) rule's identity.
+            model_match: _,
+            version_min: _,
+            extends: _,
+            native_tools,
+            message_wire_format,
+            native_tool_wire_format,
+            defer_loading,
+            tool_search,
+            responses_api,
+            hosted_tools,
+            remote_mcp,
+            conversation_state,
+            compaction,
+            background_mode,
+            tool_approval_policy,
+            max_tools,
+            prompt_caching,
+            cache_breakpoint_style,
+            vision,
+            audio,
+            pdf,
+            video,
+            files_api_supported,
+            file_upload_wire_format,
+            structured_output,
+            json_schema,
+            prefers_xml_scaffolding,
+            reserved_tool_call_token,
+            prefers_markdown_scaffolding,
+            structured_output_mode,
+            supports_assistant_prefill,
+            prefers_role_developer,
+            prefers_xml_tools,
+            thinking_block_style,
+            thinking_modes,
+            interleaved_thinking_supported,
+            anthropic_beta_features,
+            thinking,
+            vision_supported,
+            image_url_input_supported,
+            preserve_thinking,
+            server_parser,
+            honors_chat_template_kwargs,
+            chat_template_options_field,
+            requires_completion_tokens,
+            requires_streaming,
+            reasoning_effort_supported,
+            reasoning_effort_levels,
+            reasoning_none_supported,
+            max_thinking_budget,
+            reasoning_disable_supported,
+            reasoning_required_for_tools,
+            reasoning_text_promotable,
+            reasoning_wire_format,
+            seed_supported,
+            top_k_supported,
+            temperature_supported,
+            top_p_supported,
+            frequency_penalty_supported,
+            presence_penalty_supported,
+            allowed_tool_choice_modes,
+            requires_tool_result_adjacency,
+            supports_parallel_tool_calls,
+            tools_exclude_response_format,
+            recommended_endpoint,
+            text_tool_wire_format_supported,
+            preferred_tool_format,
+            tool_mode_parity,
+            tool_mode_parity_notes,
+            thinking_disable_directive,
+            auto_reasoning_overrides,
+            provider_route_denylist,
+            openrouter_provider_order,
+            serving_precision,
+        } = other;
+        fill_opt(&mut self.native_tools, native_tools);
+        fill_opt(&mut self.message_wire_format, message_wire_format);
+        fill_opt(&mut self.native_tool_wire_format, native_tool_wire_format);
+        fill_opt(&mut self.defer_loading, defer_loading);
+        fill_opt(&mut self.tool_search, tool_search);
+        fill_opt(&mut self.responses_api, responses_api);
+        fill_opt(&mut self.hosted_tools, hosted_tools);
+        fill_opt(&mut self.remote_mcp, remote_mcp);
+        fill_opt(&mut self.conversation_state, conversation_state);
+        fill_opt(&mut self.compaction, compaction);
+        fill_opt(&mut self.background_mode, background_mode);
+        fill_opt(&mut self.tool_approval_policy, tool_approval_policy);
+        fill_opt(&mut self.max_tools, max_tools);
+        fill_opt(&mut self.prompt_caching, prompt_caching);
+        fill_opt(&mut self.cache_breakpoint_style, cache_breakpoint_style);
+        fill_opt(&mut self.audio, audio);
+        fill_opt(&mut self.pdf, pdf);
+        fill_opt(&mut self.video, video);
+        fill_opt(&mut self.files_api_supported, files_api_supported);
+        fill_opt(&mut self.file_upload_wire_format, file_upload_wire_format);
+        fill_opt(&mut self.prefers_xml_scaffolding, prefers_xml_scaffolding);
+        fill_opt(&mut self.reserved_tool_call_token, reserved_tool_call_token);
+        fill_opt(
+            &mut self.prefers_markdown_scaffolding,
+            prefers_markdown_scaffolding,
+        );
+        fill_opt(&mut self.structured_output_mode, structured_output_mode);
+        fill_opt(
+            &mut self.supports_assistant_prefill,
+            supports_assistant_prefill,
+        );
+        fill_opt(&mut self.prefers_role_developer, prefers_role_developer);
+        fill_opt(&mut self.prefers_xml_tools, prefers_xml_tools);
+        fill_opt(&mut self.thinking_block_style, thinking_block_style);
+        fill_opt(
+            &mut self.interleaved_thinking_supported,
+            interleaved_thinking_supported,
+        );
+        fill_opt(&mut self.anthropic_beta_features, anthropic_beta_features);
+        fill_opt(
+            &mut self.image_url_input_supported,
+            image_url_input_supported,
+        );
+        fill_opt(&mut self.preserve_thinking, preserve_thinking);
+        fill_opt(&mut self.server_parser, server_parser);
+        fill_opt(
+            &mut self.honors_chat_template_kwargs,
+            honors_chat_template_kwargs,
+        );
+        fill_opt(
+            &mut self.chat_template_options_field,
+            chat_template_options_field,
+        );
+        fill_opt(
+            &mut self.requires_completion_tokens,
+            requires_completion_tokens,
+        );
+        fill_opt(&mut self.requires_streaming, requires_streaming);
+        fill_opt(
+            &mut self.reasoning_effort_supported,
+            reasoning_effort_supported,
+        );
+        fill_opt(&mut self.reasoning_effort_levels, reasoning_effort_levels);
+        fill_opt(&mut self.reasoning_none_supported, reasoning_none_supported);
+        fill_opt(&mut self.max_thinking_budget, max_thinking_budget);
+        fill_opt(
+            &mut self.reasoning_disable_supported,
+            reasoning_disable_supported,
+        );
+        fill_opt(
+            &mut self.reasoning_required_for_tools,
+            reasoning_required_for_tools,
+        );
+        fill_opt(
+            &mut self.reasoning_text_promotable,
+            reasoning_text_promotable,
+        );
+        fill_opt(&mut self.reasoning_wire_format, reasoning_wire_format);
+        fill_opt(&mut self.seed_supported, seed_supported);
+        fill_opt(&mut self.top_k_supported, top_k_supported);
+        fill_opt(&mut self.temperature_supported, temperature_supported);
+        fill_opt(&mut self.top_p_supported, top_p_supported);
+        fill_opt(
+            &mut self.frequency_penalty_supported,
+            frequency_penalty_supported,
+        );
+        fill_opt(
+            &mut self.presence_penalty_supported,
+            presence_penalty_supported,
+        );
+        fill_opt(
+            &mut self.allowed_tool_choice_modes,
+            allowed_tool_choice_modes,
+        );
+        fill_opt(
+            &mut self.requires_tool_result_adjacency,
+            requires_tool_result_adjacency,
+        );
+        fill_opt(
+            &mut self.supports_parallel_tool_calls,
+            supports_parallel_tool_calls,
+        );
+        fill_opt(
+            &mut self.tools_exclude_response_format,
+            tools_exclude_response_format,
+        );
+        fill_opt(&mut self.recommended_endpoint, recommended_endpoint);
+        fill_opt(
+            &mut self.text_tool_wire_format_supported,
+            text_tool_wire_format_supported,
+        );
+        fill_opt(&mut self.preferred_tool_format, preferred_tool_format);
+        fill_opt(&mut self.tool_mode_parity, tool_mode_parity);
+        fill_opt(&mut self.tool_mode_parity_notes, tool_mode_parity_notes);
+        fill_opt(
+            &mut self.thinking_disable_directive,
+            thinking_disable_directive,
+        );
+        fill_opt(&mut self.auto_reasoning_overrides, auto_reasoning_overrides);
+        fill_opt(&mut self.provider_route_denylist, provider_route_denylist);
+        fill_opt(
+            &mut self.openrouter_provider_order,
+            openrouter_provider_order,
+        );
+        fill_opt(&mut self.serving_precision, serving_precision);
+        // Legacy alias pairs resolve as ONE logical capability
+        // (`rule_structured_output`, `rule_thinking_modes`, `rule_vision`),
+        // so they fill as a unit: when the accumulated chain has explicitly
+        // set either spelling, the later rule's pair must not leak through
+        // the other spelling and override that explicit choice.
+        if self.structured_output.is_none() && self.json_schema.is_none() {
+            self.structured_output.clone_from(structured_output);
+            self.json_schema.clone_from(json_schema);
+        }
+        if self.thinking_modes.is_none() && self.thinking.is_none() {
+            self.thinking_modes.clone_from(thinking_modes);
+            self.thinking.clone_from(thinking);
+        }
+        if self.vision.is_none() && self.vision_supported.is_none() {
+            self.vision.clone_from(vision);
+            self.vision_supported.clone_from(vision_supported);
+        }
+    }
+}
+
 /// Resolved capabilities for a `(provider, model)` pair. Unset rule
 /// fields resolve to `false` / empty / `None` so callers never have to
 /// unwrap an `Option<bool>` for what are really boolean gates.
@@ -696,6 +943,12 @@ pub struct ProviderCapabilityMatrixRow {
     pub provider: String,
     pub model: String,
     pub version_min: Option<Vec<u32>>,
+    /// Whether this rule opts into field-wise fall-through
+    /// ([`ProviderRule::extends`]). Rows in this matrix are rule-shaped, so
+    /// an `extends` row honestly reports its OWN fields only — for a
+    /// matching model, unset fields resolve from later matching rows and
+    /// provider defaults rather than the printed per-rule values.
+    pub extends: bool,
     pub thinking: Vec<String>,
     pub vision: bool,
     pub audio: bool,
@@ -860,7 +1113,10 @@ pub fn set_user_overrides_from_manifest_toml(src: &str) -> Result<(), String> {
 /// Walks the provider_family chain until it finds a rule list that
 /// matches. Within any one provider's rule list, user overrides are
 /// consulted before the built-in rules. The first matching rule wins —
-/// later rules (and later layers in the family chain) are ignored.
+/// later rules (and later layers in the family chain) are ignored —
+/// unless it sets `extends = true`, in which case it contributes only the
+/// fields it explicitly sets and resolution continues to later matching
+/// rules (and ultimately provider / built-in defaults) to fill the rest.
 pub fn lookup(provider: &str, model: &str) -> Capabilities {
     let user = USER_OVERRIDES.with(|cell| cell.borrow().clone());
     lookup_with_user_overrides(provider, model, user.as_ref())
@@ -1193,7 +1449,7 @@ where
         audited_models += 1;
         let matched = first_matching_rule(user, builtin, &model.provider, &model_id);
         let mut missing_fields = Vec::new();
-        match matched.as_ref().map(|matched| matched.rule) {
+        match matched.as_ref().map(|matched| &matched.rule) {
             Some(rule) => {
                 if rule.native_tools.is_none() {
                     missing_fields.push("native_tools".to_string());
@@ -1222,7 +1478,10 @@ where
             provider: model.provider,
             model: model_id,
             rule_provider: matched.as_ref().map(|matched| matched.provider.clone()),
-            rule_model_match: matched.map(|matched| matched.rule.model_match.clone()),
+            // Honest per-rule provenance: an `extends` fall-through chain
+            // reports every absorbed rule pattern in precedence order, not a
+            // fake single source row.
+            rule_model_match: matched.map(|matched| matched.matched_patterns.join(" -> ")),
             missing_fields,
             suggested_native_tools,
             suggested_preferred_tool_format,
@@ -1240,56 +1499,136 @@ where
     }
 }
 
-struct MatchedCapabilityRule<'a> {
+struct MatchedCapabilityRule {
+    /// Provider layer of the first (highest-precedence) matched rule.
     provider: String,
-    rule: &'a ProviderRule,
+    /// Effective rule: the first match, with fields it left unset filled from
+    /// later matching rules while the chain opted into `extends` fall-through.
+    rule: ProviderRule,
+    /// `model_match` patterns of every absorbed rule, in precedence order.
+    /// A single entry unless the first match set `extends = true`.
+    matched_patterns: Vec<String>,
 }
 
-fn first_matching_rule<'a>(
-    user: Option<&'a CapabilitiesFile>,
-    builtin: &'a CapabilitiesFile,
+/// Accumulates matching rules along the resolution walk (user rules before
+/// built-in rules within a layer, then the `provider_family` chain). The
+/// first matched rule has the highest precedence; later matches only fill
+/// fields the accumulated chain left unset, and only while every absorbed
+/// rule so far opted into `extends` fall-through.
+#[derive(Default)]
+struct RuleResolution {
+    /// Provider layer of the first matched rule.
+    provider: Option<String>,
+    merged: Option<ProviderRule>,
+    /// `model_match` provenance of every absorbed rule, in precedence order.
+    matched_patterns: Vec<String>,
+}
+
+impl RuleResolution {
+    /// Merge `rule` into the accumulator. Returns `true` when the walk must
+    /// terminate: the rule does not opt into `extends` fall-through, which is
+    /// exactly the pre-`extends` first-match-wins behavior.
+    fn absorb(&mut self, layer_provider: &str, rule: &ProviderRule) -> bool {
+        if self.provider.is_none() {
+            self.provider = Some(layer_provider.to_string());
+        }
+        self.matched_patterns.push(rule.model_match.clone());
+        match &mut self.merged {
+            None => self.merged = Some(rule.clone()),
+            Some(merged) => merged.fill_missing_from(rule),
+        }
+        !rule.extends
+    }
+
+    fn into_matched(self) -> Option<MatchedCapabilityRule> {
+        Some(MatchedCapabilityRule {
+            provider: self.provider?,
+            rule: self.merged.expect("merged is set whenever provider is set"),
+            matched_patterns: self.matched_patterns,
+        })
+    }
+}
+
+/// Scan the ordered rule list for `layer_provider` (user rules first, then
+/// built-in rules), absorbing every matching rule into `resolution` until a
+/// terminating (non-`extends`) match. Returns `true` when resolution
+/// terminated within this layer.
+fn absorb_layer_matches(
+    user: Option<&CapabilitiesFile>,
+    builtin: &CapabilitiesFile,
+    layer_provider: &str,
+    model: &str,
+    resolution: &mut RuleResolution,
+) -> bool {
+    for file in user.into_iter().chain(std::iter::once(builtin)) {
+        if let Some(rules) = file.provider.get(layer_provider) {
+            for rule in rules {
+                if rule_matches(rule, model) && resolution.absorb(layer_provider, rule) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Walk provider → family(provider) → … with a visited-guard, absorbing
+/// matching rules into a [`RuleResolution`] and accumulating per-layer
+/// provider defaults (earlier layers win) exactly as far as the walk gets.
+/// Stops at the first non-`extends` match, so a terminating match at layer N
+/// never consults defaults from layers past N — the pre-`extends` behavior.
+/// An unterminated `extends` chain keeps walking so later layers can fill
+/// its gaps.
+fn resolve_rule_chain(
+    user: Option<&CapabilitiesFile>,
+    builtin: &CapabilitiesFile,
     provider: &str,
     model: &str,
-) -> Option<MatchedCapabilityRule<'a>> {
+) -> (RuleResolution, ProviderDefaults) {
+    let mut resolution = RuleResolution::default();
+    let mut effective_defaults = ProviderDefaults::default();
     let mut current = provider.to_string();
     let mut visited = HashSet::new();
     while visited.insert(current.clone()) {
-        if let Some(rule) = user
-            .and_then(|file| first_matching_rule_in_file(file, &current, model))
-            .or_else(|| first_matching_rule_in_file(builtin, &current, model))
-        {
-            return Some(MatchedCapabilityRule {
-                provider: current,
-                rule,
-            });
+        let layer_defaults = merged_provider_defaults(user, builtin, &current);
+        if effective_defaults.has_any_field() {
+            effective_defaults.fill_missing_from(&layer_defaults);
+        } else {
+            effective_defaults.overlay(&layer_defaults);
+        }
+        if absorb_layer_matches(user, builtin, &current, model, &mut resolution) {
+            break;
         }
         let next = user
             .and_then(|file| file.provider_family.get(&current))
             .or_else(|| builtin.provider_family.get(&current))
             .cloned();
-        current = next?;
+        match next {
+            Some(parent) => current = parent,
+            None => break,
+        }
     }
-    None
+    (resolution, effective_defaults)
 }
 
-fn first_matching_rule_in_file<'a>(
-    file: &'a CapabilitiesFile,
+fn first_matching_rule(
+    user: Option<&CapabilitiesFile>,
+    builtin: &CapabilitiesFile,
     provider: &str,
     model: &str,
-) -> Option<&'a ProviderRule> {
-    file.provider
-        .get(provider)?
-        .iter()
-        .find(|rule| rule_matches(rule, model))
+) -> Option<MatchedCapabilityRule> {
+    resolve_rule_chain(user, builtin, provider, model)
+        .0
+        .into_matched()
 }
 
 fn suggested_tool_capability_defaults(
     provider: &str,
     model_id: &str,
     model: &crate::llm_config::ModelDef,
-    matched: Option<&MatchedCapabilityRule<'_>>,
+    matched: Option<&MatchedCapabilityRule>,
 ) -> (bool, String) {
-    if let Some(rule) = matched.map(|matched| matched.rule) {
+    if let Some(rule) = matched.map(|matched| &matched.rule) {
         let native_tools = rule.native_tools.unwrap_or_else(|| {
             // Resolve native_tools from the pinned tool_format via its channel
             // so `json` (a TEXT-channel format) correctly implies
@@ -1373,6 +1712,7 @@ fn rule_to_matrix_row(
         provider: provider.to_string(),
         model: rule.model_match.clone(),
         version_min: rule.version_min.clone(),
+        extends: rule.extends,
         thinking: rule_thinking_modes(rule),
         vision: rule_vision(rule),
         audio: rule.audio.unwrap_or(false),
@@ -1437,81 +1777,31 @@ fn lookup_with(
     // plumbing (beta headers, file-id passthrough) is exercised when
     // a Claude model is mocked.
     if provider == "mock" {
-        let anthropic_defaults = merged_provider_defaults(user, builtin, "anthropic");
-        if let Some(mut caps) =
-            try_match_layer(user, builtin, "anthropic", model, &anthropic_defaults)
-        {
-            caps.native_tool_wire_format = "openai".to_string();
-            return caps;
-        }
-        let openai_defaults = merged_provider_defaults(user, builtin, "openai");
-        if let Some(caps) = try_match_layer(user, builtin, "openai", model, &openai_defaults) {
-            return caps;
-        }
-        let gemini_defaults = merged_provider_defaults(user, builtin, "gemini");
-        if let Some(caps) = try_match_layer(user, builtin, "gemini", model, &gemini_defaults) {
-            return caps;
+        for family in ["anthropic", "openai", "gemini"] {
+            let defaults = merged_provider_defaults(user, builtin, family);
+            let mut resolution = RuleResolution::default();
+            absorb_layer_matches(user, builtin, family, model, &mut resolution);
+            if let Some(rule) = resolution.merged.as_ref() {
+                let mut caps = rule_to_caps(rule, &defaults);
+                if family == "anthropic" {
+                    caps.native_tool_wire_format = "openai".to_string();
+                }
+                return caps;
+            }
         }
         return Capabilities::default();
     }
 
     // Normal chain: walk provider → family(provider) → ... with a
     // visited-guard to avoid cycles in malformed user overrides.
-    let mut current = provider.to_string();
-    let mut effective_defaults = ProviderDefaults::default();
-    let mut visited: std::collections::HashSet<String> = std::collections::HashSet::new();
-    while visited.insert(current.clone()) {
-        let layer_defaults = merged_provider_defaults(user, builtin, &current);
-        if effective_defaults.has_any_field() {
-            effective_defaults.fill_missing_from(&layer_defaults);
-        } else {
-            effective_defaults.overlay(&layer_defaults);
-        }
-        if let Some(caps) = try_match_layer(user, builtin, &current, model, &effective_defaults) {
-            return caps;
-        }
-        let next = user
-            .and_then(|f| f.provider_family.get(&current))
-            .or_else(|| builtin.provider_family.get(&current))
-            .cloned();
-        match next {
-            Some(parent) => current = parent,
-            None => break,
-        }
+    let (resolution, effective_defaults) = resolve_rule_chain(user, builtin, provider, model);
+    if let Some(rule) = resolution.merged.as_ref() {
+        return rule_to_caps(rule, &effective_defaults);
     }
     if effective_defaults.has_any_field() {
         return defaults_to_caps(&effective_defaults);
     }
     Capabilities::default()
-}
-
-/// Try the ordered rule list for `layer_provider` (user rules first,
-/// then built-in rules). Returns `Some(caps)` on the first match, else
-/// `None`. `original_provider` is threaded through only for diagnostics.
-fn try_match_layer(
-    user: Option<&CapabilitiesFile>,
-    builtin: &CapabilitiesFile,
-    layer_provider: &str,
-    model: &str,
-    defaults: &ProviderDefaults,
-) -> Option<Capabilities> {
-    if let Some(user) = user {
-        if let Some(rules) = user.provider.get(layer_provider) {
-            for rule in rules {
-                if rule_matches(rule, model) {
-                    return Some(rule_to_caps(rule, defaults));
-                }
-            }
-        }
-    }
-    if let Some(rules) = builtin.provider.get(layer_provider) {
-        for rule in rules {
-            if rule_matches(rule, model) {
-                return Some(rule_to_caps(rule, defaults));
-            }
-        }
-    }
-    None
 }
 
 fn merged_provider_defaults(
@@ -1534,6 +1824,7 @@ fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
     let empty = ProviderRule {
         model_match: "*".to_string(),
         version_min: None,
+        extends: false,
         native_tools: None,
         message_wire_format: None,
         native_tool_wire_format: None,
@@ -1794,7 +2085,7 @@ fn rule_thinking_block_style(rule: &ProviderRule) -> String {
     })
 }
 
-fn rule_matches(rule: &ProviderRule, model: &str) -> bool {
+pub(crate) fn rule_matches(rule: &ProviderRule, model: &str) -> bool {
     let lower = model.to_lowercase();
     if !glob_match(&rule.model_match.to_lowercase(), &lower) {
         return false;
@@ -3559,6 +3850,111 @@ native_tools = true
         assert!(
             message.contains("harn provider catalog matrix"),
             "{message}"
+        );
+    }
+
+    // --- `extends = true` field-wise fall-through ---
+
+    /// Resolve capabilities for a synthetic provider whose rules come entirely
+    /// from `src`: the parsed file is passed as the builtin base with no user
+    /// layer, so no shipped rule interferes with the `extends` assertions.
+    fn extends_caps(src: &str) -> Capabilities {
+        let file = parse_capabilities_toml(src).expect("test capabilities toml parses");
+        lookup_with("testprov", "test-model", &file, None)
+    }
+
+    #[test]
+    fn extends_rule_fills_unset_fields_from_later_matching_rule() {
+        // Rule 1 opts into `extends` and sets only native_tools; rule 2 (lower
+        // precedence, same match) supplies the fields the chain left unset.
+        let caps = extends_caps(
+            r#"
+[[provider.testprov]]
+model_match = "test-*"
+extends = true
+native_tools = true
+
+[[provider.testprov]]
+model_match = "test-*"
+vision = true
+message_wire_format = "anthropic"
+"#,
+        );
+        assert!(caps.native_tools, "field from the extends rule applies");
+        assert!(
+            caps.vision,
+            "unset field filled from the later matching rule"
+        );
+        assert_eq!(caps.message_wire_format, "anthropic");
+    }
+
+    #[test]
+    fn non_extends_rule_terminates_resolution_unchanged() {
+        // Without `extends`, the first match wins outright and the later
+        // rule's vision never applies — the pre-`extends` first-match-wins
+        // behavior is preserved.
+        let caps = extends_caps(
+            r#"
+[[provider.testprov]]
+model_match = "test-*"
+native_tools = true
+
+[[provider.testprov]]
+model_match = "test-*"
+vision = true
+"#,
+        );
+        assert!(caps.native_tools);
+        assert!(
+            !caps.vision,
+            "a non-extends first match must not absorb later rules"
+        );
+    }
+
+    #[test]
+    fn extends_rule_does_not_override_explicitly_set_field() {
+        // The higher-precedence extends rule's explicit native_tools = true
+        // wins; the later rule only fills fields the chain left unset, so its
+        // native_tools = false is ignored while its vision still applies.
+        let caps = extends_caps(
+            r#"
+[[provider.testprov]]
+model_match = "test-*"
+extends = true
+native_tools = true
+
+[[provider.testprov]]
+model_match = "test-*"
+native_tools = false
+vision = true
+"#,
+        );
+        assert!(
+            caps.native_tools,
+            "the extends rule's explicit value is not overridden by a lower rule"
+        );
+        assert!(caps.vision, "still fills the field the chain left unset");
+    }
+
+    #[test]
+    fn extends_chain_falls_through_to_provider_defaults() {
+        // An unterminated extends chain (no later matching rule) fills its
+        // remaining gaps from provider defaults.
+        let caps = extends_caps(
+            r#"
+[provider_defaults.testprov]
+seed_supported = true
+
+[[provider.testprov]]
+model_match = "test-*"
+extends = true
+native_tools = true
+"#,
+        );
+        assert!(caps.native_tools, "field from the extends rule applies");
+        assert!(
+            caps.seed_supported,
+            "unset field filled from provider defaults"
         );
     }
 }
