@@ -876,12 +876,19 @@ provider = "anthropic"
 id = "claude-sonnet-5"
 provider = "anthropic"
 
-# gpt-4o-mini's replacement per OpenAI's own deprecation guidance.
+# Default balanced hosted route for routine coding-agent work. Qwen 3.6 Flash
+# matched Plus on the 2026-07-02 Harn/OpenRouter structured JSON + native-tool
+# + text-tool smoke matrix while landing materially lower latency and token
+# price. OpenAI stays addressable through the provider-scoped tier alias below.
 [aliases.mid]
-id = "gpt-5.4-mini"
-provider = "openai"
+id = "qwen/qwen3.6-flash"
+provider = "openrouter"
 
 [aliases."tier/mid"]
+id = "qwen/qwen3.6-flash"
+provider = "openrouter"
+
+[aliases."openai/mid"]
 id = "gpt-5.4-mini"
 provider = "openai"
 
@@ -1105,6 +1112,41 @@ provider = "openrouter"
 [aliases."together-qwen3.7-max"]
 id = "Qwen/Qwen3.7-Max"
 provider = "together"
+
+# Qwen 3.6 via OpenRouter. These route through Harn capability rows that keep
+# provider-native tools, disable Qwen reasoning automatically for tool-bearing
+# turns, and deny the OpenRouter Ambient upstream for structured tool calls.
+[aliases."qwen3.6"]
+id = "qwen/qwen3.6-flash"
+provider = "openrouter"
+
+[aliases."qwen3.6-flash"]
+id = "qwen/qwen3.6-flash"
+provider = "openrouter"
+
+[aliases."qwen3.6-plus"]
+id = "qwen/qwen3.6-plus"
+provider = "openrouter"
+
+[aliases."qwen3.6-35b"]
+id = "qwen/qwen3.6-35b-a3b"
+provider = "openrouter"
+
+[aliases."openrouter-qwen3.6"]
+id = "qwen/qwen3.6-flash"
+provider = "openrouter"
+
+[aliases."openrouter-qwen3.6-flash"]
+id = "qwen/qwen3.6-flash"
+provider = "openrouter"
+
+[aliases."openrouter-qwen3.6-plus"]
+id = "qwen/qwen3.6-plus"
+provider = "openrouter"
+
+[aliases."openrouter-qwen3.6-35b"]
+id = "qwen/qwen3.6-35b-a3b"
+provider = "openrouter"
 
 # OpenRouter-only coding specialist.
 [aliases."kat-coder-pro-v2"]
@@ -2778,7 +2820,9 @@ name = "GLM 5.2 (via OpenRouter)"
 provider = "openrouter"
 context_window = 1048576
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-pricing = { input_per_mtok = 1.20, output_per_mtok = 4.10 }
+# OpenRouter `/api/v1/models` live snapshot on 2026-07-02 reports
+# $0.93/$3.00 per MTok and native `reasoning_effort` support.
+pricing = { input_per_mtok = 0.93, output_per_mtok = 3.00 }
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
@@ -2873,6 +2917,45 @@ capabilities = ["tools", "streaming"]
 tier = "small"
 open_weight = true
 strengths = ["cheap", "speed"]
+
+# OpenRouter Qwen3.6 routes. Live OpenRouter `/api/v1/models` snapshot on
+# 2026-07-02 reports tools/tool_choice, structured_outputs/response_format,
+# reasoning, text+image+video input, and the prices below. Harn's capability
+# matrix owns the runtime quirks: native tools stay enabled, reasoning is
+# disabled automatically for tool-bearing tasks, and the broken Ambient
+# OpenRouter upstream is denied through provider_route_denylist.
+[models."qwen/qwen3.6-flash"]
+name = "Qwen3.6 Flash (via OpenRouter)"
+provider = "openrouter"
+context_window = 1000000
+capabilities = ["tools", "vision", "streaming", "thinking"]
+pricing = { input_per_mtok = 0.1875, output_per_mtok = 1.125 }
+tier = "mid"
+open_weight = false
+strengths = ["speed", "cheap", "coding", "tool_use", "reasoning", "long_context"]
+
+[models."qwen/qwen3.6-plus"]
+name = "Qwen3.6 Plus (via OpenRouter)"
+provider = "openrouter"
+context_window = 1000000
+capabilities = ["tools", "vision", "streaming", "thinking"]
+pricing = { input_per_mtok = 0.325, output_per_mtok = 1.95 }
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
+benchmarks = { swe_bench_verified = 78.8 }
+
+[models."qwen/qwen3.6-35b-a3b"]
+name = "Qwen3.6 35B A3B (via OpenRouter)"
+provider = "openrouter"
+context_window = 262144
+logical_model = "qwen3.6-35b-a3b"
+equivalence_group = "qwen3.6-35b-a3b"
+capabilities = ["tools", "vision", "streaming", "thinking"]
+pricing = { input_per_mtok = 0.14, output_per_mtok = 1.00 }
+tier = "mid"
+open_weight = true
+strengths = ["cheap", "coding", "tool_use", "reasoning"]
 
 # --- source: 60-models/70-local-ollama.toml ---
 # Ollama / local models — no `pricing` (free); context_window reflects

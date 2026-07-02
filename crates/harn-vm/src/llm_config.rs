@@ -2362,10 +2362,6 @@ pub fn resolve_tier_model(
 ) -> Option<(String, String)> {
     let config = effective_config();
 
-    if let Some(alias) = config.aliases.get(target) {
-        return Some((alias.id.clone(), alias.provider.clone()));
-    }
-
     let candidate_aliases = if let Some(provider) = preferred_provider {
         vec![
             format!("{provider}/{target}"),
@@ -3389,6 +3385,11 @@ mod tests {
             .contains(&provider.as_str()),
             "small tier should resolve to an open-weight provider (got {provider} / {model})"
         );
+
+        let (model, provider) = resolve_tier_model("mid", None)
+            .expect("mid alias must resolve from the embedded catalog");
+        assert_eq!(provider, "openrouter");
+        assert_eq!(model, "qwen/qwen3.6-flash");
     }
 
     #[test]
@@ -3399,6 +3400,7 @@ mod tests {
         let (model, provider) = resolve_tier_model("mid", Some("openai"))
             .expect("mid tier scoped to openai must resolve");
         assert_eq!(provider, "openai");
+        assert_eq!(model, "gpt-5.4-mini");
         assert!(
             model_catalog_entry(&model).is_some(),
             "mid/openai alias must point at a registered model (got {model})"
@@ -3698,6 +3700,11 @@ mod tests {
             default_tool_format("qwen/qwen3-coder-flash", "openrouter"),
             "text"
         );
+        assert_eq!(
+            default_tool_format("qwen/qwen3.6-flash", "openrouter"),
+            "native"
+        );
+        assert_eq!(default_tool_format("z-ai/glm-5.2", "openrouter"), "text");
         // GPT-OSS tool defaults are provider-specific: aggregate OpenRouter and
         // Fireworks use Harn's heredoc text tools, as does DeepInfra — its
         // native Harmony channel drops tool calls into the private reasoning

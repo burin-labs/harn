@@ -41,12 +41,19 @@ provider = "anthropic"
 id = "claude-sonnet-5"
 provider = "anthropic"
 
-# gpt-4o-mini's replacement per OpenAI's own deprecation guidance.
+# Default balanced hosted route for routine coding-agent work. Qwen 3.6 Flash
+# matched Plus on the 2026-07-02 Harn/OpenRouter structured JSON + native-tool
+# + text-tool smoke matrix while landing materially lower latency and token
+# price. OpenAI stays addressable through the provider-scoped tier alias below.
 [aliases.mid]
-id = "gpt-5.4-mini"
-provider = "openai"
+id = "qwen/qwen3.6-flash"
+provider = "openrouter"
 
 [aliases."tier/mid"]
+id = "qwen/qwen3.6-flash"
+provider = "openrouter"
+
+[aliases."openai/mid"]
 id = "gpt-5.4-mini"
 provider = "openai"
 
@@ -270,6 +277,41 @@ provider = "openrouter"
 [aliases."together-qwen3.7-max"]
 id = "Qwen/Qwen3.7-Max"
 provider = "together"
+
+# Qwen 3.6 via OpenRouter. These route through Harn capability rows that keep
+# provider-native tools, disable Qwen reasoning automatically for tool-bearing
+# turns, and deny the OpenRouter Ambient upstream for structured tool calls.
+[aliases."qwen3.6"]
+id = "qwen/qwen3.6-flash"
+provider = "openrouter"
+
+[aliases."qwen3.6-flash"]
+id = "qwen/qwen3.6-flash"
+provider = "openrouter"
+
+[aliases."qwen3.6-plus"]
+id = "qwen/qwen3.6-plus"
+provider = "openrouter"
+
+[aliases."qwen3.6-35b"]
+id = "qwen/qwen3.6-35b-a3b"
+provider = "openrouter"
+
+[aliases."openrouter-qwen3.6"]
+id = "qwen/qwen3.6-flash"
+provider = "openrouter"
+
+[aliases."openrouter-qwen3.6-flash"]
+id = "qwen/qwen3.6-flash"
+provider = "openrouter"
+
+[aliases."openrouter-qwen3.6-plus"]
+id = "qwen/qwen3.6-plus"
+provider = "openrouter"
+
+[aliases."openrouter-qwen3.6-35b"]
+id = "qwen/qwen3.6-35b-a3b"
+provider = "openrouter"
 
 # OpenRouter-only coding specialist.
 [aliases."kat-coder-pro-v2"]
