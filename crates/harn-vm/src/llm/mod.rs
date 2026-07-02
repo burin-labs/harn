@@ -460,6 +460,7 @@ const LLM_RUNTIME_PRIMITIVE_BUILTINS: &[&VmBuiltinDef] = &[
     &agent_host_primitives::HOST_AGENT_PARSE_TOOL_CALLS_IMPL_DEF,
     &agent_host_primitives::HOST_AGENT_DISPATCH_TOOL_CALL_IMPL_DEF,
     &agent_host_primitives::HOST_AGENT_DISPATCH_TOOL_BATCH_IMPL_DEF,
+    &agent_host_primitives::HOST_AGENT_UNDISPATCHED_TOOL_RESULTS_BUILTIN_DEF,
     &agent_host_primitives::HOST_MCP_BOOTSTRAP_IMPL_DEF,
     &agent_host_primitives::HOST_MCP_DISCONNECT_IMPL_DEF,
     &agent_host_primitives::HOST_AGENT_REMINDER_PROVIDERS_FIRE_IMPL_DEF,

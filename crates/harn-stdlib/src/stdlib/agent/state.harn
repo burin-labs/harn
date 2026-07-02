@@ -63,9 +63,9 @@ pub fn agent_session_record_tool_results(session_id, dispatch) {
  * tool_result (carrying `feedback` as the observation) for each orphaned block
  * on the trailing assistant turn. Returns the number of blocks repaired; `0` is
  * a strict no-op (trailing message is not an assistant turn, carries no
- * structured tool calls — e.g. a homogeneous text-format run — or every block
- * already has a paired result). Called by the agent loop at every inject site
- * that declines to dispatch an assistant turn's tool calls.
+ * structured tool calls, or every block already has a paired result). Called by
+ * the agent loop at every inject site that declines to dispatch an assistant
+ * turn's tool calls.
  *
  * @effects: [host]
  * @errors: []
@@ -73,6 +73,26 @@ pub fn agent_session_record_tool_results(session_id, dispatch) {
  */
 pub fn agent_session_pair_orphaned_tool_use(session_id, feedback) {
   return __host_agent_session_pair_orphaned_tool_use(session_id, feedback)
+}
+
+/**
+ * Record placeholder tool_results for calls that were persisted as part of an
+ * assistant tool_use turn but will never be dispatched (pre-dispatch
+ * interrupt, agent_await_resumption suspension, skipped siblings). Anthropic
+ * rejects any transcript whose assistant tool_use has no adjacent tool_result
+ * (HTTP 400), so every skip path must close out its pending calls before the
+ * next LLM call or resume.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_session_record_undispatched_tool_results(session_id, tool_calls, status, reason) {
+  if len(tool_calls ?? []) == 0 {
+    return nil
+  }
+  let results = __host_agent_undispatched_tool_results(tool_calls, status, reason)
+  return __host_agent_session_record_tool_results(session_id, results)
 }
 
 fn __agent_usage_int(value) {

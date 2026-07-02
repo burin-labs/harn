@@ -104,11 +104,19 @@ import {{ agent_session_push_bridge_injection }} from "std/agent/state"
 pipeline main(task) {{
   clear_tool_hooks()
   let registry = tool_registry()
+  let handler_calls = shared_cell({{scope: "task_group", key: "handler-{session_id}", initial: 0}})
   let tools = tool_define(
     registry,
     "would_force_push",
     "Test stand-in for an irreversible side-effect tool.",
-    {{parameters: {{}}, handler: {{ _args -> return "would have force-pushed" }}}},
+    {{
+      parameters: {{}},
+      handler: {{ _args ->
+        let hsnap = shared_snapshot(handler_calls)
+        shared_cas(handler_calls, hsnap, hsnap.value + 1)
+        return "would have force-pushed"
+      }},
+    }},
   )
   let iteration_state = shared_cell({{scope: "task_group", key: "iter-{session_id}", initial: 0}})
   let mock_llm = {{ _call ->
@@ -156,6 +164,18 @@ pipeline main(task) {{
   log(skipped_count)
   let stats = transcript_stats(result.transcript)
   log(stats.tool_result_message_count)
+  log(shared_get(handler_calls))
+  let messages = transcript_messages(result.transcript)
+  var placeholder_count = 0
+  for message in messages {{
+    let role = message?.role ?? ""
+    if role == "tool" || role == "tool_result" {{
+      if contains(to_string(message?.content ?? ""), "was not dispatched: interrupted") {{
+        placeholder_count = placeholder_count + 1
+      }}
+    }}
+  }}
+  log(placeholder_count)
 }}
 "#
     )
@@ -173,8 +193,26 @@ fn pre_tool_dispatch_skips_when_interrupt_immediate_queued_mid_turn() {
         lines[1], "1",
         "expected one skipped dispatch; lines: {lines:?}"
     );
-    // Zero tool_result events — the tool never ran.
-    assert_eq!(lines[2], "0", "expected no tool dispatch; lines: {lines:?}");
+    // Exactly one tool_result message — the synthesized "interrupted"
+    // placeholder that closes out the persisted tool_use turn. Without it,
+    // the next Anthropic-native LLM call (or a resume that keeps the
+    // transcript) is rejected with HTTP 400 "tool_use ids were found
+    // without tool_result blocks".
+    assert_eq!(
+        lines[2], "1",
+        "expected the synthesized placeholder tool_result; lines: {lines:?}"
+    );
+    // The tool handler itself NEVER executed — the placeholder is
+    // bookkeeping, not a dispatch.
+    assert_eq!(
+        lines[3], "0",
+        "the tool must not actually run; lines: {lines:?}"
+    );
+    // And the placeholder self-describes as an interrupted non-dispatch.
+    assert_eq!(
+        lines[4], "1",
+        "placeholder should carry the interrupted marker; lines: {lines:?}"
+    );
 }
 
 #[test]
@@ -193,6 +231,16 @@ fn pre_tool_dispatch_dispatches_when_no_injection_queued() {
     assert_eq!(
         lines[2], "1",
         "expected one tool dispatch; lines: {lines:?}"
+    );
+    // The handler really ran exactly once.
+    assert_eq!(
+        lines[3], "1",
+        "the tool handler should run once; lines: {lines:?}"
+    );
+    // No synthesized placeholder in the control run.
+    assert_eq!(
+        lines[4], "0",
+        "control run must not synthesize placeholders; lines: {lines:?}"
     );
 }
 
