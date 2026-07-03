@@ -29,6 +29,8 @@
 //! trifecta gate only fires where an interactive approval policy is installed,
 //! so non-interactive embedders (headless evals) are unaffected by it.
 
+pub mod battery;
+
 use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
