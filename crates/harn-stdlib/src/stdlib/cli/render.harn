@@ -21,6 +21,8 @@
 //     tests stay stable across runs.
 //   * `mode()` — small helper for "am I in JSON mode?" so port scripts
 //     don't have to read `HARN_OUTPUT_JSON` directly.
+//   * Small coercion and shell-argv helpers for renderer scripts consuming
+//     JSON payloads collected by Rust shims.
 import { is_tty } from "std/io"
 
 /**
@@ -32,8 +34,8 @@ import { is_tty } from "std/io"
  * @effects: [env.read]
  * @errors: []
  */
-pub fn mode() -> string {
-  if env_or("HARN_OUTPUT_JSON", "0") == "1" {
+pub fn mode(harness: Harness) -> string {
+  if harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1" {
     return "json"
   }
   return "human"
@@ -46,8 +48,8 @@ pub fn mode() -> string {
  * @effects: [env.read]
  * @errors: []
  */
-pub fn json_mode() -> bool {
-  return mode() == "json"
+pub fn json_mode(harness: Harness) -> bool {
+  return mode(harness) == "json"
 }
 
 /**
@@ -97,4 +99,169 @@ pub fn write_envelope(env: dict) {
     json_stringify(env)
   }
   __io_println(text)
+}
+
+/**
+ * Return `value` when it is a string, otherwise `fallback`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn safe_string(value, fallback: string) -> string {
+  if type_of(value) == "string" {
+    return value
+  }
+  return fallback
+}
+
+/**
+ * Return `value` when it is a non-empty string, otherwise `fallback`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn nonempty_string(value, fallback: string) -> string {
+  let text = safe_string(value, "")
+  if text == "" {
+    return fallback
+  }
+  return text
+}
+
+/**
+ * Return `value` when it is a dict, otherwise an empty dict.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn safe_dict(value) -> dict {
+  if type_of(value) == "dict" {
+    return value
+  }
+  return {}
+}
+
+/**
+ * Return `value` when it is a list, otherwise an empty list.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn safe_list(value) -> list {
+  if type_of(value) == "list" {
+    return value
+  }
+  return []
+}
+
+/**
+ * Return `value` when it is a bool, otherwise `fallback`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn safe_bool(value, fallback: bool) -> bool {
+  if type_of(value) == "bool" {
+    return value
+  }
+  return fallback
+}
+
+/**
+ * Render an int as a string, otherwise return `fallback`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn safe_int_string(value, fallback: string) -> string {
+  if type_of(value) == "int" {
+    return to_string(value)
+  }
+  return fallback
+}
+
+/**
+ * Render an int or float as a string, otherwise return `fallback`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn safe_number_string(value, fallback: string) -> string {
+  let kind = type_of(value)
+  if kind == "int" || kind == "float" {
+    return to_string(value)
+  }
+  return fallback
+}
+
+/**
+ * Quote one shell argv item for human-display commands.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn shell_quote(value: string) -> string {
+  if value == "" {
+    return "''"
+  }
+  if regex_match("^[A-Za-z0-9_./:=+-]+$", value) != nil {
+    return value
+  }
+  return "'" + replace(value, "'", "'\"'\"'") + "'"
+}
+
+/**
+ * Render an argv list as a shell-display command.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn join_shell_argv(items: list, sep: string) -> string {
+  var out = ""
+  var first = true
+  for item in items {
+    let text = shell_quote(safe_string(item, ""))
+    if text == "" {
+      continue
+    }
+    if !first {
+      out = out + sep
+    }
+    out = out + text
+    first = false
+  }
+  return out
+}
+
+/**
+ * Print a labelled bullet list, skipping non-string/empty entries.
+ *
+ * @effects: [stdio.write]
+ * @errors: []
+ */
+pub fn print_list(harness: Harness, label: string, items: list) {
+  if items.count == 0 {
+    return
+  }
+  harness.stdio.println("  " + label + ":")
+  for item in items {
+    let text = safe_string(item, "")
+    if text != "" {
+      harness.stdio.println("    - " + text)
+    }
+  }
+}
+
+/**
+ * Print a labelled shell-display command from argv.
+ *
+ * @effects: [stdio.write]
+ * @errors: []
+ */
+pub fn render_command(harness: Harness, label: string, argv: list) {
+  if argv.count == 0 {
+    return
+  }
+  harness.stdio.println("  " + label + ":")
+  harness.stdio.println("    " + join_shell_argv(argv, " "))
 }

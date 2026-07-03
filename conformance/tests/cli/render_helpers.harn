@@ -1,0 +1,27 @@
+import {
+  join_shell_argv,
+  nonempty_string,
+  print_list,
+  render_command,
+  safe_bool,
+  safe_dict,
+  safe_int_string,
+  safe_list,
+  safe_number_string,
+  safe_string,
+} from "std/cli/render"
+
+fn main(harness: Harness) {
+  harness.stdio.println(safe_string("model", "fallback"))
+  harness.stdio.println(safe_string(3, "fallback"))
+  harness.stdio.println(nonempty_string("", "fallback"))
+  harness.stdio.println(to_string(safe_bool(true, false)))
+  harness.stdio.println(to_string(safe_bool("not-bool", true)))
+  harness.stdio.println(safe_int_string(7, "fallback"))
+  harness.stdio.println(safe_number_string(1.5, "fallback"))
+  harness.stdio.println(json_stringify(safe_dict({ok: true})))
+  harness.stdio.println(to_string(safe_list(["a", "b"]).count))
+  harness.stdio.println(join_shell_argv(["harn", "run", "two words", "quote's"], " "))
+  print_list(harness, "items", ["one", "", 4, "two"])
+  render_command(harness, "cmd", ["harn", "run", "hello world"])
+}

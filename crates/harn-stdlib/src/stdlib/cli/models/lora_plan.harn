@@ -10,134 +10,47 @@
  *   HARN_MODELS_LORA_PLAN_PAYLOAD_PRETTY - pretty report JSON.
  *   HARN_OUTPUT_JSON                     - "1" for JSON, else human text.
  */
-fn __safe_string(value, fallback: string) -> string {
-  if type_of(value) == "string" {
-    return value
-  }
-  return fallback
-}
-
-fn __nonempty_string(value, fallback: string) -> string {
-  let text = __safe_string(value, "")
-  if text == "" {
-    return fallback
-  }
-  return text
-}
-
-fn __safe_dict(value) -> dict {
-  if type_of(value) == "dict" {
-    return value
-  }
-  return {}
-}
-
-fn __safe_list(value) -> list {
-  if type_of(value) == "list" {
-    return value
-  }
-  return []
-}
-
-fn __safe_bool(value, fallback: bool) -> bool {
-  if type_of(value) == "bool" {
-    return value
-  }
-  return fallback
-}
-
-fn __safe_int_string(value, fallback: string) -> string {
-  if type_of(value) == "int" {
-    return to_string(value)
-  }
-  return fallback
-}
-
-fn __safe_number_string(value, fallback: string) -> string {
-  let kind = type_of(value)
-  if kind == "int" || kind == "float" {
-    return to_string(value)
-  }
-  return fallback
-}
-
-fn __shell_quote(value: string) -> string {
-  if value == "" {
-    return "''"
-  }
-  if regex_match("^[A-Za-z0-9_./:=+-]+$", value) != nil {
-    return value
-  }
-  return "'" + replace(value, "'", "'\"'\"'") + "'"
-}
-
-fn __join_strings(items: list, sep: string) -> string {
-  var out = ""
-  var first = true
-  for item in items {
-    let text = __shell_quote(__safe_string(item, ""))
-    if text == "" {
-      continue
-    }
-    if !first {
-      out = out + sep
-    }
-    out = out + text
-    first = false
-  }
-  return out
-}
-
-fn __print_list(harness: Harness, label: string, items: list) {
-  if items.count == 0 {
-    return
-  }
-  harness.stdio.println("  " + label + ":")
-  for item in items {
-    let text = __safe_string(item, "")
-    if text != "" {
-      harness.stdio.println("    - " + text)
-    }
-  }
-}
-
-fn __render_command(harness: Harness, label: string, argv: list) {
-  if argv.count == 0 {
-    return
-  }
-  harness.stdio.println("  " + label + ":")
-  harness.stdio.println("    " + __join_strings(argv, " "))
-}
+import {
+  nonempty_string,
+  print_list,
+  render_command,
+  safe_bool,
+  safe_dict,
+  safe_int_string,
+  safe_list,
+  safe_number_string,
+  safe_string,
+} from "std/cli/render"
 
 fn __render_human(harness: Harness, report: dict) {
-  let base = __safe_dict(report["base"])
-  let request = __safe_dict(report["request"])
-  let tool_calling = __safe_dict(report["tool_calling"])
-  let training = __safe_dict(report["training"])
-  let template = __safe_dict(report["template"])
-  let data = __safe_dict(report["data"])
-  let corpus_refresh = __safe_dict(report["corpus_refresh"])
-  let evaluation = __safe_dict(report["evaluation"])
-  let serving = __safe_dict(report["serving"])
-  let launch = __safe_dict(report["launch"])
-  let warnings = __safe_list(report["warnings"])
-  let base_id = __safe_string(base["id"], "")
-  let provider = __safe_string(base["provider"], "")
+  let base = safe_dict(report["base"])
+  let request = safe_dict(report["request"])
+  let tool_calling = safe_dict(report["tool_calling"])
+  let training = safe_dict(report["training"])
+  let template = safe_dict(report["template"])
+  let data = safe_dict(report["data"])
+  let corpus_refresh = safe_dict(report["corpus_refresh"])
+  let evaluation = safe_dict(report["evaluation"])
+  let serving = safe_dict(report["serving"])
+  let launch = safe_dict(report["launch"])
+  let warnings = safe_list(report["warnings"])
+  let base_id = safe_string(base["id"], "")
+  let provider = safe_string(base["provider"], "")
   harness.stdio.println("LoRA plan for " + base_id + " via " + provider)
-  harness.stdio.println("  base selector: " + __safe_string(base["selector"], ""))
+  harness.stdio.println("  base selector: " + safe_string(base["selector"], ""))
   harness.stdio
     .println(
     "  tool format: "
-      + __safe_string(request["effective_tool_format"], "")
+      + safe_string(request["effective_tool_format"], "")
       + " (requested "
-      + __safe_string(request["requested_tool_format"], "auto")
+      + safe_string(request["requested_tool_format"], "auto")
       + ")",
   )
-  let correction = __safe_string(request["tool_format_correction"], "")
+  let correction = safe_string(request["tool_format_correction"], "")
   if correction != "" {
     harness.stdio.println("  tool format correction: " + correction)
   }
-  let native_tools = if __safe_bool(tool_calling["native_tools"], false) {
+  let native_tools = if safe_bool(tool_calling["native_tools"], false) {
     "yes"
   } else {
     "no"
@@ -147,83 +60,79 @@ fn __render_human(harness: Harness, report: dict) {
     "  native tools: "
       + native_tools
       + ", preferred: "
-      + __nonempty_string(tool_calling["preferred_tool_format"], "unset"),
+      + nonempty_string(tool_calling["preferred_tool_format"], "unset"),
   )
   harness.stdio
     .println(
     "  training: "
-      + __safe_string(request["method"], "")
+      + safe_string(request["method"], "")
       + " + "
-      + __safe_string(training["adapter_type"], ""),
+      + safe_string(training["adapter_type"], ""),
   )
-  harness.stdio.println("  trainer: " + __safe_string(training["trainer"], ""))
+  harness.stdio.println("  trainer: " + safe_string(training["trainer"], ""))
   harness.stdio
     .println(
     "  LoRA hparams: rank="
-      + __safe_int_string(training["rank"], "")
+      + safe_int_string(training["rank"], "")
       + " alpha="
-      + __safe_int_string(training["alpha"], "")
+      + safe_int_string(training["alpha"], "")
       + " dropout="
-      + __safe_number_string(training["dropout"], ""),
+      + safe_number_string(training["dropout"], ""),
   )
-  harness.stdio.println("  quantization: " + __safe_string(training["quantization"], ""))
-  harness.stdio.println("  loss scope: " + __safe_string(training["loss_scope"], ""))
-  harness.stdio.println("  packing: " + __safe_string(training["packing"], ""))
-  harness.stdio.println("  template: " + __safe_string(template["name"], ""))
-  harness.stdio.println("  template source: " + __safe_string(template["source"], ""))
-  harness.stdio.println("  supervised target: " + __safe_string(template["supervised_target"], ""))
-  let corpus = __safe_string(request["corpus"], "")
+  harness.stdio.println("  quantization: " + safe_string(training["quantization"], ""))
+  harness.stdio.println("  loss scope: " + safe_string(training["loss_scope"], ""))
+  harness.stdio.println("  packing: " + safe_string(training["packing"], ""))
+  harness.stdio.println("  template: " + safe_string(template["name"], ""))
+  harness.stdio.println("  template source: " + safe_string(template["source"], ""))
+  harness.stdio.println("  supervised target: " + safe_string(template["supervised_target"], ""))
+  let corpus = safe_string(request["corpus"], "")
   if corpus != "" {
     harness.stdio.println("  corpus: " + corpus)
   }
   harness.stdio
     .println(
     "  corpus strategy: "
-      + __safe_string(request["effective_corpus_strategy"], "")
+      + safe_string(request["effective_corpus_strategy"], "")
       + " (requested "
-      + __safe_string(request["requested_corpus_strategy"], "auto")
+      + safe_string(request["requested_corpus_strategy"], "auto")
       + ")",
   )
-  let teacher = __safe_dict(request["teacher"])
-  let teacher_id = __safe_string(teacher["id"], "")
+  let teacher = safe_dict(request["teacher"])
+  let teacher_id = safe_string(teacher["id"], "")
   if teacher_id != "" {
     harness.stdio
       .println(
       "  teacher: "
         + teacher_id
         + " via "
-        + __safe_string(teacher["provider"], ""),
+        + safe_string(teacher["provider"], ""),
     )
   }
-  harness.stdio.println("  dataset format: " + __safe_string(data["dataset_format"], ""))
-  __print_list(harness, "template requirements", __safe_list(template["requirements"]))
-  __print_list(harness, "stop sequences", __safe_list(template["stop_sequences"]))
-  __print_list(harness, "template notes", __safe_list(template["notes"]))
-  __print_list(harness, "required columns", __safe_list(data["required_columns"]))
-  __print_list(harness, "data validation", __safe_list(data["validation"]))
-  __print_list(harness, "corpus refresh", __safe_list(corpus_refresh["generation_notes"]))
-  __print_list(
-    harness,
-    "provenance manifest",
-    __safe_list(corpus_refresh["provenance_manifest_fields"]),
-  )
-  __print_list(harness, "hard negatives", __safe_list(corpus_refresh["hard_negative_slices"]))
-  __print_list(harness, "corpus gates", __safe_list(corpus_refresh["acceptance_gates"]))
-  __print_list(harness, "trainer contract", __safe_list(training["trainer_contract"]))
-  __print_list(harness, "training notes", __safe_list(training["notes"]))
+  harness.stdio.println("  dataset format: " + safe_string(data["dataset_format"], ""))
+  print_list(harness, "template requirements", safe_list(template["requirements"]))
+  print_list(harness, "stop sequences", safe_list(template["stop_sequences"]))
+  print_list(harness, "template notes", safe_list(template["notes"]))
+  print_list(harness, "required columns", safe_list(data["required_columns"]))
+  print_list(harness, "data validation", safe_list(data["validation"]))
+  print_list(harness, "corpus refresh", safe_list(corpus_refresh["generation_notes"]))
+  print_list(harness, "provenance manifest", safe_list(corpus_refresh["provenance_manifest_fields"]))
+  print_list(harness, "hard negatives", safe_list(corpus_refresh["hard_negative_slices"]))
+  print_list(harness, "corpus gates", safe_list(corpus_refresh["acceptance_gates"]))
+  print_list(harness, "trainer contract", safe_list(training["trainer_contract"]))
+  print_list(harness, "training notes", safe_list(training["notes"]))
   harness.stdio
-    .println("  holdout policy: " + __safe_string(evaluation["holdout_policy"], ""))
-  __print_list(harness, "eval gates", __safe_list(evaluation["gates"]))
-  harness.stdio.println("  adapter binding: " + __safe_string(serving["adapter_binding"], ""))
-  harness.stdio.println("  request model: " + __safe_string(serving["request_model"], ""))
-  __print_list(harness, "serving notes", __safe_list(serving["runtime_notes"]))
-  __print_list(harness, "promotion gates", __safe_list(serving["promotion_gates"]))
-  __render_command(harness, "export dataset", __safe_list(launch["export_command"]))
-  __render_command(harness, "eval", __safe_list(evaluation["eval_command"]))
-  __render_command(harness, "inspect adapter", __safe_list(launch["inspect_command"]))
-  __render_command(harness, "local launch", __safe_list(launch["local_launch_command"]))
+    .println("  holdout policy: " + safe_string(evaluation["holdout_policy"], ""))
+  print_list(harness, "eval gates", safe_list(evaluation["gates"]))
+  harness.stdio.println("  adapter binding: " + safe_string(serving["adapter_binding"], ""))
+  harness.stdio.println("  request model: " + safe_string(serving["request_model"], ""))
+  print_list(harness, "serving notes", safe_list(serving["runtime_notes"]))
+  print_list(harness, "promotion gates", safe_list(serving["promotion_gates"]))
+  render_command(harness, "export dataset", safe_list(launch["export_command"]))
+  render_command(harness, "eval", safe_list(evaluation["eval_command"]))
+  render_command(harness, "inspect adapter", safe_list(launch["inspect_command"]))
+  render_command(harness, "local launch", safe_list(launch["local_launch_command"]))
   for warning in warnings {
-    let text = __safe_string(warning, "")
+    let text = safe_string(warning, "")
     if text != "" {
       harness.stdio.println("  warning: " + text)
     }
@@ -242,7 +151,7 @@ fn main(harness: Harness) -> int {
     harness.stdio.eprintln("internal error: failed to parse LoRA plan payload: " + to_string(e))
     return 70
   }
-  let ok = __safe_bool(report["ok"], false)
+  let ok = safe_bool(report["ok"], false)
   let json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
   if json_mode {
     let pretty = harness.env.get_or("HARN_MODELS_LORA_PLAN_PAYLOAD_PRETTY", raw)
