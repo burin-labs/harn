@@ -26,6 +26,7 @@ fn __render_human(harness: Harness, report: dict) {
   let contract = safe_dict(report["contract"])
   let training_contract = safe_dict(contract["training_contract"])
   let serving = safe_dict(report["serving"])
+  let promotion = safe_dict(report["promotion"])
   let output = safe_dict(report["output"])
   let stats = safe_dict(report["stats"])
   let warnings = safe_list(report["warnings"])
@@ -72,6 +73,12 @@ fn __render_human(harness: Harness, report: dict) {
   if request_model != "" {
     harness.stdio.println("  request model: " + request_model)
   }
+  harness.stdio
+    .println("  promotion minimum trials: " + safe_int_string(promotion["minimum_trials"], "0"))
+  harness.stdio
+    .println("  promotion baseline: " + safe_string(promotion["comparison_baseline"], ""))
+  print_list(harness, "promotion metrics", safe_list(promotion["required_metrics"]))
+  print_list(harness, "promotion gates", safe_list(promotion["gates"]))
   let path = safe_string(output["path"], "")
   if path != "" {
     harness.stdio.println("  output: " + path)
