@@ -279,6 +279,14 @@ impl AnthropicProvider {
             // `enforce_tool_result_adjacency` so the real result pairs with its
             // `tool_use` block instead of being masked by a placeholder.
             .map(anthropic_translate_tool_role_message)
+            // ASSISTANT half of the same escalation bridge: render the primary's
+            // OpenAI-dialect top-level `tool_calls` as Anthropic `tool_use`
+            // content blocks with the SAME ids, so every translated `tool_result`
+            // has its corresponding `tool_use`. Must also run before the retain
+            // below, which strips the top-level `tool_calls` key. Without this,
+            // Anthropic 400s: `unexpected tool_use_id found in tool_result blocks
+            // ... Each tool_result block must have a corresponding tool_use`.
+            .map(anthropic_translate_assistant_tool_calls)
             .filter_map(|mut message| {
                 if let Some(object) = message.as_object_mut() {
                     if let Some(content) = object.get("content").cloned() {
@@ -547,6 +555,98 @@ fn anthropic_translate_tool_role_message(message: serde_json::Value) -> serde_js
         "role": "user",
         "content": [serde_json::Value::Object(tool_result)],
     })
+}
+
+/// Translate an assistant message carrying an OpenAI/Ollama-style top-level
+/// `tool_calls` array into Anthropic's shape: `tool_use` content blocks with the
+/// SAME ids, merged into (or forming) the message's `content` block list. Any
+/// message without `tool_calls` — or already in Anthropic shape (`tool_use`
+/// blocks inline in `content`) — is returned unchanged.
+///
+/// This is the ASSISTANT half of the cross-provider escalation dialect bridge.
+/// `anthropic_translate_tool_role_message` translates the tool-RESULT half
+/// (`role:"tool"` → `role:"user"` + `tool_result` block keyed by the OpenAI call
+/// id). But the primary's assistant turn carries its calls as a top-level
+/// `tool_calls` array, which the canonical-key retain in `build_request_body`
+/// STRIPS (it is not an `ANTHROPIC_MESSAGE_KEYS` member) — leaving no `tool_use`
+/// block to pair with the translated `tool_result`. Anthropic then 400s:
+/// `messages.N.content.M: unexpected tool_use_id found in tool_result blocks:
+/// <id>. Each tool_result block must have a corresponding tool_use.` Rendering
+/// the calls as `tool_use` blocks with the same ids closes the pairing.
+///
+/// General case handled: an assistant message may carry BOTH text `content` AND
+/// `tool_calls`. Text (string content, or existing content blocks) is preserved
+/// first, then a `tool_use` block per call is appended — the OpenAI wire order
+/// (assistant text precedes its tool calls). The OpenAI `arguments` field is a
+/// JSON *string*; Anthropic wants a JSON *object* `input`, so it is parsed
+/// (falling back to an empty object on non-JSON). The call name is read from
+/// `function.name` (OpenAI) with a top-level `name` fallback, mirroring
+/// `assistant_tool_use_blocks`.
+///
+/// Provider-decoupled: only an assistant message that literally carries a
+/// top-level `tool_calls` array on the Anthropic egress path (a cross-dialect
+/// escalation) is rewritten. Homogeneous-Anthropic runs (whose assistant turns
+/// carry `tool_use` blocks inline in `content`, no top-level `tool_calls`) are
+/// byte-identical.
+fn anthropic_translate_assistant_tool_calls(message: serde_json::Value) -> serde_json::Value {
+    if message.get("role").and_then(|role| role.as_str()) != Some("assistant") {
+        return message;
+    }
+    let Some(tool_calls) = message.get("tool_calls").and_then(|value| value.as_array()) else {
+        return message;
+    };
+    if tool_calls.is_empty() {
+        return message;
+    }
+
+    // Preserve existing text/content first (OpenAI order: assistant text, then
+    // its tool calls). A plain-string content becomes a single `text` block; an
+    // existing block list is carried through as-is; null/absent content yields
+    // no leading block.
+    let mut blocks: Vec<serde_json::Value> = match message.get("content") {
+        Some(serde_json::Value::String(text)) if !text.is_empty() => {
+            vec![serde_json::json!({"type": "text", "text": text})]
+        }
+        Some(serde_json::Value::Array(existing)) => existing.clone(),
+        _ => Vec::new(),
+    };
+
+    for call in tool_calls {
+        let id = call
+            .get("id")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default();
+        let function = call.get("function");
+        let name = function
+            .and_then(|f| f.get("name"))
+            .and_then(|value| value.as_str())
+            .or_else(|| call.get("name").and_then(|value| value.as_str()))
+            .unwrap_or_default();
+        // OpenAI `arguments` is a JSON string; Anthropic `input` is a JSON
+        // object. Parse it, tolerating an already-object form and falling back
+        // to an empty object on non-JSON so a malformed primary call still
+        // produces a valid (if empty-input) tool_use rather than dropping the
+        // pairing.
+        let input = match function.and_then(|f| f.get("arguments")) {
+            Some(serde_json::Value::String(raw)) => serde_json::from_str::<serde_json::Value>(raw)
+                .unwrap_or_else(|_| serde_json::json!({})),
+            Some(other) if other.is_object() => other.clone(),
+            _ => serde_json::json!({}),
+        };
+        blocks.push(serde_json::json!({
+            "type": "tool_use",
+            "id": id,
+            "name": name,
+            "input": input,
+        }));
+    }
+
+    let mut out = message;
+    if let Some(object) = out.as_object_mut() {
+        object.remove("tool_calls");
+        object.insert("content".to_string(), serde_json::Value::Array(blocks));
+    }
+    out
 }
 
 fn enforce_tool_result_adjacency(messages: Vec<serde_json::Value>) -> Vec<serde_json::Value> {
@@ -999,6 +1099,140 @@ mod tests {
             opts.messages[2].get("role").and_then(|v| v.as_str()),
             Some("tool"),
             "persisted transcript shape must be unchanged at the storage layer"
+        );
+    }
+
+    #[test]
+    fn cross_provider_tool_use_and_result_pair_both_translated_for_anthropic() {
+        // Reproduces the THIRD stacked escalation 400 (downstream of the
+        // role:"tool" fix): `messages.N.content.M: unexpected tool_use_id found
+        // in tool_result blocks: <id>. Each tool_result block must have a
+        // corresponding tool_use.` The primary's OpenAI-dialect assistant turn
+        // carries its calls as a top-level `tool_calls` array (with BOTH text
+        // content AND the call). The role:"tool" fix translates the RESULT half
+        // into a tool_result block keyed by that id — but pre-fix the assistant
+        // `tool_calls` were STRIPPED by the canonical-key retain, leaving the
+        // tool_result orphaned. Both halves must translate so the pair matches.
+        let mut opts = base_payload();
+        opts.messages = vec![
+            serde_json::json!({"role": "user", "content": "read the file"}),
+            // OpenAI-dialect assistant turn: text content + a top-level tool_call.
+            serde_json::json!({
+                "role": "assistant",
+                "content": "I'll read it now.",
+                "tool_calls": [{
+                    "id": "call_R0hU",
+                    "type": "function",
+                    "function": {
+                        "name": "read_file",
+                        "arguments": "{\"path\":\"main.rs\"}",
+                    },
+                }],
+            }),
+            // OpenAI-dialect tool result referencing that call id.
+            serde_json::json!({
+                "role": "tool",
+                "tool_call_id": "call_R0hU",
+                "name": "read_file",
+                "content": "fn main() {}",
+            }),
+        ];
+
+        let body = AnthropicProvider::build_request_body(&opts);
+        let messages = body["messages"].as_array().expect("messages array");
+
+        // The assistant message must carry a tool_use block (id call_R0hU) with
+        // the parsed input object, AND preserve its leading text block.
+        let assistant = messages
+            .iter()
+            .find(|m| m.get("role").and_then(|r| r.as_str()) == Some("assistant"))
+            .expect("assistant message present");
+        assert!(
+            assistant.get("tool_calls").is_none(),
+            "top-level OpenAI `tool_calls` must not ride into the Anthropic request: {assistant:?}"
+        );
+        let assistant_blocks = assistant
+            .get("content")
+            .and_then(|c| c.as_array())
+            .expect("assistant content is a block list");
+        let tool_use = assistant_blocks
+            .iter()
+            .find(|b| b.get("type").and_then(|t| t.as_str()) == Some("tool_use"))
+            .expect("a tool_use block in the assistant message");
+        assert_eq!(
+            tool_use.get("id").and_then(|v| v.as_str()),
+            Some("call_R0hU")
+        );
+        assert_eq!(
+            tool_use.get("name").and_then(|v| v.as_str()),
+            Some("read_file")
+        );
+        assert_eq!(
+            tool_use.get("input"),
+            Some(&serde_json::json!({"path": "main.rs"})),
+            "OpenAI `arguments` string must be parsed into Anthropic `input` object"
+        );
+        assert!(
+            assistant_blocks
+                .iter()
+                .any(|b| b.get("type").and_then(|t| t.as_str()) == Some("text")),
+            "assistant text content must be preserved alongside the tool_use: {assistant_blocks:?}"
+        );
+
+        // The matching tool_result must exist keyed by the SAME id — and NOT be
+        // the interrupted-before-dispatch placeholder (the real result survives).
+        let tool_result = messages
+            .iter()
+            .filter(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
+            .flat_map(|m| {
+                m.get("content")
+                    .and_then(|c| c.as_array())
+                    .cloned()
+                    .unwrap_or_default()
+            })
+            .find(|b| b.get("type").and_then(|t| t.as_str()) == Some("tool_result"))
+            .expect("a tool_result block");
+        assert_eq!(
+            tool_result.get("tool_use_id").and_then(|v| v.as_str()),
+            Some("call_R0hU"),
+            "tool_result must pair with the assistant tool_use id"
+        );
+        assert_eq!(
+            tool_result.get("content").and_then(|v| v.as_str()),
+            Some("fn main() {}"),
+            "real observation must survive (no placeholder masking)"
+        );
+        // Full-pairing invariant: every tool_result id has a corresponding
+        // tool_use id — no orphan, which is exactly what Anthropic 400s on.
+        let tool_use_ids: std::collections::BTreeSet<String> = messages
+            .iter()
+            .flat_map(|m| {
+                m.get("content")
+                    .and_then(|c| c.as_array())
+                    .cloned()
+                    .unwrap_or_default()
+            })
+            .filter(|b| b.get("type").and_then(|t| t.as_str()) == Some("tool_use"))
+            .filter_map(|b| b.get("id").and_then(|v| v.as_str()).map(str::to_string))
+            .collect();
+        let tool_result_ids: std::collections::BTreeSet<String> = messages
+            .iter()
+            .flat_map(|m| {
+                m.get("content")
+                    .and_then(|c| c.as_array())
+                    .cloned()
+                    .unwrap_or_default()
+            })
+            .filter(|b| b.get("type").and_then(|t| t.as_str()) == Some("tool_result"))
+            .filter_map(|b| {
+                b.get("tool_use_id")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string)
+            })
+            .collect();
+        assert!(
+            tool_result_ids.is_subset(&tool_use_ids),
+            "orphaned tool_result id (no corresponding tool_use): results={tool_result_ids:?} uses={tool_use_ids:?}"
         );
     }
 
