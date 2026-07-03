@@ -31,9 +31,11 @@
 
 pub mod battery;
 pub mod behavioral;
+pub mod file_provenance;
 pub mod provenance;
 pub mod stance_judge;
 
+pub use file_provenance::{path_arguments, FileProvenanceLedger};
 pub use provenance::{classify_directive_trust, DirectiveProvenance};
 
 use crate::value::VmDictExt;
@@ -145,6 +147,12 @@ pub struct SecurityPolicy {
     /// result cannot be obeyed as authoritative. Default OFF (net-new
     /// enforcement); byte-identical behaviour when disabled.
     pub authenticate_directives: bool,
+    /// Track untrusted-origin file provenance: a file written while untrusted
+    /// content is in context (or by a fetch/clone/MCP step) is recorded, and a
+    /// later read of it is classified untrusted so it flows into the same taint /
+    /// trifecta gate. First-party file reads stay trusted. Default OFF (net-new
+    /// enforcement); byte-identical behaviour when disabled.
+    pub taint_file_provenance: bool,
     /// Also gate first-party secret/credential reads while tainted.
     pub gate_secret_reads: bool,
     /// Score untrusted content with an injection classifier (Layer 2) and let a
@@ -176,6 +184,7 @@ impl SecurityPolicy {
             trifecta_gate: enabled && config.trifecta_gate,
             pin_mcp_schemas: enabled && config.pin_mcp_schemas,
             authenticate_directives: enabled && config.authenticate_directives,
+            taint_file_provenance: enabled && config.taint_file_provenance,
             gate_secret_reads: enabled && config.gate_secret_reads,
             // `local-ml` mode turns detection on; other modes can still opt in.
             detect_injection: enabled

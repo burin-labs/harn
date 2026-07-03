@@ -92,6 +92,11 @@ struct AgentHostSession {
     /// it drops with the session — no cross-session leak. Read by the dispatch
     /// gate to decide whether exfiltration-capable tools need confirmation.
     taint: Vec<crate::security::TaintRecord>,
+    /// Untrusted-origin file provenance ledger: workspace paths whose content
+    /// came from an untrusted step (fetch/clone/MCP, or a write made while
+    /// context was tainted). Owned here so it drops with the session. Read on the
+    /// tool-result ingest path so a later read of a tainted file is quarantined.
+    file_provenance: crate::security::FileProvenanceLedger,
     /// Pops the per-session capability policy off the execution stack
     /// on drop. Declared last so it Drops last in `AgentHostSession`'s
     /// natural field-order drop, after every other cleanup completes.
@@ -162,6 +167,7 @@ pub(crate) fn seed_host_session_provider_model(session_id: &str, provider: &str,
         host_bridge: None,
         last_llm_stop_reason: None,
         taint: Vec::new(),
+        file_provenance: crate::security::FileProvenanceLedger::default(),
         nested_policy_guard: None,
     };
     AGENT_HOST_SESSIONS.with(|sessions| {
@@ -201,6 +207,29 @@ pub(crate) fn session_taint_snapshot(session_id: &str) -> Vec<crate::security::T
         Ok(session.taint.clone())
     })
     .unwrap_or_default()
+}
+
+/// Record that `path` now holds untrusted-origin content (taint-on-write). No-op
+/// for an unknown session.
+pub(crate) fn record_file_provenance(session_id: &str, path: &str, origin: &str) {
+    let _ = with_session(session_id, "record_file_provenance", |session| {
+        session.file_provenance.record(path, origin);
+        Ok(())
+    });
+}
+
+/// Trust classification for a read of `path` against the session's file
+/// provenance ledger (distrust-on-read). `None` for a first-party / unknown path
+/// or an unknown session.
+pub(crate) fn classify_file_read(
+    session_id: &str,
+    path: &str,
+) -> Option<(crate::security::TrustLevel, String)> {
+    with_session(session_id, "classify_file_read", |session| {
+        Ok(session.file_provenance.classify(path))
+    })
+    .ok()
+    .flatten()
 }
 
 fn opts_dict(value: Option<&VmValue>) -> crate::value::DictMap {
@@ -410,6 +439,7 @@ async fn host_agent_session_init(
         host_bridge,
         last_llm_stop_reason: None,
         taint: Vec::new(),
+        file_provenance: crate::security::FileProvenanceLedger::default(),
         nested_policy_guard,
     };
 
@@ -1350,6 +1380,58 @@ pub(crate) fn pair_orphaned_tool_use(session_id: &str, feedback: &str) -> usize 
     repaired
 }
 
+/// Distrust-on-read: classify a read whose target path is a known
+/// untrusted-origin file. Only `Read`-kind tools consume file provenance — a
+/// write to a tainted path re-taints it (see [`record_write_provenance`]), it
+/// does not surface the content. `None` for a non-read, an unparseable
+/// arguments payload, or a first-party path.
+fn file_read_provenance(
+    session_id: &str,
+    tool_name: &str,
+    result: &VmValue,
+) -> Option<(crate::security::TrustLevel, String)> {
+    let annotations = crate::orchestration::current_tool_annotations(tool_name);
+    if annotations.map(|a| a.kind) != Some(crate::tool_annotations::ToolKind::Read) {
+        return None;
+    }
+    let arguments = dict_get(result, "arguments").map(vm_to_json)?;
+    crate::security::path_arguments(&arguments)
+        .into_iter()
+        .find_map(|path| classify_file_read(session_id, &path))
+}
+
+/// Taint-on-write propagation: when a tool [`crate::security::mutates_workspace`]
+/// and either its own result is untrusted (`result_origin`) or context is
+/// already tainted (`context_tainted`), record every path it wrote as
+/// untrusted-origin. A specific `result_origin` (e.g. `fetch:web_fetch`) is
+/// preferred over the generic propagated `tainted-context` so the provenance
+/// chain stays legible. No-op when nothing untrusted is in play.
+fn record_write_provenance(
+    session_id: &str,
+    tool_name: &str,
+    result: &VmValue,
+    result_origin: Option<&str>,
+    context_tainted: bool,
+) {
+    let annotations = crate::orchestration::current_tool_annotations(tool_name);
+    if !crate::security::mutates_workspace(annotations.as_ref()) {
+        return;
+    }
+    let origin = match result_origin {
+        Some(origin) => origin.to_string(),
+        None if context_tainted => {
+            crate::security::file_provenance::TAINTED_CONTEXT_ORIGIN.to_string()
+        }
+        None => return,
+    };
+    let Some(arguments) = dict_get(result, "arguments").map(vm_to_json) else {
+        return;
+    };
+    for path in crate::security::path_arguments(&arguments) {
+        record_file_provenance(session_id, &path, &origin);
+    }
+}
+
 /// Recover the plan artifact from a dispatched emit_plan/update_plan result.
 ///
 /// The local short-circuit handler (`handle_tool_locally`) returns the
@@ -1444,6 +1526,11 @@ fn host_agent_session_record_tool_results_builtin(
     let security_policy = crate::security::current_policy();
     let mut successful = Vec::new();
     let mut rejected = Vec::new();
+    // Running "is untrusted content already in this session's context" signal for
+    // taint-on-write propagation. Seeded from prior batches' taint and flipped
+    // true as soon as an untrusted ingress is recorded in this batch, so a
+    // fetch-then-write within one batch still taints the written file.
+    let mut context_tainted = !session_taint_snapshot(&session_id).is_empty();
     for result in list_items(&results_value).iter() {
         let name = dict_get(result, "tool_name")
             .or_else(|| dict_get(result, "name"))
@@ -1479,6 +1566,18 @@ fn host_agent_session_record_tool_results_builtin(
             .or_else(|| {
                 if security_policy.authenticate_directives {
                     crate::security::classify_directive_trust(&raw_observation)
+                } else {
+                    None
+                }
+            })
+            // Untrusted-origin file provenance (distrust-on-read): a read whose
+            // target path was recorded as an untrusted-origin file (written by a
+            // fetch/clone/MCP step, or under tainted context) is quarantined by
+            // the same taint/trifecta gate as a live external ingress. Default
+            // OFF.
+            .or_else(|| {
+                if security_policy.taint_file_provenance {
+                    file_read_provenance(&session_id, &name, result)
                 } else {
                     None
                 }
@@ -1549,7 +1648,22 @@ fn host_agent_session_record_tool_results_builtin(
                         labels: crate::security::content_labels(&raw_observation),
                     },
                 );
+                context_tainted = true;
             }
+        }
+        // Untrusted-origin file provenance (taint-on-write propagation): a file
+        // this tool wrote inherits untrusted origin when the writing result is
+        // itself untrusted (fetch-to-disk / clone / MCP write) or context is
+        // already tainted, so a later read of it is quarantined by the block
+        // above. Only successful writes taint a path — a failed write created no
+        // file, so tainting it would gate a later legitimate read for nothing.
+        // Default OFF.
+        if ok && security_policy.taint_file_provenance {
+            let result_origin = provenance
+                .as_ref()
+                .filter(|(trust, _)| trust.is_untrusted())
+                .map(|(_, origin)| origin.as_str());
+            record_write_provenance(&session_id, &name, result, result_origin, context_tainted);
         }
         if ok && super::plan::is_plan_tool(&name) {
             if let Some(plan_value) = plan_artifact_from_result(result) {
