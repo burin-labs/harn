@@ -318,6 +318,13 @@ pub struct SecurityConfig {
     /// Pin + hash MCP tool schemas; require re-approval when a server mutates a
     /// tool description after first approval (rug-pull defense).
     pub pin_mcp_schemas: bool,
+    /// Authenticate cross-agent / orchestration directives on the read path.
+    /// A directive-looking span (`Orchestrator directive:` …) that lacks a valid
+    /// process-scoped provenance stamp is tagged untrusted and quarantined via
+    /// the taint/trifecta gate, so a forged directive planted in an untrusted
+    /// subagent result cannot be obeyed as authoritative. Default OFF (net-new
+    /// enforcement); byte-identical behaviour when disabled.
+    pub authenticate_directives: bool,
     /// Also gate reads of well-known secret/credential files while tainted.
     pub gate_secret_reads: bool,
     /// Score untrusted content with an injection classifier (Layer 2). Implied
@@ -353,6 +360,7 @@ impl Default for SecurityConfig {
             destyle_untrusted: true,
             trifecta_gate: true,
             pin_mcp_schemas: true,
+            authenticate_directives: false,
             gate_secret_reads: true,
             detect_injection: false,
             guard_threshold_percent: 50,
@@ -1034,6 +1042,7 @@ pub fn schema_json() -> JsonValue {
                     "destyle_untrusted": {"type": "boolean"},
                     "trifecta_gate": {"type": "boolean"},
                     "pin_mcp_schemas": {"type": "boolean"},
+                    "authenticate_directives": {"type": "boolean"},
                     "gate_secret_reads": {"type": "boolean"},
                     "detect_injection": {"type": "boolean"},
                     "guard_threshold_percent": {"type": "integer", "minimum": 0, "maximum": 100},

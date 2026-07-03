@@ -1468,6 +1468,21 @@ fn host_agent_session_record_tool_results_builtin(
                 &name,
                 &security_policy,
             )
+            // Origin-authenticated cross-agent directives (Phase 3): when a
+            // result was not already tagged untrusted by its executor
+            // provenance (e.g. a subagent / worker result that is not
+            // MCP-executed), authenticate any embedded orchestration directive.
+            // A directive-looking span lacking a valid provenance stamp is
+            // forged authority planted in untrusted content, so it is tagged
+            // untrusted and quarantined via the same taint/trifecta ledger below
+            // — never obeyed as authoritative. Default OFF.
+            .or_else(|| {
+                if security_policy.authenticate_directives {
+                    crate::security::classify_directive_trust(&raw_observation)
+                } else {
+                    None
+                }
+            })
         };
         let observation = match &provenance {
             Some((trust, origin)) if security_policy.spotlight_external => {
