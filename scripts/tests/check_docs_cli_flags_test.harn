@@ -174,7 +174,11 @@ pipeline test_parse_help_flags_lookbehind_equivalent(task) {
   assert_eq(parsed.flags.contains("--baz"), true)
 }
 
-// --- analyze_harn_args with an injected fake help oracle --------------------
+/**
+ * analyze_harn_args coverage with an injected fake help oracle: `fake_fetch`
+ * stands in for the real `--help` fetcher so the analyzer tests below stay
+ * free of any subprocess or filesystem dependency.
+ */
 fn fake_fetch(path: list<string>) -> string {
   if path.count == 0 {
     return HELP_ROOT

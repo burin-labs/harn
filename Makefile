@@ -248,9 +248,9 @@ lint-harn:
 	@echo "=== Checking Harn experiment support modules ==="
 	@$(HARN_CMD) check $(EXPERIMENT_HARN_CHECK)
 	@echo "=== Linting Harn-authored scripts ==="
-	@$(HARN_CMD) lint scripts/*.harn scripts/tests/*.harn
+	@$(HARN_CMD) lint --strict scripts/*.harn scripts/tests/*.harn
 	@echo "=== Linting bundled demo scenarios ==="
-	@$(HARN_CMD) lint crates/harn-cli/assets/demo
+	@$(HARN_CMD) lint --strict crates/harn-cli/assets/demo
 	@echo "=== Checking stdlib metadata contract (HARN-STD-101) ==="
 	@harn_bin="$(HARN_BIN)"; \
 	if [ -z "$$harn_bin" ]; then \
