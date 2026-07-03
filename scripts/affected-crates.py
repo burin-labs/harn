@@ -15,9 +15,10 @@ This exists because ``cargo-nextest`` has no ``--changed-since``: the
 selection has to be computed explicitly from the dependency graph.
 
 Soundness note: this is a PR-only fast-feedback optimization. The merge
-queue (``merge_group``) and ``push`` to main run the FULL suite
-unconditionally — see ``.github/workflows/ci.yml``. Never wire this into
-those paths.
+queue (``merge_group``) runs the FULL suite unconditionally — see
+``.github/workflows/ci.yml``. Never wire this into that path. Push-to-main
+CI is deliberately cheap because branch protection has already admitted the
+merge-queued tree.
 
 Changes to files that do NOT belong to any single crate (workspace
 ``Cargo.toml``/``Cargo.lock``, ``.cargo/``, ``rust-toolchain.toml``, the CI
