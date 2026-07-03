@@ -9,14 +9,12 @@ use serde_json::{json, Map, Value};
 use sha2::{Digest as _, Sha256};
 
 use crate::cli::ModelsLoraExportArgs;
-use crate::dispatch;
-use crate::env_guard::ScopedEnvVar;
 
 use super::{
     dataset_format_for_tool_format, expand_home, lora_adapter_binding, lora_evaluation_recipe,
-    lora_modules_value_format, lora_training_contract, normalize_plan_tool_format, sha256_file,
-    BaseModelReport, EvaluationRecipe, LoraTrainingContract, ToolCallingReport,
-    DISPATCH_LORA_INSPECT_LOCK,
+    lora_modules_value_format, lora_training_contract, normalize_plan_tool_format,
+    render_embedded_lora_report, sha256_file, BaseModelReport, EvaluationRecipe,
+    LoraTrainingContract, ToolCallingReport,
 };
 
 const LORA_EXPORT_PAYLOAD_ENV: &str = "HARN_MODELS_LORA_EXPORT_PAYLOAD_JSON";
@@ -35,32 +33,15 @@ pub(super) async fn export_dataset(args: &ModelsLoraExportArgs) -> i32 {
             return 1;
         }
     };
-    let payload_json = match serde_json::to_string(&report) {
-        Ok(json) => json,
-        Err(error) => {
-            eprintln!("error: failed to serialise LoRA export payload: {error}");
-            return 1;
-        }
-    };
-    let pretty_json = match serde_json::to_string_pretty(&report) {
-        Ok(json) => json,
-        Err(error) => {
-            eprintln!("error: failed to render LoRA export JSON: {error}");
-            return 1;
-        }
-    };
-
-    let _guard = DISPATCH_LORA_INSPECT_LOCK.lock().await;
-    let _payload = ScopedEnvVar::set(LORA_EXPORT_PAYLOAD_ENV, &payload_json);
-    let _pretty = ScopedEnvVar::set(LORA_EXPORT_PAYLOAD_PRETTY_ENV, &pretty_json);
-    let outcome = dispatch::run_embedded_script("models/lora_export", Vec::new(), args.json).await;
-    if !outcome.stderr.is_empty() {
-        let _ = std::io::stderr().write_all(outcome.stderr.as_bytes());
-    }
-    if !outcome.stdout.is_empty() {
-        let _ = std::io::stdout().write_all(outcome.stdout.as_bytes());
-    }
-    outcome.exit_code
+    render_embedded_lora_report(
+        &report,
+        LORA_EXPORT_PAYLOAD_ENV,
+        LORA_EXPORT_PAYLOAD_PRETTY_ENV,
+        "models/lora_export",
+        args.json,
+        "LoRA export",
+    )
+    .await
 }
 
 fn export_report(args: &ModelsLoraExportArgs) -> Result<LoraExportReport, String> {
