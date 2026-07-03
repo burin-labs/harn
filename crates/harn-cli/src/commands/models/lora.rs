@@ -392,6 +392,7 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
                 "v_proj".to_string(),
                 "o_proj".to_string(),
             ],
+            trainer_contract: trainer_contract_for_dataset(dataset_format, &decision.effective),
             notes: training_notes(&decision.effective),
         },
         template,
@@ -679,6 +680,33 @@ fn training_notes(tool_format: &str) -> Vec<String> {
         ],
         _ => vec!["train against the route's validated tool-call format".to_string()],
     }
+}
+
+fn trainer_contract_for_dataset(dataset_format: &str, tool_format: &str) -> Vec<String> {
+    let mut contract = vec![
+        "use TRL SFTTrainer with PEFT LoRA/QLoRA; keep the base weights frozen and save only adapter artifacts".to_string(),
+        "set assistant_only_loss=true so prompts, tool schemas, and tool observations are context rather than targets".to_string(),
+        "verify the tokenizer chat template emits assistant generation masks before trusting assistant_only_loss".to_string(),
+        "keep packing=false unless a boundary-aware packer preserves complete tool-call/tool-result pairs".to_string(),
+    ];
+    match dataset_format {
+        "messages_with_tool_calls" => {
+            contract.push(
+                "each record must include messages plus a tools column; assistant tool_calls and tool role messages stay paired".to_string(),
+            );
+        }
+        _ => {
+            contract.push(
+                "each record must include messages, tools, and assistant_tool_text; parse assistant_tool_text with Harn before tokenization".to_string(),
+            );
+        }
+    }
+    if matches!(tool_format, "text" | "json") {
+        contract.push(
+            "do not train provider-native tool tags for Harn text/json routes; Harn remains the parser at inference".to_string(),
+        );
+    }
+    contract
 }
 
 pub(super) fn lora_adapter_binding(provider_supports_lora_launch: bool) -> &'static str {
@@ -1130,6 +1158,7 @@ struct TrainingRecipe {
     loss_scope: String,
     packing: String,
     target_modules: Vec<String>,
+    trainer_contract: Vec<String>,
     notes: Vec<String>,
 }
 
@@ -1308,6 +1337,24 @@ mod tests {
             .requirements
             .iter()
             .any(|item| item.contains("Harn before training")));
+    }
+
+    #[test]
+    fn lora_trainer_contract_keeps_loss_masks_and_tool_columns_explicit() {
+        let native = trainer_contract_for_dataset("messages_with_tool_calls", "native");
+        assert!(native
+            .iter()
+            .any(|item| item.contains("assistant_only_loss=true")));
+        assert!(native
+            .iter()
+            .any(|item| item.contains("messages plus a tools column")));
+        assert!(native.iter().any(|item| item.contains("generation masks")));
+
+        let text = trainer_contract_for_dataset("harn_text_tool_calls_json_fences", "json");
+        assert!(text.iter().any(|item| item.contains("assistant_tool_text")));
+        assert!(text
+            .iter()
+            .any(|item| item.contains("Harn remains the parser")));
     }
 
     #[test]

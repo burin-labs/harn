@@ -400,6 +400,9 @@ fn models_lora_plan_human_text_includes_recipe() {
         "provenance manifest:",
         "hard negatives:",
         "corpus gates:",
+        "trainer contract:",
+        "set assistant_only_loss=true",
+        "Harn remains the parser at inference",
         "adapter binding: runtime_lora_adapter",
         "serving notes:",
         "serve the adapter as a text-channel route: Harn owns tool-call parsing for this plan",
@@ -448,6 +451,21 @@ fn models_lora_plan_json_shape_is_stable() {
     assert_eq!(
         harn_value["training"]["quantization"],
         "base_model_precision"
+    );
+    let trainer_contract = harn_value["training"]["trainer_contract"]
+        .as_array()
+        .expect("trainer contract");
+    assert!(
+        trainer_contract.iter().any(|note| note
+            .as_str()
+            .is_some_and(|text| text.contains("assistant_only_loss=true"))),
+        "trainer contract={trainer_contract:?}"
+    );
+    assert!(
+        trainer_contract.iter().any(|note| note
+            .as_str()
+            .is_some_and(|text| text.contains("messages plus a tools column"))),
+        "trainer contract={trainer_contract:?}"
     );
     assert_eq!(
         harn_value["data"]["dataset_format"],

@@ -1370,7 +1370,9 @@ distillation or corpus-refresh lane without starting any model calls. With the
 default `--corpus-strategy auto`, Harn chooses `refresh` when a corpus is
 present, `distill` when only a teacher is present, and `audit-only` otherwise.
 The report lists provenance manifest fields, hard-negative slices, and holdout
-gates so generated data cannot silently contaminate evaluation fixtures.
+gates so generated data cannot silently contaminate evaluation fixtures. It
+also lists the trainer contract Harn expects for tool-calling SFT, including
+assistant-only loss masks, `messages`/`tools` columns, and packing boundaries.
 
 ## harn models recommend
 
