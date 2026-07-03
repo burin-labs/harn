@@ -360,11 +360,12 @@ fn search_glob_filter_does_not_reinclude_gitignored_paths() {
             _ => String::new(),
         })
         .collect();
-    assert!(paths
+    let normalized_paths: Vec<String> = paths.iter().map(|path| path.replace('\\', "/")).collect();
+    assert!(normalized_paths
         .iter()
         .any(|p| p.ends_with("crates/burin-tui/src/lib.rs")));
     assert!(
-        !paths
+        !normalized_paths
             .iter()
             .any(|p| p.ends_with("crates/burin-tui/target/debug/generated.rs")),
         "gitignored build output should be skipped, got {paths:?}"
