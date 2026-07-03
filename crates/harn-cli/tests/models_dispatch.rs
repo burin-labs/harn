@@ -964,6 +964,7 @@ fn models_lora_export_json_writes_dataset_and_manifest() {
         tools.iter().any(|tool| tool["function"]["name"] == "read"),
         "tools={tools:?}"
     );
+    assert_eq!(row["metadata"]["source_tool_format"], "json");
     assert_eq!(row["metadata"]["lora_contract_id"], contract_id);
     assert_eq!(row["metadata"]["lora_target"]["contract_id"], contract_id);
     let manifest_value = parse_json(
@@ -1096,7 +1097,6 @@ fn write_lora_corpus_fixture() -> tempfile::TempDir {
         "eval_name": "tiny-read",
         "model": "manual",
         "metadata": {
-            "tool_format": "json",
             "verification": "PASS"
         },
         "messages": [
