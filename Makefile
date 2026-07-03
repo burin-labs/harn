@@ -91,8 +91,8 @@ test:
 
 # Run only the tests in crates affected by the changes vs AFFECTED_BASE
 # (default origin/main), expanded by the reverse-dependency closure. Used on
-# `pull_request` CI for fast feedback (#2663). The merge queue and pushes to
-# main run the FULL `make test` instead — see `.github/workflows/ci.yml`.
+# `pull_request` CI for fast feedback (#2663). The merge queue runs the FULL
+# `make test` instead — see `.github/workflows/ci.yml`.
 # A global/workspace-level change (Cargo.lock, .cargo/, toolchain, etc.)
 # falls back to the full workspace automatically. Requires cargo-nextest.
 AFFECTED_BASE ?= origin/main
