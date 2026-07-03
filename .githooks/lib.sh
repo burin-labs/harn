@@ -48,6 +48,27 @@ hook_target_dir() {
   fi
 }
 
+hook_default_target_dir() {
+  repo_root=$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)
+  repo_leaf=$(basename "$repo_root")
+  repo_parent=$(basename "$(dirname "$repo_root")")
+  printf '%s/harn-target/%s-%s\n' "${TMPDIR:-/tmp}" "$repo_parent" "$repo_leaf"
+}
+
+hook_export_cargo_target_dir() {
+  if [ -n "${CARGO_TARGET_DIR:-}" ]; then
+    return 0
+  fi
+
+  target_dir=$(hook_target_dir)
+  if [ -z "$target_dir" ]; then
+    target_dir=$(hook_default_target_dir)
+  fi
+  mkdir -p "$target_dir"
+  export CARGO_TARGET_DIR="$target_dir"
+  printf '=== Hook: using Cargo target dir %s ===\n' "$CARGO_TARGET_DIR" >&2
+}
+
 # Build the workspace `harn` binary and re-apply the local codesign so
 # the freshly re-linked binary keeps its ad-hoc signature — otherwise
 # Gatekeeper shows a multi-second "Verifying 'harn'..." popup the first
@@ -56,6 +77,7 @@ hook_target_dir() {
 # output is routed to stderr so command substitution stays clean.
 # Idempotent; safe to call once per hook invocation.
 hook_ensure_harn() {
+  hook_export_cargo_target_dir
   cargo build --quiet --bin harn >&2
   if [ "$(uname)" = "Darwin" ] && [ -x "scripts/sign_local_macos.sh" ]; then
     HARN_LOCAL_SIGN_QUIET=1 ./scripts/sign_local_macos.sh >&2
@@ -63,6 +85,14 @@ hook_ensure_harn() {
   target_dir=$(hook_target_dir)
   target_dir=${target_dir:-target}
   printf '%s\n' "$target_dir/debug/harn"
+}
+
+hook_export_harn_bin() {
+  if [ -n "${HARN_BIN:-}" ]; then
+    return 0
+  fi
+  HARN_BIN=$(hook_ensure_harn)
+  export HARN_BIN
 }
 
 hook_write_staged_files() {
@@ -124,7 +154,9 @@ hook_disable_cargo_incremental_if_release_bump() {
       | grep -Eq '^[-+]version = '; then
     echo "=== Hook: workspace version bump detected; disabling cargo incremental cache ==="
     export CARGO_INCREMENTAL=0
-    rm -rf target/debug/incremental
+    target_dir=$(hook_target_dir)
+    target_dir=${target_dir:-target}
+    rm -rf "$target_dir/debug/incremental"
   fi
 }
 

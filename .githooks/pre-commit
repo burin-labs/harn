@@ -10,6 +10,7 @@ harn_lint_files=$(mktemp)
 changed_packages=$(mktemp)
 trap 'rm -f "$changed" "$harn_format_files" "$harn_lint_files" "$changed_packages"' EXIT
 hook_write_staged_files "$changed"
+hook_export_cargo_target_dir
 hook_disable_cargo_incremental_if_release_bump staged
 
 # ── Guard: block accidental commits of throwaway / temporary code ──────────────
@@ -66,6 +67,7 @@ prompt_prose_done=0
 if hook_paths_match "$changed" "$HOOK_RATCHET_PATTERN"; then
   echo "=== Pre-commit: checking CI ratchets ==="
   if [ "$prompt_prose_done" -eq 0 ]; then
+    hook_export_harn_bin
     make lint-no-rust-prompt-prose
     prompt_prose_done=1
   fi
@@ -182,6 +184,7 @@ if hook_paths_match "$changed" "$HOOK_RUST_PATTERN"; then
   # test-target compile errors via `cargo check --tests`.
   if [ "$prompt_prose_done" -eq 0 ]; then
     echo "=== Pre-commit: lint-no-rust-prompt-prose ==="
+    hook_export_harn_bin
     make lint-no-rust-prompt-prose
     prompt_prose_done=1
   fi
