@@ -130,6 +130,11 @@ fn __render_human(harness: Harness, report: dict) {
   print_list(harness, "training notes", safe_list(training["notes"]))
   harness.stdio
     .println("  holdout policy: " + safe_string(evaluation["holdout_policy"], ""))
+  harness.stdio
+    .println("  minimum trials: " + safe_int_string(evaluation["minimum_trials"], "0"))
+  harness.stdio
+    .println("  comparison baseline: " + safe_string(evaluation["comparison_baseline"], ""))
+  print_list(harness, "required metrics", safe_list(evaluation["required_metrics"]))
   print_list(harness, "eval gates", safe_list(evaluation["gates"]))
   harness.stdio.println("  adapter binding: " + safe_string(serving["adapter_binding"], ""))
   harness.stdio

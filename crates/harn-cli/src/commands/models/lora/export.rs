@@ -13,9 +13,10 @@ use crate::dispatch;
 use crate::env_guard::ScopedEnvVar;
 
 use super::{
-    dataset_format_for_tool_format, expand_home, lora_adapter_binding, lora_modules_value_format,
-    lora_training_contract, normalize_plan_tool_format, sha256_file, BaseModelReport,
-    LoraTrainingContract, ToolCallingReport, DISPATCH_LORA_INSPECT_LOCK,
+    dataset_format_for_tool_format, expand_home, lora_adapter_binding, lora_evaluation_recipe,
+    lora_modules_value_format, lora_training_contract, normalize_plan_tool_format, sha256_file,
+    BaseModelReport, EvaluationRecipe, LoraTrainingContract, ToolCallingReport,
+    DISPATCH_LORA_INSPECT_LOCK,
 };
 
 const LORA_EXPORT_PAYLOAD_ENV: &str = "HARN_MODELS_LORA_EXPORT_PAYLOAD_JSON";
@@ -215,6 +216,23 @@ fn export_report(args: &ModelsLoraExportArgs) -> Result<LoraExportReport, String
         provider_supports_lora_launch,
         &lora_module_value_format,
     );
+    let promotion = lora_evaluation_recipe(
+        &target.harn_tool_format,
+        vec![
+            "harn".to_string(),
+            "eval".to_string(),
+            "tool-calls".to_string(),
+            "--planner".to_string(),
+            target
+                .adapter_name
+                .clone()
+                .unwrap_or_else(|| "ADAPTER_MODEL".to_string()),
+            "--tool-format".to_string(),
+            target.harn_tool_format.clone(),
+            "--dataset".to_string(),
+            corpus_path.display().to_string(),
+        ],
+    );
     let manifest_path = if let Some(path) = args.manifest.as_deref() {
         write_export_manifest(
             path,
@@ -226,6 +244,7 @@ fn export_report(args: &ModelsLoraExportArgs) -> Result<LoraExportReport, String
                 target: &target,
                 contract: &contract,
                 serving: &serving,
+                promotion: &promotion,
                 errors: &errors,
             },
         )?;
@@ -293,6 +312,7 @@ fn export_report(args: &ModelsLoraExportArgs) -> Result<LoraExportReport, String
         },
         contract,
         serving,
+        promotion,
         output: ExportOutput {
             path: output_path,
             sha256: output_sha256,
@@ -950,6 +970,7 @@ struct ExportManifestWrite<'a> {
     target: &'a ExportTarget,
     contract: &'a ExportContractReport,
     serving: &'a ExportServingReport,
+    promotion: &'a EvaluationRecipe,
     errors: &'a [String],
 }
 
@@ -979,6 +1000,7 @@ fn write_export_manifest(path: &Path, manifest: ExportManifestWrite<'_>) -> Resu
         "target": export_target_value(manifest.target),
         "contract": manifest.contract,
         "serving": manifest.serving,
+        "promotion": manifest.promotion,
         "errors": manifest.errors,
     });
     std::fs::write(
@@ -999,6 +1021,7 @@ struct LoraExportReport {
     target: ExportTargetReport,
     contract: ExportContractReport,
     serving: ExportServingReport,
+    promotion: EvaluationRecipe,
     output: ExportOutput,
     stats: ExportStats,
     warnings: Vec<String>,

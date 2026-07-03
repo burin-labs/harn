@@ -454,17 +454,7 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
             &decision.effective,
             dataset_format,
         ),
-        evaluation: EvaluationRecipe {
-            holdout_policy: "keep train/tune/holdout splits disjoint; never train on Harn eval fixtures"
-                .to_string(),
-            gates: vec![
-                "compare base versus adapter on identical tool-call cases".to_string(),
-                "track exact-call accuracy, parse failures, refusal false positives, latency, and cost"
-                    .to_string(),
-                "require no regression on non-tool chat smoke prompts".to_string(),
-            ],
-            eval_command,
-        },
+        evaluation: lora_evaluation_recipe(&decision.effective, eval_command),
         serving,
         launch: PlanLaunchHints {
             export_command,
@@ -1010,6 +1000,40 @@ fn corpus_refresh_recipe(
     }
 }
 
+pub(super) fn lora_evaluation_recipe(
+    tool_format: &str,
+    eval_command: Vec<String>,
+) -> EvaluationRecipe {
+    let parser_metric = if matches!(tool_format, "text" | "json") {
+        "Harn text parser acceptance rate"
+    } else {
+        "native tool-call schema acceptance rate"
+    };
+    EvaluationRecipe {
+        holdout_policy: "keep train/tune/holdout splits disjoint; never train on Harn eval fixtures"
+            .to_string(),
+        minimum_trials: 5,
+        comparison_baseline: "same base model, provider, tool format, prompt template, and tool schemas without the adapter"
+            .to_string(),
+        required_metrics: vec![
+            "exact tool-name + argument match rate".to_string(),
+            parser_metric.to_string(),
+            "malformed-call and prose-only failure rate".to_string(),
+            "wrong-tool false positive rate".to_string(),
+            "latency and cost per solved tool-call case".to_string(),
+        ],
+        gates: vec![
+            "compare base versus adapter on identical tool-call cases".to_string(),
+            "require a positive paired lift before promotion; inconclusive movement stays experimental"
+                .to_string(),
+            "require zero contract-id drift between export manifest, adapter metadata, and served route"
+                .to_string(),
+            "require no regression on non-tool chat smoke prompts".to_string(),
+        ],
+        eval_command,
+    }
+}
+
 fn template_recipe_for_route(
     model_id: &str,
     family: &str,
@@ -1337,8 +1361,11 @@ struct CorpusRefreshRecipe {
 }
 
 #[derive(Debug, Serialize)]
-struct EvaluationRecipe {
+pub(super) struct EvaluationRecipe {
     holdout_policy: String,
+    minimum_trials: u64,
+    comparison_baseline: String,
+    required_metrics: Vec<String>,
     gates: Vec<String>,
     eval_command: Vec<String>,
 }

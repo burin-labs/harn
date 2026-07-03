@@ -460,6 +460,12 @@ fn models_lora_plan_human_text_includes_recipe() {
         "trainer contract:",
         "set assistant_only_loss=true",
         "Harn remains the parser at inference",
+        "minimum trials: 5",
+        "comparison baseline: same base model, provider, tool format, prompt template, and tool schemas without the adapter",
+        "required metrics:",
+        "Harn text parser acceptance rate",
+        "require a positive paired lift before promotion; inconclusive movement stays experimental",
+        "require zero contract-id drift between export manifest, adapter metadata, and served route",
         "adapter binding: runtime_lora_adapter",
         "LoRA module format: json_with_base_model",
         "serving notes:",
@@ -614,6 +620,29 @@ fn models_lora_plan_json_shape_is_stable() {
     let eval = report["evaluation"]["eval_command"]
         .as_array()
         .expect("eval argv");
+    assert_eq!(report["evaluation"]["minimum_trials"], 5);
+    assert_eq!(
+        report["evaluation"]["comparison_baseline"],
+        "same base model, provider, tool format, prompt template, and tool schemas without the adapter"
+    );
+    let required_metrics = report["evaluation"]["required_metrics"]
+        .as_array()
+        .expect("required metrics");
+    assert!(
+        required_metrics.iter().any(|metric| metric
+            .as_str()
+            .is_some_and(|text| text.contains("native tool-call schema acceptance rate"))),
+        "required metrics={required_metrics:?}"
+    );
+    let eval_gates = report["evaluation"]["gates"]
+        .as_array()
+        .expect("eval gates");
+    assert!(
+        eval_gates.iter().any(|gate| gate
+            .as_str()
+            .is_some_and(|text| text.contains("contract-id drift"))),
+        "eval gates={eval_gates:?}"
+    );
     assert!(
         eval.windows(2)
             .any(|pair| pair[0] == "--tool-format" && pair[1] == "native"),
@@ -665,6 +694,12 @@ fn models_lora_export_check_reports_native_shape() {
         "contract split policy: train_tune_holdout_disjoint_no_eval_holdout_training",
         "adapter binding: runtime_lora_adapter",
         "LoRA module format: json_with_base_model",
+        "promotion minimum trials: 5",
+        "promotion baseline: same base model, provider, tool format, prompt template, and tool schemas without the adapter",
+        "promotion metrics:",
+        "native tool-call schema acceptance rate",
+        "promotion gates:",
+        "require zero contract-id drift between export manifest, adapter metadata, and served route",
         "mode: check",
         "stats: records=2 emitted=1 skipped=1 tool_calls=1 tool_results=1",
     ] {
@@ -754,6 +789,26 @@ fn models_lora_export_json_writes_dataset_and_manifest() {
         "json_with_base_model"
     );
     assert_eq!(report["serving"]["contract_id"], contract_id);
+    assert_eq!(report["promotion"]["minimum_trials"], 5);
+    assert_eq!(
+        report["promotion"]["comparison_baseline"],
+        "same base model, provider, tool format, prompt template, and tool schemas without the adapter"
+    );
+    let promotion_eval = report["promotion"]["eval_command"]
+        .as_array()
+        .expect("promotion eval argv");
+    assert!(
+        promotion_eval
+            .windows(2)
+            .any(|pair| pair[0] == "--planner" && pair[1] == "burin-tools"),
+        "promotion eval argv={promotion_eval:?}"
+    );
+    assert!(
+        promotion_eval
+            .windows(2)
+            .any(|pair| pair[0] == "--tool-format" && pair[1] == "native"),
+        "promotion eval argv={promotion_eval:?}"
+    );
     assert!(out.is_file(), "exported JSONL missing");
     assert!(manifest.is_file(), "manifest missing");
 
@@ -804,6 +859,18 @@ fn models_lora_export_json_writes_dataset_and_manifest() {
         "json_with_base_model"
     );
     assert_eq!(manifest_value["serving"]["contract_id"], contract_id);
+    assert_eq!(manifest_value["promotion"]["minimum_trials"], 5);
+    assert!(
+        manifest_value["promotion"]["gates"]
+            .as_array()
+            .expect("manifest promotion gates")
+            .iter()
+            .any(|gate| gate
+                .as_str()
+                .is_some_and(|text| text.contains("contract-id drift"))),
+        "manifest promotion={:?}",
+        manifest_value["promotion"]
+    );
 }
 
 // ────────────────────────────────────────────────────────────────────────
