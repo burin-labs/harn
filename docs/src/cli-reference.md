@@ -1332,6 +1332,25 @@ Ollama readiness failures use stable `readiness.status` values, including
 `daemon_down`, `bad_status`, `invalid_response`, `model_missing`, and
 `warmup_failed`. `--verify` and `--warm` exit non-zero when readiness fails.
 
+## harn models lora export
+
+Export a tool-calling corpus into a trainer-ready LoRA dataset:
+
+```bash
+harn models lora export --base local-gemma4-e4b --provider vllm --tool-format auto \
+  --corpus ./lora-corpus --out ./train.jsonl --manifest ./train.manifest.json
+harn models lora export --base local-gemma4-e4b --provider vllm --tool-format native \
+  --corpus ./lora-corpus --check --json
+```
+
+The export resolves the same provider capability matrix as model calls and
+emits either native `messages`/`tools` rows or Harn text-tool rows. Reports,
+row metadata, and manifests include a stable LoRA contract id derived from the
+base model, provider, effective Harn tool format, dataset format, and chat
+template. Use that id to keep training, adapter inspection, eval, and serving
+on the same wire contract even when adapter paths or request-model names change.
+`--check` validates conversion without writing JSONL rows.
+
 ## harn models lora inspect
 
 Inspect a PEFT LoRA adapter directory or repo id against a Harn model route:
