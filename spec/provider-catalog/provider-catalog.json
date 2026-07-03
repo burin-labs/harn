@@ -13369,7 +13369,7 @@
         "interleaved_supported": false,
         "preserve_thinking": true
       },
-      "prompt_cache": true,
+      "prompt_cache": false,
       "pricing": {
         "input_per_mtok": 0.14,
         "output_per_mtok": 1.0,
@@ -13384,7 +13384,6 @@
       "capability_tags": [
         "streaming",
         "tools",
-        "prompt_caching",
         "thinking",
         "structured_output"
       ],

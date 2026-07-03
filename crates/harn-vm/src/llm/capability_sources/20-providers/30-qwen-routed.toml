@@ -551,7 +551,7 @@ thinking_block_style = "inline"
 provider_route_denylist = ["Ambient"]
 
 [[provider.openrouter]]
-model_match = "qwen/qwen3.6*"
+model_match = "qwen/qwen3.6-flash"
 native_tools = true
 preferred_tool_format = "native"
 structured_output = "native"
@@ -561,6 +561,32 @@ auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
 prompt_caching = true
 cache_breakpoint_style = "last_block"
+server_parser = "none"
+honors_chat_template_kwargs = false
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
+thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+# OpenRouter reports input_cache_write pricing for Flash specifically. Keep
+# this exact row separate so the broader Qwen3.6 open-weight routes do not
+# inherit prompt-caching metadata that OpenRouter does not advertise for them.
+provider_route_denylist = ["Ambient"]
+
+[[provider.openrouter]]
+model_match = "qwen/qwen3.6*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+reasoning_none_supported = true
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
+preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = false
 recommended_endpoint = "/v1/chat/completions"
