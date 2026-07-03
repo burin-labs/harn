@@ -16,6 +16,13 @@
  *
  *   - mode: "off" | "spotlight" | "strict" | "local-ml"
  *   - spotlight_external: bool       — frame untrusted output as data
+ *   - neutralize_special_tokens: bool — neutralize reserved chat-template tokens
+ *                                      (<|im_start|>, [INST], …) inside untrusted
+ *                                      spans (on by default for non-"off" modes)
+ *   - destyle_untrusted: bool        — destyle forged turn/reasoning markers
+ *                                      (User:/Assistant:/System: prefixes,
+ *                                      <think> tags) inside untrusted spans
+ *                                      (on by default for non-"off" modes)
  *   - trifecta_gate: bool            — gate exfil tools while tainted
  *   - pin_mcp_schemas: bool          — re-approve on tool-description change
  *   - gate_secret_reads: bool        — gate secret-file reads while tainted

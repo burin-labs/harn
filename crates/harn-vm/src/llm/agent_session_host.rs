@@ -1476,6 +1476,8 @@ fn host_agent_session_record_tool_results_builtin(
                     origin,
                     *trust,
                     security_policy.mode,
+                    security_policy.neutralize_special_tokens,
+                    security_policy.destyle_untrusted,
                 )
             }
             _ => raw_observation.clone(),

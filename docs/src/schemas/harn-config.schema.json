@@ -412,10 +412,16 @@
     "security": {
       "additionalProperties": false,
       "properties": {
+        "destyle_untrusted": {
+          "type": "boolean"
+        },
         "detect_injection": {
           "type": "boolean"
         },
         "gate_secret_reads": {
+          "type": "boolean"
+        },
+        "neutralize_special_tokens": {
           "type": "boolean"
         },
         "guard_model": {
