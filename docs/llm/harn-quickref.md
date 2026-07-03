@@ -4329,10 +4329,10 @@ let response = request(cli, "GET", "https://api.github.com/user")
   impersonation. Provider support is data-gated by
   `std/oauth/token_exchange` capability rows; custom providers opt in
   with a `token_exchange` row.
-- **Concurrency.** Storage is the source of truth. Two concurrent
-  `token(cli)` calls may both observe staleness and both refresh; the
-  later `set` wins and both callers see the same token. Pre-refresh
-  at 75% TTL keeps that window narrow.
+- **Concurrency.** Storage is the source of truth. Refreshes run under
+  `storage.with_refresh_lock(...)`; waiters re-read inside that lock
+  and reuse another worker's rotated access/refresh token instead of
+  spending a second refresh grant.
 - **Storage key.** Defaults to `provider.id`; pass `storage_key` to
   fan out multiple installations of the same provider.
 
@@ -4396,11 +4396,12 @@ mem.delete("github")
   AEAD key is derived via HKDF-SHA256 from `key`. Pass high-entropy
   bytes, not a user passphrase.
 - `harn_cloud_*()` route through the `oauth_storage` host capability
-  (`cloud_get / cloud_set / cloud_delete`); a cloud platform enforces RLS.
-- `custom({get, set, delete, id?})` validates that the three handlers
-  are callables and then dispatches to them. Closure capture is
-  by-value, so back the closures with a real store (HTTP, MCP,
-  a cloud platform) rather than a captured local.
+  (`cloud_get / cloud_set / cloud_delete` plus refresh-lock acquire/release);
+  a cloud platform enforces RLS and backend-native refresh locking.
+- `custom({get, set, delete, with_refresh_lock?, id?})` validates that the
+  required handlers are callables and then dispatches to them. Closure capture
+  is by-value, so back the closures with a real store (HTTP, MCP, a cloud
+  platform) rather than a captured local.
 
 Full reference: [`docs/src/stdlib/oauth-storage.md`](https://harnlang.com/stdlib/oauth-storage.html).
 

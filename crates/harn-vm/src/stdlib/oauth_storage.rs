@@ -3,18 +3,19 @@
 //! Implements the [OA-03 issue] storage abstraction with five backends:
 //! `memory`, `file` (AES-256-GCM at rest), `harn_cloud_session`,
 //! `harn_cloud_org`, and `custom` (vault integrations). Each backend
-//! exposes the same `get / set / delete` surface; backend-specific
-//! configuration is captured in an opaque handle dict produced by the
-//! corresponding constructor.
+//! exposes the same `get / set / delete / with_refresh_lock` surface;
+//! backend-specific configuration is captured in an opaque handle dict
+//! produced by the corresponding constructor.
 //!
 //! [OA-03 issue]: https://github.com/burin-labs/harn/issues/1904
 //!
 //! ## Backend dispatch
 //!
 //! `memory`, `file`, and `harn_cloud_*` are dispatched by name to the
-//! Rust implementations below. `custom` is dispatched by the Harn-side
-//! wrapper module which invokes user-supplied closures; this file never
-//! sees `custom` handles. Cloud backends route through the
+//! Rust implementations below. `custom` get/set/delete calls are
+//! dispatched by the Harn-side wrapper module which invokes user-supplied
+//! closures; this file only sees `custom` handles for the process-local
+//! refresh lock around those closures. Cloud backends route through the
 //! `oauth_storage` host capability (`cloud_get / cloud_set /
 //! cloud_delete`) so embedders such as a cloud platform or IDE host can
 //! supply tenant-scoped storage; without a bridge they raise a
@@ -32,11 +33,11 @@
 //! rename.
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
-use std::fs;
+use std::collections::{BTreeMap, HashMap};
+use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use aes_gcm::aead::{Aead, KeyInit, Payload};
 use aes_gcm::{Aes256Gcm, Key as AesKey, Nonce};
@@ -46,11 +47,12 @@ use hkdf::Hkdf;
 use rand::Rng as _;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
+use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
 
 use crate::llm::vm_value_to_json;
 use crate::stdlib::host::dispatch_host_operation;
-use crate::value::{VmError, VmValue};
+use crate::value::{VmClosure, VmError, VmValue};
 use crate::vm::Vm;
 
 const HANDLE_KEY_KIND: &str = "kind";
@@ -62,9 +64,11 @@ const KIND_MEMORY: &str = "memory";
 const KIND_FILE: &str = "file";
 const KIND_HARN_CLOUD_SESSION: &str = "harn_cloud_session";
 const KIND_HARN_CLOUD_ORG: &str = "harn_cloud_org";
+const KIND_CUSTOM: &str = "custom";
 
 const HKDF_INFO: &[u8] = b"harn-oauth-storage-v1";
 const FILE_ENVELOPE_VERSION: u32 = 1;
+const REFRESH_LOCK_TIMEOUT: std::time::Duration = std::time::Duration::from_mins(1);
 
 thread_local! {
     static MEMORY_STORE: RefCell<BTreeMap<String, BTreeMap<String, StoredEntry>>> =
@@ -106,6 +110,7 @@ pub(crate) const MODULE_BUILTINS: &[&crate::stdlib::macros::VmBuiltinDef] = &[
     &OAUTH_STORAGE_GET_IMPL_DEF,
     &OAUTH_STORAGE_SET_IMPL_DEF,
     &OAUTH_STORAGE_DELETE_IMPL_DEF,
+    &OAUTH_STORAGE_WITH_REFRESH_LOCK_IMPL_DEF,
 ];
 
 #[crate::stdlib::macros::harn_builtin(
@@ -199,6 +204,30 @@ async fn oauth_storage_delete_impl(
     let key = required_string_arg(&args, 1, "__oauth_storage_delete", "key")?;
     backend_delete(&handle, &key).await?;
     Ok(VmValue::Nil)
+}
+
+#[crate::stdlib::macros::harn_builtin(
+    sig = "__oauth_storage_with_refresh_lock(handle: dict, key: string, body: closure) -> any",
+    kind = "async",
+    category = "oauth_storage"
+)]
+async fn oauth_storage_with_refresh_lock_impl(
+    ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let handle = require_handle(&args, 0, "__oauth_storage_with_refresh_lock")?;
+    let key = required_string_arg(&args, 1, "__oauth_storage_with_refresh_lock", "key")?;
+    let body = required_closure_arg(&args, 2, "__oauth_storage_with_refresh_lock")?;
+    let mut guard = acquire_refresh_lock(&handle, &key).await?;
+    let mut child_vm = ctx.child_vm();
+    let result = child_vm.call_closure_pub(&body, &[]).await;
+    ctx.forward_output(&child_vm.take_output());
+    let release_result = guard.release_cloud().await;
+    match (result, release_result) {
+        (Ok(value), Ok(())) => Ok(value),
+        (Ok(_), Err(error)) => Err(error),
+        (Err(error), _) => Err(error),
+    }
 }
 
 fn memory_handle() -> VmValue {
@@ -345,6 +374,210 @@ fn unsupported_kind<T>(kind: &str) -> Result<T, VmError> {
     Err(VmError::Runtime(format!(
         "oauth storage: unsupported backend kind `{kind}`. Use `OAuth.Storage.custom` for user-supplied storage; built-in kinds are `{KIND_MEMORY}`, `{KIND_FILE}`, `{KIND_HARN_CLOUD_SESSION}`, `{KIND_HARN_CLOUD_ORG}`."
     )))
+}
+
+struct OAuthStorageRefreshLockGuard {
+    _async_guard: OwnedMutexGuard<()>,
+    file: Option<File>,
+    cloud: Option<CloudRefreshLock>,
+}
+
+struct CloudRefreshLock {
+    scope: String,
+    key: String,
+    lease: VmValue,
+}
+
+impl Drop for OAuthStorageRefreshLockGuard {
+    fn drop(&mut self) {
+        if let Some(file) = &self.file {
+            let _ = fs2::FileExt::unlock(file);
+        }
+    }
+}
+
+impl OAuthStorageRefreshLockGuard {
+    async fn release_cloud(&mut self) -> Result<(), VmError> {
+        let Some(lock) = self.cloud.take() else {
+            return Ok(());
+        };
+        let mut params = crate::value::DictMap::new();
+        params.insert(
+            crate::value::intern_key("scope"),
+            VmValue::string(&lock.scope),
+        );
+        params.insert(crate::value::intern_key("key"), VmValue::string(&lock.key));
+        params.insert(crate::value::intern_key("lock"), lock.lease);
+        dispatch_host_operation("oauth_storage", "cloud_release_refresh_lock", &params).await?;
+        Ok(())
+    }
+}
+
+async fn acquire_refresh_lock(
+    handle: &crate::value::DictMap,
+    key: &str,
+) -> Result<OAuthStorageRefreshLockGuard, VmError> {
+    let lock_key = refresh_lock_key(handle, key)?;
+    let mutex = refresh_mutex(&lock_key);
+    let async_guard = tokio::time::timeout(REFRESH_LOCK_TIMEOUT, mutex.lock_owned())
+        .await
+        .map_err(|_| {
+            VmError::Runtime(format!(
+                "oauth storage: timed out after {}s waiting for refresh lock `{lock_key}`",
+                REFRESH_LOCK_TIMEOUT.as_secs()
+            ))
+        })?;
+    let mut guard = OAuthStorageRefreshLockGuard {
+        _async_guard: async_guard,
+        file: None,
+        cloud: None,
+    };
+    match handle_kind(handle)?.as_str() {
+        KIND_FILE => {
+            guard.file = Some(acquire_file_refresh_lock(handle, key).await?);
+        }
+        KIND_HARN_CLOUD_SESSION | KIND_HARN_CLOUD_ORG => {
+            let scope = cloud_scope(handle)?;
+            guard.cloud = Some(acquire_cloud_refresh_lock(&scope, key).await?);
+        }
+        KIND_MEMORY | KIND_CUSTOM => {}
+        other => {
+            unsupported_kind::<()>(other)?;
+        }
+    }
+    Ok(guard)
+}
+
+fn refresh_mutex(key: &str) -> Arc<AsyncMutex<()>> {
+    static LOCKS: OnceLock<Mutex<HashMap<String, Arc<AsyncMutex<()>>>>> = OnceLock::new();
+    let locks = LOCKS.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut locks = locks.lock().unwrap_or_else(|poison| poison.into_inner());
+    locks
+        .entry(key.to_string())
+        .or_insert_with(|| Arc::new(AsyncMutex::new(())))
+        .clone()
+}
+
+fn refresh_lock_key(handle: &crate::value::DictMap, key: &str) -> Result<String, VmError> {
+    match handle_kind(handle)?.as_str() {
+        KIND_FILE => Ok(format!(
+            "file:{}:{key}",
+            file_path(handle)?.to_string_lossy()
+        )),
+        KIND_HARN_CLOUD_SESSION | KIND_HARN_CLOUD_ORG => {
+            Ok(format!("cloud:{}:{key}", cloud_scope(handle)?))
+        }
+        KIND_MEMORY | KIND_CUSTOM => Ok(format!(
+            "{}:{}:{key}",
+            handle_kind(handle)?,
+            handle_id(handle)?
+        )),
+        other => unsupported_kind(other),
+    }
+}
+
+async fn acquire_file_refresh_lock(
+    handle: &crate::value::DictMap,
+    key: &str,
+) -> Result<File, VmError> {
+    let lock_path = file_refresh_lock_path(handle, key)?;
+    if let Some(parent) = lock_path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent).map_err(|error| {
+                VmError::Runtime(format!(
+                    "oauth storage: failed to create refresh lock directory `{}`: {error}",
+                    parent.display()
+                ))
+            })?;
+        }
+    }
+    let file = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(&lock_path)
+        .map_err(|error| {
+            VmError::Runtime(format!(
+                "oauth storage: failed to open refresh lock `{}`: {error}",
+                lock_path.display()
+            ))
+        })?;
+    wait_for_refresh_lock(
+        || fs2::FileExt::try_lock_exclusive(&file),
+        lock_path.as_path(),
+    )
+    .await?;
+    Ok(file)
+}
+
+async fn wait_for_refresh_lock<F>(mut try_lock: F, lock_path: &Path) -> Result<(), VmError>
+where
+    F: FnMut() -> std::io::Result<()>,
+{
+    let lock_result = tokio::time::timeout(REFRESH_LOCK_TIMEOUT, async {
+        let mut backoff = std::time::Duration::from_millis(25);
+        loop {
+            match try_lock() {
+                Ok(()) => return Ok(()),
+                Err(error) if refresh_lock_is_contended(&error) => {
+                    tokio::time::sleep(backoff).await;
+                    backoff = (backoff * 2).min(std::time::Duration::from_millis(500));
+                }
+                Err(error) => {
+                    return Err(VmError::Runtime(format!(
+                        "oauth storage: failed to acquire refresh lock `{}`: {error}",
+                        lock_path.display()
+                    )));
+                }
+            }
+        }
+    })
+    .await;
+    match lock_result {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(error)) => Err(error),
+        Err(_) => Err(VmError::Runtime(format!(
+            "oauth storage: timed out after {}s waiting for refresh lock `{}`",
+            REFRESH_LOCK_TIMEOUT.as_secs(),
+            lock_path.display()
+        ))),
+    }
+}
+
+fn refresh_lock_is_contended(error: &std::io::Error) -> bool {
+    error.kind() == std::io::ErrorKind::WouldBlock
+        || error.raw_os_error() == fs2::lock_contended_error().raw_os_error()
+}
+
+fn file_refresh_lock_path(handle: &crate::value::DictMap, key: &str) -> Result<PathBuf, VmError> {
+    let path = file_path(handle)?;
+    let digest = hex::encode(Sha256::digest(
+        format!("{}\0{key}", path.display()).as_bytes(),
+    ));
+    let short = &digest[..24];
+    let file_name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "tokens".to_string());
+    Ok(path.with_file_name(format!(".{file_name}.refresh-{short}.lock")))
+}
+
+async fn acquire_cloud_refresh_lock(scope: &str, key: &str) -> Result<CloudRefreshLock, VmError> {
+    let mut params = crate::value::DictMap::new();
+    params.insert(crate::value::intern_key("scope"), VmValue::string(scope));
+    params.insert(crate::value::intern_key("key"), VmValue::string(key));
+    params.insert(
+        crate::value::intern_key("timeout_seconds"),
+        VmValue::Int(REFRESH_LOCK_TIMEOUT.as_secs() as i64),
+    );
+    let lease =
+        dispatch_host_operation("oauth_storage", "cloud_acquire_refresh_lock", &params).await?;
+    Ok(CloudRefreshLock {
+        scope: scope.to_string(),
+        key: key.to_string(),
+        lease,
+    })
 }
 
 fn memory_get(handle_id: &str, key: &str) -> VmValue {
@@ -696,6 +929,23 @@ fn require_handle(
     }
 }
 
+fn required_closure_arg(
+    args: &[VmValue],
+    index: usize,
+    fn_name: &str,
+) -> Result<Arc<VmClosure>, VmError> {
+    match args.get(index) {
+        Some(VmValue::Closure(closure)) => Ok(closure.clone()),
+        Some(other) => Err(VmError::Runtime(format!(
+            "{fn_name}: body argument must be a closure, got {}",
+            other.type_name()
+        ))),
+        None => Err(VmError::Runtime(format!(
+            "{fn_name}: missing body argument"
+        ))),
+    }
+}
+
 fn required_string_arg(
     args: &[VmValue],
     index: usize,
@@ -893,5 +1143,64 @@ mod tests {
         };
         let result = backend_get(&bad, "k").await;
         assert!(result.is_err(), "expected decryption error, got {result:?}");
+    }
+
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn refresh_lock_retry_uses_virtual_time() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let observed_attempts = Arc::clone(&attempts);
+        let path = PathBuf::from("refresh.lock");
+        let task = tokio::spawn(async move {
+            wait_for_refresh_lock(
+                || {
+                    let attempt = attempts.fetch_add(1, Ordering::SeqCst);
+                    if attempt < 2 {
+                        Err(std::io::Error::from(std::io::ErrorKind::WouldBlock))
+                    } else {
+                        Ok(())
+                    }
+                },
+                path.as_path(),
+            )
+            .await
+        });
+        tokio::task::yield_now().await;
+
+        tokio::time::advance(std::time::Duration::from_millis(25)).await;
+        tokio::time::advance(std::time::Duration::from_millis(50)).await;
+
+        task.await.unwrap().unwrap();
+        assert_eq!(observed_attempts.load(Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn refresh_lock_timeout_uses_virtual_time() {
+        let path = PathBuf::from("refresh.lock");
+        let task = tokio::spawn(async move {
+            wait_for_refresh_lock(
+                || Err(std::io::Error::from(std::io::ErrorKind::WouldBlock)),
+                path.as_path(),
+            )
+            .await
+        });
+        tokio::task::yield_now().await;
+
+        let almost_timeout = REFRESH_LOCK_TIMEOUT
+            .checked_sub(std::time::Duration::from_millis(1))
+            .expect("refresh lock timeout exceeds one millisecond");
+        tokio::time::advance(almost_timeout).await;
+        assert!(!task.is_finished(), "lock wait timed out too early");
+        tokio::time::advance(std::time::Duration::from_millis(1)).await;
+
+        let error = task.await.unwrap().unwrap_err();
+        match error {
+            VmError::Runtime(message) => {
+                assert!(message.contains("timed out after"));
+                assert!(message.contains("refresh.lock"));
+            }
+            other => panic!("expected runtime timeout error, got {other:?}"),
+        }
     }
 }
