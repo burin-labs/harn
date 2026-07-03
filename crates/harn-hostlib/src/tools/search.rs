@@ -341,6 +341,20 @@ impl Sink for CollectorSink<'_> {
     }
 }
 
+/// Render a filesystem path for the agent-facing tool surface with
+/// forward-slash separators on every platform. Search results are consumed by
+/// the model (and the LoRA tool-call corpus), which expect `/`; emitting
+/// OS-native separators would ship `\`-paths to the model on Windows and make
+/// eval assertions platform-dependent. No-op on Unix (`MAIN_SEPARATOR == '/'`).
+fn to_agent_path(path: &std::path::Path) -> String {
+    let rendered = path.to_string_lossy();
+    if std::path::MAIN_SEPARATOR == '/' {
+        rendered.into_owned()
+    } else {
+        rendered.replace(std::path::MAIN_SEPARATOR, "/")
+    }
+}
+
 fn row_to_value(rwp: RowWithPath) -> VmValue {
     let RowWithPath { path, row } = rwp;
     let MatchRow {
@@ -355,7 +369,7 @@ fn row_to_value(rwp: RowWithPath) -> VmValue {
     let after: Vec<VmValue> = context_after.into_iter().map(str_value).collect();
 
     build_dict([
-        ("path", str_value(path.to_string_lossy())),
+        ("path", str_value(to_agent_path(&path))),
         ("line", VmValue::Int(line as i64)),
         ("column", VmValue::Int(column as i64)),
         ("text", str_value(text)),
