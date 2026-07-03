@@ -89,8 +89,11 @@ fn __render_human(harness: Harness, report: dict) {
       harness.stdio.println("  warning: " + text)
     }
   }
-  harness.stdio.println("  launch:")
-  harness.stdio.println("    " + join_shell_argv(safe_list(launch["harn_local_launch"]), " "))
+  let launch_argv = safe_list(launch["harn_local_launch"])
+  if launch_argv.count != 0 {
+    harness.stdio.println("  launch:")
+    harness.stdio.println("    " + join_shell_argv(launch_argv, " "))
+  }
 }
 
 fn __render_json(report: dict) -> string {

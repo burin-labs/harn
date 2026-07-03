@@ -52,6 +52,12 @@ fn parse_json(s: &str, label: &str) -> serde_json::Value {
     })
 }
 
+fn success_data(value: &serde_json::Value) -> &serde_json::Value {
+    assert_eq!(value["ok"], serde_json::Value::Bool(true));
+    value["data"].as_object().expect("success envelope data");
+    &value["data"]
+}
+
 // - models list ------------------------------------------------------------
 
 #[test]
@@ -308,6 +314,48 @@ fn models_lora_inspect_human_text_includes_launch_hint() {
 }
 
 #[test]
+fn models_lora_inspect_human_text_omits_launch_hint_when_provider_cannot_launch_lora() {
+    let adapter = write_lora_adapter_fixture();
+    let adapter_path = adapter.path().display().to_string();
+    let harn = run(
+        &[
+            "models",
+            "lora",
+            "inspect",
+            "--base",
+            "local-gemma4-e4b",
+            "--provider",
+            "openai",
+            "--name",
+            "burin-tools",
+            &adapter_path,
+        ],
+        &[],
+    );
+
+    assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
+    for fragment in [
+        "burin-tools -> gemma-4-e4b-it via openai",
+        "catalog LoRA launch flags: no",
+        "catalog LoRA rank flag: no",
+        "warning: provider openai does not declare local-runtime LoRA launch flags",
+    ] {
+        assert!(
+            harn.stdout.contains(fragment),
+            "harn stdout missing {fragment}: {}",
+            harn.stdout
+        );
+    }
+    for fragment in ["  launch:", "harn local launch", "--lora-adapter"] {
+        assert!(
+            !harn.stdout.contains(fragment),
+            "harn stdout unexpectedly contained {fragment}: {}",
+            harn.stdout
+        );
+    }
+}
+
+#[test]
 fn models_lora_inspect_json_shape_is_stable() {
     let adapter = write_lora_adapter_fixture();
     let adapter_path = adapter.path().display().to_string();
@@ -330,26 +378,26 @@ fn models_lora_inspect_json_shape_is_stable() {
 
     assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
     let harn_value = parse_json(&harn.stdout, "harn");
-    assert_eq!(harn_value["ok"], serde_json::Value::Bool(true));
-    assert_eq!(harn_value["base"]["selector"], "local-gemma4-e4b");
-    assert_eq!(harn_value["base"]["id"], "gemma-4-e4b-it");
-    assert_eq!(harn_value["base"]["provider"], "vllm");
-    assert_eq!(harn_value["base"]["tool_format"], "json");
-    assert_eq!(harn_value["adapter"]["name"], "burin-tools");
-    assert_eq!(harn_value["adapter"]["peft_type"], "LORA");
-    assert_eq!(harn_value["compatibility"]["base_model_match"], "suffix");
+    let report = success_data(&harn_value);
+    assert_eq!(report["base"]["selector"], "local-gemma4-e4b");
+    assert_eq!(report["base"]["id"], "gemma-4-e4b-it");
+    assert_eq!(report["base"]["provider"], "vllm");
+    assert_eq!(report["base"]["tool_format"], "json");
+    assert_eq!(report["adapter"]["name"], "burin-tools");
+    assert_eq!(report["adapter"]["peft_type"], "LORA");
+    assert_eq!(report["compatibility"]["base_model_match"], "suffix");
     assert_eq!(
-        harn_value["compatibility"]["provider_supports_lora_launch"],
+        report["compatibility"]["provider_supports_lora_launch"],
         serde_json::Value::Bool(true)
     );
     assert_eq!(
-        harn_value["compatibility"]["provider_supports_lora_max_rank"],
+        report["compatibility"]["provider_supports_lora_max_rank"],
         serde_json::Value::Bool(true)
     );
-    assert_eq!(harn_value["tool_calling"]["native_tools"], false);
-    assert_eq!(harn_value["launch"]["request_model"], "burin-tools");
-    assert_eq!(harn_value["launch"]["max_lora_rank"].as_u64(), Some(16));
-    let launch = harn_value["launch"]["harn_local_launch"]
+    assert_eq!(report["tool_calling"]["native_tools"], false);
+    assert_eq!(report["launch"]["request_model"], "burin-tools");
+    assert_eq!(report["launch"]["max_lora_rank"].as_u64(), Some(16));
+    let launch = report["launch"]["harn_local_launch"]
         .as_array()
         .expect("launch argv");
     assert!(
@@ -444,20 +492,17 @@ fn models_lora_plan_json_shape_is_stable() {
 
     assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
     let harn_value = parse_json(&harn.stdout, "harn");
-    assert_eq!(harn_value["ok"], serde_json::Value::Bool(true));
-    assert_eq!(harn_value["base"]["id"], "gemma-4-e4b-it");
-    assert_eq!(harn_value["request"]["method"], "lora");
-    assert_eq!(harn_value["request"]["requested_tool_format"], "native");
-    assert_eq!(harn_value["request"]["effective_tool_format"], "native");
-    assert_eq!(harn_value["training"]["adapter_type"], "peft_lora");
-    assert_eq!(harn_value["training"]["rank"], 16);
-    assert_eq!(harn_value["training"]["alpha"], 32);
-    assert_eq!(harn_value["training"]["dropout"], 0.05);
-    assert_eq!(
-        harn_value["training"]["quantization"],
-        "base_model_precision"
-    );
-    let trainer_contract = harn_value["training"]["trainer_contract"]
+    let report = success_data(&harn_value);
+    assert_eq!(report["base"]["id"], "gemma-4-e4b-it");
+    assert_eq!(report["request"]["method"], "lora");
+    assert_eq!(report["request"]["requested_tool_format"], "native");
+    assert_eq!(report["request"]["effective_tool_format"], "native");
+    assert_eq!(report["training"]["adapter_type"], "peft_lora");
+    assert_eq!(report["training"]["rank"], 16);
+    assert_eq!(report["training"]["alpha"], 32);
+    assert_eq!(report["training"]["dropout"], 0.05);
+    assert_eq!(report["training"]["quantization"], "base_model_precision");
+    let trainer_contract = report["training"]["trainer_contract"]
         .as_array()
         .expect("trainer contract");
     assert!(
@@ -472,30 +517,21 @@ fn models_lora_plan_json_shape_is_stable() {
             .is_some_and(|text| text.contains("messages plus a tools column"))),
         "trainer contract={trainer_contract:?}"
     );
+    assert_eq!(report["data"]["dataset_format"], "messages_with_tool_calls");
+    assert_eq!(report["request"]["requested_corpus_strategy"], "auto");
+    assert_eq!(report["request"]["effective_corpus_strategy"], "audit-only");
+    assert!(report["request"]["teacher"].is_null());
+    assert_eq!(report["corpus_refresh"]["strategy"], "audit-only");
+    assert_eq!(report["corpus_refresh"]["teacher_required"], false);
+    assert_eq!(report["serving"]["adapter_binding"], "runtime_lora_adapter");
+    assert_eq!(report["serving"]["request_model"], "ADAPTER_MODEL");
+    assert_eq!(report["serving"]["adapter_name"], "ADAPTER_NAME");
+    assert_eq!(report["serving"]["tool_format"], "native");
     assert_eq!(
-        harn_value["data"]["dataset_format"],
+        report["serving"]["dataset_format"],
         "messages_with_tool_calls"
     );
-    assert_eq!(harn_value["request"]["requested_corpus_strategy"], "auto");
-    assert_eq!(
-        harn_value["request"]["effective_corpus_strategy"],
-        "audit-only"
-    );
-    assert!(harn_value["request"]["teacher"].is_null());
-    assert_eq!(harn_value["corpus_refresh"]["strategy"], "audit-only");
-    assert_eq!(harn_value["corpus_refresh"]["teacher_required"], false);
-    assert_eq!(
-        harn_value["serving"]["adapter_binding"],
-        "runtime_lora_adapter"
-    );
-    assert_eq!(harn_value["serving"]["request_model"], "ADAPTER_MODEL");
-    assert_eq!(harn_value["serving"]["adapter_name"], "ADAPTER_NAME");
-    assert_eq!(harn_value["serving"]["tool_format"], "native");
-    assert_eq!(
-        harn_value["serving"]["dataset_format"],
-        "messages_with_tool_calls"
-    );
-    let export = harn_value["launch"]["export_command"]
+    let export = report["launch"]["export_command"]
         .as_array()
         .expect("export argv");
     assert!(
@@ -516,7 +552,7 @@ fn models_lora_plan_json_shape_is_stable() {
             .any(|pair| pair[0] == "--chat-template" && pair[1] == "gemma4_native_function_calling"),
         "export argv={export:?}"
     );
-    let serving_notes = harn_value["serving"]["runtime_notes"]
+    let serving_notes = report["serving"]["runtime_notes"]
         .as_array()
         .expect("serving runtime notes");
     assert!(
@@ -537,19 +573,16 @@ fn models_lora_plan_json_shape_is_stable() {
             .is_some_and(|text| text.contains("Gemma 4 native routes"))),
         "serving notes={serving_notes:?}"
     );
+    assert_eq!(report["template"]["name"], "gemma4_native_function_calling");
     assert_eq!(
-        harn_value["template"]["name"],
-        "gemma4_native_function_calling"
-    );
-    assert_eq!(
-        harn_value["template"]["source"],
+        report["template"]["source"],
         "Gemma 4 tokenizer/provider native function-calling chat template"
     );
     assert_eq!(
-        harn_value["template"]["supervised_target"],
+        report["template"]["supervised_target"],
         "assistant messages with native tool_calls plus paired tool role results"
     );
-    let eval = harn_value["evaluation"]["eval_command"]
+    let eval = report["evaluation"]["eval_command"]
         .as_array()
         .expect("eval argv");
     assert!(
@@ -557,7 +590,7 @@ fn models_lora_plan_json_shape_is_stable() {
             .any(|pair| pair[0] == "--tool-format" && pair[1] == "native"),
         "eval argv={eval:?}"
     );
-    let launch = harn_value["launch"]["local_launch_command"]
+    let launch = report["launch"]["local_launch_command"]
         .as_array()
         .expect("launch argv");
     assert!(
@@ -644,37 +677,34 @@ fn models_lora_export_json_writes_dataset_and_manifest() {
 
     assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
     let harn_value = parse_json(&harn.stdout, "harn");
-    assert_eq!(harn_value["ok"], serde_json::Value::Bool(true));
+    let report = success_data(&harn_value);
     assert_eq!(
-        harn_value["request"]["dataset_format"],
+        report["request"]["dataset_format"],
         "messages_with_tool_calls"
     );
-    assert_eq!(harn_value["stats"]["records"].as_u64(), Some(2));
-    assert_eq!(harn_value["stats"]["emitted"].as_u64(), Some(1));
-    assert_eq!(harn_value["stats"]["skipped"].as_u64(), Some(1));
-    assert_eq!(harn_value["stats"]["tool_calls"].as_u64(), Some(1));
-    assert_eq!(harn_value["stats"]["tool_results"].as_u64(), Some(1));
-    assert_eq!(harn_value["target"]["adapter_name"], "burin-tools");
-    let contract_id = harn_value["contract"]["id"].as_str().expect("contract id");
+    assert_eq!(report["stats"]["records"].as_u64(), Some(2));
+    assert_eq!(report["stats"]["emitted"].as_u64(), Some(1));
+    assert_eq!(report["stats"]["skipped"].as_u64(), Some(1));
+    assert_eq!(report["stats"]["tool_calls"].as_u64(), Some(1));
+    assert_eq!(report["stats"]["tool_results"].as_u64(), Some(1));
+    assert_eq!(report["target"]["adapter_name"], "burin-tools");
+    let contract_id = report["contract"]["id"].as_str().expect("contract id");
     assert!(
         contract_id.starts_with("sha256:"),
         "contract id={contract_id}"
     );
-    assert_eq!(harn_value["target"]["contract_id"], contract_id);
-    assert_eq!(harn_value["contract"]["base_model"], "gemma-4-e4b-it");
-    assert_eq!(harn_value["contract"]["provider"], "vllm");
-    assert_eq!(harn_value["contract"]["harn_tool_format"], "native");
+    assert_eq!(report["target"]["contract_id"], contract_id);
+    assert_eq!(report["contract"]["base_model"], "gemma-4-e4b-it");
+    assert_eq!(report["contract"]["provider"], "vllm");
+    assert_eq!(report["contract"]["harn_tool_format"], "native");
     assert_eq!(
-        harn_value["contract"]["dataset_format"],
+        report["contract"]["dataset_format"],
         "messages_with_tool_calls"
     );
-    assert_eq!(harn_value["contract"]["chat_template"], "gemma-4");
-    assert_eq!(harn_value["serving"]["request_model"], "burin-tools");
-    assert_eq!(
-        harn_value["serving"]["adapter_binding"],
-        "runtime_lora_adapter"
-    );
-    assert_eq!(harn_value["serving"]["contract_id"], contract_id);
+    assert_eq!(report["contract"]["chat_template"], "gemma-4");
+    assert_eq!(report["serving"]["request_model"], "burin-tools");
+    assert_eq!(report["serving"]["adapter_binding"], "runtime_lora_adapter");
+    assert_eq!(report["serving"]["contract_id"], contract_id);
     assert!(out.is_file(), "exported JSONL missing");
     assert!(manifest.is_file(), "manifest missing");
 
