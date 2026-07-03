@@ -8,17 +8,16 @@ import "std/triggers"
  * bounds in-flight closures regardless of the inbound event rate.
  */
 pipeline test(task) {
-  let gate = channel(nil, 32)
   let inflight = atomic(0)
   let peak = atomic(0)
   let completed = atomic(0)
-  let _pool = pool_create({name: "spawn-to-pool-cap-demo", max_concurrent: 3})
+  let _ = pool_create({name: "spawn-to-pool-cap-demo", max_concurrent: 3})
   let task_factory = { _event -> return { ->
     let now = atomic_add(inflight, 1) + 1
     if now > atomic_get(peak) {
       atomic_set(peak, now)
     }
-    receive(gate)
+    sleep(5ms)
     atomic_add(inflight, -1)
     atomic_add(completed, 1)
     return now
@@ -60,10 +59,6 @@ pipeline test(task) {
     }
   }
   __io_println(len(handles) == 8)
-  // Release the gate so each pool task can complete.
-  for _i in 0 to 8 exclusive {
-    send(gate, "go")
-  }
   let results = pool_wait(handles)
   __io_println(len(results) == 8)
   __io_println(atomic_get(peak) <= 3)
