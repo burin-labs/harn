@@ -8,6 +8,95 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.9.5
+
+### Added
+
+- Added `std/verification::verification_diagnostic_delta` for row-normalized
+  diagnostic-set comparison with advisory/stale suppression and deterministic
+  progress credit.
+- Added `std/verification::verification_warm_state_facts` and warm-state-aware
+  ladder planning so slow verifier rows can choose warm or cold timing per
+  profile row.
+- **Lethal-trifecta containment battery.** `security::battery::run_containment_battery`
+  drives the malicious ASR corpus through the lethal-trifecta gate, model-free
+  and deterministic, and reports per-class containment: does each attack's
+  ingress register taint so a fully-obeyed exfiltration attempt is forced to
+  confirm? It measures the product-level guarantee — *even a fooled model is
+  contained* — that the detection tier alone cannot show. The pinned baseline
+  (default posture) contains network-boundary ingress (`web_fetch`, mounted MCP)
+  but exposes the honest residual: subagent/A2A channel messages register no
+  taint, so cross-agent poisoning is uncontained unless directive
+  authentication is enabled — and even then the current marker vocabulary
+  catches only canonically-framed forged authority.
+- **Bare enum-variant match patterns.** `match r { Ok(v) -> { … } Err(e) -> { … } }`
+  now works without the `Result.` qualifier — a call-shaped pattern resolves to
+  its enum whenever the variant name is declared by exactly one visible enum
+  (ambiguity is a compile error asking for the qualified form; non-variant call
+  patterns keep expression-equality semantics). Bare patterns bind payloads,
+  count toward exhaustiveness, and work on user-declared enums.
+
+### Changed
+
+- **`std/agent/canon` root discovery.** Canon helpers now resolve harn-canon
+  roots from explicit options, `HARN_CANON_ROOT`, or workspace-local `.harn/canon`
+  before evaluating packs.
+- Slimmed push-to-main CI by relying on merge-queue Rust coverage and keeping main pushes on cheap hygiene lanes.
+- Wrap `harn models lora plan|inspect|export --json` output in the canonical CLI JSON envelope and
+  register the commands in `harn --json-schemas`.
+- Factor shared CLI render helpers for `harn models lora` plan, inspect, and export into `std/cli/render`.
+- `harn models lora plan` and `harn models lora export` now surface a
+  machine-readable training contract for assistant loss masks, packing, parser
+  ownership, and split policy in reports and export manifests.
+
+### Fixed
+
+- Route agent stall repair/no-net-progress diagnostic accounting through the
+  stdlib verification diagnostic-delta helper so stale, unbound, and advisory
+  diagnostics no longer advance hard repair gates.
+- Honor exported `HARN_BIN` across git hook Harn checks so hook-spawned Make
+  targets reuse the same binary instead of rebuilding it.
+- Fixed `harn models lora inspect` so it no longer prints a local LoRA launch
+  command for providers that do not declare LoRA launch support.
+- Fixed `agent_loop` runtime feedback labels so ordinary post-turn callback messages use
+  `post_turn` and terminal callback rescue messages use `terminal_callback`.
+- Keep `hostlib_tools_search` glob filters inside the normal ignore-aware file
+  walk so broad globs no longer re-include gitignored build output such as
+  `target/`.
+- **Generic enum payloads bind their instantiated types in match patterns.**
+  Matching a `Result<int, string>` with `Result.Ok(v)` used to bind `v` as the
+  raw declaration parameter `T` (so `return v` from a typed fn errored with
+  "expected int, found T"); the scrutinee's type arguments are now substituted,
+  and statically-unknown instantiations degrade to gradual instead of leaking
+  phantom parameter names.
+- **Container writes are type-checked.** `xs[0] = v`, `d["k"] = v`, and
+  `s.field = v` now validate the value against the element/value/field type,
+  check subscript index types (`list` → `int`, `dict<K, V>` → `K`), and emit
+  the same receiver diagnostics as reads (nilable receiver, unknown field on
+  annotated shapes/structs). The unannotated dict-literal idiom stays lenient.
+- **Flow narrowing is scope-chain aware.** Assigning inside a nested block or
+  loop no longer produces spurious "assignment to `x`: expected string, found
+  nil" errors on `string?` vars (the check target is the declared type), loop
+  bodies invalidate narrowing for variables they reassign (both inside the loop
+  and after it — `while` conditions re-narrow soundly), and path-narrowing
+  invalidation now masks ancestor-scope entries instead of only local ones.
+- **`type_of` narrowing recognises the full runtime tag vocabulary.**
+  `type_of(x) == "duration"` (and `set`, `decimal`, `channel`, `range`, `pair`,
+  …) now narrows like `list`/`dict` always did; the canonical tag list lives in
+  `harn-builtin-meta` and a VM unit test keeps `VmValue::type_name` in lockstep.
+- The HARN-OWN-001 immutable-assignment repair hints now say `var`/`let`
+  instead of the nonexistent `mut` keyword.
+
+### Security
+
+- **High-resolution ASR battery.** `security/fixtures/asr-battery.json` grows
+  from 14 fixtures (1–2 per class) to 94 (≥10 *distinct* mechanisms per
+  role-confusion class + 11 false-positive controls), so per-class attack-success
+  rate resolves a small effect instead of quantizing to 0/1. New `battery.rs`
+  invariants make the corpus self-guarding: unique ids, exactly-one `{CANARY}`
+  per coupled behavioural payload, no duplicate payloads (trial independence),
+  reserved-token presence for special-token attacks, and a ≥10-per-class floor.
+
 ## v0.9.4
 
 ### Added

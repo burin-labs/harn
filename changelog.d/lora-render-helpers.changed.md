@@ -1,1 +1,0 @@
-- Factor shared CLI render helpers for `harn models lora` plan, inspect, and export into `std/cli/render`.
