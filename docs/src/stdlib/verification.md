@@ -224,3 +224,50 @@ Useful options:
 When no profile rows match or every row is filtered out, the returned plan sets
 `fallback = true` and leaves current caller behavior unchanged unless the
 caller explicitly opts into consuming the plan.
+
+## Diagnostic Delta
+
+`verification_diagnostic_delta(previous, current, options)` compares previous
+and current diagnostics as row-normalized signature sets. It is the reusable
+Harn-side primitive for answering whether a verification failure is genuinely
+new, unchanged, advanced, cleared, or advisory without embedding that logic in
+a host product or in agent-loop string heuristics:
+
+```harn
+import { verification_diagnostic_delta } from "std/verification"
+
+pipeline default() {
+  let delta = verification_diagnostic_delta(
+    {diagnostics: ["src/a.zig:10:2: error: missing writeEscaped"]},
+    {diagnostics: ["src/a.zig:44:9: error: missing writeEscaped"]},
+    {row: {diagnosticDelta: {strip_locations: true}}},
+  )
+  return delta.status
+}
+```
+
+The result shape is auditable:
+
+- `status`: `initialized`, `unchanged`, `advanced`, `cleared`, `regressed`, or
+  `advisory`.
+- `progress_credit`: true only when a gate-bearing stuck diagnostic was removed,
+  changed, reduced, or cleared.
+- `feedsGates` / `feeds_gates`: copied from the current diagnostic contract.
+  Current advisory, stale, or unbound diagnostics always return
+  `status = "advisory"` and never receive progress credit.
+- `previous` / `current`: normalized `{count, signatures, feedsGates}` facts.
+- `removed`, `added`, and `persisted`: set differences over the normalized
+  signatures.
+- `normalization`: the merged normalization config used for the comparison.
+
+Inputs can be a string signature, a single diagnostic dict, a check/result dict,
+or a `{diagnostics:[...]}` / `{errors:[...]}` envelope. Previous diagnostics
+with `feedsGates = false` are not used as a baseline; a fresh current failure
+after such a baseline returns `initialized`, not progress.
+
+Normalization is data-driven. `diagnosticDelta`, `diagnostic_delta`,
+`signatureNormalization`, or `signature_normalization` may be declared on a
+profile row or its `check`, then overridden by direct options. Supported knobs
+include `lowercase`, `strip_ansi`, `strip_locations`, `strip_temp_paths`,
+`collapse_whitespace`, `include_path`, `include_code`, `include_severity`,
+`max_chars`, `replacements`, `strip_patterns`, and `ignore_patterns`.

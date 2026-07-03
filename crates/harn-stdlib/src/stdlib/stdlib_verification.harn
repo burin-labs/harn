@@ -100,6 +100,8 @@ type VerificationLadderPlan = {
   reason: string,
 }
 
+type VerificationDiagnosticDelta = dict
+
 fn __verification_opts(options) {
   return options ?? {}
 }
@@ -274,6 +276,414 @@ fn __verification_string_list(value) -> list<string> {
     if text != "" && !contains(out, text) {
       out = out + [text]
     }
+  }
+  return out
+}
+
+fn __verification_delta_config_dict(value) -> dict {
+  return type_of(value) == "dict" ? value : {}
+}
+
+fn __verification_delta_known_options(value) -> dict {
+  if type_of(value) != "dict" {
+    return {}
+  }
+  var out = {}
+  for key in [
+    "lowercase",
+    "strip_ansi",
+    "strip_locations",
+    "strip_temp_paths",
+    "collapse_whitespace",
+    "include_path",
+    "include_code",
+    "include_severity",
+    "max_chars",
+    "replacements",
+    "ignore_patterns",
+    "strip_patterns",
+    "stripPatterns",
+  ] {
+    if value.keys().contains(key) {
+      out = out + {[key]: value[key]}
+    }
+  }
+  return out
+}
+
+fn __verification_delta_normalization(options) -> dict {
+  let opts = __verification_opts(options)
+  let row = __verification_delta_config_dict(opts?.row ?? opts?.profile_row)
+  let check = __verification_delta_config_dict(row?.check)
+  let direct = __verification_delta_config_dict(
+    opts?.diagnosticDelta
+      ?? opts?.diagnostic_delta
+      ?? opts?.signatureNormalization
+      ?? opts?.signature_normalization,
+  )
+    + __verification_delta_known_options(opts)
+  return {
+    lowercase: true,
+    strip_ansi: true,
+    strip_locations: true,
+    strip_temp_paths: true,
+    collapse_whitespace: true,
+    include_path: false,
+    include_code: true,
+    include_severity: false,
+    max_chars: 4000,
+    replacements: [],
+    ignore_patterns: [],
+    strip_patterns: [],
+  }
+    + __verification_delta_config_dict(row?.signatureNormalization)
+    + __verification_delta_config_dict(row?.signature_normalization)
+    + __verification_delta_config_dict(row?.diagnosticDelta)
+    + __verification_delta_config_dict(row?.diagnostic_delta)
+    + __verification_delta_config_dict(check?.signatureNormalization)
+    + __verification_delta_config_dict(check?.signature_normalization)
+    + __verification_delta_config_dict(check?.diagnosticDelta)
+    + __verification_delta_config_dict(check?.diagnostic_delta)
+    + direct
+}
+
+fn __verification_delta_raw_text(value) -> string {
+  if value == nil {
+    return ""
+  }
+  if type_of(value) != "dict" {
+    return trim(to_string(value))
+  }
+  let raw = value?.failureSignature
+    ?? value?.failure_signature
+    ?? value?.signature
+    ?? value?.message
+    ?? value?.text
+    ?? value?.error
+    ?? value?.stderr
+    ?? value?.stdout
+    ?? value?.combined
+    ?? value?.result
+    ?? ""
+  return trim(to_string(raw ?? ""))
+}
+
+fn __verification_delta_status(value) -> string {
+  let direct = lowercase(trim(to_string(value?.status ?? "")))
+  if direct != "" {
+    return direct
+  }
+  return lowercase(trim(to_string(value?.classification?.status ?? value?.diagnostic?.status ?? "")))
+}
+
+fn __verification_delta_feeds_gates(value) -> bool {
+  if value == nil {
+    return true
+  }
+  if value?.feedsGates != nil {
+    return value.feedsGates ? true : false
+  }
+  if value?.feeds_gates != nil {
+    return value.feeds_gates ? true : false
+  }
+  if value?.classification?.feedsGates != nil {
+    return value.classification.feedsGates ? true : false
+  }
+  if value?.classification?.feeds_gates != nil {
+    return value.classification.feeds_gates ? true : false
+  }
+  if value?.diagnostic?.feedsGates != nil {
+    return value.diagnostic.feedsGates ? true : false
+  }
+  if value?.diagnostic?.feeds_gates != nil {
+    return value.diagnostic.feeds_gates ? true : false
+  }
+  let status = __verification_delta_status(value)
+  return !["advisory", "bound_stale", "stale", "unbound"].contains(status)
+}
+
+fn __verification_delta_explicit_success(value) -> bool {
+  if value == nil {
+    return false
+  }
+  if value?.ok != nil {
+    return value.ok ? true : false
+  }
+  if value?.success != nil {
+    return value.success ? true : false
+  }
+  let exit = to_int(value?.exit ?? value?.exit_code)
+  if exit != nil {
+    return exit == 0
+  }
+  let status = __verification_delta_status(value)
+  return ["pass", "passed", "success", "succeeded"].contains(status)
+}
+
+fn __verification_delta_explicit_failure(value) -> bool {
+  if value == nil {
+    return false
+  }
+  if value?.ok != nil {
+    return !(value.ok ? true : false)
+  }
+  if value?.success != nil {
+    return !(value.success ? true : false)
+  }
+  let exit = to_int(value?.exit ?? value?.exit_code)
+  if exit != nil {
+    return exit != 0
+  }
+  let status = __verification_delta_status(value)
+  return ["error", "fail", "failed", "failure", "timed_out", "timeout"].contains(status)
+}
+
+fn __verification_delta_has_collection(value) -> bool {
+  return type_of(value?.diagnostics) == "list" || type_of(value?.errors) == "list"
+}
+
+fn __verification_delta_synthetic_failure(value) -> dict {
+  let status = __verification_delta_status(value)
+  let exit = to_int(value?.exit ?? value?.exit_code)
+  let status_text = status == "" ? "failed" : status
+  let exit_text = exit == nil ? "" : " exit=" + to_string(exit)
+  return {message: "check " + status_text + exit_text, code: status_text}
+}
+
+fn __verification_delta_raw_entries(value) -> list {
+  if value == nil {
+    return []
+  }
+  let kind = type_of(value)
+  if kind == "list" {
+    return value
+  }
+  if kind == "string" {
+    return [value]
+  }
+  if kind != "dict" {
+    return [value]
+  }
+  if type_of(value?.diagnostics) == "list" {
+    return value.diagnostics
+  }
+  if type_of(value?.errors) == "list" {
+    return value.errors
+  }
+  if type_of(value?.diagnostic) == "dict" {
+    return [value.diagnostic]
+  }
+  if __verification_delta_raw_text(value) != "" {
+    return [value]
+  }
+  if __verification_delta_explicit_failure(value) {
+    return [__verification_delta_synthetic_failure(value)]
+  }
+  return []
+}
+
+fn __verification_delta_location(value) -> string {
+  if type_of(value) != "dict" {
+    return ""
+  }
+  var path = trim(to_string(value?.path ?? value?.file ?? value?.filename ?? value?.uri ?? ""))
+  let line = to_int(value?.line ?? value?.line_number)
+  if path != "" && line != nil {
+    path = path + ":" + to_string(line)
+    let column = to_int(value?.column ?? value?.col)
+    if column != nil {
+      path = path + ":" + to_string(column)
+    }
+  }
+  return path
+}
+
+fn __verification_delta_replacement_pattern(entry) -> string {
+  if type_of(entry) == "dict" {
+    return trim(to_string(entry?.pattern ?? entry?.regex ?? ""))
+  }
+  return trim(to_string(entry ?? ""))
+}
+
+fn __verification_delta_replacement_text(entry) -> string {
+  if type_of(entry) == "dict" {
+    return to_string(entry?.replacement ?? entry?.with ?? " ")
+  }
+  return " "
+}
+
+fn __verification_delta_normalize_text(text: string, cfg: dict) -> string {
+  var out = to_string(text ?? "")
+  if cfg?.strip_ansi != false {
+    out = regex_replace_all("\\u{1b}\\[[0-9;]*m", "", out)
+  }
+  for replacement in cfg?.replacements ?? [] {
+    let pattern = __verification_delta_replacement_pattern(replacement)
+    if pattern != "" {
+      out = regex_replace_all(pattern, __verification_delta_replacement_text(replacement), out)
+    }
+  }
+  for pattern in __verification_string_list(cfg?.strip_patterns ?? cfg?.stripPatterns) {
+    out = regex_replace_all(pattern, " ", out)
+  }
+  if cfg?.lowercase != false {
+    out = lowercase(out)
+  }
+  if cfg?.strip_locations != false {
+    out = regex_replace_all("[^\\s:]+:[0-9]+(?::[0-9]+)?", " ", out)
+    out = regex_replace_all("\\b(?:line|col|column)\\s+[0-9]+\\b", " ", out)
+  }
+  if cfg?.strip_temp_paths != false {
+    out = regex_replace_all("/tmp/[^\\s:]*", " ", out)
+    out = regex_replace_all("/var/folders/[^\\s:]*", " ", out)
+  }
+  if cfg?.collapse_whitespace != false {
+    out = trim(regex_replace_all("\\s+", " ", out))
+  }
+  let max_chars = to_int(cfg?.max_chars) ?? 4000
+  if max_chars > 0 {
+    out = truncate_text(out, max_chars)
+  }
+  return out
+}
+
+fn __verification_delta_signature(value, cfg: dict) -> string {
+  var parts: list<string> = []
+  if type_of(value) == "dict" {
+    if cfg?.include_path == true {
+      let location = __verification_delta_location(value)
+      if location != "" {
+        parts = parts.push(location)
+      }
+    }
+    if cfg?.include_severity == true {
+      let severity = trim(to_string(value?.severity ?? value?.level ?? ""))
+      if severity != "" {
+        parts = parts.push(severity)
+      }
+    }
+    if cfg?.include_code != false {
+      let code = trim(to_string(value?.code ?? value?.rule ?? value?.kind ?? ""))
+      if code != "" {
+        parts = parts.push(code)
+      }
+    }
+  }
+  let text = __verification_delta_raw_text(value)
+  if text != "" {
+    parts = parts.push(text)
+  }
+  return __verification_delta_normalize_text(join(parts, " "), cfg)
+}
+
+fn __verification_delta_ignored(signature: string, cfg: dict) -> bool {
+  for pattern in __verification_string_list(cfg?.ignore_patterns ?? cfg?.ignorePatterns) {
+    if regex_match(pattern, signature) != nil {
+      return true
+    }
+  }
+  return false
+}
+
+fn __verification_delta_direct_count(value) {
+  return to_int(
+    value?.error_count ?? value?.diagnostic_count ?? value?.diagnostics_count
+      ?? value?.failure_count,
+  )
+}
+
+fn __verification_delta_info(value, cfg: dict) -> dict {
+  let entries = __verification_delta_raw_entries(value)
+  var normalized: list<string> = []
+  for entry in entries {
+    let signature = __verification_delta_signature(entry, cfg)
+    if signature != "" && !__verification_delta_ignored(signature, cfg) {
+      normalized = normalized.push(signature)
+    }
+  }
+  var signatures: list<string> = []
+  for signature in normalized {
+    if !signatures.contains(signature) {
+      signatures = signatures.push(signature)
+    }
+  }
+  let direct_count = __verification_delta_direct_count(value)
+  let count = direct_count ?? len(normalized)
+  let has_collection = __verification_delta_has_collection(value)
+  let failed = len(normalized) > 0 || (!has_collection && __verification_delta_explicit_failure(value))
+  return {
+    count: count,
+    explicit_success: __verification_delta_explicit_success(value),
+    failed: failed,
+    feedsGates: __verification_delta_feeds_gates(value),
+    feeds_gates: __verification_delta_feeds_gates(value),
+    has_collection: has_collection,
+    signatures: signatures.sort(),
+  }
+}
+
+fn __verification_delta_set_minus(left: list<string>, right: list<string>) -> list<string> {
+  var out: list<string> = []
+  for item in left {
+    if !right.contains(item) && !out.contains(item) {
+      out = out.push(item)
+    }
+  }
+  return out.sort()
+}
+
+fn __verification_delta_set_intersection(left: list<string>, right: list<string>) -> list<string> {
+  var out: list<string> = []
+  for item in left {
+    if right.contains(item) && !out.contains(item) {
+      out = out.push(item)
+    }
+  }
+  return out.sort()
+}
+
+fn __verification_delta_gate_signatures(info: dict) -> list<string> {
+  return info.feedsGates ? info.signatures : []
+}
+
+fn __verification_delta_snapshot(info: dict) -> dict {
+  return {
+    count: info.count,
+    feedsGates: info.feedsGates,
+    feeds_gates: info.feeds_gates,
+    signatures: info.signatures,
+  }
+}
+
+fn __verification_delta_result(
+  status: string,
+  progress_credit: bool,
+  previous_info: dict,
+  current_info: dict,
+  removed: list<string>,
+  added: list<string>,
+  persisted: list<string>,
+  normalization: dict,
+  reason: string,
+) -> VerificationDiagnosticDelta {
+  var out = {
+    schema: "harn.verification.diagnostic_delta.v1",
+    status: status,
+    progress_credit: progress_credit,
+    feedsGates: current_info.feedsGates,
+    feeds_gates: current_info.feeds_gates,
+    advisory: !current_info.feedsGates,
+    reason: reason,
+    previous: __verification_delta_snapshot(previous_info),
+    current: __verification_delta_snapshot(current_info),
+    removed: removed,
+    added: added,
+    persisted: persisted,
+    same_signature_set: len(removed) == 0 && len(added) == 0,
+    normalization: normalization,
+  }
+  if previous_info.feedsGates && current_info.feedsGates {
+    out = out + {count_delta: current_info.count - previous_info.count}
   }
   return out
 }
@@ -961,6 +1371,164 @@ pub fn verification_ladder_plan(query: dict, options = nil) -> VerificationLadde
     fallback: len(selected) == 0,
     reason: reason,
   }
+}
+
+/**
+ * Compare previous and current verification diagnostics as normalized sets and
+ * return deterministic progress credit. This is the data-only primitive behind
+ * diagnostic-delta repair policy: advisory/stale/unbound diagnostics never feed
+ * gates; advisory previous diagnostics never become the baseline; a clean
+ * current result clears a gate-bearing failure; removed or changed stuck
+ * signatures advance; the same normalized set does not.
+ *
+ * Inputs may be `nil`, a string signature, a single diagnostic dict, a check
+ * result dict, or `{diagnostics:[...]}` / `{errors:[...]}`. Row-level
+ * normalization is read from `diagnosticDelta`, `diagnostic_delta`,
+ * `signatureNormalization`, or `signature_normalization` on the row and its
+ * check, then overridden by direct options.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn verification_diagnostic_delta(previous, current, options = nil) -> VerificationDiagnosticDelta {
+  let normalization = __verification_delta_normalization(options)
+  let previous_info = __verification_delta_info(previous, normalization)
+  let current_info = __verification_delta_info(current, normalization)
+  let previous_gate_signatures = __verification_delta_gate_signatures(previous_info)
+  let current_gate_signatures = __verification_delta_gate_signatures(current_info)
+  let removed = __verification_delta_set_minus(previous_gate_signatures, current_gate_signatures)
+  let added = __verification_delta_set_minus(current_gate_signatures, previous_gate_signatures)
+  let persisted = __verification_delta_set_intersection(previous_gate_signatures, current_gate_signatures)
+  if !current_info.feedsGates {
+    return __verification_delta_result(
+      "advisory",
+      false,
+      previous_info,
+      current_info,
+      removed,
+      added,
+      persisted,
+      normalization,
+      "current_diagnostic_does_not_feed_gates",
+    )
+  }
+  let current_clear = current_info.explicit_success || (current_info.has_collection && current_info.count == 0)
+  if current_clear {
+    return __verification_delta_result(
+      "cleared",
+      len(previous_gate_signatures) > 0,
+      previous_info,
+      current_info,
+      removed,
+      added,
+      persisted,
+      normalization,
+      "current_result_is_passing",
+    )
+  }
+  if !current_info.failed || len(current_gate_signatures) == 0 {
+    return __verification_delta_result(
+      "initialized",
+      false,
+      previous_info,
+      current_info,
+      removed,
+      added,
+      persisted,
+      normalization,
+      "current_has_no_gate_bearing_failure_signature",
+    )
+  }
+  if !previous_info.feedsGates || !previous_info.failed || len(previous_gate_signatures) == 0 {
+    return __verification_delta_result(
+      "initialized",
+      false,
+      previous_info,
+      current_info,
+      removed,
+      added,
+      persisted,
+      normalization,
+      "no_prior_gate_bearing_failure",
+    )
+  }
+  if len(removed) == 0 && len(added) == 0 {
+    if current_info.count < previous_info.count {
+      return __verification_delta_result(
+        "advanced",
+        true,
+        previous_info,
+        current_info,
+        removed,
+        added,
+        persisted,
+        normalization,
+        "diagnostic_count_decreased",
+      )
+    }
+    if current_info.count > previous_info.count {
+      return __verification_delta_result(
+        "regressed",
+        false,
+        previous_info,
+        current_info,
+        removed,
+        added,
+        persisted,
+        normalization,
+        "diagnostic_count_increased",
+      )
+    }
+    return __verification_delta_result(
+      "unchanged",
+      false,
+      previous_info,
+      current_info,
+      removed,
+      added,
+      persisted,
+      normalization,
+      "same_diagnostic_signature_set",
+    )
+  }
+  if len(removed) > 0 {
+    return __verification_delta_result(
+      "advanced",
+      true,
+      previous_info,
+      current_info,
+      removed,
+      added,
+      persisted,
+      normalization,
+      "diagnostic_signature_set_changed",
+    )
+  }
+  if len(added) > 0 {
+    return __verification_delta_result(
+      "regressed",
+      false,
+      previous_info,
+      current_info,
+      removed,
+      added,
+      persisted,
+      normalization,
+      "new_diagnostics_added_without_clearing_prior_signatures",
+    )
+  }
+  return __verification_delta_result(
+    "unchanged",
+    false,
+    previous_info,
+    current_info,
+    removed,
+    added,
+    persisted,
+    normalization,
+    "same_diagnostic_signature_set",
+  )
 }
 
 /**
