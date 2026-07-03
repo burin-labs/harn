@@ -184,6 +184,96 @@ fn list_dir_observes_active_overlay_entries() {
 }
 
 #[test]
+fn mkdir_defaults_recursive_and_idempotent() {
+    let dir = tempfile::tempdir().unwrap();
+    let nested = dir.path().join("one/two/three");
+    let nested_arg = nested.to_string_lossy().into_owned();
+    let mut vm = vm();
+
+    call(&mut vm, "mkdir", vec![s(&nested_arg)]).unwrap();
+    assert!(
+        nested.is_dir(),
+        "default mkdir should create missing parents"
+    );
+    call(&mut vm, "mkdir", vec![s(&nested_arg)]).unwrap();
+    assert!(nested.is_dir(), "default mkdir should remain idempotent");
+}
+
+#[test]
+fn mkdir_nonrecursive_requires_existing_parent_and_unique_target() {
+    let dir = tempfile::tempdir().unwrap();
+    let missing_parent = dir.path().join("missing/lock.d");
+    let missing_parent_arg = missing_parent.to_string_lossy().into_owned();
+    let mut vm = vm();
+
+    let missing_parent_err = call(&mut vm, "mkdir", vec![s(&missing_parent_arg), b(false)])
+        .expect_err("recursive=false must not create missing parents");
+    assert!(
+        missing_parent_err
+            .to_string()
+            .contains("Failed to create directory"),
+        "unexpected mkdir error: {missing_parent_err}"
+    );
+    assert!(
+        !missing_parent.exists(),
+        "recursive=false must not materialize nested path after failure"
+    );
+
+    let parent = dir.path().join("locks");
+    std::fs::create_dir(&parent).unwrap();
+    let lock = parent.join("release.lock.d");
+    let lock_arg = lock.to_string_lossy().into_owned();
+    call(&mut vm, "mkdir", vec![s(&lock_arg), b(false)]).unwrap();
+    assert!(
+        lock.is_dir(),
+        "recursive=false should create exactly one directory"
+    );
+
+    let duplicate_err = call(&mut vm, "mkdir", vec![s(&lock_arg), b(false)])
+        .expect_err("recursive=false must fail when the target already exists");
+    assert!(
+        duplicate_err
+            .to_string()
+            .contains("Failed to create directory"),
+        "unexpected duplicate mkdir error: {duplicate_err}"
+    );
+}
+
+#[test]
+fn mkdir_nonrecursive_observes_active_overlay_entries() {
+    let dir = tempfile::tempdir().unwrap();
+    let overlay = std::sync::Arc::new(crate::testbench::overlay_fs::OverlayFs::rooted_at(
+        dir.path(),
+    ));
+    let _guard = crate::testbench::overlay_fs::install_overlay(overlay);
+    let mut vm = vm();
+    let lock = dir.path().join("release.lock.d");
+    let lock_arg = lock.to_string_lossy().into_owned();
+
+    call(&mut vm, "mkdir", vec![s(&lock_arg), b(false)]).unwrap();
+    assert!(
+        !lock.exists(),
+        "overlay nonrecursive mkdir should not materialize on the underlying fs"
+    );
+    assert!(
+        matches!(
+            call(&mut vm, "file_exists", vec![s(&lock_arg)]).unwrap(),
+            VmValue::Bool(true)
+        ),
+        "overlay nonrecursive mkdir should be visible through harness fs"
+    );
+
+    let duplicate_err = call(&mut vm, "mkdir", vec![s(&lock_arg), b(false)])
+        .expect_err("overlay recursive=false mkdir must fail when target exists in overlay");
+    assert!(
+        duplicate_err
+            .to_string()
+            .contains("Failed to create directory"),
+        "unexpected overlay duplicate mkdir error: {duplicate_err}"
+    );
+}
+
+#[test]
 fn read_lines_observes_active_overlay_content() {
     let dir = tempfile::tempdir().unwrap();
     let overlay = std::sync::Arc::new(crate::testbench::overlay_fs::OverlayFs::rooted_at(

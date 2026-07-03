@@ -186,6 +186,59 @@ impl OverlayFs {
         }
     }
 
+    pub fn create_dir(&self, path: &Path) -> std::io::Result<()> {
+        if !self.within_root(path) {
+            return std::fs::create_dir(path);
+        }
+        let key = self.key(path);
+        let mut layer = self.layer.lock().expect("overlay layer poisoned");
+        match layer.get(&key) {
+            Some(OverlayEntry::File(_)) | Some(OverlayEntry::Directory) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    format!("overlay: {} already exists", key.display()),
+                ));
+            }
+            Some(OverlayEntry::Deleted) | None => {}
+        }
+        if !matches!(layer.get(&key), Some(OverlayEntry::Deleted)) && path.exists() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                format!("overlay: {} already exists", key.display()),
+            ));
+        }
+        let parent = key.parent().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("overlay: {} has no parent", key.display()),
+            )
+        })?;
+        match layer.get(parent) {
+            Some(OverlayEntry::Directory) => {}
+            Some(OverlayEntry::File(_)) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::NotADirectory,
+                    format!("overlay: {} parent is a file", key.display()),
+                ));
+            }
+            Some(OverlayEntry::Deleted) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    format!("overlay: {} parent was deleted", key.display()),
+                ));
+            }
+            None if parent.is_dir() => {}
+            None => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    format!("overlay: {} parent does not exist", key.display()),
+                ));
+            }
+        }
+        layer.insert(key, OverlayEntry::Directory);
+        Ok(())
+    }
+
     pub fn create_dir_all(&self, path: &Path) -> std::io::Result<()> {
         if !self.within_root(path) {
             return std::fs::create_dir_all(path);
@@ -731,6 +784,13 @@ pub mod helpers {
         match active_overlay() {
             Some(overlay) => overlay.create_dir_all(path),
             None => std::fs::create_dir_all(path),
+        }
+    }
+
+    pub fn create_dir(path: &Path) -> std::io::Result<()> {
+        match active_overlay() {
+            Some(overlay) => overlay.create_dir(path),
+            None => std::fs::create_dir(path),
         }
     }
 
