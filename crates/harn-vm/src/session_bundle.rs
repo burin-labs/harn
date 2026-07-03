@@ -6,7 +6,6 @@
 //! transcripts, tool calls, HITL questions, and observability do not fork into
 //! a second persistence model.
 
-use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs;
@@ -24,7 +23,7 @@ use crate::orchestration::{
     RunObservabilityRecord, RunRecord, RunTraceSpanRecord, RunTransitionRecord,
     RunVerificationOutcomeRecord, RunWorkerLineageRecord, ToolCallRecord,
 };
-use crate::redact::{RedactionPolicy, REDACTED_PLACEHOLDER};
+use crate::redact::{json_path_child, RedactionEntry, RedactionPolicy, REDACTED_PLACEHOLDER};
 use crate::workspace_anchor::{anchor_from_transcript_metadata_json, MountedRoot, WorkspaceAnchor};
 
 mod schema;
@@ -423,15 +422,6 @@ pub struct RedactionManifest {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
-pub struct RedactionEntry {
-    pub path: String,
-    pub class: String,
-    pub action: String,
-    pub replacement: Option<String>,
-}
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(default)]
 pub struct BundleAttachment {
     pub id: String,
     pub kind: String,
@@ -513,12 +503,9 @@ pub fn export_run_record_bundle(
 
     if !matches!(options.mode, SessionBundleExportMode::Local) {
         let redaction_policy = bundle_redaction_policy(&options.redaction_policy);
-        redact_json_with_manifest(
-            &mut bundle_value,
-            "$",
-            &redaction_policy,
-            &mut manifest.entries,
-        );
+        manifest
+            .entries
+            .extend(redaction_policy.redact_json_manifest(&mut bundle_value));
         redact_bundle_pointer_paths_json(&mut bundle_value, "$", &mut manifest.entries);
     }
     if matches!(options.mode, SessionBundleExportMode::ReplayOnly) {
@@ -627,7 +614,12 @@ pub fn validate_session_bundle_value(
     }
 
     if !options.allow_unsafe_secret_markers {
-        reject_unredacted_secret_markers(value, "$", &options.redaction_policy)?;
+        if let Some(found) = options.redaction_policy.find_unredacted_secret(value) {
+            return Err(SessionBundleError::UnsafeSecretMarker {
+                path: found.path,
+                excerpt: found.excerpt,
+            });
+        }
     }
 
     serde_json::from_value::<SessionBundle>(value.clone())
@@ -1747,56 +1739,6 @@ fn attachments_from_run(run: &RunRecord) -> Vec<BundleAttachment> {
         .collect()
 }
 
-fn redact_json_with_manifest(
-    value: &mut JsonValue,
-    path: &str,
-    policy: &RedactionPolicy,
-    entries: &mut Vec<RedactionEntry>,
-) {
-    match value {
-        JsonValue::Object(map) => {
-            let keys = map.keys().cloned().collect::<Vec<_>>();
-            for key in keys {
-                let child_path = json_path_child(path, &key);
-                if policy.field_is_sensitive(&key) {
-                    map.insert(key, JsonValue::String(REDACTED_PLACEHOLDER.to_string()));
-                    entries.push(RedactionEntry {
-                        path: child_path,
-                        class: "sensitive_field".to_string(),
-                        action: "replaced".to_string(),
-                        replacement: Some(REDACTED_PLACEHOLDER.to_string()),
-                    });
-                } else if let Some(child) = map.get_mut(&key) {
-                    redact_json_with_manifest(child, &child_path, policy, entries);
-                }
-            }
-        }
-        JsonValue::Array(items) => {
-            for (index, item) in items.iter_mut().enumerate() {
-                redact_json_with_manifest(item, &format!("{path}[{index}]"), policy, entries);
-            }
-        }
-        JsonValue::String(text) => {
-            let redacted = policy.redact_string(text);
-            if let Cow::Owned(replacement) = redacted {
-                // Record the actual replacement string (now a named
-                // `<redacted:<pattern>:<len>>` placeholder from the
-                // OA-06 catalog) in the manifest so audit consumers
-                // can attribute the leak to a specific provider.
-                let manifest_replacement = replacement.clone();
-                *text = replacement;
-                entries.push(RedactionEntry {
-                    path: path.to_string(),
-                    class: "secret_pattern_or_url".to_string(),
-                    action: "replaced".to_string(),
-                    replacement: Some(manifest_replacement),
-                });
-            }
-        }
-        _ => {}
-    }
-}
-
 fn redact_bundle_pointer_paths_json(
     value: &mut JsonValue,
     path: &str,
@@ -1929,56 +1871,4 @@ fn json_path_from_segments(path: &[&str]) -> String {
     path.iter().fold("$".to_string(), |parent, segment| {
         json_path_child(&parent, segment)
     })
-}
-
-fn reject_unredacted_secret_markers(
-    value: &JsonValue,
-    path: &str,
-    policy: &RedactionPolicy,
-) -> Result<(), SessionBundleError> {
-    match value {
-        JsonValue::Object(map) => {
-            for (key, child) in map {
-                reject_unredacted_secret_markers(child, &json_path_child(path, key), policy)?;
-            }
-        }
-        JsonValue::Array(items) => {
-            for (index, item) in items.iter().enumerate() {
-                reject_unredacted_secret_markers(item, &format!("{path}[{index}]"), policy)?;
-            }
-        }
-        JsonValue::String(text) => {
-            if matches!(policy.redact_string(text), Cow::Owned(_)) {
-                return Err(SessionBundleError::UnsafeSecretMarker {
-                    path: path.to_string(),
-                    excerpt: secret_excerpt(text),
-                });
-            }
-        }
-        _ => {}
-    }
-    Ok(())
-}
-
-fn secret_excerpt(text: &str) -> String {
-    let excerpt = text.chars().take(80).collect::<String>();
-    if text.chars().count() > 80 {
-        format!("{excerpt}...")
-    } else {
-        excerpt
-    }
-}
-
-fn json_path_child(parent: &str, key: &str) -> String {
-    if key
-        .chars()
-        .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
-    {
-        format!("{parent}.{key}")
-    } else {
-        format!(
-            "{parent}[{}]",
-            serde_json::to_string(key).unwrap_or_default()
-        )
-    }
 }
