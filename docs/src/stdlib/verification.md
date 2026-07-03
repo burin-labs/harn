@@ -40,6 +40,45 @@ Unknown-but-readable files are still included in `snapshot` with `known =
 false`, which lets a diagnostic bind to a newly created file before the next
 full code-index rebuild.
 
+## Affected-Target Facts
+
+`verification_affected_targets(changed_paths, adapters, options)` resolves the
+build/test targets affected by file changes through data-declared adapter rows.
+Adapters provide a command `spec` and a `parser_id`; Harn owns the parser
+contract, while project stacks add rows without changing Rust or host glue:
+
+```harn
+import { verification_affected_targets } from "std/verification"
+
+pipeline default() {
+  let affected = verification_affected_targets(
+    ["crates/app/src/lib.rs", "apps/web/src/index.ts"],
+    [
+      {id: "cargo", parser_id: "cargo.metadata.v1", spec: {mode: "shell", command: "cargo metadata --format-version=1 --no-deps"}},
+      {id: "web", parser_id: "js.workspace_graph.v1", spec: {mode: "shell", command: "pnpm nx graph --file=/dev/stdout"}},
+    ],
+  )
+  return affected.targets
+}
+```
+
+Parser ids currently shipped by `std/verification`:
+
+- `harn.targets_json.v1`: stdout JSON is a target list or `{targets: [...]}`
+  for custom stacks and synthetic adapters.
+- `harn.targets_lines.v1`: stdout is one target id per line.
+- `cargo.metadata.v1`: Cargo metadata JSON maps changed files to package
+  roots and package targets.
+- `js.workspace_graph.v1`: JS workspace/project graph JSON maps changed files
+  to project roots and declared build/test targets.
+
+If adapters produce no targets, the helper falls back to the existing
+code-index graph by returning the changed file plus reverse importers as
+conservative file-level targets. Disable that with `{fallback:false}`.
+Command strings may use the standard template engine with
+`changed_paths_json`, `changed_paths_space`, and `root` bindings; the space
+binding is shell-quoted by the helper.
+
 ## Check Timing Capture
 
 `verification_observation_from_command_result(result, options)` converts a

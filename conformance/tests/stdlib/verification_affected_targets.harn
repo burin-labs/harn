@@ -1,0 +1,65 @@
+import { verification_affected_targets } from "std/verification"
+
+pipeline test(task) {
+  let fact = verification_affected_targets(
+    ["crates/app/src/lib.rs", "apps/web/src/index.ts", "plugins/a/file.foo"],
+    [
+      {
+        id: "cargo",
+        parser_id: "cargo.metadata.v1",
+        spec: {
+          mode: "shell",
+          command: "printf '%s' '{\"packages\":[{\"name\":\"app\",\"manifest_path\":\"crates/app/Cargo.toml\",\"targets\":[{\"name\":\"app\"},{\"name\":\"app-tests\"}]},{\"name\":\"other\",\"manifest_path\":\"crates/other/Cargo.toml\",\"targets\":[{\"name\":\"other\"}]}]}'",
+        },
+      },
+      {
+        id: "js",
+        parser_id: "js.workspace_graph.v1",
+        spec: {
+          mode: "shell",
+          command: "printf '%s' '{\"projects\":{\"web\":{\"root\":\"apps/web\",\"targets\":{\"build\":{},\"test\":{}}},\"admin\":{\"root\":\"apps/admin\",\"targets\":{\"build\":{}}}}}'",
+        },
+      },
+      {
+        id: "synthetic",
+        parser_id: "harn.targets_json.v1",
+        spec: {
+          mode: "shell",
+          command: "printf '%s' '{\"targets\":[{\"id\":\"plugin:a\",\"kind\":\"plugin-check\",\"files\":[\"plugins/a/file.foo\"]}]}'",
+        },
+      },
+    ],
+    {command_options: {capture: {max_inline_bytes: 4096}}},
+  )
+  assert_eq(fact.changed_paths[0], "crates/app/src/lib.rs")
+  assert_eq(len(fact.targets), 3)
+  assert_eq(fact.targets[0].id, "cargo:app")
+  assert_eq(fact.targets[0].kind, "cargo-package")
+  assert_eq(fact.targets[0].files[0], "crates/app/src/lib.rs")
+  assert(contains(fact.targets[0].target_names, "app-tests"))
+  assert_eq(fact.targets[1].id, "js:web")
+  assert_eq(fact.targets[1].target_names[0], "build")
+  assert_eq(fact.targets[1].target_names[1], "test")
+  assert_eq(fact.targets[2].id, "plugin:a")
+  assert_eq(fact.targets[2].kind, "plugin-check")
+  assert_eq(fact.adapters[0].ok, true)
+  assert_eq(fact.adapters[0].target_count, 1)
+  assert_eq(fact.adapters[1].parser_id, "js.workspace_graph.v1")
+  assert_eq(fact.adapters[2].target_count, 1)
+  assert_eq(fact.fallback.enabled, false)
+  let templated = verification_affected_targets(
+    ["x/a.txt", "y/b.txt"],
+    [
+      {
+        id: "lines",
+        parser_id: "harn.targets_lines.v1",
+        spec: {mode: "shell", command: "printf '%s\\n' {{ changed_paths_space }}"},
+      },
+    ],
+    {command_options: {capture: {max_inline_bytes: 4096}}},
+  )
+  assert_eq(len(templated.targets), 2)
+  assert_eq(templated.targets[0].id, "x/a.txt")
+  assert_eq(templated.targets[1].id, "y/b.txt")
+  __io_println("verification affected targets ok")
+}
