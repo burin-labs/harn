@@ -68,6 +68,9 @@ impl UntypedAccessKind {
 /// `unknown`. This enum lets a single diagnosis routine phrase the shared
 /// error/help for whichever form the author actually wrote, so the
 /// nil-safety guidance stays consistent across `.`, `[]`, and `.()`.
+/// (`for`-`in` iteration is deliberately NOT here: iterating `nil` is a
+/// designed no-op at runtime — see
+/// conformance/tests/language/optional_chaining_nil_coalesce.harn.)
 #[derive(Clone, Copy)]
 enum AccessForm<'a> {
     Property(&'a str),

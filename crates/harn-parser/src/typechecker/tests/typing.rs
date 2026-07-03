@@ -1011,43 +1011,51 @@ fn test_explicit_generic_call_type_args_are_checked() {
 
 #[test]
 fn test_explicit_generic_call_type_args_must_match_arguments() {
+    // Explicit type arguments are a frozen contract: the argument is
+    // checked against the instantiation (`expected int, found string`),
+    // with no arg-driven re-inference (and so no union-join widening).
     let errs = errors(
         r#"pipeline t(task) {
   fn identity<T>(x: T) -> T { return x }
   let n: int = identity<int>("oops")
 }"#,
     );
-    assert_eq!(errs.len(), 2, "expected 2 errors, got: {errs:?}");
-    assert!(
-        errs.iter()
-            .any(|err| err.contains("type parameter 'T' was inferred as both int and string")),
-        "missing explicit type binding conflict error: {errs:?}"
-    );
     assert!(
         errs.iter()
             .any(|err| err.contains("expected int, found string")),
         "missing explicit type-arg mismatch error: {errs:?}"
     );
+    assert!(
+        !errs.iter().any(|err| err.contains("inferred as both")),
+        "explicit type args must not run arg-driven inference: {errs:?}"
+    );
 }
 
 #[test]
-fn test_generic_type_param_must_bind_consistently() {
+fn test_generic_type_param_conflicting_candidates_join_to_union() {
+    // Two arguments pinning the same parameter to different types infer
+    // the union (`T = int | string`), matching how a heterogeneous list
+    // literal infers `list<int | string>` and how TypeScript infers a
+    // union for multiple inference candidates. The joined type still
+    // participates in downstream checks.
     let errs = errors(
         r#"pipeline t(task) {
   fn keep<T>(a: T, b: T) -> T { return a }
   keep(1, "x")
 }"#,
     );
-    assert_eq!(errs.len(), 2, "expected 2 errors, got: {errs:?}");
-    assert!(
-        errs.iter()
-            .any(|err| err.contains("type parameter 'T' was inferred as both int and string")),
-        "missing generic binding conflict error: {errs:?}"
+    assert!(errs.is_empty(), "union-join call should be clean: {errs:?}");
+
+    let errs = errors(
+        r#"pipeline t(task) {
+  fn keep<T>(a: T, b: T) -> T { return a }
+  let n: int = keep(1, "x")
+}"#,
     );
     assert!(
         errs.iter()
-            .any(|err| err.contains("argument 2 `b`: expected int, found string")),
-        "missing instantiated argument mismatch error: {errs:?}"
+            .any(|err| err.contains("expected int, found int | string")),
+        "joined union must flow to the return type: {errs:?}"
     );
 }
 
@@ -2232,4 +2240,89 @@ fn area(s: Shape) -> int {
 }",
     );
     assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
+}
+
+#[test]
+fn test_ternary_branch_merge_collapses_never_and_simplifies() {
+    // A throwing arm contributes `never`, which must collapse out of the
+    // merged type — same rule as if/else expressions.
+    let errs = errors(
+        r#"fn f(flag: bool) -> int {
+  let x = flag ? 1 : unreachable("boom")
+  return x
+}"#,
+    );
+    assert!(errs.is_empty(), "never arm should collapse: {errs:?}");
+
+    // Nested unions flatten: `(int | nil) : int` is `int | nil`, not a
+    // nested union that defeats downstream nil-narrowing.
+    let errs = errors(
+        r"fn g() -> int? { return 1 }
+
+fn f(flag: bool) -> int {
+  let x = flag ? g() : 0
+  if x != nil {
+    return x
+  }
+  return -1
+}",
+    );
+    assert!(errs.is_empty(), "flattened union should narrow: {errs:?}");
+}
+
+#[test]
+fn test_aliased_dict_receiver_keeps_value_type_across_methods() {
+    // `type Env = dict<string, string>`: every dict combinator must see
+    // through the alias, not just `.values()`.
+    let errs = errors(
+        r"type Env = dict<string, string>
+
+fn f(e: Env) -> int {
+  let m: dict<string, string> = e.map_values(fn(v) { return v })
+  return m.count()
+}",
+    );
+    assert!(errs.is_empty(), "map_values lost the alias types: {errs:?}");
+
+    let errs = errors(
+        r"type Env = dict<string, string>
+
+fn f(e: Env) -> dict<string, int> {
+  return e.map_values(fn(v) { return v })
+}",
+    );
+    assert!(
+        errs.iter()
+            .any(|e| e.contains("dict<string, int>") && e.contains("dict<string, string>")),
+        "aliased receiver value type must participate in checks: {errs:?}"
+    );
+}
+
+#[test]
+fn test_bool_match_requires_both_arms() {
+    let errs = errors(
+        r"fn f(b: bool) -> int {
+  match b {
+    true -> { return 1 }
+  }
+}",
+    );
+    assert!(
+        errs.iter()
+            .any(|e| e.contains("Non-exhaustive match on bool") && e.contains("false")),
+        "expected bool exhaustiveness error: {errs:?}"
+    );
+
+    let errs = errors(
+        r"fn f(b: bool) -> int {
+  match b {
+    true -> { return 1 }
+    false -> { return 0 }
+  }
+}",
+    );
+    assert!(
+        errs.is_empty(),
+        "covered bool match should be clean: {errs:?}"
+    );
 }

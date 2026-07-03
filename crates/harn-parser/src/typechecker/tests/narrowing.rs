@@ -1488,3 +1488,26 @@ fn test_type_of_narrows_full_runtime_tag_vocabulary() {
     );
     assert!(errs.is_empty(), "decimal tag failed to narrow: {errs:?}");
 }
+
+#[test]
+fn test_schema_is_falsy_branch_keeps_partially_overlapping_members() {
+    // Falsy branch of a literal-schema check must NOT drop the whole
+    // `string` member: a non-"a" string is still possible. Only members
+    // every value of which matches the schema are subtracted.
+    let errs = errors(
+        r#"fn f(x: string | int) -> string {
+  if schema_is(x, "a") {
+    return "lit"
+  }
+  match type_of(x) {
+    "string" -> { return x }
+    "int" -> { return "int" }
+    _ -> { return "?" }
+  }
+}"#,
+    );
+    assert!(
+        errs.is_empty(),
+        "string member wrongly subtracted: {errs:?}"
+    );
+}

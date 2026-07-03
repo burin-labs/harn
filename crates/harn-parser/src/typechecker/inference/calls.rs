@@ -24,6 +24,7 @@ use super::super::format::format_type;
 use super::super::schema_inference::schema_type_expr_from_node;
 use super::super::scope::{is_builtin, EnumDeclInfo, FnSignature, StructDeclInfo, TypeScope};
 use super::super::union::collapse_members_opt;
+use super::super::union::simplify_union;
 use super::super::union::without_nil;
 use super::super::TypeChecker;
 
@@ -284,24 +285,33 @@ impl TypeChecker {
         let type_param_set: std::collections::BTreeSet<String> =
             type_param_names.iter().cloned().collect();
         let mut type_bindings: BTreeMap<String, TypeExpr> = BTreeMap::new();
-        if type_args.len() == type_param_names.len() {
+        let explicit_type_args =
+            type_args.len() == type_param_names.len() && !type_param_names.is_empty();
+        if explicit_type_args {
             for (param_name, type_arg) in type_param_names.iter().zip(type_args.iter()) {
                 type_bindings.insert(param_name.clone(), type_arg.clone());
             }
-        }
-
-        for (i, arg) in args.iter().enumerate() {
-            let Some(param) = Self::builtin_param_for_arg(sig, i) else {
-                continue;
-            };
-            if param.ty.is_any() {
-                continue;
-            }
-            let param_ty = param.ty.to_type_expr();
-            if let Err(message) =
-                self.bind_from_arg_node(&param_ty, arg, &type_param_set, &mut type_bindings, scope)
-            {
-                self.error_at(Code::ArgumentTypeMismatch, message, arg.span);
+        } else {
+            // See the user-fn path: arg-driven inference is skipped when the
+            // caller supplied explicit type arguments — those are a frozen
+            // contract, checked per-argument against the instantiation.
+            for (i, arg) in args.iter().enumerate() {
+                let Some(param) = Self::builtin_param_for_arg(sig, i) else {
+                    continue;
+                };
+                if param.ty.is_any() {
+                    continue;
+                }
+                let param_ty = param.ty.to_type_expr();
+                if let Err(message) = self.bind_from_arg_node(
+                    &param_ty,
+                    arg,
+                    &type_param_set,
+                    &mut type_bindings,
+                    scope,
+                ) {
+                    self.error_at(Code::ArgumentTypeMismatch, message, arg.span);
+                }
             }
         }
 
@@ -466,13 +476,16 @@ impl TypeChecker {
                 bindings.insert(param_name.to_string(), concrete.clone());
                 return Ok(());
             }
+            // Two arguments pinning the same parameter to different types
+            // JOIN to their union instead of hard-erroring: `choose(1, "x")`
+            // infers `T = int | string` the same way a heterogeneous list
+            // literal infers `list<int | string>` (and TypeScript infers a
+            // union). The call still fails downstream if the joined type
+            // violates a bound or the declared return contract.
             if existing != concrete {
-                return Err(format!(
-                    "type parameter '{}' was inferred as both {} and {}",
-                    param_name,
-                    format_type(existing),
-                    format_type(concrete)
-                ));
+                let joined = simplify_union(vec![existing.clone(), concrete.clone()]);
+                bindings.insert(param_name.to_string(), joined);
+                return Ok(());
             }
             return Ok(());
         }
@@ -1344,24 +1357,34 @@ impl TypeChecker {
             let mut type_bindings: BTreeMap<String, TypeExpr> = BTreeMap::new();
             let type_param_set: std::collections::BTreeSet<String> =
                 sig.type_param_names.iter().cloned().collect();
-            if type_args.len() == sig.type_param_names.len() {
+            let explicit_type_args =
+                type_args.len() == sig.type_param_names.len() && !sig.type_param_names.is_empty();
+            if explicit_type_args {
                 for (param_name, type_arg) in sig.type_param_names.iter().zip(type_args.iter()) {
                     type_bindings.insert(param_name.clone(), type_arg.clone());
                 }
-            }
-            for (i, arg) in args.iter().enumerate() {
-                let Some((_param_name, param_type)) = Self::function_param_for_arg(&sig, i) else {
-                    continue;
-                };
-                if let Some(param_ty) = param_type {
-                    if let Err(message) = self.bind_from_arg_node(
-                        param_ty,
-                        arg,
-                        &type_param_set,
-                        &mut type_bindings,
-                        scope,
-                    ) {
-                        self.error_at(Code::ArgumentTypeMismatch, message, arg.span);
+            } else {
+                // Arg-driven inference only runs when the caller did not
+                // supply explicit type arguments: an explicit `f<int>(...)`
+                // is a contract, and the per-argument checks below report a
+                // plain "expected int, found string" against the frozen
+                // instantiation instead of silently widening `T` via the
+                // union-join in `bind_type_param`.
+                for (i, arg) in args.iter().enumerate() {
+                    let Some((_param_name, param_type)) = Self::function_param_for_arg(&sig, i)
+                    else {
+                        continue;
+                    };
+                    if let Some(param_ty) = param_type {
+                        if let Err(message) = self.bind_from_arg_node(
+                            param_ty,
+                            arg,
+                            &type_param_set,
+                            &mut type_bindings,
+                            scope,
+                        ) {
+                            self.error_at(Code::ArgumentTypeMismatch, message, arg.span);
+                        }
                     }
                 }
             }

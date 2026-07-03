@@ -687,9 +687,13 @@ impl TypeChecker {
                 refs.apply_falsy(&mut false_scope);
                 let ft = self.infer_type(false_expr, &false_scope);
 
+                // Branch merge mirrors if/else-expression inference:
+                // `simplify_union` flattens nested unions, dedups, and
+                // collapses `Never` arms so `cond ? throw("x") : 5` is `int`,
+                // not `never | int`.
                 match (&tt, &ft) {
                     (Some(a), Some(b)) if a == b => tt,
-                    (Some(a), Some(b)) => Some(TypeExpr::Union(vec![a.clone(), b.clone()])),
+                    (Some(a), Some(b)) => Some(simplify_union(vec![a.clone(), b.clone()])),
                     (Some(_), None) => tt,
                     (None, Some(_)) => ft,
                     (None, None) => None,
@@ -770,6 +774,12 @@ impl TypeChecker {
                     }
                 }
                 let obj_type = self.infer_type(object, scope);
+                // Resolve named aliases ONCE and match every structural
+                // receiver arm against the resolved form — otherwise sibling
+                // methods disagree on aliased receivers (`type Env =
+                // dict<string, string>`: `.values()` kept the value type but
+                // `.map_values()` degraded to bare `dict`).
+                let resolved_recv = obj_type.as_ref().map(|t| self.resolve_alias(t, scope));
                 let include_optional_nil = optional_access
                     && obj_type
                         .as_ref()
@@ -785,7 +795,7 @@ impl TypeChecker {
                 // materialize. This must come before the shared-method match
                 // below so `.map` / `.filter` / etc. on an iter return Iter,
                 // not list.
-                let iter_elem_type: Option<TypeExpr> = match &obj_type {
+                let iter_elem_type: Option<TypeExpr> = match &resolved_recv {
                     Some(TypeExpr::Iter(inner)) => Some((**inner).clone()),
                     Some(TypeExpr::Named(n)) if n == "iter" => Some(TypeExpr::Named("any".into())),
                     _ => None,
@@ -863,7 +873,7 @@ impl TypeChecker {
                 // existing eager typings (the runtime still materializes
                 // them). Only the explicit .iter() bridge returns Iter.
                 if method == "iter" {
-                    match &obj_type {
+                    match &resolved_recv {
                         Some(TypeExpr::List(inner)) => {
                             return Some(result(TypeExpr::Iter(Box::new((**inner).clone()))));
                         }
@@ -884,16 +894,15 @@ impl TypeChecker {
                         _ => {}
                     }
                 }
-                let is_dict = matches!(&obj_type, Some(TypeExpr::Named(n)) if n == "dict")
-                    || matches!(&obj_type, Some(TypeExpr::DictType(..)))
-                    || matches!(&obj_type, Some(TypeExpr::Shape(_)));
+                let is_dict = matches!(&resolved_recv, Some(TypeExpr::Named(n)) if n == "dict")
+                    || matches!(&resolved_recv, Some(TypeExpr::DictType(..)))
+                    || matches!(&resolved_recv, Some(TypeExpr::Shape(_)));
                 // Element / key / value types of the (eager) collection receiver,
                 // when parameterized. Eager list/dict combinators materialize a
                 // new collection, so they return `List<…>` / `dict<…>` rather than
                 // an `Iter`, but they preserve or transform the element type the
                 // same way the lazy `Iter` combinators above do. `None` falls back
                 // to the opaque `list`/`dict` type for unparameterized receivers.
-                let resolved_recv = obj_type.as_ref().map(|t| self.resolve_alias(t, scope));
                 let list_elem: Option<TypeExpr> = match &resolved_recv {
                     Some(TypeExpr::List(inner)) => Some((**inner).clone()),
                     _ => None,
@@ -992,11 +1001,11 @@ impl TypeChecker {
                         Some(e) => Some(result(list_of(e.clone()))),
                         None => Some(result(TypeExpr::Named("list".into()))),
                     },
-                    "window" | "each_cons" | "sliding_window" => match &obj_type {
-                        Some(TypeExpr::List(inner)) => Some(result(TypeExpr::List(Box::new(
-                            TypeExpr::List(Box::new((**inner).clone())),
-                        )))),
-                        _ => Some(result(TypeExpr::Named("list".into()))),
+                    "window" | "each_cons" | "sliding_window" => match &list_elem {
+                        Some(e) => Some(result(TypeExpr::List(Box::new(TypeExpr::List(
+                            Box::new(e.clone()),
+                        ))))),
+                        None => Some(result(TypeExpr::Named("list".into()))),
                     },
                     "reduce" | "find" | "first" | "last" => None,
                     // Dict methods — project the key/value type parameters.
@@ -1016,10 +1025,10 @@ impl TypeChecker {
                         // Rekey/map_keys transform keys; resulting dict still keys-by-string.
                         // Preserve the value-type parameter when known so downstream code can
                         // still rely on dict<string, V> typing after a key-rename.
-                        if let Some(TypeExpr::DictType(_, v)) = &obj_type {
+                        if let Some(v) = &dict_val {
                             Some(result(TypeExpr::DictType(
                                 Box::new(TypeExpr::Named("string".into())),
-                                v.clone(),
+                                Box::new(v.clone()),
                             )))
                         } else {
                             Some(result(TypeExpr::Named("dict".into())))
