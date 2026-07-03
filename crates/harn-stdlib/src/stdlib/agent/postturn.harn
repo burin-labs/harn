@@ -1080,7 +1080,7 @@ pub fn agent_compute_post_turn(session, llm_result, dispatch, opts, iteration) {
     )
   }
   let verdict = __post_turn_callback_verdict(opts, payload)
-  let verdict_result = __post_turn_verdict_result(session, opts, verdict, "terminal_callback")
+  let verdict_result = __post_turn_verdict_result(session, opts, verdict)
   if verdict_result != nil {
     return __post_turn_with_narrowing(verdict_result, narrowing)
   }
@@ -1144,7 +1144,7 @@ pub fn agent_compute_terminal_callback(session, opts, terminal) {
     last_assistant_text: "",
   }
   let verdict = __terminal_callback_verdict(opts, payload)
-  let verdict_result = __post_turn_verdict_result(session, opts, verdict)
+  let verdict_result = __post_turn_verdict_result(session, opts, verdict, "terminal_callback")
   if verdict_result != nil {
     return verdict_result
   }
