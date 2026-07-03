@@ -95,3 +95,45 @@ parameters.
 Scheduler policy remains outside these helpers: callers choose the row, rung,
 command, warm/cold classification, retry strategy, and when to join background
 work.
+
+## Toolchain Identity Facts
+
+`verification_toolchain_facts(rows, options)` executes config-declared
+toolchain probes and returns data facts for verification profiles. Harn does
+not hardcode a language or toolchain list; each row supplies the command and
+version extraction pattern:
+
+```harn
+import { verification_toolchain_facts } from "std/verification"
+
+pipeline default() {
+  let facts = verification_toolchain_facts([
+    {
+      id: "go/default",
+      name: "go",
+      versionProbe: {
+        spec: {mode: "shell", command: "go version"},
+        versionPattern: "go([0-9]+\\.[0-9]+\\.[0-9]+)",
+      },
+      cacheIdentity: {GOFLAGS: "-buildvcs=false"},
+    },
+  ])
+  return facts[0]
+}
+```
+
+Each fact includes:
+
+- `id` and `name`: stable row identity.
+- `available`: whether the probe command completed successfully.
+- `version`: the first capture from `versionPattern`, when available.
+- `raw_version`: stdout, or stderr when stdout is blank.
+- `cache_identity`: caller-declared cache/build-server/env facts such as
+  `GOCACHE`, `GOFLAGS`, `ZIG_LOCAL_CACHE_DIR`, `SBT_OPTS`, or equivalent
+  project-specific fields.
+- `probe`: status, exit, duration, stdout, and stderr from the command result.
+
+Missing or failing probes return `available = false` facts instead of throwing.
+This lets verification schedulers bind false-fail risk to concrete toolchain
+and cache identity without embedding toolchain-specific heuristics in Burin or
+other host products.

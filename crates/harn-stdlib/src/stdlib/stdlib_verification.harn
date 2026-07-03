@@ -9,7 +9,7 @@
  * duplicating hostlib plumbing or inventing product-specific hash logic.
  */
 import { command_run, command_wait } from "std/command"
-import { truncate_text } from "std/text"
+import { regex_first_capture, truncate_text } from "std/text"
 
 type VerificationFileHashSnapshotEntry = {
   path: string,
@@ -54,6 +54,16 @@ type VerificationStartedCheck = {
   started: dict,
   observation_options: dict,
   snapshot: VerificationFileHashSnapshot?,
+}
+
+type VerificationToolchainFact = {
+  id: string,
+  name: string,
+  available: bool,
+  version?: string,
+  raw_version: string,
+  cache_identity: dict,
+  probe: dict,
 }
 
 fn __verification_opts(options) {
@@ -164,6 +174,59 @@ fn __verification_failure_signature(result, opts) {
   let status = result?.status ?? "failed"
   let exit = __verification_exit(result, opts)
   return "check " + to_string(status) + " exit=" + to_string(exit)
+}
+
+fn __verification_row_id(row, index: int) -> string {
+  let id = trim(to_string(row?.id ?? row?.name ?? ""))
+  if id != "" {
+    return id
+  }
+  return "toolchain/" + to_string(index)
+}
+
+fn __verification_toolchain_name(row, id: string) -> string {
+  let name = trim(to_string(row?.name ?? ""))
+  return name == "" ? id : name
+}
+
+fn __verification_toolchain_probe(row) {
+  let probe = row?.versionProbe ?? row?.probe
+  if probe == nil {
+    return nil
+  }
+  if type_of(probe) == "dict" && probe?.spec != nil {
+    return probe.spec
+  }
+  return probe
+}
+
+fn __verification_toolchain_probe_options(row, opts) {
+  let probe = row?.versionProbe ?? row?.probe ?? {}
+  return (opts?.command_options ?? {}) + (probe?.command_options ?? row?.command_options ?? {})
+}
+
+fn __verification_toolchain_version_pattern(row, opts) -> string {
+  let probe = row?.versionProbe ?? row?.probe ?? {}
+  return to_string(
+    probe?.versionPattern
+      ?? probe?.version_pattern
+      ?? row?.versionPattern
+      ?? row?.version_pattern
+      ?? opts?.version_pattern
+      ?? "([0-9]+(\\.[0-9A-Za-z_+\\-]+)+)",
+  )
+}
+
+fn __verification_toolchain_raw_version(result) -> string {
+  let stdout = trim(result?.stdout ?? "")
+  if stdout != "" {
+    return stdout
+  }
+  return trim(result?.stderr ?? "")
+}
+
+fn __verification_toolchain_cache_identity(row, opts) -> dict {
+  return (opts?.cache_identity ?? {}) + (row?.cacheIdentity ?? row?.cache_identity ?? {})
 }
 
 /**
@@ -325,4 +388,62 @@ pub fn verification_finish_check(started_check: dict, options = nil) -> Verifica
     row = verification_profile_record_run(to_string(row_id), observation, observation_options?.dir)
   }
   return {result: result, observation: observation, row: row, snapshot: started_check?.snapshot}
+}
+
+/**
+ * Execute config-declared toolchain probes and return deterministic identity
+ * facts. Rows are data, not code: Harn does not hardcode Go, Zig, Cargo, or
+ * any other toolchain. A row may declare:
+ *
+ * - `id` / `name`
+ * - `versionProbe`: a `command_run` spec or `{spec, versionPattern,
+ *   command_options}`
+ * - `cacheIdentity`: any cache/build-server/env identity fields the scheduler
+ *   wants to bind to the profile row
+ *
+ * Failed or missing probes produce `available = false` facts instead of
+ * throwing, so a verification scheduler can reason about unavailable tools.
+ *
+ * @effects: [process]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn verification_toolchain_facts(rows: list<dict>, options = nil) -> list<VerificationToolchainFact> {
+  let opts = __verification_opts(options)
+  var facts = []
+  var index = 0
+  for row in rows {
+    let id = __verification_row_id(row, index)
+    let name = __verification_toolchain_name(row, id)
+    let spec = __verification_toolchain_probe(row)
+    var result = nil
+    if spec != nil {
+      result = command_run(spec, __verification_toolchain_probe_options(row, opts))
+    }
+    let ok = result != nil && __verification_result_ok(result)
+    let raw_version = result == nil ? "" : __verification_toolchain_raw_version(result)
+    let version = ok ? regex_first_capture(__verification_toolchain_version_pattern(row, opts), raw_version) : nil
+    let exit_code = result == nil ? nil : __verification_exit(result, {})
+    let probe = {
+      status: result?.status ?? "not_configured",
+      exit: exit_code,
+      durationMs: result?.duration_ms,
+      stdout: result?.stdout ?? "",
+      stderr: result?.stderr ?? "",
+    }
+    facts = facts
+      + [
+      {
+        id: id,
+        name: name,
+        available: ok,
+        version: version,
+        raw_version: raw_version,
+        cache_identity: __verification_toolchain_cache_identity(row, opts),
+        probe: probe,
+      },
+    ]
+    index = index + 1
+  }
+  return facts
 }
