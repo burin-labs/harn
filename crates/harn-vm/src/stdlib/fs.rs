@@ -627,17 +627,23 @@ fn list_dir_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 #[harn_builtin(
     sig = "mkdir(path: string, recursive?: bool) -> nil",
     category = "fs",
-    doc = "Create a directory and any missing parents."
+    doc = "Create a directory. By default missing parents are created; pass recursive=false for single-directory creation that fails if the target already exists."
 )]
 fn mkdir_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let path = args.first().map(|a| a.display()).unwrap_or_default();
+    let recursive = !matches!(args.get(1), Some(VmValue::Bool(false)));
     let resolved = resolve_fs_path(&path);
     crate::stdlib::sandbox::enforce_fs_path(
         "mkdir",
         &resolved,
         crate::stdlib::sandbox::FsAccess::Write,
     )?;
-    overlay::create_dir_all(&resolved).map_err(|e| {
+    let result = if recursive {
+        overlay::create_dir_all(&resolved)
+    } else {
+        overlay::create_dir(&resolved)
+    };
+    result.map_err(|e| {
         VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
             "Failed to create directory {}: {e}",
             resolved.display()
