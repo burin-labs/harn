@@ -1160,6 +1160,74 @@ fn test_result_generic_type_compatibility() {
 }
 
 #[test]
+fn test_result_match_pattern_binds_instantiated_payload_types() {
+    // `Result<int, string>` scrutinee: `Result.Ok(v)` binds `v: int`, and
+    // `Result.Err(e)` binds `e: string` — not the raw declaration params.
+    let ok_errs = errors(
+        r#"fn g() -> Result<int, string> { return Ok(1) }
+
+fn f() -> int {
+  let r = g()
+  match r {
+    Result.Ok(v) -> { return v }
+    Result.Err(e) -> { return e.len() }
+  }
+}"#,
+    );
+    assert!(ok_errs.is_empty(), "unexpected type errors: {ok_errs:?}");
+
+    // The instantiated payload participates in real checks: returning the
+    // `int` payload from a `string`-returning fn is a mismatch.
+    let bad_errs = errors(
+        r#"fn g() -> Result<int, string> { return Ok(1) }
+
+fn f() -> string {
+  let r = g()
+  match r {
+    Result.Ok(v) -> { return v }
+    Result.Err(e) -> { return e }
+  }
+}"#,
+    );
+    assert_eq!(bad_errs.len(), 1, "expected 1 error, got: {bad_errs:?}");
+    assert!(bad_errs[0].contains("expected string, found int"));
+}
+
+#[test]
+fn test_generic_enum_match_pattern_binds_instantiated_payload() {
+    let errs = errors(
+        r#"enum Box<T> {
+  Full(value: T),
+  Empty
+}
+
+fn f(b: Box<string>) -> string {
+  match b {
+    Box.Full(v) -> { return v }
+    Box.Empty -> { return "" }
+  }
+}"#,
+    );
+    assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
+}
+
+#[test]
+fn test_unparameterised_generic_enum_match_binds_gradual_payload() {
+    // A bare `Result` scrutinee (no type args statically known) must not
+    // leak the phantom declaration param `T` into the arm scope; the
+    // binding degrades to gradual and the arm body stays checkable.
+    let errs = errors(
+        r#"fn f(r: Result) -> int {
+  match r {
+    Result.Ok(v) -> { return v }
+    Result.Err(e) -> { return 0 }
+  }
+}"#,
+    );
+    assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
+}
+
+#[test]
 fn test_result_generic_type_mismatch_reports_error() {
     let errs = errors(
         r"pipeline t(task) {
