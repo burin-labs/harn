@@ -391,6 +391,7 @@ fn models_lora_plan_human_text_includes_recipe() {
         "tool format: json (requested auto)",
         "training: qlora + peft_lora",
         "trainer: trl_sft_trainer",
+        "LoRA hparams: rank=16 alpha=32 dropout=0.05",
         "template: harn_text_tool_calls_json_fences",
         "template source: Harn text tool-call parser using JSON object bodies",
         "dataset format: harn_text_tool_calls_json_fences",
@@ -449,6 +450,9 @@ fn models_lora_plan_json_shape_is_stable() {
     assert_eq!(harn_value["request"]["requested_tool_format"], "native");
     assert_eq!(harn_value["request"]["effective_tool_format"], "native");
     assert_eq!(harn_value["training"]["adapter_type"], "peft_lora");
+    assert_eq!(harn_value["training"]["rank"], 16);
+    assert_eq!(harn_value["training"]["alpha"], 32);
+    assert_eq!(harn_value["training"]["dropout"], 0.05);
     assert_eq!(
         harn_value["training"]["quantization"],
         "base_model_precision"
@@ -558,6 +562,12 @@ fn models_lora_plan_json_shape_is_stable() {
         .expect("launch argv");
     assert!(
         launch.iter().any(|arg| arg == "--lora-adapter"),
+        "launch argv={launch:?}"
+    );
+    assert!(
+        launch
+            .windows(2)
+            .any(|pair| pair[0] == "--max-lora-rank" && pair[1] == "16"),
         "launch argv={launch:?}"
     );
 }

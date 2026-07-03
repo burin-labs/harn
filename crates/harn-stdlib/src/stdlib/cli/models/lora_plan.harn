@@ -46,6 +46,21 @@ fn __safe_bool(value, fallback: bool) -> bool {
   return fallback
 }
 
+fn __safe_int_string(value, fallback: string) -> string {
+  if type_of(value) == "int" {
+    return to_string(value)
+  }
+  return fallback
+}
+
+fn __safe_number_string(value, fallback: string) -> string {
+  let kind = type_of(value)
+  if kind == "int" || kind == "float" {
+    return to_string(value)
+  }
+  return fallback
+}
+
 fn __shell_quote(value: string) -> string {
   if value == "" {
     return "''"
@@ -142,6 +157,15 @@ fn __render_human(harness: Harness, report: dict) {
       + __safe_string(training["adapter_type"], ""),
   )
   harness.stdio.println("  trainer: " + __safe_string(training["trainer"], ""))
+  harness.stdio
+    .println(
+    "  LoRA hparams: rank="
+      + __safe_int_string(training["rank"], "")
+      + " alpha="
+      + __safe_int_string(training["alpha"], "")
+      + " dropout="
+      + __safe_number_string(training["dropout"], ""),
+  )
   harness.stdio.println("  quantization: " + __safe_string(training["quantization"], ""))
   harness.stdio.println("  loss scope: " + __safe_string(training["loss_scope"], ""))
   harness.stdio.println("  packing: " + __safe_string(training["packing"], ""))

@@ -1395,6 +1395,9 @@ assistant-only loss masks, `messages`/`tools` columns, and packing boundaries.
 The launch block includes the matching `harn models lora export` command so the
 trainer dataset, provenance manifest, eval route, and serving route share the
 same base model, provider, tool format, and chat-template contract.
+Use `--rank`, `--alpha`, and `--dropout` to pin adapter hyperparameters in the
+same contract; when the runtime exposes a LoRA rank flag, the local launch hint
+uses the planned rank as `--max-lora-rank` so serving buffers match training.
 
 ## harn models recommend
 
