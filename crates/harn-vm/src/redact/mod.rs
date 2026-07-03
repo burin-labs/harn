@@ -29,6 +29,7 @@
 //! install host overrides for every persistence path that calls
 //! [`current_policy`].
 
+mod manifest;
 mod patterns;
 
 use std::borrow::Cow;
@@ -38,6 +39,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde_json::Value as JsonValue;
 use url::Url;
 
+pub(crate) use manifest::json_path_child;
+pub use manifest::{RedactionEntry, UnredactedSecret};
 pub use patterns::{
     clear_audit_ring, clear_custom_patterns, custom_pattern_names, default_pattern_names,
     drain_audit_ring, install_audit_sink, register_custom_pattern, scan_secret_patterns, AuditSink,
