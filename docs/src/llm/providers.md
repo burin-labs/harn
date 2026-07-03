@@ -173,7 +173,10 @@ start training or inference. The plan also reports the template convention to
 train against: native Gemma 4 or FunctionGemma tool templates stay distinct from
 Harn text/json `<tool_call>` adapters, and the trainer contract calls out
 assistant-only loss masks plus `messages`/`tools` columns, so train and serving
-do not silently cross tool-call contracts.
+do not silently cross tool-call contracts. `harn models lora export` carries
+the same contract into dataset rows and manifests with a stable contract id
+derived from the base model, provider, effective tool format, dataset format,
+and chat template.
 
 Harn maintains local runtime risk profiles for hybrid-cache families
 (Qwen3.6, Gemma4). The profile table records preferred runtimes,

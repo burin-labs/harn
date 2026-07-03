@@ -61,6 +61,7 @@ fn __render_human(harness: Harness, report: dict) {
   let base = __safe_dict(report["base"])
   let request = __safe_dict(report["request"])
   let target = __safe_dict(report["target"])
+  let contract = __safe_dict(report["contract"])
   let serving = __safe_dict(report["serving"])
   let output = __safe_dict(report["output"])
   let stats = __safe_dict(report["stats"])
@@ -79,6 +80,7 @@ fn __render_human(harness: Harness, report: dict) {
       + ")",
   )
   harness.stdio.println("  dataset format: " + __safe_string(request["dataset_format"], ""))
+  harness.stdio.println("  contract: " + __safe_string(contract["id"], ""))
   harness.stdio.println("  target base: " + __safe_string(target["base_model"], ""))
   let adapter = __safe_string(target["adapter_name"], "")
   if adapter != "" {

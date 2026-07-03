@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use regex::Regex;
 use serde::Serialize;
 use serde_json::{json, Map, Value};
+use sha2::{Digest as _, Sha256};
 
 use crate::cli::ModelsLoraExportArgs;
 use crate::dispatch;
@@ -97,14 +98,23 @@ fn export_report(args: &ModelsLoraExportArgs) -> Result<LoraExportReport, String
     };
     let dataset_format = dataset_format_for_tool_format(&decision.effective).to_string();
     let corpus_path = resolve_corpus_path(&args.corpus)?;
+    let contract_id = lora_contract_id(
+        &resolved.id,
+        &provider,
+        &decision.effective,
+        &dataset_format,
+        args.chat_template.as_deref(),
+    )?;
     let target = ExportTarget {
         base_model: resolved.id.clone(),
         provider: provider.clone(),
         adapter_name: args.adapter_name.clone(),
         harn_tool_format: decision.effective.clone(),
         chat_template: args.chat_template.clone(),
+        contract_id: contract_id.clone(),
         metadata: parse_target_metadata(&args.target_metadata)?,
     };
+    let contract = export_contract_report(&target, &dataset_format);
     let mut writer = if args.check {
         None
     } else {
@@ -201,13 +211,16 @@ fn export_report(args: &ModelsLoraExportArgs) -> Result<LoraExportReport, String
     let manifest_path = if let Some(path) = args.manifest.as_deref() {
         write_export_manifest(
             path,
-            &corpus_path,
-            args.out.as_deref().filter(|_| !args.check),
-            output_sha256.as_deref(),
-            &stats,
-            &target,
-            &serving,
-            &errors,
+            ExportManifestWrite {
+                input_path: &corpus_path,
+                output_path: args.out.as_deref().filter(|_| !args.check),
+                output_sha256: output_sha256.as_deref(),
+                stats: &stats,
+                target: &target,
+                contract: &contract,
+                serving: &serving,
+                errors: &errors,
+            },
         )?;
         Some(path.display().to_string())
     } else {
@@ -268,8 +281,10 @@ fn export_report(args: &ModelsLoraExportArgs) -> Result<LoraExportReport, String
             adapter_name: target.adapter_name,
             harn_tool_format: target.harn_tool_format,
             chat_template: target.chat_template,
+            contract_id,
             metadata: target.metadata,
         },
+        contract,
         serving,
         output: ExportOutput {
             path: output_path,
@@ -368,6 +383,7 @@ struct ExportTarget {
     adapter_name: Option<String>,
     harn_tool_format: String,
     chat_template: Option<String>,
+    contract_id: String,
     metadata: BTreeMap<String, String>,
 }
 
@@ -785,6 +801,10 @@ fn export_metadata(
         Value::String(source_tool_format(record)),
     );
     metadata.insert("lora_target".to_string(), export_target_value(target));
+    metadata.insert(
+        "lora_contract_id".to_string(),
+        Value::String(target.contract_id.clone()),
+    );
     Value::Object(metadata)
 }
 
@@ -814,6 +834,10 @@ fn export_target_value(target: &ExportTarget) -> Value {
             Value::String(chat_template.clone()),
         );
     }
+    object.insert(
+        "contract_id".to_string(),
+        Value::String(target.contract_id.clone()),
+    );
     if !target.metadata.is_empty() {
         object.insert(
             "metadata".to_string(),
@@ -836,6 +860,39 @@ fn export_serving_report(
         adapter_binding: lora_adapter_binding(provider_supports_lora_launch).to_string(),
         tool_format: target.harn_tool_format.clone(),
         dataset_format: dataset_format.to_string(),
+        contract_id: target.contract_id.clone(),
+    }
+}
+
+fn lora_contract_id(
+    base_model: &str,
+    provider: &str,
+    harn_tool_format: &str,
+    dataset_format: &str,
+    chat_template: Option<&str>,
+) -> Result<String, String> {
+    let input = LoraContractHashInput {
+        schema_version: 1,
+        base_model,
+        provider,
+        harn_tool_format,
+        dataset_format,
+        chat_template,
+    };
+    let bytes = serde_json::to_vec(&input)
+        .map_err(|error| format!("failed to render LoRA contract hash input: {error}"))?;
+    Ok(format!("sha256:{}", hex::encode(Sha256::digest(bytes))))
+}
+
+fn export_contract_report(target: &ExportTarget, dataset_format: &str) -> ExportContractReport {
+    ExportContractReport {
+        schema_version: 1,
+        id: target.contract_id.clone(),
+        base_model: target.base_model.clone(),
+        provider: target.provider.clone(),
+        harn_tool_format: target.harn_tool_format.clone(),
+        dataset_format: dataset_format.to_string(),
+        chat_template: target.chat_template.clone(),
     }
 }
 
@@ -875,16 +932,18 @@ fn normalize_blank_lines(value: &str, regexes: &ExportRegexes) -> String {
         .to_string()
 }
 
-fn write_export_manifest(
-    path: &Path,
-    input_path: &Path,
-    output_path: Option<&Path>,
-    output_sha256: Option<&str>,
-    stats: &ExportStats,
-    target: &ExportTarget,
-    serving: &ExportServingReport,
-    errors: &[String],
-) -> Result<(), String> {
+struct ExportManifestWrite<'a> {
+    input_path: &'a Path,
+    output_path: Option<&'a Path>,
+    output_sha256: Option<&'a str>,
+    stats: &'a ExportStats,
+    target: &'a ExportTarget,
+    contract: &'a ExportContractReport,
+    serving: &'a ExportServingReport,
+    errors: &'a [String],
+}
+
+fn write_export_manifest(path: &Path, manifest: ExportManifestWrite<'_>) -> Result<(), String> {
     if let Some(parent) = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -892,24 +951,25 @@ fn write_export_manifest(
         std::fs::create_dir_all(parent)
             .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
     }
-    let output = output_path.map(|path| {
+    let output = manifest.output_path.map(|path| {
         json!({
             "path": path.display().to_string(),
-            "sha256": output_sha256.unwrap_or(""),
+            "sha256": manifest.output_sha256.unwrap_or(""),
         })
     });
     let manifest = json!({
         "exporter": "harn_models_lora_export_v1",
-        "dataset_format": serving.dataset_format.as_str(),
+        "dataset_format": manifest.serving.dataset_format.as_str(),
         "input": {
-            "path": input_path.display().to_string(),
-            "sha256": sha256_file(input_path).unwrap_or_default(),
+            "path": manifest.input_path.display().to_string(),
+            "sha256": sha256_file(manifest.input_path).unwrap_or_default(),
         },
         "output": output,
-        "stats": stats,
-        "target": export_target_value(target),
-        "serving": serving,
-        "errors": errors,
+        "stats": manifest.stats,
+        "target": export_target_value(manifest.target),
+        "contract": manifest.contract,
+        "serving": manifest.serving,
+        "errors": manifest.errors,
     });
     std::fs::write(
         path,
@@ -927,6 +987,7 @@ struct LoraExportReport {
     request: ExportRequest,
     tool_calling: ToolCallingReport,
     target: ExportTargetReport,
+    contract: ExportContractReport,
     serving: ExportServingReport,
     output: ExportOutput,
     stats: ExportStats,
@@ -951,7 +1012,29 @@ struct ExportTargetReport {
     adapter_name: Option<String>,
     harn_tool_format: String,
     chat_template: Option<String>,
+    contract_id: String,
     metadata: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Serialize)]
+struct ExportContractReport {
+    schema_version: u64,
+    id: String,
+    base_model: String,
+    provider: String,
+    harn_tool_format: String,
+    dataset_format: String,
+    chat_template: Option<String>,
+}
+
+#[derive(Serialize)]
+struct LoraContractHashInput<'a> {
+    schema_version: u64,
+    base_model: &'a str,
+    provider: &'a str,
+    harn_tool_format: &'a str,
+    dataset_format: &'a str,
+    chat_template: Option<&'a str>,
 }
 
 #[derive(Debug, Serialize)]
@@ -963,6 +1046,7 @@ struct ExportServingReport {
     adapter_binding: String,
     tool_format: String,
     dataset_format: String,
+    contract_id: String,
 }
 
 #[derive(Debug, Serialize)]

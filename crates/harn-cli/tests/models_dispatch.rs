@@ -587,6 +587,7 @@ fn models_lora_export_check_reports_native_shape() {
     for fragment in [
         "LoRA export for gemma-4-e4b-it via vllm",
         "dataset format: messages_with_tool_calls",
+        "contract: sha256:",
         "adapter binding: runtime_lora_adapter",
         "mode: check",
         "stats: records=2 emitted=1 skipped=1 tool_calls=1 tool_results=1",
@@ -644,11 +645,26 @@ fn models_lora_export_json_writes_dataset_and_manifest() {
     assert_eq!(harn_value["stats"]["tool_calls"].as_u64(), Some(1));
     assert_eq!(harn_value["stats"]["tool_results"].as_u64(), Some(1));
     assert_eq!(harn_value["target"]["adapter_name"], "burin-tools");
+    let contract_id = harn_value["contract"]["id"].as_str().expect("contract id");
+    assert!(
+        contract_id.starts_with("sha256:"),
+        "contract id={contract_id}"
+    );
+    assert_eq!(harn_value["target"]["contract_id"], contract_id);
+    assert_eq!(harn_value["contract"]["base_model"], "gemma-4-e4b-it");
+    assert_eq!(harn_value["contract"]["provider"], "vllm");
+    assert_eq!(harn_value["contract"]["harn_tool_format"], "native");
+    assert_eq!(
+        harn_value["contract"]["dataset_format"],
+        "messages_with_tool_calls"
+    );
+    assert_eq!(harn_value["contract"]["chat_template"], "gemma-4");
     assert_eq!(harn_value["serving"]["request_model"], "burin-tools");
     assert_eq!(
         harn_value["serving"]["adapter_binding"],
         "runtime_lora_adapter"
     );
+    assert_eq!(harn_value["serving"]["contract_id"], contract_id);
     assert!(out.is_file(), "exported JSONL missing");
     assert!(manifest.is_file(), "manifest missing");
 
@@ -673,15 +689,20 @@ fn models_lora_export_json_writes_dataset_and_manifest() {
         tools.iter().any(|tool| tool["function"]["name"] == "read"),
         "tools={tools:?}"
     );
+    assert_eq!(row["metadata"]["lora_contract_id"], contract_id);
+    assert_eq!(row["metadata"]["lora_target"]["contract_id"], contract_id);
     let manifest_value = parse_json(
         &fs::read_to_string(&manifest).expect("read manifest"),
         "manifest",
     );
+    assert_eq!(manifest_value["contract"]["id"], contract_id);
+    assert_eq!(manifest_value["target"]["contract_id"], contract_id);
     assert_eq!(manifest_value["serving"]["request_model"], "burin-tools");
     assert_eq!(
         manifest_value["serving"]["adapter_binding"],
         "runtime_lora_adapter"
     );
+    assert_eq!(manifest_value["serving"]["contract_id"], contract_id);
 }
 
 // ────────────────────────────────────────────────────────────────────────
