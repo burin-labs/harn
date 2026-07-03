@@ -424,13 +424,15 @@ mod tests {
     }
 
     /// A live OpenAI-compatible chat model, used only by the on-demand baseline
-    /// below. Single-shot, temperature 0, so the measurement is as reproducible
-    /// as the provider allows.
+    /// below. `temperature` is configurable so the baseline can run N>=5 at a
+    /// non-zero temperature to capture the model's stochastic susceptibility,
+    /// not just one deterministic point.
     struct OpenAiCompatModel {
         client: reqwest::Client,
         base_url: String,
         api_key: String,
         model: String,
+        temperature: f64,
     }
 
     #[async_trait]
@@ -438,7 +440,7 @@ mod tests {
         async fn respond(&self, system: &str, user: &str) -> Result<String, String> {
             let body = serde_json::json!({
                 "model": self.model,
-                "temperature": 0,
+                "temperature": self.temperature,
                 "max_tokens": 600,
                 "messages": [
                     {"role": "system", "content": system},
@@ -476,10 +478,11 @@ mod tests {
     ///   security::behavioral::tests::baseline_openai_compat
     /// ```
     ///
-    /// Reports ASR under Off (framing disabled) vs Spotlight (shipped posture)
-    /// so the framing's behavioral effect is visible alongside the absolute
-    /// number the LoRA must beat. It asserts only that the run completed — the
-    /// number is a measurement to record, not yet a gate.
+    /// Reports mean ASR under Off / Spotlight / Strict across `BEHAVIORAL_PROBE_TRIALS`
+    /// trials (default 1) at `BEHAVIORAL_PROBE_TEMP` (default 0.0). Run N>=5 at a
+    /// non-zero temperature for a gate-worthy read; N=1/temp-0 is an exploratory
+    /// point. It asserts only that the run completed — the number is a
+    /// measurement to record.
     #[test]
     #[ignore = "calls a live model provider; run on demand with a key"]
     fn baseline_openai_compat() {
@@ -491,27 +494,51 @@ mod tests {
             .unwrap_or_else(|_| "https://api.fireworks.ai/inference/v1".to_string());
         let model = std::env::var("BEHAVIORAL_PROBE_MODEL")
             .unwrap_or_else(|_| "accounts/fireworks/models/gpt-oss-120b".to_string());
+        let trials: usize = std::env::var("BEHAVIORAL_PROBE_TRIALS")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(1)
+            .max(1);
+        let temperature: f64 = std::env::var("BEHAVIORAL_PROBE_TEMP")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(0.0);
         let provider = OpenAiCompatModel {
             client: reqwest::Client::new(),
             base_url,
             api_key,
             model: model.clone(),
+            temperature,
         };
 
+        eprintln!("[behavioral-baseline] model={model} trials={trials} temp={temperature}");
         for mode in [
             SecurityMode::Off,
             SecurityMode::Spotlight,
             SecurityMode::Strict,
         ] {
-            let report = block_on(run_behavioral_battery(&provider, mode));
-            assert!(report.malicious_total >= 10, "corpus should be non-trivial");
+            // Aggregate across trials: mean ASR + per-class hit counts summed
+            // over every trial (denominator = cases * trials).
+            let mut asr_sum = 0.0;
+            let mut on_task_sum = 0.0;
+            let mut class_hits: BTreeMap<String, (usize, usize)> = BTreeMap::new();
+            for _ in 0..trials {
+                let report = block_on(run_behavioral_battery(&provider, mode));
+                assert!(report.malicious_total >= 10, "corpus should be non-trivial");
+                asr_sum += report.asr;
+                on_task_sum += report.on_task_rate;
+                for (class, (hit, total)) in report.per_class {
+                    let entry = class_hits.entry(class).or_insert((0, 0));
+                    entry.0 += hit;
+                    entry.1 += total;
+                }
+            }
             eprintln!(
-                "[behavioral-baseline] model={model} mode={mode:?} asr={:.2} on_task={:.2} ({}/{} injected)",
-                report.asr, report.on_task_rate, report.injected, report.malicious_total
+                "[behavioral-baseline] mode={mode:?} mean_asr={:.3} mean_on_task={:.3} (n={trials})",
+                asr_sum / trials as f64,
+                on_task_sum / trials as f64,
             );
-            let mut classes: Vec<_> = report.per_class.iter().collect();
-            classes.sort_by(|a, b| a.0.cmp(b.0));
-            for (class, (hit, total)) in classes {
+            for (class, (hit, total)) in &class_hits {
                 eprintln!("[behavioral-baseline]   class={class} asr={hit}/{total}");
             }
         }
