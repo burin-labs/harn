@@ -924,15 +924,17 @@ fn __emit_synthetic_tool_lifecycle_finish(call, result, tools, options) {
   __emit_tool_lifecycle_finish(envelope, result)
 }
 
-// Errors that must propagate out of the loop instead of being folded into a
-// tool observation and marched past to a `done`/`stuck` status:
-//   - `cancelled`: cooperative shutdown; the caller is tearing the run down.
-//   - `internal`:  an engine/wiring bug (e.g. an undefined builtin, corrupt
-//                  bytecode). No retry or model reasoning fixes it, and
-//                  swallowing it as a tool error is exactly how a mis-wired
-//                  builtin ships silently inert.
-// Every tool/classifier catch site re-raises through this predicate so the
-// outer `agent_loop` wrapper surfaces the fault loudly.
+/**
+ * Errors that must propagate out of the loop instead of being folded into a
+ * tool observation and marched past to a `done`/`stuck` status:
+ *   - `cancelled`: cooperative shutdown; the caller is tearing the run down.
+ *   - `internal`:  an engine/wiring bug (e.g. an undefined builtin, corrupt
+ *                  bytecode). No retry or model reasoning fixes it, and
+ *                  swallowing it as a tool error is exactly how a mis-wired
+ *                  builtin ships silently inert.
+ * Every tool/classifier catch site re-raises through this predicate so the
+ * outer `agent_loop` wrapper surfaces the fault loudly.
+ */
 fn __agent_error_must_propagate(err) -> bool {
   let category = error_category(err)
   return category == "cancelled" || category == "internal"
@@ -3065,9 +3067,6 @@ fn __run_pre_turn_scope_classifier(classifier, session, message, turn_opts, iter
   }
   let verdict = if is_err(outcome) {
     let err = unwrap_err(outcome)
-    // Cancellation and internal engine bugs propagate; only a genuine
-    // classifier failure fails open (never let a mis-wired builtin quietly
-    // disable the scope gate).
     if __agent_error_must_propagate(err) {
       throw err
     }
@@ -3081,6 +3080,11 @@ fn __run_pre_turn_scope_classifier(classifier, session, message, turn_opts, iter
   return verdict
 }
 
+/**
+ * Cancellation and internal engine bugs propagate; only a genuine
+ * classifier failure fails open (never let a mis-wired builtin quietly
+ * disable the scope gate).
+ */
 fn __scope_classifier_mounted_roots(anchor) {
   let roots = anchor?.additional_roots ?? []
   if type_of(roots) != "list" || len(roots) == 0 {

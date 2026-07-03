@@ -30,17 +30,14 @@ fn one_tool() {
   )
 }
 
-// Tool middleware that fails before dispatch with the given error category.
+/** Tool middleware that fails before dispatch with the given error category. */
 fn throwing_caller(category) {
   return { call, next -> throw_error("boom from tool caller", category) }
 }
 
 fn run_with_caller(category, cap, calls) {
   return with_llm_script(
-    [
-      {tool_calls: calls},
-      llm_text("##DONE##"),
-    ],
+    [{tool_calls: calls}, llm_text("##DONE##")],
     { ->
       let outcome = try {
         agent_loop(
@@ -68,21 +65,15 @@ fn run_with_caller(category, cap, calls) {
 
 pipeline default() {
   let one_call = [{id: "c1", name: "echo", arguments: {msg: "hi"}}]
-  let two_calls = [
-    {id: "c1", name: "echo", arguments: {msg: "hi"}},
-    {id: "c2", name: "echo", arguments: {msg: "yo"}},
-  ]
-
+  let two_calls = [{id: "c1", name: "echo", arguments: {msg: "hi"}}, {id: "c2", name: "echo", arguments: {msg: "yo"}}]
   // Sequential dispatch (cap=1): an internal bug aborts the loop.
   let seq = run_with_caller("internal", 1, one_call)
   __io_println("seq.aborted=" + to_string(seq.aborted))
   __io_println("seq.category=" + to_string(seq?.category ?? ""))
-
   // Parallel dispatch (cap=2, two calls): the internal bug still aborts.
   let par = run_with_caller("internal", 2, two_calls)
   __io_println("par.aborted=" + to_string(par.aborted))
   __io_println("par.category=" + to_string(par?.category ?? ""))
-
   // A recoverable (generic) tool failure is absorbed into a tool observation;
   // the loop completes rather than aborting.
   let recoverable = run_with_caller("generic", 1, one_call)
