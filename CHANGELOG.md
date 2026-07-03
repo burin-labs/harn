@@ -8,6 +8,99 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.9.2
+
+### Added
+
+- Added the behavioral tier of the ASR (attack-success-rate) battery
+  (`security::behavioral`): a deterministic, judge-free probe that runs each
+  role-confusion attack case through a model as a framed untrusted document and
+  scores obedience by a per-case canary token. Where the static battery measures
+  detection and containment, this measures the outcome that protects the user —
+  whether the model actually obeys an injected directive under the shipped
+  `spotlight_wrap` framing. Model access is behind a `BehavioralModel` trait so
+  the aggregation is unit-tested with mocks (no network in CI); the live baseline
+  is run on demand and is the pre-LoRA number role-robustness training must beat.
+- Added `std/agent/canon` helpers that resolve harn-canon packs, evaluate Flow slices, render bounded
+  feedback, and optionally inject it into agent sessions.
+- Added a default-OFF `code_mode` agent tool (the CodeAct pattern): the model
+  authors a short Harn script that composes the session's other tools as a typed
+  API via `call_tool(name, args)`, keeping intermediate connector data out of the
+  model context and returning only the composed result. The script runs in a
+  restricted sandbox VM whose only egress routes through the same policy +
+  approval + MCP-credential gate as the model's own tool calls, so a code-mode
+  script's capability is provably ≤ the model's own and connector credentials
+  never enter the script. Enable per session with `code_mode: true` or by listing
+  `"code_mode"` in `enabled_tools`.
+- `std/coordination` now exposes filesystem-backed directory lease helpers so Harn
+  scripts can serialize cross-process work without shell-specific lock glue. Stale
+  lease recovery is guarded by a second atomic cleanup directory to avoid
+  cross-process delete/reacquire races.
+- **`harn models lora export` can now turn tool-calling corpora into
+  trainer-ready LoRA datasets.** The command resolves the target model route,
+  exports Harn text/json or native tool-call rows, and can write a provenance
+  manifest with corpus/output hashes and conversion stats.
+- `harn models lora plan` and `harn models lora export` now include portable
+  serving and adapter-binding metadata for LoRA promotion.
+- **Role-hygiene ingress: special-token neutralization + destyling inside the
+  spotlight frame.** `spotlight_wrap` now runs two structural passes on an
+  untrusted body before framing it: `neutralize_special_tokens` rewrites reserved
+  chat-template tokens (`<|im_start|>`, `[INST]`, `<|eot_id|>`, …) to
+  `⟦special-token:…⟧` so they cannot re-open turns or inject a system message
+  (ChatBug / ChatInject / MetaBreak), and `destyle_untrusted` neutralizes
+  line-leading `User:`/`Assistant:`/`System:` labels and `<think>` reasoning tags
+  (arXiv:2603.12277) so injected content cannot read as a real turn or
+  chain-of-thought. Both are idempotent, surgical (benign look-alikes untouched),
+  and default on for every non-`off` mode; new `[security]` knobs
+  `neutralize_special_tokens` / `destyle_untrusted` toggle them via
+  `std/security::configure`. The ASR battery now proves the delta in one run:
+  special-token survival drops from **1.00** (framing only) to **0.00** under the
+  default posture, and role-style survival is **0.00** for the tagged/prefixed
+  attacks. String-level containment; a tokenizer-level guarantee over rendered
+  token IDs is a planned follow-up.
+
+### Changed
+
+- `flow_invariant_feedback` now includes capped finding locations from Flow and
+  harn-canon predicate reports by default, with `include_findings` and
+  `max_findings_per_item` options for terse callers.
+
+### Fixed
+
+- **Cross-provider escalation from an OpenAI/Ollama-dialect primary to
+  Anthropic no longer dies with `messages: Unexpected role "tool"` (HTTP 400).**
+  A cheap OpenAI-dialect primary (e.g. Fireworks gpt-oss escalating to Claude
+  Sonnet) records tool results as top-level `role:"tool"` messages. When
+  escalation switched the provider to Anthropic and replayed that history,
+  Anthropic rejected `role:"tool"` — it represents a tool result as a
+  `role:"user"` message carrying a `tool_result` content block keyed by
+  `tool_use_id`, never a top-level `role:"tool"`. The Anthropic request builder
+  now translates any `role:"tool"` message into that shape at the egress
+  boundary (before the canonical-key retain that would otherwise strip the
+  source `tool_call_id`, and before tool-result adjacency enforcement so the
+  real observation pairs with its `tool_use` block instead of being masked by an
+  interrupted-before-dispatch placeholder). It also translates the ASSISTANT
+  half of the same boundary: the primary's OpenAI-style top-level `tool_calls`
+  array is rendered as Anthropic `tool_use` content blocks with the same ids
+  (name + parsed `input`, preserving any accompanying assistant text), so every
+  translated `tool_result` has its corresponding `tool_use` — closing the third
+  stacked 400 (`unexpected tool_use_id found in tool_result blocks ... Each
+  tool_result block must have a corresponding tool_use`). The quirk lives in the
+  Anthropic adapter, so homogeneous-Anthropic and homogeneous-OpenAI/Ollama runs
+  are byte-identical — only the cross-dialect escalation case changes.
+- `harness.fs.mkdir(path, false)` now performs non-recursive, exclusive directory creation so
+  Harn workflows can use directory creation as an atomic cross-process lock primitive.
+- Release publishing now streams `cargo publish` output live while preserving retry
+  classification, making crates.io/index waits visible in GitHub Actions logs.
+- Restore the Linux x86_64 release-asset path by raising the release binary-size budget to match
+  the current stripped Harn binary and adding a workflow/default drift guard.
+- A `<tool_call>` block whose body is a JSON array of calls (`[{ "name": …, "arguments": … }]`) is no
+  longer silently swallowed as prose. A single-element array now dispatches its one call identically
+  to the bare and object-envelope forms; a multi-element array surfaces the actionable "one call per
+  `<tool_call>` block" error instead of vanishing with no feedback. The array body was being intercepted
+  by the narration-recovery path, which guarded `<`- and `{`-leading bodies from the prose fallback but
+  omitted `[`.
+
 ## v0.9.1
 
 ### Added
