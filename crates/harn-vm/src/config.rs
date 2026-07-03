@@ -302,6 +302,16 @@ pub struct SecurityConfig {
     pub mode: SecurityMode,
     /// Frame untrusted external tool/MCP output in spotlight delimiters.
     pub spotlight_external: bool,
+    /// Neutralize reserved chat-template special tokens (`<|im_start|>`,
+    /// `[INST]`, `<|eot_id|>`, …) inside untrusted spans so they cannot re-open
+    /// turns or inject a system message (ChatBug / ChatInject / MetaBreak). On by
+    /// default for every non-`off` mode.
+    pub neutralize_special_tokens: bool,
+    /// Destyle forged turn/reasoning markers (line-leading `User:`/`Assistant:`/
+    /// `System:` labels and `<think>` tags) inside untrusted spans so injected
+    /// content cannot read as a real turn or chain-of-thought. On by default for
+    /// every non-`off` mode.
+    pub destyle_untrusted: bool,
     /// Apply the lethal-trifecta gate: force confirmation when tainted context
     /// reaches an exfiltration-capable or destructive tool.
     pub trifecta_gate: bool,
@@ -339,6 +349,8 @@ impl Default for SecurityConfig {
         Self {
             mode: SecurityMode::Spotlight,
             spotlight_external: true,
+            neutralize_special_tokens: true,
+            destyle_untrusted: true,
             trifecta_gate: true,
             pin_mcp_schemas: true,
             gate_secret_reads: true,
@@ -1018,6 +1030,8 @@ pub fn schema_json() -> JsonValue {
                 "properties": {
                     "mode": {"enum": ["off", "spotlight", "strict", "local-ml"]},
                     "spotlight_external": {"type": "boolean"},
+                    "neutralize_special_tokens": {"type": "boolean"},
+                    "destyle_untrusted": {"type": "boolean"},
                     "trifecta_gate": {"type": "boolean"},
                     "pin_mcp_schemas": {"type": "boolean"},
                     "gate_secret_reads": {"type": "boolean"},

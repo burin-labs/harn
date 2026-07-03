@@ -200,6 +200,8 @@ it. Defaults are **on**, consistent with the safe defaults for `permissions`,
 | --- | --- | --- | --- |
 | `mode` | `off` \| `spotlight` \| `strict` \| `local-ml` | `spotlight` | `off` disables every layer. `spotlight` frames untrusted output as data and gates the lethal trifecta. `strict` additionally datamarks every line of untrusted content. `local-ml` is a superset of `spotlight` that also scores untrusted content with an on-device injection classifier (Layer 2). |
 | `spotlight_external` | bool | `true` | Wrap untrusted external tool/MCP output in delimiters + a provenance banner so the model treats it as data, never instructions. |
+| `neutralize_special_tokens` | bool | `true` | Neutralize reserved chat-template special tokens (`<\|im_start\|>`, `[INST]`, `<\|eot_id\|>`, …) inside untrusted spans so they cannot re-open turns or inject a system message (ChatBug / ChatInject / MetaBreak). On for every non-`off` mode. |
+| `destyle_untrusted` | bool | `true` | Destyle forged turn/reasoning markers — line-leading `User:`/`Assistant:`/`System:` labels and `<think>` tags — inside untrusted spans so injected content cannot read as a real turn or chain-of-thought. On for every non-`off` mode. |
 | `trifecta_gate` | bool | `true` | Once untrusted content is in context, upgrade an auto-allowed tool that can exfiltrate (network/fetch), destroy state, or read a secret file to an interactive confirmation. Only takes effect where an approval policy is installed. |
 | `pin_mcp_schemas` | bool | `true` | Pin + hash each MCP tool's description/schema on `tools/list`; flag any that change after first sighting (rug-pull / tool-poisoning defense). |
 | `gate_secret_reads` | bool | `true` | Include reads of well-known secret/credential files in the trifecta gate. |
@@ -223,6 +225,17 @@ The sentinel is derived from the content, so an attacker who embeds a fake
 `[END …]` marker cannot break out of the block. This is Microsoft "spotlighting"
 ([arXiv 2403.14720](https://arxiv.org/abs/2403.14720)); detection alone is not a
 defense, so it is paired with the trifecta gate rather than relied on alone.
+
+**Role hygiene inside the frame.** Spotlighting frames a span as data but leaves
+its bytes intact, so a payload can still smuggle reserved chat-template tokens or
+forge a turn/reasoning label that survives once the transcript is rendered. Two
+passes run on the body before framing (both on for every non-`off` mode):
+`neutralize_special_tokens` rewrites reserved tokens (`<|im_start|>`, `[INST]`,
+`<|eot_id|>`, …) so they cannot re-open a turn (ChatBug / ChatInject / MetaBreak),
+and `destyle_untrusted` neutralizes line-leading `User:`/`Assistant:`/`System:`
+labels and `<think>` tags so injected content cannot read as a real turn or
+chain-of-thought (arXiv:2603.12277). These are string-level containment; a
+tokenizer-level guarantee over rendered token IDs is a planned follow-up.
 
 **The lethal-trifecta gate** mirrors the [lethal trifecta](https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/):
 danger appears when an agent simultaneously has access to private data, exposure
