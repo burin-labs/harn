@@ -413,6 +413,7 @@ impl TypeChecker {
                 body,
             } => {
                 self.check_node(iterable, scope);
+                self.check_iterable_receiver(iterable, scope);
                 let mut loop_scope = scope.child();
                 // Narrowing established before the loop only holds for the
                 // first iteration if the subject is reassigned in the body.

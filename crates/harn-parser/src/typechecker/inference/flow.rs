@@ -1259,12 +1259,18 @@ impl TypeChecker {
     ) {
         let enum_name = self.match_enum_name(value, scope);
         let Some(enum_name) = enum_name else {
-            // Two non-enum cases left:
+            // Three non-enum cases left:
             //   1. `match obj.<tag>` where `obj` is a tagged shape union →
             //      check coverage over the discriminant values.
-            //   2. anything else → try the named/literal-union exhaustiveness
-            //      check.
+            //   2. a `bool` scrutinee → both `true` and `false` (or a
+            //      wildcard) must be covered, mirroring `match_covers_bool`
+            //      in the fall-through analysis.
+            //   3. anything else → try the named/literal-union
+            //      exhaustiveness check.
             if self.check_match_exhaustiveness_tagged_shape(value, arms, scope, span) {
+                return;
+            }
+            if self.check_match_exhaustiveness_bool(value, arms, scope, span) {
                 return;
             }
             self.check_match_exhaustiveness_union(value, arms, scope, span);
@@ -1406,6 +1412,60 @@ impl TypeChecker {
                 missing,
             );
         }
+        true
+    }
+
+    /// Diagnostic twin of `match_covers_bool`: a `match` on a `bool`
+    /// scrutinee must cover both `true` and `false` (or carry a wildcard).
+    /// Returns `true` when the scrutinee was a bool (whether or not a
+    /// diagnostic fired) so the dispatcher stops falling through. Without
+    /// this, `match b { true -> … }` silently type-checked while enum and
+    /// union scrutinees error on the same omission.
+    fn check_match_exhaustiveness_bool(
+        &mut self,
+        value: &SNode,
+        arms: &[MatchArm],
+        scope: &TypeScope,
+        span: Span,
+    ) -> bool {
+        let is_bool = matches!(
+            self.infer_type(value, scope)
+                .map(|ty| self.resolve_alias(&ty, scope)),
+            Some(TypeExpr::Named(n)) if n == "bool"
+        );
+        if !is_bool {
+            return false;
+        }
+        let mut covers_true = false;
+        let mut covers_false = false;
+        let mut has_wildcard = false;
+        for arm in arms.iter().filter(|arm| arm.guard.is_none()) {
+            for leaf in pattern_alternatives(&arm.pattern) {
+                match &leaf.node {
+                    Node::BoolLiteral(true) => covers_true = true,
+                    Node::BoolLiteral(false) => covers_false = true,
+                    Node::Identifier(_) => has_wildcard = true,
+                    _ => has_wildcard = true,
+                }
+            }
+        }
+        if has_wildcard || (covers_true && covers_false) {
+            return true;
+        }
+        let missing: Vec<String> = [(!covers_true, "true"), (!covers_false, "false")]
+            .iter()
+            .filter(|(missing, _)| *missing)
+            .map(|(_, name)| name.to_string())
+            .collect();
+        self.exhaustiveness_error_with_missing(
+            Code::NonExhaustiveMatch,
+            format!(
+                "Non-exhaustive match on bool: missing {}",
+                missing.join(", ")
+            ),
+            span,
+            missing,
+        );
         true
     }
 

@@ -391,12 +391,23 @@ pub(super) fn intersect_types(current: &TypeExpr, schema_type: &TypeExpr) -> Opt
     }
 }
 
+/// Whether every value of `member` matches `schema_type` — the sound
+/// condition for *dropping* the member on the falsy branch of
+/// `schema_is(x, S)`. A mere non-empty intersection is not enough:
+/// `string` overlaps the literal schema `"a"`, but a non-`"a"` string
+/// still exists on the falsy branch, so `string` must be kept. We detect
+/// full coverage as "intersecting with the schema loses nothing" —
+/// `intersect_types(member, schema) == member`.
+fn member_fully_matches(member: &TypeExpr, schema_type: &TypeExpr) -> bool {
+    intersect_types(member, schema_type).is_some_and(|intersection| &intersection == member)
+}
+
 pub(super) fn subtract_type(current: &TypeExpr, schema_type: &TypeExpr) -> Option<TypeExpr> {
     match current {
         TypeExpr::Union(members) => {
             let remaining = members
                 .iter()
-                .filter(|member| intersect_types(member, schema_type).is_none())
+                .filter(|member| !member_fully_matches(member, schema_type))
                 .cloned()
                 .collect::<Vec<_>>();
             match remaining.len() {
@@ -414,7 +425,7 @@ pub(super) fn subtract_type(current: &TypeExpr, schema_type: &TypeExpr) -> Optio
         TypeExpr::Named(name) if matches!(name.as_str(), "unknown" | "any") => {
             Some(current.clone())
         }
-        other if intersect_types(other, schema_type).is_some() => None,
+        other if member_fully_matches(other, schema_type) => None,
         other => Some(other.clone()),
     }
 }
