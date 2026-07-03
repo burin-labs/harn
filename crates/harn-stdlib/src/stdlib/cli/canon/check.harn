@@ -1,0 +1,185 @@
+/**
+ * `harn canon check` — evaluate harn-canon packs against changed files.
+ *
+ * The Rust shim owns clap parsing and passes a read-only plan via
+ * HARN_CANON_CHECK_PLAN_JSON. This script owns the policy and rendering: it
+ * calls std/agent/canon so canon-packs.json remains the routing source of
+ * truth, Flow predicates remain harn-canon-owned, and human feedback matches
+ * agent-loop injection.
+ */
+import { canon_evaluate_slice, canon_feedback_text, canon_slice_from_paths } from "std/agent/canon"
+import {
+  cli_json_envelope,
+  safe_bool,
+  safe_dict,
+  safe_int_string,
+  safe_list,
+  safe_string,
+} from "std/cli/render"
+
+fn __load_plan(harness: Harness) -> dict {
+  let raw = harness.env.get_or("HARN_CANON_CHECK_PLAN_JSON", "")
+  if raw == "" {
+    harness.stdio.eprintln("canon: internal error - HARN_CANON_CHECK_PLAN_JSON not set")
+    exit(70)
+  }
+  return try {
+    json_parse(raw)
+  } catch (e) {
+    harness.stdio.eprintln("canon: internal error - failed to parse check plan: " + to_string(e))
+    exit(70)
+  }
+}
+
+fn __options(plan: dict, slice: dict) -> dict {
+  var options = {
+    root: safe_string(plan["workspace_root"], ""),
+    workspace_root: safe_string(plan["workspace_root"], ""),
+    project_root: safe_string(plan["workspace_root"], ""),
+    files: safe_list(slice["files"]),
+    include_missing: safe_bool(plan["include_missing"], false),
+    include_semantic: safe_bool(plan["include_semantic"], false),
+    budget_ms: plan["budget_ms"] ?? 50,
+  }
+  let canon_root = safe_string(plan["canon_root"], "")
+  if canon_root != "" {
+    options = options + {canon_root: canon_root}
+  }
+  let packs = safe_list(plan["pack_ids"])
+  if len(packs) > 0 {
+    options = options + {packs: packs}
+  }
+  return options
+}
+
+fn __join_text(items: list, sep: string) -> string {
+  var out = ""
+  var first = true
+  for item in items {
+    let text = safe_string(item, "")
+    if text == "" {
+      continue
+    }
+    if !first {
+      out = out + sep
+    }
+    out = out + text
+    first = false
+  }
+  return out
+}
+
+fn __pack_summary(result: dict) -> list {
+  var summaries = []
+  for pack in safe_list(result["packs"]) {
+    let report = safe_dict(pack["report"])
+    summaries = summaries
+      .push(
+      {
+        pack_id: safe_string(pack["pack_id"], ""),
+        title: safe_string(pack["title"], ""),
+        status: safe_string(report["status"], ""),
+        ok: safe_bool(report["ok"], false),
+        record_count: len(safe_list(report["records"])),
+        skipped_count: len(safe_list(report["skipped"])),
+        invariants: safe_string(pack["invariants"], ""),
+      },
+    )
+  }
+  return summaries
+}
+
+fn __report(plan: dict, result: dict, feedback: string) -> dict {
+  let paths = safe_list(plan["paths"])
+  let selected = safe_list(result["selected_pack_ids"])
+  return {
+    schema_version: 1,
+    ok: safe_bool(result["ok"], false),
+    status: safe_string(result["status"], ""),
+    advisory: safe_bool(plan["advisory"], false),
+    workspace_root: safe_string(plan["workspace_root"], ""),
+    canon_root: safe_string(plan["canon_root"], ""),
+    paths: paths,
+    path_count: len(paths),
+    selected_pack_ids: selected,
+    pack_count: len(selected),
+    packs: __pack_summary(result),
+    feedback_text: feedback,
+    result: result,
+  }
+}
+
+fn __render_json(harness: Harness, report: dict) {
+  let ok = safe_bool(report["ok"], false) || safe_bool(report["advisory"], false)
+  if ok {
+    harness.stdio
+      .println(
+      json_stringify_pretty(cli_json_envelope({schema_version: 1, ok: true, data: report})),
+    )
+    return
+  }
+  harness.stdio
+    .println(
+    json_stringify_pretty(
+      cli_json_envelope(
+        {
+          schema_version: 1,
+          ok: false,
+          error: {
+            code: "canon_check_failed",
+            message: "harn-canon reported blocking invariant findings",
+            details: report,
+          },
+        },
+      ),
+    ),
+  )
+}
+
+fn __render_human(harness: Harness, report: dict) {
+  harness.stdio.println("harn-canon check: " + safe_string(report["status"], "unknown"))
+  harness.stdio.println("  paths: " + safe_int_string(report["path_count"], "0"))
+  let selected = __join_text(safe_list(report["selected_pack_ids"]), ", ")
+  if selected == "" {
+    harness.stdio.println("  packs: none")
+  } else {
+    harness.stdio.println("  packs: " + selected)
+  }
+  let feedback = safe_string(report["feedback_text"], "")
+  if feedback != "" {
+    harness.stdio.println("")
+    harness.stdio.println(feedback)
+  } else if safe_string(report["status"], "") == "no_packs" {
+    harness.stdio.println("")
+    harness.stdio
+      .println("No harn-canon packs selected. Pass --pack or configure canon-packs.json routing.")
+  } else {
+    harness.stdio.println("")
+    harness.stdio.println("No harn-canon findings.")
+  }
+}
+
+fn main(harness: Harness) -> int {
+  let plan = __load_plan(harness)
+  let slice = canon_slice_from_paths(
+    safe_list(plan["paths"]),
+    {
+      root: safe_string(plan["workspace_root"], ""),
+      workspace_root: safe_string(plan["workspace_root"], ""),
+      include_missing: safe_bool(plan["include_missing"], false),
+    },
+  )
+  let result = canon_evaluate_slice(slice, __options(plan, slice))
+  let feedback = canon_feedback_text(result, {header: safe_string(plan["feedback_header"], "harn-canon feedback")})
+  let report = __report(plan, result, feedback)
+  let json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
+  if json_mode {
+    __render_json(harness, report)
+  } else {
+    __render_human(harness, report)
+  }
+  if safe_bool(report["ok"], false) || safe_bool(report["advisory"], false) {
+    return 0
+  }
+  return 1
+}

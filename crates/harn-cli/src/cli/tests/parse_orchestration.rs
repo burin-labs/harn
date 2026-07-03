@@ -31,6 +31,43 @@ fn test_parses_graph_json_and_module_filter() {
 }
 
 #[test]
+fn test_parses_canon_check_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "canon",
+        "check",
+        "src/main.zig",
+        "--canon-root",
+        "vendor/harn-canon",
+        "--workspace-root",
+        "workspace",
+        "--pack",
+        "zig",
+        "--include-semantic",
+        "--budget-ms",
+        "75",
+        "--advisory",
+        "--json",
+    ]);
+
+    let Command::Canon(args) = cli.command.unwrap() else {
+        panic!("expected canon command");
+    };
+    match args.command {
+        CanonCommand::Check(check) => {
+            assert_eq!(check.paths, vec![PathBuf::from("src/main.zig")]);
+            assert_eq!(check.canon_root, Some(PathBuf::from("vendor/harn-canon")));
+            assert_eq!(check.workspace_root, PathBuf::from("workspace"));
+            assert_eq!(check.packs, vec!["zig"]);
+            assert!(check.include_semantic);
+            assert_eq!(check.budget_ms, 75);
+            assert!(check.advisory);
+            assert!(check.json);
+        }
+    }
+}
+
+#[test]
 fn test_parses_runs_inspect_compare() {
     let cli = Cli::parse_from([
         "harn",

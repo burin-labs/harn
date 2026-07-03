@@ -1,5 +1,6 @@
 pub(crate) mod agents_conformance;
 pub(crate) mod bench;
+pub(crate) mod canon;
 pub(crate) mod check;
 pub(crate) mod codemod;
 pub(crate) mod config_cmd;

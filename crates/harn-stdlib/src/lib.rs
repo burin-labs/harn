@@ -969,6 +969,10 @@ pub const STDLIB_CLI_SCRIPTS: &[StdlibCliScript] = &[
         source: include_str!("stdlib/cli/codemod.harn"),
     },
     StdlibCliScript {
+        name: "canon/check",
+        source: include_str!("stdlib/cli/canon/check.harn"),
+    },
+    StdlibCliScript {
         name: "doctor",
         source: include_str!("stdlib/cli/doctor.harn"),
     },

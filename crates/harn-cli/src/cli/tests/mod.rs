@@ -6,7 +6,7 @@ pub(crate) use std::path::PathBuf;
 pub(crate) use std::time::Duration as StdDuration;
 
 pub(crate) use super::{
-    CheckOutputFormat, Cli, Command, CompletionShell, ConfigCommand, ConnectCommand,
+    CanonCommand, CheckOutputFormat, Cli, Command, CompletionShell, ConfigCommand, ConnectCommand,
     ConnectorCommand, CrystallizeCommand, EvalCommand, EvalToolCallsCommand, FlowArchivistCommand,
     FlowCommand, HarnessThreadingMode, LocalCommand, McpCommand, McpMockCommand,
     MergeCaptainCommand, ModelsCommand, ModelsLoraCommand, OrchestratorCommand,
