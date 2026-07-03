@@ -7,11 +7,17 @@ tmp_root=$(mktemp -d)
 trap 'rm -rf "$tmp_root"' EXIT
 
 release_root="$tmp_root/release-root"
-mkdir -p "$release_root/crates/example" "$release_root/docs/src/spec/language" "$release_root/docs/theme"
+mkdir -p \
+  "$release_root/crates/example" \
+  "$release_root/crates/excluded" \
+  "$release_root/tree-sitter-harn" \
+  "$release_root/docs/src/spec/language" \
+  "$release_root/docs/theme"
 cat > "$release_root/Cargo.toml" <<'EOF'
 [workspace]
 version = "1.2.3"
-members = ["crates/example"]
+members = ["crates/example", "tree-sitter-harn"]
+exclude = ["crates/excluded"]
 resolver = "2"
 EOF
 cat > "$release_root/Cargo.lock" <<'EOF'
@@ -20,6 +26,23 @@ EOF
 cat > "$release_root/crates/example/Cargo.toml" <<'EOF'
 [package]
 name = "example"
+version = "1.2.3"
+edition = "2021"
+
+[dependencies]
+tree-sitter-harn = { path = "../../tree-sitter-harn", version = "1.2", optional = true }
+harn-excluded = { path = "../excluded", version = "1.2" }
+serde = { version = "1", optional = true }
+EOF
+cat > "$release_root/tree-sitter-harn/Cargo.toml" <<'EOF'
+[package]
+name = "tree-sitter-harn"
+version = "1.2.3"
+edition = "2021"
+EOF
+cat > "$release_root/crates/excluded/Cargo.toml" <<'EOF'
+[package]
+name = "harn-excluded"
 version = "1.2.3"
 edition = "2021"
 EOF
@@ -88,11 +111,27 @@ HARN_BIN="$fake_bin/harn" \
 FAKE_HARN_RECORD="$record_harn" \
 FAKE_MAKE_RECORD="$record_make" \
 PATH="$fake_bin:$PATH" \
-  "$repo_root/scripts/release_gate.sh" prepare --bump patch
+  "$repo_root/scripts/release_gate.sh" prepare --bump minor
 
-if ! grep -Fq "run scripts/sync_protocol_fixture_runtime_versions.harn -- --from 1.2.3 --to 1.2.4" "$record_harn"; then
+if ! grep -Fq "run scripts/sync_protocol_fixture_runtime_versions.harn -- --from 1.2.3 --to 1.3.0" "$record_harn"; then
   echo "release_gate prepare did not route fixture sync through HARN_BIN" >&2
   cat "$record_harn" >&2
+  exit 1
+fi
+
+if ! grep -Fq 'tree-sitter-harn = { path = "../../tree-sitter-harn", version = "1.3", optional = true }' "$release_root/crates/example/Cargo.toml"; then
+  echo "release_gate prepare did not update root-level workspace member dependency versions" >&2
+  cat "$release_root/crates/example/Cargo.toml" >&2
+  exit 1
+fi
+if ! grep -Fq 'harn-excluded = { path = "../excluded", version = "1.3" }' "$release_root/crates/example/Cargo.toml"; then
+  echo "release_gate prepare did not preserve excluded local crate dependency version rewrites" >&2
+  cat "$release_root/crates/example/Cargo.toml" >&2
+  exit 1
+fi
+if ! grep -Fq 'serde = { version = "1", optional = true }' "$release_root/crates/example/Cargo.toml"; then
+  echo "release_gate prepare should not rewrite non-local dependency versions" >&2
+  cat "$release_root/crates/example/Cargo.toml" >&2
   exit 1
 fi
 
@@ -112,31 +151,29 @@ if [[ -e "$record_cargo" ]]; then
   exit 1
 fi
 
-for record in "$record_make"; do
-  if ! grep -Fxq "CARGO_INCREMENTAL=0" "$record"; then
-    echo "expected CARGO_INCREMENTAL=0 in $record" >&2
-    cat "$record" >&2
-    exit 1
-  fi
-  if ! grep -Fxq "RUSTC_WRAPPER=" "$record"; then
-    echo "expected empty RUSTC_WRAPPER in $record" >&2
-    cat "$record" >&2
-    exit 1
-  fi
-  if ! grep -Fxq "CARGO_BUILD_RUSTC_WRAPPER=" "$record"; then
-    echo "expected empty CARGO_BUILD_RUSTC_WRAPPER in $record" >&2
-    cat "$record" >&2
-    exit 1
-  fi
-  if ! grep -Fxq "SCCACHE_DISABLE=1" "$record"; then
-    echo "expected SCCACHE_DISABLE=1 in $record" >&2
-    cat "$record" >&2
-    exit 1
-  fi
-done
+if ! grep -Fxq "CARGO_INCREMENTAL=0" "$record_make"; then
+  echo "expected CARGO_INCREMENTAL=0 in $record_make" >&2
+  cat "$record_make" >&2
+  exit 1
+fi
+if ! grep -Fxq "RUSTC_WRAPPER=" "$record_make"; then
+  echo "expected empty RUSTC_WRAPPER in $record_make" >&2
+  cat "$record_make" >&2
+  exit 1
+fi
+if ! grep -Fxq "CARGO_BUILD_RUSTC_WRAPPER=" "$record_make"; then
+  echo "expected empty CARGO_BUILD_RUSTC_WRAPPER in $record_make" >&2
+  cat "$record_make" >&2
+  exit 1
+fi
+if ! grep -Fxq "SCCACHE_DISABLE=1" "$record_make"; then
+  echo "expected SCCACHE_DISABLE=1 in $record_make" >&2
+  cat "$record_make" >&2
+  exit 1
+fi
 
 git -C "$release_root" reset --hard --quiet HEAD
->"$record_make"
+: >"$record_make"
 
 ship_gate="$tmp_root/fake-release-gate.sh"
 cat > "$ship_gate" <<'SH'

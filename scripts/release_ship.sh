@@ -213,6 +213,35 @@ print(m.group(1) if m else "")
 PY
 }
 
+workspace_package_manifests() {
+  python3 - <<'PY'
+from pathlib import Path
+import tomllib
+
+workspace = tomllib.loads(Path("Cargo.toml").read_text()).get("workspace", {})
+manifests = set()
+for key in ("members", "exclude"):
+    for entry in workspace.get(key, []):
+        paths = list(Path().glob(entry)) if any(ch in entry for ch in "*?[") else [Path(entry)]
+        for path in paths:
+            manifest = path if path.name == "Cargo.toml" else path / "Cargo.toml"
+            if manifest.exists():
+                manifests.add(manifest)
+
+for manifest in sorted(manifests):
+    print(manifest.as_posix())
+PY
+}
+
+stage_version_bump_manifests() {
+  local paths=(Cargo.toml Cargo.lock)
+  local manifest
+  while IFS= read -r manifest; do
+    [[ -n "$manifest" ]] && paths+=("$manifest")
+  done < <(workspace_package_manifests)
+  git add "${paths[@]}" "$@"
+}
+
 next_version() {
   local bump="$1"
   python3 - "$bump" <<'PY'
@@ -502,7 +531,7 @@ open_bump_pr() {
   fi
 
   log_step "Commit version bump"
-  git add Cargo.toml Cargo.lock crates/*/Cargo.toml spec/acp-registry/harn/agent.json
+  stage_version_bump_manifests spec/acp-registry/harn/agent.json
   git commit -m "Bump version to $next"
 
   log_step "Push bump branch"
@@ -593,7 +622,7 @@ prepare_here() {
   # Stage the version bump deterministically and then sweep tracked
   # changes (changelog, code, docs, generated mirrors) so the human's
   # next `git commit` captures the whole release in one shot.
-  git add Cargo.toml Cargo.lock crates/*/Cargo.toml
+  stage_version_bump_manifests
   git add docs/src/language-spec.md docs/src/spec/language docs/src/SUMMARY.md docs/theme/harn-keywords.js
   git add -u
 
