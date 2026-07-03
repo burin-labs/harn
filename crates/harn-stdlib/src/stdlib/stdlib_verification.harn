@@ -86,6 +86,20 @@ type VerificationAffectedTargetsFact = {
   fallback: dict,
 }
 
+type VerificationProfileMatch = {row: dict, specificity: int, index: int}
+
+type VerificationLadderPlanEntry = dict
+
+type VerificationLadderPlan = {
+  schema: string,
+  query: dict,
+  matches: list<VerificationProfileMatch>,
+  selected: list<VerificationLadderPlanEntry>,
+  skipped: list<dict>,
+  fallback: bool,
+  reason: string,
+}
+
 fn __verification_opts(options) {
   return options ?? {}
 }
@@ -616,6 +630,178 @@ fn __verification_code_index_fallback(changed_paths, opts) {
   return {enabled: true, available: len(errors) == 0, targets: targets, errors: errors}
 }
 
+fn __verification_profile_row_id(row, index: int) -> string {
+  let id = trim(to_string(row?.id ?? row?.name ?? ""))
+  if id != "" {
+    return id
+  }
+  return "profile/" + to_string(index)
+}
+
+fn __verification_check(row) -> dict {
+  if type_of(row?.check) == "dict" {
+    return row.check
+  }
+  return {}
+}
+
+fn __verification_rung_text(value) -> string {
+  return uppercase(trim(to_string(value ?? "")))
+}
+
+fn __verification_rung_rank(value) {
+  let rung = __verification_rung_text(value)
+  let direct = to_int(rung)
+  if direct != nil && direct >= 0 && direct <= 5 {
+    return direct
+  }
+  if len(rung) == 2 && starts_with(rung, "R") {
+    let parsed = to_int(substring(rung, 1))
+    if parsed != nil && parsed >= 0 && parsed <= 5 {
+      return parsed
+    }
+  }
+  return nil
+}
+
+fn __verification_rung_bound(value, fallback: int) -> int {
+  let rank = __verification_rung_rank(value)
+  return rank ?? fallback
+}
+
+fn __verification_resource_class(row, check) -> string {
+  let raw = check?.resourceClass ?? check?.resource_class ?? row?.resourceClass ?? row?.resource_class
+    ?? "moderate"
+  let value = lowercase(trim(to_string(raw)))
+  return value == "" ? "moderate" : value
+}
+
+fn __verification_resource_rank(value) -> int {
+  let resource = lowercase(trim(to_string(value ?? "")))
+  if resource == "cheap" {
+    return 0
+  }
+  if resource == "moderate" {
+    return 1
+  }
+  if resource == "heavy" {
+    return 2
+  }
+  if resource == "remote_ok" || resource == "remote-ok" || resource == "remote" {
+    return 3
+  }
+  return 4
+}
+
+fn __verification_lower_string_list(value) -> list<string> {
+  var out: list<string> = []
+  for item in __verification_string_list(value) {
+    let text = lowercase(item)
+    if !contains(out, text) {
+      out = out + [text]
+    }
+  }
+  return out
+}
+
+fn __verification_resource_allowed(resource: string, opts) -> bool {
+  let allowed = __verification_lower_string_list(opts?.resource_classes ?? opts?.allowed_resource_classes)
+  if len(allowed) == 0 {
+    return true
+  }
+  return contains(allowed, lowercase(resource))
+}
+
+fn __verification_row_p95_ms(row, opts) -> int {
+  let kind = lowercase(trim(to_string(opts?.timing_kind ?? "warm")))
+  let timings = row?.timings ?? {}
+  let raw = if kind == "cold" {
+    timings?.coldMs?.p95
+  } else if kind == "any" {
+    timings?.warmMs?.p95 ?? timings?.coldMs?.p95
+  } else {
+    timings?.warmMs?.p95 ?? timings?.coldMs?.p95
+  }
+  return to_int(raw) ?? to_int(opts?.unknown_p95_ms) ?? 999999
+}
+
+fn __verification_row_command(row, check) {
+  return check?.command ?? check?.spec ?? row?.command ?? row?.spec
+}
+
+fn __verification_command_present(command) -> bool {
+  if command == nil {
+    return false
+  }
+  if type_of(command) == "string" {
+    return trim(command) != ""
+  }
+  return true
+}
+
+fn __verification_skip(row_id: string, reason: string, profile_match) -> dict {
+  return {
+    row_id: row_id,
+    reason: reason,
+    specificity: profile_match?.specificity ?? 0,
+    index: profile_match?.index ?? 0,
+  }
+}
+
+fn __verification_ladder_candidate(profile_match, opts) {
+  let row = profile_match?.row ?? {}
+  let row_id = __verification_profile_row_id(row, to_int(profile_match?.index) ?? 0)
+  let check = __verification_check(row)
+  let rung_rank = __verification_rung_rank(check?.rung ?? row?.rung)
+  if rung_rank == nil {
+    return {entry: nil, skip: __verification_skip(row_id, "missing_or_invalid_rung", profile_match)}
+  }
+  let rung = "R" + to_string(rung_rank)
+  let min_rank = __verification_rung_bound(opts?.min_rung, 0)
+  let max_rank = __verification_rung_bound(opts?.max_rung, 5)
+  if rung_rank < min_rank {
+    return {entry: nil, skip: __verification_skip(row_id, "below_min_rung", profile_match)}
+  }
+  if rung_rank > max_rank {
+    return {entry: nil, skip: __verification_skip(row_id, "above_max_rung", profile_match)}
+  }
+  let resource = __verification_resource_class(row, check)
+  if !__verification_resource_allowed(resource, opts) {
+    return {entry: nil, skip: __verification_skip(row_id, "resource_class_filtered", profile_match)}
+  }
+  if opts?.allow_stale_prone == false
+    && (check?.staleProne ?? check?.stale_prone ?? row?.staleProne ?? row?.stale_prone ?? false) {
+    return {entry: nil, skip: __verification_skip(row_id, "stale_prone_filtered", profile_match)}
+  }
+  let command = __verification_row_command(row, check)
+  if !__verification_command_present(command) {
+    return {entry: nil, skip: __verification_skip(row_id, "missing_command", profile_match)}
+  }
+  let p95_ms = __verification_row_p95_ms(row, opts)
+  let specificity = to_int(profile_match?.specificity) ?? 0
+  let index = to_int(profile_match?.index) ?? 0
+  let sort_key = [rung_rank, __verification_resource_rank(resource), p95_ms, 0 - specificity, index]
+  return {
+    entry: {
+      row_id: row_id,
+      row: row,
+      rung: rung,
+      rung_rank: rung_rank,
+      command: command,
+      runnable: true,
+      granularity: check?.granularity ?? row?.granularity,
+      trust: check?.trust ?? check?.trust_level ?? row?.trust ?? row?.trust_level,
+      resource_class: resource,
+      p95_ms: p95_ms,
+      specificity: specificity,
+      index: index,
+      sort_key: sort_key,
+      background: check?.background ?? row?.background ?? false,
+    },
+    skip: nil,
+  }
+}
+
 /**
  * Capture current on-disk hashes for `paths` under one code-index sequence
  * binding. Unknown-but-readable workspace files are included with
@@ -718,6 +904,63 @@ pub fn verification_affected_targets(changed_paths: list<string>, adapters = nil
     targets = __verification_push_target(targets, target)
   }
   return {changed_paths: paths, targets: targets, adapters: adapter_facts, fallback: fallback}
+}
+
+/**
+ * Build a data-driven verification ladder plan from profile rows.
+ *
+ * The selector engine lives in the Harn VM builtin
+ * `verification_profile_matches`; this helper only ranks matching rows by
+ * declared rung, resource class, observed p95 timing, selector specificity,
+ * and row order. It never hardcodes languages, toolchains, or commands.
+ *
+ * Options:
+ * - `dir`: profile-store directory to read from.
+ * - `min_rung` / `max_rung`: inclusive bounds, default `R0`..`R5`.
+ * - `resource_classes`: optional allow-list such as `["cheap", "moderate"]`.
+ * - `timing_kind`: `warm` (default), `cold`, or `any`.
+ * - `unknown_p95_ms`: timing fallback for unseen rows, default `999999`.
+ * - `allow_stale_prone`: set false to skip stale-prone checks.
+ * - `limit`: optional maximum selected checks.
+ *
+ * @effects: [state]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn verification_ladder_plan(query: dict, options = nil) -> VerificationLadderPlan {
+  let opts = __verification_opts(options)
+  let matches = verification_profile_matches(query, opts?.dir)
+  var selected = []
+  var skipped = []
+  for profile_match in matches {
+    let candidate = __verification_ladder_candidate(profile_match, opts)
+    if candidate.entry != nil {
+      selected = selected + [candidate.entry]
+    } else if candidate.skip != nil {
+      skipped = skipped + [candidate.skip]
+    }
+  }
+  selected = selected.sort_by({ entry -> entry.sort_key })
+  let limit = to_int(opts?.limit)
+  if limit != nil && limit >= 0 && len(selected) > limit {
+    selected = selected.slice(0, limit)
+  }
+  let reason = if len(matches) == 0 {
+    "no_profile_rows"
+  } else if len(selected) == 0 {
+    "no_matching_runnable_rows"
+  } else {
+    "profile_rows_selected"
+  }
+  return {
+    schema: "harn.verification.ladder_plan.v1",
+    query: query,
+    matches: matches,
+    selected: selected,
+    skipped: skipped,
+    fallback: len(selected) == 0,
+    reason: reason,
+  }
 }
 
 /**

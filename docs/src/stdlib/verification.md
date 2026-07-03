@@ -176,3 +176,51 @@ Missing or failing probes return `available = false` facts instead of throwing.
 This lets verification schedulers bind false-fail risk to concrete toolchain
 and cache identity without embedding toolchain-specific heuristics in Burin or
 other host products.
+
+## Ladder Planning
+
+`verification_profile_matches(query, dir?)` returns every profile row that
+matches `{repo?, path?, language?, task?}`, ordered by the same
+most-specific-wins selector semantics as `verification_profile_resolve`.
+Each result is `{row, specificity, index}` so scheduler code can rank rows
+without reimplementing profile matching.
+
+`verification_ladder_plan(query, options)` builds an auditable plan from those
+matched rows:
+
+```harn
+import { verification_ladder_plan } from "std/verification"
+
+pipeline default() {
+  let plan = verification_ladder_plan(
+    {path: "src/main.zig", language: "zig", task: "post_edit"},
+    {resource_classes: ["cheap", "moderate"], max_rung: "R3"},
+  )
+  return plan.selected
+}
+```
+
+The planner is data-only. It never hardcodes languages, toolchains, commands,
+or build systems. It ranks matching rows by declared rung (`R0` before `R1`
+through `R5`), resource class, observed p95 timing, selector specificity, and
+row order. `selected` contains runnable checks only; matched rows without a
+command or spec are returned in `skipped` with `reason = "missing_command"`.
+Each selected entry includes the original row, row id, rung, command, runnable
+flag, granularity, trust, resource class, p95 timing, and sort key. Execution
+stays with `verification_run_check` or `verification_start_check` /
+`verification_finish_check`, so background checks remain snapshot-bound.
+
+Useful options:
+
+- `dir`: profile-store directory to read from.
+- `min_rung` / `max_rung`: inclusive rung bounds, default `R0` to `R5`;
+  values may be `R2`, `"2"`, or `2`.
+- `resource_classes`: allow-list such as `["cheap", "moderate"]`.
+- `timing_kind`: `warm` (default), `cold`, or `any`.
+- `unknown_p95_ms`: fallback timing for rows without observations.
+- `allow_stale_prone`: set `false` to skip stale-prone rows.
+- `limit`: maximum selected checks.
+
+When no profile rows match or every row is filtered out, the returned plan sets
+`fallback = true` and leaves current caller behavior unchanged unless the
+caller explicitly opts into consuming the plan.

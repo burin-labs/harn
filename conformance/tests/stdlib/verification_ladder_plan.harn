@@ -1,0 +1,130 @@
+import { verification_ladder_plan } from "std/verification"
+
+pipeline test(task) {
+  verification_profiles_set(
+    {
+      rows: [
+        {
+          id: "any/full",
+          scope: {},
+          check: {rung: "R4", command: {mode: "shell", command: "echo full"}, resourceClass: "heavy"},
+          timings: {warmMs: {p95: 9000}},
+        },
+        {
+          id: "tx/parse",
+          scope: {language: "toolchainx", task: "post_edit"},
+          check: {rung: "R0", command: {mode: "shell", command: "echo parse"}, resourceClass: "cheap"},
+          timings: {warmMs: {p95: 80}},
+        },
+        {
+          id: "tx/unit",
+          scope: {dir: "src/**", language: "toolchainx"},
+          check: {rung: "R2", command: {mode: "shell", command: "echo unit"}, resource_class: "moderate"},
+          timings: {warmMs: {p95: 500}},
+        },
+        {
+          id: "tx/full-stale",
+          scope: {language: "toolchainx"},
+          check: {
+            rung: "R4",
+            command: {mode: "shell", command: "echo stale"},
+            resourceClass: "heavy",
+            staleProne: true,
+          },
+          timings: {warmMs: {p95: 1000}},
+        },
+        {
+          id: "tx/no-rung",
+          scope: {language: "toolchainx"},
+          check: {command: {mode: "shell", command: "echo missing-rung"}},
+        },
+        {id: "tx/no-command", scope: {language: "toolchainx"}, check: {rung: "R1"}},
+        {
+          id: "tx/row-stale",
+          scope: {language: "toolchainx"},
+          check: {rung: "R0", command: {mode: "shell", command: "echo row-stale"}, resourceClass: "cheap"},
+          stale_prone: true,
+        },
+        {
+          id: "tx/r0-slow-cheap",
+          scope: {language: "toolchainx"},
+          check: {rung: "R0", command: {mode: "shell", command: "echo slow"}, resourceClass: "cheap"},
+          timings: {warmMs: {p95: 2000000000}},
+        },
+        {
+          id: "tx/r0-fast-moderate",
+          scope: {language: "toolchainx"},
+          check: {rung: "R0", command: {mode: "shell", command: "echo moderate"}, resourceClass: "moderate"},
+          timings: {warmMs: {p95: 1}},
+        },
+        {
+          id: "tx/r1-fast",
+          scope: {language: "toolchainx"},
+          check: {rung: 1, command: {mode: "shell", command: "echo r1"}, resourceClass: "cheap"},
+          timings: {warmMs: {p95: 1}},
+        },
+      ],
+    },
+  )
+  let query = {path: "src/a.tx", language: "toolchainx", task: "post_edit"}
+  let matches = verification_profile_matches(query)
+  assert_eq(matches[0].row.id, "tx/parse")
+  assert_eq(matches[1].row.id, "tx/unit")
+  assert_eq(matches[2].row.id, "tx/full-stale")
+  assert_eq(matches[3].row.id, "tx/no-rung")
+  assert_eq(matches[4].row.id, "tx/no-command")
+  assert_eq(matches[5].row.id, "tx/row-stale")
+  assert_eq(matches[6].row.id, "tx/r0-slow-cheap")
+  assert_eq(matches[7].row.id, "tx/r0-fast-moderate")
+  assert_eq(matches[8].row.id, "tx/r1-fast")
+  assert_eq(matches[9].row.id, "any/full")
+  let plan = verification_ladder_plan(query, {resource_classes: ["cheap", "moderate"], allow_stale_prone: false})
+  assert_eq(plan.schema, "harn.verification.ladder_plan.v1")
+  assert_eq(plan.reason, "profile_rows_selected")
+  assert_eq(len(plan.selected), 5)
+  assert_eq(plan.selected[0].row_id, "tx/parse")
+  assert_eq(plan.selected[0].rung, "R0")
+  assert_eq(plan.selected[0].resource_class, "cheap")
+  assert_eq(plan.selected[0].p95_ms, 80)
+  assert_eq(plan.selected[0].runnable, true)
+  assert_eq(plan.selected[1].row_id, "tx/r0-slow-cheap")
+  assert_eq(plan.selected[1].p95_ms, 2000000000)
+  assert_eq(plan.selected[2].row_id, "tx/r0-fast-moderate")
+  assert_eq(plan.selected[3].row_id, "tx/r1-fast")
+  assert_eq(plan.selected[3].rung, "R1")
+  assert_eq(plan.selected[4].row_id, "tx/unit")
+  assert_eq(plan.selected[4].rung_rank, 2)
+  assert_eq(plan.selected[4].command.command, "echo unit")
+  assert_eq(plan.fallback, false)
+  assert_eq(plan.skipped[0].row_id, "tx/full-stale")
+  assert_eq(plan.skipped[0].reason, "resource_class_filtered")
+  assert_eq(plan.skipped[1].row_id, "tx/no-rung")
+  assert_eq(plan.skipped[1].reason, "missing_or_invalid_rung")
+  assert_eq(plan.skipped[2].row_id, "tx/no-command")
+  assert_eq(plan.skipped[2].reason, "missing_command")
+  assert_eq(plan.skipped[3].row_id, "tx/row-stale")
+  assert_eq(plan.skipped[3].reason, "stale_prone_filtered")
+  assert_eq(plan.skipped[4].row_id, "any/full")
+  assert_eq(plan.skipped[4].reason, "resource_class_filtered")
+  let bounded = verification_ladder_plan(query, {max_rung: "R1"})
+  assert_eq(len(bounded.selected), 5)
+  assert_eq(bounded.selected[0].row_id, "tx/parse")
+  let numeric_bounded = verification_ladder_plan(
+    query,
+    {min_rung: 1, max_rung: 2, resource_classes: ["cheap", "moderate"], allow_stale_prone: false},
+  )
+  assert_eq(len(numeric_bounded.selected), 2)
+  assert_eq(numeric_bounded.selected[0].row_id, "tx/r1-fast")
+  assert_eq(numeric_bounded.selected[1].row_id, "tx/unit")
+  let limited = verification_ladder_plan(
+    query,
+    {resource_classes: ["cheap", "moderate"], allow_stale_prone: false, limit: 3},
+  )
+  assert_eq(len(limited.selected), 3)
+  assert_eq(limited.selected[2].row_id, "tx/r0-fast-moderate")
+  verification_profiles_set({rows: []})
+  let empty = verification_ladder_plan(query)
+  assert_eq(empty.fallback, true)
+  assert_eq(empty.reason, "no_profile_rows")
+  __io_println("verification ladder plan ok")
+}

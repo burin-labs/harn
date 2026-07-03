@@ -1,8 +1,9 @@
 //! Verification profile store and stale-diagnostic contract primitives.
 //!
 //! Provides the `verification_profiles_get`, `verification_profiles_set`,
-//! `verification_profile_resolve`, `verification_profile_record_run`, and
-//! `verification_diagnostic_classify` builtins.
+//! `verification_profile_resolve`, `verification_profile_matches`,
+//! `verification_profile_record_run`, and `verification_diagnostic_classify`
+//! builtins.
 //!
 //! A profile record set is a versioned (`schemaVersion: 1`) list of check
 //! rows keyed by scope selectors (repo -> dir glob -> language -> task
@@ -53,6 +54,7 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &VERIFICATION_PROFILES_GET_IMPL_DEF,
     &VERIFICATION_PROFILES_SET_IMPL_DEF,
     &VERIFICATION_PROFILE_RESOLVE_IMPL_DEF,
+    &VERIFICATION_PROFILE_MATCHES_IMPL_DEF,
     &VERIFICATION_PROFILE_RECORD_RUN_IMPL_DEF,
     &VERIFICATION_DIAGNOSTIC_CLASSIFY_IMPL_DEF,
 ];
@@ -213,20 +215,29 @@ fn row_specificity(row: &serde_json::Value, query: &ScopeQuery) -> Option<u32> {
 
 /// Most-specific matching row; ties keep the earliest row so a record set
 /// stays deterministic under append-only edits.
+fn matching_rows<'a>(
+    rows: &'a [serde_json::Value],
+    query: &ScopeQuery,
+) -> Vec<(u32, usize, &'a serde_json::Value)> {
+    let mut out = Vec::new();
+    for (index, row) in rows.iter().enumerate() {
+        let Some(specificity) = row_specificity(row, query) else {
+            continue;
+        };
+        out.push((specificity, index, row));
+    }
+    out.sort_by(|left, right| right.0.cmp(&left.0).then(left.1.cmp(&right.1)));
+    out
+}
+
 fn resolve_row<'a>(
     rows: &'a [serde_json::Value],
     query: &ScopeQuery,
 ) -> Option<&'a serde_json::Value> {
-    let mut best: Option<(u32, &serde_json::Value)> = None;
-    for row in rows {
-        let Some(specificity) = row_specificity(row, query) else {
-            continue;
-        };
-        if best.map(|(score, _)| specificity > score).unwrap_or(true) {
-            best = Some((specificity, row));
-        }
-    }
-    best.map(|(_, row)| row)
+    matching_rows(rows, query)
+        .into_iter()
+        .next()
+        .map(|(_, _, row)| row)
 }
 
 // -----------------------------------------------------------------------
@@ -524,6 +535,42 @@ fn verification_profile_resolve_impl(
     })
 }
 
+/// Return every row that applies to a scope query, ordered by
+/// most-specific-wins selector semantics and stable original row order for
+/// ties. Each item is `{row, specificity, index}` so higher-level Harn
+/// scheduler policy can rank candidates without duplicating the selector
+/// engine in stdlib code.
+#[harn_builtin(
+    sig = "verification_profile_matches(query: dict, dir?: string|nil) -> list",
+    category = "verification"
+)]
+fn verification_profile_matches_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let query = scope_query_from_vm(args.first());
+    let dir = optional_dir_arg(args, 1);
+    with_state("verification_profile_matches", |st| {
+        let Some(fields) = st.get_namespace(&dir, PROFILE_NAMESPACE) else {
+            return Ok(VmValue::List(std::sync::Arc::new(Vec::new())));
+        };
+        let Some(rows) = fields.get("rows").and_then(|value| value.as_array()) else {
+            return Ok(VmValue::List(std::sync::Arc::new(Vec::new())));
+        };
+        let matches = matching_rows(rows, &query)
+            .into_iter()
+            .map(|(specificity, index, row)| {
+                json_to_vm(&serde_json::json!({
+                    "row": row,
+                    "specificity": specificity,
+                    "index": index,
+                }))
+            })
+            .collect();
+        Ok(VmValue::List(std::sync::Arc::new(matches)))
+    })
+}
+
 /// Fold one run observation
 /// `{durationMs?, warm?, at?, exit?, failureSignature?, snapshot?}` into
 /// the row with the given id, persist, and return the updated row (nil
@@ -732,6 +779,37 @@ mod tests {
         assert_eq!(
             resolved_id(&rows, &query("", "toolchainx", "")),
             Some("first".to_string())
+        );
+    }
+
+    #[test]
+    fn matching_rows_return_all_matches_by_specificity_then_order() {
+        let mut rows = sample_rows();
+        rows.insert(
+            3,
+            serde_json::json!({
+                "id": "by-lang-later",
+                "scope": {"language": "toolchainx"}
+            }),
+        );
+        let ids: Vec<String> = matching_rows(&rows, &query("src/a.tx", "toolchainx", ""))
+            .into_iter()
+            .map(|(_, _, row)| {
+                row.get("id")
+                    .and_then(|id| id.as_str())
+                    .expect("row id")
+                    .to_string()
+            })
+            .collect();
+        assert_eq!(
+            ids,
+            vec![
+                "by-dir-lang".to_string(),
+                "by-lang".to_string(),
+                "by-lang-later".to_string(),
+                "by-dir".to_string(),
+                "any".to_string()
+            ]
         );
     }
 

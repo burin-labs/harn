@@ -2178,6 +2178,7 @@ advisory only), or `unbound` (no binding; advisory only).
 | `verification_profiles_get(dir?)` | dir: string | dict \| nil | Read the record set with hierarchical directory resolution |
 | `verification_profiles_set(record_set, dir?)` | record_set: dict, dir: string | nil | Replace and persist the record set; validates `schemaVersion`/`rows`, preserves unknown fields |
 | `verification_profile_resolve(query, dir?)` | query: `{repo?, path?, language?, task?}`, dir: string | dict \| nil | Most-specific matching row, or nil when none applies |
+| `verification_profile_matches(query, dir?)` | query: `{repo?, path?, language?, task?}`, dir: string | list | All matching profile rows as `{row, specificity, index}`, ordered by selector specificity and stable row order |
 | `verification_profile_record_run(row_id, observation, dir?)` | row_id: string, observation: `{durationMs?, warm?, at?, exit?, failureSignature?, snapshot?}`, dir: string | dict \| nil | Fold one run into a row's timing percentiles and `lastRun`, persist, return the updated row |
 | `verification_diagnostic_classify(envelope, current_hashes)` | envelope: dict \| nil, current_hashes: dict | dict | Classify the envelope: `{status, staleFiles, feedsGates, advisory, reason, rung?, rowId?}` |
 
