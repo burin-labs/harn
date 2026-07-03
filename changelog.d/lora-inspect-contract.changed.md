@@ -1,1 +1,0 @@
-- `harn models lora inspect` can compare adapters against LoRA export manifests and surface contract drift before promotion.
