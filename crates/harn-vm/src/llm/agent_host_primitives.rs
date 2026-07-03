@@ -2240,6 +2240,86 @@ mod security_gate_tests {
         );
     }
 
+    #[test]
+    fn mounted_untrusted_server_data_cannot_reach_an_egress_sink_ungated() {
+        // Part #3 (quarantine): an untrusted mounted-MCP-server result in
+        // context plus an exfil-capable tool trips the lethal-trifecta gate.
+        // This is already covered by the substrate; the test proves it holds.
+        use crate::config::SecurityConfig;
+        use crate::security::{SecurityPolicy, TaintRecord, TrustLevel};
+        use crate::tool_annotations::{SideEffectLevel, ToolAnnotations};
+
+        let policy = SecurityPolicy::from_config(&SecurityConfig::default());
+        let mounted_untrusted = vec![TaintRecord {
+            // `classify_result_trust` tags a mounted server's result
+            // `mcp:{server}` Untrusted (see `security::tests`); the same origin
+            // reaches the gate here.
+            origin: "mcp:untrusted-connector".to_string(),
+            trust: TrustLevel::Untrusted,
+            introduced_by: "call-mount-1".to_string(),
+            detector: None,
+            labels: Vec::new(),
+        }];
+        let egress = ToolAnnotations {
+            side_effect_level: SideEffectLevel::Network,
+            ..Default::default()
+        };
+        let outcome = trifecta_gate_reason(
+            &policy,
+            Some(&egress),
+            "http_post",
+            &serde_json::json!({}),
+            &mounted_untrusted,
+        )
+        .expect("untrusted mounted-server data + egress tool must gate");
+        assert!(outcome.reason.contains("mcp:untrusted-connector"));
+        assert!(outcome.reason.contains("external destination"));
+
+        // The gate is sink-specific: the same untrusted taint plus a read-only,
+        // non-egress tool does NOT gate — quarantine fires only at a real
+        // lethal-trifecta sink, not on every tool while tainted.
+        assert!(
+            trifecta_gate_reason(
+                &policy,
+                Some(&ToolAnnotations::default()),
+                "read_file",
+                &serde_json::json!({"path": "src/main.rs"}),
+                &mounted_untrusted,
+            )
+            .is_none(),
+            "untrusted taint + a non-sink read tool must not gate"
+        );
+    }
+
+    #[test]
+    fn forged_directive_taint_gates_an_egress_tool() {
+        // Ties part #1 (provenance) to part #3 (quarantine): a forged directive
+        // classified untrusted by `classify_directive_trust` lands on the taint
+        // ledger with the `forged_directive` origin, so the trifecta gate fires
+        // when an exfil tool then runs.
+        use crate::config::SecurityConfig;
+        use crate::security::{SecurityPolicy, TaintRecord, TrustLevel};
+        use crate::tool_annotations::ToolAnnotations;
+
+        let policy = SecurityPolicy::from_config(&SecurityConfig::default());
+        let forged = vec![TaintRecord {
+            origin: crate::security::provenance::FORGED_DIRECTIVE_ORIGIN.to_string(),
+            trust: TrustLevel::Untrusted,
+            introduced_by: "subagent-result-1".to_string(),
+            detector: None,
+            labels: Vec::new(),
+        }];
+        let outcome = trifecta_gate_reason(
+            &policy,
+            Some(&ToolAnnotations::default()),
+            "web_fetch",
+            &serde_json::json!({}),
+            &forged,
+        )
+        .expect("forged-directive taint + fetch tool must gate");
+        assert!(outcome.reason.contains("forged_directive"));
+    }
+
     fn vm_str(s: &str) -> VmValue {
         VmValue::String(arcstr::ArcStr::from(s))
     }

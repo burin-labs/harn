@@ -31,6 +31,9 @@
 
 pub mod battery;
 pub mod behavioral;
+pub mod provenance;
+
+pub use provenance::{classify_directive_trust, DirectiveProvenance};
 
 use crate::value::VmDictExt;
 use std::cell::RefCell;
@@ -134,6 +137,13 @@ pub struct SecurityPolicy {
     pub trifecta_gate: bool,
     /// Pin + hash MCP tool schemas and require re-approval on change.
     pub pin_mcp_schemas: bool,
+    /// Authenticate cross-agent / orchestration directives on the read path: a
+    /// directive-looking span (`Orchestrator directive:` …) that lacks a valid
+    /// process-scoped provenance stamp is tagged [`TrustLevel::Untrusted`] and
+    /// quarantined, so a forged directive embedded in an untrusted subagent
+    /// result cannot be obeyed as authoritative. Default OFF (net-new
+    /// enforcement); byte-identical behaviour when disabled.
+    pub authenticate_directives: bool,
     /// Also gate first-party secret/credential reads while tainted.
     pub gate_secret_reads: bool,
     /// Score untrusted content with an injection classifier (Layer 2) and let a
@@ -164,6 +174,7 @@ impl SecurityPolicy {
             destyle_untrusted: enabled && config.destyle_untrusted,
             trifecta_gate: enabled && config.trifecta_gate,
             pin_mcp_schemas: enabled && config.pin_mcp_schemas,
+            authenticate_directives: enabled && config.authenticate_directives,
             gate_secret_reads: enabled && config.gate_secret_reads,
             // `local-ml` mode turns detection on; other modes can still opt in.
             detect_injection: enabled
@@ -878,6 +889,9 @@ fn policy_from_dict(config: &crate::value::DictMap) -> SecurityPolicy {
     if let Some(b) = config.get("pin_mcp_schemas").and_then(vm_bool) {
         base.pin_mcp_schemas = b;
     }
+    if let Some(b) = config.get("authenticate_directives").and_then(vm_bool) {
+        base.authenticate_directives = b;
+    }
     if let Some(b) = config.get("gate_secret_reads").and_then(vm_bool) {
         base.gate_secret_reads = b;
     }
@@ -926,6 +940,10 @@ fn policy_summary(policy: &SecurityPolicy) -> VmValue {
         VmValue::Bool(policy.pin_mcp_schemas),
     );
     map.insert(
+        "authenticate_directives".to_string(),
+        VmValue::Bool(policy.authenticate_directives),
+    );
+    map.insert(
         "gate_secret_reads".to_string(),
         VmValue::Bool(policy.gate_secret_reads),
     );
@@ -956,6 +974,50 @@ pub fn register_security_builtins(vm: &mut Vm) {
         push_policy(policy);
         Ok(summary)
     });
+
+    // Stamp a cross-agent / orchestration directive with verifiable provenance.
+    // The legitimate orchestrator calls this so its directives authenticate on
+    // the read path; a forged directive embedded in untrusted content cannot be
+    // stamped without the process key.
+    vm.register_builtin("security_stamp_directive", |args, _out| {
+        let Some(VmValue::String(content)) = args.first() else {
+            return Err(VmError::Runtime(
+                "security_stamp_directive: requires a content string".to_string(),
+            ));
+        };
+        let emitter = match args.get(1) {
+            Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
+            _ => "orchestrator".to_string(),
+        };
+        Ok(VmValue::String(arcstr::ArcStr::from(
+            provenance::stamp_directive(content.as_ref(), &emitter),
+        )))
+    });
+
+    // Authenticate a directive-looking span on the read path. Returns
+    // `{status, forged, trust, emitter?}` so a pipeline / conformance test can
+    // observe the quarantine decision.
+    vm.register_builtin("security_verify_directive", |args, _out| {
+        let Some(VmValue::String(content)) = args.first() else {
+            return Err(VmError::Runtime(
+                "security_verify_directive: requires a content string".to_string(),
+            ));
+        };
+        let verdict = provenance::verify(content.as_ref());
+        let mut map = BTreeMap::new();
+        let (status, forged) = match &verdict {
+            DirectiveProvenance::NoDirective => ("none", false),
+            DirectiveProvenance::Authenticated { emitter } => {
+                map.put_str("emitter", emitter);
+                ("authenticated", false)
+            }
+            DirectiveProvenance::Forged => ("forged", true),
+        };
+        map.put_str("status", status);
+        map.insert("forged".to_string(), VmValue::Bool(forged));
+        map.put_str("trust", if forged { "untrusted" } else { "trusted" });
+        Ok(VmValue::dict(map))
+    });
 }
 
 #[cfg(test)]
@@ -982,6 +1044,26 @@ mod tests {
         assert!(policy.destyle_untrusted);
         assert!(policy.trifecta_gate);
         assert!(policy.pin_mcp_schemas);
+        // Directive authentication is net-new enforcement: default OFF even in
+        // the hardened default posture, so behaviour is byte-identical until a
+        // host opts in.
+        assert!(!policy.authenticate_directives);
+    }
+
+    #[test]
+    fn authenticate_directives_is_opt_in_and_off_gates_it() {
+        let opted_in = SecurityConfig {
+            authenticate_directives: true,
+            ..Default::default()
+        };
+        assert!(SecurityPolicy::from_config(&opted_in).authenticate_directives);
+        // `off` mode disables every layer, this one included.
+        let off = SecurityConfig {
+            mode: SecurityMode::Off,
+            authenticate_directives: true,
+            ..Default::default()
+        };
+        assert!(!SecurityPolicy::from_config(&off).authenticate_directives);
     }
 
     #[test]
@@ -996,6 +1078,7 @@ mod tests {
         assert!(!policy.destyle_untrusted);
         assert!(!policy.trifecta_gate);
         assert!(!policy.pin_mcp_schemas);
+        assert!(!policy.authenticate_directives);
         assert!(policy.is_off());
     }
 

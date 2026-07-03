@@ -412,6 +412,9 @@
     "security": {
       "additionalProperties": false,
       "properties": {
+        "authenticate_directives": {
+          "type": "boolean"
+        },
         "destyle_untrusted": {
           "type": "boolean"
         },

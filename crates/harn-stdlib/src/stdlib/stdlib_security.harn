@@ -25,6 +25,9 @@
  *                                      (on by default for non-"off" modes)
  *   - trifecta_gate: bool            — gate exfil tools while tainted
  *   - pin_mcp_schemas: bool          — re-approve on tool-description change
+ *   - authenticate_directives: bool  — quarantine cross-agent/orchestration
+ *                                      directives that lack a valid provenance
+ *                                      stamp (default OFF; net-new enforcement)
  *   - gate_secret_reads: bool        — gate secret-file reads while tainted
  *   - detect_injection: bool         — score untrusted content with the
  *                                      injection classifier (implied by
