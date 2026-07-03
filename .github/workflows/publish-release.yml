@@ -255,27 +255,25 @@ jobs:
             # No version drift on push-to-main: tag was already published
             # by the tag-push trigger of this workflow (or by the
             # build-release-binaries.yml tag trigger for the binaries).
-            # Self-heal when that prior tag-push run didn't actually
-            # land everything (e.g. cancelled by concurrency policy as
-            # in the v0.8.47 incident, or the App-token publish step
-            # errored). If the GitHub release for $LATEST_TAG is missing
-            # any expected archive, checksum sidecar, or asset manifest,
-            # force DRIFT=true so the publish job re-fires.
-            # release_ship.sh's per-crate publish is already idempotent
-            # — it skips crates already on crates.io — so re-running is a
-            # no-op for crates that landed and a recovery for those that
-            # didn't.
+            # Observe release assets for operator diagnostics, but do
+            # not treat missing binary assets as Cargo publish drift.
+            # The tag-triggered build-release-binaries workflow owns
+            # archives, checksum sidecars, GitHub release finalization,
+            # and container publication. During a healthy tag-first
+            # release, main can advance while that binary workflow is
+            # still uploading assets; re-running release_ship.sh from a
+            # main-push publish-release job cannot build those assets and
+            # only creates redundant release retries.
             if [[ "$EVENT_NAME" == "push" ]]; then
-              # Distinguish a genuine incomplete asset set (recover) from a
+              # Distinguish a genuine incomplete asset set (warn) from a
               # transient or eventually-consistent query failure. The old
               # `|| echo 0` collapsed "gh could not answer" into "0 assets", forcing
               # DRIFT=true → a doomed `release_ship.sh --finalize` from main HEAD
               # when the tag is an older (squash-orphaned) commit. That produced
               # a spurious red X on a routine main push right after the tag-first
               # publish (harn#2964: a `gh release view` raced the release becoming
-              # visible). Retry briefly; only force a re-publish on a confirmed
-              # missing asset, and on a persistent query failure assume the tag-first
-              # publish already shipped (crates.io is the source of truth) and skip.
+              # visible). Retry briefly; if assets are still missing, leave DRIFT
+              # false and let build-release-binaries or the release harness recover.
               RELEASE_ASSETS="__query_failed__"
               for _ in 1 2 3; do
                 if RELEASE_ASSETS="$(gh release view "$LATEST_TAG" --json assets --jq '.assets[].name' 2>/dev/null)"; then
@@ -306,8 +304,7 @@ jobs:
                 if (( ${#MISSING_ASSETS[@]} == 0 )); then
                   echo "::notice::$LATEST_TAG already published with all expected assets on https://github.com/$GITHUB_REPOSITORY/releases/tag/$LATEST_TAG. Publish job will skip; this is the intended behavior under tag-first publishing."
                 else
-                  DRIFT=true
-                  printf '::warning::%s is missing release assets: %s. Treating as drift and re-publishing from %s to recover; release_ship.sh'\''s per-crate publish is idempotent.\n' "$LATEST_TAG" "${MISSING_ASSETS[*]}" "$LATEST_TAG"
+                  printf '::warning::%s is missing release assets: %s. Publish job will skip because build-release-binaries owns binary asset recovery; if this is not an active tag build, dispatch build-release-binaries.yml for %s.\n' "$LATEST_TAG" "${MISSING_ASSETS[*]}" "$LATEST_TAG"
                 fi
               fi
             else
