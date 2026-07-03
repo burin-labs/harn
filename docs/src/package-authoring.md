@@ -138,7 +138,7 @@ description = "Reusable Harn helpers."
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/acme/acme-tools"
 provenance = "https://github.com/acme/acme-tools/releases/tag/v0.1.0"
-harn = ">=0.8,<0.9"
+harn = ">=0.9,<0.10"
 docs_url = "docs/api.md"
 permissions = ["tool:read_only"]
 host_requirements = ["workspace.read_text"]
