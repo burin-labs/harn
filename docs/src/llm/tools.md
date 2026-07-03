@@ -264,6 +264,7 @@ let tools = agent_host_tools(nil, {
   cwd: repo_root,
   max_inline_bytes: 12000,
   search_max_matches: 50,
+  search_max_line_bytes: 1024,
   exclude_globs: [".harn-runs/**", "logs/**"],
   names: {
     run_command: "release_run",
@@ -300,6 +301,7 @@ Useful options:
 | `max_inline_bytes` | Cap inline command output. If the model asks for a larger inline capture, the helper clamps it to this ceiling so full output still flows through command-output artifact readers. |
 | `command_behavior` / `run_command_behavior` | Defaults for every generated `run_command` request. `background_after_ms` gives the command a short foreground startup window, then returns `{status: "running", stdout, stderr, output_path, ...}` while progress events continue in the session. `progress_interval_ms` controls later feedback cadence and `progress_max_inline_bytes` caps snippets. |
 | `search_max_matches` / `max_search_matches` | Default `search_files.max_matches` when the model omits one; callers can still request a different cap per call. |
+| `search_max_line_bytes` / `max_search_line_bytes` | Default `search_files.max_line_bytes` when the model omits one; long matched lines are clipped around the hit so generated/minified files cannot dominate the next turn. |
 | `exclude_globs` / `search_exclude_globs` | Baseline exclusions for `search_files` using root-relative globs. Tool-call `exclude_globs` are merged with these defaults, not substituted for them. |
 | `allow_argv_prefixes` | Deny `run_command` calls unless `argv` starts with a listed string or list prefix. |
 | `preserve_filtered_output` | Default `true`. For a `producer \| tail/wc/grep/…` pipeline, tee the producer's full output to a temp file so the model can read it via `output_capture` instead of re-running a slow command. Conservative (skips `head`, `grep -q`/`-m`, command substitution, subshells, …). Set `false` to disable. |

@@ -39,6 +39,42 @@ fn matches_in(result: &VmValue) -> &Arc<Vec<VmValue>> {
     }
 }
 
+fn bool_field(result: &VmValue, key: &str) -> bool {
+    match result {
+        VmValue::Dict(d) => match d.get(key) {
+            Some(VmValue::Bool(value)) => *value,
+            other => panic!("expected `{key}` bool, got {other:?}"),
+        },
+        other => panic!("expected dict result, got {other:?}"),
+    }
+}
+
+fn string_field<'a>(result: &'a VmValue, key: &str) -> &'a str {
+    match result {
+        VmValue::Dict(d) => match d.get(key) {
+            Some(VmValue::String(value)) => value,
+            other => panic!("expected `{key}` string, got {other:?}"),
+        },
+        other => panic!("expected dict result, got {other:?}"),
+    }
+}
+
+fn list_string_field<'a>(result: &'a VmValue, key: &str) -> Vec<&'a str> {
+    match result {
+        VmValue::Dict(d) => match d.get(key) {
+            Some(VmValue::List(values)) => values
+                .iter()
+                .map(|value| match value {
+                    VmValue::String(value) => value.as_str(),
+                    other => panic!("expected string in `{key}`, got {other:?}"),
+                })
+                .collect(),
+            other => panic!("expected `{key}` list, got {other:?}"),
+        },
+        other => panic!("expected dict result, got {other:?}"),
+    }
+}
+
 fn assert_path_ends_with(path: &str, components: &[&str]) {
     let actual: Vec<String> = Path::new(path)
         .components()
@@ -208,6 +244,122 @@ fn search_respects_max_matches_and_marks_truncated() {
     }
     let rows = matches_in(&result);
     assert_eq!(rows.len(), 3);
+}
+
+#[test]
+fn search_clips_long_match_lines_around_hit_and_marks_truncated() {
+    let dir = TempDir::new().unwrap();
+    let content = format!("{}NEEDLE{}\n", "a".repeat(200), "b".repeat(200));
+    fs::write(dir.path().join("long.txt"), content).unwrap();
+
+    let reg = registry();
+    let entry = reg.find("hostlib_tools_search").unwrap();
+    let result = (entry.handler)(&dict_arg(&[
+        ("pattern", vm_string("NEEDLE")),
+        ("path", vm_string(&dir.path().to_string_lossy())),
+        ("fixed_strings", VmValue::Bool(true)),
+        ("max_line_bytes", VmValue::Int(96)),
+    ]))
+    .unwrap();
+
+    assert!(bool_field(&result, "truncated"));
+    let rows = matches_in(&result);
+    assert_eq!(rows.len(), 1);
+    let text = string_field(&rows[0], "text");
+    assert!(
+        text.len() <= 96,
+        "expected clipped line within budget, got {} bytes: {text:?}",
+        text.len()
+    );
+    assert!(
+        text.contains("NEEDLE"),
+        "clipped line must include the hit: {text:?}"
+    );
+    assert!(
+        text.starts_with("[truncated] ... "),
+        "expected clipped prefix marker: {text:?}"
+    );
+    assert!(
+        text.ends_with(" ... [truncated]"),
+        "expected clipped suffix marker: {text:?}"
+    );
+}
+
+#[test]
+fn search_clips_context_lines_and_marks_truncated() {
+    let dir = TempDir::new().unwrap();
+    fs::write(
+        dir.path().join("ctx.txt"),
+        format!("{}\nMATCH\n{}\n", "before".repeat(80), "after".repeat(80)),
+    )
+    .unwrap();
+
+    let reg = registry();
+    let entry = reg.find("hostlib_tools_search").unwrap();
+    let result = (entry.handler)(&dict_arg(&[
+        ("pattern", vm_string("MATCH")),
+        ("path", vm_string(&dir.path().to_string_lossy())),
+        ("context_before", VmValue::Int(1)),
+        ("context_after", VmValue::Int(1)),
+        ("max_line_bytes", VmValue::Int(96)),
+    ]))
+    .unwrap();
+
+    assert!(bool_field(&result, "truncated"));
+    let rows = matches_in(&result);
+    assert_eq!(rows.len(), 1);
+    let before = list_string_field(&rows[0], "context_before");
+    let after = list_string_field(&rows[0], "context_after");
+    assert_eq!(before.len(), 1);
+    assert_eq!(after.len(), 1);
+    assert!(before[0].len() <= 96, "before context over budget");
+    assert!(after[0].len() <= 96, "after context over budget");
+    assert!(before[0].ends_with(" ... [truncated]"));
+    assert!(after[0].ends_with(" ... [truncated]"));
+}
+
+#[test]
+fn search_clips_long_lines_on_utf8_boundaries() {
+    let dir = TempDir::new().unwrap();
+    let content = format!("{}NEEDLE{}\n", "λ".repeat(200), "界".repeat(200));
+    fs::write(dir.path().join("utf8.txt"), content).unwrap();
+
+    let reg = registry();
+    let entry = reg.find("hostlib_tools_search").unwrap();
+    let result = (entry.handler)(&dict_arg(&[
+        ("pattern", vm_string("NEEDLE")),
+        ("path", vm_string(&dir.path().to_string_lossy())),
+        ("fixed_strings", VmValue::Bool(true)),
+        ("max_line_bytes", VmValue::Int(97)),
+    ]))
+    .unwrap();
+
+    let rows = matches_in(&result);
+    assert_eq!(rows.len(), 1);
+    let text = string_field(&rows[0], "text");
+    assert!(text.len() <= 97, "UTF-8 clipped line over budget");
+    assert!(text.contains("NEEDLE"));
+    assert!(text.is_char_boundary(text.len()));
+}
+
+#[test]
+fn search_rejects_invalid_max_line_bytes() {
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("file.txt"), "hello\n").unwrap();
+
+    let reg = registry();
+    let entry = reg.find("hostlib_tools_search").unwrap();
+    let err = (entry.handler)(&dict_arg(&[
+        ("pattern", vm_string("hello")),
+        ("path", vm_string(&dir.path().to_string_lossy())),
+        ("max_line_bytes", VmValue::Int(8)),
+    ]))
+    .expect_err("too-small max_line_bytes must error");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("max_line_bytes"),
+        "expected max_line_bytes error, got: {msg}"
+    );
 }
 
 #[test]
