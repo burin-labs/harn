@@ -66,7 +66,10 @@ fn scan_dir(
                     .to_string()
             });
             out.push(SubProject {
-                path: dir_str.clone(),
+                // `dir_str` doubles as the OS-native `seen` dedup key above;
+                // the agent-facing `path` must carry `/` separators on every
+                // platform, so normalize the emitted copy only.
+                path: crate::tools::args::to_agent_path_str(&dir_str),
                 name,
                 language: (*language).to_string(),
                 project_marker: (*marker).to_string(),

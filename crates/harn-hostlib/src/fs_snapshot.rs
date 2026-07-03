@@ -43,6 +43,7 @@ use crate::error::HostlibError;
 use crate::registry::{BuiltinRegistry, HostlibCapability};
 use crate::tools::args::{
     build_dict, dict_arg, optional_string, optional_string_list, require_string, str_value,
+    to_agent_path,
 };
 
 const SNAPSHOT_BUILTIN: &str = "hostlib_fs_snapshot";
@@ -285,7 +286,7 @@ pub fn snapshot(
             })?;
         if let Some(bytes) = added {
             byte_count = byte_count.saturating_add(bytes);
-            captured_paths.push(path.to_string_lossy().into_owned());
+            captured_paths.push(to_agent_path(&path));
         }
     }
     enforce_byte_cap(bundle, session_id, Some(scope_id));
@@ -338,7 +339,7 @@ pub fn restore(
         let Some(entry) = state.entries.get(&path) else {
             continue;
         };
-        let label = path.to_string_lossy().into_owned();
+        let label = to_agent_path(&path);
         match restore_entry(&state, &path, entry) {
             Ok(()) => restored_paths.push(label),
             Err(reason) => skipped_paths_with_reasons.push((label, reason)),
@@ -367,11 +368,7 @@ pub fn list_snapshots(session_id: &str) -> Result<Vec<SnapshotSummary>, HostlibE
             snapshot_id: state.snapshot_id.clone(),
             scope_id: state.scope_id.clone(),
             taken_at_ms: state.taken_at_ms,
-            captured_paths: state
-                .entries
-                .keys()
-                .map(|path| path.to_string_lossy().into_owned())
-                .collect(),
+            captured_paths: state.entries.keys().map(to_agent_path).collect(),
             byte_count: entry_byte_count(state),
         })
         .collect();

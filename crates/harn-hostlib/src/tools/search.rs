@@ -20,7 +20,7 @@ use ignore::WalkBuilder;
 use crate::error::HostlibError;
 use crate::tools::args::{
     build_dict, dict_arg, optional_bool, optional_int, optional_string, optional_string_list,
-    require_string, str_value,
+    require_string, str_value, to_agent_path,
 };
 use crate::tools::permissions::enforce_path_scope;
 
@@ -378,20 +378,6 @@ impl Sink for CollectorSink<'_> {
             SinkContextKind::Other => {}
         }
         Ok(true)
-    }
-}
-
-/// Render a filesystem path for the agent-facing tool surface with
-/// forward-slash separators on every platform. Search results are consumed by
-/// the model (and the LoRA tool-call corpus), which expect `/`; emitting
-/// OS-native separators would ship `\`-paths to the model on Windows and make
-/// eval assertions platform-dependent. No-op on Unix (`MAIN_SEPARATOR == '/'`).
-fn to_agent_path(path: &std::path::Path) -> String {
-    let rendered = path.to_string_lossy();
-    if std::path::MAIN_SEPARATOR == '/' {
-        rendered.into_owned()
-    } else {
-        rendered.replace(std::path::MAIN_SEPARATOR, "/")
     }
 }
 

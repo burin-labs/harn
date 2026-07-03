@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 use harn_vm::VmValue;
 
 use crate::error::HostlibError;
+use crate::tools::args::to_agent_path;
 use crate::tools::payload::{optional_string, optional_u64, require_dict_arg, require_string};
 use crate::tools::proc;
 use crate::tools::response::ResponseBuilder;
@@ -54,9 +55,9 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         .bool("timed_out", false);
     if let Some(artifacts) = proc::live_artifact_snapshot(None, Some(&handle_id)) {
         builder = builder
-            .str("output_path", artifacts.output_path.display().to_string())
-            .str("stdout_path", artifacts.stdout_path.display().to_string())
-            .str("stderr_path", artifacts.stderr_path.display().to_string())
+            .str("output_path", to_agent_path(&artifacts.output_path))
+            .str("stdout_path", to_agent_path(&artifacts.stdout_path))
+            .str("stderr_path", to_agent_path(&artifacts.stderr_path))
             .int("line_count", artifacts.line_count as i64)
             .int("byte_count", artifacts.byte_count as i64)
             .str("output_sha256", artifacts.output_sha256);

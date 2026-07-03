@@ -23,7 +23,7 @@ use super::versions::EditOp;
 use crate::error::HostlibError;
 use crate::tools::args::{
     build_dict, dict_arg, optional_bool, optional_int_list, optional_string, optional_string_list,
-    require_string, str_value,
+    require_string, str_value, to_agent_path, to_agent_path_str,
 };
 use crate::value_args;
 
@@ -186,7 +186,7 @@ pub(super) fn collect_hits_into(
 ) {
     let before = hits.len();
     collect_hits_scoped(state, needle, case_sensitive, &[], hits);
-    let root = state.root.to_string_lossy().to_string();
+    let root = to_agent_path(&state.root);
     for hit in &mut hits[before..] {
         hit.root = Some(root.clone());
     }
@@ -1423,10 +1423,10 @@ fn normalize_relative_path(state: &IndexState, path: &str) -> String {
     let p = std::path::Path::new(path);
     if p.is_absolute() {
         if let Ok(rel) = p.strip_prefix(&state.root) {
-            return rel.to_string_lossy().replace('\\', "/");
+            return to_agent_path(rel);
         }
     }
-    path.to_string()
+    to_agent_path_str(path)
 }
 
 fn candidates_for(state: &IndexState, needle: &str) -> Vec<FileId> {

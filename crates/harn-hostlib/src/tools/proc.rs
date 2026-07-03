@@ -28,6 +28,7 @@ use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 use crate::error::HostlibError;
 use crate::process::{self as process_handle, ProcessError, SpawnSpec};
+use crate::tools::args::to_agent_path;
 use crate::tools::response::ResponseBuilder;
 
 mod artifacts;
@@ -311,9 +312,9 @@ pub(crate) fn build_response(
         .bool("timed_out", outcome.timed_out)
         .str("stdout", outcome.stdout)
         .str("stderr", outcome.stderr)
-        .str("output_path", outcome.output_path.display().to_string())
-        .str("stdout_path", outcome.stdout_path.display().to_string())
-        .str("stderr_path", outcome.stderr_path.display().to_string())
+        .str("output_path", to_agent_path(&outcome.output_path))
+        .str("stdout_path", to_agent_path(&outcome.stdout_path))
+        .str("stderr_path", to_agent_path(&outcome.stderr_path))
         .int("line_count", outcome.line_count as i64)
         .int("byte_count", outcome.byte_count as i64)
         .str("output_sha256", outcome.output_sha256)
@@ -376,9 +377,9 @@ pub(crate) fn running_response(
         .bool("timed_out", false)
         .str("stdout", "")
         .str("stderr", "")
-        .str("output_path", artifacts.output_path.display().to_string())
-        .str("stdout_path", artifacts.stdout_path.display().to_string())
-        .str("stderr_path", artifacts.stderr_path.display().to_string())
+        .str("output_path", to_agent_path(&artifacts.output_path))
+        .str("stdout_path", to_agent_path(&artifacts.stdout_path))
+        .str("stderr_path", to_agent_path(&artifacts.stderr_path))
         .int("line_count", 0)
         .int("byte_count", 0)
         .str("output_sha256", "")

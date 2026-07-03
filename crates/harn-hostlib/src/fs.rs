@@ -23,7 +23,7 @@ use crate::error::HostlibError;
 use crate::registry::{BuiltinRegistry, HostlibCapability};
 use crate::tools::args::{
     build_dict, dict_arg, optional_bool, optional_int, optional_string, optional_string_list,
-    require_string, str_value,
+    require_string, str_value, to_agent_path,
 };
 use crate::tools::permissions::enforce_path_scope;
 
@@ -309,7 +309,7 @@ pub fn commit_staged(session_id: &str, paths: &[String]) -> Result<CommitResult,
         let Some(entry) = state.entries.get(&path).cloned() else {
             continue;
         };
-        let path_label = path.to_string_lossy().into_owned();
+        let path_label = to_agent_path(&path);
         // The overlay always lives inside the workspace, but commit flushes
         // to the *target* working-tree path. Enforce workspace-root scope
         // against that target so a staged entry — possibly persisted under
@@ -353,7 +353,7 @@ pub fn discard_staged(session_id: &str, paths: &[String]) -> Result<DiscardResul
     let mut discarded_paths = Vec::new();
     for path in selected {
         if state.entries.remove(&path).is_some() {
-            discarded_paths.push(path.to_string_lossy().into_owned());
+            discarded_paths.push(to_agent_path(&path));
         }
     }
     persist_state(&state, "discard_staged", None).map_err(|err| HostlibError::Backend {
@@ -1134,7 +1134,7 @@ fn append_journal(state: &SessionState, op: &str, path: Option<&Path>) -> Result
     let line = serde_json::to_string(&serde_json::json!({
         "ts_ms": now_ms(),
         "op": op,
-        "path": path.map(|path| path.to_string_lossy().into_owned()),
+        "path": path.map(|path| path.to_string_lossy().into_owned()), // agent-path-ok: on-disk journal.jsonl audit line, never returned to the agent
         "pending_count": state.entries.len(),
     }))
     .map_err(|err| format!("serialize staged journal: {err}"))?;
@@ -1417,7 +1417,7 @@ fn status_from_state(state: &SessionState) -> StagedStatus {
             StagedEntry::Delete { .. } => ("delete", 0, disk_size(path).unwrap_or(0)),
         };
         pending_writes.push(PendingWrite {
-            path: path.to_string_lossy().into_owned(),
+            path: to_agent_path(path),
             kind,
             bytes_added,
             bytes_removed,
