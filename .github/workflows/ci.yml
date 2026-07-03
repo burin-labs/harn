@@ -32,18 +32,16 @@ jobs:
   # to run at all.
   #
   # SAFETY PRINCIPLE — prune for PR fast feedback, run comprehensive on the
-  # merge-queue speculative commit. Coarse
+  # merge-queue speculative commit and the post-merge backstop. Coarse
   # path-filtering is sound for `pull_request` events: a PR that touches only
   # docs/website/markdown cannot regress the Rust build, so the ~45 paid
   # Linux-min those four matrix lanes cost are pure waste. But the merge queue
   # (`merge_group`) builds a speculative merge commit (target + earlier-queued
   # PRs + this PR) and is the ONLY place a cross-PR interaction regression is
-  # caught. A later `push` to main is the same squashed tree after branch
-  # protection, so it stays on the cheap hygiene/docs path instead of paying
-  # for another full Linux Rust sweep. On merge_group we MUST NOT prune — the
-  # `force` step below overrides the filter to `'true'`. Do not wire the
-  # downstream `if:`s back to the raw `steps.filter.outputs.*`; they must read
-  # `steps.force.outputs.*`.
+  # caught; `push` to main is the post-merge backstop. On those events we MUST
+  # NOT prune — the `force` step below overrides the filter to `'true'` on
+  # `merge_group` / `push`. Do not wire the downstream `if:`s back to the raw
+  # `steps.filter.outputs.*`; they must read `steps.force.outputs.*`.
   #
   # The filter is an EXCLUSION list with `predicate-quantifier: every`: a file
   # only fails to mark `rust=true` when it matches EVERY pattern, i.e. it is
@@ -108,32 +106,27 @@ jobs:
 
           echo "release_metadata_only=$release_metadata_only" >> "$GITHUB_OUTPUT"
           echo "release metadata only: $release_metadata_only"
-      - name: Resolve heavy-lane gate (force on merge_group, slim on push)
+      - name: Resolve heavy-lane gate (force on merge_group / push)
         id: force
         # `pull_request`: honour the paths filter — a docs/website/markdown-only
         #   PR skips the heavy Linux Rust lanes for fast, cheap feedback. A
         #   release/vX.Y.Z PR whose diff is only release metadata also skips
         #   those PR-head lanes because `release_harn` already ran the release
-        #   audit locally; merge_group below remains the full backstop.
-        # `merge_group`: force `rust=true` so a cross-PR interaction regression
-        #   cannot slip the queue.
-        # `push`: keep the run cheap. Branch protection has already admitted
-        #   the merge-queued tree, and CI status treats the Linux Rust lanes as
-        #   pass-by-skip on this event.
+        #   audit locally; merge_group / push below remain full backstops.
+        # `merge_group` / `push`: force `rust=true` — the speculative merge
+        #   commit and the post-merge backstop must run the full suite so a
+        #   cross-PR interaction regression can't slip the queue.
         env:
-          FORCE_ALL: ${{ github.event_name == 'merge_group' }}
+          FORCE_ALL: ${{ github.event_name == 'merge_group' || github.event_name == 'push' }}
           F_RUST: ${{ steps.filter.outputs.rust }}
           RELEASE_METADATA_ONLY: ${{ steps.release_metadata.outputs.release_metadata_only }}
         run: |
           set -euo pipefail
           if [ "${FORCE_ALL}" = "true" ]; then
-            echo "::notice::changes: ${GITHUB_EVENT_NAME} — forcing heavy Linux Rust lanes on (merge-queue is never pruned)"
+            echo "::notice::changes: ${GITHUB_EVENT_NAME} — forcing heavy Linux Rust lanes on (merge-queue / post-merge backstop is never pruned)"
             echo "rust=true" >> "$GITHUB_OUTPUT"
-          elif [ "${GITHUB_EVENT_NAME}" = "push" ]; then
-            echo "::notice::changes: push — keeping main-push CI on cheap hygiene/docs lanes; merge queue is the full Rust backstop"
-            echo "rust=false" >> "$GITHUB_OUTPUT"
           elif [ "${RELEASE_METADATA_ONLY}" = "true" ]; then
-            echo "::notice::changes: release metadata-only PR — skipping heavy Linux Rust lanes until merge-queue"
+            echo "::notice::changes: release metadata-only PR — skipping heavy Linux Rust lanes until merge-queue / post-merge backstop"
             echo "rust=false" >> "$GITHUB_OUTPUT"
           else
             echo "::notice::changes: ${GITHUB_EVENT_NAME} — heavy Linux Rust lanes gated by paths filter (rust=${F_RUST})"
@@ -171,7 +164,7 @@ jobs:
     name: ${{ matrix.name }}
     needs: changes
     # Heavy Linux Rust lanes. Skipped on a docs/website/markdown-only PR; forced
-    # on for merge_group (see the `changes` job). ci-status treats a skip
+    # on for merge_group / push (see the `changes` job). ci-status treats a skip
     # here as PASS so branch protection isn't deadlocked.
     if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
@@ -271,14 +264,13 @@ jobs:
           make lint-no-rust-prompt-prose
           cargo clippy --workspace --all-targets -- -D warnings
       # SAFETY PRINCIPLE — prune for PR fast feedback, run the FULL suite on
-      # the merge queue (#2663). On `pull_request`
+      # the merge queue and post-merge backstop (#2663). On `pull_request`
       # events we run only the tests in crates affected by the diff, expanded
       # by the reverse-dependency closure (a change to crate X must test X and
       # everything that depends on X). On `merge_group` (the speculative merge
       # commit — the ONLY place a cross-PR interaction regression is caught)
-      # we run the WHOLE workspace unconditionally — never prune that path.
-      # A later `push` to main keeps CI cheap because branch protection has
-      # already admitted the merge-queued tree. Global changes (Cargo.lock,
+      # and `push` to main (post-merge backstop) we run the WHOLE workspace
+      # unconditionally — never prune those. Global changes (Cargo.lock,
       # .cargo/, toolchain, this workflow) auto-fall-back to the full
       # workspace inside `scripts/affected-crates.py`.
       - name: Run affected-crate tests (PR fast feedback)
@@ -297,66 +289,34 @@ jobs:
           # merge-base for the diff.
           git fetch --no-tags origin "$BASE_REF"
           make test-affected
-      - name: Run full test suite (merge queue)
+      - name: Run full test suite (merge queue + push backstop)
         if: matrix.kind == 'test' && github.event_name != 'pull_request'
         env:
           NEXTEST_PROFILE: ci
         run: make test
       # These checks use the harn CLI and generated artifacts, but they do not
       # need to serialize behind clippy and nextest.
+      #
+      # `scripts/audit_gates.sh` builds the harn CLI + runs the conformance
+      # suite ONCE (the serial long pole), exports the warm `target/debug/harn`
+      # as HARN_BIN so no downstream gate re-walks cargo's build graph, then
+      # hands the ~25 independent gates to `make -j -k`. Every gate reuses the
+      # warm binary and is independent of its siblings, so the tail collapses
+      # from a serial `sum(gates)` to a parallel `max(gate)` and `-k` reports
+      # every gate's verdict instead of stopping at the first failure. This
+      # mirrors the proven `release_gate.sh audit` fan-out.
+      #
+      # The gate set is the same battery that used to run as a serial chain
+      # here: test-agent-scripts, protocol-conformance, lint-no-xfail-regression,
+      # lint-harn, fmt-harn, and the check-* drift/audit guards (highlight,
+      # language-spec, grammar/trigger keywords, provider/connector matrices,
+      # docs snippets/cli-flags/model-refs, diagnostics catalog, protocol +
+      # connector-schema + session-bundle + run-view-fixture drift, provider
+      # catalog + refresh workflow, workflow quickstart, vm rss soak).
+      # mcp-rc-conformance stays pruned (subset of the parallel nextest lane).
       - name: Run Harn conformance and audit
         if: matrix.kind == 'audit'
-        run: |
-          make conformance
-          # Agent-loop Harn unit tests (stall detector, loop control, judge
-          # verdict, transcript helpers) live outside conformance/, so they were
-          # never run by any workflow and silently rotted. Warm harn binary from
-          # `make conformance` above makes this effectively free.
-          make test-agent-scripts
-          make protocol-conformance
-          # NOTE: `make mcp-rc-conformance` used to run here as well, but its
-          # two `cargo test -p ... --tests` invocations are a strict subset of
-          # `cargo nextest run --workspace` in the parallel Rust test lane.
-          # Promoted out of `make lint` so the Linux critical path doesn't pay
-          # ~1-2 min to compile harn-cli from scratch just to count `@xfail:`
-          # markers. `make conformance` above already warmed target/debug/harn.
-          make lint-no-xfail-regression
-          make lint-harn
-          make fmt-harn
-          # Audit gates promoted from release_gate.sh audit so a stale
-          # generated artifact (highlight keywords, language-spec mirror,
-          # trigger quickref, provider/connector matrices, docs snippets)
-          # fails the PR instead of waiting until release time. These all
-          # use the already-warm `target/debug/harn` binary built by
-          # `make conformance` above, so they're effectively free here.
-          make check-highlight
-          make check-language-spec
-          make check-grammar-keywords
-          make check-trigger-quickref
-          make check-provider-matrix
-          make check-provider-support
-          make check-connector-matrix
-          make check-trigger-examples
-          make check-docs-model-refs
-          make check-docs-snippets
-          make check-docs-cli-flags
-          make check-diagnostics-catalog
-          # Drift guards that previously existed only in `make all` and so
-          # never ran in any workflow — a contributor could edit
-          # spec/openapi.yaml or the SessionBundle DTO and ship stale
-          # generated artifacts with green CI. The generated-artifact
-          # registry (scripts/generated_artifacts.toml) now forces every
-          # ci = true check to be referenced here. Most reuse the warm harn
-          # binary; the run/session view fixture check is a narrow harn-vm
-          # contract test.
-          make check-protocol-artifacts
-          make check-connector-schemas
-          make check-session-bundle-schema
-          make check-run-view-fixtures
-          make check-provider-catalog
-          make check-provider-catalog-drift
-          make check-docs-workflow-quickstart
-          make check-vm-rss-soak
+        run: ./scripts/audit_gates.sh
       # sccache-action starts a long-lived `sccache --start-server` daemon that
       # outlives every job step. GitHub's post-job "Cleaning up orphan
       # processes" phase then terminates it, and on the ubuntu lanes that
@@ -374,7 +334,7 @@ jobs:
     name: Audit scripts
     needs: changes
     # Heavy Linux lane (compiles the harn CLI via `cargo run`). Skipped on a
-    # docs/website/markdown-only PR; forced on for merge_group (see the
+    # docs/website/markdown-only PR; forced on for merge_group / push (see the
     # `changes` job). ci-status treats a skip here as PASS.
     if: needs.changes.outputs.rust == 'true'
     # Mixed audit gates. The first checks are pure Python / shell and stay
@@ -893,12 +853,11 @@ jobs:
           )
 
           # The heavy Linux Rust lanes (rust-builds, audit-scripts) skip on a
-          # docs/website/markdown-only PR and on push-to-main (gated by the
-          # `changes` job) and run unconditionally on merge_group. Treat
-          # `skipped` as passing here so branch protection isn't deadlocked
-          # when they skip; only an actual failure should fail the gate. (The
-          # `changes` job itself stays a hard required-success above, so a
-          # filter-job failure still blocks.)
+          # docs/website/markdown-only PR (gated by the `changes` job) and run
+          # unconditionally on merge_group / push. Treat `skipped` as passing
+          # here so branch protection isn't deadlocked when they skip; only an
+          # actual failure should fail the gate. (The `changes` job itself stays
+          # a hard required-success above, so a filter-job failure still blocks.)
           rust_builds_result="${{ needs['rust-builds'].result }}"
           echo "Rust build group: $rust_builds_result"
           if [ "$rust_builds_result" != "success" ] && [ "$rust_builds_result" != "skipped" ]; then
