@@ -298,6 +298,13 @@ impl TypeChecker {
         bindings
     }
 
+    fn has_complete_explicit_type_bindings(
+        type_param_names: &[String],
+        type_args: &[TypeExpr],
+    ) -> bool {
+        !type_param_names.is_empty() && type_args.len() == type_param_names.len()
+    }
+
     fn bind_call_params_from_args(
         &self,
         params: &[CallParam<'_>],
@@ -331,6 +338,30 @@ impl TypeChecker {
         errors
     }
 
+    fn bind_inferred_call_type_params(
+        &self,
+        params: &[CallParam<'_>],
+        has_rest: bool,
+        type_param_names: &[String],
+        type_args: &[TypeExpr],
+        args: &[SNode],
+        bindings: &mut BTreeMap<String, TypeExpr>,
+        scope: &TypeScope,
+    ) -> Vec<(Span, String)> {
+        if Self::has_complete_explicit_type_bindings(type_param_names, type_args) {
+            Vec::new()
+        } else {
+            self.bind_call_params_from_args(
+                params,
+                has_rest,
+                type_param_names,
+                args,
+                bindings,
+                scope,
+            )
+        }
+    }
+
     pub(in crate::typechecker) fn infer_function_call_type_bindings(
         &self,
         sig: &FnSignature,
@@ -340,10 +371,11 @@ impl TypeChecker {
     ) -> BTreeMap<String, TypeExpr> {
         let params = Self::function_call_params(sig);
         let mut bindings = Self::initial_type_bindings(&sig.type_param_names, type_args);
-        let _ = self.bind_call_params_from_args(
+        let _ = self.bind_inferred_call_type_params(
             &params,
             sig.has_rest,
             &sig.type_param_names,
+            type_args,
             args,
             &mut bindings,
             scope,
@@ -361,10 +393,11 @@ impl TypeChecker {
         let type_param_names = sig.type_param_names();
         let params = Self::builtin_call_params(sig);
         let mut bindings = Self::initial_type_bindings(&type_param_names, type_args);
-        let _ = self.bind_call_params_from_args(
+        let _ = self.bind_inferred_call_type_params(
             &params,
             sig.has_rest,
             &type_param_names,
+            type_args,
             args,
             &mut bindings,
             scope,
@@ -463,10 +496,11 @@ impl TypeChecker {
         }
 
         let mut type_bindings = Self::initial_type_bindings(&sig.type_param_names, type_args);
-        for (error_span, message) in self.bind_call_params_from_args(
+        for (error_span, message) in self.bind_inferred_call_type_params(
             &sig.params,
             sig.has_rest,
             &sig.type_param_names,
+            type_args,
             args,
             &mut type_bindings,
             scope,
