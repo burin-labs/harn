@@ -12,6 +12,7 @@ trap 'rm -f "$changed" "$harn_format_files" "$harn_lint_files" "$changed_package
 hook_write_staged_files "$changed"
 hook_export_cargo_target_dir
 hook_disable_cargo_incremental_if_release_bump staged
+hook_export_existing_harn_bin_for_non_rust_changes "$changed"
 
 # ── Guard: block accidental commits of throwaway / temporary code ──────────────
 # Mark scratch code so it can never be committed by accident:
@@ -150,7 +151,8 @@ if hook_paths_match "$changed" "$HOOK_HARN_PATTERN"; then
     # Build + re-codesign once before xargs so the freshly-relinked
     # binary keeps its ad-hoc signature; otherwise Gatekeeper shows a
     # multi-second "Verifying 'harn'..." popup on every invocation.
-    harn_bin=$(hook_ensure_harn)
+    hook_export_harn_bin
+    harn_bin=$HARN_BIN
     xargs -0 "$harn_bin" fmt < "$harn_format_files"
     xargs -0 git add -- < "$harn_format_files"
     echo "    Harn formatting OK."
@@ -162,7 +164,8 @@ if hook_paths_match "$changed" "$HOOK_HARN_PATTERN"; then
   hook_write_harn_lint_files "$changed" "$harn_lint_files"
   if [ -s "$harn_lint_files" ]; then
     echo "=== Pre-commit: linting staged Harn files ==="
-    harn_bin=$(hook_ensure_harn)
+    hook_export_harn_bin
+    harn_bin=$HARN_BIN
     xargs -0 "$harn_bin" lint --fix < "$harn_lint_files"
     xargs -0 "$harn_bin" fmt < "$harn_lint_files"
     xargs -0 git add -- < "$harn_lint_files"
@@ -227,7 +230,8 @@ if hook_paths_match "$changed" "$HOOK_LANGSPEC_PATTERN"; then
   # generated. Regen + restage is sub-second, so do the consistency fixup
   # inline rather than failing the commit. Mirrors the highlight stanza.
   echo "=== Pre-commit: syncing generated language spec ==="
-  "$(hook_ensure_harn)" run scripts/sync_language_spec.harn
+  hook_export_harn_bin
+  "$HARN_BIN" run scripts/sync_language_spec.harn
   git add spec/HARN_SPEC.md docs/src/language-spec.md docs/src/spec/language docs/src/SUMMARY.md
   echo "    Language spec OK."
 else

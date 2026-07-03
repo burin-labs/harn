@@ -77,6 +77,15 @@ hook_export_cargo_target_dir() {
 # output is routed to stderr so command substitution stays clean.
 # Idempotent; safe to call once per hook invocation.
 hook_ensure_harn() {
+  if [ -n "${HARN_BIN:-}" ]; then
+    if [ ! -x "$HARN_BIN" ]; then
+      echo "HARN_BIN is not executable: $HARN_BIN" >&2
+      exit 1
+    fi
+    printf '%s\n' "$HARN_BIN"
+    return
+  fi
+
   hook_export_cargo_target_dir
   cargo build --quiet --bin harn >&2
   if [ "$(uname)" = "Darwin" ] && [ -x "scripts/sign_local_macos.sh" ]; then
@@ -89,10 +98,33 @@ hook_ensure_harn() {
 
 hook_export_harn_bin() {
   if [ -n "${HARN_BIN:-}" ]; then
+    if [ ! -x "$HARN_BIN" ]; then
+      echo "HARN_BIN is not executable: $HARN_BIN" >&2
+      exit 1
+    fi
+    export HARN_BIN
     return 0
   fi
   HARN_BIN=$(hook_ensure_harn)
   export HARN_BIN
+}
+
+hook_export_existing_harn_bin_for_non_rust_changes() {
+  changed_file_list=$1
+  if hook_paths_match "$changed_file_list" "$HOOK_RUST_PATTERN"; then
+    return 0
+  fi
+  if [ -n "${HARN_BIN:-}" ]; then
+    hook_export_harn_bin
+    return 0
+  fi
+  path_harn=$(command -v harn 2>/dev/null || true)
+  if [ -z "$path_harn" ]; then
+    return 0
+  fi
+  HARN_BIN=$path_harn
+  export HARN_BIN
+  printf '=== Hook: reusing HARN_BIN %s (no Rust/Cargo changes) ===\n' "$HARN_BIN" >&2
 }
 
 hook_write_staged_files() {

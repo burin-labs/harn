@@ -12,6 +12,7 @@ trap 'rm -f "$changed" "$harn_format_files" "$harn_lint_files" "$changed_package
 hook_write_push_files "$changed"
 hook_export_cargo_target_dir
 hook_disable_cargo_incremental_if_release_bump "push $(hook_push_base)"
+hook_export_existing_harn_bin_for_non_rust_changes "$changed"
 
 # Signature guard (cheapest gate — local, no network). main enforces the
 # required_signatures ruleset server-side; an unsigned commit is rejected at
@@ -189,7 +190,8 @@ if hook_paths_match "$changed" "$HOOK_HARN_PATTERN"; then
     # ad-hoc signature across both xargs batches; without this, every
     # cargo-run invocation would strip the signature and trip
     # Gatekeeper's "Verifying 'harn'..." popup.
-    harn_bin=$(hook_ensure_harn)
+    hook_export_harn_bin
+    harn_bin=$HARN_BIN
   fi
   if [ -s "$harn_format_files" ]; then
     echo "=== Pre-push: checking affected Harn formatting ==="
