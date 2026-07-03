@@ -101,6 +101,7 @@ fn __render_human(harness: Harness, report: dict) {
   let training = __safe_dict(report["training"])
   let template = __safe_dict(report["template"])
   let data = __safe_dict(report["data"])
+  let corpus_refresh = __safe_dict(report["corpus_refresh"])
   let evaluation = __safe_dict(report["evaluation"])
   let launch = __safe_dict(report["launch"])
   let warnings = __safe_list(report["warnings"])
@@ -150,12 +151,39 @@ fn __render_human(harness: Harness, report: dict) {
   if corpus != "" {
     harness.stdio.println("  corpus: " + corpus)
   }
+  harness.stdio
+    .println(
+    "  corpus strategy: "
+      + __safe_string(request["effective_corpus_strategy"], "")
+      + " (requested "
+      + __safe_string(request["requested_corpus_strategy"], "auto")
+      + ")",
+  )
+  let teacher = __safe_dict(request["teacher"])
+  let teacher_id = __safe_string(teacher["id"], "")
+  if teacher_id != "" {
+    harness.stdio
+      .println(
+      "  teacher: "
+        + teacher_id
+        + " via "
+        + __safe_string(teacher["provider"], ""),
+    )
+  }
   harness.stdio.println("  dataset format: " + __safe_string(data["dataset_format"], ""))
   __print_list(harness, "template requirements", __safe_list(template["requirements"]))
   __print_list(harness, "stop sequences", __safe_list(template["stop_sequences"]))
   __print_list(harness, "template notes", __safe_list(template["notes"]))
   __print_list(harness, "required columns", __safe_list(data["required_columns"]))
   __print_list(harness, "data validation", __safe_list(data["validation"]))
+  __print_list(harness, "corpus refresh", __safe_list(corpus_refresh["generation_notes"]))
+  __print_list(
+    harness,
+    "provenance manifest",
+    __safe_list(corpus_refresh["provenance_manifest_fields"]),
+  )
+  __print_list(harness, "hard negatives", __safe_list(corpus_refresh["hard_negative_slices"]))
+  __print_list(harness, "corpus gates", __safe_list(corpus_refresh["acceptance_gates"]))
   __print_list(harness, "training notes", __safe_list(training["notes"]))
   harness.stdio
     .println("  holdout policy: " + __safe_string(evaluation["holdout_policy"], ""))

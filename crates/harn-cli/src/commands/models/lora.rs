@@ -229,6 +229,7 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
     let method = normalize_lora_method(&args.method)?;
     let quantization = quantization_for_method(&method).to_string();
     let requested_tool_format = normalize_plan_tool_format(&args.tool_format)?;
+    let requested_corpus_strategy = normalize_corpus_strategy(&args.corpus_strategy)?;
     let resolved = harn_vm::llm_config::resolve_model_info(&args.base_model);
     let provider = args
         .provider
@@ -262,6 +263,15 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
         .as_ref()
         .map(|corpus| corpus.trim().to_string())
         .filter(|corpus| !corpus.is_empty());
+    let teacher = args
+        .teacher
+        .as_ref()
+        .map(|selector| teacher_report(selector));
+    let effective_corpus_strategy = effective_corpus_strategy(
+        &requested_corpus_strategy,
+        corpus.as_deref(),
+        teacher.as_ref(),
+    );
     let dataset_arg = corpus
         .clone()
         .unwrap_or_else(|| "conformance/tool-call-eval".to_string());
@@ -323,6 +333,9 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
         provider_supports_lora_launch,
         capabilities.native_tools,
         &requested_tool_format,
+        &requested_corpus_strategy,
+        &effective_corpus_strategy,
+        teacher.as_ref(),
     );
     Ok(LoraPlanReport {
         ok: true,
@@ -344,6 +357,9 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
             effective_tool_format: decision.effective.clone(),
             tool_format_correction: decision.correction,
             corpus,
+            requested_corpus_strategy,
+            effective_corpus_strategy: effective_corpus_strategy.clone(),
+            teacher: teacher.clone(),
         },
         tool_calling: ToolCallingReport {
             native_tools: capabilities.native_tools,
@@ -372,6 +388,12 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
             required_columns: required_columns_for_dataset(dataset_format),
             validation: validation_steps_for_dataset(dataset_format),
         },
+        corpus_refresh: corpus_refresh_recipe(
+            &effective_corpus_strategy,
+            teacher.as_ref(),
+            &decision.effective,
+            dataset_format,
+        ),
         evaluation: EvaluationRecipe {
             holdout_policy: "keep train/tune/holdout splits disjoint; never train on Harn eval fixtures"
                 .to_string(),
@@ -545,6 +567,34 @@ fn normalize_plan_tool_format(raw: &str) -> Result<String, String> {
     }
 }
 
+fn normalize_corpus_strategy(raw: &str) -> Result<String, String> {
+    let strategy = raw.trim().to_ascii_lowercase();
+    match strategy.as_str() {
+        "auto" | "audit-only" | "refresh" | "distill" => Ok(strategy),
+        _ => Err(format!(
+            "unsupported corpus strategy `{raw}`; expected `auto`, `audit-only`, `refresh`, or `distill`"
+        )),
+    }
+}
+
+fn effective_corpus_strategy(
+    requested: &str,
+    corpus: Option<&str>,
+    teacher: Option<&TeacherReport>,
+) -> String {
+    if requested != "auto" {
+        return requested.to_string();
+    }
+    if teacher.is_none() {
+        return "audit-only".to_string();
+    }
+    if corpus.is_some() {
+        "refresh".to_string()
+    } else {
+        "distill".to_string()
+    }
+}
+
 fn quantization_for_method(method: &str) -> &'static str {
     match method {
         "qlora" => "4bit_base_model",
@@ -609,6 +659,87 @@ fn training_notes(tool_format: &str) -> Vec<String> {
                 .to_string(),
         ],
         _ => vec!["train against the route's validated tool-call format".to_string()],
+    }
+}
+
+fn teacher_report(selector: &str) -> TeacherReport {
+    let resolved = harn_vm::llm_config::resolve_model_info(selector);
+    let provider = resolved.provider.clone();
+    TeacherReport {
+        selector: selector.to_string(),
+        id: resolved.id.clone(),
+        provider,
+        resolved_alias: resolved.alias,
+        tool_format: harn_vm::llm_config::default_tool_format(&resolved.id, &resolved.provider),
+        family: resolved.family,
+        lineage: resolved.lineage,
+    }
+}
+
+fn corpus_refresh_recipe(
+    strategy: &str,
+    teacher: Option<&TeacherReport>,
+    tool_format: &str,
+    dataset_format: &str,
+) -> CorpusRefreshRecipe {
+    let teacher_required = matches!(strategy, "refresh" | "distill");
+    let mut generation_notes = match strategy {
+        "refresh" => vec![
+            "use the teacher to repair or extend existing corpus records; preserve stable ids for unchanged examples".to_string(),
+            "write new examples only into train/tune splits until a separate holdout review promotes them".to_string(),
+        ],
+        "distill" => vec![
+            "use the teacher to generate synthetic task/tool/result trajectories from frozen tool schemas".to_string(),
+            "sample single-turn and multi-turn cases separately so turn-repair behavior remains measurable".to_string(),
+        ],
+        _ => vec![
+            "audit the supplied corpus without synthetic generation before training".to_string(),
+            "prefer parser/schema fixes over adding near-duplicate examples".to_string(),
+        ],
+    };
+    generation_notes.push(format!(
+        "render every accepted example in the effective `{tool_format}` tool-call convention"
+    ));
+    generation_notes.push(format!(
+        "store examples in `{dataset_format}` form so training and eval consume one contract"
+    ));
+    if let Some(teacher) = teacher {
+        generation_notes.push(format!(
+            "record teacher route {} via {} for every synthetic or repaired record",
+            teacher.id, teacher.provider
+        ));
+    }
+    CorpusRefreshRecipe {
+        strategy: strategy.to_string(),
+        teacher_required,
+        teacher: teacher.cloned(),
+        generation_notes,
+        provenance_manifest_fields: vec![
+            "source_record_id".to_string(),
+            "source_transcript_id".to_string(),
+            "teacher_model".to_string(),
+            "teacher_provider".to_string(),
+            "target_base_model".to_string(),
+            "target_tool_format".to_string(),
+            "tool_schema_hash".to_string(),
+            "prompt_template_hash".to_string(),
+            "split".to_string(),
+            "license".to_string(),
+        ],
+        hard_negative_slices: vec![
+            "wrong-tool disambiguation under similar schemas".to_string(),
+            "malformed-call repair without executing unsafe arguments".to_string(),
+            "permission-denied or no-write tool outcomes".to_string(),
+            "tool-result follow-up after partial or empty results".to_string(),
+            "multi-turn correction after stale or contradictory observations".to_string(),
+        ],
+        acceptance_gates: vec![
+            "target parser accepts every assistant tool-call target".to_string(),
+            "tool names and arguments validate against the frozen inference schemas".to_string(),
+            "dedupe by normalized tool name, arguments, and outcome class".to_string(),
+            "train/tune/holdout splits stay disjoint from Harn and Burin eval holdouts".to_string(),
+            "base-versus-adapter eval runs on identical cases before promotion".to_string(),
+        ],
     }
 }
 
@@ -741,6 +872,9 @@ fn plan_warnings(
     provider_supports_lora_launch: bool,
     native_tools: bool,
     requested_tool_format: &str,
+    requested_corpus_strategy: &str,
+    effective_corpus_strategy: &str,
+    teacher: Option<&TeacherReport>,
 ) -> Vec<String> {
     let mut warnings = Vec::new();
     if let Some(correction) = &decision.correction {
@@ -759,6 +893,17 @@ fn plan_warnings(
         warnings.push(format!(
             "provider {provider} does not declare local-runtime LoRA launch flags; plan still describes training and eval, but launch must be external"
         ));
+    }
+    if matches!(effective_corpus_strategy, "refresh" | "distill") && teacher.is_none() {
+        warnings.push(format!(
+            "corpus strategy {effective_corpus_strategy} needs --teacher to generate or repair examples"
+        ));
+    }
+    if requested_corpus_strategy == "audit-only" && teacher.is_some() {
+        warnings.push(
+            "--teacher was supplied but corpus strategy is audit-only; teacher metadata is recorded but generation stays disabled"
+                .to_string(),
+        );
     }
     warnings
 }
@@ -837,6 +982,7 @@ struct LoraPlanReport {
     training: TrainingRecipe,
     template: TemplateRecipe,
     data: DataRecipe,
+    corpus_refresh: CorpusRefreshRecipe,
     evaluation: EvaluationRecipe,
     launch: PlanLaunchHints,
     warnings: Vec<String>,
@@ -849,6 +995,9 @@ struct PlanRequest {
     effective_tool_format: String,
     tool_format_correction: Option<String>,
     corpus: Option<String>,
+    requested_corpus_strategy: String,
+    effective_corpus_strategy: String,
+    teacher: Option<TeacherReport>,
 }
 
 #[derive(Debug, Serialize)]
@@ -877,6 +1026,28 @@ struct DataRecipe {
     dataset_format: String,
     required_columns: Vec<String>,
     validation: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct TeacherReport {
+    selector: String,
+    id: String,
+    provider: String,
+    resolved_alias: Option<String>,
+    tool_format: String,
+    family: String,
+    lineage: String,
+}
+
+#[derive(Debug, Serialize)]
+struct CorpusRefreshRecipe {
+    strategy: String,
+    teacher_required: bool,
+    teacher: Option<TeacherReport>,
+    generation_notes: Vec<String>,
+    provenance_manifest_fields: Vec<String>,
+    hard_negative_slices: Vec<String>,
+    acceptance_gates: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]

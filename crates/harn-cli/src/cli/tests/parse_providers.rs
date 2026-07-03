@@ -383,6 +383,10 @@ fn test_parses_models_lora_plan_args() {
         "json",
         "--corpus",
         "./lora-corpus",
+        "--teacher",
+        "dashscope/qwen3-coder-next",
+        "--corpus-strategy",
+        "refresh",
         "--method",
         "lora",
         "--json",
@@ -401,6 +405,8 @@ fn test_parses_models_lora_plan_args() {
     assert_eq!(args.provider.as_deref(), Some("vllm"));
     assert_eq!(args.tool_format, "json");
     assert_eq!(args.corpus.as_deref(), Some("./lora-corpus"));
+    assert_eq!(args.teacher.as_deref(), Some("dashscope/qwen3-coder-next"));
+    assert_eq!(args.corpus_strategy, "refresh");
     assert_eq!(args.method, "lora");
     assert!(args.json);
 }

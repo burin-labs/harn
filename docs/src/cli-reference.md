@@ -1355,6 +1355,7 @@ Plan a portable LoRA or QLoRA fine-tune for a Harn model route:
 
 ```bash
 harn models lora plan --base local-gemma4-e4b --provider vllm --tool-format auto --corpus ./lora-corpus
+harn models lora plan --base local-gemma4-e4b --provider vllm --teacher dashscope/qwen3-coder-next --corpus ./lora-corpus
 harn models lora plan --base google/gemma-4-E4B-it --provider google --tool-format native --json
 ```
 
@@ -1364,7 +1365,12 @@ recipe. The report includes an explicit template block so native Gemma 4 or
 FunctionGemma training stays on the model tokenizer's function-calling template,
 while Harn text/json adapters target the Harn `<tool_call>` parser convention.
 Use this before exporting a corpus so train, eval, and runtime serving all agree
-on the same tool-call contract.
+on the same tool-call contract. Add `--teacher <model>` to plan a synthetic
+distillation or corpus-refresh lane without starting any model calls. With the
+default `--corpus-strategy auto`, Harn chooses `refresh` when a corpus is
+present, `distill` when only a teacher is present, and `audit-only` otherwise.
+The report lists provenance manifest fields, hard-negative slices, and holdout
+gates so generated data cannot silently contaminate evaluation fixtures.
 
 ## harn models recommend
 

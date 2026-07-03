@@ -379,6 +379,8 @@ fn models_lora_plan_human_text_includes_recipe() {
             "auto",
             "--corpus",
             "./lora-corpus",
+            "--teacher",
+            "dashscope/qwen3-coder-next",
         ],
         &[],
     );
@@ -393,6 +395,11 @@ fn models_lora_plan_human_text_includes_recipe() {
         "template source: Harn text tool-call parser using JSON object bodies",
         "dataset format: harn_text_tool_calls_json_fences",
         "corpus: ./lora-corpus",
+        "corpus strategy: refresh (requested auto)",
+        "teacher: dashscope/qwen3-coder-next via dashscope",
+        "provenance manifest:",
+        "hard negatives:",
+        "corpus gates:",
         "harn eval tool-calls --planner ADAPTER_MODEL --tool-format json --dataset ./lora-corpus",
         "harn models lora inspect --base local-gemma4-e4b --provider vllm --name ADAPTER_NAME ADAPTER_PATH_OR_REPO",
         "harn local launch local-gemma4-e4b --provider vllm --model-source gemma-4-e4b-it",
@@ -441,6 +448,14 @@ fn models_lora_plan_json_shape_is_stable() {
         harn_value["data"]["dataset_format"],
         "messages_with_tool_calls"
     );
+    assert_eq!(harn_value["request"]["requested_corpus_strategy"], "auto");
+    assert_eq!(
+        harn_value["request"]["effective_corpus_strategy"],
+        "audit-only"
+    );
+    assert!(harn_value["request"]["teacher"].is_null());
+    assert_eq!(harn_value["corpus_refresh"]["strategy"], "audit-only");
+    assert_eq!(harn_value["corpus_refresh"]["teacher_required"], false);
     assert_eq!(
         harn_value["template"]["name"],
         "gemma4_native_function_calling"

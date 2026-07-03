@@ -70,6 +70,12 @@ pub(crate) struct ModelsLoraPlanArgs {
     /// Corpus path or dataset id to include in the generated eval/training recipe.
     #[arg(long, value_name = "PATH_OR_DATASET")]
     pub corpus: Option<String>,
+    /// Optional teacher model route for synthetic corpus refresh or distillation.
+    #[arg(long, value_parser = llm_model_completion_parser(), hide_possible_values = true)]
+    pub teacher: Option<String>,
+    /// Corpus strategy (`auto`, `audit-only`, `refresh`, or `distill`).
+    #[arg(long = "corpus-strategy", default_value = "auto")]
+    pub corpus_strategy: String,
     /// Adapter training method (`qlora` or `lora`).
     #[arg(long, default_value = "qlora")]
     pub method: String,
