@@ -68,7 +68,7 @@ bump_version() {
   local next="$1"
   python3 - "$next" <<'PY'
 from pathlib import Path
-import json, re, sys
+import json, re, sys, tomllib
 
 next_version = sys.argv[1]
 major_minor = ".".join(next_version.split(".")[:2])
@@ -83,26 +83,44 @@ if count != 1:
 root.write_text(updated)
 
 # Update inter-crate dep specs across workspace + excluded crates so a
-# major/minor bump keeps harn-* path deps resolvable against the new
+# major/minor bump keeps local path deps resolvable against the new
 # version line. Patch bumps within a X.Y line are no-ops here.
-crate_dirs = [p for p in Path("crates").iterdir() if p.is_dir()]
-harn_crates = {p.name for p in crate_dirs}
+workspace = tomllib.loads(root.read_text()).get("workspace", {})
+
+
+def workspace_package_manifests() -> list[Path]:
+    manifests: set[Path] = set()
+    for key in ("members", "exclude"):
+        for entry in workspace.get(key, []):
+            paths = list(Path().glob(entry)) if any(ch in entry for ch in "*?[") else [Path(entry)]
+            for path in paths:
+                manifest = path if path.name == "Cargo.toml" else path / "Cargo.toml"
+                if manifest.exists():
+                    manifests.add(manifest)
+    return sorted(manifests)
+
+
+package_manifests = workspace_package_manifests()
+local_packages: set[str] = set()
+for manifest in package_manifests:
+    data = tomllib.loads(manifest.read_text())
+    name = data.get("package", {}).get("name")
+    if isinstance(name, str) and name:
+        local_packages.add(name)
+
 pattern = re.compile(
-    r'(harn-[A-Za-z0-9_-]+)(\s*=\s*\{\s*path\s*=\s*"[^"]+"\s*,\s*version\s*=\s*)"([^"]+)"'
+    r'([A-Za-z0-9_-]+)(\s*=\s*\{\s*path\s*=\s*"[^"]+"\s*,\s*version\s*=\s*)"([^"]+)"'
 )
 
 
 def rewrite(match: re.Match) -> str:
     name = match.group(1)
-    if name not in harn_crates:
+    if name not in local_packages:
         return match.group(0)
     return f'{name}{match.group(2)}"{major_minor}"'
 
 
-for crate_dir in crate_dirs:
-    manifest = crate_dir / "Cargo.toml"
-    if not manifest.exists():
-        continue
+for manifest in [root, *package_manifests]:
     original = manifest.read_text()
     new_text = pattern.sub(rewrite, original)
     if new_text != original:
@@ -450,7 +468,7 @@ PY
   # already validated by the release audit before this version-only rewrite, and
   # CI validates the pushed release branch, so do not pay for a second
   # post-bump workspace check here.
-  HARN_BIN= make gen-protocol-artifacts
+  HARN_BIN="" make gen-protocol-artifacts
   echo "Version updated: $current -> $next"
   echo "Next steps:"
   echo "  1. Review docs/release notes diff"
