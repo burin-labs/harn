@@ -326,6 +326,7 @@ test-agent-scripts:
 	@echo "    Harn agent-loop tests OK."
 
 test-pr-gate-scripts:
+	python3 scripts/tests/check_generated_registry_py_test.py
 	./scripts/tests/ci_release_metadata_only_test.sh
 	./scripts/tests/changelog_fragment_check_test.sh
 	./scripts/tests/nextest_filters_from_paths_test.sh
@@ -677,9 +678,9 @@ check-grammar-keywords:
 
 # Meta-guard: fail if scripts/generated_artifacts.toml (the single source
 # of truth for every gen/check drift pair) has drifted from its consumers
-# — the Makefile `all:` recipe, the CI workflows, and the declared output
-# files. Pure-Python; no harn build required. See the registry header for
+# -- the Makefile `all:` recipe, the CI workflows, and the declared output
+# files. Pure Python; no harn build required. See the registry header for
 # the add-a-new-artifact checklist.
 check-generated-registry:
 	@echo "=== Checking generated-artifact registry is in sync ==="
-	@$(HARN_CMD) run scripts/check_generated_registry.harn
+	@python3 scripts/check_generated_registry.py

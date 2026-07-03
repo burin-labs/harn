@@ -18,7 +18,6 @@ It is a living tracker, not a spec. When you port a script, move its row to
 | `check_diagnostic_codes.harn` | `make lint-diagnostic-codes` | Registry + struct-literal/`Code::` scan; uses `regex_captures` `.line`/`.start`. |
 | `check_docs_links.harn` | `make check-docs-links` | Markdown local-link resolver; `..` resolved at `fs.exists` time. |
 | `verify_language_spec.harn` | `scripts/release_gate.sh` (`verify_language_spec` phase) | Extracts ```harn fences from the spec and type-checks each; resolves the checker binary via `cargo metadata`. |
-| `check_generated_registry.harn` | `make check-generated-registry` | `toml_parse` + Makefile/workflow scan; whole-target match hand-rolled (no regex look-around). |
 | `verify_release_metadata.harn` | `ci.yml` + `release_gate.sh` | Cargo.toml↔CHANGELOG checks; reuses `std/semver`; imports `render_release_notes.harn` in-process for its render smoke check. |
 | `render_release_notes.harn` | `release_gate.sh` + `build-release-binaries.yml` | CHANGELOG section → GitHub notes; the release-asset job invokes the built linux-x64 release binary (no toolchain there). |
 | `sync_protocol_fixture_runtime_versions.harn` | `scripts/release_gate.sh` | Fixture runtime-version bump; `--write` produces byte-identical fixtures. |
@@ -53,6 +52,11 @@ pure helpers, run by `make test-harn-scripts`.
   crates, to compute the nextest filter. Running it via `cargo run --bin harn`
   would force a multi-minute `harn` build on every PR — including a cold
   Windows build — purely to decide what to test, defeating its entire purpose.
+- **`check_generated_registry.py`** — the Harn port remains as a tested reference,
+  but the wired `make check-generated-registry` path is Python. This check is
+  intentionally a hook/bootstrap guard for Makefile/workflow/hook drift; running
+  it through `harn run` makes hook-only pushes and release recovery builds pay a
+  cold Harn compile before the fast-only pre-push escape can take effect.
   Python3 is present on all runners with zero build cost. Revisit only if a
   cheap prebuilt-`harn` is available in PR CI.
 
