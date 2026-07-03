@@ -57,6 +57,8 @@ const HOST_DESERIALIZE_EVENT_TYPES: &[&str] = &[
     "structural_validator_decision",
     "scope_classifier_verdict",
     "missing_tool_call_verdict",
+    "budget_exhausted",
+    "budget_circuit_breaker",
     "progress_reported",
     "tool_search_query",
     "tool_search_result",

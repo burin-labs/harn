@@ -1485,6 +1485,46 @@ fn from_host_stance_events_map_to_stance_transition() {
 }
 
 #[test]
+fn from_host_deserializes_budget_events() {
+    // Budget termination is a normal host-emitted loop outcome, so both
+    // variants must stay inside the explicit host allowlist.
+    match AgentEvent::from_host_payload(
+        "s1",
+        "budget_exhausted",
+        &json!({ "kind": "budget", "max_iterations": 12, "iteration": 12, "cost_usd": 0.0, "wall_clock_ms": 0 }),
+    )
+    .expect("budget_exhausted")
+    {
+        AgentEvent::BudgetExhausted {
+            max_iterations,
+            kind,
+            ..
+        } => {
+            assert_eq!(max_iterations, 12);
+            assert_eq!(kind.as_deref(), Some("budget"));
+        }
+        other => panic!("expected BudgetExhausted, got {other:?}"),
+    }
+    match AgentEvent::from_host_payload(
+        "s1",
+        "budget_circuit_breaker",
+        &json!({ "kind": "consecutive_failures", "consecutive_count": 3, "paused_for_ms": 500 }),
+    )
+    .expect("budget_circuit_breaker")
+    {
+        AgentEvent::BudgetCircuitBreaker {
+            consecutive_count,
+            paused_for_ms,
+            ..
+        } => {
+            assert_eq!(consecutive_count, 3);
+            assert_eq!(paused_for_ms, 500);
+        }
+        other => panic!("expected BudgetCircuitBreaker, got {other:?}"),
+    }
+}
+
+#[test]
 fn from_host_rejects_non_host_and_unknown_event_types() {
     // A real `AgentEvent` variant that is never emitted through the host
     // path stays rejected (parity with the retired match's allowlist).
