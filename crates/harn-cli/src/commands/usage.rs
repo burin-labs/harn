@@ -15,11 +15,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, Datelike, NaiveDate, TimeZone, Utc};
 use harn_vm::event_log::{
     open_event_log, EventLog, EventLogConfig, LogEvent, Topic, HARN_LLM_TRANSCRIPT_TOPIC,
 };
 use serde::Serialize;
+use time::{format_description::well_known::Rfc3339, Date, Month, OffsetDateTime, Time};
 
 use crate::cli::{UsageArgs, UsageGroupBy};
 use crate::json_envelope::{to_string_pretty, JsonEnvelope};
@@ -396,23 +396,38 @@ fn group_key(call: &UsageCall, group_by: UsageGroupBy) -> String {
     }
 }
 
-fn to_utc(occurred_at_ms: i64) -> DateTime<Utc> {
-    Utc.timestamp_millis_opt(occurred_at_ms)
-        .single()
-        .unwrap_or_else(|| Utc.timestamp_opt(0, 0).single().unwrap_or_default())
+fn to_utc(occurred_at_ms: i64) -> OffsetDateTime {
+    OffsetDateTime::from_unix_timestamp_nanos(occurred_at_ms as i128 * 1_000_000)
+        .unwrap_or(OffsetDateTime::UNIX_EPOCH)
 }
 
 fn day_bucket(occurred_at_ms: i64) -> String {
-    to_utc(occurred_at_ms).format("%Y-%m-%d").to_string()
+    let date = to_utc(occurred_at_ms).date();
+    format!(
+        "{:04}-{:02}-{:02}",
+        date.year(),
+        u8::from(date.month()),
+        date.day()
+    )
 }
 
 fn week_bucket(occurred_at_ms: i64) -> String {
-    let iso = to_utc(occurred_at_ms).iso_week();
-    format!("{}-W{:02}", iso.year(), iso.week())
+    let date = to_utc(occurred_at_ms).date();
+    format!("{}-W{:02}", iso_week_year(date), date.iso_week())
 }
 
 fn month_bucket(occurred_at_ms: i64) -> String {
-    to_utc(occurred_at_ms).format("%Y-%m").to_string()
+    let date = to_utc(occurred_at_ms).date();
+    format!("{:04}-{:02}", date.year(), u8::from(date.month()))
+}
+
+fn iso_week_year(date: Date) -> i32 {
+    let week = date.iso_week();
+    match (date.month(), week) {
+        (Month::January, 52 | 53) => date.year() - 1,
+        (Month::December, 1) => date.year() + 1,
+        _ => date.year(),
+    }
 }
 
 /// Parse a `--since`/`--until` boundary into epoch millis. Accepts a
@@ -423,17 +438,23 @@ fn parse_boundary(raw: Option<&str>, is_until: bool) -> Result<Option<i64>, Stri
     let Some(raw) = raw.map(str::trim).filter(|s| !s.is_empty()) else {
         return Ok(None);
     };
-    if let Ok(dt) = DateTime::parse_from_rfc3339(raw) {
-        return Ok(Some(dt.with_timezone(&Utc).timestamp_millis()));
+    if let Ok(dt) = OffsetDateTime::parse(raw, &Rfc3339) {
+        return Ok(Some(dt.unix_timestamp_nanos() as i64 / 1_000_000));
     }
-    if let Ok(date) = NaiveDate::parse_from_str(raw, "%Y-%m-%d") {
+    let date_format = time::format_description::parse("[year]-[month]-[day]")
+        .map_err(|error| format!("failed to build date parser: {error}"))?;
+    if let Ok(date) = Date::parse(raw, &date_format) {
         let date = if is_until {
-            date.succ_opt().unwrap_or(date)
+            date.next_day().unwrap_or(date)
         } else {
             date
         };
-        let dt = date.and_hms_opt(0, 0, 0).unwrap_or_default();
-        return Ok(Some(Utc.from_utc_datetime(&dt).timestamp_millis()));
+        return Ok(Some(
+            date.with_time(Time::MIDNIGHT)
+                .assume_utc()
+                .unix_timestamp_nanos() as i64
+                / 1_000_000,
+        ));
     }
     Err(format!(
         "could not parse date `{raw}` (expected YYYY-MM-DD or an RFC3339 timestamp)"
@@ -612,6 +633,12 @@ mod tests {
         }
     }
 
+    fn timestamp_millis(year: i32, month: Month, day: u8, hour: u8, minute: u8, second: u8) -> i64 {
+        let date = Date::from_calendar_date(year, month, day).unwrap();
+        let time = Time::from_hms(hour, minute, second).unwrap();
+        date.with_time(time).assume_utc().unix_timestamp_nanos() as i64 / 1_000_000
+    }
+
     #[test]
     fn provider_rollup_sums_cost_and_tokens() {
         let calls = vec![
@@ -649,11 +676,11 @@ mod tests {
     #[test]
     fn day_group_by_produces_cumulative_series() {
         // 2026-01-01 and 2026-01-02 UTC.
-        let day1 = Utc.with_ymd_and_hms(2026, 1, 1, 12, 0, 0).unwrap();
-        let day2 = Utc.with_ymd_and_hms(2026, 1, 2, 12, 0, 0).unwrap();
+        let day1 = timestamp_millis(2026, Month::January, 1, 12, 0, 0);
+        let day2 = timestamp_millis(2026, Month::January, 2, 12, 0, 0);
         let calls = vec![
-            call("p", "m", day1.timestamp_millis(), 10, 1, 0, 1.0),
-            call("p", "m", day2.timestamp_millis(), 10, 1, 0, 2.0),
+            call("p", "m", day1, 10, 1, 0, 1.0),
+            call("p", "m", day2, 10, 1, 0, 2.0),
         ];
         let report = aggregate(&calls, UsageGroupBy::Day, vec![]);
         assert_eq!(report.group_by, "day");
@@ -668,14 +695,8 @@ mod tests {
     fn boundary_parsing_bare_date_is_inclusive_day() {
         let since = parse_boundary(Some("2026-01-02"), false).unwrap().unwrap();
         let until = parse_boundary(Some("2026-01-02"), true).unwrap().unwrap();
-        let expected_since = Utc
-            .with_ymd_and_hms(2026, 1, 2, 0, 0, 0)
-            .unwrap()
-            .timestamp_millis();
-        let expected_until = Utc
-            .with_ymd_and_hms(2026, 1, 3, 0, 0, 0)
-            .unwrap()
-            .timestamp_millis();
+        let expected_since = timestamp_millis(2026, Month::January, 2, 0, 0, 0);
+        let expected_until = timestamp_millis(2026, Month::January, 3, 0, 0, 0);
         assert_eq!(since, expected_since);
         assert_eq!(until, expected_until);
     }
@@ -685,10 +706,7 @@ mod tests {
         let value = parse_boundary(Some("2026-01-02T06:00:00Z"), false)
             .unwrap()
             .unwrap();
-        let expected = Utc
-            .with_ymd_and_hms(2026, 1, 2, 6, 0, 0)
-            .unwrap()
-            .timestamp_millis();
+        let expected = timestamp_millis(2026, Month::January, 2, 6, 0, 0);
         assert_eq!(value, expected);
     }
 }
