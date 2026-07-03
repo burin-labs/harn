@@ -16,7 +16,7 @@ const LORA_PLAN_PAYLOAD_ENV: &str = "HARN_MODELS_LORA_PLAN_PAYLOAD_JSON";
 const LORA_PLAN_PAYLOAD_PRETTY_ENV: &str = "HARN_MODELS_LORA_PLAN_PAYLOAD_PRETTY";
 /// Serialises the dispatch path so concurrent in-process callers do not race on
 /// the env vars that carry the Rust-collected adapter/catalog facts.
-static DISPATCH_LORA_INSPECT_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+static LORA_RENDER_DISPATCH_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 pub(crate) async fn run(args: ModelsLoraArgs) {
     let exit_code = match args.command {
@@ -37,32 +37,15 @@ async fn inspect(args: &ModelsLoraInspectArgs) -> i32 {
             return 1;
         }
     };
-    let payload_json = match serde_json::to_string(&report) {
-        Ok(json) => json,
-        Err(error) => {
-            eprintln!("error: failed to serialise LoRA inspect payload: {error}");
-            return 1;
-        }
-    };
-    let pretty_json = match serde_json::to_string_pretty(&report) {
-        Ok(json) => json,
-        Err(error) => {
-            eprintln!("error: failed to render LoRA inspect JSON: {error}");
-            return 1;
-        }
-    };
-
-    let _guard = DISPATCH_LORA_INSPECT_LOCK.lock().await;
-    let _payload = ScopedEnvVar::set(LORA_INSPECT_PAYLOAD_ENV, &payload_json);
-    let _pretty = ScopedEnvVar::set(LORA_INSPECT_PAYLOAD_PRETTY_ENV, &pretty_json);
-    let outcome = dispatch::run_embedded_script("models/lora_inspect", Vec::new(), args.json).await;
-    if !outcome.stderr.is_empty() {
-        let _ = std::io::stderr().write_all(outcome.stderr.as_bytes());
-    }
-    if !outcome.stdout.is_empty() {
-        let _ = std::io::stdout().write_all(outcome.stdout.as_bytes());
-    }
-    outcome.exit_code
+    render_embedded_lora_report(
+        &report,
+        LORA_INSPECT_PAYLOAD_ENV,
+        LORA_INSPECT_PAYLOAD_PRETTY_ENV,
+        "models/lora_inspect",
+        args.json,
+        "LoRA inspect",
+    )
+    .await
 }
 
 async fn plan(args: &ModelsLoraPlanArgs) -> i32 {
@@ -73,25 +56,44 @@ async fn plan(args: &ModelsLoraPlanArgs) -> i32 {
             return 1;
         }
     };
+    render_embedded_lora_report(
+        &report,
+        LORA_PLAN_PAYLOAD_ENV,
+        LORA_PLAN_PAYLOAD_PRETTY_ENV,
+        "models/lora_plan",
+        args.json,
+        "LoRA plan",
+    )
+    .await
+}
+
+pub(super) async fn render_embedded_lora_report<T: Serialize>(
+    report: &T,
+    payload_env: &'static str,
+    pretty_env: &'static str,
+    script_name: &'static str,
+    json: bool,
+    label: &str,
+) -> i32 {
     let payload_json = match serde_json::to_string(&report) {
         Ok(json) => json,
         Err(error) => {
-            eprintln!("error: failed to serialise LoRA plan payload: {error}");
+            eprintln!("error: failed to serialise {label} payload: {error}");
             return 1;
         }
     };
     let pretty_json = match serde_json::to_string_pretty(&report) {
         Ok(json) => json,
         Err(error) => {
-            eprintln!("error: failed to render LoRA plan JSON: {error}");
+            eprintln!("error: failed to render {label} JSON: {error}");
             return 1;
         }
     };
 
-    let _guard = DISPATCH_LORA_INSPECT_LOCK.lock().await;
-    let _payload = ScopedEnvVar::set(LORA_PLAN_PAYLOAD_ENV, &payload_json);
-    let _pretty = ScopedEnvVar::set(LORA_PLAN_PAYLOAD_PRETTY_ENV, &pretty_json);
-    let outcome = dispatch::run_embedded_script("models/lora_plan", Vec::new(), args.json).await;
+    let _guard = LORA_RENDER_DISPATCH_LOCK.lock().await;
+    let _payload = ScopedEnvVar::set(payload_env, &payload_json);
+    let _pretty = ScopedEnvVar::set(pretty_env, &pretty_json);
+    let outcome = dispatch::run_embedded_script(script_name, Vec::new(), json).await;
     if !outcome.stderr.is_empty() {
         let _ = std::io::stderr().write_all(outcome.stderr.as_bytes());
     }
