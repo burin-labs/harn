@@ -1,0 +1,659 @@
+//! Catalog query surface: provider/model lookups, per-role and per-model
+//! parameter defaults, pricing, capability tags, tool-format resolution, and
+//! tier candidate enumeration.
+use std::collections::BTreeMap;
+
+use super::*;
+
+use harn_glob::match_name as glob_match;
+
+/// Get provider config for resolving base_url, auth, etc.
+pub fn provider_config(name: &str) -> Option<ProviderDef> {
+    effective_config().providers.get(name).cloned()
+}
+
+pub fn provider_protocol(name: &str) -> Option<String> {
+    provider_config(name).and_then(|def| def.protocol)
+}
+
+pub fn provider_uses_acp(name: &str) -> bool {
+    provider_protocol(name)
+        .as_deref()
+        .is_some_and(|protocol| protocol.eq_ignore_ascii_case("acp"))
+}
+
+/// Get model-specific default parameters (temperature, etc.).
+/// Matches glob patterns in model_defaults keys.
+pub fn model_params(model_id: &str) -> BTreeMap<String, toml::Value> {
+    let config = effective_config();
+    let mut params = BTreeMap::new();
+    for (pattern, defaults) in &config.model_defaults {
+        if glob_match(pattern, model_id) {
+            for (k, v) in defaults {
+                params.insert(k.clone(), v.clone());
+            }
+        }
+    }
+    params
+}
+
+/// Get per-role LLM defaults, e.g. `[model_roles.merge]`.
+///
+/// Role defaults are intentionally shaped like ordinary `llm_call` options:
+/// callers can pin `provider`/`model`, install `route_policy` or `prefer`,
+/// and tune budget/latency knobs without creating a parallel routing stack.
+/// Environment variables provide a lightweight operational override for
+/// merge/fast-apply workers:
+///
+/// - `HARN_LLM_MERGE_PROVIDER`, `HARN_LLM_MERGE_MODEL`,
+///   `HARN_LLM_MERGE_ROUTE_POLICY`
+/// - `HARN_LLM_FAST_APPLY_PROVIDER`, `HARN_LLM_FAST_APPLY_MODEL`,
+///   `HARN_LLM_FAST_APPLY_ROUTE_POLICY`
+/// - `HARN_LLM_ROLE_<ROLE>_PROVIDER`, `_MODEL`, `_ROUTE_POLICY`
+pub fn model_role_defaults(role: &str) -> BTreeMap<String, toml::Value> {
+    let normalized = normalize_model_role_name(role);
+    if normalized.is_empty() {
+        return BTreeMap::new();
+    }
+    let config = effective_config();
+    let mut params = BTreeMap::new();
+    for key in role_lookup_keys(&normalized) {
+        extend_model_role_defaults(&config, &key, &mut params);
+    }
+    apply_model_role_env_overrides(&normalized, &mut params);
+    params
+}
+
+fn extend_model_role_defaults(
+    config: &ProvidersConfig,
+    role: &str,
+    params: &mut BTreeMap<String, toml::Value>,
+) {
+    for (configured_role, defaults) in &config.model_roles {
+        if normalize_model_role_name(configured_role) == role {
+            params.extend(defaults.clone());
+        }
+    }
+    if let Some(defaults) = config.model_roles.get(role) {
+        params.extend(defaults.clone());
+    }
+}
+
+fn normalize_model_role_name(role: &str) -> String {
+    role.trim().to_ascii_lowercase().replace('-', "_")
+}
+
+fn role_lookup_keys(role: &str) -> Vec<String> {
+    if role == "merge" {
+        vec!["fast_apply".to_string(), "merge".to_string()]
+    } else if role == "fast_apply" {
+        vec!["merge".to_string(), "fast_apply".to_string()]
+    } else {
+        vec![role.to_string()]
+    }
+}
+
+fn role_env_token(role: &str) -> String {
+    role.chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_uppercase()
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>()
+        .split('_')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("_")
+}
+
+fn apply_model_role_env_overrides(role: &str, params: &mut BTreeMap<String, toml::Value>) {
+    for alias in role_env_aliases(role) {
+        apply_model_role_env_var(&format!("HARN_LLM_{alias}_PROVIDER"), "provider", params);
+        apply_model_role_env_var(&format!("HARN_LLM_{alias}_MODEL"), "model", params);
+        apply_model_role_env_var(
+            &format!("HARN_LLM_{alias}_ROUTE_POLICY"),
+            "route_policy",
+            params,
+        );
+        apply_model_role_env_var(
+            &format!("HARN_LLM_ROLE_{alias}_PROVIDER"),
+            "provider",
+            params,
+        );
+        apply_model_role_env_var(&format!("HARN_LLM_ROLE_{alias}_MODEL"), "model", params);
+        apply_model_role_env_var(
+            &format!("HARN_LLM_ROLE_{alias}_ROUTE_POLICY"),
+            "route_policy",
+            params,
+        );
+    }
+}
+
+fn role_env_aliases(role: &str) -> Vec<String> {
+    let token = role_env_token(role);
+    if token.is_empty() {
+        return Vec::new();
+    }
+    if token == "MERGE" {
+        vec!["FAST_APPLY".to_string(), "MERGE".to_string()]
+    } else if token == "FAST_APPLY" {
+        vec!["MERGE".to_string(), "FAST_APPLY".to_string()]
+    } else {
+        vec![token]
+    }
+}
+
+fn apply_model_role_env_var(
+    env_name: &str,
+    option_name: &str,
+    params: &mut BTreeMap<String, toml::Value>,
+) {
+    let Ok(value) = std::env::var(env_name) else {
+        return;
+    };
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    params.insert(
+        option_name.to_string(),
+        toml::Value::String(trimmed.to_string()),
+    );
+}
+
+/// Get list of configured provider names.
+pub fn provider_names() -> Vec<String> {
+    effective_config().providers.keys().cloned().collect()
+}
+
+/// Return every configured alias name, sorted deterministically.
+pub fn known_model_names() -> Vec<String> {
+    effective_config().aliases.keys().cloned().collect()
+}
+
+pub fn alias_entries() -> Vec<(String, AliasDef)> {
+    effective_config().aliases.into_iter().collect()
+}
+
+pub fn alias_tool_calling_entry(alias: &str) -> Option<AliasToolCallingDef> {
+    effective_config().alias_tool_calling.get(alias).cloned()
+}
+
+/// Return every configured model-catalog entry, sorted by provider then id.
+pub fn model_catalog_entries() -> Vec<(String, ModelDef)> {
+    let config = effective_config();
+    model_catalog_entries_with_config(&config)
+}
+
+pub(crate) fn model_catalog_entries_with_config(
+    config: &ProvidersConfig,
+) -> Vec<(String, ModelDef)> {
+    sorted_model_entries_with_config(config)
+        .into_iter()
+        .map(|(id, model)| {
+            let provider = model.provider.clone();
+            (
+                id.clone(),
+                with_effective_capability_tags(id, provider, model),
+            )
+        })
+        .collect()
+}
+
+pub(crate) fn sorted_model_entries_with_config(
+    config: &ProvidersConfig,
+) -> Vec<(String, ModelDef)> {
+    let mut entries: Vec<_> = config
+        .models
+        .iter()
+        .map(|(id, model)| (id.clone(), model.clone()))
+        .collect();
+    entries.sort_by(|(id_a, model_a), (id_b, model_b)| {
+        model_a
+            .provider
+            .cmp(&model_b.provider)
+            .then_with(|| id_a.cmp(id_b))
+    });
+    entries
+}
+
+pub fn model_catalog_entry(model_id: &str) -> Option<ModelDef> {
+    effective_config()
+        .models
+        .get(model_id)
+        .cloned()
+        .map(|model| {
+            let provider = model.provider.clone();
+            with_effective_capability_tags(model_id.to_string(), provider, model)
+        })
+}
+
+pub fn model_rate_limits(model_id: &str) -> Option<RateLimitsDef> {
+    model_catalog_entry(model_id).and_then(|model| model.rate_limits)
+}
+
+pub fn wire_model_id(model_id: &str) -> String {
+    model_catalog_entry(model_id)
+        .and_then(|model| model.wire_model)
+        .unwrap_or_else(|| model_id.to_string())
+}
+
+pub fn provider_rate_limits(provider: &str) -> Option<RateLimitsDef> {
+    provider_config(provider).and_then(|provider| {
+        provider
+            .rate_limits
+            .unwrap_or_default()
+            .with_rpm_fallback(provider.rpm)
+    })
+}
+
+pub fn model_equivalence_group(model_id: &str) -> Option<String> {
+    model_catalog_entry(model_id).and_then(|model| {
+        model
+            .equivalence_group
+            .or(model.logical_model)
+            .filter(|group| !group.trim().is_empty())
+    })
+}
+
+/// Return same-logical-model routes that can be considered for explicit
+/// failover or cross-provider experiments. Equivalence is a catalog assertion
+/// about compatible model weights/family, not wire-level identity.
+pub fn equivalent_model_catalog_entries(selector: &str) -> Vec<(String, ModelDef)> {
+    let resolved = resolve_model_info(selector);
+    let Some(group) = model_equivalence_group(&resolved.id) else {
+        return Vec::new();
+    };
+    let config = effective_config();
+    let Some(source) = config.models.get(&resolved.id) else {
+        return Vec::new();
+    };
+    let source_caps = crate::llm::capabilities::lookup(&source.provider, &resolved.id);
+    let source_context = source
+        .runtime_context_window
+        .unwrap_or(source.context_window);
+
+    sorted_model_entries_with_config(&config)
+        .into_iter()
+        .filter(|(id, model)| !(id == &resolved.id && model.provider == resolved.provider))
+        .filter(|(_, model)| !model.deprecated)
+        .filter(|(_, model)| model.availability != ModelAvailability::Dedicated)
+        .filter(|(_, model)| {
+            model.equivalence_group.as_deref() == Some(group.as_str())
+                || model.logical_model.as_deref() == Some(group.as_str())
+        })
+        .filter(|(id, model)| {
+            let caps = crate::llm::capabilities::lookup(&model.provider, id);
+            let candidate_context = model.runtime_context_window.unwrap_or(model.context_window);
+            candidate_context >= source_context
+                && (!source_caps.native_tools || caps.native_tools)
+                && (!source_caps.text_tool_wire_format_supported
+                    || caps.text_tool_wire_format_supported)
+                && (!source_caps.reasoning_effort_supported || caps.reasoning_effort_supported)
+                && source_caps.structured_output_mode == caps.structured_output_mode
+        })
+        .map(|(id, model)| {
+            let provider = model.provider.clone();
+            (
+                id.clone(),
+                with_effective_capability_tags(id, provider, model),
+            )
+        })
+        .collect()
+}
+
+pub fn qc_default_model(provider: &str) -> Option<String> {
+    std::env::var("BURIN_QC_MODEL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            effective_config()
+                .qc_defaults
+                .get(&provider.to_lowercase())
+                .cloned()
+        })
+}
+
+pub fn default_model_for_provider(provider: &str) -> String {
+    if provider_uses_acp(provider) {
+        return "default".to_string();
+    }
+    match provider {
+        "local" => std::env::var("LOCAL_LLM_MODEL")
+            .or_else(|_| std::env::var("HARN_LLM_MODEL"))
+            .unwrap_or_else(|_| "gemma-4-26b-a4b-it".to_string()),
+        "mlx" => std::env::var("MLX_MODEL_ID")
+            .unwrap_or_else(|_| "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit".to_string()),
+        "openai" => "gpt-4o-mini".to_string(),
+        "ollama" => "llama3.2".to_string(),
+        "openrouter" => "anthropic/claude-sonnet-4.6".to_string(),
+        _ => "claude-sonnet-4-6".to_string(),
+    }
+}
+
+pub fn qc_defaults() -> BTreeMap<String, String> {
+    effective_config().qc_defaults
+}
+
+pub fn model_pricing_per_mtok(model_id: &str) -> Option<ModelPricing> {
+    effective_config()
+        .models
+        .get(model_id)
+        .and_then(|model| model.pricing.clone())
+}
+
+/// Premium per-MTok pricing for a model's accelerated-serving ("fast mode")
+/// tier, when the catalog declares one. Returns `None` for models with no
+/// fast tier or a tier that omits explicit pricing — callers fall back to
+/// standard pricing in that case.
+pub fn model_fast_pricing_per_mtok(model_id: &str) -> Option<ModelPricing> {
+    effective_config()
+        .models
+        .get(model_id)
+        .and_then(|model| model.fast_mode.as_ref())
+        .and_then(|fast_mode| fast_mode.pricing.clone())
+}
+
+pub fn pricing_per_1k_for(provider: &str, model_id: &str) -> Option<(f64, f64)> {
+    model_pricing_per_mtok(model_id)
+        .map(|pricing| {
+            (
+                pricing.input_per_mtok / 1000.0,
+                pricing.output_per_mtok / 1000.0,
+            )
+        })
+        .or_else(|| {
+            let (input, output, _) = provider_economics(provider);
+            match (input, output) {
+                (Some(input), Some(output)) => Some((input, output)),
+                _ => None,
+            }
+        })
+}
+
+pub fn auth_env_names(auth_env: &AuthEnv) -> Vec<String> {
+    match auth_env {
+        AuthEnv::None => Vec::new(),
+        AuthEnv::Single(name) => vec![name.clone()],
+        AuthEnv::Multiple(names) => names.clone(),
+    }
+}
+
+pub fn provider_key_available(provider: &str) -> bool {
+    let Some(pdef) = provider_config(provider) else {
+        return provider == "ollama";
+    };
+    if pdef.auth_style == "none" || matches!(pdef.auth_env, AuthEnv::None) {
+        return true;
+    }
+    auth_env_names(&pdef.auth_env).into_iter().any(|env_name| {
+        std::env::var(env_name)
+            .ok()
+            .is_some_and(|value| !value.trim().is_empty())
+    })
+}
+
+pub fn available_provider_names() -> Vec<String> {
+    provider_names()
+        .into_iter()
+        .filter(|provider| provider_key_available(provider))
+        .collect()
+}
+
+/// Check if a provider advertises a legacy provider-level feature.
+pub fn provider_has_feature(provider: &str, feature: &str) -> bool {
+    provider_config(provider)
+        .map(|p| p.features.iter().any(|f| f == feature))
+        .unwrap_or(false)
+}
+
+/// Provider-level catalog pricing/latency. Model-specific catalog pricing
+/// wins when available; this is the adapter-level fallback used by routing
+/// and portal summaries when a model has no explicit catalog entry.
+pub fn provider_economics(provider: &str) -> (Option<f64>, Option<f64>, Option<u64>) {
+    provider_config(provider)
+        .map(|p| (p.cost_per_1k_in, p.cost_per_1k_out, p.latency_p50_ms))
+        .unwrap_or((None, None, None))
+}
+
+/// The tool-call channel a `tool_format` string addresses.
+///
+/// `native` is the provider JSON tool-calling channel; `text` (the canonical
+/// tagged/heredoc grammar) and `json` (fenced-JSON) are both TEXT-channel
+/// formats — they ride in the assistant's visible content and parse with a
+/// text parser. This is the single source of truth for "is this format a
+/// text-channel format?" so the parity gates, native-tools resolution, and
+/// tool-result message role all agree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolFormatChannel {
+    /// Provider native JSON tool calling.
+    Native,
+    /// A text-channel grammar carried in assistant content (`text` or `json`).
+    Text,
+}
+
+/// Classify a `tool_format` string into its channel, or `None` for an unknown
+/// value (a typo, or a not-yet-wired format). Callers use this to reject
+/// unknown formats loudly instead of silently defaulting.
+///
+/// EXHAUSTIVE-MATCH GUARD: this `match` is the canonical place tool_format is
+/// switched. Adding a new format requires a branch here, so a half-wired
+/// format fails to compile rather than silently reading as text.
+pub fn tool_format_channel(format: &str) -> Option<ToolFormatChannel> {
+    match format {
+        "native" => Some(ToolFormatChannel::Native),
+        "text" | "json" => Some(ToolFormatChannel::Text),
+        _ => None,
+    }
+}
+
+/// True when `format` is a tool_format Harn understands (`native`, `text`, or
+/// `json`). Used to gate the capability-matrix `preferred_tool_format` so a
+/// pinned format is honored, while an unknown value falls through to the
+/// native/text heuristic.
+pub fn is_known_tool_format(format: &str) -> bool {
+    tool_format_channel(format).is_some()
+}
+
+/// Resolve the default tool format for a model+provider combination.
+/// Priority: alias `tool_format` (matched by model ID) > provider/model
+/// capability matrix > legacy provider feature > "json" (the global
+/// text-channel default; heredoc "text" is opt-in via a pin or explicit
+/// request).
+pub fn default_tool_format(model: &str, provider: &str) -> String {
+    let config = effective_config();
+    default_tool_format_with_config(&config, model, provider)
+}
+
+pub(crate) fn default_tool_format_with_config(
+    config: &ProvidersConfig,
+    model: &str,
+    provider: &str,
+) -> String {
+    // Aliases match by model ID + provider, or by alias name.
+    for (name, alias) in &config.aliases {
+        let matches = (alias.id == model && alias.provider == provider) || name == model;
+        if matches {
+            if let Some(ref fmt) = alias.tool_format {
+                return fmt.clone();
+            }
+        }
+    }
+    let capabilities = crate::llm::capabilities::lookup(provider, model);
+    if let Some(format) = capabilities.preferred_tool_format.as_deref() {
+        // A capability row may pin any known tool_format, including `text`
+        // (heredoc) — the reverse safety valve a regressing model uses to pin
+        // OFF the global json default. `json` is also honored when a row sets
+        // it. The exhaustive match below is the EXHAUSTIVE-MATCH GUARD: a new
+        // tool_format that isn't classified here fails loudly rather than
+        // silently falling through to the native/json heuristic.
+        if is_known_tool_format(format) {
+            return format.to_string();
+        }
+    }
+    let capability_matrix_native = capabilities.native_tools;
+    let legacy_provider_native = config
+        .providers
+        .get(provider)
+        .map(|p| p.features.iter().any(|f| f == "native_tools"))
+        .unwrap_or(false);
+    if capability_matrix_native || legacy_provider_native {
+        "native".to_string()
+    } else {
+        // GLOBAL DEFAULT: a text-channel model with no pinned format resolves
+        // to fenced-json (`json`), not heredoc (`text`). The win is STRUCTURAL
+        // — a JSON string can't carry a raw newline, so a `<<EOF` content
+        // delimiter never collides with the call wrapper (heredoc's known
+        // production defect: models leak `<<EOF` into file content → the
+        // `line 0: <<` thrash). Fenced-json swept a clean 1.0/1.0/1.0
+        // (compliance/parse-determinism/expressiveness) across every model
+        // measured, and the structural guarantee generalizes to unmeasured
+        // models. Heredoc (`text`) stays selectable explicitly and via a
+        // per-model `preferred_tool_format = "text"` pin (the reverse valve).
+        "json".to_string()
+    }
+}
+
+fn with_effective_capability_tags(
+    model_id: String,
+    provider: String,
+    mut model: ModelDef,
+) -> ModelDef {
+    model.capabilities = effective_model_capability_tags(&provider, &model_id);
+    model
+}
+
+/// Legacy display tags derived from the canonical provider/model capability
+/// matrix. The matrix is the source of truth; `models.*.capabilities` in
+/// providers.toml is accepted only for backwards-compatible parsing.
+pub fn effective_model_capability_tags(provider: &str, model_id: &str) -> Vec<String> {
+    let caps = crate::llm::capabilities::lookup(provider, model_id);
+    capability_tags_from_capabilities(&caps)
+}
+
+pub(crate) fn capability_tags_from_capabilities(
+    caps: &crate::llm::capabilities::Capabilities,
+) -> Vec<String> {
+    let mut tags = Vec::new();
+    // Today all Harn chat providers expose streaming. Keep this as a
+    // transport baseline rather than a duplicated per-model declaration.
+    tags.push("streaming".to_string());
+    if caps.native_tools || caps.text_tool_wire_format_supported {
+        tags.push("tools".to_string());
+    }
+    if !caps.tool_search.is_empty() {
+        tags.push("tool_search".to_string());
+    }
+    if caps.vision || caps.vision_supported {
+        tags.push("vision".to_string());
+    }
+    if caps.audio {
+        tags.push("audio".to_string());
+    }
+    if caps.pdf {
+        tags.push("pdf".to_string());
+    }
+    if caps.video {
+        tags.push("video".to_string());
+    }
+    if caps.files_api_supported {
+        tags.push("files".to_string());
+    }
+    if caps.prompt_caching {
+        tags.push("prompt_caching".to_string());
+    }
+    if !caps.thinking_modes.is_empty() {
+        tags.push("thinking".to_string());
+    }
+    if caps.interleaved_thinking_supported
+        || caps
+            .thinking_modes
+            .iter()
+            .any(|mode| mode == "adaptive" || mode == "effort")
+    {
+        tags.push("extended_thinking".to_string());
+    }
+    if caps.structured_output.is_some() || caps.json_schema.is_some() {
+        tags.push("structured_output".to_string());
+    }
+    tags
+}
+
+/// Resolve a tier or alias into a concrete model/provider pair.
+pub fn resolve_tier_model(
+    target: &str,
+    preferred_provider: Option<&str>,
+) -> Option<(String, String)> {
+    let config = effective_config();
+
+    let candidate_aliases = if let Some(provider) = preferred_provider {
+        vec![
+            format!("{provider}/{target}"),
+            format!("{provider}:{target}"),
+            format!("tier/{target}"),
+            target.to_string(),
+        ]
+    } else {
+        vec![format!("tier/{target}"), target.to_string()]
+    };
+
+    for alias_name in candidate_aliases {
+        if let Some(alias) = config.aliases.get(&alias_name) {
+            return Some((alias.id.clone(), alias.provider.clone()));
+        }
+    }
+
+    None
+}
+
+/// Return all configured alias-backed model/provider pairs whose resolved
+/// model falls into the requested capability tier. The result is de-duplicated
+/// and sorted deterministically by provider then model id.
+pub fn tier_candidates(target: &str) -> Vec<(String, String)> {
+    let config = effective_config();
+    let mut seen = std::collections::BTreeSet::new();
+    let mut candidates = Vec::new();
+
+    for alias in config.aliases.values() {
+        let pair = (alias.id.clone(), alias.provider.clone());
+        if seen.contains(&pair) {
+            continue;
+        }
+        if model_tier(&alias.id) == target {
+            seen.insert(pair.clone());
+            candidates.push(pair);
+        }
+    }
+
+    candidates.sort_by(|(model_a, provider_a), (model_b, provider_b)| {
+        provider_a
+            .cmp(provider_b)
+            .then_with(|| model_a.cmp(model_b))
+    });
+    candidates
+}
+
+/// Return all configured alias-backed model/provider pairs. Used by routing
+/// policies that need to compare alternatives across tiers.
+pub fn all_model_candidates() -> Vec<(String, String)> {
+    let config = effective_config();
+    let mut seen = std::collections::BTreeSet::new();
+    let mut candidates = Vec::new();
+
+    for alias in config.aliases.values() {
+        let pair = (alias.id.clone(), alias.provider.clone());
+        if seen.insert(pair.clone()) {
+            candidates.push(pair);
+        }
+    }
+
+    candidates.sort_by(|(model_a, provider_a), (model_b, provider_b)| {
+        provider_a
+            .cmp(provider_b)
+            .then_with(|| model_a.cmp(model_b))
+    });
+    candidates
+}
