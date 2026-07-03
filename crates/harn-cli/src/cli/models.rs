@@ -90,6 +90,12 @@ pub(crate) struct ModelsLoraInspectArgs {
     /// Provider/runtime to check against instead of inferring from the base model.
     #[arg(long)]
     pub provider: Option<String>,
+    /// LoRA export manifest to compare against the adapter and requested route.
+    #[arg(long, value_name = "PATH")]
+    pub manifest: Option<std::path::PathBuf>,
+    /// Fail when the adapter config omits or mismatches the manifest contract id.
+    #[arg(long = "require-contract-id")]
+    pub require_contract_id: bool,
     /// Emit structured JSON.
     #[arg(long)]
     pub json: bool,

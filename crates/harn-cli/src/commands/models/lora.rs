@@ -102,6 +102,9 @@ async fn plan(args: &ModelsLoraPlanArgs) -> i32 {
 }
 
 fn inspect_report(args: &ModelsLoraInspectArgs) -> Result<LoraInspectReport, String> {
+    if args.require_contract_id && args.manifest.is_none() {
+        return Err("--require-contract-id requires --manifest".to_string());
+    }
     let resolved = harn_vm::llm_config::resolve_model_info(&args.base_model);
     let provider = args
         .provider
@@ -163,10 +166,23 @@ fn inspect_report(args: &ModelsLoraInspectArgs) -> Result<LoraInspectReport, Str
             "adapter rank is known but provider {provider} does not declare a max LoRA rank flag"
         ));
     }
+    let contract = inspect_contract_report(
+        args.manifest.as_deref(),
+        args.require_contract_id,
+        &adapter,
+        &resolved.id,
+        &provider,
+        &tool_format,
+    )?;
+    if let Some(contract) = &contract {
+        warnings.extend(contract.warnings.clone());
+    }
     let ok = warnings.iter().all(|warning| {
         !warning.starts_with("local adapter exists")
             && !warning.starts_with("adapter_config.json peft_type")
             && !warning.starts_with("adapter base_model_name_or_path")
+            && !warning.starts_with("LoRA contract mismatch")
+            && !warning.starts_with("LoRA contract missing")
     });
     let request_model = adapter.name.clone();
     let max_lora_rank = adapter
@@ -211,6 +227,7 @@ fn inspect_report(args: &ModelsLoraInspectArgs) -> Result<LoraInspectReport, Str
             context_window: catalog.as_ref().map(|model| model.context_window),
         },
         adapter,
+        contract,
         compatibility: CompatibilityReport {
             base_model_match,
             provider_supports_lora_launch,
@@ -231,6 +248,163 @@ fn inspect_report(args: &ModelsLoraInspectArgs) -> Result<LoraInspectReport, Str
         },
         warnings,
     })
+}
+
+fn inspect_contract_report(
+    manifest_path: Option<&Path>,
+    require_adapter_contract_id: bool,
+    adapter: &AdapterReport,
+    resolved_base_model: &str,
+    provider: &str,
+    tool_format: &str,
+) -> Result<Option<InspectContractReport>, String> {
+    let Some(path) = manifest_path else {
+        return Ok(None);
+    };
+    let raw = std::fs::read_to_string(path)
+        .map_err(|error| format!("failed to read manifest {}: {error}", path.display()))?;
+    let manifest = serde_json::from_str::<serde_json::Value>(&raw)
+        .map_err(|error| format!("failed to parse manifest {}: {error}", path.display()))?;
+    let contract = manifest
+        .get("contract")
+        .and_then(serde_json::Value::as_object)
+        .ok_or_else(|| format!("manifest {} is missing contract object", path.display()))?;
+    let contract_id = manifest_string_from_object(contract, "id");
+    let manifest_base_model = manifest_string_from_object(contract, "base_model");
+    let manifest_provider = manifest_string_from_object(contract, "provider");
+    let manifest_tool_format = manifest_string_from_object(contract, "harn_tool_format");
+    let manifest_dataset_format = manifest_string_from_object(contract, "dataset_format");
+    let manifest_chat_template = manifest_string_from_object(contract, "chat_template");
+    let target_adapter_name = manifest
+        .get("target")
+        .and_then(serde_json::Value::as_object)
+        .and_then(|target| manifest_string_from_object(target, "adapter_name"));
+    let serving_request_model = manifest
+        .get("serving")
+        .and_then(serde_json::Value::as_object)
+        .and_then(|serving| manifest_string_from_object(serving, "request_model"));
+
+    let base_model_match = base_model_match(manifest_base_model.as_deref(), resolved_base_model);
+    let provider_matches = manifest_provider
+        .as_deref()
+        .is_some_and(|manifest_provider| manifest_provider == provider);
+    let tool_format_matches = manifest_tool_format
+        .as_deref()
+        .is_some_and(|manifest_tool_format| manifest_tool_format == tool_format);
+    let adapter_name_expectations = [
+        target_adapter_name.as_deref(),
+        serving_request_model.as_deref(),
+    ];
+    let adapter_name_matches = if adapter_name_expectations.iter().any(Option::is_some) {
+        Some(
+            adapter_name_expectations
+                .into_iter()
+                .flatten()
+                .all(|expected| expected == adapter.name),
+        )
+    } else {
+        None
+    };
+    let adapter_contract_id_matches = match (&adapter.contract_id, &contract_id) {
+        (Some(adapter_id), Some(manifest_id)) => Some(adapter_id == manifest_id),
+        _ => None,
+    };
+
+    let mut warnings = Vec::new();
+    if matches!(
+        base_model_match,
+        BaseModelMatch::Mismatch | BaseModelMatch::Unknown
+    ) {
+        warnings.push(format!(
+            "LoRA contract mismatch: manifest base_model={} does not match resolved base {}",
+            manifest_base_model.as_deref().unwrap_or("<missing>"),
+            resolved_base_model
+        ));
+    }
+    if !provider_matches {
+        warnings.push(format!(
+            "LoRA contract mismatch: manifest provider={} does not match provider {}",
+            manifest_provider.as_deref().unwrap_or("<missing>"),
+            provider
+        ));
+    }
+    if !tool_format_matches {
+        warnings.push(format!(
+            "LoRA contract mismatch: manifest tool format={} does not match route tool format {}",
+            manifest_tool_format.as_deref().unwrap_or("<missing>"),
+            tool_format
+        ));
+    }
+    if contract_id.is_none() {
+        warnings.push("LoRA contract mismatch: manifest contract.id is missing".to_string());
+    }
+    if adapter_name_matches == Some(false) {
+        warnings.push(format!(
+            "LoRA contract mismatch: manifest adapter/request model does not match adapter name {}",
+            adapter.name
+        ));
+    }
+    if adapter_contract_id_matches == Some(false) {
+        warnings.push(format!(
+            "LoRA contract mismatch: adapter contract id {} does not match manifest contract id {}",
+            adapter.contract_id.as_deref().unwrap_or("<missing>"),
+            contract_id.as_deref().unwrap_or("<missing>")
+        ));
+    }
+    if adapter.contract_id.is_none() {
+        let prefix = if require_adapter_contract_id {
+            "LoRA contract missing"
+        } else {
+            "LoRA contract warning"
+        };
+        warnings.push(format!(
+            "{prefix}: adapter_config.json does not include harn_lora_contract_id"
+        ));
+    }
+
+    let status = if warnings.iter().any(|warning| {
+        warning.starts_with("LoRA contract mismatch")
+            || warning.starts_with("LoRA contract missing")
+    }) {
+        ContractCheckStatus::Fail
+    } else if warnings.is_empty() {
+        ContractCheckStatus::Pass
+    } else {
+        ContractCheckStatus::Warn
+    };
+
+    Ok(Some(InspectContractReport {
+        manifest_path: path.display().to_string(),
+        contract_id,
+        adapter_contract_id: adapter.contract_id.clone(),
+        status,
+        base_model_match,
+        provider_matches,
+        tool_format_matches,
+        adapter_name_matches,
+        require_adapter_contract_id,
+        manifest: InspectContractManifest {
+            base_model: manifest_base_model,
+            provider: manifest_provider,
+            harn_tool_format: manifest_tool_format,
+            dataset_format: manifest_dataset_format,
+            chat_template: manifest_chat_template,
+            adapter_name: target_adapter_name,
+            request_model: serving_request_model,
+        },
+        warnings,
+    }))
+}
+
+fn manifest_string_from_object(
+    object: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) -> Option<String> {
+    object
+        .get(key)
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
 }
 
 fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
@@ -517,6 +691,7 @@ fn inspect_adapter(input: &str, explicit_name: Option<&str>) -> Result<AdapterRe
         rank: config_u64(&config, "r"),
         lora_alpha: config_f64(&config, "lora_alpha"),
         target_modules: config_string_list(&config, "target_modules"),
+        contract_id: config_contract_id(&config),
     })
 }
 
@@ -559,6 +734,16 @@ fn config_string_list(config: &Option<serde_json::Value>, key: &str) -> Vec<Stri
                 .collect()
         })
         .unwrap_or_default()
+}
+
+fn config_contract_id(config: &Option<serde_json::Value>) -> Option<String> {
+    [
+        "harn_lora_contract_id",
+        "lora_contract_id",
+        "harn_contract_id",
+    ]
+    .into_iter()
+    .find_map(|key| config_string(config, key))
 }
 
 fn base_model_match(declared: Option<&str>, resolved_id: &str) -> BaseModelMatch {
@@ -1204,6 +1389,7 @@ struct LoraInspectReport {
     ok: bool,
     base: BaseModelReport,
     adapter: AdapterReport,
+    contract: Option<InspectContractReport>,
     compatibility: CompatibilityReport,
     tool_calling: ToolCallingReport,
     launch: LaunchHints,
@@ -1239,6 +1425,41 @@ struct AdapterReport {
     rank: Option<u64>,
     lora_alpha: Option<f64>,
     target_modules: Vec<String>,
+    contract_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct InspectContractReport {
+    manifest_path: String,
+    contract_id: Option<String>,
+    adapter_contract_id: Option<String>,
+    status: ContractCheckStatus,
+    base_model_match: BaseModelMatch,
+    provider_matches: bool,
+    tool_format_matches: bool,
+    adapter_name_matches: Option<bool>,
+    require_adapter_contract_id: bool,
+    manifest: InspectContractManifest,
+    warnings: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct InspectContractManifest {
+    base_model: Option<String>,
+    provider: Option<String>,
+    harn_tool_format: Option<String>,
+    dataset_format: Option<String>,
+    chat_template: Option<String>,
+    adapter_name: Option<String>,
+    request_model: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ContractCheckStatus {
+    Pass,
+    Warn,
+    Fail,
 }
 
 #[derive(Debug, Serialize)]
@@ -1430,6 +1651,8 @@ mod tests {
             adapter: adapter_dir.display().to_string(),
             name: Some("burin-tools".to_string()),
             provider: Some("vllm".to_string()),
+            manifest: None,
+            require_contract_id: false,
             json: true,
         };
         let report = inspect_report(&args).expect("report");
@@ -1480,6 +1703,8 @@ mod tests {
             adapter: adapter_dir.display().to_string(),
             name: Some("burin-tools".to_string()),
             provider: Some("openai".to_string()),
+            manifest: None,
+            require_contract_id: false,
             json: true,
         };
         let report = inspect_report(&args).expect("report");
@@ -1513,6 +1738,8 @@ mod tests {
             adapter: adapter_dir.display().to_string(),
             name: None,
             provider: Some("vllm".to_string()),
+            manifest: None,
+            require_contract_id: false,
             json: true,
         };
         let report = inspect_report(&args).expect("report");
