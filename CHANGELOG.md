@@ -8,6 +8,79 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.9.4
+
+### Added
+
+- **Verification facts now expose seq-bound file-hash snapshots (#3818).**
+  `hostlib_code_index_file_hash_snapshot`,
+  `std/verification::verification_file_hash_snapshot`, and
+  `std/code_librarian::code_librarian_file_hash_snapshot` capture batched
+  current file hashes with index metadata so stale diagnostics and background
+  checks can bind results to explicit file snapshots without duplicating
+  hashing logic.
+- Added verification profile matching and data-driven ladder planning helpers in `std/verification`.
+- Added `std/verification::verification_affected_targets` for config-declared
+  affected-target facts with Cargo, JS workspace graph, generic JSON, generic
+  line, and code-index fallback adapters.
+- Added `std/verification` toolchain identity facts from config-declared probe
+  rows, including version extraction, cache identity, and non-throwing unavailable
+  facts for missing tools.
+- Added a semantic *stance* tier to the behavioral ASR probe
+  (`security::stance_judge`): a judge that reads the framed attack turn and the
+  model's reply and classifies obeyed-vs-resisted, run as a post-processor over
+  the `BEHAVIORAL_PROBE_DUMP` transcripts. The deterministic canary metric alone
+  conflates a model that *obeyed* an injection with one that *refused but quoted*
+  the canary while describing it; the judge separates them, surfacing
+  narrate-and-quote false alarms (canary hit, judged resisted) and subtle
+  obedience the canary missed (canary absent, judged obeyed). The judging logic
+  is unit-tested against a mock; the live judge is an on-demand `#[ignore]` run.
+- Added `std/agent/canon` helpers that build harn-canon slices from changed paths and inject feedback for those paths.
+- `harn models lora export` now includes a stable LoRA contract id in reports,
+  exported row metadata, and provenance manifests.
+- **`harn models lora plan` now prints the matching export command.** The plan
+  includes a manifest-backed `harn models lora export` invocation so LoRA
+  dataset export, trainer inputs, evals, and serving all share the same resolved
+  model/tool-call contract.
+- Added `std/verification` helpers for converting command results into
+  verification profile observations, recording check timing, running one
+  snapshot-bound check through the profile store, and starting/finishing
+  background checks with the same snapshot-bound receipt shape.
+
+### Changed
+
+- `harn models lora plan` now records LoRA rank, alpha, and dropout in the training
+  contract and propagates the planned rank into local launch hints when the runtime
+  supports max-rank configuration.
+- `harn models lora plan` now reports the tool-calling SFT trainer contract,
+  including assistant-only loss masks, required tool-calling columns, and
+  packing boundaries.
+- Update OpenRouter Qwen3.6 Flash and GLM-5.2 catalog cache-pricing metadata from the live model API.
+- **Provider matrix evidence.** The generated provider matrix now shows catalog
+  parity notes as the evidence fallback for unsampled model/tool-format rows,
+  so documented GLM/Qwen/MiniMax/Kimi provider quirks point at the probe record
+  instead of reading as uncollected data.
+
+### Fixed
+
+- **Pattern learning in read-only agent modes.** Learned-context lookup now skips
+  legacy migration writes, and post-run observation degrades to explicit
+  unavailable metadata when storage is denied, so read-only/headless agent runs
+  no longer abort before the first model call.
+- Fixed release publishing retry classification by capturing cargo output
+  synchronously before matching retryable errors.
+- `release_gate.sh prepare` no longer reruns a full workspace cargo check after
+  release audit and post-bump protocol artifact generation have validated the
+  release branch.
+- Release version-bump tooling now rewrites local path dependency requirements
+  for every Cargo workspace member, including root-level members such as
+  `tree-sitter-harn`.
+- Made SpawnToPool trigger conformance fixtures use per-run pool names so repeated or adjacent runs
+  cannot share stale pool state.
+- Z.AI GLM reasoning now lowers through the Harn capability matrix to
+  `thinking: {type: ...}` plus `reasoning_effort`, matching the current GLM-5.2
+  API instead of relying on generic OpenAI-compatible reasoning fields.
+
 ## v0.9.3
 
 ### Added
