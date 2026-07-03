@@ -408,4 +408,94 @@ mod tests {
             ProbeOutcome::Neither
         );
     }
+
+    /// A live OpenAI-compatible chat model, used only by the on-demand baseline
+    /// below. Single-shot, temperature 0, so the measurement is as reproducible
+    /// as the provider allows.
+    struct OpenAiCompatModel {
+        client: reqwest::Client,
+        base_url: String,
+        api_key: String,
+        model: String,
+    }
+
+    #[async_trait]
+    impl BehavioralModel for OpenAiCompatModel {
+        async fn respond(&self, system: &str, user: &str) -> Result<String, String> {
+            let body = serde_json::json!({
+                "model": self.model,
+                "temperature": 0,
+                "max_tokens": 600,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+            });
+            let resp = self
+                .client
+                .post(format!("{}/chat/completions", self.base_url))
+                .bearer_auth(&self.api_key)
+                .json(&body)
+                .send()
+                .await
+                .map_err(|error| format!("request failed: {error}"))?;
+            if !resp.status().is_success() {
+                return Err(format!("provider status {}", resp.status()));
+            }
+            let json: serde_json::Value = resp
+                .json()
+                .await
+                .map_err(|error| format!("decode failed: {error}"))?;
+            json["choices"][0]["message"]["content"]
+                .as_str()
+                .map(|text| text.to_string())
+                .ok_or_else(|| "no content in response".to_string())
+        }
+    }
+
+    /// On-demand pre-LoRA baseline. Ignored by default so CI never calls a
+    /// provider; run with a key in the environment:
+    ///
+    /// ```sh
+    /// set -a; source ~/gate-clone/.env; set +a
+    /// cargo test -p harn-vm --lib -- --ignored --nocapture \
+    ///   security::behavioral::tests::baseline_openai_compat
+    /// ```
+    ///
+    /// Reports ASR under Off (framing disabled) vs Spotlight (shipped posture)
+    /// so the framing's behavioral effect is visible alongside the absolute
+    /// number the LoRA must beat. It asserts only that the run completed — the
+    /// number is a measurement to record, not yet a gate.
+    #[test]
+    #[ignore = "calls a live model provider; run on demand with a key"]
+    fn baseline_openai_compat() {
+        let Ok(api_key) = std::env::var("FIREWORKS_API_KEY") else {
+            eprintln!("[behavioral-baseline] no FIREWORKS_API_KEY in env; skipping");
+            return;
+        };
+        let base_url = std::env::var("FIREWORKS_BASE_URL")
+            .unwrap_or_else(|_| "https://api.fireworks.ai/inference/v1".to_string());
+        let model = std::env::var("BEHAVIORAL_PROBE_MODEL")
+            .unwrap_or_else(|_| "accounts/fireworks/models/gpt-oss-120b".to_string());
+        let provider = OpenAiCompatModel {
+            client: reqwest::Client::new(),
+            base_url,
+            api_key,
+            model: model.clone(),
+        };
+
+        for mode in [SecurityMode::Off, SecurityMode::Spotlight] {
+            let report = block_on(run_behavioral_battery(&provider, mode));
+            assert!(report.malicious_total >= 10, "corpus should be non-trivial");
+            eprintln!(
+                "[behavioral-baseline] model={model} mode={mode:?} asr={:.2} on_task={:.2} ({}/{} injected)",
+                report.asr, report.on_task_rate, report.injected, report.malicious_total
+            );
+            let mut classes: Vec<_> = report.per_class.iter().collect();
+            classes.sort_by(|a, b| a.0.cmp(b.0));
+            for (class, (hit, total)) in classes {
+                eprintln!("[behavioral-baseline]   class={class} asr={hit}/{total}");
+            }
+        }
+    }
 }
