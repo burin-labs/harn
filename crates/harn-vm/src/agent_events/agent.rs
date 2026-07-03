@@ -433,6 +433,24 @@ pub enum AgentEvent {
         #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
         kept_tool_details: serde_json::Value,
     },
+    /// Read-only stance lifecycle (std/agent/stance): `phase` is one of
+    /// `armed`, `write_access_granted`, `write_access_denied`,
+    /// `disarmed`. Arming carries the permitted tool window; the
+    /// grant/deny phases carry the escape-hatch justification and the
+    /// consent verdict so a trace viewer can explain every elevation.
+    StanceTransition {
+        session_id: String,
+        phase: String,
+        escape_tool: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        allowed_tools: Vec<String>,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        justification: String,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        consent: String,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        reason: String,
+    },
     /// Emitted when a `tool_search` query is issued by the model. Carries
     /// the raw query args, the configured strategy, and a `mode` tag
     /// distinguishing the client-executed fallback (`"client"`) from
@@ -852,6 +870,7 @@ impl AgentEvent {
             | Self::SkillDeactivated { session_id, .. }
             | Self::SkillScopeTools { session_id, .. }
             | Self::SkillNarrow { session_id, .. }
+            | Self::StanceTransition { session_id, .. }
             | Self::ToolSearchQuery { session_id, .. }
             | Self::ToolSearchResult { session_id, .. }
             | Self::TranscriptCompacted { session_id, .. }

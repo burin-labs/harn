@@ -50,6 +50,7 @@ import {
   agent_stall_observe_tool_calls,
   agent_stall_repair_config,
 } from "std/agent/stall"
+import { agent_stance_apply, agent_stance_post_turn, agent_stance_prepare } from "std/agent/stance"
 import {
   agent_emit_event,
   agent_record_native_tool_fallback,
@@ -3465,6 +3466,7 @@ fn __agent_loop_run(message, session, initial_opts) {
         }
         turn_opts = agent_tool_search_inject_if_needed(turn_opts)
         turn_opts = agent_apply_tool_surface_narrowing(turn_opts)
+        turn_opts = agent_stance_apply(turn_opts)
         let turn_llm_opts = __agent_loop_effective_llm_options(turn_opts)
         __agent_loop_checkpoint(session.session_id, "pre_compact", {iteration: iteration_index + 1})
         agent_autocompact_if_needed(session, turn_llm_opts)
@@ -4144,6 +4146,7 @@ fn __agent_loop_run(message, session, initial_opts) {
           ) },
         )
         opts = __apply_post_turn_options(opts, outcome)
+        opts = agent_stance_post_turn(session, opts)
         let repair_cfg = agent_stall_repair_config(turn_opts?.stall_diagnostics)
         let reverify_mandated = __agent_loop_post_edit_reverify_mandated(repair_cfg, turn_opts, stall_state, dispatch, opts?.tools)
         if __turn_made_edit(dispatch, opts?.tools) {
@@ -4563,6 +4566,8 @@ fn __agent_loop_run(message, session, initial_opts) {
   return unwrap(run)
 }
 
+// Read-only stance runs LAST so neither a skill activation nor a
+// tool-search promotion can re-admit mutating tools while armed.
 // The invalid `agent_await_resumption` call was never dispatched, so
 // if the model emitted it as a native tool_use block the feedback
 // inject would orphan it; repair pairing first.
@@ -4670,5 +4675,6 @@ pub fn agent_loop(message, system_prompt = nil, options = nil) {
     }
   }
   opts = __agent_loop_fire_resume_continuity(session, opts)
+  opts = agent_stance_prepare(session, message, opts)
   return __agent_loop_run(message, session, opts)
 }

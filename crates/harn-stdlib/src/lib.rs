@@ -514,6 +514,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/agent/postturn.harn"),
     },
     StdlibSource {
+        module: "agent/stance",
+        source: include_str!("stdlib/agent/stance.harn"),
+    },
+    StdlibSource {
         module: "agent/sitrep",
         source: include_str!("stdlib/agent/sitrep.harn"),
     },

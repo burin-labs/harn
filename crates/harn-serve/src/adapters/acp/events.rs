@@ -515,6 +515,57 @@ impl AgentEventSink for AcpAgentEventSink {
                     "update": update,
                 }));
             }
+            AgentEvent::StanceTransition {
+                session_id,
+                phase,
+                escape_tool,
+                allowed_tools,
+                justification,
+                consent,
+                reason,
+            } => {
+                let mut update = serde_json::json!({
+                    "sessionUpdate": "stance_transition",
+                });
+                let mut harn_meta = serde_json::Map::new();
+                harn_meta.insert(
+                    "phase".to_string(),
+                    serde_json::Value::String(phase.clone()),
+                );
+                harn_meta.insert(
+                    "escapeTool".to_string(),
+                    serde_json::Value::String(escape_tool.clone()),
+                );
+                if !allowed_tools.is_empty() {
+                    harn_meta.insert(
+                        "allowedTools".to_string(),
+                        serde_json::to_value(allowed_tools).unwrap_or_default(),
+                    );
+                }
+                if !justification.is_empty() {
+                    harn_meta.insert(
+                        "justification".to_string(),
+                        serde_json::Value::String(justification.clone()),
+                    );
+                }
+                if !consent.is_empty() {
+                    harn_meta.insert(
+                        "consent".to_string(),
+                        serde_json::Value::String(consent.clone()),
+                    );
+                }
+                if !reason.is_empty() {
+                    harn_meta.insert(
+                        "reason".to_string(),
+                        serde_json::Value::String(reason.clone()),
+                    );
+                }
+                merge_harn_meta(&mut update, harn_meta);
+                self.write_notification(serde_json::json!({
+                    "sessionId": session_id,
+                    "update": update,
+                }));
+            }
             AgentEvent::ToolSearchQuery {
                 session_id,
                 tool_use_id,

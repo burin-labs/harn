@@ -1813,6 +1813,37 @@ transcript/audit content stays available by pointer. Useful options:
 reachability-GC projection automatically supplies the current scratchpad as a
 root plus a scratchpad-version write barrier for that turn.
 
+## Read-only stance (experimental)
+
+`agent_loop({read_only_stance: {...}})` arms a least-privilege tool window
+for tasks classified as read-only (research/investigation): only tools whose
+annotations declare them read-only (`kind` read/search/think/fetch, or
+`side_effect_level` none/read_only — unannotated tools count as mutating)
+plus an auto-registered escape hatch (default `request_write_access`) reach
+the model. The escape hatch verifies consent agentically: its `consent_check`
+(default: a structured `llm_call` over the session's recent user messages)
+grants only when the user expressed or clearly implied consent to modify the
+workspace; a grant disarms the stance next turn, a denial tells the model to
+ask the user. Every transition emits a `stance_transition` event
+(`phase`: armed / write_access_granted / write_access_denied / disarmed).
+
+```harn,ignore
+agent_loop(task, nil, {
+  tools: tools,
+  read_only_stance: {
+    enabled: true,
+    armed: intent.should_use_read_only_agent,  // host classifier decides
+    // classifier: fn(message) -> {read_only, confidence},  // or infer here
+    // consent_check: fn(justification, session_id) -> {verdict, reason},
+    hard_keep: ["ask_user"],
+  },
+})
+```
+
+Ships default-OFF. This is the Harn mechanism for the tool-surface
+program's task-intent mount: the window derives from intent, and elevation
+is justified, consent-verified, and traced.
+
 ## Reminders
 
 System reminders are typed, ephemeral `system_reminder` transcript events
