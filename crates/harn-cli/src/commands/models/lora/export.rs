@@ -357,7 +357,8 @@ struct ExportRegexes {
     available_tools: Regex,
     blank_lines: Regex,
     declare_function: Regex,
-    result: Regex,
+    result_end: Regex,
+    result_start: Regex,
     tool_block: Regex,
     tool_bullet: Regex,
     tool_name: Regex,
@@ -371,10 +372,10 @@ impl ExportRegexes {
             blank_lines: Regex::new(r"\n{3,}").expect("blank-lines regex"),
             declare_function: Regex::new(r"\bdeclare\s+function\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(")
                 .expect("declare-function regex"),
-            result: Regex::new(
-                r"(?s)^\[result of (?P<name>[A-Za-z_][A-Za-z0-9_]*)\](?P<body>.*?)(?:\[end of .*? result\])?\s*$",
-            )
-            .expect("tool-result regex"),
+            result_end: Regex::new(r"(?m)\[end of (?P<label>[^\]\n]+?) result\]\s*")
+                .expect("tool-result-end regex"),
+            result_start: Regex::new(r"(?m)\[result of (?P<label>[^\]\n]+)\]\s*")
+                .expect("tool-result-start regex"),
             tool_block: Regex::new(r"(?s)<tool_call>\s*(.*?)\s*</tool_call>")
                 .expect("tool-block regex"),
             tool_bullet: Regex::new(r"(?m)^\s*-\s*([A-Za-z_][A-Za-z0-9_]*)\b")
@@ -469,11 +470,11 @@ fn convert_structured_record(
                 structured_messages.push(Value::Object(message));
             }
             "user" => {
-                if let Some(tool_result) =
-                    structured_tool_result_message(content, &mut pending_tool_calls, regexes)
+                if let Some(tool_results) =
+                    structured_tool_result_messages(content, &mut pending_tool_calls, regexes)
                 {
-                    tool_result_count += 1;
-                    structured_messages.push(tool_result);
+                    tool_result_count += tool_results.len() as u64;
+                    structured_messages.extend(tool_results);
                 } else {
                     pending_tool_calls.clear();
                     structured_messages.push(normalized_message(role, content));
@@ -598,34 +599,99 @@ fn normalized_message(role: &str, content: &str) -> Value {
     })
 }
 
-fn structured_tool_result_message(
+struct ToolResultBlock {
+    name: String,
+    content: String,
+}
+
+fn structured_tool_result_messages(
     content: &str,
     pending_tool_calls: &mut VecDeque<Value>,
     regexes: &ExportRegexes,
-) -> Option<Value> {
-    let captures = regexes.result.captures(content.trim())?;
-    let name = captures.name("name")?.as_str();
-    let next_call = pending_tool_calls.front()?;
-    let call_name = next_call
-        .get("function")
-        .and_then(Value::as_object)
-        .and_then(|function| function.get("name"))
-        .and_then(Value::as_str)?;
-    if call_name != name {
+) -> Option<Vec<Value>> {
+    let blocks = tool_result_blocks(content, regexes)?;
+    if blocks.is_empty() {
         return None;
     }
-    let next_call = pending_tool_calls.pop_front()?;
-    let tool_call_id = next_call.get("id").and_then(Value::as_str).unwrap_or("");
-    let body = captures
-        .name("body")
-        .map(|body| body.as_str())
-        .unwrap_or("");
-    Some(json!({
-        "role": "tool",
-        "tool_call_id": tool_call_id,
-        "name": name,
-        "content": normalize_blank_lines(body, regexes),
-    }))
+    let mut remaining_tool_calls = pending_tool_calls.clone();
+    let mut messages = Vec::new();
+    for block in blocks {
+        let next_call = remaining_tool_calls.pop_front()?;
+        let call_name = next_call
+            .get("function")
+            .and_then(Value::as_object)
+            .and_then(|function| function.get("name"))
+            .and_then(Value::as_str)?;
+        if call_name != block.name {
+            return None;
+        }
+        let tool_call_id = next_call.get("id").and_then(Value::as_str).unwrap_or("");
+        messages.push(json!({
+            "role": "tool",
+            "tool_call_id": tool_call_id,
+            "name": block.name,
+            "content": block.content,
+        }));
+    }
+    *pending_tool_calls = remaining_tool_calls;
+    Some(messages)
+}
+
+fn tool_result_blocks(content: &str, regexes: &ExportRegexes) -> Option<Vec<ToolResultBlock>> {
+    let text = content.trim();
+    if text.is_empty() {
+        return None;
+    }
+    let mut blocks = Vec::new();
+    let mut cursor = 0;
+    while cursor < text.len() {
+        cursor = skip_ascii_whitespace(text, cursor);
+        if cursor >= text.len() {
+            break;
+        }
+        let start = regexes.result_start.captures_at(text, cursor)?;
+        let whole = start.get(0)?;
+        if whole.start() != cursor {
+            return None;
+        }
+        let name = tool_name_from_result_label(start.name("label")?.as_str(), regexes)?;
+        let body_start = whole.end();
+        let next_start = regexes.result_start.find_at(text, body_start);
+        let end = regexes.result_end.find_at(text, body_start);
+        let (body_end, next_cursor) = match (end, next_start) {
+            (Some(end), Some(next_start)) if end.start() < next_start.start() => {
+                (end.start(), end.end())
+            }
+            (Some(end), None) => (end.start(), end.end()),
+            (_, Some(next_start)) => (next_start.start(), next_start.start()),
+            (None, None) => (text.len(), text.len()),
+        };
+        blocks.push(ToolResultBlock {
+            name,
+            content: normalize_blank_lines(&text[body_start..body_end], regexes),
+        });
+        cursor = next_cursor;
+    }
+    Some(blocks)
+}
+
+fn tool_name_from_result_label(label: &str, regexes: &ExportRegexes) -> Option<String> {
+    let name = label.split_whitespace().next()?;
+    if regexes.tool_name.is_match(name) {
+        return Some(name.to_string());
+    }
+    None
+}
+
+fn skip_ascii_whitespace(text: &str, mut cursor: usize) -> usize {
+    while cursor < text.len() {
+        let byte = text.as_bytes()[cursor];
+        if !byte.is_ascii_whitespace() {
+            break;
+        }
+        cursor += 1;
+    }
+    cursor
 }
 
 fn parse_json_tool_blocks(

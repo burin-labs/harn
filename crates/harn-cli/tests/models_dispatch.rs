@@ -1005,6 +1005,55 @@ fn models_lora_export_json_writes_dataset_and_manifest() {
     );
 }
 
+#[test]
+fn models_lora_export_json_structures_grouped_tool_results() {
+    let corpus = write_lora_grouped_result_corpus_fixture();
+    let corpus_path = corpus.path().join("burin-tool-calling-corpus.jsonl");
+    let out = corpus.path().join("structured.jsonl");
+    let harn = run(
+        &[
+            "models",
+            "lora",
+            "export",
+            "--base",
+            "local-gemma4-e4b",
+            "--provider",
+            "vllm",
+            "--tool-format",
+            "native",
+            "--corpus",
+            corpus_path.to_str().expect("utf8 corpus path"),
+            "--out",
+            out.to_str().expect("utf8 out path"),
+            "--json",
+        ],
+        &[],
+    );
+
+    assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
+    let harn_value = parse_json(&harn.stdout, "harn");
+    let report = success_data(&harn_value);
+    assert_eq!(report["stats"]["records"].as_u64(), Some(1));
+    assert_eq!(report["stats"]["emitted"].as_u64(), Some(1));
+    assert_eq!(report["stats"]["tool_calls"].as_u64(), Some(2));
+    assert_eq!(report["stats"]["tool_results"].as_u64(), Some(2));
+
+    let row_text = fs::read_to_string(&out).expect("read exported JSONL");
+    let row = parse_json(row_text.trim(), "export row");
+    let messages = row["messages"].as_array().expect("messages array");
+    let tool_messages = messages
+        .iter()
+        .filter(|message| message["role"] == "tool")
+        .collect::<Vec<_>>();
+    assert_eq!(tool_messages.len(), 2, "messages={messages:?}");
+    assert_eq!(tool_messages[0]["name"], "read");
+    assert_eq!(tool_messages[0]["tool_call_id"], "call_2_1");
+    assert_eq!(tool_messages[0]["content"], "pub fn add() {}");
+    assert_eq!(tool_messages[1]["name"], "run");
+    assert_eq!(tool_messages[1]["tool_call_id"], "call_2_2");
+    assert_eq!(tool_messages[1]["content"], "1 passed");
+}
+
 // ────────────────────────────────────────────────────────────────────────
 
 fn write_lora_adapter_fixture() -> tempfile::TempDir {
@@ -1136,6 +1185,45 @@ fn write_lora_corpus_fixture() -> tempfile::TempDir {
             + "\n"
             + &serde_json::to_string(&context_row).expect("serialize context row")
             + "\n",
+    )
+    .expect("write corpus");
+    tmp
+}
+
+fn write_lora_grouped_result_corpus_fixture() -> tempfile::TempDir {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let record = serde_json::json!({
+        "id": "grouped-results",
+        "language": "rust",
+        "task_type": "test",
+        "eval_name": "grouped-results",
+        "model": "manual",
+        "metadata": {
+            "tool_format": "json",
+            "verification": "PASS"
+        },
+        "messages": [
+            {
+                "role": "system",
+                "content": "Available tools: read, run"
+            },
+            {
+                "role": "user",
+                "content": "Inspect and test src/lib.rs."
+            },
+            {
+                "role": "assistant",
+                "content": "<tool_call>\n{\"name\":\"read\",\"arguments\":{\"path\":\"src/lib.rs\"}}\n</tool_call>\n\n<tool_call>\n{\"name\":\"run\",\"arguments\":{\"command\":\"cargo test\"}}\n</tool_call>\n"
+            },
+            {
+                "role": "user",
+                "content": "[result of read src/lib.rs]\npub fn add() {}\n[end of read result]\n\n[result of run]\n1 passed\n[end of run result]"
+            }
+        ]
+    });
+    fs::write(
+        tmp.path().join("burin-tool-calling-corpus.jsonl"),
+        serde_json::to_string(&record).expect("serialize record") + "\n",
     )
     .expect("write corpus");
     tmp
