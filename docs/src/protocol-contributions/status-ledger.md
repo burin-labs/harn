@@ -40,7 +40,7 @@ and should be differentiated against, not ignored.
 | [`agentclientprotocol/agent-client-protocol#1261`](https://github.com/agentclientprotocol/agent-client-protocol/pull/1261) | Open PR, mergeable, review still required as of 2026-07-03; no maintainer review since the 2026-06-27 rebase. | Rebase note posted at [`discussioncomment-4819339360`](https://github.com/agentclientprotocol/agent-client-protocol/pull/1261#issuecomment-4819339360). |
 | [`agentclientprotocol/agent-client-protocol#484`](https://github.com/agentclientprotocol/agent-client-protocol/pull/484) | Closed in favor of `#1261`. | Relevant predecessor for prompt queueing / steer-via-yield framing. |
 | [`agentclientprotocol/agent-client-protocol#1224`](https://github.com/agentclientprotocol/agent-client-protocol/discussions/1224) | Open discussion, no maintainer response visible as of 2026-07-03. | Ambient system-role context injection / reminder sibling of `#1220`; the 2026-06-27 next-step ping ([`discussioncomment-17455653`](https://github.com/agentclientprotocol/agent-client-protocol/discussions/1224#discussioncomment-17455653)) is still unanswered. |
-| [`agentclientprotocol/agent-client-protocol#1233`](https://github.com/agentclientprotocol/agent-client-protocol/discussions/1233) | Open discussion, no maintainer response visible as of 2026-07-03. | `session/suspend` + `session/await_resumption`; the 2026-06-27 next-step ping ([`discussioncomment-17455656`](https://github.com/agentclientprotocol/agent-client-protocol/discussions/1233#discussioncomment-17455656)) is still unanswered. |
+| [`agentclientprotocol/agent-client-protocol#1233`](https://github.com/agentclientprotocol/agent-client-protocol/discussions/1233) | Open discussion, no maintainer response visible as of 2026-07-03. | `session/suspend` + `session/await_resumption`. A substantive v2 alignment comment was posted 2026-07-03 ([`discussioncomment-17525582`](https://github.com/agentclientprotocol/agent-client-protocol/discussions/1233#discussioncomment-17525582)): resume-side enrichment dropped in favor of the merged session-resume-replay RFD, offering an RFD PR if maintainers want one. |
 | [`agentclientprotocol/registry#397`](https://github.com/agentclientprotocol/registry/pull/397) | Open PR, no review decision as of 2026-07-03. | Registry submission; entry refreshed to Harn v0.8.158 with revalidated archive URLs on 2026-06-30. |
 
 ## A2A
@@ -61,15 +61,19 @@ any follow-up upstream post should use v1.0 names.
 | [`a2aproject/A2A#1858`](https://github.com/a2aproject/A2A/discussions/1858) | Open discussion, no maintainer/TSC reply visible as of 2026-07-03. | Good-faith community feedback converged toward one `PAUSED` state plus a structured `pause` object; the draft-PR-vs-extension next-step ping ([`discussioncomment-17455657`](https://github.com/a2aproject/A2A/discussions/1858#discussioncomment-17455657)) is still unanswered. |
 | [`a2aproject/A2A#1937`](https://github.com/a2aproject/A2A/issues/1937) | Open issue, last updated 2026-06-19. | Context-binding profile for delegated authority — binds an already-valid delegation to a task/session/target/scope. Complement of (not substitute for) the [actor-chain extension RFC](./a2a-actor-chain-extension.md); best anchor thread for that filing. |
 | [`a2aproject/A2A#153`](https://github.com/a2aproject/A2A/issues/153) | Open issue (since 2025-06). | Confused-deputy framing for A2A; canonical motivation citation for payload-visible principals. |
+| [`a2aproject/A2A#2027`](https://github.com/a2aproject/A2A/discussions/2027) | Filed 2026-07-03 (Ideas category). | `InjectTaskReminder` ambient-context discussion, from the [reminder RFC](./a2a-message-kind-reminder.md) with A2A v1.0 naming. Dupe-checked before filing. |
+| [`a2aproject/A2A#2028`](https://github.com/a2aproject/A2A/issues/2028) | Filed 2026-07-03. | Actor-chain extension proposal from the [actor-chain RFC](./a2a-actor-chain-extension.md), anchored to `#1937` / `#153`. |
 
 ## MCP and OAuth Identity
 
 | Item | Verified state | Notes |
 |---|---|---|
-| [`modelcontextprotocol/modelcontextprotocol#2736`](https://github.com/modelcontextprotocol/modelcontextprotocol/discussions/2736) | Open discussion, no maintainer response as of 2026-07-03; first substantive community reply landed 2026-06-27 after the SEP-path ping ([`discussioncomment-17455659`](https://github.com/modelcontextprotocol/modelcontextprotocol/discussions/2736#discussioncomment-17455659)). | The reply endorses a deliberately small first SEP: one host-owned limit envelope plus one typed stop/failure shape, with a decision-basis receipt (estimated vs actual usage, applied policy limit, meter basis, preflight-vs-mid-call-vs-post-hoc stop cause) and append-only follow-up records for retries/overrides. |
+| [`modelcontextprotocol/modelcontextprotocol#2736`](https://github.com/modelcontextprotocol/modelcontextprotocol/discussions/2736) | Open discussion, no maintainer response as of 2026-07-03; first substantive community reply landed 2026-06-27 after the SEP-path ping ([`discussioncomment-17455659`](https://github.com/modelcontextprotocol/modelcontextprotocol/discussions/2736#discussioncomment-17455659)). | The reply endorses a deliberately small first SEP: one host-owned limit envelope plus one typed stop/failure shape, with a decision-basis receipt and append-only follow-up records. A narrowed-scope restatement was posted 2026-07-03 ([`discussioncomment-17525578`](https://github.com/modelcontextprotocol/modelcontextprotocol/discussions/2736#discussioncomment-17525578)), offering to draft the SEP unless maintainers object. |
+| [`modelcontextprotocol/modelcontextprotocol#3007`](https://github.com/modelcontextprotocol/modelcontextprotocol/discussions/3007) | Filed 2026-07-03 (Ideas - General). | `notifications/reminder` server→host ambient-context discussion, from the [reminder RFC](./mcp-notifications-reminder.md). Dupe-checked before filing. |
+| [`modelcontextprotocol/modelcontextprotocol#3008`](https://github.com/modelcontextprotocol/modelcontextprotocol/discussions/3008) | Filed 2026-07-03 (Ideas - General). | `authenticatedIdentity` pre-SEP discussion, from the [identity RFC](./mcp-authenticated-identity.md); progressing to a SEP requires an auth-area maintainer sponsor. |
 | [`modelcontextprotocol/modelcontextprotocol#214`](https://github.com/modelcontextprotocol/modelcontextprotocol/issues/214) | Closed. | Maintainer guidance on 2026-01-16 pointed custom auth pieces toward [`modelcontextprotocol/ext-auth`](https://github.com/modelcontextprotocol/ext-auth). |
 | [`modelcontextprotocol/ext-auth#13`](https://github.com/modelcontextprotocol/ext-auth/issues/13) | Open, no activity since 2026-01-31. | Maintainer response says Enterprise-Managed Authorization does not currently support distinguishing agent vs user identity and points to ID-JAG issue `#73`. |
-| [`oauth-wg/oauth-identity-assertion-authz-grant#73`](https://github.com/oauth-wg/oauth-identity-assertion-authz-grant/issues/73) | Open, last updated 2026-04-02. | The live venue for actor-chain work: workload / agent identity SSO and explicit delegated on-behalf-of access, reusing RFC 8693 `act`. See the [positioning note](./oauth-actor-chain-positioning.md). |
+| [`oauth-wg/oauth-identity-assertion-authz-grant#73`](https://github.com/oauth-wg/oauth-identity-assertion-authz-grant/issues/73) | Open. | The live venue for actor-chain work: workload / agent identity SSO and explicit delegated on-behalf-of access, reusing RFC 8693 `act`. Implementer feedback posted 2026-07-03 ([`issuecomment-4878092226`](https://github.com/oauth-wg/oauth-identity-assertion-authz-grant/issues/73#issuecomment-4878092226)) per the [positioning note](./oauth-actor-chain-positioning.md). |
 | [`oauth-wg/oauth-identity-assertion-authz-grant#80`](https://github.com/oauth-wg/oauth-identity-assertion-authz-grant/issues/80) | Closed as completed and milestoned 2026-04-22. | Optional `actor_token` proposal split out from `#73`; folded into the `#73` direction rather than rejected. |
 | [`modelcontextprotocol/modelcontextprotocol#1299`](https://github.com/modelcontextprotocol/modelcontextprotocol/issues/1299) | Closed as completed 2025-09-02. | SEP-1299 is server-side OAuth flow management, unrelated to a server→client identity surface; it does not claim the `authenticatedIdentity` slot. |
 | [`modelcontextprotocol/modelcontextprotocol` discussion `#1827`](https://github.com/modelcontextprotocol/modelcontextprotocol/discussions/1827) | Open discussion, unanswered (opened 2025-11-17). | `upstream_identity` propagation, client→server — the opposite direction from the [`authenticatedIdentity` RFC](./mcp-authenticated-identity.md); the two compose. |
@@ -83,15 +87,11 @@ any follow-up upstream post should use v1.0 names.
 - A2A `#1858`: the RFC in this directory now matches the converged
   single-state `PAUSED` + `pause` object. A draft PR is ready to cut
   if maintainers answer the pending draft-PR-vs-extension question.
-- MCP `#2736`: the 2026-06-27 community reply endorses a small first
-  SEP (host-owned limit envelope + typed stop/failure + decision-basis
-  receipt). A follow-up reply narrowing the proposal to that scope is
-  the next external step.
-- File A2A reminder and MCP reminder proposals only from neutral
-  ambient-context examples such as editor file-watchers, build/test
-  watchers, CI/review notifications, and existing host-hook/rules
-  systems.
-- For MCP identity, follow `ext-auth#13` / ID-JAG `#73` rather than
-  reopening the closed MCP `#214`; keep any public comment focused on
-  the protocol distinction between OAuth client continuity and runtime
-  actor identity.
+- MCP `#2736`: the narrowed-scope reply is posted; if no objection
+  lands, the next step is drafting the SEP itself
+  (`seps/0000-sampling-budget-caps.md` PR with a maintainer sponsor).
+- MCP `#3008`: progressing past discussion requires an auth-area
+  maintainer sponsor; that outreach is the next step if the thread
+  gets traction.
+- All 2026-07-03 filings are new threads awaiting first responses;
+  no re-pings without new substance.

@@ -1,7 +1,9 @@
 # A2A RFC: ambient reminder injection for peer agents
 
 **Upstream repo:** [a2aproject/A2A][a2a]
-**Status:** Draft (not yet filed upstream). Revised 2026-07-03 to A2A
+**Status:** Filed upstream 2026-07-03 as
+[a2aproject/A2A discussion #2027](https://github.com/a2aproject/A2A/discussions/2027),
+awaiting first response. Revised 2026-07-03 to A2A
 v1.0 conventions: `a2a.proto` is now the normative source of truth,
 the proposed operation uses PascalCase (`InjectTaskReminder`),
 streamed reminder lifecycle uses a member-typed `TaskReminderEvent`

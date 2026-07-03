@@ -1,7 +1,9 @@
 # MCP RFC: `authenticatedIdentity` on `InitializeResult`
 
 **Upstream repo:** [modelcontextprotocol/modelcontextprotocol][mcp]
-**Status:** Draft (not yet filed upstream). Verified non-duplicate on
+**Status:** Filed upstream 2026-07-03 as pre-SEP
+[MCP discussion #3008](https://github.com/modelcontextprotocol/modelcontextprotocol/discussions/3008),
+awaiting first response. Verified non-duplicate on
 2026-07-03: [SEP-1299][sep-1299] is unrelated (server-side OAuth flow
 management, closed 2025-09-02) and [discussion #1827][mcp-1827]
 (`upstream_identity`) runs the opposite direction (client→server
