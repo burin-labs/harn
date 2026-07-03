@@ -21,6 +21,7 @@ pub(crate) mod cache;
 mod call;
 pub mod capabilities;
 pub mod capability_audit;
+mod code_mode;
 pub(crate) mod compass_router;
 pub(crate) mod config_builtins;
 pub(crate) mod content;
@@ -464,6 +465,7 @@ const LLM_RUNTIME_PRIMITIVE_BUILTINS: &[&VmBuiltinDef] = &[
     &agent_host_primitives::HOST_MCP_BOOTSTRAP_IMPL_DEF,
     &agent_host_primitives::HOST_MCP_DISCONNECT_IMPL_DEF,
     &agent_host_primitives::HOST_AGENT_REMINDER_PROVIDERS_FIRE_IMPL_DEF,
+    &code_mode::HOST_CODE_MODE_RUN_IMPL_DEF,
     // llm.host core
     &COST_ROUTE_BUILTIN_DEF,
     &LLM_CALL_BUILTIN_DEF,

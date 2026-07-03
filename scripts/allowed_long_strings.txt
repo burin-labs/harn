@@ -1,2 +1,4 @@
 # Allowed long Rust string literals in protected orchestration paths.
 # Format: crates/path/file.rs:line # one-line justification
+crates/harn-vm/src/llm/code_mode.rs:311 # test fixture: fake connector Harn script (returns JSON text), not model-facing prose
+crates/harn-vm/src/llm/code_mode.rs:332 # test fixture: code-mode composition Harn script, not model-facing prose

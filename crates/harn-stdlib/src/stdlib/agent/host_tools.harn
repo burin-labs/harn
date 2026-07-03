@@ -1035,6 +1035,78 @@ pub fn agent_command_tools(registry = nil, options = nil) {
 }
 
 /**
+ * Code mode is default-OFF: only surface it when the caller explicitly opts in
+ * with `code_mode: true` or lists "code_mode" in `enabled_tools`. It is a
+ * powerful composition surface (a script that calls other tools), so it must
+ * never appear by default.
+ */
+fn __agent_host_code_mode_enabled(options) {
+  let opts = __agent_host_options(options)
+  let enabled = opts?.enabled_tools ?? opts?.tools
+  let explicitly_enabled = __agent_host_list_contains(enabled, "code_mode")
+  let opted_in = opts?.code_mode ?? false
+  if !opted_in && !explicitly_enabled {
+    return false
+  }
+  let disabled = opts?.disabled_tools ?? []
+  if __agent_host_list_contains(disabled, "code_mode") {
+    return false
+  }
+  return true
+}
+
+/**
+ * agent_composition_tools adds the default-OFF `code_mode` tool: the model
+ * authors a short Harn script that composes the session's other tools as a
+ * typed API (the CodeAct pattern) instead of emitting N separate tool calls.
+ * The script runs in a restricted sandbox VM whose only egress is `call_tool`,
+ * which routes every call through the same policy + approval + MCP-credential
+ * gate the model's own tool calls use. Intermediate values stay in the sandbox;
+ * only what the script returns re-enters the model context.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_composition_tools(registry = nil, options = nil) {
+  let opts = __agent_host_options(options)
+  var tools = registry ?? tool_registry()
+  if __agent_host_code_mode_enabled(opts) {
+    let key = "code_mode"
+    tools = tool_define(
+      tools,
+      __agent_host_name(opts, key, "code_mode"),
+      __agent_host_description(
+        opts,
+        key,
+        "Run a short Harn script that composes the available tools as a typed API. "
+          + "Call tools from the script with `call_tool(name, args)`; it returns each "
+          + "tool's result for further composition. Keep intermediate data in the script "
+          + "and `return` only the final composed value. Prefer this for connector chains "
+          + "(read from one tool, transform, write to another) to avoid many round-trips "
+          + "and keep large intermediate payloads out of context. Tool calls from the "
+          + "script are still subject to the same permission and approval rules.",
+      ),
+      __agent_host_config(
+        opts,
+        key,
+        {
+          parameters: {code: {type: "string"}, allow_tools: {type: "array", items: {type: "string"}, required: false}},
+          returns: {type: "object"},
+          annotations: __agent_host_annotations(opts, key, {kind: "code_mode", side_effect_level: "workspace"}),
+          handler: { args -> __agent_host_render(
+            __host_code_mode_run({code: args.code, allow_tools: args?.allow_tools, tools: tools, options: opts}),
+            opts,
+            key,
+          ) },
+        },
+      ),
+    )
+  }
+  return tools
+}
+
+/**
  * agent_host_tools adds read/search/git inspection tools and argv-based command tools.
  *
  * @effects: []
@@ -1044,5 +1116,6 @@ pub fn agent_command_tools(registry = nil, options = nil) {
 pub fn agent_host_tools(registry = nil, options = nil) {
   var tools = agent_read_tools(registry, options)
   tools = agent_command_tools(tools, options)
+  tools = agent_composition_tools(tools, options)
   return tools
 }
