@@ -1,0 +1,129 @@
+import { agent_capture_events } from "std/agent/events"
+import { with_llm_script } from "std/testing"
+
+fn has_tool(tools, name) {
+  for item in tools ?? [] {
+    if item?.function?.name == name || item?.name == name {
+      return true
+    }
+  }
+  return false
+}
+
+fn events_of(events, kind) {
+  return events.filter({ event -> event.type == kind })
+}
+
+fn stance_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "look",
+    "read a file",
+    {
+      parameters: {},
+      annotations: {kind: "read", side_effect_level: "read_only"},
+      handler: { _args -> "contents" },
+    },
+  )
+  tools = tool_define(
+    tools,
+    "search",
+    "search the repo",
+    {
+      parameters: {},
+      annotations: {kind: "search", side_effect_level: "read_only"},
+      handler: { _args -> "hits" },
+    },
+  )
+  tools = tool_define(
+    tools,
+    "edit",
+    "edit a file",
+    {
+      parameters: {},
+      annotations: {kind: "edit", side_effect_level: "workspace_write"},
+      handler: { _args -> "edited" },
+    },
+  )
+  tools = tool_define(
+    tools,
+    "run",
+    "run a command",
+    {
+      parameters: {},
+      annotations: {kind: "execute", side_effect_level: "process_exec"},
+      handler: { _args -> "ran" },
+    },
+  )
+  tools = tool_define(tools, "mystery", "unannotated tool", {parameters: {}, handler: { _args -> "?" }})
+  return tools
+}
+
+/**
+ * Deterministic consent check: grant only when the justification cites
+ * explicit user consent (stands in for the default LLM verdict).
+ */
+fn scripted_consent(justification, _session_id) {
+  if contains(justification, "user said go ahead") {
+    return {verdict: "grant", consent: "express", reason: "user approved"}
+  }
+  return {verdict: "deny", consent: "none", reason: "no consent found"}
+}
+
+pipeline default() {
+  with_llm_script(
+    [
+      {tool_calls: [{id: "look-1", name: "look", arguments: {}}]},
+      {
+        tool_calls: [{id: "esc-1", name: "request_write_access", arguments: {justification: "I want to fix it"}}],
+      },
+      {
+        tool_calls: [{id: "esc-2", name: "request_write_access", arguments: {justification: "user said go ahead"}}],
+      },
+      {tool_calls: [{id: "edit-1", name: "edit", arguments: {}}]},
+      {text: "done ##DONE##"},
+    ],
+    { ->
+      let session = "read-only-stance-" + uuid()
+      let captured = agent_capture_events(
+        session,
+        fn() { return agent_loop(
+          "no code changes yet, just research the bug",
+          nil,
+          {
+            provider: "mock",
+            tools: stance_tools(),
+            tool_format: "native",
+            loop_until_done: true,
+            max_iterations: 6,
+            session_id: session,
+            read_only_stance: {enabled: true, armed: true, consent_check: scripted_consent},
+          },
+        ) },
+      )
+      let calls = llm_mock_calls()
+      let first_tools = calls[0].tools
+      __io_println(has_tool(first_tools, "look"))
+      __io_println(has_tool(first_tools, "search"))
+      __io_println(has_tool(first_tools, "request_write_access"))
+      __io_println(has_tool(first_tools, "edit"))
+      __io_println(has_tool(first_tools, "run"))
+      __io_println(has_tool(first_tools, "mystery"))
+      let third_tools = calls[2].tools
+      __io_println(has_tool(third_tools, "edit"))
+      let fourth_tools = calls[3].tools
+      __io_println(has_tool(fourth_tools, "edit"))
+      let stance_events = events_of(captured.events, "stance_transition")
+      let phases = stance_events.map({ event -> event.phase })
+      __io_println(contains(phases, "armed"))
+      __io_println(contains(phases, "write_access_denied"))
+      __io_println(contains(phases, "write_access_granted"))
+      __io_println(contains(phases, "disarmed"))
+    },
+  )
+}
+// Turn 1: armed window — read-only tools + escape hatch only.
+// Turn 3 request denied (no consent) — still narrowed on turn 3's call.
+// Turn 4: grant landed post-turn — edit is back.
+// Events tell the story: one typed stream, distinguished by phase.

@@ -908,6 +908,58 @@ fn __validate_tool_surface_unknown_policy(policy) {
   throw "agent_loop: `tool_surface_narrowing.unknown_tool_policy` must be \"keep\" or \"prune\""
 }
 
+fn __default_read_only_stance() {
+  return {
+    enabled: false,
+    armed: nil,
+    escape_tool: "request_write_access",
+    consent_check: nil,
+    classifier: nil,
+    min_confidence: 0.8,
+    hard_keep: [],
+  }
+}
+
+fn __normalize_read_only_stance(value) {
+  let defaults = __default_read_only_stance()
+  if value == nil {
+    return defaults
+  }
+  if type_of(value) == "bool" {
+    return defaults + {enabled: value}
+  }
+  if type_of(value) != "dict" {
+    throw "agent_loop: `read_only_stance` must be a dict, bool, or nil; got " + type_of(value)
+  }
+  let enabled = value?.enabled ?? true
+  if type_of(enabled) != "bool" {
+    throw "agent_loop: `read_only_stance.enabled` must be a bool"
+  }
+  let armed = value?.armed
+  if armed != nil && type_of(armed) != "bool" {
+    throw "agent_loop: `read_only_stance.armed` must be a bool or nil"
+  }
+  let escape_tool = value?.escape_tool ?? defaults.escape_tool
+  if type_of(escape_tool) != "string" || escape_tool == "" {
+    throw "agent_loop: `read_only_stance.escape_tool` must be a non-empty string"
+  }
+  let min_confidence = value?.min_confidence ?? defaults.min_confidence
+  if type_of(min_confidence) != "float" && type_of(min_confidence) != "int" {
+    throw "agent_loop: `read_only_stance.min_confidence` must be a number"
+  }
+  let hard_keep = value?.hard_keep ?? defaults.hard_keep
+  __validate_string_list("agent_loop: `read_only_stance.hard_keep`", hard_keep)
+  return defaults
+    + value
+    + {
+    enabled: enabled,
+    armed: armed,
+    escape_tool: escape_tool,
+    min_confidence: min_confidence,
+    hard_keep: hard_keep,
+  }
+}
+
 fn __normalize_tool_surface_narrowing(value) {
   let safe_defaults = __tool_surface_safe_defaults()
   if value == nil {
@@ -1308,6 +1360,7 @@ pub fn agent_loop_options(options = nil) {
     iteration_budget: budget,
     max_iterations: budget.max,
     tool_surface_narrowing: __normalize_tool_surface_narrowing(opts?.tool_surface_narrowing),
+    read_only_stance: __normalize_read_only_stance(opts?.read_only_stance),
   }
   opts = agent_reasoning_apply(opts)
   opts = __normalize_reminder_provider_options(opts)

@@ -2963,6 +2963,33 @@ fn build_agent_event(
                 get_usize("archived_messages"),
             ),
         }),
+        // Read-only stance lifecycle (std/agent/stance). The four stdlib
+        // event names map onto one typed variant distinguished by `phase`
+        // so trace consumers match on a single event type.
+        stance @ ("stance_armed"
+        | "stance_write_access_granted"
+        | "stance_write_access_denied"
+        | "stance_disarmed") => {
+            let allowed_tools = payload_obj
+                .and_then(|m| m.get("allowed_tools"))
+                .and_then(|value| value.as_array())
+                .map(|values| {
+                    values
+                        .iter()
+                        .filter_map(|value| value.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default();
+            Ok(AgentEvent::StanceTransition {
+                session_id: session_id.to_string(),
+                phase: stance.strip_prefix("stance_").unwrap_or(stance).to_string(),
+                escape_tool: get_string("escape_tool"),
+                allowed_tools,
+                justification: get_string("justification"),
+                consent: get_string("consent"),
+                reason: get_string("reason"),
+            })
+        }
         other => Err(VmError::Runtime(format!(
             "{HOST_AGENT_EMIT_EVENT}: unsupported event type `{other}`"
         ))),
