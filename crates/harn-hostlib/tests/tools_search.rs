@@ -134,6 +134,25 @@ fn search_glob_filter_matches_file_names_at_any_depth() {
 }
 
 #[test]
+fn search_star_glob_matches_files_at_any_depth() {
+    let dir = TempDir::new().unwrap();
+    fs::create_dir_all(dir.path().join("src")).unwrap();
+    fs::write(dir.path().join("root.txt"), "fn target() {}\n").unwrap();
+    fs::write(dir.path().join("src/nested.txt"), "fn target() {}\n").unwrap();
+
+    let reg = registry();
+    let entry = reg.find("hostlib_tools_search").unwrap();
+    let result = (entry.handler)(&dict_arg(&[
+        ("pattern", vm_string("target")),
+        ("path", vm_string(&dir.path().to_string_lossy())),
+        ("glob", vm_string("*")),
+        ("fixed_strings", VmValue::Bool(true)),
+    ]))
+    .unwrap();
+    assert_eq!(matches_in(&result).len(), 2);
+}
+
+#[test]
 fn search_respects_exclude_globs() {
     let dir = TempDir::new().unwrap();
     fs::create_dir_all(dir.path().join("logs")).unwrap();
