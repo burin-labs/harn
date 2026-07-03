@@ -223,18 +223,31 @@ impl SecurityPolicy {
         // file/command-provenance prerequisite above, so the inert combination
         // cannot arise from config or a future caller.
         let trifecta_gate = enabled && config.trifecta_gate;
+        // The special-token and destyle hygiene passes run only inside
+        // `spotlight_wrap`, which the agent host invokes solely under
+        // `if policy.spotlight_external`. Without spotlight framing they never
+        // execute, so "hygiene on, spotlight off" is an inert combination that
+        // also makes `policy_summary` misreport. Gate them on their framing
+        // prerequisite structurally; the meaningful granularity (toggling a
+        // hygiene pass off *within* spotlight) is preserved.
+        let spotlight_external = enabled && config.spotlight_external;
         Self {
             mode: config.mode,
-            spotlight_external: enabled && config.spotlight_external,
-            neutralize_special_tokens: enabled && config.neutralize_special_tokens,
-            destyle_untrusted: enabled && config.destyle_untrusted,
+            spotlight_external,
+            neutralize_special_tokens: spotlight_external && config.neutralize_special_tokens,
+            destyle_untrusted: spotlight_external && config.destyle_untrusted,
             trifecta_gate,
             pin_mcp_schemas: enabled && config.pin_mcp_schemas,
             authenticate_directives: enabled && (config.authenticate_directives || hardened),
             taint_file_provenance,
             taint_command_reads: taint_file_provenance && (config.taint_command_reads || hardened),
             precise_exfil_gate: trifecta_gate && (config.precise_exfil_gate || hardened),
-            gate_secret_reads: enabled && config.gate_secret_reads,
+            // The secret-read arm is evaluated only inside `trifecta_gate_reason`
+            // (agent_host_primitives.rs:976), which runs solely under
+            // `if policy.trifecta_gate`. Like the precise gate it is a sub-toggle
+            // of the trifecta gate and is inert without it, so gate it on the
+            // same prerequisite rather than leaving the dead combination settable.
+            gate_secret_reads: trifecta_gate && config.gate_secret_reads,
             // `local-ml` mode turns detection on; other modes can still opt in.
             detect_injection: enabled
                 && (config.detect_injection || matches!(config.mode, SecurityMode::LocalMl)),
@@ -1245,6 +1258,60 @@ mod tests {
         let policy = SecurityPolicy::from_config(&paired);
         assert!(policy.trifecta_gate);
         assert!(policy.precise_exfil_gate);
+    }
+
+    #[test]
+    fn secret_read_gate_requires_the_trifecta_gate() {
+        // The secret-read arm is evaluated only inside `trifecta_gate_reason`,
+        // which runs solely under `if policy.trifecta_gate`. Without the trifecta
+        // gate it never fires, so gate it on its prerequisite structurally.
+        let inert = SecurityConfig {
+            gate_secret_reads: true,
+            trifecta_gate: false,
+            ..Default::default()
+        };
+        assert!(!SecurityPolicy::from_config(&inert).gate_secret_reads);
+        assert!(!SecurityPolicy::from_config(&inert).trifecta_gate);
+
+        let paired = SecurityConfig {
+            gate_secret_reads: true,
+            trifecta_gate: true,
+            ..Default::default()
+        };
+        let policy = SecurityPolicy::from_config(&paired);
+        assert!(policy.trifecta_gate);
+        assert!(policy.gate_secret_reads);
+    }
+
+    #[test]
+    fn hygiene_passes_require_spotlight_framing() {
+        // Special-token neutralization and destyle run only inside
+        // `spotlight_wrap`, invoked solely under `if policy.spotlight_external`.
+        // Without framing they never execute, so "hygiene on, spotlight off" is
+        // inert and would make the summary lie. Gate them on their prerequisite;
+        // toggling a pass off *within* spotlight still works.
+        let inert = SecurityConfig {
+            spotlight_external: false,
+            neutralize_special_tokens: true,
+            destyle_untrusted: true,
+            ..Default::default()
+        };
+        let policy = SecurityPolicy::from_config(&inert);
+        assert!(!policy.spotlight_external);
+        assert!(!policy.neutralize_special_tokens);
+        assert!(!policy.destyle_untrusted);
+
+        // Meaningful granularity survives: spotlight on, one pass off.
+        let framed = SecurityConfig {
+            spotlight_external: true,
+            neutralize_special_tokens: false,
+            destyle_untrusted: true,
+            ..Default::default()
+        };
+        let policy = SecurityPolicy::from_config(&framed);
+        assert!(policy.spotlight_external);
+        assert!(!policy.neutralize_special_tokens);
+        assert!(policy.destyle_untrusted);
     }
 
     #[test]
