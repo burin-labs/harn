@@ -1599,20 +1599,22 @@ pub(crate) async fn observed_llm_call(
                     }
                     continue;
                 }
-                annotate_current_span(&[
-                    ("status", serde_json::json!("ok")),
-                    ("input_tokens", serde_json::json!(result.input_tokens)),
-                    ("output_tokens", serde_json::json!(result.output_tokens)),
-                    (
-                        "cost_usd",
-                        serde_json::json!(crate::llm::cost::calculate_cost_for_provider(
-                            &result.provider,
-                            &result.model,
-                            result.input_tokens,
-                            result.output_tokens,
-                        )),
+                let usage = crate::tracing::LlmCallUsage {
+                    model: result.model.clone(),
+                    provider: result.provider.clone(),
+                    input_tokens: result.input_tokens,
+                    output_tokens: result.output_tokens,
+                    cache_read_tokens: result.cache_read_tokens,
+                    cache_write_tokens: result.cache_write_tokens,
+                    cost_usd: crate::llm::cost::pricing_aware_call_cost(
+                        &result.provider,
+                        &result.model,
+                        result.input_tokens,
+                        result.output_tokens,
                     ),
-                ]);
+                };
+                annotate_current_span(&[("status", serde_json::json!("ok"))]);
+                annotate_current_span(&usage.metadata_pairs());
                 dump_llm_response(
                     iteration.unwrap_or(0),
                     &call_id,

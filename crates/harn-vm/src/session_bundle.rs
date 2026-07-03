@@ -364,7 +364,9 @@ pub struct BundlePermission {
     pub payload: JsonValue,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+// Not `Eq`: embeds `RunTraceSpanRecord`, which carries a float `cost_usd`
+// and is therefore only `PartialEq`.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct BundleReplay {
     pub replay_fixture: Option<ReplayFixture>,

@@ -1002,7 +1002,9 @@ pub fn tool_fixture_hash(tool_name: &str, args: &serde_json::Value) -> String {
     format!("{:016x}", hasher.finish())
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+// Not `Eq`: `cost_usd: Option<f64>` carries a float, so the record is only
+// `PartialEq`. Nothing keys a set/map on trace spans, so this is inert.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct RunTraceSpanRecord {
     pub trace_id: String,
@@ -1014,6 +1016,14 @@ pub struct RunTraceSpanRecord {
     pub duration_ms: u64,
     pub metadata: BTreeMap<String, serde_json::Value>,
     pub links: Vec<crate::tracing::SpanLink>,
+    /// First-class per-call cost projection for `llm_call` spans, in USD.
+    /// Mirrors the `cost_usd` metadata key so downstream viewers can build
+    /// cost flame graphs without parsing the metadata map. `None` for
+    /// non-LLM spans and for `llm_call` spans whose (provider, model) pair
+    /// has no catalog pricing. Defaults to `None` when absent, so records
+    /// persisted before this field existed still load.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost_usd: Option<f64>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -1127,4 +1137,101 @@ pub struct RunExecutionRecord {
     pub branch: Option<String>,
     pub base_ref: Option<String>,
     pub cleanup: Option<String>,
+}
+
+#[cfg(test)]
+mod trace_span_record_tests {
+    use super::*;
+
+    #[test]
+    fn trace_span_record_round_trips_with_cost_and_token_metadata() {
+        let span = RunTraceSpanRecord {
+            trace_id: "trace_1".to_string(),
+            span_id: 7,
+            parent_id: Some(3),
+            kind: "llm_call".to_string(),
+            name: "llm_call".to_string(),
+            start_ms: 120,
+            duration_ms: 900,
+            metadata: BTreeMap::from([
+                ("model".to_string(), serde_json::json!("claude-sonnet-4")),
+                ("provider".to_string(), serde_json::json!("anthropic")),
+                ("input_tokens".to_string(), serde_json::json!(1200)),
+                ("output_tokens".to_string(), serde_json::json!(340)),
+                ("cache_read_tokens".to_string(), serde_json::json!(800)),
+                ("cache_write_tokens".to_string(), serde_json::json!(64)),
+                ("cost_usd".to_string(), serde_json::json!(0.0123)),
+            ]),
+            links: Vec::new(),
+            cost_usd: Some(0.0123),
+        };
+        let encoded = serde_json::to_string(&span).unwrap();
+        let decoded: RunTraceSpanRecord = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded, span);
+        assert_eq!(decoded.cost_usd, Some(0.0123));
+        assert_eq!(
+            decoded.metadata["cache_read_tokens"],
+            serde_json::json!(800)
+        );
+    }
+
+    #[test]
+    fn trace_span_record_loads_legacy_json_without_cost_field() {
+        // A record persisted before `cost_usd` existed. `#[serde(default)]`
+        // on the struct must fill the missing field with `None` rather than
+        // failing the whole RunRecord load.
+        let legacy = serde_json::json!({
+            "trace_id": "trace_legacy",
+            "span_id": 2,
+            "parent_id": null,
+            "kind": "llm_call",
+            "name": "llm_call",
+            "start_ms": 0,
+            "duration_ms": 500,
+            "metadata": { "model": "gpt-4o-mini", "input_tokens": 10 },
+            "links": []
+        });
+        let decoded: RunTraceSpanRecord = serde_json::from_value(legacy).unwrap();
+        assert_eq!(decoded.cost_usd, None);
+        assert_eq!(decoded.kind, "llm_call");
+        assert_eq!(decoded.metadata["model"], serde_json::json!("gpt-4o-mini"));
+    }
+
+    #[test]
+    fn trace_span_record_omits_cost_field_when_absent() {
+        // Non-LLM spans leave `cost_usd` unset; the field is skipped on the
+        // wire so the persisted shape stays byte-identical to pre-change
+        // records for spans that carry no cost.
+        let span = RunTraceSpanRecord {
+            trace_id: "trace_1".to_string(),
+            span_id: 1,
+            kind: "tool_call".to_string(),
+            name: "read".to_string(),
+            ..RunTraceSpanRecord::default()
+        };
+        let encoded = serde_json::to_value(&span).unwrap();
+        assert!(encoded.get("cost_usd").is_none());
+    }
+
+    #[test]
+    fn legacy_run_record_without_new_span_kinds_still_loads() {
+        // A RunRecord whose trace carries the new marker span kinds must
+        // deserialize (kinds are free-form strings on the record), and an
+        // older record without them is unaffected.
+        let json = serde_json::json!({
+            "trace_spans": [
+                { "trace_id": "t", "span_id": 1, "kind": "model_route", "name": "model_route",
+                  "metadata": { "from_model": "a", "to_model": "b", "reason": "escalation" } },
+                { "trace_id": "t", "span_id": 2, "kind": "tool_mount", "name": "tool_mount",
+                  "metadata": { "source": "mcp", "tool_count": 3 } }
+            ]
+        });
+        let decoded: RunRecord = serde_json::from_value(json).unwrap();
+        assert_eq!(decoded.trace_spans.len(), 2);
+        assert_eq!(decoded.trace_spans[0].kind, "model_route");
+        assert_eq!(
+            decoded.trace_spans[1].metadata["source"],
+            serde_json::json!("mcp")
+        );
+    }
 }
