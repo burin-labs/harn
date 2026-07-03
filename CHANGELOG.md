@@ -3,8 +3,9 @@
 Release notes for Harn v0.8 and newer are documented in this file.
 
 Detailed pre-v0.8 release notes (v0.6.0 – v0.7.62) live in
-[CHANGELOG-pre-0.8.md](CHANGELOG-pre-0.8.md). Condensed pre-v0.6
-highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
+[changelog/archive/CHANGELOG-pre-0.8.md](changelog/archive/CHANGELOG-pre-0.8.md).
+Condensed pre-v0.6 highlights live in
+[changelog/archive/CHANGELOG-pre-0.6.md](changelog/archive/CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 

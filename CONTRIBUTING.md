@@ -460,9 +460,10 @@ Day to day: drop a `changelog.d/<id>.<category>.md` fragment per PR; see
 
 At a major (or 0.x-equivalent) cut, keep `CHANGELOG.md` focused on the
 active release range by snipping the prior series into a versioned
-archive such as `CHANGELOG-pre-0.8.md` (detailed per-patch notes for
-v0.6.0 – v0.7.62) or `CHANGELOG-pre-0.6.md` (condensed pre-launch
-summaries) and leaving a link near the top of `CHANGELOG.md`. The
+archive under `changelog/archive/` such as
+`changelog/archive/CHANGELOG-pre-0.8.md` (detailed per-patch notes for
+v0.6.0 – v0.7.62) or `changelog/archive/CHANGELOG-pre-0.6.md` (condensed
+pre-launch summaries) and leaving a link near the top of `CHANGELOG.md`. The
 `harn-bump-fleet/lib/changelog.harn::changelog_archive_below_version`
 helper produces the same split layout deterministically.
 

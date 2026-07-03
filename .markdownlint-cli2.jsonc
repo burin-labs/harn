@@ -65,6 +65,6 @@
     // assembled history must not be reflowed. (harn-bump-fleet release_harn.harn
     // runs `make lint-md` post-assembly.)
     "CHANGELOG.md",
-    "CHANGELOG-pre-*.md"
+    "changelog/archive/CHANGELOG-pre-*.md"
   ]
 }
