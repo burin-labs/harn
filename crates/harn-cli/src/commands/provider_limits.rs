@@ -77,7 +77,10 @@ fn emit_json(
         .iter()
         .map(|p| resolved_json(p, &rate_governor::resolved_limits_for(p)))
         .collect();
-    let filter = args.provider.as_ref().map(|p| p.trim().to_ascii_lowercase());
+    let filter = args
+        .provider
+        .as_ref()
+        .map(|p| p.trim().to_ascii_lowercase());
     let governors: Vec<serde_json::Value> = live
         .iter()
         .filter(|(route, _)| match filter.as_ref() {
@@ -131,7 +134,10 @@ fn emit_text(
         );
     }
 
-    let filter = args.provider.as_ref().map(|p| p.trim().to_ascii_lowercase());
+    let filter = args
+        .provider
+        .as_ref()
+        .map(|p| p.trim().to_ascii_lowercase());
     let shown: Vec<&(String, rate_governor::GovernorSnapshot)> = live
         .iter()
         .filter(|(route, _)| match filter.as_ref() {

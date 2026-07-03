@@ -317,7 +317,11 @@ fn record_governor_call_outcome(
             // provider is already throttled → soft-throttle, not capability.
             let committed_nothing = result.text.is_empty()
                 && result.tool_calls.is_empty()
-                && result.thinking.as_deref().map(str::is_empty).unwrap_or(true);
+                && result
+                    .thinking
+                    .as_deref()
+                    .map(str::is_empty)
+                    .unwrap_or(true);
             let empty_billed = committed_nothing && result.output_tokens > 0;
             if empty_billed && rate_governor::provider_already_throttled(provider, org_key) {
                 (
@@ -2210,7 +2214,7 @@ mod retry_tests {
         assert_eq!(
             governor_throttle_signal_for_error(&categorized(
                 "connection reset by peer",
-                ErrorCategory::NetworkError
+                ErrorCategory::TransientNetwork
             )),
             None
         );

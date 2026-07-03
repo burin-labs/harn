@@ -506,8 +506,8 @@ impl ProviderGovernor {
     /// never collapses toward zero but still de-synchronizes N agents.
     fn backoff_window_ms(&mut self, retry_after_ms: Option<u64>) -> u64 {
         let exp = self.open_cycles.saturating_sub(1);
-        let mut window = self.limits.backoff_base_ms as f64
-            * self.limits.backoff_multiplier.powi(exp as i32);
+        let mut window =
+            self.limits.backoff_base_ms as f64 * self.limits.backoff_multiplier.powi(exp as i32);
         if !window.is_finite() {
             window = self.limits.backoff_max_ms as f64;
         }
@@ -638,14 +638,19 @@ fn registry() -> &'static Mutex<Registry> {
     REGISTRY.get_or_init(|| Mutex::new(Registry::default()))
 }
 
-fn with_governor<R>(provider: &str, org_key: &str, f: impl FnOnce(&mut ProviderGovernor) -> R) -> R {
+fn with_governor<R>(
+    provider: &str,
+    org_key: &str,
+    f: impl FnOnce(&mut ProviderGovernor) -> R,
+) -> R {
     let key = route_key(provider, org_key);
     let mut reg = registry()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     let governor = reg.governors.entry(key).or_insert_with(|| {
-        let limits =
-            ResolvedLimits::from_catalog(super::capabilities::provider_limits_for(provider).as_ref());
+        let limits = ResolvedLimits::from_catalog(
+            super::capabilities::provider_limits_for(provider).as_ref(),
+        );
         ProviderGovernor::new(limits)
     });
     f(governor)
@@ -837,9 +842,7 @@ mod tests {
 
     impl GovernorEnabledGuard {
         fn on() -> Self {
-            let lock = TEST_ENV_LOCK
-                .lock()
-                .unwrap_or_else(|p| p.into_inner());
+            let lock = TEST_ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
             let prev = std::env::var(RATE_GOVERNOR_ENABLED_ENV).ok();
             std::env::set_var(RATE_GOVERNOR_ENABLED_ENV, "1");
             reset_for_tests();
@@ -882,12 +885,7 @@ mod tests {
             Some(ThrottleSignal::RateLimit429)
         );
         assert_eq!(
-            ThrottleSignal::classify(
-                None,
-                "server temporarily limiting requests",
-                false,
-                false
-            ),
+            ThrottleSignal::classify(None, "server temporarily limiting requests", false, false),
             Some(ThrottleSignal::RateLimit429)
         );
     }
@@ -927,7 +925,10 @@ mod tests {
 
     #[test]
     fn clean_success_has_no_signal() {
-        assert_eq!(ThrottleSignal::classify(Some(200), "ok", false, false), None);
+        assert_eq!(
+            ThrottleSignal::classify(Some(200), "ok", false, false),
+            None
+        );
     }
 
     // --- Config resolution ---------------------------------------------
@@ -1241,11 +1242,11 @@ mod tests {
             bad_snap.concurrency_limit < bad_snap.max_concurrency,
             "AIMD decreased concurrency on the throttled provider"
         );
-        assert!(circuit_is_open(bad.0, bad.1), "auto-response seam sees OPEN");
-        assert!(matches!(
-            gate(bad.0, bad.1, 0),
-            GateOutcome::CircuitOpen(_)
-        ));
+        assert!(
+            circuit_is_open(bad.0, bad.1),
+            "auto-response seam sees OPEN"
+        );
+        assert!(matches!(gate(bad.0, bad.1, 0), GateOutcome::CircuitOpen(_)));
 
         // 3) The healthy provider is UNAFFECTED while the bad one is open.
         assert_eq!(gate(good.0, good.1, 0), GateOutcome::Proceed);
@@ -1255,7 +1256,11 @@ mod tests {
         // 4) Time passes the Retry-After window → HALF-OPEN probe → serve →
         //    CLOSED. The governor RECOVERS.
         crate::clock_mock::advance(Duration::from_millis(6_000));
-        assert_eq!(gate(bad.0, bad.1, 0), GateOutcome::Proceed, "probe admitted");
+        assert_eq!(
+            gate(bad.0, bad.1, 0),
+            GateOutcome::Proceed,
+            "probe admitted"
+        );
         record_outcome(bad.0, bad.1, GovernorOutcome::Served);
         let recovered = snapshot(bad.0, bad.1).expect("bad governor exists");
         assert_eq!(recovered.circuit_state, "closed", "recovered to CLOSED");
