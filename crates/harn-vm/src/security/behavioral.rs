@@ -195,6 +195,50 @@ fn score_reply(probe: &Probe, reply: &Result<String, String>) -> ProbeOutcome {
     }
 }
 
+/// Append one probe's full transcript to the JSONL sidecar named by the
+/// `BEHAVIORAL_PROBE_DUMP` env var, when set. This is a diagnostic seam: a live
+/// A/B (for example base vs. LoRA-adapted model) can be root-caused from the
+/// actual replies instead of aggregate counts alone — the exact confound the
+/// first role-robustness A/B hit, where a fine-tuned model's output style shifted
+/// the benign completion marker and made `on_task` un-interpretable from numbers.
+///
+/// Unset env is a no-op, so CI (mock models, no env) is byte-identical. Each
+/// record carries everything needed to re-derive any outcome offline: the framed
+/// user turn, the raw reply, the canary, and the scored outcome. IO errors are
+/// swallowed — a diagnostic dump must never change the measured result.
+fn dump_probe_record(
+    probe: &Probe,
+    mode: SecurityMode,
+    reply: &Result<String, String>,
+    outcome: ProbeOutcome,
+) {
+    let Ok(path) = std::env::var("BEHAVIORAL_PROBE_DUMP") else {
+        return;
+    };
+    let (reply_ok, reply_err) = match reply {
+        Ok(text) => (Some(text.as_str()), None),
+        Err(err) => (None, Some(err.as_str())),
+    };
+    let record = serde_json::json!({
+        "id": probe.id,
+        "class": probe.class,
+        "mode": format!("{mode:?}"),
+        "canary": probe.canary,
+        "outcome": format!("{outcome:?}"),
+        "user": probe.user,
+        "reply": reply_ok,
+        "error": reply_err,
+    });
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        use std::io::Write;
+        let _ = writeln!(file, "{record}");
+    }
+}
+
 /// Run the behavioral battery: probe every malicious case in the corpus through
 /// `model` under `mode` and aggregate the deterministic outcomes into a
 /// [`BehavioralReport`]. Benign controls are skipped — ASR is defined over the
@@ -216,6 +260,8 @@ pub async fn run_behavioral_battery<M: BehavioralModel + ?Sized>(
         let probe = build_probe(case, mode);
         let reply = model.respond(&probe.system, &probe.user).await;
         let outcome = score_reply(&probe, &reply);
+
+        dump_probe_record(&probe, mode, &reply, outcome);
 
         let class_entry = per_class.entry(case.class.clone()).or_insert((0, 0));
         class_entry.1 += 1;
@@ -483,6 +529,22 @@ mod tests {
     /// non-zero temperature for a gate-worthy read; N=1/temp-0 is an exploratory
     /// point. It asserts only that the run completed — the number is a
     /// measurement to record.
+    ///
+    /// Set `BEHAVIORAL_PROBE_DUMP=<path>` to append every probe's full transcript
+    /// (framed user turn, raw reply, canary, scored outcome) as JSONL, so a live
+    /// A/B (e.g. base vs. LoRA-adapted model) can be root-caused from the actual
+    /// replies rather than aggregate counts. The first role-robustness A/B needed
+    /// exactly this: the canary metric conflates "obeyed the injection" with
+    /// "narrated the injection and happened to quote the canary", and only the
+    /// transcripts distinguish them.
+    ///
+    /// N>=5 only buys statistical power when the *server* honours the request
+    /// temperature. Some local servers do not — `mlx_lm.server` 0.31.3 ignores
+    /// per-request `temperature` and decodes greedily, so every trial is
+    /// byte-identical and "N=5" degenerates to N=1. For a deterministic canary
+    /// probe that greedy read is still valid, but do not report it as five
+    /// independent samples; confirm variance (or use a temp-honouring server)
+    /// before claiming a bootstrap CI on a local surface.
     #[test]
     #[ignore = "calls a live model provider; run on demand with a key"]
     fn baseline_openai_compat() {
