@@ -325,6 +325,14 @@ pub struct SecurityConfig {
     /// subagent result cannot be obeyed as authoritative. Default OFF (net-new
     /// enforcement); byte-identical behaviour when disabled.
     pub authenticate_directives: bool,
+    /// Track untrusted-origin file provenance. A file written while untrusted
+    /// content is in the session's context — or by a fetch/clone/MCP step — is
+    /// recorded, and a later read of that path is classified untrusted so a
+    /// deferred on-disk injection (a cloned dependency's README, a downloaded
+    /// dataset) is quarantined by the same taint/trifecta gate as a live fetch.
+    /// First-party file reads stay trusted. Default OFF (net-new enforcement);
+    /// byte-identical behaviour when disabled.
+    pub taint_file_provenance: bool,
     /// Also gate reads of well-known secret/credential files while tainted.
     pub gate_secret_reads: bool,
     /// Score untrusted content with an injection classifier (Layer 2). Implied
@@ -361,6 +369,7 @@ impl Default for SecurityConfig {
             trifecta_gate: true,
             pin_mcp_schemas: true,
             authenticate_directives: false,
+            taint_file_provenance: false,
             gate_secret_reads: true,
             detect_injection: false,
             guard_threshold_percent: 50,
@@ -1043,6 +1052,7 @@ pub fn schema_json() -> JsonValue {
                     "trifecta_gate": {"type": "boolean"},
                     "pin_mcp_schemas": {"type": "boolean"},
                     "authenticate_directives": {"type": "boolean"},
+                    "taint_file_provenance": {"type": "boolean"},
                     "gate_secret_reads": {"type": "boolean"},
                     "detect_injection": {"type": "boolean"},
                     "guard_threshold_percent": {"type": "integer", "minimum": 0, "maximum": 100},

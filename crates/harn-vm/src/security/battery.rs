@@ -35,7 +35,7 @@ use serde::Deserialize;
 
 use super::{
     classify_directive_trust, classify_injection, classify_result_trust, is_exfil_capable,
-    spotlight_wrap, SecurityPolicy, TrustLevel, RESERVED_SPECIAL_TOKENS,
+    spotlight_wrap, FileProvenanceLedger, SecurityPolicy, TrustLevel, RESERVED_SPECIAL_TOKENS,
 };
 use crate::config::SecurityMode;
 use crate::tool_annotations::{SideEffectLevel, ToolAnnotations, ToolKind};
@@ -244,6 +244,10 @@ struct Ingress {
     executor: Option<VmValue>,
     tool_name: &'static str,
     annotations: Option<ToolAnnotations>,
+    /// Workspace path a `Read` surface names. Set only for on-disk surfaces
+    /// (`file_content`), so the containment tier can model the worst-case
+    /// untrusted origin of that file through the real file-provenance ledger.
+    path: Option<&'static str>,
 }
 
 /// The executor descriptor an untrusted mounted MCP server attaches to its
@@ -271,16 +275,23 @@ fn ingress_for_surface(surface: &str) -> Ingress {
                 kind: ToolKind::Fetch,
                 ..Default::default()
             }),
+            path: None,
         },
         // Mounted MCP server result: untrusted by executor provenance.
         "mcp_tool_result" => Ingress {
             executor: Some(untrusted_mcp_executor()),
             tool_name: "connector__search",
             annotations: None,
+            path: None,
         },
-        // A workspace file read: first-party by default (`Read` kind, no external
+        // A workspace file read. First-party by default (`Read` kind, no external
         // executor), so it is NOT tainted unless the body is a forged directive
-        // caught by the (opt-in) directive authenticator.
+        // caught by the (opt-in) directive authenticator OR — under
+        // `taint_file_provenance` — the file carries an untrusted origin. The
+        // `path` models the realistic worst case: this file was written by a
+        // fetch / clone step (a vendored dependency, a downloaded artifact), so
+        // the containment tier records it through the real file-provenance ledger
+        // before the read.
         "file_content" => Ingress {
             executor: None,
             tool_name: "read_file",
@@ -288,6 +299,7 @@ fn ingress_for_surface(surface: &str) -> Ingress {
                 kind: ToolKind::Read,
                 ..Default::default()
             }),
+            path: Some("vendor/cloned-dep/README.md"),
         },
         // A generic local tool result: no external provenance -> first-party.
         "tool_result" => Ingress {
@@ -297,6 +309,7 @@ fn ingress_for_surface(surface: &str) -> Ingress {
                 kind: ToolKind::Execute,
                 ..Default::default()
             }),
+            path: None,
         },
         // A subagent / A2A channel message: no MCP executor and no fetch kind.
         // The pipeline annotates delegation tools (subagent / delegate /
@@ -313,6 +326,7 @@ fn ingress_for_surface(surface: &str) -> Ingress {
                 )]),
                 ..Default::default()
             }),
+            path: None,
         },
         // Fail-safe: an unmodelled surface is treated as an opaque first-party
         // result (the conservative case for a containment *lower* bound).
@@ -320,6 +334,7 @@ fn ingress_for_surface(surface: &str) -> Ingress {
             executor: None,
             tool_name: "unknown_tool",
             annotations: None,
+            path: None,
         },
     }
 }
@@ -330,6 +345,9 @@ fn ingress_for_surface(surface: &str) -> Ingress {
 pub struct ContainmentReport {
     /// Whether directive authentication (the cross-agent quarantine path) was on.
     pub authenticate_directives: bool,
+    /// Whether untrusted-origin file provenance (the on-disk quarantine path) was
+    /// on.
+    pub taint_file_provenance: bool,
     /// Malicious attacks whose ingress arms the gate, so a subsequent
     /// exfil-capable tool call is forced to confirm. Higher is better.
     pub contained: usize,
@@ -371,9 +389,24 @@ pub fn run_containment_battery(policy: &SecurityPolicy) -> ContainmentReport {
         malicious_total += 1;
         let ingress = ingress_for_surface(&case.surface);
 
-        // The SAME two-step trust derivation the live dispatch loop applies:
+        // Untrusted-origin file provenance (opt-in): model the realistic worst
+        // case for an on-disk surface — the file was written by a fetch / clone
+        // step — by recording its path through the REAL ledger before the read,
+        // exactly as the live dispatch loop's taint-on-write path would. A
+        // first-party file has no such record and stays trusted (out of the
+        // threat model); this is why the tier keys on `ingress.path`, set only
+        // for the `file_content` surface.
+        let mut file_ledger = FileProvenanceLedger::default();
+        if policy.taint_file_provenance {
+            if let Some(path) = ingress.path {
+                file_ledger.record(path, "fetch:clone");
+            }
+        }
+
+        // The SAME trust derivation the live dispatch loop applies:
         // executor/annotation provenance first, then (opt-in) directive
-        // authentication of forged cross-agent authority.
+        // authentication of forged cross-agent authority, then (opt-in)
+        // distrust-on-read of an untrusted-origin file.
         let armed = classify_result_trust(
             ingress.executor.as_ref(),
             ingress.annotations.as_ref(),
@@ -383,6 +416,13 @@ pub fn run_containment_battery(policy: &SecurityPolicy) -> ContainmentReport {
         .or_else(|| {
             if policy.authenticate_directives {
                 classify_directive_trust(&case.payload)
+            } else {
+                None
+            }
+        })
+        .or_else(|| {
+            if policy.taint_file_provenance {
+                ingress.path.and_then(|path| file_ledger.classify(path))
             } else {
                 None
             }
@@ -412,6 +452,7 @@ pub fn run_containment_battery(policy: &SecurityPolicy) -> ContainmentReport {
 
     ContainmentReport {
         authenticate_directives: policy.authenticate_directives,
+        taint_file_provenance: policy.taint_file_provenance,
         contained,
         malicious_total,
         containment_rate,
@@ -729,6 +770,73 @@ mod tests {
         assert!(
             hardened.containment_rate < 1.0,
             "first-party ingress must remain the measured residual"
+        );
+    }
+
+    #[test]
+    fn file_provenance_contains_untrusted_origin_file_reads() {
+        use crate::config::SecurityConfig;
+
+        // Every malicious attack whose ingress is an on-disk file read. Under the
+        // default posture these are the uncontained first-party residual; under
+        // `taint_file_provenance` their worst-case origin (a fetched / cloned
+        // file) is recorded, so the read arms the gate.
+        let file_read_attacks = load_corpus()
+            .iter()
+            .filter(|case| case.malicious && case.surface == "file_content")
+            .count();
+        assert!(
+            file_read_attacks > 0,
+            "corpus must carry on-disk file-read attacks for this tier to measure"
+        );
+
+        // Hold directive authentication OFF so the delta is attributable purely to
+        // file provenance (a forged directive in a file body would otherwise be
+        // contained by the other path, double-counting).
+        let default = run_containment_battery(&SecurityPolicy::default());
+        assert!(!default.taint_file_provenance);
+        let hardened = run_containment_battery(&SecurityPolicy::from_config(&SecurityConfig {
+            taint_file_provenance: true,
+            ..Default::default()
+        }));
+        assert!(hardened.taint_file_provenance && !hardened.authenticate_directives);
+
+        // Containment never regresses, and it rises by EXACTLY the file-read
+        // attack count: distrust-on-read arms the gate for each untrusted-origin
+        // file and nothing else moves.
+        assert_eq!(
+            hardened.contained,
+            default.contained + file_read_attacks,
+            "file provenance must contain exactly the on-disk file-read attacks"
+        );
+        assert!(hardened.containment_rate > default.containment_rate);
+
+        eprintln!(
+            "[containment] file-provenance posture exfil-sink: contained={}/{} ({:.2}); \
+             +{} over default from untrusted-origin file reads",
+            hardened.contained,
+            hardened.malicious_total,
+            hardened.containment_rate,
+            file_read_attacks,
+        );
+
+        // The tier is honest about its scope: a `tool_result` surface (opaque
+        // local command output whose payload path is not a structured argument)
+        // is NOT covered by lexical file provenance and remains uncontained here.
+        let both = run_containment_battery(&SecurityPolicy::from_config(&SecurityConfig {
+            taint_file_provenance: true,
+            authenticate_directives: true,
+            ..Default::default()
+        }));
+        eprintln!(
+            "[containment] both origin-based mechanisms (directive-auth + file-provenance): \
+             contained={}/{} ({:.2})",
+            both.contained, both.malicious_total, both.containment_rate,
+        );
+        assert!(
+            both.containment_rate < 1.0,
+            "file provenance + directive auth is still not total containment; \
+             the tool_result residual remains"
         );
     }
 }
