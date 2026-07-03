@@ -182,6 +182,10 @@ fn _fail_dispatch(error_text) {
   return [{tool_name: "run", ok: false, error: error_text}]
 }
 
+fn _stale_dispatch(error_text) {
+  return [{tool_name: "run", ok: false, status: "bound_stale", error: error_text}]
+}
+
 fn _ok_dispatch() {
   return [{tool_name: "run", ok: true, result: "all tests pass"}]
 }
@@ -229,6 +233,69 @@ pipeline test_fold_same_failure_no_edit_increments_streak(task) {
   assert(o3.warning.pattern == "stuck_same_diagnostic")
   // The strategy-shift nudge is grounded in the diagnostic snippet.
   assert(o3.warning.diagnostic_snippet == "boom")
+}
+
+pipeline test_fold_location_shift_uses_verification_delta_normalization(task) {
+  let o1 = _fold(agent_stall_initial_state(), _fail_dispatch("src/a.rs:10:2: error E0425: missing foo"), false)
+  let o2 = _fold(o1.state, _fail_dispatch("src/a.rs:99:7: error E0425: missing foo"), false)
+  assert(o2.state.same_diagnostic_streak == 2)
+  assert(o2.state.last_diagnostic_delta_status == "unchanged")
+}
+
+pipeline test_fold_stale_diagnostic_does_not_feed_repair_gate(task) {
+  let o1 = _fold(agent_stall_initial_state(), _fail_dispatch("boom"), false)
+  assert(o1.state.same_diagnostic_streak == 1)
+  assert(o1.state.failing_verify_turns == 1)
+  let stale = _fold(o1.state, _stale_dispatch("boom"), false)
+  assert(stale.warning == nil)
+  assert(stale.state.same_diagnostic_streak == 1)
+  assert(stale.state.failing_verify_turns == 1)
+  assert(stale.state.last_diagnostic_delta_status == "initialized")
+  let fresh_again = _fold(stale.state, _fail_dispatch("boom"), false)
+  assert(fresh_again.state.same_diagnostic_streak == 2)
+  assert(fresh_again.warning == nil)
+}
+
+pipeline test_fold_stale_after_edit_keeps_reverify_owed(task) {
+  let o1 = _fold(agent_stall_initial_state(), _fail_dispatch("boom"), false)
+  let stale = _fold(o1.state, _stale_dispatch("boom"), true)
+  assert(stale.warning == nil)
+  assert(stale.state.same_diagnostic_streak == 1)
+  assert(stale.state.failing_verify_turns == 1)
+  assert(stale.state.reverify_owed)
+}
+
+pipeline test_stale_diagnostic_not_generic_repeated_error_when_repair_off(task) {
+  let config = {
+    enabled: true,
+    repair_aware: false,
+    post_edit_reverify: false,
+    repeat_same_error: 2,
+    repeat_same_observation: 2,
+    no_progress_messages: 99,
+    ping_pong_cycles: 99,
+  }
+  let o1 = agent_stall_observe_tool_calls(
+    "unit-stale-core",
+    _run_call(),
+    1,
+    config,
+    agent_stall_initial_state(),
+    true,
+    _stale_dispatch("boom"),
+  )
+  let o2 = agent_stall_observe_tool_calls(
+    "unit-stale-core",
+    _run_call(),
+    2,
+    config,
+    o1.state,
+    true,
+    _stale_dispatch("boom"),
+  )
+  assert(o2.warning == nil)
+  assert(o2.state.same_error_streak == 0)
+  assert(o2.state.same_observation_streak == 0)
 }
 
 pipeline test_fold_productive_edit_resets_streak(task) {
@@ -418,12 +485,41 @@ const GUARD_CONFIG = {
   no_net_progress_hard_cap_after: 16,
 }
 
+const STALE_GUARD_CONFIG = {
+  enabled: true,
+  repair_aware: true,
+  stuck_same_diagnostic_after: 3,
+  post_edit_reverify: true,
+  no_net_progress_extend_guard: true,
+  no_net_progress_extend_after: 3,
+  no_net_progress_hard_cap_after: 16,
+  repeat_same_error: 99,
+  repeat_same_observation: 99,
+  no_progress_messages: 99,
+  ping_pong_cycles: 99,
+}
+
 fn _fold_guarded(state, prev_dispatch, prior_made_edit) {
   return agent_stall_observe_tool_calls(
     "unit-guard",
     _run_call(),
     1,
     GUARD_CONFIG,
+    state,
+    true,
+    prev_dispatch,
+    "",
+    false,
+    prior_made_edit,
+  )
+}
+
+fn _fold_stale_guarded(state, prev_dispatch, prior_made_edit) {
+  return agent_stall_observe_tool_calls(
+    "unit-stale-guard",
+    _run_call(),
+    1,
+    STALE_GUARD_CONFIG,
     state,
     true,
     prev_dispatch,
@@ -492,6 +588,21 @@ pipeline test_no_net_progress_explore_turn_not_starved(task) {
   let o = _fold_guarded(initial, nil, false)
   assert(o.state.last_diagnostic_class != "fail")
   assert(!agent_stall_no_net_progress(GUARD_CONFIG, o.state))
+}
+
+pipeline test_no_net_progress_ignores_stale_diagnostics(task) {
+  let o1 = _fold_stale_guarded(agent_stall_initial_state(), _fail_dispatch("boom"), false)
+  assert(o1.state.same_diagnostic_streak == 1)
+  assert(o1.state.failing_verify_turns == 1)
+  let stale1 = _fold_stale_guarded(o1.state, _stale_dispatch("boom"), false)
+  let stale2 = _fold_stale_guarded(stale1.state, _stale_dispatch("boom"), false)
+  assert(stale2.warning == nil)
+  assert(stale2.state.same_diagnostic_streak == 1)
+  assert(stale2.state.failing_verify_turns == 1)
+  assert(!agent_stall_no_net_progress(STALE_GUARD_CONFIG, stale2.state))
+  let fresh_again = _fold_stale_guarded(stale2.state, _fail_dispatch("boom"), false)
+  assert(fresh_again.state.same_diagnostic_streak == 2)
+  assert(!agent_stall_no_net_progress(STALE_GUARD_CONFIG, fresh_again.state))
 }
 
 const HARD_CAP_CONFIG = {

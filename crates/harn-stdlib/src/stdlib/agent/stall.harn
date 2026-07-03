@@ -1,4 +1,5 @@
 import { agent_emit_event, agent_session_inject_feedback } from "std/agent/state"
+import { verification_diagnostic_delta } from "std/verification"
 
 // Deterministic thrash / degenerate-loop detector over the agent's
 // action/observation stream (#2712, part of the #2708 cheap-model
@@ -121,11 +122,12 @@ const SOFT_PROGRESS_TOOLS = ["agent_progress"]
  *   - Warning extras (only on the "stuck_same_diagnostic" pattern):
  *     diagnostic_class / diagnostic_signature / diagnostic_snippet.
  *   - State (the current-failure model — folded by __agent_stall_fold_diagnostic
- *     from the turn's verification result, and deliberately NOT cleared by
+ *     from the turn's verification result through std/verification's
+ *     diagnostic-delta semantics, and deliberately NOT cleared by
  *     __agent_stall_reset_action so a different corrective action does not clear
  *     "same root failure"): last_diagnostic_class / last_diagnostic_signature /
- *     last_diagnostic_snippet / write_epoch / same_diagnostic_streak /
- *     edit_since_failure / reverify_owed.
+ *     last_diagnostic_snippet / last_diagnostic_delta_current / write_epoch /
+ *     same_diagnostic_streak / edit_since_failure / reverify_owed.
  */
 type AgentStallConfig = {
   enabled: bool,
@@ -188,6 +190,9 @@ type AgentStallState = {
   last_diagnostic_class: string,
   last_diagnostic_signature: string,
   last_diagnostic_snippet: string,
+  last_diagnostic_delta_current: dict,
+  last_diagnostic_delta_status: string,
+  last_diagnostic_delta_reason: string,
   write_epoch: int,
   same_diagnostic_streak: int,
   failing_verify_turns: int,
@@ -347,6 +352,9 @@ pub fn agent_stall_initial_state() -> AgentStallState {
     last_diagnostic_class: "",
     last_diagnostic_signature: "",
     last_diagnostic_snippet: "",
+    last_diagnostic_delta_current: {},
+    last_diagnostic_delta_status: "",
+    last_diagnostic_delta_reason: "",
     write_epoch: 0,
     same_diagnostic_streak: 0,
     failing_verify_turns: 0,
@@ -425,48 +433,24 @@ fn __agent_stall_is_context_window_error(text: string) -> bool {
     || contains(lowered, "max_tokens")
 }
 
-/**
- * Normalize an error text into a LOCATION-INVARIANT form before hashing it
- * into a stall signature. The SAME compile/test diagnostic at a shifting
- * `file:line:col` (the agent edits, the error re-fires one line lower) must
- * collapse to one signature — otherwise the repeat streak resets every turn
- * and the same-error trip never fires. Mirrors Burin's pipeline-side fix
- * (#2953/#2954) and its `error_signature` / `completion_gate_strip_diag_location`
- * normalizers: strip ANSI, lowercase, drop `path:line[:col]` coordinates,
- * bare `line N` / `column N` refs, and transient sandbox paths, then collapse
- * whitespace. Deterministic pure transform — no clock, no LLM.
- *
- * We intentionally do NOT strip every bare number: distinguishing identity
- * lives in numbers (error codes like `E0001`, type widths like `i32`,
- * symbol/test names), and a blanket digit strip collapses GENUINELY DISTINCT
- * diagnostics (`E0001` vs `E0002`) into one signature — that would falsely
- * trip the same-error stall on a model that is making real progress through
- * different errors. Only positional coordinates (`file:line:col`, `line N`,
- * `column N`) shift between turns for the SAME diagnostic, so only those are
- * normalized away.
- */
-fn __agent_stall_normalize_error(text: string) -> string {
-  var s = lowercase(to_string(text ?? ""))
-  // Strip ANSI SGR escape sequences (color codes) so styled vs plain
-  // diagnostics hash identically.
-  s = regex_replace("\\u{1b}\\[[0-9;]*m", "", s)
-  // file:line[:col] coordinates -> single space, so the same error class at
-  // a different position collapses to one signature.
-  s = regex_replace("[^\\s:]+:[0-9]+(?::[0-9]+)?", " ", s)
-  // bare `line N` / `column N` / `col N` positional references.
-  s = regex_replace("\\b(?:line|col|column)\\s+[0-9]+\\b", " ", s)
-  // collapse transient sandbox/temp paths that shift between runs.
-  s = regex_replace("/tmp/[^\\s:]*", " ", s)
-  s = regex_replace("/var/folders/[^\\s:]*", " ", s)
-  // collapse whitespace.
-  s = trim(regex_replace("\\s+", " ", s))
-  return s
+fn __agent_stall_delta_signature(current: dict) -> string {
+  let signatures = current?.signatures ?? []
+  let count = to_int(current?.count) ?? len(signatures)
+  return "err:" + sha256(json_stringify({signatures: signatures, count: count}))
+}
+
+fn __agent_stall_result_error_signature(delta, result) -> string {
+  if len(delta.current.signatures) > 0 {
+    return __agent_stall_delta_signature(delta.current)
+  }
+  let fallback = to_string(result?.error ?? result?.message ?? result?.result ?? "")
+  return "err:" + sha256(fallback)
 }
 
 /**
  * Outcome of a dispatched result, normalized for the detector: one of
- * "ok" / "error" / "context_window", plus a byte-stable signature of the
- * observation payload (for "ok") or the error text (for "error").
+ * "ok" / "error" / "advisory" / "context_window", plus a byte-stable
+ * signature of the observation payload (for "ok") or diagnostic set.
  */
 fn __agent_stall_result_outcome(result) -> dict {
   if __agent_stall_result_ok(result) {
@@ -477,7 +461,11 @@ fn __agent_stall_result_outcome(result) -> dict {
   if __agent_stall_is_context_window_error(error_text) {
     return {kind: "context_window", signature: "ctx"}
   }
-  return {kind: "error", signature: "err:" + sha256(__agent_stall_normalize_error(error_text))}
+  let delta = verification_diagnostic_delta(nil, result)
+  if !delta.feedsGates {
+    return {kind: "advisory", signature: "advisory:" + sha256(json_stringify(delta.current))}
+  }
+  return {kind: "error", signature: __agent_stall_result_error_signature(delta, result)}
 }
 
 /**
@@ -544,14 +532,39 @@ fn __agent_stall_turn_result(prev_dispatch) {
   return first
 }
 
+fn __agent_stall_delta_previous(state: AgentStallState) {
+  if state.last_diagnostic_class != "fail" {
+    return nil
+  }
+  let current = state.last_diagnostic_delta_current ?? {}
+  let signatures = current?.signatures ?? []
+  if len(signatures) == 0 {
+    return nil
+  }
+  return {
+    diagnostics: signatures,
+    diagnostic_count: to_int(current?.count) ?? len(signatures),
+    feedsGates: current?.feedsGates ?? current?.feeds_gates ?? true,
+  }
+}
+
+fn __agent_stall_delta_gate_failure(delta) -> bool {
+  if delta == nil {
+    return false
+  }
+  return ["initialized", "unchanged", "advanced", "regressed"].contains(delta.status)
+    && delta.feedsGates
+    && len(delta.current.signatures) > 0
+}
+
 /**
  * __agent_stall_fold_diagnostic folds the current-failure model for one turn.
  * It is a PURE function of (state, prev_dispatch, turn_made_edit):
  *
  *  - It classifies the turn's representative verification result (the first
- *    failing dispatch result, else the first result) into a ProbeOutcome-shaped
- *    class and a byte-stable signature via __agent_stall_result_outcome (never
- *    reimplementing the sha256/normalization).
+ *    failing dispatch result, else the first result) through
+ *    std/verification's diagnostic-delta helper. That helper owns
+ *    location/temp-path normalization and the stale/advisory gate contract.
  *  - On a successful workspace-mutating edit this turn it bumps `write_epoch`
  *    (which arms the post-edit re-verify mandate the loop honors).
  *  - The failure SIGNATURE is the progress signal: a productive edit changes
@@ -590,14 +603,27 @@ fn __agent_stall_fold_diagnostic(state: AgentStallState, prev_dispatch, turn_mad
     state.write_epoch
   }
   let result = __agent_stall_turn_result(prev_dispatch)
-  let result_is_fail = result != nil && !__agent_stall_result_ok(result)
-  if !result_is_fail {
+  let result_is_non_ok = result != nil && !__agent_stall_result_ok(result)
+  let delta = if result_is_non_ok {
+    verification_diagnostic_delta(__agent_stall_delta_previous(state), result)
+  } else {
+    nil
+  }
+  let result_is_gate_failure = __agent_stall_delta_gate_failure(delta)
+  if !result_is_gate_failure {
     // No FAILING verification this turn. A successful edit on top of a live
     // failure is NOT proof the failure is resolved (its "ok" is the edit
     // succeeding, not the check passing): owe a re-verify and preserve the
     // current-failure model so the next re-fail of the SAME diagnostic is
     // recognized across the edit. A genuine passing result on a NON-edit turn
     // is real verification evidence and clears the model.
+    if result_is_non_ok && (delta == nil || delta.status != "cleared") {
+      if turn_made_edit && state.last_diagnostic_class == "fail" {
+        return state
+          + {write_epoch: new_write_epoch, edit_since_failure: true, reverify_owed: true}
+      }
+      return state + {write_epoch: new_write_epoch}
+    }
     if turn_made_edit && state.last_diagnostic_class == "fail" {
       return state
         + {write_epoch: new_write_epoch, edit_since_failure: true, reverify_owed: true}
@@ -607,12 +633,19 @@ fn __agent_stall_fold_diagnostic(state: AgentStallState, prev_dispatch, turn_mad
       return state + {write_epoch: new_write_epoch}
     }
     // A passing verification clears the current-failure model.
-    let pass_outcome = __agent_stall_result_outcome(result)
+    let pass_signature = if delta != nil {
+      "ok:" + sha256(json_stringify(delta.current))
+    } else {
+      __agent_stall_result_outcome(result).signature
+    }
     return state
       + {
       last_diagnostic_class: "pass",
-      last_diagnostic_signature: pass_outcome.signature,
+      last_diagnostic_signature: pass_signature,
       last_diagnostic_snippet: "",
+      last_diagnostic_delta_current: {},
+      last_diagnostic_delta_status: delta?.status ?? "cleared",
+      last_diagnostic_delta_reason: delta?.reason ?? "current_result_is_passing",
       write_epoch: new_write_epoch,
       same_diagnostic_streak: 0,
       failing_verify_turns: 0,
@@ -620,15 +653,12 @@ fn __agent_stall_fold_diagnostic(state: AgentStallState, prev_dispatch, turn_mad
       reverify_owed: false,
     }
   }
-  // result_is_fail: fold against the prior failure model. The signature
-  // is the progress signal, so the streak advances on the SAME signature
-  // regardless of whether an edit intervened — a flailing edit that leaves the
-  // same error counts as thrash, while a productive edit changes the signature
-  // and resets the streak (the false-positive safety property).
-  let outcome = __agent_stall_result_outcome(result)
-  let signature = outcome.signature
-  let same_signature = signature == state.last_diagnostic_signature
-    && state.last_diagnostic_class == "fail"
+  // Gate-bearing failure: fold against the prior failure model. The diagnostic
+  // delta status is the progress signal, so the streak advances only when the
+  // std/verification helper says the normalized signature set is unchanged.
+  // Advisory/stale/unbound diagnostics never reach this branch.
+  let signature = __agent_stall_delta_signature(delta.current)
+  let same_signature = delta.status == "unchanged" && state.last_diagnostic_class == "fail"
   let new_streak = if same_signature {
     state.same_diagnostic_streak + 1
   } else {
@@ -643,6 +673,9 @@ fn __agent_stall_fold_diagnostic(state: AgentStallState, prev_dispatch, turn_mad
     last_diagnostic_class: "fail",
     last_diagnostic_signature: signature,
     last_diagnostic_snippet: __agent_stall_result_snippet(result),
+    last_diagnostic_delta_current: delta.current,
+    last_diagnostic_delta_status: delta.status,
+    last_diagnostic_delta_reason: delta.reason,
     write_epoch: new_write_epoch,
     same_diagnostic_streak: new_streak,
     failing_verify_turns: failing_turns,
@@ -1473,6 +1506,9 @@ pub fn agent_stall_clear_current_failure(stall_state: AgentStallState) -> AgentS
   return stall_state
     + {
     last_diagnostic_class: "pass",
+    last_diagnostic_delta_current: {},
+    last_diagnostic_delta_status: "cleared",
+    last_diagnostic_delta_reason: "terminal_success",
     same_diagnostic_streak: 0,
     failing_verify_turns: 0,
     reverify_owed: false,
