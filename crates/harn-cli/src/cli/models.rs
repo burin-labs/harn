@@ -38,6 +38,8 @@ pub(crate) enum ModelsLoraCommand {
     Inspect(ModelsLoraInspectArgs),
     /// Plan a portable LoRA/QLoRA tool-calling fine-tune for a Harn model route.
     Plan(ModelsLoraPlanArgs),
+    /// Check a tool-calling corpus before spending GPU time on LoRA training.
+    Preflight(ModelsLoraPreflightArgs),
 }
 
 #[derive(Debug, Args)]
@@ -133,6 +135,49 @@ pub(crate) struct ModelsLoraPlanArgs {
     /// LoRA dropout probability.
     #[arg(long, default_value_t = 0.05)]
     pub dropout: f64,
+    /// Emit structured JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ModelsLoraPreflightArgs {
+    /// Base model alias or provider-native id the adapter will target.
+    #[arg(long = "base", value_parser = llm_model_completion_parser(), hide_possible_values = true)]
+    pub base_model: String,
+    /// Provider/runtime to check against instead of inferring from the base model.
+    #[arg(long)]
+    pub provider: Option<String>,
+    /// Corpus JSONL file, or a directory containing a conventional corpus JSONL.
+    #[arg(long, value_name = "PATH")]
+    pub corpus: String,
+    /// Training config file to read max_seq_length/min_fit_ratio from.
+    #[arg(long, value_name = "PATH")]
+    pub config: Option<std::path::PathBuf>,
+    /// Override the config's max_seq_length.
+    #[arg(long = "max-seq-length")]
+    pub max_seq_length: Option<u64>,
+    /// Override the config's min_fit_ratio.
+    #[arg(long = "min-fit-ratio")]
+    pub min_fit_ratio: Option<f64>,
+    /// Hard approximate token budget outlier ceiling.
+    #[arg(long = "hard-token-limit", default_value_t = 32_768)]
+    pub hard_token_limit: u64,
+    /// Minimum trainable record count.
+    #[arg(long = "min-records", default_value_t = 1)]
+    pub min_records: u64,
+    /// Expected source tool-call body format (`json`, `text`, or `auto`).
+    #[arg(long = "source-tool-format", default_value = "json")]
+    pub source_tool_format: String,
+    /// Minimum share of tool calls matching --source-tool-format.
+    #[arg(long = "min-tool-call-share", default_value_t = 0.95)]
+    pub min_tool_call_share: f64,
+    /// Require the last assistant message in each trainable record to contain this marker.
+    #[arg(long = "done-marker")]
+    pub done_marker: Option<String>,
+    /// Exit non-zero when readiness checks fail.
+    #[arg(long)]
+    pub check: bool,
     /// Emit structured JSON.
     #[arg(long)]
     pub json: bool,

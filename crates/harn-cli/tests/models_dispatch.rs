@@ -843,6 +843,130 @@ fn models_lora_export_check_reports_native_shape() {
 }
 
 #[test]
+fn models_lora_preflight_human_text_reports_readiness() {
+    let corpus = write_lora_corpus_fixture();
+    let config = corpus.path().join("config.yaml");
+    fs::write(&config, "max_seq_length: 4096\nmin_fit_ratio: 1.0\n").expect("write config");
+    let harn = run(
+        &[
+            "models",
+            "lora",
+            "preflight",
+            "--base",
+            "local-gemma4-e4b",
+            "--provider",
+            "vllm",
+            "--corpus",
+            corpus.path().to_str().expect("utf8 corpus path"),
+            "--config",
+            config.to_str().expect("utf8 config path"),
+            "--min-records",
+            "1",
+            "--done-marker",
+            "##DONE##",
+            "--check",
+        ],
+        &[],
+    );
+
+    assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
+    for fragment in [
+        "LoRA preflight for gemma-4-e4b-it via vllm",
+        "target tool format: json",
+        "expected source tool format: json",
+        "max_seq_length: 4096",
+        "minimum records: 1",
+        "required done marker: ##DONE##",
+        "records: raw=2 trainable=1 skipped=1",
+        "fit: 1/1",
+        "tool calls: json=1 text=0 unknown=0 malformed_json=0",
+        "declared tool formats:",
+        "languages:",
+        "longest examples:",
+        "result: PASS",
+    ] {
+        assert!(
+            harn.stdout.contains(fragment),
+            "harn stdout missing {fragment}: {}",
+            harn.stdout
+        );
+    }
+}
+
+#[test]
+fn models_lora_preflight_json_reports_failures() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let corpus = tmp.path().join("burin-tool-calling-corpus.jsonl");
+    let config = tmp.path().join("config.yaml");
+    fs::write(&config, "max_seq_length: 128\nmin_fit_ratio: 1.0\n").expect("write config");
+    let record = serde_json::json!({
+        "id": "bad-tool",
+        "language": "rust",
+        "task_type": "test",
+        "eval_name": "bad-tool",
+        "metadata": {"tool_format": "json"},
+        "messages": [
+            {"role": "system", "content": "Available tools: read"},
+            {"role": "user", "content": "Fix it."},
+            {
+                "role": "assistant",
+                "content": "<tool_call>\n{\"name\":\"not_live\",\"arguments\":{}}\n</tool_call>"
+            }
+        ]
+    });
+    fs::write(
+        &corpus,
+        serde_json::to_string(&record).expect("serialize record") + "\n",
+    )
+    .expect("write corpus");
+    let harn = run(
+        &[
+            "models",
+            "lora",
+            "preflight",
+            "--base",
+            "local-gemma4-e4b",
+            "--provider",
+            "vllm",
+            "--corpus",
+            tmp.path().to_str().expect("utf8 corpus path"),
+            "--config",
+            config.to_str().expect("utf8 config path"),
+            "--min-records",
+            "1",
+            "--done-marker",
+            "##DONE##",
+            "--check",
+            "--json",
+        ],
+        &[],
+    );
+
+    assert_eq!(harn.exit_code, 1, "harn stdout={}", harn.stdout);
+    let harn_value = parse_json(&harn.stdout, "harn");
+    assert_eq!(harn_value["ok"], serde_json::Value::Bool(false));
+    let details = &harn_value["error"]["details"];
+    assert_eq!(details["stats"]["trainable_records"], 1);
+    assert_eq!(
+        details["stats"]["records_with_unrecognized_tools"],
+        serde_json::Value::from(1)
+    );
+    let errors = details["errors"].as_array().expect("errors");
+    assert!(
+        errors.iter().any(|error| error
+            .as_str()
+            .is_some_and(|text| text.contains("missing required done marker"))),
+        "errors={errors:?}"
+    );
+    assert!(
+        errors.iter().any(|error| error
+            .as_str()
+            .is_some_and(|text| text.contains("not declared"))),
+        "errors={errors:?}"
+    );
+}
+
+#[test]
 fn models_lora_export_json_writes_dataset_and_manifest() {
     let corpus = write_lora_corpus_fixture();
     let corpus_path = corpus.path().join("burin-tool-calling-corpus.jsonl");

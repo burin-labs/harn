@@ -9,6 +9,7 @@ use crate::dispatch;
 use crate::env_guard::ScopedEnvVar;
 
 mod export;
+mod preflight;
 
 const LORA_INSPECT_PAYLOAD_ENV: &str = "HARN_MODELS_LORA_INSPECT_PAYLOAD_JSON";
 const LORA_INSPECT_PAYLOAD_PRETTY_ENV: &str = "HARN_MODELS_LORA_INSPECT_PAYLOAD_PRETTY";
@@ -23,6 +24,7 @@ pub(crate) async fn run(args: ModelsLoraArgs) {
         ModelsLoraCommand::Export(args) => export::export_dataset(&args).await,
         ModelsLoraCommand::Inspect(args) => inspect(&args).await,
         ModelsLoraCommand::Plan(args) => plan(&args).await,
+        ModelsLoraCommand::Preflight(args) => preflight::preflight(&args).await,
     };
     if exit_code != 0 {
         std::process::exit(exit_code);

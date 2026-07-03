@@ -1358,6 +1358,27 @@ mask policy, packing policy, parser owner, and split policy so trainers can
 verify the SFT setup without scraping human-readable notes.
 `--check` validates conversion without writing JSONL rows.
 
+## harn models lora preflight
+
+Check a tool-calling corpus before spending GPU time on LoRA training:
+
+```bash
+harn models lora preflight --base local-gemma4-e4b --provider vllm \
+  --corpus ./lora-corpus --config ./config/e4b.yaml --done-marker '##DONE##' --check
+harn models lora preflight --base google/gemma-4-e4b-it \
+  --corpus ./lora-corpus/burin-tool-calling-corpus.jsonl \
+  --source-tool-format json --min-records 190 --json
+```
+
+The preflight is CPU-only. It resolves the target model route, reads
+`max_seq_length` and `min_fit_ratio` from a lightweight config file when
+provided, then checks record count, approximate sequence-budget fit, hard token
+outliers, source tool-call body format, malformed tool-call blocks, undeclared
+tool names, and an optional caller-supplied done marker. Use `--check` to make
+readiness failures exit non-zero. The command intentionally owns reusable LoRA
+corpus readiness in Harn; product-specific markers or thresholds should be
+passed as flags rather than hard-coded into hosts.
+
 ## harn models lora inspect
 
 Inspect a PEFT LoRA adapter directory or repo id against a Harn model route:
