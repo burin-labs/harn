@@ -299,13 +299,14 @@ When in doubt, prefer the repo scripts over re-inventing the steps:
 ## Wall-clock expectations
 
 `release_gate.sh audit` (run by `--prepare`) does a serial `cargo build
---workspace --all-targets` warm prebuild before spawning 5 parallel
-lanes (`rust-audit`, `harn-audit`, `docs-audit`, `grammar-audit`,
-`security-audit`). Typical wall-clock:
+-p harn-cli --bin harn` warm prebuild before spawning the parallel lanes
+(`rust-audit`, `harn-audit`, `docs-audit`, `grammar-audit`, `security-audit`,
+`package-audit`, `smoke-audit`). Typical wall-clock:
 
-- Cold `target/`: ~6-10 min, dominated by prebuild.
-- Warm `target/` after a recent build: ~10-30 s for the whole audit.
-- A lane exceeding ~5 min after the prebuild is a regression worth
+- Cold `target/`: ~10-15 min, dominated by `rust-audit` clippy/nextest and
+  package verification rather than the CLI prebuild.
+- Warm `target/` after a recent build: ~2-5 min for the whole audit.
+- A lane exceeding ~5 min after the CLI prebuild is a regression worth
   investigating, not cold-cache cost.
 
 In CI, the merge-queue CI of the Release PR pays cold-cache cost

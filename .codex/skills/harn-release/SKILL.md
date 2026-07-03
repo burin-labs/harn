@@ -206,8 +206,10 @@ default step.
   Release PR proved the same gates a few minutes ago. Pass
   `--reaudit` to opt back in for paranoid local recovery.
 - `release_gate.sh audit` (called by `--prepare`) starts with a
-  serial `cargo build --workspace --all-targets` warm prebuild before
-  spawning the five parallel lanes. Cold ~6-10 min, warm ~10-30 s.
+  serial `cargo build -p harn-cli --bin harn` warm prebuild before
+  spawning the seven parallel lanes. Cold wall-clock is dominated by
+  `rust-audit` clippy/nextest plus package verification; warm wall-clock
+  should be a few minutes.
 - The release-bot App needs `Contents: write`, `Pull requests: write`,
   `Actions: write`, `Metadata: read` installed on this repo. Required
   repo secrets: `RELEASE_APP_ID`, `RELEASE_APP_PRIVATE_KEY`,

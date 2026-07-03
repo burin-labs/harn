@@ -173,9 +173,10 @@ The work is in the one release PR. After that, hands off.
   CI) rejects malformed headings, duplicates, out-of-order entries,
   and empty section bodies.
 - `release_gate.sh audit` (called by `--prepare`) starts with a
-  serial `cargo build --workspace --all-targets` warm prebuild before
-  spawning the five parallel lanes. Cold wall-clock ~6-10 min, warm
-  ~10-30 s. Finalize no longer pays this cost.
+  serial `cargo build -p harn-cli --bin harn` warm prebuild before
+  spawning the seven parallel lanes. Cold wall-clock is dominated by
+  `rust-audit` clippy/nextest plus package verification; warm wall-clock
+  should be a few minutes. Finalize no longer pays this cost.
 - The release-bot App needs `Contents: write`, `Pull requests: write`,
   `Actions: write`, `Metadata: read` installed on this repo. Repo
   secrets that gate the workflows: `RELEASE_APP_ID`,
