@@ -67,6 +67,22 @@ type VerificationToolchainFact = {
   probe: dict,
 }
 
+type VerificationWarmStateFact = {
+  id: string,
+  name: string,
+  configured: bool,
+  available: bool,
+  ready: bool,
+  warm: bool,
+  timing_kind: string,
+  mode: string,
+  expected_warm_delta_ms?: int,
+  warm_ms?: int,
+  cold_ms?: int,
+  cache_identity: dict,
+  probe: dict,
+}
+
 type VerificationAffectedTarget = dict
 
 type VerificationAffectedAdapterFact = {
@@ -263,6 +279,103 @@ fn __verification_toolchain_raw_version(result) -> string {
 
 fn __verification_toolchain_cache_identity(row, opts) -> dict {
   return (opts?.cache_identity ?? {}) + (row?.cacheIdentity ?? row?.cache_identity ?? {})
+}
+
+fn __verification_warm_state_mode(row) {
+  let mode = row?.warmMode ?? row?.warm_mode ?? row?.warmState ?? row?.warm_state
+  if mode == nil {
+    return nil
+  }
+  if type_of(mode) == "dict" {
+    return mode
+  }
+  return {warm: mode ? true : false}
+}
+
+fn __verification_warm_state_id(row, index: int) -> string {
+  let mode = __verification_warm_state_mode(row) ?? {}
+  let id = trim(to_string(mode?.id ?? row?.row_id ?? row?.id ?? row?.name ?? ""))
+  if id != "" {
+    return id
+  }
+  return "warm-state/" + to_string(index)
+}
+
+fn __verification_warm_state_name(row, id: string) -> string {
+  let mode = __verification_warm_state_mode(row) ?? {}
+  let name = trim(to_string(mode?.name ?? row?.name ?? ""))
+  return name == "" ? id : name
+}
+
+fn __verification_warm_state_probe(row) {
+  let mode = __verification_warm_state_mode(row) ?? {}
+  let probe = mode?.readyProbe ?? mode?.ready_probe ?? mode?.readinessProbe ?? mode?.readiness_probe
+    ?? mode?.probe
+    ?? row?.readyProbe
+    ?? row?.ready_probe
+    ?? row?.readinessProbe
+    ?? row?.readiness_probe
+    ?? row?.probe
+  if probe == nil {
+    return nil
+  }
+  if type_of(probe) == "dict" && probe?.spec != nil {
+    return probe.spec
+  }
+  return probe
+}
+
+fn __verification_warm_state_probe_options(row, opts) {
+  let mode = __verification_warm_state_mode(row) ?? {}
+  let probe = mode?.readyProbe ?? mode?.ready_probe ?? mode?.readinessProbe ?? mode?.readiness_probe
+    ?? mode?.probe
+    ?? row?.readyProbe
+    ?? row?.ready_probe
+    ?? row?.readinessProbe
+    ?? row?.readiness_probe
+    ?? row?.probe
+    ?? {}
+  return (opts?.command_options ?? {})
+    + (probe?.command_options ?? mode?.command_options ?? row?.command_options ?? {})
+}
+
+fn __verification_warm_state_cache_identity(row, opts) -> dict {
+  let mode = __verification_warm_state_mode(row) ?? {}
+  return (opts?.cache_identity ?? {})
+    + (row?.cacheIdentity ?? row?.cache_identity ?? {})
+    + (mode?.cacheIdentity ?? mode?.cache_identity ?? {})
+}
+
+fn __verification_warm_state_expected_delta_ms(row, mode) {
+  return to_int(
+    mode?.expectedWarmDeltaMs
+      ?? mode?.expected_warm_delta_ms
+      ?? row?.expectedWarmDeltaMs
+      ?? row?.expected_warm_delta_ms,
+  )
+}
+
+fn __verification_warm_state_timings(row, mode) {
+  let timings = row?.timings ?? mode?.timings ?? {}
+  let warm_ms = to_int(mode?.warmMs ?? mode?.warm_ms ?? timings?.warmMs?.p95 ?? timings?.warm_ms?.p95)
+  let cold_ms = to_int(mode?.coldMs ?? mode?.cold_ms ?? timings?.coldMs?.p95 ?? timings?.cold_ms?.p95)
+  return {warm_ms: warm_ms, cold_ms: cold_ms}
+}
+
+fn __verification_warm_state_mode_name(mode) -> string {
+  let raw = mode?.mode ?? mode?.kind ?? mode?.type ?? "probe"
+  let value = lowercase(trim(to_string(raw)))
+  return value == "" ? "probe" : value
+}
+
+fn __verification_warm_state_probe_receipt(result) -> dict {
+  return {
+    status: result?.status ?? "not_configured",
+    exit: result == nil ? nil : __verification_exit(result, {}),
+    durationMs: result?.duration_ms,
+    stdout: result?.stdout ?? "",
+    stderr: result?.stderr ?? "",
+  }
 }
 
 fn __verification_string_list(value) -> list<string> {
@@ -1122,8 +1235,40 @@ fn __verification_resource_allowed(resource: string, opts) -> bool {
   return contains(allowed, lowercase(resource))
 }
 
-fn __verification_row_p95_ms(row, opts) -> int {
-  let kind = lowercase(trim(to_string(opts?.timing_kind ?? "warm")))
+fn __verification_warm_state_fact_for(row_id: string, opts) {
+  let facts = opts?.warm_state_facts ?? opts?.warm_states ?? []
+  if type_of(facts) == "dict" {
+    return facts[row_id]
+  }
+  for fact in facts {
+    let id = trim(to_string(fact?.row_id ?? fact?.id ?? ""))
+    if id == row_id {
+      return fact
+    }
+  }
+  return nil
+}
+
+fn __verification_row_timing_kind(row_id: string, row, opts, warm_state) -> string {
+  let explicit = lowercase(trim(to_string(opts?.timing_kind ?? "")))
+  if explicit != "" && explicit != "auto" {
+    return explicit
+  }
+  if warm_state != nil {
+    return warm_state?.warm ?? false ? "warm" : "cold"
+  }
+  let mode = __verification_warm_state_mode(row)
+  if mode?.warm != nil {
+    return mode.warm ? "warm" : "cold"
+  }
+  if mode?.ready != nil {
+    return mode.ready ? "warm" : "cold"
+  }
+  return "warm"
+}
+
+fn __verification_row_p95_ms(row, opts, timing_kind: string) -> int {
+  let kind = lowercase(trim(to_string(timing_kind)))
   let timings = row?.timings ?? {}
   let raw = if kind == "cold" {
     timings?.coldMs?.p95
@@ -1187,7 +1332,9 @@ fn __verification_ladder_candidate(profile_match, opts) {
   if !__verification_command_present(command) {
     return {entry: nil, skip: __verification_skip(row_id, "missing_command", profile_match)}
   }
-  let p95_ms = __verification_row_p95_ms(row, opts)
+  let warm_state = __verification_warm_state_fact_for(row_id, opts)
+  let timing_kind = __verification_row_timing_kind(row_id, row, opts, warm_state)
+  let p95_ms = __verification_row_p95_ms(row, opts, timing_kind)
   let specificity = to_int(profile_match?.specificity) ?? 0
   let index = to_int(profile_match?.index) ?? 0
   let sort_key = [rung_rank, __verification_resource_rank(resource), p95_ms, 0 - specificity, index]
@@ -1203,6 +1350,8 @@ fn __verification_ladder_candidate(profile_match, opts) {
       trust: check?.trust ?? check?.trust_level ?? row?.trust ?? row?.trust_level,
       resource_class: resource,
       p95_ms: p95_ms,
+      timing_kind: timing_kind,
+      warm_state: warm_state,
       specificity: specificity,
       index: index,
       sort_key: sort_key,
@@ -1727,6 +1876,68 @@ pub fn verification_toolchain_facts(rows: list<dict>, options = nil) -> list<Ver
         raw_version: raw_version,
         cache_identity: __verification_toolchain_cache_identity(row, opts),
         probe: probe,
+      },
+    ]
+    index = index + 1
+  }
+  return facts
+}
+
+/**
+ * Execute config-declared warm-state probes and return deterministic readiness
+ * facts for verification scheduling. Rows are data, not code: a row may
+ * declare `warmMode` / `warm_state` with a `readyProbe`, cache identity,
+ * expected warm-vs-cold delta, and optional timing hints. The helper does not
+ * hardcode language names or build-system daemons.
+ *
+ * A ready probe that exits successfully marks the row warm; a failing or
+ * missing probe marks it cold. Pass the returned list to
+ * `verification_ladder_plan(..., {timing_kind:"auto", warm_state_facts:facts})`
+ * so each selected check uses its own warm or cold p95 timing.
+ *
+ * @effects: [process]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn verification_warm_state_facts(rows: list<dict>, options = nil) -> list<VerificationWarmStateFact> {
+  let opts = __verification_opts(options)
+  var facts = []
+  var index = 0
+  for row in rows {
+    let mode = __verification_warm_state_mode(row)
+    let id = __verification_warm_state_id(row, index)
+    let name = __verification_warm_state_name(row, id)
+    let spec = __verification_warm_state_probe(row)
+    var result = nil
+    if spec != nil {
+      result = command_run(spec, __verification_warm_state_probe_options(row, opts))
+    }
+    let probe_ready = result != nil && __verification_result_ok(result)
+    let configured = mode != nil || spec != nil
+    let ready = if mode?.ready != nil {
+      mode.ready ? true : false
+    } else if mode?.warm != nil {
+      mode.warm ? true : false
+    } else {
+      probe_ready
+    }
+    let timings = __verification_warm_state_timings(row, mode ?? {})
+    facts = facts
+      + [
+      {
+        id: id,
+        name: name,
+        configured: configured,
+        available: probe_ready,
+        ready: ready,
+        warm: ready,
+        timing_kind: ready ? "warm" : "cold",
+        mode: __verification_warm_state_mode_name(mode ?? {}),
+        expected_warm_delta_ms: __verification_warm_state_expected_delta_ms(row, mode ?? {}),
+        warm_ms: timings.warm_ms,
+        cold_ms: timings.cold_ms,
+        cache_identity: __verification_warm_state_cache_identity(row, opts),
+        probe: __verification_warm_state_probe_receipt(result),
       },
     ]
     index = index + 1
