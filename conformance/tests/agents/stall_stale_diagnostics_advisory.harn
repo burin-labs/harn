@@ -1,0 +1,74 @@
+import {
+  agent_stall_initial_state,
+  agent_stall_no_net_progress,
+  agent_stall_observe_tool_calls,
+} from "std/agent/stall"
+
+fn call() {
+  return [{name: "verify", arguments: {}}]
+}
+
+fn dispatch(hash: string, current_hash: string) {
+  return {
+    results: [
+      {
+        tool_name: "verify",
+        ok: false,
+        status: "error",
+        error: "src/writer.zig:10:2: error: missing writeEscaped",
+        rung: "R2",
+        rowId: "zig/test",
+        at: "2026-07-03T00:00:00Z",
+        snapshot: {"src/writer.zig": hash},
+        current_hashes: {"src/writer.zig": current_hash},
+      },
+    ],
+  }
+}
+
+fn run(dispatches, config) {
+  var state = agent_stall_initial_state()
+  var warnings = []
+  for item in dispatches {
+    let obs = agent_stall_observe_tool_calls("stall-stale-diag-" + uuid(), call(), 1, config, state, true, item)
+    state = obs.state
+    if obs.warning != nil {
+      warnings = warnings + [obs.warning]
+    }
+  }
+  return {state: state, warnings: warnings}
+}
+
+pipeline default() {
+  let stale = run(
+    [dispatch("old", "new"), dispatch("old", "new"), dispatch("old", "new"), dispatch("old", "new")],
+    {
+      enabled: true,
+      inject_feedback: false,
+      repair_aware: true,
+      stuck_same_diagnostic_after: 2,
+      no_net_progress_extend_guard: true,
+      no_net_progress_hard_cap_after: 2,
+    },
+  )
+  assert_eq(len(stale.warnings), 0)
+  assert_eq(stale.state.last_diagnostic_class, "")
+  assert_eq(stale.state.same_diagnostic_streak, 0)
+  assert_eq(stale.state.failing_verify_turns, 0)
+  assert_eq(agent_stall_no_net_progress({no_net_progress_extend_guard: true}, stale.state), false)
+  let repeated_stale = run(
+    [dispatch("old", "new"), dispatch("old", "new"), dispatch("old", "new")],
+    {enabled: true, inject_feedback: false, repair_aware: false, repeat_same_error: 2},
+  )
+  assert_eq(len(repeated_stale.warnings), 0)
+  assert_eq(repeated_stale.state.same_error_streak, 0)
+  let fresh = run(
+    [dispatch("new", "new"), dispatch("new", "new")],
+    {enabled: true, inject_feedback: false, repair_aware: true, stuck_same_diagnostic_after: 2},
+  )
+  assert_eq(len(fresh.warnings), 1)
+  assert_eq(fresh.warnings[0].pattern, "stuck_same_diagnostic")
+  assert_eq(fresh.state.last_diagnostic_class, "fail")
+  assert_eq(fresh.state.same_diagnostic_streak, 2)
+  __io_println("stall stale diagnostics advisory ok")
+}
