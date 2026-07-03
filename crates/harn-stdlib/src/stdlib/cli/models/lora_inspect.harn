@@ -12,6 +12,7 @@
  *   HARN_OUTPUT_JSON                        — "1" for JSON, else human text.
  */
 import {
+  cli_json_envelope,
   join_shell_argv,
   nonempty_string,
   safe_bool,
@@ -92,6 +93,26 @@ fn __render_human(harness: Harness, report: dict) {
   harness.stdio.println("    " + join_shell_argv(safe_list(launch["harn_local_launch"]), " "))
 }
 
+fn __render_json(report: dict) -> string {
+  let ok = safe_bool(report["ok"], false)
+  let envelope = if ok {
+    cli_json_envelope({schema_version: 1, ok: true, data: report})
+  } else {
+    cli_json_envelope(
+      {
+        schema_version: 1,
+        ok: false,
+        error: {
+          code: "lora_inspect_failed",
+          message: "LoRA adapter inspection found an incompatible or incomplete adapter.",
+          details: report,
+        },
+      },
+    )
+  }
+  return json_stringify_pretty(envelope)
+}
+
 fn main(harness: Harness) -> int {
   let raw = harness.env.get_or("HARN_MODELS_LORA_INSPECT_PAYLOAD_JSON", "")
   if raw == "" {
@@ -108,8 +129,7 @@ fn main(harness: Harness) -> int {
   let ok = safe_bool(report["ok"], false)
   let json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
   if json_mode {
-    let pretty = harness.env.get_or("HARN_MODELS_LORA_INSPECT_PAYLOAD_PRETTY", raw)
-    harness.stdio.println(pretty)
+    harness.stdio.println(__render_json(report))
   } else {
     __render_human(harness, report)
   }

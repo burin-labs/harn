@@ -213,6 +213,26 @@ pub fn catalog() -> Vec<SchemaEntry> {
             schema_json: None,
         },
         SchemaEntry {
+            command: "models lora plan",
+            schema_version: 1,
+            description: "Portable LoRA/QLoRA route plan: base model, tool-call format, trainer, data, eval, and launch contract.",
+            schema_json: None,
+        },
+        SchemaEntry {
+            command: "models lora inspect",
+            schema_version: 1,
+            description:
+                "PEFT LoRA adapter compatibility report with base-model, provider, tool-call, and launch metadata.",
+            schema_json: None,
+        },
+        SchemaEntry {
+            command: "models lora export",
+            schema_version: 1,
+            description:
+                "Trainer-ready LoRA dataset export report, including contract id, manifest paths, stats, and validation results.",
+            schema_json: None,
+        },
+        SchemaEntry {
             command: "check connector-matrix",
             schema_version: crate::commands::check::connector_matrix::CONNECTOR_MATRIX_SCHEMA_VERSION,
             description: "Connector package capability matrix rows.",
@@ -423,6 +443,22 @@ mod tests {
             entry.schema_version,
             crate::commands::fix::FIX_APPLY_SCHEMA_VERSION
         );
+    }
+
+    #[test]
+    fn catalog_includes_models_lora_commands() {
+        let entries = catalog();
+        for command in [
+            "models lora plan",
+            "models lora inspect",
+            "models lora export",
+        ] {
+            let entry = entries
+                .iter()
+                .find(|entry| entry.command == command)
+                .unwrap_or_else(|| panic!("{command} schema should be registered"));
+            assert_eq!(entry.schema_version, 1);
+        }
     }
 
     #[test]
