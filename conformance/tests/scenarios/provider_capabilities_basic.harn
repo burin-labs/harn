@@ -151,6 +151,9 @@ pipeline test(task) {
     qwen37_plus.auto_reasoning_overrides.agent == "off",
     "Qwen3.7 Plus disables reasoning for agent tool loops",
   )
+  let qwen36_flash = provider_capabilities("openrouter", "qwen/qwen3.6-flash")
+  assert(qwen36_flash.native_tools, "OpenRouter Qwen3.6 Flash exposes native tools")
+  assert(qwen36_flash.prompt_caching, "OpenRouter Qwen3.6 Flash exposes prompt caching")
   let qwen37_max = provider_capabilities("together", "Qwen/Qwen3.7-Max")
   assert(qwen37_max.native_tools, "Together Qwen3.7 Max exposes native tools")
   assert(qwen37_max.prompt_caching, "Together Qwen3.7 Max exposes prompt caching")

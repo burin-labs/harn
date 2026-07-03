@@ -2233,6 +2233,8 @@ thinking_modes = ["enabled"]
 reasoning_none_supported = true
 auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
+prompt_caching = true
+cache_breakpoint_style = "last_block"
 server_parser = "none"
 honors_chat_template_kwargs = false
 recommended_endpoint = "/v1/chat/completions"

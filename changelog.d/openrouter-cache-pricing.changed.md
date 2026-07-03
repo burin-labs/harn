@@ -1,0 +1,1 @@
+- Update OpenRouter Qwen3.6 Flash and GLM-5.2 catalog cache-pricing metadata from the live model API.

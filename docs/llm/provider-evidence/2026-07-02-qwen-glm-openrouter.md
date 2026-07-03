@@ -59,6 +59,10 @@ preset and the Qwen/GLM OpenRouter catalog rows.
   internal flat `{name, arguments}` tool-call records back to strict
   OpenAI-compatible `{type: "function", function: ...}` history before dispatch:
   <https://github.com/microsoft/copilot-intellij-feedback/issues/1874>.
+- OpenRouter `/api/v1/models`, fetched 2026-07-03, additionally reports cache
+  pricing fields that were absent from the first source patch:
+  `qwen/qwen3.6-flash.pricing.input_cache_write = "0.000000234375"` and
+  `z-ai/glm-5.2.pricing.input_cache_read = "0.00000018"`.
 
 ## Live Probe
 
@@ -78,6 +82,20 @@ the smoke matrix, was faster in these probes, keeps a 1M context window, and is
 cheaper than Plus or GLM. Keep GLM 5.2 catalogued and effort-aware, but do not
 promote it to the default until longer agent-loop probes overcome the existing
 GLM tool-call, streaming, and reasoning-channel reliability evidence.
+
+Follow-up sanity probe, 2026-07-03: direct OpenRouter chat completions with
+temperature 0 and `reasoning.enabled=false` still passed the tiny structured
+JSON and forced-native-tool checks for both `qwen/qwen3.6-flash` and
+`z-ai/glm-5.2`.
+
+| Model | Structured JSON | Forced native tool | Approx cost |
+| --- | ---: | ---: | ---: |
+| `qwen/qwen3.6-flash` | 0.72s, pass | 0.96s, pass | $0.000134 |
+| `z-ai/glm-5.2` | 2.76s, pass | 0.69s, pass | $0.000357 |
+
+This probe is only a transport/shape sanity check. It supports keeping Qwen as
+the cheap/value default, while GLM remains a worthwhile escalation candidate for
+longer coding-agent evals where its higher output price can earn its keep.
 
 Product guidance: Harn's provider catalog and presets are the single source of
 truth for this decision. Host products such as Burin should display or select
