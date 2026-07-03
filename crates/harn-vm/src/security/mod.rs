@@ -216,17 +216,24 @@ impl SecurityPolicy {
         // provenance. Gate the command flag on it structurally so the inert
         // combination cannot arise from config or a future caller.
         let taint_file_provenance = enabled && (config.taint_file_provenance || hardened);
+        // The precise exfil gate only *narrows* the coarse trifecta gate — its
+        // logic runs exclusively inside `trifecta_gate_reason`, which is called
+        // solely under `if policy.trifecta_gate`. With the trifecta gate off it
+        // is dead weight. Gate it on `trifecta_gate` structurally, mirroring the
+        // file/command-provenance prerequisite above, so the inert combination
+        // cannot arise from config or a future caller.
+        let trifecta_gate = enabled && config.trifecta_gate;
         Self {
             mode: config.mode,
             spotlight_external: enabled && config.spotlight_external,
             neutralize_special_tokens: enabled && config.neutralize_special_tokens,
             destyle_untrusted: enabled && config.destyle_untrusted,
-            trifecta_gate: enabled && config.trifecta_gate,
+            trifecta_gate,
             pin_mcp_schemas: enabled && config.pin_mcp_schemas,
             authenticate_directives: enabled && (config.authenticate_directives || hardened),
             taint_file_provenance,
             taint_command_reads: taint_file_provenance && (config.taint_command_reads || hardened),
-            precise_exfil_gate: enabled && (config.precise_exfil_gate || hardened),
+            precise_exfil_gate: trifecta_gate && (config.precise_exfil_gate || hardened),
             gate_secret_reads: enabled && config.gate_secret_reads,
             // `local-ml` mode turns detection on; other modes can still opt in.
             detect_injection: enabled
@@ -1213,6 +1220,31 @@ mod tests {
         let policy = SecurityPolicy::from_config(&paired);
         assert!(policy.taint_file_provenance);
         assert!(policy.taint_command_reads);
+    }
+
+    #[test]
+    fn precise_exfil_gate_requires_the_trifecta_gate() {
+        // The precise gate only narrows the coarse trifecta gate — its logic
+        // runs solely inside `trifecta_gate_reason`, called only under
+        // `if policy.trifecta_gate`. Without the trifecta gate it is dead
+        // weight, so the flag is gated on its prerequisite structurally and the
+        // nonsensical "precise gate, no trifecta gate" subset cannot arise.
+        let inert = SecurityConfig {
+            precise_exfil_gate: true,
+            trifecta_gate: false,
+            ..Default::default()
+        };
+        assert!(!SecurityPolicy::from_config(&inert).precise_exfil_gate);
+        assert!(!SecurityPolicy::from_config(&inert).trifecta_gate);
+
+        let paired = SecurityConfig {
+            precise_exfil_gate: true,
+            trifecta_gate: true,
+            ..Default::default()
+        };
+        let policy = SecurityPolicy::from_config(&paired);
+        assert!(policy.trifecta_gate);
+        assert!(policy.precise_exfil_gate);
     }
 
     #[test]
