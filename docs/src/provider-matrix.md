@@ -172,6 +172,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `openrouter` | `qwen/qwen3.7-plus` | `any` | `enabled` | yes | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `openrouter` | `qwen/qwen3.7-max` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `openrouter` | `qwen/qwen3.6-plus` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
+| `openrouter` | `qwen/qwen3.6-flash` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `openrouter` | `qwen/qwen3.6*` | `any` | `enabled` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `openrouter` | `qwen/qwen3-coder-plus` | `any` | no | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `none` | `text` | yes | yes | `native_unreliable` | yes | yes |
 | `openrouter` | `qwen/qwen3-coder-flash` | `any` | no | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `none` | `text` | yes | yes | `native_unreliable` | yes | yes |

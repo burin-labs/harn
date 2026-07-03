@@ -80,16 +80,17 @@ strengths = ["cheap", "speed"]
 
 # OpenRouter Qwen3.6 routes. Live OpenRouter `/api/v1/models` snapshot on
 # 2026-07-02 reports tools/tool_choice, structured_outputs/response_format,
-# reasoning, text+image+video input, and the prices below. Harn's capability
-# matrix owns the runtime quirks: native tools stay enabled, reasoning is
-# disabled automatically for tool-bearing tasks, and the broken Ambient
-# OpenRouter upstream is denied through provider_route_denylist.
+# reasoning, text+image+video input, and the prices below. A 2026-07-03
+# refresh also reports input_cache_write for Flash. Harn's capability matrix
+# owns the runtime quirks: native tools stay enabled, reasoning is disabled
+# automatically for tool-bearing tasks, and the broken Ambient OpenRouter
+# upstream is denied through provider_route_denylist.
 [models."qwen/qwen3.6-flash"]
 name = "Qwen3.6 Flash (via OpenRouter)"
 provider = "openrouter"
 context_window = 1000000
-capabilities = ["tools", "vision", "streaming", "thinking"]
-pricing = { input_per_mtok = 0.1875, output_per_mtok = 1.125 }
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.1875, output_per_mtok = 1.125, cache_write_per_mtok = 0.234375 }
 tier = "mid"
 open_weight = false
 strengths = ["speed", "cheap", "coding", "tool_use", "reasoning", "long_context"]
