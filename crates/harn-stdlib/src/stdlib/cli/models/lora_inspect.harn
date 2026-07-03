@@ -39,6 +39,7 @@ fn __render_human(harness: Harness, report: dict) {
   let base = safe_dict(report["base"])
   let adapter = safe_dict(report["adapter"])
   let compatibility = safe_dict(report["compatibility"])
+  let contract = safe_dict(report["contract"])
   let launch = safe_dict(report["launch"])
   let tool_calling = safe_dict(report["tool_calling"])
   let warnings = safe_list(report["warnings"])
@@ -86,6 +87,47 @@ fn __render_human(harness: Harness, report: dict) {
   let max_rank = safe_int_string(launch["max_lora_rank"], "")
   if max_rank != "" {
     harness.stdio.println("  max LoRA rank: " + max_rank)
+  }
+  let contract_id = safe_string(contract["contract_id"], "")
+  let contract_manifest = safe_string(contract["manifest_path"], "")
+  if contract_id != "" || contract_manifest != "" {
+    harness.stdio.println("  contract: " + nonempty_string(contract["contract_id"], "<missing>"))
+    harness.stdio.println("  contract manifest: " + contract_manifest)
+    harness.stdio.println("  contract status: " + safe_string(contract["status"], "unknown"))
+    harness.stdio
+      .println(
+      "  adapter contract id: "
+        + nonempty_string(contract["adapter_contract_id"], "<missing>"),
+    )
+    let provider_match = if safe_bool(contract["provider_matches"], false) {
+      "match"
+    } else {
+      "mismatch"
+    }
+    let tool_format_match = if safe_bool(contract["tool_format_matches"], false) {
+      "match"
+    } else {
+      "mismatch"
+    }
+    let adapter_match_value = contract["adapter_name_matches"]
+    let adapter_match = if adapter_match_value == nil {
+      "not_checked"
+    } else if safe_bool(adapter_match_value, false) {
+      "match"
+    } else {
+      "mismatch"
+    }
+    harness.stdio
+      .println(
+      "  contract route: base="
+        + __base_match_label(safe_string(contract["base_model_match"], "unknown"))
+        + " provider="
+        + provider_match
+        + " tool_format="
+        + tool_format_match
+        + " adapter="
+        + adapter_match,
+    )
   }
   for warning in warnings {
     let text = safe_string(warning, "")

@@ -418,6 +418,137 @@ fn models_lora_inspect_json_shape_is_stable() {
 }
 
 #[test]
+fn models_lora_inspect_manifest_contract_reports_match() {
+    let contract_id = "sha256:fixture-contract";
+    let adapter = write_lora_adapter_fixture_with_contract(Some(contract_id));
+    let manifest = write_lora_manifest_fixture(adapter.path(), contract_id);
+    let adapter_path = adapter.path().display().to_string();
+    let manifest_path = manifest.display().to_string();
+    let harn = run(
+        &[
+            "models",
+            "lora",
+            "inspect",
+            "--base",
+            "local-gemma4-e4b",
+            "--provider",
+            "vllm",
+            "--name",
+            "burin-tools",
+            "--manifest",
+            &manifest_path,
+            "--json",
+            &adapter_path,
+        ],
+        &[],
+    );
+
+    assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
+    let harn_value = parse_json(&harn.stdout, "harn");
+    let report = success_data(&harn_value);
+    let contract = report["contract"].as_object().expect("contract report");
+    assert_eq!(contract["status"], "pass");
+    assert_eq!(contract["contract_id"], contract_id);
+    assert_eq!(contract["adapter_contract_id"], contract_id);
+    assert_eq!(contract["base_model_match"], "exact");
+    assert_eq!(contract["provider_matches"], true);
+    assert_eq!(contract["tool_format_matches"], true);
+    assert_eq!(contract["adapter_name_matches"], true);
+    assert_eq!(
+        contract["manifest"]["dataset_format"],
+        "harn_text_tool_calls_json_fences"
+    );
+    assert!(contract["warnings"]
+        .as_array()
+        .expect("warnings")
+        .is_empty());
+}
+
+#[test]
+fn models_lora_inspect_manifest_human_text_reports_contract_route() {
+    let contract_id = "sha256:fixture-contract";
+    let adapter = write_lora_adapter_fixture_with_contract(Some(contract_id));
+    let manifest = write_lora_manifest_fixture(adapter.path(), contract_id);
+    let adapter_path = adapter.path().display().to_string();
+    let manifest_path = manifest.display().to_string();
+    let harn = run(
+        &[
+            "models",
+            "lora",
+            "inspect",
+            "--base",
+            "local-gemma4-e4b",
+            "--provider",
+            "vllm",
+            "--name",
+            "burin-tools",
+            "--manifest",
+            &manifest_path,
+            &adapter_path,
+        ],
+        &[],
+    );
+
+    assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
+    for fragment in [
+        "contract: sha256:fixture-contract",
+        "contract status: pass",
+        "adapter contract id: sha256:fixture-contract",
+        "contract route: base=exact provider=match tool_format=match adapter=match",
+    ] {
+        assert!(
+            harn.stdout.contains(fragment),
+            "harn stdout missing {fragment}: {}",
+            harn.stdout
+        );
+    }
+}
+
+#[test]
+fn models_lora_inspect_require_contract_id_fails_when_adapter_omits_it() {
+    let adapter = write_lora_adapter_fixture();
+    let manifest = write_lora_manifest_fixture(adapter.path(), "sha256:fixture-contract");
+    let adapter_path = adapter.path().display().to_string();
+    let manifest_path = manifest.display().to_string();
+    let harn = run(
+        &[
+            "models",
+            "lora",
+            "inspect",
+            "--base",
+            "local-gemma4-e4b",
+            "--provider",
+            "vllm",
+            "--name",
+            "burin-tools",
+            "--manifest",
+            &manifest_path,
+            "--require-contract-id",
+            "--json",
+            &adapter_path,
+        ],
+        &[],
+    );
+
+    assert_eq!(harn.exit_code, 1, "harn stdout={}", harn.stdout);
+    let harn_value = parse_json(&harn.stdout, "harn");
+    assert_eq!(harn_value["ok"], serde_json::Value::Bool(false));
+    let details = &harn_value["error"]["details"];
+    assert_eq!(details["contract"]["status"], "fail");
+    assert_eq!(
+        details["contract"]["adapter_contract_id"],
+        serde_json::Value::Null
+    );
+    let warnings = details["warnings"].as_array().expect("warnings");
+    assert!(
+        warnings.iter().any(|warning| warning
+            .as_str()
+            .is_some_and(|text| text.contains("LoRA contract missing"))),
+        "warnings={warnings:?}"
+    );
+}
+
+#[test]
 fn models_lora_plan_human_text_includes_recipe() {
     let harn = run(
         &[
@@ -876,21 +1007,84 @@ fn models_lora_export_json_writes_dataset_and_manifest() {
 // ────────────────────────────────────────────────────────────────────────
 
 fn write_lora_adapter_fixture() -> tempfile::TempDir {
+    write_lora_adapter_fixture_with_contract(None)
+}
+
+fn write_lora_adapter_fixture_with_contract(contract_id: Option<&str>) -> tempfile::TempDir {
     let tmp = tempfile::tempdir().expect("tempdir");
     fs::write(tmp.path().join("adapter_model.safetensors"), b"stub").expect("adapter weights");
+    let mut config = serde_json::json!({
+        "peft_type": "LORA",
+        "base_model_name_or_path": "google/gemma-4-e4b-it",
+        "task_type": "CAUSAL_LM",
+        "r": 16,
+        "lora_alpha": 32,
+        "target_modules": ["q_proj", "v_proj"]
+    });
+    if let Some(contract_id) = contract_id {
+        config["harn_lora_contract_id"] = serde_json::Value::String(contract_id.to_string());
+    }
     fs::write(
         tmp.path().join("adapter_config.json"),
-        r#"{
-            "peft_type": "LORA",
-            "base_model_name_or_path": "google/gemma-4-e4b-it",
-            "task_type": "CAUSAL_LM",
-            "r": 16,
-            "lora_alpha": 32,
-            "target_modules": ["q_proj", "v_proj"]
-        }"#,
+        serde_json::to_string_pretty(&config).expect("adapter config JSON"),
     )
     .expect("adapter config");
     tmp
+}
+
+fn write_lora_manifest_fixture(root: &std::path::Path, contract_id: &str) -> std::path::PathBuf {
+    let path = root.join("export.manifest.json");
+    let manifest = serde_json::json!({
+        "exporter": "harn_models_lora_export_v1",
+        "dataset_format": "harn_text_tool_calls_json_fences",
+        "target": {
+            "base_model": "gemma-4-e4b-it",
+            "provider": "vllm",
+            "adapter_name": "burin-tools",
+            "harn_tool_format": "json",
+            "contract_id": contract_id
+        },
+        "contract": {
+            "schema_version": 1,
+            "id": contract_id,
+            "base_model": "gemma-4-e4b-it",
+            "provider": "vllm",
+            "harn_tool_format": "json",
+            "dataset_format": "harn_text_tool_calls_json_fences",
+            "chat_template": "harn_text_tool_calls_json_fences",
+            "training_contract": {
+                "schema_version": 1,
+                "loss_scope": "assistant_tool_calls",
+                "assistant_mask_policy": "require_chat_template_generation_masks",
+                "packing_policy": "disabled_unless_boundary_aware_tool_pack_pairs",
+                "tool_parser_owner": "harn_text_tool_parser",
+                "dataset_format": "harn_text_tool_calls_json_fences",
+                "dataset_split_policy": "train_tune_holdout_disjoint_no_eval_holdout_training",
+                "required_example_metadata": []
+            }
+        },
+        "serving": {
+            "request_model": "burin-tools",
+            "adapter_name": "burin-tools",
+            "base_model": "gemma-4-e4b-it",
+            "provider": "vllm",
+            "adapter_binding": "runtime_lora_adapter",
+            "lora_module_value_format": "json_with_base_model",
+            "tool_format": "json",
+            "dataset_format": "harn_text_tool_calls_json_fences",
+            "contract_id": contract_id
+        },
+        "promotion": {
+            "minimum_trials": 5,
+            "gates": []
+        }
+    });
+    fs::write(
+        &path,
+        serde_json::to_string_pretty(&manifest).expect("manifest JSON"),
+    )
+    .expect("write manifest");
+    path
 }
 
 fn write_lora_corpus_fixture() -> tempfile::TempDir {
