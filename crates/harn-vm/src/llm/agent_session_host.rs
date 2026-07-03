@@ -1646,6 +1646,7 @@ fn host_agent_session_record_tool_results_builtin(
                             None
                         },
                         labels: crate::security::content_labels(&raw_observation),
+                        endpoints: crate::security::extract_endpoints(&raw_observation),
                     },
                 );
                 context_tainted = true;

@@ -31,10 +31,15 @@
 
 pub mod battery;
 pub mod behavioral;
+pub mod exfil_precision;
 pub mod file_provenance;
 pub mod provenance;
 pub mod stance_judge;
 
+pub use exfil_precision::{
+    args_target_endpoints, destination_is_untrusted_originated, extract_endpoints,
+    precise_exfil_gate_fires,
+};
 pub use file_provenance::{path_arguments, FileProvenanceLedger};
 pub use provenance::{classify_directive_trust, DirectiveProvenance};
 
@@ -120,6 +125,12 @@ pub struct TaintRecord {
     /// injection signal in its own right.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub labels: Vec<String>,
+    /// Destination endpoints (URL hosts, emails) named inside this untrusted
+    /// span. The exfil gate treats a sink targeting one of these as
+    /// attacker-originated (the injection controls where data goes) under
+    /// `precise_exfil_gate`. See [`exfil_precision`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub endpoints: Vec<String>,
 }
 
 /// Resolved, runtime-readable security policy. Derived from [`SecurityConfig`];
@@ -153,6 +164,14 @@ pub struct SecurityPolicy {
     /// trifecta gate. First-party file reads stay trusted. Default OFF (net-new
     /// enforcement); byte-identical behaviour when disabled.
     pub taint_file_provenance: bool,
+    /// Narrow the exfil axis of the lethal-trifecta gate to the real attack
+    /// signature: fire only when the sink's destination is attacker-originated
+    /// (an endpoint seen in untrusted content) or the payload ships a secret,
+    /// instead of on any exfil-capable tool while any untrusted content is in
+    /// context. Cuts false confirmations on benign research/synthesis to a
+    /// user-named destination. Default OFF (the coarse gate is byte-identical);
+    /// when on it only ever *narrows* what gates (fail-safe on unknown sinks).
+    pub precise_exfil_gate: bool,
     /// Also gate first-party secret/credential reads while tainted.
     pub gate_secret_reads: bool,
     /// Score untrusted content with an injection classifier (Layer 2) and let a
@@ -185,6 +204,7 @@ impl SecurityPolicy {
             pin_mcp_schemas: enabled && config.pin_mcp_schemas,
             authenticate_directives: enabled && config.authenticate_directives,
             taint_file_provenance: enabled && config.taint_file_provenance,
+            precise_exfil_gate: enabled && config.precise_exfil_gate,
             gate_secret_reads: enabled && config.gate_secret_reads,
             // `local-ml` mode turns detection on; other modes can still opt in.
             detect_injection: enabled
@@ -628,7 +648,7 @@ fn heuristic_score(text: &str) -> f64 {
 
 /// Zero-width and bidi-control code points abused to hide instructions from a
 /// human reviewer while the model still reads them.
-fn is_hidden_control_char(c: char) -> bool {
+pub(crate) fn is_hidden_control_char(c: char) -> bool {
     matches!(
         c as u32,
         0x200B..=0x200F   // zero-width space/joiners, LRM/RLM

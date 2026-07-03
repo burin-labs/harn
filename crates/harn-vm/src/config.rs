@@ -333,6 +333,14 @@ pub struct SecurityConfig {
     /// First-party file reads stay trusted. Default OFF (net-new enforcement);
     /// byte-identical behaviour when disabled.
     pub taint_file_provenance: bool,
+    /// Narrow the exfil axis of the lethal-trifecta gate to attacker-originated
+    /// destinations. When on, an exfil-capable tool only forces confirmation if
+    /// its destination was named in untrusted content (the injection controls
+    /// where data goes) or its payload references a secret — so benign research
+    /// and synthesis to a user-named / configured destination is not gated.
+    /// Fail-safe: an unknown / unextractable destination still gates. Default
+    /// OFF (coarse gate is byte-identical when disabled).
+    pub precise_exfil_gate: bool,
     /// Also gate reads of well-known secret/credential files while tainted.
     pub gate_secret_reads: bool,
     /// Score untrusted content with an injection classifier (Layer 2). Implied
@@ -370,6 +378,7 @@ impl Default for SecurityConfig {
             pin_mcp_schemas: true,
             authenticate_directives: false,
             taint_file_provenance: false,
+            precise_exfil_gate: false,
             gate_secret_reads: true,
             detect_injection: false,
             guard_threshold_percent: 50,
@@ -1053,6 +1062,7 @@ pub fn schema_json() -> JsonValue {
                     "pin_mcp_schemas": {"type": "boolean"},
                     "authenticate_directives": {"type": "boolean"},
                     "taint_file_provenance": {"type": "boolean"},
+                    "precise_exfil_gate": {"type": "boolean"},
                     "gate_secret_reads": {"type": "boolean"},
                     "detect_injection": {"type": "boolean"},
                     "guard_threshold_percent": {"type": "integer", "minimum": 0, "maximum": 100},
