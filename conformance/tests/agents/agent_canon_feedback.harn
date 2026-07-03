@@ -25,14 +25,26 @@ pub fn no_bad(slice, _ctx, _repo_at_base) {
 """
 
 pipeline main(task) {
+  let manifest = {
+    schema_version: 1,
+    packs: [
+      {
+        id: "zig",
+        title: "Zig",
+        invariants: "zig/invariants.harn",
+        extensions: ["foo"],
+        file_names: ["buildfile"],
+      },
+    ],
+  }
   __io_println(join(canon_pack_ids_for_path("src/main.zig"), ","))
+  __io_println(join(canon_pack_ids_for_path("src/main.foo", manifest), ","))
+  __io_println(join(canon_pack_ids_for_path("Buildfile", manifest), ","))
+  __io_println(to_string(len(canon_pack_ids_for_path("src/main.zig", manifest)) == 0))
   with_fs(
-    {
-      "canon-packs.json": {schema_version: 1, packs: [{id: "zig", title: "Zig", invariants: "zig/invariants.harn"}]},
-      "zig/invariants.harn": INVARIANTS,
-    },
+    {"canon-packs.json": manifest, "zig/invariants.harn": INVARIANTS},
     { dir ->
-      let slice = canon_slice_from_files([{path: "src/main.zig", text: "const bad = true;"}])
+      let slice = canon_slice_from_files([{path: "src/main.foo", text: "const bad = true;"}])
       let result = canon_evaluate_slice(slice, {canon_root: dir, files: slice.files})
       __io_println(result.status)
       __io_println(to_string(result.packs[0].report.records[0].name == "no_bad"))
