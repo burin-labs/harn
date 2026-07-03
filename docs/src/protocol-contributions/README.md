@@ -34,7 +34,7 @@ The Harn convention for cross-protocol primitives is:
 
 ## Current RFCs
 
-Statuses below were last verified on 2026-06-27. See the
+Statuses below were last verified on 2026-07-03. See the
 [filing status ledger](./status-ledger.md) for the upstream PR,
 discussion, and issue states checked during triage.
 
@@ -43,7 +43,7 @@ discussion, and issue states checked during triage.
 | RFC | Upstream | Status | Reference impl |
 |---|---|---|---|
 | [ACP `session/inject_reminder`](./acp-session-inject-reminder.md) | agentclientprotocol/agent-client-protocol | Discussion open ([ACP #1224](https://github.com/agentclientprotocol/agent-client-protocol/discussions/1224)) | `session/remind` JSON-RPC method + `_meta.harn.reminder`-decorated transcript events |
-| [A2A `Message.kind: "Reminder"`](./a2a-message-kind-reminder.md) | a2aproject/A2A | Draft (not yet filed upstream) | `_meta.harn.reminder` on outbound A2A task messages |
+| [A2A `InjectTaskReminder`](./a2a-message-kind-reminder.md) | a2aproject/A2A | Draft (not yet filed upstream); revised to A2A v1.0 conventions 2026-07-03 | `metadata.harn.reminder` on outbound A2A task events |
 | [MCP `notifications/reminder`](./mcp-notifications-reminder.md) | modelcontextprotocol/specification | Draft (not yet filed upstream) | `_meta.harn.reminder` on MCP server-emitted notifications |
 
 ### Suspend / resume + paused state ([#1848][1848])
@@ -51,9 +51,19 @@ discussion, and issue states checked during triage.
 | RFC | Upstream | Status | Reference impl |
 |---|---|---|---|
 | [ACP `session/suspend`](./acp-session-suspend.md) | agentclientprotocol/agent-client-protocol | Discussion open ([ACP #1233](https://github.com/agentclientprotocol/agent-client-protocol/discussions/1233)); no maintainer reply as of 2026-06-27 | `__host_worker_suspend` builtin + `_meta.harn.suspend`-decorated session updates; sibling to the already-shipped `session/resume` ([ACP #1726](https://github.com/agentclientprotocol/agent-client-protocol/discussions/1726)) |
-| [A2A `TaskState.PAUSED`](./a2a-paused-state.md) | a2aproject/A2A | Discussion open ([A2A #1858](https://github.com/a2aproject/A2A/discussions/1858)); community feedback favors one `PAUSED` state plus structured `pause` metadata; no maintainer/TSC reply as of 2026-06-27 | `metadata.harn.pause`-decorated `tasks/statusUpdate` SSE events |
+| [A2A `TASK_STATE_PAUSED`](./a2a-paused-state.md) | a2aproject/A2A | Discussion open ([A2A #1858](https://github.com/a2aproject/A2A/discussions/1858)); community feedback favors one `PAUSED` state plus structured `pause` metadata; no maintainer/TSC reply as of 2026-07-03; revised to A2A v1.0 conventions 2026-07-03 | `metadata.harn.pause`-decorated task status events |
 
 [1848]: https://github.com/burin-labs/harn/issues/1848
+
+### Agent identity & provenance ([#3330][3330])
+
+| RFC | Upstream | Status | Reference impl |
+|---|---|---|---|
+| [A2A actor-chain extension](./a2a-actor-chain-extension.md) | a2aproject/A2A | Draft (not yet filed upstream); anchor threads [A2A #1937](https://github.com/a2aproject/A2A/issues/1937) + [A2A #153](https://github.com/a2aproject/A2A/issues/153) | `ActorChain` carried under `metadata.actor_chain` in the `harn-serve` A2A adapter |
+| [MCP `authenticatedIdentity`](./mcp-authenticated-identity.md) | modelcontextprotocol/modelcontextprotocol | Draft (not yet filed upstream); SEP path, sponsor-gated | Host-side "connected as" registry tracked under [harn#3331](https://github.com/burin-labs/harn/issues/3331) |
+| [MCP/OAuth actor-token positioning](./oauth-actor-chain-positioning.md) | oauth-wg / modelcontextprotocol/ext-auth | Engagement plan (comment on existing threads; nothing new to file) | `ActorChain` (RFC 8693 `act` shape) in `harn-vm` |
+
+[3330]: https://github.com/burin-labs/harn/issues/3330
 
 ## Scope
 
