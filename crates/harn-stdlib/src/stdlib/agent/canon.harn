@@ -17,6 +17,25 @@ fn __canon_path(root, rel) -> string {
   return path_join(__canon_text(root), raw)
 }
 
+fn __canon_manifest_path(root) -> string {
+  let text = __canon_text(root)
+  if text == "" {
+    return ""
+  }
+  return path_join(text, "canon-packs.json")
+}
+
+fn __canon_root_with_manifest(root) -> string {
+  let text = __canon_text(root)
+  if text == "" {
+    return ""
+  }
+  if harness.fs.exists(__canon_manifest_path(text)) {
+    return text
+  }
+  return ""
+}
+
 fn __canon_push_unique(items, value) {
   let text = __canon_text(value)
   if text == "" || contains(items, text) {
@@ -148,6 +167,42 @@ fn __canon_pack_ids_for_path_from_manifest(path, manifest) -> list<string> {
 }
 
 /**
+ * Resolve the harn-canon root for callers that did not pass one explicitly.
+ *
+ * Resolution order:
+ *   1. `options.canon_root`, returned as-is so invalid explicit roots still fail
+ *      when the caller loads `canon-packs.json`;
+ *   2. `HARN_CANON_ROOT`, when it contains `canon-packs.json`;
+ *   3. workspace-local `.harn/canon` or `.harn/harn-canon`, when present.
+ *
+ * @effects: [fs.read, env.read]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn canon_resolve_root(options = nil) -> string {
+  let opts = options ?? {}
+  let explicit = __canon_text(opts?.canon_root)
+  if explicit != "" {
+    return explicit
+  }
+  let env_root = __canon_root_with_manifest(harness.env.get_or("HARN_CANON_ROOT", ""))
+  if env_root != "" {
+    return env_root
+  }
+  let root = __canon_text(opts?.project_root ?? project_root() ?? cwd() ?? "")
+  if root == "" {
+    return ""
+  }
+  for candidate in [path_join(root, ".harn", "canon"), path_join(root, ".harn", "harn-canon")] {
+    let found = __canon_root_with_manifest(candidate)
+    if found != "" {
+      return found
+    }
+  }
+  return ""
+}
+
+/**
  * Infer harn-canon pack ids for one file path.
  *
  * @effects: []
@@ -253,7 +308,7 @@ pub fn canon_load_manifest(canon_root: string) -> dict {
   if root == "" {
     throw "canon_load_manifest: canon_root is required"
   }
-  let path = path_join(root, "canon-packs.json")
+  let path = __canon_manifest_path(root)
   let manifest = read_json(path, nil)
   if manifest == nil {
     throw "canon_load_manifest: failed to read " + path
@@ -329,7 +384,7 @@ fn __canon_pack_from_item(item, manifest, canon_root) {
  */
 pub fn canon_resolve_packs(options = nil) -> list<dict> {
   let opts = options ?? {}
-  let canon_root = opts?.canon_root
+  let canon_root = canon_resolve_root(opts)
   var requested = opts?.packs ?? opts?.pack_ids ?? []
   if type_of(requested) == "string" {
     requested = [requested]
