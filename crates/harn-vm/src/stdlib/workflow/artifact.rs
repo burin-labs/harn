@@ -63,16 +63,23 @@ pub(super) fn checkpoint_run(
 pub(super) fn snapshot_trace_spans() -> Vec<RunTraceSpanRecord> {
     crate::tracing::peek_spans()
         .into_iter()
-        .map(|span| RunTraceSpanRecord {
-            trace_id: span.trace_id,
-            span_id: span.span_id,
-            parent_id: span.parent_id,
-            kind: span.kind.as_str().to_string(),
-            name: span.name,
-            start_ms: span.start_ms,
-            duration_ms: span.duration_ms,
-            metadata: span.metadata,
-            links: span.links,
+        .map(|span| {
+            let cost_usd = span
+                .metadata
+                .get(crate::tracing::meta::COST_USD)
+                .and_then(serde_json::Value::as_f64);
+            RunTraceSpanRecord {
+                trace_id: span.trace_id,
+                span_id: span.span_id,
+                parent_id: span.parent_id,
+                kind: span.kind.as_str().to_string(),
+                name: span.name,
+                start_ms: span.start_ms,
+                duration_ms: span.duration_ms,
+                metadata: span.metadata,
+                links: span.links,
+                cost_usd,
+            }
         })
         .collect()
 }

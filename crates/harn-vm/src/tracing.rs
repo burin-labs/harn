@@ -53,6 +53,19 @@ pub enum SpanKind {
     /// OTel INTERNAL span — distinct from `FnCall` so OTel exporters and
     /// `harn run --profile-json` do not confuse them with LLM/tool work.
     UserTiming,
+    /// A model routing / escalation decision — the agent switched the
+    /// serving model mid-run. Metadata carries `from_model`, `to_model`,
+    /// and `reason` (see [`meta`]). Emitted as a zero-duration marker at
+    /// the decision point so viewers can annotate the flame graph with the
+    /// switch instead of inferring it from adjacent `llm_call` models.
+    ModelRoute,
+    /// A batch of tools promoted into the active surface (MCP bootstrap,
+    /// skill activation, or a search-driven mount). Metadata carries
+    /// `tool_names`, `tool_count`, `source`, and an optional `detail`.
+    ToolMount,
+    /// A single deferred tool schema promoted via `tool_search`. Metadata
+    /// carries `tool_name`, `query`, and the match `score`.
+    DeferredToolLoad,
 }
 
 impl SpanKind {
@@ -76,8 +89,148 @@ impl SpanKind {
             Self::ChannelEmit => "channel_emit",
             Self::ChannelMatch => "channel_match",
             Self::UserTiming => "user_timing",
+            Self::ModelRoute => "model_route",
+            Self::ToolMount => "tool_mount",
+            Self::DeferredToolLoad => "deferred_tool_load",
         }
     }
+}
+
+/// Canonical metadata keys for VM trace spans. Downstream viewers (Burin
+/// portal, harn-cloud dashboard) key off these exact strings to render
+/// token flame graphs and tool-selection events, so they are defined once
+/// here rather than retyped at each emission site.
+pub mod meta {
+    // llm_call token + cost attribution.
+    pub const MODEL: &str = "model";
+    pub const PROVIDER: &str = "provider";
+    pub const INPUT_TOKENS: &str = "input_tokens";
+    pub const OUTPUT_TOKENS: &str = "output_tokens";
+    pub const CACHE_READ_TOKENS: &str = "cache_read_tokens";
+    pub const CACHE_WRITE_TOKENS: &str = "cache_write_tokens";
+    pub const COST_USD: &str = "cost_usd";
+
+    // model_route.
+    pub const FROM_MODEL: &str = "from_model";
+    pub const TO_MODEL: &str = "to_model";
+    pub const REASON: &str = "reason";
+
+    // tool_mount.
+    pub const TOOL_NAMES: &str = "tool_names";
+    pub const TOOL_COUNT: &str = "tool_count";
+    pub const SOURCE: &str = "source";
+    pub const DETAIL: &str = "detail";
+
+    // deferred_tool_load.
+    pub const TOOL_NAME: &str = "tool_name";
+    pub const QUERY: &str = "query";
+    pub const SCORE: &str = "score";
+}
+
+/// Structured per-LLM-call token and cost attribution for an `llm_call`
+/// span. Built once at the call site and lowered to metadata pairs via
+/// [`LlmCallUsage::metadata_pairs`] so every emission uses the canonical
+/// [`meta`] keys instead of ad-hoc strings. `cost_usd` is `None` when the
+/// (provider, model) pair has no catalog pricing.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct LlmCallUsage {
+    pub model: String,
+    pub provider: String,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cache_write_tokens: i64,
+    pub cost_usd: Option<f64>,
+}
+
+impl LlmCallUsage {
+    /// Lower to `(key, value)` pairs keyed by the canonical [`meta`]
+    /// constants, suitable for `annotate_current_span` / `span_set_metadata`.
+    pub fn metadata_pairs(&self) -> Vec<(&'static str, serde_json::Value)> {
+        let mut pairs = vec![
+            (meta::MODEL, serde_json::json!(self.model)),
+            (meta::PROVIDER, serde_json::json!(self.provider)),
+            (meta::INPUT_TOKENS, serde_json::json!(self.input_tokens)),
+            (meta::OUTPUT_TOKENS, serde_json::json!(self.output_tokens)),
+            (
+                meta::CACHE_READ_TOKENS,
+                serde_json::json!(self.cache_read_tokens),
+            ),
+            (
+                meta::CACHE_WRITE_TOKENS,
+                serde_json::json!(self.cache_write_tokens),
+            ),
+        ];
+        if let Some(cost) = self.cost_usd {
+            pairs.push((meta::COST_USD, serde_json::json!(cost)));
+        }
+        pairs
+    }
+}
+
+/// Emit a zero-duration marker span of `kind` carrying `metadata`. Marker
+/// spans model point-in-time telemetry events (model routing, tool mounts,
+/// deferred-tool promotions) that have no meaningful duration but need to
+/// appear in the trace tree at their causal position under the current
+/// active span. No-op when tracing is disabled.
+pub fn emit_marker_span(
+    kind: SpanKind,
+    name: impl Into<String>,
+    metadata: Vec<(&str, serde_json::Value)>,
+) {
+    let span_id = span_start(kind, name.into());
+    if span_id == 0 {
+        return;
+    }
+    for (key, value) in metadata {
+        span_set_metadata(span_id, key, value);
+    }
+    span_end(span_id);
+}
+
+/// Emit a [`SpanKind::ModelRoute`] marker for a model switch / escalation.
+pub fn emit_model_route(from_model: &str, to_model: &str, reason: &str) {
+    emit_marker_span(
+        SpanKind::ModelRoute,
+        "model_route",
+        vec![
+            (meta::FROM_MODEL, serde_json::json!(from_model)),
+            (meta::TO_MODEL, serde_json::json!(to_model)),
+            (meta::REASON, serde_json::json!(reason)),
+        ],
+    );
+}
+
+/// Emit a [`SpanKind::ToolMount`] marker for a batch of tools promoted into
+/// the active surface. `source` is the promotion origin (`"mcp"`,
+/// `"skill"`, `"search"`); `detail` optionally names the concrete source
+/// (e.g. an MCP server name).
+pub fn emit_tool_mount(tool_names: &[String], source: &str, detail: Option<&str>) {
+    if tool_names.is_empty() {
+        return;
+    }
+    let mut metadata = vec![
+        (meta::TOOL_NAMES, serde_json::json!(tool_names)),
+        (meta::TOOL_COUNT, serde_json::json!(tool_names.len())),
+        (meta::SOURCE, serde_json::json!(source)),
+    ];
+    if let Some(detail) = detail {
+        metadata.push((meta::DETAIL, serde_json::json!(detail)));
+    }
+    emit_marker_span(SpanKind::ToolMount, "tool_mount", metadata);
+}
+
+/// Emit a [`SpanKind::DeferredToolLoad`] marker for a single deferred tool
+/// schema promoted via `tool_search`.
+pub fn emit_deferred_tool_load(tool_name: &str, query: &str, score: Option<f64>) {
+    let mut metadata = vec![
+        (meta::TOOL_NAME, serde_json::json!(tool_name)),
+        (meta::QUERY, serde_json::json!(query)),
+    ];
+    if let Some(score) = score {
+        metadata.push((meta::SCORE, serde_json::json!(score)));
+    }
+    emit_marker_span(SpanKind::DeferredToolLoad, "deferred_tool_load", metadata);
 }
 
 /// Link to a span that is causally related but not the parent.
@@ -796,6 +949,114 @@ mod tests {
         assert!(snapshot
             .iter()
             .any(|span| span.kind == SpanKind::UserTiming && span.name == "script.work"));
+    }
+
+    #[test]
+    fn test_new_span_kinds_stringify() {
+        assert_eq!(SpanKind::ModelRoute.as_str(), "model_route");
+        assert_eq!(SpanKind::ToolMount.as_str(), "tool_mount");
+        assert_eq!(SpanKind::DeferredToolLoad.as_str(), "deferred_tool_load");
+    }
+
+    #[test]
+    fn test_llm_call_usage_metadata_pairs_carry_cache_tokens() {
+        let usage = LlmCallUsage {
+            model: "claude-sonnet-4".into(),
+            provider: "anthropic".into(),
+            input_tokens: 100,
+            output_tokens: 20,
+            cache_read_tokens: 40,
+            cache_write_tokens: 8,
+            cost_usd: Some(0.0123),
+        };
+        let pairs: BTreeMap<&str, serde_json::Value> = usage.metadata_pairs().into_iter().collect();
+        assert_eq!(pairs[meta::MODEL], serde_json::json!("claude-sonnet-4"));
+        assert_eq!(pairs[meta::PROVIDER], serde_json::json!("anthropic"));
+        assert_eq!(pairs[meta::INPUT_TOKENS], serde_json::json!(100));
+        assert_eq!(pairs[meta::OUTPUT_TOKENS], serde_json::json!(20));
+        assert_eq!(pairs[meta::CACHE_READ_TOKENS], serde_json::json!(40));
+        assert_eq!(pairs[meta::CACHE_WRITE_TOKENS], serde_json::json!(8));
+        assert_eq!(pairs[meta::COST_USD], serde_json::json!(0.0123));
+    }
+
+    #[test]
+    fn test_llm_call_usage_omits_cost_when_unpriced() {
+        let usage = LlmCallUsage {
+            model: "local-model".into(),
+            provider: "local".into(),
+            input_tokens: 5,
+            output_tokens: 1,
+            cost_usd: None,
+            ..LlmCallUsage::default()
+        };
+        let pairs: BTreeMap<&str, serde_json::Value> = usage.metadata_pairs().into_iter().collect();
+        assert!(!pairs.contains_key(meta::COST_USD));
+        // Token attribution is still present even when unpriced.
+        assert_eq!(pairs[meta::INPUT_TOKENS], serde_json::json!(5));
+    }
+
+    #[test]
+    fn test_marker_spans_nest_under_active_span_and_carry_metadata() {
+        set_tracing_enabled(true);
+        reset_tracing();
+        let parent = span_start(SpanKind::Pipeline, "agent_loop".into());
+        emit_model_route("cheap-model", "smart-model", "no_progress");
+        emit_tool_mount(
+            &["read".to_string(), "write".to_string()],
+            "mcp",
+            Some("filesystem"),
+        );
+        emit_deferred_tool_load("grep", "search files", Some(4.5));
+        span_end(parent);
+
+        let spans = peek_spans();
+        let route = spans
+            .iter()
+            .find(|s| s.kind == SpanKind::ModelRoute)
+            .expect("model_route span");
+        assert_eq!(route.parent_id, Some(parent));
+        assert_eq!(
+            route.metadata[meta::TO_MODEL],
+            serde_json::json!("smart-model")
+        );
+        assert_eq!(
+            route.metadata[meta::FROM_MODEL],
+            serde_json::json!("cheap-model")
+        );
+
+        let mount = spans
+            .iter()
+            .find(|s| s.kind == SpanKind::ToolMount)
+            .expect("tool_mount span");
+        assert_eq!(mount.metadata[meta::TOOL_COUNT], serde_json::json!(2));
+        assert_eq!(mount.metadata[meta::SOURCE], serde_json::json!("mcp"));
+        assert_eq!(
+            mount.metadata[meta::DETAIL],
+            serde_json::json!("filesystem")
+        );
+
+        let deferred = spans
+            .iter()
+            .find(|s| s.kind == SpanKind::DeferredToolLoad)
+            .expect("deferred_tool_load span");
+        assert_eq!(
+            deferred.metadata[meta::TOOL_NAME],
+            serde_json::json!("grep")
+        );
+        assert_eq!(deferred.metadata[meta::SCORE], serde_json::json!(4.5));
+        set_tracing_enabled(false);
+    }
+
+    #[test]
+    fn test_empty_tool_mount_is_a_noop() {
+        set_tracing_enabled(true);
+        reset_tracing();
+        let parent = span_start(SpanKind::Pipeline, "loop".into());
+        emit_tool_mount(&[], "mcp", Some("empty-server"));
+        span_end(parent);
+        let spans = peek_spans();
+        assert!(!spans.iter().any(|s| s.kind == SpanKind::ToolMount));
+        set_tracing_enabled(false);
     }
 
     #[test]

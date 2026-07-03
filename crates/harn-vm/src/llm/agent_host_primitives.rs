@@ -1979,9 +1979,19 @@ async fn host_mcp_bootstrap_impl(
                             .and_then(|t| t.as_array())
                             .cloned()
                             .unwrap_or_default();
+                        let mut mounted_tool_names: Vec<String> = Vec::new();
                         for tool in raw_tools {
-                            tools_added.push(tag_mcp_tool(tool, &server_name, eager_schemas));
+                            let tagged = tag_mcp_tool(tool, &server_name, eager_schemas);
+                            if let Some(name) = tagged.get("name").and_then(|v| v.as_str()) {
+                                mounted_tool_names.push(name.to_string());
+                            }
+                            tools_added.push(tagged);
                         }
+                        crate::tracing::emit_tool_mount(
+                            &mounted_tool_names,
+                            "mcp",
+                            Some(&server_name),
+                        );
                         clients.insert(server_name, handle);
                     }
                 }

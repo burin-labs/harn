@@ -583,6 +583,26 @@ pub fn calculate_cost_for_provider(
         / 1000.0
 }
 
+/// Per-call USD cost for trace attribution, or `None` when the
+/// (provider, model) pair has no catalog pricing. Unlike
+/// [`calculate_cost_for_provider`] (which coerces unknown pricing to
+/// `0.0` for budget arithmetic), this preserves the distinction so a
+/// `cost_usd` span field can honestly report "unpriced" rather than a
+/// misleading zero. Pricing resolution matches `calculate_cost_for_provider`:
+/// catalog model rate first, then provider-level economics.
+pub fn pricing_aware_call_cost(
+    provider: &str,
+    model: &str,
+    input_tokens: i64,
+    output_tokens: i64,
+) -> Option<f64> {
+    let detail = pricing_detail_for(provider, model)?;
+    Some(
+        (input_tokens as f64 * detail.input_per_1k + output_tokens as f64 * detail.output_per_1k)
+            / 1000.0,
+    )
+}
+
 pub(crate) fn cache_hit_ratio(
     input_tokens: i64,
     cache_read_tokens: i64,
@@ -1302,6 +1322,32 @@ mod tests {
 
         assert!(pricing_detail_for("local", "no-such-local-model").is_some()); // local has 0/0
         assert!(pricing_detail_for("nonexistent_provider", "ghost-model").is_none());
+    }
+
+    #[test]
+    fn pricing_aware_call_cost_distinguishes_unpriced_from_zero() {
+        let _guard = crate::llm::env_guard();
+        crate::llm_config::clear_user_overrides();
+
+        // Known catalog model: Some(cost) matching the priced arithmetic.
+        let priced = pricing_aware_call_cost("anthropic", "claude-sonnet-4-20250514", 1_000, 1_000);
+        let expected =
+            calculate_cost_for_provider("anthropic", "claude-sonnet-4-20250514", 1_000, 1_000);
+        assert!(priced.is_some());
+        assert!((priced.unwrap() - expected).abs() < 1e-9);
+
+        // Genuinely unpriced (provider not in the catalog economics table):
+        // None, not a misleading 0.0. `calculate_cost_for_provider` coerces
+        // the same case to 0.0, which is exactly the ambiguity this helper
+        // exists to remove.
+        assert_eq!(
+            pricing_aware_call_cost("nonexistent_provider", "ghost-model", 1_000, 1_000),
+            None
+        );
+        assert_eq!(
+            calculate_cost_for_provider("nonexistent_provider", "ghost-model", 1_000, 1_000),
+            0.0
+        );
     }
 
     #[test]
