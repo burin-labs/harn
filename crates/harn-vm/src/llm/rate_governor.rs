@@ -556,7 +556,7 @@ impl ProviderGovernor {
 }
 
 /// The decision returned by [`gate`].
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GateOutcome {
     /// Proceed with the call; a slot was reserved and MUST be released via
     /// [`record_outcome`].
@@ -570,7 +570,7 @@ pub enum GateOutcome {
 
 /// A plain, serializable-shaped snapshot of one governor's state for
 /// `governor_state` records and the CLI/MCP status surface.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GovernorSnapshot {
     pub concurrency_limit: u32,
     pub max_concurrency: u32,
@@ -1255,7 +1255,7 @@ mod tests {
 
         // 4) Time passes the Retry-After window → HALF-OPEN probe → serve →
         //    CLOSED. The governor RECOVERS.
-        crate::clock_mock::advance(Duration::from_millis(6_000));
+        crate::clock_mock::advance(Duration::from_secs(6));
         assert_eq!(
             gate(bad.0, bad.1, 0),
             GateOutcome::Proceed,
