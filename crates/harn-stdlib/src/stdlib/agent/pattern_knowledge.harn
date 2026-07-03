@@ -784,10 +784,31 @@ pub fn pattern_learning_pending(options = nil) -> list {
  * Store one completed-run observation and refresh pending proposals when learning is enabled.
  *
  * @effects: [store.read, store.write, fs.read]
- * @errors: [HARN-PATTERN-001]
+ * @errors: []
  * @api_stability: experimental
  */
 pub fn pattern_learning_observe(
+  session_id: string,
+  message: string,
+  tool_sequence: list = [],
+  options = nil,
+) -> dict {
+  return try {
+    pattern_learning_observe_inner(session_id, message, tool_sequence, options)
+  } catch (e) {
+    {
+      observed: false,
+      enabled: false,
+      unavailable: true,
+      error: to_string(e),
+      observation_count: 0,
+      pending_count: 0,
+      proposals: [],
+    }
+  }
+}
+
+fn pattern_learning_observe_inner(
   session_id: string,
   message: string,
   tool_sequence: list = [],
@@ -895,8 +916,22 @@ pub fn pattern_learning_skill_matches(query: string, limit: int = 3, options = n
  * @api_stability: experimental
  */
 pub fn pattern_learning_context(session_id: string, message: string, limit: int = 3, options = nil) -> dict {
-  let pending = pattern_learning_pending(options)
-  let matches = pattern_learning_skill_matches(message, limit, options)
+  return try {
+    pattern_learning_context_inner(session_id, message, limit, options)
+  } catch (e) {
+    {body: "", matches: [], pending_count: 0, banner: "", unavailable: true, error: to_string(e)}
+  }
+}
+
+fn pattern_learning_context_inner(
+  session_id: string,
+  message: string,
+  limit: int = 3,
+  options = nil,
+) -> dict {
+  let read_options = (options ?? {}) + {skip_migration: true}
+  let pending = pattern_learning_pending(read_options)
+  let matches = pattern_learning_skill_matches(message, limit, read_options)
   if len(matches) == 0 && len(pending) == 0 {
     return {body: "", matches: [], pending_count: 0, banner: ""}
   }
