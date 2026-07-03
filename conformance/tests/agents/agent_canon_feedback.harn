@@ -1,0 +1,49 @@
+import {
+  canon_evaluate_slice,
+  canon_feedback_text,
+  canon_inject_feedback,
+  canon_pack_ids_for_path,
+  canon_slice_from_files,
+} from "std/agent/canon"
+import { with_fs } from "std/testing"
+
+let INVARIANTS = """
+@invariant
+@deterministic
+@archivist(evidence: ["fixture"], confidence: 1.0, source_date: "2026-07-03")
+pub fn no_bad(slice, _ctx, _repo_at_base) {
+  if contains(slice.files[0].text, "bad") {
+    return {
+      verdict: "Block",
+      rule: "no_bad",
+      findings: [{path: slice.files[0].path, message: "bad sentinel"}],
+      remediation: "Remove bad sentinel text.",
+    }
+  }
+  return {verdict: "Allow", rule: "no_bad", findings: [], remediation: ""}
+}
+"""
+
+pipeline main(task) {
+  __io_println(join(canon_pack_ids_for_path("src/main.zig"), ","))
+  with_fs(
+    {
+      "canon-packs.json": {schema_version: 1, packs: [{id: "zig", title: "Zig", invariants: "zig/invariants.harn"}]},
+      "zig/invariants.harn": INVARIANTS,
+    },
+    { dir ->
+      let slice = canon_slice_from_files([{path: "src/main.zig", text: "const bad = true;"}])
+      let result = canon_evaluate_slice(slice, {canon_root: dir, files: slice.files})
+      __io_println(result.status)
+      __io_println(to_string(result.packs[0].report.records[0].name == "no_bad"))
+      let feedback = canon_feedback_text(result)
+      __io_println(to_string(contains(feedback, "no_bad")))
+      let session_id = agent_session_open("canon-feedback-" + uuid_v7())
+      let injected = canon_inject_feedback(session_id, slice, {canon_root: dir, files: slice.files})
+      let messages = agent_session_snapshot(session_id).messages
+      __io_println(to_string(injected.injected))
+      __io_println(to_string(contains(messages[len(messages) - 1].content, "harn-canon")))
+      agent_session_close(session_id)
+    },
+  )
+}
