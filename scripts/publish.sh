@@ -148,16 +148,16 @@ run_and_capture_output() {
   shift
   local output_file
   output_file="$(mktemp "${TMPDIR:-/tmp}/harn-publish-output.XXXXXX")"
-  : > "$output_file"
 
   local command_status=0
-  if "$@" > >(tee -a "$output_file") 2> >(tee -a "$output_file" >&2); then
+  if "$@" >"$output_file" 2>&1; then
     command_status=0
   else
     command_status=$?
   fi
 
   printf -v "$__output_var" '%s' "$(cat "$output_file")"
+  cat "$output_file"
   rm -f "$output_file"
   return "$command_status"
 }

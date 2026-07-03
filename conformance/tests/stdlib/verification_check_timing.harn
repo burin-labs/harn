@@ -1,0 +1,75 @@
+import {
+  verification_finish_check,
+  verification_observation_from_command_result,
+  verification_record_check_result,
+  verification_run_check,
+  verification_start_check,
+} from "std/verification"
+
+pipeline test(task) {
+  verification_profiles_set(
+    {
+      rows: [
+        {id: "check/shell", scope: {task: "verify"}, check: {rung: "R1", command: "echo verification-run"}},
+      ],
+    },
+  )
+  let failed_result = {
+    ok: false,
+    success: false,
+    status: "completed",
+    exit_code: 2,
+    duration_ms: 77,
+    stdout: "",
+    stderr: "compile failed\nline 2",
+  }
+  let observation = verification_observation_from_command_result(
+    failed_result,
+    {warm: false, snapshot: {"src/main.harn": "hash-a"}, failure_signature_from: "stderr"},
+  )
+  assert_eq(observation.durationMs, 77)
+  assert_eq(observation.warm, false)
+  assert_eq(observation.exit, 2)
+  assert(observation.snapshot != nil, "observation should carry supplied snapshot")
+  assert_eq(observation.snapshot["src/main.harn"], "hash-a")
+  assert_eq(observation.failureSignature, "compile failed\nline 2")
+  let recorded = verification_record_check_result(
+    "check/shell",
+    failed_result,
+    {warm: false, snapshot: {"src/main.harn": "hash-a"}, failure_signature_from: "stderr"},
+  )
+  assert(recorded.row != nil, "profile row should be updated")
+  assert_eq(recorded.row.timings.coldMs.p50, 77)
+  assert_eq(recorded.row.timings.samples, 1)
+  assert_eq(recorded.row.lastRun.exit, 2)
+  assert_eq(recorded.row.lastRun.snapshot["src/main.harn"], "hash-a")
+  let run = verification_run_check(
+    "check/shell",
+    {mode: "shell", command: "echo verification-run"},
+    {warm: true, command_options: {capture: {max_inline_bytes: 4096}}},
+  )
+  assert(run.row != nil, "profile row should be updated after running check")
+  assert_eq(run.result.success, true)
+  assert_eq(trim(run.result.stdout), "verification-run")
+  assert_eq(run.observation.warm, true)
+  assert(run.observation.durationMs != nil)
+  assert_eq(run.row.timings.samples, 2)
+  assert(run.row.timings.warmMs.p50 != nil)
+  assert_eq(run.row.lastRun.exit, 0)
+  assert_eq(run.row.lastRun.failureSignature, nil)
+  let started = verification_start_check(
+    "check/shell",
+    {mode: "shell", command: "echo verification-background"},
+    {warm: true, command_options: {capture: {max_inline_bytes: 4096}}},
+  )
+  assert(started.started.handle_id != nil, "background check should return a handle")
+  let finished = verification_finish_check(started)
+  assert(finished.row != nil, "background profile row should be updated after finish")
+  assert_eq(finished.result.success, true)
+  assert_eq(trim(finished.result.stdout), "verification-background")
+  assert_eq(finished.observation.warm, true)
+  assert_eq(finished.row.timings.samples, 3)
+  let missing = verification_record_check_result("missing", failed_result, {warm: true})
+  assert_eq(missing.row, nil)
+  __io_println("verification check timing ok")
+}

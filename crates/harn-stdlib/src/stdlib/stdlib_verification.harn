@@ -8,6 +8,9 @@
  * can bind diagnostics and background check results to file snapshots without
  * duplicating hostlib plumbing or inventing product-specific hash logic.
  */
+import { command_run, command_wait } from "std/command"
+import { truncate_text } from "std/text"
+
 type VerificationFileHashSnapshotEntry = {
   path: string,
   known: bool,
@@ -30,6 +33,139 @@ type VerificationFileHashSnapshot = {
   files: list<VerificationFileHashSnapshotEntry>,
 }
 
+type VerificationCheckObservation = {
+  durationMs?: int,
+  warm: bool,
+  at?: string,
+  exit?: int,
+  failureSignature?: string,
+  snapshot?: dict,
+}
+
+type VerificationRecordedCheck = {
+  result: dict,
+  observation: VerificationCheckObservation,
+  row: dict?,
+  snapshot: VerificationFileHashSnapshot?,
+}
+
+type VerificationStartedCheck = {
+  row_id: string,
+  started: dict,
+  observation_options: dict,
+  snapshot: VerificationFileHashSnapshot?,
+}
+
+fn __verification_opts(options) {
+  return options ?? {}
+}
+
+fn __verification_result_ok(result) -> bool {
+  if result?.ok != nil {
+    return result.ok ? true : false
+  }
+  if result?.success != nil {
+    return result.success ? true : false
+  }
+  let exit = to_int(result?.exit_code)
+  let status = result?.status ?? "completed"
+  return status == "completed" && exit == 0 && !(result?.timed_out ?? false)
+}
+
+fn __verification_duration_ms(result, opts) {
+  if opts?.duration_ms != nil {
+    return to_int(opts.duration_ms)
+  }
+  if result?.duration_ms != nil {
+    return to_int(result.duration_ms)
+  }
+  if result?.execution_duration_ms != nil {
+    return to_int(result.execution_duration_ms)
+  }
+  return nil
+}
+
+fn __verification_exit(result, opts) {
+  if opts?.exit != nil {
+    return to_int(opts.exit)
+  }
+  if result?.exit_code != nil {
+    return to_int(result.exit_code)
+  }
+  if result?.status == "timed_out" || result?.timed_out == true {
+    return 124
+  }
+  if result?.ok != nil || result?.success != nil {
+    return __verification_result_ok(result) ? 0 : 1
+  }
+  return nil
+}
+
+fn __verification_warm(opts) -> bool {
+  if opts?.warm != nil {
+    return opts.warm ? true : false
+  }
+  if opts?.cold != nil {
+    return !(opts.cold ? true : false)
+  }
+  return true
+}
+
+fn __verification_snapshot_map(value) {
+  if value == nil {
+    return nil
+  }
+  if type_of(value) == "dict" && value?.snapshot != nil {
+    return value.snapshot
+  }
+  return value
+}
+
+fn __verification_capture_snapshot(opts) {
+  var snapshot_fact = nil
+  var snapshot = __verification_snapshot_map(opts?.snapshot)
+  if opts?.snapshot_paths != nil {
+    snapshot_fact = verification_file_hash_snapshot(opts.snapshot_paths)
+    snapshot = snapshot_fact.snapshot
+  }
+  return {fact: snapshot_fact, snapshot: snapshot}
+}
+
+fn __verification_result_text(result, source: string) -> string {
+  if source == "stderr" {
+    return result?.stderr ?? ""
+  }
+  if source == "stdout" {
+    return result?.stdout ?? ""
+  }
+  if source == "combined" {
+    return result?.combined ?? ((result?.stdout ?? "") + (result?.stderr ?? ""))
+  }
+  return ""
+}
+
+fn __verification_failure_signature(result, opts) {
+  if opts?.failure_signature != nil {
+    let explicit = to_string(opts.failure_signature)
+    return trim(explicit) == "" ? nil : explicit
+  }
+  if __verification_result_ok(result) {
+    return nil
+  }
+  let source = opts?.failure_signature_from ?? "combined"
+  if source == "none" {
+    return nil
+  }
+  let max_chars = to_int(opts?.max_failure_signature_chars) ?? 4000
+  let text = trim(__verification_result_text(result, source))
+  if text != "" {
+    return truncate_text(text, max_chars)
+  }
+  let status = result?.status ?? "failed"
+  let exit = __verification_exit(result, opts)
+  return "check " + to_string(status) + " exit=" + to_string(exit)
+}
+
 /**
  * Capture current on-disk hashes for `paths` under one code-index sequence
  * binding. Unknown-but-readable workspace files are included with
@@ -44,4 +180,149 @@ type VerificationFileHashSnapshot = {
  */
 pub fn verification_file_hash_snapshot(paths: list<string>) -> VerificationFileHashSnapshot {
   return hostlib_code_index_file_hash_snapshot({paths: paths})
+}
+
+/**
+ * Convert a normalized command/check result into the canonical profile-store
+ * observation shape: `{durationMs, warm, exit, failureSignature?, snapshot?}`.
+ * This keeps timing capture DRY while leaving scheduler policy to the caller.
+ *
+ * Options:
+ * - `warm` / `cold`: classify the run for warm/cold timing distributions.
+ * - `snapshot`: either a direct file->hash map or a
+ *   `VerificationFileHashSnapshot`.
+ * - `failure_signature`: explicit signature to persist on failing runs.
+ * - `failure_signature_from`: `combined` (default), `stderr`, `stdout`, or
+ *   `none`.
+ * - `max_failure_signature_chars`: defaults to 4000.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn verification_observation_from_command_result(result: dict, options = nil) -> VerificationCheckObservation {
+  let opts = __verification_opts(options)
+  var observation = {warm: __verification_warm(opts)}
+  let duration_ms = __verification_duration_ms(result, opts)
+  if duration_ms != nil {
+    observation = observation + {durationMs: duration_ms}
+  }
+  let exit_code = __verification_exit(result, opts)
+  if exit_code != nil {
+    observation = observation + {exit: exit_code}
+  }
+  let snapshot = __verification_snapshot_map(opts?.snapshot)
+  if snapshot != nil {
+    observation = observation + {snapshot: snapshot}
+  }
+  let failure_signature = __verification_failure_signature(result, opts)
+  if failure_signature != nil {
+    observation = observation + {failureSignature: failure_signature}
+  }
+  if opts?.at != nil {
+    observation = observation + {at: to_string(opts.at)}
+  }
+  return observation
+}
+
+/**
+ * Record one command/check result into a verification profile row and return
+ * the persisted row plus the observation that was applied. Unknown row ids
+ * return `row = nil`, matching `verification_profile_record_run`.
+ *
+ * @effects: [state]
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ */
+pub fn verification_record_check_result(row_id: string, result: dict, options = nil) -> VerificationRecordedCheck {
+  let opts = __verification_opts(options)
+  let observation = verification_observation_from_command_result(result, opts)
+  let row = verification_profile_record_run(row_id, observation, opts?.dir)
+  return {result: result, observation: observation, row: row, snapshot: nil}
+}
+
+/**
+ * Run a command as one verification check, capture optional launch-time file
+ * hashes, and record exactly one profile observation for the completed result.
+ *
+ * Options:
+ * - `command_options`: options passed to `command_run`.
+ * - `snapshot_paths`: file paths hashed before the command launches.
+ * - `snapshot`: explicit file->hash map when the caller already captured one.
+ * - `record`: set `false` to run and build the observation without updating
+ *   the profile store.
+ * - any `verification_observation_from_command_result` option.
+ *
+ * @effects: [process, host, fs, state]
+ * @errors: [backend, invalid_argument]
+ * @api_stability: experimental
+ */
+pub fn verification_run_check(row_id: string, spec, options = nil) -> VerificationRecordedCheck {
+  let opts = __verification_opts(options)
+  if opts?.command_options?.background == true {
+    throw "verification_run_check: background command_options are not supported; use verification_start_check"
+  }
+  let captured = __verification_capture_snapshot(opts)
+  let result = command_run(spec, opts?.command_options)
+  let observation = verification_observation_from_command_result(result, opts + {snapshot: captured.snapshot})
+  var row = nil
+  if opts?.record != false {
+    row = verification_profile_record_run(row_id, observation, opts?.dir)
+  }
+  return {result: result, observation: observation, row: row, snapshot: captured.fact}
+}
+
+/**
+ * Start a verification check in the background after capturing optional
+ * launch-time file hashes. The returned receipt is safe to persist and pass to
+ * `verification_finish_check`; no profile row is updated until finish records
+ * the completed result.
+ *
+ * @effects: [process, host, fs]
+ * @errors: [backend, invalid_argument]
+ * @api_stability: experimental
+ */
+pub fn verification_start_check(row_id: string, spec, options = nil) -> VerificationStartedCheck {
+  let opts = __verification_opts(options)
+  let captured = __verification_capture_snapshot(opts)
+  let command_options = (opts?.command_options ?? {}) + {background: true}
+  let started = command_run(spec, command_options)
+  return {
+    row_id: row_id,
+    started: started,
+    observation_options: opts + {snapshot: captured.snapshot},
+    snapshot: captured.fact,
+  }
+}
+
+/**
+ * Wait for a check started by `verification_start_check`, record its completed
+ * command result into the profile row, and return the same recorded-check
+ * receipt shape as `verification_run_check`.
+ *
+ * Options:
+ * - `wait_options`: options passed to `command_wait`.
+ * - `record`: set `false` to wait and build the observation without updating
+ *   the profile store.
+ * - `row_id`: override the row id stored in the started-check receipt.
+ * - any observation option can override the started-check observation options.
+ *
+ * @effects: [process, state]
+ * @errors: [backend, invalid_argument]
+ * @api_stability: experimental
+ */
+pub fn verification_finish_check(started_check: dict, options = nil) -> VerificationRecordedCheck {
+  let opts = __verification_opts(options)
+  let row_id = opts?.row_id ?? started_check?.row_id
+  if row_id == nil || trim(to_string(row_id)) == "" {
+    throw "verification_finish_check: row_id must be supplied in the receipt or options"
+  }
+  let result = command_wait(started_check.started, opts?.wait_options ?? {timeout_ms: 60000})
+  let observation_options = (started_check?.observation_options ?? {}) + opts
+  let observation = verification_observation_from_command_result(result, observation_options)
+  var row = nil
+  if opts?.record != false && started_check?.observation_options?.record != false {
+    row = verification_profile_record_run(to_string(row_id), observation, observation_options?.dir)
+  }
+  return {result: result, observation: observation, row: row, snapshot: started_check?.snapshot}
 }
