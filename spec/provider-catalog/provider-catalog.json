@@ -15912,10 +15912,11 @@
       },
       "reasoning": {
         "modes": [
-          "enabled"
+          "enabled",
+          "effort"
         ],
-        "effort_supported": false,
-        "none_supported": false,
+        "effort_supported": true,
+        "none_supported": true,
         "interleaved_supported": false,
         "preserve_thinking": false
       },
@@ -15936,6 +15937,7 @@
         "tools",
         "prompt_caching",
         "thinking",
+        "extended_thinking",
         "structured_output"
       ],
       "family": "glm",

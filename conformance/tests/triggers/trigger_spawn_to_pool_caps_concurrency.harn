@@ -1,4 +1,4 @@
-import { pool_create, pool_wait } from "std/lifecycle/pool"
+import { Backpressure, pool_create, pool_wait } from "std/lifecycle/pool"
 import "std/triggers"
 
 /**
@@ -8,11 +8,15 @@ import "std/triggers"
  * bounds in-flight closures regardless of the inbound event rate.
  */
 pipeline test(task) {
-  let gate = channel(nil, 32)
+  mock_time(1700000000000)
+  let bp = Backpressure()
+  let gate = channel(nil, 8)
   let inflight = atomic(0)
   let peak = atomic(0)
   let completed = atomic(0)
-  let _pool = pool_create({name: "spawn-to-pool-cap-demo", max_concurrent: 3})
+  let _ = pool_create(
+    {name: "spawn-to-pool-cap-demo", max_concurrent: 3, backpressure: bp.queue(8, "fail_submitter")},
+  )
   let task_factory = { _event -> return { ->
     let now = atomic_add(inflight, 1) + 1
     if now > atomic_get(peak) {
@@ -60,8 +64,7 @@ pipeline test(task) {
     }
   }
   __io_println(len(handles) == 8)
-  // Release the gate so each pool task can complete.
-  for _i in 0 to 8 exclusive {
+  for _i in 0 to len(handles) exclusive {
     send(gate, "go")
   }
   let results = pool_wait(handles)
@@ -69,4 +72,5 @@ pipeline test(task) {
   __io_println(atomic_get(peak) <= 3)
   __io_println(atomic_get(inflight) == 0)
   __io_println(atomic_get(completed) == 8)
+  unmock_time()
 }

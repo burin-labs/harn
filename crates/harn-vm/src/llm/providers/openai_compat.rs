@@ -239,6 +239,11 @@ impl OpenAiCompatibleProvider {
                     }
                 }
             }
+            Some("zai") => {
+                if let Some(thinking) = zai_thinking_config(&opts.thinking) {
+                    body["thinking"] = thinking;
+                }
+            }
             _ => {}
         }
         if caps.reasoning_effort_supported {
@@ -1233,6 +1238,18 @@ fn minimax_thinking_config(thinking: &ThinkingConfig) -> Option<serde_json::Valu
     }
 }
 
+fn zai_thinking_config(thinking: &ThinkingConfig) -> Option<serde_json::Value> {
+    match thinking {
+        ThinkingConfig::Disabled
+        | ThinkingConfig::Effort {
+            level: crate::llm::api::ReasoningEffort::None,
+        } => Some(serde_json::json!({ "type": "disabled" })),
+        ThinkingConfig::Enabled { .. }
+        | ThinkingConfig::Adaptive
+        | ThinkingConfig::Effort { .. } => Some(serde_json::json!({ "type": "enabled" })),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1849,6 +1866,59 @@ thinking_modes = ["enabled"]
         assert_eq!(body["reasoning"]["enabled"], true);
         assert!(body.get("chat_template_kwargs").is_none());
         assert!(body.get("reasoning_effort").is_none());
+    }
+
+    #[test]
+    fn zai_glm52_effort_uses_thinking_object_and_reasoning_effort() {
+        let mut payload = base_request_payload();
+        payload.provider = "zai".to_string();
+        payload.model = "glm-5.2".to_string();
+        payload.thinking = ThinkingConfig::Effort {
+            level: ReasoningEffort::Max,
+        };
+
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+
+        assert_eq!(body["thinking"], json!({"type": "enabled"}));
+        assert_eq!(body["reasoning_effort"], "max");
+        assert!(
+            body.get("reasoning").is_none(),
+            "Z.AI uses `thinking`, not the generic `reasoning` object"
+        );
+        assert!(
+            body.get("chat_template_kwargs").is_none(),
+            "Z.AI GLM does not use Qwen-style chat_template_kwargs"
+        );
+    }
+
+    #[test]
+    fn zai_glm52_disabled_uses_thinking_disabled() {
+        let mut payload = base_request_payload();
+        payload.provider = "zai".to_string();
+        payload.model = "glm-5.2".to_string();
+        payload.thinking = ThinkingConfig::Disabled;
+
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+
+        assert_eq!(body["thinking"], json!({"type": "disabled"}));
+        assert!(body.get("reasoning_effort").is_none());
+        assert!(body.get("reasoning").is_none());
+    }
+
+    #[test]
+    fn zai_glm52_none_effort_is_explicitly_supported() {
+        let mut payload = base_request_payload();
+        payload.provider = "zai".to_string();
+        payload.model = "glm-5.2".to_string();
+        payload.thinking = ThinkingConfig::Effort {
+            level: ReasoningEffort::None,
+        };
+
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+
+        assert_eq!(body["thinking"], json!({"type": "disabled"}));
+        assert_eq!(body["reasoning_effort"], "none");
+        assert!(body.get("reasoning").is_none());
     }
 
     #[test]
