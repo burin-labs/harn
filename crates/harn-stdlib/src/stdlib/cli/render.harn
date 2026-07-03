@@ -83,6 +83,38 @@ pub fn envelope(spec: Envelope) -> dict {
   return out
 }
 
+/** Shape of the canonical harn-cli JSON envelope. */
+type CliJsonEnvelope = {schema_version: int, ok: bool, data?: any, error?: any, warnings?: list}
+
+/**
+ * Wrap `data` in the canonical harn-cli JSON envelope:
+ * `{schemaVersion, ok, data, error, warnings}`.
+ *
+ * Use this for subcommands documented by `harn --json-schemas`. The older
+ * `envelope()` helper is kept for command-specific `apiStability` payloads.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn cli_json_envelope(spec: CliJsonEnvelope) -> dict {
+  let data = if spec.data == nil {
+    nil
+  } else {
+    spec.data
+  }
+  let error = if spec.error == nil {
+    nil
+  } else {
+    spec.error
+  }
+  let warnings = if spec.warnings == nil {
+    []
+  } else {
+    spec.warnings
+  }
+  return {schemaVersion: spec.schema_version, ok: spec.ok, data: data, error: error, warnings: warnings}
+}
+
 /**
  * Serialize an envelope and write it to stdout. Uses pretty-printed
  * JSON when stdout is a tty (so humans can read it without piping
