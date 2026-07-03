@@ -446,9 +446,11 @@ if updated != text:
 PY
   # HARN_BIN may still point at the pre-bump binary warmed during the audit
   # phase. Protocol artifacts stamp the compiled crate version, so force this
-  # target through a fresh post-bump cargo-built binary.
+  # target through a fresh post-bump cargo-built binary. The full workspace was
+  # already validated by the release audit before this version-only rewrite, and
+  # CI validates the pushed release branch, so do not pay for a second
+  # post-bump workspace check here.
   HARN_BIN= make gen-protocol-artifacts
-  cargo check --workspace --all-targets >/dev/null
   echo "Version updated: $current -> $next"
   echo "Next steps:"
   echo "  1. Review docs/release notes diff"

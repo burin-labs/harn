@@ -59,15 +59,6 @@ chmod +x "$fake_bin/harn"
 cat > "$fake_bin/cargo" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
-if [[ "${1:-}" == "check" ]]; then
-  {
-    printf 'CARGO_INCREMENTAL=%s\n' "${CARGO_INCREMENTAL-__unset__}"
-    printf 'RUSTC_WRAPPER=%s\n' "${RUSTC_WRAPPER-__unset__}"
-    printf 'CARGO_BUILD_RUSTC_WRAPPER=%s\n' "${CARGO_BUILD_RUSTC_WRAPPER-__unset__}"
-    printf 'SCCACHE_DISABLE=%s\n' "${SCCACHE_DISABLE-__unset__}"
-  } >> "$FAKE_CARGO_RECORD"
-  exit 0
-fi
 echo "unexpected cargo invocation: $*" >&2
 exit 2
 SH
@@ -95,7 +86,6 @@ record_make="$tmp_root/make-record.txt"
 HARN_RELEASE_ROOT="$release_root" \
 HARN_BIN="$fake_bin/harn" \
 FAKE_HARN_RECORD="$record_harn" \
-FAKE_CARGO_RECORD="$record_cargo" \
 FAKE_MAKE_RECORD="$record_make" \
 PATH="$fake_bin:$PATH" \
   "$repo_root/scripts/release_gate.sh" prepare --bump patch
@@ -116,8 +106,13 @@ if ! grep -Fxq "HARN_BIN=" "$record_make"; then
   cat "$record_make" >&2
   exit 1
 fi
+if [[ -e "$record_cargo" ]]; then
+  echo "release_gate prepare should not run a redundant post-bump cargo check" >&2
+  cat "$record_cargo" >&2
+  exit 1
+fi
 
-for record in "$record_cargo" "$record_make"; do
+for record in "$record_make"; do
   if ! grep -Fxq "CARGO_INCREMENTAL=0" "$record"; then
     echo "expected CARGO_INCREMENTAL=0 in $record" >&2
     cat "$record" >&2
