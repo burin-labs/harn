@@ -44,84 +44,6 @@ fn __canon_push_unique(items, value) {
   return items.push(text)
 }
 
-let __CANON_EXTENSION_PACKS = {
-  bash: ["shell"],
-  c: ["c"],
-  cc: ["cpp"],
-  cjs: ["javascript"],
-  cpp: ["cpp"],
-  cs: ["csharp"],
-  css: ["css"],
-  cts: ["typescript"],
-  cxx: ["cpp"],
-  dart: ["dart"],
-  dockerfile: ["dockerfile"],
-  ex: ["elixir"],
-  exs: ["elixir"],
-  go: ["go"],
-  gql: ["graphql"],
-  graphql: ["graphql"],
-  h: ["c", "cpp"],
-  harn: ["harn"],
-  hh: ["cpp"],
-  hpp: ["cpp"],
-  hs: ["haskell"],
-  htm: ["html"],
-  html: ["html"],
-  hxx: ["cpp"],
-  java: ["java"],
-  js: ["javascript"],
-  json: ["json"],
-  jsx: ["javascript"],
-  ksh: ["shell"],
-  kt: ["kotlin"],
-  kts: ["kotlin"],
-  less: ["css"],
-  lua: ["lua"],
-  markdown: ["markdown"],
-  md: ["markdown"],
-  mjs: ["javascript"],
-  mts: ["typescript"],
-  php: ["php"],
-  proto: ["protobuf"],
-  py: ["python"],
-  pyw: ["python"],
-  qmd: ["r"],
-  r: ["r"],
-  rb: ["ruby"],
-  rmd: ["r"],
-  rs: ["rust"],
-  sass: ["css"],
-  sc: ["scala"],
-  scala: ["scala"],
-  scss: ["css"],
-  sh: ["shell"],
-  sql: ["sql"],
-  swift: ["swift"],
-  tf: ["terraform"],
-  tfvars: ["terraform"],
-  toml: ["toml"],
-  ts: ["typescript"],
-  tsx: ["typescript"],
-  xml: ["xml"],
-  xsd: ["xml"],
-  xsl: ["xml"],
-  xslt: ["xml"],
-  yaml: ["yaml"],
-  yml: ["yaml"],
-  zig: ["zig"],
-  zsh: ["shell"],
-}
-
-fn __canon_pack_for_extension(extension, name) -> list<string> {
-  let e = lowercase(extension)
-  let base = lowercase(name)
-  if base == "dockerfile" || base == "containerfile" || e == "dockerfile" {
-    return ["dockerfile"]
-  }
-  return __CANON_EXTENSION_PACKS[e] ?? []
-}
-
 fn __canon_manifest_has_routing(manifest) -> bool {
   for pack in manifest?.packs ?? [] {
     if len(pack?.extensions ?? []) > 0 || len(pack?.file_names ?? []) > 0 {
@@ -203,7 +125,7 @@ pub fn canon_resolve_root(options = nil) -> string {
 }
 
 /**
- * Infer harn-canon pack ids for one file path.
+ * Infer harn-canon pack ids for one file path from a parsed manifest.
  *
  * @effects: []
  * @errors: []
@@ -217,15 +139,15 @@ pub fn canon_pack_ids_for_path(path, manifest = nil) -> list<string> {
   if __canon_manifest_has_routing(manifest) {
     return __canon_pack_ids_for_path_from_manifest(raw, manifest)
   }
-  return __canon_pack_for_extension(ext(raw), basename(raw))
+  return []
 }
 
 /**
  * Infer harn-canon pack ids for a list of `{path, text?}` file records.
  *
- * When a parsed `canon-packs.json` manifest is supplied, its routing selectors
- * are authoritative; the built-in extension table is only a legacy fallback for
- * callers that have not loaded harn-canon metadata yet.
+ * The parsed `canon-packs.json` manifest owns routing selectors. Callers that
+ * have not loaded harn-canon metadata should pass explicit pack ids instead of
+ * relying on a second extension table.
  *
  * @effects: []
  * @errors: []
