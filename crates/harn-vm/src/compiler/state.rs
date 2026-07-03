@@ -35,6 +35,7 @@ impl Compiler {
             line: 1,
             column: 1,
             enum_names: std::collections::HashSet::new(),
+            enum_variant_owners: std::collections::HashMap::new(),
             struct_layouts: std::collections::HashMap::new(),
             interface_methods: std::collections::HashMap::new(),
             loop_stack: Vec::new(),
@@ -244,6 +245,8 @@ impl Compiler {
         // even when the enum is declared inside a pipeline.
         Self::collect_enum_names(program, &mut self.enum_names);
         self.enum_names.insert("Result".to_string());
+        Self::collect_enum_variant_owners(program, &mut self.enum_variant_owners);
+        Self::seed_builtin_variant_owners(&mut self.enum_variant_owners);
         Self::collect_struct_layouts(program, &mut self.struct_layouts);
         Self::collect_interface_methods(program, &mut self.interface_methods);
         self.collect_type_aliases(program);
@@ -332,6 +335,8 @@ impl Compiler {
     ) -> Result<Chunk, CompileError> {
         Self::collect_enum_names(program, &mut self.enum_names);
         self.enum_names.insert("Result".to_string());
+        Self::collect_enum_variant_owners(program, &mut self.enum_variant_owners);
+        Self::seed_builtin_variant_owners(&mut self.enum_variant_owners);
         Self::collect_struct_layouts(program, &mut self.struct_layouts);
         Self::collect_interface_methods(program, &mut self.interface_methods);
         self.collect_type_aliases(program);
@@ -1269,6 +1274,39 @@ impl Compiler {
         }
     }
 
+    /// Collect variant name → owning enum names across the whole program
+    /// (including nested declarations). Powers bare call-shaped match
+    /// patterns (`Ok(v)` without the `Result.` qualifier): a pattern
+    /// resolves only when exactly one visible enum owns the variant name.
+    pub(super) fn collect_enum_variant_owners(
+        nodes: &[SNode],
+        owners: &mut std::collections::HashMap<String, Vec<String>>,
+    ) {
+        harn_parser::visit::walk_program(nodes, &mut |sn| {
+            if let Node::EnumDecl { name, variants, .. } = &sn.node {
+                for variant in variants {
+                    let entry = owners.entry(variant.name.clone()).or_default();
+                    if !entry.contains(name) {
+                        entry.push(name.clone());
+                    }
+                }
+            }
+        });
+    }
+
+    /// Seed the built-in `Result` enum's variants into the owner map (the
+    /// same special-casing `compile`/`compile_named` apply to `enum_names`).
+    pub(super) fn seed_builtin_variant_owners(
+        owners: &mut std::collections::HashMap<String, Vec<String>>,
+    ) {
+        for variant in ["Ok", "Err"] {
+            let entry = owners.entry(variant.to_string()).or_default();
+            if !entry.contains(&"Result".to_string()) {
+                entry.push("Result".to_string());
+            }
+        }
+    }
+
     pub(super) fn collect_struct_layouts(
         nodes: &[SNode],
         layouts: &mut std::collections::HashMap<String, Vec<String>>,
@@ -1383,6 +1421,7 @@ impl Compiler {
     ) -> Result<CompiledFunction, CompileError> {
         let mut fn_compiler = self.nested_body();
         fn_compiler.enum_names = self.enum_names.clone();
+        fn_compiler.enum_variant_owners = self.enum_variant_owners.clone();
         fn_compiler.interface_methods = self.interface_methods.clone();
         fn_compiler.type_aliases = self.type_aliases.clone();
         fn_compiler.struct_layouts = self.struct_layouts.clone();

@@ -209,6 +209,94 @@ impl Compiler {
         Ok(())
     }
 
+    /// Resolve a bare call-shaped pattern name (`Ok(v)`) to its owning enum.
+    /// `Some(enum_name)` when exactly one visible enum declares the variant;
+    /// an error when several do (the pattern must be qualified); `None` when
+    /// no enum declares it (the pattern falls through to expression-equality
+    /// compilation, preserving `match x { compute() -> ... }`).
+    fn resolve_bare_variant_enum(
+        &self,
+        variant: &str,
+        line: u32,
+    ) -> Result<Option<String>, CompileError> {
+        match self.enum_variant_owners.get(variant) {
+            None => Ok(None),
+            Some(owners) if owners.len() == 1 => Ok(Some(owners[0].clone())),
+            Some(owners) => Err(CompileError {
+                message: format!(
+                    "match pattern `{variant}(...)` is ambiguous: variant `{variant}` is declared by enums {}; qualify it as `{}.{variant}(...)`",
+                    owners.join(", "),
+                    owners[0],
+                ),
+                line,
+            }),
+        }
+    }
+
+    /// Shared codegen for an enum-variant match arm (`Result.Ok(v)`,
+    /// `EnumName.Variant(x)`, `Ok(v)`): MatchEnum test, payload bindings,
+    /// optional guard, body, and the fail path. Expects the match value on
+    /// the stack; leaves it there for the next arm on failure.
+    fn compile_enum_variant_arm(
+        &mut self,
+        enum_name: &str,
+        variant: &str,
+        pat_args: &[SNode],
+        arm: &harn_parser::MatchArm,
+        end_jumps: &mut Vec<usize>,
+    ) -> Result<(), CompileError> {
+        self.chunk.emit(Op::Dup, self.line);
+        let en_idx = self.string_constant(enum_name);
+        let vn_idx = self.string_constant(variant);
+        self.chunk.emit_u16(Op::MatchEnum, en_idx, self.line);
+        let hi = (vn_idx >> 8) as u8;
+        let lo = vn_idx as u8;
+        self.chunk.code.push(hi);
+        self.chunk.code.push(lo);
+        self.chunk.lines.push(self.line);
+        self.chunk.columns.push(self.column);
+        self.chunk.lines.push(self.line);
+        self.chunk.columns.push(self.column);
+        let skip = self.chunk.emit_jump(Op::JumpIfFalse, self.line);
+        self.chunk.emit(Op::Pop, self.line);
+        self.begin_scope();
+
+        // Bind field variables from the enum's fields; the match value
+        // stays on the stack for extraction.
+        for (i, pat_arg) in pat_args.iter().enumerate() {
+            if let Node::Identifier(binding_name) = &pat_arg.node {
+                self.chunk.emit(Op::Dup, self.line);
+                let fields_idx = self.string_constant("fields");
+                self.chunk.emit_u16(Op::GetProperty, fields_idx, self.line);
+                let idx_const = self.chunk.add_constant(Constant::Int(i as i64));
+                self.chunk.emit_u16(Op::Constant, idx_const, self.line);
+                self.chunk.emit(Op::Subscript, self.line);
+                self.emit_binding_target(binding_name, false);
+            }
+        }
+
+        if let Some(ref guard) = arm.guard {
+            self.compile_node(guard)?;
+            let guard_skip = self.chunk.emit_jump(Op::JumpIfFalse, self.line);
+            self.chunk.emit(Op::Pop, self.line);
+            self.chunk.emit(Op::Pop, self.line);
+            self.compile_match_body(&arm.body)?;
+            self.end_scope();
+            end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
+            self.chunk.patch_jump(guard_skip);
+            self.chunk.emit(Op::Pop, self.line);
+            self.end_scope();
+        } else {
+            self.chunk.emit(Op::Pop, self.line);
+            self.compile_match_body(&arm.body)?;
+            self.end_scope();
+            end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
+        }
+        self.chunk.patch_jump(skip);
+        self.chunk.emit(Op::Pop, self.line);
+        Ok(())
+    }
+
     pub(super) fn compile_match_expr(
         &mut self,
         value: &SNode,
@@ -245,56 +333,27 @@ impl Compiler {
                     variant,
                     args: pat_args,
                 } => {
-                    self.chunk.emit(Op::Dup, self.line);
-                    let en_idx = self.string_constant(enum_name);
-                    let vn_idx = self.string_constant(variant);
-                    self.chunk.emit_u16(Op::MatchEnum, en_idx, self.line);
-                    let hi = (vn_idx >> 8) as u8;
-                    let lo = vn_idx as u8;
-                    self.chunk.code.push(hi);
-                    self.chunk.code.push(lo);
-                    self.chunk.lines.push(self.line);
-                    self.chunk.columns.push(self.column);
-                    self.chunk.lines.push(self.line);
-                    self.chunk.columns.push(self.column);
-                    let skip = self.chunk.emit_jump(Op::JumpIfFalse, self.line);
-                    self.chunk.emit(Op::Pop, self.line);
-                    self.begin_scope();
-
-                    // Bind field variables from the enum's fields; the
-                    // match value stays on the stack for extraction.
-                    for (i, pat_arg) in pat_args.iter().enumerate() {
-                        if let Node::Identifier(binding_name) = &pat_arg.node {
-                            self.chunk.emit(Op::Dup, self.line);
-                            let fields_idx = self.string_constant("fields");
-                            self.chunk.emit_u16(Op::GetProperty, fields_idx, self.line);
-                            let idx_const = self.chunk.add_constant(Constant::Int(i as i64));
-                            self.chunk.emit_u16(Op::Constant, idx_const, self.line);
-                            self.chunk.emit(Op::Subscript, self.line);
-                            self.emit_binding_target(binding_name, false);
-                        }
-                    }
-
-                    // Optional guard
-                    if let Some(ref guard) = arm.guard {
-                        self.compile_node(guard)?;
-                        let guard_skip = self.chunk.emit_jump(Op::JumpIfFalse, self.line);
-                        self.chunk.emit(Op::Pop, self.line);
-                        self.chunk.emit(Op::Pop, self.line);
-                        self.compile_match_body(&arm.body)?;
-                        self.end_scope();
-                        end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
-                        self.chunk.patch_jump(guard_skip);
-                        self.chunk.emit(Op::Pop, self.line);
-                        self.end_scope();
-                    } else {
-                        self.chunk.emit(Op::Pop, self.line);
-                        self.compile_match_body(&arm.body)?;
-                        self.end_scope();
-                        end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
-                    }
-                    self.chunk.patch_jump(skip);
-                    self.chunk.emit(Op::Pop, self.line);
+                    self.compile_enum_variant_arm(
+                        enum_name,
+                        variant,
+                        pat_args,
+                        arm,
+                        &mut end_jumps,
+                    )?;
+                }
+                // Bare call-shaped variant pattern: `Ok(v)`, `Some(x)` —
+                // resolved to its owning enum when the variant name is
+                // unambiguous; otherwise compiled as an expression-equality
+                // pattern like any other call expression.
+                Node::FunctionCall {
+                    name,
+                    args: pat_args,
+                    ..
+                } if self.resolve_bare_variant_enum(name, self.line)?.is_some() => {
+                    let enum_name = self
+                        .resolve_bare_variant_enum(name, self.line)?
+                        .expect("guard checked Some");
+                    self.compile_enum_variant_arm(&enum_name, name, pat_args, arm, &mut end_jumps)?;
                 }
                 // Enum variant without args: PropertyAccess(EnumName, Variant)
                 Node::PropertyAccess { object, property } if matches!(&object.node, Node::Identifier(n) if self.enum_names.contains(n)) =>
@@ -348,58 +407,17 @@ impl Compiler {
                     args: pat_args,
                 } if matches!(&object.node, Node::Identifier(n) if self.enum_names.contains(n)) => {
                     let enum_name = if let Node::Identifier(n) = &object.node {
-                        n.as_str()
+                        n.clone()
                     } else {
                         unreachable!()
                     };
-                    self.chunk.emit(Op::Dup, self.line);
-                    let en_idx = self.string_constant(enum_name);
-                    let vn_idx = self.string_constant(method);
-                    self.chunk.emit_u16(Op::MatchEnum, en_idx, self.line);
-                    let hi = (vn_idx >> 8) as u8;
-                    let lo = vn_idx as u8;
-                    self.chunk.code.push(hi);
-                    self.chunk.code.push(lo);
-                    self.chunk.lines.push(self.line);
-                    self.chunk.columns.push(self.column);
-                    self.chunk.lines.push(self.line);
-                    self.chunk.columns.push(self.column);
-                    let skip = self.chunk.emit_jump(Op::JumpIfFalse, self.line);
-                    self.chunk.emit(Op::Pop, self.line);
-                    self.begin_scope();
-
-                    for (i, pat_arg) in pat_args.iter().enumerate() {
-                        if let Node::Identifier(binding_name) = &pat_arg.node {
-                            self.chunk.emit(Op::Dup, self.line);
-                            let fields_idx = self.string_constant("fields");
-                            self.chunk.emit_u16(Op::GetProperty, fields_idx, self.line);
-                            let idx_const = self.chunk.add_constant(Constant::Int(i as i64));
-                            self.chunk.emit_u16(Op::Constant, idx_const, self.line);
-                            self.chunk.emit(Op::Subscript, self.line);
-                            self.emit_binding_target(binding_name, false);
-                        }
-                    }
-
-                    // Optional guard
-                    if let Some(ref guard) = arm.guard {
-                        self.compile_node(guard)?;
-                        let guard_skip = self.chunk.emit_jump(Op::JumpIfFalse, self.line);
-                        self.chunk.emit(Op::Pop, self.line);
-                        self.chunk.emit(Op::Pop, self.line);
-                        self.compile_match_body(&arm.body)?;
-                        self.end_scope();
-                        end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
-                        self.chunk.patch_jump(guard_skip);
-                        self.chunk.emit(Op::Pop, self.line);
-                        self.end_scope();
-                    } else {
-                        self.chunk.emit(Op::Pop, self.line);
-                        self.compile_match_body(&arm.body)?;
-                        self.end_scope();
-                        end_jumps.push(self.chunk.emit_jump(Op::Jump, self.line));
-                    }
-                    self.chunk.patch_jump(skip);
-                    self.chunk.emit(Op::Pop, self.line);
+                    self.compile_enum_variant_arm(
+                        &enum_name,
+                        method,
+                        pat_args,
+                        arm,
+                        &mut end_jumps,
+                    )?;
                 }
                 // Binding pattern: bare identifier always matches.
                 Node::Identifier(name) => {

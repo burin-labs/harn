@@ -260,7 +260,7 @@ impl TypeChecker {
                 variant,
                 args,
             } => {
-                self.define_enum_pattern_bindings(enum_name, variant, args, scope);
+                self.define_enum_pattern_bindings(enum_name, variant, args, value_type, scope);
             }
             Node::MethodCall {
                 object,
@@ -268,10 +268,44 @@ impl TypeChecker {
                 args,
             } => {
                 if let Node::Identifier(enum_name) = &object.node {
-                    self.define_enum_pattern_bindings(enum_name, method, args, scope);
+                    self.define_enum_pattern_bindings(enum_name, method, args, value_type, scope);
+                }
+            }
+            // Bare call-shaped variant pattern (`Ok(v)`): resolve the enum
+            // from the scrutinee's static type, or — for an untyped
+            // scrutinee — from the unique visible enum declaring the
+            // variant (mirroring the compiler's resolution rule; payloads
+            // then bind gradually).
+            Node::FunctionCall { name, args, .. } => {
+                let enum_name = self.enum_name_of_scrutinee(value_type, scope).or_else(|| {
+                    let owners = scope.enum_owners_of_variant(name);
+                    match owners.as_slice() {
+                        [only] => Some(only.clone()),
+                        _ => None,
+                    }
+                });
+                if let Some(enum_name) = enum_name {
+                    self.define_enum_pattern_bindings(&enum_name, name, args, value_type, scope);
                 }
             }
             _ => {}
+        }
+    }
+
+    /// The enum a match scrutinee's static type resolves to, if any. Powers
+    /// bare call-shaped variant patterns (`Ok(v)` without `Result.`).
+    pub(in crate::typechecker) fn enum_name_of_scrutinee(
+        &self,
+        value_type: Option<&TypeExpr>,
+        scope: &TypeScope,
+    ) -> Option<String> {
+        match self.resolve_alias(value_type?, scope) {
+            TypeExpr::Named(name) | TypeExpr::Applied { name, .. }
+                if scope.get_enum(&name).is_some() =>
+            {
+                Some(name)
+            }
+            _ => None,
         }
     }
 
@@ -280,6 +314,7 @@ impl TypeChecker {
         enum_name: &str,
         variant: &str,
         args: &[SNode],
+        value_type: Option<&TypeExpr>,
         scope: &mut TypeScope,
     ) {
         let Some(enum_info) = scope.get_enum(enum_name) else {
@@ -288,12 +323,58 @@ impl TypeChecker {
         let Some(variant_info) = enum_info.variants.iter().find(|v| v.name == variant) else {
             return;
         };
+        // Instantiate the variant's declared field types with the scrutinee's
+        // type arguments: matching a `Result<int, string>` must bind
+        // `Result.Ok(v)`'s payload as `int`, not the raw declaration-side
+        // parameter `T`. When the scrutinee's arguments are unknown (bare
+        // `Result`, or no static type), a field type that still mentions a
+        // declaration parameter is degraded to gradual instead of leaking a
+        // phantom named type into the arm scope.
+        // Declaration params that are NOT also generic params of the
+        // enclosing scope: after substitution these have no meaning at the
+        // match site (inside `fn f<T>(r: Result<T, E2>)` the surviving `T`
+        // is the function's own parameter and stays).
+        let unbound_param_names: std::collections::BTreeSet<String> = enum_info
+            .type_params
+            .iter()
+            .map(|tp| tp.name.clone())
+            .filter(|name| !scope.is_generic_type_param(name))
+            .collect();
+        let type_bindings: BTreeMap<String, TypeExpr> = value_type
+            .map(|ty| self.resolve_alias(ty, scope))
+            .and_then(|resolved| match resolved {
+                TypeExpr::Applied { name, args: targs }
+                    if name == enum_name && targs.len() == enum_info.type_params.len() =>
+                {
+                    Some(
+                        enum_info
+                            .type_params
+                            .iter()
+                            .map(|tp| tp.name.clone())
+                            .zip(targs)
+                            .collect(),
+                    )
+                }
+                _ => None,
+            })
+            .unwrap_or_default();
         let bindings: Vec<(String, InferredType)> = args
             .iter()
             .zip(&variant_info.fields)
             .filter_map(|(arg, field)| match &arg.node {
                 Node::Identifier(name) if name != "_" => {
-                    Some((name.clone(), field.type_expr.clone()))
+                    let field_ty = field.type_expr.as_ref().map(|ty| {
+                        if type_bindings.is_empty() {
+                            ty.clone()
+                        } else {
+                            Self::apply_type_bindings(ty, &type_bindings)
+                        }
+                    });
+                    let field_ty = field_ty.filter(|ty| {
+                        // Unbound declaration params stay gradual, not phantom.
+                        !Self::contains_type_param(ty, &unbound_param_names)
+                    });
+                    Some((name.clone(), field_ty))
                 }
                 _ => None,
             })
@@ -1119,6 +1200,8 @@ impl TypeChecker {
             }
             PathNarrowing::Intersect(schema) => intersect_types(&ty, schema).or(Some(ty)),
             PathNarrowing::Subtract(schema) => subtract_type(&ty, schema).or(Some(ty)),
+            // Invalidated by a base reassignment: natural type unchanged.
+            PathNarrowing::Cleared => Some(ty),
         }
     }
 
@@ -1251,7 +1334,7 @@ impl TypeChecker {
         natural
     }
 
-    fn infer_subscript_type_from_type(
+    pub(super) fn infer_subscript_type_from_type(
         &self,
         ty: &TypeExpr,
         index: &SNode,

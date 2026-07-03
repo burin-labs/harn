@@ -490,6 +490,40 @@ impl VmValue {
         }
     }
 
+    /// Every tag [`VmValue::type_name`] can return, excluding harness-object
+    /// names (delegated to `HarnessValue::type_name`). Keep in lockstep with
+    /// the match below AND with `harn_builtin_meta::runtime_type_tags::ALL`
+    /// — a unit test asserts the latter, which is what keeps the
+    /// typechecker's `type_of` narrowing honest.
+    pub const ALL_TYPE_NAMES: &'static [&'static str] = &[
+        "string",
+        "bytes",
+        "int",
+        "float",
+        "decimal",
+        "bool",
+        "nil",
+        "list",
+        "dict",
+        "closure",
+        "builtin",
+        "duration",
+        "enum",
+        "struct",
+        "task_handle",
+        "channel",
+        "atomic",
+        "rng",
+        "sync_permit",
+        "mcp_client",
+        "set",
+        "generator",
+        "stream",
+        "range",
+        "iter",
+        "pair",
+    ];
+
     pub fn type_name(&self) -> &'static str {
         match self {
             VmValue::String(_) => "string",
@@ -879,3 +913,28 @@ pub fn struct_fields_to_map(
 /// Sync builtin function for the VM.
 pub type VmBuiltinFn =
     Arc<dyn Fn(&[VmValue], &mut String) -> Result<VmValue, VmError> + Send + Sync>;
+
+#[cfg(test)]
+mod runtime_type_tag_tests {
+    use super::VmValue;
+
+    /// The canonical tag registry in `harn-builtin-meta` is what the
+    /// typechecker's `type_of` narrowing trusts; this assertion is the link
+    /// that keeps it in lockstep with what the runtime actually produces.
+    #[test]
+    fn type_name_tags_match_canonical_registry() {
+        let canonical = harn_builtin_meta::runtime_type_tags::ALL;
+        for tag in VmValue::ALL_TYPE_NAMES {
+            assert!(
+                canonical.contains(tag),
+                "VmValue::type_name tag `{tag}` missing from harn_builtin_meta::runtime_type_tags::ALL"
+            );
+        }
+        for tag in canonical {
+            assert!(
+                VmValue::ALL_TYPE_NAMES.contains(tag),
+                "canonical tag `{tag}` is not produced by VmValue::type_name; remove it or update ALL_TYPE_NAMES"
+            );
+        }
+    }
+}

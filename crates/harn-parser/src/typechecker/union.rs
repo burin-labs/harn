@@ -89,19 +89,23 @@ pub(super) fn contains_nil(ty: &TypeExpr) -> bool {
 }
 
 /// Whether a union member corresponds to the `type_of(...)` string
-/// `target`. Recognises both the bare `Named(target)` form and the
-/// parameterised constructor forms (`List<T>` → "list", `DictType` /
+/// `target`. Recognises the bare `Named(target)` form, parameterised
+/// constructors both structural (`List<T>` → "list", `DictType` /
 /// `Shape` → "dict", `FnType` → "closure", `Iter` → "iter",
-/// `Generator` → "generator", `Stream` → "stream") plus literal
-/// refinements (`LitString` → "string", `LitInt` → "int"). Without
-/// this, `type_of(x) == "list"` would refuse to narrow `list<int> | int`
-/// because the union member is `List(int)`, not `Named("list")`.
+/// `Generator` → "generator", `Stream` → "stream") and applied
+/// (`set<int>` → "set", `channel<T>` → "channel"), literal refinements
+/// (`LitString` → "string", `LitInt` → "int"), and `owned<T>` markers
+/// (transparent to the runtime kind). Without this, `type_of(x) == "list"`
+/// would refuse to narrow `list<int> | int` because the union member is
+/// `List(int)`, not `Named("list")`.
 fn member_matches_runtime_kind(member: &TypeExpr, target: &str) -> bool {
     match (member, target) {
         (TypeExpr::Named(n), t) => n == t,
+        (TypeExpr::Applied { name, .. }, t) => name == t,
+        (TypeExpr::Owned(inner), t) => member_matches_runtime_kind(inner, t),
         (TypeExpr::List(_), "list") => true,
         (TypeExpr::DictType(_, _), "dict") => true,
-        (TypeExpr::Shape(_), "dict") => true,
+        (TypeExpr::Shape(_) | TypeExpr::OpenShape { .. }, "dict") => true,
         (TypeExpr::FnType { .. }, "closure") => true,
         (TypeExpr::Iter(_), "iter") => true,
         (TypeExpr::Generator(_), "generator") => true,

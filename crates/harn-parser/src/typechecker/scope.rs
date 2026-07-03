@@ -329,11 +329,25 @@ impl TypeScope {
 
     /// Drop ruled-out sets for every reference *path* rooted at `base` (used
     /// on reassignment of the base, alongside [`Self::clear_unknown_ruled_out`]
-    /// for the base itself). Current-scope only, matching the path-narrowing
-    /// invalidation, since both are applied into the same branch scope.
+    /// for the base itself). Ancestor-scope entries are masked with an empty
+    /// list (the same shadow convention as `clear_unknown_ruled_out`), since
+    /// lookups walk the scope chain.
     pub(super) fn clear_unknown_ruled_out_paths_rooted_at(&mut self, base: &str) {
         self.unknown_ruled_out
             .retain(|key, _| key == base || !path_key_rooted_at(key, base));
+        let mut ancestor = self.parent.as_deref();
+        let mut masked: Vec<String> = Vec::new();
+        while let Some(scope) = ancestor {
+            for key in scope.unknown_ruled_out.keys() {
+                if key != base && path_key_rooted_at(key, base) && !masked.contains(key) {
+                    masked.push(key.clone());
+                }
+            }
+            ancestor = scope.parent.as_deref();
+        }
+        for key in masked {
+            self.unknown_ruled_out.insert(key, Vec::new());
+        }
     }
 
     /// Collect every function name visible through this scope chain.
@@ -419,6 +433,24 @@ impl TypeScope {
             .or_else(|| self.parent.as_ref()?.get_enum(name))
     }
 
+    /// Names of every visible enum that declares a variant named `variant`,
+    /// walking the scope chain (child declarations shadow same-named parent
+    /// enums). Powers bare call-shaped match patterns (`Ok(v)`): the
+    /// compiler resolves them when exactly one enum owns the variant name.
+    pub(super) fn enum_owners_of_variant(&self, variant: &str) -> Vec<String> {
+        let mut owners: Vec<String> = Vec::new();
+        let mut cur = Some(self);
+        while let Some(scope) = cur {
+            for (name, info) in &scope.enums {
+                if info.variants.iter().any(|v| v.name == variant) && !owners.contains(name) {
+                    owners.push(name.clone());
+                }
+            }
+            cur = scope.parent.as_deref();
+        }
+        owners
+    }
+
     pub(super) fn get_interface(&self, name: &str) -> Option<&InterfaceDeclInfo> {
         self.interfaces
             .get(name)
@@ -463,6 +495,17 @@ impl TypeScope {
         self.vars.insert(name.to_string(), ty);
     }
 
+    /// Pre-narrowing type recorded for a flow-narrowed variable, walking
+    /// the lexical scope chain. Narrowing applied by an outer branch
+    /// condition is still a narrowing from the perspective of a nested
+    /// block or loop scope — a flat `narrowed_vars` read would miss it and
+    /// mistake the narrowed type for the variable's declared type.
+    pub(super) fn narrowed_original(&self, name: &str) -> Option<&InferredType> {
+        self.narrowed_vars
+            .get(name)
+            .or_else(|| self.parent.as_ref()?.narrowed_original(name))
+    }
+
     /// Roll back any flow-narrowed variables to their pre-narrowing types.
     /// Used when reusing the post-body fn scope for return-type checking, so a
     /// parameter typed `T?` is still seen as `T?` in the return position even
@@ -494,12 +537,25 @@ impl TypeScope {
 
     /// Drop every path narrowing rooted at `base` (used on reassignment of the
     /// base variable, which may invalidate any path that reads through it).
-    /// Only the current scope is touched — mirroring `narrowed_vars` rollback,
-    /// which is likewise current-scope-scoped, since narrowings are applied
-    /// into the same branch scope they are invalidated from.
+    /// Local entries are removed; entries recorded in ancestor scopes are
+    /// masked with a [`PathNarrowing::Cleared`] tombstone, since path lookups
+    /// walk the scope chain.
     pub(super) fn clear_narrowed_paths_rooted_at(&mut self, base: &str) {
         self.narrowed_paths
             .retain(|key, _| !path_key_rooted_at(key, base));
+        let mut ancestor = self.parent.as_deref();
+        let mut masked: Vec<String> = Vec::new();
+        while let Some(scope) = ancestor {
+            for key in scope.narrowed_paths.keys() {
+                if path_key_rooted_at(key, base) && !masked.contains(key) {
+                    masked.push(key.clone());
+                }
+            }
+            ancestor = scope.parent.as_deref();
+        }
+        for key in masked {
+            self.narrowed_paths.insert(key, PathNarrowing::Cleared);
+        }
     }
 
     pub(super) fn define_var_mutable(&mut self, name: &str, ty: InferredType) {
@@ -623,6 +679,11 @@ pub(super) enum PathNarrowing {
     /// Subtract a schema from the path's type (the falsy branch of
     /// `schema_is(path, S)` / `is_type(path, S)`).
     Subtract(TypeExpr),
+    /// Tombstone: the path's narrowing has been invalidated (its base was
+    /// reassigned). Reads use the path's natural type unchanged. Needed
+    /// because lookups walk the scope chain — deleting a local entry
+    /// cannot mask a directive recorded in an ancestor scope.
+    Cleared,
 }
 
 /// Bidirectional type refinements extracted from a condition.

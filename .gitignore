@@ -37,6 +37,7 @@ harn-spec-verify-*/
 # SQLite DBs, checkpoint/workflow dirs, and per-suite timing caches under
 # fixture .harn/ dirs must stay ignored without shadowing shipped manifests.
 conformance/tests/**/.harn/metadata/
+conformance/tests/**/.harn/memory/
 conformance/tests/**/.harn/checkpoints/
 conformance/tests/**/.harn/workflows/
 conformance/tests/**/.harn/*.sqlite

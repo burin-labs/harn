@@ -760,6 +760,10 @@ does not flow into `list<float>`.
 - `unwrap_err(r) -> string` — returns the error message, panics if
   `Ok`.
 - `r?.field` — optional chaining that returns `nil` on `Err`.
+- `match r { Ok(v) -> { … } Err(e) -> { … } }` — bare variant
+  patterns; the `Result.` qualifier is optional when the variant name
+  is unambiguous, and payloads bind with the instantiated types
+  (`Result<int, string>` binds `v: int`, `e: string`).
 
 ```harn
 let r = try { llm_call("hi", nil, opts) }

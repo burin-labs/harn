@@ -535,3 +535,121 @@ fn arithmetic_without_assert_guard_still_flagged() {
         "expected nilable error without a guard, got: {errs:?}"
     );
 }
+
+#[test]
+fn test_list_subscript_write_checks_element_type() {
+    let errs = errors(
+        r#"fn f() -> int {
+  var xs: list<int> = [1, 2]
+  xs[0] = "not an int"
+  return xs[0]
+}"#,
+    );
+    assert!(
+        errs.iter()
+            .any(|e| e.contains("expected int, found string")),
+        "expected element-type mismatch, got: {errs:?}"
+    );
+}
+
+#[test]
+fn test_dict_subscript_write_checks_value_and_key_types() {
+    let errs = errors(
+        r#"fn f() -> int {
+  var d: dict<string, int> = {a: 1}
+  d["b"] = "nope"
+  d[0] = 2
+  return 0
+}"#,
+    );
+    assert!(
+        errs.iter()
+            .any(|e| e.contains("expected int, found string")),
+        "expected value-type mismatch, got: {errs:?}"
+    );
+    assert!(
+        errs.iter()
+            .any(|e| e.contains("subscript index") && e.contains("expected string, found int")),
+        "expected index-type mismatch, got: {errs:?}"
+    );
+}
+
+#[test]
+fn test_shape_field_write_checks_field_type() {
+    let errs = errors(
+        r#"fn f() -> int {
+  var s: {n: int} = {n: 1}
+  s.n = "nope"
+  return s.n
+}"#,
+    );
+    assert!(
+        errs.iter()
+            .any(|e| e.contains("expected int, found string")),
+        "expected field-type mismatch, got: {errs:?}"
+    );
+}
+
+#[test]
+fn test_struct_field_write_checks_type_and_existence() {
+    let errs = errors(
+        r#"struct Point { x: int, y: int }
+
+fn f() -> int {
+  var p = Point({x: 1, y: 2})
+  p.x = "nope"
+  p.z = 1
+  return p.x
+}"#,
+    );
+    assert!(
+        errs.iter()
+            .any(|e| e.contains("expected int, found string")),
+        "expected field-type mismatch, got: {errs:?}"
+    );
+    assert!(
+        errs.iter().any(|e| e.contains("field `z` does not exist")),
+        "expected unknown-field error, got: {errs:?}"
+    );
+}
+
+#[test]
+fn test_optional_shape_field_write_accepts_nil() {
+    let errs = errors(
+        r#"fn f() -> int {
+  var s: {n: int, m?: string} = {n: 1}
+  s.m = nil
+  s.m = "ok"
+  return s.n
+}"#,
+    );
+    assert!(errs.is_empty(), "got: {errs:?}");
+}
+
+#[test]
+fn test_unannotated_dict_literal_writes_stay_lenient() {
+    // The ambient dict idiom: an unannotated dict/list local tolerates
+    // heterogeneous writes, matching read-side leniency.
+    let errs = errors(
+        r#"pipeline t(task) {
+  var d = {a: 1}
+  d.b = "hello"
+  d["c"] = true
+  var xs = [1, 2]
+  xs[0] = "loose"
+}"#,
+    );
+    assert!(errs.is_empty(), "got: {errs:?}");
+}
+
+#[test]
+fn test_compound_assignment_to_list_element_type_checks() {
+    let errs = errors(
+        r"fn f() -> int {
+  var xs: list<int> = [1, 2]
+  xs[0] += 1
+  return xs[0]
+}",
+    );
+    assert!(errs.is_empty(), "got: {errs:?}");
+}

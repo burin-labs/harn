@@ -1160,6 +1160,74 @@ fn test_result_generic_type_compatibility() {
 }
 
 #[test]
+fn test_result_match_pattern_binds_instantiated_payload_types() {
+    // `Result<int, string>` scrutinee: `Result.Ok(v)` binds `v: int`, and
+    // `Result.Err(e)` binds `e: string` — not the raw declaration params.
+    let ok_errs = errors(
+        r"fn g() -> Result<int, string> { return Ok(1) }
+
+fn f() -> int {
+  let r = g()
+  match r {
+    Result.Ok(v) -> { return v }
+    Result.Err(e) -> { return e.len() }
+  }
+}",
+    );
+    assert!(ok_errs.is_empty(), "unexpected type errors: {ok_errs:?}");
+
+    // The instantiated payload participates in real checks: returning the
+    // `int` payload from a `string`-returning fn is a mismatch.
+    let bad_errs = errors(
+        r"fn g() -> Result<int, string> { return Ok(1) }
+
+fn f() -> string {
+  let r = g()
+  match r {
+    Result.Ok(v) -> { return v }
+    Result.Err(e) -> { return e }
+  }
+}",
+    );
+    assert_eq!(bad_errs.len(), 1, "expected 1 error, got: {bad_errs:?}");
+    assert!(bad_errs[0].contains("expected string, found int"));
+}
+
+#[test]
+fn test_generic_enum_match_pattern_binds_instantiated_payload() {
+    let errs = errors(
+        r#"enum Box<T> {
+  Full(value: T),
+  Empty
+}
+
+fn f(b: Box<string>) -> string {
+  match b {
+    Box.Full(v) -> { return v }
+    Box.Empty -> { return "" }
+  }
+}"#,
+    );
+    assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
+}
+
+#[test]
+fn test_unparameterised_generic_enum_match_binds_gradual_payload() {
+    // A bare `Result` scrutinee (no type args statically known) must not
+    // leak the phantom declaration param `T` into the arm scope; the
+    // binding degrades to gradual and the arm body stays checkable.
+    let errs = errors(
+        r"fn f(r: Result) -> int {
+  match r {
+    Result.Ok(v) -> { return v }
+    Result.Err(e) -> { return 0 }
+  }
+}",
+    );
+    assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
+}
+
+#[test]
 fn test_result_generic_type_mismatch_reports_error() {
     let errs = errors(
         r"pipeline t(task) {
@@ -2114,4 +2182,54 @@ pipeline t(task) {
         !bad_errs.is_empty(),
         "expected an error: `fn(string)` cannot fill an `fn(int)` slot"
     );
+}
+
+#[test]
+fn test_bare_variant_match_patterns_bind_and_cover() {
+    // Bare `Ok(v)` / `Err(e)` patterns resolve to the Result enum, bind
+    // instantiated payload types, and count toward exhaustiveness.
+    let errs = errors(
+        r"fn g() -> Result<int, string> { return Ok(1) }
+
+fn f() -> int {
+  match g() {
+    Ok(v) -> { return v }
+    Err(e) -> { return e.len() }
+  }
+}",
+    );
+    assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
+
+    // Missing a variant is still non-exhaustive with bare patterns.
+    let errs = errors(
+        r"fn g() -> Result<int, string> { return Ok(1) }
+
+fn f() -> int {
+  match g() {
+    Ok(v) -> { return v }
+  }
+}",
+    );
+    assert!(
+        errs.iter().any(|e| e.contains("Non-exhaustive")),
+        "expected non-exhaustive error, got: {errs:?}"
+    );
+}
+
+#[test]
+fn test_bare_variant_pattern_on_user_enum() {
+    let errs = errors(
+        r"enum Shape {
+  Circle(radius: int),
+  Square(side: int)
+}
+
+fn area(s: Shape) -> int {
+  match s {
+    Circle(r) -> { return r * r * 3 }
+    Square(w) -> { return w * w }
+  }
+}",
+    );
+    assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
 }

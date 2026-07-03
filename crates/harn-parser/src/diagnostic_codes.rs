@@ -907,13 +907,13 @@ const REPAIR_BINDINGS_RENAME_TO_CLOSEST: RepairTemplate = RepairTemplate {
 
 const REPAIR_BINDINGS_MAKE_MUTABLE: RepairTemplate = RepairTemplate {
     id: "bindings/make-mutable",
-    summary: "Mark the binding `mut` so it can be reassigned",
+    summary: "Declare the binding with `var` so it can be reassigned",
     safety: RepairSafety::ScopeLocal,
 };
 
 const REPAIR_BINDINGS_MAKE_IMMUTABLE: RepairTemplate = RepairTemplate {
     id: "bindings/make-immutable",
-    summary: "Drop `mut` since the binding is never reassigned",
+    summary: "Declare the never-reassigned binding with `let` instead of `var`",
     safety: RepairSafety::BehaviorPreserving,
 };
 

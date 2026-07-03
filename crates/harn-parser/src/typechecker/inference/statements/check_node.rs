@@ -414,6 +414,9 @@ impl TypeChecker {
             } => {
                 self.check_node(iterable, scope);
                 let mut loop_scope = scope.child();
+                // Narrowing established before the loop only holds for the
+                // first iteration if the subject is reassigned in the body.
+                Self::invalidate_loop_assigned_narrowings(&mut loop_scope, body);
                 let iter_type = self.infer_type(iterable, scope);
                 if let BindingPattern::Identifier(variable) = pattern {
                     let elem_type = iter_type
@@ -451,14 +454,23 @@ impl TypeChecker {
                     self.define_pattern_vars_typed(pattern, &elem_source, &mut loop_scope, false);
                 }
                 self.check_block(body, &mut loop_scope);
+                // Statements after the loop see the post-reassignment types.
+                Self::invalidate_loop_assigned_narrowings(scope, body);
             }
 
             Node::WhileLoop { condition, body } => {
                 self.check_node(condition, scope);
                 let refs = self.extract_refinements_with_lint(condition, scope);
                 let mut loop_scope = scope.child();
+                // Invalidate pre-loop narrowings for body-reassigned vars
+                // first, then apply the loop condition's own refinements —
+                // the condition is re-tested every iteration, so its
+                // narrowing stays trustworthy inside the body.
+                Self::invalidate_loop_assigned_narrowings(&mut loop_scope, body);
                 refs.apply_truthy(&mut loop_scope);
                 self.check_block(body, &mut loop_scope);
+                // Statements after the loop see the post-reassignment types.
+                Self::invalidate_loop_assigned_narrowings(scope, body);
             }
 
             Node::RequireStmt { condition, message } => {
@@ -522,11 +534,19 @@ impl TypeChecker {
             Node::Assignment {
                 target, value, op, ..
             } => {
+                // Slot type of a property/subscript target (`xs[0]`, `d.k`),
+                // with receiver/index diagnostics emitted as a side effect.
+                // `None` for bare-identifier targets and gradual receivers.
+                let path_slot_type = if matches!(&target.node, Node::Identifier(_)) {
+                    None
+                } else {
+                    self.assignment_path_slot_type(target, scope)
+                };
                 let expected_value_type = if op.is_none() {
                     if let Node::Identifier(name) = &target.node {
                         scope.get_var(name).cloned().flatten()
                     } else {
-                        None
+                        path_slot_type.clone()
                     }
                 } else {
                     None
@@ -555,10 +575,13 @@ impl TypeChecker {
                         };
                         if !context_checked {
                             if let Some(actual) = &assigned {
-                                // Check against the original (pre-narrowing) type if narrowed
+                                // Check against the original (pre-narrowing) type if
+                                // narrowed — anywhere in the scope chain, so an
+                                // assignment inside a nested block/loop still
+                                // validates against the declared type rather than
+                                // the branch-narrowed one.
                                 let check_type = scope
-                                    .narrowed_vars
-                                    .get(name)
+                                    .narrowed_original(name)
                                     .and_then(|t| t.as_ref())
                                     .unwrap_or(var_type);
                                 if !self.types_compatible(check_type, actual, scope) {
@@ -590,8 +613,16 @@ impl TypeChecker {
                         }
                     }
 
-                    // Invalidate narrowing on reassignment: restore original type
-                    if let Some(original) = scope.narrowed_vars.remove(name) {
+                    // Invalidate narrowing on reassignment: restore original
+                    // type. The narrowing record may live in an ancestor
+                    // scope (branch condition narrowed, assignment sits in a
+                    // nested block); defining the original in the current
+                    // scope shadows the stale narrowed entry either way.
+                    let original = scope
+                        .narrowed_vars
+                        .remove(name)
+                        .or_else(|| scope.narrowed_original(name).cloned());
+                    if let Some(original) = original {
                         if let Some(widened) = widened_slot_type.as_ref() {
                             scope.define_var(name, Some(widened.clone()));
                         } else {
@@ -610,6 +641,42 @@ impl TypeChecker {
                     scope.clear_narrowed_paths_rooted_at(name);
                     scope.clear_unknown_ruled_out_paths_rooted_at(name);
                 } else if let Some(base) = Self::assignment_target_root(target) {
+                    // Value-vs-slot check for container writes: `xs[0] = v`
+                    // against the element type, `d["k"] = v` against the dict
+                    // value type, `s.n = v` against the field type. Mirrors
+                    // the bare-identifier branch above, including the
+                    // compound-op result typing.
+                    if let Some(slot_type) = &path_slot_type {
+                        let value_type = self.infer_type(value, scope);
+                        let assigned = if let Some(op) = op {
+                            let slot_read = self.infer_type(target, scope);
+                            infer_binary_op_type(op, &slot_read, &value_type)
+                        } else {
+                            value_type
+                        };
+                        if !context_checked {
+                            if let Some(actual) = &assigned {
+                                if !self.types_compatible(slot_type, actual, scope) {
+                                    let label = self.render_assignment_target(target);
+                                    self.type_mismatch_at(
+                                        Code::AssignmentTypeMismatch,
+                                        format!("assignment to `{label}`"),
+                                        slot_type,
+                                        actual,
+                                        value.span,
+                                        (
+                                            Some((
+                                                target.span,
+                                                format!("`{label}` has this expected type"),
+                                            )),
+                                            Some(value.span),
+                                        ),
+                                        scope,
+                                    );
+                                }
+                            }
+                        }
+                    }
                     // Mutating a path (`entry.arguments = ...`, `o.a[i] = ...`)
                     // can invalidate any narrowing rooted at the same base, so
                     // conservatively drop them all.
@@ -734,7 +801,20 @@ impl TypeChecker {
                 self.check_node(value, scope);
                 let value_type = self.infer_type(value, scope);
                 for arm in arms {
-                    self.check_node(&arm.pattern, scope);
+                    // A bare call-shaped variant pattern (`Ok(v)`) is a
+                    // *pattern*, not a call expression — checking it as an
+                    // expression would flag the payload binding as an
+                    // undefined name. It compiles as an enum-variant arm
+                    // whenever some visible enum declares the variant, so
+                    // mirror that resolution rule here.
+                    let is_bare_variant_pattern = matches!(
+                        &arm.pattern.node,
+                        Node::FunctionCall { name, .. }
+                            if !scope.enum_owners_of_variant(name).is_empty()
+                    );
+                    if !is_bare_variant_pattern {
+                        self.check_node(&arm.pattern, scope);
+                    }
                     // Check for incompatible literal pattern types —
                     // once per alternative inside an OrPattern so
                     // mixed-type or-patterns still surface the warning.
@@ -837,24 +917,18 @@ impl TypeChecker {
                         }
                     }
                     // Bind the arm's pattern variables (list/dict destructuring,
-                    // including `[a, ...rest]`) with their refined types so the
-                    // guard and body are type-checked against them, not against
-                    // gradual `unknown`. Enum/variant patterns are excluded: a
-                    // variant field can be an unsubstituted generic parameter
-                    // (e.g. the `E` in `Result.Err(e)`), and binding it as a
-                    // concrete type here yields false positives — proper enum
-                    // binding needs type-argument substitution from the matched
-                    // value, which is not wired through this path.
-                    if !matches!(
-                        &arm.pattern.node,
-                        Node::EnumConstruct { .. } | Node::MethodCall { .. }
-                    ) {
-                        self.define_match_pattern_bindings(
-                            &arm.pattern,
-                            value_type.as_ref(),
-                            &mut arm_scope,
-                        );
-                    }
+                    // including `[a, ...rest]`, and enum variant payloads) with
+                    // their refined types so the guard and body are type-checked
+                    // against them, not against gradual `unknown`. Enum variant
+                    // fields are instantiated with the scrutinee's type
+                    // arguments (`Result.Ok(v)` on a `Result<int, string>` binds
+                    // `v: int`); an unsubstitutable declaration parameter
+                    // degrades to gradual inside `define_enum_pattern_bindings`.
+                    self.define_match_pattern_bindings(
+                        &arm.pattern,
+                        value_type.as_ref(),
+                        &mut arm_scope,
+                    );
                     // `match type_of(subject) { "T" -> … }` narrows the subject
                     // in the arm — independent of the pattern-binding gate above.
                     self.narrow_match_subject(value, &arm.pattern, &mut arm_scope);

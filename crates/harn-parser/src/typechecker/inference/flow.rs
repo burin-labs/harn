@@ -94,26 +94,13 @@ fn property_access_parts(node: &SNode) -> Option<(&SNode, String)> {
 }
 
 /// The runtime kinds that `type_of(...)` can return and that the refinement
-/// logic knows how to map to a `TypeExpr` member kind. Kept in lockstep with
-/// `VmValue::type_name` so the narrower never accepts a tag the runtime can't
-/// produce. Shared by `if`/`guard` `type_of` narrowing and `match type_of(…)`
+/// logic knows how to map to a `TypeExpr` member kind. Sourced from the
+/// canonical tag registry in `harn-builtin-meta`, which `harn-vm` asserts
+/// against `VmValue::type_name`, so the narrower and the runtime cannot
+/// drift. Shared by `if`/`guard` `type_of` narrowing and `match type_of(…)`
 /// arm narrowing.
 fn is_type_of_tag(tag: &str) -> bool {
-    const TAGS: &[&str] = &[
-        "int",
-        "string",
-        "float",
-        "bool",
-        "nil",
-        "list",
-        "dict",
-        "closure",
-        "bytes",
-        "generator",
-        "stream",
-        "iter",
-    ];
-    TAGS.contains(&tag)
+    harn_builtin_meta::runtime_type_tags::is_narrowable_tag(tag)
 }
 
 /// The literal `TypeExpr` for a discriminant value, used to build the
@@ -228,7 +215,46 @@ fn evaluate_constant_bool(condition: &SNode) -> Option<bool> {
     }
 }
 
+/// Names of variables assigned (plain or compound) anywhere in `body`,
+/// including nested control flow and closures. Drives loop back-edge
+/// narrowing invalidation: a variable narrowed before a loop and reassigned
+/// inside it may hold its widened declared type on the second iteration, so
+/// the narrowing cannot be trusted anywhere in the loop body.
+pub(in crate::typechecker) fn assigned_var_names(body: &[SNode]) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    crate::visit::walk_program(body, &mut |node| {
+        if let Node::Assignment { target, .. } = &node.node {
+            if let Node::Identifier(name) = &target.node {
+                if !names.iter().any(|n| n == name) {
+                    names.push(name.clone());
+                }
+            }
+        }
+    });
+    names
+}
+
 impl TypeChecker {
+    /// Invalidate, in a fresh loop scope, every narrowing (variable or
+    /// reference path) whose subject is reassigned somewhere in the loop
+    /// body. Type narrowing established before the loop only describes the
+    /// first iteration; from the back edge onward the variable may hold any
+    /// value of its declared type. Mirrors the reassignment invalidation in
+    /// the `Assignment` arm, applied eagerly at loop entry.
+    pub(in crate::typechecker) fn invalidate_loop_assigned_narrowings(
+        scope: &mut TypeScope,
+        body: &[SNode],
+    ) {
+        for name in assigned_var_names(body) {
+            if let Some(original) = scope.narrowed_original(&name).cloned() {
+                scope.narrowed_vars.remove(&name);
+                scope.define_var(&name, original);
+            }
+            scope.clear_narrowed_paths_rooted_at(&name);
+            scope.clear_unknown_ruled_out_paths_rooted_at(&name);
+        }
+    }
+
     /// Wrap `extract_refinements` with the [`Code::LintVacuousCondition`]
     /// emission pass. Callers that own `&mut self` (every `if` / `while` /
     /// `guard` site) should prefer this over the bare associated form so the
@@ -1098,6 +1124,12 @@ impl TypeChecker {
                     | Node::MethodCall {
                         method: variant, ..
                     } => covered.push(variant.clone()),
+                    // Bare call-shaped variant pattern (`Ok(v)`).
+                    Node::FunctionCall { name: variant, .. }
+                        if variant_names.contains(&variant.as_str()) =>
+                    {
+                        covered.push(variant.clone());
+                    }
                     Node::Identifier(_) => return true,
                     _ => {}
                 }
@@ -1259,6 +1291,15 @@ impl TypeChecker {
                     Node::MethodCall {
                         method: variant, ..
                     } => covered.push(variant.clone()),
+                    // Bare call-shaped variant pattern: Variant(bindings...)
+                    Node::FunctionCall { name: variant, .. }
+                        if variants
+                            .variants
+                            .iter()
+                            .any(|declared| declared.name == *variant) =>
+                    {
+                        covered.push(variant.clone());
+                    }
                     // Identifier patterns bind and catch all remaining values at runtime.
                     Node::Identifier(_) => {
                         has_wildcard = true;
@@ -1513,11 +1554,12 @@ impl TypeChecker {
         }
     }
 
-    /// Complete set of concrete variants that `type_of` may return, used as
-    /// the reference for exhaustive-narrowing warnings on `unknown`.
-    const UNKNOWN_CONCRETE_TYPES: &'static [&'static str] = &[
-        "int", "string", "float", "bool", "nil", "list", "dict", "closure", "bytes",
-    ];
+    /// The `type_of` variants an `unknown` value must rule out before an
+    /// exhaustive-narrowing chain counts as complete. Sourced from the
+    /// canonical tag registry in `harn-builtin-meta` (the boundary-API
+    /// JSON-representable subset — see `UNKNOWN_COVERAGE` there).
+    const UNKNOWN_CONCRETE_TYPES: &'static [&'static str] =
+        harn_builtin_meta::runtime_type_tags::UNKNOWN_COVERAGE;
 
     /// Whether a reference node's type resolves to a top type (`unknown` /
     /// `any`) — the precondition for path-based `type_of` exhaustiveness
