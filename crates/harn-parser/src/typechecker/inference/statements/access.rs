@@ -463,7 +463,7 @@ impl TypeChecker {
                 {
                     if !self.types_compatible(&expected_index, &actual_index, scope) {
                         self.type_mismatch_at(
-                            crate::diagnostic_codes::Code::AssignmentTypeMismatch,
+                            Code::AssignmentTypeMismatch,
                             "subscript index",
                             &expected_index,
                             &actual_index,

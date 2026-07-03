@@ -645,11 +645,11 @@ fn test_unannotated_dict_literal_writes_stay_lenient() {
 #[test]
 fn test_compound_assignment_to_list_element_type_checks() {
     let errs = errors(
-        r#"fn f() -> int {
+        r"fn f() -> int {
   var xs: list<int> = [1, 2]
   xs[0] += 1
   return xs[0]
-}"#,
+}",
     );
     assert!(errs.is_empty(), "got: {errs:?}");
 }

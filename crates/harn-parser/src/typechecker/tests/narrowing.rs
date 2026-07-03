@@ -1376,7 +1376,7 @@ fn test_assignment_in_nested_scope_checks_against_declared_type() {
     // target is the declared (pre-narrowing) type from the scope chain,
     // not the branch-narrowed `string`.
     let errs = errors(
-        r#"fn f(start: string?) -> int {
+        r"fn f(start: string?) -> int {
   var x: string? = start
   if x != nil {
     for i in [1, 2] {
@@ -1384,7 +1384,7 @@ fn test_assignment_in_nested_scope_checks_against_declared_type() {
     }
   }
   return 0
-}"#,
+}",
     );
     assert!(errs.is_empty(), "got: {errs:?}");
 }
@@ -1417,7 +1417,7 @@ fn test_while_condition_narrowing_survives_body_reassignment() {
     // The while condition re-tests every iteration, so its own narrowing
     // stays sound even though the body reassigns the variable.
     let errs = errors(
-        r#"fn next_val() -> string? { return nil }
+        r"fn next_val() -> string? { return nil }
 
 fn f(start: string?) -> int {
   var x: string? = start
@@ -1427,7 +1427,7 @@ fn f(start: string?) -> int {
     x = next_val()
   }
   return n
-}"#,
+}",
     );
     assert!(errs.is_empty(), "got: {errs:?}");
 }
