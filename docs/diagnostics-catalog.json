@@ -1690,7 +1690,7 @@
         {
           "id": "bindings/make-immutable",
           "safety": "behavior-preserving",
-          "summary": "Drop `mut` since the binding is never reassigned"
+          "summary": "Declare the never-reassigned binding with `let` instead of `var`"
         }
       ],
       "related": [
@@ -2362,7 +2362,7 @@
         {
           "id": "bindings/make-mutable",
           "safety": "scope-local",
-          "summary": "Mark the binding `mut` so it can be reassigned"
+          "summary": "Declare the binding with `var` so it can be reassigned"
         }
       ],
       "related": [
@@ -2379,7 +2379,7 @@
         {
           "id": "bindings/make-immutable",
           "safety": "behavior-preserving",
-          "summary": "Drop `mut` since the binding is never reassigned"
+          "summary": "Declare the never-reassigned binding with `let` instead of `var`"
         }
       ],
       "related": [

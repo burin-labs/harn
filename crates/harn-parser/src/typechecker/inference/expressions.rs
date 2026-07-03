@@ -271,7 +271,41 @@ impl TypeChecker {
                     self.define_enum_pattern_bindings(enum_name, method, args, value_type, scope);
                 }
             }
+            // Bare call-shaped variant pattern (`Ok(v)`): resolve the enum
+            // from the scrutinee's static type, or — for an untyped
+            // scrutinee — from the unique visible enum declaring the
+            // variant (mirroring the compiler's resolution rule; payloads
+            // then bind gradually).
+            Node::FunctionCall { name, args, .. } => {
+                let enum_name = self.enum_name_of_scrutinee(value_type, scope).or_else(|| {
+                    let owners = scope.enum_owners_of_variant(name);
+                    match owners.as_slice() {
+                        [only] => Some(only.clone()),
+                        _ => None,
+                    }
+                });
+                if let Some(enum_name) = enum_name {
+                    self.define_enum_pattern_bindings(&enum_name, name, args, value_type, scope);
+                }
+            }
             _ => {}
+        }
+    }
+
+    /// The enum a match scrutinee's static type resolves to, if any. Powers
+    /// bare call-shaped variant patterns (`Ok(v)` without `Result.`).
+    pub(in crate::typechecker) fn enum_name_of_scrutinee(
+        &self,
+        value_type: Option<&TypeExpr>,
+        scope: &TypeScope,
+    ) -> Option<String> {
+        match self.resolve_alias(value_type?, scope) {
+            TypeExpr::Named(name) | TypeExpr::Applied { name, .. }
+                if scope.get_enum(&name).is_some() =>
+            {
+                Some(name)
+            }
+            _ => None,
         }
     }
 

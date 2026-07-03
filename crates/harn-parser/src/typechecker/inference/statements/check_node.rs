@@ -801,7 +801,20 @@ impl TypeChecker {
                 self.check_node(value, scope);
                 let value_type = self.infer_type(value, scope);
                 for arm in arms {
-                    self.check_node(&arm.pattern, scope);
+                    // A bare call-shaped variant pattern (`Ok(v)`) is a
+                    // *pattern*, not a call expression — checking it as an
+                    // expression would flag the payload binding as an
+                    // undefined name. It compiles as an enum-variant arm
+                    // whenever some visible enum declares the variant, so
+                    // mirror that resolution rule here.
+                    let is_bare_variant_pattern = matches!(
+                        &arm.pattern.node,
+                        Node::FunctionCall { name, .. }
+                            if !scope.enum_owners_of_variant(name).is_empty()
+                    );
+                    if !is_bare_variant_pattern {
+                        self.check_node(&arm.pattern, scope);
+                    }
                     // Check for incompatible literal pattern types —
                     // once per alternative inside an OrPattern so
                     // mixed-type or-patterns still surface the warning.
@@ -904,24 +917,18 @@ impl TypeChecker {
                         }
                     }
                     // Bind the arm's pattern variables (list/dict destructuring,
-                    // including `[a, ...rest]`) with their refined types so the
-                    // guard and body are type-checked against them, not against
-                    // gradual `unknown`. Enum/variant patterns are excluded: a
-                    // variant field can be an unsubstituted generic parameter
-                    // (e.g. the `E` in `Result.Err(e)`), and binding it as a
-                    // concrete type here yields false positives — proper enum
-                    // binding needs type-argument substitution from the matched
-                    // value, which is not wired through this path.
-                    if !matches!(
-                        &arm.pattern.node,
-                        Node::EnumConstruct { .. } | Node::MethodCall { .. }
-                    ) {
-                        self.define_match_pattern_bindings(
-                            &arm.pattern,
-                            value_type.as_ref(),
-                            &mut arm_scope,
-                        );
-                    }
+                    // including `[a, ...rest]`, and enum variant payloads) with
+                    // their refined types so the guard and body are type-checked
+                    // against them, not against gradual `unknown`. Enum variant
+                    // fields are instantiated with the scrutinee's type
+                    // arguments (`Result.Ok(v)` on a `Result<int, string>` binds
+                    // `v: int`); an unsubstitutable declaration parameter
+                    // degrades to gradual inside `define_enum_pattern_bindings`.
+                    self.define_match_pattern_bindings(
+                        &arm.pattern,
+                        value_type.as_ref(),
+                        &mut arm_scope,
+                    );
                     // `match type_of(subject) { "T" -> … }` narrows the subject
                     // in the arm — independent of the pattern-binding gate above.
                     self.narrow_match_subject(value, &arm.pattern, &mut arm_scope);

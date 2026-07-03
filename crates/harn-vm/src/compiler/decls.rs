@@ -89,6 +89,7 @@ impl Compiler {
 
                 let mut fn_compiler = self.nested_body();
                 fn_compiler.enum_names = self.enum_names.clone();
+                fn_compiler.enum_variant_owners = self.enum_variant_owners.clone();
                 fn_compiler.interface_methods = self.interface_methods.clone();
                 fn_compiler.type_aliases = self.type_aliases.clone();
                 fn_compiler.struct_layouts = self.struct_layouts.clone();
@@ -144,6 +145,7 @@ impl Compiler {
         // Emit a constructor: StructName({field: val, ...}) -> StructInstance.
         let mut fn_compiler = self.nested_body();
         fn_compiler.enum_names = self.enum_names.clone();
+        fn_compiler.enum_variant_owners = self.enum_variant_owners.clone();
         fn_compiler.interface_methods = self.interface_methods.clone();
         fn_compiler.type_aliases = self.type_aliases.clone();
         fn_compiler.struct_layouts = self.struct_layouts.clone();

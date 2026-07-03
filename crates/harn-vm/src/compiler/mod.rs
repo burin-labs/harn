@@ -134,6 +134,10 @@ pub struct Compiler {
     column: u32,
     /// Track enum type names so PropertyAccess on them can produce EnumVariant.
     enum_names: std::collections::HashSet<String>,
+    /// Variant name → owning enum names. Lets a bare call-shaped match
+    /// pattern (`Ok(v)`, `Some(x)`) resolve to its enum without
+    /// qualification when the variant name is unambiguous.
+    enum_variant_owners: std::collections::HashMap<String, Vec<String>>,
     /// Track struct type names to declared field order for indexed instances.
     struct_layouts: std::collections::HashMap<String, Vec<String>>,
     /// Track interface names → method names for runtime enforcement.

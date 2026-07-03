@@ -1,0 +1,48 @@
+enum Shape {
+  Circle(radius)
+  Square(side)
+}
+
+fn describe(s: Shape) -> string {
+  match s {
+    Circle(r) -> { return "circle r=${r}" }
+    Square(w) -> { return "square w=${w}" }
+  }
+}
+
+fn half(v: int) -> Result<int, string> {
+  if v % 2 == 0 {
+    return Ok(v / 2)
+  }
+  return Err("odd: ${v}")
+}
+
+pipeline test(task) {
+  // Bare call-shaped variant patterns on the builtin Result enum.
+  match half(10) {
+    Ok(v) -> { log("ok ${v}") }
+    Err(e) -> { log("err ${e}") }
+  }
+  match half(7) {
+    Ok(v) -> { log("ok ${v}") }
+    Err(e) -> { log("err ${e}") }
+  }
+  // Bare patterns on a user-declared enum, via a typed fn.
+  log(describe(Shape.Circle(2)))
+  log(describe(Shape.Square(3)))
+  // Guards still apply to bare variant arms.
+  match half(10) {
+    Ok(v) if v > 100 -> { log("big ${v}") }
+    Ok(v) -> { log("small ${v}") }
+    Err(e) -> { log("err ${e}") }
+  }
+  // A call-shaped pattern that is NOT a variant stays an
+  // expression-equality pattern.
+  fn code_red() -> int {
+    return 3
+  }
+  match 3 {
+    code_red() -> { log("red") }
+    _ -> { log("other") }
+  }
+}

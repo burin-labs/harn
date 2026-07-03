@@ -2183,3 +2183,53 @@ pipeline t(task) {
         "expected an error: `fn(string)` cannot fill an `fn(int)` slot"
     );
 }
+
+#[test]
+fn test_bare_variant_match_patterns_bind_and_cover() {
+    // Bare `Ok(v)` / `Err(e)` patterns resolve to the Result enum, bind
+    // instantiated payload types, and count toward exhaustiveness.
+    let errs = errors(
+        r#"fn g() -> Result<int, string> { return Ok(1) }
+
+fn f() -> int {
+  match g() {
+    Ok(v) -> { return v }
+    Err(e) -> { return e.len() }
+  }
+}"#,
+    );
+    assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
+
+    // Missing a variant is still non-exhaustive with bare patterns.
+    let errs = errors(
+        r#"fn g() -> Result<int, string> { return Ok(1) }
+
+fn f() -> int {
+  match g() {
+    Ok(v) -> { return v }
+  }
+}"#,
+    );
+    assert!(
+        errs.iter().any(|e| e.contains("Non-exhaustive")),
+        "expected non-exhaustive error, got: {errs:?}"
+    );
+}
+
+#[test]
+fn test_bare_variant_pattern_on_user_enum() {
+    let errs = errors(
+        r#"enum Shape {
+  Circle(radius: int),
+  Square(side: int)
+}
+
+fn area(s: Shape) -> int {
+  match s {
+    Circle(r) -> { return r * r * 3 }
+    Square(w) -> { return w * w }
+  }
+}"#,
+    );
+    assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
+}

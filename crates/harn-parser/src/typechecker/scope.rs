@@ -433,6 +433,24 @@ impl TypeScope {
             .or_else(|| self.parent.as_ref()?.get_enum(name))
     }
 
+    /// Names of every visible enum that declares a variant named `variant`,
+    /// walking the scope chain (child declarations shadow same-named parent
+    /// enums). Powers bare call-shaped match patterns (`Ok(v)`): the
+    /// compiler resolves them when exactly one enum owns the variant name.
+    pub(super) fn enum_owners_of_variant(&self, variant: &str) -> Vec<String> {
+        let mut owners: Vec<String> = Vec::new();
+        let mut cur = Some(self);
+        while let Some(scope) = cur {
+            for (name, info) in &scope.enums {
+                if info.variants.iter().any(|v| v.name == variant) && !owners.contains(name) {
+                    owners.push(name.clone());
+                }
+            }
+            cur = scope.parent.as_deref();
+        }
+        owners
+    }
+
     pub(super) fn get_interface(&self, name: &str) -> Option<&InterfaceDeclInfo> {
         self.interfaces
             .get(name)

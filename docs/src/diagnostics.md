@@ -2469,7 +2469,7 @@ unused import lint
 mutable never reassigned lint
 
 - **Repair:** `bindings/make-immutable` &nbsp;·&nbsp; **Safety:** `behavior-preserving`
-- Drop `mut` since the binding is never reassigned
+- Declare the never-reassigned binding with `let` instead of `var`
 - **See also:** [`HARN-OWN-002`](#harn-own-002)
 
 #### How to fix
@@ -3393,7 +3393,7 @@ module graph cannot be constructed. Compilation cannot proceed.
 immutable binding is reassigned
 
 - **Repair:** `bindings/make-mutable` &nbsp;·&nbsp; **Safety:** `scope-local`
-- Mark the binding `mut` so it can be reassigned
+- Declare the binding with `var` so it can be reassigned
 - **See also:** [`HARN-OWN-002`](#harn-own-002)
 
 #### How to fix
@@ -3408,7 +3408,7 @@ immutable binding is reassigned
 mutable binding is never reassigned
 
 - **Repair:** `bindings/make-immutable` &nbsp;·&nbsp; **Safety:** `behavior-preserving`
-- Drop `mut` since the binding is never reassigned
+- Declare the never-reassigned binding with `let` instead of `var`
 - **See also:** [`HARN-LNT-018`](#harn-lnt-018)
 
 #### How to fix

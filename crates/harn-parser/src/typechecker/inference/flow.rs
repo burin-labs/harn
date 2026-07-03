@@ -1124,6 +1124,12 @@ impl TypeChecker {
                     | Node::MethodCall {
                         method: variant, ..
                     } => covered.push(variant.clone()),
+                    // Bare call-shaped variant pattern (`Ok(v)`).
+                    Node::FunctionCall { name: variant, .. }
+                        if variant_names.contains(&variant.as_str()) =>
+                    {
+                        covered.push(variant.clone());
+                    }
                     Node::Identifier(_) => return true,
                     _ => {}
                 }
@@ -1285,6 +1291,15 @@ impl TypeChecker {
                     Node::MethodCall {
                         method: variant, ..
                     } => covered.push(variant.clone()),
+                    // Bare call-shaped variant pattern: Variant(bindings...)
+                    Node::FunctionCall { name: variant, .. }
+                        if variants
+                            .variants
+                            .iter()
+                            .any(|declared| declared.name == *variant) =>
+                    {
+                        covered.push(variant.clone());
+                    }
                     // Identifier patterns bind and catch all remaining values at runtime.
                     Node::Identifier(_) => {
                         has_wildcard = true;
