@@ -2257,7 +2257,7 @@ fn test_ternary_branch_merge_collapses_never_and_simplifies() {
     // Nested unions flatten: `(int | nil) : int` is `int | nil`, not a
     // nested union that defeats downstream nil-narrowing.
     let errs = errors(
-        r#"fn g() -> int? { return 1 }
+        r"fn g() -> int? { return 1 }
 
 fn f(flag: bool) -> int {
   let x = flag ? g() : 0
@@ -2265,7 +2265,7 @@ fn f(flag: bool) -> int {
     return x
   }
   return -1
-}"#,
+}",
     );
     assert!(errs.is_empty(), "flattened union should narrow: {errs:?}");
 }
@@ -2275,21 +2275,21 @@ fn test_aliased_dict_receiver_keeps_value_type_across_methods() {
     // `type Env = dict<string, string>`: every dict combinator must see
     // through the alias, not just `.values()`.
     let errs = errors(
-        r#"type Env = dict<string, string>
+        r"type Env = dict<string, string>
 
 fn f(e: Env) -> int {
   let m: dict<string, string> = e.map_values(fn(v) { return v })
   return m.count()
-}"#,
+}",
     );
     assert!(errs.is_empty(), "map_values lost the alias types: {errs:?}");
 
     let errs = errors(
-        r#"type Env = dict<string, string>
+        r"type Env = dict<string, string>
 
 fn f(e: Env) -> dict<string, int> {
   return e.map_values(fn(v) { return v })
-}"#,
+}",
     );
     assert!(
         errs.iter()
@@ -2301,11 +2301,11 @@ fn f(e: Env) -> dict<string, int> {
 #[test]
 fn test_bool_match_requires_both_arms() {
     let errs = errors(
-        r#"fn f(b: bool) -> int {
+        r"fn f(b: bool) -> int {
   match b {
     true -> { return 1 }
   }
-}"#,
+}",
     );
     assert!(
         errs.iter()
@@ -2314,12 +2314,12 @@ fn test_bool_match_requires_both_arms() {
     );
 
     let errs = errors(
-        r#"fn f(b: bool) -> int {
+        r"fn f(b: bool) -> int {
   match b {
     true -> { return 1 }
     false -> { return 0 }
   }
-}"#,
+}",
     );
     assert!(
         errs.is_empty(),
