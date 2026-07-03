@@ -333,6 +333,15 @@ pub struct SecurityConfig {
     /// First-party file reads stay trusted. Default OFF (net-new enforcement);
     /// byte-identical behaviour when disabled.
     pub taint_file_provenance: bool,
+    /// Extend untrusted-origin file provenance to the command surface. An
+    /// `Execute`-kind tool whose command string names a tainted-origin path
+    /// (`cat vendor/dep/README`) launders that content back into context outside
+    /// a structured `read_file` call; classify it untrusted by the same file
+    /// origin so the laundering read is quarantined too. Closes the `tool_result`
+    /// residual (fetch-to-disk then `cat`). Fires only on paths already known
+    /// untrusted, so a first-party `cat src/main.rs` stays trusted. Default OFF
+    /// (net-new enforcement); byte-identical behaviour when disabled.
+    pub taint_command_reads: bool,
     /// Narrow the exfil axis of the lethal-trifecta gate to attacker-originated
     /// destinations. When on, an exfil-capable tool only forces confirmation if
     /// its destination was named in untrusted content (the injection controls
@@ -378,6 +387,7 @@ impl Default for SecurityConfig {
             pin_mcp_schemas: true,
             authenticate_directives: false,
             taint_file_provenance: false,
+            taint_command_reads: false,
             precise_exfil_gate: false,
             gate_secret_reads: true,
             detect_injection: false,
@@ -1062,6 +1072,7 @@ pub fn schema_json() -> JsonValue {
                     "pin_mcp_schemas": {"type": "boolean"},
                     "authenticate_directives": {"type": "boolean"},
                     "taint_file_provenance": {"type": "boolean"},
+                    "taint_command_reads": {"type": "boolean"},
                     "precise_exfil_gate": {"type": "boolean"},
                     "gate_secret_reads": {"type": "boolean"},
                     "detect_injection": {"type": "boolean"},

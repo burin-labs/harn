@@ -114,12 +114,74 @@ impl FileProvenanceLedger {
         })
     }
 
+    /// Trust classification for an `Execute`-kind tool whose command string names
+    /// a tainted-origin path — the laundering read (`cat vendor/dep/README`) that
+    /// evades structured [`Self::classify`] because the path never appears as a
+    /// `path` argument. Splits the command into path-shaped tokens (maximal runs
+    /// of path characters, so shell quoting / pipes / redirects are natural
+    /// delimiters), normalizes each, and returns the first that is a known
+    /// untrusted-origin file. Matching is exact on the normalized key, so a short
+    /// tainted name never substring-matches an unrelated path. `None` when the
+    /// command names no tainted path (fail-open, never a false quarantine).
+    pub fn references_tainted_path(&self, command: &str) -> Option<(TrustLevel, String)> {
+        if self.tainted.is_empty() {
+            return None;
+        }
+        command
+            .split(|c: char| !is_path_char(c))
+            .filter(|token| !token.is_empty())
+            .find_map(|token| self.classify(token))
+    }
+
     pub fn is_empty(&self) -> bool {
         self.tainted.is_empty()
     }
 
     pub fn len(&self) -> usize {
         self.tainted.len()
+    }
+}
+
+/// Characters that can appear in a workspace path. A command string is split on
+/// everything else, so shell metacharacters (pipes, redirects, quotes, `;`, `&`)
+/// delimit tokens without needing to enumerate them.
+fn is_path_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || matches!(c, '/' | '.' | '-' | '_' | '~')
+}
+
+/// Argument keys an `Execute`-kind tool names its shell command under. Mirrors
+/// [`PATH_KEYS`] for the command surface.
+const COMMAND_KEYS: &[&str] = &["command", "cmd", "script"];
+
+/// Extract the shell command string a tool call names, joining a `command` /
+/// `cmd` / `script` string plus any `args` / `argv` array elements, so a command
+/// split across an argv list is still scanned as one string. `None` when no
+/// command is present (unknown shape fails open to "no provenance").
+pub fn command_string(arguments: &serde_json::Value) -> Option<String> {
+    let obj = arguments.as_object()?;
+    let mut parts: Vec<String> = Vec::new();
+    for key in COMMAND_KEYS {
+        if let Some(serde_json::Value::String(value)) = obj.get(*key) {
+            if !value.trim().is_empty() {
+                parts.push(value.clone());
+            }
+        }
+    }
+    for key in ["args", "argv"] {
+        if let Some(serde_json::Value::Array(items)) = obj.get(key) {
+            for item in items {
+                if let serde_json::Value::String(value) = item {
+                    if !value.trim().is_empty() {
+                        parts.push(value.clone());
+                    }
+                }
+            }
+        }
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(" "))
     }
 }
 
@@ -228,5 +290,52 @@ mod tests {
         assert!(path_arguments(&json!({"query": "ripgrep this"})).is_empty());
         assert!(path_arguments(&json!({"path": "   "})).is_empty());
         assert!(path_arguments(&json!("not an object")).is_empty());
+    }
+
+    #[test]
+    fn references_tainted_path_catches_a_laundered_command_read() {
+        let mut ledger = FileProvenanceLedger::default();
+        ledger.record("vendor/dep/README.md", "fetch:clone");
+        // A `cat` that re-reads the tainted file, with a pipe and redirect around it.
+        assert_eq!(
+            ledger.references_tainted_path("cat ./vendor/dep/README.md | head -n 40"),
+            Some((TrustLevel::Untrusted, "file:fetch:clone".to_string()))
+        );
+        // Quoted spelling still matches (the quote is a non-path delimiter).
+        assert_eq!(
+            ledger.references_tainted_path("grep -R foo \"vendor/dep/README.md\""),
+            Some((TrustLevel::Untrusted, "file:fetch:clone".to_string()))
+        );
+    }
+
+    #[test]
+    fn references_tainted_path_is_precise_and_fail_open() {
+        let mut ledger = FileProvenanceLedger::default();
+        ledger.record("a.md", "fetch:clone");
+        // A first-party path that merely SHARES a suffix must not match: lookup is
+        // exact on the normalized key, never a substring.
+        assert!(ledger
+            .references_tainted_path("cat data.md && echo done")
+            .is_none());
+        // A command naming no tainted path at all is trusted.
+        assert!(ledger.references_tainted_path("ls -la src/").is_none());
+        // An empty ledger short-circuits to trusted.
+        assert!(FileProvenanceLedger::default()
+            .references_tainted_path("cat anything")
+            .is_none());
+    }
+
+    #[test]
+    fn command_string_joins_command_and_argv() {
+        assert_eq!(
+            command_string(&json!({"command": "cat vendor/dep/README.md"})),
+            Some("cat vendor/dep/README.md".to_string())
+        );
+        assert_eq!(
+            command_string(&json!({"cmd": "grep", "args": ["-R", "foo", "vendor/dep/README.md"]})),
+            Some("grep -R foo vendor/dep/README.md".to_string())
+        );
+        assert!(command_string(&json!({"path": "src/a.rs"})).is_none());
+        assert!(command_string(&json!({"command": "   "})).is_none());
     }
 }

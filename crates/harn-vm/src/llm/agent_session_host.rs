@@ -1400,6 +1400,31 @@ fn file_read_provenance(
         .find_map(|path| classify_file_read(session_id, &path))
 }
 
+/// Command-argument provenance (distrust-on-launder): an `Execute`-kind tool
+/// whose command string names a path already recorded as an untrusted-origin
+/// file re-reads that content into context outside a structured `read_file`
+/// call (`cat vendor/dep/README`). Classify it untrusted by the same file origin
+/// so the laundered payload arms the taint / trifecta gate, closing the
+/// `tool_result` residual. `None` for non-Execute tools, commandless calls, and
+/// commands that name no tainted path.
+fn command_read_provenance(
+    session_id: &str,
+    tool_name: &str,
+    result: &VmValue,
+) -> Option<(crate::security::TrustLevel, String)> {
+    let annotations = crate::orchestration::current_tool_annotations(tool_name);
+    if annotations.map(|a| a.kind) != Some(crate::tool_annotations::ToolKind::Execute) {
+        return None;
+    }
+    let arguments = dict_get(result, "arguments").map(vm_to_json)?;
+    let command = crate::security::command_string(&arguments)?;
+    with_session(session_id, "command_read_provenance", |session| {
+        Ok(session.file_provenance.references_tainted_path(&command))
+    })
+    .ok()
+    .flatten()
+}
+
 /// Taint-on-write propagation: when a tool [`crate::security::mutates_workspace`]
 /// and either its own result is untrusted (`result_origin`) or context is
 /// already tainted (`context_tainted`), record every path it wrote as
@@ -1578,6 +1603,18 @@ fn host_agent_session_record_tool_results_builtin(
             .or_else(|| {
                 if security_policy.taint_file_provenance {
                     file_read_provenance(&session_id, &name, result)
+                } else {
+                    None
+                }
+            })
+            // Command-argument provenance (distrust-on-launder): an Execute-kind
+            // tool whose command string names an untrusted-origin file re-reads
+            // that content outside a structured `read_file` call (`cat <path>`),
+            // the laundering path that evades lexical file provenance. Quarantined
+            // by the same taint/trifecta gate. Default OFF.
+            .or_else(|| {
+                if security_policy.taint_command_reads {
+                    command_read_provenance(&session_id, &name, result)
                 } else {
                     None
                 }
