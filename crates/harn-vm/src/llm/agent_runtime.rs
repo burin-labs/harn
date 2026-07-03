@@ -214,12 +214,21 @@ pub fn current_agent_session_id() -> Option<String> {
     crate::agent_sessions::current_session_id()
 }
 
+/// Install (or merge in) MCP client handles for a session. Merges by server
+/// name so an incremental `__host_mcp_bootstrap` — used by mid-conversation
+/// skill-declared MCP mounting — adds new servers without dropping the live
+/// handles of servers mounted by an earlier bootstrap. A same-named entry is
+/// overwritten with the freshly connected handle. On the initial bootstrap
+/// the session has no entry, so this is identical to a plain insert.
 pub(crate) fn install_session_mcp_clients(
     session_id: &str,
     clients: BTreeMap<String, VmMcpClientHandle>,
 ) {
     if let Ok(mut map) = SESSION_MCP_CLIENTS.lock() {
-        map.insert(session_id.to_string(), clients);
+        let existing = map.entry(session_id.to_string()).or_default();
+        for (name, handle) in clients {
+            existing.insert(name, handle);
+        }
     }
 }
 

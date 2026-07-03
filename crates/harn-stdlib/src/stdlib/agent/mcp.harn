@@ -10,10 +10,75 @@ pub fn agent_mcp_bootstrap_if_needed(session, opts) {
   if specs == nil || len(specs) == 0 {
     return opts
   }
+  return __mcp_bootstrap_and_admit(session, opts, specs)
+}
+
+/**
+ * agent_mcp_mount_additional.
+ *
+ * Mount MCP servers declared by a skill that activated mid-conversation.
+ * Only servers whose name is not already mounted (tracked via the
+ * `_mcp_server_info` running list the bootstrap path appends to) are
+ * bootstrapped, so a live server is never re-connected and its tools are
+ * never duplicated in the catalog or ceiling. `__host_mcp_bootstrap`
+ * replaces the session's MCP client map on every call, so re-bootstrapping
+ * the full set would drop live handles — mounting ONLY the delta keeps
+ * every previously mounted server intact.
+ *
+ * The delta bootstrap result is stashed on the returned opts as
+ * `_mcp_delta_bootstrap` (nil when nothing new mounted) so the caller can
+ * admit the same tools into the current turn's options with
+ * `agent_mcp_admit_bootstrap` — no second host round-trip.
+ *
+ * @effects: [host, mcp]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_mcp_mount_additional(session, opts, requested_specs) {
+  let delta = __mcp_delta_specs(opts, requested_specs ?? [])
+  if len(delta) == 0 {
+    return opts + {_mcp_delta_bootstrap: nil}
+  }
+  let mounted = __mcp_bootstrap_and_admit(session, opts, delta)
+  return mounted + {_mcp_delta_bootstrap: mounted?._mcp_bootstrap}
+}
+
+/**
+ * agent_mcp_admit_bootstrap.
+ *
+ * Admit an already-computed `__host_mcp_bootstrap` result's tools into a
+ * second opts view (catalog merge + ceiling extension) without a fresh
+ * host call. Lets a mid-conversation mount thread the new tools into the
+ * current turn's options as well as the persistent loop options.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_mcp_admit_bootstrap(opts, result) {
+  if type_of(result) != "dict" {
+    return opts
+  }
+  return __mcp_admit_tools(opts, result)
+}
+
+/** Bootstrap `specs` and admit their tools into `opts` (catalog + ceiling). */
+fn __mcp_bootstrap_and_admit(session, opts, specs) {
   let result = __host_mcp_bootstrap(session.session_id, specs)
-  let out = opts + {_mcp_bootstrap: result, _mcp_server_info: result?.server_info ?? []}
-  if len(result.tools_added) == 0 {
-    return out
+  let prior_info = opts?._mcp_server_info ?? []
+  let out = opts + {_mcp_bootstrap: result, _mcp_server_info: prior_info + (result?.server_info ?? [])}
+  return __mcp_admit_tools(out, result)
+}
+
+/**
+ * Merge a bootstrap result's `tools_added` into the catalog (deduping by
+ * dispatch name) and extend the execution-policy tool ceiling so the tools
+ * are visible AND callable. Idempotent: a tool already present is skipped.
+ */
+fn __mcp_admit_tools(opts, result) {
+  let tools_added = result?.tools_added ?? []
+  if len(tools_added) == 0 {
+    return opts
   }
   let existing = opts?.tools
   let existing_tools = if existing?._type == "tool_registry" {
@@ -21,8 +86,59 @@ pub fn agent_mcp_bootstrap_if_needed(session, opts) {
   } else {
     []
   }
-  let reg = {_type: "tool_registry", tools: existing_tools + result.tools_added}
-  return __with_mcp_tool_ceiling(out + {tools: reg}, result.tools_added)
+  let reg = {_type: "tool_registry", tools: __mcp_merge_tool_lists(existing_tools, tools_added)}
+  return __with_mcp_tool_ceiling(opts + {tools: reg}, tools_added)
+}
+
+/** Append `added` tools to `existing`, skipping any whose name is present. */
+fn __mcp_merge_tool_lists(existing, added) {
+  var out = existing
+  var names = []
+  for entry in existing {
+    let name = __mcp_tool_ceiling_name(entry)
+    if name != "" {
+      names = names + [name]
+    }
+  }
+  for entry in added {
+    let name = __mcp_tool_ceiling_name(entry)
+    if name != "" && names.contains(name) {
+      continue
+    }
+    out = out + [entry]
+    if name != "" {
+      names = names + [name]
+    }
+  }
+  return out
+}
+
+/** Spec entries whose server name is neither already mounted nor a dup. */
+fn __mcp_delta_specs(opts, specs) {
+  let mounted = __mcp_mounted_server_ids(opts)
+  var delta = []
+  var seen = []
+  for spec in specs {
+    let name = to_string(spec?.name ?? "")
+    if name == "" || mounted.contains(name) || seen.contains(name) {
+      continue
+    }
+    delta = delta + [spec]
+    seen = seen + [name]
+  }
+  return delta
+}
+
+/** Server names already mounted this run, from the running `_mcp_server_info`. */
+fn __mcp_mounted_server_ids(opts) {
+  var ids = []
+  for info in opts?._mcp_server_info ?? [] {
+    let name = to_string(info?.name ?? "")
+    if name != "" && !ids.contains(name) {
+      ids = ids + [name]
+    }
+  }
+  return ids
 }
 
 /**

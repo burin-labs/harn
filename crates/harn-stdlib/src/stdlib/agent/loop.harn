@@ -12,7 +12,11 @@ import {
   agent_verify_completion_judge_cap,
   agent_verify_or_continue,
 } from "std/agent/judge"
-import { agent_mcp_bootstrap_if_needed } from "std/agent/mcp"
+import {
+  agent_mcp_admit_bootstrap,
+  agent_mcp_bootstrap_if_needed,
+  agent_mcp_mount_additional,
+} from "std/agent/mcp"
 import { agent_loop_options, agent_tool_format } from "std/agent/options"
 import {
   agent_apply_tool_surface_narrowing,
@@ -3316,6 +3320,26 @@ fn __agent_loop_final_wrapup(message, session, opts, final_status, stop_reason, 
   return true
 }
 
+/**
+ * Flatten the MCP server specs declared by the currently active skills.
+ *
+ * Drives the per-turn mid-conversation MCP mount (gated by the default-off
+ * `mid_conversation_mcp_mount` opt): the loop feeds the result to
+ * `agent_mcp_mount_additional`, which mounts only the servers not already
+ * active so a mid-conversation skill's tools become visible AND callable
+ * without re-mounting live servers. Empty when no active skill declares MCP
+ * servers, which keeps the flag-off path untouched.
+ */
+fn __agent_loop_active_skill_mcp_specs(active_skills) {
+  var specs = []
+  for active_skill in active_skills ?? [] {
+    for spec in active_skill?.mcp ?? [] {
+      specs = specs + [spec]
+    }
+  }
+  return specs
+}
+
 @complexity(allow)
 fn __agent_loop_run(message, session, initial_opts) {
   var opts = initial_opts
@@ -3428,6 +3452,16 @@ fn __agent_loop_run(message, session, initial_opts) {
         if turn_opts?._skill_activated_this_turn ?? false {
           opts = agent_reset_tool_surface_narrowing(opts)
           turn_opts = agent_reset_tool_surface_narrowing(turn_opts)
+        }
+        if opts?.mid_conversation_mcp_mount ?? false {
+          let skill_mcp_specs = __agent_loop_active_skill_mcp_specs(turn_opts?.active_skills)
+          if len(skill_mcp_specs) > 0 {
+            opts = agent_mcp_mount_additional(session, opts, skill_mcp_specs)
+            let mcp_delta = opts?._mcp_delta_bootstrap
+            if mcp_delta != nil {
+              turn_opts = agent_mcp_admit_bootstrap(turn_opts, mcp_delta)
+            }
+          }
         }
         turn_opts = agent_tool_search_inject_if_needed(turn_opts)
         turn_opts = agent_apply_tool_surface_narrowing(turn_opts)

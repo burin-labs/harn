@@ -91,6 +91,14 @@ pub struct SkillManifest {
     /// (#2965) can pick version-matched grounding cards.
     #[serde(default)]
     pub targets: Option<String>,
+    /// MCP servers this skill declares. Each entry is an opaque spec object
+    /// (the `{name, command/url, args, env, ...}` shape `__host_mcp_bootstrap`
+    /// consumes). When the skill activates mid-conversation and the
+    /// `mid_conversation_mcp_mount` loop flag is on, the agent loop mounts any
+    /// of these servers not already active so their tools become visible and
+    /// callable. Accepts `mcp` or `mcp-servers`/`mcp_servers` on the wire.
+    #[serde(default, alias = "mcp_servers")]
+    pub mcp: Vec<serde_json::Value>,
 }
 
 /// Outcome of parsing a SKILL.md frontmatter block.
@@ -123,6 +131,8 @@ const KNOWN_CANONICAL_KEYS: &[&str] = &[
     "shell",
     "argument_hint",
     "targets",
+    "mcp",
+    "mcp_servers",
 ];
 
 /// Split a SKILL.md file into (frontmatter_yaml, body).
@@ -341,6 +351,28 @@ mod tests {
         assert!(
             parsed.unknown_fields.is_empty(),
             "targets must not surface as an unknown field: {:?}",
+            parsed.unknown_fields,
+        );
+    }
+
+    #[test]
+    fn mcp_servers_frontmatter_parses_and_is_recognized() {
+        // A skill declares MCP servers to mount when it activates. The specs
+        // are opaque `{name, command, args, ...}` objects preserved verbatim
+        // for `__host_mcp_bootstrap`. `mcp-servers` is an accepted alias.
+        let yaml = "name: weather\nshort: Weather lookups\n\
+                    mcp-servers:\n  - name: weather-mcp\n    command: node\n    args: [\"server.js\"]\n";
+        let parsed = parse_frontmatter(yaml).expect("parse");
+        assert_eq!(parsed.manifest.mcp.len(), 1);
+        let spec = &parsed.manifest.mcp[0];
+        assert_eq!(
+            spec.get("name").and_then(|v| v.as_str()),
+            Some("weather-mcp")
+        );
+        assert_eq!(spec.get("command").and_then(|v| v.as_str()), Some("node"));
+        assert!(
+            parsed.unknown_fields.is_empty(),
+            "mcp-servers must not surface as unknown: {:?}",
             parsed.unknown_fields,
         );
     }
