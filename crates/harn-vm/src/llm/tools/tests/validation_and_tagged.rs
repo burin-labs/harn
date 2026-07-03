@@ -211,6 +211,74 @@ fn tagged_parser_accepts_gemma_json_tool_call_body() {
 }
 
 #[test]
+fn tagged_parser_accepts_single_element_json_array_tool_call_body() {
+    // A cheap model expressed its one call as a single-element JSON array
+    // inside the `<tool_call>` wrapper — the OpenAI `tool_calls: [ {...} ]`
+    // shape leaking into the text channel. `parse_json_tool_call_body` already
+    // dispatches a one-element array, but the `[`-leading body was being
+    // intercepted by the narration-recovery path and silently swallowed as
+    // prose (calls: [], no error, no feedback) so the model's correct action
+    // vanished. This is the unambiguous-recovery case: exactly one logical
+    // call, so it must dispatch identically to the bare and object-envelope
+    // forms — RED before the `recover_tool_call_narration` `[`-guard fix,
+    // GREEN after.
+    let tools = sample_tool_registry();
+    let text = r#"<tool_call>[{"name":"edit","arguments":{"action":"create","path":"a.rs","content":"fn a() {}"}}]</tool_call>"#;
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert!(
+        result.violations.is_empty(),
+        "violations: {:?}",
+        result.violations
+    );
+    assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
+    assert_eq!(
+        result.calls.len(),
+        1,
+        "single-element JSON array must dispatch one call, not drop to prose: prose={:?}",
+        result.prose
+    );
+    assert_eq!(result.calls[0]["name"], json!("edit"));
+    assert_eq!(result.calls[0]["arguments"]["path"], json!("a.rs"));
+    assert!(
+        !result.prose.contains("\"name\""),
+        "the array body must not leak into prose: {:?}",
+        result.prose
+    );
+}
+
+#[test]
+fn tagged_parser_rejects_multi_element_json_array_with_actionable_error() {
+    // A multi-element JSON array in one `<tool_call>` block is genuinely
+    // ambiguous (result-correlation needs one call per block), so it must NOT
+    // over-dispatch. But it must also not silently vanish as prose: before the
+    // `[`-guard fix the whole array was swallowed with calls: [] and no error,
+    // giving the model zero feedback. It must now surface the actionable
+    // "one call per <tool_call> block" diagnostic so the model self-corrects.
+    let tools = sample_tool_registry();
+    let text = r#"<tool_call>[{"name":"edit","arguments":{"action":"create","path":"a.rs"}},{"name":"edit","arguments":{"action":"create","path":"b.rs"}}]</tool_call>"#;
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert!(
+        result.calls.is_empty(),
+        "ambiguous multi-call array must not over-dispatch: {:?}",
+        result.calls
+    );
+    assert!(
+        result
+            .errors
+            .iter()
+            .any(|error| error.contains("one call per <tool_call> block")),
+        "must surface the actionable one-call-per-block error, not drop to prose: errors={:?} prose={:?}",
+        result.errors,
+        result.prose
+    );
+    assert!(
+        !result.prose.contains("\"name\""),
+        "the array body must not leak into prose: {:?}",
+        result.prose
+    );
+}
+
+#[test]
 fn tagged_parser_accepts_nested_xml_json_args_tool_call_body() {
     // Some OpenAI-compatible value routes emit a generic XML function wrapper
     // inside Harn's `<tool_call>` block, for example:
