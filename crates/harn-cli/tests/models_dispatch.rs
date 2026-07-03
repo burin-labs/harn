@@ -485,6 +485,113 @@ fn models_lora_plan_json_shape_is_stable() {
     );
 }
 
+#[test]
+fn models_lora_export_check_reports_native_shape() {
+    let corpus = write_lora_corpus_fixture();
+    let harn = run(
+        &[
+            "models",
+            "lora",
+            "export",
+            "--base",
+            "local-gemma4-e4b",
+            "--provider",
+            "vllm",
+            "--tool-format",
+            "native",
+            "--corpus",
+            corpus.path().to_str().expect("utf8 path"),
+            "--check",
+        ],
+        &[],
+    );
+
+    assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
+    for fragment in [
+        "LoRA export for gemma-4-e4b-it via vllm",
+        "dataset format: messages_with_tool_calls",
+        "mode: check",
+        "stats: records=2 emitted=1 skipped=1 tool_calls=1 tool_results=1",
+    ] {
+        assert!(
+            harn.stdout.contains(fragment),
+            "harn stdout missing {fragment}: {}",
+            harn.stdout
+        );
+    }
+}
+
+#[test]
+fn models_lora_export_json_writes_dataset_and_manifest() {
+    let corpus = write_lora_corpus_fixture();
+    let corpus_path = corpus.path().join("burin-tool-calling-corpus.jsonl");
+    let out = corpus.path().join("structured.jsonl");
+    let manifest = corpus.path().join("structured.manifest.json");
+    let harn = run(
+        &[
+            "models",
+            "lora",
+            "export",
+            "--base",
+            "local-gemma4-e4b",
+            "--provider",
+            "vllm",
+            "--tool-format",
+            "native",
+            "--corpus",
+            corpus_path.to_str().expect("utf8 corpus path"),
+            "--out",
+            out.to_str().expect("utf8 out path"),
+            "--manifest",
+            manifest.to_str().expect("utf8 manifest path"),
+            "--adapter-name",
+            "burin-tools",
+            "--chat-template",
+            "gemma-4",
+            "--json",
+        ],
+        &[],
+    );
+
+    assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
+    let harn_value = parse_json(&harn.stdout, "harn");
+    assert_eq!(harn_value["ok"], serde_json::Value::Bool(true));
+    assert_eq!(
+        harn_value["request"]["dataset_format"],
+        "messages_with_tool_calls"
+    );
+    assert_eq!(harn_value["stats"]["records"].as_u64(), Some(2));
+    assert_eq!(harn_value["stats"]["emitted"].as_u64(), Some(1));
+    assert_eq!(harn_value["stats"]["skipped"].as_u64(), Some(1));
+    assert_eq!(harn_value["stats"]["tool_calls"].as_u64(), Some(1));
+    assert_eq!(harn_value["stats"]["tool_results"].as_u64(), Some(1));
+    assert_eq!(harn_value["target"]["adapter_name"], "burin-tools");
+    assert!(out.is_file(), "exported JSONL missing");
+    assert!(manifest.is_file(), "manifest missing");
+
+    let row_text = fs::read_to_string(&out).expect("read exported JSONL");
+    let row = parse_json(row_text.trim(), "export row");
+    let messages = row["messages"].as_array().expect("messages array");
+    assert!(
+        messages.iter().any(|message| message["role"] == "assistant"
+            && message["tool_calls"]
+                .as_array()
+                .is_some_and(|calls| calls.len() == 1)),
+        "messages={messages:?}"
+    );
+    assert!(
+        messages.iter().any(|message| message["role"] == "tool"
+            && message["name"] == "read"
+            && message["tool_call_id"] == "call_2_1"),
+        "messages={messages:?}"
+    );
+    let tools = row["tools"].as_array().expect("tools array");
+    assert!(
+        tools.iter().any(|tool| tool["function"]["name"] == "read"),
+        "tools={tools:?}"
+    );
+}
+
 // ────────────────────────────────────────────────────────────────────────
 
 fn write_lora_adapter_fixture() -> tempfile::TempDir {
@@ -502,6 +609,60 @@ fn write_lora_adapter_fixture() -> tempfile::TempDir {
         }"#,
     )
     .expect("adapter config");
+    tmp
+}
+
+fn write_lora_corpus_fixture() -> tempfile::TempDir {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let record = serde_json::json!({
+        "id": "tiny-read",
+        "language": "rust",
+        "task_type": "explain",
+        "eval_name": "tiny-read",
+        "model": "manual",
+        "metadata": {
+            "tool_format": "json",
+            "verification": "PASS"
+        },
+        "messages": [
+            {
+                "role": "system",
+                "content": "Available tools: read, run\n- edit(action, path, content)\ndeclare function read(args: { path: string }): string;"
+            },
+            {
+                "role": "user",
+                "content": "Read src/lib.rs and summarize it."
+            },
+            {
+                "role": "assistant",
+                "content": "<assistant_prose>\nI will inspect the file.\n</assistant_prose>\n\n<tool_call>\n{\"name\":\"read\",\"arguments\":{\"path\":\"src/lib.rs\"}}\n</tool_call>\n"
+            },
+            {
+                "role": "user",
+                "content": "[result of read] pub fn add(a: i32, b: i32) -> i32 { a + b } [end of read result]"
+            },
+            {
+                "role": "assistant",
+                "content": "<assistant_prose>\nThe file defines an add helper.\n</assistant_prose>\n<done>##DONE##</done>"
+            }
+        ]
+    });
+    let context_row = serde_json::json!({
+        "id": "source-context",
+        "eval_name": "source-context",
+        "source_context": {
+            "notes": "metadata-only rows are not training examples"
+        },
+        "messages": []
+    });
+    fs::write(
+        tmp.path().join("burin-tool-calling-corpus.jsonl"),
+        serde_json::to_string(&record).expect("serialize record")
+            + "\n"
+            + &serde_json::to_string(&context_row).expect("serialize context row")
+            + "\n",
+    )
+    .expect("write corpus");
     tmp
 }
 

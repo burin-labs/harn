@@ -32,10 +32,49 @@ pub(crate) struct ModelsLoraArgs {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum ModelsLoraCommand {
+    /// Export a tool-calling corpus into a trainer-ready LoRA dataset.
+    Export(ModelsLoraExportArgs),
     /// Inspect a PEFT LoRA adapter directory or repo id.
     Inspect(ModelsLoraInspectArgs),
     /// Plan a portable LoRA/QLoRA tool-calling fine-tune for a Harn model route.
     Plan(ModelsLoraPlanArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ModelsLoraExportArgs {
+    /// Base model alias or provider-native id the dataset targets.
+    #[arg(long = "base", value_parser = llm_model_completion_parser(), hide_possible_values = true)]
+    pub base_model: String,
+    /// Provider/runtime to plan against instead of inferring from the base model.
+    #[arg(long)]
+    pub provider: Option<String>,
+    /// Tool-call format to export for (`auto`, `native`, `text`, or `json`).
+    #[arg(long = "tool-format", default_value = "auto")]
+    pub tool_format: String,
+    /// Corpus JSONL file, or a directory containing a conventional corpus JSONL.
+    #[arg(long, value_name = "PATH")]
+    pub corpus: String,
+    /// Write exported JSONL rows to this path. Required unless --check is set.
+    #[arg(long, value_name = "PATH")]
+    pub out: Option<std::path::PathBuf>,
+    /// Write a provenance manifest with input/output hashes and export stats.
+    #[arg(long, value_name = "PATH")]
+    pub manifest: Option<std::path::PathBuf>,
+    /// Validate conversion and print a report without writing dataset rows.
+    #[arg(long)]
+    pub check: bool,
+    /// Served LoRA adapter/model name to include in row metadata.
+    #[arg(long = "adapter-name")]
+    pub adapter_name: Option<String>,
+    /// Chat template identifier to include in row metadata.
+    #[arg(long = "chat-template")]
+    pub chat_template: Option<String>,
+    /// Extra target provenance copied into row metadata, as KEY=VALUE.
+    #[arg(long = "target-metadata", value_name = "KEY=VALUE")]
+    pub target_metadata: Vec<String>,
+    /// Emit structured JSON report.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]

@@ -369,6 +369,67 @@ fn test_parses_models_lora_inspect_args() {
 }
 
 #[test]
+fn test_parses_models_lora_export_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "models",
+        "lora",
+        "export",
+        "--base",
+        "local-gemma4-e4b",
+        "--provider",
+        "vllm",
+        "--tool-format",
+        "native",
+        "--corpus",
+        "./lora-corpus",
+        "--out",
+        "./data/tool-calls.jsonl",
+        "--manifest",
+        "./data/tool-calls.manifest.json",
+        "--adapter-name",
+        "burin-tools",
+        "--chat-template",
+        "gemma-4",
+        "--target-metadata",
+        "lane=structured",
+        "--json",
+    ]);
+
+    let Command::Models(args) = cli.command.unwrap() else {
+        panic!("expected models command");
+    };
+    let ModelsCommand::Lora(args) = args.command else {
+        panic!("expected models lora command");
+    };
+    let ModelsLoraCommand::Export(args) = args.command else {
+        panic!("expected models lora export command");
+    };
+    assert_eq!(args.base_model, "local-gemma4-e4b");
+    assert_eq!(args.provider.as_deref(), Some("vllm"));
+    assert_eq!(args.tool_format, "native");
+    assert_eq!(args.corpus, "./lora-corpus");
+    assert_eq!(
+        args.out
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .as_deref(),
+        Some("./data/tool-calls.jsonl")
+    );
+    assert_eq!(
+        args.manifest
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .as_deref(),
+        Some("./data/tool-calls.manifest.json")
+    );
+    assert_eq!(args.adapter_name.as_deref(), Some("burin-tools"));
+    assert_eq!(args.chat_template.as_deref(), Some("gemma-4"));
+    assert_eq!(args.target_metadata, vec!["lane=structured"]);
+    assert!(args.json);
+}
+
+#[test]
 fn test_parses_models_lora_plan_args() {
     let cli = Cli::parse_from([
         "harn",
