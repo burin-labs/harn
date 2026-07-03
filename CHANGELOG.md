@@ -8,6 +8,100 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.9.1
+
+### Added
+
+- **Static ASR battery for the prompt-injection substrate.**
+  `harn_vm::security::battery` measures `crate::security` against the
+  role-confusion attack classes (arXiv:2603.12277 and the ChatBug / ChatInject /
+  MetaBreak lineage) with no model call: `run_static_battery(mode)` reports the
+  classifier's under-detection rate, the false-positive rate on benign controls,
+  and the special-token survival rate through `spotlight_wrap`. The embedded
+  corpus (`security/fixtures/asr-battery.json`) carries CoT-forgery, role-tag
+  forgery, special-token smuggling, spotlight breakout, concealment, exfil, and
+  cross-agent-poisoning attacks plus benign false-positive controls, each with a
+  `injected_directive` / `success_signal` the Burin behavioural tier consumes.
+  Baseline pinned 2026-07-02 (heuristic classifier, threshold 50%):
+  undetected 0.82, false-positive 0.33, special-token survival 1.00 — the
+  quantified headroom for the neural `local-ml` classifier and the
+  token-neutralization work.
+- **Canonical manifest-producing redaction for whole transcripts and run
+  records.** `RedactionPolicy` gains `redact_json_manifest` — a single walk that
+  scrubs an arbitrary JSON structure (a transcript, a serialized `RunRecord`, a
+  session bundle) in place while returning an auditable `RedactionEntry` manifest
+  for every value it touched — and `find_unredacted_secret`, the symmetric
+  share/ingest gate that refuses a payload still carrying a high-confidence
+  secret. These were previously private helpers inside `session_bundle`; they now
+  live in `harn_vm::redact` so every export surface (session bundles today;
+  portal transcript download, TUI export, and harn-cloud tape ingest next) calls
+  one engine instead of reimplementing the walk and drifting from the
+  leaf-scrubbing policy. `session_bundle` now consumes the canonical functions
+  with identical behavior; `RedactionEntry` moved to `harn_vm::redact`.
+- **Agent-run traces now carry first-class per-LLM-call token and cost
+  attribution, plus tool-selection span kinds.** Each `llm_call` span records
+  structured token usage keyed by canonical metadata constants
+  (`input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens`,
+  `model`, `provider`) built through the typed `LlmCallUsage` helper, and its
+  `cost_usd` is now `None` (honest "unpriced") rather than a misleading `0.0`
+  when the (provider, model) pair has no catalog entry. `RunTraceSpanRecord`
+  gains an optional, first-class `cost_usd` field so downstream viewers (Burin
+  portal, harn-cloud dashboard) can build token/cost flame graphs without
+  reconstructing them from cumulative-usage diffs; the field defaults to `None`
+  so records persisted before it existed still load. Three point-in-time marker
+  span kinds are added for the tool surface — `model_route`
+  (`from_model`/`to_model`/`reason`), `tool_mount`
+  (`tool_names`/`tool_count`/`source`/`detail`), and `deferred_tool_load`
+  (`tool_name`/`query`/`score`) — emitted via typed `emit_*` helpers. `tool_mount`
+  is wired at MCP bootstrap; `model_route` and `deferred_tool_load` ship the
+  emission API for the escalation and `tool_search`-promotion sites to call.
+  Telemetry only — no agent behavior changes.
+
+### Changed
+
+- `harn models lora plan` now accepts `--teacher` and `--corpus-strategy` to plan
+  synthetic distillation or corpus-refresh LoRA data lanes with provenance fields,
+  hard-negative coverage, and holdout-contamination gates.
+
+### Fixed
+
+- Reduced local hook rebuild churn by giving hooks a deterministic per-worktree
+  Cargo target directory when none is configured and by running prompt-prose
+  checks through one resolved `harn` binary instead of repeated `cargo run`
+  invocations.
+- **Internal engine bugs surfaced during tool dispatch now abort the agent
+  loop instead of being swallowed as a recoverable tool error.** The loop's
+  tool-dispatch catch sites only ever distinguished `cancelled` errors; every
+  other failure — including a `VmError::UndefinedBuiltin` (a `#[harn_builtin]`
+  def missing from its install array), corrupt bytecode, or another VM
+  invariant violation — was folded into a synthetic tool-error observation and
+  the run marched on to a `done`/`stuck` status with no log, no non-zero exit,
+  and no test failure. That is what let a mis-wired builtin ship silently inert.
+  A new `ErrorCategory::Internal` classifies these faults (both the structured
+  `VmError::UndefinedBuiltin`/`InvalidInstruction` variants and the stringly
+  `"Undefined builtin: …"` message form), the Rust tool-dispatch retry loop no
+  longer wastes retries on them, and every agent-loop tool/classifier catch site
+  re-raises them through a shared `__agent_error_must_propagate` predicate —
+  exactly like `cancelled`. `error_category(err)` now returns `"internal"` for
+  these so Harn middleware can react to them too.
+- Update release smoke package fixtures and package-authoring examples to target the Harn v0.9 compatibility line.
+- Hardened release audits against retry drag by keeping demo tests from copying
+  ignored `.harn` runtime state, printing release-audit lane log paths
+  immediately, narrowing the audit warm prebuild to the CLI binary, and reusing
+  one stable package-check target for extracted crate verification.
+- **The default-enabled reminder-provider set is now derived from a single
+  source of truth instead of a parallel hand-maintained list.** Previously
+  `canonical_providers()` (the provider objects) and `canonical_provider_ids()`
+  (the default-enabled ids) were two separate arrays kept in sync only by
+  convention. Adding a default-on provider but forgetting its id in the second
+  list left it registered yet never fired — and that silent miss was
+  indistinguishable from the intentional opt-in case (the burin compass, which
+  is deliberately registered-but-off). `ReminderProvider` gained a
+  `default_enabled()` method (defaulting to `true`; the compass overrides it to
+  `false`), and the default id set is derived from `canonical_providers()`
+  filtered by that flag, so a new provider fires by default automatically and
+  the drift class is gone.
+
 ## v0.9.0
 
 ### Breaking
