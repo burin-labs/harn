@@ -8,6 +8,78 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.9.3
+
+### Added
+
+- `std/agent/canon` now infers harn-canon packs from `canon-packs.json` routing metadata when a manifest is available.
+- Added `std/coordination::coord_with_dir_lock` for scoped directory-lock critical
+  sections that release on success or thrown errors.
+- **Mid-conversation MCP mounting for skill-declared servers (default-off).**
+  MCP servers were only bootstrapped once, at agent-loop entry, so a skill that
+  activated mid-conversation could never surface its MCP tools. A SKILL.md
+  frontmatter field `mcp` (alias `mcp-servers`) now carries opaque MCP server
+  specs, and — when the new default-off `mid_conversation_mcp_mount` loop opt is
+  set — the loop mounts any server an active skill declares that is not already
+  active. `agent_mcp_mount_additional` bootstraps only the delta (tracked via
+  the running `_mcp_server_info` list), reusing the same catalog merge and
+  `__with_mcp_tool_ceiling` admission as the initial bootstrap so the new
+  `server__tool` entries become visible AND callable without re-connecting a
+  live server or duplicating tools/ceiling entries. `install_session_mcp_clients`
+  now merges (rather than replaces) the session MCP client map so an incremental
+  bootstrap never drops live handles. With the flag off the one-time bootstrap
+  path is byte-identical to before.
+- Added an opt-in transcript dump to the behavioral ASR probe
+  (`security::behavioral`): set `BEHAVIORAL_PROBE_DUMP=<path>` and every probe
+  appends its full transcript (framed user turn, raw reply, canary, scored
+  outcome) as JSONL. A live A/B — base vs. a LoRA-adapted model — can then be
+  root-caused from the actual replies instead of aggregate counts, which is what
+  distinguishes a model that *obeyed* an injection from one that merely *narrated*
+  it and happened to quote the canary. Env unset is a byte-for-byte no-op, so CI
+  (mock models, no env) is unchanged. The on-demand baseline doc also records
+  that `mlx_lm.server` 0.31.3 ignores per-request temperature, so a local "N=5"
+  read degenerates to N=1 — confirm variance before claiming a bootstrap CI on a
+  local surface.
+- Added a degenerate-variance guard to the behavioral ASR baseline: after the
+  trials loop, if every trial produced an identical outcome signature it warns
+  that the effective N is 1 and a bootstrap CI must not be claimed. This is
+  provider-agnostic — it catches any temperature-ignoring serving surface (the
+  confirmed `mlx_lm.server` 0.31.3 `mx.compile` RNG bug, a misconfigured server,
+  or simply `temp=0`) at runtime, so the harness detects the quirk instead of
+  hardcoding a brittle per-provider capability list.
+
+### Changed
+
+- `harn models lora plan` now includes serving notes that keep parser ownership
+  and native tool strictness aligned with the selected model route and tool-call
+  format.
+
+### Fixed
+
+- Prevented main-push release checks from treating in-progress binary asset uploads
+  as a cargo publish retry signal.
+
+### Security
+
+- **Origin-authenticated cross-agent directives (default-OFF `authenticate_directives`).**
+  Defends the measured `cross_agent_poison` weak class — a forged
+  `Orchestrator directive:` / `Coordinator override:` planted inside a subagent's
+  untrusted result that the model obeys as if it were a real orchestration
+  directive (arXiv:2504.16902 / arXiv:2506.23260). The new
+  `security::provenance` module stamps a legitimate directive with a
+  process-scoped HMAC over `(emitter, body)` — reusing the same per-process
+  signing pattern the channel journal already uses, not a new PKI — and
+  authenticates directive-looking spans on the read/ingest path: a marker with a
+  stamp that verifies is `Authenticated` and passes through; a marker with no /
+  invalid stamp is `Forged` and is classified `TrustLevel::Untrusted`, flowing
+  into the existing `TaintRecord` ledger and lethal-trifecta gate so it is
+  quarantined as DATA and can never reach an egress/write sink without approval.
+  Wired into `agent_session_host` behind the default-OFF `[security]` flag
+  (byte-identical when disabled); the existing MCP/fetch taint tagging and the
+  trifecta gate already cover mounted-untrusted-connector quarantine, now proven
+  by tests. Adds the `security_stamp_directive` / `security_verify_directive`
+  builtins and a `trigger_directive_provenance_gate` conformance fixture.
+
 ## v0.9.2
 
 ### Added
