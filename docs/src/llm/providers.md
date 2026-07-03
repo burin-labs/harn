@@ -171,8 +171,9 @@ paths. `--teacher <model>` adds a corpus refresh/distillation plan with
 provenance manifest fields, hard-negative slices, and holdout gates; it does not
 start training or inference. The plan also reports the template convention to
 train against: native Gemma 4 or FunctionGemma tool templates stay distinct from
-Harn text/json `<tool_call>` adapters, so train and serving do not silently cross
-tool-call contracts.
+Harn text/json `<tool_call>` adapters, and the trainer contract calls out
+assistant-only loss masks plus `messages`/`tools` columns, so train and serving
+do not silently cross tool-call contracts.
 
 Harn maintains local runtime risk profiles for hybrid-cache families
 (Qwen3.6, Gemma4). The profile table records preferred runtimes,

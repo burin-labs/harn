@@ -185,6 +185,7 @@ fn __render_human(harness: Harness, report: dict) {
   )
   __print_list(harness, "hard negatives", __safe_list(corpus_refresh["hard_negative_slices"]))
   __print_list(harness, "corpus gates", __safe_list(corpus_refresh["acceptance_gates"]))
+  __print_list(harness, "trainer contract", __safe_list(training["trainer_contract"]))
   __print_list(harness, "training notes", __safe_list(training["notes"]))
   harness.stdio
     .println("  holdout policy: " + __safe_string(evaluation["holdout_policy"], ""))
