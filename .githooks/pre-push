@@ -10,6 +10,7 @@ harn_lint_files=$(mktemp)
 changed_packages=$(mktemp)
 trap 'rm -f "$changed" "$harn_format_files" "$harn_lint_files" "$changed_packages"' EXIT
 hook_write_push_files "$changed"
+hook_export_cargo_target_dir
 hook_disable_cargo_incremental_if_release_bump "push $(hook_push_base)"
 
 # Signature guard (cheapest gate — local, no network). main enforces the
@@ -134,7 +135,8 @@ fi
 # in a release PR), not under a section that already shipped under a tag.
 if hook_paths_match "$changed" '^CHANGELOG\.md$'; then
   echo "=== Pre-push: checking CHANGELOG for retroactive edits ==="
-  if ! cargo run --quiet --bin harn -- run scripts/check_changelog_no_retroactive_edits.harn; then
+  hook_export_harn_bin
+  if ! "$HARN_BIN" run scripts/check_changelog_no_retroactive_edits.harn; then
     echo "" >&2
     echo "  Bypass for genuine fix-ups (typos, broken links):" >&2
     echo "    ALLOW_CHANGELOG_RETROACTIVE_EDIT=1 git push" >&2
