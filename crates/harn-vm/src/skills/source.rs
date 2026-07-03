@@ -490,6 +490,19 @@ pub fn skill_entry_to_vm(skill: &Skill) -> crate::value::VmValue {
     entry.put_opt_str("shell", skill.manifest.shell.as_deref());
     entry.put_opt_str("argument_hint", skill.manifest.argument_hint.as_deref());
     entry.put_opt_str("targets", skill.manifest.targets.as_deref());
+    if !skill.manifest.mcp.is_empty() {
+        entry.insert(
+            crate::value::intern_key("mcp"),
+            VmValue::List(std::sync::Arc::new(
+                skill
+                    .manifest
+                    .mcp
+                    .iter()
+                    .map(crate::json_to_vm_value)
+                    .collect(),
+            )),
+        );
+    }
     entry.put_str("body", skill.body.as_str());
     if let Some(dir) = &skill.skill_dir {
         entry.put_str("skill_dir", dir.display().to_string());
@@ -569,6 +582,19 @@ pub fn skill_manifest_ref_to_vm(skill: &SkillManifestRef) -> crate::value::VmVal
     entry.put_opt_str("shell", skill.manifest.shell.as_deref());
     entry.put_opt_str("argument_hint", skill.manifest.argument_hint.as_deref());
     entry.put_opt_str("targets", skill.manifest.targets.as_deref());
+    if !skill.manifest.mcp.is_empty() {
+        entry.insert(
+            crate::value::intern_key("mcp"),
+            VmValue::List(std::sync::Arc::new(
+                skill
+                    .manifest
+                    .mcp
+                    .iter()
+                    .map(crate::json_to_vm_value)
+                    .collect(),
+            )),
+        );
+    }
     entry.put_str("source", skill.layer.label());
     entry.put_opt_str("namespace", skill.namespace.as_deref());
     VmValue::dict(entry)
@@ -611,6 +637,33 @@ mod tests {
         assert_eq!(skill.manifest.short, "deploy the service");
         assert_eq!(skill.manifest.description, "ship it");
         assert_eq!(skill.body, "run deploy");
+    }
+
+    #[test]
+    fn mcp_servers_surface_on_the_vm_entry() {
+        // A skill declaring MCP servers must expose them on its registry entry
+        // as `mcp` so the agent loop can mount them mid-conversation.
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            "weather/SKILL.md",
+            "---\nname: weather\nshort: Weather lookups\nmcp-servers:\n  - name: weather-mcp\n    command: node\n---\nbody",
+        );
+        let src = FsSkillSource::new(tmp.path(), Layer::Project);
+        let skill = src.fetch("weather").unwrap();
+        assert_eq!(skill.manifest.mcp.len(), 1);
+
+        let entry = skill_entry_to_vm(&skill);
+        let dict = entry.as_dict().expect("entry is a dict");
+        let crate::value::VmValue::List(servers) = dict.get("mcp").expect("entry carries mcp") else {
+            panic!("mcp must be a list");
+        };
+        assert_eq!(servers.len(), 1);
+        let name = servers[0]
+            .as_dict()
+            .and_then(|d| d.get("name"))
+            .map(crate::value::VmValue::display);
+        assert_eq!(name.as_deref(), Some("weather-mcp"));
     }
 
     #[test]
