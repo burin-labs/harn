@@ -12,11 +12,10 @@ fn factory_for(tag) {
 }
 
 pipeline test(task) {
-  let _pool = pool_create(
-    {name: "spawn-to-pool-extractor-demo", max_concurrent: 1, queue: fair_round_robin("key")},
-  )
   let unique = to_string(to_int(harness.clock.timestamp())) + "-"
     + to_string(harness.random.gen_range(100000, 999999))
+  let pool_name = "spawn-to-pool-extractor-demo-" + unique
+  let _ = pool_create({name: pool_name, max_concurrent: 1, queue: fair_round_robin("key")})
   let trigger_id = "trigger-spawn-to-pool-extract-" + unique
   let handle: TriggerHandle = trigger_register(
     {
@@ -25,7 +24,7 @@ pipeline test(task) {
       provider: "github",
       handler: SpawnToPool(
         {
-          pool: "spawn-to-pool-extractor-demo",
+          pool: pool_name,
           priority_from: "headers.priority",
           key_from: "tenant_id",
           task_factory: factory_for("seed"),
@@ -55,7 +54,7 @@ pipeline test(task) {
   // result so observers (audit, action graph) can correlate the pool task
   // back to the originating event without re-parsing the payload.
   __io_println(fired.status == "dispatched")
-  __io_println(fired.result?.pool == "spawn-to-pool-extractor-demo")
+  __io_println(fired.result?.pool == pool_name)
   __io_println(fired.result?.priority == 7)
   __io_println(fired.result?.key == "acme")
   // Missing paths fall back to defaults (priority 0, no key) rather than
