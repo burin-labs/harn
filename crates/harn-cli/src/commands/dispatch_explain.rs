@@ -13,6 +13,7 @@ use crate::cli::ProviderDispatchExplainArgs;
 pub(crate) fn run(args: &ProviderDispatchExplainArgs) {
     let caps = harn_vm::llm::capabilities::lookup(&args.provider, &args.model);
     let wire_format = harn_vm::llm::resolved_dispatch::wire_format_for(&args.provider, &args.model);
+    let message_wire_format = caps.message_wire_format.as_str().to_string();
     let base_url = harn_vm::llm_config::provider_config(&args.provider)
         .map(|def| harn_vm::llm_config::resolve_base_url(&def))
         .unwrap_or_else(|| default_base_url_for(wire_format));
@@ -48,7 +49,7 @@ pub(crate) fn run(args: &ProviderDispatchExplainArgs) {
             "provider": args.provider,
             "model": args.model,
             "wire_format": wire_format,
-            "message_wire_format": caps.message_wire_format,
+            "message_wire_format": message_wire_format,
             "native_tool_wire_format": caps.native_tool_wire_format,
             "base_url_host": base_url_host,
             "tool_format": tool_format,
@@ -67,7 +68,7 @@ pub(crate) fn run(args: &ProviderDispatchExplainArgs) {
 
     println!("dispatch-explain {}:{}", args.provider, args.model);
     println!("  wire_format:      {wire_format}");
-    println!("  message_wire:     {}", caps.message_wire_format);
+    println!("  message_wire:     {message_wire_format}");
     println!("  tool_wire:        {}", caps.native_tool_wire_format);
     println!("  base_url_host:    {base_url_host}");
     println!("  tool_format:      {tool_format}");
@@ -82,10 +83,11 @@ pub(crate) fn run(args: &ProviderDispatchExplainArgs) {
 }
 
 fn default_base_url_for(wire_format: &str) -> String {
-    if wire_format == "anthropic_native" {
-        "https://api.anthropic.com/v1".to_string()
-    } else {
-        "https://api.openai.com/v1".to_string()
+    match wire_format {
+        "anthropic_native" => "https://api.anthropic.com/v1".to_string(),
+        "gemini" => "https://generativelanguage.googleapis.com/v1beta".to_string(),
+        "ollama" => "http://localhost:11434".to_string(),
+        _ => "https://api.openai.com/v1".to_string(),
     }
 }
 

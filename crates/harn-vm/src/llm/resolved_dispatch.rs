@@ -26,6 +26,7 @@
 //! so the model's next-turn payload is byte-identical with or without it.
 
 use super::api::{LlmCallOptions, ThinkingConfig};
+use super::capabilities::WireDialect;
 
 /// Where a single resolved dispatch field came from. Carried on
 /// [`LlmCallOptions::dispatch_provenance`], populated by the pipeline resolver
@@ -35,15 +36,14 @@ use super::api::{LlmCallOptions, ThinkingConfig};
 ///
 /// The string values are a small, stable vocabulary so downstream tooling
 /// (the harness-debugger `dispatch_trace` MCP tool) can filter on them:
-///   - `operator_pin`         — an explicit operator/env pin (e.g.
-///                              `BURIN_EVAL_SMART_PROVIDER`).
-///   - `pipeline_input`       — a `selected_*` field on the pipeline input.
-///   - `escalation_override`  — chosen by the smart-escalation resolver.
-///   - `catalog_default`      — filled from the provider catalog / capability
-///                              registry default.
-///   - `inherited_from_primary` — no pin/override existed, so the value fell
-///                              through from the cheap primary model. THIS is
-///                              the value that flags a silent-inheritance bug.
+/// - `operator_pin`: an explicit operator/env pin, such as
+///   `BURIN_EVAL_SMART_PROVIDER`.
+/// - `pipeline_input`: a `selected_*` field on the pipeline input.
+/// - `escalation_override`: chosen by the smart-escalation resolver.
+/// - `catalog_default`: filled from the provider catalog / capability registry.
+/// - `inherited_from_primary`: no pin/override existed, so the value fell
+///   through from the cheap primary model. THIS is the value that flags a
+///   silent-inheritance bug.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DispatchProvenance {
     pub provider: Option<String>,
@@ -279,10 +279,11 @@ fn provider_error_class(lower: &str) -> String {
 /// registry (the single source of truth). This is the field whose absence made
 /// the escalation incident hard to root-cause.
 pub fn wire_format_for(provider: &str, model: &str) -> &'static str {
-    if super::capabilities::lookup(provider, model).message_wire_format == "anthropic" {
-        "anthropic_native"
-    } else {
-        "openai_compat"
+    match super::capabilities::lookup(provider, model).message_wire_format {
+        WireDialect::Anthropic => "anthropic_native",
+        WireDialect::OpenAiCompat => "openai_compat",
+        WireDialect::Ollama => "ollama",
+        WireDialect::Gemini => "gemini",
     }
 }
 
@@ -365,6 +366,12 @@ mod tests {
     #[test]
     fn wire_format_compat_for_openai_style() {
         assert_eq!(wire_format_for("openai", "gpt-4o"), "openai_compat");
+    }
+
+    #[test]
+    fn wire_format_preserves_native_non_openai_dialects() {
+        assert_eq!(wire_format_for("gemini", "gemini-2.5-pro"), "gemini");
+        assert_eq!(wire_format_for("ollama", "llama3.2"), "ollama");
     }
 
     #[test]

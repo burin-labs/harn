@@ -1,1 +1,5 @@
-Fix the streaming empty-completion error at the shared SSE parser hardcoding "openai-compatible model" even for native Anthropic streams. The throw now names the actual wire style (`anthropic-native` vs `openai-compatible`) and the concrete `provider:model`, so a native Anthropic empty-stream flake no longer prints a misleading "openai-compatible" label — a single wrong string previously sent an escalation root-cause hunt down the wrong transport-routing path.
+Fix the streaming empty-completion error at the shared SSE parser hardcoding
+"openai-compatible model" even for native Anthropic streams. The throw now
+names the actual wire style (`anthropic-native` vs `openai-compatible`) and the
+concrete `provider:model`, so a native Anthropic empty-stream flake no longer
+prints a misleading "openai-compatible" label.
