@@ -69,6 +69,21 @@ pipeline main(task) {
       let path_messages = agent_session_snapshot(path_session_id).messages
       __io_println(to_string(path_injected.injected))
       __io_println(to_string(contains(path_messages[len(path_messages) - 1].content, "no_bad")))
+      let reminder_session_id = agent_session_open("canon-reminder-feedback-" + uuid_v7())
+      let reminder_injected = canon_inject_feedback(
+        reminder_session_id,
+        slice,
+        {canon_root: dir, files: slice.files, inject: "reminder"},
+      )
+      let reminder_events = transcript_events_by_kind(agent_session_snapshot(reminder_session_id), "system_reminder")
+      __io_println(to_string(reminder_injected.injected))
+      __io_println(to_string(to_string(reminder_injected.reminder_id ?? "") != ""))
+      __io_println(to_string(len(reminder_events) == 1))
+      __io_println(to_string(reminder_events[0].reminder.preserve_on_compact))
+      __io_println(to_string(reminder_events[0].reminder.ttl_turns == 1))
+      __io_println(to_string(reminder_events[0].reminder.tags[0] == "harn-canon"))
+      __io_println(to_string(contains(reminder_events[0].reminder.body, "no_bad")))
+      agent_session_close(reminder_session_id)
       agent_session_close(path_session_id)
       agent_session_close(session_id)
     },
