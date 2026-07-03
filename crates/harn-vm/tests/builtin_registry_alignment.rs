@@ -131,6 +131,7 @@ const RUNTIME_ONLY_EXCEPTIONS: &[&str] = &[
     "__host_agent_truncated_tool_call",
     "__host_agent_undispatched_tool_results",
     "__host_autonomy_budget_check",
+    "__host_code_mode_run",
     "__host_drain_file_edits",
     "__host_fire_session_hook",
     "__host_mcp_bootstrap",
