@@ -15,6 +15,13 @@
       "default": false
     },
     "max_matches": { "type": "integer", "minimum": 1, "default": 1000 },
+    "max_line_bytes": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 65536,
+      "default": 1024,
+      "description": "Maximum UTF-8 bytes returned for each matched or context line. Long matched lines are clipped around the first match; context lines are prefix-clipped."
+    },
     "context_before": { "type": "integer", "minimum": 0, "default": 0 },
     "context_after": { "type": "integer", "minimum": 0, "default": 0 },
     "include_hidden": { "type": "boolean", "default": false }

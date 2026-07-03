@@ -25,6 +25,11 @@ use crate::tools::args::{
 use crate::tools::permissions::enforce_path_scope;
 
 const BUILTIN: &str = "hostlib_tools_search";
+const DEFAULT_MAX_LINE_BYTES: usize = 1024;
+const MIN_MAX_LINE_BYTES: i64 = 64;
+const HARD_MAX_LINE_BYTES: i64 = 64 * 1024;
+const CLIP_PREFIX: &str = "[truncated] ... ";
+const CLIP_SUFFIX: &str = " ... [truncated]";
 
 /// Public entry point invoked by the registered builtin.
 pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
@@ -53,6 +58,12 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let fixed_strings = optional_bool(BUILTIN, dict, "fixed_strings", false)?;
     let include_hidden = optional_bool(BUILTIN, dict, "include_hidden", false)?;
     let max_matches = optional_int(BUILTIN, dict, "max_matches", 1000)?;
+    let max_line_bytes = optional_int(
+        BUILTIN,
+        dict,
+        "max_line_bytes",
+        DEFAULT_MAX_LINE_BYTES as i64,
+    )?;
     let context_before = optional_int(BUILTIN, dict, "context_before", 0)?;
     let context_after = optional_int(BUILTIN, dict, "context_after", 0)?;
 
@@ -61,6 +72,13 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
             builtin: BUILTIN,
             param: "max_matches",
             message: "must be >= 1".to_string(),
+        });
+    }
+    if !(MIN_MAX_LINE_BYTES..=HARD_MAX_LINE_BYTES).contains(&max_line_bytes) {
+        return Err(HostlibError::InvalidParameter {
+            builtin: BUILTIN,
+            param: "max_line_bytes",
+            message: format!("must be between {MIN_MAX_LINE_BYTES} and {HARD_MAX_LINE_BYTES}"),
         });
     }
     if context_before < 0 {
@@ -79,6 +97,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     }
 
     let max_matches = max_matches as usize;
+    let max_line_bytes = max_line_bytes as usize;
     let context_before = context_before as usize;
     let context_after = context_after as usize;
 
@@ -124,6 +143,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
             pending_before: VecDeque::new(),
             context_before,
             remaining: max_matches.saturating_sub(all_rows.len()),
+            max_line_bytes,
         };
         let mut searcher = SearcherBuilder::new()
             .before_context(context_before)
@@ -135,6 +155,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
             let _ = err;
             continue;
         }
+        truncated |= sink.rows.iter().any(|row| row.truncated);
         for row in sink.rows {
             all_rows.push(RowWithPath {
                 path: file_path.clone(),
@@ -261,11 +282,17 @@ struct MatchRow {
     text: String,
     context_before: VecDeque<String>,
     context_after: VecDeque<String>,
+    truncated: bool,
 }
 
 struct RowWithPath {
     path: PathBuf,
     row: MatchRow,
+}
+
+struct ContextLine {
+    text: String,
+    truncated: bool,
 }
 
 struct CollectorSink<'a> {
@@ -277,9 +304,10 @@ struct CollectorSink<'a> {
     rows: Vec<MatchRow>,
     /// Sliding window of recent before-context lines published by
     /// [`Sink::context`] before each [`Sink::matched`] call.
-    pending_before: VecDeque<String>,
+    pending_before: VecDeque<ContextLine>,
     context_before: usize,
     remaining: usize,
+    max_line_bytes: usize,
 }
 
 impl Sink for CollectorSink<'_> {
@@ -299,17 +327,26 @@ impl Sink for CollectorSink<'_> {
         let trimmed = raw_line.trim_end_matches(['\n', '\r']);
 
         let mut column = 1u64;
+        let mut match_start = None;
         if let Ok(Some(m)) = self.matcher.find(sink_match.bytes()) {
             column = (m.start() as u64) + 1;
+            match_start = Some(m.start().min(trimmed.len()));
         }
 
         let before = std::mem::take(&mut self.pending_before);
+        let truncated = before.iter().any(|line| line.truncated);
+        let before = before
+            .into_iter()
+            .map(|line| line.text)
+            .collect::<VecDeque<_>>();
+        let (text, text_truncated) = clip_text(trimmed, self.max_line_bytes, match_start);
         self.rows.push(MatchRow {
             line: line_number,
             column,
-            text: trimmed.to_string(),
+            text,
             context_before: before,
             context_after: VecDeque::new(),
+            truncated: truncated || text_truncated,
         });
         self.remaining -= 1;
         Ok(self.remaining > 0)
@@ -321,18 +358,21 @@ impl Sink for CollectorSink<'_> {
         ctx: &SinkContext<'_>,
     ) -> Result<bool, std::io::Error> {
         let line = std::str::from_utf8(ctx.bytes()).unwrap_or("");
-        let trimmed = line.trim_end_matches(['\n', '\r']).to_string();
+        let trimmed = line.trim_end_matches(['\n', '\r']);
+        let (text, truncated) = clip_text(trimmed, self.max_line_bytes, None);
 
         match ctx.kind() {
             SinkContextKind::Before => {
-                self.pending_before.push_back(trimmed);
+                self.pending_before
+                    .push_back(ContextLine { text, truncated });
                 while self.pending_before.len() > self.context_before {
                     self.pending_before.pop_front();
                 }
             }
             SinkContextKind::After => {
                 if let Some(last) = self.rows.last_mut() {
-                    last.context_after.push_back(trimmed);
+                    last.context_after.push_back(text);
+                    last.truncated |= truncated;
                 }
             }
             SinkContextKind::Other => {}
@@ -363,6 +403,7 @@ fn row_to_value(rwp: RowWithPath) -> VmValue {
         text,
         context_before,
         context_after,
+        truncated: _,
     } = row;
 
     let before: Vec<VmValue> = context_before.into_iter().map(str_value).collect();
@@ -376,4 +417,61 @@ fn row_to_value(rwp: RowWithPath) -> VmValue {
         ("context_before", VmValue::List(Arc::new(before))),
         ("context_after", VmValue::List(Arc::new(after))),
     ])
+}
+
+fn clip_text(value: &str, max_bytes: usize, anchor_byte: Option<usize>) -> (String, bool) {
+    if value.len() <= max_bytes {
+        return (value.to_string(), false);
+    }
+
+    let Some(anchor_byte) = anchor_byte else {
+        let keep = max_bytes.saturating_sub(CLIP_SUFFIX.len()).max(1);
+        let end = floor_char_boundary(value, keep);
+        return (format!("{}{}", &value[..end], CLIP_SUFFIX), true);
+    };
+
+    let content_budget = max_bytes
+        .saturating_sub(CLIP_PREFIX.len())
+        .saturating_sub(CLIP_SUFFIX.len())
+        .max(1);
+    let anchor_byte = anchor_byte.min(value.len());
+    let mut start = anchor_byte.saturating_sub(content_budget / 2);
+    if start.saturating_add(content_budget) > value.len() {
+        start = value.len().saturating_sub(content_budget);
+    }
+    start = floor_char_boundary(value, start);
+    let mut end = (start + content_budget).min(value.len());
+    end = floor_char_boundary(value, end);
+    if end <= start {
+        end = next_char_boundary(value, start);
+    }
+
+    let mut out = String::with_capacity(max_bytes);
+    if start > 0 {
+        out.push_str(CLIP_PREFIX);
+    }
+    out.push_str(&value[start..end]);
+    if end < value.len() {
+        out.push_str(CLIP_SUFFIX);
+    }
+    (out, true)
+}
+
+fn floor_char_boundary(value: &str, mut index: usize) -> usize {
+    index = index.min(value.len());
+    while index > 0 && !value.is_char_boundary(index) {
+        index -= 1;
+    }
+    index
+}
+
+fn next_char_boundary(value: &str, index: usize) -> usize {
+    if index >= value.len() {
+        return value.len();
+    }
+    value[index..]
+        .chars()
+        .next()
+        .map(|ch| index + ch.len_utf8())
+        .unwrap_or(value.len())
 }

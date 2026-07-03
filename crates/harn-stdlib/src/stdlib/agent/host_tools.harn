@@ -212,6 +212,11 @@ fn __agent_host_search_request(args, options) {
   if args?.max_matches == nil && default_max_matches != nil {
     req = req + {max_matches: default_max_matches}
   }
+  let default_max_line_bytes = __agent_host_options(options)?.search_max_line_bytes
+    ?? __agent_host_options(options)?.max_search_line_bytes
+  if args?.max_line_bytes == nil && default_max_line_bytes != nil {
+    req = req + {max_line_bytes: default_max_line_bytes}
+  }
   let configured_exclude_globs = __agent_host_options(options)?.search_exclude_globs
     ?? __agent_host_options(options)?.exclude_globs
   let exclude_globs = __agent_host_string_list(configured_exclude_globs, "exclude_globs")
@@ -224,6 +229,7 @@ fn __agent_host_search_request(args, options) {
     "case_insensitive",
     "fixed_strings",
     "max_matches",
+    "max_line_bytes",
     "context_before",
     "context_after",
     "include_hidden",
@@ -743,6 +749,7 @@ pub fn agent_read_tools(registry = nil, options = nil) {
             case_insensitive: {type: "boolean", required: false},
             fixed_strings: {type: "boolean", required: false},
             max_matches: {type: "integer", required: false},
+            max_line_bytes: {type: "integer", required: false},
             context_before: {type: "integer", required: false},
             context_after: {type: "integer", required: false},
             include_hidden: {type: "boolean", required: false},

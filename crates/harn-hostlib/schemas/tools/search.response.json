@@ -8,7 +8,10 @@
       "type": "array",
       "items": { "$ref": "#/$defs/Match" }
     },
-    "truncated": { "type": "boolean" }
+    "truncated": {
+      "type": "boolean",
+      "description": "True when `max_matches` dropped additional matches or `max_line_bytes` clipped any returned match/context line."
+    }
   },
   "required": ["matches", "truncated"],
   "additionalProperties": false,
