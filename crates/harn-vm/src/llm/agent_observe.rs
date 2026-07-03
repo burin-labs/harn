@@ -229,6 +229,155 @@ pub(super) fn is_overloaded_llm_error(err: &VmError) -> bool {
     crate::value::error_to_category(err) == crate::value::ErrorCategory::Overloaded
 }
 
+/// L0 detection: classify an LLM-call failure into a rate-governor throttle
+/// signal from the STRUCTURED error category (never a raw log string), reusing
+/// the same category logic the cooldown/breaker seams above use so the governor
+/// agrees with the runtime's own routing. Returns `None` for non-throttle
+/// failures (network/auth/context/generic 5xx). A 429 → `RateLimit429`; a
+/// provider overload (529/503/`overloaded_error`) → `Overloaded`. The
+/// empty-under-load signal is detected separately (on the `Ok` empty path)
+/// because it is not a thrown error.
+fn governor_throttle_signal_for_error(
+    err: &VmError,
+) -> Option<crate::llm::rate_governor::ThrottleSignal> {
+    use crate::llm::rate_governor::ThrottleSignal;
+    let category = crate::value::error_to_category(err);
+    if category == crate::value::ErrorCategory::Overloaded {
+        return Some(ThrottleSignal::Overloaded);
+    }
+    let rate_limited = crate::llm::api::classify_llm_error(category, &err.to_string()).reason
+        == crate::llm::api::LlmErrorReason::RateLimit;
+    if rate_limited {
+        return Some(ThrottleSignal::RateLimit429);
+    }
+    None
+}
+
+/// Estimated (input + output) tokens for a call, for the governor's TPM bucket.
+/// Reuses the same gross-token projection the route limiter charges, so the two
+/// agree. `0` when unprojectable.
+fn governor_estimated_tokens(opts: &super::api::LlmCallOptions) -> u64 {
+    let projection = super::cost::project_llm_call_cost(opts, 0.0);
+    (projection.projected_input_tokens.max(0) + projection.projected_output_tokens.max(0)) as u64
+}
+
+/// Wait behind the rate governor until it admits this call. `Wait`/`CircuitOpen`
+/// resolve to a bounded back-off (honoring the mock clock) so retries pace
+/// themselves instead of blind-firing at a throttled provider.
+///
+/// Returns `true` when the governor RESERVED an in-flight slot (the outcome path
+/// MUST then release it exactly once) and `false` when it did not — either the
+/// flag is off, or the admission cap was hit while the circuit was still OPEN.
+/// The cap exists for the same reason the durable rate limiter caps its backoff:
+/// a governor should pace, not hang. On a cap-hit-while-OPEN we proceed WITHOUT a
+/// reservation, so the outcome path skips the release and the in-flight count
+/// stays balanced; a real 429/overload then re-feeds the governor and the normal
+/// retry/escalation path, exactly as an uncapped limiter would after its clamp.
+async fn await_governor_admission(provider: &str, org_key: &str, est_tokens: u64) -> bool {
+    use crate::llm::rate_governor::{gate, GateOutcome};
+    if !crate::llm::rate_governor::enabled() {
+        return false;
+    }
+    const GOVERNOR_MAX_ADMISSION_WAITS: usize = 256;
+    for _ in 0..GOVERNOR_MAX_ADMISSION_WAITS {
+        match gate(provider, org_key, est_tokens) {
+            GateOutcome::Proceed => return true,
+            GateOutcome::Wait(d) | GateOutcome::CircuitOpen(d) => {
+                crate::clock_mock::sleep(d).await;
+            }
+        }
+    }
+    // Cap hit: one last gate. Proceed reserves a slot; a persisting OPEN does
+    // not — we fall through unreserved rather than hammer or hang.
+    matches!(gate(provider, org_key, est_tokens), GateOutcome::Proceed)
+}
+
+/// Release the governor slot reserved by [`await_governor_admission`] and record
+/// the call's outcome (AIMD + circuit + L0 `provider_throttle` emission). No-op
+/// when the flag is off. Runs exactly once per gated attempt.
+fn record_governor_call_outcome(
+    provider: &str,
+    org_key: &str,
+    reserved: bool,
+    llm_result: &Result<super::api::LlmResult, VmError>,
+) {
+    use crate::llm::rate_governor::{self, GovernorOutcome, ThrottleSignal};
+    // No reservation → nothing to release. This happens when the flag is off, or
+    // the admission cap was hit while the circuit stayed OPEN. Skipping keeps the
+    // in-flight count balanced.
+    if !reserved {
+        return;
+    }
+    // Classify the outcome (and the throttle signal, if any) BEFORE recording,
+    // so the empty-under-load heuristic reads the circuit state as it was during
+    // the call — not after this outcome mutates it.
+    let (outcome, throttle) = match llm_result {
+        Ok(result) => {
+            // Empty-under-load: billed output but committed nothing, WHILE this
+            // provider is already throttled → soft-throttle, not capability.
+            let committed_nothing = result.text.is_empty()
+                && result.tool_calls.is_empty()
+                && result.thinking.as_deref().map(str::is_empty).unwrap_or(true);
+            let empty_billed = committed_nothing && result.output_tokens > 0;
+            if empty_billed && rate_governor::provider_already_throttled(provider, org_key) {
+                (
+                    GovernorOutcome::Throttled {
+                        signal: ThrottleSignal::EmptyUnderLoad,
+                        retry_after_ms: None,
+                    },
+                    Some((ThrottleSignal::EmptyUnderLoad, None)),
+                )
+            } else {
+                (GovernorOutcome::Served, None)
+            }
+        }
+        Err(err) => match governor_throttle_signal_for_error(err) {
+            Some(signal) => {
+                let retry_after_ms = extract_retry_after_ms(err);
+                (
+                    GovernorOutcome::Throttled {
+                        signal,
+                        retry_after_ms,
+                    },
+                    Some((signal, retry_after_ms)),
+                )
+            }
+            None => (GovernorOutcome::Neutral, None),
+        },
+    };
+    // Record the outcome first so the emitted `governor_state` snapshot reflects
+    // the governor's REACTION (shrunk concurrency, opened circuit).
+    rate_governor::record_outcome(provider, org_key, outcome);
+    if let Some((signal, retry_after_ms)) = throttle {
+        emit_provider_throttle(provider, org_key, signal, retry_after_ms);
+    }
+}
+
+/// Emit the L0 `provider_throttle` transcript record + a `governor_state`
+/// snapshot record, following the `resolved_dispatch` emit pattern
+/// ([`append_llm_transcript_entry`]).
+fn emit_provider_throttle(
+    provider: &str,
+    org_key: &str,
+    signal: crate::llm::rate_governor::ThrottleSignal,
+    retry_after_ms: Option<u64>,
+) {
+    let ts = chrono_now();
+    append_llm_transcript_entry(&crate::llm::rate_governor::build_throttle_record(
+        provider,
+        org_key,
+        signal,
+        None,
+        retry_after_ms,
+        ts.clone(),
+    ));
+    if let Some(snapshot) = crate::llm::rate_governor::snapshot(provider, org_key) {
+        append_llm_transcript_entry(&crate::llm::rate_governor::build_state_record(
+            provider, org_key, &snapshot, ts,
+        ));
+    }
+}
+
 /// Shared-cooldown duration to record for a failed call, or 0 for "no
 /// cooldown". Rate-limit (429) failures cool down for the provider's
 /// Retry-After when one was sent (there is no meaningful default — catalog
@@ -1454,6 +1603,17 @@ pub(crate) async fn observed_llm_call(
 
         let rate_limit_permit = super::rate_limit::acquire_permit_for_llm_call(opts).await?;
 
+        // Rate governor (Layer 1, behind the `llm.rate_governor` flag; a byte-
+        // identical no-op when off). Retries WAIT behind the governor instead of
+        // blind-firing: an AIMD-shrunk concurrency limit, a full token bucket, or
+        // an OPEN circuit all resolve to a bounded back-off here rather than
+        // another hammer at a throttled provider. `gate` reserves an in-flight
+        // slot on `Proceed`; the outcome below releases it exactly once.
+        let governor_org_key = crate::llm::rate_governor::org_key_id(&opts.api_key);
+        let governor_est_tokens = governor_estimated_tokens(opts);
+        let governor_reserved =
+            await_governor_admission(&opts.provider, &governor_org_key, governor_est_tokens).await;
+
         let call_id = next_call_id();
         let prompt_chars: usize = opts
             .messages
@@ -1545,6 +1705,19 @@ pub(crate) async fn observed_llm_call(
         };
         drop(rate_limit_permit);
         let duration_ms = start.elapsed().as_millis() as u64;
+
+        // Release the governor slot reserved above and drive AIMD + the circuit
+        // (no-op when the flag is off). Runs once per gated attempt, BEFORE the
+        // arms below branch into retry/return/error, so the slot accounting can
+        // never leak. Detection (L0) also emits a `provider_throttle` record on
+        // a throttle signal. `empty_under_load` fires only when this provider is
+        // ALREADY throttled — the 24/24-empties soft-throttle signature.
+        record_governor_call_outcome(
+            &opts.provider,
+            &governor_org_key,
+            governor_reserved,
+            &llm_result,
+        );
 
         match llm_result {
             Ok(result) => {
@@ -2003,6 +2176,48 @@ mod retry_tests {
             message: msg.to_string(),
             category,
         }
+    }
+
+    // ----- L0 governor throttle detection (VmError -> ThrottleSignal) --------
+
+    #[test]
+    fn governor_detects_rate_limit_and_overload_from_runtime_errors() {
+        use crate::llm::rate_governor::ThrottleSignal;
+        // A 429 rate-limit error (however carried) → RateLimit429.
+        assert_eq!(
+            governor_throttle_signal_for_error(&thrown(
+                "anthropic HTTP 429 [rate_limited]: rate_limit_error"
+            )),
+            Some(ThrottleSignal::RateLimit429)
+        );
+        assert_eq!(
+            governor_throttle_signal_for_error(&categorized(
+                "provider rate limit exceeded",
+                ErrorCategory::RateLimit
+            )),
+            Some(ThrottleSignal::RateLimit429)
+        );
+        // A provider overload (529/503 / overloaded_error) → Overloaded.
+        assert_eq!(
+            governor_throttle_signal_for_error(&categorized(
+                "anthropic overloaded_error",
+                ErrorCategory::Overloaded
+            )),
+            Some(ThrottleSignal::Overloaded)
+        );
+        // Non-throttle failures carry no governor signal (the network breaker /
+        // retry path owns those).
+        assert_eq!(
+            governor_throttle_signal_for_error(&categorized(
+                "connection reset by peer",
+                ErrorCategory::NetworkError
+            )),
+            None
+        );
+        assert_eq!(
+            governor_throttle_signal_for_error(&thrown("some generic 500 server_error")),
+            None
+        );
     }
 
     // ----- runtime tool_format fallback (native -> text) ---------------------

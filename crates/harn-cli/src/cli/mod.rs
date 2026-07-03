@@ -174,8 +174,8 @@ pub(crate) use profile::ProfileArgs;
 pub(crate) use provider::{
     refresh_provider_catalog_if_requested, ProviderArgs, ProviderCacheProbeArgs,
     ProviderCapabilitiesArgs, ProviderCapabilitiesCommand, ProviderCapabilitiesPromoteFromEvalArgs,
-    ProviderCommand, ProviderDispatchExplainArgs, ProviderProbeArgs, ProviderToolProbeArgs,
-    ProviderToolProbeModeArg,
+    ProviderCommand, ProviderDispatchExplainArgs, ProviderLimitsArgs, ProviderProbeArgs,
+    ProviderToolProbeArgs, ProviderToolProbeModeArg,
 };
 pub(crate) use providers::{
     ProviderCatalogCommand, ProvidersBuildCapabilitiesArgs, ProvidersBuildConfigArgs,

@@ -43,10 +43,12 @@ pub use audit::{
 };
 pub use lookup::{
     builtin_file, clear_user_overrides, lookup, lookup_with_user_overrides,
-    parse_capabilities_toml, set_user_overrides, set_user_overrides_from_manifest_toml,
-    set_user_overrides_toml,
+    parse_capabilities_toml, provider_limit_providers, provider_limits_for, set_user_overrides,
+    set_user_overrides_from_manifest_toml, set_user_overrides_toml,
 };
-pub use model::{Capabilities, CapabilitiesFile, ProviderDefaults, WireDialect};
+pub use model::{
+    Capabilities, CapabilitiesFile, GovernorBackoff, ProviderDefaults, ProviderLimits, WireDialect,
+};
 pub use rule::ProviderRule;
 pub use tool_format::{
     no_viable_tool_channel, no_viable_tool_channel_with_caps, validate_tool_format,
