@@ -204,6 +204,18 @@ impl Default for SecurityPolicy {
 impl SecurityPolicy {
     pub fn from_config(config: &SecurityConfig) -> Self {
         let enabled = !matches!(config.mode, SecurityMode::Off);
+        // The hardened tiers (`strict`, `local-ml`) bundle the origin-provenance
+        // defenses on, mirroring how `local-ml` implies `detect_injection`
+        // below. The fine-grained booleans stay available for tests and config,
+        // but the *product* surface is the coherent mode ladder — a user never
+        // hand-assembles the bundle, so a nonsensical subset cannot be picked.
+        let hardened = matches!(config.mode, SecurityMode::Strict | SecurityMode::LocalMl);
+        // File provenance is the prerequisite for command-laundered-read
+        // provenance: distrust-on-command-read looks paths up in the taint
+        // ledger that taint-on-write populates, so it is inert without file
+        // provenance. Gate the command flag on it structurally so the inert
+        // combination cannot arise from config or a future caller.
+        let taint_file_provenance = enabled && (config.taint_file_provenance || hardened);
         Self {
             mode: config.mode,
             spotlight_external: enabled && config.spotlight_external,
@@ -211,10 +223,10 @@ impl SecurityPolicy {
             destyle_untrusted: enabled && config.destyle_untrusted,
             trifecta_gate: enabled && config.trifecta_gate,
             pin_mcp_schemas: enabled && config.pin_mcp_schemas,
-            authenticate_directives: enabled && config.authenticate_directives,
-            taint_file_provenance: enabled && config.taint_file_provenance,
-            taint_command_reads: enabled && config.taint_command_reads,
-            precise_exfil_gate: enabled && config.precise_exfil_gate,
+            authenticate_directives: enabled && (config.authenticate_directives || hardened),
+            taint_file_provenance,
+            taint_command_reads: taint_file_provenance && (config.taint_command_reads || hardened),
+            precise_exfil_gate: enabled && (config.precise_exfil_gate || hardened),
             gate_secret_reads: enabled && config.gate_secret_reads,
             // `local-ml` mode turns detection on; other modes can still opt in.
             detect_injection: enabled
@@ -955,6 +967,15 @@ fn policy_from_dict(config: &crate::value::DictMap) -> SecurityPolicy {
     if let Some(b) = config.get("authenticate_directives").and_then(vm_bool) {
         base.authenticate_directives = b;
     }
+    if let Some(b) = config.get("taint_file_provenance").and_then(vm_bool) {
+        base.taint_file_provenance = b;
+    }
+    if let Some(b) = config.get("taint_command_reads").and_then(vm_bool) {
+        base.taint_command_reads = b;
+    }
+    if let Some(b) = config.get("precise_exfil_gate").and_then(vm_bool) {
+        base.precise_exfil_gate = b;
+    }
     if let Some(b) = config.get("gate_secret_reads").and_then(vm_bool) {
         base.gate_secret_reads = b;
     }
@@ -1005,6 +1026,18 @@ fn policy_summary(policy: &SecurityPolicy) -> VmValue {
     map.insert(
         "authenticate_directives".to_string(),
         VmValue::Bool(policy.authenticate_directives),
+    );
+    map.insert(
+        "taint_file_provenance".to_string(),
+        VmValue::Bool(policy.taint_file_provenance),
+    );
+    map.insert(
+        "taint_command_reads".to_string(),
+        VmValue::Bool(policy.taint_command_reads),
+    );
+    map.insert(
+        "precise_exfil_gate".to_string(),
+        VmValue::Bool(policy.precise_exfil_gate),
     );
     map.insert(
         "gate_secret_reads".to_string(),
@@ -1127,6 +1160,97 @@ mod tests {
             ..Default::default()
         };
         assert!(!SecurityPolicy::from_config(&off).authenticate_directives);
+    }
+
+    #[test]
+    fn hardened_modes_bundle_the_provenance_defenses() {
+        // Selecting a hardened tier turns the whole origin-provenance bundle on
+        // from mode alone — the config booleans stay at their (false) defaults.
+        for mode in [SecurityMode::Strict, SecurityMode::LocalMl] {
+            let cfg = SecurityConfig {
+                mode,
+                ..Default::default()
+            };
+            let policy = SecurityPolicy::from_config(&cfg);
+            assert!(policy.authenticate_directives, "{mode:?} authenticate");
+            assert!(policy.taint_file_provenance, "{mode:?} file provenance");
+            assert!(policy.taint_command_reads, "{mode:?} command reads");
+            assert!(policy.precise_exfil_gate, "{mode:?} precise gate");
+        }
+    }
+
+    #[test]
+    fn spotlight_default_leaves_the_provenance_bundle_off() {
+        // The default posture is unchanged: baseline spotlight + coarse gate,
+        // provenance refinements off, so behaviour is byte-identical until a
+        // host opts into a hardened tier or a flag.
+        let policy = SecurityPolicy::from_config(&SecurityConfig::default());
+        assert!(!policy.authenticate_directives);
+        assert!(!policy.taint_file_provenance);
+        assert!(!policy.taint_command_reads);
+        assert!(!policy.precise_exfil_gate);
+    }
+
+    #[test]
+    fn command_reads_require_file_provenance() {
+        // Command-laundered-read taint is inert without file provenance (no
+        // recorded paths to reference), so the flag is gated on its prerequisite
+        // structurally — the nonsensical "command reads, no file provenance"
+        // subset cannot arise from config.
+        let inert = SecurityConfig {
+            taint_command_reads: true,
+            taint_file_provenance: false,
+            ..Default::default()
+        };
+        assert!(!SecurityPolicy::from_config(&inert).taint_command_reads);
+        assert!(!SecurityPolicy::from_config(&inert).taint_file_provenance);
+
+        let paired = SecurityConfig {
+            taint_command_reads: true,
+            taint_file_provenance: true,
+            ..Default::default()
+        };
+        let policy = SecurityPolicy::from_config(&paired);
+        assert!(policy.taint_file_provenance);
+        assert!(policy.taint_command_reads);
+    }
+
+    #[test]
+    fn off_mode_disables_the_provenance_bundle_even_when_hardened_named() {
+        // `off` wins over the hardened-tier bundling: no layer survives.
+        let cfg = SecurityConfig {
+            mode: SecurityMode::Off,
+            taint_file_provenance: true,
+            taint_command_reads: true,
+            precise_exfil_gate: true,
+            ..Default::default()
+        };
+        let policy = SecurityPolicy::from_config(&cfg);
+        assert!(!policy.taint_file_provenance);
+        assert!(!policy.taint_command_reads);
+        assert!(!policy.precise_exfil_gate);
+        assert!(!policy.authenticate_directives);
+    }
+
+    #[test]
+    fn policy_from_dict_parses_the_provenance_keys() {
+        let mut config = crate::value::DictMap::new();
+        config.insert(
+            arcstr::ArcStr::from("taint_file_provenance"),
+            VmValue::Bool(true),
+        );
+        config.insert(
+            arcstr::ArcStr::from("taint_command_reads"),
+            VmValue::Bool(true),
+        );
+        config.insert(
+            arcstr::ArcStr::from("precise_exfil_gate"),
+            VmValue::Bool(true),
+        );
+        let policy = policy_from_dict(&config);
+        assert!(policy.taint_file_provenance);
+        assert!(policy.taint_command_reads);
+        assert!(policy.precise_exfil_gate);
     }
 
     #[test]

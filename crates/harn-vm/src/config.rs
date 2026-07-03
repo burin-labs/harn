@@ -258,6 +258,13 @@ impl Default for RedactionConfig {
 /// scored by an injection classifier (the built-in heuristic by default, or a
 /// downloadable `harn-guard` neural model when installed), and a flagged score
 /// tightens the trifecta gate. It is a superset of `Spotlight`.
+///
+/// Both hardened tiers (`Strict` and `LocalMl`) additionally bundle the
+/// origin-provenance defenses — `authenticate_directives`,
+/// `taint_file_provenance`, `taint_command_reads`, and the precise
+/// (destination-aware) exfil gate — on. See [`SecurityPolicy::from_config`].
+/// The individual `SecurityConfig` booleans remain for tests and fine-grained
+/// config, but the mode ladder is the coherent product surface.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum SecurityMode {

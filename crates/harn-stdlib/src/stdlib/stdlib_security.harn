@@ -54,7 +54,9 @@ pub fn spotlight() -> dict {
 }
 
 /**
- * Enable strict mode: spotlight + per-line datamarking of untrusted content.
+ * Enable strict mode: spotlight + per-line datamarking of untrusted content +
+ * the origin-provenance bundle (directive authentication, file + command-read
+ * taint, and the precise destination-aware exfil gate).
  *
  * @effects: [state]
  * @errors: []
@@ -64,10 +66,12 @@ pub fn strict() -> dict {
 }
 
 /**
- * Enable local-ml mode: spotlight + trifecta gate + on-device injection
- * detection. Untrusted content is scored by the injection classifier (the
- * built-in heuristic by default, or a downloadable `harn-guard` neural model
- * when registered), and a flagged score tightens the trifecta gate.
+ * Enable local-ml mode: spotlight + trifecta gate + the origin-provenance
+ * bundle (directive authentication, file + command-read taint, and the precise
+ * destination-aware exfil gate) + on-device injection detection. Untrusted
+ * content is scored by the injection classifier (the built-in heuristic by
+ * default, or a downloadable `harn-guard` neural model when registered), and a
+ * flagged score tightens the trifecta gate.
  *
  * Pass `model` to select a `harn guard` catalog name or model directory; the
  * host loads it lazily when built with the guard inference backend. The empty
