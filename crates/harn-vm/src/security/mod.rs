@@ -40,7 +40,7 @@ pub use exfil_precision::{
     args_target_endpoints, destination_is_untrusted_originated, extract_endpoints,
     precise_exfil_gate_fires,
 };
-pub use file_provenance::{path_arguments, FileProvenanceLedger};
+pub use file_provenance::{command_string, path_arguments, FileProvenanceLedger};
 pub use provenance::{classify_directive_trust, DirectiveProvenance};
 
 use crate::value::VmDictExt;
@@ -164,6 +164,15 @@ pub struct SecurityPolicy {
     /// trifecta gate. First-party file reads stay trusted. Default OFF (net-new
     /// enforcement); byte-identical behaviour when disabled.
     pub taint_file_provenance: bool,
+    /// Extend untrusted-origin file provenance to the command surface: an
+    /// `Execute`-kind tool whose command string names a tainted-origin path
+    /// (`cat vendor/dep/README`) re-reads that content into context outside a
+    /// structured `read_file` call — the laundering read that closes the
+    /// `tool_result` residual. Classified untrusted by the same file origin, so
+    /// the laundered payload arms the taint / trifecta gate. Fires only on paths
+    /// already known untrusted, so a first-party `cat src/main.rs` stays trusted.
+    /// Default OFF (net-new enforcement); byte-identical behaviour when disabled.
+    pub taint_command_reads: bool,
     /// Narrow the exfil axis of the lethal-trifecta gate to the real attack
     /// signature: fire only when the sink's destination is attacker-originated
     /// (an endpoint seen in untrusted content) or the payload ships a secret,
@@ -204,6 +213,7 @@ impl SecurityPolicy {
             pin_mcp_schemas: enabled && config.pin_mcp_schemas,
             authenticate_directives: enabled && config.authenticate_directives,
             taint_file_provenance: enabled && config.taint_file_provenance,
+            taint_command_reads: enabled && config.taint_command_reads,
             precise_exfil_gate: enabled && config.precise_exfil_gate,
             gate_secret_reads: enabled && config.gate_secret_reads,
             // `local-ml` mode turns detection on; other modes can still opt in.
