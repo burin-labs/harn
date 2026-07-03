@@ -81,7 +81,11 @@ When a pipeline evaluates predicates during an agent run, use
 `flow_invariant_feedback(report, opts?)` to turn the
 `flow_evaluate_invariants(...)` report into compact model-facing feedback. It
 emits non-allowing verdicts, discovery diagnostics, and optional skipped
-records without introducing a second session-injection channel:
+records without introducing a second session-injection channel. By default it
+also includes up to three `findings` labels from harn-canon-style predicate
+results, preferring `path` plus line metadata when present. Set
+`include_findings: false`, or lower `max_findings_per_item`, when a caller needs
+a terser reminder.
 
 ```harn,ignore
 let report = flow_evaluate_invariants("", slice, {
