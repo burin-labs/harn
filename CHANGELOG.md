@@ -8,6 +8,141 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.9.0
+
+### Breaking
+
+- `parallel` and `parallel each` are now fail-fast: the first branch that
+  throws cancels all in-flight siblings (in-flight LLM/host calls are dropped,
+  queued branches never start) and its error propagates out of the construct.
+  Previously every branch ran to completion and the first error in source
+  order was raised only after all branches finished. When several branches
+  have already failed by the time the cancellation lands, the lowest-index
+  branch's error is reported, so the propagated error stays deterministic.
+  Cancelled siblings are still joined before the construct returns.
+  **Migration:** if you need every branch to run regardless of failures,
+  switch to `parallel settle`, which is unchanged and still runs everything,
+  collecting per-branch `Ok`/`Err` outcomes.
+- **Subprocesses now die with their invoking scope.** Foreground `run_command` /
+  `run_test` / `run_build_command` / `manage_packages` tool commands and the
+  VM-side `process.exec` / `shell` / `exec_opts` builtins spawn their child in
+  its own process group and, when the invoking scope is cancelled, a `deadline`
+  expires, or the VM is dropped, terminate the whole group — SIGTERM, a 2s grace
+  period, then SIGKILL (Unix; best-effort direct-child kill on Windows).
+  Previously such children (and their grandchildren) kept running as orphans
+  until they exited on their own. Scripts that relied on an orphaned survivor
+  should use the existing background form instead:
+  `run_command({..., background: true})` children are exempt from scope
+  cancellation and are reaped only via `cancel_handle` or agent-session-end
+  cleanup. As part of the same change, `deadline`/host-cancel now preempt a
+  *blocking* command mid-wait (the command returns `status: "killed"` and the
+  scope error surfaces immediately) instead of waiting for the child to finish.
+
+### Added
+
+- **Capability rules support `extends = true` field-wise fall-through.** A
+  matching `[[provider.<name>]]` capability rule that sets `extends = true`
+  now contributes ONLY the fields it explicitly sets and lets resolution
+  continue to later matching rules (user rules before built-in rules, then
+  the `provider_family` chain) and ultimately to provider / built-in defaults
+  to fill the rest. A rule without `extends` (or with `extends = false`)
+  terminates resolution exactly as before, so every existing catalog and
+  overlay is unchanged. This lets an overlay tweak one field of a shipped row
+  without copying the whole row verbatim (which silently freezes the rest of
+  the row against catalog updates). The capability matrix (`harn` audit /
+  matrix surfaces) reports an `extends` row's own fields and, for a matched
+  model, the full precedence chain of absorbed rule patterns.
+- Added `flow_invariant_feedback(report, options?)` to turn Flow invariant
+  reports into compact agent-feedback text.
+
+### Changed
+
+- Agent tool dispatch takes a fast path when no policy/permission machinery is
+  configured: the session policy guard, execution-policy enforcement, and the
+  dynamic-permission check are skipped (each is a provable no-op without a
+  configured policy, permission scope, or cached session grant), and the JSON
+  form of tool arguments is no longer deep-cloned twice per call.
+  `perf/vm/agent_tool_dispatch` improves from ~72.5ms to ~65.5ms per run
+  (3,000 dispatches; ~10% faster, ~2.3us/dispatch of avoided policy/permission
+  setup; settled-min A/B on the same machine, ~1.5ms run-to-run noise). Any
+  configured policy, approval, command policy, permissions option, ambient
+  policy scope, or session grant routes through the unchanged slow path.
+- `harn models lora plan` now reports the template convention to train
+  against, including distinct guidance for native Gemma 4, FunctionGemma, and
+  Harn text/json tool-call adapters.
+- Release PR CI now skips redundant PR-head Rust, macOS, and Windows lanes
+  when the release branch diff contains only generated release metadata, while
+  preserving full merge-queue and post-merge backstops.
+- Local git hooks no longer treat every Makefile-only change as a Rust
+  workspace compile trigger; Makefile changes still run workflow lint and
+  generated-artifact registry checks.
+- The advisory CLI cold-start budget now skips release PRs, avoiding a
+  version-bump-only release binary build that does not gate cold-start changes.
+
+### Fixed
+
+- **Agent-loop transcript integrity: no more orphaned tool_use / tool_result
+  pairs.** Skip paths that persist an assistant tool_use turn without
+  dispatching (pre-dispatch user interrupt, `agent_await_resumption`
+  suspension and its parallel siblings, invalid await arguments) now record
+  synthesized placeholder tool_results (`interrupted` /
+  `awaiting_resumption` / `skipped`), so Anthropic-native sessions no longer
+  400 with "tool_use ids were found without tool_result blocks" after an
+  interrupt or resume. The Anthropic egress normalizer additionally
+  backfills a deterministic placeholder tool_result for any orphaned
+  tool_use id as a safety net, and auto-compaction never splits the kept
+  window between an assistant tool-use message and its tool_result
+  message(s).
+- **Escalation no longer orphans a `tool_use` block into an Anthropic HTTP
+  400.** When a text-format primary model escalated to a native-format model
+  (e.g. Fireworks → Anthropic), the escalated model would emit a real
+  `tool_use` block that the loop then declined to dispatch (native-format
+  fallback reject, all-blank-name drop, parse-error, or no-progress nudge) and
+  followed with a bare user-feedback message. That left the assistant
+  `tool_use` with no matching `tool_result`, which Anthropic rejects with a
+  non-retryable HTTP 400 (`tool_use ids were found without tool_result blocks
+  immediately after`), killing the run before the escalated fix was applied.
+  Every such inject path now first synthesizes a matching `tool_result` for
+  each orphaned block (carrying the same corrective feedback as its
+  observation) via the shared `agent_session_pair_orphaned_tool_use` repair, so
+  the pairing invariant holds across the native / OpenAI / Gemini wire shapes.
+  The repair is a strict no-op for homogeneous text-format runs (whose calls
+  stay inline in `content`) and for blocks the loop already dispatched, so
+  converging runs are unaffected.
+- **Escalation tool-result pairing is now actually effective on text-primary
+  runs (both the declined-dispatch AND the dispatched path).** The orphan
+  repair, and the sibling `record_tool_results` dispatch path, both synthesized
+  their tool-result using the session-locked `tool_format`. That lock is pinned
+  to the PRIMARY model's format (`text`) at session init and is never re-claimed
+  when the run escalates to a native model — so on the exact scenario the repair
+  targets (a text-format primary escalating to Anthropic/OpenAI), the tool-result
+  took the text-channel branch and was emitted as a bare `role:"user"` message,
+  leaving the escalated model's native `tool_use` block orphaned and
+  re-triggering the same non-retryable Anthropic HTTP 400. A structured native
+  `tool_use`/`tool_call` block is native by definition (text/json channels carry
+  calls inline in `content` and produce no structured blocks), so both paths now
+  synthesize the tool-result in the provider's native shape (anthropic
+  `tool_result`+`tool_use_id`, openai `tool`+`tool_call_id`) when the assistant
+  turn carries native blocks, regardless of the session lock. Homogeneous
+  text-channel runs and already-dispatched blocks remain strict no-ops.
+- Sanitize nested OpenAI-compatible assistant `tool_calls` history before
+  provider dispatch so strict OpenRouter/Fireworks routes do not receive
+  storage-only or telemetry fields.
+- **CI now catches `#[harn_builtin]` defs that are declared but never
+  installed on a live VM.** A builtin annotated with `#[harn_builtin]` is
+  auto-added to the linkme `ALL_BUILTIN_DEFS` slice, but *installing* it onto a
+  running VM still runs through hand-maintained `register_*` functions (the
+  `LLM_RUNTIME_PRIMITIVE_BUILTINS` array, `register_agent_session_host_primitives`,
+  the per-module `register_*_builtins`, …). A def could therefore exist — and
+  pass every parser-alignment test — yet never be wired into runtime dispatch,
+  so any call threw `Undefined builtin` at runtime and got silently swallowed by
+  the agent loop's outer `try` (this is how `__host_agent_undispatched_tool_results`
+  shipped inert before the transcript-integrity fix). A new alignment test,
+  `every_runtime_handler_builtin_is_installed_on_a_full_vm`, walks
+  `ALL_BUILTIN_DEFS` against the fully-configured stdlib VM and fails the build
+  if any runtime-handler def is missing from every `register_*` path, naming the
+  builtin and the array to add it to.
+
 ## v0.8.169
 
 ### Added
