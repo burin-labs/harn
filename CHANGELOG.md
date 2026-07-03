@@ -8,6 +8,52 @@ highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.9.2
+
+### Fixed
+
+- **Cross-provider escalation dialect (both halves) — fixes the 400s that
+  killed cheap-model → sonnet escalation.** When a cheap OpenAI/Ollama-dialect
+  primary (e.g. Fireworks `gpt-oss-120b`) escalates to Anthropic
+  (`claude-sonnet-4-6`) and its history is replayed, two distinct Anthropic
+  `HTTP 400 [invalid_request]`s used to kill the run. Both are now translated at
+  egress in `AnthropicProvider::build_request_body`:
+  - Tool-results carried as top-level `role:"tool"` messages (the OpenAI/Ollama
+    native dialect) are translated to Anthropic's shape — a `role:"user"`
+    message with a `tool_result` content block (`{type:"tool_result",
+    tool_use_id, content}`) — instead of sailing through as an
+    `Unexpected role "tool"` 400 (#3857).
+  - The assistant turn's top-level OpenAI `tool_calls` array
+    (`{id, type:"function", function:{name, arguments}}`) is translated to
+    Anthropic `tool_use` content blocks with matching ids, so each replayed
+    `tool_result` has a corresponding `tool_use` instead of failing with
+    `unexpected tool_use_id found in tool_result blocks … Each tool_result block
+    must have a corresponding tool_use` (#3862).
+- **`harness.fs.mkdir` honors the `recursive?` flag.** The builtin signature
+  advertised `recursive?: bool` but the VM always called `create_dir_all`;
+  `harness.fs.mkdir(path, false)` now uses non-recursive exclusive directory
+  creation (with overlay-filesystem support so testbench/dry-run writes see the
+  same exclusive behavior), giving release orchestration an atomic cross-process
+  lock-directory primitive (#3859).
+
+### Security
+
+- **Role-hygiene ingress (special-token neutralization + destyling).** Two
+  structural passes now run on an untrusted body *before* `spotlight_wrap`
+  frames it, closing the gaps spotlighting leaves against the role-confusion
+  attack classes (arXiv:2603.12277, ChatBug / ChatInject / MetaBreak): reserved
+  chat-template special tokens (`<|im_start|>`, `[INST]`, `<|eot_id|>`, …) are
+  neutralized, and forged turn/reasoning style (line-leading `User:` labels,
+  `<think>…</think>` blocks) is destyled (#3855).
+
+### Changed
+
+- **Flow predicate feedback includes concrete findings.** `flow_invariant_feedback`
+  now emits capped harn-canon-style `findings` labels by default, surfacing the
+  file locations from residual predicate reports in the reusable Flow/reporting
+  layer; `include_findings` and `max_findings_per_item` options let callers keep
+  the terser output (#3858).
+
 ## v0.9.1
 
 ### Added
