@@ -4,9 +4,11 @@
 
 **Harn is a programming language and runtime for building AI agents.**
 
-You write the parts that are yours — the workflow, the tools, the policies, the prompts. Harn owns the
-plumbing every agent needs and everyone otherwise rebuilds by hand: transcripts, context assembly, retries,
-tool routing, provider differences, persistence, replay, and evals.
+- You write the parts that are yours: workflows, tools, policies, and prompts.
+- **Harn** ([harnlang.com](https://harnlang.com/)) owns the plumbing every agent needs
+so you don't have to roll your own or pull in a patchwork of libraries. These include
+transcripts and session management, context assembly, retries, tool routing, provider
+differences, persistence, replay, and evals.
 
 ```harn
 tool search(pattern: string) -> string {
@@ -24,8 +26,13 @@ log(result.status)        // "done"
 log(result.visible_text)  // the agent's final answer
 ```
 
-That loop is provider-agnostic, resumable, replayable, and produces a durable run record — without any glue
+That loop is provider-agnostic, resumable, replayable, and produces a durable run record without any glue
 code of your own.
+
+Harn's CLI, runtime, and rich model/provider catalog handle footguns, quirks, and differences across LLM
+APIs. The Harn toolchain helps you hit the ground running with local and cloud inference without
+any of the pain of figuring out what context window works best, what fits on your machine, or how to deal with
+an open-weight model whose native tool calling isn't great.
 
 > **Pre-release.** Harn is pre-1.0; the language, standard library, and CLI can change between releases.
 > Track changes in the [release notes](https://github.com/burin-labs/harn/releases) and
@@ -197,8 +204,8 @@ Capabilities are grouped below with pointers to the docs for depth. The full API
 
 ## Trust & provenance
 
-Every run produces a durable record — persisted stage transcripts, artifacts, policy decisions, verification
-outcomes, and delegated child lineage — that you can inspect, replay, and evaluate after the fact.
+Every run produces a durable record: persisted stage transcripts, artifacts, policy decisions, verification
+outcomes, and delegated child lineage that you can inspect, replay, and evaluate after the fact.
 
 Harn also emits portable `opentrustgraph/v0.1` trust records for autonomy decisions, approval gates, and
 tier transitions. `v0.1` reserves three `metadata` keys — `effects_grant`, `effects_used`, and
