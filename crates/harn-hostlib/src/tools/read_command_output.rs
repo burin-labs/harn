@@ -5,6 +5,7 @@ use std::io::{Read, Seek, SeekFrom};
 use harn_vm::VmValue;
 
 use crate::error::HostlibError;
+use crate::tools::args::to_agent_path;
 use crate::tools::payload::{optional_string, optional_u64, require_dict_arg};
 use crate::tools::proc;
 use crate::tools::response::ResponseBuilder;
@@ -58,7 +59,7 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     buf.truncate(bytes_read);
 
     Ok(ResponseBuilder::new()
-        .str("path", path.display().to_string())
+        .str("path", to_agent_path(&path))
         .int("offset", offset as i64)
         .int("bytes_read", bytes_read as i64)
         .int("total_bytes", total_bytes as i64)

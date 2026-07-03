@@ -34,7 +34,9 @@ use harn_vm::VmValue;
 use super::builtins::SharedIndex;
 use super::state::IndexState;
 use crate::error::HostlibError;
-use crate::tools::args::{build_dict, dict_arg, optional_bool, optional_string_list, str_value};
+use crate::tools::args::{
+    build_dict, dict_arg, optional_bool, optional_string_list, str_value, to_agent_path,
+};
 
 /// Shared cell holding the read-only secondary indexes. Each entry is a
 /// fully-built [`IndexState`] anchored at one dependency root. Empty until
@@ -93,7 +95,7 @@ pub(super) fn run_add_readonly_roots(
             guard.push(state);
         }
         added.push(build_dict([
-            ("root", str_value(canonical.to_string_lossy().as_ref())),
+            ("root", str_value(to_agent_path(&canonical))),
             ("files_indexed", VmValue::Int(files_indexed)),
         ]));
     }

@@ -377,6 +377,11 @@ jobs:
       # go preinstalled, so no setup action is required.
       - run: make check-bindings
       - run: make lint-test-patterns
+      # Pure-shell grep gate: agent-facing hostlib paths must be
+      # forward-slash-normalized on every platform (see
+      # scripts/check_agent_path_normalization.sh). Kept with the other
+      # fast Python/shell gates so it fails before the harn CLI compile.
+      - run: make lint-agent-path-normalization
       - run: make test-pr-gate-scripts
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
       - uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
@@ -447,7 +452,14 @@ jobs:
 
           # Single source of truth for the Windows-relevant path set, shared by
           # the pull_request and push code paths so they can never drift.
-          windows_pattern='^(Cargo\.lock|Cargo\.toml|rust-toolchain\.toml|\.config/nextest\.toml|crates/harn-vm/Cargo\.toml|crates/harn-vm/src/(process_sandbox\.rs|shells\.rs|stdlib/(process\.rs|sandbox(/|\.rs))|vm/tests_runtime\.rs)|\.github/workflows/(ci|windows-nightly|build-release-binaries|release-smoke)\.yml|scripts/(release_smoke|smoke_installed_binary)\.sh)$'
+          # harn-hostlib is the deterministic-tools surface: it emits paths,
+          # spawns processes, and hits the filesystem, so it carries
+          # Windows-specific separator / path / process behavior. #3914 shipped
+          # a Windows-only path-separator break here that skipped this gate
+          # (hostlib was absent from the pattern) and only surfaced on the
+          # main-push backstop. Route the whole crate — the windows job's
+          # nextest filter already builds+tests `package(harn-hostlib)`.
+          windows_pattern='^(Cargo\.lock|Cargo\.toml|rust-toolchain\.toml|\.config/nextest\.toml|crates/harn-vm/Cargo\.toml|crates/harn-vm/src/(process_sandbox\.rs|shells\.rs|stdlib/(process\.rs|sandbox(/|\.rs))|vm/tests_runtime\.rs)|crates/harn-hostlib/(src|tests)/.*\.rs|crates/harn-hostlib/Cargo\.toml|\.github/workflows/(ci|windows-nightly|build-release-binaries|release-smoke)\.yml|scripts/(release_smoke|smoke_installed_binary)\.sh)$'
 
           # Pick the diff base per event. push diffs against the previous tip;
           # pull_request diffs against the PR base. merge_group leaves

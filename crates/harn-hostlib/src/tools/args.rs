@@ -134,6 +134,36 @@ pub fn str_value(s: impl AsRef<str>) -> VmValue {
     VmValue::string(s)
 }
 
+/// Normalize a filesystem path into the string form the agent/tool surface
+/// must emit on **every** platform: forward-slash (`/`) separators.
+///
+/// `Path::display()` / `to_string_lossy()` render OS-native separators —
+/// backslashes on Windows — so a raw path string leaks `crates\foo\bar.rs`
+/// into tool output on Windows. That breaks the product invariant every
+/// path-consuming layer downstream assumes: the LLM, the tool-call corpus,
+/// pipeline glob/prefix matching, and cross-OS determinism all expect `/`.
+///
+/// This is the single chokepoint for that conversion. Any path string that
+/// crosses into a `VmValue`, a tool-result payload, or anything the model or
+/// a pipeline reads MUST go through here (or [`to_agent_path_str`] for a
+/// `&str` you already hold). Do **not** hand-roll `.replace('\\', "/")` at
+/// new call sites and do **not** feed the result back into a filesystem
+/// syscall — keep OS-native paths for syscalls; only the agent-facing STRING
+/// is normalized.
+///
+/// Idempotent: a value already using `/` is returned unchanged.
+pub fn to_agent_path(path: impl AsRef<std::path::Path>) -> String {
+    to_agent_path_str(path.as_ref().to_string_lossy())
+}
+
+/// [`to_agent_path`] for a string you already hold (e.g. a path label that was
+/// captured before this normalization existed, or a `Cow<str>`). Emits
+/// forward-slash separators regardless of the platform the string was built
+/// on.
+pub fn to_agent_path_str(path: impl AsRef<str>) -> String {
+    path.as_ref().replace('\\', "/")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -161,5 +191,36 @@ mod tests {
             optional_int("test", &payload, "limit", 0),
             Err(HostlibError::InvalidParameter { param: "limit", .. })
         ));
+    }
+
+    #[test]
+    fn to_agent_path_str_rewrites_backslashes() {
+        // Simulates the string a Windows `Path::display()` would produce.
+        assert_eq!(
+            to_agent_path_str("crates\\burin-tui\\src\\lib.rs"),
+            "crates/burin-tui/src/lib.rs"
+        );
+    }
+
+    #[test]
+    fn to_agent_path_str_leaves_forward_slashes_untouched() {
+        // The Unix rendering (and any already-normalized value) must be
+        // idempotent so the helper is safe to apply unconditionally.
+        assert_eq!(
+            to_agent_path_str("crates/burin-tui/src/lib.rs"),
+            "crates/burin-tui/src/lib.rs"
+        );
+    }
+
+    #[test]
+    fn to_agent_path_never_emits_backslashes() {
+        // Whatever the host separator, the emitted string carries only `/`.
+        let joined: std::path::PathBuf = ["crates", "burin-tui", "src", "lib.rs"].iter().collect();
+        let emitted = to_agent_path(&joined);
+        assert!(
+            !emitted.contains('\\'),
+            "agent path must not contain backslashes, got {emitted:?}"
+        );
+        assert!(emitted.ends_with("crates/burin-tui/src/lib.rs"));
     }
 }

@@ -54,7 +54,9 @@ use harn_vm::VmValue;
 use crate::code_index::SharedIndex;
 use crate::error::HostlibError;
 use crate::fs::FsMode;
-use crate::tools::args::{build_dict, dict_arg, optional_string, require_string, str_value};
+use crate::tools::args::{
+    build_dict, dict_arg, optional_string, require_string, str_value, to_agent_path,
+};
 
 use super::unified_diff::{render as render_unified_diff, ChangeKind};
 
@@ -707,7 +709,7 @@ fn paths_match_for_display(read_path: &Path, candidate: &Path) -> bool {
 }
 
 fn diff_path_label(path: &Path) -> String {
-    path.to_string_lossy().replace('\\', "/")
+    to_agent_path(path)
 }
 
 // ---------------------------------------------------------------------------

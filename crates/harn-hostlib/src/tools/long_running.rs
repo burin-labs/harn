@@ -46,6 +46,7 @@ use harn_vm::VmValue;
 
 use crate::error::HostlibError;
 use crate::process::{self as process_handle, ProcessHandle, ProcessKiller, SpawnSpec};
+use crate::tools::args::to_agent_path;
 use crate::tools::proc::{self, CaptureConfig, CommandStatus, EnvMode};
 
 /// Atomic counter for generating unique handle IDs within this process.
@@ -456,15 +457,15 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
     payload.insert("stderr".into(), serde_json::Value::String(inline_stderr));
     payload.insert(
         "output_path".into(),
-        serde_json::Value::String(artifacts.output_path.display().to_string()),
+        serde_json::Value::String(to_agent_path(&artifacts.output_path)),
     );
     payload.insert(
         "stdout_path".into(),
-        serde_json::Value::String(artifacts.stdout_path.display().to_string()),
+        serde_json::Value::String(to_agent_path(&artifacts.stdout_path)),
     );
     payload.insert(
         "stderr_path".into(),
-        serde_json::Value::String(artifacts.stderr_path.display().to_string()),
+        serde_json::Value::String(to_agent_path(&artifacts.stderr_path)),
     );
     payload.insert(
         "line_count".into(),
@@ -578,9 +579,9 @@ fn spawn_progress_thread(context: ProgressThreadContext) -> std::thread::JoinHan
                 "signal": null,
                 "stdout": inline_stdout,
                 "stderr": inline_stderr,
-                "output_path": context.output_path.display().to_string(),
-                "stdout_path": context.stdout_path.display().to_string(),
-                "stderr_path": context.stderr_path.display().to_string(),
+                "output_path": to_agent_path(&context.output_path),
+                "stdout_path": to_agent_path(&context.stdout_path),
+                "stderr_path": to_agent_path(&context.stderr_path),
                 "byte_count": byte_count as i64,
                 "line_count": stdout.iter().chain(stderr.iter()).filter(|byte| **byte == b'\n').count() as i64,
                 "process_group_id": context.process_group_id,

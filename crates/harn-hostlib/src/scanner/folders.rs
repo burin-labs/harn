@@ -83,7 +83,7 @@ pub fn build_project_metadata(
     code_patterns: Vec<String>,
     last_scanned_at: String,
 ) -> ProjectMetadata {
-    let root_path_string = root_path.to_string_lossy().replace('\\', "/");
+    let root_path_string = crate::tools::args::to_agent_path(root_path);
     let name = root_path
         .file_name()
         .and_then(|name| name.to_str())

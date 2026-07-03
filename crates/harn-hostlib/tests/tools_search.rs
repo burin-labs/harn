@@ -515,6 +515,15 @@ fn search_glob_filter_does_not_reinclude_gitignored_paths() {
     assert!(paths
         .iter()
         .any(|p| p.ends_with("crates/burin-tui/src/lib.rs")));
+    // Product invariant: the agent-facing `path` is forward-slash-normalized
+    // on every platform. `to_string_lossy()` would leak backslashes on
+    // Windows (this regressed in #3914); the search handler now routes through
+    // `to_agent_path`. Assert no native separators survive so the guarantee is
+    // enforced on the Windows CI lane, not just Unix.
+    assert!(
+        paths.iter().all(|p| !p.contains('\\')),
+        "search match paths must use `/` separators on all platforms, got {paths:?}"
+    );
     assert!(
         !paths
             .iter()

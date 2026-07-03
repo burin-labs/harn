@@ -20,7 +20,7 @@ use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use crate::error::HostlibError;
 use crate::registry::{BuiltinRegistry, HostlibCapability, RegisteredBuiltin, SyncHandler};
 use crate::tools::args::{
-    build_dict, dict_arg, optional_bool, optional_int, optional_string, str_value,
+    build_dict, dict_arg, optional_bool, optional_int, optional_string, str_value, to_agent_path,
 };
 use crate::value_args::optional_string_list;
 
@@ -541,7 +541,7 @@ fn normalize_existing_path_buf(
 }
 
 fn path_to_string(path: &Path) -> String {
-    path.to_string_lossy().replace('\\', "/")
+    to_agent_path(path)
 }
 
 fn next_subscription_id() -> String {

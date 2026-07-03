@@ -387,7 +387,7 @@ fn canonicalize(root: &Path) -> PathBuf {
 pub(crate) fn relative_path(root: &Path, abs: &Path) -> Option<String> {
     let canonical_abs = canonicalize_existing(abs);
     let stripped = canonical_abs.strip_prefix(root).ok()?;
-    Some(stripped.to_string_lossy().replace('\\', "/"))
+    Some(crate::tools::args::to_agent_path(stripped))
 }
 
 fn canonicalize_existing(abs: &Path) -> PathBuf {

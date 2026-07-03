@@ -13,7 +13,7 @@ use harn_vm::VmValue;
 
 use crate::error::HostlibError;
 use crate::tools::args::{
-    build_dict, dict_arg, optional_int, optional_string, require_string, str_value,
+    build_dict, dict_arg, optional_int, optional_string, require_string, str_value, to_agent_path,
 };
 
 const BUILTIN: &str = "hostlib_tools_git";
@@ -107,7 +107,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
 
     Ok(build_dict([
         ("operation", str_value(operation.as_str())),
-        ("repo", str_value(repo.to_string_lossy())),
+        ("repo", str_value(to_agent_path(&repo))),
         ("data", data),
     ]))
 }
