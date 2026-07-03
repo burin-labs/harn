@@ -76,7 +76,7 @@ pub(crate) fn render_pending_reminders(
             if caps.prefers_role_developer {
                 return reminder_developer_message(reminder);
             }
-            if caps.message_wire_format == "anthropic" {
+            if caps.message_wire_format.is_anthropic() {
                 return match reminder.role_hint {
                     ReminderRoleHint::UserBlock => {
                         reminder_user_block_message(caps, reminder, false)

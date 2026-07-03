@@ -188,7 +188,7 @@ async fn fetch_provider_max_context_uncached(
     }
 
     let caps = crate::llm::capabilities::lookup(provider, model);
-    if caps.message_wire_format == "ollama" {
+    if caps.message_wire_format.is_ollama() {
         return fetch_ollama_context_window(model, base_url).await;
     }
 

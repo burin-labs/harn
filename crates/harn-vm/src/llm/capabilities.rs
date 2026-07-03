@@ -764,13 +764,78 @@ impl ProviderRule {
     }
 }
 
+/// The message/request/response wire dialect a route speaks.
+///
+/// This is the single typed representation of what used to be encoded two
+/// different, drift-prone ways: the stringly `Capabilities.message_wire_format`
+/// field (compared against `"anthropic"`/`"gemini"`/`"ollama"` literals at a
+/// dozen call sites) and the `(is_anthropic_style, is_ollama)` boolean pair
+/// threaded independently through the transport/response layers. A closed enum
+/// makes an unhandled or mistyped dialect a compile error and removes the
+/// boolean-blindness where two `bool`s could silently disagree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WireDialect {
+    /// Anthropic native Messages API (`/v1/messages`). The only dialect that
+    /// surfaces Claude's extended-thinking stream. `message_wire_format =
+    /// "anthropic"`.
+    Anthropic,
+    /// OpenAI-compatible Chat Completions (`/v1/chat/completions`). The default
+    /// for hosted/openai-shape routes. `message_wire_format = "openai"`.
+    OpenAiCompat,
+    /// Ollama native `/api/chat`. `message_wire_format = "ollama"`.
+    Ollama,
+    /// Google Gemini `generateContent`. `message_wire_format = "gemini"`.
+    Gemini,
+}
+
+impl WireDialect {
+    /// Parse the catalog's `message_wire_format` string. Unrecognized values
+    /// (including the explicit `"openai"`) resolve to [`WireDialect::OpenAiCompat`],
+    /// exactly matching the pre-cutover behavior where every
+    /// `== "anthropic"/"gemini"/"ollama"` check fell through to the
+    /// OpenAI-compatible path.
+    pub fn from_message_wire_format(value: &str) -> WireDialect {
+        match value {
+            "anthropic" => WireDialect::Anthropic,
+            "ollama" => WireDialect::Ollama,
+            "gemini" => WireDialect::Gemini,
+            _ => WireDialect::OpenAiCompat,
+        }
+    }
+
+    /// The canonical `message_wire_format` string for display and round-trip.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            WireDialect::Anthropic => "anthropic",
+            WireDialect::OpenAiCompat => "openai",
+            WireDialect::Ollama => "ollama",
+            WireDialect::Gemini => "gemini",
+        }
+    }
+
+    /// Whether this route speaks Anthropic's native Messages shape.
+    pub fn is_anthropic(self) -> bool {
+        matches!(self, WireDialect::Anthropic)
+    }
+
+    /// Whether this route speaks Ollama's native `/api/chat` shape.
+    pub fn is_ollama(self) -> bool {
+        matches!(self, WireDialect::Ollama)
+    }
+
+    /// Whether this route speaks Google Gemini's `generateContent` shape.
+    pub fn is_gemini(self) -> bool {
+        matches!(self, WireDialect::Gemini)
+    }
+}
+
 /// Resolved capabilities for a `(provider, model)` pair. Unset rule
 /// fields resolve to `false` / empty / `None` so callers never have to
 /// unwrap an `Option<bool>` for what are really boolean gates.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Capabilities {
     pub native_tools: bool,
-    pub message_wire_format: String,
+    pub message_wire_format: WireDialect,
     pub native_tool_wire_format: String,
     pub defer_loading: bool,
     pub tool_search: Vec<String>,
@@ -860,7 +925,7 @@ impl Default for Capabilities {
     fn default() -> Self {
         Self {
             native_tools: false,
-            message_wire_format: "openai".to_string(),
+            message_wire_format: WireDialect::OpenAiCompat,
             native_tool_wire_format: "openai".to_string(),
             defer_loading: false,
             tool_search: Vec::new(),
@@ -1907,11 +1972,13 @@ fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilitie
     let thinking_modes = rule_thinking_modes(rule);
     Capabilities {
         native_tools: rule.native_tools.unwrap_or(false),
-        message_wire_format: rule
-            .message_wire_format
-            .clone()
-            .or_else(|| defaults.message_wire_format.clone())
-            .unwrap_or_else(|| "openai".to_string()),
+        message_wire_format: WireDialect::from_message_wire_format(
+            &rule
+                .message_wire_format
+                .clone()
+                .or_else(|| defaults.message_wire_format.clone())
+                .unwrap_or_else(|| "openai".to_string()),
+        ),
         native_tool_wire_format: rule
             .native_tool_wire_format
             .clone()
@@ -3062,7 +3129,7 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
         reset();
         let caps = lookup("bedrock", "anthropic.claude-3-5-sonnet-20240620-v1:0");
         assert!(caps.native_tools);
-        assert_eq!(caps.message_wire_format, "anthropic");
+        assert_eq!(caps.message_wire_format, WireDialect::Anthropic);
         assert_eq!(caps.native_tool_wire_format, "anthropic");
     }
 
@@ -3077,7 +3144,7 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
     fn cerebras_inherits_openai_family() {
         reset();
         let caps = lookup("cerebras", "gpt-oss-120b");
-        assert_eq!(caps.message_wire_format, "openai");
+        assert_eq!(caps.message_wire_format, WireDialect::OpenAiCompat);
         assert_eq!(caps.native_tool_wire_format, "openai");
         // gpt-oss uses NATIVE tool calls across cerebras/groq/together. Under
         // json/text it emits a bare {"tool","arguments"} dialect the
@@ -3192,7 +3259,7 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
     fn mock_with_gemini_model_routes_to_gemini() {
         reset();
         let caps = lookup("mock", "gemini-2.5-flash");
-        assert_eq!(caps.message_wire_format, "gemini");
+        assert_eq!(caps.message_wire_format, WireDialect::Gemini);
         assert_eq!(caps.native_tool_wire_format, "openai");
         assert!(caps.prefers_xml_scaffolding);
     }
@@ -3885,7 +3952,7 @@ message_wire_format = "anthropic"
             caps.vision,
             "unset field filled from the later matching rule"
         );
-        assert_eq!(caps.message_wire_format, "anthropic");
+        assert_eq!(caps.message_wire_format, WireDialect::Anthropic);
     }
 
     #[test]

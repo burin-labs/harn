@@ -6,6 +6,7 @@
 use std::time::{Duration, Instant};
 
 use crate::agent_events::{AgentEvent, ToolCallStatus};
+use crate::llm::capabilities::WireDialect;
 use crate::value::{VmError, VmValue};
 
 use super::openai_normalize::{
@@ -160,24 +161,24 @@ pub(super) async fn vm_call_llm_api(
         return dispatch_to_registered_provider(opts, delta_tx).await;
     }
 
-    // Fallback for unregistered providers: dispatch by API style.
-    let is_ollama = crate::llm::provider::provider_uses_ollama_messages(provider, &opts.model);
-    let is_anthropic =
-        crate::llm::provider::provider_uses_anthropic_messages(provider, &opts.model);
+    // Fallback for unregistered providers: dispatch by wire dialect. A single
+    // capability lookup yields the typed dialect instead of two independent
+    // predicate lookups that could disagree.
+    let dialect = crate::llm::capabilities::lookup(provider, &opts.model).message_wire_format;
 
-    if is_ollama {
+    if dialect.is_ollama() {
         return crate::llm::providers::OllamaProvider
             .chat_impl(opts, delta_tx)
             .await;
     }
 
-    let body = if is_anthropic {
+    let body = if dialect.is_anthropic() {
         crate::llm::providers::AnthropicProvider::build_request_body(opts)
     } else {
         crate::llm::providers::OpenAiCompatibleProvider::build_request_body(opts, false)
     };
 
-    vm_call_llm_api_with_body(opts, delta_tx, body, is_anthropic, is_ollama).await
+    vm_call_llm_api_with_body(opts, delta_tx, body, dialect).await
 }
 
 /// Dispatch to a registered provider by name.
@@ -260,13 +261,10 @@ pub(crate) async fn vm_call_llm_api_with_body(
     opts: &LlmRequestPayload,
     delta_tx: Option<DeltaSender>,
     body: serde_json::Value,
-    is_anthropic_style: bool,
-    is_ollama: bool,
+    dialect: WireDialect,
 ) -> Result<LlmResult, VmError> {
     let started = Instant::now();
-    let mut result =
-        vm_call_llm_api_with_body_inner(opts, delta_tx, body, is_anthropic_style, is_ollama)
-            .await?;
+    let mut result = vm_call_llm_api_with_body_inner(opts, delta_tx, body, dialect).await?;
     // Reserved-token tool-call delimiter remap (single boundary).
     //
     // For models that reserve `<tool_call>`/`</tool_call>` as special tokens
@@ -317,9 +315,14 @@ async fn vm_call_llm_api_with_body_inner(
     opts: &LlmRequestPayload,
     delta_tx: Option<DeltaSender>,
     mut body: serde_json::Value,
-    is_anthropic_style: bool,
-    is_ollama: bool,
+    dialect: WireDialect,
 ) -> Result<LlmResult, VmError> {
+    // Derive the transport-shape booleans once from the single typed dialect.
+    // The `(true, true)` state was never valid; a single `WireDialect` makes
+    // it unrepresentable and removes the re-derivation that used to happen at
+    // the response-parse boundary below.
+    let is_anthropic_style = dialect.is_anthropic();
+    let is_ollama = dialect.is_ollama();
     let provider = &opts.provider;
     let model = &opts.model;
     let wants_streaming = delta_tx.is_some() && opts.stream;
@@ -529,8 +532,9 @@ async fn vm_call_llm_api_with_body_inner(
         ))))
     })?;
 
-    let is_anthropic_style =
-        crate::llm::provider::provider_uses_anthropic_messages(provider, model);
+    // Reuse the dialect resolved for this dispatch instead of re-looking it up
+    // (the previous re-lookup passed the same `(provider, model)` and could
+    // only ever agree with `is_anthropic_style` above).
     parse_llm_response(&json, provider, model, is_anthropic_style, tools_offered)
 }
 

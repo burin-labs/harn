@@ -265,18 +265,24 @@ pub(crate) fn provider_tool_search_variants(provider: &str, model: &str) -> Vec<
 /// capability rather than a provider-name check so mock/proxy routes can
 /// exercise the same behavior as the hosted model family they emulate.
 pub(crate) fn provider_uses_anthropic_messages(provider: &str, model: &str) -> bool {
-    super::capabilities::lookup(provider, model).message_wire_format == "anthropic"
+    super::capabilities::lookup(provider, model)
+        .message_wire_format
+        .is_anthropic()
 }
 
 /// Whether shared helpers should preserve Google `generateContent` message
 /// parts, including native function calls and thought signatures.
 pub(crate) fn provider_uses_gemini_messages(provider: &str, model: &str) -> bool {
-    super::capabilities::lookup(provider, model).message_wire_format == "gemini"
+    super::capabilities::lookup(provider, model)
+        .message_wire_format
+        .is_gemini()
 }
 
 /// Whether shared helpers should use Ollama's chat message quirks.
 pub(crate) fn provider_uses_ollama_messages(provider: &str, model: &str) -> bool {
-    super::capabilities::lookup(provider, model).message_wire_format == "ollama"
+    super::capabilities::lookup(provider, model)
+        .message_wire_format
+        .is_ollama()
 }
 
 /// Whether native tool definitions should use Anthropic's `input_schema`

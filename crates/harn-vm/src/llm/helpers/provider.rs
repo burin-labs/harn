@@ -497,7 +497,9 @@ impl ResolvedProvider {
             .as_ref()
             .map(|p| p.chat_endpoint.contains("/messages"))
             .unwrap_or_else(|| {
-                crate::llm::capabilities::lookup(provider, "").message_wire_format == "anthropic"
+                crate::llm::capabilities::lookup(provider, "")
+                    .message_wire_format
+                    .is_anthropic()
             });
         let (default_base, default_endpoint) = if is_anthropic_style {
             ("https://api.anthropic.com/v1", "/messages")
