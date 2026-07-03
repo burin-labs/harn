@@ -1283,11 +1283,17 @@ fn recover_tool_call_narration(
     // No narration tag. Only reclassify as prose when the body is plainly NOT
     // an attempted tool call: it carries no inner `<tag>` (not an unknown-tool
     // attempt like `<frobnicate>{...}`), no `{` JSON body (the Gemma-style
-    // `{ "name": …, "arguments": … }` shape), and no `name(` call head (so a
+    // `{ "name": …, "arguments": … }` shape), no `[` JSON-array body (a
+    // `[{ "name": …, "arguments": … }]` call the model wrapped in a one- or
+    // many-element array — `parse_json_tool_call_body` dispatches a single
+    // element and gives an actionable "one call per block" error otherwise;
+    // without this guard the whole array was silently swallowed as prose and
+    // the call vanished with no feedback), and no `name(` call head (so a
     // bare call to an unknown/misspelled tool still surfaces its real error
     // instead of being silently swallowed as prose).
     if remainder.starts_with('<')
         || remainder.starts_with('{')
+        || remainder.starts_with('[')
         || remainder.is_empty()
         || looks_like_call_head(remainder)
     {
