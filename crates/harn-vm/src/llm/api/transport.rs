@@ -1371,8 +1371,20 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
         && tool_calls.is_empty()
         && !has_tool_search_block
     {
+        // Name the ACTUAL wire style, not a hardcoded "openai-compatible".
+        // This streaming parser handles BOTH the native Anthropic SSE shape
+        // and the OpenAI-compatible shape (see `is_anthropic_style`), so a
+        // native Anthropic empty-completion flake used to be mislabeled as
+        // "openai-compatible model", which sent a real root-cause hunt down
+        // the wrong (transport-routing) path. The `provider` id is the ground
+        // truth; the wire style disambiguates native vs. compat.
+        let wire_style = if is_anthropic_style {
+            "anthropic-native"
+        } else {
+            "openai-compatible"
+        };
         return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-            "openai-compatible model {model} reported completion_tokens={output_tokens} but delivered no content, reasoning, or tool calls"
+            "{wire_style} model {provider}:{model} reported completion_tokens={output_tokens} but delivered no content, reasoning, or tool calls"
         )))));
     }
     // Deterministic upstream contract-violation backstop (streaming path).

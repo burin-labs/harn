@@ -13,6 +13,7 @@ pub(crate) mod crystallize;
 pub mod demo;
 pub(crate) mod dev;
 pub(crate) mod diagnostics_catalog;
+pub(crate) mod dispatch_explain;
 pub(crate) mod doctor;
 pub(crate) mod dump_highlight_keywords;
 pub(crate) mod dump_protocol_artifacts;
