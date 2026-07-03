@@ -127,7 +127,7 @@
 #                     visible text when the provider omits content.
 #   reasoning_wire_format:
 #                     OpenAI-compatible non-standard reasoning transport:
-#                     openrouter, enabled, or minimax.
+#                     openrouter, enabled, minimax, or zai.
 #   recommended_endpoint: preferred endpoint family for this route.
 #   text_tool_wire_format_supported: whether Harn text tool calls survive.
 #   preferred_tool_format:

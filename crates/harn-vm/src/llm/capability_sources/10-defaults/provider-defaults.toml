@@ -46,6 +46,9 @@ top_k_supported = false
 [provider_defaults.moonshot]
 top_k_supported = false
 
+[provider_defaults.zai]
+reasoning_wire_format = "zai"
+
 [provider_defaults.baseten]
 top_k_supported = false
 top_p_supported = false

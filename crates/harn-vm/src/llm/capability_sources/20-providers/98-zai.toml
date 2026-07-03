@@ -20,6 +20,14 @@
 # TODO(zai-glm-native-probe): if a forced-format native probe against a specific
 # zai-direct GLM-5.x route ever returns clean `message.tool_calls`, narrow this
 # back to `native` for that route with the probe transcript as evidence.
+#
+# THINKING WIRE — Z.AI is OpenAI-compatible for chat, but not for reasoning
+# controls. Official GLM-5.2 docs show `thinking = {type = "enabled"}` plus
+# top-level `reasoning_effort` (https://docs.z.ai/guides/llm/glm-5.2), and
+# external bug reports caught clients still sending stale `enable_thinking`
+# booleans (https://github.com/openclaw/openclaw/issues/58680). Keep the wire
+# shape in Harn's capability matrix via provider_defaults.zai instead of making
+# each host or Burin learn that quirk.
 
 [[provider.zai]]
 model_match = "glm-5.2*"
@@ -28,7 +36,10 @@ preferred_tool_format = "text"
 tool_mode_parity = "native_unreliable"
 tool_mode_parity_notes = "GLM-5.x native channel emits `<tool_call><arg_key>...` markup as content instead of OpenAI message.tool_calls (2026-06-23 live Baseten probe, see 39-baseten.toml); heredoc text tools parse cleanly. Same family pinned native_unreliable on Fireworks (glm-5p*) and DeepInfra (*glm-5*)."
 structured_output = "native"
-thinking_modes = ["enabled"]
+thinking_modes = ["enabled", "effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+reasoning_none_supported = true
 text_tool_wire_format_supported = true
 prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true
