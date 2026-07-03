@@ -66,7 +66,7 @@ fi
 # `README` is matched with an optional path prefix ((.*/)?) so crate- and
 # package-level READMEs (e.g. crates/harn-hostlib/README.md) are exempt too,
 # not just the repo-root README. A README is documentation wherever it lives.
-ignored_pattern='^(\.github/|\.githooks/|docs/|spec/|(.*/)?README(\.md)?$|AGENTS\.md$|CLAUDE\.md$|CONTRIBUTING\.md$|\.gitignore$|\.gitattributes$|\.editorconfig$|\.markdownlint[^/]*$|changelog\.d/(\.gitkeep|README\.md)$|tests?/|conformance/|benchmarks/|evals/|examples/|experiments/|test_fixtures/|perf/|playground/|tree-sitter-harn/|editors/)'
+ignored_pattern='^(\.github/|\.githooks/|docs/|spec/|(.*/)?README(\.md)?$|AGENTS\.md$|CLAUDE\.md$|CONTRIBUTING\.md$|\.gitignore$|\.gitattributes$|\.editorconfig$|\.markdownlint[^/]*$|changelog\.d/(\.gitkeep|README\.md)$|tests?/|conformance/|benchmarks/|evals/|examples/|experiments/|perf/|playground/|tree-sitter-harn/|editors/)'
 nontrivial=$(printf '%s\n' "$changed_files" | grep -Ev "$ignored_pattern" || true)
 if [ -z "$nontrivial" ]; then
   echo "::notice title=Changelog fragment gate::only docs/test/CI paths touched; pass."
