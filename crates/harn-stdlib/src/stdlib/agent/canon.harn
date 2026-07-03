@@ -103,6 +103,50 @@ fn __canon_pack_for_extension(extension, name) -> list<string> {
   return __CANON_EXTENSION_PACKS[e] ?? []
 }
 
+fn __canon_manifest_has_routing(manifest) -> bool {
+  for pack in manifest?.packs ?? [] {
+    if len(pack?.extensions ?? []) > 0 || len(pack?.file_names ?? []) > 0 {
+      return true
+    }
+  }
+  return false
+}
+
+fn __canon_selector_matches(values, wanted) -> bool {
+  let target = lowercase(__canon_text(wanted))
+  if target == "" {
+    return false
+  }
+  for value in values ?? [] {
+    if lowercase(__canon_text(value)) == target {
+      return true
+    }
+  }
+  return false
+}
+
+fn __canon_pack_ids_for_path_from_manifest(path, manifest) -> list<string> {
+  let raw = __canon_text(path)
+  if raw == "" {
+    return []
+  }
+  let extension = lowercase(ext(raw))
+  let name = lowercase(basename(raw))
+  var ids = []
+  for pack in manifest?.packs ?? [] {
+    let id = __canon_text(pack?.id)
+    if id == "" {
+      continue
+    }
+    let matches_extension = __canon_selector_matches(pack?.extensions, extension)
+    let matches_name = __canon_selector_matches(pack?.file_names, name)
+    if matches_extension || matches_name {
+      ids = __canon_push_unique(ids, id)
+    }
+  }
+  return ids.sort()
+}
+
 /**
  * Infer harn-canon pack ids for one file path.
  *
@@ -110,10 +154,13 @@ fn __canon_pack_for_extension(extension, name) -> list<string> {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn canon_pack_ids_for_path(path) -> list<string> {
+pub fn canon_pack_ids_for_path(path, manifest = nil) -> list<string> {
   let raw = __canon_text(path)
   if raw == "" {
     return []
+  }
+  if __canon_manifest_has_routing(manifest) {
+    return __canon_pack_ids_for_path_from_manifest(raw, manifest)
   }
   return __canon_pack_for_extension(ext(raw), basename(raw))
 }
@@ -121,15 +168,19 @@ pub fn canon_pack_ids_for_path(path) -> list<string> {
 /**
  * Infer harn-canon pack ids for a list of `{path, text?}` file records.
  *
+ * When a parsed `canon-packs.json` manifest is supplied, its routing selectors
+ * are authoritative; the built-in extension table is only a legacy fallback for
+ * callers that have not loaded harn-canon metadata yet.
+ *
  * @effects: []
  * @errors: []
  * @api_stability: experimental
  */
-pub fn canon_pack_ids_for_files(files) -> list<string> {
+pub fn canon_pack_ids_for_files(files, manifest = nil) -> list<string> {
   var ids = []
   for file in files ?? [] {
     let path = __canon_text(file?.path ?? file?.name)
-    for id in canon_pack_ids_for_path(path) {
+    for id in canon_pack_ids_for_path(path, manifest) {
       ids = __canon_push_unique(ids, id)
     }
   }
@@ -256,7 +307,7 @@ pub fn canon_resolve_packs(options = nil) -> list<dict> {
     nil
   }
   if len(requested) == 0 {
-    requested = canon_pack_ids_for_files(opts?.files ?? opts?.slice?.files ?? [])
+    requested = canon_pack_ids_for_files(opts?.files ?? opts?.slice?.files ?? [], manifest)
   }
   var resolved = []
   for item in requested {
