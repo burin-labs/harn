@@ -365,7 +365,10 @@ mod tests {
         let parsed = parse_frontmatter(yaml).expect("parse");
         assert_eq!(parsed.manifest.mcp.len(), 1);
         let spec = &parsed.manifest.mcp[0];
-        assert_eq!(spec.get("name").and_then(|v| v.as_str()), Some("weather-mcp"));
+        assert_eq!(
+            spec.get("name").and_then(|v| v.as_str()),
+            Some("weather-mcp")
+        );
         assert_eq!(spec.get("command").and_then(|v| v.as_str()), Some("node"));
         assert!(
             parsed.unknown_fields.is_empty(),

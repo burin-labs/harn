@@ -655,7 +655,8 @@ mod tests {
 
         let entry = skill_entry_to_vm(&skill);
         let dict = entry.as_dict().expect("entry is a dict");
-        let crate::value::VmValue::List(servers) = dict.get("mcp").expect("entry carries mcp") else {
+        let crate::value::VmValue::List(servers) = dict.get("mcp").expect("entry carries mcp")
+        else {
             panic!("mcp must be a list");
         };
         assert_eq!(servers.len(), 1);
