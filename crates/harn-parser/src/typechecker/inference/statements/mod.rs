@@ -61,19 +61,21 @@ impl UntypedAccessKind {
     }
 }
 
-/// The runtime forms that dereference a receiver value: a property read
-/// (`obj.name`), a subscript (`obj[idx]`), a method call (`obj.name(..)`),
-/// and `for`-`in` iteration (which dereferences its iterable). All fail
-/// identically at runtime when the receiver is statically `nil`,
-/// may-be-`nil` (a `T | nil` union), or `unknown`. This enum lets a single
-/// diagnosis routine phrase the shared error/help for whichever form the
-/// author actually wrote, so the nil-safety guidance stays consistent.
+/// The three runtime forms that dereference a receiver value: a property
+/// read (`obj.name`), a subscript (`obj[idx]`), and a method call
+/// (`obj.name(..)`). All three fail identically at runtime when the
+/// receiver is statically `nil`, may-be-`nil` (a `T | nil` union), or
+/// `unknown`. This enum lets a single diagnosis routine phrase the shared
+/// error/help for whichever form the author actually wrote, so the
+/// nil-safety guidance stays consistent across `.`, `[]`, and `.()`.
+/// (`for`-`in` iteration is deliberately NOT here: iterating `nil` is a
+/// designed no-op at runtime — see
+/// conformance/tests/language/optional_chaining_nil_coalesce.harn.)
 #[derive(Clone, Copy)]
 enum AccessForm<'a> {
     Property(&'a str),
     Subscript,
     Method(&'a str),
-    Iteration,
 }
 
 impl AccessForm<'_> {
@@ -84,7 +86,6 @@ impl AccessForm<'_> {
             Self::Property(name) => format!("property `{name}`"),
             Self::Subscript => "an index".to_string(),
             Self::Method(name) => format!("method `{name}`"),
-            Self::Iteration => "elements".to_string(),
         }
     }
 
@@ -99,7 +100,6 @@ impl AccessForm<'_> {
             Self::Method(name) => {
                 format!("the optional call operator `?.{name}(…)`")
             }
-            Self::Iteration => "a `?? []` default".to_string(),
         }
     }
 
@@ -110,7 +110,6 @@ impl AccessForm<'_> {
             Self::Property(name) => format!("property access `.{name}`"),
             Self::Subscript => "subscript access".to_string(),
             Self::Method(name) => format!("method call `.{name}()`"),
-            Self::Iteration => "`for`-`in` iteration".to_string(),
         }
     }
 
@@ -121,7 +120,6 @@ impl AccessForm<'_> {
             Self::Property(_) => "a shape with that field",
             Self::Subscript => "a list, dict, or string",
             Self::Method(_) => "a value with that method",
-            Self::Iteration => "an iterable (list, dict, range, iter, …)",
         }
     }
 
@@ -131,7 +129,6 @@ impl AccessForm<'_> {
             Self::Property(_) => "before reading fields",
             Self::Subscript => "before indexing",
             Self::Method(_) => "before calling methods",
-            Self::Iteration => "before iterating",
         }
     }
 }

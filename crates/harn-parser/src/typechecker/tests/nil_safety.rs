@@ -221,37 +221,3 @@ fn dict_literal_subscript_stays_loose() {
         "ambient dict idiom should stay loose; errs={errs:?} warns={warns:?}"
     );
 }
-
-#[test]
-fn test_for_in_over_nilable_iterable_is_flagged() {
-    let errs = errors(
-        r#"fn f(xs: list<int>?) -> int {
-  var total = 0
-  for x in xs {
-    total = total + x
-  }
-  return total
-}"#,
-    );
-    assert!(
-        errs.iter().any(|e| e.contains("may be nil")),
-        "expected nilable-iterable error: {errs:?}"
-    );
-
-    // Guarded iteration stays clean.
-    let errs = errors(
-        r#"fn f(xs: list<int>?) -> int {
-  var total = 0
-  if xs != nil {
-    for x in xs {
-      total = total + x
-    }
-  }
-  return total
-}"#,
-    );
-    assert!(
-        errs.is_empty(),
-        "guarded iteration should be clean: {errs:?}"
-    );
-}

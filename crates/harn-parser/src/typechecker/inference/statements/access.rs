@@ -345,36 +345,6 @@ impl TypeChecker {
         }
     }
 
-    /// `for`-`in` iterable nil-safety, mirroring `check_subscript_access`:
-    /// iterating a statically-`nil` or may-be-`nil` iterable throws at
-    /// runtime, so it earns the same diagnostic as the other dereference
-    /// forms instead of the historical silent nil-strip (the element-type
-    /// inference drops the nil arm, which hid the hazard entirely).
-    /// `unknown` iterables stay silent: narrowing guidance there belongs to
-    /// the boundary-validation lints, and a warning on every
-    /// `for x in parsed` would be noise.
-    pub(super) fn check_iterable_receiver(&mut self, iterable: &SNode, scope: &TypeScope) {
-        let Some(raw) = self.infer_type(iterable, scope) else {
-            return;
-        };
-        let resolved = self.resolve_alias(&raw, scope);
-        if !self.is_strict_access_source(iterable, &raw, scope) {
-            return;
-        }
-        if matches!(&resolved, TypeExpr::Named(n) if n == "nil") {
-            self.diagnose_nil_or_unknown_receiver(
-                &resolved,
-                AccessForm::Iteration,
-                iterable.span,
-                false,
-            );
-            return;
-        }
-        if self.is_nilable_union(&resolved, scope) {
-            self.emit_nilable_access_error(AccessForm::Iteration, &resolved, iterable.span);
-        }
-    }
-
     /// Method-call (`obj.name(..)`) receiver nil-safety, mirroring
     /// `check_property_access`: a statically-`nil`, may-be-`nil`, or
     /// `unknown` receiver is diagnosed before the args/bound checks run.
