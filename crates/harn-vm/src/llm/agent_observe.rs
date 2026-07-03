@@ -722,7 +722,7 @@ fn append_llm_transcript_event_log(entry: &serde_json::Value) {
     let Some(log) = crate::event_log::active_event_log() else {
         return;
     };
-    let topic = crate::event_log::Topic::new("agent.transcript.llm")
+    let topic = crate::event_log::Topic::new(crate::event_log::HARN_LLM_TRANSCRIPT_TOPIC)
         .expect("static transcript topic should be valid");
     let kind = entry
         .get("type")

@@ -954,6 +954,12 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                 process::exit(code);
             }
         }
+        Command::Usage(args) => {
+            let code = commands::usage::run(args).await;
+            if code != 0 {
+                process::exit(code);
+            }
+        }
         Command::Flow(args) => match commands::flow::run_flow(&args) {
             Ok(code) => {
                 if code != 0 {
