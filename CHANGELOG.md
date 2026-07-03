@@ -9,6 +9,138 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.9.7
+
+### Added
+
+- Add `harn canon check` to evaluate harn-canon invariant packs against changed files through the Harn stdlib.
+- **Read-only stance (experimental, default-off).** `agent_loop` gains a
+  `read_only_stance` option: tasks classified as read-only get a
+  least-privilege tool window (read-only-annotated tools only; unannotated
+  tools count as mutating) plus an auto-registered `request_write_access`
+  escape hatch whose consent check verifies — agentically, against the
+  session's recent user messages — that the user expressed or implied consent
+  before mutating tools return. Transitions emit typed `stance_transition`
+  events (armed / write_access_granted / write_access_denied / disarmed) on
+  the agent event stream and the ACP session-update channel.
+- Add a self-contained `resolved_dispatch` transcript record emitted per
+  agent-loop LLM call: the final resolved provider, model, wire format
+  (`anthropic_native` vs `openai_compat`), base URL host, thinking config, tool
+  format, per-field provenance (including `inherited_from_primary`), and a
+  normalized outcome that distinguishes `served`,
+  `empty_completion_transient_recovered`, `empty_completion_terminal`,
+  `usage_limit`, and `provider_error`.
+
+  A new deterministic
+  `harn provider dispatch-explain <provider> <model> [--thinking] [--tool-format ...] [--json]`
+  command reports the same wire-format/tool-format/thinking resolution
+  statically, with no network or LLM call.
+- Added `std/verification::verification_gate_input`, a structured reducer that
+  combines stale-diagnostic classification with diagnostic-delta progress credit
+  for loop gate policy. Harn's agent stall detector now uses that reducer so
+  stale or unbound diagnostics stay advisory instead of feeding no-progress
+  streaks.
+
+### Changed
+
+- Raised the Linux x86_64 release binary-size ratchet to 192 MiB after the
+  v0.9.6 build measured 190.13 MiB, keeping the gate narrow while unblocking
+  release asset recovery.
+- `std/agent/canon` now infers harn-canon packs only from `canon-packs.json`, keeping manifest
+  routing as the single source of truth.
+- `harn models lora inspect` can compare adapters against LoRA export manifests and surface contract drift before promotion.
+- `harn models lora plan` and `export` now report a reusable adapter promotion
+  contract with minimum trial count, base-vs-adapter baseline, required metrics,
+  and contract-id drift gates.
+- `make check-generated-registry` now runs through a buildless Python auditor, so
+  hook-only pushes and release recovery paths no longer compile Harn just to check
+  Makefile/workflow/hook registry drift.
+
+### Fixed
+
+- **Typechecker call checking is now rest-aware and consolidated (#3922).** Generic
+  return inference now binds type parameters from every variadic argument, and
+  user functions that shadow builtin names report their own arity diagnostics.
+- **A thinking-enabled Anthropic (Claude) model routed over the OpenAI-compatible
+  transport is now rejected at dispatch with a clear error instead of silently
+  serving a billed-but-empty completion (#3956).** Anthropic's OpenAI-compatibility
+  surface bills the thinking budget but never streams extended thinking, so this
+  pairing — usually caused by a dropped or mis-scoped provider on an escalation
+  path — used to fail far downstream with no structured cause. A new typed
+  `Route::resolve` validates the `(provider, model, thinking)` triple before any
+  HTTP call and errors loudly, pointing at the likely upstream provider-drop.
+  Valid routes (native Anthropic, non-thinking compat calls, and legitimate
+  non-Anthropic reasoning models over compat) are unaffected.
+- `harn-hostlib` tool results now emit forward-slash-separated paths on every
+  platform. Search matches, staged/committed/discarded file labels, command
+  artifact paths (`output_path`/`stdout_path`/`stderr_path`), git repo roots,
+  code-index roots, filesystem snapshot paths, and directory-watch events
+  previously leaked OS-native backslashes on Windows (`crates\foo\bar.rs`),
+  breaking the path invariant the model and every path-consuming pipeline
+  assume. All agent-facing path strings now route through a single
+  `to_agent_path` normalizer, guarded by `check_agent_path_normalization.sh`.
+- Fix the streaming empty-completion error at the shared SSE parser hardcoding
+  "openai-compatible model" even for native Anthropic streams. The throw now
+  names the actual wire style (`anthropic-native` vs `openai-compatible`) and the
+  concrete `provider:model`, so a native Anthropic empty-stream flake no longer
+  prints a misleading "openai-compatible" label.
+- **`harn models lora export` now preserves grouped tool results.** Structured
+  LoRA exports convert multiple `[result of ...]` blocks in one user message
+  into ordered tool-role messages instead of collapsing the group into prose.
+- Added storage-scoped OAuth refresh locking so std/oauth clients re-read tokens inside
+  a single-flight transaction before spending refresh grants.
+
+### Security
+
+- **Command-argument provenance (opt-in).** Under `taint_command_reads`,
+  untrusted-origin file provenance extends from structured `read_file` calls to
+  the command surface: an `Execute`-kind tool whose command string names a
+  tainted-origin file (`cat vendor/dep/README`) is classified untrusted by the
+  same file origin, so a payload laundered back into context outside a
+  structured read still arms the taint / lethal-trifecta gate. This closes the
+  `tool_result` residual — the fetch-to-disk-then-`cat` laundering path that
+  evaded lexical file provenance. It fires only on paths already recorded
+  untrusted (via taint-on-write), so a first-party `cat src/main.rs` stays
+  trusted and no new confirmations land on ordinary command use. Default OFF
+  (byte-identical behaviour when disabled). With this on alongside directive
+  authentication and file provenance, the containment battery reaches full
+  coverage of its worst-case corpus (every modelled ingress — fetch/MCP
+  provenance, cross-agent channel, on-disk read, and laundered command read — is
+  contained).
+- **Hygiene passes require spotlight framing.** `SecurityPolicy::from_config`
+  now gates `neutralize_special_tokens` and `destyle_untrusted` on
+  `spotlight_external`. Both passes run only inside `spotlight_wrap`, which the
+  agent host invokes solely under `if policy.spotlight_external`, so "hygiene on,
+  spotlight off" was an inert combination that additionally made `policy_summary`
+  misreport the active posture. Gating them on their framing prerequisite
+  (mirroring the file/command-provenance and precise/trifecta gates) removes the
+  nonsensical subset while preserving the meaningful granularity — toggling a
+  hygiene pass off *within* spotlight. Default posture is byte-identical.
+- **Precise exfil gate requires the trifecta gate.** `SecurityPolicy::from_config`
+  now gates `precise_exfil_gate` on `trifecta_gate` structurally. The precise
+  gate only narrows the coarse trifecta gate — its logic runs solely inside
+  `trifecta_gate_reason`, which is called only when the trifecta gate is armed —
+  so it is inert on its own. Gating it on its prerequisite (mirroring the
+  existing file/command-provenance gate) means the nonsensical "precise gate, no
+  trifecta gate" configuration can no longer arise from config or a future
+  caller. The live install path routes through `from_config`, so the invariant
+  holds end-to-end. Default posture is byte-identical.
+- **Secret-read gate requires the trifecta gate.** `SecurityPolicy::from_config`
+  now gates `gate_secret_reads` on `trifecta_gate`. The secret-read arm is
+  evaluated only inside `trifecta_gate_reason`, which runs solely when the
+  trifecta gate is armed, so it is inert on its own. Gating it on its
+  prerequisite (mirroring the precise-exfil gate) removes the dead
+  "secret-read gate on, trifecta gate off" configuration. Default posture is
+  byte-identical.
+- The `strict` and `local-ml` security tiers now bundle the origin-provenance
+  defenses — directive authentication, untrusted-origin file taint, command-read
+  taint, and the precise (destination-aware) exfil gate — on from the mode alone.
+  Previously these opt-in flags had no runtime install path (`policy_from_dict`
+  dropped three of them and no caller set them), so the defenses were reachable
+  only from `#[cfg(test)]`. Command-read taint is now structurally gated on file
+  taint, so the inert "command reads without file provenance" combination can no
+  longer be configured. The default `spotlight` posture is unchanged.
+
 ## v0.9.6
 
 ### Added
