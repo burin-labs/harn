@@ -4,15 +4,22 @@
 // normalizes coordination envelopes so agents can coordinate without inventing
 // host-local mailboxes or user-visible prose protocols.
 import { filter_nil } from "std/collections"
+import { ensure_parent_dir, read_json, write_json } from "std/fs"
 import { memory_store } from "std/memory"
 
 let __COORD_SCHEMA = "harn.coordination.message.v1"
 
 let __COORD_RECEIPT_SCHEMA = "harn.coordination.receipt.v1"
 
+let __COORD_DIR_LOCK_SCHEMA = "harn.coordination.dir_lock.v1"
+
 let __COORD_CHANNEL_PREFIX = "coord"
 
 let __COORD_KINDS = ["status", "claim", "handoff", "blocker", "decision", "request", "fact"]
+
+let __COORD_DIR_LOCK_TTL_MS = 10 * 60 * 1000
+
+let __COORD_DIR_LOCK_REAPER_TTL_MS = 60 * 1000
 
 fn __coord_string(value) {
   if value == nil {
@@ -367,6 +374,257 @@ fn __coord_kind(message, options) {
   return kind
 }
 
+fn __coord_dir_lock_path(resource_path, options) {
+  let opts = __coord_dict(options)
+  let explicit = trim(__coord_string(opts?.lock_path))
+  if explicit != "" {
+    return explicit
+  }
+  let resource = trim(__coord_string(resource_path))
+  if resource == "" {
+    throw "std/coordination: lock resource path is required"
+  }
+  return resource + ".lock.d"
+}
+
+fn __coord_dir_lock_record_path(lock_path) {
+  return path_join(lock_path, "owner.json")
+}
+
+fn __coord_dir_lock_reaper_path(lock_path) {
+  return lock_path + ".reap.d"
+}
+
+fn __coord_dir_lock_owner(owner, options) {
+  let opts = __coord_dict(options)
+  let ctx = __coord_ctx()
+  let raw = if type_of(owner) == "dict" {
+    owner
+  } else {
+    {}
+  }
+  let explicit = if type_of(owner) == "string" {
+    owner
+  } else {
+    nil
+  }
+  var owner_id = trim(
+    __coord_string(
+      raw?.id
+        ?? raw?.owner_id
+        ?? explicit
+        ?? opts?.owner_id
+        ?? opts?.run_id
+        ?? ctx?.run_id
+        ?? ctx?.agent_session_id
+        ?? ctx?.worker_id
+        ?? ctx?.agent
+        ?? ctx?.persona,
+    ),
+  )
+  if owner_id == "" {
+    owner_id = "coord-lock-" + uuid_v7()
+  }
+  return filter_nil(
+    raw
+      + {
+      id: owner_id,
+      agent: raw?.agent ?? opts?.agent ?? ctx?.agent ?? ctx?.persona,
+      session_id: raw?.session_id ?? opts?.session_id ?? ctx?.agent_session_id,
+      worker_id: raw?.worker_id ?? opts?.worker_id ?? ctx?.worker_id,
+      run_id: raw?.run_id ?? opts?.run_id ?? ctx?.run_id,
+    },
+  )
+}
+
+fn __coord_dir_lock_record(resource_path, lock_path, owner, options, now_ms) {
+  let opts = __coord_dict(options)
+  let ttl_ms = __coord_nonnegative_int(opts?.ttl_ms ?? opts?.lease_ms, __COORD_DIR_LOCK_TTL_MS, "ttl_ms")
+  let token = trim(__coord_string(opts?.token))
+  return filter_nil(
+    {
+      schema: __COORD_DIR_LOCK_SCHEMA,
+      resource_path: resource_path,
+      lock_path: lock_path,
+      record_path: __coord_dir_lock_record_path(lock_path),
+      token: if token == "" {
+        "coord-lock-token-" + uuid_v7()
+      } else {
+        token
+      },
+      owner: owner,
+      reason: opts?.reason,
+      refs: __coord_list(opts?.refs),
+      acquired_at_ms: now_ms,
+      updated_at_ms: now_ms,
+      ttl_ms: ttl_ms,
+      expires_at_ms: now_ms + ttl_ms,
+    },
+  )
+}
+
+fn __coord_dir_lock_same_record(record, expected) {
+  if type_of(record) != "dict" || type_of(expected) != "dict" {
+    return false
+  }
+  let token = record?.token
+  return token != nil && token == expected?.token && record?.acquired_at_ms == expected?.acquired_at_ms
+}
+
+fn __coord_dir_lock_existing(lock_path, now_ms) {
+  let record_path = __coord_dir_lock_record_path(lock_path)
+  if !harness.fs.exists(lock_path) {
+    return {status: "absent", lock_path: lock_path, record_path: record_path}
+  }
+  if !harness.fs.exists(record_path) {
+    return {status: "unrecorded", lock_path: lock_path, record_path: record_path}
+  }
+  let record = read_json(record_path, nil)
+  if type_of(record) != "dict" || record?.schema != __COORD_DIR_LOCK_SCHEMA {
+    return {status: "malformed", lock_path: lock_path, record_path: record_path, record: record}
+  }
+  return {
+    status: if __coord_dir_lock_stale(record, now_ms) {
+      "stale"
+    } else {
+      "active"
+    },
+    lock_path: lock_path,
+    record_path: record_path,
+    record: record,
+  }
+}
+
+fn __coord_dir_lock_clear_if_same(lock_path, expected_record) {
+  let current = __coord_dir_lock_existing(lock_path, harness.clock.now_ms())
+  if current.status == "absent" {
+    return true
+  }
+  if !__coord_dir_lock_same_record(current.record, expected_record) {
+    return false
+  }
+  harness.fs.delete(lock_path)
+  return true
+}
+
+fn __coord_dir_lock_stale(record, now_ms) {
+  let expires_at_ms = to_int(record?.expires_at_ms)
+  return expires_at_ms != nil && expires_at_ms <= now_ms
+}
+
+fn __coord_dir_lock_conflict(resource_path, lock_path, existing, options) {
+  let opts = __coord_dict(options)
+  let result = filter_nil(
+    {
+      schema: __COORD_DIR_LOCK_SCHEMA,
+      acquired: false,
+      status: "conflict",
+      reason: existing.status,
+      resource_path: resource_path,
+      lock_path: lock_path,
+      record_path: existing.record_path,
+      holder: existing.record,
+      message: coord_dir_lock_conflict_message(existing),
+    },
+  )
+  if opts?.throw_on_conflict ?? true {
+    throw result.message
+  }
+  return result
+}
+
+fn __coord_dir_lock_reaper_options(options, lock_path) {
+  let opts = __coord_dict(options)
+  let ttl_ms = __coord_positive_int(opts?.reaper_ttl_ms, __COORD_DIR_LOCK_REAPER_TTL_MS, "reaper_ttl_ms")
+  return opts
+    + {
+    lock_path: __coord_dir_lock_reaper_path(lock_path),
+    ttl_ms: ttl_ms,
+    reason: opts?.reaper_reason ?? "coord_dir_lock_stale_cleanup",
+    token: "coord-lock-reaper-token-" + uuid_v7(),
+  }
+}
+
+fn __coord_dir_lock_reaper_conflict(resource_path, lock_path, options) {
+  let opts = __coord_dict(options)
+  let reaper_path = __coord_dir_lock_reaper_path(lock_path)
+  let reaper = __coord_dir_lock_existing(reaper_path, harness.clock.now_ms())
+  if reaper.status == "absent" {
+    return nil
+  }
+  if reaper.status == "stale" && (opts?.take_stale ?? true) {
+    let cleared = __coord_dir_lock_clear_if_same(reaper_path, reaper.record)
+    if cleared {
+      return nil
+    }
+  }
+  let refreshed = __coord_dir_lock_existing(reaper_path, harness.clock.now_ms())
+  return __coord_dir_lock_conflict(resource_path, reaper_path, refreshed, opts)
+}
+
+fn __coord_dir_lock_take_stale(resource_path, lock_path, owner, options, existing) {
+  let opts = __coord_dict(options)
+  let reaper_opts = __coord_dir_lock_reaper_options(opts, lock_path)
+  let reaper_path = __coord_dir_lock_reaper_path(lock_path)
+  let reaper = __coord_dir_lock_try_acquire(resource_path, reaper_path, owner, reaper_opts)
+  if reaper == nil {
+    let active_reaper = __coord_dir_lock_existing(reaper_path, harness.clock.now_ms())
+    return __coord_dir_lock_conflict(resource_path, reaper_path, active_reaper, opts)
+  }
+  var acquired = nil
+  let current = __coord_dir_lock_existing(lock_path, harness.clock.now_ms())
+  if current.status == "stale" && __coord_dir_lock_same_record(current.record, existing.record) {
+    let cleared = __coord_dir_lock_clear_if_same(lock_path, existing.record)
+    if cleared {
+      acquired = __coord_dir_lock_try_acquire(resource_path, lock_path, owner, opts, current.record)
+    }
+  }
+  let _ = try {
+    coord_release_dir_lock(reaper)
+  } catch (_e) {
+    nil
+  }
+  if acquired != nil {
+    return acquired
+  }
+  let refreshed = __coord_dir_lock_existing(lock_path, harness.clock.now_ms())
+  return __coord_dir_lock_conflict(resource_path, lock_path, refreshed, opts)
+}
+
+fn __coord_dir_lock_try_acquire(resource_path, lock_path, owner, options, stale_removed = nil) {
+  let opts = __coord_dict(options)
+  if opts?.ensure_parent ?? true {
+    ensure_parent_dir(lock_path)
+  }
+  let created = try {
+    harness.fs.mkdir(lock_path, false)
+    true
+  } catch (_e) {
+    false
+  }
+  if !created {
+    return nil
+  }
+  let now_ms = harness.clock.now_ms()
+  let record = __coord_dir_lock_record(resource_path, lock_path, owner, opts, now_ms)
+  write_json(record.record_path, record, {pretty: true, ensure_parent: false})
+  return filter_nil(
+    {
+      schema: __COORD_DIR_LOCK_SCHEMA,
+      acquired: true,
+      status: "acquired",
+      resource_path: resource_path,
+      lock_path: lock_path,
+      reaper_path: __coord_dir_lock_reaper_path(lock_path),
+      record_path: record.record_path,
+      token: record.token,
+      owner: owner,
+      record: record,
+      stale_removed: stale_removed,
+    },
+  )
+}
+
 fn __coord_actor(message, options, ctx) {
   let raw = __coord_dict(options?.from ?? message?.from)
   return filter_nil(
@@ -467,6 +725,138 @@ pub fn coord_request(scope, room, recipient, message, options = nil) {
     opts
       + {id: request_id, kind: opts?.request_kind ?? "request", thread_id: opts?.thread_id ?? request_id},
   )
+}
+
+/**
+ * Return the directory-lock path used for a resource path.
+ *
+ * Directory locks use `harness.fs.mkdir(path, false)` for atomic creation, so
+ * they coordinate across processes without shell-specific `mkdir` glue.
+ *
+ * @effects: []
+ * @errors: [runtime]
+ */
+pub fn coord_dir_lock_path(resource_path, options = nil) -> string {
+  return __coord_dir_lock_path(resource_path, options)
+}
+
+/**
+ * Return the owner-record path stored inside a directory lock.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn coord_dir_lock_record_path(lock_path: string) -> string {
+  return __coord_dir_lock_record_path(lock_path)
+}
+
+/**
+ * Return the internal stale-cleanup guard directory for a directory lock.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn coord_dir_lock_reaper_path(lock_path: string) -> string {
+  return __coord_dir_lock_reaper_path(lock_path)
+}
+
+/**
+ * Render a human-readable conflict message from a directory-lock state.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn coord_dir_lock_conflict_message(conflict) -> string {
+  let state = conflict?.reason ?? conflict?.status ?? "active"
+  let holder = conflict?.holder ?? conflict?.record
+  let owner = holder?.owner ?? {}
+  let owner_id = owner?.id ?? holder?.owner_id ?? "unknown"
+  let expires = holder?.expires_at_ms
+  let lock_path = conflict?.lock_path ?? holder?.lock_path ?? "unknown"
+  var message = "coordination directory lock is held: " + lock_path + " (state: " + state + ")"
+  message = message + "\n- owner: " + __coord_string(owner_id)
+  if owner?.run_id != nil {
+    message = message + "\n- run: " + __coord_string(owner.run_id)
+  }
+  if expires != nil {
+    message = message + "\n- expires_at_ms: " + __coord_string(expires)
+  }
+  return message
+}
+
+/**
+ * Acquire an atomic filesystem-backed directory lease.
+ *
+ * The function creates `resource_path + ".lock.d"` with non-recursive mkdir.
+ * On success it writes `owner.json` inside the lock directory and returns a
+ * structured record. If the lock exists and its owner record has expired, the
+ * stale directory is removed and acquisition is retried once.
+ *
+ * Options:
+ * - `lock_path`: override the default lock directory path.
+ * - `ttl_ms` / `lease_ms`: lease duration, default 10 minutes.
+ * - `throw_on_conflict`: default true; false returns `{acquired:false}`.
+ * - `take_stale`: default true; false reports stale locks as conflicts.
+ * - `reaper_ttl_ms`: stale-cleanup guard duration, default 1 minute.
+ * - `ensure_parent`: default true; create the lock parent when missing.
+ *
+ * @effects: [fs.write]
+ * @errors: [runtime]
+ */
+pub fn coord_acquire_dir_lock(resource_path: string, owner = nil, options = nil) {
+  let opts = __coord_dict(options)
+  let lock_path = __coord_dir_lock_path(resource_path, opts)
+  let normalized_owner = __coord_dir_lock_owner(owner, opts)
+  let reaper_conflict = __coord_dir_lock_reaper_conflict(resource_path, lock_path, opts)
+  if reaper_conflict != nil {
+    return reaper_conflict
+  }
+  let acquired = __coord_dir_lock_try_acquire(resource_path, lock_path, normalized_owner, opts)
+  if acquired != nil {
+    return acquired
+  }
+  let now_ms = harness.clock.now_ms()
+  let existing = __coord_dir_lock_existing(lock_path, now_ms)
+  if existing.status == "stale" && (opts?.take_stale ?? true) {
+    return __coord_dir_lock_take_stale(resource_path, lock_path, normalized_owner, opts, existing)
+  }
+  return __coord_dir_lock_conflict(resource_path, lock_path, existing, opts)
+}
+
+/**
+ * Release a directory lease returned by `coord_acquire_dir_lock`.
+ *
+ * By default the token in the live owner record must match the supplied lock
+ * record. Pass `{strict:false}` to best-effort delete by path.
+ *
+ * @effects: [fs.write]
+ * @errors: [runtime]
+ */
+pub fn coord_release_dir_lock(lock, options = nil) {
+  let opts = __coord_dict(options)
+  let lock_path = if type_of(lock) == "string" {
+    lock
+  } else {
+    lock?.lock_path ?? lock?.record?.lock_path
+  }
+  if trim(__coord_string(lock_path)) == "" {
+    throw "std/coordination: lock_path is required"
+  }
+  if !harness.fs.exists(lock_path) {
+    return {released: false, status: "absent", lock_path: lock_path}
+  }
+  if opts?.strict ?? true {
+    let expected = lock?.token ?? lock?.record?.token
+    if expected != nil {
+      let current = __coord_dir_lock_existing(lock_path, harness.clock.now_ms())
+      let actual = current?.record?.token
+      if actual != expected {
+        throw "std/coordination: refusing to release directory lock owned by another token"
+      }
+    }
+  }
+  harness.fs.delete(lock_path)
+  return {released: true, status: "released", lock_path: lock_path}
 }
 
 /**
