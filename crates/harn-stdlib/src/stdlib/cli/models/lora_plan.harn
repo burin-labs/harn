@@ -103,6 +103,7 @@ fn __render_human(harness: Harness, report: dict) {
   let data = __safe_dict(report["data"])
   let corpus_refresh = __safe_dict(report["corpus_refresh"])
   let evaluation = __safe_dict(report["evaluation"])
+  let serving = __safe_dict(report["serving"])
   let launch = __safe_dict(report["launch"])
   let warnings = __safe_list(report["warnings"])
   let base_id = __safe_string(base["id"], "")
@@ -188,6 +189,10 @@ fn __render_human(harness: Harness, report: dict) {
   harness.stdio
     .println("  holdout policy: " + __safe_string(evaluation["holdout_policy"], ""))
   __print_list(harness, "eval gates", __safe_list(evaluation["gates"]))
+  harness.stdio.println("  adapter binding: " + __safe_string(serving["adapter_binding"], ""))
+  harness.stdio.println("  request model: " + __safe_string(serving["request_model"], ""))
+  __print_list(harness, "serving notes", __safe_list(serving["runtime_notes"]))
+  __print_list(harness, "promotion gates", __safe_list(serving["promotion_gates"]))
   __render_command(harness, "eval", __safe_list(evaluation["eval_command"]))
   __render_command(harness, "inspect adapter", __safe_list(launch["inspect_command"]))
   __render_command(harness, "local launch", __safe_list(launch["local_launch_command"]))
