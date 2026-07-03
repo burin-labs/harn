@@ -25,6 +25,7 @@ pub mod a2a;
 pub mod actor_chain;
 pub mod agent_events;
 pub mod agent_sessions;
+pub mod agent_transcript_budget;
 pub mod atomic_io;
 pub mod autonomy;
 pub(crate) mod aws_sigv4;
