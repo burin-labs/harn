@@ -42,6 +42,14 @@ pub struct AttackCase {
     pub surface: String,
     pub malicious: bool,
     pub payload: String,
+    /// The behavioral tier's coupled attack: the same attack vector, but with a
+    /// `{CANARY}` placeholder woven into the payload's OWN authority (the forged
+    /// reasoning/role/special-token frame demands the canary), so the live probe
+    /// measures whether the injection *controls* the model rather than whether it
+    /// obeys a generic tacked-on token request. `{CANARY}` is substituted per
+    /// case at probe time. The static tier ignores this field.
+    #[serde(default)]
+    pub behavioral_payload: Option<String>,
     #[serde(default)]
     pub injected_directive: Option<String>,
     #[serde(default)]

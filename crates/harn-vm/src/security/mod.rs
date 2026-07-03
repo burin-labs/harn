@@ -30,6 +30,7 @@
 //! so non-interactive embedders (headless evals) are unaffected by it.
 
 pub mod battery;
+pub mod behavioral;
 
 use crate::value::VmDictExt;
 use std::cell::RefCell;
