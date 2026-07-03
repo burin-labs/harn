@@ -28,6 +28,7 @@ fn __render_human(harness: Harness, report: dict) {
   let request = safe_dict(report["request"])
   let tool_calling = safe_dict(report["tool_calling"])
   let training = safe_dict(report["training"])
+  let training_contract = safe_dict(training["contract"])
   let template = safe_dict(report["template"])
   let data = safe_dict(report["data"])
   let corpus_refresh = safe_dict(report["corpus_refresh"])
@@ -83,6 +84,12 @@ fn __render_human(harness: Harness, report: dict) {
   harness.stdio.println("  quantization: " + safe_string(training["quantization"], ""))
   harness.stdio.println("  loss scope: " + safe_string(training["loss_scope"], ""))
   harness.stdio.println("  packing: " + safe_string(training["packing"], ""))
+  harness.stdio
+    .println("  assistant mask: " + safe_string(training_contract["assistant_mask_policy"], ""))
+  harness.stdio
+    .println("  parser owner: " + safe_string(training_contract["tool_parser_owner"], ""))
+  harness.stdio
+    .println("  split policy: " + safe_string(training_contract["dataset_split_policy"], ""))
   harness.stdio.println("  template: " + safe_string(template["name"], ""))
   harness.stdio.println("  template source: " + safe_string(template["source"], ""))
   harness.stdio.println("  supervised target: " + safe_string(template["supervised_target"], ""))

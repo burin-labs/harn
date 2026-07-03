@@ -13,8 +13,9 @@ use crate::dispatch;
 use crate::env_guard::ScopedEnvVar;
 
 use super::{
-    dataset_format_for_tool_format, expand_home, lora_adapter_binding, normalize_plan_tool_format,
-    sha256_file, BaseModelReport, ToolCallingReport, DISPATCH_LORA_INSPECT_LOCK,
+    dataset_format_for_tool_format, expand_home, lora_adapter_binding, lora_training_contract,
+    normalize_plan_tool_format, sha256_file, BaseModelReport, LoraTrainingContract,
+    ToolCallingReport, DISPATCH_LORA_INSPECT_LOCK,
 };
 
 const LORA_EXPORT_PAYLOAD_ENV: &str = "HARN_MODELS_LORA_EXPORT_PAYLOAD_JSON";
@@ -893,6 +894,7 @@ fn export_contract_report(target: &ExportTarget, dataset_format: &str) -> Export
         harn_tool_format: target.harn_tool_format.clone(),
         dataset_format: dataset_format.to_string(),
         chat_template: target.chat_template.clone(),
+        training_contract: lora_training_contract(dataset_format, &target.harn_tool_format),
     }
 }
 
@@ -1025,6 +1027,7 @@ struct ExportContractReport {
     harn_tool_format: String,
     dataset_format: String,
     chat_template: Option<String>,
+    training_contract: LoraTrainingContract,
 }
 
 #[derive(Serialize)]
