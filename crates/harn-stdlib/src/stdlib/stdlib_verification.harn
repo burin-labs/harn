@@ -9,6 +9,7 @@
  * duplicating hostlib plumbing or inventing product-specific hash logic.
  */
 import { command_run, command_wait } from "std/command"
+import { shell_quote } from "std/runtime"
 import { regex_first_capture, truncate_text } from "std/text"
 
 type VerificationFileHashSnapshotEntry = {
@@ -64,6 +65,25 @@ type VerificationToolchainFact = {
   raw_version: string,
   cache_identity: dict,
   probe: dict,
+}
+
+type VerificationAffectedTarget = dict
+
+type VerificationAffectedAdapterFact = {
+  id: string,
+  parser_id: string,
+  status: string,
+  ok: bool,
+  target_count: int,
+  exit?: int,
+  error?: string,
+}
+
+type VerificationAffectedTargetsFact = {
+  changed_paths: list<string>,
+  targets: list<VerificationAffectedTarget>,
+  adapters: list<VerificationAffectedAdapterFact>,
+  fallback: dict,
 }
 
 fn __verification_opts(options) {
@@ -229,6 +249,373 @@ fn __verification_toolchain_cache_identity(row, opts) -> dict {
   return (opts?.cache_identity ?? {}) + (row?.cacheIdentity ?? row?.cache_identity ?? {})
 }
 
+fn __verification_string_list(value) -> list<string> {
+  if value == nil {
+    return []
+  }
+  let raw = type_of(value) == "list" ? value : [value]
+  var out: list<string> = []
+  for item in raw {
+    let text = trim(to_string(item ?? ""))
+    if text != "" && !contains(out, text) {
+      out = out + [text]
+    }
+  }
+  return out
+}
+
+fn __verification_clean_path(value) -> string {
+  var path = regex_replace_all("\\\\", "/", trim(to_string(value ?? "")))
+  while starts_with(path, "./") {
+    path = substring(path, 2)
+  }
+  return path
+}
+
+fn __verification_path_under(root_value, path_value) -> bool {
+  let root = __verification_clean_path(root_value)
+  let path = __verification_clean_path(path_value)
+  if path == "" {
+    return false
+  }
+  if root == "" || root == "." {
+    return true
+  }
+  return path == root || starts_with(path, root + "/")
+}
+
+fn __verification_shell_join(values) -> string {
+  var quoted = []
+  for value in values ?? [] {
+    quoted = quoted + [shell_quote(to_string(value))]
+  }
+  return join(quoted, " ")
+}
+
+fn __verification_render_adapter_value(value, ctx) {
+  if type_of(value) == "string" {
+    return render_string(value, ctx)
+  }
+  if type_of(value) == "list" {
+    var out = []
+    for item in value {
+      out = out + [__verification_render_adapter_value(item, ctx)]
+    }
+    return out
+  }
+  if type_of(value) == "dict" {
+    var out = {}
+    for key in value.keys() {
+      out = out + {[key]: __verification_render_adapter_value(value[key], ctx)}
+    }
+    return out
+  }
+  return value
+}
+
+fn __verification_adapter_spec(row, changed_paths, opts) {
+  let spec = row?.spec ?? row?.command
+  if spec == nil {
+    return nil
+  }
+  let ctx = (opts?.template_context ?? {})
+    + (row?.template_context ?? {})
+    + {
+    changed_paths: changed_paths,
+    changed_paths_json: json_stringify(changed_paths),
+    changed_paths_space: __verification_shell_join(changed_paths),
+    root: opts?.root ?? opts?.workspace_root ?? "",
+  }
+  return __verification_render_adapter_value(spec, ctx)
+}
+
+fn __verification_adapter_command_options(row, opts) {
+  return (opts?.command_options ?? {}) + (row?.command_options ?? {})
+}
+
+fn __verification_adapter_id(row, index: int) -> string {
+  let id = trim(to_string(row?.id ?? row?.name ?? ""))
+  return id == "" ? "adapter/" + to_string(index) : id
+}
+
+fn __verification_parser_id(row) -> string {
+  let parser = trim(to_string(row?.parser_id ?? row?.parser ?? "harn.targets_json.v1"))
+  return parser == "" ? "harn.targets_json.v1" : parser
+}
+
+fn __verification_target_from_value(value, adapter_id: string, default_kind: string, files) {
+  let base = if type_of(value) == "dict" {
+    value
+  } else {
+    {id: to_string(value), label: to_string(value)}
+  }
+  let id = trim(to_string(base?.id ?? base?.name ?? base?.label ?? ""))
+  if id == "" {
+    return nil
+  }
+  var out = base + {id: id, adapter_id: adapter_id, source: base?.source ?? "adapter"}
+  if out?.label == nil {
+    out = out + {label: id}
+  }
+  if out?.kind == nil {
+    out = out + {kind: default_kind}
+  }
+  if out?.files == nil {
+    out = out + {files: __verification_string_list(files)}
+  }
+  return out
+}
+
+fn __verification_push_target(targets, target) {
+  if target == nil {
+    return targets
+  }
+  let key = trim(to_string(target?.id ?? ""))
+  if key == "" {
+    return targets
+  }
+  for existing in targets {
+    if existing?.id == key {
+      return targets
+    }
+  }
+  return targets + [target]
+}
+
+fn __verification_json_target_values(data) {
+  if type_of(data) == "list" {
+    return data
+  }
+  if type_of(data) == "dict" {
+    let targets = data?.targets ?? data?.affectedTargets ?? data?.affected_targets
+    if type_of(targets) == "list" {
+      return targets
+    }
+  }
+  return []
+}
+
+fn __verification_parse_json_targets(adapter_id: string, data, changed_paths) {
+  var targets = []
+  for item in __verification_json_target_values(data) {
+    targets = __verification_push_target(
+      targets,
+      __verification_target_from_value(item, adapter_id, "target", item?.files ?? changed_paths),
+    )
+  }
+  return targets
+}
+
+fn __verification_parse_line_targets(adapter_id: string, text: string, changed_paths) {
+  var targets = []
+  for line in text.split("\n") {
+    let id = trim(line)
+    if id != "" {
+      targets = __verification_push_target(
+        targets,
+        __verification_target_from_value(id, adapter_id, "target", changed_paths),
+      )
+    }
+  }
+  return targets
+}
+
+fn __verification_cargo_package_files(package, changed_paths) -> list<string> {
+  let manifest = __verification_clean_path(package?.manifest_path ?? "")
+  let root = dirname(manifest)
+  var files: list<string> = []
+  for path in changed_paths {
+    if __verification_path_under(root, path) {
+      files = files + [path]
+    }
+  }
+  return files
+}
+
+fn __verification_cargo_target_names(package) -> list<string> {
+  var names: list<string> = []
+  for target in package?.targets ?? [] {
+    let name = trim(to_string(target?.name ?? target))
+    if name != "" && !contains(names, name) {
+      names = names + [name]
+    }
+  }
+  return names
+}
+
+fn __verification_parse_cargo_metadata(adapter_id: string, data, changed_paths) {
+  var targets = []
+  for package in data?.packages ?? [] {
+    let files = __verification_cargo_package_files(package, changed_paths)
+    if len(files) == 0 {
+      continue
+    }
+    let name = trim(to_string(package?.name ?? ""))
+    if name == "" {
+      continue
+    }
+    targets = __verification_push_target(
+      targets,
+      {
+        id: "cargo:" + name,
+        label: name,
+        kind: "cargo-package",
+        adapter_id: adapter_id,
+        source: "adapter",
+        files: files,
+        manifest_path: package?.manifest_path,
+        target_names: __verification_cargo_target_names(package),
+      },
+    )
+  }
+  return targets
+}
+
+fn __verification_project_targets(project) -> list<string> {
+  let raw = project?.targets ?? project?.tasks ?? []
+  if type_of(raw) == "dict" {
+    return raw.keys().sort()
+  }
+  var names: list<string> = []
+  for item in raw {
+    let name = trim(to_string(item?.name ?? item))
+    if name != "" && !contains(names, name) {
+      names = names + [name]
+    }
+  }
+  return names.sort()
+}
+
+fn __verification_project_rows(data) {
+  let raw = data?.projects ?? data?.workspaces ?? data
+  var rows = []
+  if type_of(raw) == "dict" {
+    for name in raw.keys().sort() {
+      rows = rows + [(raw[name] ?? {}) + {name: name}]
+    }
+    return rows
+  }
+  if type_of(raw) == "list" {
+    return raw
+  }
+  return []
+}
+
+fn __verification_parse_js_workspace_graph(adapter_id: string, data, changed_paths) {
+  var targets = []
+  for project in __verification_project_rows(data) {
+    let root = project?.root ?? project?.sourceRoot ?? project?.source_root ?? ""
+    var files: list<string> = []
+    for path in changed_paths {
+      if __verification_path_under(root, path) {
+        files = files + [path]
+      }
+    }
+    if len(files) == 0 {
+      continue
+    }
+    let name = trim(to_string(project?.name ?? project?.id ?? root))
+    if name == "" {
+      continue
+    }
+    targets = __verification_push_target(
+      targets,
+      {
+        id: "js:" + name,
+        label: name,
+        kind: "js-project",
+        adapter_id: adapter_id,
+        source: "adapter",
+        files: files,
+        root: root,
+        target_names: __verification_project_targets(project),
+      },
+    )
+  }
+  return targets
+}
+
+fn __verification_parse_adapter_targets(
+  row,
+  adapter_id: string,
+  parser_id: string,
+  result,
+  changed_paths,
+) {
+  if parser_id == "harn.targets_lines.v1" || parser_id == "lines.v1" {
+    return __verification_parse_line_targets(adapter_id, result?.stdout ?? "", changed_paths)
+  }
+  let data = json_parse(result?.stdout ?? "null")
+  if parser_id == "harn.targets_json.v1" || parser_id == "json.targets.v1" {
+    return __verification_parse_json_targets(adapter_id, data, changed_paths)
+  }
+  if parser_id == "cargo.metadata.v1" {
+    return __verification_parse_cargo_metadata(adapter_id, data, changed_paths)
+  }
+  if parser_id == "js.workspace_graph.v1" || parser_id == "nx.project_graph.v1" {
+    return __verification_parse_js_workspace_graph(adapter_id, data, changed_paths)
+  }
+  throw "verification_affected_targets: unsupported parser_id `" + parser_id + "`"
+}
+
+fn __verification_code_index_fallback(changed_paths, opts) {
+  if opts?.fallback == false {
+    return {enabled: false, available: false, targets: []}
+  }
+  var targets = []
+  var errors = []
+  for path in changed_paths {
+    targets = __verification_push_target(
+      targets,
+      {
+        id: "file:" + path,
+        label: path,
+        kind: "file",
+        source: "code_index",
+        files: [path],
+        reason: "changed_file",
+      },
+    )
+    let file_id = try {
+      hostlib_code_index_path_to_id({path: path})
+    } catch (e) {
+      errors = errors + [to_string(e)]
+      nil
+    }
+    if file_id == nil || file_id == 0 {
+      continue
+    }
+    let importers = try {
+      hostlib_code_index_deps_get({file_id: file_id, direction: "importers"})
+    } catch (e) {
+      errors = errors + [to_string(e)]
+      []
+    }
+    for importer_id in importers {
+      let importer_path = try {
+        hostlib_code_index_id_to_path({file_id: importer_id})
+      } catch (_e) {
+        nil
+      }
+      if importer_path != nil {
+        targets = __verification_push_target(
+          targets,
+          {
+            id: "file:" + importer_path,
+            label: importer_path,
+            kind: "file",
+            source: "code_index",
+            files: [importer_path],
+            reason: "reverse_dependency",
+            changed_path: path,
+          },
+        )
+      }
+    }
+  }
+  return {enabled: true, available: len(errors) == 0, targets: targets, errors: errors}
+}
+
 /**
  * Capture current on-disk hashes for `paths` under one code-index sequence
  * binding. Unknown-but-readable workspace files are included with
@@ -243,6 +630,94 @@ fn __verification_toolchain_cache_identity(row, opts) -> dict {
  */
 pub fn verification_file_hash_snapshot(paths: list<string>) -> VerificationFileHashSnapshot {
   return hostlib_code_index_file_hash_snapshot({paths: paths})
+}
+
+/**
+ * Resolve build/test targets affected by changed files using data-declared
+ * adapters. Each adapter row supplies a command `spec` (or `command`) and a
+ * `parser_id`; Harn ships parser ids for generic JSON/line targets, Cargo
+ * metadata, and JS workspace graphs, while arbitrary stacks can add rows
+ * without changing Rust code.
+ *
+ * Supported parser ids:
+ * - `harn.targets_json.v1`: stdout JSON is `[{id, ...}]` or `{targets:[...]}`
+ * - `harn.targets_lines.v1`: one target id per stdout line
+ * - `cargo.metadata.v1`: Cargo metadata JSON; changed files map to packages
+ * - `js.workspace_graph.v1`: `{projects:{name:{root, targets}}}` or list rows
+ *
+ * If adapters produce no targets, the helper falls back to the existing
+ * code-index file graph: the changed file plus reverse importers become
+ * conservative file targets. Pass `{fallback:false}` to disable that.
+ *
+ * @effects: [process, host]
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ */
+pub fn verification_affected_targets(changed_paths: list<string>, adapters = nil, options = nil) -> VerificationAffectedTargetsFact {
+  let opts = __verification_opts(options)
+  let paths = __verification_string_list(changed_paths)
+  let rows = adapters ?? opts?.adapters ?? []
+  var targets = []
+  var adapter_facts: list<VerificationAffectedAdapterFact> = []
+  var index = 0
+  for row in rows {
+    let adapter_id = __verification_adapter_id(row, index)
+    let parser_id = __verification_parser_id(row)
+    let spec = __verification_adapter_spec(row, paths, opts)
+    if spec == nil {
+      adapter_facts = adapter_facts
+        + [{id: adapter_id, parser_id: parser_id, status: "not_configured", ok: false, target_count: 0}]
+      index = index + 1
+      continue
+    }
+    let result = command_run(spec, __verification_adapter_command_options(row, opts))
+    let parsed = try {
+      __verification_parse_adapter_targets(row, adapter_id, parser_id, result, paths)
+    } catch (e) {
+      if opts?.fail_on_adapter_error ?? false {
+        throw e
+      }
+      adapter_facts = adapter_facts
+        + [
+        {
+          id: adapter_id,
+          parser_id: parser_id,
+          status: result?.status ?? "failed",
+          ok: false,
+          exit: __verification_exit(result, {}),
+          target_count: 0,
+          error: to_string(e),
+        },
+      ]
+      []
+    }
+    for target in parsed {
+      targets = __verification_push_target(targets, target)
+    }
+    if len(parsed) > 0 || len(adapter_facts) == index {
+      adapter_facts = adapter_facts
+        + [
+        {
+          id: adapter_id,
+          parser_id: parser_id,
+          status: result?.status ?? "completed",
+          ok: __verification_result_ok(result),
+          exit: __verification_exit(result, {}),
+          target_count: len(parsed),
+        },
+      ]
+    }
+    index = index + 1
+  }
+  let fallback = if len(targets) == 0 || opts?.include_fallback == true {
+    __verification_code_index_fallback(paths, opts)
+  } else {
+    {enabled: false, available: false, targets: []}
+  }
+  for target in fallback.targets ?? [] {
+    targets = __verification_push_target(targets, target)
+  }
+  return {changed_paths: paths, targets: targets, adapters: adapter_facts, fallback: fallback}
 }
 
 /**
