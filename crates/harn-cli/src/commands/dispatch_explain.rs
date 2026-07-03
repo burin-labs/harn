@@ -8,7 +8,7 @@
 //! claude-sonnet route native?" without running an eval and grepping a
 //! transcript.
 
-use crate::cli::provider::ProviderDispatchExplainArgs;
+use crate::cli::ProviderDispatchExplainArgs;
 
 pub(crate) fn run(args: &ProviderDispatchExplainArgs) {
     let caps = harn_vm::llm::capabilities::lookup(&args.provider, &args.model);
