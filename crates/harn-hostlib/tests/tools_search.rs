@@ -109,6 +109,50 @@ fn search_respects_glob_filter() {
 }
 
 #[test]
+fn search_glob_filter_matches_file_names_at_any_depth() {
+    let dir = TempDir::new().unwrap();
+    fs::create_dir_all(dir.path().join("src")).unwrap();
+    fs::write(dir.path().join("src/hit.rs"), "fn target() {}\n").unwrap();
+    fs::write(dir.path().join("src/ignored.txt"), "fn target() {}\n").unwrap();
+
+    let reg = registry();
+    let entry = reg.find("hostlib_tools_search").unwrap();
+    let result = (entry.handler)(&dict_arg(&[
+        ("pattern", vm_string("target")),
+        ("path", vm_string(&dir.path().to_string_lossy())),
+        ("glob", vm_string("*.rs")),
+        ("fixed_strings", VmValue::Bool(true)),
+    ]))
+    .unwrap();
+    let rows = matches_in(&result);
+    assert_eq!(rows.len(), 1);
+    if let VmValue::Dict(d) = &rows[0] {
+        if let Some(VmValue::String(s)) = d.get("path") {
+            assert_path_ends_with(s, &["src", "hit.rs"]);
+        }
+    }
+}
+
+#[test]
+fn search_star_glob_matches_files_at_any_depth() {
+    let dir = TempDir::new().unwrap();
+    fs::create_dir_all(dir.path().join("src")).unwrap();
+    fs::write(dir.path().join("root.txt"), "fn target() {}\n").unwrap();
+    fs::write(dir.path().join("src/nested.txt"), "fn target() {}\n").unwrap();
+
+    let reg = registry();
+    let entry = reg.find("hostlib_tools_search").unwrap();
+    let result = (entry.handler)(&dict_arg(&[
+        ("pattern", vm_string("target")),
+        ("path", vm_string(&dir.path().to_string_lossy())),
+        ("glob", vm_string("*")),
+        ("fixed_strings", VmValue::Bool(true)),
+    ]))
+    .unwrap();
+    assert_eq!(matches_in(&result).len(), 2);
+}
+
+#[test]
 fn search_respects_exclude_globs() {
     let dir = TempDir::new().unwrap();
     fs::create_dir_all(dir.path().join("logs")).unwrap();
@@ -276,6 +320,56 @@ fn search_respects_gitignore_unless_overridden() {
         !paths.iter().any(|p| p.ends_with("ignored.txt")),
         "gitignored file should be skipped, got {paths:?}"
     );
+}
+
+#[test]
+fn search_glob_filter_does_not_reinclude_gitignored_paths() {
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join(".gitignore"), "target/\n").unwrap();
+    fs::create_dir_all(dir.path().join("crates/burin-tui/src")).unwrap();
+    fs::create_dir_all(dir.path().join("crates/burin-tui/target/debug")).unwrap();
+    fs::write(
+        dir.path().join("crates/burin-tui/src/lib.rs"),
+        "needle from source\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.path()
+            .join("crates/burin-tui/target/debug/generated.rs"),
+        "needle from build output\n",
+    )
+    .unwrap();
+
+    let reg = registry();
+    let entry = reg.find("hostlib_tools_search").unwrap();
+    let result = (entry.handler)(&dict_arg(&[
+        ("pattern", vm_string("needle")),
+        ("path", vm_string(&dir.path().to_string_lossy())),
+        ("glob", vm_string("crates/burin-tui/**")),
+        ("fixed_strings", VmValue::Bool(true)),
+    ]))
+    .unwrap();
+    let rows = matches_in(&result);
+    let paths: Vec<String> = rows
+        .iter()
+        .map(|row| match row {
+            VmValue::Dict(d) => match d.get("path") {
+                Some(VmValue::String(s)) => s.to_string(),
+                _ => String::new(),
+            },
+            _ => String::new(),
+        })
+        .collect();
+    assert!(paths
+        .iter()
+        .any(|p| p.ends_with("crates/burin-tui/src/lib.rs")));
+    assert!(
+        !paths
+            .iter()
+            .any(|p| p.ends_with("crates/burin-tui/target/debug/generated.rs")),
+        "gitignored build output should be skipped, got {paths:?}"
+    );
+    assert_eq!(rows.len(), 1);
 }
 
 #[test]

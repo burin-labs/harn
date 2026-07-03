@@ -83,6 +83,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let context_after = context_after as usize;
 
     let matcher = build_matcher(&pattern, case_insensitive, fixed_strings)?;
+    let include_set = build_include_glob(glob)?;
     let exclude_set = build_exclude_globs(exclude_globs)?;
 
     let mut walker = WalkBuilder::new(&path);
@@ -98,25 +99,6 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         // exists. (Without this, `ignore` requires a `.git/` ancestor.)
         .require_git(false)
         .parents(true);
-    if let Some(glob_pat) = glob.as_deref() {
-        let mut builder = ignore::overrides::OverrideBuilder::new(&path);
-        let normalized = normalize_glob(glob_pat);
-        builder
-            .add(&normalized)
-            .map_err(|err| HostlibError::InvalidParameter {
-                builtin: BUILTIN,
-                param: "glob",
-                message: format!("invalid glob `{glob_pat}`: {err}"),
-            })?;
-        let overrides = builder
-            .build()
-            .map_err(|err| HostlibError::InvalidParameter {
-                builtin: BUILTIN,
-                param: "glob",
-                message: format!("invalid glob `{glob_pat}`: {err}"),
-            })?;
-        walker.overrides(overrides);
-    }
 
     let mut all_rows: Vec<RowWithPath> = Vec::new();
     let mut truncated = false;
@@ -130,6 +112,9 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
             continue;
         }
         let file_path = entry.path().to_path_buf();
+        if !included_by_globs(&path, &file_path, include_set.as_ref()) {
+            continue;
+        }
         if excluded_by_globs(&path, &file_path, exclude_set.as_ref()) {
             continue;
         }
@@ -191,38 +176,70 @@ fn build_matcher(
         })
 }
 
-/// Normalize a user-supplied glob so callers writing
-/// `internal/manifest/*.go` get matches at any depth.
-fn normalize_glob(glob: &str) -> String {
-    if glob.contains('/') && !glob.starts_with("**/") {
-        format!("**/{glob}")
-    } else {
-        glob.to_string()
-    }
+fn build_include_glob(pattern: Option<String>) -> Result<Option<GlobSet>, HostlibError> {
+    let Some(pattern) = pattern else {
+        return Ok(None);
+    };
+    build_glob_set([pattern], "glob")
 }
 
 fn build_exclude_globs(patterns: Vec<String>) -> Result<Option<GlobSet>, HostlibError> {
     if patterns.is_empty() {
         return Ok(None);
     }
+    build_glob_set(patterns, "exclude_globs")
+}
+
+fn build_glob_set(
+    patterns: impl IntoIterator<Item = String>,
+    param: &'static str,
+) -> Result<Option<GlobSet>, HostlibError> {
     let mut builder = GlobSetBuilder::new();
     for pattern in patterns {
-        let normalized = normalize_glob(&pattern);
-        let glob = Glob::new(&normalized).map_err(|err| HostlibError::InvalidParameter {
-            builtin: BUILTIN,
-            param: "exclude_globs",
-            message: format!("invalid glob `{pattern}`: {err}"),
-        })?;
-        builder.add(glob);
+        for normalized in normalize_glob_variants(&pattern) {
+            let glob = Glob::new(&normalized).map_err(|err| HostlibError::InvalidParameter {
+                builtin: BUILTIN,
+                param,
+                message: format!("invalid glob `{pattern}`: {err}"),
+            })?;
+            builder.add(glob);
+        }
     }
     builder
         .build()
         .map(Some)
         .map_err(|err| HostlibError::InvalidParameter {
             builtin: BUILTIN,
-            param: "exclude_globs",
-            message: format!("invalid exclude glob set: {err}"),
+            param,
+            message: format!("invalid glob set: {err}"),
         })
+}
+
+/// Normalize user-supplied globs so `*.rs` and `internal/*.go` behave like
+/// ripgrep-style path filters at any depth while still matching root files.
+fn normalize_glob_variants(glob: &str) -> Vec<String> {
+    let glob = glob.replace('\\', "/");
+    if glob == "*" || glob.starts_with("**/") {
+        return vec![glob];
+    }
+    let normalized = format!("**/{glob}");
+    if normalized == glob {
+        vec![glob]
+    } else {
+        vec![glob, normalized]
+    }
+}
+
+fn included_by_globs(
+    root: &std::path::Path,
+    file_path: &std::path::Path,
+    set: Option<&GlobSet>,
+) -> bool {
+    let Some(set) = set else {
+        return true;
+    };
+    let candidate = file_path.strip_prefix(root).unwrap_or(file_path);
+    set.is_match(candidate)
 }
 
 fn excluded_by_globs(
