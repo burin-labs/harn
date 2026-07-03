@@ -124,6 +124,35 @@ exit 22
 SH
 chmod +x "$fake_bin/curl"
 
+cat > "$fake_bin/tee" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+
+append=false
+if [[ "${1:-}" == "-a" ]]; then
+  append=true
+  shift
+fi
+
+target="${1:-}"
+if [[ -z "$target" ]]; then
+  echo "fake tee expected a target file" >&2
+  exit 2
+fi
+
+tmp="$(mktemp)"
+cat > "$tmp"
+/bin/sleep 0.05
+if [[ "$append" == "true" ]]; then
+  cat "$tmp" >> "$target"
+else
+  cat "$tmp" > "$target"
+fi
+cat "$tmp"
+rm -f "$tmp"
+SH
+chmod +x "$fake_bin/tee"
+
 cat > "$fake_bin/sleep" <<'SH'
 #!/usr/bin/env bash
 exit 0

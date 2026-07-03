@@ -149,13 +149,28 @@ run_and_capture_output() {
   local output_file
   output_file="$(mktemp "${TMPDIR:-/tmp}/harn-publish-output.XXXXXX")"
   : > "$output_file"
+  local fifo_dir
+  local stdout_fifo
+  local stderr_fifo
+  fifo_dir="$(mktemp -d "${TMPDIR:-/tmp}/harn-publish-fifo.XXXXXX")"
+  stdout_fifo="$fifo_dir/stdout"
+  stderr_fifo="$fifo_dir/stderr"
+  mkfifo "$stdout_fifo" "$stderr_fifo"
+
+  tee -a "$output_file" < "$stdout_fifo" &
+  local stdout_tee_pid=$!
+  tee -a "$output_file" < "$stderr_fifo" >&2 &
+  local stderr_tee_pid=$!
 
   local command_status=0
-  if "$@" > >(tee -a "$output_file") 2> >(tee -a "$output_file" >&2); then
+  if "$@" > "$stdout_fifo" 2> "$stderr_fifo"; then
     command_status=0
   else
     command_status=$?
   fi
+  wait "$stdout_tee_pid" || true
+  wait "$stderr_tee_pid" || true
+  rm -rf "$fifo_dir"
 
   printf -v "$__output_var" '%s' "$(cat "$output_file")"
   rm -f "$output_file"
