@@ -2,8 +2,10 @@ import {
   canon_evaluate_slice,
   canon_feedback_text,
   canon_inject_feedback,
+  canon_inject_paths_feedback,
   canon_pack_ids_for_path,
   canon_slice_from_files,
+  canon_slice_from_paths,
 } from "std/agent/canon"
 import { with_fs } from "std/testing"
 
@@ -42,7 +44,12 @@ pipeline main(task) {
   __io_println(join(canon_pack_ids_for_path("Buildfile", manifest), ","))
   __io_println(to_string(len(canon_pack_ids_for_path("src/main.zig", manifest)) == 0))
   with_fs(
-    {"canon-packs.json": manifest, "zig/invariants.harn": INVARIANTS},
+    {
+      "canon-packs.json": manifest,
+      "src/main.foo": "const bad = true;",
+      "src/ok.foo": "const good = true;",
+      "zig/invariants.harn": INVARIANTS,
+    },
     { dir ->
       let slice = canon_slice_from_files([{path: "src/main.foo", text: "const bad = true;"}])
       let result = canon_evaluate_slice(slice, {canon_root: dir, files: slice.files})
@@ -50,11 +57,19 @@ pipeline main(task) {
       __io_println(to_string(result.packs[0].report.records[0].name == "no_bad"))
       let feedback = canon_feedback_text(result)
       __io_println(to_string(contains(feedback, "no_bad")))
+      let path_slice = canon_slice_from_paths(["src/main.foo"], {root: dir})
+      __io_println(to_string(path_slice.files[0].text == "const bad = true;"))
       let session_id = agent_session_open("canon-feedback-" + uuid_v7())
       let injected = canon_inject_feedback(session_id, slice, {canon_root: dir, files: slice.files})
       let messages = agent_session_snapshot(session_id).messages
       __io_println(to_string(injected.injected))
       __io_println(to_string(contains(messages[len(messages) - 1].content, "harn-canon")))
+      let path_session_id = agent_session_open("canon-path-feedback-" + uuid_v7())
+      let path_injected = canon_inject_paths_feedback(path_session_id, ["src/main.foo"], {root: dir, canon_root: dir})
+      let path_messages = agent_session_snapshot(path_session_id).messages
+      __io_println(to_string(path_injected.injected))
+      __io_println(to_string(contains(path_messages[len(path_messages) - 1].content, "no_bad")))
+      agent_session_close(path_session_id)
       agent_session_close(session_id)
     },
   )

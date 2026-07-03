@@ -207,6 +207,41 @@ pub fn canon_slice_from_files(files, metadata = nil) -> dict {
 }
 
 /**
+ * Build a canon slice by reading changed file paths from a workspace.
+ *
+ * Options:
+ *   root | workspace_root: base directory for relative paths
+ *   include_missing: include missing paths with empty text and `missing: true`
+ *   metadata: slice metadata
+ *
+ * @effects: [fs.read]
+ * @errors: [runtime]
+ * @api_stability: experimental
+ */
+pub fn canon_slice_from_paths(paths, options = nil) -> dict {
+  let opts = options ?? {}
+  let root = opts?.root ?? opts?.workspace_root
+  var files = []
+  for item in paths ?? [] {
+    let path = __canon_text(item?.path ?? item?.name ?? item)
+    if path == "" {
+      continue
+    }
+    if item?.text != nil || item?.content != nil {
+      files = files.push({path: path, text: to_string(item?.text ?? item?.content ?? "")})
+      continue
+    }
+    let read_path = __canon_path(root, path)
+    if harness.fs.exists(read_path) {
+      files = files.push({path: path, text: harness.fs.read_text(read_path)})
+    } else if opts?.include_missing ?? false {
+      files = files.push({path: path, text: "", missing: true})
+    }
+  }
+  return {files: files, metadata: opts?.metadata ?? {}}
+}
+
+/**
  * Load `canon-packs.json` from a configured harn-canon root.
  *
  * @effects: [fs.read]
@@ -425,4 +460,22 @@ pub fn canon_inject_feedback(session_id: string, slice, options = nil) -> dict {
   }
   return result
     + {feedback_text: feedback, injected: feedback != "" && mode != "none", reminder_id: reminder_id}
+}
+
+/**
+ * Evaluate harn-canon packs for changed paths and inject bounded feedback.
+ *
+ * This is the agent-loop seam for hosts that already know which files changed:
+ * the host or pipeline passes paths, Harn reads the current workspace content,
+ * harn-canon remains the predicate source of truth, and delivery still goes
+ * through `canon_inject_feedback`.
+ *
+ * @effects: [fs.read, host]
+ * @errors: [runtime]
+ * @api_stability: experimental
+ */
+pub fn canon_inject_paths_feedback(session_id: string, paths, options = nil) -> dict {
+  let opts = options ?? {}
+  let slice = canon_slice_from_paths(paths, opts)
+  return canon_inject_feedback(session_id, slice, opts + {files: slice.files})
 }
