@@ -143,6 +143,25 @@ publish_output_means_already_published() {
   grep -Eiq "$ALREADY_PUBLISHED_PATTERN" <<<"$output"
 }
 
+run_and_capture_output() {
+  local __output_var="$1"
+  shift
+  local output_file
+  output_file="$(mktemp "${TMPDIR:-/tmp}/harn-publish-output.XXXXXX")"
+  : > "$output_file"
+
+  local command_status=0
+  if "$@" > >(tee -a "$output_file") 2> >(tee -a "$output_file" >&2); then
+    command_status=0
+  else
+    command_status=$?
+  fi
+
+  printf -v "$__output_var" '%s' "$(cat "$output_file")"
+  rm -f "$output_file"
+  return "$command_status"
+}
+
 crate_version_exists() {
   local crate="$1"
   if ! command -v curl &>/dev/null; then
@@ -167,12 +186,9 @@ attempt_workspace_publish() {
     echo ""
     echo "=== Publishing workspace (attempt $attempt/$MAX_ATTEMPTS) ==="
     local output
-    if output=$(cargo publish --workspace $DRY_RUN $VERIFY_FLAGS $ALLOW_DIRTY 2>&1); then
-      echo "$output"
+    if run_and_capture_output output cargo publish --workspace $DRY_RUN $VERIFY_FLAGS $ALLOW_DIRTY; then
       return 0
     fi
-
-    echo "$output"
 
     if echo "$output" | grep -Eq "$RETRYABLE_PATTERN"; then
       if [[ $attempt -lt $MAX_ATTEMPTS ]]; then
@@ -214,8 +230,7 @@ attempt_per_crate_publish() {
       echo "  $crate already published at version $CURRENT_VERSION — skipping"
       continue
     fi
-    if output=$(cargo publish -p "$crate" $DRY_RUN $VERIFY_FLAGS $ALLOW_DIRTY 2>&1); then
-      echo "$output"
+    if run_and_capture_output output cargo publish -p "$crate" $DRY_RUN $VERIFY_FLAGS $ALLOW_DIRTY; then
       continue
     fi
     if publish_output_means_already_published "$output" || crate_version_exists "$crate"; then
@@ -223,11 +238,9 @@ attempt_per_crate_publish() {
       continue
     fi
     if echo "$output" | grep -q "429\|Too Many Requests"; then
-      echo "$output"
       echo "  Rate limited on $crate. Waiting ${RETRY_DELAY}s and retrying once..."
       sleep "$RETRY_DELAY"
-      if output=$(cargo publish -p "$crate" $DRY_RUN $VERIFY_FLAGS $ALLOW_DIRTY 2>&1); then
-        echo "$output"
+      if run_and_capture_output output cargo publish -p "$crate" $DRY_RUN $VERIFY_FLAGS $ALLOW_DIRTY; then
         continue
       fi
       if publish_output_means_already_published "$output" || crate_version_exists "$crate"; then
@@ -235,7 +248,6 @@ attempt_per_crate_publish() {
         continue
       fi
     fi
-    echo "$output"
     echo "  FAILED to publish $crate"
     return 1
   done < <(workspace_publish_crates)
