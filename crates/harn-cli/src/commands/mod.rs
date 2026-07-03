@@ -80,6 +80,7 @@ pub mod trigger;
 pub(crate) mod trust;
 pub(crate) mod try_cmd;
 pub(crate) mod upgrade;
+pub(crate) mod usage;
 pub(crate) mod viz;
 pub(crate) mod workflow;
 

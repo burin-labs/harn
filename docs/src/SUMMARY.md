@@ -235,6 +235,7 @@
 ## Observability
 
 - [Harn portal](./portal.md)
+- [LLM spend/usage analytics (`harn usage`)](./usage.md)
 - [Unified observability API](./observability/unified-api.md)
 - [Trigger observability in the action graph](./observability/triggers-in-action-graph.md)
 - [Orchestrator observability](./orchestrator/observability.md)

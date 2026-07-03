@@ -67,6 +67,7 @@ mod trigger;
 mod trust;
 mod try_cmd;
 mod upgrade;
+mod usage;
 mod util;
 mod verify;
 mod version;
@@ -218,6 +219,7 @@ pub(crate) use trace::{TraceArgs, TraceCommand, TraceImportArgs};
 pub(crate) use trigger::{TriggerArgs, TriggerCancelArgs, TriggerCommand, TriggerReplayArgs};
 pub(crate) use try_cmd::TryArgs;
 pub(crate) use upgrade::UpgradeArgs;
+pub(crate) use usage::{UsageArgs, UsageGroupBy};
 // `TrustOutcomeArg` / `TrustTierArg` are referenced from the cli
 // parser tests only; they're matched via destructuring elsewhere.
 #[allow(unused_imports)]
@@ -378,6 +380,12 @@ SCRIPTING
     Trigger(TriggerArgs),
     /// Statically enumerate declared trigger routes and their requirements.
     Routes(RoutesArgs),
+    /// Aggregate LLM spend/usage analytics from the local event log's
+    /// `provider_call_response` records: cost, tokens, and prompt-cache
+    /// efficiency rolled up by provider, model, or a day/week/month
+    /// time series. Reuses the runtime-computed `cost_usd` — no pricing
+    /// is recomputed. Pair with `--json` for an agent-readable envelope.
+    Usage(UsageArgs),
     /// Statically enumerate modules, symbols, imports, capabilities, effects, and host calls.
     Graph(GraphArgs),
     /// Inspect Harn Flow atom, slice, and predicate audit state.

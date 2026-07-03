@@ -28,6 +28,11 @@ pub use sqlite::SqliteEventLog;
 
 pub type EventId = u64;
 
+/// Topic the LLM observability writer appends `provider_call_response`
+/// (and sibling transcript) events to. Read by `harn portal` and
+/// `harn usage`; kept here so every reader/writer shares one literal.
+pub const HARN_LLM_TRANSCRIPT_TOPIC: &str = "agent.transcript.llm";
+
 pub const HARN_EVENT_LOG_BACKEND_ENV: &str = "HARN_EVENT_LOG_BACKEND";
 pub const HARN_EVENT_LOG_DIR_ENV: &str = "HARN_EVENT_LOG_DIR";
 pub const HARN_EVENT_LOG_SQLITE_PATH_ENV: &str = "HARN_EVENT_LOG_SQLITE_PATH";
