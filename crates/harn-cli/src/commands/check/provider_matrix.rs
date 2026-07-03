@@ -110,7 +110,7 @@ pub(crate) fn generate_markdown(
     }
     out.push_str("\n## Tool-format recommendations by catalog model\n\n");
     out.push_str(
-        "This section starts from the checked-in provider catalog. Recommended format follows the live capability matrix, and the empirical columns are layered from `.harn-runs/coding-agent-bench/latest/tool_mode_parity_overlay.toml` when that overlay exists locally. Rows without sampled evidence show `data not yet collected`.\n\n",
+        "This section starts from the checked-in provider catalog. Recommended format follows the live capability matrix, and the empirical columns are layered from `.harn-runs/coding-agent-bench/latest/tool_mode_parity_overlay.toml` when that overlay exists locally. Rows without sampled benchmark evidence show catalog capability notes when present, otherwise `data not yet collected`.\n\n",
     );
     out.push_str(
         "| Provider | Model | Recommended format | Parity | Native pass | Text pass | Samples | Last evaluated | Confidence | Evidence |\n",
@@ -139,7 +139,7 @@ pub(crate) fn generate_markdown(
             empirical
                 .map(|row| format!("`{}`", row.confidence))
                 .unwrap_or_else(|| "-".to_string()),
-            empirical_status_cell(empirical),
+            evidence_cell(model, empirical),
         ));
     }
     out
@@ -336,12 +336,20 @@ fn parity_cell(model: &CatalogModel) -> String {
         .unwrap_or_else(|| "unknown".to_string())
 }
 
-fn empirical_status_cell(empirical: Option<&ModelToolEmpiricalParity>) -> String {
+fn evidence_cell(model: &CatalogModel, empirical: Option<&ModelToolEmpiricalParity>) -> String {
     if empirical.is_some() {
-        "`sampled`".to_string()
-    } else {
-        "`data not yet collected`".to_string()
+        return "`sampled`".to_string();
     }
+    if let Some(note) = model
+        .tool_support
+        .parity_notes
+        .as_deref()
+        .map(str::trim)
+        .filter(|note| !note.is_empty())
+    {
+        return format!("catalog note: {}", escape_md(note));
+    }
+    "`data not yet collected`".to_string()
 }
 
 fn pass_rate_cell_native(empirical: &ModelToolEmpiricalParity) -> String {
@@ -511,5 +519,24 @@ mod tests {
         assert!(markdown.contains(&format!("`{sampled_model_id}` | `text` | `text_better` | `25.0%` | `75.0%` | 6 | `2026-05-24` | `high` | `sampled`")));
         assert!(markdown.contains(&unsampled_model_id));
         assert!(markdown.contains("`data not yet collected`"));
+    }
+
+    #[test]
+    fn markdown_uses_catalog_parity_notes_as_evidence_fallback() {
+        let rows = harn_vm::llm::capabilities::matrix_rows();
+        let mut catalog = harn_vm::provider_catalog::artifact();
+        catalog.models[0].tool_support.empirical_parity = None;
+        catalog.models[0].tool_support.parity_notes =
+            Some("native broke | text passed".to_string());
+        let model_id = catalog.models[0].id.clone();
+
+        let markdown = generate_markdown(&rows, &catalog);
+
+        assert!(markdown.contains(&format!(
+            "`{model_id}` | `{}` | `{}`",
+            recommended_tool_format_cell(&catalog.models[0]),
+            parity_cell(&catalog.models[0])
+        )));
+        assert!(markdown.contains("catalog note: native broke \\| text passed"));
     }
 }
