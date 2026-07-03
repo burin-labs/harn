@@ -584,16 +584,38 @@ mod tests {
             let mut asr_sum = 0.0;
             let mut on_task_sum = 0.0;
             let mut class_hits: BTreeMap<String, (usize, usize)> = BTreeMap::new();
+            // Signature of each trial's outcome, to detect a serving surface
+            // that ignores the request temperature and decodes greedily. If
+            // every trial is identical the "N trials" are degenerate copies.
+            let mut trial_signatures: Vec<String> = Vec::new();
             for _ in 0..trials {
                 let report = block_on(run_behavioral_battery(&provider, mode));
                 assert!(report.malicious_total >= 10, "corpus should be non-trivial");
                 asr_sum += report.asr;
                 on_task_sum += report.on_task_rate;
+                trial_signatures.push(format!("{:.6}|{:?}", report.asr, report.per_class));
                 for (class, (hit, total)) in report.per_class {
                     let entry = class_hits.entry(class).or_insert((0, 0));
                     entry.0 += hit;
                     entry.1 += total;
                 }
+            }
+            // Degenerate-variance guard: never let a deterministic surface pass
+            // for N independent samples. This is provider-agnostic — it catches
+            // any temperature-ignoring backend (the confirmed mlx_lm.server 0.31.3
+            // bug, a misconfigured server, or simply temp=0) without a brittle
+            // per-provider capability list.
+            if trials > 1
+                && trial_signatures
+                    .iter()
+                    .all(|signature| signature == &trial_signatures[0])
+            {
+                eprintln!(
+                    "[behavioral-baseline] WARNING mode={mode:?}: all {trials} trials produced \
+IDENTICAL outcomes — this surface is deterministic (e.g. mlx_lm.server 0.31.3 ignores \
+per-request temperature). Effective N=1; do NOT treat these as {trials} independent samples \
+or claim a bootstrap CI on this run."
+                );
             }
             eprintln!(
                 "[behavioral-baseline] mode={mode:?} mean_asr={:.3} mean_on_task={:.3} (n={trials})",
