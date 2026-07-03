@@ -118,6 +118,15 @@ pub(crate) struct ModelsLoraPlanArgs {
     /// Adapter training method (`qlora` or `lora`).
     #[arg(long, default_value = "qlora")]
     pub method: String,
+    /// LoRA rank to plan for training and serving.
+    #[arg(long, default_value_t = 16)]
+    pub rank: u32,
+    /// LoRA alpha. Defaults to 2 * --rank.
+    #[arg(long)]
+    pub alpha: Option<u32>,
+    /// LoRA dropout probability.
+    #[arg(long, default_value_t = 0.05)]
+    pub dropout: f64,
     /// Emit structured JSON.
     #[arg(long)]
     pub json: bool,

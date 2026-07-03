@@ -230,6 +230,9 @@ fn inspect_report(args: &ModelsLoraInspectArgs) -> Result<LoraInspectReport, Str
 
 fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
     let method = normalize_lora_method(&args.method)?;
+    let rank = normalize_lora_rank(args.rank)?;
+    let alpha = normalize_lora_alpha(args.alpha, rank)?;
+    let dropout = normalize_lora_dropout(args.dropout)?;
     let quantization = quantization_for_method(&method).to_string();
     let requested_tool_format = normalize_plan_tool_format(&args.tool_format)?;
     let requested_corpus_strategy = normalize_corpus_strategy(&args.corpus_strategy)?;
@@ -298,7 +301,7 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
         .and_then(|runtime| runtime.lora_modules_arg.as_ref())
         .is_some();
     let launch_command = if provider_supports_lora_launch {
-        vec![
+        let mut command = vec![
             "harn".to_string(),
             "local".to_string(),
             "launch".to_string(),
@@ -309,7 +312,15 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
             resolved.id.clone(),
             "--lora-adapter".to_string(),
             format!("{adapter_name}={adapter_ref}"),
-        ]
+        ];
+        if local_runtime
+            .as_ref()
+            .and_then(|runtime| runtime.max_lora_rank_arg.as_ref())
+            .is_some()
+        {
+            command.extend(["--max-lora-rank".to_string(), rank.to_string()]);
+        }
+        command
     } else {
         Vec::new()
     };
@@ -408,6 +419,9 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
         training: TrainingRecipe {
             adapter_type: "peft_lora".to_string(),
             trainer: "trl_sft_trainer".to_string(),
+            rank,
+            alpha,
+            dropout,
             quantization,
             loss_scope: "assistant_tool_calls".to_string(),
             packing: "off_by_default_for_tool_boundaries".to_string(),
@@ -601,6 +615,28 @@ fn normalize_lora_method(raw: &str) -> Result<String, String> {
             "unsupported LoRA method `{raw}`; expected `qlora` or `lora`"
         )),
     }
+}
+
+fn normalize_lora_rank(rank: u32) -> Result<u32, String> {
+    if rank == 0 {
+        return Err("--rank must be greater than 0".to_string());
+    }
+    Ok(rank)
+}
+
+fn normalize_lora_alpha(alpha: Option<u32>, rank: u32) -> Result<u32, String> {
+    let alpha = alpha.unwrap_or_else(|| rank.saturating_mul(2));
+    if alpha == 0 {
+        return Err("--alpha must be greater than 0".to_string());
+    }
+    Ok(alpha)
+}
+
+fn normalize_lora_dropout(dropout: f64) -> Result<f64, String> {
+    if !dropout.is_finite() || !(0.0..1.0).contains(&dropout) {
+        return Err("--dropout must be a finite value in [0.0, 1.0)".to_string());
+    }
+    Ok(dropout)
 }
 
 fn normalize_plan_tool_format(raw: &str) -> Result<String, String> {
@@ -1180,6 +1216,9 @@ struct PlanRequest {
 struct TrainingRecipe {
     adapter_type: String,
     trainer: String,
+    rank: u32,
+    alpha: u32,
+    dropout: f64,
     quantization: String,
     loss_scope: String,
     packing: String,
@@ -1382,6 +1421,39 @@ mod tests {
         assert!(text
             .iter()
             .any(|item| item.contains("Harn remains the parser")));
+    }
+
+    #[test]
+    fn lora_plan_normalizes_hyperparameters_for_serving_contract() {
+        let default_args = ModelsLoraPlanArgs {
+            base_model: "local-gemma4-e4b".to_string(),
+            provider: Some("vllm".to_string()),
+            tool_format: "json".to_string(),
+            corpus: None,
+            teacher: None,
+            corpus_strategy: "auto".to_string(),
+            method: "qlora".to_string(),
+            rank: 24,
+            alpha: None,
+            dropout: 0.1,
+            json: true,
+        };
+        let report = plan_report(&default_args).expect("report");
+        assert_eq!(report.training.rank, 24);
+        assert_eq!(report.training.alpha, 48);
+        assert_eq!(report.training.dropout, 0.1);
+        assert!(report
+            .launch
+            .local_launch_command
+            .windows(2)
+            .any(|pair| pair == ["--max-lora-rank", "24"]));
+
+        let explicit_args = ModelsLoraPlanArgs {
+            alpha: Some(32),
+            ..default_args
+        };
+        let explicit = plan_report(&explicit_args).expect("explicit report");
+        assert_eq!(explicit.training.alpha, 32);
     }
 
     #[test]

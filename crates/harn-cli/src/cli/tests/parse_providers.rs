@@ -450,6 +450,12 @@ fn test_parses_models_lora_plan_args() {
         "refresh",
         "--method",
         "lora",
+        "--rank",
+        "32",
+        "--alpha",
+        "64",
+        "--dropout",
+        "0.1",
         "--json",
     ]);
 
@@ -469,6 +475,9 @@ fn test_parses_models_lora_plan_args() {
     assert_eq!(args.teacher.as_deref(), Some("dashscope/qwen3-coder-next"));
     assert_eq!(args.corpus_strategy, "refresh");
     assert_eq!(args.method, "lora");
+    assert_eq!(args.rank, 32);
+    assert_eq!(args.alpha, Some(64));
+    assert_eq!(args.dropout, 0.1);
     assert!(args.json);
 }
 
