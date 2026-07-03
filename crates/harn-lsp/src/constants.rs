@@ -581,6 +581,10 @@ pub(crate) const BUILTINS: &[(&str, &str)] = &[
         "verification_profile_resolve(query, dir?) -> dict",
     ),
     (
+        "verification_profile_matches",
+        "verification_profile_matches(query, dir?) -> list",
+    ),
+    (
         "verification_profile_record_run",
         "verification_profile_record_run(row_id, observation, dir?) -> dict",
     ),
@@ -993,6 +997,7 @@ pub(crate) fn builtin_doc(name: &str) -> Option<String> {
         "verification_profiles_get" => "**verification_profiles_get(dir?)** → dict | nil — Read the verification profile record set (`schemaVersion`, `rows`, unknown fields preserved) with hierarchical directory resolution.",
         "verification_profiles_set" => "**verification_profiles_set(record_set, dir?)** → nil — Replace and persist the verification profile record set. Validates `schemaVersion`/`rows`; round-trips unknown fields.",
         "verification_profile_resolve" => "**verification_profile_resolve(query, dir?)** → dict | nil — Most-specific matching profile row for `{repo?, path?, language?, task?}` (task > language > dir glob > repo).",
+        "verification_profile_matches" => "**verification_profile_matches(query, dir?)** → list — All matching profile rows for `{repo?, path?, language?, task?}`, ordered by selector specificity and stable row order as `{row, specificity, index}`.",
         "verification_profile_record_run" => "**verification_profile_record_run(row_id, observation, dir?)** → dict | nil — Fold `{durationMs?, warm?, at?, exit?, failureSignature?, snapshot?}` into a row's timings/lastRun and persist.",
         "verification_diagnostic_classify" => "**verification_diagnostic_classify(envelope, current_hashes)** → dict — Classify a diagnostic `{rung, rowId?, at, snapshot}` as `bound_fresh`/`bound_stale`/`unbound`; only `bound_fresh` may feed gates.",
         "metadata_save" => "**metadata_save()** → nil — Flush metadata to .harn/metadata/ files",
