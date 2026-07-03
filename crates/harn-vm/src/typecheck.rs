@@ -268,18 +268,10 @@ pub(crate) fn validate_user_call_args(
     args: &CallArgs<'_>,
     span: Option<Span>,
 ) -> Result<(), VmError> {
-    let total = func.params.len();
-    let required = func.required_param_count();
+    let required = func.minimum_arg_count();
     let got = args.len();
 
-    let arity_ok = if func.has_rest_param {
-        // Rest absorbs everything >= (total - 1).
-        got >= total.saturating_sub(1)
-    } else {
-        got >= required && got <= total
-    };
-
-    if !arity_ok {
+    if got < required {
         let expected = arity_expect_for(func);
         return Err(VmError::ArityMismatch(Box::new(ArityMismatchError {
             callee: func.name.clone(),
@@ -454,18 +446,7 @@ pub fn validate_against_signature(
 /// for a user-defined function. Respects defaults and rest-param flags
 /// so the message reads naturally.
 fn arity_expect_for(func: &CompiledFunction) -> ArityExpect {
-    let total = func.params.len();
-    let required = func.required_param_count();
-    if func.has_rest_param {
-        ArityExpect::AtLeast(total.saturating_sub(1))
-    } else if required == total {
-        ArityExpect::Exact(total)
-    } else {
-        ArityExpect::Range {
-            min: required,
-            max: total,
-        }
-    }
+    ArityExpect::AtLeast(func.minimum_arg_count())
 }
 
 #[cfg(test)]

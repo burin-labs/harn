@@ -700,7 +700,7 @@ fn(a: int, b: int) -> int { a + b }
 | `TypeExpr` | `Named`, `List`, `Optional`, `Union`, `Shape`, `FnType`, `Generic` | type annotations |
 | `TypeParam` | `name: String`, `constraint: Option<String>` | generics |
 | `TypedParam` | `name`, `type_expr`, `default_value`, `is_rest` | fn params |
-| `WhereClause` | `type_name: String`, `bound: String` | generic constraints |
+| `WhereClause` | `type_name: String`, `bound: TypeExpr` | generic constraints |
 | `MatchArm` | `pattern: SNode`, `guard: Option<SNode>`, `body: Vec<SNode>` | match |
 | `SelectCase` | `variable`, `channel`, `body` | select |
 | `DictEntry` | `key: SNode`, `value: SNode` | dict/struct |

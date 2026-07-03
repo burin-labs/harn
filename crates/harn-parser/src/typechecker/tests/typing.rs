@@ -1468,13 +1468,13 @@ fn test_builtin_arity_warning() {
 #[test]
 fn test_user_function_named_like_builtin_reports_user_arity() {
     let warns = warnings(
-        r#"pipeline t(task) {
-  fn len() -> int { return 0 }
-  len("extra")
-}"#,
+        r"pipeline t(task) {
+  fn len(value: string) -> int { return 0 }
+  len()
+}",
     );
     assert_eq!(warns.len(), 1, "expected one arity warning, got: {warns:?}");
-    assert!(warns[0].contains("Function 'len' expects 0 arguments, got 1"));
+    assert!(warns[0].contains("Function 'len' expects at least 1 argument, got 0"));
 }
 
 #[test]

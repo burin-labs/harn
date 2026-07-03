@@ -631,7 +631,12 @@ module.exports = grammar({
     where_clause: ($) =>
       seq(
         "where",
-        commaSep1(seq($.identifier, ":", $.identifier))
+        commaSep1(seq(
+          $.identifier,
+          ":",
+          $.type_annotation,
+          repeat(seq("+", $.type_annotation))
+        ))
       ),
 
     interface_declaration: ($) =>
@@ -1134,6 +1139,7 @@ module.exports = grammar({
         "(",
         optional($.parameter_list),
         ")",
+        optional(seq("->", field("return_type", $.type_annotation))),
         field("body", $.block)
       ),
 

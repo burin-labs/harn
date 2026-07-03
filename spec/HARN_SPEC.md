@@ -355,6 +355,8 @@ statement_sep      ::= NEWLINE+ | ';' NEWLINE*
 fn_decl            ::= ['pub'] 'fn' IDENTIFIER [generic_params]
                        '(' fn_param_list ')' ['->' type_expr]
                        [where_clause] '{' block '}'
+where_clause       ::= 'where' where_bound (',' where_bound)*
+where_bound        ::= IDENTIFIER ':' type_expr ('+' type_expr)*
 type_decl          ::= ['pub'] 'type' IDENTIFIER [generic_params] '=' type_expr
 enum_decl          ::= ['pub'] 'enum' IDENTIFIER [generic_params] '{'
                        (enum_variant | ',' | NEWLINE)* '}'
@@ -3635,8 +3637,16 @@ consistently across all arguments in the call, and container bindings such as
 `list<T>` propagate the concrete element type instead of collapsing to an
 unconstrained generic.
 
+Bounds are full type expressions, so generic interfaces can be constrained
+with their concrete arguments:
+
+```harn,ignore
+interface Sink<in T> { fn accept(self, value: T) -> nil }
+fn drain<S>(sink: S) where S: Sink<int> { sink.accept(1) }
+```
+
 A type parameter may carry more than one bound, written either as repeated
-clauses or additively — the two forms are equivalent and `T` must satisfy
+clauses or additively -- the two forms are equivalent and `T` must satisfy
 every bound:
 
 ```harn,ignore

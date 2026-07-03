@@ -143,7 +143,13 @@ impl TypeChecker {
         expected: &TypeExpr,
         scope: &mut TypeScope,
     ) -> bool {
-        let Node::Closure { params, body, .. } = &snode.node else {
+        let Node::Closure {
+            params,
+            return_type,
+            body,
+            ..
+        } = &snode.node
+        else {
             return false;
         };
         let Some((expected_params, expected_return)) = self.expected_fn_parts(expected, scope)
@@ -151,9 +157,12 @@ impl TypeChecker {
             return false;
         };
 
+        let closure_return = return_type
+            .clone()
+            .unwrap_or_else(|| expected_return.clone());
         let expected_fn = TypeExpr::FnType {
             params: expected_params.clone(),
-            return_type: Box::new(expected_return.clone()),
+            return_type: Box::new(expected_return),
         };
         let actual_fn = TypeExpr::FnType {
             params: params
@@ -167,9 +176,9 @@ impl TypeChecker {
                         .unwrap_or_else(Self::wildcard_type)
                 })
                 .collect(),
-            return_type: Box::new(expected_return.clone()),
+            return_type: Box::new(closure_return.clone()),
         };
-        if params.len() != expected_params.len()
+        if params.len() > expected_params.len()
             || !self.types_compatible(&expected_fn, &actual_fn, scope)
         {
             self.type_mismatch_at(
@@ -207,7 +216,7 @@ impl TypeChecker {
         self.stream_fn_depth = 0;
         self.stream_emit_types.clear();
         self.expected_return_types
-            .push(Some(expected_return.clone()));
+            .push(Some(closure_return.clone()));
         self.check_block(body, &mut closure_scope);
         self.expected_return_types.pop();
         self.stream_fn_depth = saved_stream_depth;
@@ -217,7 +226,7 @@ impl TypeChecker {
         let mut ret_scope = closure_scope.clone();
         ret_scope.restore_narrowed_vars();
         for stmt in body {
-            self.check_return_type(stmt, &expected_return, snode.span, &mut ret_scope);
+            self.check_return_type(stmt, &closure_return, snode.span, &mut ret_scope);
         }
         if !matches!(
             body.last().map(|stmt| &stmt.node),
@@ -226,12 +235,12 @@ impl TypeChecker {
             let actual_return = self
                 .infer_closure_body_return(body, &ret_scope)
                 .unwrap_or_else(|| TypeExpr::Named("nil".into()));
-            if !self.types_compatible(&expected_return, &actual_return, &ret_scope) {
+            if !self.types_compatible(&closure_return, &actual_return, &ret_scope) {
                 let value_span = body.last().map(|stmt| stmt.span).unwrap_or(snode.span);
                 self.type_mismatch_at(
                     Code::ClosureReturnTypeMismatch,
                     "closure return value",
-                    &expected_return,
+                    &closure_return,
                     &actual_return,
                     value_span,
                     (

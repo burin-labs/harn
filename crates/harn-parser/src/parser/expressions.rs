@@ -839,12 +839,19 @@ impl Parser {
         self.consume(&TokenKind::LParen, "(")?;
         let params = self.parse_typed_param_list()?;
         self.consume(&TokenKind::RParen, ")")?;
+        let return_type = if self.check(&TokenKind::Arrow) {
+            self.advance();
+            Some(self.parse_nested_type_expr("closure return type")?)
+        } else {
+            None
+        };
         self.consume(&TokenKind::LBrace, "{")?;
         let body = self.parse_block()?;
         self.consume(&TokenKind::RBrace, "}")?;
         Ok(spanned(
             Node::Closure {
                 params,
+                return_type,
                 body,
                 fn_syntax: true,
             },
@@ -1058,6 +1065,7 @@ impl Parser {
         Ok(spanned(
             Node::Closure {
                 params,
+                return_type: None,
                 body,
                 fn_syntax: false,
             },

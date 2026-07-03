@@ -478,6 +478,7 @@ pub enum Node {
     Block(Vec<SNode>),
     Closure {
         params: Vec<TypedParam>,
+        return_type: Option<TypeExpr>,
         body: Vec<SNode>,
         /// When true, this closure was written as `fn(params) { body }`.
         /// The formatter preserves this distinction.
@@ -731,10 +732,10 @@ impl TypeParam {
 }
 
 /// A where-clause constraint on a generic type parameter.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct WhereClause {
     pub type_name: String,
-    pub bound: String,
+    pub bound: TypeExpr,
 }
 
 /// A parameter with an optional type annotation and optional default value.

@@ -250,7 +250,7 @@ fn format_where_clauses(clauses: &[WhereClause]) -> String {
     }
     let mut parts: Vec<String> = clauses
         .iter()
-        .map(|w| format!("{}:{}", w.type_name, w.bound))
+        .map(|w| format!("{}:{}", w.type_name, format_type_expr(&w.bound)))
         .collect();
     parts.sort();
     format!(" where {}", parts.join(","))

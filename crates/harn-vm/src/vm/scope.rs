@@ -215,6 +215,7 @@ impl Vm {
         }
         let (local_slots, initial_local_slots) =
             self.prepare_closure_local_slots_args(closure, args)?;
+        let callee_argc = closure.func.callee_arg_count(args.len());
         let step_args =
             if crate::step_runtime::step_definition_for_function(&closure.func.name).is_some() {
                 args.to_vec_from(0)
@@ -223,7 +224,7 @@ impl Vm {
             };
         self.enter_closure_frame(
             closure,
-            args.len(),
+            callee_argc,
             local_slots,
             initial_local_slots,
             &step_args,
@@ -246,7 +247,7 @@ impl Vm {
             self.stack.truncate(stack_truncate_to);
             return Err(VmError::StackOverflow);
         }
-        let args_len = self.stack.len() - args_start;
+        let supplied_args_len = self.stack.len() - args_start;
         let (local_slots, initial_local_slots) =
             match self.prepare_closure_local_slots(closure, &self.stack[args_start..]) {
                 Ok(prepared) => prepared,
@@ -261,10 +262,11 @@ impl Vm {
             } else {
                 Vec::new()
             };
+        let callee_argc = closure.func.callee_arg_count(supplied_args_len);
         self.stack.truncate(stack_truncate_to);
         self.enter_closure_frame(
             closure,
-            args_len,
+            callee_argc,
             local_slots,
             initial_local_slots,
             &step_args,
@@ -308,7 +310,7 @@ impl Vm {
         };
         let module_functions = closure.module_functions();
         let module_state = closure.module_state();
-        let argc = args.len();
+        let argc = closure.func.callee_arg_count(args.len());
         // Spawn the generator body as an async task.
         // The task will execute until return, sending yielded values through the channel.
         let tx_for_error = child.yield_sender.clone();

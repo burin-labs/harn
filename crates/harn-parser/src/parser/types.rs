@@ -109,7 +109,7 @@ impl Parser {
                         // by both A and B. Desugar each additive term into its
                         // own clause so downstream consumers see a flat list.
                         loop {
-                            let bound = self.consume_identifier("type bound")?;
+                            let bound = self.parse_nested_type_expr("type bound")?;
                             clauses.push(WhereClause {
                                 type_name: type_name.clone(),
                                 bound,

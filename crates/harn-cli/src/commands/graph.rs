@@ -646,7 +646,7 @@ fn format_where_clauses(clauses: &[WhereClause]) -> String {
     }
     let clauses = clauses
         .iter()
-        .map(|clause| format!("{}: {}", clause.type_name, clause.bound))
+        .map(|clause| format!("{}: {}", clause.type_name, format_type(&clause.bound)))
         .collect::<Vec<_>>()
         .join(", ");
     format!(" where {clauses}")

@@ -1,0 +1,12 @@
+pipeline test(task) {
+  fn maybe_reset(x: string?, reset: bool) -> string {
+    if x != nil {
+      if reset {
+        x = nil
+      }
+      return x.upper()
+    }
+    return ""
+  }
+  __io_println(maybe_reset("ok", false))
+}

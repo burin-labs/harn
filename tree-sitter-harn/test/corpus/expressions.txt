@@ -1,4 +1,34 @@
 ==================
+Fn Expression Return Type
+==================
+
+pipeline test() {
+  let f = fn(name: string) -> string {
+    return name
+  }
+}
+
+---
+
+(source_file
+  (pipeline_declaration
+    name: (identifier)
+    (block
+      (let_binding
+        name: (identifier)
+        value: (fn_expression
+          (parameter_list
+            (typed_parameter
+              name: (identifier)
+              type: (type_annotation
+                (identifier))))
+          return_type: (type_annotation
+            (identifier))
+          body: (block
+            (return_statement
+              (identifier))))))))
+
+==================
 Const Keyword Property And Long Durations
 ==================
 

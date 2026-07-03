@@ -143,33 +143,32 @@ const KNOWN_CANONICAL_KEYS: &[&str] = &[
 /// is present, returns `("", full_source)`.
 pub fn split_frontmatter(source: &str) -> (&str, &str) {
     let trimmed = source.strip_prefix('\u{feff}').unwrap_or(source);
-    let leading_lines = trimmed.lines();
-    let mut chars_consumed = 0usize;
+    let mut line_start = 0usize;
     let mut saw_opener = false;
     let mut fm_start = 0usize;
-    for line in leading_lines {
-        let line_len_with_newline = line.len() + 1;
+    while line_start < trimmed.len() {
+        let line_end = match trimmed[line_start..].find('\n') {
+            Some(offset) => line_start + offset + 1,
+            None => trimmed.len(),
+        };
+        let line = &trimmed[line_start..line_end];
         if !saw_opener {
             if line.trim().is_empty() {
-                chars_consumed += line_len_with_newline;
+                line_start = line_end;
                 continue;
             }
             if line.trim() == "---" {
                 saw_opener = true;
-                chars_consumed += line_len_with_newline;
-                fm_start = chars_consumed;
+                fm_start = line_end;
+                line_start = line_end;
                 continue;
             }
             return ("", trimmed);
         }
         if line.trim() == "---" {
-            let fm_end = chars_consumed;
-            // Normalize body_start against the original &str length so we
-            // never slice past the end when the file lacks a trailing \n.
-            let body_start = (chars_consumed + line_len_with_newline).min(trimmed.len());
-            return (&trimmed[fm_start..fm_end], &trimmed[body_start..]);
+            return (&trimmed[fm_start..line_start], &trimmed[line_end..]);
         }
-        chars_consumed += line_len_with_newline;
+        line_start = line_end;
     }
     // Unterminated frontmatter: treat the whole file as body.
     ("", trimmed)
@@ -293,6 +292,28 @@ mod tests {
         let (fm, body) = split_frontmatter(src);
         assert_eq!(fm, "name: hi\n");
         assert_eq!(body, "body");
+    }
+
+    #[test]
+    fn splits_crlf_frontmatter_without_truncating_yaml() {
+        let src = concat!(
+            "---\r\n",
+            "name: manual\r\n",
+            "short: Manual card\r\n",
+            "disable-model-invocation: true\r\n",
+            "---\r\n",
+            "# Body\r\n",
+        );
+        let (fm, body) = split_frontmatter(src);
+
+        assert_eq!(
+            fm,
+            "name: manual\r\nshort: Manual card\r\ndisable-model-invocation: true\r\n"
+        );
+        assert_eq!(body, "# Body\r\n");
+
+        let parsed = parse_frontmatter(fm).expect("parse CRLF frontmatter");
+        assert!(parsed.manifest.disable_model_invocation);
     }
 
     #[test]

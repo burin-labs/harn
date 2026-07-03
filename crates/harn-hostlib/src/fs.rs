@@ -296,6 +296,12 @@ pub fn staged_status(session_id: &str) -> Result<StagedStatus, HostlibError> {
     Ok(status)
 }
 
+/// Return native filesystem paths for every pending staged entry.
+///
+/// Public staged status normalizes paths for the agent/tool surface. Internal
+/// callers that need to read from the filesystem must keep the native
+/// [`PathBuf`]s, especially on Windows where slash-normalized display strings
+/// are not always valid filesystem paths.
 pub(crate) fn staged_pending_paths(session_id: &str) -> Result<BTreeSet<PathBuf>, HostlibError> {
     validate_session_id(STATUS_BUILTIN, session_id)?;
     let mut guard = lock_sessions();
@@ -1646,6 +1652,51 @@ fn discard_result_to_value(result: DiscardResult) -> VmValue {
                 .collect(),
         )),
     )])
+}
+
+#[cfg(test)]
+mod staged_path_tests {
+    use super::{set_mode, stage_write_or_none, staged_pending_paths, staged_status, FsMode};
+    use tempfile::tempdir;
+
+    #[test]
+    fn staged_pending_paths_preserve_native_filesystem_paths() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path().canonicalize().expect("canonical tempdir");
+        let path = root.join("src").join("lib.rs");
+        let session_id = format!(
+            "native-paths-{}-{}",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        );
+
+        set_mode(&session_id, FsMode::Staged, Some(&root)).expect("set staged mode");
+        stage_write_or_none(
+            "test",
+            &path,
+            b"fn beta() {}\n",
+            true,
+            true,
+            Some(&session_id),
+        )
+        .expect("stage write")
+        .expect("staged write");
+
+        let native_paths = staged_pending_paths(&session_id).expect("pending paths");
+        assert_eq!(
+            native_paths,
+            std::collections::BTreeSet::from([path.clone()])
+        );
+
+        let status = staged_status(&session_id).expect("staged status");
+        assert_eq!(status.pending_writes.len(), 1);
+        assert_eq!(
+            status.pending_writes[0].path,
+            crate::tools::args::to_agent_path(&path)
+        );
+
+        let _ = super::remove_session_state(&session_id, Some(&root));
+    }
 }
 
 #[cfg(test)]

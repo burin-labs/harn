@@ -1261,7 +1261,7 @@ impl super::super::Vm {
                 "invalid call argument stack range".to_string(),
             ));
         }
-        let args_len = self.stack.len() - args_start;
+        let supplied_args_len = self.stack.len() - args_start;
         let args = &self.stack[args_start..];
         if let Err(error) = crate::typecheck::validate_user_call(&closure.func, args, None) {
             self.stack.truncate(stack_truncate_to);
@@ -1321,6 +1321,7 @@ impl super::super::Vm {
         self.stack.truncate(stack_base);
         let chunk = Arc::clone(&closure.func.chunk);
         let inline_cache_set = self.inline_cache_set_index_for_chunk(&chunk);
+        let callee_argc = closure.func.callee_arg_count(supplied_args_len);
         self.frames.push(CallFrame {
             chunk,
             inline_cache_set,
@@ -1331,7 +1332,7 @@ impl super::super::Vm {
             initial_local_slots,
             saved_iterator_depth,
             fn_name: closure.func.name.clone(),
-            argc: args_len,
+            argc: callee_argc,
             saved_source_dir,
             module_functions: closure.module_functions(),
             module_state: closure.module_state(),

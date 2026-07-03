@@ -524,7 +524,7 @@ pub(crate) fn format_where_clauses(clauses: &[WhereClause]) -> String {
     } else {
         let parts: Vec<String> = clauses
             .iter()
-            .map(|c| format!("{}: {}", c.type_name, c.bound))
+            .map(|c| format!("{}: {}", c.type_name, format_type_expr(&c.bound)))
             .collect();
         format!(" where {}", parts.join(", "))
     }

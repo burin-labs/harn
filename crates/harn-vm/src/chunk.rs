@@ -571,6 +571,25 @@ impl CompiledFunction {
         self.default_start.unwrap_or(self.params.len())
     }
 
+    /// Minimum number of caller-supplied arguments needed to enter the function.
+    pub(crate) fn minimum_arg_count(&self) -> usize {
+        if self.has_rest_param {
+            self.required_param_count()
+                .min(self.params.len().saturating_sub(1))
+        } else {
+            self.required_param_count()
+        }
+    }
+
+    /// Argument count visible to callee bytecode via `GetArgc`.
+    pub(crate) fn callee_arg_count(&self, supplied: usize) -> usize {
+        if self.has_rest_param {
+            supplied
+        } else {
+            supplied.min(self.params.len())
+        }
+    }
+
     pub fn declares_type_param(&self, name: &str) -> bool {
         self.type_params.iter().any(|param| param == name)
     }

@@ -36,8 +36,8 @@ impl TypeChecker {
                 .collect(),
             required_params: params
                 .iter()
-                .filter(|param| param.default_value.is_none())
-                .count(),
+                .position(|param| param.default_value.is_some())
+                .unwrap_or_else(|| params.iter().filter(|param| !param.rest).count()),
             where_clauses: where_clauses
                 .iter()
                 .map(|where_clause| (where_clause.type_name.clone(), where_clause.bound.clone()))
@@ -300,7 +300,6 @@ impl TypeChecker {
             | Node::MutexBlock { body, .. }
             | Node::DeadlineBlock { body, .. }
             | Node::Retry { body, .. }
-            | Node::DeferStmt { body }
             | Node::WhileLoop { body, .. } => {
                 let mut block_scope = scope.child();
                 self.collect_block_returns(body, &mut block_scope, out)
@@ -371,7 +370,6 @@ impl TypeChecker {
             | Node::SpawnExpr { body }
             | Node::Retry { body, .. }
             | Node::CostRoute { body, .. }
-            | Node::DeferStmt { body }
             | Node::MutexBlock { body, .. }
             | Node::Parallel { body, .. }
             | Node::TryExpr { body } => Self::body_contains_yield(body),
@@ -614,7 +612,11 @@ impl TypeChecker {
         self.types_compatible(expected, &TypeExpr::Named("nil".into()), scope)
     }
 
-    fn body_cannot_fall_through(&self, body: &[SNode], scope: &TypeScope) -> bool {
+    pub(in crate::typechecker) fn body_cannot_fall_through(
+        &self,
+        body: &[SNode],
+        scope: &TypeScope,
+    ) -> bool {
         body.iter()
             .any(|stmt| self.stmt_cannot_fall_through(stmt, scope))
     }

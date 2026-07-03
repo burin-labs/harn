@@ -80,6 +80,7 @@ impl Compiler {
                             default_value: None,
                             rest: false,
                         }],
+                        return_type: None,
                         body: vec![replaced],
                         fn_syntax: false,
                     });

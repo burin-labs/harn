@@ -119,7 +119,7 @@
         },
         {
           "name": "keyword.declaration.harn",
-          "match": "\\b(pipeline|fn|tool|skill|eval_pack|enum|struct|interface|impl|type|extends|override|pub)\\b"
+          "match": "\\b(pipeline|fn|tool|skill|eval_pack|enum|struct|interface|impl|type|where|extends|override|pub)\\b"
         }
       ]
     },

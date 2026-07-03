@@ -7,11 +7,8 @@
 //! `x != nil`, `type_of(x) == "T"`, `x.has("k")`, `schema_is(x, S)`, and
 //! their negations.
 //!
-//! The match-exhaustiveness checks (`check_match_exhaustiveness`,
-//! `check_match_exhaustiveness_union`) and the `unknown`-variant
-//! exhaustiveness check (`check_unknown_exhaustiveness`) live here too —
-//! they all consume the same `unknown_ruled_out` ledger that refinement
-//! extraction populates.
+//! Match exhaustiveness and the `unknown`-variant fallback check live here
+//! too, sharing the same flow facts that refinement extraction populates.
 
 use crate::ast::*;
 use crate::diagnostic_codes::Code;
@@ -159,6 +156,74 @@ fn format_discriminant(v: &DiscriminantValue) -> String {
     }
 }
 
+enum PatternCoverage<T> {
+    Covers(T),
+    Wildcard,
+    NoCoverage,
+    Unknown,
+}
+
+enum MatchCoverageSubject {
+    Bool,
+    Enum(String),
+    TaggedShapeUnion,
+    LiteralUnion,
+    NamedUnion,
+}
+
+struct MatchCoverage {
+    subject: MatchCoverageSubject,
+    missing: Vec<String>,
+    has_wildcard: bool,
+    analyzable: bool,
+}
+
+impl MatchCoverage {
+    fn is_exhaustive(&self) -> bool {
+        self.has_wildcard || self.missing.is_empty()
+    }
+
+    fn should_diagnose(&self) -> bool {
+        self.analyzable && !self.is_exhaustive()
+    }
+}
+
+fn collect_arm_pattern_coverage<T: PartialEq>(
+    arms: &[MatchArm],
+    mut classify: impl FnMut(&SNode) -> PatternCoverage<T>,
+) -> (Vec<T>, bool, bool) {
+    let mut covered = Vec::new();
+    let mut has_wildcard = false;
+    let mut analyzable = true;
+    for arm in arms.iter().filter(|arm| arm.guard.is_none()) {
+        for leaf in pattern_alternatives(&arm.pattern) {
+            match classify(leaf) {
+                PatternCoverage::Covers(value) => {
+                    if !covered.contains(&value) {
+                        covered.push(value);
+                    }
+                }
+                PatternCoverage::Wildcard => has_wildcard = true,
+                PatternCoverage::NoCoverage => {}
+                PatternCoverage::Unknown => analyzable = false,
+            }
+        }
+    }
+    (covered, has_wildcard, analyzable)
+}
+
+fn missing_expected<T: PartialEq>(
+    expected: &[T],
+    covered: &[T],
+    format: impl Fn(&T) -> String,
+) -> Vec<String> {
+    expected
+        .iter()
+        .filter(|value| !covered.contains(value))
+        .map(format)
+        .collect()
+}
+
 /// Whether a condition is a bare scalar literal (no operator wrapping).
 /// Used by the vacuous-condition lint to skip the `if true { … }` /
 /// `if false { … }` block-scope idiom while still flagging compound
@@ -215,33 +280,44 @@ fn evaluate_constant_bool(condition: &SNode) -> Option<bool> {
     }
 }
 
-/// Names of variables assigned (plain or compound) anywhere in `body`,
-/// including nested control flow and closures. Drives loop back-edge
-/// narrowing invalidation: a variable narrowed before a loop and reassigned
-/// inside it may hold its widened declared type on the second iteration, so
-/// the narrowing cannot be trusted anywhere in the loop body.
+/// Names of variables assigned (plain or compound) anywhere in the same
+/// enclosing callable body. Nested control flow is scanned; nested callables are
+/// skipped because their assignments do not execute as part of the current
+/// branch/loop flow.
 pub(in crate::typechecker) fn assigned_var_names(body: &[SNode]) -> Vec<String> {
     let mut names: Vec<String> = Vec::new();
-    crate::visit::walk_program(body, &mut |node| {
-        if let Node::Assignment { target, .. } = &node.node {
+    for node in body {
+        collect_assigned_var_names(node, &mut names);
+    }
+    names
+}
+
+fn collect_assigned_var_names(node: &SNode, names: &mut Vec<String>) {
+    match &node.node {
+        Node::Assignment { target, .. } => {
             if let Node::Identifier(name) = &target.node {
                 if !names.iter().any(|n| n == name) {
                     names.push(name.clone());
                 }
             }
         }
-    });
-    names
+        Node::Closure { .. }
+        | Node::FnDecl { .. }
+        | Node::ToolDecl { .. }
+        | Node::Pipeline { .. }
+        | Node::OverrideDecl { .. } => return,
+        _ => {}
+    }
+    for child in crate::visit::immediate_children(node) {
+        collect_assigned_var_names(child, names);
+    }
 }
 
 impl TypeChecker {
-    /// Invalidate, in a fresh loop scope, every narrowing (variable or
-    /// reference path) whose subject is reassigned somewhere in the loop
-    /// body. Type narrowing established before the loop only describes the
-    /// first iteration; from the back edge onward the variable may hold any
-    /// value of its declared type. Mirrors the reassignment invalidation in
-    /// the `Assignment` arm, applied eagerly at loop entry.
-    pub(in crate::typechecker) fn invalidate_loop_assigned_narrowings(
+    /// Invalidate every narrowing (variable or reference path) whose subject is
+    /// reassigned in a branch or loop body that can continue in the current
+    /// callable.
+    pub(in crate::typechecker) fn invalidate_assigned_narrowings(
         scope: &mut TypeScope,
         body: &[SNode],
     ) {
@@ -1024,50 +1100,8 @@ impl TypeChecker {
         arms: &[MatchArm],
         scope: &TypeScope,
     ) -> bool {
-        if arms.iter().any(Self::match_arm_is_unguarded_catch_all) {
-            return true;
-        }
-        if self.match_covers_bool(value, arms, scope) {
-            return true;
-        }
-        if let Some(enum_name) = self.match_enum_name(value, scope) {
-            return self.match_covers_enum_variants(&enum_name, arms, scope);
-        }
-        if let Some(exhaustive) = self.match_covers_tagged_shape_union(value, arms, scope) {
-            return exhaustive;
-        }
-        self.match_covers_union(value, arms, scope).unwrap_or(false)
-    }
-
-    /// A `match` on a `bool` scrutinee is exhaustive when its unguarded arms
-    /// cover both `true` and `false` — there is no third inhabitant, so no
-    /// wildcard is required. Mirrors how Rust/Swift treat a `match`/`switch`
-    /// over `Bool`. Gated on the scrutinee actually being `bool` so that
-    /// `match someInt { true -> .., false -> .. }` (a pattern/type mismatch
-    /// handled elsewhere) is not mistaken for exhaustive.
-    fn match_covers_bool(&self, value: &SNode, arms: &[MatchArm], scope: &TypeScope) -> bool {
-        let is_bool = matches!(
-            self.infer_type(value, scope)
-                .map(|ty| self.resolve_alias(&ty, scope)),
-            Some(TypeExpr::Named(n)) if n == "bool"
-        );
-        if !is_bool {
-            return false;
-        }
-        let mut covers_true = false;
-        let mut covers_false = false;
-        for arm in arms.iter().filter(|arm| arm.guard.is_none()) {
-            for leaf in pattern_alternatives(&arm.pattern) {
-                if let Node::BoolLiteral(b) = &leaf.node {
-                    if *b {
-                        covers_true = true;
-                    } else {
-                        covers_false = true;
-                    }
-                }
-            }
-        }
-        covers_true && covers_false
+        self.match_coverage(value, arms, scope)
+            .is_some_and(|coverage| coverage.is_exhaustive())
     }
 
     fn match_enum_name(&self, value: &SNode, scope: &TypeScope) -> Option<String> {
@@ -1087,65 +1121,71 @@ impl TypeChecker {
         }
     }
 
-    fn match_arm_is_unguarded_catch_all(arm: &MatchArm) -> bool {
-        arm.guard.is_none()
-            && pattern_alternatives(&arm.pattern)
-                .iter()
-                .any(|leaf| matches!(&leaf.node, Node::Identifier(_)))
-    }
-
-    fn match_covers_enum_variants(
-        &self,
-        enum_name: &str,
-        arms: &[MatchArm],
-        scope: &TypeScope,
-    ) -> bool {
-        let Some(enum_info) = scope.get_enum(enum_name) else {
-            return false;
-        };
-        let variant_names: Vec<&str> = enum_info
-            .variants
-            .iter()
-            .map(|variant| variant.name.as_str())
-            .collect();
-        let mut covered: Vec<String> = Vec::new();
-        for arm in arms.iter().filter(|arm| arm.guard.is_none()) {
-            for leaf in pattern_alternatives(&arm.pattern) {
-                match &leaf.node {
-                    Node::StringLiteral(name) | Node::Identifier(name)
-                        if variant_names.contains(&name.as_str()) =>
-                    {
-                        covered.push(name.clone());
-                    }
-                    Node::EnumConstruct { variant, .. }
-                    | Node::PropertyAccess {
-                        property: variant, ..
-                    }
-                    | Node::MethodCall {
-                        method: variant, ..
-                    } => covered.push(variant.clone()),
-                    // Bare call-shaped variant pattern (`Ok(v)`).
-                    Node::FunctionCall { name: variant, .. }
-                        if variant_names.contains(&variant.as_str()) =>
-                    {
-                        covered.push(variant.clone());
-                    }
-                    Node::Identifier(_) => return true,
-                    _ => {}
-                }
-            }
-        }
-        variant_names
-            .iter()
-            .all(|variant| covered.iter().any(|covered| covered == variant))
-    }
-
-    fn match_covers_tagged_shape_union(
+    fn match_coverage(
         &self,
         value: &SNode,
         arms: &[MatchArm],
         scope: &TypeScope,
-    ) -> Option<bool> {
+    ) -> Option<MatchCoverage> {
+        if let Some(enum_name) = self.match_enum_name(value, scope) {
+            return self.enum_match_coverage(&enum_name, arms, scope);
+        }
+        if let Some(coverage) = self.tagged_shape_match_coverage(value, arms, scope) {
+            return Some(coverage);
+        }
+        if let Some(coverage) = self.bool_match_coverage(value, arms, scope) {
+            return Some(coverage);
+        }
+        self.union_match_coverage(value, arms, scope)
+    }
+
+    fn enum_match_coverage(
+        &self,
+        enum_name: &str,
+        arms: &[MatchArm],
+        scope: &TypeScope,
+    ) -> Option<MatchCoverage> {
+        let enum_info = scope.get_enum(enum_name)?;
+        let variant_names: Vec<String> = enum_info
+            .variants
+            .iter()
+            .map(|variant| variant.name.clone())
+            .collect();
+        let (covered, has_wildcard, analyzable) =
+            collect_arm_pattern_coverage(arms, |leaf| match &leaf.node {
+                Node::StringLiteral(name) if variant_names.contains(name) => {
+                    PatternCoverage::Covers(name.clone())
+                }
+                Node::EnumConstruct { variant, .. }
+                | Node::PropertyAccess {
+                    property: variant, ..
+                }
+                | Node::MethodCall {
+                    method: variant, ..
+                } if variant_names.contains(variant) => PatternCoverage::Covers(variant.clone()),
+                Node::FunctionCall { name: variant, .. } if variant_names.contains(variant) => {
+                    PatternCoverage::Covers(variant.clone())
+                }
+                Node::Identifier(_) => PatternCoverage::Wildcard,
+                Node::StringLiteral(_) => PatternCoverage::NoCoverage,
+                _ => PatternCoverage::Unknown,
+            });
+        let missing =
+            missing_expected(&variant_names, &covered, |variant| format!("\"{variant}\""));
+        Some(MatchCoverage {
+            subject: MatchCoverageSubject::Enum(enum_name.to_string()),
+            missing,
+            has_wildcard,
+            analyzable,
+        })
+    }
+
+    fn tagged_shape_match_coverage(
+        &self,
+        value: &SNode,
+        arms: &[MatchArm],
+        scope: &TypeScope,
+    ) -> Option<MatchCoverage> {
         let Node::PropertyAccess { object, property } = &value.node else {
             return None;
         };
@@ -1163,38 +1203,73 @@ impl TypeChecker {
             return None;
         }
 
-        let mut covered: Vec<DiscriminantValue> = Vec::new();
-        for arm in arms.iter().filter(|arm| arm.guard.is_none()) {
-            for leaf in pattern_alternatives(&arm.pattern) {
-                match &leaf.node {
-                    Node::StringLiteral(value) => {
-                        covered.push(DiscriminantValue::Str(value.clone()));
-                    }
-                    Node::IntLiteral(value) => covered.push(DiscriminantValue::Int(*value)),
-                    Node::Identifier(_) => return Some(true),
-                    _ => {}
+        let expected: Vec<DiscriminantValue> = members
+            .iter()
+            .filter_map(|member| {
+                let TypeExpr::Shape(fields) = member else {
+                    return None;
+                };
+                fields
+                    .iter()
+                    .find(|field| field.name == *property)
+                    .and_then(|field| DiscriminantValue::from_type(&field.type_expr))
+            })
+            .collect();
+        let (covered, has_wildcard, analyzable) =
+            collect_arm_pattern_coverage(arms, |leaf| match &leaf.node {
+                Node::StringLiteral(value) => {
+                    PatternCoverage::Covers(DiscriminantValue::Str(value.clone()))
                 }
-            }
-        }
-
-        Some(members.iter().all(|member| {
-            let TypeExpr::Shape(fields) = member else {
-                return true;
-            };
-            let Some(field) = fields.iter().find(|field| field.name == *property) else {
-                return true;
-            };
-            DiscriminantValue::from_type(&field.type_expr)
-                .is_some_and(|value| covered.contains(&value))
-        }))
+                Node::IntLiteral(value) => PatternCoverage::Covers(DiscriminantValue::Int(*value)),
+                Node::Identifier(_) => PatternCoverage::Wildcard,
+                _ => PatternCoverage::Unknown,
+            });
+        let missing = missing_expected(&expected, &covered, format_discriminant);
+        Some(MatchCoverage {
+            subject: MatchCoverageSubject::TaggedShapeUnion,
+            missing,
+            has_wildcard,
+            analyzable,
+        })
     }
 
-    fn match_covers_union(
+    fn bool_match_coverage(
         &self,
         value: &SNode,
         arms: &[MatchArm],
         scope: &TypeScope,
-    ) -> Option<bool> {
+    ) -> Option<MatchCoverage> {
+        let is_bool = matches!(
+            self.infer_type(value, scope)
+                .map(|ty| self.resolve_alias(&ty, scope)),
+            Some(TypeExpr::Named(n)) if n == "bool"
+        );
+        if !is_bool {
+            return None;
+        }
+        let (covered, has_wildcard, analyzable) =
+            collect_arm_pattern_coverage(arms, |leaf| match &leaf.node {
+                Node::BoolLiteral(true) => PatternCoverage::Covers("true"),
+                Node::BoolLiteral(false) => PatternCoverage::Covers("false"),
+                Node::Identifier(_) => PatternCoverage::Wildcard,
+                _ => PatternCoverage::Unknown,
+            });
+        let expected = ["true", "false"];
+        let missing = missing_expected(&expected, &covered, |name| (*name).to_string());
+        Some(MatchCoverage {
+            subject: MatchCoverageSubject::Bool,
+            missing,
+            has_wildcard,
+            analyzable,
+        })
+    }
+
+    fn union_match_coverage(
+        &self,
+        value: &SNode,
+        arms: &[MatchArm],
+        scope: &TypeScope,
+    ) -> Option<MatchCoverage> {
         let inferred = self.infer_type(value, scope)?;
         let TypeExpr::Union(members) = self.resolve_alias(&inferred, scope) else {
             return None;
@@ -1204,22 +1279,28 @@ impl TypeChecker {
             .iter()
             .all(|member| matches!(member, TypeExpr::LitString(_) | TypeExpr::LitInt(_)))
         {
-            let mut covered: Vec<DiscriminantValue> = Vec::new();
-            for arm in arms.iter().filter(|arm| arm.guard.is_none()) {
-                for leaf in pattern_alternatives(&arm.pattern) {
-                    match &leaf.node {
-                        Node::StringLiteral(value) => {
-                            covered.push(DiscriminantValue::Str(value.clone()));
-                        }
-                        Node::IntLiteral(value) => covered.push(DiscriminantValue::Int(*value)),
-                        Node::Identifier(_) => return Some(true),
-                        _ => {}
+            let expected: Vec<DiscriminantValue> = members
+                .iter()
+                .filter_map(DiscriminantValue::from_type)
+                .collect();
+            let (covered, has_wildcard, analyzable) =
+                collect_arm_pattern_coverage(arms, |leaf| match &leaf.node {
+                    Node::StringLiteral(value) => {
+                        PatternCoverage::Covers(DiscriminantValue::Str(value.clone()))
                     }
-                }
-            }
-            return Some(members.iter().all(|member| {
-                DiscriminantValue::from_type(member).is_some_and(|value| covered.contains(&value))
-            }));
+                    Node::IntLiteral(value) => {
+                        PatternCoverage::Covers(DiscriminantValue::Int(*value))
+                    }
+                    Node::Identifier(_) => PatternCoverage::Wildcard,
+                    _ => PatternCoverage::Unknown,
+                });
+            let missing = missing_expected(&expected, &covered, format_discriminant);
+            return Some(MatchCoverage {
+                subject: MatchCoverageSubject::LiteralUnion,
+                missing,
+                has_wildcard,
+                analyzable,
+            });
         }
 
         if !members
@@ -1229,25 +1310,30 @@ impl TypeChecker {
             return None;
         }
 
-        let mut covered: Vec<&'static str> = Vec::new();
-        for arm in arms.iter().filter(|arm| arm.guard.is_none()) {
-            for leaf in pattern_alternatives(&arm.pattern) {
-                match &leaf.node {
-                    Node::NilLiteral => covered.push("nil"),
-                    Node::BoolLiteral(_) => covered.push("bool"),
-                    Node::IntLiteral(_) => covered.push("int"),
-                    Node::FloatLiteral(_) => covered.push("float"),
-                    Node::StringLiteral(_) => covered.push("string"),
-                    Node::Identifier(_) => return Some(true),
-                    _ => {}
-                }
-            }
-        }
-
-        Some(members.iter().all(|member| match member {
-            TypeExpr::Named(name) => covered.contains(&name.as_str()),
-            _ => true,
-        }))
+        let expected: Vec<String> = members
+            .iter()
+            .filter_map(|member| match member {
+                TypeExpr::Named(name) => Some(name.clone()),
+                _ => None,
+            })
+            .collect();
+        let (covered, has_wildcard, analyzable) =
+            collect_arm_pattern_coverage(arms, |leaf| match &leaf.node {
+                Node::NilLiteral => PatternCoverage::Covers("nil".to_string()),
+                Node::BoolLiteral(_) => PatternCoverage::Covers("bool".to_string()),
+                Node::IntLiteral(_) => PatternCoverage::Covers("int".to_string()),
+                Node::FloatLiteral(_) => PatternCoverage::Covers("float".to_string()),
+                Node::StringLiteral(_) => PatternCoverage::Covers("string".to_string()),
+                Node::Identifier(_) => PatternCoverage::Wildcard,
+                _ => PatternCoverage::Unknown,
+            });
+        let missing = missing_expected(&expected, &covered, |name| name.clone());
+        Some(MatchCoverage {
+            subject: MatchCoverageSubject::NamedUnion,
+            missing,
+            has_wildcard,
+            analyzable,
+        })
     }
 
     pub(in crate::typechecker) fn check_match_exhaustiveness(
@@ -1257,361 +1343,40 @@ impl TypeChecker {
         scope: &TypeScope,
         span: Span,
     ) {
-        let enum_name = self.match_enum_name(value, scope);
-        let Some(enum_name) = enum_name else {
-            // Three non-enum cases left:
-            //   1. `match obj.<tag>` where `obj` is a tagged shape union →
-            //      check coverage over the discriminant values.
-            //   2. a `bool` scrutinee → both `true` and `false` (or a
-            //      wildcard) must be covered, mirroring `match_covers_bool`
-            //      in the fall-through analysis.
-            //   3. anything else → try the named/literal-union
-            //      exhaustiveness check.
-            if self.check_match_exhaustiveness_tagged_shape(value, arms, scope, span) {
-                return;
-            }
-            if self.check_match_exhaustiveness_bool(value, arms, scope, span) {
-                return;
-            }
-            self.check_match_exhaustiveness_union(value, arms, scope, span);
+        let Some(coverage) = self.match_coverage(value, arms, scope) else {
             return;
         };
-        let Some(variants) = scope.get_enum(&enum_name) else {
-            return;
-        };
-
-        // Collect variant names covered by match arms
-        let mut covered: Vec<String> = Vec::new();
-        let mut has_wildcard = false;
-
-        for arm in arms.iter().filter(|arm| arm.guard.is_none()) {
-            for leaf in pattern_alternatives(&arm.pattern) {
-                match &leaf.node {
-                    // String literal pattern (matching on .variant): "VariantA"
-                    Node::StringLiteral(s) => covered.push(s.clone()),
-                    // Direct enum construct pattern: EnumName.Variant
-                    Node::EnumConstruct { variant, .. } => covered.push(variant.clone()),
-                    // PropertyAccess pattern: EnumName.Variant (no args)
-                    Node::PropertyAccess { property, .. } => covered.push(property.clone()),
-                    // MethodCall pattern: EnumName.Variant(bindings...)
-                    Node::MethodCall {
-                        method: variant, ..
-                    } => covered.push(variant.clone()),
-                    // Bare call-shaped variant pattern: Variant(bindings...)
-                    Node::FunctionCall { name: variant, .. }
-                        if variants
-                            .variants
-                            .iter()
-                            .any(|declared| declared.name == *variant) =>
-                    {
-                        covered.push(variant.clone());
-                    }
-                    // Identifier patterns bind and catch all remaining values at runtime.
-                    Node::Identifier(_) => {
-                        has_wildcard = true;
-                    }
-                    _ => {
-                        // Unknown pattern shape — conservatively treat as wildcard
-                        has_wildcard = true;
-                    }
-                }
-            }
-        }
-
-        if has_wildcard {
+        if !coverage.should_diagnose() {
             return;
         }
-
-        let missing: Vec<&String> = variants
-            .variants
-            .iter()
-            .map(|variant| &variant.name)
-            .filter(|variant| !covered.contains(variant))
-            .collect();
-        if !missing.is_empty() {
-            let missing_literals: Vec<String> =
-                missing.iter().map(|s| format!("\"{s}\"")).collect();
-            let missing_str = missing_literals.join(", ");
-            self.exhaustiveness_error_with_missing(
-                Code::NonExhaustiveMatch,
-                format!("Non-exhaustive match on enum {enum_name}: missing variants {missing_str}"),
-                span,
-                missing_literals,
-            );
-        }
+        self.emit_match_coverage_diagnostic(&coverage, span);
     }
 
-    /// Check exhaustiveness for `match obj.<tag>` where `obj` resolves to a
-    /// tagged shape union. Returns `true` when the value matched a tagged
-    /// shape union (whether or not a diagnostic was emitted) so the
-    /// dispatcher in `check_match_exhaustiveness` can stop falling through.
-    fn check_match_exhaustiveness_tagged_shape(
-        &mut self,
-        value: &SNode,
-        arms: &[MatchArm],
-        scope: &TypeScope,
-        span: Span,
-    ) -> bool {
-        let Node::PropertyAccess { object, property } = &value.node else {
-            return false;
-        };
-        let Node::Identifier(obj_var) = &object.node else {
-            return false;
-        };
-        let Some(Some(raw_type)) = scope.get_var(obj_var).cloned() else {
-            return false;
-        };
-        let resolved = self.resolve_alias(&raw_type, scope);
-        let TypeExpr::Union(members) = resolved else {
-            return false;
-        };
-        let members = resolve_union_shape_members(&members, scope);
-        if discriminant_field(&members).as_deref() != Some(property.as_str()) {
-            return false;
-        }
-
-        let mut has_wildcard = false;
-        let mut covered: Vec<DiscriminantValue> = Vec::new();
-        for arm in arms.iter().filter(|arm| arm.guard.is_none()) {
-            for leaf in pattern_alternatives(&arm.pattern) {
-                match &leaf.node {
-                    Node::StringLiteral(s) => covered.push(DiscriminantValue::Str(s.clone())),
-                    Node::IntLiteral(v) => covered.push(DiscriminantValue::Int(*v)),
-                    Node::Identifier(name) if name == "_" => has_wildcard = true,
-                    _ => has_wildcard = true,
-                }
+    fn emit_match_coverage_diagnostic(&mut self, coverage: &MatchCoverage, span: Span) {
+        let missing = coverage.missing.join(", ");
+        let message = match &coverage.subject {
+            MatchCoverageSubject::Bool => {
+                format!("Non-exhaustive match on bool: missing {missing}")
             }
-        }
-        if has_wildcard {
-            return true;
-        }
-
-        let mut missing: Vec<String> = Vec::new();
-        for member in &members {
-            let TypeExpr::Shape(fields) = member else {
-                continue;
-            };
-            let Some(field) = fields.iter().find(|f| f.name == *property) else {
-                continue;
-            };
-            let Some(value) = DiscriminantValue::from_type(&field.type_expr) else {
-                continue;
-            };
-            if !covered.contains(&value) {
-                missing.push(format_discriminant(&value));
+            MatchCoverageSubject::Enum(enum_name) => {
+                format!("Non-exhaustive match on enum {enum_name}: missing variants {missing}")
             }
-        }
-        if !missing.is_empty() {
-            self.exhaustiveness_error_with_missing(
-                Code::NonExhaustiveMatch,
-                format!(
-                    "Non-exhaustive match on tagged shape union: missing variants {}",
-                    missing.join(", ")
-                ),
-                span,
-                missing,
-            );
-        }
-        true
-    }
-
-    /// Diagnostic twin of `match_covers_bool`: a `match` on a `bool`
-    /// scrutinee must cover both `true` and `false` (or carry a wildcard).
-    /// Returns `true` when the scrutinee was a bool (whether or not a
-    /// diagnostic fired) so the dispatcher stops falling through. Without
-    /// this, `match b { true -> … }` silently type-checked while enum and
-    /// union scrutinees error on the same omission.
-    fn check_match_exhaustiveness_bool(
-        &mut self,
-        value: &SNode,
-        arms: &[MatchArm],
-        scope: &TypeScope,
-        span: Span,
-    ) -> bool {
-        let is_bool = matches!(
-            self.infer_type(value, scope)
-                .map(|ty| self.resolve_alias(&ty, scope)),
-            Some(TypeExpr::Named(n)) if n == "bool"
-        );
-        if !is_bool {
-            return false;
-        }
-        let mut covers_true = false;
-        let mut covers_false = false;
-        let mut has_wildcard = false;
-        for arm in arms.iter().filter(|arm| arm.guard.is_none()) {
-            for leaf in pattern_alternatives(&arm.pattern) {
-                match &leaf.node {
-                    Node::BoolLiteral(true) => covers_true = true,
-                    Node::BoolLiteral(false) => covers_false = true,
-                    Node::Identifier(_) => has_wildcard = true,
-                    _ => has_wildcard = true,
-                }
+            MatchCoverageSubject::TaggedShapeUnion => {
+                format!("Non-exhaustive match on tagged shape union: missing variants {missing}")
             }
-        }
-        if has_wildcard || (covers_true && covers_false) {
-            return true;
-        }
-        let missing: Vec<String> = [(!covers_true, "true"), (!covers_false, "false")]
-            .iter()
-            .filter(|(missing, _)| *missing)
-            .map(|(_, name)| name.to_string())
-            .collect();
+            MatchCoverageSubject::LiteralUnion => {
+                format!("Non-exhaustive match on literal union: missing {missing}")
+            }
+            MatchCoverageSubject::NamedUnion => {
+                format!("Non-exhaustive match on union type: missing {missing}")
+            }
+        };
         self.exhaustiveness_error_with_missing(
             Code::NonExhaustiveMatch,
-            format!(
-                "Non-exhaustive match on bool: missing {}",
-                missing.join(", ")
-            ),
+            message,
             span,
-            missing,
+            coverage.missing.clone(),
         );
-        true
-    }
-
-    /// Check exhaustiveness for match on union types: handles named-type
-    /// unions (`string | int | nil`) and pure literal unions
-    /// (`"pass" | "fail"`, `0 | 1 | 2`).
-    fn check_match_exhaustiveness_union(
-        &mut self,
-        value: &SNode,
-        arms: &[MatchArm],
-        scope: &TypeScope,
-        span: Span,
-    ) {
-        let Some(inferred) = self.infer_type(value, scope) else {
-            return;
-        };
-        let resolved = self.resolve_alias(&inferred, scope);
-        let TypeExpr::Union(members) = resolved else {
-            return;
-        };
-
-        // Pure literal union (LitString / LitInt only). Cover-by-equality.
-        if members
-            .iter()
-            .all(|m| matches!(m, TypeExpr::LitString(_) | TypeExpr::LitInt(_)))
-        {
-            self.check_literal_union_exhaustiveness(&members, arms, span);
-            return;
-        }
-
-        // Only check unions of named types (string, int, nil, bool, etc.)
-        if !members.iter().all(|m| matches!(m, TypeExpr::Named(_))) {
-            return;
-        }
-
-        let mut has_wildcard = false;
-        let mut covered_types: Vec<String> = Vec::new();
-
-        for arm in arms.iter().filter(|arm| arm.guard.is_none()) {
-            for leaf in pattern_alternatives(&arm.pattern) {
-                match &leaf.node {
-                    // type_of(x) == "string" style patterns are common but hard to detect here
-                    // Literal patterns cover specific types
-                    Node::NilLiteral => covered_types.push("nil".into()),
-                    Node::BoolLiteral(_) => {
-                        if !covered_types.contains(&"bool".into()) {
-                            covered_types.push("bool".into());
-                        }
-                    }
-                    Node::IntLiteral(_) => {
-                        if !covered_types.contains(&"int".into()) {
-                            covered_types.push("int".into());
-                        }
-                    }
-                    Node::FloatLiteral(_) => {
-                        if !covered_types.contains(&"float".into()) {
-                            covered_types.push("float".into());
-                        }
-                    }
-                    Node::StringLiteral(_) => {
-                        if !covered_types.contains(&"string".into()) {
-                            covered_types.push("string".into());
-                        }
-                    }
-                    Node::Identifier(name) if name == "_" => {
-                        has_wildcard = true;
-                    }
-                    _ => {
-                        has_wildcard = true;
-                    }
-                }
-            }
-        }
-
-        if has_wildcard {
-            return;
-        }
-
-        let type_names: Vec<&str> = members
-            .iter()
-            .filter_map(|m| match m {
-                TypeExpr::Named(n) => Some(n.as_str()),
-                _ => None,
-            })
-            .collect();
-        let missing: Vec<&&str> = type_names
-            .iter()
-            .filter(|t| !covered_types.iter().any(|c| c == **t))
-            .collect();
-        if !missing.is_empty() {
-            let missing_str = missing
-                .iter()
-                .map(|s| s.to_string())
-                .collect::<Vec<_>>()
-                .join(", ");
-            self.exhaustiveness_error_at(
-                Code::NonExhaustiveMatch,
-                format!("Non-exhaustive match on union type: missing {missing_str}"),
-                span,
-            );
-        }
-    }
-
-    /// Coverage check for a pure literal union. Each declared literal must
-    /// either appear as a literal arm pattern or be silenced by a wildcard.
-    fn check_literal_union_exhaustiveness(
-        &mut self,
-        members: &[TypeExpr],
-        arms: &[MatchArm],
-        span: Span,
-    ) {
-        let mut has_wildcard = false;
-        let mut covered: Vec<DiscriminantValue> = Vec::new();
-        for arm in arms.iter().filter(|arm| arm.guard.is_none()) {
-            for leaf in pattern_alternatives(&arm.pattern) {
-                match &leaf.node {
-                    Node::StringLiteral(s) => covered.push(DiscriminantValue::Str(s.clone())),
-                    Node::IntLiteral(v) => covered.push(DiscriminantValue::Int(*v)),
-                    Node::Identifier(name) if name == "_" => has_wildcard = true,
-                    _ => has_wildcard = true,
-                }
-            }
-        }
-        if has_wildcard {
-            return;
-        }
-        let mut missing: Vec<String> = Vec::new();
-        for member in members {
-            let Some(value) = DiscriminantValue::from_type(member) else {
-                continue;
-            };
-            if !covered.contains(&value) {
-                missing.push(format_discriminant(&value));
-            }
-        }
-        if !missing.is_empty() {
-            self.exhaustiveness_error_with_missing(
-                Code::NonExhaustiveMatch,
-                format!(
-                    "Non-exhaustive match on literal union: missing {}",
-                    missing.join(", ")
-                ),
-                span,
-                missing,
-            );
-        }
     }
 
     /// The `type_of` variants an `unknown` value must rule out before an

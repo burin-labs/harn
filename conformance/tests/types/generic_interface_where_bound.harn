@@ -1,0 +1,23 @@
+pipeline test(task) {
+  interface Sink<in T> {
+    fn accept(self, value: T) -> nil
+  }
+  struct IntSink {
+    label: string
+  }
+  impl IntSink {
+    fn accept(self, value: int) -> nil {
+      __io_println(self.label + ":" + to_string(value))
+      return nil
+    }
+  }
+  fn drain<S>(sink: S, value: int) where S: Sink<int> {
+    sink.accept(value)
+  }
+  fn use_direct(sink: Sink<int>) {
+    sink.accept(9)
+  }
+  let sink = IntSink({label: "int"})
+  drain(sink, 7)
+  use_direct(sink)
+}

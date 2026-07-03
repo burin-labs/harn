@@ -1,0 +1,7 @@
+pipeline default() {
+  fn summarize(prefix: string = "items", ...values: int) -> string {
+    return prefix + ":" + to_string(len(values))
+  }
+  __io_println(summarize())
+  __io_println(summarize("nums", 1, 2, 3))
+}

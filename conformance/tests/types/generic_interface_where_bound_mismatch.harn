@@ -1,0 +1,18 @@
+pipeline test(task) {
+  interface Sink<in T> {
+    fn accept(self, value: T) -> nil
+  }
+  struct StringSink {
+    label: string
+  }
+  impl StringSink {
+    fn accept(self, value: string) -> nil {
+      return nil
+    }
+  }
+  fn drain<S>(sink: S, value: int) where S: Sink<int> {
+    sink.accept(value)
+  }
+  let sink = StringSink({label: "string"})
+  drain(sink, 7)
+}

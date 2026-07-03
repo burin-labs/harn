@@ -561,34 +561,10 @@ impl TypeChecker {
     }
 
     /// Diagnostic site for non-exhaustive `match` arms. Match arms must be
-    /// exhaustive — a missing-variant `match` is a hard error. Authors who
+    /// exhaustive — a missing-case `match` is a hard error. Authors who
     /// genuinely want partial coverage opt out with a wildcard `_` arm.
-    /// Partial `if/elif/else` chains are intentionally allowed and are
-    /// instead handled by `check_unknown_exhaustiveness`, which stays a
-    /// warning so the `unreachable()` opt-in pattern continues to work.
-    pub(in crate::typechecker) fn exhaustiveness_error_at(
-        &mut self,
-        code: Code,
-        message: String,
-        span: Span,
-    ) {
-        self.diagnostics.push(TypeDiagnostic {
-            code,
-            message,
-            severity: DiagnosticSeverity::Error,
-            span: Some(span),
-            help: None,
-            related: Vec::new(),
-            fix: None,
-            details: None,
-            repair: default_repair(code),
-        });
-    }
-
-    /// Like `exhaustiveness_error_at` but additionally attaches the
-    /// missing-variant list as structured details. LSP code-actions
-    /// read this to synthesise an "Add missing match arms" quick-fix
-    /// without string-parsing the message.
+    /// The missing-case list is structured so LSP code-actions can synthesize
+    /// "Add missing match arms" fixes without string-parsing the message.
     pub(in crate::typechecker) fn exhaustiveness_error_with_missing(
         &mut self,
         code: Code,
