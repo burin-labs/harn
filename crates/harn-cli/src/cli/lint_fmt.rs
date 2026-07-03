@@ -8,6 +8,10 @@ pub(crate) struct PathTargetsArgs {
     /// Force-enable the `require-file-header` rule (overrides harn.toml).
     #[arg(long = "require-file-header")]
     pub require_file_header: bool,
+    /// Treat warnings as failures: exit non-zero when any file emits a lint
+    /// warning, not just an error. Overrides `[check] strict` in harn.toml.
+    #[arg(long)]
+    pub strict: bool,
     /// Emit a structured `JsonEnvelope` report instead of human-readable output.
     /// See `docs/src/cli-json-contract.md` for the envelope shape.
     #[arg(long)]

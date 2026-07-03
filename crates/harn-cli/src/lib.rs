@@ -621,7 +621,7 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                         &lint_config.persona_step_allowlist,
                         script_diags_for(file.as_path()),
                     );
-                    should_fail |= report.outcome().should_fail(config.strict);
+                    should_fail |= report.outcome().should_fail(config.strict || args.strict);
                     json_files.push(report);
                 }
                 let report = commands::check::LintReport::from_files(json_files);
@@ -701,7 +701,7 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                     );
                     total_findings += outcome.findings;
                     total_fixable += outcome.fixable;
-                    should_fail |= outcome.should_fail(config.strict);
+                    should_fail |= outcome.should_fail(config.strict || args.strict);
                 }
                 for file in &prompt_files {
                     let lint_config = commands::check::load_harn_lint_config(file);
@@ -713,7 +713,7 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
                     );
                     total_findings += outcome.findings;
                     total_fixable += outcome.fixable;
-                    should_fail |= outcome.should_fail(config.strict);
+                    should_fail |= outcome.should_fail(config.strict || args.strict);
                 }
                 // ESLint-style hint: when findings are auto-fixable, point the
                 // user at `--fix`. Emphasized when *every* finding is fixable.
