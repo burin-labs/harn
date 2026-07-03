@@ -388,6 +388,18 @@ pub const SCHEMAS: &[(&str, &str, SchemaKind, &str)] = &[
         SchemaKind::Response,
         include_str!("../schemas/code_index/file_hash.response.json"),
     ),
+    (
+        "code_index",
+        "file_hash_snapshot",
+        SchemaKind::Request,
+        include_str!("../schemas/code_index/file_hash_snapshot.request.json"),
+    ),
+    (
+        "code_index",
+        "file_hash_snapshot",
+        SchemaKind::Response,
+        include_str!("../schemas/code_index/file_hash_snapshot.response.json"),
+    ),
     // code_index — cached reads
     (
         "code_index",

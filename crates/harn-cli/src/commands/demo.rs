@@ -112,6 +112,17 @@ const SCENARIOS: &[Scenario] = &[
         tape: include_str!("../../assets/demo/project-metadata/tape.jsonl"),
     },
     Scenario {
+        id: "verification-snapshot",
+        title: "verification_file_hash_snapshot binds checks to current file bytes",
+        description: "Build a throw-away Rust workspace, seed the code index, then capture a \
+                      seq-bound batch of file hashes through `std/verification`: fresh indexed \
+                      files reuse index metadata, changed or newly-created files read current \
+                      disk bytes, missing paths are explicit, and the resulting path->hash map \
+                      feeds `verification_diagnostic_classify`. Fully offline.",
+        script: include_str!("../../assets/demo/verification-snapshot/scenario.harn"),
+        tape: include_str!("../../assets/demo/verification-snapshot/tape.jsonl"),
+    },
+    Scenario {
         id: "command-capture",
         title: "run_command preserves a slow command's full output past a `| tail` filter",
         description: "Walk the std/agent/command_capture recognizer: rewrite `producer | tail/wc/grep` \

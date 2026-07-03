@@ -1,0 +1,85 @@
+/**
+ * verification-snapshot demo: capture current file hashes under one
+ * code-index sequence binding and feed that snapshot to verification
+ * freshness classification.
+ *
+ * The scenario builds a small throw-away Rust workspace, seeds the code
+ * index, then captures:
+ *
+ *   1. an indexed file whose hash can be reused from fresh index metadata;
+ *   2. a missing path, recorded explicitly in `missing`;
+ *   3. a changed indexed file and a newly-created unindexed file, both read
+ *      from current disk bytes without requiring another full rebuild.
+ *
+ * Fully offline: no LLM calls, no network. The public demo path goes through
+ * `std/verification::verification_file_hash_snapshot`, which routes to the
+ * new `hostlib_code_index_file_hash_snapshot` primitive.
+ */
+import { verification_file_hash_snapshot } from "std/verification"
+
+fn seed_workspace(root: string) {
+  harness.fs.mkdir(root)
+  harness.fs.mkdir(path_join(root, "src"))
+  harness.fs.write_text(path_join(root, "src/app.rs"), "pub fn answer() -> i32 { 42 }\n")
+  harness.fs.write_text(path_join(root, "README.md"), "# verification demo\n")
+}
+
+pipeline default(_task) {
+  let root = path_join(asset_root(), "verification-workspace")
+  seed_workspace(root)
+  let _ = hostlib_code_index_rebuild({root: root})
+  let before = verification_file_hash_snapshot(["src/app.rs", "src/missing.rs"])
+  require before.algorithm == "fnv1a64", "snapshot algorithm should be fnv1a64"
+  require before.snapshot["src/app.rs"] != nil, "indexed file hash should be captured"
+  require before.files[0].known, "indexed file should be known"
+  require before.files[0].hash_source == "indexed", "fresh indexed hash should reuse index metadata"
+  require before.missing[0] == "src/missing.rs", "missing path should be reported"
+  harness.fs
+    .write_text(path_join(root, "src/app.rs"), "pub fn answer() -> i32 { 43 }\npub fn extra() {}\n")
+  harness.fs.write_text(path_join(root, "src/new.rs"), "pub fn new_file() {}\n")
+  let after = verification_file_hash_snapshot(["src/app.rs", "src/new.rs", "src/missing.rs"])
+  let diagnostic = verification_diagnostic_classify(
+    {
+      rung: "R2",
+      rowId: "verification-snapshot-demo",
+      at: after.captured_at_ms,
+      snapshot: after.snapshot,
+    },
+    after.snapshot,
+  )
+  require before.snapshot["src/app.rs"] != after.snapshot["src/app.rs"], "changed file hash should move"
+  require after.files[0].known, "changed indexed file should remain known"
+  require after.files[0].hash_source == "disk", "changed indexed file should read current disk bytes"
+  require !after.files[1].known, "new file should be readable but unknown to the index"
+  require after.files[1].hash_source == "disk", "new file should read current disk bytes"
+  require after.files[2].hash_source == "missing", "missing file should stay explicit"
+  require diagnostic.status == "bound_fresh", "snapshot map should bind freshness"
+  require diagnostic.feedsGates, "bound snapshot should feed verification gates"
+  __io_println("=== verification-snapshot demo ===")
+  __io_println("workspace: " + root)
+  __io_println(
+    "initial seq "
+      + to_string(before.seq)
+      + ", changed hash source "
+      + after.files[0].hash_source
+      + ", new-file source "
+      + after.files[1].hash_source,
+  )
+  __io_println("")
+  let receipt = {
+    receipt_kind: "verification_snapshot_receipt",
+    algorithm: after.algorithm,
+    initial_seq: before.seq,
+    after_seq: after.seq,
+    indexed_hash_source: before.files[0].hash_source,
+    changed_hash_source: after.files[0].hash_source,
+    new_file_known: after.files[1].known,
+    new_file_hash_source: after.files[1].hash_source,
+    missing_count: len(after.missing),
+    hash_changed: before.snapshot["src/app.rs"] != after.snapshot["src/app.rs"],
+    diagnostic_status: diagnostic.status,
+    feeds_gates: diagnostic.feedsGates,
+  }
+  __io_println(json_stringify(receipt))
+  return receipt
+}

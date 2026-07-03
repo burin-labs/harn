@@ -347,6 +347,43 @@ fn project_metadata_demo_runs_end_to_end_against_bundled_tape() {
 }
 
 #[test]
+fn verification_snapshot_demo_runs_end_to_end_against_bundled_tape() {
+    let outcome = run_demo_scenario("verification-snapshot");
+    assert_eq!(
+        outcome.exit_code, 0,
+        "verification-snapshot demo failed (exit {}):\nstderr:\n{}\nstdout:\n{}",
+        outcome.exit_code, outcome.stderr, outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("verification_snapshot_receipt"),
+        "verification-snapshot demo should emit the receipt envelope:\n{}",
+        outcome.stdout
+    );
+    assert!(
+        outcome
+            .stdout
+            .contains("\"indexed_hash_source\":\"indexed\""),
+        "fresh indexed files should reuse the code-index hash:\n{}",
+        outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("\"changed_hash_source\":\"disk\"")
+            && outcome.stdout.contains("\"new_file_hash_source\":\"disk\""),
+        "changed and unindexed files should be read from current disk bytes:\n{}",
+        outcome.stdout
+    );
+    assert!(
+        outcome.stdout.contains("\"hash_changed\":true")
+            && outcome
+                .stdout
+                .contains("\"diagnostic_status\":\"bound_fresh\"")
+            && outcome.stdout.contains("\"feeds_gates\":true"),
+        "snapshot map should bind freshness and feed verification gates:\n{}",
+        outcome.stdout
+    );
+}
+
+#[test]
 fn compaction_policy_demo_runs_end_to_end_against_bundled_tape() {
     let outcome = run_demo_scenario("compaction-policy");
     assert_eq!(

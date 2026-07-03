@@ -1,0 +1,47 @@
+/**
+ * std/verification — deterministic verification facts and helper shapes.
+ *
+ * Import: import "std/verification"
+ *
+ * This module is the Harn-owned home for reusable verification intelligence
+ * primitives. It intentionally starts with fact capture, not policy: callers
+ * can bind diagnostics and background check results to file snapshots without
+ * duplicating hostlib plumbing or inventing product-specific hash logic.
+ */
+type VerificationFileHashSnapshotEntry = {
+  path: string,
+  known: bool,
+  readable: bool,
+  hash: string?,
+  hash_source: "indexed" | "disk" | "missing",
+  size: int?,
+  mtime_ms: int?,
+  indexed_hash: string?,
+  indexed_mtime_ms: int?,
+  last_edit_seq: int,
+}
+
+type VerificationFileHashSnapshot = {
+  seq: int,
+  captured_at_ms: int,
+  algorithm: string,
+  snapshot: dict,
+  missing: list<string>,
+  files: list<VerificationFileHashSnapshotEntry>,
+}
+
+/**
+ * Capture current on-disk hashes for `paths` under one code-index sequence
+ * binding. Unknown-but-readable workspace files are included with
+ * `known = false`; unreadable or out-of-workspace paths return a null hash
+ * and appear in `missing`. The `snapshot` field is the direct path->hash map
+ * consumed by `verification_diagnostic_classify`.
+ *
+ * @effects: [host, fs]
+ * @errors: [backend, invalid_argument]
+ * @api_stability: experimental
+ * @example: verification_file_hash_snapshot(["src/main.zig", "build.zig"])
+ */
+pub fn verification_file_hash_snapshot(paths: list<string>) -> VerificationFileHashSnapshot {
+  return hostlib_code_index_file_hash_snapshot({paths: paths})
+}

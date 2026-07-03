@@ -126,6 +126,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/stdlib_timing.harn"),
     },
     StdlibSource {
+        module: "verification",
+        source: include_str!("stdlib/stdlib_verification.harn"),
+    },
+    StdlibSource {
         module: "tools",
         source: include_str!("stdlib/stdlib_tools.harn"),
     },
@@ -1384,6 +1388,7 @@ mod tests {
             "eval/stats",
             "eval/agreement",
             "edit",
+            "verification",
             "disclosure",
             "artifact/web",
             "command",

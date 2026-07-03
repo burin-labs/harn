@@ -52,6 +52,7 @@ pub(super) const BUILTIN_ID_TO_PATH: &str = "hostlib_code_index_id_to_path";
 pub(super) const BUILTIN_FILE_IDS: &str = "hostlib_code_index_file_ids";
 pub(super) const BUILTIN_FILE_META: &str = "hostlib_code_index_file_meta";
 pub(super) const BUILTIN_FILE_HASH: &str = "hostlib_code_index_file_hash";
+pub(super) const BUILTIN_FILE_HASH_SNAPSHOT: &str = "hostlib_code_index_file_hash_snapshot";
 
 pub(super) const BUILTIN_READ_RANGE: &str = "hostlib_code_index_read_range";
 pub(super) const BUILTIN_REINDEX_FILE: &str = "hostlib_code_index_reindex_file";
@@ -444,6 +445,72 @@ pub(super) fn run_file_hash(
         Ok(bytes) => Ok(str_value(fnv1a64(&bytes).to_string())),
         Err(_) => Ok(VmValue::Nil),
     }
+}
+
+pub(super) fn run_file_hash_snapshot(
+    index: &SharedIndex,
+    args: &[VmValue],
+) -> Result<VmValue, HostlibError> {
+    let raw = dict_arg(BUILTIN_FILE_HASH_SNAPSHOT, args)?;
+    let dict = raw.as_ref();
+    if !dict.contains_key("paths") {
+        return Err(HostlibError::MissingParameter {
+            builtin: BUILTIN_FILE_HASH_SNAPSHOT,
+            param: "paths",
+        });
+    }
+    let paths = optional_string_list(BUILTIN_FILE_HASH_SNAPSHOT, dict, "paths")?;
+    if paths.is_empty() {
+        return Err(HostlibError::InvalidParameter {
+            builtin: BUILTIN_FILE_HASH_SNAPSHOT,
+            param: "paths",
+            message: "must contain at least one path".to_string(),
+        });
+    }
+    if paths.len() > 4096 {
+        return Err(HostlibError::InvalidParameter {
+            builtin: BUILTIN_FILE_HASH_SNAPSHOT,
+            param: "paths",
+            message: "must contain at most 4096 paths".to_string(),
+        });
+    }
+
+    let guard = index.lock().expect("code_index mutex poisoned");
+    let Some(state) = guard.as_ref() else {
+        return Ok(build_dict([
+            ("seq", VmValue::Int(0)),
+            ("captured_at_ms", VmValue::Int(now_unix_ms())),
+            ("algorithm", str_value("fnv1a64")),
+            ("snapshot", VmValue::dict(harn_vm::value::DictMap::new())),
+            (
+                "missing",
+                VmValue::List(Arc::new(paths.into_iter().map(str_value).collect())),
+            ),
+            ("files", VmValue::List(Arc::new(Vec::new()))),
+        ]));
+    };
+    let seq = state.versions.current_seq as i64;
+    let captured_at_ms = now_unix_ms();
+    let mut files = Vec::with_capacity(paths.len());
+    let mut snapshot = harn_vm::value::DictMap::new();
+    let mut missing = Vec::new();
+    for path in paths {
+        let entry = file_hash_snapshot_entry(state, &path);
+        if let Some(hash) = &entry.hash {
+            snapshot.insert(harn_vm::value::intern_key(&entry.path), str_value(hash));
+        } else {
+            missing.push(str_value(&entry.path));
+        }
+        files.push(entry.value);
+    }
+    Ok(build_dict([
+        ("seq", VmValue::Int(seq)),
+        ("captured_at_ms", VmValue::Int(captured_at_ms)),
+        ("algorithm", str_value("fnv1a64")),
+        ("snapshot", VmValue::dict(snapshot)),
+        ("missing", VmValue::List(Arc::new(missing))),
+        ("files", VmValue::List(Arc::new(files))),
+    ]))
 }
 
 // === Cached reads ===
@@ -1072,6 +1139,117 @@ pub(super) fn run_freshness(
 }
 
 // === Helpers ===
+
+struct FileHashSnapshotEntry {
+    value: VmValue,
+    path: String,
+    hash: Option<String>,
+}
+
+fn file_hash_snapshot_entry(state: &IndexState, path: &str) -> FileHashSnapshotEntry {
+    let normalized = normalize_relative_path(state, path);
+    let indexed_file = state
+        .lookup_path(&normalized)
+        .and_then(|id| state.files.get(&id));
+    let abs = state
+        .absolute_path(path)
+        .or_else(|| state.absolute_path(&normalized));
+    let (readable, hash, hash_source, disk_size, disk_mtime_ms) = match abs {
+        Some(abs) => {
+            let metadata = std::fs::metadata(&abs).ok();
+            let mtime_ms = metadata
+                .as_ref()
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as i64);
+            if let (Some(file), Some(metadata), Some(mtime_ms)) =
+                (indexed_file, metadata.as_ref(), mtime_ms)
+            {
+                if metadata.len() == file.size_bytes && mtime_ms == file.mtime_ms {
+                    return file_hash_snapshot_value(
+                        state,
+                        normalized,
+                        indexed_file,
+                        true,
+                        Some(file.content_hash.to_string()),
+                        "indexed",
+                        VmValue::Int(file.size_bytes as i64),
+                        VmValue::Int(file.mtime_ms),
+                    );
+                }
+            }
+            let bytes = match crate::fs::read(&abs, None) {
+                Some(result) => result,
+                None => std::fs::read(&abs),
+            };
+            match bytes {
+                Ok(bytes) => {
+                    let hash = fnv1a64(&bytes).to_string();
+                    (
+                        true,
+                        Some(hash),
+                        "disk",
+                        VmValue::Int(bytes.len() as i64),
+                        mtime_ms.map(VmValue::Int).unwrap_or(VmValue::Nil),
+                    )
+                }
+                Err(_) => (false, None, "missing", VmValue::Nil, VmValue::Nil),
+            }
+        }
+        None => (false, None, "missing", VmValue::Nil, VmValue::Nil),
+    };
+    file_hash_snapshot_value(
+        state,
+        normalized,
+        indexed_file,
+        readable,
+        hash,
+        hash_source,
+        disk_size,
+        disk_mtime_ms,
+    )
+}
+
+fn file_hash_snapshot_value(
+    state: &IndexState,
+    normalized: String,
+    indexed_file: Option<&super::file_table::IndexedFile>,
+    readable: bool,
+    hash: Option<String>,
+    hash_source: &str,
+    disk_size: VmValue,
+    disk_mtime_ms: VmValue,
+) -> FileHashSnapshotEntry {
+    let indexed_hash = indexed_file
+        .map(|file| str_value(file.content_hash.to_string()))
+        .unwrap_or(VmValue::Nil);
+    let indexed_mtime_ms = indexed_file
+        .map(|file| VmValue::Int(file.mtime_ms))
+        .unwrap_or(VmValue::Nil);
+    let last_edit_seq = state
+        .versions
+        .last_entry(&normalized)
+        .map(|entry| entry.seq as i64)
+        .unwrap_or(0);
+    let hash_value = hash.as_ref().map(str_value).unwrap_or(VmValue::Nil);
+    let value = build_dict([
+        ("path", str_value(&normalized)),
+        ("known", VmValue::Bool(indexed_file.is_some())),
+        ("readable", VmValue::Bool(readable)),
+        ("hash", hash_value),
+        ("hash_source", str_value(hash_source)),
+        ("size", disk_size),
+        ("mtime_ms", disk_mtime_ms),
+        ("indexed_hash", indexed_hash),
+        ("indexed_mtime_ms", indexed_mtime_ms),
+        ("last_edit_seq", VmValue::Int(last_edit_seq)),
+    ]);
+    FileHashSnapshotEntry {
+        value,
+        path: normalized,
+        hash,
+    }
+}
 
 fn ensure_state<'a>(
     builtin: &'static str,

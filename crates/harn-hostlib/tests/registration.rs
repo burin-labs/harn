@@ -112,6 +112,7 @@ fn code_index_capability_registers_documented_methods() {
             "hostlib_code_index_file_ids",
             "hostlib_code_index_file_meta",
             "hostlib_code_index_file_hash",
+            "hostlib_code_index_file_hash_snapshot",
             // Cached reads (#776).
             "hostlib_code_index_read_range",
             "hostlib_code_index_reindex_file",
@@ -440,10 +441,10 @@ fn install_default_wires_every_module_into_a_vm() {
         ]
     );
     // Builtin count: 15 ast (incl. apply_node + insert_at_anchor) +
-    // 28 code_index (incl. add_readonly_roots, #2403 follow-up) + 2 scanner
+    // 29 code_index (incl. add_readonly_roots, #2403 follow-up) + 2 scanner
     // + 4 embed + 4 fs + 4 fs_snapshot + 2 fs_watch + 14 tools
-    // + 1 hostlib_enable + 4 secret_store = 78.
-    assert!(registry.builtins().len() >= 78);
+    // + 1 hostlib_enable + 4 secret_store = 79.
+    assert!(registry.builtins().len() >= 79);
 }
 
 #[test]
