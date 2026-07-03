@@ -11,6 +11,7 @@
 //! per-subcommand module and are accessed through their parent enum.
 
 mod bench;
+mod canon;
 mod check;
 mod codemod;
 mod completion;
@@ -76,6 +77,7 @@ mod watch;
 mod workflow;
 
 pub(crate) use bench::{BenchArgs, BenchCommand, BenchReplayArgs};
+pub(crate) use canon::{CanonArgs, CanonCheckArgs, CanonCommand};
 pub(crate) use check::{CheckArgs, CheckOutputFormat};
 pub(crate) use codemod::CodemodArgs;
 pub(crate) use completion::{CompletionArgs, CompletionShell};
@@ -390,6 +392,8 @@ SCRIPTING
     Graph(GraphArgs),
     /// Inspect Harn Flow atom, slice, and predicate audit state.
     Flow(FlowArgs),
+    /// Evaluate harn-canon invariant packs against changed files.
+    Canon(CanonArgs),
     /// Validate, preview, and run portable workflow bundles.
     Workflow(WorkflowArgs),
     /// Control local durable workflow automations for trusted hosts.

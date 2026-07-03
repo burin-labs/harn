@@ -968,6 +968,7 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
             }
             Err(error) => command_error(&error),
         },
+        Command::Canon(args) => commands::canon::run(args).await,
         Command::Workflow(args) => match commands::workflow::handle(args) {
             Ok(code) => {
                 if code != 0 {
