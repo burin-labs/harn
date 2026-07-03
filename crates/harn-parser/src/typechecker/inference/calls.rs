@@ -44,13 +44,6 @@ impl CallKind {
             Self::Function => "Function",
         }
     }
-
-    fn arity_code(self) -> Code {
-        match self {
-            Self::Builtin => Code::BuiltinArity,
-            Self::Function => Code::OrchestrationArity,
-        }
-    }
 }
 
 struct CallParam<'a> {
@@ -454,18 +447,18 @@ impl TypeChecker {
                     (format!("{}-{}", sig.required_params, total), false)
                 };
                 let arg_word = if single_arg { "argument" } else { "arguments" };
-                self.warning_at(
-                    sig.kind.arity_code(),
-                    format!(
-                        "{} '{}' expects {} {}, got {}",
-                        target_label,
-                        sig.name,
-                        expected,
-                        arg_word,
-                        args.len()
-                    ),
-                    span,
+                let message = format!(
+                    "{} '{}' expects {} {}, got {}",
+                    target_label,
+                    sig.name,
+                    expected,
+                    arg_word,
+                    args.len()
                 );
+                match sig.kind {
+                    CallKind::Builtin => self.warning_at(Code::BuiltinArity, message, span),
+                    CallKind::Function => self.warning_at(Code::OrchestrationArity, message, span),
+                }
             }
         }
 
