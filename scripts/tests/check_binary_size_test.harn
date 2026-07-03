@@ -69,7 +69,7 @@ pipeline test_parse_args_help(task) {
 // --- parse_budget_mb / budget_bytes_of --------------------------------------
 @test
 pipeline test_budget_parse_valid(task) {
-  assert_eq(parse_budget_mb(default_binary_size_budget_mb()), 190.0)
+  assert_eq(parse_budget_mb(default_binary_size_budget_mb()), 192.0)
   assert_eq(parse_budget_mb("1.2"), 1.2)
 }
 
@@ -82,7 +82,7 @@ pipeline test_budget_parse_invalid(task) {
 
 @test
 pipeline test_budget_bytes_rounding(task) {
-  assert_eq(budget_bytes_of(190.0), 199229440)
+  assert_eq(budget_bytes_of(192.0), 201326592)
   // awk printf "%.0f", 1.2 * 1024 * 1024 == 1258291
   assert_eq(budget_bytes_of(1.2), 1258291)
 }
