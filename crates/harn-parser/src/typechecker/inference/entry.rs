@@ -12,8 +12,7 @@ use crate::ast::*;
 use crate::diagnostic_codes::Code;
 
 use super::super::scope::{
-    EnumDeclInfo, FnSignature, ImplMethodSig, InterfaceDeclInfo, StructDeclInfo, TypeAliasInfo,
-    TypeScope,
+    EnumDeclInfo, ImplMethodSig, InterfaceDeclInfo, StructDeclInfo, TypeAliasInfo, TypeScope,
 };
 use super::super::{InlayHintInfo, TypeChecker, TypeDiagnostic};
 
@@ -153,26 +152,12 @@ impl TypeChecker {
                     // since it was derived from the body and so cannot
                     // contradict it.
                     let declared = Self::callable_return_type(*is_stream, return_type, body);
-                    let sig_return = declared
-                        .clone()
-                        .or_else(|| self.infer_unannotated_fn_return(params, body));
-                    let required_params =
-                        params.iter().filter(|p| p.default_value.is_none()).count();
-                    let sig = FnSignature {
-                        params: params
-                            .iter()
-                            .map(|p| (p.name.clone(), p.type_expr.clone()))
-                            .collect(),
-                        return_type: sig_return,
-                        definition_span: Some(snode.span),
-                        type_param_names: type_params.iter().map(|tp| tp.name.clone()).collect(),
-                        required_params,
-                        where_clauses: where_clauses
-                            .iter()
-                            .map(|wc| (wc.type_name.clone(), wc.bound.clone()))
-                            .collect(),
-                        has_rest: params.last().is_some_and(|p| p.rest),
-                    };
+                    let sig = Self::fn_signature_from_decl(
+                        inner_node,
+                        Some(snode.span),
+                        |params, body| self.infer_unannotated_fn_return(params, body),
+                    )
+                    .expect("matched FnDecl");
                     Rc::make_mut(&mut self.scope).define_fn(name, sig);
                     if name == "main" {
                         self.check_main_signature(params, snode.span);
@@ -294,62 +279,20 @@ impl TypeChecker {
                 _ => node,
             };
             match &inner.node {
-                Node::FnDecl {
-                    name,
-                    params,
-                    return_type,
-                    type_params,
-                    where_clauses,
-                    body,
-                    is_stream,
-                    ..
-                } => {
-                    let return_type =
-                        TypeChecker::callable_return_type(*is_stream, return_type, body);
-                    let sig = FnSignature {
-                        params: params
-                            .iter()
-                            .map(|p| (p.name.clone(), p.type_expr.clone()))
-                            .collect(),
-                        return_type,
-                        definition_span: Some(inner.span),
-                        type_param_names: type_params.iter().map(|tp| tp.name.clone()).collect(),
-                        required_params: params
-                            .iter()
-                            .filter(|p| p.default_value.is_none())
-                            .count(),
-                        where_clauses: where_clauses
-                            .iter()
-                            .map(|wc| (wc.type_name.clone(), wc.bound.clone()))
-                            .collect(),
-                        has_rest: params.last().is_some_and(|p| p.rest),
-                    };
+                Node::FnDecl { name, body, .. } => {
+                    let sig =
+                        TypeChecker::fn_signature_from_decl(inner, Some(inner.span), |_, _| None)
+                            .expect("matched FnDecl");
                     scope.define_fn(name, sig);
                     walk_all(scope, body);
                 }
                 Node::Pipeline { name, body, .. } => {
-                    let sig = FnSignature {
-                        params: Vec::new(),
-                        return_type: None,
-                        definition_span: Some(inner.span),
-                        type_param_names: Vec::new(),
-                        required_params: 0,
-                        where_clauses: Vec::new(),
-                        has_rest: false,
-                    };
+                    let sig = TypeChecker::empty_callable_signature(Some(inner.span));
                     scope.define_fn(name, sig);
                     walk_all(scope, body);
                 }
                 Node::ToolDecl { name, body, .. } => {
-                    let sig = FnSignature {
-                        params: Vec::new(),
-                        return_type: None,
-                        definition_span: Some(inner.span),
-                        type_param_names: Vec::new(),
-                        required_params: 0,
-                        where_clauses: Vec::new(),
-                        has_rest: false,
-                    };
+                    let sig = TypeChecker::empty_callable_signature(Some(inner.span));
                     scope.define_fn(name, sig);
                     walk_all(scope, body);
                 }
@@ -407,48 +350,13 @@ impl TypeChecker {
                 _ => snode,
             };
             match &inner.node {
-                Node::FnDecl {
-                    name,
-                    params,
-                    return_type,
-                    type_params,
-                    where_clauses,
-                    body,
-                    is_stream,
-                    ..
-                } => {
-                    let return_type =
-                        TypeChecker::callable_return_type(*is_stream, return_type, body);
-                    let sig = FnSignature {
-                        params: params
-                            .iter()
-                            .map(|p| (p.name.clone(), p.type_expr.clone()))
-                            .collect(),
-                        return_type,
-                        definition_span: None,
-                        type_param_names: type_params.iter().map(|tp| tp.name.clone()).collect(),
-                        required_params: params
-                            .iter()
-                            .filter(|p| p.default_value.is_none())
-                            .count(),
-                        where_clauses: where_clauses
-                            .iter()
-                            .map(|wc| (wc.type_name.clone(), wc.bound.clone()))
-                            .collect(),
-                        has_rest: params.last().is_some_and(|p| p.rest),
-                    };
+                Node::FnDecl { name, .. } => {
+                    let sig = TypeChecker::fn_signature_from_decl(inner, None, |_, _| None)
+                        .expect("matched FnDecl");
                     scope.define_fn(name, sig);
                 }
                 Node::Pipeline { name, .. } | Node::ToolDecl { name, .. } => {
-                    let sig = FnSignature {
-                        params: Vec::new(),
-                        return_type: None,
-                        definition_span: None,
-                        type_param_names: Vec::new(),
-                        required_params: 0,
-                        where_clauses: Vec::new(),
-                        has_rest: false,
-                    };
+                    let sig = TypeChecker::empty_callable_signature(None);
                     scope.define_fn(name, sig);
                 }
                 _ => {}

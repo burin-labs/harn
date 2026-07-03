@@ -12,7 +12,10 @@
 //! across the program to catch deprecated calls that hide inside
 //! expression contexts where `check_node` would only trigger `infer_type`.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    borrow::Cow,
+    collections::{BTreeMap, BTreeSet},
+};
 
 use crate::ast::*;
 use crate::builtin_signatures;
@@ -28,28 +31,58 @@ use super::super::union::simplify_union;
 use super::super::union::without_nil;
 use super::super::TypeChecker;
 
-impl TypeChecker {
-    fn builtin_param_for_arg(
-        sig: &builtin_signatures::BuiltinSignature,
-        index: usize,
-    ) -> Option<&builtin_signatures::Param> {
-        if sig.has_rest && index >= sig.params.len().saturating_sub(1) {
-            sig.params.last()
-        } else {
-            sig.params.get(index)
+#[derive(Clone, Copy)]
+enum CallKind {
+    Builtin,
+    Function,
+}
+
+impl CallKind {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Builtin => "Builtin function",
+            Self::Function => "Function",
         }
     }
 
-    fn function_param_for_arg(
-        sig: &FnSignature,
+    fn arity_code(self) -> Code {
+        match self {
+            Self::Builtin => Code::BuiltinArity,
+            Self::Function => Code::OrchestrationArity,
+        }
+    }
+}
+
+struct CallParam<'a> {
+    name: &'a str,
+    ty: Option<Cow<'a, TypeExpr>>,
+    bind_generics: bool,
+    check_type: bool,
+    allow_optional_nil: bool,
+}
+
+struct CallCheckSignature<'a> {
+    name: &'a str,
+    kind: CallKind,
+    params: Vec<CallParam<'a>>,
+    required_params: usize,
+    type_param_names: Vec<String>,
+    where_clauses: Vec<(String, String)>,
+    has_rest: bool,
+    definition_span: Option<Span>,
+}
+
+impl TypeChecker {
+    fn call_param_for_arg<'params, 'types>(
+        params: &'params [CallParam<'types>],
+        has_rest: bool,
         index: usize,
-    ) -> Option<(&str, Option<&TypeExpr>)> {
-        let entry = if sig.has_rest && index >= sig.params.len().saturating_sub(1) {
-            sig.params.last()
+    ) -> Option<&'params CallParam<'types>> {
+        if has_rest && index >= params.len().saturating_sub(1) {
+            params.last()
         } else {
-            sig.params.get(index)
-        }?;
-        Some((entry.0.as_str(), entry.1.as_ref()))
+            params.get(index)
+        }
     }
 
     /// Collapse the field types of a shape into a single value type. Used when
@@ -216,6 +249,358 @@ impl TypeChecker {
         }
     }
 
+    fn builtin_call_params(sig: &builtin_signatures::BuiltinSignature) -> Vec<CallParam<'_>> {
+        sig.params
+            .iter()
+            .map(|param| {
+                let is_schema_param = matches!(param.ty, builtin_signatures::Ty::SchemaOf(_));
+                let is_any = param.ty.is_any();
+                CallParam {
+                    name: param.name,
+                    ty: (!is_any).then(|| Cow::Owned(param.ty.to_type_expr())),
+                    bind_generics: !is_any,
+                    check_type: !is_any && !is_schema_param,
+                    allow_optional_nil: param.optional,
+                }
+            })
+            .collect()
+    }
+
+    fn function_call_params(sig: &FnSignature) -> Vec<CallParam<'_>> {
+        sig.params
+            .iter()
+            .map(|(name, ty)| CallParam {
+                name,
+                ty: ty.as_ref().map(Cow::Borrowed),
+                bind_generics: ty.is_some(),
+                check_type: ty.is_some(),
+                allow_optional_nil: false,
+            })
+            .collect()
+    }
+
+    fn typed_param_call_params(params: &[TypedParam]) -> Vec<CallParam<'_>> {
+        params
+            .iter()
+            .map(|param| CallParam {
+                name: &param.name,
+                ty: param.type_expr.as_ref().map(Cow::Borrowed),
+                bind_generics: param.type_expr.is_some(),
+                check_type: param.type_expr.is_some(),
+                allow_optional_nil: false,
+            })
+            .collect()
+    }
+
+    fn initial_type_bindings(
+        type_param_names: &[String],
+        type_args: &[TypeExpr],
+    ) -> BTreeMap<String, TypeExpr> {
+        let mut bindings = BTreeMap::new();
+        if type_args.len() == type_param_names.len() {
+            for (param_name, type_arg) in type_param_names.iter().zip(type_args.iter()) {
+                bindings.insert(param_name.clone(), type_arg.clone());
+            }
+        }
+        bindings
+    }
+
+    fn bind_call_params_from_args(
+        &self,
+        params: &[CallParam<'_>],
+        has_rest: bool,
+        type_param_names: &[String],
+        args: &[SNode],
+        bindings: &mut BTreeMap<String, TypeExpr>,
+        scope: &TypeScope,
+    ) -> Vec<(Span, String)> {
+        let type_param_set: BTreeSet<String> = type_param_names.iter().cloned().collect();
+        if type_param_set.is_empty() {
+            return Vec::new();
+        }
+        let mut errors = Vec::new();
+        for (i, arg) in args.iter().enumerate() {
+            let Some(param) = Self::call_param_for_arg(params, has_rest, i) else {
+                continue;
+            };
+            if !param.bind_generics {
+                continue;
+            }
+            let Some(param_ty) = param.ty.as_deref() else {
+                continue;
+            };
+            if let Err(message) =
+                self.bind_from_arg_node(param_ty, arg, &type_param_set, bindings, scope)
+            {
+                errors.push((arg.span, message));
+            }
+        }
+        errors
+    }
+
+    pub(in crate::typechecker) fn infer_function_call_type_bindings(
+        &self,
+        sig: &FnSignature,
+        type_args: &[TypeExpr],
+        args: &[SNode],
+        scope: &TypeScope,
+    ) -> BTreeMap<String, TypeExpr> {
+        let params = Self::function_call_params(sig);
+        let mut bindings = Self::initial_type_bindings(&sig.type_param_names, type_args);
+        let _ = self.bind_call_params_from_args(
+            &params,
+            sig.has_rest,
+            &sig.type_param_names,
+            args,
+            &mut bindings,
+            scope,
+        );
+        bindings
+    }
+
+    pub(in crate::typechecker) fn infer_builtin_call_type_bindings(
+        &self,
+        sig: &builtin_signatures::BuiltinSignature,
+        type_args: &[TypeExpr],
+        args: &[SNode],
+        scope: &TypeScope,
+    ) -> BTreeMap<String, TypeExpr> {
+        let type_param_names = sig.type_param_names();
+        let params = Self::builtin_call_params(sig);
+        let mut bindings = Self::initial_type_bindings(&type_param_names, type_args);
+        let _ = self.bind_call_params_from_args(
+            &params,
+            sig.has_rest,
+            &type_param_names,
+            args,
+            &mut bindings,
+            scope,
+        );
+        bindings
+    }
+
+    pub(in crate::typechecker) fn infer_typed_param_type_bindings(
+        &self,
+        params: &[TypedParam],
+        has_rest: bool,
+        type_param_names: &[String],
+        args: &[SNode],
+        scope: &TypeScope,
+    ) -> (BTreeMap<String, TypeExpr>, Vec<(Span, String)>) {
+        let call_params = Self::typed_param_call_params(params);
+        let mut bindings = BTreeMap::new();
+        let errors = self.bind_call_params_from_args(
+            &call_params,
+            has_rest,
+            type_param_names,
+            args,
+            &mut bindings,
+            scope,
+        );
+        (bindings, errors)
+    }
+
+    fn check_call_signature_arguments(
+        &mut self,
+        sig: CallCheckSignature<'_>,
+        type_args: &[TypeExpr],
+        args: &[SNode],
+        has_spread: bool,
+        scope: &mut TypeScope,
+        span: Span,
+    ) {
+        let target_label = sig.kind.label();
+        if !type_args.is_empty() {
+            if sig.type_param_names.is_empty() {
+                self.error_at(
+                    Code::GenericTypeArgumentUnsupported,
+                    format!(
+                        "{target_label} '{}' does not declare type parameters",
+                        sig.name
+                    ),
+                    span,
+                );
+            } else if type_args.len() != sig.type_param_names.len() {
+                self.error_at(
+                    Code::GenericTypeArgumentArity,
+                    format!(
+                        "{} '{}' expects {} type arguments, got {}",
+                        target_label,
+                        sig.name,
+                        sig.type_param_names.len(),
+                        type_args.len()
+                    ),
+                    span,
+                );
+            }
+        }
+
+        if !has_spread {
+            let total = sig.params.len();
+            let arity_ok = if sig.has_rest {
+                args.len() >= total.saturating_sub(1)
+            } else {
+                args.len() >= sig.required_params && args.len() <= total
+            };
+            if !arity_ok {
+                let (expected, single_arg) = if sig.has_rest {
+                    (
+                        format!("at least {}", total.saturating_sub(1)),
+                        total.saturating_sub(1) == 1,
+                    )
+                } else if sig.required_params == total {
+                    (total.to_string(), total == 1)
+                } else {
+                    (format!("{}-{}", sig.required_params, total), false)
+                };
+                let arg_word = if single_arg { "argument" } else { "arguments" };
+                self.warning_at(
+                    sig.kind.arity_code(),
+                    format!(
+                        "{} '{}' expects {} {}, got {}",
+                        target_label,
+                        sig.name,
+                        expected,
+                        arg_word,
+                        args.len()
+                    ),
+                    span,
+                );
+            }
+        }
+
+        let mut type_bindings = Self::initial_type_bindings(&sig.type_param_names, type_args);
+        for (error_span, message) in self.bind_call_params_from_args(
+            &sig.params,
+            sig.has_rest,
+            &sig.type_param_names,
+            args,
+            &mut type_bindings,
+            scope,
+        ) {
+            self.error_at(Code::ArgumentTypeMismatch, message, error_span);
+        }
+
+        let type_param_set: BTreeSet<String> = sig.type_param_names.iter().cloned().collect();
+        let unbound_type_params: BTreeSet<String> = type_param_set
+            .iter()
+            .filter(|name| !type_bindings.contains_key(*name))
+            .cloned()
+            .collect();
+        let mut expected_args: Vec<Option<(String, TypeExpr, bool)>> =
+            Vec::with_capacity(args.len());
+        let mut contextual_args = Vec::with_capacity(args.len());
+        for (i, arg) in args.iter().enumerate() {
+            let Some(param) = Self::call_param_for_arg(&sig.params, sig.has_rest, i) else {
+                self.check_node(arg, scope);
+                expected_args.push(None);
+                contextual_args.push(false);
+                continue;
+            };
+            let Some(expected) = param.ty.as_deref().filter(|_| param.check_type) else {
+                self.check_node(arg, scope);
+                expected_args.push(None);
+                contextual_args.push(false);
+                continue;
+            };
+            let expected = Self::apply_type_bindings(expected, &type_bindings);
+            let contextual_expected =
+                (!Self::contains_type_param(&expected, &unbound_type_params)).then_some(&expected);
+            let context_checked = self.check_node_with_expected(arg, contextual_expected, scope);
+            expected_args.push(Some((
+                param.name.to_string(),
+                expected,
+                param.allow_optional_nil,
+            )));
+            contextual_args.push(context_checked);
+        }
+
+        let call_scope_owned;
+        let call_scope: &TypeScope = if sig.type_param_names.is_empty() {
+            scope
+        } else {
+            let mut s = scope.child();
+            for tp_name in &sig.type_param_names {
+                s.generic_type_params.insert(tp_name.clone());
+            }
+            call_scope_owned = s;
+            &call_scope_owned
+        };
+
+        for (i, arg) in args.iter().enumerate() {
+            let Some((param_name, expected, allow_optional_nil)) =
+                expected_args.get(i).and_then(|entry| entry.as_ref())
+            else {
+                continue;
+            };
+            let Some(actual) = self.infer_type(arg, scope) else {
+                continue;
+            };
+            if matches!(sig.kind, CallKind::Builtin) {
+                self.check_strict_llm_option_keys(sig.name, param_name, expected, arg);
+            }
+            if !matches!(sig.kind, CallKind::Builtin)
+                || !Self::builtin_uses_strict_llm_option_keys(sig.name, param_name)
+            {
+                self.check_unknown_option_bag_fields(
+                    format!("argument {} `{}`", i + 1, param_name),
+                    param_name,
+                    expected,
+                    arg,
+                    call_scope,
+                );
+            }
+            let compatible = contextual_args.get(i).copied().unwrap_or(false)
+                || self.types_compatible(expected, &actual, call_scope)
+                || (*allow_optional_nil
+                    && without_nil(&actual).is_none_or(|non_nil| {
+                        self.types_compatible(expected, &non_nil, call_scope)
+                    }));
+            if !compatible {
+                self.type_mismatch_at(
+                    Code::ArgumentTypeMismatch,
+                    format!("argument {} `{}`", i + 1, param_name),
+                    expected,
+                    &actual,
+                    arg.span,
+                    (
+                        sig.definition_span
+                            .map(|span| (span, format!("parameter `{param_name}` declared here"))),
+                        Some(arg.span),
+                    ),
+                    call_scope,
+                );
+            }
+        }
+
+        for (type_param, bound) in &sig.where_clauses {
+            if let Some(concrete_type) = type_bindings.get(type_param) {
+                let concrete_name = format_type(concrete_type);
+                let Some(base_type_name) = Self::base_type_name(concrete_type) else {
+                    self.error_at(Code::WhereConstraintMismatch,
+                        format!(
+                            "Type '{concrete_name}' does not satisfy interface '{bound}': only named types can satisfy interfaces (required by constraint `where {type_param}: {bound}`)"
+                        ),
+                        span,
+                    );
+                    continue;
+                };
+                if let Some(reason) =
+                    self.interface_mismatch_reason(base_type_name, bound, &BTreeMap::new(), scope)
+                {
+                    self.error_at(
+                        Code::WhereConstraintMismatch,
+                        format!(
+                            "Type '{concrete_name}' does not satisfy interface '{bound}': {reason} \
+                             (required by constraint `where {type_param}: {bound}`)"
+                        ),
+                        span,
+                    );
+                }
+            }
+        }
+    }
+
     fn check_builtin_signature_call(
         &mut self,
         name: &str,
@@ -226,210 +611,17 @@ impl TypeChecker {
         scope: &mut TypeScope,
         span: Span,
     ) {
-        if !type_args.is_empty() {
-            if !sig.is_generic() {
-                self.error_at(
-                    Code::GenericTypeArgumentUnsupported,
-                    format!("Builtin function '{name}' does not declare type parameters"),
-                    span,
-                );
-            } else if type_args.len() != sig.type_params.len() {
-                self.error_at(
-                    Code::GenericTypeArgumentArity,
-                    format!(
-                        "Builtin function '{}' expects {} type arguments, got {}",
-                        name,
-                        sig.type_params.len(),
-                        type_args.len()
-                    ),
-                    span,
-                );
-            }
-        }
-
-        if !has_spread {
-            let required = sig.required_params();
-            let total = sig.params.len();
-            let arity_ok = if sig.has_rest {
-                args.len() >= total.saturating_sub(1)
-            } else {
-                args.len() >= required && args.len() <= total
-            };
-            if !arity_ok {
-                let (expected, single_arg) = if sig.has_rest {
-                    (
-                        format!("at least {}", total.saturating_sub(1)),
-                        total.saturating_sub(1) == 1,
-                    )
-                } else if required == total {
-                    (total.to_string(), total == 1)
-                } else {
-                    (format!("{required}-{total}"), false)
-                };
-                let arg_word = if single_arg { "argument" } else { "arguments" };
-                self.warning_at(
-                    Code::BuiltinArity,
-                    format!(
-                        "Builtin function '{}' expects {} {}, got {}",
-                        name,
-                        expected,
-                        arg_word,
-                        args.len()
-                    ),
-                    span,
-                );
-            }
-        }
-
-        let type_param_names = sig.type_param_names();
-        let type_param_set: std::collections::BTreeSet<String> =
-            type_param_names.iter().cloned().collect();
-        let mut type_bindings: BTreeMap<String, TypeExpr> = BTreeMap::new();
-        let explicit_type_args =
-            type_args.len() == type_param_names.len() && !type_param_names.is_empty();
-        if explicit_type_args {
-            for (param_name, type_arg) in type_param_names.iter().zip(type_args.iter()) {
-                type_bindings.insert(param_name.clone(), type_arg.clone());
-            }
-        } else {
-            // See the user-fn path: arg-driven inference is skipped when the
-            // caller supplied explicit type arguments — those are a frozen
-            // contract, checked per-argument against the instantiation.
-            for (i, arg) in args.iter().enumerate() {
-                let Some(param) = Self::builtin_param_for_arg(sig, i) else {
-                    continue;
-                };
-                if param.ty.is_any() {
-                    continue;
-                }
-                let param_ty = param.ty.to_type_expr();
-                if let Err(message) = self.bind_from_arg_node(
-                    &param_ty,
-                    arg,
-                    &type_param_set,
-                    &mut type_bindings,
-                    scope,
-                ) {
-                    self.error_at(Code::ArgumentTypeMismatch, message, arg.span);
-                }
-            }
-        }
-
-        let unbound_type_params: std::collections::BTreeSet<String> = type_param_set
-            .iter()
-            .filter(|name| !type_bindings.contains_key(*name))
-            .cloned()
-            .collect();
-        let mut expected_args: Vec<Option<TypeExpr>> = Vec::with_capacity(args.len());
-        let mut contextual_args = Vec::with_capacity(args.len());
-        for (i, arg) in args.iter().enumerate() {
-            let Some(param) = Self::builtin_param_for_arg(sig, i) else {
-                self.check_node(arg, scope);
-                expected_args.push(None);
-                contextual_args.push(false);
-                continue;
-            };
-            if param.ty.is_any() || matches!(param.ty, builtin_signatures::Ty::SchemaOf(_)) {
-                self.check_node(arg, scope);
-                expected_args.push(None);
-                contextual_args.push(false);
-                continue;
-            }
-            let expected = Self::apply_type_bindings(&param.ty.to_type_expr(), &type_bindings);
-            let contextual_expected =
-                (!Self::contains_type_param(&expected, &unbound_type_params)).then_some(&expected);
-            let context_checked = self.check_node_with_expected(arg, contextual_expected, scope);
-            expected_args.push(Some(expected));
-            contextual_args.push(context_checked);
-        }
-
-        // `call_scope` only needs to differ from `scope` when the callee
-        // declares its own generic type params (which must be visible while
-        // we check this call's arguments). The common case — calling a
-        // non-generic builtin — borrows `scope` directly, sparing a clone
-        // per call. Otherwise we allocate a child that adds those names.
-        let call_scope_owned;
-        let call_scope: &TypeScope = if sig.type_params.is_empty() {
-            scope
-        } else {
-            let mut s = scope.child();
-            for tp_name in sig.type_params {
-                s.generic_type_params.insert((*tp_name).to_string());
-            }
-            call_scope_owned = s;
-            &call_scope_owned
+        let check_sig = CallCheckSignature {
+            name,
+            kind: CallKind::Builtin,
+            params: Self::builtin_call_params(sig),
+            required_params: sig.required_params(),
+            type_param_names: sig.type_param_names(),
+            where_clauses: sig.where_clause_strings(),
+            has_rest: sig.has_rest,
+            definition_span: None,
         };
-
-        for (i, arg) in args.iter().enumerate() {
-            let Some(param) = Self::builtin_param_for_arg(sig, i) else {
-                continue;
-            };
-            let Some(expected) = expected_args.get(i).and_then(|ty| ty.as_ref()) else {
-                continue;
-            };
-            let actual = self.infer_type(arg, scope);
-            if let Some(actual) = &actual {
-                self.check_strict_llm_option_keys(name, param.name, expected, arg);
-                if !Self::builtin_uses_strict_llm_option_keys(name, param.name) {
-                    self.check_unknown_option_bag_fields(
-                        format!("argument {} `{}`", i + 1, param.name),
-                        param.name,
-                        expected,
-                        arg,
-                        call_scope,
-                    );
-                }
-                let compatible = contextual_args.get(i).copied().unwrap_or(false)
-                    || self.types_compatible(expected, actual, call_scope)
-                    || (param.optional
-                        && without_nil(actual).is_none_or(|non_nil| {
-                            self.types_compatible(expected, &non_nil, call_scope)
-                        }));
-                if !compatible {
-                    self.type_mismatch_at(
-                        Code::ArgumentTypeMismatch,
-                        format!("argument {} `{}`", i + 1, param.name),
-                        expected,
-                        actual,
-                        arg.span,
-                        (None, Some(arg.span)),
-                        call_scope,
-                    );
-                }
-            }
-        }
-
-        if !sig.where_clauses.is_empty() {
-            for (type_param, bound) in sig.where_clauses {
-                if let Some(concrete_type) = type_bindings.get(*type_param) {
-                    let concrete_name = format_type(concrete_type);
-                    let Some(base_type_name) = Self::base_type_name(concrete_type) else {
-                        self.error_at(Code::WhereConstraintMismatch,
-                            format!(
-                                "Type '{concrete_name}' does not satisfy interface '{bound}': only named types can satisfy interfaces (required by constraint `where {type_param}: {bound}`)"
-                            ),
-                            span,
-                        );
-                        continue;
-                    };
-                    if let Some(reason) = self.interface_mismatch_reason(
-                        base_type_name,
-                        bound,
-                        &BTreeMap::new(),
-                        scope,
-                    ) {
-                        self.error_at(
-                            Code::WhereConstraintMismatch,
-                            format!(
-                                "Type '{concrete_name}' does not satisfy interface '{bound}': {reason} \
-                                 (required by constraint `where {type_param}: {bound}`)"
-                            ),
-                            span,
-                        );
-                    }
-                }
-            }
-        }
+        self.check_call_signature_arguments(check_sig, type_args, args, has_spread, scope, span);
     }
 
     pub(in crate::typechecker) fn check_harness_method_call(
@@ -1302,202 +1494,19 @@ impl TypeChecker {
         // Check against known function signatures
         let has_spread = args.iter().any(|a| matches!(&a.node, Node::Spread(_)));
         if let Some(sig) = scope.get_fn(name).cloned() {
-            if !type_args.is_empty() {
-                if sig.type_param_names.is_empty() {
-                    self.error_at(
-                        Code::GenericTypeArgumentUnsupported,
-                        format!("Function '{name}' does not declare type parameters"),
-                        span,
-                    );
-                } else if type_args.len() != sig.type_param_names.len() {
-                    self.error_at(
-                        Code::GenericTypeArgumentArity,
-                        format!(
-                            "Function '{}' expects {} type arguments, got {}",
-                            name,
-                            sig.type_param_names.len(),
-                            type_args.len()
-                        ),
-                        span,
-                    );
-                }
-            }
-            if !has_spread && !is_builtin(name) {
-                let arity_ok = if sig.has_rest {
-                    args.len() >= sig.params.len().saturating_sub(1)
-                } else {
-                    args.len() >= sig.required_params && args.len() <= sig.params.len()
-                };
-                if !arity_ok {
-                    let total = sig.params.len();
-                    let (expected, single_arg) = if sig.has_rest {
-                        (
-                            format!("at least {}", total.saturating_sub(1)),
-                            total.saturating_sub(1) == 1,
-                        )
-                    } else if sig.required_params == total {
-                        (format!("{total}"), total == 1)
-                    } else {
-                        (format!("{}-{}", sig.required_params, total), false)
-                    };
-                    let arg_word = if single_arg { "argument" } else { "arguments" };
-                    self.warning_at(
-                        Code::OrchestrationArity,
-                        format!(
-                            "Function '{}' expects {} {}, got {}",
-                            name,
-                            expected,
-                            arg_word,
-                            args.len()
-                        ),
-                        span,
-                    );
-                }
-            }
-            let mut type_bindings: BTreeMap<String, TypeExpr> = BTreeMap::new();
-            let type_param_set: std::collections::BTreeSet<String> =
-                sig.type_param_names.iter().cloned().collect();
-            let explicit_type_args =
-                type_args.len() == sig.type_param_names.len() && !sig.type_param_names.is_empty();
-            if explicit_type_args {
-                for (param_name, type_arg) in sig.type_param_names.iter().zip(type_args.iter()) {
-                    type_bindings.insert(param_name.clone(), type_arg.clone());
-                }
-            } else {
-                // Arg-driven inference only runs when the caller did not
-                // supply explicit type arguments: an explicit `f<int>(...)`
-                // is a contract, and the per-argument checks below report a
-                // plain "expected int, found string" against the frozen
-                // instantiation instead of silently widening `T` via the
-                // union-join in `bind_type_param`.
-                for (i, arg) in args.iter().enumerate() {
-                    let Some((_param_name, param_type)) = Self::function_param_for_arg(&sig, i)
-                    else {
-                        continue;
-                    };
-                    if let Some(param_ty) = param_type {
-                        if let Err(message) = self.bind_from_arg_node(
-                            param_ty,
-                            arg,
-                            &type_param_set,
-                            &mut type_bindings,
-                            scope,
-                        ) {
-                            self.error_at(Code::ArgumentTypeMismatch, message, arg.span);
-                        }
-                    }
-                }
-            }
-            let unbound_type_params: std::collections::BTreeSet<String> = type_param_set
-                .iter()
-                .filter(|name| !type_bindings.contains_key(*name))
-                .cloned()
-                .collect();
-            let mut expected_args: Vec<Option<(String, TypeExpr)>> = Vec::with_capacity(args.len());
-            let mut contextual_args = Vec::with_capacity(args.len());
-            for (i, arg) in args.iter().enumerate() {
-                let Some((param_name, param_type)) = Self::function_param_for_arg(&sig, i) else {
-                    self.check_node(arg, scope);
-                    expected_args.push(None);
-                    contextual_args.push(false);
-                    continue;
-                };
-                if let Some(expected) = param_type {
-                    let expected = Self::apply_type_bindings(expected, &type_bindings);
-                    let contextual_expected =
-                        (!Self::contains_type_param(&expected, &unbound_type_params))
-                            .then_some(&expected);
-                    let context_checked =
-                        self.check_node_with_expected(arg, contextual_expected, scope);
-                    expected_args.push(Some((param_name.to_string(), expected)));
-                    contextual_args.push(context_checked);
-                } else {
-                    self.check_node(arg, scope);
-                    expected_args.push(None);
-                    contextual_args.push(false);
-                }
-            }
-
-            // Most callees have no generic type params and can reuse the
-            // caller's scope by reference. The branch with a child scope
-            // is only allocated when generic names need to be visible
-            // during arg checking.
-            let call_scope_owned;
-            let call_scope: &TypeScope = if sig.type_param_names.is_empty() {
-                scope
-            } else {
-                let mut s = scope.child();
-                for tp_name in &sig.type_param_names {
-                    s.generic_type_params.insert(tp_name.clone());
-                }
-                call_scope_owned = s;
-                &call_scope_owned
+            let check_sig = CallCheckSignature {
+                name,
+                kind: CallKind::Function,
+                params: Self::function_call_params(&sig),
+                required_params: sig.required_params,
+                type_param_names: sig.type_param_names.clone(),
+                where_clauses: sig.where_clauses.clone(),
+                has_rest: sig.has_rest,
+                definition_span: sig.definition_span,
             };
-            for (i, arg) in args.iter().enumerate() {
-                if let Some((param_name, expected)) =
-                    expected_args.get(i).and_then(|entry| entry.as_ref())
-                {
-                    let actual = self.infer_type(arg, scope);
-                    if let Some(actual) = &actual {
-                        self.check_unknown_option_bag_fields(
-                            format!("argument {} `{}`", i + 1, param_name),
-                            param_name,
-                            expected,
-                            arg,
-                            call_scope,
-                        );
-                        if !contextual_args.get(i).copied().unwrap_or(false)
-                            && !self.types_compatible(expected, actual, call_scope)
-                        {
-                            self.type_mismatch_at(
-                                Code::ArgumentTypeMismatch,
-                                format!("argument {} `{}`", i + 1, param_name),
-                                expected,
-                                actual,
-                                arg.span,
-                                (
-                                    sig.definition_span.map(|span| {
-                                        (span, format!("parameter `{param_name}` declared here"))
-                                    }),
-                                    Some(arg.span),
-                                ),
-                                call_scope,
-                            );
-                        }
-                    }
-                }
-            }
-            if !sig.where_clauses.is_empty() {
-                for (type_param, bound) in &sig.where_clauses {
-                    if let Some(concrete_type) = type_bindings.get(type_param) {
-                        let concrete_name = format_type(concrete_type);
-                        let Some(base_type_name) = Self::base_type_name(concrete_type) else {
-                            self.error_at(Code::WhereConstraintMismatch,
-                                format!(
-                                    "Type '{concrete_name}' does not satisfy interface '{bound}': only named types can satisfy interfaces (required by constraint `where {type_param}: {bound}`)"
-                                ),
-                                span,
-                            );
-                            continue;
-                        };
-                        if let Some(reason) = self.interface_mismatch_reason(
-                            base_type_name,
-                            bound,
-                            &BTreeMap::new(),
-                            scope,
-                        ) {
-                            self.error_at(
-                                Code::WhereConstraintMismatch,
-                                format!(
-                                    "Type '{concrete_name}' does not satisfy interface '{bound}': {reason} \
-                                     (required by constraint `where {type_param}: {bound}`)"
-                                ),
-                                span,
-                            );
-                        }
-                    }
-                }
-            }
+            self.check_call_signature_arguments(
+                check_sig, type_args, args, has_spread, scope, span,
+            );
         } else if let Some(sig) =
             builtin_signatures::lookup(name).filter(|_| !self.name_is_imported(name))
         {

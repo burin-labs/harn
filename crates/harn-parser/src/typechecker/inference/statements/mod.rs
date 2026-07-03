@@ -9,8 +9,6 @@
 //! `check_pattern_defaults`) and `check_attributes` live here because
 //! they are only called from `check_node`'s arms.
 
-use std::collections::BTreeMap;
-
 use harn_lexer::Span;
 mod access;
 mod attributes;
@@ -29,8 +27,8 @@ use super::super::format::{format_type, is_obvious_type};
 use super::super::is_gradual_type_name;
 use super::super::schema_inference::schema_type_expr_from_node;
 use super::super::scope::{
-    EnumDeclInfo, FnSignature, ImplMethodSig, InferredType, InterfaceDeclInfo, PathNarrowing,
-    StructDeclInfo, TypeAliasInfo, TypeScope,
+    EnumDeclInfo, ImplMethodSig, InferredType, InterfaceDeclInfo, PathNarrowing, StructDeclInfo,
+    TypeAliasInfo, TypeScope,
 };
 use super::super::union::{
     collapse_members_opt, contains_nil, discriminant_field, narrow_shape_union_by_tag,

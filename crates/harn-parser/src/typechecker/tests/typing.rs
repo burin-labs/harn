@@ -186,6 +186,19 @@ fn test_rest_param_binding_is_list_of_declared_type() {
 }
 
 #[test]
+fn test_generic_rest_return_type_binds_from_all_rest_args() {
+    let errs = errors(
+        r#"pipeline t(task) {
+  fn wrap<T>(label: string, ...xs: list<T>) -> list<T> { return [] }
+  let bad: list<string> = wrap("items", [], [1])
+}"#,
+    );
+    assert_eq!(errs.len(), 1, "expected one mismatch, got: {errs:?}");
+    assert!(errs[0].contains("expected list<string>"), "{errs:?}");
+    assert!(errs[0].contains("found list<int>"), "{errs:?}");
+}
+
+#[test]
 fn test_transcript_append_builtins_preserve_input_container_type() {
     let errs = errors(
         r#"pipeline t(task) {
@@ -1450,6 +1463,18 @@ fn test_builtin_arity_warning() {
     let warns = warnings(r#"pipeline t(task) { len("abc", "extra") }"#);
     assert_eq!(warns.len(), 1);
     assert!(warns[0].contains("Builtin function 'len' expects 1 argument, got 2"));
+}
+
+#[test]
+fn test_user_function_named_like_builtin_reports_user_arity() {
+    let warns = warnings(
+        r#"pipeline t(task) {
+  fn len() -> int { return 0 }
+  len("extra")
+}"#,
+    );
+    assert_eq!(warns.len(), 1, "expected one arity warning, got: {warns:?}");
+    assert!(warns[0].contains("Function 'len' expects 0 arguments, got 1"));
 }
 
 #[test]

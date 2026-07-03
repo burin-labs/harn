@@ -560,26 +560,8 @@ impl TypeChecker {
                         if sig.type_param_names.is_empty() {
                             return Some(ty);
                         }
-                        let mut bindings = BTreeMap::new();
-                        let type_param_set: std::collections::BTreeSet<String> =
-                            sig.type_param_names.iter().cloned().collect();
-                        if type_args.len() == sig.type_param_names.len() {
-                            for (param_name, type_arg) in sig.type_param_names.iter().zip(type_args)
-                            {
-                                bindings.insert(param_name.clone(), type_arg.clone());
-                            }
-                        }
-                        for (arg, (_param_name, param_type)) in args.iter().zip(sig.params.iter()) {
-                            if let Some(param_ty) = param_type {
-                                let _ = self.bind_from_arg_node(
-                                    param_ty,
-                                    arg,
-                                    &type_param_set,
-                                    &mut bindings,
-                                    scope,
-                                );
-                            }
-                        }
+                        let mut bindings =
+                            self.infer_function_call_type_bindings(&sig, type_args, args, scope);
                         // Type parameters that the call site never pinned (e.g.
                         // `pick_keys({})` with an empty literal) would otherwise
                         // surface as a phantom `Named("V")` in downstream
@@ -614,24 +596,8 @@ impl TypeChecker {
                 // option).
                 if let Some(sig) = builtin_signatures::lookup(name).filter(|s| s.is_generic()) {
                     let type_param_names = sig.type_param_names();
-                    let type_param_set: std::collections::BTreeSet<String> =
-                        type_param_names.iter().cloned().collect();
-                    let mut bindings: BTreeMap<String, TypeExpr> = BTreeMap::new();
-                    if type_args.len() == type_param_names.len() {
-                        for (param_name, type_arg) in type_param_names.iter().zip(type_args) {
-                            bindings.insert(param_name.clone(), type_arg.clone());
-                        }
-                    }
-                    let param_types = sig.param_type_exprs();
-                    for (arg, param_ty) in args.iter().zip(param_types.iter()) {
-                        let _ = self.bind_from_arg_node(
-                            param_ty,
-                            arg,
-                            &type_param_set,
-                            &mut bindings,
-                            scope,
-                        );
-                    }
+                    let bindings =
+                        self.infer_builtin_call_type_bindings(sig, type_args, args, scope);
                     let all_bound = type_param_names.iter().all(|tp| bindings.contains_key(tp));
                     if all_bound {
                         return Some(Self::apply_type_bindings(
