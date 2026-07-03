@@ -437,7 +437,7 @@ return { total: total, first_title: first.records[0].title }
     fn allowlist_blocks_tools_outside_the_declared_connector_set() {
         let err = block_on_local(async {
             let tools = secret_tool_registry().await;
-            let allow: BTreeSet<String> = ["something_else".to_string()].into_iter().collect();
+            let allow: BTreeSet<String> = std::iter::once("something_else".to_string()).collect();
             let mut vm = crate::Vm::new();
             crate::register_vm_stdlib(&mut vm);
             let ctx = AsyncBuiltinCtx::for_test(vm);
