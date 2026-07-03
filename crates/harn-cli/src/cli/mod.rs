@@ -136,8 +136,8 @@ pub(crate) use merge_captain::{
 };
 pub(crate) use models::{
     ModelInfoArgs, ModelRecommendArgs, ModelsArgs, ModelsCommand, ModelsInstallArgs,
-    ModelsListArgs, ModelsLoraArgs, ModelsLoraCommand, ModelsLoraInspectArgs, ModelsLoraPlanArgs,
-    ModelsTestArgs,
+    ModelsListArgs, ModelsLoraArgs, ModelsLoraCommand, ModelsLoraExportArgs, ModelsLoraInspectArgs,
+    ModelsLoraPlanArgs, ModelsTestArgs,
 };
 pub(crate) use orchestrator::{
     OrchestratorArgs, OrchestratorCommand, OrchestratorDeployArgs, OrchestratorDeployProvider,

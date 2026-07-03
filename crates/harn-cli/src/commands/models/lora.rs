@@ -2,22 +2,25 @@ use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
+use sha2::{Digest as _, Sha256};
 
 use crate::cli::{ModelsLoraArgs, ModelsLoraCommand, ModelsLoraInspectArgs, ModelsLoraPlanArgs};
 use crate::dispatch;
 use crate::env_guard::ScopedEnvVar;
 
+mod export;
+
 const LORA_INSPECT_PAYLOAD_ENV: &str = "HARN_MODELS_LORA_INSPECT_PAYLOAD_JSON";
 const LORA_INSPECT_PAYLOAD_PRETTY_ENV: &str = "HARN_MODELS_LORA_INSPECT_PAYLOAD_PRETTY";
 const LORA_PLAN_PAYLOAD_ENV: &str = "HARN_MODELS_LORA_PLAN_PAYLOAD_JSON";
 const LORA_PLAN_PAYLOAD_PRETTY_ENV: &str = "HARN_MODELS_LORA_PLAN_PAYLOAD_PRETTY";
-
 /// Serialises the dispatch path so concurrent in-process callers do not race on
 /// the env vars that carry the Rust-collected adapter/catalog facts.
 static DISPATCH_LORA_INSPECT_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 pub(crate) async fn run(args: ModelsLoraArgs) {
     let exit_code = match args.command {
+        ModelsLoraCommand::Export(args) => export::export_dataset(&args).await,
         ModelsLoraCommand::Inspect(args) => inspect(&args).await,
         ModelsLoraCommand::Plan(args) => plan(&args).await,
     };
@@ -412,6 +415,12 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
         },
         warnings,
     })
+}
+
+fn sha256_file(path: &Path) -> Result<String, String> {
+    let bytes = std::fs::read(path)
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    Ok(hex::encode(Sha256::digest(bytes)))
 }
 
 fn inspect_adapter(input: &str, explicit_name: Option<&str>) -> Result<AdapterReport, String> {
