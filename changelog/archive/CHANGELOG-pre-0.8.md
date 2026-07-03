@@ -2,7 +2,7 @@
 
 This archive holds detailed per-patch release notes for Harn **v0.6.0
 through v0.7.62**. Active per-patch notes for v0.8 and newer live in
-[CHANGELOG.md](CHANGELOG.md); the condensed pre-v0.6 history lives in
+[CHANGELOG.md](../../CHANGELOG.md); the condensed pre-v0.6 history lives in
 [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 
 Snipped from `CHANGELOG.md` on 2026-05-27 to keep the active changelog
