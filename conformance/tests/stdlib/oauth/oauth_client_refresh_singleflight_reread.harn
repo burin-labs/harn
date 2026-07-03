@@ -1,0 +1,237 @@
+// std/oauth/client: refresh decisions re-read storage inside the refresh lock.
+//
+// The custom storage hook simulates another worker rotating the token after
+// this caller observed a stale/401 token but before its locked refresh body
+// runs. The client must reuse that fresh token and avoid a second refresh
+// grant.
+import { client, refresh, request, token } from "std/oauth/client"
+import { custom } from "std/oauth/providers"
+import { memory } from "std/oauth/storage"
+
+fn provider(id) {
+  return custom(
+    {
+      id: id,
+      auth_url: "https://idp.example/authorize",
+      token_url: "https://idp.example/token",
+      default_scopes: ["read"],
+    },
+  )
+}
+
+fn locking_store(inner, rotated_token) {
+  return inner
+    + {
+    with_refresh_lock: { key, body ->
+      inner.set(key, rotated_token, 3600)
+      return body()
+    },
+  }
+}
+
+fn require_eq(label, actual, expected) {
+  if actual != expected {
+    throw label + ": expected " + to_string(expected) + ", got " + to_string(actual)
+  }
+}
+
+fn exercise_fresh_token_no_lock(harness: Harness) {
+  let _ = mock_time(1700000000000)
+  let now = to_int(harness.clock.timestamp())
+  let inner = memory()
+  inner
+    .set(
+    "freshNoLock",
+    {
+      access_token: "ACCESS-FRESH",
+      refresh_token: "REFRESH-FRESH",
+      issued_at_unix: now,
+      expires_at_unix: now + 3600,
+      token_type: "Bearer",
+    },
+  )
+  var lock_calls = 0
+  let store = inner
+    + {
+    with_refresh_lock: { key, body ->
+      lock_calls = lock_calls + 1
+      return body()
+    },
+  }
+  let cli = client(provider("freshNoLock"), {client_id: "cli-id", storage: store})
+  http_mock_clear()
+  http_mock(
+    "POST",
+    "https://idp.example/token",
+    {
+      status: 500,
+      body: "{\"error\":\"should_not_refresh\"}",
+      headers: {"content-type": "application/json"},
+    },
+  )
+  require_eq("token() returns the already-fresh token", token(cli), "ACCESS-FRESH")
+  require_eq("fresh token path must not acquire refresh lock", lock_calls, 0)
+  require_eq(
+    "fresh token path must not call token endpoint",
+    len(http_mock_calls({include_sensitive: true})),
+    0,
+  )
+  let _ = unmock_time()
+}
+
+fn exercise_ttl_threshold(harness: Harness) {
+  let _ = mock_time(1700000000000)
+  let now = to_int(harness.clock.timestamp())
+  let inner = memory()
+  inner
+    .set(
+    "ttlReread",
+    {
+      access_token: "ACCESS-STALE",
+      refresh_token: "REFRESH-STALE",
+      issued_at_unix: now - 3600,
+      expires_at_unix: now - 1800,
+      token_type: "Bearer",
+    },
+  )
+  let store = locking_store(
+    inner,
+    {
+      access_token: "ACCESS-FRESH",
+      refresh_token: "REFRESH-FRESH",
+      issued_at_unix: now,
+      expires_at_unix: now + 3600,
+      token_type: "Bearer",
+    },
+  )
+  let cli = client(provider("ttlReread"), {client_id: "cli-id", storage: store})
+  http_mock_clear()
+  http_mock(
+    "POST",
+    "https://idp.example/token",
+    {
+      status: 500,
+      body: "{\"error\":\"should_not_refresh\"}",
+      headers: {"content-type": "application/json"},
+    },
+  )
+  require_eq("token() returns the locked re-read token", token(cli), "ACCESS-FRESH")
+  require_eq(
+    "no refresh grant spent after locked re-read",
+    len(http_mock_calls({include_sensitive: true})),
+    0,
+  )
+  let _ = unmock_time()
+}
+
+fn exercise_post_401(harness: Harness) {
+  let _ = mock_time(1700000000000)
+  let now = to_int(harness.clock.timestamp())
+  let inner = memory()
+  inner
+    .set(
+    "post401Reread",
+    {
+      access_token: "ACCESS-OLD",
+      refresh_token: "REFRESH-OLD",
+      issued_at_unix: now,
+      expires_at_unix: now + 3600,
+      token_type: "Bearer",
+    },
+  )
+  let store = locking_store(
+    inner,
+    {
+      access_token: "ACCESS-ROTATED",
+      refresh_token: "REFRESH-ROTATED",
+      issued_at_unix: now,
+      expires_at_unix: now + 3600,
+      token_type: "Bearer",
+    },
+  )
+  let cli = client(provider("post401Reread"), {client_id: "cli-id", storage: store})
+  http_mock_clear()
+  http_mock(
+    "POST",
+    "https://idp.example/token",
+    {
+      status: 500,
+      body: "{\"error\":\"should_not_refresh\"}",
+      headers: {"content-type": "application/json"},
+    },
+  )
+  http_mock(
+    "GET",
+    "https://api.example.test/me",
+    {
+      responses: [
+        {status: 401, body: "{\"error\":\"token expired\"}", headers: {"content-type": "application/json"}},
+        {status: 200, body: "{\"user\":\"agent\"}", headers: {"content-type": "application/json"}},
+      ],
+    },
+  )
+  let response = request(cli, "GET", "https://api.example.test/me")
+  require_eq("request() retries with another worker's rotated token", response.status, 200)
+  let calls = http_mock_calls({include_sensitive: true})
+  require_eq("no refresh grant spent after locked post-401 re-read", len(calls), 2)
+  require_eq("first GET used stale token", calls[0].headers.authorization, "Bearer ACCESS-OLD")
+  require_eq("retry used rotated token", calls[1].headers.authorization, "Bearer ACCESS-ROTATED")
+  let _ = unmock_time()
+}
+
+fn exercise_forced_refresh(harness: Harness) {
+  let _ = mock_time(1700000000000)
+  let now = to_int(harness.clock.timestamp())
+  let inner = memory()
+  inner
+    .set(
+    "forcedReread",
+    {
+      access_token: "ACCESS-OLD",
+      refresh_token: "REFRESH-OLD",
+      issued_at_unix: now,
+      expires_at_unix: now + 3600,
+      token_type: "Bearer",
+    },
+  )
+  let store = locking_store(
+    inner,
+    {
+      access_token: "ACCESS-ROTATED",
+      refresh_token: "REFRESH-ROTATED",
+      issued_at_unix: now,
+      expires_at_unix: now + 3600,
+      token_type: "Bearer",
+    },
+  )
+  let cli = client(provider("forcedReread"), {client_id: "cli-id", storage: store})
+  http_mock_clear()
+  http_mock(
+    "POST",
+    "https://idp.example/token",
+    {
+      status: 500,
+      body: "{\"error\":\"should_not_refresh\"}",
+      headers: {"content-type": "application/json"},
+    },
+  )
+  require_eq(
+    "refresh() returns another worker's rotated token",
+    refresh(cli).access_token,
+    "ACCESS-ROTATED",
+  )
+  require_eq(
+    "no refresh grant spent after locked forced-refresh re-read",
+    len(http_mock_calls({include_sensitive: true})),
+    0,
+  )
+  let _ = unmock_time()
+}
+
+pipeline test(task) {
+  exercise_fresh_token_no_lock(harness)
+  exercise_ttl_threshold(harness)
+  exercise_post_401(harness)
+  exercise_forced_refresh(harness)
+  log("oauth client refresh singleflight reread ok")
+}

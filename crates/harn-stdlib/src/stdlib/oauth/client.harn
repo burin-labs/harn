@@ -12,8 +12,10 @@
  * `token(client)` is the convenience that returns a valid access token
  * string and refreshes transparently when the stored token is past 75%
  * of its TTL. Tokens never travel through closure captures —
- * `token()` always reads the storage backend as the source of truth so
- * concurrent in-process callers see the latest refresh.
+ * `token()` always reads the storage backend as the source of truth.
+ * Refreshes run under `storage.with_refresh_lock(...)` and re-read
+ * inside that transaction so concurrent TTL, explicit, and post-401
+ * callers collapse to a single token-endpoint refresh per storage key.
  *
  *     import { providers } from "std/oauth/providers"
  *     import { memory } from "std/oauth/storage"
@@ -46,11 +48,11 @@
  * `token_refreshed` event log entry containing the provider id,
  * storage key, and pre/post expiry — never the new access token.
  *
- * Concurrency: storage IS the source of truth. Two concurrent
- * `token(cli)` calls may both observe staleness and both issue a
- * refresh; the second `set` wins and both callers see the same
- * fresh-enough token afterwards. Pre-refresh at 75% TTL keeps that
- * window narrow.
+ * Concurrency: storage IS the source of truth. Token refresh is
+ * single-flight per `(storage backend, storage_key)`; waiters re-read
+ * the stored token inside the refresh transaction and reuse another
+ * worker's rotated access/refresh token instead of spending a second
+ * refresh grant.
  */
 import { merge } from "std/json"
 import {
@@ -109,6 +111,7 @@ fn __require_storage(storage) {
   let g = storage?.get
   let s = storage?.set
   let d = storage?.delete
+  let w = storage?.with_refresh_lock
   if type_of(g) != "closure" && type_of(g) != "builtin" {
     throw "std/oauth/client: opts.storage.get must be a function"
   }
@@ -117,6 +120,9 @@ fn __require_storage(storage) {
   }
   if type_of(d) != "closure" && type_of(d) != "builtin" {
     throw "std/oauth/client: opts.storage.delete must be a function"
+  }
+  if type_of(w) != "closure" && type_of(w) != "builtin" {
+    throw "std/oauth/client: opts.storage.with_refresh_lock must be a function"
   }
   return storage
 }
@@ -478,17 +484,63 @@ fn __refresh_locked(harness: Harness, cfg, prev_token, reason) {
   return next_token
 }
 
-fn __maybe_refresh(harness: Harness, cfg, reason) {
-  let stored = cfg.storage.get(cfg.storage_key)
-  if stored == nil {
+fn __same_access_token(stored, observed_token) -> bool {
+  if observed_token == nil {
+    return true
+  }
+  return to_string(stored?.access_token ?? "") == to_string(observed_token?.access_token ?? "")
+}
+
+fn __same_token_identity(stored, observed_token) -> bool {
+  if observed_token == nil {
+    return true
+  }
+  return __same_access_token(stored, observed_token)
+    && to_string(stored?.refresh_token ?? "") == to_string(observed_token?.refresh_token ?? "")
+}
+
+fn __refresh_needed(stored, now_s, reason, observed_token = nil) -> bool {
+  if reason == "forced" {
+    if !__same_token_identity(stored, observed_token) {
+      return false
+    }
+    return true
+  }
+  if reason == "post_401" {
+    if !__same_access_token(stored, observed_token) {
+      return false
+    }
+    return true
+  }
+  return __token_is_stale(stored, now_s)
+}
+
+fn __maybe_refresh(harness: Harness, cfg, reason, observed_token = nil) {
+  let observed = cfg.storage.get(cfg.storage_key)
+  if observed == nil {
     throw __DIAGNOSTIC_REFRESH_EXPIRED
       + ": std/oauth/client: no token in storage; run authorization first"
   }
   let now_s = __now_seconds(harness)
-  if !__token_is_stale(stored, now_s) && reason != "forced" && reason != "post_401" {
-    return stored
+  if !__refresh_needed(observed, now_s, reason, observed_token) {
+    return observed
   }
-  return __refresh_locked(harness, cfg, stored, reason)
+  return cfg.storage
+    .with_refresh_lock(
+    cfg.storage_key,
+    { ->
+      let stored = cfg.storage.get(cfg.storage_key)
+      if stored == nil {
+        throw __DIAGNOSTIC_REFRESH_EXPIRED
+          + ": std/oauth/client: no token in storage; run authorization first"
+      }
+      let locked_now_s = __now_seconds(harness)
+      if !__refresh_needed(stored, locked_now_s, reason, observed_token) {
+        return stored
+      }
+      return __refresh_locked(harness, cfg, stored, reason)
+    },
+  )
 }
 
 fn __get_valid_token(harness: Harness, cfg) {
@@ -773,7 +825,7 @@ fn __token_request(harness: Harness, cfg, method, url, opts) {
     return response
   }
   // 401 on a token-bearing call -> refresh + retry once.
-  let refreshed = __maybe_refresh(harness, cfg, "post_401")
+  let refreshed = __maybe_refresh(harness, cfg, "post_401", access)
   let retried_headers = __with_bearer(opts_dict?.headers ?? {}, refreshed.access_token)
   let retried_opts = merge(opts_dict, {headers: retried_headers})
   return harness.net.request(method, url, retried_opts)
@@ -845,7 +897,7 @@ pub fn client(provider, opts) -> OAuthClient {
     auth_endpoint: __redact_endpoint(cfg.auth_url),
     start_authorization: { -> __start_authorization(cfg) },
     exchange_code: { pkce, code, state -> __exchange_code(harness, cfg, pkce, code, state) },
-    refresh: { -> __maybe_refresh(harness, cfg, "forced") },
+    refresh: { -> __maybe_refresh(harness, cfg, "forced", cfg.storage.get(cfg.storage_key)) },
     token: { -> __get_valid_token(harness, cfg).access_token },
     current_token: { -> cfg.storage.get(cfg.storage_key) },
     token_exchange: { exchange_opts -> __token_exchange(harness, cfg, exchange_opts) },
@@ -858,7 +910,7 @@ pub fn client(provider, opts) -> OAuthClient {
  * token returns a valid access token for `client`, refreshing
  * transparently when the stored token is past 75% of its TTL or
  * already expired. Routes through the client's storage backend on
- * every call so concurrent in-process callers see the latest refresh.
+ * every call; refreshes are single-flight per storage key.
  *
  * @effects: [time, net]
  * @errors: [invalid_argument]

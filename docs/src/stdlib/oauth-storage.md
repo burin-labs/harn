@@ -3,9 +3,10 @@
 `std/oauth/storage` is the token-store abstraction shared by the OAuth
 client (`OAuth.client(...)`, RFC 6749 + 7636, RFC 8628 device flow). One
 storage handle backs every grant type, every refresh, and every revoke
-the client performs. A handle is just a dict with three closures —
-`get`, `set`, `delete` — so the client never needs to know whether a
-token lives in process memory, on disk, in a cloud platform, or in a vault.
+the client performs. A handle is just a dict with storage closures —
+`get`, `set`, `delete`, and `with_refresh_lock` — so the client never
+needs to know whether a token lives in process memory, on disk, in a cloud
+platform, or in a vault.
 
 The five backends are:
 
@@ -98,20 +99,24 @@ the `oauth_storage` host capability:
 | `oauth_storage.cloud_get` | `{scope, key}` | TokenSet or nil |
 | `oauth_storage.cloud_set` | `{scope, key, token, ttl_seconds?}` | nil |
 | `oauth_storage.cloud_delete` | `{scope, key}` | nil |
+| `oauth_storage.cloud_acquire_refresh_lock` | `{scope, key, timeout_seconds}` | lock lease |
+| `oauth_storage.cloud_release_refresh_lock` | `{scope, key, lock}` | nil |
 
 `scope` is `"session"` for `harn_cloud_session()` and `"org"` for
 `harn_cloud_org()`. The cloud-platform embedder is responsible for
-tenant-scoped storage (RLS) and refresh metadata.
+tenant-scoped storage (RLS), refresh metadata, and a backend-native lock
+lease so rotating refresh tokens are single-flight across every worker
+sharing the same cloud storage key.
 
 Tests can substitute the host with `host_mock("oauth_storage",
-"cloud_get", {result: ...})`. With no embedder and no mock, the call
-raises `oauth_storage.cloud_get is not available`, which is the
-deterministic "not configured" signal.
+"cloud_get", {result: ...})` and the matching refresh-lock operations.
+With no embedder and no mock, the missing `oauth_storage.cloud_*`
+operation raises a deterministic "not configured" signal.
 
 ## Custom backend hook protocol
 
 `custom(handlers)` lets callers plug in a vault, KMS, or
-platform-native keychain. `handlers` is a dict with three keys:
+platform-native keychain. `handlers` is a dict with these keys:
 
 ```harn
 import { custom } from "std/oauth/storage"
@@ -128,14 +133,23 @@ fn vault_delete(_path) {
   return nil
 }
 
-let _store = custom({
+fn vault_with_lock(_path, body) {
+  return body()
+}
+
+let store = custom({
   get: { key -> vault_get("oauth/" + key) },
   set: { key, token_set, ttl_seconds = nil ->
     vault_put("oauth/" + key, token_set, {ttl: ttl_seconds})
   },
   delete: { key -> vault_delete("oauth/" + key) },
+  with_refresh_lock: { key, body -> vault_with_lock("oauth/" + key, body) },
   id: "my-vault",          // optional, surfaces in diagnostics
 })
+
+if store.id != "my-vault" {
+  throw "custom backend id mismatch"
+}
 ```
 
 Contract for each closure:
@@ -145,11 +159,15 @@ Contract for each closure:
 | `get` | `fn(key: string) -> TokenSet \| nil` | The stored TokenSet, or `nil` if absent. **Must not raise** for a missing key. |
 | `set` | `fn(key: string, token_set: TokenSet, ttl_seconds: int \| nil) -> nil` | Persists the TokenSet. `ttl_seconds` is a hint; backends may ignore it. |
 | `delete` | `fn(key: string) -> nil` | Idempotent removal. **Must not raise** for a missing key. |
+| `with_refresh_lock` | `fn(key: string, body: fn() -> any) -> any` | Optional. Runs `body()` while holding a backend-native lock for `key`. |
 
-`custom` validates that all three closures are functions before
-returning the handle. The optional `id` field defaults to `"custom"`
-and is exposed as `store.id` so diagnostics can distinguish multiple
-custom backends.
+`custom` validates that required closures are functions before returning
+the handle. When `with_refresh_lock` is omitted, Harn supplies an
+in-process lock for the custom handle id. Durable backends should provide
+their own hook so refresh-token rotation is single-flight across every
+worker that shares the backend. The optional `id` field defaults to
+`"custom"` and is exposed as `store.id` so diagnostics can distinguish
+multiple custom backends.
 
 Closure capture is by value in Harn, so the closures cannot mutate
 outer scope to track state. Delegate to a real backend (a cloud platform,
@@ -164,7 +182,8 @@ This module satisfies the OA-03 acceptance criteria from issue #1904:
   `harn_cloud_org`, `custom`).
 * File backend encrypts at rest with AES-256-GCM.
 * Cloud backends route through `oauth_storage.cloud_*` host
-  capabilities so embedders enforce RLS / tenant isolation.
+  capabilities so embedders enforce RLS / tenant isolation and
+  refresh-token single-flight.
 * Custom backend hook protocol documented above.
 * Conformance per backend (store / retrieve / refresh / delete) lives
   in `conformance/tests/stdlib/oauth/oauth_storage.harn`.

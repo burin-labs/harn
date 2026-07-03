@@ -33,6 +33,10 @@ fn exercise_backend(label, store, expect_kind) {
   store.set("secondary", secondary)
   require_token(label + ".get(primary)", store.get("primary"), "tok-primary")
   require_token(label + ".get(secondary)", store.get("secondary"), "tok-secondary")
+  let locked = store.with_refresh_lock("primary", { -> store.get("primary").access_token + "-locked" })
+  if locked != "tok-primary-locked" {
+    throw label + ".with_refresh_lock: expected tok-primary-locked, got " + to_string(locked)
+  }
   // Refresh: overwrite the entry and confirm the new value is returned.
   store.set("primary", {access_token: "tok-primary-v2", refresh_token: "rfr-primary-v2"}, 7200)
   require_token(label + ".get(primary refreshed)", store.get("primary"), "tok-primary-v2")
@@ -106,12 +110,31 @@ fn exercise_custom() {
     throw "custom: expected id=test-vault, got " + s.id
   }
   exercise_backend("custom", s, "custom")
+  let locked_inner = memory()
+  let locked = custom(
+    {
+      get: { key -> locked_inner.get(key) },
+      set: { key, tok, ttl = nil -> locked_inner.set(key, tok, ttl) },
+      delete: { key -> locked_inner.delete(key) },
+      with_refresh_lock: { key, body ->
+        locked_inner.set("lock-marker", {access_token: key}, 60)
+        return body() + "-via-custom-lock"
+      },
+      id: "test-vault-locked",
+    },
+  )
+  let locked_result = locked.with_refresh_lock("vault-key", { -> locked_inner.get("lock-marker").access_token })
+  if locked_result != "vault-key-via-custom-lock" {
+    throw "custom.with_refresh_lock: hook did not wrap the body, got " + to_string(locked_result)
+  }
 }
 
 fn exercise_cloud(scope, factory, expect_kind) {
   host_mock_clear()
   host_mock("oauth_storage", "cloud_set", {result: nil})
   host_mock("oauth_storage", "cloud_delete", {result: nil})
+  host_mock("oauth_storage", "cloud_acquire_refresh_lock", {result: {lease_id: "lease-" + scope}})
+  host_mock("oauth_storage", "cloud_release_refresh_lock", {result: nil})
   host_mock(
     "oauth_storage",
     "cloud_get",
@@ -127,9 +150,13 @@ fn exercise_cloud(scope, factory, expect_kind) {
   s.set("github", {access_token: "tok"}, 3600)
   require_token("cloud[" + scope + "].get", s.get("github"), "cloud-tok")
   s.delete("github")
+  let locked = s.with_refresh_lock("github", { -> "locked-" + scope })
+  if locked != "locked-" + scope {
+    throw "cloud[" + scope + "].with_refresh_lock returned " + to_string(locked)
+  }
   let calls = host_mock_calls()
-  if len(calls) != 3 {
-    throw "cloud[" + scope + "]: expected 3 host calls, got " + to_string(len(calls))
+  if len(calls) != 5 {
+    throw "cloud[" + scope + "]: expected 5 host calls, got " + to_string(len(calls))
   }
   if calls[0].operation != "cloud_set" {
     throw "cloud[" + scope + "]: first call should be cloud_set, got " + calls[0].operation
@@ -142,6 +169,18 @@ fn exercise_cloud(scope, factory, expect_kind) {
   }
   if calls[2].operation != "cloud_delete" || calls[2].params.scope != scope {
     throw "cloud[" + scope + "]: cloud_delete call shape mismatch"
+  }
+  if calls[3].operation != "cloud_acquire_refresh_lock" || calls[3].params.scope != scope {
+    throw "cloud[" + scope + "]: cloud_acquire_refresh_lock call shape mismatch"
+  }
+  if calls[3].params.timeout_seconds == nil || calls[3].params.timeout_seconds <= 0 {
+    throw "cloud[" + scope + "]: refresh lock timeout missing"
+  }
+  if calls[4].operation != "cloud_release_refresh_lock" || calls[4].params.scope != scope {
+    throw "cloud[" + scope + "]: cloud_release_refresh_lock call shape mismatch"
+  }
+  if calls[4].params.lock.lease_id != "lease-" + scope {
+    throw "cloud[" + scope + "]: release did not carry lock lease"
   }
   host_mock_clear()
 }

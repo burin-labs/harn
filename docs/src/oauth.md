@@ -99,6 +99,7 @@ Token storage is a single three-closure protocol:
 storage.get(key) -> TokenSet | nil
 storage.set(key, token_set, ttl_seconds = nil) -> nil
 storage.delete(key) -> nil
+storage.with_refresh_lock(key, { -> ... }) -> any
 ```
 
 Pick a backend; the OAuth client never knows the difference.
@@ -109,7 +110,7 @@ Pick a backend; the OAuth client never knows the difference.
 | `file(path, key)` | yes (AES-256-GCM) | local development, single-host operators |
 | `harn_cloud_session()` | yes (host cap) | one user's cloud-managed agent |
 | `harn_cloud_org()` | yes (host cap) | shared org credentials ("the org's GitHub bot") |
-| `custom({get, set, delete, id?})` | depends | vaults, KMS, platform keychains |
+| `custom({get, set, delete, with_refresh_lock?, id?})` | depends | vaults, KMS, platform keychains |
 
 ```harn,ignore
 import { custom, file, harn_cloud_org, memory } from "std/oauth/storage"
@@ -121,6 +122,7 @@ let vault = custom({
   get:    { key -> vault_get("oauth/" + key) },
   set:    { key, token_set, ttl_seconds = nil -> vault_put("oauth/" + key, token_set) },
   delete: { key -> vault_delete("oauth/" + key) },
+  with_refresh_lock: { key, body -> vault_with_lock("oauth/" + key, body) },
 })
 ```
 
@@ -180,8 +182,14 @@ standalone helper that takes the handle as the first argument:
   before touching the token endpoint.
 - **Transparent refresh.** `token(cli)` re-reads storage every call and
   refreshes if the stored TokenSet is past 75% TTL or already expired.
-- **One retry on 401.** `request(cli, ...)` performs a forced refresh
-  and replays the request exactly once when the server returns 401.
+  Refreshes run under `storage.with_refresh_lock(...)` and re-read inside
+  that transaction, so TTL-triggered, explicit, and post-401 callers
+  sharing a storage key collapse to one refresh grant.
+- **One retry on 401.** `request(cli, ...)` performs a refresh and
+  replays the request exactly once when the server returns 401. If
+  another worker already rotated the token while this request waited for
+  the storage lock, the retry uses the fresh stored token without spending
+  another refresh grant.
 - **Token exchange is data-gated.** `token_exchange(cli, opts)` validates
   subject, actor, and requested token types against `std/oauth/token_exchange`
   capability rows. Custom providers opt in with a `token_exchange` row; the
@@ -194,10 +202,10 @@ standalone helper that takes the handle as the first argument:
   `oauth.client.audit` (`token_refreshed` / `token_exchanged` /
   `token_revoked`) with presence flags + expiry timestamps. The access
   token never lands in the audit payload.
-- **Storage is the source of truth.** Two concurrent `token(cli)` calls
-  may both observe staleness and both refresh; the second `set` wins
-  and both callers see the same token. The 75% pre-refresh window keeps
-  the race narrow.
+- **Storage is the source of truth.** Concurrent `token(cli)` or
+  `refresh(cli)` calls may observe the same token, but only the lock
+  holder issues the refresh. Waiters re-read inside the lock and reuse
+  the stored rotated access/refresh token.
 - **Storage key defaults to `provider.id`.** Pass `storage_key` to fan
   out multiple installations of the same provider (e.g. one GitHub OAuth
   app per tenant).
@@ -816,11 +824,12 @@ let issues = request(cli, "GET", "https://api.github.com/orgs/burin-labs/issues"
 ```
 
 `harn_cloud_org()` routes through the `oauth_storage.cloud_*` host
-capability with `scope = "org"`. A cloud platform is responsible for
-tenant-scoped storage (RLS), so two agents running in the same org
-share the same authenticated client without either of them being able
-to read tokens for a different org. The `storage_key` is per-purpose,
-not per-user: one entry covers every consumer of the bot.
+capability with `scope = "org"`, including the refresh-lock operations
+used by transparent token rotation. A cloud platform is responsible for
+tenant-scoped storage (RLS), so two agents running in the same org share
+the same authenticated client without either of them being able to read
+tokens for a different org. The `storage_key` is per-purpose, not
+per-user: one entry covers every consumer of the bot.
 
 ### Custom enterprise OIDC provider
 
