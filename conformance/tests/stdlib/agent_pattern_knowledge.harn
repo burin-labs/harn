@@ -35,6 +35,22 @@ pipeline default() {
       pattern_learning_set_enabled(false, options)
       let status = pattern_learning_status(options)
       __io_println(status.enabled)
+      let read_only_options = options + {namespace: "readonly"}
+      let read_only_policy = {capabilities: {workspace: ["exists", "read_text", "list"]}, side_effect_level: "read_only"}
+      let read_only_context = with_execution_policy(
+        read_only_policy,
+        fn() { return pattern_learning_context("ro1", "Read-only context lookup", 3, read_only_options) },
+      )
+      __io_println(read_only_context.body == "")
+      __io_println(!(read_only_context.unavailable ?? false))
+      __io_println(to_string(read_only_context.error ?? "") == "")
+      let read_only_observe = with_execution_policy(
+        read_only_policy,
+        fn() { return pattern_learning_observe("ro2", "Read-only observation", ["read"], read_only_options) },
+      )
+      __io_println(!read_only_observe.observed)
+      __io_println(read_only_observe.unavailable)
+      __io_println(contains(to_string(read_only_observe.error ?? ""), "workspace write ceiling"))
     },
   )
 }
