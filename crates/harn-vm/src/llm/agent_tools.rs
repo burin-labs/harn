@@ -632,6 +632,13 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
                 category: ErrorCategory::ToolRejected,
                 ..
             }) => break ToolDispatchOutcome { result, executor },
+            // An internal engine/wiring bug (undefined builtin, corrupt
+            // bytecode) will never resolve on retry. Break immediately so the
+            // error propagates to the agent loop, which re-raises it instead of
+            // burning the retry budget and folding it into a tool observation.
+            Err(e) if crate::value::error_to_category(e).is_internal() => {
+                break ToolDispatchOutcome { result, executor }
+            }
             Err(_) if attempt < tool_retries => {
                 attempt += 1;
                 let delay = tool_backoff_ms * (1u64 << attempt.min(5));

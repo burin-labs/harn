@@ -1,0 +1,81 @@
+/**
+ * An internal engine/wiring bug surfaced during tool dispatch must ABORT the
+ * agent loop, not be swallowed as a recoverable tool observation.
+ *
+ * Regression guard for the "undefined builtin swallowed by the loop's outer
+ * try" class: before this, every error except `cancelled` was folded into a
+ * synthetic tool-error result and the loop marched on to a `done` status, so a
+ * mis-wired builtin (a `#[harn_builtin]` def missing from its install array)
+ * shipped silently inert. An `internal`-category error now propagates through
+ * `__agent_error_must_propagate` at both the sequential (`__invoke_tool`) and
+ * parallel (`parallel settle`) dispatch sites, exactly like `cancelled`.
+ *
+ * We simulate the fault with a `tool_caller` that throws a categorized error
+ * (an `internal` category models the engine bug; a `generic` category models a
+ * genuinely recoverable tool failure). `throw_error(msg, "internal")` produces
+ * the same category the runtime assigns to `VmError::UndefinedBuiltin`.
+ */
+import { llm_text, with_llm_script } from "std/testing"
+
+fn one_tool() {
+  let r = tool_registry()
+  return tool_define(
+    r,
+    "echo",
+    "Echo tool",
+    {
+      handler: { args -> return "echoed:" + to_string(args?.msg ?? "") },
+      parameters: {msg: {type: "string"}},
+    },
+  )
+}
+
+/** Tool middleware that fails before dispatch with the given error category. */
+fn throwing_caller(category) {
+  return { call, next -> throw_error("boom from tool caller", category) }
+}
+
+fn run_with_caller(category, cap, calls) {
+  return with_llm_script(
+    [{tool_calls: calls}, llm_text("##DONE##")],
+    { ->
+      let outcome = try {
+        agent_loop(
+          "internal-error probe",
+          nil,
+          {
+            provider: "mock",
+            tools: one_tool(),
+            tool_format: "native",
+            max_iterations: 3,
+            loop_until_done: true,
+            done_sentinel: "##DONE##",
+            max_concurrent_tools: cap,
+            tool_caller: throwing_caller(category),
+          },
+        )
+      }
+      if is_err(outcome) {
+        return {aborted: true, category: error_category(unwrap_err(outcome))}
+      }
+      return {aborted: false, status: unwrap(outcome).status}
+    },
+  )
+}
+
+pipeline default() {
+  let one_call = [{id: "c1", name: "echo", arguments: {msg: "hi"}}]
+  let two_calls = [{id: "c1", name: "echo", arguments: {msg: "hi"}}, {id: "c2", name: "echo", arguments: {msg: "yo"}}]
+  // Sequential dispatch (cap=1): an internal bug aborts the loop.
+  let seq = run_with_caller("internal", 1, one_call)
+  __io_println("seq.aborted=" + to_string(seq.aborted))
+  __io_println("seq.category=" + to_string(seq?.category ?? ""))
+  // Parallel dispatch (cap=2, two calls): the internal bug still aborts.
+  let par = run_with_caller("internal", 2, two_calls)
+  __io_println("par.aborted=" + to_string(par.aborted))
+  __io_println("par.category=" + to_string(par?.category ?? ""))
+  // A recoverable (generic) tool failure is absorbed into a tool observation;
+  // the loop completes rather than aborting.
+  let recoverable = run_with_caller("generic", 1, one_call)
+  __io_println("recoverable.aborted=" + to_string(recoverable.aborted))
+}

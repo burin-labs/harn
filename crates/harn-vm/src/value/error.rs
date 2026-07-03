@@ -138,6 +138,26 @@ pub enum VmError {
     ArgTypeMismatch(Box<ArgTypeMismatchError>),
 }
 
+impl VmError {
+    /// The `VmValue` a `catch` binding (or a `parallel settle` result) observes
+    /// for this error: the raw thrown value for [`VmError::Thrown`] (so a
+    /// structured error — e.g. a `{category, message}` dict from `throw_error` —
+    /// keeps its shape and category), otherwise the rendered message.
+    ///
+    /// Single source of truth for VM-error-to-value lowering so every seam that
+    /// surfaces a caught error to Harn (`try`/`catch` via `handle_error`,
+    /// `parallel settle`) exposes identical, structure-preserving values. Before
+    /// this was shared, `parallel settle` stringified errors via `to_string()`,
+    /// so a categorized error thrown in a settle branch lost its category (a
+    /// `cancelled`/`internal` fault that must propagate looked `generic`).
+    pub fn thrown_value(&self) -> VmValue {
+        match self {
+            VmError::Thrown(v) => v.clone(),
+            other => VmValue::String(arcstr::ArcStr::from(other.to_string())),
+        }
+    }
+}
+
 /// Error categories for structured error handling in agent orchestration.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ErrorCategory {
@@ -181,6 +201,14 @@ pub enum ErrorCategory {
     CircuitOpen,
     /// LLM cost or token budget would be exceeded
     BudgetExceeded,
+    /// An internal engine/wiring bug — an undefined builtin, corrupt bytecode,
+    /// or another VM invariant violation that no amount of retrying or model
+    /// reasoning can fix. Distinct from `Generic` so callers (notably the agent
+    /// loop) can re-raise it loudly instead of folding it into a tool-error
+    /// observation and marching on to a `done` status. This is the category
+    /// that keeps a mis-wired builtin (e.g. a `#[harn_builtin]` def missing
+    /// from its install array) from shipping silently inert.
+    Internal,
     /// Generic/unclassified error
     Generic,
 }
@@ -204,6 +232,7 @@ impl ErrorCategory {
             ErrorCategory::NotFound => "not_found",
             ErrorCategory::CircuitOpen => "circuit_open",
             ErrorCategory::BudgetExceeded => "budget_exceeded",
+            ErrorCategory::Internal => "internal",
             ErrorCategory::Generic => "generic",
         }
     }
@@ -226,8 +255,15 @@ impl ErrorCategory {
             "not_found" => ErrorCategory::NotFound,
             "circuit_open" => ErrorCategory::CircuitOpen,
             "budget_exceeded" => ErrorCategory::BudgetExceeded,
+            "internal" => ErrorCategory::Internal,
             _ => ErrorCategory::Generic,
         }
+    }
+
+    /// Whether this category represents an internal engine/wiring bug that must
+    /// be surfaced rather than retried or swallowed as a recoverable failure.
+    pub fn is_internal(&self) -> bool {
+        matches!(self, ErrorCategory::Internal)
     }
 
     /// Whether an error of this category is worth retrying for a transient
@@ -270,6 +306,11 @@ pub fn error_to_category(err: &VmError) -> ErrorCategory {
             .unwrap_or(ErrorCategory::Generic),
         VmError::Thrown(VmValue::String(s)) => classify_error_message(s),
         VmError::Runtime(msg) => classify_error_message(msg),
+        // Engine/wiring bugs: an undefined builtin (declared but not installed,
+        // or a typo in stdlib/host code) or corrupt bytecode. No retry or model
+        // reasoning fixes these, so they get their own category the agent loop
+        // re-raises instead of swallowing.
+        VmError::UndefinedBuiltin(_) | VmError::InvalidInstruction(_) => ErrorCategory::Internal,
         // A deadlock is permanently non-retryable and not provider-related —
         // `Generic` is the correct "surface it, don't back off" bucket.
         VmError::Deadlock(_) => ErrorCategory::Generic,
@@ -284,7 +325,14 @@ pub fn classify_error_message(msg: &str) -> ErrorCategory {
     if let Some(cat) = classify_by_http_status(msg) {
         return cat;
     }
-    // 2. Well-known error identifiers from major APIs
+    // 2. Internal engine/wiring bug surfaced as a plain message. Some call
+    //    sites build `Runtime("Undefined builtin: …")` strings instead of the
+    //    structured `VmError::UndefinedBuiltin` variant; classify both the same
+    //    so the agent loop re-raises rather than swallows.
+    if msg.contains("Undefined builtin") {
+        return ErrorCategory::Internal;
+    }
+    // 3. Well-known error identifiers from major APIs
     //    (Anthropic, OpenAI, and standard HTTP patterns)
     let lower = msg.to_lowercase();
     if lower.contains("cancelled") || lower.contains("canceled") {
@@ -481,6 +529,38 @@ mod tests {
             classify_error_message("operation canceled by host"),
             ErrorCategory::Cancelled
         );
+    }
+
+    #[test]
+    fn classifies_undefined_builtin_as_internal() {
+        // Structured variant (dispatch table miss / uninstalled builtin).
+        assert_eq!(
+            error_to_category(&VmError::UndefinedBuiltin("__host_agent_foo".into())),
+            ErrorCategory::Internal
+        );
+        // Corrupt bytecode / compiler-VM opcode drift.
+        assert_eq!(
+            error_to_category(&VmError::InvalidInstruction(200)),
+            ErrorCategory::Internal
+        );
+        // Stringly form: some call sites build a `Runtime("Undefined builtin: …")`
+        // message instead of the structured variant — both must classify the same.
+        assert_eq!(
+            error_to_category(&VmError::Runtime(
+                "Undefined builtin: __host_agent_foo (did you mean `bar`?)".into()
+            )),
+            ErrorCategory::Internal
+        );
+        assert_eq!(
+            classify_error_message("Undefined builtin: __host_agent_foo"),
+            ErrorCategory::Internal
+        );
+        // Internal errors are never treated as transient/retryable.
+        assert!(!ErrorCategory::Internal.is_transient());
+        assert!(ErrorCategory::Internal.is_internal());
+        // Round-trips through the string form the agent loop compares against.
+        assert_eq!(ErrorCategory::Internal.as_str(), "internal");
+        assert_eq!(ErrorCategory::parse("internal"), ErrorCategory::Internal);
     }
 
     #[test]

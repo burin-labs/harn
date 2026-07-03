@@ -141,6 +141,11 @@ impl ToolCallErrorCategory {
             | Internal::NotFound
             | Internal::CircuitOpen
             | Internal::BudgetExceeded
+            // An internal engine/wiring bug is a host-side failure, not the
+            // tool's fault; it normally propagates out of the loop, but if one
+            // is ever recorded as a tool event, `HostBridgeError` is the honest
+            // wire bucket.
+            | Internal::Internal
             | Internal::Generic => Self::HostBridgeError,
         }
     }
