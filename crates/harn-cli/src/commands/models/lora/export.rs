@@ -13,9 +13,9 @@ use crate::dispatch;
 use crate::env_guard::ScopedEnvVar;
 
 use super::{
-    dataset_format_for_tool_format, expand_home, lora_adapter_binding, lora_training_contract,
-    normalize_plan_tool_format, sha256_file, BaseModelReport, LoraTrainingContract,
-    ToolCallingReport, DISPATCH_LORA_INSPECT_LOCK,
+    dataset_format_for_tool_format, expand_home, lora_adapter_binding, lora_modules_value_format,
+    lora_training_contract, normalize_plan_tool_format, sha256_file, BaseModelReport,
+    LoraTrainingContract, ToolCallingReport, DISPATCH_LORA_INSPECT_LOCK,
 };
 
 const LORA_EXPORT_PAYLOAD_ENV: &str = "HARN_MODELS_LORA_EXPORT_PAYLOAD_JSON";
@@ -83,6 +83,7 @@ fn export_report(args: &ModelsLoraExportArgs) -> Result<LoraExportReport, String
         .as_ref()
         .and_then(|runtime| runtime.lora_modules_arg.as_ref())
         .is_some();
+    let lora_module_value_format = lora_modules_value_format(local_runtime.as_ref());
     let catalog_default_tool_format =
         harn_vm::llm_config::default_tool_format(&resolved.id, &provider);
     let decision = if requested_tool_format == "auto" {
@@ -208,7 +209,12 @@ fn export_report(args: &ModelsLoraExportArgs) -> Result<LoraExportReport, String
     } else {
         args.out.as_deref().map(sha256_file).transpose()?
     };
-    let serving = export_serving_report(&target, &dataset_format, provider_supports_lora_launch);
+    let serving = export_serving_report(
+        &target,
+        &dataset_format,
+        provider_supports_lora_launch,
+        &lora_module_value_format,
+    );
     let manifest_path = if let Some(path) = args.manifest.as_deref() {
         write_export_manifest(
             path,
@@ -852,6 +858,7 @@ fn export_serving_report(
     target: &ExportTarget,
     dataset_format: &str,
     provider_supports_lora_launch: bool,
+    lora_module_value_format: &str,
 ) -> ExportServingReport {
     ExportServingReport {
         request_model: target.adapter_name.clone(),
@@ -859,6 +866,7 @@ fn export_serving_report(
         base_model: target.base_model.clone(),
         provider: target.provider.clone(),
         adapter_binding: lora_adapter_binding(provider_supports_lora_launch).to_string(),
+        lora_module_value_format: lora_module_value_format.to_string(),
         tool_format: target.harn_tool_format.clone(),
         dataset_format: dataset_format.to_string(),
         contract_id: target.contract_id.clone(),
@@ -1047,6 +1055,7 @@ struct ExportServingReport {
     base_model: String,
     provider: String,
     adapter_binding: String,
+    lora_module_value_format: String,
     tool_format: String,
     dataset_format: String,
     contract_id: String,

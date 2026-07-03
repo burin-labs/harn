@@ -80,6 +80,7 @@ export interface HarnLocalRuntime {
   cache_ram_arg?: string
   enable_lora_arg?: string
   lora_modules_arg?: string
+  lora_modules_value_format?: "name_path" | "json_with_base_model"
   max_lora_rank_arg?: string
   default_args?: string[]
   stop?: "keep_alive_zero" | "pid" | "external"
@@ -368,6 +369,7 @@ public struct HarnLocalRuntime: Codable, Sendable, Equatable {
     public let cacheRamArg: String?
     public let enableLoraArg: String?
     public let loraModulesArg: String?
+    public let loraModulesValueFormat: String?
     public let maxLoraRankArg: String?
     public let defaultArgs: [String]?
     public let stop: String?
@@ -394,6 +396,7 @@ public struct HarnLocalRuntime: Codable, Sendable, Equatable {
         case cacheRamArg = "cache_ram_arg"
         case enableLoraArg = "enable_lora_arg"
         case loraModulesArg = "lora_modules_arg"
+        case loraModulesValueFormat = "lora_modules_value_format"
         case maxLoraRankArg = "max_lora_rank_arg"
         case defaultArgs = "default_args"
         case stop

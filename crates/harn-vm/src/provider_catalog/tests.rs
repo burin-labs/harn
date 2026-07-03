@@ -374,6 +374,31 @@ fn validation_rejects_missing_required_metadata() {
 }
 
 #[test]
+fn validation_rejects_unknown_lora_module_value_format() {
+    let mut catalog = artifact();
+    let provider = catalog
+        .providers
+        .iter_mut()
+        .find(|provider| provider.local_runtime.is_some())
+        .expect("catalog has local runtime provider");
+    provider
+        .local_runtime
+        .as_mut()
+        .expect("local runtime")
+        .lora_modules_value_format = Some("provider_custom".to_string());
+
+    let report = validate_artifact(&catalog);
+    assert!(
+        report
+            .errors
+            .iter()
+            .any(|message| message.contains("lora_modules_value_format")),
+        "expected lora_modules_value_format validation error, got {:?}",
+        report.errors
+    );
+}
+
+#[test]
 fn validation_rejects_duplicate_and_dangling_aliases() {
     let mut duplicated = artifact();
     duplicated.aliases.push(duplicated.aliases[0].clone());

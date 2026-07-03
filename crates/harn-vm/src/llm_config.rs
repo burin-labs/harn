@@ -620,9 +620,12 @@ pub struct LocalRuntimeDef {
     /// Flag that enables adapter-aware serving for LoRA-capable runtimes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enable_lora_arg: Option<String>,
-    /// Flag that accepts one or more `name=path-or-repo` LoRA module specs.
+    /// Flag that accepts one or more LoRA module specs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lora_modules_arg: Option<String>,
+    /// Runtime value shape for LoRA module specs. Defaults to `name_path`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lora_modules_value_format: Option<String>,
     /// Optional rank-limit flag for runtimes that need an explicit ceiling.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_lora_rank_arg: Option<String>,

@@ -73,6 +73,10 @@ fn __render_human(harness: Harness, report: dict) {
     "no"
   }
   harness.stdio.println("  catalog LoRA launch flags: " + launch_supported)
+  let module_format = safe_string(compatibility["provider_lora_module_value_format"], "")
+  if module_format != "" {
+    harness.stdio.println("  LoRA module format: " + module_format)
+  }
   let rank_supported = if safe_bool(compatibility["provider_supports_lora_max_rank"], false) {
     "yes"
   } else {

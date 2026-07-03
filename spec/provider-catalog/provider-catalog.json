@@ -1065,11 +1065,12 @@
         "ctx_arg": "--max-model-len",
         "enable_lora_arg": "--enable-lora",
         "lora_modules_arg": "--lora-modules",
+        "lora_modules_value_format": "json_with_base_model",
         "max_lora_rank_arg": "--max-lora-rank",
         "stop": "pid",
         "source_url": "https://docs.vllm.ai/en/stable/cli/serve/",
         "last_verified": "2026-07-02",
-        "notes": "OpenAI-compatible vLLM server. `harn local launch --lora-adapter name=path` maps to vLLM's startup LoRA module flags so the adapter appears as a request model."
+        "notes": "OpenAI-compatible vLLM server. `harn local launch --lora-adapter name=path` maps to vLLM's startup LoRA module flags with base-model lineage so the adapter appears as a request model."
       },
       "latency_p50_ms": 800
     },
