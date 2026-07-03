@@ -402,6 +402,8 @@ fn models_lora_plan_human_text_includes_recipe() {
         "corpus gates:",
         "adapter binding: runtime_lora_adapter",
         "serving notes:",
+        "serve the adapter as a text-channel route: Harn owns tool-call parsing for this plan",
+        "keep provider-native tool parsers disabled unless the proxy maps them back to Harn text tool calls",
         "promotion gates:",
         "harn eval tool-calls --planner ADAPTER_MODEL --tool-format json --dataset ./lora-corpus",
         "harn models lora inspect --base local-gemma4-e4b --provider vllm --name ADAPTER_NAME ADAPTER_PATH_OR_REPO",
@@ -469,6 +471,27 @@ fn models_lora_plan_json_shape_is_stable() {
     assert_eq!(
         harn_value["serving"]["dataset_format"],
         "messages_with_tool_calls"
+    );
+    let serving_notes = harn_value["serving"]["runtime_notes"]
+        .as_array()
+        .expect("serving runtime notes");
+    assert!(
+        serving_notes.iter().any(|note| note
+            .as_str()
+            .is_some_and(|text| text.contains("schema-constrained or strict tool calling"))),
+        "serving notes={serving_notes:?}"
+    );
+    assert!(
+        serving_notes.iter().any(|note| note
+            .as_str()
+            .is_some_and(|text| text.contains("--enable-auto-tool-choice"))),
+        "serving notes={serving_notes:?}"
+    );
+    assert!(
+        serving_notes.iter().any(|note| note
+            .as_str()
+            .is_some_and(|text| text.contains("Gemma 4 native routes"))),
+        "serving notes={serving_notes:?}"
     );
     assert_eq!(
         harn_value["template"]["name"],

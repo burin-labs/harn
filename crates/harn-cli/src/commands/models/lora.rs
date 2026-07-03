@@ -723,6 +723,7 @@ fn serving_recipe(
         "do not change the tool-call format between dataset export, serving, and evaluation"
             .to_string(),
     );
+    runtime_notes.extend(tool_call_serving_notes(base_model, provider, tool_format));
     ServingRecipe {
         request_model: request_model.to_string(),
         adapter_name: adapter_name.to_string(),
@@ -739,6 +740,47 @@ fn serving_recipe(
             "keep a rollback path to the base route or previous adapter revision".to_string(),
         ],
     }
+}
+
+fn tool_call_serving_notes(base_model: &str, provider: &str, tool_format: &str) -> Vec<String> {
+    let mut notes = Vec::new();
+    if matches!(tool_format, "text" | "json") {
+        notes.push(
+            "serve the adapter as a text-channel route: Harn owns tool-call parsing for this plan"
+                .to_string(),
+        );
+        notes.push(
+            "keep provider-native tool parsers disabled unless the proxy maps them back to Harn text tool calls"
+                .to_string(),
+        );
+        return notes;
+    }
+    if tool_format != "native" {
+        return notes;
+    }
+
+    notes.push(
+        "prefer schema-constrained or strict tool calling during serving and eval when the runtime supports it"
+            .to_string(),
+    );
+    if provider == "vllm" {
+        notes.push(
+            "for vLLM native tools, serve with --enable-auto-tool-choice and the model family's matching --tool-call-parser/chat-template"
+                .to_string(),
+        );
+    }
+    if is_functiongemma_route(base_model, "", "") {
+        notes.push(
+            "FunctionGemma routes need the functiongemma parser/chat template and <start_function_response> stop handling"
+                .to_string(),
+        );
+    } else if is_gemma4_route(base_model, "", "") {
+        notes.push(
+            "Gemma 4 native routes must keep the tokenizer/provider tool declaration, call, and response template identical between training and serving"
+                .to_string(),
+        );
+    }
+    notes
 }
 
 fn teacher_report(selector: &str) -> TeacherReport {
@@ -1284,6 +1326,10 @@ mod tests {
             .runtime_notes
             .iter()
             .any(|note| note.contains("per request model name")));
+        assert!(supported
+            .runtime_notes
+            .iter()
+            .any(|note| note.contains("Harn owns tool-call parsing")));
 
         let external = serving_recipe(
             "gemma-4-e4b-it",
@@ -1302,5 +1348,23 @@ mod tests {
             .runtime_notes
             .iter()
             .any(|note| note.contains("external runtime")));
+
+        let native_functiongemma = serving_recipe(
+            "google/functiongemma-270m-it",
+            "vllm",
+            "ADAPTER_MODEL",
+            "ADAPTER_NAME",
+            "native",
+            "messages_with_tool_calls",
+            true,
+        );
+        assert!(native_functiongemma
+            .runtime_notes
+            .iter()
+            .any(|note| note.contains("--enable-auto-tool-choice")));
+        assert!(native_functiongemma
+            .runtime_notes
+            .iter()
+            .any(|note| note.contains("functiongemma parser/chat template")));
     }
 }
