@@ -73,6 +73,7 @@ pub fn schema_value() -> Value {
                     "cache_ram_arg": {"type": "string"},
                     "enable_lora_arg": {"type": "string"},
                     "lora_modules_arg": {"type": "string"},
+                    "lora_modules_value_format": {"enum": ["name_path", "json_with_base_model"]},
                     "max_lora_rank_arg": {"type": "string"},
                     "default_args": {"type": "array", "items": {"type": "string"}},
                     "stop": {"enum": ["keep_alive_zero", "pid", "external"]},

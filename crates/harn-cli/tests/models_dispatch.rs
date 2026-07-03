@@ -298,6 +298,7 @@ fn models_lora_inspect_human_text_includes_launch_hint() {
         "tool format: json",
         "native tools: no, preferred: unset",
         "catalog LoRA launch flags: yes",
+        "LoRA module format: json_with_base_model",
         "catalog LoRA rank flag: yes",
         "max LoRA rank: 16",
         "harn local launch local-gemma4-e4b --provider vllm",
@@ -394,6 +395,10 @@ fn models_lora_inspect_json_shape_is_stable() {
         report["compatibility"]["provider_supports_lora_max_rank"],
         serde_json::Value::Bool(true)
     );
+    assert_eq!(
+        report["compatibility"]["provider_lora_module_value_format"],
+        "json_with_base_model"
+    );
     assert_eq!(report["tool_calling"]["native_tools"], false);
     assert_eq!(report["launch"]["request_model"], "burin-tools");
     assert_eq!(report["launch"]["max_lora_rank"].as_u64(), Some(16));
@@ -456,6 +461,7 @@ fn models_lora_plan_human_text_includes_recipe() {
         "set assistant_only_loss=true",
         "Harn remains the parser at inference",
         "adapter binding: runtime_lora_adapter",
+        "LoRA module format: json_with_base_model",
         "serving notes:",
         "serve the adapter as a text-channel route: Harn owns tool-call parsing for this plan",
         "keep provider-native tool parsers disabled unless the proxy maps them back to Harn text tool calls",
@@ -543,6 +549,10 @@ fn models_lora_plan_json_shape_is_stable() {
     assert_eq!(report["corpus_refresh"]["strategy"], "audit-only");
     assert_eq!(report["corpus_refresh"]["teacher_required"], false);
     assert_eq!(report["serving"]["adapter_binding"], "runtime_lora_adapter");
+    assert_eq!(
+        report["serving"]["lora_module_value_format"],
+        "json_with_base_model"
+    );
     assert_eq!(report["serving"]["request_model"], "ADAPTER_MODEL");
     assert_eq!(report["serving"]["adapter_name"], "ADAPTER_NAME");
     assert_eq!(report["serving"]["tool_format"], "native");
@@ -654,6 +664,7 @@ fn models_lora_export_check_reports_native_shape() {
         "contract parser owner: provider_tokenizer_runtime",
         "contract split policy: train_tune_holdout_disjoint_no_eval_holdout_training",
         "adapter binding: runtime_lora_adapter",
+        "LoRA module format: json_with_base_model",
         "mode: check",
         "stats: records=2 emitted=1 skipped=1 tool_calls=1 tool_results=1",
     ] {
@@ -738,6 +749,10 @@ fn models_lora_export_json_writes_dataset_and_manifest() {
     );
     assert_eq!(report["serving"]["request_model"], "burin-tools");
     assert_eq!(report["serving"]["adapter_binding"], "runtime_lora_adapter");
+    assert_eq!(
+        report["serving"]["lora_module_value_format"],
+        "json_with_base_model"
+    );
     assert_eq!(report["serving"]["contract_id"], contract_id);
     assert!(out.is_file(), "exported JSONL missing");
     assert!(manifest.is_file(), "manifest missing");
@@ -783,6 +798,10 @@ fn models_lora_export_json_writes_dataset_and_manifest() {
     assert_eq!(
         manifest_value["serving"]["adapter_binding"],
         "runtime_lora_adapter"
+    );
+    assert_eq!(
+        manifest_value["serving"]["lora_module_value_format"],
+        "json_with_base_model"
     );
     assert_eq!(manifest_value["serving"]["contract_id"], contract_id);
 }

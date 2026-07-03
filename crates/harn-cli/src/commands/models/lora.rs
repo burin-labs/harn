@@ -116,6 +116,7 @@ fn inspect_report(args: &ModelsLoraInspectArgs) -> Result<LoraInspectReport, Str
     let adapter = inspect_adapter(&args.adapter, args.name.as_deref())?;
     let local_runtime =
         harn_vm::llm_config::provider_config(&provider).and_then(|provider| provider.local_runtime);
+    let provider_lora_module_value_format = lora_modules_value_format(local_runtime.as_ref());
     let provider_supports_lora_launch = local_runtime
         .as_ref()
         .and_then(|runtime| runtime.lora_modules_arg.as_ref())
@@ -214,6 +215,7 @@ fn inspect_report(args: &ModelsLoraInspectArgs) -> Result<LoraInspectReport, Str
             base_model_match,
             provider_supports_lora_launch,
             provider_supports_lora_max_rank,
+            provider_lora_module_value_format,
         },
         tool_calling: ToolCallingReport {
             native_tools: capabilities.native_tools,
@@ -299,6 +301,7 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
     ];
     let local_runtime =
         harn_vm::llm_config::provider_config(&provider).and_then(|provider| provider.local_runtime);
+    let lora_module_value_format = lora_modules_value_format(local_runtime.as_ref());
     let provider_supports_lora_launch = local_runtime
         .as_ref()
         .and_then(|runtime| runtime.lora_modules_arg.as_ref())
@@ -377,6 +380,7 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
         &decision.effective,
         dataset_format,
         provider_supports_lora_launch,
+        &lora_module_value_format,
     );
     let warnings = plan_warnings(
         &provider,
@@ -820,6 +824,15 @@ pub(super) fn lora_adapter_binding(provider_supports_lora_launch: bool) -> &'sta
     }
 }
 
+pub(super) fn lora_modules_value_format(
+    local_runtime: Option<&harn_vm::llm_config::LocalRuntimeDef>,
+) -> String {
+    local_runtime
+        .and_then(|runtime| runtime.lora_modules_value_format.as_deref())
+        .unwrap_or("name_path")
+        .to_string()
+}
+
 fn serving_recipe(
     base_model: &str,
     provider: &str,
@@ -828,6 +841,7 @@ fn serving_recipe(
     tool_format: &str,
     dataset_format: &str,
     provider_supports_lora_launch: bool,
+    lora_module_value_format: &str,
 ) -> ServingRecipe {
     let adapter_binding = lora_adapter_binding(provider_supports_lora_launch).to_string();
     let mut runtime_notes = Vec::new();
@@ -861,6 +875,7 @@ fn serving_recipe(
         base_model: base_model.to_string(),
         provider: provider.to_string(),
         adapter_binding,
+        lora_module_value_format: lora_module_value_format.to_string(),
         tool_format: tool_format.to_string(),
         dataset_format: dataset_format.to_string(),
         runtime_notes,
@@ -1207,6 +1222,7 @@ struct CompatibilityReport {
     base_model_match: BaseModelMatch,
     provider_supports_lora_launch: bool,
     provider_supports_lora_max_rank: bool,
+    provider_lora_module_value_format: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -1334,6 +1350,7 @@ struct ServingRecipe {
     base_model: String,
     provider: String,
     adapter_binding: String,
+    lora_module_value_format: String,
     tool_format: String,
     dataset_format: String,
     runtime_notes: Vec<String>,
@@ -1574,8 +1591,10 @@ mod tests {
             "json",
             "harn_text_tool_calls_json_fences",
             true,
+            "json_with_base_model",
         );
         assert_eq!(supported.adapter_binding, "runtime_lora_adapter");
+        assert_eq!(supported.lora_module_value_format, "json_with_base_model");
         assert!(supported
             .runtime_notes
             .iter()
@@ -1593,6 +1612,7 @@ mod tests {
             "json",
             "harn_text_tool_calls_json_fences",
             false,
+            "name_path",
         );
         assert_eq!(
             external.adapter_binding,
@@ -1611,6 +1631,7 @@ mod tests {
             "native",
             "messages_with_tool_calls",
             true,
+            "json_with_base_model",
         );
         assert!(native_functiongemma
             .runtime_notes

@@ -13,6 +13,7 @@ use std::time::Duration;
 use harn_vm::llm::readiness::probe_provider_readiness;
 use harn_vm::llm_config::{self, LocalMemoryDef, LocalRuntimeDef};
 use serde::Serialize;
+use serde_json::json;
 use time::{format_description, OffsetDateTime};
 
 use crate::cli::LocalLaunchArgs;
@@ -95,8 +96,19 @@ struct LoraAdapterSpec {
 }
 
 impl LoraAdapterSpec {
-    fn module_spec(&self) -> String {
-        format!("{}={}", self.name, self.path)
+    fn module_spec(&self, value_format: &str, base_model: &str) -> Result<String, String> {
+        match value_format {
+            "name_path" => Ok(format!("{}={}", self.name, self.path)),
+            "json_with_base_model" => serde_json::to_string(&json!({
+                "name": self.name,
+                "path": self.path,
+                "base_model_name": base_model,
+            }))
+            .map_err(|error| format!("failed to render LoRA module spec JSON: {error}")),
+            other => Err(format!(
+                "unsupported local_runtime.lora_modules_value_format `{other}`; expected name_path or json_with_base_model"
+            )),
+        }
     }
 }
 
@@ -552,7 +564,7 @@ fn build_managed_args(
     if args.metrics {
         explicit.push("--metrics".to_string());
     }
-    explicit.extend(build_lora_args(args, runtime)?);
+    explicit.extend(build_lora_args(args, runtime, model_source)?);
 
     let explicit_keys: std::collections::HashSet<&str> = explicit
         .iter()
@@ -568,6 +580,7 @@ fn build_managed_args(
 fn build_lora_args(
     args: &LocalLaunchArgs,
     runtime: &LocalRuntimeDef,
+    model_source: &str,
 ) -> Result<Vec<String>, String> {
     if args.lora_adapters.is_empty() && args.max_lora_rank.is_none() {
         return Ok(Vec::new());
@@ -584,7 +597,16 @@ fn build_lora_args(
             out.push(enable_arg.to_string());
         }
         out.push(modules_arg.to_string());
-        out.extend(specs.iter().map(LoraAdapterSpec::module_spec));
+        let value_format = runtime
+            .lora_modules_value_format
+            .as_deref()
+            .unwrap_or("name_path");
+        out.extend(
+            specs
+                .iter()
+                .map(|spec| spec.module_spec(value_format, model_source))
+                .collect::<Result<Vec<_>, _>>()?,
+        );
     }
     if let Some(rank) = args.max_lora_rank {
         let rank_arg = runtime.max_lora_rank_arg.as_deref().ok_or_else(|| {
@@ -1020,6 +1042,43 @@ mod tests {
         assert!(built
             .windows(2)
             .any(|pair| pair == ["--max-lora-rank", "64"]));
+    }
+
+    #[test]
+    fn build_managed_args_can_emit_lora_modules_with_base_model_lineage() {
+        let mut runtime = runtime();
+        runtime.prefix_args = vec!["serve".to_string()];
+        runtime.model_arg = Some("--model".to_string());
+        runtime.enable_lora_arg = Some("--enable-lora".to_string());
+        runtime.lora_modules_arg = Some("--lora-modules".to_string());
+        runtime.lora_modules_value_format = Some("json_with_base_model".to_string());
+
+        let mut args = cli_args();
+        args.lora_adapters = vec!["tools=hf-user/tools-lora".to_string()];
+
+        let built = build_managed_args(
+            &args,
+            &runtime,
+            "google/gemma-4-e4b-it",
+            "gemma-4-e4b-it",
+            "127.0.0.1",
+            8000,
+            8192,
+        )
+        .expect("managed args");
+
+        let modules_idx = built
+            .iter()
+            .position(|arg| arg == "--lora-modules")
+            .expect("lora modules flag");
+        let module: serde_json::Value =
+            serde_json::from_str(&built[modules_idx + 1]).expect("json module spec");
+        assert_eq!(module["name"].as_str(), Some("tools"));
+        assert_eq!(module["path"].as_str(), Some("hf-user/tools-lora"));
+        assert_eq!(
+            module["base_model_name"].as_str(),
+            Some("google/gemma-4-e4b-it")
+        );
     }
 
     #[test]

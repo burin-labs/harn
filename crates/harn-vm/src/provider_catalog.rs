@@ -862,6 +862,13 @@ fn validate_local_runtime(
         ("cache_type_k_arg", runtime.cache_type_k_arg.as_deref()),
         ("cache_type_v_arg", runtime.cache_type_v_arg.as_deref()),
         ("cache_ram_arg", runtime.cache_ram_arg.as_deref()),
+        ("enable_lora_arg", runtime.enable_lora_arg.as_deref()),
+        ("lora_modules_arg", runtime.lora_modules_arg.as_deref()),
+        (
+            "lora_modules_value_format",
+            runtime.lora_modules_value_format.as_deref(),
+        ),
+        ("max_lora_rank_arg", runtime.max_lora_rank_arg.as_deref()),
         ("stop", runtime.stop.as_deref()),
         ("source_url", runtime.source_url.as_deref()),
         ("last_verified", runtime.last_verified.as_deref()),
@@ -877,6 +884,13 @@ fn validate_local_runtime(
         if !matches!(stop, "keep_alive_zero" | "pid" | "external") {
             result.errors.push(format!(
                 "{owner} local_runtime.stop must be keep_alive_zero, pid, or external"
+            ));
+        }
+    }
+    if let Some(format) = runtime.lora_modules_value_format.as_deref() {
+        if !matches!(format, "name_path" | "json_with_base_model") {
+            result.errors.push(format!(
+                "{owner} local_runtime.lora_modules_value_format must be name_path or json_with_base_model"
             ));
         }
     }

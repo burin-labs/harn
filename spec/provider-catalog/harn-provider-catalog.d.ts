@@ -51,6 +51,7 @@ export interface HarnLocalRuntime {
   cache_ram_arg?: string
   enable_lora_arg?: string
   lora_modules_arg?: string
+  lora_modules_value_format?: "name_path" | "json_with_base_model"
   max_lora_rank_arg?: string
   default_args?: string[]
   stop?: "keep_alive_zero" | "pid" | "external"

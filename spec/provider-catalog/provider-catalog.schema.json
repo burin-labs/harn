@@ -388,6 +388,12 @@
         "lora_modules_arg": {
           "type": "string"
         },
+        "lora_modules_value_format": {
+          "enum": [
+            "name_path",
+            "json_with_base_model"
+          ]
+        },
         "max_lora_rank_arg": {
           "type": "string"
         },

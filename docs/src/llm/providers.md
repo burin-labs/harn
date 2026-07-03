@@ -161,7 +161,11 @@ the cataloged runtime shape. Use `harn models lora inspect --base <model>
 <adapter> --provider <provider>` to check local PEFT adapter metadata and print
 the corresponding Harn-managed launch command before starting the server. If
 the adapter config declares a rank and the provider catalog has a max-rank
-runtime flag, the generated command includes `--max-lora-rank` as well.
+runtime flag, the generated command includes `--max-lora-rank` as well. Runtime
+rows can also declare `lora_modules_value_format = "json_with_base_model"` for
+servers such as vLLM whose LoRA module flag should carry parent-model lineage
+metadata; Harn still exposes the portable `--lora-adapter NAME=PATH_OR_REPO`
+CLI and keeps the provider-specific value shape in the catalog.
 Use `harn models lora plan --base <model> --provider <provider>
 --tool-format auto --corpus <path>` before training a new adapter. It resolves
 the same provider capability matrix as runtime calls, records the effective

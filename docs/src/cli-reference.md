@@ -1286,7 +1286,11 @@ JSON mode. Use a smaller `--ctx` or free RAM when the guard trips; pass
 `--allow-memory-risk` only to override an intentionally conservative estimate.
 For runtimes whose catalog row declares LoRA launch flags, repeat
 `--lora-adapter NAME=PATH_OR_REPO` to expose startup adapters; when exactly one
-adapter is loaded, Harn records that adapter name as the selected request model.
+adapter is loaded, Harn records that adapter name as the selected request
+model. Provider catalog rows also own the module value shape: the default is the
+portable `NAME=PATH_OR_REPO` form, while rows such as vLLM can opt into
+lineage-preserving JSON values with the served base model recorded as
+`base_model_name`.
 
 ## harn local profile
 
@@ -1403,6 +1407,9 @@ same base model, provider, tool format, and chat-template contract.
 Use `--rank`, `--alpha`, and `--dropout` to pin adapter hyperparameters in the
 same contract; when the runtime exposes a LoRA rank flag, the local launch hint
 uses the planned rank as `--max-lora-rank` so serving buffers match training.
+The `serving.lora_module_value_format` field records whether the runtime uses
+the portable `NAME=PATH_OR_REPO` adapter value or a cataloged richer value such
+as vLLM's base-model-lineage JSON.
 
 ## harn models recommend
 
