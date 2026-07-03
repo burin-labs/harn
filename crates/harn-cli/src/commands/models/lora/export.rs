@@ -12,8 +12,8 @@ use crate::dispatch;
 use crate::env_guard::ScopedEnvVar;
 
 use super::{
-    dataset_format_for_tool_format, expand_home, normalize_plan_tool_format, sha256_file,
-    BaseModelReport, ToolCallingReport, DISPATCH_LORA_INSPECT_LOCK,
+    dataset_format_for_tool_format, expand_home, lora_adapter_binding, normalize_plan_tool_format,
+    sha256_file, BaseModelReport, ToolCallingReport, DISPATCH_LORA_INSPECT_LOCK,
 };
 
 const LORA_EXPORT_PAYLOAD_ENV: &str = "HARN_MODELS_LORA_EXPORT_PAYLOAD_JSON";
@@ -75,6 +75,12 @@ fn export_report(args: &ModelsLoraExportArgs) -> Result<LoraExportReport, String
         .unwrap_or_else(|| resolved.provider.clone());
     let catalog = harn_vm::llm_config::model_catalog_entry(&resolved.id);
     let capabilities = harn_vm::llm::capabilities::lookup(&provider, &resolved.id);
+    let local_runtime =
+        harn_vm::llm_config::provider_config(&provider).and_then(|provider| provider.local_runtime);
+    let provider_supports_lora_launch = local_runtime
+        .as_ref()
+        .and_then(|runtime| runtime.lora_modules_arg.as_ref())
+        .is_some();
     let catalog_default_tool_format =
         harn_vm::llm_config::default_tool_format(&resolved.id, &provider);
     let decision = if requested_tool_format == "auto" {
@@ -191,6 +197,7 @@ fn export_report(args: &ModelsLoraExportArgs) -> Result<LoraExportReport, String
     } else {
         args.out.as_deref().map(sha256_file).transpose()?
     };
+    let serving = export_serving_report(&target, &dataset_format, provider_supports_lora_launch);
     let manifest_path = if let Some(path) = args.manifest.as_deref() {
         write_export_manifest(
             path,
@@ -199,7 +206,7 @@ fn export_report(args: &ModelsLoraExportArgs) -> Result<LoraExportReport, String
             output_sha256.as_deref(),
             &stats,
             &target,
-            &dataset_format,
+            &serving,
             &errors,
         )?;
         Some(path.display().to_string())
@@ -263,6 +270,7 @@ fn export_report(args: &ModelsLoraExportArgs) -> Result<LoraExportReport, String
             chat_template: target.chat_template,
             metadata: target.metadata,
         },
+        serving,
         output: ExportOutput {
             path: output_path,
             sha256: output_sha256,
@@ -815,6 +823,22 @@ fn export_target_value(target: &ExportTarget) -> Value {
     Value::Object(object)
 }
 
+fn export_serving_report(
+    target: &ExportTarget,
+    dataset_format: &str,
+    provider_supports_lora_launch: bool,
+) -> ExportServingReport {
+    ExportServingReport {
+        request_model: target.adapter_name.clone(),
+        adapter_name: target.adapter_name.clone(),
+        base_model: target.base_model.clone(),
+        provider: target.provider.clone(),
+        adapter_binding: lora_adapter_binding(provider_supports_lora_launch).to_string(),
+        tool_format: target.harn_tool_format.clone(),
+        dataset_format: dataset_format.to_string(),
+    }
+}
+
 fn record_string(record: &Map<String, Value>, key: &str) -> String {
     record
         .get(key)
@@ -858,7 +882,7 @@ fn write_export_manifest(
     output_sha256: Option<&str>,
     stats: &ExportStats,
     target: &ExportTarget,
-    dataset_format: &str,
+    serving: &ExportServingReport,
     errors: &[String],
 ) -> Result<(), String> {
     if let Some(parent) = path
@@ -876,7 +900,7 @@ fn write_export_manifest(
     });
     let manifest = json!({
         "exporter": "harn_models_lora_export_v1",
-        "dataset_format": dataset_format,
+        "dataset_format": serving.dataset_format.as_str(),
         "input": {
             "path": input_path.display().to_string(),
             "sha256": sha256_file(input_path).unwrap_or_default(),
@@ -884,6 +908,7 @@ fn write_export_manifest(
         "output": output,
         "stats": stats,
         "target": export_target_value(target),
+        "serving": serving,
         "errors": errors,
     });
     std::fs::write(
@@ -902,6 +927,7 @@ struct LoraExportReport {
     request: ExportRequest,
     tool_calling: ToolCallingReport,
     target: ExportTargetReport,
+    serving: ExportServingReport,
     output: ExportOutput,
     stats: ExportStats,
     warnings: Vec<String>,
@@ -926,6 +952,17 @@ struct ExportTargetReport {
     harn_tool_format: String,
     chat_template: Option<String>,
     metadata: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Serialize)]
+struct ExportServingReport {
+    request_model: Option<String>,
+    adapter_name: Option<String>,
+    base_model: String,
+    provider: String,
+    adapter_binding: String,
+    tool_format: String,
+    dataset_format: String,
 }
 
 #[derive(Debug, Serialize)]

@@ -61,6 +61,7 @@ fn __render_human(harness: Harness, report: dict) {
   let base = __safe_dict(report["base"])
   let request = __safe_dict(report["request"])
   let target = __safe_dict(report["target"])
+  let serving = __safe_dict(report["serving"])
   let output = __safe_dict(report["output"])
   let stats = __safe_dict(report["stats"])
   let warnings = __safe_list(report["warnings"])
@@ -86,6 +87,11 @@ fn __render_human(harness: Harness, report: dict) {
   let template = __safe_string(target["chat_template"], "")
   if template != "" {
     harness.stdio.println("  chat template: " + template)
+  }
+  harness.stdio.println("  adapter binding: " + __safe_string(serving["adapter_binding"], ""))
+  let request_model = __safe_string(serving["request_model"], "")
+  if request_model != "" {
+    harness.stdio.println("  request model: " + request_model)
   }
   let path = __safe_string(output["path"], "")
   if path != "" {

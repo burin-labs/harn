@@ -330,6 +330,15 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
         &resolved.lineage,
         &decision.effective,
     );
+    let serving = serving_recipe(
+        &resolved.id,
+        &provider,
+        &request_model,
+        &adapter_name,
+        &decision.effective,
+        dataset_format,
+        provider_supports_lora_launch,
+    );
     let warnings = plan_warnings(
         &provider,
         &decision,
@@ -408,6 +417,7 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
             ],
             eval_command,
         },
+        serving,
         launch: PlanLaunchHints {
             inspect_command,
             local_launch_command: launch_command,
@@ -668,6 +678,66 @@ fn training_notes(tool_format: &str) -> Vec<String> {
                 .to_string(),
         ],
         _ => vec!["train against the route's validated tool-call format".to_string()],
+    }
+}
+
+pub(super) fn lora_adapter_binding(provider_supports_lora_launch: bool) -> &'static str {
+    if provider_supports_lora_launch {
+        "runtime_lora_adapter"
+    } else {
+        "external_runtime_or_merged_adapter"
+    }
+}
+
+fn serving_recipe(
+    base_model: &str,
+    provider: &str,
+    request_model: &str,
+    adapter_name: &str,
+    tool_format: &str,
+    dataset_format: &str,
+    provider_supports_lora_launch: bool,
+) -> ServingRecipe {
+    let adapter_binding = lora_adapter_binding(provider_supports_lora_launch).to_string();
+    let mut runtime_notes = Vec::new();
+    if provider_supports_lora_launch {
+        runtime_notes.push(
+            "serve the base model once and select the LoRA adapter per request model name"
+                .to_string(),
+        );
+        runtime_notes.push(
+            "keep adapter names stable across train, inspect, local launch, and eval reports"
+                .to_string(),
+        );
+    } else {
+        runtime_notes.push(
+            "register the adapter in the external runtime or merge it only after promotion gates pass"
+                .to_string(),
+        );
+        runtime_notes.push(
+            "record the runtime-specific adapter binding in the export manifest metadata"
+                .to_string(),
+        );
+    }
+    runtime_notes.push(
+        "do not change the tool-call format between dataset export, serving, and evaluation"
+            .to_string(),
+    );
+    ServingRecipe {
+        request_model: request_model.to_string(),
+        adapter_name: adapter_name.to_string(),
+        base_model: base_model.to_string(),
+        provider: provider.to_string(),
+        adapter_binding,
+        tool_format: tool_format.to_string(),
+        dataset_format: dataset_format.to_string(),
+        runtime_notes,
+        promotion_gates: vec![
+            "inspect the adapter against the exact served base model before launch".to_string(),
+            "run base-versus-adapter tool-call evals with the same request model selector"
+                .to_string(),
+            "keep a rollback path to the base route or previous adapter revision".to_string(),
+        ],
     }
 }
 
@@ -993,6 +1063,7 @@ struct LoraPlanReport {
     data: DataRecipe,
     corpus_refresh: CorpusRefreshRecipe,
     evaluation: EvaluationRecipe,
+    serving: ServingRecipe,
     launch: PlanLaunchHints,
     warnings: Vec<String>,
 }
@@ -1064,6 +1135,19 @@ struct EvaluationRecipe {
     holdout_policy: String,
     gates: Vec<String>,
     eval_command: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct ServingRecipe {
+    request_model: String,
+    adapter_name: String,
+    base_model: String,
+    provider: String,
+    adapter_binding: String,
+    tool_format: String,
+    dataset_format: String,
+    runtime_notes: Vec<String>,
+    promotion_gates: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1182,5 +1266,41 @@ mod tests {
             .requirements
             .iter()
             .any(|item| item.contains("Harn before training")));
+    }
+
+    #[test]
+    fn lora_serving_recipe_keeps_runtime_binding_explicit() {
+        let supported = serving_recipe(
+            "gemma-4-e4b-it",
+            "vllm",
+            "ADAPTER_MODEL",
+            "ADAPTER_NAME",
+            "json",
+            "harn_text_tool_calls_json_fences",
+            true,
+        );
+        assert_eq!(supported.adapter_binding, "runtime_lora_adapter");
+        assert!(supported
+            .runtime_notes
+            .iter()
+            .any(|note| note.contains("per request model name")));
+
+        let external = serving_recipe(
+            "gemma-4-e4b-it",
+            "external",
+            "ADAPTER_MODEL",
+            "ADAPTER_NAME",
+            "json",
+            "harn_text_tool_calls_json_fences",
+            false,
+        );
+        assert_eq!(
+            external.adapter_binding,
+            "external_runtime_or_merged_adapter"
+        );
+        assert!(external
+            .runtime_notes
+            .iter()
+            .any(|note| note.contains("external runtime")));
     }
 }

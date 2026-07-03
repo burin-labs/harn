@@ -400,6 +400,9 @@ fn models_lora_plan_human_text_includes_recipe() {
         "provenance manifest:",
         "hard negatives:",
         "corpus gates:",
+        "adapter binding: runtime_lora_adapter",
+        "serving notes:",
+        "promotion gates:",
         "harn eval tool-calls --planner ADAPTER_MODEL --tool-format json --dataset ./lora-corpus",
         "harn models lora inspect --base local-gemma4-e4b --provider vllm --name ADAPTER_NAME ADAPTER_PATH_OR_REPO",
         "harn local launch local-gemma4-e4b --provider vllm --model-source gemma-4-e4b-it",
@@ -457,6 +460,17 @@ fn models_lora_plan_json_shape_is_stable() {
     assert_eq!(harn_value["corpus_refresh"]["strategy"], "audit-only");
     assert_eq!(harn_value["corpus_refresh"]["teacher_required"], false);
     assert_eq!(
+        harn_value["serving"]["adapter_binding"],
+        "runtime_lora_adapter"
+    );
+    assert_eq!(harn_value["serving"]["request_model"], "ADAPTER_MODEL");
+    assert_eq!(harn_value["serving"]["adapter_name"], "ADAPTER_NAME");
+    assert_eq!(harn_value["serving"]["tool_format"], "native");
+    assert_eq!(
+        harn_value["serving"]["dataset_format"],
+        "messages_with_tool_calls"
+    );
+    assert_eq!(
         harn_value["template"]["name"],
         "gemma4_native_function_calling"
     );
@@ -510,6 +524,7 @@ fn models_lora_export_check_reports_native_shape() {
     for fragment in [
         "LoRA export for gemma-4-e4b-it via vllm",
         "dataset format: messages_with_tool_calls",
+        "adapter binding: runtime_lora_adapter",
         "mode: check",
         "stats: records=2 emitted=1 skipped=1 tool_calls=1 tool_results=1",
     ] {
@@ -566,6 +581,11 @@ fn models_lora_export_json_writes_dataset_and_manifest() {
     assert_eq!(harn_value["stats"]["tool_calls"].as_u64(), Some(1));
     assert_eq!(harn_value["stats"]["tool_results"].as_u64(), Some(1));
     assert_eq!(harn_value["target"]["adapter_name"], "burin-tools");
+    assert_eq!(harn_value["serving"]["request_model"], "burin-tools");
+    assert_eq!(
+        harn_value["serving"]["adapter_binding"],
+        "runtime_lora_adapter"
+    );
     assert!(out.is_file(), "exported JSONL missing");
     assert!(manifest.is_file(), "manifest missing");
 
@@ -589,6 +609,15 @@ fn models_lora_export_json_writes_dataset_and_manifest() {
     assert!(
         tools.iter().any(|tool| tool["function"]["name"] == "read"),
         "tools={tools:?}"
+    );
+    let manifest_value = parse_json(
+        &fs::read_to_string(&manifest).expect("read manifest"),
+        "manifest",
+    );
+    assert_eq!(manifest_value["serving"]["request_model"], "burin-tools");
+    assert_eq!(
+        manifest_value["serving"]["adapter_binding"],
+        "runtime_lora_adapter"
     );
 }
 
