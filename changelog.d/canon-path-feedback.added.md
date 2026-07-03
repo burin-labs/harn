@@ -1,0 +1,1 @@
+- Added `std/agent/canon` helpers that build harn-canon slices from changed paths and inject feedback for those paths.
