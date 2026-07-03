@@ -322,7 +322,7 @@ pub(crate) fn extract_llm_options(
     if enforce_capability_gates && uses_file_ids && !caps.files_api_supported {
         return Err(unsupported_option_error("files_api", &provider, &model));
     }
-    if uses_file_ids && caps.message_wire_format == "anthropic" {
+    if uses_file_ids && caps.message_wire_format.is_anthropic() {
         crate::llm::api::push_unique_anthropic_beta_feature(
             &mut anthropic_beta_features,
             crate::stdlib::files::ANTHROPIC_FILES_API_BETA,

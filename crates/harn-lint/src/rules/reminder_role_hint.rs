@@ -150,7 +150,7 @@ fn literal_string(node: &SNode) -> Option<String> {
 
 fn route_supports_user_block(route: &LlmRoute) -> bool {
     let caps = capabilities::lookup(&route.provider, &route.model);
-    caps.message_wire_format == "anthropic" || caps.prefers_role_developer
+    caps.message_wire_format.is_anthropic() || caps.prefers_role_developer
 }
 
 fn make_diagnostic(route: &LlmRoute, span: Span) -> LintDiagnostic {

@@ -1107,7 +1107,7 @@ pub(crate) fn capabilities_to_vm_value(
         crate::value::intern_key("native_tools"),
         VmValue::Bool(caps.native_tools),
     );
-    dict.put_str("message_wire_format", caps.message_wire_format.clone());
+    dict.put_str("message_wire_format", caps.message_wire_format.as_str());
     dict.put_str(
         "native_tool_wire_format",
         caps.native_tool_wire_format.clone(),

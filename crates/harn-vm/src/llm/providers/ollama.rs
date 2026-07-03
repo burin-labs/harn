@@ -195,8 +195,10 @@ impl OllamaProvider {
         }
         let body = Self::build_request_body(request);
         crate::llm::api::vm_call_llm_api_with_body(
-            request, delta_tx, body, false, // is_anthropic_style
-            true,  // is_ollama
+            request,
+            delta_tx,
+            body,
+            crate::llm::capabilities::WireDialect::Ollama,
         )
         .await
     }

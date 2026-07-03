@@ -467,8 +467,7 @@ impl AnthropicProvider {
             request,
             delta_tx,
             Self::build_request_body(request),
-            true,  // is_anthropic_style
-            false, // is_ollama
+            crate::llm::capabilities::WireDialect::Anthropic,
         )
         .await
     }

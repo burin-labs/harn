@@ -376,8 +376,10 @@ impl OpenAiCompatibleProvider {
             delta_tx
         };
         let result = crate::llm::api::vm_call_llm_api_with_body(
-            request, delta_tx, body, false, // is_anthropic_style
-            false, // is_ollama
+            request,
+            delta_tx,
+            body,
+            crate::llm::capabilities::WireDialect::OpenAiCompat,
         )
         .await?;
         Ok(result)
