@@ -330,6 +330,31 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
         &resolved.lineage,
         &decision.effective,
     );
+    let export_corpus_arg = corpus
+        .clone()
+        .unwrap_or_else(|| "CORPUS_JSONL_OR_DIR".to_string());
+    let export_command = vec![
+        "harn".to_string(),
+        "models".to_string(),
+        "lora".to_string(),
+        "export".to_string(),
+        "--base".to_string(),
+        args.base_model.clone(),
+        "--provider".to_string(),
+        provider.clone(),
+        "--tool-format".to_string(),
+        decision.effective.clone(),
+        "--corpus".to_string(),
+        export_corpus_arg,
+        "--out".to_string(),
+        "ADAPTER_DATASET.jsonl".to_string(),
+        "--manifest".to_string(),
+        "ADAPTER_DATASET.manifest.json".to_string(),
+        "--adapter-name".to_string(),
+        adapter_name.clone(),
+        "--chat-template".to_string(),
+        template.name.clone(),
+    ];
     let serving = serving_recipe(
         &resolved.id,
         &provider,
@@ -420,6 +445,7 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
         },
         serving,
         launch: PlanLaunchHints {
+            export_command,
             inspect_command,
             local_launch_command: launch_command,
             request_model,
@@ -1223,6 +1249,7 @@ struct ServingRecipe {
 
 #[derive(Debug, Serialize)]
 struct PlanLaunchHints {
+    export_command: Vec<String>,
     inspect_command: Vec<String>,
     local_launch_command: Vec<String>,
     request_model: String,

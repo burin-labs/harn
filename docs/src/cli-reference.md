@@ -1373,6 +1373,9 @@ The report lists provenance manifest fields, hard-negative slices, and holdout
 gates so generated data cannot silently contaminate evaluation fixtures. It
 also lists the trainer contract Harn expects for tool-calling SFT, including
 assistant-only loss masks, `messages`/`tools` columns, and packing boundaries.
+The launch block includes the matching `harn models lora export` command so the
+trainer dataset, provenance manifest, eval route, and serving route share the
+same base model, provider, tool format, and chat-template contract.
 
 ## harn models recommend
 
