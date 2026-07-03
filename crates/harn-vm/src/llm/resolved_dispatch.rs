@@ -8,11 +8,9 @@
 //! used to require joining the `provider_call_request` and
 //! `provider_call_response` transcript events by `call_id`, cross-referencing
 //! `capabilities.toml` to learn the wire format, and reconstructing the
-//! provenance of each field by reading five-plus scattered resolution layers.
-//! A real 2026-07 escalation incident took six log-greps and multiple
-//! contradictory root-cause passes (transport-routing -> provider-drop ->
-//! refuted -> mislabeled error string) precisely because no single record
-//! captured the *final resolved decision*.
+//! provenance of each field by reading scattered resolution layers. The
+//! transcript needs to carry the *final resolved decision* so route debugging
+//! does not depend on reconstructing state from adjacent events.
 //!
 //! `resolved_dispatch` collapses that into ONE append-only transcript event
 //! per LLM call. It is:
@@ -20,9 +18,8 @@
 //!   - deterministic in its wire-format/base-url fields (derived from the
 //!     capability registry, the single source of truth), and
 //!   - provenance-bearing: each of provider/model/wire_format/thinking/
-//!     tool_format records WHERE it came from. The smoking-gun value is
-//!     `inherited_from_primary` — it would have made the escalation incident
-//!     obvious on the first read.
+//!     tool_format records WHERE it came from. The high-signal value is
+//!     `inherited_from_primary`, which flags silent route inheritance directly.
 //!
 //! This module is observability-only. It reads the request options + the
 //! result and emits a record; it never feeds back into request construction,
@@ -108,14 +105,11 @@ impl DispatchProvenance {
 /// pattern-match raw error strings.
 ///
 /// The `served` vs `empty_completion_transient_recovered` vs
-/// `empty_completion_terminal` split is the exact distinction the escalation
-/// guard hinges on (mirrors burin-code#3550's `escalation_served_empty_signal`
-/// vocabulary — an empty flake the runtime RETRIED and recovered from is not a
-/// dead lane; only a TERMINAL unrecovered empty is). The whole 2026-07 incident
-/// was a series of transient recovered empties misread as a terminal serve
-/// failure; this enum makes the two unmistakable in the transcript.
+/// `empty_completion_terminal` split is the distinction the escalation guard
+/// hinges on: an empty response the runtime retried and recovered from is not a
+/// dead lane; only a terminal unrecovered empty is.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DispatchOutcome {
+pub(crate) enum DispatchOutcome {
     /// The call returned committed content / a tool call / thinking on the
     /// first attempt.
     Served {
@@ -133,15 +127,11 @@ pub enum DispatchOutcome {
     /// The provider billed output tokens but committed nothing, and the runtime
     /// exhausted its retry budget (or surfaced the empty as a terminal error).
     /// THIS is the "escalation served empty" dead-lane signal.
-    EmptyCompletionTerminal {
-        completion_tokens: i64,
-    },
+    EmptyCompletionTerminal { completion_tokens: i64 },
     /// The provider hit a usage / quota / rate limit.
     UsageLimit,
     /// Any other provider-side error, with a short class label.
-    ProviderError {
-        class: String,
-    },
+    ProviderError { class: String },
 }
 
 impl DispatchOutcome {
@@ -151,11 +141,15 @@ impl DispatchOutcome {
     /// TERMINAL (the retry budget was exhausted and the loop is returning the
     /// empty result unchanged); a served result after >0 empty retries is a
     /// transient-recovered flake; a clean first-attempt serve is `served`.
-    pub fn from_result(result: &super::api::LlmResult, empty_retries: usize) -> Self {
+    pub(crate) fn from_result(result: &super::api::LlmResult, empty_retries: usize) -> Self {
         let content_len = result.text.len();
         let committed_nothing = result.text.is_empty()
             && result.tool_calls.is_empty()
-            && result.thinking.as_deref().map(str::is_empty).unwrap_or(true);
+            && result
+                .thinking
+                .as_deref()
+                .map(str::is_empty)
+                .unwrap_or(true);
         if committed_nothing && result.output_tokens > 0 {
             return DispatchOutcome::EmptyCompletionTerminal {
                 completion_tokens: result.output_tokens,
@@ -179,7 +173,7 @@ impl DispatchOutcome {
     /// error here is by definition terminal. Keyed on the same stable substrings
     /// the retry/skip classifiers use, so the record agrees with the runtime's
     /// own routing decisions.
-    pub fn from_error_message(message: &str) -> Self {
+    pub(crate) fn from_error_message(message: &str) -> Self {
         let lower = message.to_lowercase();
         if lower.contains("completion_tokens=")
             && (lower.contains("delivered no content")
@@ -207,7 +201,7 @@ impl DispatchOutcome {
     }
 
     /// Stable machine label. `dispatch_trace` filters on these.
-    pub fn label(&self) -> &'static str {
+    pub(crate) fn label(&self) -> &'static str {
         match self {
             DispatchOutcome::Served { .. } => "served",
             DispatchOutcome::EmptyCompletionTransientRecovered { .. } => {
@@ -217,12 +211,6 @@ impl DispatchOutcome {
             DispatchOutcome::UsageLimit => "usage_limit",
             DispatchOutcome::ProviderError { .. } => "provider_error",
         }
-    }
-
-    /// True only for the dead-lane signal: a terminal, unrecovered empty
-    /// completion. Transient-recovered empties are explicitly NOT this.
-    pub fn is_served_empty(&self) -> bool {
-        matches!(self, DispatchOutcome::EmptyCompletionTerminal { .. })
     }
 
     fn to_json(&self) -> serde_json::Value {
@@ -333,7 +321,7 @@ fn thinking_json(thinking: &ThinkingConfig) -> serde_json::Value {
 /// `provider_call_request` / `provider_call_response` events; the record itself
 /// carries everything a consumer needs to answer "what dispatched, from where,
 /// and what came back" without any join.
-pub fn build_record(
+pub(crate) fn build_record(
     iteration: usize,
     call_id: &str,
     span_id: Option<u64>,
@@ -381,31 +369,32 @@ mod tests {
 
     #[test]
     fn outcome_empty_completion_terminal_from_billed_no_content() {
-        // The exact string the FIXED transport throw now emits — note it names
-        // the native wire style, not the old hardcoded "openai-compatible".
+        // The transport error must name the actual native wire style, not a
+        // generic OpenAI-compatible path.
         let msg = "anthropic-native model anthropic:claude-sonnet-4-6 reported \
                    completion_tokens=8 but delivered no content, reasoning, or tool calls";
-        assert_eq!(
+        assert!(matches!(
             DispatchOutcome::from_error_message(msg),
             DispatchOutcome::EmptyCompletionTerminal {
                 completion_tokens: 0
             }
-        );
-        assert!(DispatchOutcome::from_error_message(msg).is_served_empty());
+        ));
     }
 
     #[test]
     fn transient_recovered_is_not_served_empty() {
         // A recovered flake (>0 empty retries but the call ultimately served)
-        // must NOT be flagged as the dead-lane signal. This is the exact
-        // misclassification the 2026-07 incident hinged on.
+        // must not be flagged as the dead-lane signal.
         let recovered = DispatchOutcome::EmptyCompletionTransientRecovered {
             completion_tokens: 487,
             content_len: 1666,
             empty_retries: 3,
         };
         assert_eq!(recovered.label(), "empty_completion_transient_recovered");
-        assert!(!recovered.is_served_empty());
+        assert!(!matches!(
+            recovered,
+            DispatchOutcome::EmptyCompletionTerminal { .. }
+        ));
     }
 
     #[test]

@@ -6,8 +6,7 @@
 //! record: instead of asking "what did this call dispatch", it answers "what
 //! WOULD this pair dispatch" — so anyone can confirm "does anthropic
 //! claude-sonnet route native?" without running an eval and grepping a
-//! transcript. The whole 2026-07 escalation root-cause hunt would have been a
-//! single `harn provider dispatch-explain anthropic claude-sonnet-4-6` away.
+//! transcript.
 
 use crate::cli::provider::ProviderDispatchExplainArgs;
 
@@ -75,11 +74,7 @@ pub(crate) fn run(args: &ProviderDispatchExplainArgs) {
     println!("  native_tools:     {}", caps.native_tools);
     println!(
         "  thinking:         advertised={advertises_thinking}{}",
-        if args.thinking {
-            " (requested)"
-        } else {
-            ""
-        }
+        if args.thinking { " (requested)" } else { "" }
     );
     if let Some(note) = thinking_note {
         println!("  NOTE: {note}");
