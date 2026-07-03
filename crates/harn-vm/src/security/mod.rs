@@ -32,6 +32,7 @@
 pub mod battery;
 pub mod behavioral;
 pub mod provenance;
+pub mod stance_judge;
 
 pub use provenance::{classify_directive_trust, DirectiveProvenance};
 
