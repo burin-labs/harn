@@ -1121,7 +1121,7 @@ version = "0.1.0"
 description = "Fake harn-openapi for scaffold tests."
 license = "MIT OR Apache-2.0"
 repository = "https://example.test/harn-openapi"
-harn = ">=0.8,<0.9"
+harn = ">=0.9,<0.10"
 docs_url = "docs/api.md"
 
 [exports]
