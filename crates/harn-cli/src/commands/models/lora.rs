@@ -168,30 +168,33 @@ fn inspect_report(args: &ModelsLoraInspectArgs) -> Result<LoraInspectReport, Str
             && !warning.starts_with("adapter base_model_name_or_path")
     });
     let request_model = adapter.name.clone();
-    let model_source = adapter
-        .base_model_name_or_path
-        .clone()
-        .unwrap_or_else(|| resolved.id.clone());
-    let lora_spec = format!("{}={}", adapter.name, adapter.input);
-    let launch_provider = provider.clone();
     let max_lora_rank = adapter
         .rank
         .filter(|_| provider_supports_lora_launch && provider_supports_lora_max_rank);
-    let mut harn_local_launch = vec![
-        "harn".to_string(),
-        "local".to_string(),
-        "launch".to_string(),
-        args.base_model.clone(),
-        "--provider".to_string(),
-        launch_provider,
-        "--model-source".to_string(),
-        model_source,
-        "--lora-adapter".to_string(),
-        lora_spec,
-    ];
-    if let Some(rank) = max_lora_rank {
-        harn_local_launch.extend(["--max-lora-rank".to_string(), rank.to_string()]);
-    }
+    let harn_local_launch = if provider_supports_lora_launch {
+        let model_source = adapter
+            .base_model_name_or_path
+            .clone()
+            .unwrap_or_else(|| resolved.id.clone());
+        let mut command = vec![
+            "harn".to_string(),
+            "local".to_string(),
+            "launch".to_string(),
+            args.base_model.clone(),
+            "--provider".to_string(),
+            provider.clone(),
+            "--model-source".to_string(),
+            model_source,
+            "--lora-adapter".to_string(),
+            format!("{}={}", adapter.name, adapter.input),
+        ];
+        if let Some(rank) = max_lora_rank {
+            command.extend(["--max-lora-rank".to_string(), rank.to_string()]);
+        }
+        command
+    } else {
+        Vec::new()
+    };
     Ok(LoraInspectReport {
         ok,
         base: BaseModelReport {
@@ -1358,6 +1361,43 @@ mod tests {
             .harn_local_launch
             .windows(2)
             .any(|pair| pair == ["--max-lora-rank", "16"]));
+    }
+
+    #[test]
+    fn inspect_omits_launch_argv_when_provider_lacks_lora_flags() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let adapter_dir = tmp.path().join("burin-tools");
+        std::fs::create_dir(&adapter_dir).expect("adapter dir");
+        std::fs::write(adapter_dir.join("adapter_model.safetensors"), b"stub")
+            .expect("adapter weights");
+        std::fs::write(
+            adapter_dir.join("adapter_config.json"),
+            r#"{
+                "peft_type": "LORA",
+                "base_model_name_or_path": "google/gemma-4-e4b-it",
+                "r": 16
+            }"#,
+        )
+        .expect("adapter config");
+
+        let args = ModelsLoraInspectArgs {
+            base_model: "local-gemma4-e4b".to_string(),
+            adapter: adapter_dir.display().to_string(),
+            name: Some("burin-tools".to_string()),
+            provider: Some("openai".to_string()),
+            json: true,
+        };
+        let report = inspect_report(&args).expect("report");
+        assert!(report.ok, "{:?}", report.warnings);
+        assert!(!report.compatibility.provider_supports_lora_launch);
+        assert!(!report.compatibility.provider_supports_lora_max_rank);
+        assert_eq!(report.launch.request_model, "burin-tools");
+        assert_eq!(report.launch.max_lora_rank, None);
+        assert!(report.launch.harn_local_launch.is_empty());
+        assert!(report
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("provider openai")));
     }
 
     #[test]
