@@ -408,6 +408,7 @@ fn models_lora_plan_human_text_includes_recipe() {
         "serve the adapter as a text-channel route: Harn owns tool-call parsing for this plan",
         "keep provider-native tool parsers disabled unless the proxy maps them back to Harn text tool calls",
         "promotion gates:",
+        "harn models lora export --base local-gemma4-e4b --provider vllm --tool-format json --corpus ./lora-corpus --out ADAPTER_DATASET.jsonl --manifest ADAPTER_DATASET.manifest.json --adapter-name ADAPTER_NAME --chat-template harn_text_tool_calls_json_fences",
         "harn eval tool-calls --planner ADAPTER_MODEL --tool-format json --dataset ./lora-corpus",
         "harn models lora inspect --base local-gemma4-e4b --provider vllm --name ADAPTER_NAME ADAPTER_PATH_OR_REPO",
         "harn local launch local-gemma4-e4b --provider vllm --model-source gemma-4-e4b-it",
@@ -489,6 +490,27 @@ fn models_lora_plan_json_shape_is_stable() {
     assert_eq!(
         harn_value["serving"]["dataset_format"],
         "messages_with_tool_calls"
+    );
+    let export = harn_value["launch"]["export_command"]
+        .as_array()
+        .expect("export argv");
+    assert!(
+        export
+            .windows(2)
+            .any(|pair| pair[0] == "--tool-format" && pair[1] == "native"),
+        "export argv={export:?}"
+    );
+    assert!(
+        export
+            .windows(2)
+            .any(|pair| pair[0] == "--corpus" && pair[1] == "CORPUS_JSONL_OR_DIR"),
+        "export argv={export:?}"
+    );
+    assert!(
+        export
+            .windows(2)
+            .any(|pair| pair[0] == "--chat-template" && pair[1] == "gemma4_native_function_calling"),
+        "export argv={export:?}"
     );
     let serving_notes = harn_value["serving"]["runtime_notes"]
         .as_array()
