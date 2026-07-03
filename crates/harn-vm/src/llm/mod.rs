@@ -136,6 +136,7 @@ pub(crate) mod provider;
 pub(crate) mod providers;
 pub(crate) mod rate_limit;
 pub mod receipts;
+pub(crate) mod route;
 mod stream;
 pub(crate) mod tool_delimiter;
 pub(crate) mod tools;

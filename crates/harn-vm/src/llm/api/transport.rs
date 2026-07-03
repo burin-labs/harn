@@ -157,6 +157,20 @@ pub(super) async fn vm_call_llm_api(
             .await;
     }
 
+    // Reject a structurally-broken route before any HTTP call. A thinking-enabled
+    // Anthropic-family model resolved to the OpenAI-compatible transport is
+    // billed-but-empty (Anthropic's compat surface never streams extended
+    // thinking); erroring here surfaces the upstream provider-drop instead of
+    // serving an empty completion far downstream (harn#3956). Valid routes are
+    // dispatched byte-identically below. The `fake` test double never touches
+    // the real transport, so it is exempt (`mock` already resolves to the
+    // anthropic dialect for Claude ids and so never trips the guard).
+    if !crate::llm::fake::FakeLlmProvider::should_intercept(provider) {
+        crate::llm::route::Route::resolve(provider, &opts.model, &opts.thinking).map_err(
+            |err| VmError::Thrown(VmValue::String(arcstr::ArcStr::from(err.into_message()))),
+        )?;
+    }
+
     if crate::llm::provider::is_provider_registered(provider) {
         return dispatch_to_registered_provider(opts, delta_tx).await;
     }
