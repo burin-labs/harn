@@ -235,7 +235,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 
 ## Tool-format recommendations by catalog model
 
-This section starts from the checked-in provider catalog. Recommended format follows the live capability matrix, and the empirical columns are layered from `.harn-runs/coding-agent-bench/latest/tool_mode_parity_overlay.toml` when that overlay exists locally. Rows without sampled evidence show `data not yet collected`.
+This section starts from the checked-in provider catalog. Recommended format follows the live capability matrix, and the empirical columns are layered from `.harn-runs/coding-agent-bench/latest/tool_mode_parity_overlay.toml` when that overlay exists locally. Rows without sampled benchmark evidence show catalog capability notes when present, otherwise `data not yet collected`.
 
 | Provider | Model | Recommended format | Parity | Native pass | Text pass | Samples | Last evaluated | Confidence | Evidence |
 |---|---|---|---|---|---|---:|---|---|---|
@@ -264,9 +264,9 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `baseten` | `baseten/nvidia/Nemotron-120B-A12B` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `baseten` | `baseten/openai/gpt-oss-120b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `baseten` | `baseten/zai-org/GLM-4.7` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `baseten` | `baseten/zai-org/GLM-5` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
-| `baseten` | `baseten/zai-org/GLM-5.1` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
-| `baseten` | `baseten/zai-org/GLM-5.2` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
+| `baseten` | `baseten/zai-org/GLM-5` | `text` | `native_unreliable` | - | - | - | - | - | catalog note: 2026-06-23 live Baseten probe: forced native/off emitted visible `<tool_call><arg_key>...` content with no provider-native tool_calls; Harn heredoc text tools emitted parseable `<tool_call>\nadd({ ... })\n</tool_call>`. |
+| `baseten` | `baseten/zai-org/GLM-5.1` | `text` | `native_unreliable` | - | - | - | - | - | catalog note: 2026-06-23 live Baseten probe: forced native/off emitted visible `<tool_call><arg_key>...` content with no provider-native tool_calls; Harn heredoc text tools emitted parseable `<tool_call>\nadd({ ... })\n</tool_call>`. |
+| `baseten` | `baseten/zai-org/GLM-5.2` | `text` | `native_unreliable` | - | - | - | - | - | catalog note: 2026-06-23 live Baseten probe: forced native/off emitted visible `<tool_call><arg_key>...` content with no provider-native tool_calls; Harn heredoc text tools emitted parseable `<tool_call>\nadd({ ... })\n</tool_call>`. |
 | `cerebras` | `gpt-oss-120b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `cerebras` | `llama-3.3-70b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `cerebras` | `zai-glm-4.7` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
@@ -276,20 +276,20 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `dashscope` | `dashscope/qwen3.5-397b-a17b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `dashscope` | `dashscope/qwen3.6-35b-a3b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `dashscope` | `dashscope/qwen3.7-max` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `deepinfra` | `deepinfra/Qwen/Qwen3.6-35B-A3B` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
+| `deepinfra` | `deepinfra/Qwen/Qwen3.6-35B-A3B` | `text` | `native_unreliable` | - | - | - | - | - | catalog note: 2026-06-24 forced-format sweep (N=5): DeepInfra Qwen3.6-35B-A3B native bills empty completions (1/5) and fenced-JSON is flaky (2/5); heredoc text carried a backslash-heavy Zig body byte-clean 5/5. |
 | `deepinfra` | `deepinfra/Qwen/Qwen3.7-Max` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `deepinfra` | `deepinfra/deepseek-ai/DeepSeek-V3.2` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `deepinfra` | `deepinfra/deepseek-ai/DeepSeek-V4-Flash` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `deepinfra` | `deepinfra/deepseek-ai/DeepSeek-V4-Pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `deepinfra` | `deepinfra/moonshotai/Kimi-K2.7-Code` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `deepinfra` | `deepinfra/openai/gpt-oss-120b` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
-| `deepinfra` | `deepinfra/zai-org/GLM-5.2` | `json` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
+| `deepinfra` | `deepinfra/openai/gpt-oss-120b` | `text` | `native_unreliable` | - | - | - | - | - | catalog note: 2026-06-24 Harn agent-loop (gpt-oss-120b, zig-feat, tool grounding present): DeepInfra native billed completion_tokens=86 with no dispatchable tool call or answer (Harmony reasoning-channel-only / upstream contract violation), repeated ~10x -> run unusable. Text/heredoc is the clean pay-per-token channel. See vLLM #22578/#44216, SGLang #8976/#10738, openai/harmony #68. |
+| `deepinfra` | `deepinfra/zai-org/GLM-5.2` | `json` | `native_unreliable` | - | - | - | - | - | catalog note: 2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted a malformed native call whose function name was the whole JSON payload; fenced JSON text-channel tools completed the loop. |
 | `deepseek` | `deepseek-chat` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `deepseek` | `deepseek-reasoner` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `deepseek` | `deepseek-v4-flash` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `deepseek` | `deepseek-v4-pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `fireworks` | `accounts/fireworks/models/deepseek-v4-pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `fireworks` | `accounts/fireworks/models/glm-5p2` | `json` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
+| `fireworks` | `accounts/fireworks/models/glm-5p2` | `json` | `native_unreliable` | - | - | - | - | - | catalog note: 2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted XML `<tool_use>` text instead of provider-native tool_calls. JSON tools completed the loop when auto reasoning was disabled; text tools did not. |
 | `fireworks` | `accounts/fireworks/models/gpt-oss-120b` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
 | `fireworks` | `accounts/fireworks/models/kimi-k2p6` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `fireworks` | `accounts/fireworks/models/kimi-k2p7-code` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
@@ -308,7 +308,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `groq` | `llama-3.3-70b-versatile` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `groq` | `qwen/qwen3.6-27b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `llamacpp` | `qwen3.6-35b-a3b` | `json` | `text_only` | - | - | - | - | - | `data not yet collected` |
-| `llamacpp` | `qwen3.6-35b-a3b-ud-q4-k-xl` | `native` | `native` | - | - | - | - | - | `data not yet collected` |
+| `llamacpp` | `qwen3.6-35b-a3b-ud-q4-k-xl` | `native` | `native` | - | - | - | - | - | catalog note: Harn-managed llama.cpp launch plus one-tool probe passed native and streaming native on 2026-06-05. |
 | `llamacpp` | `qwen3.6-35b-a3b-ud-q5-k-xl` | `json` | `text_only` | - | - | - | - | - | `data not yet collected` |
 | `local` | `gemma-4-12b-it` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `local` | `gemma-4-26b-a4b-it` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
@@ -318,8 +318,8 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `minimax` | `MiniMax-M2` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `minimax` | `MiniMax-M2.5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `minimax` | `MiniMax-M2.5-highspeed` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `minimax` | `MiniMax-M2.7` | `json` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
-| `minimax` | `MiniMax-M2.7-highspeed` | `json` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
+| `minimax` | `MiniMax-M2.7` | `json` | `native_unreliable` | - | - | - | - | - | catalog note: 2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and prose claiming the tool had run; fenced JSON text-channel tools completed the loop. |
+| `minimax` | `MiniMax-M2.7-highspeed` | `json` | `native_unreliable` | - | - | - | - | - | catalog note: 2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and prose claiming the tool had run; fenced JSON text-channel tools completed the loop. |
 | `minimax` | `MiniMax-M3` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `minimax` | `MiniMax-Text-01` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `mistral` | `codestral-2508` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
@@ -331,22 +331,22 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `mlx` | `unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `mlx` | `unsloth/Qwen3.6-35B-A3B-UD-MLX-8bit` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `moonshot` | `moonshot/kimi-k2.6` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `moonshot` | `moonshot/kimi-k2.7-code` | `json` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
-| `moonshot` | `moonshot/kimi-k2.7-code-highspeed` | `json` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
+| `moonshot` | `moonshot/kimi-k2.7-code` | `json` | `native_unreliable` | - | - | - | - | - | catalog note: 2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and claimed the tool was unavailable. Harn JSON tools completed the loop; text tools also pass after fixing text-mode history projection. |
+| `moonshot` | `moonshot/kimi-k2.7-code-highspeed` | `json` | `native_unreliable` | - | - | - | - | - | catalog note: 2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and claimed the tool was unavailable. Harn JSON tools completed the loop; text tools also pass after fixing text-mode history projection. |
 | `nvidia` | `nvidia/deepseek-v4-flash` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `nvidia` | `nvidia/deepseek-v4-pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `nvidia` | `nvidia/kimi-k2.6` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `nvidia` | `nvidia/minimax-m2.7` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `nvidia` | `nvidia/minimax-m3` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `nvidia` | `nvidia/mistral-medium-3.5-128b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `nvidia` | `nvidia/nemotron-3-nano-30b-a3b` | `native` | `interchangeable` | - | - | - | - | - | `data not yet collected` |
+| `nvidia` | `nvidia/nemotron-3-nano-30b-a3b` | `native` | `interchangeable` | - | - | - | - | - | catalog note: 2026-06-20 Harn agent-loop smoke: NVIDIA NIM Nemotron 3 Nano completed both native and JSON tool loops with reasoning disabled. Earlier native false negatives were caused by Harn's parser treating terse final answers as billed no-ops; keep native preferred. |
 | `nvidia` | `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `nvidia` | `nvidia/nemotron-3-super-120b-a12b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `nvidia` | `nvidia/nemotron-3-ultra-550b-a55b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `nvidia` | `nvidia/openai/gpt-oss-120b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `nvidia` | `nvidia/openai/gpt-oss-20b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `nvidia` | `nvidia/step-3.7-flash` | `native` | `interchangeable` | - | - | - | - | - | `data not yet collected` |
-| `nvidia` | `nvidia/z-ai/glm-5.1` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
+| `nvidia` | `nvidia/z-ai/glm-5.1` | `text` | `native_unreliable` | - | - | - | - | - | catalog note: GLM-5.x's native channel emits `<tool_call><arg_key>...` markup as content instead of OpenAI message.tool_calls — a weight-intrinsic behavior reproduced across every GLM-5 host probed (zai/Baseten live, Together + OpenRouter agent-loop smoke, DeepInfra, Fireworks glm-5p*). NVIDIA serves the same weights, so the same leak applies; pin the clean heredoc text channel for family parity. Flagged by the native_unreliable-family consistency gate. |
 | `ollama` | `devstral-small-2:24b` | `json` | `text_only` | - | - | - | - | - | `data not yet collected` |
 | `ollama` | `gemma4:12b-mlx` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
 | `ollama` | `gemma4:12b-mxfp8` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
@@ -372,14 +372,14 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `openrouter` | `anthropic/claude-opus-4.8` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `anthropic/claude-sonnet-4-6` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `anthropic/claude-sonnet-5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `openrouter` | `deepseek/deepseek-v3.2` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
+| `openrouter` | `deepseek/deepseek-v3.2` | `text` | `native_unreliable` | - | - | - | - | - | catalog note: OpenRouter DeepSeek V3.2 advertises native tools, but coding-agent runs observed provider-native failures; default to Harn text tools and recover DSML markers. |
 | `openrouter` | `deepseek/deepseek-v4-flash` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `deepseek/deepseek-v4-pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `google/gemini-2.5-flash` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `google/gemini-3.5-flash` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `google/gemma-4-26b-a4b-it` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `google/gemma-4-31b-it` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `openrouter` | `kwaipilot/kat-coder-pro-v2` | `native` | `interchangeable` | - | - | - | - | - | `data not yet collected` |
+| `openrouter` | `kwaipilot/kat-coder-pro-v2` | `native` | `interchangeable` | - | - | - | - | - | catalog note: Live OpenRouter probe on 2026-06-12 returned a valid provider-native tool call for KAT-Coder-Pro V2. |
 | `openrouter` | `minimax/minimax-m2` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `minimax/minimax-m2.5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `minimax/minimax-m2.7` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
@@ -388,42 +388,42 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `openrouter` | `mistralai/mistral-medium-3-5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `mistralai/mistral-small-2603` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `moonshotai/kimi-k2.6` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `openrouter` | `moonshotai/kimi-k2.7-code` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
+| `openrouter` | `moonshotai/kimi-k2.7-code` | `text` | `native_unreliable` | - | - | - | - | - | catalog note: 2026-06-24 forced-format sweep (N=5): OpenRouter Kimi-K2.7-Code native dispatched 5/5 but double-escaped backslash bodies (1/5 fidelity); fenced-JSON emitted no parseable Harn call (0/5). Heredoc text carried the body byte-clean 5/5. |
 | `openrouter` | `openai/gpt-oss-120b` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
-| `openrouter` | `qwen/qwen3-coder` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
-| `openrouter` | `qwen/qwen3-coder-next` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
+| `openrouter` | `qwen/qwen3-coder` | `text` | `native_unreliable` | - | - | - | - | - | catalog note: OpenRouter Qwen3-Coder Flash native tools exhausted the coding-agent fixture while text tools completed; default to Harn text tools for preset parity. |
+| `openrouter` | `qwen/qwen3-coder-next` | `text` | `native_unreliable` | - | - | - | - | - | catalog note: OpenRouter Qwen3-Coder Flash native tools exhausted the coding-agent fixture while text tools completed; default to Harn text tools for preset parity. |
 | `openrouter` | `qwen/qwen3.5-397b-a17b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `qwen/qwen3.6-35b-a3b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `qwen/qwen3.6-flash` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `qwen/qwen3.6-plus` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `qwen/qwen3.7-max` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `qwen/qwen3.7-plus` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `openrouter` | `stepfun/step-3.7-flash` | `native` | `interchangeable` | - | - | - | - | - | `data not yet collected` |
-| `openrouter` | `z-ai/glm-5` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
-| `openrouter` | `z-ai/glm-5.1` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
-| `openrouter` | `z-ai/glm-5.2` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
-| `openrouter` | `z-ai/glm-5v-turbo` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
-| `sambanova` | `sambanova/DeepSeek-V3.2` | `native` | `interchangeable` | - | - | - | - | - | `data not yet collected` |
+| `openrouter` | `stepfun/step-3.7-flash` | `native` | `interchangeable` | - | - | - | - | - | catalog note: Live OpenRouter probe on 2026-06-12 returned a valid provider-native tool call for Step 3.7 Flash with reasoning enabled. |
+| `openrouter` | `z-ai/glm-5` | `text` | `native_unreliable` | - | - | - | - | - | catalog note: 2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and hallucinated a result token; heredoc text tools completed the loop. OpenRouter reasoning-on text tools emitted malformed tool markup, so auto reasoning is off for agent/code/verify tasks. |
+| `openrouter` | `z-ai/glm-5.1` | `text` | `native_unreliable` | - | - | - | - | - | catalog note: 2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and hallucinated a result token; heredoc text tools completed the loop. OpenRouter reasoning-on text tools emitted malformed tool markup, so auto reasoning is off for agent/code/verify tasks. |
+| `openrouter` | `z-ai/glm-5.2` | `text` | `native_unreliable` | - | - | - | - | - | catalog note: 2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and hallucinated a result token; heredoc text tools completed the loop. OpenRouter reasoning-on text tools emitted malformed tool markup, so auto reasoning is off for agent/code/verify tasks. |
+| `openrouter` | `z-ai/glm-5v-turbo` | `text` | `native_unreliable` | - | - | - | - | - | catalog note: 2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and hallucinated a result token; heredoc text tools completed the loop. OpenRouter reasoning-on text tools emitted malformed tool markup, so auto reasoning is off for agent/code/verify tasks. |
+| `sambanova` | `sambanova/DeepSeek-V3.2` | `native` | `interchangeable` | - | - | - | - | - | catalog note: 2026-06-20 Harn agent-loop smoke: SambaNova DeepSeek-V3.2 completed both native and JSON tool loops with reasoning disabled. Earlier native false negatives were caused by Harn's parser treating terse final answers as billed no-ops; keep native preferred. |
 | `sambanova` | `sambanova/DeepSeek-V4-Pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `sambanova` | `sambanova/Llama-4-Maverick` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `sambanova` | `sambanova/Meta-Llama-3.3-70B-Instruct` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `sambanova` | `sambanova/MiniMax-M2.7` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
+| `sambanova` | `sambanova/MiniMax-M2.7` | `text` | `native_unreliable` | - | - | - | - | - | catalog note: 2026-06-24 forced-format sweep (N=5): SambaNova MiniMax-M2.7 corrupted a backslash-heavy body on BOTH native (0/5) and fenced-JSON (0/5); heredoc text carried it byte-clean 5/5. |
 | `sambanova` | `sambanova/gemma-4-31B-it` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `sambanova` | `sambanova/gpt-oss-120b` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
-| `together` | `MiniMaxAI/MiniMax-M2.7` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
-| `together` | `MiniMaxAI/MiniMax-M3` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
+| `sambanova` | `sambanova/gpt-oss-120b` | `text` | `native_unreliable` | - | - | - | - | - | catalog note: 2026-06-24 Harn agent-loop (gpt-oss-120b, zig-feat, tool grounding present): SambaNova native ended with a provider/tool-protocol failure (Harmony empty tool_calls / reasoning-channel-only class). Text/heredoc is the clean pay-per-token channel. See vLLM #22578/#44216, SGLang #8976/#10738, openai/harmony #68. |
+| `together` | `MiniMaxAI/MiniMax-M2.7` | `text` | `native_unreliable` | - | - | - | - | - | catalog note: 2026-06-24 forced-format sweep (N=5): Together MiniMax-M2.7 native 1/5 fidelity, fenced-JSON 2/5; heredoc text 4/5 (best on both dispatch and fidelity). Backslash-heavy bodies only round-trip on the escape-free text channel. Supersedes the 2026-06-20 json pin. |
+| `together` | `MiniMaxAI/MiniMax-M3` | `text` | `native_unreliable` | - | - | - | - | - | catalog note: Family-on-host consistency pin: Together MiniMax-M2.7 native was 1/5 fidelity in the 2026-06-24 sweep; no M3-on-Together probe yet, so inherit text rather than an optimistic native pin. |
 | `together` | `Qwen/Qwen2.5-7B-Instruct-Turbo` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `together` | `Qwen/Qwen3-Coder-Next-FP8` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `together` | `Qwen/Qwen3.7-Max` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `together` | `deepseek-ai/DeepSeek-V4-Pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `together` | `google/gemma-4-31B-it` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `together` | `meta-llama/Llama-3.3-70B-Instruct-Turbo` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `together` | `meta-llama/Llama-3.3-70B-Instruct-Turbo` | `native` | `unknown` | - | - | - | - | - | catalog note: Together documents native tool calls for this serverless sample route; add live parity probes before broadening to all Together-hosted Llama variants. |
 | `together` | `moonshotai/Kimi-K2.7-Code` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `together` | `zai-org/GLM-5.1` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
-| `together` | `zai-org/GLM-5.2` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
+| `together` | `zai-org/GLM-5.1` | `text` | `native_unreliable` | - | - | - | - | - | catalog note: 2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and hallucinated a result token; heredoc text tools completed the loop. |
+| `together` | `zai-org/GLM-5.2` | `text` | `native_unreliable` | - | - | - | - | - | catalog note: 2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and hallucinated a result token; heredoc text tools completed the loop. |
 | `xai` | `grok-4.3` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `xai` | `grok-build-0.1` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `zai` | `glm-4.7-flash` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
-| `zai` | `glm-5` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
-| `zai` | `glm-5.1` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
-| `zai` | `glm-5.2` | `text` | `native_unreliable` | - | - | - | - | - | `data not yet collected` |
+| `zai` | `glm-4.7-flash` | `text` | `native_unreliable` | - | - | - | - | - | catalog note: Family-consistency pin: GLM native channels emit `<tool_call>` markup as content (2026-06-23 Baseten GLM-5.2 probe); no zai-direct GLM-4.7 probe yet, so inherit the family verdict rather than an optimistic native pin. |
+| `zai` | `glm-5` | `text` | `native_unreliable` | - | - | - | - | - | catalog note: GLM-5.x native channel emits `<tool_call><arg_key>...` markup as content instead of OpenAI message.tool_calls (2026-06-23 live Baseten probe, see 39-baseten.toml); heredoc text tools parse cleanly. Same family pinned native_unreliable on Fireworks (glm-5p*) and DeepInfra (*glm-5*). |
+| `zai` | `glm-5.1` | `text` | `native_unreliable` | - | - | - | - | - | catalog note: GLM-5.x native channel emits `<tool_call><arg_key>...` markup as content instead of OpenAI message.tool_calls (2026-06-23 live Baseten probe, see 39-baseten.toml); heredoc text tools parse cleanly. Same family pinned native_unreliable on Fireworks (glm-5p*) and DeepInfra (*glm-5*). |
+| `zai` | `glm-5.2` | `text` | `native_unreliable` | - | - | - | - | - | catalog note: GLM-5.x native channel emits `<tool_call><arg_key>...` markup as content instead of OpenAI message.tool_calls (2026-06-23 live Baseten probe, see 39-baseten.toml); heredoc text tools parse cleanly. Same family pinned native_unreliable on Fireworks (glm-5p*) and DeepInfra (*glm-5*). |
