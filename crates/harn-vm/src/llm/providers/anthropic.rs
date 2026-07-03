@@ -264,6 +264,21 @@ impl AnthropicProvider {
             .messages
             .iter()
             .cloned()
+            // Cross-provider escalation choke point: a cheap OpenAI/Ollama-dialect
+            // primary records tool results as top-level `role:"tool"` messages
+            // (`{role:"tool", tool_call_id, content}`). When escalation switches
+            // the provider to Anthropic and replays that history, Anthropic 400s
+            // with `messages: Unexpected role "tool"` — it represents a tool
+            // result as a `role:"user"` message carrying a `tool_result` content
+            // block, never a top-level `role:"tool"`. Translate at the egress
+            // boundary so BOTH carried-forward primary results and any synthesized
+            // ones are covered, regardless of which path produced them. Runs
+            // before the retain/`anthropic_content` map below so the id survives
+            // (it lives in `tool_call_id`, which is NOT an `ANTHROPIC_MESSAGE_KEYS`
+            // member and would otherwise be stripped) and before
+            // `enforce_tool_result_adjacency` so the real result pairs with its
+            // `tool_use` block instead of being masked by a placeholder.
+            .map(anthropic_translate_tool_role_message)
             .filter_map(|mut message| {
                 if let Some(object) = message.as_object_mut() {
                     if let Some(content) = object.get("content").cloned() {
@@ -477,6 +492,61 @@ fn is_empty_anthropic_message(message: &serde_json::Value) -> bool {
         Some(serde_json::Value::Array(blocks)) => blocks.is_empty(),
         _ => false,
     }
+}
+
+/// Translate a top-level tool-result-role message into Anthropic's shape: a
+/// `role:"user"` message whose `content` is a single `tool_result` block keyed
+/// by `tool_use_id`. Any other message is returned unchanged.
+///
+/// Two source shapes are covered because both are top-level roles Anthropic's
+/// Messages API rejects with HTTP 400 (`messages: Unexpected role "..."`):
+///
+///   - `role:"tool"` — the OpenAI/Ollama native dialect a cheap primary records
+///     (`{role:"tool", tool_call_id, content}`), carried forward on escalation.
+///   - `role:"tool_result"` — the shape `tool_result_message_for_provider`
+///     emits for the Anthropic branch; if such a synthesized message is ever
+///     appended as a top-level message (rather than as a `tool_result` block
+///     inside a `role:"user"` message), it would 400 the same way.
+///
+/// The source id lives in `tool_call_id` (OpenAI) or `tool_use_id` (Anthropic
+/// native). The original `content` becomes the `tool_result` block's `content` —
+/// Anthropic accepts a plain string there, and list-of-blocks content (e.g. an
+/// image tool result) survives the later `anthropic_content` pass because that
+/// pass recurses into the block's content.
+///
+/// This is intentionally provider-agnostic at the call site: the quirk (Anthropic
+/// has no top-level tool-result role) is encoded here in the Anthropic adapter,
+/// so homogeneous Anthropic and homogeneous OpenAI/Ollama runs are byte-identical
+/// to before — only a message that literally carries one of those top-level roles
+/// on the Anthropic egress path (i.e. a cross-dialect escalation) is rewritten.
+fn anthropic_translate_tool_role_message(message: serde_json::Value) -> serde_json::Value {
+    let role = message.get("role").and_then(|role| role.as_str());
+    if role != Some("tool") && role != Some("tool_result") {
+        return message;
+    }
+    let tool_use_id = message
+        .get("tool_call_id")
+        .or_else(|| message.get("tool_use_id"))
+        .and_then(|value| value.as_str())
+        .unwrap_or_default()
+        .to_string();
+    let content = message
+        .get("content")
+        .cloned()
+        .unwrap_or(serde_json::Value::String(String::new()));
+    let mut tool_result = serde_json::Map::new();
+    tool_result.insert("type".to_string(), serde_json::json!("tool_result"));
+    tool_result.insert("tool_use_id".to_string(), serde_json::json!(tool_use_id));
+    tool_result.insert("content".to_string(), content);
+    // Preserve an is_error flag if the primary marked the observation an error,
+    // so Anthropic sees the same result semantics the OpenAI dialect carried.
+    if let Some(is_error) = message.get("is_error") {
+        tool_result.insert("is_error".to_string(), is_error.clone());
+    }
+    serde_json::json!({
+        "role": "user",
+        "content": [serde_json::Value::Object(tool_result)],
+    })
 }
 
 fn enforce_tool_result_adjacency(messages: Vec<serde_json::Value>) -> Vec<serde_json::Value> {
@@ -854,6 +924,186 @@ mod tests {
         assert_eq!(
             messages[0].get("content").and_then(|v| v.as_str()),
             Some("do the task")
+        );
+    }
+
+    #[test]
+    fn cross_provider_tool_role_message_translated_to_anthropic_shape() {
+        // Reproduces the cross-provider escalation HTTP 400
+        // (`messages: Unexpected role "tool"`): a cheap OpenAI/Ollama-dialect
+        // primary records tool results as top-level `role:"tool"` messages.
+        // When escalation switches the provider to Anthropic and replays that
+        // history, Anthropic rejects `role:"tool"` — it wants a `role:"user"`
+        // message carrying a `tool_result` content block. Pre-fix, the
+        // `role:"tool"` message rides through verbatim (its `tool_call_id` is
+        // even stripped by the canonical-key retain), producing the 400.
+        let mut opts = base_payload();
+        opts.messages = vec![
+            serde_json::json!({"role": "user", "content": "read the file"}),
+            serde_json::json!({
+                "role": "assistant",
+                "content": [
+                    {"type": "tool_use", "id": "call_001", "name": "read_file", "input": {}}
+                ],
+            }),
+            // OpenAI dialect tool-result carried forward from the primary.
+            serde_json::json!({
+                "role": "tool",
+                "tool_call_id": "call_001",
+                "name": "read_file",
+                "content": "fn main() {}",
+            }),
+        ];
+
+        let body = AnthropicProvider::build_request_body(&opts);
+        let messages = body["messages"].as_array().expect("messages array");
+
+        // No top-level `role:"tool"` message may survive to the Anthropic wire.
+        assert!(
+            messages
+                .iter()
+                .all(|m| m.get("role").and_then(|r| r.as_str()) != Some("tool")),
+            "a top-level role:\"tool\" message rode into the Anthropic request: {messages:?}"
+        );
+
+        // The tool result must now be a `role:"user"` message carrying a
+        // `tool_result` block keyed by the matching tool_use_id, and the real
+        // observation must be preserved (not masked by an interrupted-before-
+        // dispatch placeholder).
+        let tool_result_block = messages
+            .iter()
+            .filter(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
+            .flat_map(|m| {
+                m.get("content")
+                    .and_then(|c| c.as_array())
+                    .cloned()
+                    .unwrap_or_default()
+            })
+            .find(|block| block.get("type").and_then(|t| t.as_str()) == Some("tool_result"))
+            .expect("a user message carrying a tool_result block");
+        assert_eq!(
+            tool_result_block
+                .get("tool_use_id")
+                .and_then(|v| v.as_str()),
+            Some("call_001"),
+            "tool_result must key off the original tool_call_id"
+        );
+        assert_eq!(
+            tool_result_block.get("content").and_then(|v| v.as_str()),
+            Some("fn main() {}"),
+            "the real observation must survive (no placeholder masking)"
+        );
+
+        // Replay-preservation: the source transcript shape is untouched.
+        assert_eq!(
+            opts.messages[2].get("role").and_then(|v| v.as_str()),
+            Some("tool"),
+            "persisted transcript shape must be unchanged at the storage layer"
+        );
+    }
+
+    #[test]
+    fn top_level_tool_result_role_message_translated_to_anthropic_shape() {
+        // Defense-in-depth: a synthesized tool-result whose role is the
+        // Anthropic-native `tool_result` string (what
+        // tool_result_message_for_provider emits) would ALSO 400 if it reached
+        // egress as a top-level message. The same choke point must fold it into
+        // a role:"user" + tool_result block.
+        let mut opts = base_payload();
+        opts.messages = vec![
+            serde_json::json!({"role": "user", "content": "read the file"}),
+            serde_json::json!({
+                "role": "assistant",
+                "content": [
+                    {"type": "tool_use", "id": "toolu_9", "name": "read_file", "input": {}}
+                ],
+            }),
+            serde_json::json!({
+                "role": "tool_result",
+                "tool_use_id": "toolu_9",
+                "content": "fn main() {}",
+            }),
+        ];
+
+        let body = AnthropicProvider::build_request_body(&opts);
+        let messages = body["messages"].as_array().expect("messages array");
+        assert!(
+            messages.iter().all(|m| {
+                let r = m.get("role").and_then(|r| r.as_str());
+                r != Some("tool") && r != Some("tool_result")
+            }),
+            "a top-level tool-result role rode into the Anthropic request: {messages:?}"
+        );
+        let block = messages
+            .iter()
+            .filter(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
+            .flat_map(|m| {
+                m.get("content")
+                    .and_then(|c| c.as_array())
+                    .cloned()
+                    .unwrap_or_default()
+            })
+            .find(|b| b.get("type").and_then(|t| t.as_str()) == Some("tool_result"))
+            .expect("a user message carrying a tool_result block");
+        assert_eq!(
+            block.get("tool_use_id").and_then(|v| v.as_str()),
+            Some("toolu_9")
+        );
+        assert_eq!(
+            block.get("content").and_then(|v| v.as_str()),
+            Some("fn main() {}")
+        );
+    }
+
+    #[test]
+    fn homogeneous_anthropic_tool_result_unchanged_by_translation() {
+        // Guard: a message history already in Anthropic shape (role:"user"
+        // with a tool_result block) must be byte-identical before and after —
+        // the translation only touches literal role:"tool" messages.
+        let mut opts = base_payload();
+        opts.messages = vec![
+            serde_json::json!({"role": "user", "content": "read the file"}),
+            serde_json::json!({
+                "role": "assistant",
+                "content": [
+                    {"type": "tool_use", "id": "toolu_001", "name": "read_file", "input": {}}
+                ],
+            }),
+            serde_json::json!({
+                "role": "user",
+                "content": [
+                    {"type": "tool_result", "tool_use_id": "toolu_001", "content": "fn main() {}"}
+                ],
+            }),
+        ];
+
+        let body = AnthropicProvider::build_request_body(&opts);
+        let messages = body["messages"].as_array().expect("messages array");
+        // The tool_result user message survives with its id and content intact,
+        // and no placeholder/backfill was synthesized (exactly one tool_result).
+        let tool_results: Vec<_> = messages
+            .iter()
+            .filter(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
+            .flat_map(|m| {
+                m.get("content")
+                    .and_then(|c| c.as_array())
+                    .cloned()
+                    .unwrap_or_default()
+            })
+            .filter(|block| block.get("type").and_then(|t| t.as_str()) == Some("tool_result"))
+            .collect();
+        assert_eq!(
+            tool_results.len(),
+            1,
+            "no duplicate/placeholder tool_result"
+        );
+        assert_eq!(
+            tool_results[0].get("tool_use_id").and_then(|v| v.as_str()),
+            Some("toolu_001")
+        );
+        assert_eq!(
+            tool_results[0].get("content").and_then(|v| v.as_str()),
+            Some("fn main() {}")
         );
     }
 
