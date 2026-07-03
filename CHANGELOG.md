@@ -9,6 +9,127 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.9.6
+
+### Added
+
+- **`harn usage` — LLM spend/usage analytics.** Aggregates the
+  `provider_call_response` records Harn already emits into cost, token, and
+  prompt-cache-efficiency rollups by provider, model, or a day/week/month
+  cumulative time series. Reuses the runtime-computed `cost_usd` (no pricing is
+  recomputed) and the same event-log reader `harn portal` uses. Supports
+  `--since`/`--until`, `--provider`/`--model` filters, `--all` cross-project
+  discovery, and `--json`/`--csv` output; `mock`-provider rows are excluded by
+  default.
+- **`harn lint --strict` promotes lint warnings to a non-zero exit.** The flag
+  overrides `[check] strict` in `harn.toml`, so a single invocation can deny
+  warning noise (e.g. in CI) instead of leaving every finding advisory. The
+  bundled demo scenarios and repo `scripts/*.harn` lint clean under it, and
+  `make lint-harn` now runs those surfaces with `--strict` so lint noise cannot
+  regress.
+
+### Changed
+
+- Archived the pre-v0.8 changelogs under `changelog/archive/`
+  (`CHANGELOG-pre-0.8.md`, `CHANGELOG-pre-0.6.md`) to keep the repository
+  root focused on the active `CHANGELOG.md`. Links in `CHANGELOG.md`,
+  `CONTRIBUTING.md`, and the markdownlint ignore glob were updated to the
+  new paths.
+- **The CI "Harn conformance + audit" lane runs its gate battery in
+  parallel.** `scripts/audit_gates.sh` builds the harn CLI + runs the
+  conformance suite once, exports the warm `target/debug/harn` as `HARN_BIN`
+  so no downstream gate re-walks cargo's build graph, then hands the ~25
+  independent gates to `make -j -k`. The serial check-`*`/lint tail collapses
+  from `sum(gates)` to `max(gate)` (measured ~116s → ~41s, 2.83x, on a warm
+  binary) with identical verdicts, and `-k` reports every gate's result
+  instead of stopping at the first failure. Mirrors the proven
+  `release_gate.sh audit` fan-out.
+- `harn local launch` now lets provider catalog rows choose a LoRA module value
+  shape, with vLLM using lineage-preserving JSON module specs while the public
+  `--lora-adapter NAME=PATH_OR_REPO` flag stays portable.
+- **Generic inference joins conflicting candidates to a union.** `keep(1, "x")`
+  against `fn keep<T>(a: T, b: T) -> T` now infers `T = int | string` (matching
+  heterogeneous list-literal inference and TypeScript) instead of hard-erroring
+  "type parameter 'T' was inferred as both int and string". Explicit type
+  arguments (`identity<int>("oops")`) remain a frozen contract checked
+  per-argument — they no longer run arg-driven re-inference at all.
+- **`match` on a `bool` scrutinee must be exhaustive.** `match b { true -> … }`
+  with no `false`/wildcard arm now errors like enum and union matches do.
+
+### Removed
+
+- Removed the orphaned `test_fixtures/execute_response_raw.txt` sample
+  transcript (no reader anywhere in the tree; last touched in an unrelated
+  v0.5.34 release commit) and dropped the now-empty `test_fixtures/` from the
+  changelog-fragment gate's ignore list.
+
+### Fixed
+
+- **Hostlib search now bounds oversized line payloads.** `hostlib_tools_search`
+  clips long matched/context lines at UTF-8 boundaries, keeps matched-line
+  snippets centered on the hit, exposes `max_line_bytes` for presets/APIs, and
+  marks the response `truncated` when either match count or line content is
+  clipped.
+- **Ternary branch merging matches if/else expressions.** `cond ? 1 :
+  unreachable(…)` infers `int` (the `never` arm collapses) and nested unions
+  flatten/dedup instead of producing `Union[Union[…]]` shapes that defeated
+  downstream narrowing.
+- **Aliased collection receivers keep their element/value types across all
+  methods.** With `type Env = dict<string, string>`, methods like
+  `.map_values()`, `.merge()`, `.window()`, and `.iter()` now see through the
+  alias the way `.values()`/`.keys()` already did.
+- **The falsy branch of `schema_is(x, S)` no longer over-narrows.** Subtracting
+  a literal schema (`"a"`) from `string | int` kept only `int`, wrongly
+  dropping the whole `string` member; members are now subtracted only when
+  every value of the member matches the schema.
+- `hostlib_tools_search` now reports match paths with forward-slash separators on
+  every platform, matching the rest of the agent tool surface. Previously Windows
+  emitted OS-native backslash paths (`crates\foo\bar.rs`), which shipped
+  non-portable paths to the model and broke path-suffix matching in downstream
+  tooling and tests.
+
+### Security
+
+- **Cross-agent zero-trust (opt-in).** Under `authenticate_directives`,
+  `classify_result_trust` now distrusts a result returned over a delegation /
+  A2A channel by ORIGIN — a tool annotated with an `agent_channel` capability —
+  rather than by a forged-authority keyword vocabulary. A peer agent's output
+  may itself have ingested untrusted content, so it is quarantined as untrusted
+  data and cannot smuggle authority regardless of phrasing; provenance-stamped
+  hand-offs still authenticate. The containment battery shows this lifts
+  cross-agent-poisoning containment from 1/10 (keyword authenticator) to 10/10
+  and overall exfil-sink containment from 0.49 to 0.63 under the opted-in
+  posture, with the default posture byte-identical.
+- **Precise exfil gate (opt-in).** Under `precise_exfil_gate`, the
+  lethal-trifecta exfil axis fires only on the real attack signature — the
+  untrusted content controls the destination (an endpoint it named, recovered
+  even from a steganographic payload), the payload ships a secret, or the
+  untrusted content was flagged as a likely injection — instead of on any
+  exfil-capable tool while any untrusted content is in context. Benign
+  research-and-synthesis to a user-named or configured destination (a doc, a
+  connector) is no longer confirmed. Destinations are matched after de-cloaking
+  Unicode tag smuggling (ASCII smuggling) and zero-width / bidi host splitting,
+  so a hidden exfil destination cannot slip the narrowed gate. The multi-step
+  "structuring" case — a danger triangle assembled from individually innocent
+  steps — is already covered: the taint ledger is context-global and persists
+  for the session, so the gate fires when the exfil leg runs no matter how many
+  benign steps separate it from the untrusted ingress. Default OFF (the coarse
+  gate is byte-identical when disabled). The new exfil-precision battery pins
+  the effect: the coarse gate confirms every benign workflow; the precise gate
+  confirms none while containing every attack, including the hidden-destination
+  ones.
+- **Untrusted-origin file taint (opt-in).** Under `taint_file_provenance`, a
+  file written while untrusted content is in the session's context — or by a
+  fetch / clone / MCP step — is recorded in a session-scoped provenance ledger,
+  and a later read of that path is classified untrusted so it flows into the
+  same lethal-trifecta gate as a live external ingress. This quarantines a
+  deferred on-disk injection (a cloned dependency's `README`, a downloaded
+  dataset) that a plain first-party file read would otherwise carry straight to
+  an exfil sink. First-party file reads stay trusted (a file you authored is not
+  an injection vector). The containment battery shows this lifts overall
+  exfil-sink containment by exactly the on-disk file-read attack count; the
+  default posture is byte-identical.
+
 ## v0.9.5
 
 ### Added
