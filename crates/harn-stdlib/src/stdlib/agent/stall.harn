@@ -1,5 +1,5 @@
 import { agent_emit_event, agent_session_inject_feedback } from "std/agent/state"
-import { verification_diagnostic_delta } from "std/verification"
+import { verification_gate_input } from "std/verification"
 
 // Deterministic thrash / degenerate-loop detector over the agent's
 // action/observation stream (#2712, part of the #2708 cheap-model
@@ -447,6 +447,20 @@ fn __agent_stall_result_error_signature(delta, result) -> string {
   return "err:" + sha256(fallback)
 }
 
+fn __agent_stall_current_hashes(result) {
+  if type_of(result) != "dict" {
+    return nil
+  }
+  return result?.current_hashes
+    ?? result?.currentHashes
+    ?? result?.file_hashes
+    ?? result?.fileHashes
+}
+
+fn __agent_stall_gate_input(previous, result) {
+  return verification_gate_input(previous, result, __agent_stall_current_hashes(result))
+}
+
 /**
  * Outcome of a dispatched result, normalized for the detector: one of
  * "ok" / "error" / "advisory" / "context_window", plus a byte-stable
@@ -461,11 +475,11 @@ fn __agent_stall_result_outcome(result) -> dict {
   if __agent_stall_is_context_window_error(error_text) {
     return {kind: "context_window", signature: "ctx"}
   }
-  let delta = verification_diagnostic_delta(nil, result)
-  if !delta.feedsGates {
-    return {kind: "advisory", signature: "advisory:" + sha256(json_stringify(delta.current))}
+  let gate = __agent_stall_gate_input(nil, result)
+  if !gate.feedsGates {
+    return {kind: "advisory", signature: "advisory:" + sha256(json_stringify(gate.current))}
   }
-  return {kind: "error", signature: __agent_stall_result_error_signature(delta, result)}
+  return {kind: "error", signature: __agent_stall_result_error_signature(gate.delta, result)}
 }
 
 /**
@@ -545,16 +559,12 @@ fn __agent_stall_delta_previous(state: AgentStallState) {
     diagnostics: signatures,
     diagnostic_count: to_int(current?.count) ?? len(signatures),
     feedsGates: current?.feedsGates ?? current?.feeds_gates ?? true,
+    classification: {status: "bound_fresh", feedsGates: true, advisory: false},
   }
 }
 
-fn __agent_stall_delta_gate_failure(delta) -> bool {
-  if delta == nil {
-    return false
-  }
-  return ["initialized", "unchanged", "advanced", "regressed"].contains(delta.status)
-    && delta.feedsGates
-    && len(delta.current.signatures) > 0
+fn __agent_stall_gate_failure(gate) -> bool {
+  return gate != nil && (gate?.gate_bearing_failure ?? false)
 }
 
 /**
@@ -604,12 +614,13 @@ fn __agent_stall_fold_diagnostic(state: AgentStallState, prev_dispatch, turn_mad
   }
   let result = __agent_stall_turn_result(prev_dispatch)
   let result_is_non_ok = result != nil && !__agent_stall_result_ok(result)
-  let delta = if result_is_non_ok {
-    verification_diagnostic_delta(__agent_stall_delta_previous(state), result)
+  let gate = if result_is_non_ok {
+    __agent_stall_gate_input(__agent_stall_delta_previous(state), result)
   } else {
     nil
   }
-  let result_is_gate_failure = __agent_stall_delta_gate_failure(delta)
+  let delta = gate?.delta
+  let result_is_gate_failure = __agent_stall_gate_failure(gate)
   if !result_is_gate_failure {
     // No FAILING verification this turn. A successful edit on top of a live
     // failure is NOT proof the failure is resolved (its "ok" is the edit

@@ -118,6 +118,8 @@ type VerificationLadderPlan = {
 
 type VerificationDiagnosticDelta = dict
 
+type VerificationGateInput = dict
+
 fn __verification_opts(options) {
   return options ?? {}
 }
@@ -799,6 +801,91 @@ fn __verification_delta_result(
     out = out + {count_delta: current_info.count - previous_info.count}
   }
   return out
+}
+
+fn __verification_gate_hashes(value) -> dict {
+  let snapshot = __verification_snapshot_map(value)
+  return type_of(snapshot) == "dict" ? snapshot : {}
+}
+
+fn __verification_gate_hashes_available(value) -> bool {
+  if value == nil {
+    return false
+  }
+  return type_of(__verification_snapshot_map(value)) == "dict"
+}
+
+fn __verification_gate_embedded_classification(value) {
+  if type_of(value) != "dict" {
+    return nil
+  }
+  if type_of(value?.classification) == "dict" {
+    return value.classification
+  }
+  let status = to_string(value?.status ?? "")
+  if ["bound_fresh", "bound_stale", "unbound"].contains(status) {
+    return value
+  }
+  return nil
+}
+
+fn __verification_gate_unclassified(value) -> dict {
+  let status = __verification_delta_status(value)
+  let feeds_gates = __verification_delta_feeds_gates(value)
+  return {
+    status: status == "" ? "unclassified" : status,
+    staleFiles: [],
+    stale_files: [],
+    feedsGates: feeds_gates,
+    feeds_gates: feeds_gates,
+    advisory: !feeds_gates,
+    reason: feeds_gates ? "current file hashes unavailable; preserving diagnostic gate status" : "diagnostic status does not feed gates",
+  }
+}
+
+fn __verification_gate_classification(value, current_hashes: dict, hashes_available: bool) -> dict {
+  let embedded = __verification_gate_embedded_classification(value)
+  if embedded != nil {
+    return embedded
+  }
+  if !hashes_available {
+    return __verification_gate_unclassified(value)
+  }
+  let envelope = type_of(value) == "dict" ? value : nil
+  return verification_diagnostic_classify(envelope, current_hashes)
+}
+
+fn __verification_gate_delta_value(value, classification: dict) -> dict {
+  let base = if type_of(value) == "dict" {
+    value
+  } else if value == nil {
+    {}
+  } else {
+    {failureSignature: to_string(value)}
+  }
+  let feeds_gates = classification?.feedsGates ? true : false
+  return base
+    + {
+    classification: classification,
+    feedsGates: feeds_gates,
+    feeds_gates: feeds_gates,
+    advisory: !feeds_gates,
+  }
+}
+
+fn __verification_gate_status(delta: dict, classification: dict) -> string {
+  if !(classification?.feedsGates ? true : false) {
+    return "advisory"
+  }
+  let status = to_string(delta?.status ?? "")
+  return status == "" ? "initialized" : status
+}
+
+fn __verification_gate_reason(delta: dict, classification: dict) -> string {
+  if !(classification?.feedsGates ? true : false) {
+    return to_string(classification?.reason ?? "current diagnostic is advisory")
+  }
+  return to_string(delta?.reason ?? "")
 }
 
 fn __verification_clean_path(value) -> string {
@@ -1678,6 +1765,52 @@ pub fn verification_diagnostic_delta(previous, current, options = nil) -> Verifi
     normalization,
     "same_diagnostic_signature_set",
   )
+}
+
+/**
+ * Build the canonical gate-facing verification object for no-progress,
+ * escalation, and completion policy. The helper classifies both previous and
+ * current diagnostics against `current_hashes`, demotes stale or unbound
+ * diagnostics to advisory, then computes diagnostic-delta progress credit over
+ * only gate-bearing signatures.
+ *
+ * The intent is one DRY seam: callers feed this object to loop policy instead
+ * of re-checking snapshot freshness, regex-normalizing signatures, and
+ * deciding stale/advisory status independently.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn verification_gate_input(previous, current, current_hashes = nil, options = nil) -> VerificationGateInput {
+  let opts = __verification_opts(options)
+  let hashes_available = __verification_gate_hashes_available(current_hashes)
+  let hashes = __verification_gate_hashes(current_hashes)
+  let previous_classification = __verification_gate_classification(previous, hashes, hashes_available)
+  let current_classification = __verification_gate_classification(current, hashes, hashes_available)
+  let previous_delta = __verification_gate_delta_value(previous, previous_classification)
+  let current_delta = __verification_gate_delta_value(current, current_classification)
+  let delta = verification_diagnostic_delta(previous_delta, current_delta, opts)
+  let status = __verification_gate_status(delta, current_classification)
+  let feeds_gates = current_classification?.feedsGates ? true : false
+  let gate_bearing_failure = feeds_gates && len(delta?.current?.signatures ?? []) > 0 && status != "cleared"
+  return {
+    schema: "harn.verification.gate_input.v1",
+    status: status,
+    reason: __verification_gate_reason(delta, current_classification),
+    feedsGates: feeds_gates,
+    feeds_gates: feeds_gates,
+    advisory: !feeds_gates,
+    progress_credit: feeds_gates && delta?.progress_credit ? true : false,
+    no_progress: feeds_gates && status == "unchanged",
+    gate_bearing_failure: gate_bearing_failure,
+    blocks_completion: gate_bearing_failure,
+    stale: current_classification?.status == "bound_stale",
+    stale_files: current_classification?.staleFiles ?? [],
+    previous: {classification: previous_classification, value: previous_delta},
+    current: {classification: current_classification, value: current_delta},
+    delta: delta,
+  }
 }
 
 /**

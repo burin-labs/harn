@@ -327,3 +327,66 @@ profile row or its `check`, then overridden by direct options. Supported knobs
 include `lowercase`, `strip_ansi`, `strip_locations`, `strip_temp_paths`,
 `collapse_whitespace`, `include_path`, `include_code`, `include_severity`,
 `max_chars`, `replacements`, `strip_patterns`, and `ignore_patterns`.
+
+## Gate Input
+
+`verification_gate_input(previous, current, current_hashes, options)` is the
+canonical Harn-side reducer for no-progress, escalation, and completion policy.
+It classifies both diagnostics with `verification_diagnostic_classify`, demotes
+stale or unbound diagnostics to advisory, and then runs
+`verification_diagnostic_delta` over only gate-bearing signatures:
+
+```harn
+import { verification_gate_input } from "std/verification"
+
+pipeline default() {
+  let current_hashes = {"src/writer.zig": "new"}
+  let previous = {
+    rung: "R2",
+    at: "2026-07-03T00:00:00Z",
+    snapshot: {"src/writer.zig": "old"},
+    diagnostics: ["src/writer.zig:10:2: error: missing writeEscaped"],
+  }
+  let current = {
+    rung: "R2",
+    at: "2026-07-03T00:01:00Z",
+    snapshot: current_hashes,
+    diagnostics: ["src/writer.zig:99:7: error: missing writeEscaped"],
+  }
+  return verification_gate_input(
+    previous,
+    current,
+    current_hashes,
+    {row: {diagnosticDelta: {strip_locations: true}}},
+  )
+}
+```
+
+The returned shape is the object loop policy should consume instead of
+reassembling freshness and signature state from strings:
+
+- `status`: `advisory`, `initialized`, `unchanged`, `advanced`, `cleared`, or
+  `regressed`.
+- `feedsGates` / `feeds_gates`: true only when the current diagnostic is
+  snapshot-bound and fresh.
+- `progress_credit`: true only when a fresh, gate-bearing diagnostic advanced
+  or cleared.
+- `no_progress`: true for the same fresh normalized signature set.
+- `gate_bearing_failure` / `blocks_completion`: true when the current fresh
+  diagnostic still contains failure signatures.
+- `stale` and `stale_files`: copied from the current diagnostic classification.
+- `previous` / `current`: the classified values passed into the delta reducer.
+- `delta`: the full `verification_diagnostic_delta` receipt.
+
+When `current_hashes` is `nil`, the reducer preserves the diagnostic's existing
+gate status instead of calling the freshness classifier with an empty hash map.
+Callers that have a current file-hash snapshot should pass it; callers that
+already classified a diagnostic can embed `classification` on the diagnostic.
+`std/agent/stall` uses this reducer for its current-failure model, so stale or
+unbound diagnostics remain advisory and do not increment no-progress streaks.
+
+This is the DRY seam for stale-diagnostic enforcement: a red diagnostic bound
+to an older file hash is advisory and cannot feed no-progress detectors,
+escalation streaks, verifier signatures, or completion gates. A newer fresh
+green result at the same or higher rung clears the gate without requiring
+callers to compare transcript order or line-number-shifted strings.
