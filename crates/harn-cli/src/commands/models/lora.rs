@@ -434,6 +434,7 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
                 "v_proj".to_string(),
                 "o_proj".to_string(),
             ],
+            contract: lora_training_contract(dataset_format, &decision.effective),
             trainer_contract: trainer_contract_for_dataset(dataset_format, &decision.effective),
             notes: training_notes(&decision.effective),
         },
@@ -748,6 +749,7 @@ fn training_notes(tool_format: &str) -> Vec<String> {
 }
 
 fn trainer_contract_for_dataset(dataset_format: &str, tool_format: &str) -> Vec<String> {
+    let machine_contract = lora_training_contract(dataset_format, tool_format);
     let mut contract = vec![
         "use TRL SFTTrainer with PEFT LoRA/QLoRA; keep the base weights frozen and save only adapter artifacts".to_string(),
         "set assistant_only_loss=true so prompts, tool schemas, and tool observations are context rather than targets".to_string(),
@@ -771,7 +773,43 @@ fn trainer_contract_for_dataset(dataset_format: &str, tool_format: &str) -> Vec<
             "do not train provider-native tool tags for Harn text/json routes; Harn remains the parser at inference".to_string(),
         );
     }
+    contract.push(format!(
+        "machine contract: mask={} packing={} parser_owner={} split={}",
+        machine_contract.assistant_mask_policy,
+        machine_contract.packing_policy,
+        machine_contract.tool_parser_owner,
+        machine_contract.dataset_split_policy
+    ));
     contract
+}
+
+pub(super) fn lora_training_contract(
+    dataset_format: &str,
+    tool_format: &str,
+) -> LoraTrainingContract {
+    LoraTrainingContract {
+        schema_version: 1,
+        loss_scope: "assistant_tool_calls".to_string(),
+        assistant_mask_policy: "require_chat_template_generation_masks".to_string(),
+        packing_policy: "disabled_unless_boundary_aware_tool_pack_pairs".to_string(),
+        tool_parser_owner: tool_parser_owner_for_format(tool_format).to_string(),
+        dataset_format: dataset_format.to_string(),
+        dataset_split_policy: "train_tune_holdout_disjoint_no_eval_holdout_training".to_string(),
+        required_example_metadata: vec![
+            "dataset_format".to_string(),
+            "source_tool_format".to_string(),
+            "lora_contract_id".to_string(),
+            "lora_target".to_string(),
+        ],
+    }
+}
+
+fn tool_parser_owner_for_format(tool_format: &str) -> &'static str {
+    match tool_format {
+        "native" => "provider_tokenizer_runtime",
+        "text" | "json" => "harn_text_tool_parser",
+        _ => "catalog_validated_route",
+    }
 }
 
 pub(super) fn lora_adapter_binding(provider_supports_lora_launch: bool) -> &'static str {
@@ -1226,8 +1264,21 @@ struct TrainingRecipe {
     loss_scope: String,
     packing: String,
     target_modules: Vec<String>,
+    contract: LoraTrainingContract,
     trainer_contract: Vec<String>,
     notes: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub(super) struct LoraTrainingContract {
+    schema_version: u64,
+    loss_scope: String,
+    assistant_mask_policy: String,
+    packing_policy: String,
+    tool_parser_owner: String,
+    dataset_format: String,
+    dataset_split_policy: String,
+    required_example_metadata: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1461,6 +1512,23 @@ mod tests {
         assert!(text
             .iter()
             .any(|item| item.contains("Harn remains the parser")));
+
+        let native_contract = lora_training_contract("messages_with_tool_calls", "native");
+        assert_eq!(
+            native_contract.assistant_mask_policy,
+            "require_chat_template_generation_masks"
+        );
+        assert_eq!(
+            native_contract.tool_parser_owner,
+            "provider_tokenizer_runtime"
+        );
+        assert_eq!(
+            native_contract.dataset_split_policy,
+            "train_tune_holdout_disjoint_no_eval_holdout_training"
+        );
+
+        let text_contract = lora_training_contract("harn_text_tool_calls_json_fences", "json");
+        assert_eq!(text_contract.tool_parser_owner, "harn_text_tool_parser");
     }
 
     #[test]

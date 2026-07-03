@@ -440,6 +440,9 @@ fn models_lora_plan_human_text_includes_recipe() {
         "training: qlora + peft_lora",
         "trainer: trl_sft_trainer",
         "LoRA hparams: rank=16 alpha=32 dropout=0.05",
+        "assistant mask: require_chat_template_generation_masks",
+        "parser owner: harn_text_tool_parser",
+        "split policy: train_tune_holdout_disjoint_no_eval_holdout_training",
         "template: harn_text_tool_calls_json_fences",
         "template source: Harn text tool-call parser using JSON object bodies",
         "dataset format: harn_text_tool_calls_json_fences",
@@ -502,6 +505,22 @@ fn models_lora_plan_json_shape_is_stable() {
     assert_eq!(report["training"]["alpha"], 32);
     assert_eq!(report["training"]["dropout"], 0.05);
     assert_eq!(report["training"]["quantization"], "base_model_precision");
+    assert_eq!(
+        report["training"]["contract"]["assistant_mask_policy"],
+        "require_chat_template_generation_masks"
+    );
+    assert_eq!(
+        report["training"]["contract"]["packing_policy"],
+        "disabled_unless_boundary_aware_tool_pack_pairs"
+    );
+    assert_eq!(
+        report["training"]["contract"]["tool_parser_owner"],
+        "provider_tokenizer_runtime"
+    );
+    assert_eq!(
+        report["training"]["contract"]["dataset_split_policy"],
+        "train_tune_holdout_disjoint_no_eval_holdout_training"
+    );
     let trainer_contract = report["training"]["trainer_contract"]
         .as_array()
         .expect("trainer contract");
@@ -631,6 +650,9 @@ fn models_lora_export_check_reports_native_shape() {
         "LoRA export for gemma-4-e4b-it via vllm",
         "dataset format: messages_with_tool_calls",
         "contract: sha256:",
+        "contract assistant mask: require_chat_template_generation_masks",
+        "contract parser owner: provider_tokenizer_runtime",
+        "contract split policy: train_tune_holdout_disjoint_no_eval_holdout_training",
         "adapter binding: runtime_lora_adapter",
         "mode: check",
         "stats: records=2 emitted=1 skipped=1 tool_calls=1 tool_results=1",
@@ -702,6 +724,18 @@ fn models_lora_export_json_writes_dataset_and_manifest() {
         "messages_with_tool_calls"
     );
     assert_eq!(report["contract"]["chat_template"], "gemma-4");
+    assert_eq!(
+        report["contract"]["training_contract"]["assistant_mask_policy"],
+        "require_chat_template_generation_masks"
+    );
+    assert_eq!(
+        report["contract"]["training_contract"]["tool_parser_owner"],
+        "provider_tokenizer_runtime"
+    );
+    assert_eq!(
+        report["contract"]["training_contract"]["dataset_split_policy"],
+        "train_tune_holdout_disjoint_no_eval_holdout_training"
+    );
     assert_eq!(report["serving"]["request_model"], "burin-tools");
     assert_eq!(report["serving"]["adapter_binding"], "runtime_lora_adapter");
     assert_eq!(report["serving"]["contract_id"], contract_id);
@@ -736,6 +770,14 @@ fn models_lora_export_json_writes_dataset_and_manifest() {
         "manifest",
     );
     assert_eq!(manifest_value["contract"]["id"], contract_id);
+    assert_eq!(
+        manifest_value["contract"]["training_contract"]["assistant_mask_policy"],
+        "require_chat_template_generation_masks"
+    );
+    assert_eq!(
+        manifest_value["contract"]["training_contract"]["tool_parser_owner"],
+        "provider_tokenizer_runtime"
+    );
     assert_eq!(manifest_value["target"]["contract_id"], contract_id);
     assert_eq!(manifest_value["serving"]["request_model"], "burin-tools");
     assert_eq!(

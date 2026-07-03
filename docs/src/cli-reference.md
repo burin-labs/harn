@@ -1349,6 +1349,9 @@ row metadata, and manifests include a stable LoRA contract id derived from the
 base model, provider, effective Harn tool format, dataset format, and chat
 template. Use that id to keep training, adapter inspection, eval, and serving
 on the same wire contract even when adapter paths or request-model names change.
+The manifest's `contract.training_contract` block also records the assistant
+mask policy, packing policy, parser owner, and split policy so trainers can
+verify the SFT setup without scraping human-readable notes.
 `--check` validates conversion without writing JSONL rows.
 
 ## harn models lora inspect
@@ -1392,6 +1395,8 @@ The report lists provenance manifest fields, hard-negative slices, and holdout
 gates so generated data cannot silently contaminate evaluation fixtures. It
 also lists the trainer contract Harn expects for tool-calling SFT, including
 assistant-only loss masks, `messages`/`tools` columns, and packing boundaries.
+The JSON report exposes the same machine-readable contract under
+`training.contract` for automation that prepares TRL/PEFT trainer configs.
 The launch block includes the matching `harn models lora export` command so the
 trainer dataset, provenance manifest, eval route, and serving route share the
 same base model, provider, tool format, and chat-template contract.
