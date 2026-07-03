@@ -2,6 +2,6 @@ import { json_mode, mode } from "std/cli/render"
 
 fn main(harness: Harness) {
   // No env var set → human mode.
-  harness.stdio.println(mode())
-  harness.stdio.println(to_string(json_mode()))
+  harness.stdio.println(mode(harness))
+  harness.stdio.println(to_string(json_mode(harness)))
 }

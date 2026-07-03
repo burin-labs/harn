@@ -9,118 +9,79 @@
  *   HARN_MODELS_LORA_EXPORT_PAYLOAD_PRETTY - pretty report JSON.
  *   HARN_OUTPUT_JSON                       - "1" for JSON, else human text.
  */
-fn __safe_string(value, fallback: string) -> string {
-  if type_of(value) == "string" {
-    return value
-  }
-  return fallback
-}
-
-fn __safe_dict(value) -> dict {
-  if type_of(value) == "dict" {
-    return value
-  }
-  return {}
-}
-
-fn __safe_list(value) -> list {
-  if type_of(value) == "list" {
-    return value
-  }
-  return []
-}
-
-fn __safe_bool(value, fallback: bool) -> bool {
-  if type_of(value) == "bool" {
-    return value
-  }
-  return fallback
-}
-
-fn __safe_int_string(value, fallback: string) -> string {
-  if type_of(value) == "int" {
-    return to_string(value)
-  }
-  return fallback
-}
-
-fn __print_list(harness: Harness, label: string, items: list) {
-  if items.count == 0 {
-    return
-  }
-  harness.stdio.println("  " + label + ":")
-  for item in items {
-    let text = __safe_string(item, "")
-    if text != "" {
-      harness.stdio.println("    - " + text)
-    }
-  }
-}
+import {
+  print_list,
+  safe_bool,
+  safe_dict,
+  safe_int_string,
+  safe_list,
+  safe_string,
+} from "std/cli/render"
 
 fn __render_human(harness: Harness, report: dict) {
-  let base = __safe_dict(report["base"])
-  let request = __safe_dict(report["request"])
-  let target = __safe_dict(report["target"])
-  let contract = __safe_dict(report["contract"])
-  let serving = __safe_dict(report["serving"])
-  let output = __safe_dict(report["output"])
-  let stats = __safe_dict(report["stats"])
-  let warnings = __safe_list(report["warnings"])
-  let errors = __safe_list(report["errors"])
-  let base_id = __safe_string(base["id"], "")
-  let provider = __safe_string(base["provider"], "")
+  let base = safe_dict(report["base"])
+  let request = safe_dict(report["request"])
+  let target = safe_dict(report["target"])
+  let contract = safe_dict(report["contract"])
+  let serving = safe_dict(report["serving"])
+  let output = safe_dict(report["output"])
+  let stats = safe_dict(report["stats"])
+  let warnings = safe_list(report["warnings"])
+  let errors = safe_list(report["errors"])
+  let base_id = safe_string(base["id"], "")
+  let provider = safe_string(base["provider"], "")
   harness.stdio.println("LoRA export for " + base_id + " via " + provider)
-  harness.stdio.println("  corpus: " + __safe_string(request["corpus"], ""))
+  harness.stdio.println("  corpus: " + safe_string(request["corpus"], ""))
   harness.stdio
     .println(
     "  tool format: "
-      + __safe_string(request["effective_tool_format"], "")
+      + safe_string(request["effective_tool_format"], "")
       + " (requested "
-      + __safe_string(request["requested_tool_format"], "auto")
+      + safe_string(request["requested_tool_format"], "auto")
       + ")",
   )
-  harness.stdio.println("  dataset format: " + __safe_string(request["dataset_format"], ""))
-  harness.stdio.println("  contract: " + __safe_string(contract["id"], ""))
-  harness.stdio.println("  target base: " + __safe_string(target["base_model"], ""))
-  let adapter = __safe_string(target["adapter_name"], "")
+  harness.stdio.println("  dataset format: " + safe_string(request["dataset_format"], ""))
+  harness.stdio.println("  contract: " + safe_string(contract["id"], ""))
+  harness.stdio.println("  target base: " + safe_string(target["base_model"], ""))
+  let adapter = safe_string(target["adapter_name"], "")
   if adapter != "" {
     harness.stdio.println("  adapter name: " + adapter)
   }
-  let template = __safe_string(target["chat_template"], "")
+  let template = safe_string(target["chat_template"], "")
   if template != "" {
     harness.stdio.println("  chat template: " + template)
   }
-  harness.stdio.println("  adapter binding: " + __safe_string(serving["adapter_binding"], ""))
-  let request_model = __safe_string(serving["request_model"], "")
+  harness.stdio.println("  adapter binding: " + safe_string(serving["adapter_binding"], ""))
+  let request_model = safe_string(serving["request_model"], "")
   if request_model != "" {
     harness.stdio.println("  request model: " + request_model)
   }
-  let path = __safe_string(output["path"], "")
+  let path = safe_string(output["path"], "")
   if path != "" {
     harness.stdio.println("  output: " + path)
   }
-  let manifest = __safe_string(output["manifest_path"], "")
+  let manifest = safe_string(output["manifest_path"], "")
   if manifest != "" {
     harness.stdio.println("  manifest: " + manifest)
   }
-  if __safe_bool(request["check"], false) {
+  if safe_bool(request["check"], false) {
     harness.stdio.println("  mode: check")
   }
   harness.stdio
     .println(
     "  stats: records="
-      + __safe_int_string(stats["records"], "0")
+      + safe_int_string(stats["records"], "0")
       + " emitted="
-      + __safe_int_string(stats["emitted"], "0")
+      + safe_int_string(stats["emitted"], "0")
       + " skipped="
-      + __safe_int_string(stats["skipped"], "0")
+      + safe_int_string(stats["skipped"], "0")
       + " tool_calls="
-      + __safe_int_string(stats["tool_calls"], "0")
+      + safe_int_string(stats["tool_calls"], "0")
       + " tool_results="
-      + __safe_int_string(stats["tool_results"], "0"),
+      + safe_int_string(stats["tool_results"], "0"),
   )
-  __print_list(harness, "warnings", warnings)
-  __print_list(harness, "errors", errors)
+  print_list(harness, "warnings", warnings)
+  print_list(harness, "errors", errors)
 }
 
 fn main(harness: Harness) -> int {
@@ -135,7 +96,7 @@ fn main(harness: Harness) -> int {
     harness.stdio.eprintln("internal error: failed to parse LoRA export payload: " + to_string(e))
     return 70
   }
-  let ok = __safe_bool(report["ok"], false)
+  let ok = safe_bool(report["ok"], false)
   let json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
   if json_mode {
     let pretty = harness.env.get_or("HARN_MODELS_LORA_EXPORT_PAYLOAD_PRETTY", raw)
