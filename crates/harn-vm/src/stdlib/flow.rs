@@ -28,6 +28,8 @@ use crate::vm::{AsyncBuiltinCtx, Vm, VmBuiltinArity, VmBuiltinMetadata};
 
 const DEFAULT_FEEDBACK_MAX_ITEMS: usize = 8;
 const HARD_FEEDBACK_MAX_ITEMS: usize = 50;
+const DEFAULT_FEEDBACK_MAX_FINDINGS_PER_ITEM: usize = 3;
+const HARD_FEEDBACK_MAX_FINDINGS_PER_ITEM: usize = 20;
 const DEFAULT_FEEDBACK_MAX_MESSAGE_CHARS: usize = 240;
 const HARD_FEEDBACK_MAX_MESSAGE_CHARS: usize = 2_000;
 
@@ -711,9 +713,11 @@ fn validate_span(start: u64, end: u64, builtin: &str) -> Result<(), VmError> {
 
 #[derive(Clone, Copy)]
 struct FlowFeedbackOptions {
+    include_findings: bool,
     include_allow: bool,
     include_skipped: bool,
     empty_if_clear: bool,
+    max_findings_per_item: usize,
     max_items: usize,
     max_message_chars: usize,
 }
@@ -721,9 +725,11 @@ struct FlowFeedbackOptions {
 impl Default for FlowFeedbackOptions {
     fn default() -> Self {
         Self {
+            include_findings: true,
             include_allow: false,
             include_skipped: false,
             empty_if_clear: true,
+            max_findings_per_item: DEFAULT_FEEDBACK_MAX_FINDINGS_PER_ITEM,
             max_items: DEFAULT_FEEDBACK_MAX_ITEMS,
             max_message_chars: DEFAULT_FEEDBACK_MAX_MESSAGE_CHARS,
         }
@@ -745,7 +751,9 @@ impl FlowFeedbackOptions {
         const KEYS: &[&str] = &[
             "empty_if_clear",
             "include_allow",
+            "include_findings",
             "include_skipped",
+            "max_findings_per_item",
             "max_items",
             "max_message_chars",
         ];
@@ -760,10 +768,18 @@ impl FlowFeedbackOptions {
         let mut parsed = Self::default();
         parsed.include_allow =
             feedback_bool_option(opts, "include_allow")?.unwrap_or(parsed.include_allow);
+        parsed.include_findings =
+            feedback_bool_option(opts, "include_findings")?.unwrap_or(parsed.include_findings);
         parsed.include_skipped =
             feedback_bool_option(opts, "include_skipped")?.unwrap_or(parsed.include_skipped);
         parsed.empty_if_clear =
             feedback_bool_option(opts, "empty_if_clear")?.unwrap_or(parsed.empty_if_clear);
+        parsed.max_findings_per_item = feedback_usize_option(
+            opts,
+            "max_findings_per_item",
+            DEFAULT_FEEDBACK_MAX_FINDINGS_PER_ITEM,
+            HARD_FEEDBACK_MAX_FINDINGS_PER_ITEM,
+        )?;
         parsed.max_items = feedback_usize_option(
             opts,
             "max_items",
@@ -943,6 +959,10 @@ fn record_feedback_item(
             line.push_str(&remediation);
         }
     }
+    if let Some(findings) = findings_text(record, options) {
+        line.push_str(" Findings: ");
+        line.push_str(&findings);
+    }
     Some(line)
 }
 
@@ -993,6 +1013,65 @@ fn remediation_text<'a>(
                 .and_then(json_str)
                 .filter(|value| !value.trim().is_empty())
         })
+}
+
+fn findings_text(record: &serde_json::Value, options: &FlowFeedbackOptions) -> Option<String> {
+    if !options.include_findings {
+        return None;
+    }
+    let findings = record
+        .get("raw_result")
+        .and_then(|value| value.get("findings"))
+        .or_else(|| record.get("findings"))
+        .and_then(serde_json::Value::as_array)?;
+    let mut labels = Vec::new();
+    let mut omitted = 0usize;
+    for finding in findings {
+        let Some(label) = finding_label(finding, options.max_message_chars) else {
+            continue;
+        };
+        if labels.iter().any(|existing| existing == &label) {
+            continue;
+        }
+        if labels.len() >= options.max_findings_per_item {
+            omitted += 1;
+            continue;
+        }
+        labels.push(label);
+    }
+    if labels.is_empty() {
+        return None;
+    }
+    let mut text = labels.join(", ");
+    if omitted > 0 {
+        text.push_str(&format!(" (+{omitted} more)"));
+    }
+    Some(text)
+}
+
+fn finding_label(finding: &serde_json::Value, max_chars: usize) -> Option<String> {
+    if let Some(text) = json_str(finding) {
+        return Some(feedback_compact(text, max_chars));
+    }
+    let object = finding.as_object()?;
+    if let Some(path) = object.get("path").and_then(json_str) {
+        let mut label = path.to_string();
+        if let Some(line) = object
+            .get("line")
+            .or_else(|| object.get("start_line"))
+            .and_then(serde_json::Value::as_u64)
+        {
+            label.push(':');
+            label.push_str(&line.to_string());
+        }
+        return Some(feedback_compact(&label, max_chars));
+    }
+    for key in ["message", "reason", "text"] {
+        if let Some(text) = object.get(key).and_then(json_str) {
+            return Some(feedback_compact(text, max_chars));
+        }
+    }
+    None
 }
 
 fn json_str(value: &serde_json::Value) -> Option<&str> {
@@ -1302,7 +1381,13 @@ mod tests {
                         "confidence": 1.0
                     },
                     "raw_result": {
-                        "remediation": "Remove bad sentinel text."
+                        "remediation": "Remove bad sentinel text.",
+                        "findings": [
+                            {"path": "src/main.zig", "pattern": "bad"},
+                            {"path": "src/lib.zig", "line": 42},
+                            {"path": "src/extra.zig"},
+                            {"path": "src/omitted.zig"}
+                        ]
                     }
                 },
                 {
@@ -1338,9 +1423,89 @@ mod tests {
         assert!(text.contains("Flow invariants need attention:"));
         assert!(text.contains("- Block no_bad: no_bad: bad sentinel text remains"));
         assert!(text.contains("Remediation: Remove bad sentinel text."));
+        assert!(text.contains("Findings: src/main.zig, src/lib.zig:42, src/extra.zig (+1 more)"));
         assert!(text.contains("- Warn style_nit: comment is stale"));
         assert!(text.contains("Remediation: Update the comment."));
         assert!(!text.contains("passed"));
+    }
+
+    #[test]
+    fn flow_invariant_feedback_can_omit_findings() {
+        let vm = vm_with_flow_builtins();
+        let report = json_to_vm_value(&serde_json::json!({
+            "ok": false,
+            "status": "fail",
+            "records": [{
+                "name": "no_bad",
+                "kind": "deterministic",
+                "result": {
+                    "verdict": {
+                        "kind": "block",
+                        "error": {
+                            "code": "no_bad",
+                            "message": "bad sentinel text remains"
+                        }
+                    },
+                    "confidence": 1.0
+                },
+                "raw_result": {
+                    "findings": [{"path": "src/main.zig"}]
+                }
+            }],
+            "skipped": []
+        }));
+        let options = json_to_vm_value(&serde_json::json!({"include_findings": false}));
+        let feedback = call(&vm, "flow_invariant_feedback", &[report, options]);
+        let VmValue::String(text) = feedback else {
+            panic!("expected feedback string");
+        };
+
+        assert!(text.contains("- Block no_bad: no_bad: bad sentinel text remains"));
+        assert!(!text.contains("Findings:"));
+        assert!(!text.contains("src/main.zig"));
+    }
+
+    #[test]
+    fn flow_invariant_feedback_caps_findings_per_item() {
+        let vm = vm_with_flow_builtins();
+        let report = json_to_vm_value(&serde_json::json!({
+            "ok": false,
+            "status": "fail",
+            "records": [{
+                "name": "no_bad",
+                "kind": "deterministic",
+                "result": {
+                    "verdict": {
+                        "kind": "block",
+                        "error": {
+                            "code": "no_bad",
+                            "message": "bad sentinel text remains"
+                        }
+                    },
+                    "confidence": 1.0
+                },
+                "raw_result": {
+                    "findings": [
+                        {"path": "src/main.zig"},
+                        {"path": "src/main.zig"},
+                        {"pattern": "not enough to label"},
+                        "src/lib.zig",
+                        {"message": "src/extra.zig"}
+                    ]
+                }
+            }],
+            "skipped": []
+        }));
+        let options = json_to_vm_value(&serde_json::json!({"max_findings_per_item": 1}));
+        let feedback = call(&vm, "flow_invariant_feedback", &[report, options]);
+        let VmValue::String(text) = feedback else {
+            panic!("expected feedback string");
+        };
+
+        assert!(text.contains("Findings: src/main.zig (+2 more)"));
+        assert!(!text.contains("src/lib.zig"));
+        assert!(!text.contains("src/extra.zig"));
+        assert!(!text.contains("not enough to label"));
     }
 
     #[test]
