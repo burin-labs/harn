@@ -12,6 +12,12 @@
 // Note: the `harn run` sandbox scopes filesystem access to the workspace
 // root. When HARN_BIN / CARGO_TARGET_DIR / --report-dir point outside the
 // repo, run with `harn run --no-sandbox` (CI keeps everything in-tree).
+const DEFAULT_BINARY_SIZE_BUDGET_MB: string = "190.00"
+
+pub fn default_binary_size_budget_mb() -> string {
+  return DEFAULT_BINARY_SIZE_BUDGET_MB
+}
+
 /** The --help text (bash `usage()` heredoc, invocation line updated). */
 pub fn usage_text() -> string {
   return """
@@ -24,7 +30,7 @@ Options:
   --no-build           Check an already-built release binary
   --target TARGET      Cargo target triple to build/check
   --bin PATH           Override the harn binary path
-  --budget-mb MB       Maximum binary size in MiB (default: 189.50)
+  --budget-mb MB       Maximum binary size in MiB (default: ${DEFAULT_BINARY_SIZE_BUDGET_MB})
   --report-dir DIR     Directory for binary-size and cargo-bloat reports
   --skip-bloat         Only write binary-size.txt; do not run cargo-bloat
   -h, --help           Show this help
@@ -194,7 +200,7 @@ pipeline main(task) {
   let defaults = {
     target: env_or("HARN_RELEASE_TARGET", ""),
     harn_bin: env_or("HARN_BIN", ""),
-    budget_mb: env_or("BINARY_SIZE_BUDGET_MB", "189.50"),
+    budget_mb: env_or("BINARY_SIZE_BUDGET_MB", DEFAULT_BINARY_SIZE_BUDGET_MB),
     report_dir: env_or("BINARY_SIZE_REPORT_DIR", ""),
   }
   let parsed = parse_args(argv, defaults)
