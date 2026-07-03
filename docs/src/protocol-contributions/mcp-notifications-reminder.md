@@ -1,7 +1,9 @@
 # MCP RFC: `notifications/reminder` server→host ambient context
 
 **Upstream repo:** [modelcontextprotocol/specification][mcp-spec]
-**Status:** Draft (not yet filed upstream).
+**Status:** Filed upstream 2026-07-03 as
+[MCP discussion #3007](https://github.com/modelcontextprotocol/modelcontextprotocol/discussions/3007),
+awaiting first response.
 **Authors:** Burin Labs
 **Reference impl:** `harn-serve` MCP adapter
 ([`crates/harn-serve/src/adapters/mcp.rs`][mcp-rs]) + typed

@@ -1,7 +1,9 @@
 # A2A RFC: actor-chain extension for delegated authority
 
 **Upstream repo:** [a2aproject/A2A][a2a]
-**Status:** Draft (not yet filed upstream). Verified non-duplicate on
+**Status:** Filed upstream 2026-07-03 as
+[a2aproject/A2A#2028](https://github.com/a2aproject/A2A/issues/2028),
+awaiting first response. Verified non-duplicate on
 2026-07-03; anchor threads are [A2A #1937][a2a-1937] (context-binding
 profile for delegated authority) and [A2A #153][a2a-153] (confused
 deputy). Written against A2A v1.0 conventions (`a2a.proto` normative,

@@ -1,6 +1,8 @@
 # Positioning note: actor chains in MCP enterprise auth (ID-JAG)
 
-**Status:** Engagement plan, not an RFC. Verified 2026-07-03. Unlike
+**Status:** Feedback posted 2026-07-03 on
+[oauth-wg #73](https://github.com/oauth-wg/oauth-identity-assertion-authz-grant/issues/73#issuecomment-4878092226).
+Verified 2026-07-03. Unlike
 the other documents in this directory, there is no new proposal to
 file: the substance already lives in active upstream threads, and the
 right contribution is implementer feedback there.
