@@ -242,7 +242,12 @@ impl SecurityPolicy {
             taint_file_provenance,
             taint_command_reads: taint_file_provenance && (config.taint_command_reads || hardened),
             precise_exfil_gate: trifecta_gate && (config.precise_exfil_gate || hardened),
-            gate_secret_reads: enabled && config.gate_secret_reads,
+            // The secret-read arm is evaluated only inside `trifecta_gate_reason`
+            // (agent_host_primitives.rs:976), which runs solely under
+            // `if policy.trifecta_gate`. Like the precise gate it is a sub-toggle
+            // of the trifecta gate and is inert without it, so gate it on the
+            // same prerequisite rather than leaving the dead combination settable.
+            gate_secret_reads: trifecta_gate && config.gate_secret_reads,
             // `local-ml` mode turns detection on; other modes can still opt in.
             detect_injection: enabled
                 && (config.detect_injection || matches!(config.mode, SecurityMode::LocalMl)),
@@ -1253,6 +1258,29 @@ mod tests {
         let policy = SecurityPolicy::from_config(&paired);
         assert!(policy.trifecta_gate);
         assert!(policy.precise_exfil_gate);
+    }
+
+    #[test]
+    fn secret_read_gate_requires_the_trifecta_gate() {
+        // The secret-read arm is evaluated only inside `trifecta_gate_reason`,
+        // which runs solely under `if policy.trifecta_gate`. Without the trifecta
+        // gate it never fires, so gate it on its prerequisite structurally.
+        let inert = SecurityConfig {
+            gate_secret_reads: true,
+            trifecta_gate: false,
+            ..Default::default()
+        };
+        assert!(!SecurityPolicy::from_config(&inert).gate_secret_reads);
+        assert!(!SecurityPolicy::from_config(&inert).trifecta_gate);
+
+        let paired = SecurityConfig {
+            gate_secret_reads: true,
+            trifecta_gate: true,
+            ..Default::default()
+        };
+        let policy = SecurityPolicy::from_config(&paired);
+        assert!(policy.trifecta_gate);
+        assert!(policy.gate_secret_reads);
     }
 
     #[test]
