@@ -1,0 +1,85 @@
+import { verification_ladder_plan, verification_warm_state_facts } from "std/verification"
+
+pipeline test(task) {
+  let facts = verification_warm_state_facts(
+    [
+      {
+        id: "svc/warm",
+        name: "warm-daemon",
+        warmMode: {
+          mode: "build-server",
+          readyProbe: {spec: {mode: "shell", command: "true"}},
+          expectedWarmDeltaMs: 8000,
+        },
+        cacheIdentity: {SERVER_HOME: ".server"},
+        timings: {warmMs: {p95: 120}, coldMs: {p95: 5000}},
+      },
+      {
+        id: "svc/cold",
+        name: "cold-daemon",
+        warmMode: {
+          mode: "build-server",
+          readyProbe: {spec: {mode: "shell", command: "exit 7"}},
+          expectedWarmDeltaMs: 9000,
+        },
+        cacheIdentity: {SERVER_HOME: ".server-cold"},
+        timings: {warmMs: {p95: 10}, coldMs: {p95: 7000}},
+      },
+    ],
+    {command_options: {capture: {max_inline_bytes: 4096}}},
+  )
+  assert_eq(len(facts), 2)
+  assert_eq(facts[0].id, "svc/warm")
+  assert_eq(facts[0].configured, true)
+  assert_eq(facts[0].available, true)
+  assert_eq(facts[0].warm, true)
+  assert_eq(facts[0].timing_kind, "warm")
+  assert_eq(facts[0].expected_warm_delta_ms, 8000)
+  assert_eq(facts[0].warm_ms, 120)
+  assert_eq(facts[0].cold_ms, 5000)
+  assert_eq(facts[0].cache_identity.SERVER_HOME, ".server")
+  assert_eq(facts[1].available, false)
+  assert_eq(facts[1].ready, false)
+  assert_eq(facts[1].warm, false)
+  assert_eq(facts[1].timing_kind, "cold")
+  assert_eq(facts[1].probe.exit, 7)
+  verification_profiles_set(
+    {
+      rows: [
+        {
+          id: "svc/warm",
+          scope: {language: "toolchainy", task: "post_edit"},
+          check: {rung: "R2", command: {mode: "shell", command: "echo warm"}, resourceClass: "moderate"},
+          timings: {warmMs: {p95: 120}, coldMs: {p95: 5000}},
+        },
+        {
+          id: "svc/cold",
+          scope: {language: "toolchainy", task: "post_edit"},
+          check: {rung: "R2", command: {mode: "shell", command: "echo cold"}, resourceClass: "moderate"},
+          timings: {warmMs: {p95: 10}, coldMs: {p95: 7000}},
+        },
+      ],
+    },
+  )
+  let plan = verification_ladder_plan(
+    {language: "toolchainy", task: "post_edit"},
+    {timing_kind: "auto", warm_state_facts: facts},
+  )
+  assert_eq(len(plan.selected), 2)
+  assert_eq(plan.selected[0].row_id, "svc/warm")
+  assert_eq(plan.selected[0].timing_kind, "warm")
+  assert_eq(plan.selected[0].p95_ms, 120)
+  assert_eq(plan.selected[0].warm_state.id, "svc/warm")
+  assert_eq(plan.selected[1].row_id, "svc/cold")
+  assert_eq(plan.selected[1].timing_kind, "cold")
+  assert_eq(plan.selected[1].p95_ms, 7000)
+  assert_eq(plan.selected[1].warm_state.id, "svc/cold")
+  let cold_override = verification_ladder_plan(
+    {language: "toolchainy", task: "post_edit"},
+    {timing_kind: "cold", warm_state_facts: facts},
+  )
+  assert_eq(cold_override.selected[0].row_id, "svc/warm")
+  assert_eq(cold_override.selected[0].p95_ms, 5000)
+  assert_eq(cold_override.selected[0].timing_kind, "cold")
+  __io_println("verification warm state ok")
+}

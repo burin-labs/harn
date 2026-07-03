@@ -177,6 +177,58 @@ This lets verification schedulers bind false-fail risk to concrete toolchain
 and cache identity without embedding toolchain-specific heuristics in Burin or
 other host products.
 
+## Warm-State Facts
+
+`verification_warm_state_facts(rows, options)` executes config-declared
+readiness probes for slow verifier state such as build servers, watchers, and
+toolchain caches. Rows are data, not code: a profile row or fact row declares a
+`warmMode` / `warm_state` object with a `readyProbe`, optional cache identity,
+and expected warm-vs-cold delta. Harn does not hardcode sbt, Gradle, Cargo,
+Zig, or any other stack.
+
+```harn
+import { verification_ladder_plan, verification_warm_state_facts } from "std/verification"
+
+pipeline default() {
+  let warm = verification_warm_state_facts([
+    {
+      id: "scala/full",
+      name: "sbt",
+      warmMode: {
+        mode: "build-server",
+        readyProbe: {spec: {mode: "shell", command: "test -S .bloop/socket"}},
+        expectedWarmDeltaMs: 8000,
+      },
+      cacheIdentity: {BLOOP_HOME: ".bloop"},
+    },
+  ])
+  let plan = verification_ladder_plan(
+    {path: "modules/cart/src/Main.scala", language: "scala", task: "post_edit"},
+    {timing_kind: "auto", warm_state_facts: warm},
+  )
+  return plan.selected
+}
+```
+
+Each fact includes:
+
+- `id` and `name`: stable row identity, usually matching a verification profile
+  row id.
+- `configured`: whether a warm mode or readiness probe was declared.
+- `available` / `ready` / `warm`: the probe result normalized into scheduler
+  booleans. A missing or failing probe makes the row cold, not an error.
+- `timing_kind`: `warm` or `cold`, ready to feed ladder planning.
+- `expected_warm_delta_ms`, `warm_ms`, and `cold_ms`: caller-declared or
+  profile-derived timing hints.
+- `cache_identity`: cache/build-server identity fields that make warm-state
+  facts auditable.
+- `probe`: status, exit, duration, stdout, and stderr from the readiness probe.
+
+Pass the returned list to `verification_ladder_plan` with
+`{timing_kind:"auto", warm_state_facts:facts}` to choose warm or cold p95 timing
+per row. This keeps slow-toolchain scheduling in Harn profile data instead of
+embedding stack-specific string heuristics in a host product.
+
 ## Ladder Planning
 
 `verification_profile_matches(query, dir?)` returns every profile row that
@@ -206,8 +258,9 @@ through `R5`), resource class, observed p95 timing, selector specificity, and
 row order. `selected` contains runnable checks only; matched rows without a
 command or spec are returned in `skipped` with `reason = "missing_command"`.
 Each selected entry includes the original row, row id, rung, command, runnable
-flag, granularity, trust, resource class, p95 timing, and sort key. Execution
-stays with `verification_run_check` or `verification_start_check` /
+flag, granularity, trust, resource class, p95 timing, timing kind, optional
+warm-state fact, and sort key. Execution stays with `verification_run_check` or
+`verification_start_check` /
 `verification_finish_check`, so background checks remain snapshot-bound.
 
 Useful options:
@@ -216,7 +269,10 @@ Useful options:
 - `min_rung` / `max_rung`: inclusive rung bounds, default `R0` to `R5`;
   values may be `R2`, `"2"`, or `2`.
 - `resource_classes`: allow-list such as `["cheap", "moderate"]`.
-- `timing_kind`: `warm` (default), `cold`, or `any`.
+- `timing_kind`: `warm` (default), `cold`, `any`, or `auto`; `auto` uses
+  `warm_state_facts` per row and falls back to warm timing when no fact exists.
+- `warm_state_facts`: facts from `verification_warm_state_facts`, either a
+  list keyed by `id` / `row_id` or a dict keyed by profile row id.
 - `unknown_p95_ms`: fallback timing for rows without observations.
 - `allow_stale_prone`: set `false` to skip stale-prone rows.
 - `limit`: maximum selected checks.
