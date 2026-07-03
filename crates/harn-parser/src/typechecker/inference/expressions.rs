@@ -1166,6 +1166,8 @@ impl TypeChecker {
             }
             PathNarrowing::Intersect(schema) => intersect_types(&ty, schema).or(Some(ty)),
             PathNarrowing::Subtract(schema) => subtract_type(&ty, schema).or(Some(ty)),
+            // Invalidated by a base reassignment: natural type unchanged.
+            PathNarrowing::Cleared => Some(ty),
         }
     }
 
@@ -1298,7 +1300,7 @@ impl TypeChecker {
         natural
     }
 
-    fn infer_subscript_type_from_type(
+    pub(super) fn infer_subscript_type_from_type(
         &self,
         ty: &TypeExpr,
         index: &SNode,

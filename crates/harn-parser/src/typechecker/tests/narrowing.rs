@@ -1368,3 +1368,86 @@ fn test_unknown_exhaustiveness_warns_on_path() {
         "expected path exhaustiveness warning naming uncovered kinds, got: {warns:?}"
     );
 }
+
+#[test]
+fn test_assignment_in_nested_scope_checks_against_declared_type() {
+    // `x = nil` on a `string?` var must be legal even when the assignment
+    // sits in a loop body nested inside the narrowing branch — the check
+    // target is the declared (pre-narrowing) type from the scope chain,
+    // not the branch-narrowed `string`.
+    let errs = errors(
+        r#"fn f(start: string?) -> int {
+  var x: string? = start
+  if x != nil {
+    for i in [1, 2] {
+      x = nil
+    }
+  }
+  return 0
+}"#,
+    );
+    assert!(errs.is_empty(), "got: {errs:?}");
+}
+
+#[test]
+fn test_loop_body_reassignment_invalidates_pre_loop_narrowing() {
+    // Narrowing before the loop only describes the first iteration when
+    // the body reassigns the variable: `x.upper()` must be rejected.
+    let errs = errors(
+        r#"fn f(start: string?) -> string {
+  var x: string? = start
+  var out = ""
+  if x != nil {
+    for i in [1, 2] {
+      out = x.upper()
+      x = nil
+    }
+  }
+  return out
+}"#,
+    );
+    assert!(
+        errs.iter().any(|e| e.contains("upper")),
+        "expected nilable-access error inside the loop, got: {errs:?}"
+    );
+}
+
+#[test]
+fn test_while_condition_narrowing_survives_body_reassignment() {
+    // The while condition re-tests every iteration, so its own narrowing
+    // stays sound even though the body reassigns the variable.
+    let errs = errors(
+        r#"fn next_val() -> string? { return nil }
+
+fn f(start: string?) -> int {
+  var x: string? = start
+  var n = 0
+  while x != nil {
+    n = n + x.len()
+    x = next_val()
+  }
+  return n
+}"#,
+    );
+    assert!(errs.is_empty(), "got: {errs:?}");
+}
+
+#[test]
+fn test_post_loop_read_sees_invalidated_narrowing() {
+    let errs = errors(
+        r#"fn f(start: string?) -> string {
+  var x: string? = start
+  if x != nil {
+    for i in [1] {
+      x = nil
+    }
+    return x.upper()
+  }
+  return ""
+}"#,
+    );
+    assert!(
+        errs.iter().any(|e| e.contains("upper")),
+        "expected nilable-access error after the loop, got: {errs:?}"
+    );
+}

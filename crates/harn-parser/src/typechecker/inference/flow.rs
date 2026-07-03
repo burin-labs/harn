@@ -228,7 +228,46 @@ fn evaluate_constant_bool(condition: &SNode) -> Option<bool> {
     }
 }
 
+/// Names of variables assigned (plain or compound) anywhere in `body`,
+/// including nested control flow and closures. Drives loop back-edge
+/// narrowing invalidation: a variable narrowed before a loop and reassigned
+/// inside it may hold its widened declared type on the second iteration, so
+/// the narrowing cannot be trusted anywhere in the loop body.
+pub(in crate::typechecker) fn assigned_var_names(body: &[SNode]) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    crate::visit::walk_program(body, &mut |node| {
+        if let Node::Assignment { target, .. } = &node.node {
+            if let Node::Identifier(name) = &target.node {
+                if !names.iter().any(|n| n == name) {
+                    names.push(name.clone());
+                }
+            }
+        }
+    });
+    names
+}
+
 impl TypeChecker {
+    /// Invalidate, in a fresh loop scope, every narrowing (variable or
+    /// reference path) whose subject is reassigned somewhere in the loop
+    /// body. Type narrowing established before the loop only describes the
+    /// first iteration; from the back edge onward the variable may hold any
+    /// value of its declared type. Mirrors the reassignment invalidation in
+    /// the `Assignment` arm, applied eagerly at loop entry.
+    pub(in crate::typechecker) fn invalidate_loop_assigned_narrowings(
+        scope: &mut TypeScope,
+        body: &[SNode],
+    ) {
+        for name in assigned_var_names(body) {
+            if let Some(original) = scope.narrowed_original(&name).cloned() {
+                scope.narrowed_vars.remove(&name);
+                scope.define_var(&name, original);
+            }
+            scope.clear_narrowed_paths_rooted_at(&name);
+            scope.clear_unknown_ruled_out_paths_rooted_at(&name);
+        }
+    }
+
     /// Wrap `extract_refinements` with the [`Code::LintVacuousCondition`]
     /// emission pass. Callers that own `&mut self` (every `if` / `while` /
     /// `guard` site) should prefer this over the bare associated form so the

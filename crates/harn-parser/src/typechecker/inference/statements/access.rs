@@ -415,6 +415,86 @@ impl TypeChecker {
         }
     }
 
+    /// Diagnose a property/subscript assignment target and compute the type
+    /// of the slot being written (`xs[0] = v` → the list element type,
+    /// `d["k"] = v` → the dict value type, `s.n = v` → the field type).
+    ///
+    /// Emits the same receiver diagnostics the read side would (nil /
+    /// nilable / unknown receiver, unknown field on an annotated shape or
+    /// struct) so a write target is held to the same contract as a read of
+    /// the same path, plus a container index-type check for `list` (int)
+    /// and `dict<K, V>` (K) subscripts.
+    ///
+    /// Returns `None` — skipping the value check — when the receiver is
+    /// gradual, lenient (the unannotated dict-literal idiom, per
+    /// [`Self::is_strict_access_source`]), or the slot type is unknown.
+    pub(in crate::typechecker) fn assignment_path_slot_type(
+        &mut self,
+        target: &SNode,
+        scope: &TypeScope,
+    ) -> Option<TypeExpr> {
+        match &target.node {
+            Node::PropertyAccess { object, property }
+            | Node::OptionalPropertyAccess { object, property } => {
+                let optional = matches!(&target.node, Node::OptionalPropertyAccess { .. });
+                self.check_property_access(object, property, scope, target.span, optional);
+                let raw = self.infer_type(object, scope)?;
+                if !self.is_strict_access_source(object, &raw, scope) {
+                    return None;
+                }
+                self.infer_property_type_from_type(&raw, property, scope, false)
+            }
+            Node::SubscriptAccess { object, index }
+            | Node::OptionalSubscriptAccess { object, index } => {
+                let optional = matches!(&target.node, Node::OptionalSubscriptAccess { .. });
+                self.check_subscript_access(object, scope, target.span, optional);
+                let raw = self.infer_type(object, scope)?;
+                if !self.is_strict_access_source(object, &raw, scope) {
+                    return None;
+                }
+                let resolved = self.resolve_alias(&raw, scope);
+                let expected_index: Option<TypeExpr> = match &resolved {
+                    TypeExpr::List(_) => Some(TypeExpr::Named("int".into())),
+                    TypeExpr::DictType(key, _) => Some(key.as_ref().clone()),
+                    _ => None,
+                };
+                if let (Some(expected_index), Some(actual_index)) =
+                    (expected_index, self.infer_type(index, scope))
+                {
+                    if !self.types_compatible(&expected_index, &actual_index, scope) {
+                        self.type_mismatch_at(
+                            crate::diagnostic_codes::Code::AssignmentTypeMismatch,
+                            "subscript index",
+                            &expected_index,
+                            &actual_index,
+                            index.span,
+                            (None, Some(index.span)),
+                            scope,
+                        );
+                    }
+                }
+                self.infer_subscript_type_from_type(&resolved, index, scope, false)
+            }
+            _ => None,
+        }
+    }
+
+    /// Human-readable rendering of an assignment target for diagnostics:
+    /// the canonical path key when the target is a constant reference path
+    /// (`xs[0]`, `cfg.mode`), otherwise the trimmed source text.
+    pub(in crate::typechecker) fn render_assignment_target(&self, target: &SNode) -> String {
+        if let Some(key) = crate::typechecker::union::reference_path_key(target) {
+            return key;
+        }
+        self.source
+            .as_deref()
+            .and_then(|source| source.get(target.span.start..target.span.end))
+            .map(str::trim)
+            .filter(|text| !text.is_empty() && text.len() <= 60)
+            .map(str::to_string)
+            .unwrap_or_else(|| "assignment target".to_string())
+    }
+
     /// Root identifier of an assignment target that is a property/subscript
     /// path (`o.a`, `o.a[i]`, `o?.a`). Returns `None` for a bare identifier
     /// target (handled separately) or an unrooted target.
