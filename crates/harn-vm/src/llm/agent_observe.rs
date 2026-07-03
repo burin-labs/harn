@@ -1103,6 +1103,30 @@ pub(super) fn dump_llm_response(
     }));
 }
 
+/// Emit the self-contained `resolved_dispatch` transcript record for one LLM
+/// call: the final resolved provider/model/wire_format/thinking/tool_format +
+/// where each came from (`provenance`) + the normalized outcome. This is the
+/// one-call answer to "what did this LLM call actually dispatch, and what did
+/// it return" that used to require joining request+response events and
+/// cross-referencing the capability catalog by hand.
+pub(super) fn dump_resolved_dispatch(
+    iteration: usize,
+    call_id: &str,
+    opts: &super::api::LlmCallOptions,
+    effective_tool_format: &str,
+    outcome: &super::resolved_dispatch::DispatchOutcome,
+) {
+    append_llm_transcript_entry(&super::resolved_dispatch::build_record(
+        iteration,
+        call_id,
+        crate::tracing::current_span_id(),
+        chrono_now(),
+        opts,
+        effective_tool_format,
+        outcome,
+    ));
+}
+
 pub(super) fn annotate_current_span(metadata: &[(&str, serde_json::Value)]) {
     let Some(span_id) = crate::tracing::current_span_id() else {
         return;
@@ -1414,6 +1438,12 @@ pub(crate) async fn observed_llm_call(
     let mut degraded_to_text = false;
     let mut degraded_stream_transport = false;
     let mut attempt = 0usize;
+    // How many empty-completion flakes this call retried through. Distinct from
+    // `attempt` (which also counts transient-error and tool-format-degrade
+    // retries) so the `resolved_dispatch` record can tell a clean serve from a
+    // serve that RECOVERED from an empty flake — the exact recovered-vs-terminal
+    // distinction the escalation guard hinges on.
+    let mut empty_completion_retries = 0usize;
     loop {
         let opts: &super::api::LlmCallOptions = working.as_ref();
         // Network-only circuit breaker: if this route has seen sustained
@@ -1584,6 +1614,7 @@ pub(crate) async fn observed_llm_call(
                         );
                     }
                     attempt += 1;
+                    empty_completion_retries += 1;
                     let backoff =
                         if crate::llm::providers::MockProvider::should_intercept(&opts.provider) {
                             0
@@ -1622,6 +1653,16 @@ pub(crate) async fn observed_llm_call(
                     duration_ms,
                     opts.applied_structural_experiment.as_ref(),
                     opts.tools.as_ref(),
+                );
+                dump_resolved_dispatch(
+                    iteration.unwrap_or(0),
+                    &call_id,
+                    opts,
+                    &effective_tool_format,
+                    &super::resolved_dispatch::DispatchOutcome::from_result(
+                        &result,
+                        empty_completion_retries,
+                    ),
                 );
                 annotate_current_span(&[(
                     "structural_experiment",
@@ -1819,9 +1860,26 @@ pub(crate) async fn observed_llm_call(
                     if let Some(metrics) = crate::active_metrics_registry() {
                         metrics.record_llm_call(&opts.provider, &opts.model, status, 0.0);
                     }
+                    // Terminal failure: emit the self-contained dispatch record
+                    // with the error-derived outcome so a consumer sees the
+                    // resolved route AND why it failed without joining events or
+                    // re-parsing the error string. Retryable attempts do NOT
+                    // emit (the retry/recovery is the story there); only the
+                    // surfaced terminal error does.
+                    dump_resolved_dispatch(
+                        iteration.unwrap_or(0),
+                        &call_id,
+                        opts,
+                        &effective_tool_format,
+                        &super::resolved_dispatch::DispatchOutcome::from_error_message(&message),
+                    );
                     return Err(error);
                 }
                 if is_empty_completion_retry_error(&error) {
+                    // This thrown empty completion is being retried (we passed
+                    // the `!can_retry` gate). Count it so a subsequent serve is
+                    // recorded as transient-recovered, not a clean serve.
+                    empty_completion_retries += 1;
                     append_llm_observability_entry(
                         "empty_completion_retry",
                         serde_json::Map::from_iter([

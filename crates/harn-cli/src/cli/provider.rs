@@ -25,6 +25,40 @@ pub(crate) enum ProviderCommand {
     Probe(ProviderProbeArgs),
     /// Run one-tool provider conformance and classify native/text fallback.
     ToolProbe(ProviderToolProbeArgs),
+    /// Deterministically explain how a (provider, model) pair would dispatch:
+    /// resolved wire format (anthropic-native vs openai-compat), base URL host,
+    /// native-tool support, and thinking eligibility — a pure capability-registry
+    /// lookup with NO network call and NO LLM call. Answers "does anthropic
+    /// claude-sonnet route native?" instantly, without running an eval.
+    #[command(name = "dispatch-explain")]
+    DispatchExplain(ProviderDispatchExplainArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ProviderDispatchExplainArgs {
+    /// Provider id (e.g. `anthropic`, `openrouter`, `openai`).
+    #[arg(
+        value_parser = llm_provider_completion_parser(),
+        hide_possible_values = true
+    )]
+    pub provider: String,
+    /// Model alias or provider-native model id (e.g. `claude-sonnet-4-6`).
+    #[arg(
+        value_parser = llm_model_completion_parser(),
+        hide_possible_values = true
+    )]
+    pub model: String,
+    /// Report as if extended thinking were requested. Affects the thinking
+    /// eligibility line; does not change wire-format resolution.
+    #[arg(long)]
+    pub thinking: bool,
+    /// Explain a specific tool_format (`native` / `text` / `json`) instead of
+    /// the model's preferred format.
+    #[arg(long = "tool-format")]
+    pub tool_format: Option<String>,
+    /// Emit the structured explanation as JSON.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]

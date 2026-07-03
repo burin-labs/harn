@@ -47,6 +47,7 @@ pub mod readiness;
 pub mod reasoning_policy;
 pub(crate) mod reminder_providers;
 mod rerank;
+pub mod resolved_dispatch;
 pub(crate) mod routing;
 pub(crate) mod routing_verifier;
 pub(crate) mod schema_recover;
@@ -743,6 +744,7 @@ mod tests {
             routing_policy: None,
             region: None,
             session_id: None,
+            dispatch_provenance: None,
             reminders: None,
             reminder_lifecycle: Vec::new(),
             messages: Vec::new(),

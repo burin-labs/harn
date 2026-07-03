@@ -88,6 +88,13 @@ pub(crate) fn extract_llm_options(
     let session_id = opt_str(&options, "session_id")
         .filter(|value| !value.is_empty())
         .or_else(crate::agent_sessions::current_session_id);
+    // Provenance annotation supplied by the pipeline resolver (which resolved
+    // field came from a pin vs. was inherited from the primary). Observability
+    // only — emitted verbatim into the `resolved_dispatch` transcript record.
+    let dispatch_provenance = options
+        .as_ref()
+        .and_then(|o| o.get("dispatch_provenance"))
+        .and_then(crate::llm::resolved_dispatch::DispatchProvenance::from_vm_value);
     let pending_reminders = pending_reminders_from_session(session_id.as_deref());
     let rendered_reminders = render_pending_reminders(&caps, &pending_reminders);
     let reminder_lifecycle = rendered_reminder_lifecycle(
@@ -661,6 +668,7 @@ pub(crate) fn extract_llm_options(
         routing_policy,
         region: None,
         session_id,
+        dispatch_provenance,
         reminders,
         reminder_lifecycle,
         messages,

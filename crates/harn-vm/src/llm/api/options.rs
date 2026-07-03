@@ -325,6 +325,14 @@ pub(crate) struct LlmCallOptions {
     /// own lifecycle events. `None` for raw `llm_call(...)` invocations
     /// from script context — those have no agent session to attach to.
     pub session_id: Option<String>,
+    /// Where each resolved dispatch field (provider/model/wire_format/
+    /// thinking/tool_format) came from. Populated by the pipeline resolver
+    /// (via a `dispatch_provenance` entry in the agent-loop options dict) and
+    /// emitted verbatim into the `resolved_dispatch` transcript record so a
+    /// consumer can tell an operator pin from a value silently
+    /// `inherited_from_primary`. `None` for raw `llm_call(...)` invocations
+    /// and internal calls that no resolver annotated.
+    pub dispatch_provenance: Option<crate::llm::resolved_dispatch::DispatchProvenance>,
     /// Agent-loop reminder provider configuration. Parsed for option-table
     /// visibility and transcript/replay fidelity; raw `llm_call(...)` does
     /// not evaluate reminder providers.
@@ -713,6 +721,7 @@ pub(crate) fn base_opts(provider: &str) -> LlmCallOptions {
         routing_policy: None,
         region: None,
         session_id: None,
+        dispatch_provenance: None,
         reminders: None,
         reminder_lifecycle: Vec::new(),
         messages: vec![serde_json::json!({"role": "user", "content": "hello"})],

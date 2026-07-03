@@ -826,3 +826,30 @@ fn test_parses_providers_recommend_args() {
     assert_eq!(recommend.provider.as_deref(), Some("ollama"));
     assert!(recommend.json);
 }
+
+#[test]
+fn test_parses_provider_dispatch_explain_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "provider",
+        "dispatch-explain",
+        "anthropic",
+        "claude-sonnet-4-6",
+        "--thinking",
+        "--tool-format",
+        "native",
+        "--json",
+    ]);
+
+    let Command::Provider(provider) = cli.command.unwrap() else {
+        panic!("expected provider command");
+    };
+    let ProviderCommand::DispatchExplain(args) = provider.command else {
+        panic!("expected provider dispatch-explain command");
+    };
+    assert_eq!(args.provider, "anthropic");
+    assert_eq!(args.model, "claude-sonnet-4-6");
+    assert!(args.thinking);
+    assert_eq!(args.tool_format.as_deref(), Some("native"));
+    assert!(args.json);
+}

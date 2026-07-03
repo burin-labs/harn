@@ -78,6 +78,7 @@ pub async fn run_model_smoke_test(
         routing_policy: None,
         region: None,
         session_id: None,
+        dispatch_provenance: None,
         reminders: None,
         reminder_lifecycle: Vec::new(),
         messages: vec![serde_json::json!({
