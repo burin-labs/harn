@@ -3,6 +3,7 @@ import {
   coord_dir_lock_path,
   coord_dir_lock_reaper_path,
   coord_release_dir_lock,
+  coord_with_dir_lock,
 } from "std/coordination"
 
 pipeline default() {
@@ -61,5 +62,33 @@ pipeline default() {
   __io_println(during_reap.lock_path == reaper.lock_path)
   let _ = coord_release_dir_lock(reaper)
   __io_println(harness.fs.exists(second.lock_path))
+  let scoped_value = coord_with_dir_lock(
+    resource,
+    { lock ->
+      __io_println(lock.acquired)
+      __io_println(harness.fs.exists(lock.lock_path))
+      "done-" + lock.record.owner.id
+    },
+    {id: "run-D", run_id: "release-D"},
+    {ttl_ms: 100, token: "token-D"},
+  )
+  __io_println(scoped_value)
+  __io_println(harness.fs.exists(coord_dir_lock_path(resource)))
+  let scoped_throw = try {
+    coord_with_dir_lock(
+      resource,
+      { lock ->
+        __io_println(harness.fs.exists(lock.lock_path))
+        throw "scoped-boom"
+      },
+      {id: "run-E", run_id: "release-E"},
+      {ttl_ms: 100, token: "token-E"},
+    )
+    false
+  } catch (e) {
+    contains(to_string(e), "scoped-boom")
+  }
+  __io_println(scoped_throw)
+  __io_println(harness.fs.exists(coord_dir_lock_path(resource)))
   unmock_time()
 }
