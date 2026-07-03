@@ -14,9 +14,10 @@ pipeline test(task) {
   let inflight = atomic(0)
   let peak = atomic(0)
   let completed = atomic(0)
-  let _ = pool_create(
-    {name: "spawn-to-pool-cap-demo", max_concurrent: 3, backpressure: bp.queue(8, "fail_submitter")},
-  )
+  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+    + to_string(harness.random.gen_range(100000, 999999))
+  let pool_name = "spawn-to-pool-cap-demo-" + unique
+  let _ = pool_create({name: pool_name, max_concurrent: 3, backpressure: bp.queue(8, "fail_submitter")})
   let task_factory = { _event -> return { ->
     let now = atomic_add(inflight, 1) + 1
     if now > atomic_get(peak) {
@@ -27,15 +28,13 @@ pipeline test(task) {
     atomic_add(completed, 1)
     return now
   } }
-  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
-    + to_string(harness.random.gen_range(100000, 999999))
   let trigger_id = "trigger-spawn-to-pool-" + unique
   let handle: TriggerHandle = trigger_register(
     {
       id: trigger_id,
       kind: "issue.opened",
       provider: "github",
-      handler: SpawnToPool({pool: "spawn-to-pool-cap-demo", task_factory: task_factory}),
+      handler: SpawnToPool({pool: pool_name, task_factory: task_factory}),
       when: nil,
       retry: nil,
       match: {events: ["issue.opened"]},
@@ -59,7 +58,7 @@ pipeline test(task) {
         headers: {x_delivery: "evt-" + to_string(i) + "-" + unique},
       },
     )
-    if dispatch.status == "dispatched" && dispatch.result?.pool == "spawn-to-pool-cap-demo" {
+    if dispatch.status == "dispatched" && dispatch.result?.pool == pool_name {
       handles = handles.push(dispatch.result)
     }
   }

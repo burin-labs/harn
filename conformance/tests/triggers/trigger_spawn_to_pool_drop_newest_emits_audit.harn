@@ -12,13 +12,10 @@ import "std/triggers"
 pipeline test(task) {
   let bp = Backpressure()
   let gate = channel(nil, 1)
-  let _pool = pool_create(
-    {
-      name: "spawn-to-pool-drop-newest-demo",
-      max_concurrent: 1,
-      backpressure: bp.queue(1, "drop_newest"),
-    },
-  )
+  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+    + to_string(harness.random.gen_range(100000, 999999))
+  let pool_name = "spawn-to-pool-drop-newest-demo-" + unique
+  let _ = pool_create({name: pool_name, max_concurrent: 1, backpressure: bp.queue(1, "drop_newest")})
   // Filter to drop receipts so the assertion ignores the `pool_submit`
   // and `pool_dequeue` receipts emitted on the same topic by PL-06.
   let stream = event_log
@@ -27,15 +24,13 @@ pipeline test(task) {
     receive(gate)
     return "ok"
   } }
-  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
-    + to_string(harness.random.gen_range(100000, 999999))
   let trigger_id = "trigger-spawn-to-pool-dropnew-" + unique
   let handle: TriggerHandle = trigger_register(
     {
       id: trigger_id,
       kind: "issue.opened",
       provider: "github",
-      handler: SpawnToPool({pool: "spawn-to-pool-drop-newest-demo", task_factory: task_factory}),
+      handler: SpawnToPool({pool: pool_name, task_factory: task_factory}),
       when: nil,
       retry: nil,
       match: {events: ["issue.opened"]},
