@@ -3,12 +3,11 @@ use serde_json::json;
 use crate::agent_events::AgentEvent;
 
 use super::{
-    agent_turn_made_no_llm_call, assistant_message_from_llm_result, build_agent_event,
-    canonical_acp_stop_reason, canonical_provider_stop_reason, dict_get, initial_user_content,
-    is_length_truncation, last_assistant_text, list_items, pair_orphaned_tool_use,
-    reset_agent_session_host_state, seed_host_session_provider_model,
-    synthesize_orphan_tool_results, text_has_tool_call_prefix, tool_result_message_for_provider,
-    truncated_tool_call_should_continue, vm_to_json,
+    agent_turn_made_no_llm_call, assistant_message_from_llm_result, canonical_acp_stop_reason,
+    canonical_provider_stop_reason, dict_get, initial_user_content, is_length_truncation,
+    last_assistant_text, list_items, pair_orphaned_tool_use, reset_agent_session_host_state,
+    seed_host_session_provider_model, synthesize_orphan_tool_results, text_has_tool_call_prefix,
+    tool_result_message_for_provider, truncated_tool_call_should_continue, vm_to_json,
 };
 
 /// Execution policy that annotates the file-provenance test vocabulary so
@@ -433,7 +432,8 @@ fn agent_emit_loop_stuck_preserves_pipeline_payload() {
         "message": "I am stuck after repeated verification failures.",
     });
 
-    let event = build_agent_event("session-1", "loop_stuck", &payload).expect("loop_stuck event");
+    let event = AgentEvent::from_host_payload("session-1", "loop_stuck", &payload)
+        .expect("loop_stuck event");
 
     match event {
         AgentEvent::LoopStuckSignal {

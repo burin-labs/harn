@@ -25,6 +25,7 @@
 //!    of truth for session-scoped VM state.
 
 mod agent;
+mod from_host;
 mod registry;
 mod sinks;
 mod tool;
