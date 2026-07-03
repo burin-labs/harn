@@ -51,6 +51,11 @@ fn __coord_dict(value) {
   return {}
 }
 
+fn __coord_is_callable(value) -> bool {
+  let kind = type_of(value)
+  return kind == "function" || kind == "closure" || kind == "fn"
+}
+
 fn __coord_ctx() {
   let ctx = runtime_context()
   if type_of(ctx) == "dict" {
@@ -857,6 +862,40 @@ pub fn coord_release_dir_lock(lock, options = nil) {
   }
   harness.fs.delete(lock_path)
   return {released: true, status: "released", lock_path: lock_path}
+}
+
+/**
+ * Acquire a directory lease for the duration of `body(lock)`.
+ *
+ * The lock is always released before returning the body value or rethrowing the
+ * body error. This is the preferred API for exclusive sections because callers
+ * do not need to duplicate release-on-error scaffolding around
+ * `coord_acquire_dir_lock` / `coord_release_dir_lock`.
+ *
+ * @effects: [fs.write]
+ * @errors: [runtime]
+ * @example: coord_with_dir_lock(path, { lock -> update_manifest(lock) }, {id: "release"})
+ */
+pub fn coord_with_dir_lock(resource_path: string, body, owner = nil, options = nil) {
+  if !__coord_is_callable(body) {
+    throw "std/coordination: coord_with_dir_lock body must be callable; got " + type_of(body)
+  }
+  let lock = coord_acquire_dir_lock(resource_path, owner, options)
+  if !(lock?.acquired ?? false) {
+    throw lock?.message ?? "std/coordination: directory lock was not acquired"
+  }
+  try {
+    let value = body(lock)
+    coord_release_dir_lock(lock)
+    return value
+  } catch (e) {
+    let _ = try {
+      coord_release_dir_lock(lock)
+    } catch (_release_error) {
+      nil
+    }
+    throw e
+  }
 }
 
 /**
