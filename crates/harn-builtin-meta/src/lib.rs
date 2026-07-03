@@ -13,6 +13,7 @@
 //! parser's static typechecking tables and the `#[harn_builtin]` macro's
 //! `@NAME` signature injection.
 
+pub mod runtime_type_tags;
 pub mod shapes;
 pub mod signatures;
 

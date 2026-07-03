@@ -1451,3 +1451,40 @@ fn test_post_loop_read_sees_invalidated_narrowing() {
         "expected nilable-access error after the loop, got: {errs:?}"
     );
 }
+
+#[test]
+fn test_type_of_narrows_full_runtime_tag_vocabulary() {
+    // Tags from the canonical runtime registry (duration, set, decimal, …)
+    // narrow the same way the historical whitelist (list, dict, …) did.
+    // Regression: `type_of(x) == "duration"` silently failed to narrow
+    // because the typechecker kept its own 12-tag copy of the registry.
+    let errs = errors(
+        r#"fn f(x: string | duration) -> string {
+  if type_of(x) == "duration" {
+    return "d"
+  }
+  return x
+}"#,
+    );
+    assert!(errs.is_empty(), "duration tag failed to narrow: {errs:?}");
+
+    let errs = errors(
+        r#"fn f(x: string | set<int>) -> string {
+  if type_of(x) == "set" {
+    return "s"
+  }
+  return x
+}"#,
+    );
+    assert!(errs.is_empty(), "set<int> tag failed to narrow: {errs:?}");
+
+    let errs = errors(
+        r#"fn f(x: string | decimal) -> string {
+  if type_of(x) == "decimal" {
+    return "d"
+  }
+  return x
+}"#,
+    );
+    assert!(errs.is_empty(), "decimal tag failed to narrow: {errs:?}");
+}

@@ -94,26 +94,13 @@ fn property_access_parts(node: &SNode) -> Option<(&SNode, String)> {
 }
 
 /// The runtime kinds that `type_of(...)` can return and that the refinement
-/// logic knows how to map to a `TypeExpr` member kind. Kept in lockstep with
-/// `VmValue::type_name` so the narrower never accepts a tag the runtime can't
-/// produce. Shared by `if`/`guard` `type_of` narrowing and `match type_of(…)`
+/// logic knows how to map to a `TypeExpr` member kind. Sourced from the
+/// canonical tag registry in `harn-builtin-meta`, which `harn-vm` asserts
+/// against `VmValue::type_name`, so the narrower and the runtime cannot
+/// drift. Shared by `if`/`guard` `type_of` narrowing and `match type_of(…)`
 /// arm narrowing.
 fn is_type_of_tag(tag: &str) -> bool {
-    const TAGS: &[&str] = &[
-        "int",
-        "string",
-        "float",
-        "bool",
-        "nil",
-        "list",
-        "dict",
-        "closure",
-        "bytes",
-        "generator",
-        "stream",
-        "iter",
-    ];
-    TAGS.contains(&tag)
+    harn_builtin_meta::runtime_type_tags::is_narrowable_tag(tag)
 }
 
 /// The literal `TypeExpr` for a discriminant value, used to build the
@@ -1552,11 +1539,12 @@ impl TypeChecker {
         }
     }
 
-    /// Complete set of concrete variants that `type_of` may return, used as
-    /// the reference for exhaustive-narrowing warnings on `unknown`.
-    const UNKNOWN_CONCRETE_TYPES: &'static [&'static str] = &[
-        "int", "string", "float", "bool", "nil", "list", "dict", "closure", "bytes",
-    ];
+    /// The `type_of` variants an `unknown` value must rule out before an
+    /// exhaustive-narrowing chain counts as complete. Sourced from the
+    /// canonical tag registry in `harn-builtin-meta` (the boundary-API
+    /// JSON-representable subset — see `UNKNOWN_COVERAGE` there).
+    const UNKNOWN_CONCRETE_TYPES: &'static [&'static str] =
+        harn_builtin_meta::runtime_type_tags::UNKNOWN_COVERAGE;
 
     /// Whether a reference node's type resolves to a top type (`unknown` /
     /// `any`) — the precondition for path-based `type_of` exhaustiveness
