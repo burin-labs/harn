@@ -11,11 +11,94 @@ use crate::diagnostic_codes::Code;
 use harn_lexer::Span;
 
 use super::super::format::format_type;
-use super::super::scope::{InferredType, TypeScope};
+use super::super::scope::{FnSignature, InferredType, TypeScope};
 use super::super::union::simplify_union;
 use super::super::TypeChecker;
 
 impl TypeChecker {
+    pub(in crate::typechecker) fn fn_signature_from_parts(
+        params: &[TypedParam],
+        return_type: InferredType,
+        definition_span: Option<Span>,
+        type_params: &[TypeParam],
+        where_clauses: &[WhereClause],
+    ) -> FnSignature {
+        FnSignature {
+            params: params
+                .iter()
+                .map(|param| (param.name.clone(), param.type_expr.clone()))
+                .collect(),
+            return_type,
+            definition_span,
+            type_param_names: type_params
+                .iter()
+                .map(|type_param| type_param.name.clone())
+                .collect(),
+            required_params: params
+                .iter()
+                .filter(|param| param.default_value.is_none())
+                .count(),
+            where_clauses: where_clauses
+                .iter()
+                .map(|where_clause| (where_clause.type_name.clone(), where_clause.bound.clone()))
+                .collect(),
+            has_rest: params.last().is_some_and(|param| param.rest),
+        }
+    }
+
+    pub(in crate::typechecker) fn fn_signature_from_decl<F>(
+        inner: &SNode,
+        definition_span: Option<Span>,
+        infer_return: F,
+    ) -> Option<FnSignature>
+    where
+        F: FnOnce(&[TypedParam], &[SNode]) -> InferredType,
+    {
+        let Node::FnDecl {
+            type_params,
+            params,
+            return_type,
+            where_clauses,
+            body,
+            is_stream,
+            ..
+        } = &inner.node
+        else {
+            return None;
+        };
+        let return_type = Self::callable_return_type(*is_stream, return_type, body)
+            .or_else(|| infer_return(params, body));
+        Some(Self::fn_signature_from_parts(
+            params,
+            return_type,
+            definition_span,
+            type_params,
+            where_clauses,
+        ))
+    }
+
+    pub(in crate::typechecker) fn nongeneric_signature_from_params(
+        params: &[TypedParam],
+        return_type: InferredType,
+        definition_span: Option<Span>,
+    ) -> FnSignature {
+        Self::fn_signature_from_parts(params, return_type, definition_span, &[], &[])
+    }
+
+    pub(in crate::typechecker) fn empty_callable_signature(
+        definition_span: Option<Span>,
+    ) -> FnSignature {
+        FnSignature {
+            params: Vec::new(),
+            return_type: None,
+            definition_span,
+            type_param_names: Vec::new(),
+            required_params: 0,
+            where_clauses: Vec::new(),
+            has_rest: false,
+        }
+    }
+
     pub(in crate::typechecker) fn callable_return_type(
         is_stream: bool,
         return_type: &Option<TypeExpr>,

@@ -226,22 +226,13 @@ impl TypeChecker {
                 let callable_return_type =
                     Self::callable_return_type(*is_stream, return_type, body)
                         .or_else(|| self.infer_unannotated_fn_return(params, body));
-                let required_params = params.iter().filter(|p| p.default_value.is_none()).count();
-                let sig = FnSignature {
-                    params: params
-                        .iter()
-                        .map(|p| (p.name.clone(), p.type_expr.clone()))
-                        .collect(),
-                    return_type: callable_return_type,
-                    definition_span: Some(span),
-                    type_param_names: type_params.iter().map(|tp| tp.name.clone()).collect(),
-                    required_params,
-                    where_clauses: where_clauses
-                        .iter()
-                        .map(|wc| (wc.type_name.clone(), wc.bound.clone()))
-                        .collect(),
-                    has_rest: params.last().is_some_and(|p| p.rest),
-                };
+                let sig = Self::fn_signature_from_parts(
+                    params,
+                    callable_return_type,
+                    Some(span),
+                    type_params,
+                    where_clauses,
+                );
                 scope.define_fn(name, sig);
                 scope.define_var(name, None);
                 scope.clear_nil_widenable(name);
@@ -264,20 +255,8 @@ impl TypeChecker {
                 body,
                 ..
             } => {
-                // Register the tool like a function for type checking purposes
-                let required_params = params.iter().filter(|p| p.default_value.is_none()).count();
-                let sig = FnSignature {
-                    params: params
-                        .iter()
-                        .map(|p| (p.name.clone(), p.type_expr.clone()))
-                        .collect(),
-                    return_type: return_type.clone(),
-                    definition_span: Some(span),
-                    type_param_names: Vec::new(),
-                    required_params,
-                    where_clauses: Vec::new(),
-                    has_rest: params.last().is_some_and(|p| p.rest),
-                };
+                let sig =
+                    Self::nongeneric_signature_from_params(params, return_type.clone(), Some(span));
                 scope.define_fn(name, sig);
                 scope.define_var(name, None);
                 scope.clear_nil_widenable(name);
@@ -1589,29 +1568,22 @@ impl TypeChecker {
                             span,
                         );
                     }
-                    let type_param_set: std::collections::BTreeSet<String> = enum_info
+                    let type_param_names: Vec<String> = enum_info
                         .type_params
                         .iter()
                         .map(|tp| tp.name.clone())
                         .collect();
-                    let mut type_bindings = BTreeMap::new();
-                    for (field, arg) in enum_variant.fields.iter().zip(args.iter()) {
-                        let Some(expected_type) = &field.type_expr else {
-                            continue;
-                        };
-                        let Some(actual_type) = self.infer_type(arg, scope) else {
-                            continue;
-                        };
-                        if let Err(message) = Self::extract_type_bindings(
-                            expected_type,
-                            &actual_type,
-                            &type_param_set,
-                            &mut type_bindings,
-                        ) {
-                            self.error_at(Code::GenericTypeArgumentMismatch, message, arg.span);
-                        }
+                    let (type_bindings, binding_errors) = self.infer_typed_param_type_bindings(
+                        &enum_variant.fields,
+                        false,
+                        &type_param_names,
+                        args,
+                        scope,
+                    );
+                    for (error_span, message) in binding_errors {
+                        self.error_at(Code::GenericTypeArgumentMismatch, message, error_span);
                     }
-                    let unbound_type_params: std::collections::BTreeSet<String> = type_param_set
+                    let unbound_type_params: std::collections::BTreeSet<String> = type_param_names
                         .iter()
                         .filter(|name| !type_bindings.contains_key(*name))
                         .cloned()
