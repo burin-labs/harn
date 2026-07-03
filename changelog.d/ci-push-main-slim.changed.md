@@ -1,1 +1,0 @@
-- Slimmed push-to-main CI by relying on merge-queue Rust coverage and keeping main pushes on cheap hygiene lanes.
