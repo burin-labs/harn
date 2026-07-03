@@ -481,6 +481,69 @@ fn test_parses_models_lora_plan_args() {
     assert!(args.json);
 }
 
+#[test]
+fn test_parses_models_lora_preflight_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "models",
+        "lora",
+        "preflight",
+        "--base",
+        "local-gemma4-e4b",
+        "--provider",
+        "vllm",
+        "--corpus",
+        "./lora-corpus",
+        "--config",
+        "./config/e4b.yaml",
+        "--max-seq-length",
+        "8192",
+        "--min-fit-ratio",
+        "0.98",
+        "--hard-token-limit",
+        "32768",
+        "--min-records",
+        "190",
+        "--source-tool-format",
+        "json",
+        "--min-tool-call-share",
+        "0.95",
+        "--done-marker",
+        "##DONE##",
+        "--check",
+        "--json",
+    ]);
+
+    let Command::Models(args) = cli.command.unwrap() else {
+        panic!("expected models command");
+    };
+    let ModelsCommand::Lora(args) = args.command else {
+        panic!("expected models lora command");
+    };
+    let ModelsLoraCommand::Preflight(args) = args.command else {
+        panic!("expected models lora preflight command");
+    };
+    assert_eq!(args.base_model, "local-gemma4-e4b");
+    assert_eq!(args.provider.as_deref(), Some("vllm"));
+    assert_eq!(args.corpus, "./lora-corpus");
+    assert_eq!(
+        args.config
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .as_deref(),
+        Some("./config/e4b.yaml")
+    );
+    assert_eq!(args.max_seq_length, Some(8192));
+    assert_eq!(args.min_fit_ratio, Some(0.98));
+    assert_eq!(args.hard_token_limit, 32_768);
+    assert_eq!(args.min_records, 190);
+    assert_eq!(args.source_tool_format, "json");
+    assert_eq!(args.min_tool_call_share, 0.95);
+    assert_eq!(args.done_marker.as_deref(), Some("##DONE##"));
+    assert!(args.check);
+    assert!(args.json);
+}
+
 fn parse_provider_catalog(args: &[&str]) -> ProviderCatalogCommand {
     let mut argv = vec!["harn", "provider", "catalog"];
     argv.extend_from_slice(args);

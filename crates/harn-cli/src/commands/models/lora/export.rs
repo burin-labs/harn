@@ -305,7 +305,7 @@ fn export_report(args: &ModelsLoraExportArgs) -> Result<LoraExportReport, String
     })
 }
 
-fn resolve_corpus_path(raw: &str) -> Result<PathBuf, String> {
+pub(super) fn resolve_corpus_path(raw: &str) -> Result<PathBuf, String> {
     let expanded = expand_home(raw);
     let path = PathBuf::from(expanded);
     let resolved = if path.is_dir() {
@@ -353,19 +353,19 @@ fn parse_target_metadata(raw: &[String]) -> Result<BTreeMap<String, String>, Str
     Ok(metadata)
 }
 
-struct ExportRegexes {
+pub(super) struct ExportRegexes {
     available_tools: Regex,
     blank_lines: Regex,
     declare_function: Regex,
     result_end: Regex,
     result_start: Regex,
-    tool_block: Regex,
+    pub(super) tool_block: Regex,
     tool_bullet: Regex,
-    tool_name: Regex,
+    pub(super) tool_name: Regex,
 }
 
 impl ExportRegexes {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             available_tools: Regex::new(r"(?im)^Available tools:\s*(.+)$")
                 .expect("available-tools regex"),
@@ -396,8 +396,8 @@ struct ExportTarget {
     metadata: BTreeMap<String, String>,
 }
 
-struct ParsedToolCall {
-    name: String,
+pub(super) struct ParsedToolCall {
+    pub(super) name: String,
     arguments: Value,
 }
 
@@ -579,7 +579,9 @@ fn convert_text_records(
     })
 }
 
-fn record_messages(record: &Map<String, Value>) -> Result<Vec<Map<String, Value>>, String> {
+pub(super) fn record_messages(
+    record: &Map<String, Value>,
+) -> Result<Vec<Map<String, Value>>, String> {
     let Some(messages) = record.get("messages").and_then(Value::as_array) else {
         return Err("record has no messages array".to_string());
     };
@@ -706,7 +708,7 @@ fn parse_json_tool_blocks(
     Ok(calls)
 }
 
-fn parse_json_tool_body(body: &str) -> Result<Vec<ParsedToolCall>, String> {
+pub(super) fn parse_json_tool_body(body: &str) -> Result<Vec<ParsedToolCall>, String> {
     let body = body.trim();
     if body.is_empty() {
         return Err("empty <tool_call> body".to_string());
@@ -765,7 +767,7 @@ fn parse_json_tool_body(body: &str) -> Result<Vec<ParsedToolCall>, String> {
     Ok(calls)
 }
 
-fn available_tool_names(system_text: &str, regexes: &ExportRegexes) -> BTreeSet<String> {
+pub(super) fn available_tool_names(system_text: &str, regexes: &ExportRegexes) -> BTreeSet<String> {
     let mut names = BTreeSet::new();
     for captures in regexes.declare_function.captures_iter(system_text) {
         if let Some(name) = captures.get(1) {
@@ -981,7 +983,7 @@ fn record_string(record: &Map<String, Value>, key: &str) -> String {
         .to_string()
 }
 
-fn record_id(record: &Map<String, Value>, fallback_line: usize) -> String {
+pub(super) fn record_id(record: &Map<String, Value>, fallback_line: usize) -> String {
     record
         .get("id")
         .and_then(Value::as_str)
@@ -990,7 +992,7 @@ fn record_id(record: &Map<String, Value>, fallback_line: usize) -> String {
         .unwrap_or_else(|| format!("line-{fallback_line}"))
 }
 
-fn source_tool_format(record: &Map<String, Value>) -> String {
+pub(super) fn source_tool_format(record: &Map<String, Value>) -> String {
     record
         .get("metadata")
         .and_then(Value::as_object)

@@ -1,0 +1,1 @@
+- Added `harn models lora preflight` for CPU-only tool-calling corpus readiness checks before LoRA training.

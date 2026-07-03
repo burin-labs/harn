@@ -233,6 +233,13 @@ pub fn catalog() -> Vec<SchemaEntry> {
             schema_json: None,
         },
         SchemaEntry {
+            command: "models lora preflight",
+            schema_version: 1,
+            description:
+                "LoRA corpus readiness report before GPU training, including sequence-fit, tool-call shape, and threshold failures.",
+            schema_json: None,
+        },
+        SchemaEntry {
             command: "check connector-matrix",
             schema_version: crate::commands::check::connector_matrix::CONNECTOR_MATRIX_SCHEMA_VERSION,
             description: "Connector package capability matrix rows.",
@@ -459,6 +466,7 @@ mod tests {
             "models lora plan",
             "models lora inspect",
             "models lora export",
+            "models lora preflight",
         ] {
             let entry = entries
                 .iter()
