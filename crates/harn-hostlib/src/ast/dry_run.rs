@@ -101,11 +101,7 @@ pub(super) fn run_with_code_index(
     let mut per_file_diffs: Vec<FileDiffEntry> = Vec::new();
     let mut lines_added_total = 0usize;
     let mut lines_removed_total = 0usize;
-    let staged_paths: BTreeSet<PathBuf> = crate::fs::staged_status(&session_id)?
-        .pending_writes
-        .into_iter()
-        .map(|write| PathBuf::from(write.path))
-        .collect();
+    let staged_paths = crate::fs::staged_pending_paths(&session_id)?;
     let diff_targets = diff_targets(staged_paths, touched);
 
     for target in &diff_targets {
