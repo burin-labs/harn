@@ -22,6 +22,7 @@ equivalent), then talk to the librarian.
 | `code_librarian_what_imports(path)` | `list<LibrarianImport>` | `hostlib_code_index_importers_of` |
 | `code_librarian_recent_changes(since_seq = 0)` | `list<LibrarianFileChange>` | `hostlib_code_index_changes_since` |
 | `code_librarian_freshness(path)` | `LibrarianFreshness` | `hostlib_code_index_freshness` |
+| `code_librarian_file_hash_snapshot(paths)` | `LibrarianFileHashSnapshot` | `std/verification::verification_file_hash_snapshot` |
 | `code_librarian_branch_overlay(branch)` | `LibrarianOverlay` | `hostlib_code_index_branch_overlay` |
 
 The Cypher executor that backs `code_librarian_query` and
@@ -73,6 +74,11 @@ The full walk-through lives at
   number (`since_seq`) because Harn has no native `Duration` primitive
   yet. Pair with `hostlib_code_index_current_seq({})` to checkpoint and
   resume.
+- `code_librarian_file_hash_snapshot` captures current file hashes for many
+  workspace paths under one code-index sequence binding. Its `snapshot`
+  field is the direct path-to-hash map accepted by
+  `verification_diagnostic_classify`, and its `files` field preserves
+  per-path index/readability metadata for HUDs and diagnostics.
 - The library does not rebuild the index; consumers must call
   `hostlib_code_index_rebuild` before the first query (and after
   large workspace mutations) themselves.

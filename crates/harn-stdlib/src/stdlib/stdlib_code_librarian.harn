@@ -20,6 +20,7 @@ import { agent_emit_event } from "std/agent/state"
 import { with_cache_envelope } from "std/cache"
 import { safe_structured_call } from "std/llm/safe"
 import { schema_object, schema_string } from "std/schema"
+import { verification_file_hash_snapshot } from "std/verification"
 
 type LibrarianRecord = dict
 
@@ -75,6 +76,9 @@ type LibrarianFreshness = {
 
 /** Overlay activation result: branch name (or nil when deactivated) + reuse fraction. */
 type LibrarianOverlay = {active: string?, reuse_fraction: float}
+
+/** Seq-bound current file-hash snapshot for verification freshness checks. */
+type LibrarianFileHashSnapshot = dict
 
 /**
  * Pass a Cypher query straight through to the typed symbol graph executor.
@@ -207,6 +211,21 @@ pub fn code_librarian_recent_changes(since_seq: int = 0) -> list<LibrarianFileCh
  */
 pub fn code_librarian_freshness(path: string) -> LibrarianFreshness {
   return hostlib_code_index_freshness({path: path})
+}
+
+/**
+ * Batch current file hashes under one code-index sequence binding. The
+ * returned `snapshot` map is the direct shape expected by
+ * `verification_diagnostic_classify`, while `files` preserves per-path
+ * index/readability metadata for HUDs and debuggers.
+ *
+ * @effects: [host, fs]
+ * @errors: [backend, invalid_argument]
+ * @api_stability: experimental
+ * @example: code_librarian_file_hash_snapshot(["src/util.ts"])
+ */
+pub fn code_librarian_file_hash_snapshot(paths: list<string>) -> LibrarianFileHashSnapshot {
+  return verification_file_hash_snapshot(paths)
 }
 
 /**

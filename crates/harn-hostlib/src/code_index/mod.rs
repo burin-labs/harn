@@ -294,6 +294,13 @@ impl HostlibCapability for CodeIndexCapability {
             "file_hash",
             builtins::run_file_hash,
         );
+        register(
+            registry,
+            self.index.clone(),
+            builtins::BUILTIN_FILE_HASH_SNAPSHOT,
+            "file_hash_snapshot",
+            builtins::run_file_hash_snapshot,
+        );
 
         // Cached read paths. `read_range` falls back to the read-only
         // secondary roots (issue #2403 follow-up) so a symbol discovered in

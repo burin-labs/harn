@@ -111,6 +111,31 @@ fn workspace() -> tempfile::TempDir {
     dir
 }
 
+fn fnv1a64_string(bytes: &[u8]) -> String {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in bytes {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h.to_string()
+}
+
+fn snapshot_entry(snapshot: &VmValue, path: &str) -> Arc<harn_vm::value::DictMap> {
+    let snapshot = extract_dict(snapshot);
+    let files = extract_list(snapshot.get("files").unwrap());
+    files
+        .iter()
+        .map(extract_dict)
+        .find(|entry| extract_str(entry.get("path").unwrap()) == path)
+        .unwrap_or_else(|| panic!("snapshot entry for {path} not found"))
+}
+
+fn snapshot_hash(snapshot: &VmValue, path: &str) -> Option<String> {
+    let snapshot = extract_dict(snapshot);
+    let hashes = extract_dict(snapshot.get("snapshot").unwrap());
+    hashes.get(path).map(extract_str)
+}
+
 // === File table accessors ===
 
 #[test]
@@ -228,6 +253,138 @@ fn file_hash_reads_the_file_off_disk() {
         h
     };
     assert_eq!(s, expected.to_string());
+}
+
+#[test]
+fn file_hash_snapshot_batches_current_hashes_and_seq_binding() {
+    let dir = workspace();
+    let (registry, _) = build();
+    rebuild_in(dir.path(), &registry);
+    fs::write(dir.path().join("src/new.ts"), "export const y = 2;\n").unwrap();
+
+    let initial = call(
+        &registry,
+        "hostlib_code_index_file_hash_snapshot",
+        dict(&[(
+            "paths",
+            VmValue::List(Arc::new(vec![
+                VmValue::string("README.md"),
+                VmValue::string("src/new.ts"),
+                VmValue::string("src/util.ts"),
+            ])),
+        )]),
+    );
+    let initial_dict = extract_dict(&initial);
+    assert_eq!(extract_int(initial_dict.get("seq").unwrap()), 0);
+    assert_eq!(
+        extract_str(initial_dict.get("algorithm").unwrap()),
+        "fnv1a64"
+    );
+    assert!(extract_list(initial_dict.get("missing").unwrap()).is_empty());
+
+    let readme = snapshot_entry(&initial, "README.md");
+    assert!(extract_bool(readme.get("known").unwrap()));
+    assert!(extract_bool(readme.get("readable").unwrap()));
+    assert_eq!(extract_str(readme.get("hash_source").unwrap()), "indexed");
+    assert_eq!(
+        extract_str(readme.get("hash").unwrap()),
+        fnv1a64_string(b"# project\n")
+    );
+    assert_eq!(
+        snapshot_hash(&initial, "README.md").unwrap(),
+        fnv1a64_string(b"# project\n")
+    );
+    assert_eq!(
+        extract_str(readme.get("indexed_hash").unwrap()),
+        fnv1a64_string(b"# project\n")
+    );
+    assert_eq!(extract_int(readme.get("last_edit_seq").unwrap()), 0);
+
+    let new_file = snapshot_entry(&initial, "src/new.ts");
+    assert!(!extract_bool(new_file.get("known").unwrap()));
+    assert!(extract_bool(new_file.get("readable").unwrap()));
+    assert_eq!(extract_str(new_file.get("hash_source").unwrap()), "disk");
+    assert_eq!(
+        extract_str(new_file.get("hash").unwrap()),
+        fnv1a64_string(b"export const y = 2;\n")
+    );
+    assert_eq!(
+        snapshot_hash(&initial, "src/new.ts").unwrap(),
+        fnv1a64_string(b"export const y = 2;\n")
+    );
+    assert!(matches!(
+        new_file.get("indexed_hash").unwrap(),
+        VmValue::Nil
+    ));
+
+    let util = snapshot_entry(&initial, "src/util.ts");
+    let util_indexed_hash = extract_str(util.get("hash").unwrap());
+    let changed_util_source = "export function helper() { return 4300; }\n";
+    fs::write(dir.path().join("src/util.ts"), changed_util_source).unwrap();
+    let changed = call(
+        &registry,
+        "hostlib_code_index_file_hash_snapshot",
+        dict(&[(
+            "paths",
+            VmValue::List(Arc::new(vec![VmValue::string("src/util.ts")])),
+        )]),
+    );
+    let changed_util = snapshot_entry(&changed, "src/util.ts");
+    let changed_hash = extract_str(changed_util.get("hash").unwrap());
+    assert_eq!(
+        extract_str(changed_util.get("hash_source").unwrap()),
+        "disk"
+    );
+    assert_ne!(changed_hash, util_indexed_hash);
+    assert_eq!(
+        extract_str(changed_util.get("indexed_hash").unwrap()),
+        util_indexed_hash
+    );
+
+    let agent_id = extract_int(&call(
+        &registry,
+        "hostlib_code_index_agent_register",
+        dict(&[("name", VmValue::string("verification"))]),
+    ));
+    let seq = extract_int(&call(
+        &registry,
+        "hostlib_code_index_version_record",
+        dict(&[
+            ("agent_id", VmValue::Int(agent_id)),
+            ("path", VmValue::string("src/util.ts")),
+            ("op", VmValue::string("write")),
+            ("hash", VmValue::string(&changed_hash)),
+            ("size", VmValue::Int(changed_util_source.len() as i64)),
+        ]),
+    ));
+    let bound = call(
+        &registry,
+        "hostlib_code_index_file_hash_snapshot",
+        dict(&[(
+            "paths",
+            VmValue::List(Arc::new(vec![VmValue::string("src/util.ts")])),
+        )]),
+    );
+    let bound_dict = extract_dict(&bound);
+    assert_eq!(extract_int(bound_dict.get("seq").unwrap()), seq);
+    let bound_util = snapshot_entry(&bound, "src/util.ts");
+    assert_eq!(extract_int(bound_util.get("last_edit_seq").unwrap()), seq);
+    assert_eq!(extract_str(bound_util.get("hash").unwrap()), changed_hash);
+    assert_eq!(snapshot_hash(&bound, "src/util.ts").unwrap(), changed_hash);
+
+    let changes = call(
+        &registry,
+        "hostlib_code_index_changes_since",
+        dict(&[("seq", VmValue::Int(0))]),
+    );
+    let records = extract_list(&changes);
+    let util_record = records
+        .iter()
+        .map(extract_dict)
+        .find(|record| extract_str(record.get("path").unwrap()) == "src/util.ts")
+        .expect("version log records util edit");
+    assert_eq!(extract_int(util_record.get("seq").unwrap()), seq);
+    assert_eq!(extract_str(util_record.get("hash").unwrap()), changed_hash);
 }
 
 #[test]
