@@ -335,7 +335,30 @@ pub fn classify_result_trust(
     if kind == ToolKind::Fetch || is_known_fetch_tool(tool_name) {
         return Some((TrustLevel::Untrusted, format!("fetch:{tool_name}")));
     }
+    // Cross-agent zero-trust (opt-in): a result returned over a delegation / A2A
+    // channel is another agent's output, and that peer may itself have ingested
+    // untrusted content. Under directive authentication we distrust it by
+    // ORIGIN — provenance, not a keyword vocabulary — so forged cross-agent
+    // authority is quarantined regardless of how it is phrased. Provenance-
+    // stamped directives still authenticate via `classify_directive_trust` on
+    // the caller's `.or_else(...)` path, so a legitimate stamped hand-off is not
+    // gated. Gated on `authenticate_directives` so the default posture is
+    // byte-identical until a host opts in.
+    if policy.authenticate_directives && is_agent_channel(annotations) {
+        return Some((TrustLevel::Untrusted, format!("agent:{tool_name}")));
+    }
     None
+}
+
+/// Whether a tool returns another agent's output over a delegation / A2A
+/// channel, declared by pipeline annotations carrying an `agent_channel`
+/// capability. Such a result is a cross-trust-boundary ingress: the peer agent
+/// is not part of this agent's trusted context and may have been poisoned by
+/// content it ingested, so its output is untrusted DATA, never authority.
+pub fn is_agent_channel(annotations: Option<&ToolAnnotations>) -> bool {
+    annotations
+        .map(|a| a.capabilities.keys().any(|k| k == "agent_channel"))
+        .unwrap_or(false)
 }
 
 /// Cheap, deterministic content signals attached to a [`TaintRecord`]. These
@@ -1115,6 +1138,43 @@ mod tests {
     fn trusted_workspace_reads_are_not_tainted() {
         let policy = SecurityPolicy::default();
         assert!(classify_result_trust(None, None, "read_file", &policy).is_none());
+    }
+
+    #[test]
+    fn agent_channel_results_are_untrusted_by_origin_when_opted_in() {
+        use crate::config::SecurityConfig;
+        use crate::tool_annotations::ToolAnnotations;
+
+        let agent_channel = ToolAnnotations {
+            capabilities: BTreeMap::from([(
+                "agent_channel".to_string(),
+                vec!["result".to_string()],
+            )]),
+            ..Default::default()
+        };
+        assert!(is_agent_channel(Some(&agent_channel)));
+        assert!(!is_agent_channel(Some(&ToolAnnotations::default())));
+
+        // Default posture leaves a delegation result trusted (byte-identical
+        // behaviour): the peer agent's output only becomes untrusted-by-origin
+        // once directive authentication is opted in.
+        let default = SecurityPolicy::default();
+        assert!(!default.authenticate_directives);
+        assert!(
+            classify_result_trust(None, Some(&agent_channel), "subagent", &default).is_none(),
+            "agent-channel distrust must be opt-in"
+        );
+
+        // Opted in, the delegation origin is distrusted regardless of the result
+        // text — provenance, not a forged-authority keyword vocabulary.
+        let hardened = SecurityPolicy::from_config(&SecurityConfig {
+            authenticate_directives: true,
+            ..Default::default()
+        });
+        assert_eq!(
+            classify_result_trust(None, Some(&agent_channel), "subagent", &hardened),
+            Some((TrustLevel::Untrusted, "agent:subagent".to_string()))
+        );
     }
 
     #[test]
