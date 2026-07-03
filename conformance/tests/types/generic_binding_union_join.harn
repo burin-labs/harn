@@ -1,0 +1,10 @@
+pipeline test(task) {
+  fn keep<T>(a: T, b: T) -> T {
+    return a
+  }
+  // Conflicting inference candidates join to a union (T = int | string),
+  // matching heterogeneous list-literal inference; the call is legal and
+  // the value is usable as either member after narrowing.
+  let joined = keep(1, "x")
+  log(type_of(joined))
+}
