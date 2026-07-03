@@ -1,7 +1,5 @@
 # Harn
 
-[![CI](https://github.com/burin-labs/harn/actions/workflows/ci.yml/badge.svg)](https://github.com/burin-labs/harn/actions/workflows/ci.yml)
-
 **Harn is a programming language and runtime for building AI agents.**
 
 You write the parts that are yours — the workflow, the tools, the policies, the prompts. Harn owns the
