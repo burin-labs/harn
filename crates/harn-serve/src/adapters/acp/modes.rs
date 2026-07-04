@@ -707,8 +707,8 @@ mod tests {
         // ...the embedder roots are carried through...
         assert_eq!(policy.read_only_roots, roots);
         // ...and ActAuto approval semantics are preserved (no approval gate ->
-        // network side effects allowed, no recursion clamp).
-        assert_eq!(policy.side_effect_level.as_deref(), Some("network"));
+        // the current maximum side-effect ceiling, no recursion clamp).
+        assert_eq!(policy.side_effect_level.as_deref(), Some("desktop_control"));
         assert_eq!(policy.recursion_limit, None);
     }
 
@@ -733,7 +733,7 @@ mod tests {
             policy.process_sandbox.read_roots,
             vec!["/opt/sdk".to_string()]
         );
-        assert_eq!(policy.side_effect_level.as_deref(), Some("network"));
+        assert_eq!(policy.side_effect_level.as_deref(), Some("desktop_control"));
     }
 
     #[test]

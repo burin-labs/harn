@@ -264,6 +264,7 @@ var HarnSideEffectLevels = []HarnSideEffectLevel{
 	"workspace_write",
 	"process_exec",
 	"network",
+	"desktop_control",
 }
 
 // HarnWorkerStatus is the typed alias for the HarnWorkerStatuses wire vocabulary.

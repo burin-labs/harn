@@ -213,6 +213,7 @@ export const HARN_SIDE_EFFECT_LEVELS = [
   "workspace_write",
   "process_exec",
   "network",
+  "desktop_control",
 ] as const
 export type HarnSideEffectLevel = (typeof HARN_SIDE_EFFECT_LEVELS)[number]
 

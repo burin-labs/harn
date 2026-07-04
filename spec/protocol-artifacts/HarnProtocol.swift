@@ -368,6 +368,7 @@ public enum HarnSideEffectLevel: String, Codable, Sendable, CaseIterable {
     case workspaceWrite = "workspace_write"
     case processExec = "process_exec"
     case network = "network"
+    case desktopControl = "desktop_control"
 
     public static let allCases: [Self] = [
         "none",
@@ -375,6 +376,7 @@ public enum HarnSideEffectLevel: String, Codable, Sendable, CaseIterable {
         "workspace_write",
         "process_exec",
         "network",
+        "desktop_control",
     ].map { Self(rawValue: $0)! }
 }
 
