@@ -1303,7 +1303,28 @@ fn screenshot_from_tool_result(result: &VmValue) -> Option<VmValue> {
         }
     }
     let json = vm_to_json(result);
-    find(&json).map(crate::stdlib::json_to_vm_value)
+    let found = find(&json).map(crate::stdlib::json_to_vm_value);
+    // TEMP DIAGNOSTIC.
+    if json.get("tool_name").and_then(|v| v.as_str()) == Some("computer") {
+        let result_field = json.get("result");
+        let _ = std::fs::write(
+            "/private/tmp/burin_sshot_diag.json",
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "result_field_type": result_field.map(|v| match v {
+                    serde_json::Value::String(_) => "string",
+                    serde_json::Value::Object(_) => "object",
+                    serde_json::Value::Array(_) => "array",
+                    serde_json::Value::Null => "null",
+                    _ => "other",
+                }),
+                "result_field_keys": result_field.and_then(|v| v.as_object()).map(|m| m.keys().cloned().collect::<Vec<_>>()),
+                "top_keys": json.as_object().map(|m| m.keys().cloned().collect::<Vec<_>>()),
+                "screenshot_found": found.is_some(),
+            }))
+            .unwrap_or_default(),
+        );
+    }
+    found
 }
 
 /// The `(id, name)` of one provider-native tool-call block carried on an
