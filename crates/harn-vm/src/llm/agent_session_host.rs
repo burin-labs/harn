@@ -1303,6 +1303,44 @@ fn screenshot_from_tool_result(result: &VmValue) -> Option<VmValue> {
         }
     }
     let json = vm_to_json(result);
+    // TEMP DIAGNOSTIC: dump the result item structure (base64 elided) so we can
+    // see exactly where the screenshot sits — or that it was stripped upstream.
+    {
+        fn elide(v: &serde_json::Value) -> serde_json::Value {
+            match v {
+                serde_json::Value::Object(m) => serde_json::Value::Object(
+                    m.iter()
+                        .map(|(k, val)| {
+                            if (k == "base64" || k == "data")
+                                && val.as_str().map(|s| s.len() > 200).unwrap_or(false)
+                            {
+                                (
+                                    k.clone(),
+                                    serde_json::json!(format!(
+                                        "<{} chars>",
+                                        val.as_str().map(|s| s.len()).unwrap_or(0)
+                                    )),
+                                )
+                            } else {
+                                (k.clone(), elide(val))
+                            }
+                        })
+                        .collect(),
+                ),
+                serde_json::Value::Array(a) => {
+                    serde_json::Value::Array(a.iter().map(elide).collect())
+                }
+                other => other.clone(),
+            }
+        }
+        let name = json.get("tool_name").and_then(|v| v.as_str()).unwrap_or("");
+        if name == "computer" {
+            let _ = std::fs::write(
+                "/private/tmp/burin_result_item.json",
+                serde_json::to_vec_pretty(&elide(&json)).unwrap_or_default(),
+            );
+        }
+    }
     find(&json).map(crate::stdlib::json_to_vm_value)
 }
 
