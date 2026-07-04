@@ -9,6 +9,34 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.9.9
+
+### Added
+
+- **LoRA preflight now validates the target tool-call format.** `harn models
+  lora preflight` accepts `--tool-format`, checks that the corpus source tool
+  calls can export into the selected Harn/native route, and `harn models lora
+  plan` now prints a matching preflight command before dataset export.
+- Added a `precision` class (`"high"` for self-identifying token shapes,
+  `"heuristic"` for keyword/context matches like `Bearer <b64>` or
+  `password = "..."`) to every `secret_scan` finding and to the canonical
+  secret catalog. Consumers can now hard-block only high-precision findings
+  without hard-coding detector names.
+- Added an optional `{audit: false}` second argument to `secret_scan` so a
+  hot-path caller (e.g. a per-edit or per-command guard) can get catalog-backed
+  findings without appending an `audit.secret_scan` event on every call. The
+  one-argument form still audits, unchanged.
+
+### Fixed
+
+- **Agent loop and provider routing hygiene (#3999).** Harn now hides debug-only
+  nested-execution policy events by default, strips internal verdict envelopes
+  from visible assistant text, requires real verification before ending repair
+  loops, and routes the mid-tier preset to Qwen3-Coder-Next with refreshed
+  OpenRouter/Z.AI catalog metadata.
+- Added `includes()` as a membership alias for Harn strings and collections.
+- Preserve host helper builtins when composition dispatcher closures run inside embedded hosts.
+
 ## v0.9.8
 
 ### Added
