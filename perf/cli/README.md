@@ -39,12 +39,11 @@ For each tracked subcommand the runner:
    `exit`.
 4. Repeats `N` times (default `20`) and reports the median.
 
-Wall time is measured by `hyperfine` when it is on `$PATH`; the runner
-falls back to a small Python timing loop otherwise (matching the
-fallback that `scripts/bench_vm.sh` already uses for cold/warm-start
-mode). The Python fallback is intentional — `hyperfine` is not in the
-default dev-setup install on macOS, and we do not want the gate to
-silently regress to "skipped" when contributors run it locally.
+Wall time is measured by `hyperfine` when it is on `$PATH`; the Harn
+controller falls back to `monotonic_ms()` around the isolated subprocess
+otherwise. The fallback is intentional — `hyperfine` is not in the default
+dev-setup install on macOS, and we do not want the gate to silently regress
+to "skipped" when contributors run it locally.
 
 ## Running locally
 
@@ -123,16 +122,18 @@ the W-ticket work, not the G5 skeleton.
 
 ## Tracked commands (initial set)
 
-The harness starts with the three smallest, most-deterministic
-subcommands. Each one exits in well under a budget's worth of work, so
-the measured time is dominated by CLI fixed cost — exactly what we
-want to budget.
+The harness starts with the two currently enabled smallest,
+most-deterministic subcommands. Each one exits in well under a budget's
+worth of work, so the measured time is dominated by CLI fixed cost — exactly
+what we want to budget.
 
 | Bench key       | Invocation                                                          | Source ticket |
 | --------------- | ------------------------------------------------------------------- | ------------- |
 | `version`       | `harn version`                                                      | W1 (#2297)    |
-| `try --help`    | `harn try --help`                                                   | W2 placeholder|
-| `trace import`  | `harn trace import --trace-file <empty> --output <tmp>`             | W3 (#2303)    |
+| `try --help`    | `harn try --help`                                                   | W2 placeholder |
+
+`trace import` is intentionally not enrolled yet; `budgets.toml` carries the
+current sandbox rationale and re-enable plan.
 
 Future W tickets append rows here when they enroll a command. Two
 rules:

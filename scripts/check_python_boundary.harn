@@ -22,12 +22,6 @@ let PYTHON_ALLOWLIST = [
   },
   {
     kind: "exact",
-    pattern: "scripts/_bench_cli_cold_start.py",
-    category: "measurement-backend",
-    reason: "Measures Harn CLI startup from outside the Harn runtime.",
-  },
-  {
-    kind: "exact",
     pattern: "scripts/check_burin_protocol_bindings.py",
     category: "foreign-artifact-check",
     reason: "Compares generated Swift and TypeScript artifacts for a downstream host.",

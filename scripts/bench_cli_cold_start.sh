@@ -11,10 +11,10 @@
 #
 # Either condition can fail the gate (see the README for the rules).
 #
-# Hyperfine is used when present on $PATH; otherwise we fall back to a
-# small Python timing loop (`time.perf_counter()` around subprocess
-# invocation). The fallback is intentional — `hyperfine` is not in the
-# default dev-setup install on macOS.
+# Hyperfine is used when present on $PATH; otherwise the Harn controller
+# falls back to `monotonic_ms()` around subprocess invocation. The
+# fallback is intentional — `hyperfine` is not in the default dev-setup
+# install on macOS.
 #
 # See perf/cli/README.md for usage and design notes. Tracks epic #2293
 # (G5 = #2298).
@@ -126,11 +126,6 @@ if [[ ! -f "$baseline_file" ]]; then
   exit 2
 fi
 
-if ! command -v python3 >/dev/null 2>&1; then
-  echo "error: python3 is required for this benchmark" >&2
-  exit 2
-fi
-
 if [[ "$build_release" -eq 1 ]]; then
   cargo build --release --bin harn
 fi
@@ -145,10 +140,10 @@ if [[ ! -x "$harn_bin" ]]; then
   exit 1
 fi
 
-# Hand off to the Python helper. It owns:
+# Hand off to the Harn controller. It owns:
 #   - TOML parse of budgets
 #   - JSON load/dump of baselines
-#   - dispatch between hyperfine and the perf_counter fallback
+#   - dispatch between hyperfine and the monotonic fallback
 #   - cache-wipe orchestration around each run
 #   - budget + baseline comparison and pass/fail decision
 HARN_BIN="$harn_bin" \
@@ -158,4 +153,4 @@ HARN_CLI_ITERATIONS="$iterations" \
 HARN_CLI_COMMANDS_FILTER="$commands_filter" \
 HARN_CLI_UPDATE_BASELINE="$update_baseline" \
 HARN_CLI_REPO_ROOT="$repo_root" \
-  exec python3 "$repo_root/scripts/_bench_cli_cold_start.py"
+  exec "$harn_bin" run --no-sandbox "$repo_root/scripts/bench_cli_cold_start.harn"

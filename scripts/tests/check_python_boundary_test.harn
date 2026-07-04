@@ -45,6 +45,7 @@ pipeline test_current_repo_python_boundary_is_explicit(task) {
 pipeline test_allowlist_exact_and_prefix_rules(task) {
   assert_eq(python_boundary_rule_for("scripts/affected-crates.py").allowed, true)
   assert_eq(python_boundary_rule_for("conformance/helpers/github_mock_server.py").allowed, true)
+  assert_eq(python_boundary_rule_for("scripts/_bench_cli_cold_start.py").allowed, false)
   assert_eq(python_boundary_rule_for("scripts/new_orchestration.py").allowed, false)
 }
 
