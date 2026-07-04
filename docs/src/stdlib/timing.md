@@ -10,11 +10,13 @@ pre-aggregated numeric series. Use a span attribute when the value belongs on
 the current span instead of a new one.
 
 ```harn
+import { agent_preset } from "std/agent/presets"
 import { timed } from "std/timing"
 
 pipeline default() {
   let outcome = timed("benchmark.agent_loop", {case_id: "python-add"}, { ->
-    return repair_agent(task)
+    let opts = agent_preset("repair")
+    return agent_loop(task, opts?.system, opts)
   })
   __io_println("duration_ms=${outcome.timing.duration_ms}")
   return outcome.result

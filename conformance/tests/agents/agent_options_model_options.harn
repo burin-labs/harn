@@ -1,8 +1,4 @@
-import {
-  agent_model_options,
-  agent_sanitize_model_options,
-  agent_stack_model_policy,
-} from "std/agent/stack"
+import { agent_model_options, agent_sanitize_model_options } from "std/agent/options"
 
 pipeline default() {
   let env_route = agent_model_options(
@@ -68,17 +64,4 @@ pipeline default() {
   __io_println(healthcheck.reasoning_effort == nil)
   __io_println(healthcheck.thinking == nil)
   __io_println(healthcheck.prompt_cache == nil)
-  let policy = agent_stack_model_policy(
-    {
-      options: {
-        provider: "mock",
-        model: "gpt-5.4-preview",
-        iteration_budget: {mode: "adaptive", initial: 1, max: 5},
-        unknown: "drop-me",
-      },
-    },
-  )
-  __io_println(policy.provider)
-  __io_println(policy.iteration_budget.max)
-  __io_println(policy.unknown == nil)
 }

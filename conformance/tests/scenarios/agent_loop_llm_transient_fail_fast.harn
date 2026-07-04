@@ -1,0 +1,23 @@
+import { llm_text, with_llm_script } from "std/testing"
+
+pipeline default() {
+  // agent_loop is fail-fast on transient provider errors: the pre-v0.10
+  // per-call `llm_retries` budget (profiles defaulted it to 2) was removed.
+  // A single injected transient error surfaces as `provider_error` after one
+  // model call. Resilience is composed on the `llm_caller:` seam via
+  // `with_retry` from std/llm/handlers — see
+  // llm_caller_with_retry_recovers_from_transient_error.
+  with_llm_script(
+    [
+      {error: {category: "rate_limit", message: "429 transient"}},
+      llm_text("unreachable without a composed retry handler. ##DONE##"),
+    ],
+    { ->
+      let result = agent_loop("finish", nil, {provider: "mock"})
+      __io_println(result.status)
+      __io_println(result.error.kind)
+      __io_println(result.error.category)
+      __io_println(len(llm_mock_calls()))
+    },
+  )
+}

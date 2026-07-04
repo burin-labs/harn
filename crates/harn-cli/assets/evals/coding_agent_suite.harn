@@ -5,7 +5,7 @@
 // benchmark.
 import { agent_host_tools } from "std/agent/host_tools"
 import { agent_first_tool_format_override_warning_text } from "std/agent/options"
-import { audit_agent, repair_agent, summary_agent } from "std/agent/presets"
+import { agent_preset } from "std/agent/presets"
 import { parse_args } from "std/cli"
 import { command_run } from "std/command"
 import { edit_apply_old_new_patch } from "std/edit"
@@ -858,16 +858,22 @@ fn __run_fixture_agent(
       + {structural_validator: with_structural_validator(structural_validator_config)}
   }
   if fixture == "read-only-audit" {
-    return audit_agent(task, options)
+    return __run_preset_agent("audit", task, options)
   }
   if fixture == "no-tool-diagnosis" {
-    return summary_agent(
+    return __run_preset_agent(
+      "summary",
       task,
       options
         + {max_iterations: 1, iteration_budget: {mode: "fixed", initial: 1, max: 1, extend_by: 0}},
     )
   }
-  return repair_agent(task, options)
+  return __run_preset_agent("repair", task, options)
+}
+
+fn __run_preset_agent(kind: string, task: string, options) {
+  let opts = agent_preset(kind, options)
+  return agent_loop(task, opts?.system, opts)
 }
 
 fn __final_files(harness: Harness, root: string, fixture: string) {

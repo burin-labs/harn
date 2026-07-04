@@ -328,8 +328,6 @@ fn __workflow_agent_loop_options(
     tool_format: tool_format,
     native_tool_fallback: __workflow_native_tool_fallback(model_policy.native_tool_fallback),
     daemon: false,
-    llm_retries: 2,
-    llm_backoff_ms: 2000,
     exit_when_verified: config.exit_when_verified ?? false,
     loop_detect_warn: 2,
     loop_detect_block: 3,

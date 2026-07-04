@@ -1146,8 +1146,6 @@ from `std/agent/options`.
 | `schema_retries` | int | 1 | When validation fails, re-prompt up to N times with a corrective user turn. Each retry is a single-turn correction — the invalid response is NOT persisted; the original messages are replayed with one appended user-role correction citing the validation errors + schema. Works alongside `output_validation: "error"`. |
 | `schema_retry_nudge` | string \| bool | auto | String = verbatim corrective message (+ validation errors appended). `true` = auto nudge from schema required/properties keys. `false` = bare retry — replays the original messages unchanged, no correction appended. |
 | `schema_stream_abort` | bool | `true` when `output_schema` is set | While streaming, feed each visible text delta through an incremental JSON validator. The moment the partial response can no longer satisfy `output_schema`, the provider stream is aborted, a `schema_stream_aborted` transcript event fires, and the abort consumes one `schema_retries` slot — the retry replays the prompt with a corrective nudge that cites the failing JSON path and reason. Opt out with `false` to wait for the whole malformed response (post-hoc validator still runs). |
-| `llm_retries` | int | 0 | (deprecated; see `with_retry`) Retries on transient HTTP / provider errors. Raw `llm_call` is fail-fast by default; set to N to allow N retries after the first attempt. Note off-by-one: `llm_retries: 3` ≈ `with_retry(..., {max_attempts: 4})`. |
-| `llm_backoff_ms` | int | 250 | (deprecated; see `with_retry`) Base exponential backoff in milliseconds. |
 | `llm_caller` | closure | nil | (`agent_loop` only) Custom caller wrapping the per-turn `llm_call`. See "Composable LLM callers" below. |
 | `tool_caller` | closure | nil | (`agent_loop` only) Custom caller wrapping every tool dispatch. Signature `fn(call, next) -> result_dict`. See "Composable tool middleware" below. |
 | `max_concurrent_tools` | int | 1 | (`agent_loop` only) When a planner emits N tool calls in one turn, dispatch siblings concurrently capped at this count. Results inject in source order regardless of completion order. Middleware-backed dispatch uses a fresh caller chain per sibling, so `audit.layers` histories never cross-talk. With `with_audit_log`, each receipt carries an `emit_order` field so consumers can sort completion-ordered events back to source order. |
@@ -2036,10 +2034,10 @@ Returns a namespaced dict: top-level `status`, `text`, `visible_text`
 (`iterations`, `duration_ms`, `input_tokens`, `output_tokens`); tool
 invocation data nested under `tools` (`calls`, `successful`, `rejected`,
 `mode`). Failed tool dispatches are fed back to the next model turn as
-error observations and appear under `tools.rejected`. The preferred
+error observations and appear under `tools.rejected`. The
 resilience surface is the `llm_caller:` seam (see "Composable LLM
-callers"); the legacy `llm_retries` / `llm_backoff_ms` options are
-still accepted for back-compat but emit a deprecation lint. Plus its
+callers"); the pre-0.10 `llm_retries` / `llm_backoff_ms` options were
+removed and the `deprecated_llm_options` lint hard-errors on them. Plus its
 own `profile`, `tool_retries`, `max_iterations`, `max_nudges`, and
 `native_tool_fallback`
 (`"allow"`, `"allow_once"`, or `"reject"` for native-tool stages that
@@ -2053,12 +2051,12 @@ enough to enable the interleaved-thinking beta header for the whole loop.
 Profiles preload common loop budgets and retry counts. Explicit keys
 override the profile:
 
-| Profile | `max_iterations` | `max_nudges` | `tool_retries` | `llm_retries` | `schema_retries` |
-|---|---:|---:|---:|---:|---:|
-| `tool_using` (default) | 50 | 8 | 0 | 2 | 0 |
-| `researcher` | 30 | 4 | 0 | 2 | 0 |
-| `verifier` | 5 | 0 | 0 | 2 | 3 |
-| `completer` | 1 | 0 | 0 | 2 | 0 |
+| Profile | `max_iterations` | `max_nudges` | `tool_retries` | `schema_retries` |
+|---|---:|---:|---:|---:|
+| `tool_using` (default) | 50 | 8 | 0 | 0 |
+| `researcher` | 30 | 4 | 0 | 0 |
+| `verifier` | 5 | 0 | 0 | 3 |
+| `completer` | 1 | 0 | 0 | 0 |
 
 Use `iteration_budget: {mode, initial, max, extend_by}` when a loop should
 start with a small cap and extend only while making progress. `max_iterations`
@@ -3072,7 +3070,7 @@ fn about_outages(event: TriggerEvent) -> bool {
   let result = llm_call(
     "Is this message about outages? " + event.kind,
     nil,
-    {provider: "mock", model: "gpt-4o-mini", llm_retries: 0},
+    {provider: "mock", model: "gpt-4o-mini"},
   )
   return contains(result.text.lower(), "yes")
 }
@@ -3811,7 +3809,7 @@ let data = r.data
 // HARN_RATE_LIMIT_<PROVIDER>_RPM/_TPM and provider/model catalog
 // `rate_limits` fields.
 let r = with_rate_limit("openai", fn() {
-  llm_call(user_prompt, nil, {provider: "openai", llm_retries: 0})
+  llm_call(user_prompt, nil, {provider: "openai"})
 }, {max_retries: 5, backoff_ms: 500})
 ```
 
@@ -3840,7 +3838,7 @@ to write deterministic tests for either helper's error path:
 ```harn
 llm_mock({error: {category: "rate_limit", message: "429", retry_after_ms: 2500}})
 try {
-  llm_call("hi", nil, {provider: "mock", llm_retries: 0})
+  llm_call("hi", nil, {provider: "mock"})
 } catch (e) {
   assert(e.kind == "transient")
   assert(e.reason == "rate_limit")
@@ -3849,7 +3847,7 @@ try {
 }
 
 llm_mock({error: {category: "rate_limit", message: "429"}})
-let r = llm_call_safe("hi", nil, {provider: "mock", llm_retries: 0})
+let r = llm_call_safe("hi", nil, {provider: "mock"})
 assert(!r.ok)
 assert(r.error.category == "rate_limit")
 
@@ -3884,27 +3882,23 @@ agent_loop(task, system, resilient_opts)
 The caller signature is `fn(call) -> {ok, value | status, error?}`
 where `call = {prompt, system, opts, turn: {iteration, session_id, attempt}}`.
 
-**Off-by-one in retry semantics:** `llm_retries: 3` historically meant
-4 total attempts; `with_retry`'s `max_attempts: N` means N total
-attempts. To migrate `llm_retries: K`, pass `max_attempts: K + 1`.
+**Off-by-one in retry semantics:** the removed `llm_retries: 3`
+historically meant 4 total attempts; `with_retry`'s `max_attempts: N`
+means N total attempts. To migrate `llm_retries: K`, pass
+`max_attempts: K + 1`.
 
-For the common "agent runtime cell" shape, prefer `std/agent/stack`
-over per-script provider/model/binder glue:
+For role/env model resolution, use `agent_model_options` from
+`std/agent/options` (the pre-0.10 `std/agent/stack` bundle was removed):
 
 ```harn,ignore
-import {agent_stack, agent_stack_audit_line} from "std/agent/stack"
+import {agent_model_options} from "std/agent/options"
 
-let stack = agent_stack({
+let route = agent_model_options({
   role: "planner",
   defaults: {provider: "anthropic", model: "claude-sonnet-5", task: "agent"},
-  retry: {max_attempts: 3},
-  logging: true,
-  budget: {max_calls: 40},
-  required_reason: true,
 })
-
-log(agent_stack_audit_line(stack))
-agent_loop(task, system, stack.options + {loop_until_done: true})
+let caller = with_retry(default_llm_caller(), {max_attempts: 3})
+agent_loop(task, system, route.options + {loop_until_done: true, llm_caller: caller})
 ```
 
 `agent_model_options` resolves explicit options, role env overrides such as
@@ -4582,9 +4576,9 @@ for entry in drain_audit() {
   the `local:` prefix and routes to Ollama. Without `"auto"`, an
   explicit provider such as `"local"` still wins.
 - `schema_retries` retries schema-validation failures with a
-  corrective nudge. `llm_retries` (deprecated; prefer `with_retry`)
-  retries transient provider errors. They compose orthogonally —
-  each schema retry starts a fresh transient budget.
+  corrective nudge. Transient provider errors are fail-fast — compose
+  `with_retry` from `std/llm/handlers` for retry policy. The two
+  concerns stay orthogonal.
 - A schema retry is a **single-turn correction**, not a multi-turn
   conversation. The invalid response is not persisted; the retry
   replays the original messages with one appended user-role correction

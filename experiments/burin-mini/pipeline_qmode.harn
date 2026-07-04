@@ -663,7 +663,6 @@ pipeline default() {
       temperature: 0.2,
       max_tokens: 2048,
       max_iterations: 10,
-      llm_retries: 1,
       turn_policy: {require_action_or_yield: true, max_prose_chars: 280},
       stop_after_successful_tools: ["ask_question", "exit_plan_mode"],
       session_id: session_id,

@@ -136,7 +136,7 @@ let result = agent_loop(task, system, {
 })
 ```
 
-Migrating from `llm_retries: K` (deprecated): use
+Migrating from `llm_retries: K` (removed in 0.10): use
 `with_retry(default_llm_caller(), {max_attempts: K + 1})`. The off-by-one is
 deliberate — `llm_retries` historically counted retries after the first
 attempt; `max_attempts` counts total attempts. See
@@ -281,8 +281,6 @@ Key options:
 | Option | Default | Notes |
 |---|---|---|
 | `provider` | `"auto"` | `"auto"` infers from model prefix (`local:` / `/` / `claude-*` / `gpt-*` / `:`). |
-| `llm_retries` | `0` | Transient error retries (HTTP 5xx, timeout, rate-limit). Set to N to allow N retries after the first attempt. |
-| `llm_backoff_ms` | `250` | Base exponential backoff in milliseconds. |
 | `schema_retries` | `1` | Re-prompt on `output_schema` validation failure. Retries run regardless of final `output_validation`; `"error"` controls whether exhausted validation failures throw. |
 | `schema_retry_nudge` | auto | String (verbatim), `true` (auto), or `false` (bare retry). |
 | `output_validation` | `"off"` | `"error"` throws on mismatch; `"warn"` logs. |

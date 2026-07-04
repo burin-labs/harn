@@ -6,14 +6,13 @@
  * (merge: read-only auto-approve consent; oncall: 50-call rate cap)
  * fire when nothing is supplied.
  */
-import {
-  agent_preset,
-  merge_captain_agent,
-  oncall_captain_agent,
-  release_captain_agent,
-  review_captain_agent,
-} from "std/agent/presets"
+import { agent_preset } from "std/agent/presets"
 import { llm_text, with_llm_script } from "std/testing"
+
+fn preset_agent(kind, prompt, options = nil) {
+  let opts = agent_preset(kind, options)
+  return agent_loop(prompt, opts?.system, opts)
+}
 
 pipeline default() {
   // (1) merge_captain — long adaptive budget; tool_using profile;
@@ -112,7 +111,8 @@ pipeline default() {
       llm_text("<user_response>Done.</user_response>"),
     ],
     { ->
-      let merge_run = merge_captain_agent(
+      let merge_run = preset_agent(
+        "merge_captain",
         "Try one read and one write.",
         {provider: "mock", tools: registry, tool_format: "native", max_iterations: 3},
       )
@@ -129,7 +129,8 @@ pipeline default() {
       llm_text("<user_response>Stopping.</user_response>"),
     ],
     { ->
-      let oncall_capped = oncall_captain_agent(
+      let oncall_capped = preset_agent(
+        "oncall_captain",
         "Hammer the same tool.",
         {
           provider: "mock",
@@ -148,7 +149,8 @@ pipeline default() {
       llm_text("<user_response>Dry run preview.</user_response>"),
     ],
     { ->
-      let release_dry = release_captain_agent(
+      let release_dry = preset_agent(
+        "release_captain",
         "Preview the action.",
         {provider: "mock", tools: registry, tool_format: "native", max_iterations: 3, dry_run: true},
       )
@@ -162,7 +164,11 @@ pipeline default() {
       llm_text("<user_response>Looks good.</user_response>"),
     ],
     { ->
-      let review_run = review_captain_agent("Review this PR.", {provider: "mock", tools: registry, tool_format: "native"})
+      let review_run = preset_agent(
+        "review_captain",
+        "Review this PR.",
+        {provider: "mock", tools: registry, tool_format: "native"},
+      )
       __io_println(review_run.status)
     },
   )
@@ -172,7 +178,8 @@ pipeline default() {
       llm_text("<user_response>Done.</user_response>"),
     ],
     { ->
-      let merge_no_consent = merge_captain_agent(
+      let merge_no_consent = preset_agent(
+        "merge_captain",
         "Delete with consent disabled.",
         {provider: "mock", tools: registry, tool_format: "native", max_iterations: 3, consent: false},
       )

@@ -642,17 +642,10 @@ pub(crate) async fn execute_schema_retry_loop(
     bridge: Option<&Arc<crate::bridge::HostBridge>>,
 ) -> Result<SchemaLoopOutcome, VmError> {
     let _ = structural_experiments::apply_structural_experiment(ctx, &mut opts, None).await?;
-    let retry_config = agent_observe::LlmRetryConfig {
-        retries: helpers::opt_int(&options, "llm_retries")
-            .unwrap_or(agent_observe::DEFAULT_LLM_CALL_RETRIES as i64)
-            .max(0) as usize,
-        backoff_ms: helpers::opt_int(&options, "llm_backoff_ms")
-            .unwrap_or(agent_observe::DEFAULT_LLM_CALL_BACKOFF_MS as i64)
-            .max(0) as u64,
-    };
-    // Schema retry loop is orthogonal to transient retries. Each
-    // schema retry gets a fresh transient budget. Small/local models
-    // often need the corrective nudge to produce conforming JSON.
+    // Schema retry loop is orthogonal to transport concerns: `llm_call` is
+    // fail-fast on transient provider errors (compose `with_retry` from
+    // `std/llm/handlers` for retry policy). Small/local models often need
+    // the corrective nudge to produce conforming JSON.
     let schema_retries = helpers::opt_int(&options, "schema_retries")
         .unwrap_or(1)
         .max(0) as usize;
@@ -674,7 +667,6 @@ pub(crate) async fn execute_schema_retry_loop(
             &opts,
             tool_format.as_deref(),
             bridge,
-            &retry_config,
             None,
             user_visible,
             bridged, // offthread=true on the bridge path, local set otherwise

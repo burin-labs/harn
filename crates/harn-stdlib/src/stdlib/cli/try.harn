@@ -32,7 +32,7 @@ fn main(harness: Harness) {
   // not bare identifiers, and `harn try` is meant to be a zero-config
   // smoke test. Users wanting tool-augmented loops should use `harn
   // run` with a script that builds the options explicitly.
-  var options = {max_iterations: max_iters, llm_retries: 2}
+  var options = {max_iterations: max_iters}
   let provider = __trimmed_env(harness, "HARN_TRY_PROVIDER")
   let model = __trimmed_env(harness, "HARN_TRY_MODEL")
   if provider != nil && model != nil {

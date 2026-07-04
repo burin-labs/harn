@@ -14,7 +14,6 @@ pipeline test(task) {
             provider: "mock",
             model: "claude-opus-4-20250514",
             max_tokens: 1024,
-            llm_retries: 0,
             budget: {max_cost_usd: 0.0001},
           },
         )
@@ -29,13 +28,7 @@ pipeline test(task) {
         llm_call(
           "this prompt is longer than one estimated token",
           nil,
-          {
-            provider: "mock",
-            model: "gpt-4o-mini",
-            max_tokens: 16,
-            llm_retries: 0,
-            budget: {max_input_tokens: 1},
-          },
+          {provider: "mock", model: "gpt-4o-mini", max_tokens: 16, budget: {max_input_tokens: 1}},
         )
       }
       let input_err = unwrap_err(input_limited)

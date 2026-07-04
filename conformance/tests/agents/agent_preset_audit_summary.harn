@@ -1,5 +1,10 @@
-import { audit_agent, repair_agent, summary_agent } from "std/agent/presets"
+import { agent_preset } from "std/agent/presets"
 import { llm_text, with_llm_script } from "std/testing"
+
+fn preset_agent(kind, prompt, options = nil) {
+  let opts = agent_preset(kind, options)
+  return agent_loop(prompt, opts?.system, opts)
+}
 
 fn audit_tools() {
   var tools = tool_registry()
@@ -18,7 +23,7 @@ fn audit_tools() {
 }
 
 pipeline default() {
-  // audit_agent: native completion, no done sentinel; must complete on
+  // audit preset: native completion, no done sentinel; must complete on
   // final user_response text.
   with_llm_script(
     [
@@ -26,7 +31,11 @@ pipeline default() {
       llm_text("<user_response>Audit complete.</user_response>"),
     ],
     { ->
-      let audit = audit_agent("Audit the release", {provider: "mock", tools: audit_tools(), tool_format: "native"})
+      let audit = preset_agent(
+        "audit",
+        "Audit the release",
+        {provider: "mock", tools: audit_tools(), tool_format: "native"},
+      )
       __io_println(audit.status)
       __io_println(audit.text)
       __io_println(audit.adaptive_budget.mode)
@@ -37,7 +46,7 @@ pipeline default() {
   with_llm_script(
     [llm_text("Just a summary.")],
     { ->
-      let summary = summary_agent("Summarize.", {provider: "mock"})
+      let summary = preset_agent("summary", "Summarize.", {provider: "mock"})
       __io_println(summary.status)
       __io_println(summary.text)
       __io_println(summary.llm.iterations)
@@ -46,7 +55,7 @@ pipeline default() {
   with_llm_script(
     [llm_text("Local summary.")],
     { ->
-      let local_summary = summary_agent("Summarize locally.", {provider: "mock", model: "mystery-model-7b"})
+      let local_summary = preset_agent("summary", "Summarize locally.", {provider: "mock", model: "mystery-model-7b"})
       __io_println(local_summary.status)
       __io_println(local_summary.text)
       let summary_calls = llm_mock_calls()
@@ -59,7 +68,8 @@ pipeline default() {
       llm_text("<user_response>Fixed.</user_response>"),
     ],
     { ->
-      let repair = repair_agent(
+      let repair = preset_agent(
+        "repair",
         "Repair the regression",
         {provider: "mock", tools: audit_tools(), tool_format: "native"},
       )
@@ -70,8 +80,8 @@ pipeline default() {
   )
 }
 // No `##DONE##` sentinel should leak into the system prompt.
-// summary_agent: cheap one-shot, no tools, no looping.
-// summary_agent should not inject native-tool options when it has no tools.
+// summary preset: cheap one-shot, no tools, no looping.
+// The summary preset should not inject native-tool options when it has no tools.
 // This keeps local/Ollama-style providers without native tool support usable.
-// repair_agent: tool-using with adaptive budget defaults; ends on natural
+// repair preset: tool-using with adaptive budget defaults; ends on natural
 // user_response.

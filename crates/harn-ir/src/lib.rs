@@ -2028,7 +2028,7 @@ fn classify_call(name: &str, args: &[SNode]) -> CallSemantics {
     let mut display_name = name.to_string();
     let classification = match name {
         "request_approval" => CallClassification::ApprovalGate,
-        "llm_budget_remaining" | "agent_budget" | "llm_budget" => CallClassification::BudgetRead,
+        "llm_budget_remaining" | "llm_budget" => CallClassification::BudgetRead,
         "egress_policy" => CallClassification::PolicyGate(PolicyScopeKind::Egress),
         "command_policy_push" => CallClassification::PolicyPush(PolicyScopeKind::Command),
         "command_policy_pop" => CallClassification::PolicyPop(PolicyScopeKind::Command),

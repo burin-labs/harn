@@ -57,8 +57,6 @@ fn __chat_agent_option_keys() {
     "done_sentinel",
     "final_wrapup",
     "max_verify_attempts",
-    "llm_retries",
-    "llm_backoff_ms",
     "context_callback",
     "context_filter",
     "timestamp_messages",

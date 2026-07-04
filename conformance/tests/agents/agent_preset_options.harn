@@ -1,5 +1,5 @@
 import { agent_loop_options } from "std/agent/options"
-import { agent_budget, agent_preset } from "std/agent/presets"
+import { agent_preset } from "std/agent/presets"
 
 pipeline default() {
   let audit = agent_preset("audit")
@@ -51,12 +51,4 @@ pipeline default() {
   let overridden = agent_preset("audit", {max_nudges: 4, loop_until_done: false})
   __io_println(overridden.max_nudges)
   __io_println(overridden.loop_until_done)
-  // agent_budget standalone helper.
-  let custom = agent_budget("adaptive", {initial: 2, max: 6})
-  __io_println(custom.mode)
-  __io_println(custom.initial)
-  __io_println(custom.max)
-  let pass_through = agent_budget({mode: "adaptive", initial: 3, max: 9, extend_by: 2})
-  __io_println(pass_through.initial)
-  __io_println(pass_through.max)
 }

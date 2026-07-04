@@ -15,7 +15,7 @@ pipeline default(task) {
     { ->
       let r = with_rate_limit(
         "mock",
-        fn() { llm_call("hello", nil, {provider: "mock", llm_retries: 0}) },
+        fn() { llm_call("hello", nil, {provider: "mock"}) },
         {backoff_ms: 1, max_retries: 5},
       )
       __io_println(r.text)
