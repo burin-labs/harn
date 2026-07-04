@@ -40,16 +40,6 @@ if [ ! -f "$log_file" ]; then
   exit 0
 fi
 
-# Parse the NDJSON with a small, dependency-free field extractor (grep -o on
-# a fixed key order — the log lines are written by hook_timing_finish's own
-# printf, so the key order and lack of embedded quotes/newlines in values is
-# guaranteed) rather than requiring jq, which isn't in the zero-dep contract
-# this instrument promises.
-awk_field() {
-  # $1 = json line, $2 = key
-  printf '%s' "$1" | grep -o "\"$2\":\"\{0,1\}[^,\"}]*\"\{0,1\}" | head -1 | sed -E "s/\"$2\":\"?([^\"]*)\"?/\1/"
-}
-
 if [ "$json_output" -eq 1 ]; then
   printf '['
   first=1
@@ -67,24 +57,29 @@ echo "Hook timing report (source: $log_file)"
 
 # Group by (repo, hook), collecting durations and failure counts, then
 # compute p50/p95/max per group with awk (sort -n per group + index by
-# fraction — POSIX awk, no external stats dependency).
-awk -F'"' '
+# fraction — POSIX awk, no external stats dependency). Each field is pulled
+# independently via match()/substr() on its own "key":value marker rather
+# than by fixed quote-delimited field position, since duration_ms/exit_code
+# are bare (unquoted) numbers that would otherwise throw off `-F"` parity
+# for every field after them on the line.
+awk '
+  function extract_quoted(line, key,    re, value) {
+    re = "\"" key "\":\"[^\"]*\""
+    if (!match(line, re)) { return "" }
+    value = substr(line, RSTART + length(key) + 4, RLENGTH - length(key) - 5)
+    return value
+  }
+  function extract_number(line, key,    re, value) {
+    re = "\"" key "\":-?[0-9]+"
+    if (!match(line, re)) { return "" }
+    value = substr(line, RSTART + length(key) + 3, RLENGTH - length(key) - 3)
+    return value
+  }
   {
-    repo = ""; hook = ""; duration = ""; exit_code = ""
-    for (i = 1; i <= NF; i += 2) {
-      key = $i
-      if (key ~ /repo$/)   { repo = $(i + 1) }
-      if (key ~ /hook$/)   { hook = $(i + 1) }
-    }
-    # duration_ms and exit_code are bare numbers, not quoted, so pull them
-    # with a plain field split on the numeric-key markers instead.
-    line = $0
-    if (match(line, /"duration_ms":[0-9]+/)) {
-      duration = substr(line, RSTART + 14, RLENGTH - 14)
-    }
-    if (match(line, /"exit_code":-?[0-9]+/)) {
-      exit_code = substr(line, RSTART + 12, RLENGTH - 12)
-    }
+    repo = extract_quoted($0, "repo")
+    hook = extract_quoted($0, "hook")
+    duration = extract_number($0, "duration_ms")
+    exit_code = extract_number($0, "exit_code")
     if (repo == "" || hook == "" || duration == "") { next }
     key = repo SUBSEP hook
     count[key] += 1

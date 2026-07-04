@@ -70,6 +70,7 @@ report_billing_usage() {
   # summing quantity (minutes) and netAmount (USD).
   printf '%s' "$billing_json" | python3 -c '
 import json, sys
+
 data = json.load(sys.stdin)
 totals = {}
 for item in data.get("usageItems", []):
@@ -79,11 +80,16 @@ for item in data.get("usageItems", []):
     entry = totals.setdefault(repo, {"minutes": 0.0, "usd": 0.0})
     entry["minutes"] += item.get("quantity", 0.0)
     entry["usd"] += item.get("netAmount", 0.0)
+
 rows = sorted(totals.items(), key=lambda kv: kv[1]["usd"], reverse=True)
-print(f"{\"workflow\":<28} {\"minutes\":>10} {\"estimated_usd\":>14}  source")
-print(f"{\"-\"*28} {\"-\"*10} {\"-\"*14}  {\"-\"*13}")
+header_workflow = "workflow"
+header_minutes = "minutes"
+header_usd = "estimated_usd"
+print("%-28s %10s %14s  source" % (header_workflow, header_minutes, header_usd))
+print("%-28s %10s %14s  %s" % ("-" * 28, "-" * 10, "-" * 14, "-" * 13))
 for repo, totals_row in rows:
-    print(f"repo:{repo:<23} {totals_row[\"minutes\"]:>10.2f} {totals_row[\"usd\"]:>14.2f}  billing-usage")
+    label = "repo:" + repo
+    print("%-28s %10.2f %14.2f  billing-usage" % (label, totals_row["minutes"], totals_row["usd"]))
 '
 }
 
@@ -108,7 +114,7 @@ totals = {}
 for line in sys.stdin:
     repo, workflow, timing_raw = line.rstrip("\n").split("\t", 2)
     timing = json.loads(timing_raw)
-    key = f"{repo}:{workflow}"
+    key = repo + ":" + workflow
     entry = totals.setdefault(key, {"minutes": 0.0, "usd": 0.0})
     for runner_os, billable in timing.get("billable", {}).items():
         minutes = billable.get("total_ms", 0) / 60000
@@ -116,10 +122,10 @@ for line in sys.stdin:
         entry["usd"] += minutes * PRICE_PER_MINUTE.get(runner_os, 0.0)
 
 rows = sorted(totals.items(), key=lambda kv: kv[1]["usd"], reverse=True)
-print(f"{\"workflow\":<28} {\"minutes\":>10} {\"estimated_usd\":>14}  source")
-print(f"{\"-\"*28} {\"-\"*10} {\"-\"*14}  {\"-\"*13}")
+print("%-28s %10s %14s  source" % ("workflow", "minutes", "estimated_usd"))
+print("%-28s %10s %14s  %s" % ("-" * 28, "-" * 10, "-" * 14, "-" * 13))
 for key, totals_row in rows:
-    print(f"{key:<28} {totals_row[\"minutes\"]:>10.2f} {totals_row[\"usd\"]:>14.2f}  run-timing")
+    print("%-28s %10.2f %14.2f  run-timing" % (key, totals_row["minutes"], totals_row["usd"]))
 '
 }
 
