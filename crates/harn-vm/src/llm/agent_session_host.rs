@@ -3382,7 +3382,20 @@ fn install_session_policies_inner(
     installed: &mut InstalledPolicies,
 ) -> Result<(), VmError> {
     if let Some(requested) = parse_capability_policy(opts_map.get("policy"))? {
-        let effective = match crate::orchestration::current_execution_policy() {
+        let outer = crate::orchestration::current_execution_policy();
+        if requested.tools.iter().any(|t| t == "computer")
+            || requested.tool_annotations.contains_key("computer")
+        {
+            eprintln!(
+                "[INSTALL-DIAG] requested.side_effect={:?} requested.tools_len={} outer.is_some={} outer.side_effect={:?} outer.tools_len={:?}",
+                requested.side_effect_level,
+                requested.tools.len(),
+                outer.is_some(),
+                outer.as_ref().and_then(|o| o.side_effect_level.clone()),
+                outer.as_ref().map(|o| o.tools.len()),
+            );
+        }
+        let effective = match outer {
             Some(outer) => outer.intersect(&requested).map_err(VmError::Runtime)?,
             None => requested,
         };
