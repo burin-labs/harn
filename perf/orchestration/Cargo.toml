@@ -6,7 +6,7 @@ publish = false
 
 [dependencies]
 futures = "0.3"
-harn-vm = { path = "../../crates/harn-vm" }
+harn-vm = { path = "../../crates/harn-vm", features = ["vm-bench-internals"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt", "time"] }
 
@@ -21,6 +21,16 @@ harness = false
 [[bench]]
 name = "bench_workflow_bundle"
 path = "bench_workflow_bundle.rs"
+harness = false
+
+[[bench]]
+name = "bench_harn_entry_crossing"
+path = "bench_harn_entry_crossing.rs"
+harness = false
+
+[[bench]]
+name = "bench_transcript_projection"
+path = "bench_transcript_projection.rs"
 harness = false
 
 [lints]
