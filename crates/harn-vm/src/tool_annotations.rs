@@ -119,6 +119,15 @@ impl SideEffectLevel {
         Self::DesktopControl,
     ];
 
+    /// The most-permissive side-effect level — the TOP of the ladder. This is
+    /// the single source of truth for "the outermost / most-autonomous ceiling":
+    /// the runtime's builtin ceiling and the top autonomy tier both reference it,
+    /// so adding a new most-invasive level (as `desktop_control` was added above
+    /// `network`) automatically raises every permissive bound instead of leaving
+    /// hardcoded `"network"` strings that silently cap the new level out. NEVER
+    /// hardcode a specific top level as "the max"; call this.
+    pub const MAX: Self = Self::DesktopControl;
+
     /// Numeric rank used by the policy intersector and side-effect
     /// ceiling check. Higher rank ⇒ more invasive.
     pub fn rank(&self) -> usize {
@@ -313,6 +322,28 @@ mod tests {
             SideEffectLevel::DesktopControl
         );
         assert_eq!(SideEffectLevel::DesktopControl.as_str(), "desktop_control");
+    }
+
+    #[test]
+    fn max_is_the_unique_top_of_the_ladder() {
+        // Guardrail: `SideEffectLevel::MAX` MUST be the strictly-highest-ranked
+        // level. Adding a new most-invasive variant without updating `MAX` (the
+        // single "most-permissive ceiling" the builtin ceiling and top autonomy
+        // tier both reference) fails here — so the "network was the top" footgun
+        // that silently capped `desktop_control` cannot recur.
+        for level in SideEffectLevel::ALL {
+            assert!(
+                level.rank() <= SideEffectLevel::MAX.rank(),
+                "{level:?} outranks MAX ({:?}); update SideEffectLevel::MAX",
+                SideEffectLevel::MAX
+            );
+        }
+        // And MAX is uniquely the top (exactly one level at the max rank).
+        let at_top = SideEffectLevel::ALL
+            .iter()
+            .filter(|l| l.rank() == SideEffectLevel::MAX.rank())
+            .count();
+        assert_eq!(at_top, 1, "MAX must be the unique top of the ladder");
     }
 
     #[test]

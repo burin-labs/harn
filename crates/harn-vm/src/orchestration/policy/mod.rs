@@ -570,11 +570,6 @@ pub fn enforce_current_policy_for_tool(tool_name: &str) -> Result<(), PolicyDeni
         if requested_level != SideEffectLevel::None
             && !policy_allows_side_effect(&policy, requested_level.as_str())
         {
-            eprintln!(
-                "[CEILING-DIAG] tool={tool_name} requested={} ceiling={:?}",
-                requested_level.as_str(),
-                policy.side_effect_level,
-            );
             return reject_tool(
                 DenialGate::SideEffectCeiling,
                 None,
@@ -731,7 +726,8 @@ pub fn builtin_ceiling() -> CapabilityPolicy {
         // the max of ITS tools (e.g. `network`); only a surface that actually
         // carries a `desktop_control` tool (computer use, gated by the off-by-
         // default flag) can reach the top.
-        side_effect_level: Some(SideEffectLevel::DesktopControl.as_str().to_string()),
+        // Tracks the ladder top via `SideEffectLevel::MAX` (never a hardcoded level).
+        side_effect_level: Some(SideEffectLevel::MAX.as_str().to_string()),
         recursion_limit: Some(RuntimeLimits::DEFAULT.max_nested_execution_depth),
         tool_arg_constraints: Vec::new(),
         tool_annotations: BTreeMap::new(),
