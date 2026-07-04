@@ -1459,6 +1459,10 @@ uses the planned rank as `--max-lora-rank` so serving buffers match training.
 The `serving.lora_module_value_format` field records whether the runtime uses
 the portable `NAME=PATH_OR_REPO` adapter value or a cataloged richer value such
 as vLLM's base-model-lineage JSON.
+For native Gemma 4 routes on vLLM, the plan also warns that the `gemma4`
+tool-call parser and chat template are part of the serving contract. Validate
+or promote adapters with serialized native-tool traffic unless the pinned vLLM
+parser version is already proven concurrency-safe for the route.
 
 ## harn models recommend
 

@@ -805,6 +805,25 @@ fn models_lora_plan_json_shape_is_stable() {
             .is_some_and(|text| text.contains("Gemma 4 native routes"))),
         "serving notes={serving_notes:?}"
     );
+    assert!(
+        serving_notes.iter().any(|note| note
+            .as_str()
+            .is_some_and(|text| text.contains("serialize Gemma 4 native-tool validation traffic"))),
+        "serving notes={serving_notes:?}"
+    );
+    assert!(
+        serving_notes.iter().any(|note| note.as_str().is_some_and(
+            |text| text.contains("gemma4 tool-call parser and chat-template revision")
+        )),
+        "serving notes={serving_notes:?}"
+    );
+    let warnings = report["warnings"].as_array().expect("warnings");
+    assert!(
+        warnings.iter().any(|warning| warning
+            .as_str()
+            .is_some_and(|text| text.contains("Gemma 4 native tool parsing under vLLM"))),
+        "warnings={warnings:?}"
+    );
     assert_eq!(report["template"]["name"], "gemma4_native_function_calling");
     assert_eq!(
         report["template"]["source"],
