@@ -26,6 +26,12 @@ use super::{
 const DEFAULT_TARGET_WIDTH: u32 = 1400;
 const DEFAULT_TARGET_HEIGHT: u32 = 1050;
 
+/// Upper bound on a model-requested `wait` / `hold_key` duration. The duration
+/// is model-controlled, so a hallucinated or adversarial value (e.g. `u64::MAX`
+/// ms) must not wedge the synchronous executor thread or pin keys down forever —
+/// every sleep is clamped to this cap.
+const MAX_ACTION_DURATION_MS: u64 = 60_000;
+
 /// Resolve the target screenshot box from the environment, falling back to the
 /// default. The capture is fitted INSIDE this box (aspect-preserving).
 fn target_dims() -> (u32, u32) {
@@ -62,27 +68,39 @@ fn fit_within(width: u32, height: u32, max_w: u32, max_h: u32) -> (u32, u32) {
 pub struct LocalBackend {
     /// Cached transform from screenshot (target) space to the logical-point
     /// space `enigo` expects, as `(x_ratio, y_ratio)` where
-    /// `logical = target * ratio`. Refreshed on every screenshot (the agent
-    /// loop always screenshots before acting); defaults to identity.
-    transform: Mutex<(f64, f64)>,
+    /// `logical = target * ratio`. `None` until the first screenshot establishes
+    /// the display geometry: a coordinate action issued before any screenshot
+    /// has no valid transform, so it errors rather than silently applying an
+    /// identity map (which would mislocate every click on a Retina display).
+    transform: Mutex<Option<(f64, f64)>>,
 }
 
 impl LocalBackend {
     /// Construct a local backend.
     pub fn new() -> Self {
         Self {
-            transform: Mutex::new((1.0, 1.0)),
+            transform: Mutex::new(None),
         }
     }
 
-    /// Map a screenshot-space coordinate (target pixels, what the model sees
-    /// and returns) into the logical-point space `enigo` uses for input.
-    fn to_input_coords(&self, x: i32, y: i32) -> (i32, i32) {
-        let (rx, ry) = *self.transform.lock().expect("transform mutex");
-        (
+    /// Map a screenshot-space coordinate (target pixels, what the model sees and
+    /// returns) into the logical-point space `enigo` uses for input. Errors if no
+    /// screenshot has established the transform yet — the model must observe the
+    /// screen before it can act on coordinates.
+    fn to_input_coords(&self, x: i32, y: i32) -> Result<(i32, i32), String> {
+        let (rx, ry) = self
+            .transform
+            .lock()
+            .expect("transform mutex")
+            .ok_or_else(|| {
+                "no coordinate transform yet — take a screenshot before issuing a coordinate \
+                 action so the display geometry is known"
+                    .to_string()
+            })?;
+        Ok((
             (f64::from(x) * rx).round() as i32,
             (f64::from(y) * ry).round() as i32,
-        )
+        ))
     }
 }
 
@@ -143,10 +161,10 @@ impl ComputerBackend for LocalBackend {
         // logical_dim / target_dim (this folds in the Retina backing scale).
         let logical_width = monitor.width().unwrap_or(physical_width).max(1);
         let logical_height = monitor.height().unwrap_or(captured.height()).max(1);
-        *self.transform.lock().expect("transform mutex") = (
+        *self.transform.lock().expect("transform mutex") = Some((
             f64::from(logical_width) / f64::from(target_width),
             f64::from(logical_height) / f64::from(target_height),
-        );
+        ));
         let scale_factor = f64::from(physical_width) / f64::from(logical_width);
 
         let mut png = Vec::new();
@@ -188,7 +206,7 @@ impl LocalBackend {
     fn run_action(&self, enigo: &mut Enigo, action: &ComputerAction) -> Result<(), String> {
         match action {
             ComputerAction::MouseMove { x, y } => {
-                let (x, y) = self.to_input_coords(*x, *y);
+                let (x, y) = self.to_input_coords(*x, *y)?;
                 enigo
                     .move_mouse(x, y, Coordinate::Abs)
                     .map_err(|err| format!("move_mouse: {err}"))
@@ -200,7 +218,7 @@ impl LocalBackend {
                 count,
                 modifiers,
             } => {
-                let (x, y) = self.to_input_coords(*x, *y);
+                let (x, y) = self.to_input_coords(*x, *y)?;
                 enigo
                     .move_mouse(x, y, Coordinate::Abs)
                     .map_err(|err| format!("move_mouse: {err}"))?;
@@ -214,7 +232,7 @@ impl LocalBackend {
                 })
             }
             ComputerAction::MouseDown { button, x, y } => {
-                let (x, y) = self.to_input_coords(*x, *y);
+                let (x, y) = self.to_input_coords(*x, *y)?;
                 enigo
                     .move_mouse(x, y, Coordinate::Abs)
                     .map_err(|err| format!("move_mouse: {err}"))?;
@@ -223,7 +241,7 @@ impl LocalBackend {
                     .map_err(|err| format!("button press: {err}"))
             }
             ComputerAction::MouseUp { button, x, y } => {
-                let (x, y) = self.to_input_coords(*x, *y);
+                let (x, y) = self.to_input_coords(*x, *y)?;
                 enigo
                     .move_mouse(x, y, Coordinate::Abs)
                     .map_err(|err| format!("move_mouse: {err}"))?;
@@ -239,8 +257,8 @@ impl LocalBackend {
                 to_y,
                 modifiers,
             } => {
-                let (fx, fy) = self.to_input_coords(*from_x, *from_y);
-                let (tx, ty) = self.to_input_coords(*to_x, *to_y);
+                let (fx, fy) = self.to_input_coords(*from_x, *from_y)?;
+                let (tx, ty) = self.to_input_coords(*to_x, *to_y)?;
                 with_modifiers(enigo, modifiers, |enigo| {
                     enigo
                         .move_mouse(fx, fy, Coordinate::Abs)
@@ -263,7 +281,7 @@ impl LocalBackend {
                 amount,
                 modifiers,
             } => {
-                let (x, y) = self.to_input_coords(*x, *y);
+                let (x, y) = self.to_input_coords(*x, *y)?;
                 enigo
                     .move_mouse(x, y, Coordinate::Abs)
                     .map_err(|err| format!("move_mouse: {err}"))?;
@@ -294,7 +312,9 @@ impl LocalBackend {
                         .key(*key, Direction::Press)
                         .map_err(|err| format!("key press: {err}"))?;
                 }
-                std::thread::sleep(std::time::Duration::from_millis(*duration_ms));
+                std::thread::sleep(std::time::Duration::from_millis(
+                    (*duration_ms).min(MAX_ACTION_DURATION_MS),
+                ));
                 for key in resolved.iter().rev() {
                     enigo
                         .key(*key, Direction::Release)
@@ -303,7 +323,9 @@ impl LocalBackend {
                 Ok(())
             }
             ComputerAction::Wait { duration_ms } => {
-                std::thread::sleep(std::time::Duration::from_millis(*duration_ms));
+                std::thread::sleep(std::time::Duration::from_millis(
+                    (*duration_ms).min(MAX_ACTION_DURATION_MS),
+                ));
                 Ok(())
             }
         }

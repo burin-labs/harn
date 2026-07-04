@@ -428,7 +428,17 @@ fn select_backend() -> Arc<dyn ComputerBackend> {
         "none" => Arc::new(NullBackend::new(
             "computer use is disabled (BURIN_COMPUTER_USE_TRANSPORT=none)".to_string(),
         )),
-        "" | "local" => default_local_backend(),
+        "local" => default_local_backend(),
+        // DEFAULT-DENY: an unset transport is inert, even when `computer-local`
+        // is compiled in. A capability that drives the real mouse/keyboard must
+        // never go live merely because the feature is built — arming the live
+        // backend requires an explicit `BURIN_COMPUTER_USE_TRANSPORT=local`. The
+        // product's off-by-default flag is the outer gate; this is the inner one.
+        "" => Arc::new(NullBackend::new(
+            "computer use is not armed (set BURIN_COMPUTER_USE_TRANSPORT=local for the local \
+             backend, or helper|remote for a socket backend)"
+                .to_string(),
+        )),
         other => Arc::new(NullBackend::new(format!(
             "unknown BURIN_COMPUTER_USE_TRANSPORT '{other}' (expected local|helper|remote|none)"
         ))),

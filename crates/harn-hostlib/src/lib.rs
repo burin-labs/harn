@@ -81,10 +81,12 @@ pub fn install_default(vm: &mut harn_vm::Vm) -> HostlibRegistry {
         .with(tools::ToolsCapability)
         .with(secret_store::SecretStoreCapability);
     // Computer use (screenshot + mouse/keyboard) is opt-in at the feature
-    // level; the backend it binds is further gated at runtime by
-    // `BURIN_COMPUTER_USE_TRANSPORT` and, in the product, an off-by-default
-    // setting. Registering the builtins is harmless when disabled — the
-    // NullBackend fails each call with an explanatory message.
+    // level AND default-deny at runtime: even with `computer-local` compiled,
+    // the backend is a NullBackend unless `BURIN_COMPUTER_USE_TRANSPORT` is
+    // explicitly set to `local` (or `helper`/`remote`). In the product it is
+    // gated again by an off-by-default setting. Registering the builtins is
+    // therefore harmless when unarmed — every call fails with an explanatory
+    // message until the transport is explicitly chosen.
     #[cfg(feature = "computer")]
     {
         registry = registry.with(computer::ComputerUseCapability::new());

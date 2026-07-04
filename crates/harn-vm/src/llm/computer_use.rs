@@ -105,22 +105,6 @@ pub(crate) fn openai_computer_tool(
     })
 }
 
-/// Project the neutral `computer` function tool onto the route's native
-/// computer-use surface, in place.
-///
-/// - `native_anthropic` / `native_openai`: remove the plain function-schema
-///   `computer` copy from `native_tools` and push the provider-native tool into
-///   `provider_tools`, so the model sees exactly one computer tool (the native
-///   one).
-/// - any other style (`function`, `grounded`, or unset): no-op — the plain
-///   function-schema tool is the generic fallback the model calls directly.
-///
-/// INTEGRATION SEAM — display size: the native tool advertises, and the
-/// screenshot is scaled to, `DEFAULT_DISPLAY_WIDTH` x `DEFAULT_DISPLAY_HEIGHT`
-/// (Anthropic XGA) until the real captured display size is threaded here. The
-/// orchestrator should pass the captured `ScreenImage { width, height }`
-/// (scaled per [`scale_screenshot`]) so the advertised size matches the image
-/// the model actually receives.
 /// Whether to project the neutral computer tool onto the provider's native
 /// computer-use surface. Default OFF (the universal function-tool path is used);
 /// opt in with `BURIN_COMPUTER_USE_NATIVE=1|on|true` once a route's native
@@ -136,21 +120,37 @@ fn native_computer_projection_enabled() -> bool {
     )
 }
 
+/// Project the neutral `computer` function tool onto the route's native
+/// computer-use surface, in place.
+///
+/// - `native_anthropic` / `native_openai`: remove the plain function-schema
+///   `computer` copy from `native_tools` and push the provider-native tool into
+///   `provider_tools`, so the model sees exactly one computer tool (the native
+///   one).
+/// - any other style (`function`, `grounded`, or unset): no-op — the plain
+///   function-schema tool is the generic fallback the model calls directly.
+///
+/// NATIVE PATH IS NOT YET COORDINATE-SAFE — that is why it is default OFF and
+/// behind `BURIN_COMPUTER_USE_NATIVE`. The native tool advertises a fixed
+/// `DEFAULT_DISPLAY_WIDTH` x `DEFAULT_DISPLAY_HEIGHT` (Anthropic XGA) coordinate
+/// space, but three seams are NOT yet wired and must be armed together as one
+/// unit before this is enabled:
+///
+/// 1. the captured screenshot is NOT scaled to the advertised size (see
+///    `scale_screenshot`);
+/// 2. the model's returned coordinates are NOT mapped back to the real display
+///    (see `map_coord_back`);
+/// 3. the provider's native action vocabulary is NOT lowered to the neutral
+///    `ComputerAction` the harn `computer` handler executes.
+///
+/// Until all three land, enabling the opt-in makes clicks land in the wrong
+/// place. The default universal function-tool path uses none of this and is the
+/// verified surface.
 pub(crate) fn project_computer_tools(
     caps: &Capabilities,
     native_tools: &mut Option<Vec<Value>>,
     provider_tools: &mut Vec<Value>,
 ) {
-    // Native provider computer tools (Anthropic `computer_20251124`, OpenAI
-    // Responses `computer`) are an OPT-IN optimization, not the default. The
-    // universal path is the plain function-schema `computer` tool + the neutral
-    // screenshot round-trip: it uses ONE action schema (x/y, not the provider's
-    // `coordinate[]`), works on every vision model regardless of whether the
-    // provider supports native computer use (so a cheap model never 400s on an
-    // unsupported `computer_20251124`), and carries screenshots back through the
-    // verified image-block path. Native projection also swaps in the provider's
-    // own action vocabulary, which the harn `computer` handler does not parse —
-    // so keep it behind an explicit opt-in until that lowering is wired.
     project_computer_tools_with(
         caps,
         native_tools,

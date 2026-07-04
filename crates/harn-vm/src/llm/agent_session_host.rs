@@ -1212,20 +1212,23 @@ fn tool_result_message_for_provider(
         }
     }
     // A tool that returned a screenshot (the computer tool) carries the image
-    // back to the model as a `[text, screenshot]` content list. The provider
-    // content mappers (`anthropic_content`/`openai_content`) project the neutral
-    // screenshot dict into the provider's image block — and Anthropic's egress
-    // wraps BOTH `role:"tool"` and `role:"tool_result"` messages into a
-    // `tool_result` block, so this works regardless of whether the provider was
-    // recognized as Anthropic at record time (the session's last provider/model
-    // is not reliably set when the result is recorded). Gate only on the channel:
-    // the text channel has no image affordance, so it keeps the plain string.
+    // back to the model as a `[text, screenshot]` content list on EVERY channel,
+    // including the text channel (`role:"user"`). Computer use is only meaningful
+    // for a vision-capable model — the surface never offers the tool to a
+    // non-vision route — and every provider accepts an image content part in the
+    // message role this builds (Anthropic `tool_result`/`user`, OpenAI `user`
+    // after relocation, text-channel `user`). The provider content mappers
+    // (`anthropic_content`/`openai_content`) project the neutral screenshot dict
+    // into the provider's image block; Anthropic's egress additionally wraps both
+    // `role:"tool"` and `role:"tool_result"` messages into a `tool_result` block,
+    // so delivery does not depend on the session's last provider/model being set
+    // at record time (it often is not). `is_text_channel` only decides the ROLE
+    // above, not whether the image rides along.
     //
     // The text part is a SHORT summary, never the raw observation: a screenshot
     // observation is ~800 KB of base64 (the display-string of the ScreenImage),
     // which would bloat every subsequent turn and is redundant once the image
     // itself rides along. A result with no screenshot is byte-identical to before.
-    let _ = is_text_channel;
     match screenshot {
         Some(image) => {
             let summary = screenshot_result_summary(observation);
