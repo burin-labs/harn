@@ -54,6 +54,7 @@ GATES=(
   check-run-view-fixtures
   check-provider-catalog
   check-provider-catalog-drift
+  check-python-boundary
   check-docs-workflow-quickstart
   check-vm-rss-soak
 )

@@ -34,6 +34,7 @@ It is a living tracker, not a spec. When you port a script, move its row to
 | `check_changelog_no_retroactive_edits.harn` | `.github/workflows/ci.yml` + pre-push hook | Published-version CHANGELOG guard; bypasses require env/trailer review signal. |
 | `check_rust_prompt_prose.harn` | `scripts/check_no_rust_prompt_prose.sh` + pre-commit hook | Rust prompt-prose ratchet with stable allowlist/digest contract. |
 | `check_generated_registry.harn` | `make check-generated-registry` + pre-push hook | Registry/Makefile/workflow generated-artifact guard. |
+| `check_python_boundary.harn` | `make check-python-boundary` + audit gate | Ratchets Python usage to explicit bootstrap/platform/generated/fixture reasons. |
 
 Each ported script has a paired `scripts/tests/<name>_test.harn` exercising its
 pure helpers, run by `make test-harn-scripts`.
