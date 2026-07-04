@@ -1,0 +1,90 @@
+// Caller-managed conversation history seeding (agent_loop `history` option, #4019).
+//
+// A seeded `history` carrying a fact ("the codeword is pixel") must appear in
+// the loop's FIRST outbound LLM request, in order, ahead of the fresh user
+// turn — so a history-dependent question can be answered from prior context.
+// Reproduces the issue's A/B failure deterministically with a capturing mock
+// caller (no live model): the caller echoes the messages it was handed back as
+// its response text, and the seeded turns are asserted in both the outbound
+// request and the resulting transcript.
+import { agent_session_messages } from "std/agent/state"
+
+fn summarize(messages) {
+  var out = []
+  for msg in messages {
+    out = out.push(to_string(msg?.role ?? "") + "=" + to_string(msg?.content ?? ""))
+  }
+  return join(out, " | ")
+}
+
+pipeline test() {
+  let caller = { call -> return {
+    ok: true,
+    value: {
+      text: "SEEN[" + summarize(call.opts.messages) + "]",
+      provider: "mock",
+      model: "mock",
+      input_tokens: 0,
+      output_tokens: 0,
+    },
+  } }
+  let history = [
+    {role: "user", content: "Remember this: the codeword is pixel."},
+    {role: "assistant", content: "Understood, the codeword is pixel."},
+  ]
+  let session = "agent-history-seed-conformance"
+  let result = agent_loop(
+    "What is the codeword?",
+    nil,
+    {session_id: session, provider: "mock", llm_caller: caller, history: history, max_iterations: 1},
+  )
+  // The first outbound request carried the seeded turns in order, ahead of the
+  // fresh user question — exactly as `llm_call`'s `messages` array would.
+  let expected_first_call = "SEEN[user=Remember this: the codeword is pixel. | "
+    + "assistant=Understood, the codeword is pixel. | user=What is the codeword?]"
+  assert(
+    contains(result.visible_text, expected_first_call),
+    "first LLM call must include seeded history in order; saw: " + result.visible_text,
+  )
+  // The seeded turns are ordinary transcript turns.
+  let transcript = agent_session_messages(session)
+  assert(len(transcript) >= 3, "transcript should retain seeded turns plus the question")
+  assert(transcript[0].role == "user", "seed turn 0 role")
+  assert(transcript[0].content == "Remember this: the codeword is pixel.", "seed turn 0 content")
+  assert(transcript[1].role == "assistant", "seed turn 1 role")
+  assert(transcript[2].role == "user", "fresh user question follows the seed")
+  assert(transcript[2].content == "What is the codeword?", "fresh user question content")
+  // Blank-message shape: when `history` carries the latest user turn and the
+  // task message is empty, no trailing empty user turn is appended.
+  let blank_history = [
+    {role: "user", content: "Remember: the codeword is pixel."},
+    {role: "assistant", content: "Understood."},
+    {role: "user", content: "What is the codeword?"},
+  ]
+  let blank_session = "agent-history-seed-blank-conformance"
+  let blank_result = agent_loop(
+    "",
+    nil,
+    {
+      session_id: blank_session,
+      provider: "mock",
+      llm_caller: caller,
+      history: blank_history,
+      max_iterations: 1,
+    },
+  )
+  let blank_expected = "SEEN[user=Remember: the codeword is pixel. | "
+    + "assistant=Understood. | user=What is the codeword?]"
+  assert(
+    contains(blank_result.visible_text, blank_expected),
+    "blank-message loop must send exactly the seeded history; saw: " + blank_result.visible_text,
+  )
+  // No empty user turn was appended: the trailing `]` in the asserted SEEN
+  // output above proves the seeded question was the last outbound turn. The
+  // first three transcript turns are exactly the seeded history.
+  let blank_transcript = agent_session_messages(blank_session)
+  assert(blank_transcript[0].content == "Remember: the codeword is pixel.", "blank seed turn 0")
+  assert(blank_transcript[2].role == "user", "blank seed question role")
+  assert(blank_transcript[2].content == "What is the codeword?", "blank seed question content")
+  log("history seeding tests passed")
+}

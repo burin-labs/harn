@@ -228,6 +228,47 @@ model calls it, the current `agent_loop` turn stops with
 `stop_reason: "wait_for_user"` and the wrapper returns to `on_user_input`.
 Pass `wait_for_user_tool: false` to keep the tool registry unchanged.
 
+### Seeding caller-managed history
+
+A harness that owns its own conversation history — a chat app, a replayed
+transcript, a router that reconstructs prior turns from its own store — can
+seed those turns into an agent loop with the `history` option. It is a list of
+messages in the same canonical shape `llm_call` accepts (`{role, content, ...}`,
+roles `user` / `assistant` / `tool_result` / `system`). The turns are prepended
+to the transcript as real conversational turns, ahead of the fresh task message,
+so the loop's first (and every subsequent) provider request presents them
+exactly as `llm_call`'s `messages` array would.
+
+```harn,ignore
+let result = agent_loop(
+  "What is the codeword?",
+  nil,
+  {
+    provider: "ollama",
+    model: "devstral-small-2",
+    history: [
+      {role: "user", content: "Remember this: the codeword is pixel."},
+      {role: "assistant", content: "Understood — the codeword is pixel."},
+    ],
+  },
+)
+```
+
+`history` is **transient seeding, not session persistence** — the caller owns
+the history and passes it in on every call; nothing is stored across loops.
+When `history` is non-empty and the task `message` is blank, the loop treats the
+last history turn as the current turn and does not append an empty user message.
+The seeded turns are ordinary transcript turns thereafter: `done_judge`,
+compaction, and per-turn projection all treat them like any turn the loop
+produced itself (compaction may summarize them once the transcript grows).
+
+This is the middle rung of the orchestration ladder: use `llm_call` for a single
+stateless request; use `agent_loop` with `history` for a tool-using chat turn
+that must see prior context; reach for a workflow only when one interaction spans
+more than one goal, attempt, or model. Chat-shaped harnesses that previously had
+to stay on raw `llm_call`/`llm_stream_call` to keep their history can now use the
+full agent loop (tools, judges, compaction) without losing the conversation.
+
 ### agent_loop options
 
 Same as `llm_call`, plus additional options:
@@ -235,6 +276,7 @@ Same as `llm_call`, plus additional options:
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `profile` | string | `"tool_using"` | Named preset for common loop shapes. One of `"tool_using"`, `"researcher"`, `"verifier"`, or `"completer"`; explicit option keys override profile defaults |
+| `history` | list | nil | Caller-managed conversation history to seed. A list of messages in the canonical `llm_call` shape (`{role, content, ...}`, roles `user`/`assistant`/`tool_result`/`system`) prepended to the transcript as real turns ahead of the task message, so the first LLM call sees them exactly as `llm_call`'s `messages` array would. Transient seeding, not session persistence — the caller owns the history. When `history` is non-empty and the task `message` is blank, no empty user turn is appended. See [Seeding caller-managed history](#seeding-caller-managed-history) |
 | `loop_until_done` | bool | `false` | Keep looping until completion. Native-tool loops complete on final text with no tool calls; text-tool/no-tool sentinel loops complete on `##DONE##` or `<done>##DONE##</done>` |
 | `done_sentinel` | string\|nil | mode-aware | Completion sentinel for sentinel-based loops. Use a non-empty string such as `"##DONE##"` to require sentinel completion, or `nil` for no sentinel. Native-tool loop-until-done loops default to `nil`; text/no-tool loop-until-done loops default to `"##DONE##"` |
 | `max_iterations` | int | `50` | Maximum number of LLM round-trips. Equivalent to `iteration_budget: {mode: "fixed", initial: N, max: N}` |
