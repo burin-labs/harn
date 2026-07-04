@@ -1,4 +1,3 @@
-use crate::value::VmDictExt;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -7,12 +6,11 @@ use ignore::WalkBuilder;
 use sha2::{Digest, Sha256};
 
 use crate::runtime_limits::RuntimeLimits;
-use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
+use crate::stdlib::process::resolve_source_relative_path;
+use crate::stdlib::project_catalog::{project_catalog, ProjectCatalogEntry};
+use crate::value::{VmDictExt, VmError, VmValue};
 
-use super::process::resolve_source_relative_path;
-use super::project_catalog::{project_catalog, ProjectCatalogEntry};
-use super::project_enrich::register_project_enrich_builtin;
+use super::*;
 
 const STANDARD_VENDOR_DIRS: &[&str] = &[
     ".git",
@@ -121,89 +119,25 @@ const CI_FILE_NAMES: &[&str] = &[
     "bitrise.yml",
     "circle.yml",
 ];
-const CONTEXT_PROFILE_SCHEMA_VERSION: i64 = 1;
-const GITHUB_CREDENTIAL_ENV_KEYS: &[&str] =
-    &["GITHUB_PERSONAL_ACCESS_TOKEN", "GITHUB_TOKEN", "GH_TOKEN"];
-
-#[derive(Debug, Clone, Copy)]
-struct ContextProfileDef {
-    id: &'static str,
-    cap: &'static str,
-    skills: &'static [&'static str],
-    tool_groups: &'static [&'static str],
-    mcp_presets: &'static [&'static str],
-    body: &'static str,
-}
-
-const CONTEXT_PROFILE_DEFS: &[ContextProfileDef] = &[
-    ContextProfileDef {
-        id: "git",
-        cap: "vcs.git",
-        skills: &["git"],
-        tool_groups: &["git"],
-        mcp_presets: &[],
-        body: "Project profile: Git repository detected. Treat branch state, staged changes, and remote history as part of the working context before changing repository state.",
-    },
-    ContextProfileDef {
-        id: "github",
-        cap: "remote.github",
-        skills: &["github"],
-        tool_groups: &["github"],
-        mcp_presets: &["github"],
-        body: "Project profile: GitHub remote detected. Prefer GitHub-aware issue, pull request, and CI workflows when GitHub tools or MCP presets are available.",
-    },
-    ContextProfileDef {
-        id: "rust",
-        cap: "language.rust",
-        skills: &["rust"],
-        tool_groups: &["cargo"],
-        mcp_presets: &[],
-        body: "Project profile: Rust project detected. Prefer Cargo-native build, test, lint, and workspace workflows.",
-    },
-    ContextProfileDef {
-        id: "node",
-        cap: "ecosystem.node",
-        skills: &["node", "typescript"],
-        tool_groups: &["node"],
-        mcp_presets: &[],
-        body: "Project profile: Node or TypeScript project detected. Prefer package-manager scripts and lockfile-aware dependency workflows.",
-    },
-    ContextProfileDef {
-        id: "python",
-        cap: "language.python",
-        skills: &["python"],
-        tool_groups: &["python"],
-        mcp_presets: &[],
-        body: "Project profile: Python project detected. Prefer the detected environment manager and test runner before falling back to raw Python commands.",
-    },
-    ContextProfileDef {
-        id: "swift",
-        cap: "language.swift",
-        skills: &["swift"],
-        tool_groups: &["swift"],
-        mcp_presets: &[],
-        body: "Project profile: Swift package detected. Prefer SwiftPM build and test workflows.",
-    },
-];
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-struct ProjectFingerprint {
-    primary_language: String,
-    languages: Vec<String>,
-    frameworks: Vec<String>,
-    package_manager: Option<String>,
-    package_managers: Vec<String>,
-    test_runner: Option<String>,
-    build_tool: Option<String>,
-    vcs: Option<String>,
-    ci: Vec<String>,
-    has_tests: bool,
-    has_ci: bool,
-    lockfile_paths: Vec<String>,
+pub(super) struct ProjectFingerprint {
+    pub(super) primary_language: String,
+    pub(super) languages: Vec<String>,
+    pub(super) frameworks: Vec<String>,
+    pub(super) package_manager: Option<String>,
+    pub(super) package_managers: Vec<String>,
+    pub(super) test_runner: Option<String>,
+    pub(super) build_tool: Option<String>,
+    pub(super) vcs: Option<String>,
+    pub(super) ci: Vec<String>,
+    pub(super) has_tests: bool,
+    pub(super) has_ci: bool,
+    pub(super) lockfile_paths: Vec<String>,
 }
 
 impl ProjectFingerprint {
-    fn into_vm_value(self) -> VmValue {
+    pub(super) fn into_vm_value(self) -> VmValue {
         let mut value = BTreeMap::new();
         value.put_str("primary_language", self.primary_language);
         value.insert(
@@ -306,15 +240,15 @@ struct FingerprintSignals {
 }
 
 #[derive(Debug, Clone, Copy, Default, Eq, Ord, PartialEq, PartialOrd)]
-enum ScanTier {
+pub(super) enum ScanTier {
     #[default]
     Ambient,
     Config,
 }
 
 #[derive(Debug, Clone)]
-struct ProjectScanOptions {
-    tiers: BTreeSet<ScanTier>,
+pub(super) struct ProjectScanOptions {
+    pub(super) tiers: BTreeSet<ScanTier>,
     depth: Option<usize>,
     include_hidden: bool,
     include_vendor: bool,
@@ -334,15 +268,15 @@ impl Default for ProjectScanOptions {
 }
 
 #[derive(Debug, Clone, Default)]
-struct ProjectTreeEntry {
-    relative_path: String,
-    metadata_path: String,
-    structure_hash: String,
-    content_hash: String,
+pub(super) struct ProjectTreeEntry {
+    pub(super) relative_path: String,
+    pub(super) metadata_path: String,
+    pub(super) structure_hash: String,
+    pub(super) content_hash: String,
 }
 
 impl ProjectTreeEntry {
-    fn into_vm_value(self) -> VmValue {
+    pub(super) fn into_vm_value(self) -> VmValue {
         let mut value = BTreeMap::new();
         value.put_str("path", self.relative_path);
         value.put_str("dir", self.metadata_path);
@@ -353,9 +287,9 @@ impl ProjectTreeEntry {
 }
 
 #[derive(Debug, Clone, Default)]
-struct ProjectEvidence {
+pub(super) struct ProjectEvidence {
     path: PathBuf,
-    language_scores: BTreeMap<String, f64>,
+    pub(super) language_scores: BTreeMap<String, f64>,
     framework_scores: BTreeMap<String, f64>,
     build_systems: BTreeSet<String>,
     vcs: Option<String>,
@@ -370,7 +304,7 @@ struct ProjectEvidence {
 }
 
 impl ProjectEvidence {
-    fn into_vm_value(self) -> VmValue {
+    pub(super) fn into_vm_value(self) -> VmValue {
         let confidence = confidence_value(&self);
         let mut result = BTreeMap::new();
         result.put_str("path", self.path.to_string_lossy());
@@ -481,400 +415,7 @@ impl ProjectEvidence {
     }
 }
 
-#[derive(Debug, Clone, Default)]
-struct ContextProfileOptions {
-    fingerprint: Option<ProjectFingerprint>,
-    remote: Option<GitRemoteSignal>,
-    signal_source: Option<String>,
-    credentials: BTreeSet<String>,
-    include_env_credentials: bool,
-}
-
-#[derive(Debug, Clone, Default)]
-struct ContextSignals {
-    fingerprint: ProjectFingerprint,
-    remote: Option<GitRemoteSignal>,
-    source: String,
-    credentials: BTreeSet<String>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-struct GitRemoteSignal {
-    name: String,
-    host: String,
-    slug: Option<String>,
-    redacted_url: String,
-}
-
-#[derive(Debug, Clone)]
-struct ContextProfileFragment {
-    id: String,
-    source: String,
-    body: String,
-    requires_caps: Vec<String>,
-}
-
-#[derive(Debug, Clone)]
-struct McpPresetCandidate {
-    id: String,
-    status: String,
-    missing_credentials: Vec<String>,
-}
-
-#[derive(Debug, Clone)]
-struct ContextProfileActivation {
-    id: String,
-    reason: String,
-    caps: Vec<String>,
-    skills: Vec<String>,
-    tool_groups: Vec<String>,
-    mcp_presets: Vec<String>,
-    mcp_preset_candidates: Vec<McpPresetCandidate>,
-    prompt_fragment: ContextProfileFragment,
-}
-
-#[derive(Debug, Clone)]
-struct ContextProfileResolution {
-    path: PathBuf,
-    signals: ContextSignals,
-    profiles: Vec<ContextProfileActivation>,
-    always_on_prompt_tokens: i64,
-    activated_prompt_tokens: i64,
-    always_on_prompt_bytes: usize,
-    activated_prompt_bytes: usize,
-}
-
-impl ContextProfileResolution {
-    fn into_vm_value(self) -> VmValue {
-        let profile_ids = self
-            .profiles
-            .iter()
-            .map(|profile| profile.id.clone())
-            .collect::<Vec<_>>();
-        let skills = unique_flatten(
-            self.profiles
-                .iter()
-                .flat_map(|profile| profile.skills.clone()),
-        );
-        let tool_groups = unique_flatten(
-            self.profiles
-                .iter()
-                .flat_map(|profile| profile.tool_groups.clone()),
-        );
-        let mcp_presets = unique_flatten(
-            self.profiles
-                .iter()
-                .flat_map(|profile| profile.mcp_presets.clone()),
-        );
-        let caps = unique_flatten(
-            self.profiles
-                .iter()
-                .flat_map(|profile| profile.caps.clone()),
-        );
-        let prompt_fragments = self
-            .profiles
-            .iter()
-            .map(|profile| profile.prompt_fragment.clone().into_vm_value())
-            .collect::<Vec<_>>();
-        let mcp_preset_candidates = unique_mcp_candidates(
-            self.profiles
-                .iter()
-                .flat_map(|profile| profile.mcp_preset_candidates.clone()),
-        );
-
-        let mut token_delta = BTreeMap::new();
-        token_delta.insert(
-            "activated_tokens".to_string(),
-            VmValue::Int(self.activated_prompt_tokens),
-        );
-        token_delta.insert(
-            "always_on_tokens".to_string(),
-            VmValue::Int(self.always_on_prompt_tokens),
-        );
-        token_delta.insert(
-            "saved_tokens".to_string(),
-            VmValue::Int((self.always_on_prompt_tokens - self.activated_prompt_tokens).max(0)),
-        );
-        token_delta.insert(
-            "activated_bytes".to_string(),
-            VmValue::Int(self.activated_prompt_bytes as i64),
-        );
-        token_delta.insert(
-            "always_on_bytes".to_string(),
-            VmValue::Int(self.always_on_prompt_bytes as i64),
-        );
-        token_delta.insert(
-            "saved_bytes".to_string(),
-            VmValue::Int(
-                self.always_on_prompt_bytes
-                    .saturating_sub(self.activated_prompt_bytes) as i64,
-            ),
-        );
-
-        let mut out = BTreeMap::new();
-        out.insert(
-            "schema_version".to_string(),
-            VmValue::Int(CONTEXT_PROFILE_SCHEMA_VERSION),
-        );
-        out.put_str("path", self.path.to_string_lossy());
-        out.insert("signals".to_string(), self.signals.into_vm_value());
-        out.insert("profile_ids".to_string(), string_list_value(profile_ids));
-        out.insert(
-            "profiles".to_string(),
-            VmValue::List(std::sync::Arc::new(
-                self.profiles
-                    .into_iter()
-                    .map(ContextProfileActivation::into_vm_value)
-                    .collect(),
-            )),
-        );
-        out.insert("skills".to_string(), string_list_value(skills));
-        out.insert("tool_groups".to_string(), string_list_value(tool_groups));
-        out.insert("mcp_presets".to_string(), string_list_value(mcp_presets));
-        out.insert(
-            "mcp_preset_candidates".to_string(),
-            VmValue::List(std::sync::Arc::new(
-                mcp_preset_candidates
-                    .into_iter()
-                    .map(McpPresetCandidate::into_vm_value)
-                    .collect(),
-            )),
-        );
-        out.insert("caps".to_string(), string_list_value(caps));
-        out.insert(
-            "prompt_fragments".to_string(),
-            VmValue::List(std::sync::Arc::new(prompt_fragments)),
-        );
-        out.insert("token_delta".to_string(), VmValue::dict(token_delta));
-        VmValue::dict(out)
-    }
-}
-
-impl ContextSignals {
-    fn into_vm_value(self) -> VmValue {
-        let mut out = BTreeMap::new();
-        out.insert("source".to_string(), VmValue::string(self.source));
-        out.insert("fingerprint".to_string(), self.fingerprint.into_vm_value());
-        out.insert(
-            "remote".to_string(),
-            self.remote
-                .map(GitRemoteSignal::into_vm_value)
-                .unwrap_or(VmValue::Nil),
-        );
-        out.insert(
-            "credentials".to_string(),
-            string_list_value(self.credentials.into_iter().collect()),
-        );
-        VmValue::dict(out)
-    }
-}
-
-impl GitRemoteSignal {
-    fn into_vm_value(self) -> VmValue {
-        let mut out = BTreeMap::new();
-        out.insert("name".to_string(), VmValue::string(self.name));
-        out.insert("host".to_string(), VmValue::string(self.host));
-        out.insert(
-            "slug".to_string(),
-            self.slug.map(VmValue::string).unwrap_or(VmValue::Nil),
-        );
-        out.insert("url".to_string(), VmValue::string(self.redacted_url));
-        VmValue::dict(out)
-    }
-}
-
-impl ContextProfileFragment {
-    fn into_vm_value(self) -> VmValue {
-        let mut out = BTreeMap::new();
-        out.insert("id".to_string(), VmValue::string(self.id));
-        out.insert("source".to_string(), VmValue::string(self.source));
-        out.insert("body".to_string(), VmValue::string(self.body));
-        out.insert(
-            "requires_caps".to_string(),
-            string_list_value(self.requires_caps),
-        );
-        VmValue::dict(out)
-    }
-}
-
-impl McpPresetCandidate {
-    fn into_vm_value(self) -> VmValue {
-        let mut out = BTreeMap::new();
-        out.insert("id".to_string(), VmValue::string(self.id));
-        out.insert("status".to_string(), VmValue::string(self.status));
-        out.insert(
-            "missing_credentials".to_string(),
-            string_list_value(self.missing_credentials),
-        );
-        VmValue::dict(out)
-    }
-}
-
-impl ContextProfileActivation {
-    fn into_vm_value(self) -> VmValue {
-        let mut out = BTreeMap::new();
-        out.insert("id".to_string(), VmValue::string(self.id));
-        out.insert("reason".to_string(), VmValue::string(self.reason));
-        out.insert("caps".to_string(), string_list_value(self.caps));
-        out.insert("skills".to_string(), string_list_value(self.skills));
-        out.insert(
-            "tool_groups".to_string(),
-            string_list_value(self.tool_groups),
-        );
-        out.insert(
-            "mcp_presets".to_string(),
-            string_list_value(self.mcp_presets),
-        );
-        out.insert(
-            "mcp_preset_candidates".to_string(),
-            VmValue::List(std::sync::Arc::new(
-                self.mcp_preset_candidates
-                    .into_iter()
-                    .map(McpPresetCandidate::into_vm_value)
-                    .collect(),
-            )),
-        );
-        out.insert(
-            "prompt_fragment".to_string(),
-            self.prompt_fragment.into_vm_value(),
-        );
-        VmValue::dict(out)
-    }
-}
-
-pub(crate) fn register_project_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
-    register_project_enrich_builtin(vm);
-}
-
-pub(crate) const MODULE_BUILTINS: &[&crate::stdlib::macros::VmBuiltinDef] = &[
-    &PROJECT_CONTEXT_PROFILE_NATIVE_IMPL_DEF,
-    &PROJECT_FINGERPRINT_IMPL_DEF,
-    &PROJECT_SCAN_NATIVE_IMPL_DEF,
-    &PROJECT_SCAN_TREE_NATIVE_IMPL_DEF,
-    &PROJECT_WALK_TREE_NATIVE_IMPL_DEF,
-    &PROJECT_CATALOG_NATIVE_IMPL_DEF,
-];
-
-#[crate::stdlib::macros::harn_builtin(
-    sig = "project_context_profile_native(path?: string, options?: dict) -> dict",
-    category = "project"
-)]
-fn project_context_profile_native_impl(
-    args: &[VmValue],
-    _out: &mut String,
-) -> Result<VmValue, VmError> {
-    if args.len() > 2 {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            "project_context_profile: expected at most 2 arguments",
-        ))));
-    }
-    let path = args
-        .first()
-        .map(|value| value.display())
-        .unwrap_or_else(|| ".".to_string());
-    let options = parse_context_profile_options(args.get(1));
-    let root = if options.fingerprint.is_none() {
-        resolve_existing_directory(&path)?
-    } else {
-        resolve_source_relative_path(&path)
-            .canonicalize()
-            .unwrap_or_else(|_| resolve_source_relative_path(&path))
-    };
-    Ok(resolve_context_profile(&root, options).into_vm_value())
-}
-
-#[crate::stdlib::macros::harn_builtin(
-    sig = "project_fingerprint(path?: string) -> dict",
-    category = "project"
-)]
-fn project_fingerprint_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    if args.len() > 1 {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            "project_fingerprint: expected at most 1 argument",
-        ))));
-    }
-    let path = args
-        .first()
-        .map(|value| value.display())
-        .unwrap_or_else(|| ".".to_string());
-    let root = resolve_existing_directory(&path)?;
-    Ok(detect_project_fingerprint(&root).into_vm_value())
-}
-
-#[crate::stdlib::macros::harn_builtin(
-    sig = "project_scan_native(path?: string, options?: dict) -> dict",
-    category = "project"
-)]
-fn project_scan_native_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let path = args
-        .first()
-        .map(|value| value.display())
-        .unwrap_or_else(|| ".".to_string());
-    let options = parse_project_options(args.get(1));
-    let root = resolve_existing_directory(&path)?;
-    Ok(scan_exact_directory(&root, &options).into_vm_value())
-}
-
-#[crate::stdlib::macros::harn_builtin(
-    sig = "project_scan_tree_native(path?: string, options?: dict) -> dict",
-    category = "project"
-)]
-fn project_scan_tree_native_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let path = args
-        .first()
-        .map(|value| value.display())
-        .unwrap_or_else(|| ".".to_string());
-    let options = parse_project_options(args.get(1));
-    let base = resolve_existing_directory(&path)?;
-    let tree = scan_project_tree(&base, &options)?;
-    Ok(VmValue::dict(
-        tree.into_iter()
-            .map(|(rel, evidence)| (rel, evidence.into_vm_value()))
-            .collect::<crate::value::DictMap>(),
-    ))
-}
-
-#[crate::stdlib::macros::harn_builtin(
-    sig = "project_walk_tree_native(path?: string, options?: dict) -> list",
-    category = "project"
-)]
-fn project_walk_tree_native_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let path = args
-        .first()
-        .map(|value| value.display())
-        .unwrap_or_else(|| ".".to_string());
-    let options = parse_project_options(args.get(1));
-    let base = resolve_existing_directory(&path)?;
-    let tree = walk_project_tree(&base, &options)?;
-    Ok(VmValue::List(std::sync::Arc::new(
-        tree.into_iter()
-            .map(ProjectTreeEntry::into_vm_value)
-            .collect(),
-    )))
-}
-
-#[crate::stdlib::macros::harn_builtin(
-    sig = "project_catalog_native() -> list",
-    category = "project"
-)]
-fn project_catalog_native_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let entries = project_catalog()
-        .iter()
-        .map(catalog_entry_value)
-        .collect::<Vec<_>>();
-    Ok(VmValue::List(std::sync::Arc::new(entries)))
-}
-
-pub(crate) fn project_scan_config_value(dir: &Path) -> VmValue {
-    let mut options = ProjectScanOptions::default();
-    options.tiers.insert(ScanTier::Config);
-    scan_exact_directory(dir, &options).into_vm_value()
-}
-
-fn parse_project_options(value: Option<&VmValue>) -> ProjectScanOptions {
+pub(super) fn parse_project_options(value: Option<&VmValue>) -> ProjectScanOptions {
     let mut options = ProjectScanOptions::default();
     let Some(dict) = value.and_then(VmValue::as_dict) else {
         return options;
@@ -918,311 +459,13 @@ fn parse_project_options(value: Option<&VmValue>) -> ProjectScanOptions {
     options
 }
 
-fn parse_context_profile_options(value: Option<&VmValue>) -> ContextProfileOptions {
-    let mut options = ContextProfileOptions {
-        include_env_credentials: true,
-        ..ContextProfileOptions::default()
-    };
-    let Some(dict) = value.and_then(VmValue::as_dict) else {
-        options.credentials.extend(env_credentials());
-        return options;
-    };
-
-    if let Some(include_env) = dict.get("include_env_credentials").and_then(value_as_bool) {
-        options.include_env_credentials = include_env;
-    }
-    if let Some(credentials) = dict.get("credentials") {
-        options.credentials.extend(parse_credentials(credentials));
-    }
-    if let Some(fingerprint) = dict
-        .get("fingerprint")
-        .and_then(project_fingerprint_from_value)
-    {
-        options.fingerprint = Some(fingerprint);
-        options
-            .signal_source
-            .get_or_insert_with(|| "provided".to_string());
-    }
-    if let Some(remote) = dict.get("remote").and_then(remote_signal_from_value) {
-        options.remote = Some(remote);
-        options
-            .signal_source
-            .get_or_insert_with(|| "provided".to_string());
-    }
-    if let Some(source) = dict.get("source").and_then(value_as_string) {
-        options.signal_source = Some(source);
-    }
-
-    if let Some(signals) = dict.get("signals").and_then(VmValue::as_dict) {
-        if options.fingerprint.is_none() {
-            let fingerprint_value = signals
-                .get("fingerprint")
-                .or_else(|| signals.get("project_fingerprint"));
-            options.fingerprint = fingerprint_value
-                .and_then(project_fingerprint_from_value)
-                .or_else(|| project_fingerprint_from_dict(signals));
-        }
-        if options.remote.is_none() {
-            options.remote = signals
-                .get("remote")
-                .or_else(|| signals.get("git_remote"))
-                .and_then(remote_signal_from_value);
-        }
-        if options.signal_source.is_none() {
-            options.signal_source = signals
-                .get("source")
-                .and_then(value_as_string)
-                .or_else(|| {
-                    signals
-                        .get("_provenance")
-                        .and_then(VmValue::as_dict)
-                        .and_then(|provenance| provenance.get("source"))
-                        .and_then(value_as_string)
-                })
-                .or_else(|| Some("provided".to_string()));
-        }
-    }
-
-    if options.include_env_credentials {
-        options.credentials.extend(env_credentials());
-    }
-    options
-}
-
-fn resolve_context_profile(
-    root: &Path,
-    options: ContextProfileOptions,
-) -> ContextProfileResolution {
-    let fingerprint = options
-        .fingerprint
-        .clone()
-        .unwrap_or_else(|| detect_project_fingerprint(root));
-    let remote = options.remote.clone().or_else(|| detect_git_remote(root));
-    let had_supplied_signals = options.fingerprint.is_some() || options.remote.is_some();
-    let source = options.signal_source.unwrap_or_else(|| {
-        if had_supplied_signals {
-            "provided".to_string()
-        } else {
-            "scan".to_string()
-        }
-    });
-    let signals = ContextSignals {
-        fingerprint,
-        remote,
-        source,
-        credentials: options.credentials,
-    };
-
-    let profiles = CONTEXT_PROFILE_DEFS
-        .iter()
-        .filter(|profile| context_profile_matches(profile, &signals))
-        .map(|profile| activate_context_profile(profile, &signals))
-        .collect::<Vec<_>>();
-    let always_on_prompt = CONTEXT_PROFILE_DEFS
-        .iter()
-        .map(|profile| profile.body)
-        .collect::<Vec<_>>()
-        .join("\n\n");
-    let activated_prompt = profiles
-        .iter()
-        .map(|profile| profile.prompt_fragment.body.as_str())
-        .collect::<Vec<_>>()
-        .join("\n\n");
-
-    ContextProfileResolution {
-        path: root.to_path_buf(),
-        signals,
-        profiles,
-        always_on_prompt_tokens: crate::llm::estimate_text_tokens(&always_on_prompt),
-        activated_prompt_tokens: crate::llm::estimate_text_tokens(&activated_prompt),
-        always_on_prompt_bytes: always_on_prompt.len(),
-        activated_prompt_bytes: activated_prompt.len(),
-    }
-}
-
-fn context_profile_matches(profile: &ContextProfileDef, signals: &ContextSignals) -> bool {
-    match profile.id {
-        "git" => signals.fingerprint.vcs.as_deref() == Some("git") || signals.remote.is_some(),
-        "github" => signals.remote.as_ref().is_some_and(|remote| {
-            remote.host == "github.com" || (remote.host.is_empty() && remote.slug.is_some())
-        }),
-        "rust" => signal_has_language(&signals.fingerprint, "rust"),
-        "node" => {
-            signal_has_language(&signals.fingerprint, "typescript")
-                || signal_has_language(&signals.fingerprint, "javascript")
-                || ["npm", "pnpm", "yarn"]
-                    .iter()
-                    .any(|manager| signal_has_package_manager(&signals.fingerprint, manager))
-        }
-        "python" => signal_has_language(&signals.fingerprint, "python"),
-        "swift" => signal_has_language(&signals.fingerprint, "swift"),
-        _ => false,
-    }
-}
-
-fn activate_context_profile(
-    profile: &ContextProfileDef,
-    signals: &ContextSignals,
-) -> ContextProfileActivation {
-    let candidates = profile
-        .mcp_presets
-        .iter()
-        .map(|id| mcp_preset_candidate(id, &signals.credentials))
-        .collect::<Vec<_>>();
-    let ready_presets = candidates
-        .iter()
-        .filter(|candidate| candidate.status == "ready")
-        .map(|candidate| candidate.id.clone())
-        .collect::<Vec<_>>();
-    ContextProfileActivation {
-        id: profile.id.to_string(),
-        reason: context_profile_reason(profile, signals),
-        caps: vec![profile.cap.to_string()],
-        skills: profile
-            .skills
-            .iter()
-            .map(|skill| (*skill).to_string())
-            .collect(),
-        tool_groups: profile
-            .tool_groups
-            .iter()
-            .map(|group| (*group).to_string())
-            .collect(),
-        mcp_presets: ready_presets,
-        mcp_preset_candidates: candidates,
-        prompt_fragment: ContextProfileFragment {
-            id: format!("profile:{}", profile.id),
-            source: format!("profile:{}", profile.id),
-            body: profile.body.to_string(),
-            requires_caps: vec![profile.cap.to_string()],
-        },
-    }
-}
-
-fn context_profile_reason(profile: &ContextProfileDef, signals: &ContextSignals) -> String {
-    match profile.id {
-        "git" => "vcs=git".to_string(),
-        "github" => match signals
-            .remote
-            .as_ref()
-            .and_then(|remote| remote.slug.as_ref())
-        {
-            Some(slug) => format!("github remote `{slug}`"),
-            None => "github remote".to_string(),
-        },
-        "rust" => "language=rust".to_string(),
-        "node" => "ecosystem=node".to_string(),
-        "python" => "language=python".to_string(),
-        "swift" => "language=swift".to_string(),
-        _ => "matched".to_string(),
-    }
-}
-
-fn signal_has_language(fingerprint: &ProjectFingerprint, language: &str) -> bool {
-    fingerprint.primary_language == language
-        || fingerprint
-            .languages
-            .iter()
-            .any(|candidate| candidate == language)
-}
-
-fn signal_has_package_manager(fingerprint: &ProjectFingerprint, package_manager: &str) -> bool {
-    fingerprint.package_manager.as_deref() == Some(package_manager)
-        || fingerprint
-            .package_managers
-            .iter()
-            .any(|candidate| candidate == package_manager)
-}
-
-fn mcp_preset_candidate(id: &str, credentials: &BTreeSet<String>) -> McpPresetCandidate {
-    let missing_credentials = missing_preset_credentials(id, credentials);
-    McpPresetCandidate {
-        id: id.to_string(),
-        status: if missing_credentials.is_empty() {
-            "ready".to_string()
-        } else {
-            "needs_credentials".to_string()
-        },
-        missing_credentials,
-    }
-}
-
-fn missing_preset_credentials(id: &str, credentials: &BTreeSet<String>) -> Vec<String> {
-    let Some(preset) = crate::mcp_presets::preset(id) else {
-        return Vec::new();
-    };
-    let mut missing = Vec::new();
-    for placeholder in &preset.placeholders {
-        if !placeholder.required {
-            continue;
-        }
-        if placeholder.target != crate::mcp_presets::PlaceholderTarget::Env {
-            missing.push(placeholder.key.clone());
-            continue;
-        }
-        let alias = credential_alias(&placeholder.key);
-        if !credentials.contains(&alias) {
-            missing.push(placeholder.key.clone());
-        }
-    }
-    missing
-}
-
-fn parse_credentials(value: &VmValue) -> BTreeSet<String> {
-    let mut out = BTreeSet::new();
-    match value {
-        VmValue::List(items) => {
-            for item in items.iter() {
-                let credential = credential_alias(&item.display());
-                if !credential.is_empty() {
-                    out.insert(credential);
-                }
-            }
-        }
-        VmValue::Dict(dict) => {
-            for (key, value) in dict.iter() {
-                if matches!(value, VmValue::Bool(false) | VmValue::Nil) {
-                    continue;
-                }
-                let credential = credential_alias(key);
-                if !credential.is_empty() {
-                    out.insert(credential);
-                }
-            }
-        }
-        _ => {}
-    }
-    out
-}
-
-fn env_credentials() -> BTreeSet<String> {
-    GITHUB_CREDENTIAL_ENV_KEYS
-        .iter()
-        .filter(|key| {
-            std::env::var(key)
-                .ok()
-                .is_some_and(|value| !value.is_empty())
-        })
-        .map(|key| credential_alias(key))
-        .collect()
-}
-
-fn credential_alias(value: &str) -> String {
-    let normalized = value.trim().to_ascii_lowercase();
-    if normalized.is_empty() {
-        return String::new();
-    }
-    if normalized.contains("github") || normalized == "gh_token" || normalized == "gh-token" {
-        return "github".to_string();
-    }
-    normalized.replace('-', "_")
-}
-
-fn project_fingerprint_from_value(value: &VmValue) -> Option<ProjectFingerprint> {
+pub(super) fn project_fingerprint_from_value(value: &VmValue) -> Option<ProjectFingerprint> {
     project_fingerprint_from_dict(value.as_dict()?)
 }
 
-fn project_fingerprint_from_dict(dict: &crate::value::DictMap) -> Option<ProjectFingerprint> {
+pub(super) fn project_fingerprint_from_dict(
+    dict: &crate::value::DictMap,
+) -> Option<ProjectFingerprint> {
     if !dict_has_project_fingerprint_shape(dict) {
         return None;
     }
@@ -1278,222 +521,6 @@ fn dict_has_project_fingerprint_shape(dict: &crate::value::DictMap) -> bool {
     .any(|key| dict.contains_key(*key))
 }
 
-fn remote_signal_from_value(value: &VmValue) -> Option<GitRemoteSignal> {
-    match value {
-        VmValue::String(url) => remote_signal_from_url("origin", url),
-        VmValue::Dict(dict) => {
-            let name = optional_string_field(dict, "name").unwrap_or_else(|| "origin".to_string());
-            let url = optional_string_field(dict, "url").unwrap_or_default();
-            let host = optional_string_field(dict, "host")
-                .or_else(|| remote_host(&url))
-                .map(normalize_remote_host)
-                .unwrap_or_default();
-            let slug = optional_string_field(dict, "slug")
-                .and_then(|slug| normalize_github_slug(&slug))
-                .or_else(|| github_slug_from_remote(&url));
-            if host.is_empty() && slug.is_none() && url.is_empty() {
-                return None;
-            }
-            Some(GitRemoteSignal {
-                name,
-                host,
-                slug,
-                redacted_url: redact_remote_url(&url),
-            })
-        }
-        _ => None,
-    }
-}
-
-fn detect_git_remote(dir: &Path) -> Option<GitRemoteSignal> {
-    let git_path = find_git_path(dir)?;
-    let mut remotes = Vec::new();
-    for config in git_config_paths(&git_path) {
-        let Some(text) = read_text_if_exists(config) else {
-            continue;
-        };
-        remotes.extend(parse_git_config_remotes(&text));
-    }
-    remotes
-        .iter()
-        .find(|remote| remote.name == "origin")
-        .cloned()
-        .or_else(|| remotes.into_iter().next())
-}
-
-fn find_git_path(dir: &Path) -> Option<PathBuf> {
-    let mut cursor = Some(dir);
-    while let Some(path) = cursor {
-        let git_path = path.join(".git");
-        if git_path.exists() {
-            return Some(git_path);
-        }
-        cursor = path.parent();
-    }
-    None
-}
-
-fn git_config_paths(git_path: &Path) -> Vec<PathBuf> {
-    if git_path.is_dir() {
-        return vec![git_path.join("config")];
-    }
-    let Some(git_dir) = read_gitdir_file(git_path) else {
-        return Vec::new();
-    };
-    let mut out = vec![git_dir.join("config")];
-    if let Some(common_dir) = read_commondir(&git_dir) {
-        out.push(common_dir.join("config"));
-    }
-    out
-}
-
-fn read_gitdir_file(git_path: &Path) -> Option<PathBuf> {
-    let text = read_text_if_exists(git_path.to_path_buf())?;
-    let raw = text.trim().strip_prefix("gitdir:")?.trim();
-    let candidate = PathBuf::from(raw);
-    if candidate.is_absolute() {
-        Some(candidate)
-    } else {
-        Some(git_path.parent()?.join(candidate))
-    }
-}
-
-fn read_commondir(git_dir: &Path) -> Option<PathBuf> {
-    let raw = read_text_if_exists(git_dir.join("commondir"))?;
-    let candidate = PathBuf::from(raw.trim());
-    if candidate.is_absolute() {
-        Some(candidate)
-    } else {
-        Some(git_dir.join(candidate))
-    }
-}
-
-fn parse_git_config_remotes(config: &str) -> Vec<GitRemoteSignal> {
-    let mut current_remote: Option<String> = None;
-    let mut remotes = Vec::new();
-    for line in config.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with('[') && trimmed.ends_with(']') {
-            current_remote = parse_remote_section(trimmed);
-            continue;
-        }
-        let Some(name) = current_remote.as_deref() else {
-            continue;
-        };
-        let Some((key, value)) = trimmed.split_once('=') else {
-            continue;
-        };
-        if key.trim() == "url" {
-            if let Some(signal) = remote_signal_from_url(name, value.trim()) {
-                remotes.push(signal);
-            }
-        }
-    }
-    remotes
-}
-
-fn parse_remote_section(section: &str) -> Option<String> {
-    let inner = section.strip_prefix('[')?.strip_suffix(']')?.trim();
-    let rest = inner.strip_prefix("remote")?.trim();
-    let quoted = rest.strip_prefix('"')?;
-    let (name, _) = quoted.split_once('"')?;
-    Some(name.to_string())
-}
-
-fn remote_signal_from_url(name: &str, url: &str) -> Option<GitRemoteSignal> {
-    let host = remote_host(url).map(normalize_remote_host)?;
-    Some(GitRemoteSignal {
-        name: name.to_string(),
-        slug: github_slug_from_remote(url),
-        host,
-        redacted_url: redact_remote_url(url),
-    })
-}
-
-fn remote_host(url: &str) -> Option<String> {
-    let trimmed = url.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    if let Some(rest) = trimmed.split_once("://").map(|(_, rest)| rest) {
-        let authority = rest.split('/').next().unwrap_or_default();
-        let host_port = authority.rsplit('@').next().unwrap_or(authority);
-        let host = host_port.split(':').next().unwrap_or_default();
-        return (!host.is_empty()).then(|| host.to_string());
-    }
-    if let Some((left, _path)) = trimmed.split_once(':') {
-        let host = left.rsplit('@').next().unwrap_or(left);
-        return (!host.is_empty()).then(|| host.to_string());
-    }
-    None
-}
-
-fn normalize_remote_host(host: String) -> String {
-    let normalized = host.trim().trim_end_matches('.').to_ascii_lowercase();
-    if normalized == "github" {
-        "github.com".to_string()
-    } else {
-        normalized
-    }
-}
-
-fn github_slug_from_remote(url: &str) -> Option<String> {
-    let host = remote_host(url).map(normalize_remote_host)?;
-    if host != "github.com" {
-        return None;
-    }
-    let path = if let Some(rest) = url.split_once("://").map(|(_, rest)| rest) {
-        rest.split_once('/')
-            .map(|(_, path)| path)
-            .unwrap_or_default()
-            .to_string()
-    } else {
-        url.split_once(':')
-            .map(|(_, path)| path)
-            .unwrap_or_default()
-            .to_string()
-    };
-    normalize_github_slug(&path)
-}
-
-fn normalize_github_slug(value: &str) -> Option<String> {
-    let mut path = strip_url_suffix(value.trim())
-        .trim_start_matches('/')
-        .trim_end_matches('/')
-        .to_string();
-    if let Some(stripped) = path.strip_suffix(".git") {
-        path = stripped.to_string();
-    }
-    let mut parts = path.split('/').filter(|part| !part.is_empty());
-    let owner = parts.next()?;
-    let repo = parts.next()?;
-    Some(format!("{owner}/{repo}"))
-}
-
-fn redact_remote_url(url: &str) -> String {
-    let sanitized = strip_url_suffix(url.trim()).to_string();
-    let Some((scheme, rest)) = sanitized.split_once("://") else {
-        return sanitized;
-    };
-    let Some((userinfo, tail)) = rest.split_once('@') else {
-        return sanitized;
-    };
-    if userinfo.is_empty() || tail.is_empty() {
-        return sanitized;
-    }
-    format!("{scheme}://<redacted>@{tail}")
-}
-
-fn strip_url_suffix(value: &str) -> &str {
-    let mut sanitized = value;
-    for marker in ['?', '#'] {
-        if let Some((head, _)) = sanitized.split_once(marker) {
-            sanitized = head;
-        }
-    }
-    sanitized
-}
-
 fn string_list_field(dict: &crate::value::DictMap, key: &str) -> Vec<String> {
     match dict.get(key) {
         Some(VmValue::List(items)) => items
@@ -1513,54 +540,6 @@ fn string_list_field(dict: &crate::value::DictMap, key: &str) -> Vec<String> {
     }
 }
 
-fn optional_string_field(dict: &crate::value::DictMap, key: &str) -> Option<String> {
-    dict.get(key)
-        .and_then(value_as_string)
-        .filter(|value| !value.is_empty())
-}
-
-fn value_as_string(value: &VmValue) -> Option<String> {
-    match value {
-        VmValue::Nil => None,
-        VmValue::String(s) => Some(s.to_string()),
-        other => Some(other.display()),
-    }
-}
-
-fn string_list_value(values: Vec<String>) -> VmValue {
-    VmValue::List(std::sync::Arc::new(
-        values.into_iter().map(VmValue::string).collect(),
-    ))
-}
-
-fn unique_flatten(values: impl Iterator<Item = String>) -> Vec<String> {
-    let mut seen = BTreeSet::new();
-    let mut out = Vec::new();
-    for value in values {
-        if seen.insert(value.clone()) {
-            out.push(value);
-        }
-    }
-    out
-}
-
-fn unique_mcp_candidates(
-    values: impl Iterator<Item = McpPresetCandidate>,
-) -> Vec<McpPresetCandidate> {
-    let mut out: BTreeMap<String, McpPresetCandidate> = BTreeMap::new();
-    for value in values {
-        out.entry(value.id.clone()).or_insert(value);
-    }
-    out.into_values().collect()
-}
-
-fn value_as_bool(value: &VmValue) -> Option<bool> {
-    match value {
-        VmValue::Bool(flag) => Some(*flag),
-        _ => None,
-    }
-}
-
 fn value_as_list(value: &VmValue) -> Option<&[VmValue]> {
     match value {
         VmValue::List(items) => Some(items.as_slice()),
@@ -1568,24 +547,7 @@ fn value_as_list(value: &VmValue) -> Option<&[VmValue]> {
     }
 }
 
-fn resolve_existing_directory(path: &str) -> Result<PathBuf, VmError> {
-    let resolved = resolve_source_relative_path(path);
-    let target = if resolved.is_dir() {
-        resolved
-    } else {
-        resolved
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| PathBuf::from("."))
-    };
-    if target.exists() {
-        target.canonicalize().map_err(path_error)
-    } else {
-        Err(path_missing_error(&target))
-    }
-}
-
-fn detect_project_fingerprint(dir: &Path) -> ProjectFingerprint {
+pub(super) fn detect_project_fingerprint(dir: &Path) -> ProjectFingerprint {
     let mut signals = FingerprintSignals::default();
     walk_project_fingerprint(dir, dir, 0, &mut signals);
 
@@ -2198,20 +1160,7 @@ fn first_ordered_value(values: &[String]) -> Option<String> {
     values.first().cloned()
 }
 
-fn path_error(error: std::io::Error) -> VmError {
-    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-        "project.scan: failed to resolve path: {error}"
-    ))))
-}
-
-fn path_missing_error(path: &Path) -> VmError {
-    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-        "project.scan: path does not exist: {}",
-        path.display()
-    ))))
-}
-
-fn scan_project_tree(
+pub(super) fn scan_project_tree(
     base: &Path,
     options: &ProjectScanOptions,
 ) -> Result<BTreeMap<String, ProjectEvidence>, VmError> {
@@ -2240,7 +1189,7 @@ fn scan_project_tree(
     Ok(results)
 }
 
-fn walk_project_tree(
+pub(super) fn walk_project_tree(
     base: &Path,
     options: &ProjectScanOptions,
 ) -> Result<Vec<ProjectTreeEntry>, VmError> {
@@ -2433,7 +1382,7 @@ fn hex_digest(bytes: impl AsRef<[u8]>) -> String {
         .collect()
 }
 
-fn scan_exact_directory(dir: &Path, options: &ProjectScanOptions) -> ProjectEvidence {
+pub(super) fn scan_exact_directory(dir: &Path, options: &ProjectScanOptions) -> ProjectEvidence {
     let mut evidence = ProjectEvidence {
         path: dir.to_path_buf(),
         vcs: detect_vcs(dir),
@@ -2538,7 +1487,7 @@ fn apply_config_tier(dir: &Path, evidence: &mut ProjectEvidence, build_commands:
     }
 }
 
-fn detect_package_name(dir: &Path) -> Option<String> {
+pub(super) fn detect_package_name(dir: &Path) -> Option<String> {
     package_name_from_pyproject(dir)
         .or_else(|| package_name_from_package_json(dir))
         .or_else(|| package_name_from_go_mod(dir))
@@ -2594,10 +1543,6 @@ fn read_first_existing_text(dir: &Path, names: &[&str]) -> Option<String> {
     names
         .iter()
         .find_map(|name| read_text_if_exists(dir.join(name)))
-}
-
-fn read_text_if_exists(path: PathBuf) -> Option<String> {
-    std::fs::read_to_string(path).ok()
 }
 
 fn read_json_object(path: PathBuf) -> Option<serde_json::Map<String, serde_json::Value>> {
@@ -2857,7 +1802,7 @@ fn confidence_value(evidence: &ProjectEvidence) -> VmValue {
     VmValue::dict(confidence)
 }
 
-fn sorted_confident_labels(scores: &BTreeMap<String, f64>) -> Vec<String> {
+pub(super) fn sorted_confident_labels(scores: &BTreeMap<String, f64>) -> Vec<String> {
     let mut items = scores
         .iter()
         .filter(|(_label, score)| **score >= 0.5)
@@ -2884,87 +1829,3 @@ fn push_unique(values: &mut Vec<String>, value: String) {
         values.push(value);
     }
 }
-
-fn catalog_entry_value(entry: &ProjectCatalogEntry) -> VmValue {
-    let mut value = BTreeMap::new();
-    value.put_str("id", entry.id);
-    value.insert(
-        "languages".to_string(),
-        VmValue::List(std::sync::Arc::new(
-            entry
-                .languages
-                .iter()
-                .map(|item| VmValue::String(arcstr::ArcStr::from((*item).to_string())))
-                .collect(),
-        )),
-    );
-    value.insert(
-        "frameworks".to_string(),
-        VmValue::List(std::sync::Arc::new(
-            entry
-                .frameworks
-                .iter()
-                .map(|item| VmValue::String(arcstr::ArcStr::from((*item).to_string())))
-                .collect(),
-        )),
-    );
-    value.insert(
-        "build_systems".to_string(),
-        VmValue::List(std::sync::Arc::new(
-            entry
-                .build_systems
-                .iter()
-                .map(|item| VmValue::String(arcstr::ArcStr::from((*item).to_string())))
-                .collect(),
-        )),
-    );
-    value.insert(
-        "anchors".to_string(),
-        VmValue::List(std::sync::Arc::new(
-            entry
-                .anchors
-                .iter()
-                .map(|item| VmValue::String(arcstr::ArcStr::from((*item).to_string())))
-                .collect(),
-        )),
-    );
-    value.insert(
-        "lockfiles".to_string(),
-        VmValue::List(std::sync::Arc::new(
-            entry
-                .lockfiles
-                .iter()
-                .map(|item| VmValue::String(arcstr::ArcStr::from((*item).to_string())))
-                .collect(),
-        )),
-    );
-    value.insert(
-        "source_globs".to_string(),
-        VmValue::List(std::sync::Arc::new(
-            entry
-                .source_globs
-                .iter()
-                .map(|item| VmValue::String(arcstr::ArcStr::from((*item).to_string())))
-                .collect(),
-        )),
-    );
-    value.insert(
-        "default_build_cmd".to_string(),
-        entry
-            .default_build_cmd
-            .map(|value| VmValue::String(arcstr::ArcStr::from(value.to_string())))
-            .unwrap_or(VmValue::Nil),
-    );
-    value.insert(
-        "default_test_cmd".to_string(),
-        entry
-            .default_test_cmd
-            .map(|value| VmValue::String(arcstr::ArcStr::from(value.to_string())))
-            .unwrap_or(VmValue::Nil),
-    );
-    VmValue::dict(value)
-}
-
-#[cfg(test)]
-#[path = "project_tests.rs"]
-mod tests;

@@ -1,5 +1,10 @@
 use super::*;
 
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
+
+use crate::value::VmValue;
+
 fn temp_dir(label: &str) -> tempfile::TempDir {
     tempfile::Builder::new()
         .prefix(&format!("harn-project-{label}-"))
