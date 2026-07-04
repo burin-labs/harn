@@ -6,7 +6,7 @@
 //! state instead of provider-specific branches at call sites:
 //!   - **L0 detection** ([`ThrottleSignal::classify`]): turns a provider outcome
 //!     into a throttle signal from STRUCTURED inputs (HTTP status, Retry-After,
-//!     Anthropic overloaded/rate_limit body, and the empty-completion-under-load
+//!     Anthropic overloaded/rate_limit body, and the unproductive-under-load
 //!     heuristic), emitted as a `provider_throttle` transcript record.
 //!   - **L1 governor** ([`ProviderGovernor`]): an AIMD concurrency limiter
 //!     (additive-increase on sustained success toward the configured max,
@@ -23,7 +23,7 @@
 //! store can back the same interface without a call-site change. The existing
 //! route limiter ([`super::rate_limit`]) keeps its own token
 //! buckets/durable layer/network breaker; this governor ADDS adaptive
-//! concurrency + a throttle-signal (429/overload/empty-under-load) circuit
+//! concurrency + a throttle-signal (429/overload/unproductive-under-load) circuit
 //! breaker + the structured throttle/state records, and only when the
 //! `llm.rate_governor` flag is on.
 //!
@@ -81,9 +81,9 @@ pub enum ThrottleSignal {
     RateLimit429,
     /// HTTP 529 / 503, or an Anthropic `overloaded_error` body.
     Overloaded,
-    /// A completion that billed output tokens but committed nothing, arriving
-    /// while the provider is already known-throttled (its circuit is not
-    /// CLOSED). Treated as a soft throttle, not a capability failure.
+    /// A completion that committed no usable response, arriving while the
+    /// provider is already known-throttled (its circuit is not CLOSED). Treated
+    /// as a soft throttle, not a capability failure.
     EmptyUnderLoad,
 }
 
@@ -105,8 +105,8 @@ impl ThrottleSignal {
     /// - `body_lower`: the (already-lowercased) error body / message, checked
     ///   for the Anthropic `overloaded_error` / `rate_limit_error` /
     ///   "temporarily limiting requests" markers and a bare `429`/`529`.
-    /// - `empty_completion`: the completion billed output tokens but committed
-    ///   nothing (content, thinking, tool calls all empty).
+    /// - `empty_completion`: the completion committed no usable response
+    ///   (content, thinking, tool calls all empty).
     /// - `provider_already_throttled`: this provider's circuit is not CLOSED, so
     ///   an empty completion is attributable to load, not the model.
     pub fn classify(
