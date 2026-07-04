@@ -331,6 +331,9 @@ fn stdlib_owned_agent_aliases_declare_load_bearing_keys() {
         "iteration_budget",
         "stall_diagnostics",
         "done_judge",
+        // Caller-managed history seeding (#4030) is agent_loop-only; it must
+        // never migrate onto LlmCallOptions.
+        "history",
     ] {
         assert!(
             loop_options.contains(key),

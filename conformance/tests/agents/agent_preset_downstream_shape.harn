@@ -1,0 +1,24 @@
+/**
+ * Pinned downstream-shape (item 8): a bump-fleet-shaped call — an
+ * `agent_preset("release_captain", ...)` plus a small override dict — pins that
+ * the caller's overrides win and the pack rows fill everything else, so the
+ * ~30-key override dicts adopters used to hand-roll collapse to a handful of
+ * intentional keys.
+ */
+import { agent_preset } from "std/agent/presets"
+
+pipeline default() {
+  let opts = agent_preset("release_captain", {provider: "anthropic", timeout_ms: 600000, max_nudges: 5})
+  // Caller overrides win over the pack / captain defaults.
+  __io_println(opts.provider)
+  __io_println(opts.timeout_ms)
+  __io_println(opts.max_nudges)
+  // Pack fills everything the caller omitted.
+  __io_println(opts.budget.total_budget_usd == 25.0)
+  __io_println(len(opts.model_ladder) > 0)
+  // The preset's own behavior template still applies.
+  __io_println(opts._preset_kind)
+  __io_println(opts.profile)
+  __io_println(opts.iteration_budget.max)
+  __io_println(opts?.llm_caller != nil)
+}

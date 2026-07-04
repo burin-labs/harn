@@ -10,7 +10,13 @@
 // contracts by name instead of re-deriving the knobs at every call site. All
 // defaults remain caller-overridable.
 import { agent_tool_format_resolution } from "std/agent/options"
-import { compose, default_llm_caller, with_logging, with_routing } from "std/llm/handlers"
+import {
+  compose,
+  default_llm_caller,
+  with_logging,
+  with_retry,
+  with_routing,
+} from "std/llm/handlers"
 import {
   compose_tool_callers,
   with_audit_log,
@@ -21,9 +27,190 @@ import {
   with_telemetry,
 } from "std/llm/tool_middleware"
 
-let __GENERIC_KINDS = ["audit", "repair", "summary", "verify"]
+// -------------------------------------------------------------------------------------------------
 
-let __CAPTAIN_KINDS = ["merge_captain", "review_captain", "oncall_captain", "release_captain"]
+// Preset kind registry: user-defined kinds are first-class and discoverable
+// through the same register/validate path the built-in kinds are registered
+// through (no hardcoded kind lists). A spec is `{family, pack}` — `family`
+// selects the behavior template and `pack` carries the fill-nil option rows.
+
+// -------------------------------------------------------------------------------------------------
+
+// Fill-nil pack keys a spec may carry. Each is a lower-priority default that
+// fills ONLY a nil/absent option key; an explicit caller value always wins.
+let __PRESET_PACK_KEYS = ["budget", "fallback_chain", "model_ladder", "provider", "timeout_ms"]
+
+fn __preset_kind_string(value) {
+  if value == nil {
+    throw "agent_preset(kind, options?): kind is required"
+  }
+  if type_of(value) != "string" {
+    throw "agent_preset(kind, options?): kind must be a string; got " + type_of(value)
+  }
+  return lowercase(trim(value))
+}
+
+/**
+ * Validate a preset spec and return its normalized `{family, pack}` shape.
+ * Shared by the built-in registration and `agent_preset_register` so
+ * user-defined kinds are held to the same contract as the built-ins.
+ */
+fn __validate_preset_spec(kind, spec) {
+  if type_of(spec) != "dict" {
+    throw "agent_preset_register(\"" + kind + "\"): spec must be a dict; got " + type_of(spec)
+  }
+  let family = spec?.family ?? "generic"
+  if family != "generic" && family != "captain" {
+    throw "agent_preset_register(\"" + kind + "\"): spec.family must be \"generic\" or \"captain\"; got "
+      + to_string(family)
+  }
+  let pack = spec?.pack ?? {}
+  if type_of(pack) != "dict" {
+    throw "agent_preset_register(\"" + kind + "\"): spec.pack must be a dict; got " + type_of(pack)
+  }
+  for key in pack.keys() {
+    if !contains(__PRESET_PACK_KEYS, key) {
+      throw "agent_preset_register(\"" + kind + "\"): spec.pack has unknown key \"" + key
+        + "\"; allowed: "
+        + join(__PRESET_PACK_KEYS, ", ")
+    }
+  }
+  return {family: family, pack: pack}
+}
+
+/**
+ * Per-kind pack rows: the provider / transport-timeout / cost-budget /
+ * model-ladder defaults callers used to hand-roll around agent_preset,
+ * promoted to fill-nil data rows. Captains carry longer timeouts and larger
+ * budgets by design.
+ *
+ * TODO(PR-C): `model_ladder` is a plain models list today; once the
+ * `[model_ladders.*]` catalog rows land, replace these with catalog
+ * ladder-name references and lower them into `fallback_chain` at resolve time.
+ * Budgets are session-cumulative (`total_budget_usd`), NOT per-call ceilings:
+ * `budget.max_cost_usd` is pre-flight-checked against the worst-case
+ * projection (full `max_tokens` as output), so a tight per-call default would
+ * preemptively kill legitimate calls.
+ */
+fn __builtin_preset_specs() {
+  let frontier_ladder = ["claude-opus-4-8", "claude-sonnet-4-5"]
+  let cheap_ladder = ["gpt-4o-mini"]
+  return {
+    audit: {
+      family: "generic",
+      pack: {
+        budget: {total_budget_usd: 5.0},
+        model_ladder: frontier_ladder,
+        provider: "anthropic",
+        timeout_ms: 120000,
+      },
+    },
+    merge_captain: {
+      family: "captain",
+      pack: {
+        budget: {total_budget_usd: 25.0},
+        model_ladder: frontier_ladder,
+        provider: "anthropic",
+        timeout_ms: 300000,
+      },
+    },
+    oncall_captain: {
+      family: "captain",
+      pack: {
+        budget: {total_budget_usd: 15.0},
+        model_ladder: frontier_ladder,
+        provider: "anthropic",
+        timeout_ms: 180000,
+      },
+    },
+    release_captain: {
+      family: "captain",
+      pack: {
+        budget: {total_budget_usd: 25.0},
+        model_ladder: frontier_ladder,
+        provider: "anthropic",
+        timeout_ms: 300000,
+      },
+    },
+    repair: {
+      family: "generic",
+      pack: {
+        budget: {total_budget_usd: 10.0},
+        model_ladder: frontier_ladder,
+        provider: "anthropic",
+        timeout_ms: 180000,
+      },
+    },
+    review_captain: {
+      family: "captain",
+      pack: {
+        budget: {total_budget_usd: 15.0},
+        model_ladder: frontier_ladder,
+        provider: "anthropic",
+        timeout_ms: 240000,
+      },
+    },
+    summary: {
+      family: "generic",
+      pack: {budget: {total_budget_usd: 1.0}, model_ladder: cheap_ladder, provider: "openai", timeout_ms: 60000},
+    },
+    verify: {
+      family: "generic",
+      pack: {budget: {total_budget_usd: 1.0}, model_ladder: cheap_ladder, provider: "openai", timeout_ms: 60000},
+    },
+  }
+}
+
+// Built-in registration is lazy (module-level initializers cannot call local
+// fns) but dogfoods the same validation path user kinds go through.
+var __BUILTIN_PRESETS = {}
+
+var __USER_PRESETS = {}
+
+fn __preset_registry() {
+  if len(__BUILTIN_PRESETS.keys()) == 0 {
+    let specs = __builtin_preset_specs()
+    var reg = {}
+    for kind in specs.keys() {
+      reg = reg + {[kind]: __validate_preset_spec(kind, specs[kind])}
+    }
+    __BUILTIN_PRESETS = reg
+  }
+  return __BUILTIN_PRESETS + __USER_PRESETS
+}
+
+/**
+ * agent_preset_register(kind, spec) registers (or overrides) a preset kind so
+ * `agent_preset(kind, ...)` and `agent_preset_kinds()` see it. `spec` is
+ * `{family?: "generic" | "captain", pack?: dict}`: `family` selects the
+ * behavior template (captains additionally compose the opt-in tool/LLM
+ * middleware layers), and `pack` supplies fill-nil option defaults
+ * (`provider`, `timeout_ms`, `budget`, `fallback_chain`, `model_ladder`) that
+ * fill ONLY nil/absent keys. The spec shape is validated; an invalid family
+ * or unknown pack key throws. Returns the normalized kind string.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn agent_preset_register(kind, spec) {
+  let normalized = __preset_kind_string(kind)
+  if normalized == "" {
+    throw "agent_preset_register: kind must be a non-empty string"
+  }
+  __USER_PRESETS = __USER_PRESETS + {[normalized]: __validate_preset_spec(normalized, spec)}
+  return normalized
+}
+
+/**
+ * agent_preset_kinds() returns the registered preset kinds (built-in plus any
+ * user-registered), sorted. Discovery surface for tooling and pickers.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn agent_preset_kinds() {
+  return __preset_registry().keys().sort()
+}
 
 fn __dict_or_empty(value) {
   if value == nil {
@@ -40,20 +227,16 @@ fn __has_key(opts, key) {
 }
 
 fn __is_captain(kind) {
-  return contains(__CAPTAIN_KINDS, kind)
+  let registry = __preset_registry()
+  return registry[kind]?.family == "captain"
 }
 
 fn __preset_kind(value) {
-  if value == nil {
-    throw "agent_preset(kind, options?): kind is required"
-  }
-  if type_of(value) != "string" {
-    throw "agent_preset(kind, options?): kind must be a string; got " + type_of(value)
-  }
-  let kind = lowercase(trim(value))
-  if !contains(__GENERIC_KINDS, kind) && !contains(__CAPTAIN_KINDS, kind) {
+  let kind = __preset_kind_string(value)
+  let registry = __preset_registry()
+  if !contains(registry.keys(), kind) {
     throw "agent_preset: kind must be one of "
-      + join(__GENERIC_KINDS + __CAPTAIN_KINDS, ", ")
+      + join(registry.keys().sort(), ", ")
       + "; got "
       + value
   }
@@ -436,18 +619,84 @@ fn __apply_captain_llm_caller(opts, kind) {
   return opts + {llm_caller: composed}
 }
 
+// -------------------------------------------------------------------------------------------------
+
+// Fill-nil pack + default transport retry: the two lower-priority seams that
+// sit under the caller's explicit input.
+
+// -------------------------------------------------------------------------------------------------
+
 /**
- * agent_preset returns normalized agent_loop options for a generic role
- * or a captain-shaped persona template.
+ * Fill the kind's pack rows (provider / timeout / budget / model ladder) into
+ * ONLY the nil/absent option keys. Explicit caller input at a higher-priority
+ * seam is never overridden — this is the data-over-code default layer.
+ */
+fn __apply_preset_pack(opts, kind) {
+  let spec = __preset_registry()[kind]
+  let pack = spec?.pack ?? {}
+  var resolved = opts
+  for key in pack.keys() {
+    if resolved?[key] == nil {
+      resolved = resolved + {[key]: pack[key]}
+    }
+  }
+  return resolved
+}
+
+/**
+ * Bake a bounded default transport retry onto the `llm_caller:` seam. Since
+ * v0.10 removed the per-call `llm_retries` budget (agent_loop is now fail-fast
+ * on transient transport errors), presets re-introduce resilience here by
+ * wrapping whatever caller is in effect — a caller-supplied `llm_caller`, a
+ * captain-composed routing caller, or the stdlib default caller — with
+ * `with_retry`. Its default predicate retries only transport-class failures
+ * (transient / rate_limited / timeout / network / provider_5xx /
+ * stream_interrupt / exception) and NEVER schema_validation, auth, budget,
+ * context-window, or policy failures. Pass `retry: false` to opt out (stay
+ * fail-fast) or `retry: {max_attempts, base_ms, ...}` to tune it.
+ */
+fn __apply_default_retry(opts) {
+  let requested = opts?.retry
+  if type_of(requested) == "bool" && !requested {
+    return opts
+  }
+  let retry_cfg = if type_of(requested) == "dict" {
+    requested
+  } else {
+    {max_attempts: 3}
+  }
+  let base = opts?.llm_caller ?? default_llm_caller()
+  return opts + {llm_caller: with_retry(base, retry_cfg)}
+}
+
+// Twin of the removed profile default `llm_retries: 2` (2 retries after
+// the first attempt == max_attempts 3).
+/**
+ * agent_preset is THE way to build `agent_loop` options: it returns a
+ * normalized `agent_loop` options dict for a generic role or a captain-shaped
+ * persona template. Pass the result straight to `agent_loop(...)`, or merge
+ * further overrides on top — caller input always wins over the preset's
+ * defaults.
+ *
+ * At the `llm_call` tier there is no equivalent preset machinery: a "preset"
+ * there is just a plain typed `LlmCallOptions` value you spread per call.
+ * Preset machinery (budgets, completion policy, middleware stacks, transport
+ * retry) only exists at the agent-cell tier this function serves.
  *
  * `kind` is one of:
  *   - generic:  "audit", "repair", "summary", "verify"
  *   - captain:  "merge_captain", "review_captain", "oncall_captain",
  *               "release_captain"
  *
+ * The kind set is the registry (`agent_preset_kinds()`); register your own
+ * with `agent_preset_register(kind, spec)`.
+ *
  * The returned dict is a plain `agent_loop` options dict. Callers can
  * spread it into `agent_loop(...)` directly, or merge further overrides
- * on top. Captain presets additionally compose:
+ * on top. Every kind additionally fills its pack rows (provider, transport
+ * timeout, cost budget, model ladder) into nil/absent keys, and bakes a
+ * bounded default transport retry onto the `llm_caller:` seam (opt out with
+ * `retry: false`). Captain presets additionally compose:
  *   - a `tool_caller` middleware stack from any of `audit_sink`,
  *     `telemetry`, `consent`, `rate_limit`, `dry_run`,
  *     `handoff_sink` the caller supplied;
@@ -466,7 +715,6 @@ fn __apply_captain_llm_caller(opts, kind) {
  *
  * @effects: []
  * @errors: []
- * @api_stability: experimental
  */
 pub fn agent_preset(kind, options = nil) {
   let resolved_kind = __preset_kind(kind)
@@ -477,6 +725,8 @@ pub fn agent_preset(kind, options = nil) {
   opts = __apply_reasoning_defaults(opts, resolved_kind)
   opts = __apply_captain_tool_caller(opts, resolved_kind)
   opts = __apply_captain_llm_caller(opts, resolved_kind)
+  opts = __apply_preset_pack(opts, resolved_kind)
+  opts = __apply_default_retry(opts)
   opts = __apply_tool_format(opts, resolved_kind)
   return opts + {_preset_kind: resolved_kind}
 }

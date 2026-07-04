@@ -196,6 +196,7 @@ pub type AgentLoopOptions = {
   timeout?: int,
   timeout_ms?: int,
   messages?: list,
+  history?: list,
   transcript?: dict,
   session_id?: string,
   system?: string,
@@ -284,6 +285,8 @@ pub type AgentLoopOptions = {
   llm_transcript_dir?: string,
 }
 
+// TODO(#4033): add `on_delta?: fn` once the streaming-delta seam (PR #4033)
+// merges to main and this branch rebases onto it.
 // llm_call surface (kept in lockstep with LlmCallOptions in
 // std/llm/options by typed_options_parity.rs).
 // Loop shape and completion.
@@ -299,12 +302,14 @@ pub type AgentLoopOptions = {
 // Observability.
 /**
  * Overrides accepted by `agent_preset(kind, overrides)` and the captain
- * presets in `std/agent/presets`: any agent_loop option plus the opt-in
- * captain layer dependencies.
+ * presets in `std/agent/presets`: any agent_loop option, plus the opt-in
+ * captain layer dependencies, the `retry` transport-retry control
+ * (`false` to opt out of the baked default, or a `with_retry` config
+ * dict), and `model_ladder` (overrides the kind's fill-nil model ladder).
  *
  * Rust twin: none — presets are stdlib-owned option packs.
  */
-pub type AgentPresetOptions = AgentLoopOptions & {consent?: any, audit_sink?: any, telemetry?: any, rate_limit?: bool | dict, dry_run?: bool | dict, handoff_sink?: any, cheap_caller?: any, frontier_caller?: any, escalate_predicate?: any, logging_sink?: any, logging_options?: dict, llm_options?: dict, persona?: any, task_kind?: string, judge?: bool | JudgeConfig}
+pub type AgentPresetOptions = AgentLoopOptions & {consent?: any, audit_sink?: any, telemetry?: any, rate_limit?: bool | dict, dry_run?: bool | dict, handoff_sink?: any, cheap_caller?: any, frontier_caller?: any, escalate_predicate?: any, logging_sink?: any, logging_options?: dict, llm_options?: dict, persona?: any, task_kind?: string, judge?: bool | JudgeConfig, retry?: bool | dict, model_ladder?: list<string>}
 
 fn __profile_defaults(profile) {
   if profile == "tool_using" {
