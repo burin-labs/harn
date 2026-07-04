@@ -156,7 +156,7 @@ pub(crate) fn project_computer_tools(
         native_tools,
         provider_tools,
         native_computer_projection_enabled(),
-    )
+    );
 }
 
 fn project_computer_tools_with(

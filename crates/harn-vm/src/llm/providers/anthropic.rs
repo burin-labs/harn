@@ -1042,12 +1042,20 @@ mod tests {
         crate::llm::agent_session_host::record_tool_results_for_test(&session_id, dispatch);
 
         let transcript = crate::agent_sessions::transcript(&session_id).expect("transcript");
-        let transcript_json = crate::llm::agent_session_host::vm_to_json(&transcript);
-        let messages_json = transcript_json
-            .get("messages")
-            .cloned()
-            .unwrap_or(transcript_json.clone());
-        let messages = messages_json.as_array().cloned().unwrap_or_default();
+        // Route the recorded transcript messages through the SAME VmValue->json
+        // conversion the live `llm_call` uses (`vm_messages_to_json`), not just
+        // `build_request_body`. That conversion is the rung that previously
+        // stringified a `[text, screenshot]` tool_result block list into ~1MB of
+        // base64 TEXT, so a test that fed transcript messages straight to
+        // build_request_body passed while the live path dropped the image. This
+        // guards the full record -> vm_messages_to_json -> egress chain.
+        let message_vms: Vec<crate::value::VmValue> =
+            match transcript.as_dict().and_then(|dict| dict.get("messages")) {
+                Some(crate::value::VmValue::List(list)) => list.iter().cloned().collect(),
+                _ => Vec::new(),
+            };
+        let messages =
+            crate::llm::helpers::vm_messages_to_json(&message_vms).expect("messages json");
 
         let mut opts = base_payload();
         opts.model = "claude-opus-4-8".to_string();
