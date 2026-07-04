@@ -6,8 +6,9 @@ use super::{
     agent_turn_made_no_llm_call, assistant_message_from_llm_result, canonical_acp_stop_reason,
     canonical_provider_stop_reason, dict_get, initial_user_content, is_length_truncation,
     last_assistant_text, list_items, pair_orphaned_tool_use, reset_agent_session_host_state,
-    seed_host_session_provider_model, synthesize_orphan_tool_results, text_has_tool_call_prefix,
-    tool_result_message_for_provider, truncated_tool_call_should_continue, vm_to_json,
+    screenshot_from_tool_result, seed_host_session_provider_model, synthesize_orphan_tool_results,
+    text_has_tool_call_prefix, tool_result_message_for_provider, truncated_tool_call_should_continue,
+    vm_to_json,
 };
 
 /// Execution policy that annotates the file-provenance test vocabulary so
@@ -597,6 +598,7 @@ fn tool_results_replay_with_provider_appropriate_ids() {
         "release_run",
         "call_001",
         "ok",
+        None,
     ));
     assert_eq!(local["role"], "tool");
     assert_eq!(local["name"], "release_run");
@@ -609,6 +611,7 @@ fn tool_results_replay_with_provider_appropriate_ids() {
         "release_run",
         "call_002",
         "ok",
+        None,
     ));
     assert_eq!(anthropic["role"], "tool_result");
     assert_eq!(anthropic["tool_use_id"], "call_002");
@@ -620,6 +623,7 @@ fn tool_results_replay_with_provider_appropriate_ids() {
         "release_run",
         "call_003",
         "ok",
+        None,
     ));
     assert_eq!(bedrock_claude["role"], "tool_result");
     assert_eq!(bedrock_claude["tool_use_id"], "call_003");
@@ -631,6 +635,7 @@ fn tool_results_replay_with_provider_appropriate_ids() {
         "release_run",
         "call_004",
         "ok",
+        None,
     ));
     assert_eq!(gemini["role"], "tool");
     assert_eq!(gemini["name"], "release_run");
@@ -643,10 +648,56 @@ fn tool_results_replay_with_provider_appropriate_ids() {
         "release_run",
         "call_005",
         "ok",
+        None,
     ));
     assert_eq!(text_mode["role"], "user");
     assert!(text_mode.get("tool_call_id").is_none());
     assert!(text_mode.get("tool_use_id").is_none());
+}
+
+#[test]
+fn computer_tool_result_carries_screenshot_as_block_list() {
+    // The computer tool's dispatch result: `result` holds the raw handler
+    // return `{ok, text, screenshot:{ScreenImage}}`.
+    let dispatch_result = crate::stdlib::json_to_vm_value(&json!({
+        "tool_name": "computer",
+        "observation": "Captured screenshot 1024x768.",
+        "result": {
+            "ok": true,
+            "text": "Captured screenshot 1024x768.",
+            "screenshot": {
+                "base64": "AAAA",
+                "media_type": "image/png",
+                "width": 1024,
+                "height": 768,
+                "scale_factor": 1.0,
+            },
+        },
+    }));
+    let screenshot = screenshot_from_tool_result(&dispatch_result).expect("screenshot extracted");
+
+    // On a native channel the message content is a `[text, screenshot]` list so
+    // the provider content mapper can project the screenshot to an image block.
+    let anthropic = vm_to_json(&tool_result_message_for_provider(
+        "anthropic",
+        "claude-opus-4-8",
+        "native",
+        "computer",
+        "call_shot",
+        "Captured screenshot 1024x768.",
+        Some(&screenshot),
+    ));
+    assert_eq!(anthropic["role"], "tool_result");
+    let content = anthropic["content"].as_array().expect("block list");
+    assert_eq!(content[0]["type"], "text");
+    // The neutral ScreenImage dict rides through untouched here — the image-block
+    // projection happens in `anthropic_content` at egress (covered in content.rs).
+    assert_eq!(content[1]["base64"], "AAAA");
+    assert_eq!(content[1]["scale_factor"], 1.0);
+
+    // A result with no screenshot keeps plain-string content (unchanged behavior).
+    let plain = crate::stdlib::json_to_vm_value(&json!({"tool_name": "read", "result": "ok"}));
+    assert!(screenshot_from_tool_result(&plain).is_none());
 }
 
 /// Anthropic's Messages API rejects (non-retryable HTTP 400) any request in

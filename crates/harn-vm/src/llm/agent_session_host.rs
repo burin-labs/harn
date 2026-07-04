@@ -1189,6 +1189,7 @@ fn tool_result_message_for_provider(
     name: &str,
     tool_call_id: &str,
     observation: &str,
+    screenshot: Option<&VmValue>,
 ) -> VmValue {
     let mut msg = crate::value::DictMap::new();
     // A text-channel tool_format (`text` or `json`) carries tool results back
@@ -1210,8 +1211,51 @@ fn tool_result_message_for_provider(
             msg.put_str("tool_call_id", tool_call_id);
         }
     }
-    msg.put_str("content", observation);
+    // A tool that returned a screenshot (the computer tool) carries the image
+    // back to the model as a content block. On a native channel the content
+    // becomes a `[text, screenshot]` block list — the provider content mappers
+    // (`anthropic_content`/`openai_content`) convert the neutral screenshot dict
+    // into the provider's image block. The text channel has no image affordance
+    // (and computer use requires a vision/native model anyway), so it keeps the
+    // plain-string observation. A result with no screenshot is byte-identical to
+    // before (plain-string content), so every other tool is unaffected.
+    match screenshot {
+        Some(image) if !is_text_channel => {
+            let mut text_block = crate::value::DictMap::new();
+            text_block.put_str("type", "text");
+            text_block.put_str("text", observation);
+            let content = vec![VmValue::dict(text_block), image.clone()];
+            msg.put("content", VmValue::List(std::sync::Arc::new(content)));
+        }
+        _ => {
+            msg.put_str("content", observation);
+        }
+    }
     VmValue::dict(msg)
+}
+
+/// The neutral screenshot dict a computer-use tool returns (`ScreenImage`:
+/// `{base64, media_type, width, height, scale_factor}`), pulled off a raw tool
+/// result so it can ride back to the model as an image content block. Looks under
+/// the `screenshot` and `image` keys of the handler's return value and only
+/// accepts a dict that actually carries `base64` + `scale_factor`, so a tool with
+/// an unrelated `image`/`screenshot` field never misfires. Returns the dict as a
+/// `VmValue` (unconverted) — the provider content mappers do the image-block
+/// projection at egress.
+fn screenshot_from_tool_result(result: &VmValue) -> Option<VmValue> {
+    let raw = dict_get(result, "result")?;
+    for key in ["screenshot", "image"] {
+        if let Some(candidate) = dict_get(raw, key) {
+            let has_base64 = dict_get(candidate, "base64")
+                .map(|v| !v.display().is_empty())
+                .unwrap_or(false);
+            let has_scale = dict_get(candidate, "scale_factor").is_some();
+            if has_base64 && has_scale {
+                return Some(candidate.clone());
+            }
+        }
+    }
+    None
 }
 
 /// The `(id, name)` of one provider-native tool-call block carried on an
@@ -1350,6 +1394,9 @@ fn synthesize_orphan_tool_results(
             &block.name,
             &block.id,
             feedback,
+            // A synthesized orphan-repair result is plain feedback text — never
+            // an image.
+            None,
         ));
     }
     out
@@ -1780,6 +1827,9 @@ fn host_agent_session_record_tool_results_builtin(
                 });
             }
         }
+        // A computer-use result carries a screenshot the model must see; ride it
+        // back as an image content block (see `tool_result_message_for_provider`).
+        let screenshot = screenshot_from_tool_result(result);
         crate::agent_sessions::inject_message(
             &session_id,
             tool_result_message_for_provider(
@@ -1789,6 +1839,7 @@ fn host_agent_session_record_tool_results_builtin(
                 &name,
                 &tool_call_id,
                 &observation,
+                screenshot.as_ref(),
             ),
         )
         .map_err(VmError::Runtime)?;

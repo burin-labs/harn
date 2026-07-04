@@ -269,6 +269,49 @@ pub(super) fn render_tool_result(value: &serde_json::Value) -> String {
     }
 }
 
+/// A base64 image payload longer than this is replaced by a `<... N bytes>`
+/// marker in the rendered transcript text. A 1024x768 PNG screenshot is ~1MB of
+/// base64, which would swamp the transcript — but the full payload still travels
+/// to the model as an image content block (see the tool-result recording path),
+/// so eliding it from the *text* rendering is pure hygiene, not data loss.
+const RENDERED_IMAGE_BASE64_ELIDE_THRESHOLD: usize = 512;
+
+/// Return a copy of a tool result with any large `base64` image payload replaced
+/// by a compact `<screenshot base64 elided: N bytes>` marker, so the transcript
+/// text stays small. Recurses through objects and arrays so a screenshot nested
+/// under `screenshot`/`image` (the computer tool's `{ok, text, screenshot:{...}}`
+/// shape) is elided wherever it sits. Non-image results are returned unchanged
+/// (structurally identical), so this is a no-op for every existing tool.
+pub(super) fn elide_image_base64(value: &serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Object(map) => {
+            let mut out = serde_json::Map::with_capacity(map.len());
+            for (key, child) in map {
+                if key == "base64" {
+                    if let Some(data) = child.as_str() {
+                        if data.len() > RENDERED_IMAGE_BASE64_ELIDE_THRESHOLD {
+                            out.insert(
+                                key.clone(),
+                                serde_json::json!(format!(
+                                    "<base64 elided: {} bytes>",
+                                    data.len()
+                                )),
+                            );
+                            continue;
+                        }
+                    }
+                }
+                out.insert(key.clone(), elide_image_base64(child));
+            }
+            serde_json::Value::Object(out)
+        }
+        serde_json::Value::Array(items) => {
+            serde_json::Value::Array(items.iter().map(elide_image_base64).collect())
+        }
+        other => other.clone(),
+    }
+}
+
 pub(super) fn is_denied_tool_result(value: &serde_json::Value) -> bool {
     if is_denied_tool_result_object(value) {
         return true;

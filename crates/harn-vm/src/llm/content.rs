@@ -482,6 +482,18 @@ pub(crate) fn anthropic_content(content: &serde_json::Value) -> serde_json::Valu
                     out.push(anthropic_file_block(block, file));
                 } else if let Some(text) = normalized_text_block(block) {
                     out.push(text);
+                } else if block.get("type").and_then(|value| value.as_str()) == Some("tool_result") {
+                    // A `tool_result` block carries its own nested content list
+                    // (Anthropic's tool-result shape). An image tool result puts a
+                    // neutral screenshot dict in that nested list, so recurse to
+                    // convert it into an `image` block — otherwise the raw dict
+                    // reaches Anthropic and 400s. A string/plain nested content
+                    // round-trips unchanged through the `_ => content.clone()` arm.
+                    let mut normalized_block = block.clone();
+                    if let Some(inner) = block.get("content") {
+                        normalized_block["content"] = anthropic_content(inner);
+                    }
+                    out.push(normalized_block);
                 } else {
                     out.push(block.clone());
                 }
@@ -895,5 +907,32 @@ mod computer_use_tests {
         let arr = mapped.as_array().expect("array");
         assert_eq!(arr[0]["type"], "image_url");
         assert_eq!(arr[0]["image_url"]["url"], "data:image/png;base64,AAAA");
+    }
+
+    #[test]
+    fn anthropic_recurses_into_tool_result_block_content() {
+        // The actual Anthropic egress shape: the tool result is wrapped in a
+        // `{type:"tool_result", content:[...]}` block whose nested content list
+        // holds a text block + a neutral ScreenImage dict. `anthropic_content`
+        // must recurse into the block and convert the screenshot to an `image`
+        // block, or the raw dict reaches Anthropic and 400s.
+        let message_content = serde_json::json!([
+            {
+                "type": "tool_result",
+                "tool_use_id": "call_1",
+                "content": [
+                    {"type": "text", "text": "Captured screenshot 1024x768."},
+                    {"base64": "AAAA", "media_type": "image/png", "width": 1024, "height": 768, "scale_factor": 1.0}
+                ]
+            }
+        ]);
+        let mapped = anthropic_content(&message_content);
+        let arr = mapped.as_array().expect("array");
+        assert_eq!(arr[0]["type"], "tool_result");
+        let inner = arr[0]["content"].as_array().expect("nested content array");
+        assert_eq!(inner[0]["type"], "text");
+        assert_eq!(inner[1]["type"], "image");
+        assert_eq!(inner[1]["source"]["type"], "base64");
+        assert_eq!(inner[1]["source"]["data"], "AAAA");
     }
 }
