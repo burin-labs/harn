@@ -1,5 +1,5 @@
 # Experimental providers config for the codex-style loop spike.
-# Set HARN_PROVIDERS_CONFIG=/Users/ksinder/projects/harn/.worktrees/codex-loop/.experiments/providers.toml
+# Set HARN_PROVIDERS_CONFIG=<repo>/experiments/manual-evals/providers.toml
 # before invoking harn so it picks this up.
 
 [providers.llamacpp]
