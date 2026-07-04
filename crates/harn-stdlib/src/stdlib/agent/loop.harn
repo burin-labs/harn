@@ -91,15 +91,15 @@ import { omit } from "std/json"
 import { llm_call_options } from "std/llm/options"
 
 /**
- * Pipeline entrypoints execute agent loops without a lexical `Harness` binding,
- * so loop budget timing uses the ambient builtins that share the VM clock backend.
+ * Agent-loop budget timing must route through the VM-level harness clock so
+ * paused-clock tests, replay, and capability analysis see the same clock source.
  */
 fn __agent_loop_clock_now_ms() {
-  return now_ms()
+  return harness.clock.now_ms()
 }
 
 fn __agent_loop_clock_sleep_ms(delay_ms) {
-  sleep_ms(delay_ms)
+  harness.clock.sleep_ms(delay_ms)
 }
 
 fn __default_invoke_llm(message, turn_system, llm_opts) {
