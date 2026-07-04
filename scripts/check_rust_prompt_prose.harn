@@ -1,15 +1,12 @@
 // Reject new long Rust-owned prompt prose in protected orchestration paths.
 //
-// Ported from scripts/check_rust_prompt_prose.py. Behavior-identical: the same
-// raw + normal string-literal extraction (raw literals first, then normal
-// literals that do not start inside a raw span), the same Python
-// `unicode_escape` decoding of normal literals, the same
-// `re.sub(r"\s+", " ", text).strip()` normalization driving both the
-// normalized-length threshold and the 16-hex sha256 digest, the same protected
-// path set / tests + excluded-file filtering, the same allowlist parsing with
-// missing / malformed / over-limit / stale handling, and byte-identical
-// stdout / stderr / exit codes for --self-test, default scan, --threshold,
-// --root, --allowlist, and positional path overrides.
+// Behavior constraints: extract raw literals before normal literals so normal
+// scans cannot start inside a raw span; decode normal literal escapes with
+// Python-compatible `unicode_escape` semantics; normalize whitespace like
+// `re.sub(r"\s+", " ", text).strip()` before threshold and digest checks.
+// Keep stdout, stderr, and exit-code contracts stable for --self-test,
+// default scans, --threshold, --root, --allowlist, and positional path
+// overrides.
 //
 // Pure logic lives in `pub fn`s that take source text directly so the paired
 // test can drive them with no filesystem. `main` does the globbing / reads and
