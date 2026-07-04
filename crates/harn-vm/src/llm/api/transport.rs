@@ -295,6 +295,68 @@ pub(crate) async fn vm_call_llm_api_with_body(
     dialect: WireDialect,
 ) -> Result<LlmResult, VmError> {
     let started = Instant::now();
+    // TEMP DIAGNOSTIC: when a request carries an image, dump a summary of every
+    // image block (media_type, byte length, head/tail) to a fixed path so we can
+    // confirm exactly what pixels reach the model in a live run. Fires for every
+    // provider/transport since this is the shared funnel.
+    {
+        let mut summaries = Vec::new();
+        fn walk(v: &serde_json::Value, out: &mut Vec<serde_json::Value>) {
+            match v {
+                serde_json::Value::Object(m) => {
+                    if m.get("type").and_then(|t| t.as_str()) == Some("image") {
+                        if let Some(src) = m.get("source") {
+                            let data = src.get("data").and_then(|d| d.as_str()).unwrap_or("");
+                            out.push(serde_json::json!({
+                                "media_type": src.get("media_type"),
+                                "len": data.len(),
+                                "head": data.chars().take(40).collect::<String>(),
+                            }));
+                        }
+                    }
+                    if m.get("type").and_then(|t| t.as_str()) == Some("image_url") {
+                        let url = m.get("image_url").and_then(|u| u.get("url")).and_then(|u| u.as_str()).unwrap_or("");
+                        out.push(serde_json::json!({"image_url_len": url.len(), "head": url.chars().take(48).collect::<String>()}));
+                    }
+                    for val in m.values() {
+                        walk(val, out);
+                    }
+                }
+                serde_json::Value::Array(a) => {
+                    for x in a {
+                        walk(x, out);
+                    }
+                }
+                _ => {}
+            }
+        }
+        walk(&body, &mut summaries);
+        if !summaries.is_empty() {
+            let dump = serde_json::json!({
+                "provider": &opts.provider,
+                "model": &opts.model,
+                "message_count": body.get("messages").and_then(|m| m.as_array()).map(|a| a.len()),
+                "input_count": body.get("input").and_then(|m| m.as_array()).map(|a| a.len()),
+                "image_blocks": summaries,
+            });
+            let _ = std::fs::write(
+                "/private/tmp/burin_computer_request_dump.json",
+                serde_json::to_vec_pretty(&dump).unwrap_or_default(),
+            );
+        } else if body.get("tools").is_some() || body.get("messages").is_some() {
+            // Record that a request went out with NO image blocks (helps confirm
+            // whether the screenshot is being stripped before send).
+            let _ = std::fs::write(
+                "/private/tmp/burin_computer_request_noimage.json",
+                serde_json::to_vec_pretty(&serde_json::json!({
+                    "provider": &opts.provider,
+                    "model": &opts.model,
+                    "message_count": body.get("messages").and_then(|m| m.as_array()).map(|a| a.len()),
+                }))
+                .unwrap_or_default(),
+            );
+        }
+    }
     let mut result = vm_call_llm_api_with_body_inner(opts, delta_tx, body, dialect).await?;
     // Reserved-token tool-call delimiter remap (single boundary).
     //

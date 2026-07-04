@@ -481,63 +481,13 @@ impl AnthropicProvider {
         request: &LlmRequestPayload,
         delta_tx: Option<DeltaSender>,
     ) -> Result<LlmResult, VmError> {
-        let body = Self::build_request_body(request);
-        // TEMP DIAGNOSTIC: dump the outgoing request (with a summary of any image
-        // blocks) so we can confirm exactly what pixels reach the model.
-        if let Ok(path) = std::env::var("BURIN_DEBUG_REQUEST_FILE") {
-            let mut summary = Vec::new();
-            if let Some(messages) = body.get("messages").and_then(|m| m.as_array()) {
-                for (mi, message) in messages.iter().enumerate() {
-                    collect_image_summaries(message.get("content"), mi, &mut summary);
-                }
-            }
-            let dump = serde_json::json!({
-                "image_blocks": summary,
-                "body": body,
-            });
-            let _ = std::fs::write(&path, serde_json::to_vec(&dump).unwrap_or_default());
-        }
         crate::llm::api::vm_call_llm_api_with_body(
             request,
             delta_tx,
-            body,
+            Self::build_request_body(request),
             crate::llm::capabilities::WireDialect::Anthropic,
         )
         .await
-    }
-}
-
-/// TEMP DIAGNOSTIC helper: walk a message's content and record `(message_index,
-/// media_type, data_len, data_head, data_tail)` for every base64 image source.
-fn collect_image_summaries(
-    content: Option<&serde_json::Value>,
-    message_index: usize,
-    out: &mut Vec<serde_json::Value>,
-) {
-    let Some(content) = content else { return };
-    match content {
-        serde_json::Value::Array(items) => {
-            for item in items {
-                // Recurse into tool_result blocks' nested content.
-                if item.get("type").and_then(|t| t.as_str()) == Some("tool_result") {
-                    collect_image_summaries(item.get("content"), message_index, out);
-                }
-                if item.get("type").and_then(|t| t.as_str()) == Some("image") {
-                    if let Some(source) = item.get("source") {
-                        let data = source.get("data").and_then(|d| d.as_str()).unwrap_or("");
-                        out.push(serde_json::json!({
-                            "message_index": message_index,
-                            "media_type": source.get("media_type"),
-                            "source_type": source.get("type"),
-                            "data_len": data.len(),
-                            "data_head": data.chars().take(48).collect::<String>(),
-                            "data_tail": data.chars().rev().take(24).collect::<String>().chars().rev().collect::<String>(),
-                        }));
-                    }
-                }
-            }
-        }
-        _ => {}
     }
 }
 
