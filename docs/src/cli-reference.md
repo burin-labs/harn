@@ -1423,7 +1423,8 @@ Plan a portable LoRA or QLoRA fine-tune for a Harn model route:
 
 ```bash
 harn models lora plan --base local-gemma4-e4b --provider vllm --tool-format auto --corpus ./lora-corpus
-harn models lora plan --base local-gemma4-e4b --provider vllm --teacher dashscope/qwen3-coder-next --corpus ./lora-corpus
+harn models lora plan --base local-gemma4-e4b --provider vllm --trainer unsloth_sft \
+  --teacher dashscope/qwen3-coder-next --corpus ./lora-corpus
 harn models lora plan --base google/gemma-4-E4B-it --provider google --tool-format native --json
 ```
 
@@ -1441,9 +1442,12 @@ The report lists provenance manifest fields, hard-negative slices, and holdout
 gates so generated data cannot silently contaminate evaluation fixtures. It
 also lists the trainer contract Harn expects for tool-calling SFT, including
 assistant-only loss masks, `messages`/`tools` columns, packing boundaries, and
-method-specific target modules. QLoRA plans use PEFT's `all-linear` target
-module shorthand; full LoRA plans keep explicit attention projection modules in
-`training.target_modules`.
+method-specific target modules. Use `--trainer trl_sft_trainer`,
+`--trainer unsloth_sft`, or `--trainer external_sft_trainer` to make the
+backend contract explicit; Harn still owns export, manifests, eval, and serving
+promotion, while trainer-specific runtimes only fit the adapter weights. QLoRA
+plans use PEFT's `all-linear` target module shorthand; full LoRA plans keep
+explicit attention projection modules in `training.target_modules`.
 The `corpus_refresh.model_aware_selection` block records base-model failure
 buckets, parser/schema difficulty signals, sampling policy, refinement loops,
 and stop conditions so corpus refresh jobs prioritize failures the target model

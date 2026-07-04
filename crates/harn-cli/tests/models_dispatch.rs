@@ -565,6 +565,8 @@ fn models_lora_plan_human_text_includes_recipe() {
             "./lora-corpus",
             "--teacher",
             "dashscope/qwen3-coder-next",
+            "--trainer",
+            "unsloth_sft",
         ],
         &[],
     );
@@ -574,7 +576,7 @@ fn models_lora_plan_human_text_includes_recipe() {
         "LoRA plan for gemma-4-e4b-it via vllm",
         "tool format: json (requested auto)",
         "training: qlora + peft_lora",
-        "trainer: trl_sft_trainer",
+        "trainer: unsloth_sft",
         "LoRA hparams: rank=16 alpha=32 dropout=0.05",
         "target modules: all-linear",
         "training base precision: 4bit_nf4_or_runtime_equivalent",
@@ -597,6 +599,8 @@ fn models_lora_plan_human_text_includes_recipe() {
         "trainer contract:",
         "set assistant_only_loss=true",
         "Harn remains the parser at inference",
+        "use Unsloth only as the trainer backend",
+        "record torch/CUDA, tokenizer class, and chat-template hash",
         "minimum trials: 5",
         "comparison baseline: same base model, provider, tool format, prompt template, and tool schemas without the adapter",
         "required metrics:",
@@ -651,6 +655,7 @@ fn models_lora_plan_json_shape_is_stable() {
     assert_eq!(report["request"]["requested_tool_format"], "native");
     assert_eq!(report["request"]["effective_tool_format"], "native");
     assert_eq!(report["training"]["adapter_type"], "peft_lora");
+    assert_eq!(report["training"]["trainer"], "trl_sft_trainer");
     assert_eq!(report["training"]["rank"], 16);
     assert_eq!(report["training"]["alpha"], 32);
     assert_eq!(report["training"]["dropout"], 0.05);
@@ -717,6 +722,12 @@ fn models_lora_plan_json_shape_is_stable() {
         trainer_contract.iter().any(|note| note
             .as_str()
             .is_some_and(|text| text.contains("messages plus a tools column"))),
+        "trainer contract={trainer_contract:?}"
+    );
+    assert!(
+        trainer_contract.iter().any(|note| note
+            .as_str()
+            .is_some_and(|text| text.contains("stock TRL/PEFT backend"))),
         "trainer contract={trainer_contract:?}"
     );
     assert_eq!(report["data"]["dataset_format"], "messages_with_tool_calls");

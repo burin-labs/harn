@@ -416,6 +416,7 @@ fn manifest_string_from_object(
 
 fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
     let method = normalize_lora_method(&args.method)?;
+    let trainer = normalize_lora_trainer(&args.trainer)?;
     let rank = normalize_lora_rank(args.rank)?;
     let alpha = normalize_lora_alpha(args.alpha, rank)?;
     let dropout = normalize_lora_dropout(args.dropout)?;
@@ -600,7 +601,7 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
         "--chat-template".to_string(),
         template.name.clone(),
         "--trainer".to_string(),
-        "trl_sft_trainer".to_string(),
+        trainer.clone(),
         "--method".to_string(),
         method.clone(),
         "--rank".to_string(),
@@ -689,7 +690,7 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
         },
         training: TrainingRecipe {
             adapter_type: "peft_lora".to_string(),
-            trainer: "trl_sft_trainer".to_string(),
+            trainer: trainer.clone(),
             rank,
             alpha,
             dropout,
@@ -698,7 +699,11 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
             packing: "off_by_default_for_tool_boundaries".to_string(),
             target_modules,
             contract: lora_training_contract(dataset_format, &decision.effective),
-            trainer_contract: trainer_contract_for_dataset(dataset_format, &decision.effective),
+            trainer_contract: trainer_contract_for_dataset(
+                dataset_format,
+                &decision.effective,
+                &trainer,
+            ),
             notes: training_notes(&decision.effective),
         },
         precision,
@@ -885,6 +890,20 @@ fn normalize_lora_method(raw: &str) -> Result<String, String> {
         "lora" | "qlora" => Ok(method),
         _ => Err(format!(
             "unsupported LoRA method `{raw}`; expected `qlora` or `lora`"
+        )),
+    }
+}
+
+fn normalize_lora_trainer(raw: &str) -> Result<String, String> {
+    let trainer = raw.trim().to_ascii_lowercase().replace('-', "_");
+    match trainer.as_str() {
+        "trl" | "trl_sft" | "trl_sft_trainer" => Ok("trl_sft_trainer".to_string()),
+        "unsloth" | "unsloth_sft" | "unsloth_trl_sft" => Ok("unsloth_sft".to_string()),
+        "external" | "external_sft" | "external_sft_trainer" => {
+            Ok("external_sft_trainer".to_string())
+        }
+        _ => Err(format!(
+            "unsupported LoRA trainer `{raw}`; expected `trl_sft_trainer`, `unsloth_sft`, or `external_sft_trainer`"
         )),
     }
 }
@@ -1125,7 +1144,11 @@ fn training_notes(tool_format: &str) -> Vec<String> {
     }
 }
 
-fn trainer_contract_for_dataset(dataset_format: &str, tool_format: &str) -> Vec<String> {
+fn trainer_contract_for_dataset(
+    dataset_format: &str,
+    tool_format: &str,
+    trainer: &str,
+) -> Vec<String> {
     let machine_contract = lora_training_contract(dataset_format, tool_format);
     let mut contract = vec![
         "use TRL SFTTrainer with PEFT LoRA/QLoRA; keep the base weights frozen and save only adapter artifacts".to_string(),
@@ -1149,6 +1172,29 @@ fn trainer_contract_for_dataset(dataset_format: &str, tool_format: &str) -> Vec<
         contract.push(
             "do not train provider-native tool tags for Harn text/json routes; Harn remains the parser at inference".to_string(),
         );
+    }
+    match trainer {
+        "unsloth_sft" => {
+            contract.push(
+                "use Unsloth only as the trainer backend; Harn remains the authority for export, manifest, eval, and serving contracts".to_string(),
+            );
+            contract.push(
+                "enable Unsloth gradient checkpointing for long tool-call transcripts and keep packing disabled unless the packer preserves tool boundaries".to_string(),
+            );
+            contract.push(
+                "record torch/CUDA, tokenizer class, and chat-template hash in `harn models lora manifest --target-metadata` after training".to_string(),
+            );
+        }
+        "external_sft_trainer" => {
+            contract.push(
+                "external trainers must reproduce the Harn trainer contract exactly and stamp their backend/version in the LoRA manifest".to_string(),
+            );
+        }
+        _ => {
+            contract.push(
+                "use the stock TRL/PEFT backend unless a named trainer backend is recorded in the manifest".to_string(),
+            );
+        }
     }
     contract.push(format!(
         "machine contract: mask={} packing={} parser_owner={} split={}",
@@ -2134,7 +2180,8 @@ mod tests {
 
     #[test]
     fn lora_trainer_contract_keeps_loss_masks_and_tool_columns_explicit() {
-        let native = trainer_contract_for_dataset("messages_with_tool_calls", "native");
+        let native =
+            trainer_contract_for_dataset("messages_with_tool_calls", "native", "trl_sft_trainer");
         assert!(native
             .iter()
             .any(|item| item.contains("assistant_only_loss=true")));
@@ -2143,7 +2190,11 @@ mod tests {
             .any(|item| item.contains("messages plus a tools column")));
         assert!(native.iter().any(|item| item.contains("generation masks")));
 
-        let text = trainer_contract_for_dataset("harn_text_tool_calls_json_fences", "json");
+        let text = trainer_contract_for_dataset(
+            "harn_text_tool_calls_json_fences",
+            "json",
+            "trl_sft_trainer",
+        );
         assert!(text.iter().any(|item| item.contains("assistant_tool_text")));
         assert!(text
             .iter()
@@ -2165,6 +2216,11 @@ mod tests {
 
         let text_contract = lora_training_contract("harn_text_tool_calls_json_fences", "json");
         assert_eq!(text_contract.tool_parser_owner, "harn_text_tool_parser");
+
+        let unsloth =
+            trainer_contract_for_dataset("harn_text_tool_calls_json_fences", "json", "unsloth_sft");
+        assert!(unsloth.iter().any(|item| item.contains("Unsloth")));
+        assert!(unsloth.iter().any(|item| item.contains("torch/CUDA")));
     }
 
     #[test]
@@ -2177,6 +2233,7 @@ mod tests {
             teacher: None,
             corpus_strategy: "auto".to_string(),
             method: "qlora".to_string(),
+            trainer: "trl_sft_trainer".to_string(),
             rank: 24,
             alpha: None,
             dropout: 0.1,
@@ -2210,12 +2267,14 @@ mod tests {
             teacher: Some("dashscope/qwen3-coder-next".to_string()),
             corpus_strategy: "refresh".to_string(),
             method: "qlora".to_string(),
+            trainer: "unsloth_trl_sft".to_string(),
             rank: 24,
             alpha: None,
             dropout: 0.1,
             json: true,
         };
         let report = plan_report(&args).expect("report");
+        assert_eq!(report.training.trainer, "unsloth_sft");
         let selection = &report.corpus_refresh.model_aware_selection;
         assert!(selection
             .difficulty_signals
@@ -2245,6 +2304,7 @@ mod tests {
             teacher: Some("dashscope/qwen3-coder-next".to_string()),
             corpus_strategy: "refresh".to_string(),
             method: "qlora".to_string(),
+            trainer: "unsloth_sft".to_string(),
             rank: 24,
             alpha: Some(48),
             dropout: 0.1,
@@ -2266,6 +2326,11 @@ mod tests {
             .manifest_command
             .windows(2)
             .any(|pair| pair == ["--teacher", "dashscope/qwen3-coder-next"]));
+        assert!(report
+            .launch
+            .manifest_command
+            .windows(2)
+            .any(|pair| pair == ["--trainer", "unsloth_sft"]));
         assert!(report.launch.manifest_command.windows(2).any(|pair| pair
             == [
                 "--target-metadata",

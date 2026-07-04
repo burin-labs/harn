@@ -198,6 +198,9 @@ pub(crate) struct ModelsLoraPlanArgs {
     /// Adapter training method (`qlora` or `lora`).
     #[arg(long, default_value = "qlora")]
     pub method: String,
+    /// Trainer/backend contract (`trl_sft_trainer`, `unsloth_sft`, or `external_sft_trainer`).
+    #[arg(long, default_value = "trl_sft_trainer")]
+    pub trainer: String,
     /// LoRA rank to plan for training and serving.
     #[arg(long, default_value_t = 16)]
     pub rank: u32,
