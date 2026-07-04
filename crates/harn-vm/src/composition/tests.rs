@@ -6,11 +6,39 @@ use serde_json::Value;
 
 use super::*;
 use crate::agent_events::{AgentEvent, ToolCallErrorCategory, ToolCallStatus};
+use crate::compiler::Compiler;
 use crate::testbench::mcp_mock::{
     McpWorldFault, McpWorldFaultSpec, McpWorldOperation, McpWorldRuntime, McpWorldSpec,
     McpWorldToolSpec,
 };
 use crate::tool_annotations::{SideEffectLevel, ToolAnnotations};
+use crate::value::{VmError, VmValue};
+use harn_lexer::Lexer;
+use harn_parser::Parser;
+
+async fn run_composition_dispatcher_source(
+    source: &str,
+    configure: impl FnOnce(&mut crate::Vm),
+) -> Result<Value, VmError> {
+    let mut lexer = Lexer::new(source);
+    let tokens = lexer
+        .tokenize()
+        .map_err(|error| VmError::Runtime(error.to_string()))?;
+    let mut parser = Parser::new(tokens);
+    let program = parser
+        .parse()
+        .map_err(|error| VmError::Runtime(error.to_string()))?;
+    let chunk = Compiler::new()
+        .compile(&program)
+        .map_err(|error| VmError::Runtime(error.to_string()))?;
+
+    let mut vm = crate::Vm::new();
+    crate::register_vm_stdlib(&mut vm);
+    vm.unregister_builtin("host_has");
+    configure(&mut vm);
+    let value = vm.execute(&chunk).await?;
+    Ok(crate::llm::vm_value_to_json(&value))
+}
 
 #[test]
 fn snippet_hash_includes_language() {
@@ -236,6 +264,93 @@ async fn harn_composition_executes_read_only_binding_and_records_child_trace() {
     assert_eq!(report.child_calls.len(), 1);
     assert_eq!(report.child_results[0].status, ToolCallStatus::Completed);
     assert_eq!(report.run.result.unwrap()["text"], "hello");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn harn_composition_dispatcher_closure_can_call_host_has() {
+    let report = run_composition_dispatcher_source(
+        r#"
+pipeline default(task) {
+  let tools = [
+    {
+      "name": "look",
+      "parameters": {"type": "object", "required": ["path"]},
+      "annotations": {"side_effect_level": "read_only"}
+    }
+  ]
+  let manifest = composition_binding_manifest(tools)
+  let dispatcher = { binding, input ->
+    return {
+      "binding": binding,
+      "has_runtime_result": host_has("runtime", "set_result"),
+      "path": input.path
+    }
+  }
+  return composition_execute(
+    "let result = look({path: \"README.md\"})\nreturn result",
+    manifest,
+    {"dispatcher": dispatcher}
+  )
+}
+"#,
+        |_| {},
+    )
+    .await
+    .expect("composition succeeds");
+
+    assert_eq!(report["ok"], true);
+    assert_eq!(report["run"]["result"]["binding"], "look");
+    assert_eq!(report["run"]["result"]["has_runtime_result"], false);
+    assert_eq!(report["run"]["result"]["path"], "README.md");
+    assert_eq!(report["child_results"][0]["status"], "completed");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn harn_composition_dispatcher_closure_preserves_custom_host_has() {
+    let report = run_composition_dispatcher_source(
+        r#"
+pipeline default(task) {
+  let tools = [
+    {
+      "name": "look",
+      "parameters": {"type": "object", "required": ["path"]},
+      "annotations": {"side_effect_level": "read_only"}
+    }
+  ]
+  let manifest = composition_binding_manifest(tools)
+  let dispatcher = { binding, input ->
+    return {
+      "binding": binding,
+      "has_runtime_result": host_has("runtime", "set_result"),
+      "path": input.path
+    }
+  }
+  return composition_execute(
+    "let result = look({path: \"README.md\"})\nreturn result",
+    manifest,
+    {"dispatcher": dispatcher}
+  )
+        }
+"#,
+        |vm| {
+            vm.register_builtin("host_has", |args, output| {
+                assert!(output.is_empty());
+                let capability = args.first().map(VmValue::display).unwrap_or_default();
+                let operation = args.get(1).map(VmValue::display).unwrap_or_default();
+                Ok(VmValue::Bool(
+                    capability == "runtime" && operation == "set_result",
+                ))
+            });
+        },
+    )
+    .await
+    .expect("composition succeeds");
+
+    assert_eq!(report["ok"], true);
+    assert_eq!(report["run"]["result"]["binding"], "look");
+    assert_eq!(report["run"]["result"]["has_runtime_result"], true);
+    assert_eq!(report["run"]["result"]["path"], "README.md");
+    assert_eq!(report["child_results"][0]["status"], "completed");
 }
 
 #[tokio::test(flavor = "current_thread")]
