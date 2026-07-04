@@ -38,20 +38,21 @@ It is a living tracker, not a spec. When you port a script, move its row to
 | `bench_cli_cold_start.harn` | `scripts/bench_cli_cold_start.sh` + `cli-cold-start-budget.yml` | Cold-start benchmark controller; isolates measured Harn subprocesses with `env -i` so controller runtime state cannot leak into the timed child. |
 | `verify_tree_sitter_parse.harn` | `release_gate.sh` grammar audit | Regenerates/builds the tree-sitter grammar when stale, sweeps positive `.harn` sources, and preserves strict/non-strict failure policy. |
 | `check_burin_protocol_bindings.harn` | `make check-burin-protocol-artifacts` | Cross-repo Swift/TypeScript protocol artifact drift check against a Burin checkout. |
+| `check_protocol_bindings.harn` | `make check-bindings` | Harn owns the round-trip driver and diagnostics; Python is invoked only as the generated Python SDK runtime under test. |
 
 Each ported script has a paired `scripts/tests/<name>_test.harn` exercising its
 pure helpers, run by `make test-harn-scripts`.
 
 ## Kept in Python — toolchain reason
 
-- **`affected-crates.py`** — a Harn port exists and is parity-verified (matches
-  Python byte-for-byte across every `--base`/`--output` mode, with the
-  reverse-dependency closure validated against a captured `cargo metadata`), but
-  it is **not wired**. It is a CI-*bootstrap* tool: `ci.yml`'s Windows lane and
-  `make test-affected` run it *before* (and specifically to avoid) compiling
-  crates, to compute the nextest filter. Running it via `cargo run --bin harn`
-  would force a multi-minute `harn` build on every PR — including a cold
-  Windows build — purely to decide what to test, defeating its entire purpose.
+- **`affected-crates.py`** — the one repo-owned Python bootstrap exception. It
+  is a CI-*bootstrap* tool: `ci.yml`'s Windows lane and `make test-affected` run
+  it *before* (and specifically to avoid) compiling crates, to compute the
+  nextest filter. Running it via `cargo run --bin harn` would force a
+  multi-minute `harn` build on every PR — including a cold Windows build —
+  purely to decide what to test, defeating its entire purpose. Do not keep an
+  unwired Harn twin; revisit only if all affected lanes can run a prebuilt Harn
+  binary without changing the fast-feedback economics.
 
 ## Out of scope — stays in its current language
 
@@ -69,9 +70,6 @@ script's purpose or fight a tool that is JS/Python by design.
 - **`spec/protocol-artifacts/*.ts`, `python/harn_protocol.py`,
   `harn-protocol.ts`** — generated multi-language SDK bindings for external
   consumers.
-- **`check_protocol_bindings.py`** — imports the generated Python binding and
-  round-trips through it. Porting to Harn would stop testing the artifact it
-  exists to validate.
 - **`conformance/helpers/*.py`** (github/slack/linear/mcp/http mock servers) —
   out-of-process mock servers for the conformance harness; intentionally foreign
   infra spawned as subprocesses.

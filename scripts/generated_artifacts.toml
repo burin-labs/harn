@@ -295,7 +295,7 @@ outputs = [
   "spec/protocol-artifacts/python/harn_protocol.py",
   "spec/protocol-artifacts/go/harnprotocol/harnprotocol.go",
 ]
-sources = ["spec/protocol-artifacts/python/", "spec/protocol-artifacts/go/", "scripts/check_protocol_bindings.py"]
+sources = ["spec/protocol-artifacts/python/", "spec/protocol-artifacts/go/", "scripts/check_protocol_bindings.harn"]
 ci = true
 make_all = true
 pre_commit = false
