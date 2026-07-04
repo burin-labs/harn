@@ -249,7 +249,7 @@ category = "logical_task"
 plan = "task_local_or_explicit"
 
 [[thread_local]]
-path = "src/llm_config.rs"
+path = "src/llm_config/loading.rs"
 statics = ["USER_OVERRIDES"]
 category = "logical_task"
 plan = "task_local_or_explicit"
