@@ -9,6 +9,136 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.9.12
+
+### Breaking
+
+- **Removed the deprecated `llm_retries` / `llm_backoff_ms` options and the
+  in-call transient retry budget.** `llm_call` and `agent_loop` are fail-fast
+  on transient provider errors (the `agent_loop` profiles no longer inject
+  `llm_retries: 2`); compose retry policy on the caller seam with
+  `with_retry(default_llm_caller(), {...})` from `std/llm/handlers` — note the
+  off-by-one, `llm_retries: K` → `with_retry(..., {max_attempts: K + 1})`. The
+  `deprecated_llm_options` lint is now a hard error carrying that hint. The
+  built-in empty-completion retry is a fixed single silent retry for
+  provider-shaped routes and can no longer be widened per call.
+- **Deleted `std/agent/stack` and the preset wrapper fns.** `agent_stack`,
+  `agent_llm_caller`, `agent_tool_stack`, `agent_stack_audit_line`,
+  `agent_stack_model_policy`, `agent_budget`, and the eight `*_agent` wrappers
+  (`audit_agent` … `release_captain_agent`) are gone; `agent_preset(kind,
+  options?)` + `agent_loop` is the single preset surface. The survivors
+  `agent_model_options` / `agent_sanitize_model_options` moved to
+  `std/agent/options`. See `docs/src/migrations/v0.10.md` for side-by-side
+  rewrites.
+
+### Added
+
+- `agent_loop` gained a `history` option: a caller-managed conversation history
+  (a list of `{role, content, ...}` messages in the canonical `llm_call` shape)
+  prepended to the transcript as real conversational turns ahead of the task
+  message. The seeded turns are visible to the model exactly as `llm_call`'s
+  `messages` array would be, and are treated as ordinary transcript turns by
+  done_judge, compaction, and projection. This is transient seeding (the caller
+  owns the history), distinct from session persistence, and unblocks
+  chat-shaped harnesses that manage their own history from using the full agent
+  loop instead of raw `llm_call`.
+- **`std/llm/safe` gains free-text cleanup helpers `strip_think_blocks` and
+  `strip_code_fences` (#4021).** `strip_think_blocks` removes inline `<think>` /
+  `<thinking>` reasoning blocks from raw model output; `strip_code_fences` strips
+  whole-line Markdown fence delimiters (with or without a language hint) for when a
+  model wraps an entire document in a fence. These are the manual escape hatch for
+  free text that did not flow through the capability-gated `llm_call` envelope (a
+  hand-assembled string, a cached blob, an uncatalogued provider).
+- **Default mutation toolset.** `std/agent/host_tools` now ships
+  `agent_edit_tools(...)`, the canonical root-scoped `write_file`, `edit_file`,
+  `create_directory`, and `delete_path` tools every embedder previously
+  hand-rolled. They wrap the existing hostlib filesystem primitives, reuse the
+  same root resolution and path-scope enforcement as `agent_read_tools`, and are
+  annotated as mutating (`kind: edit|delete`, `side_effect_level:
+  workspace_write`) so the read-only stance hides them. Compose explicitly over
+  the read/command surface (`agent_edit_tools(agent_host_tools(nil, opts),
+  opts)`); mutation stays opt-in.
+- **`agent_loop` gains an `on_delta` streaming seam (#4020).** Pass an
+  `on_delta: { delta -> ... }` closure and each per-turn model call is issued
+  through the streaming transport, firing the callback once per streamed chunk of
+  the assistant's visible text — so chat-shaped harnesses can render or transform
+  the token stream without abandoning `agent_loop` for a raw `llm_stream_call`.
+  The callback is observational (return value ignored); the turn still returns a
+  complete result, so native tool calls and usage are preserved and tool dispatch
+  is unaffected. Providers that do not stream fall back to a single delta carrying
+  the full visible text. A custom `llm_caller` short-circuits the default path, so
+  a non-streaming caller simply never fires `on_delta`. Tool-call-fragment
+  streaming is intentionally out of scope for v1. The `llm_mock` testing surface
+  learns a `stream_chunks` field (helper: `llm_stream_text([...])`) for scripting
+  deterministic streaming responses.
+- Add computer use (screenshot + mouse/keyboard control) as an opt-in host capability. `harn-hostlib`
+  gains a cross-platform `computer` module (Cargo features `computer` / `computer-local`) exposing
+  `hostlib_computer_{screenshot,execute,ui_tree,permissions}` over pluggable local (`xcap` capture +
+  `enigo` input), helper, and remote (TCP) socket backends that all share one wire protocol. `harn-vm`
+  projects a single neutral computer tool onto each provider's native surface — Anthropic
+  `computer_20251124` (with the `computer-use-2025-11-24` beta header), OpenAI Responses `computer`, or a
+  portable function-schema fallback for other vision models — and carries screenshot tool results back as
+  image content blocks. Off by default; gated by model capability (`computer_use_style`) and
+  `BURIN_COMPUTER_USE_TRANSPORT`.
+- Typed option aliases are now the single documented path for building
+  orchestration options. `std/llm/options` gains `LlmCallOptions`, `LlmBudget`,
+  and `ModelLadder` (plus `llm_options(...)` / `model_ladder(...)`
+  constructors); `std/agent/options` gains `AgentLoopOptions`,
+  `AgentPresetOptions`, `IterationBudget`, `TurnPolicy`, `StallDiagnostics`,
+  `CompactionPolicy`, and `JudgeConfig` (plus `agent_options(...)` /
+  `agent_preset_options(...)`); `std/workflow/options` gains `StageSpec`,
+  `WorkflowRetryPolicy` (including the staged `repair_prompt_builder` /
+  `feedback` retry-with-feedback keys), `ModelPolicySpec`, `StageContract`,
+  and `WorkflowExecuteOptions` (plus `workflow_stage_spec(...)` /
+  `workflow_execute_options(...)`). Each alias carries a cross-reference to
+  its Rust policy twin and a serde-defaults key-parity test pins the two
+  surfaces together. A new info-level `unnormalized-options` lint
+  (`HARN-LNT-060`) flags inline option dict literals passed directly to
+  `agent_loop` / `workflow_execute` and points at the typed constructors —
+  raw dicts still execute unchanged. Docs examples across `llm_call`,
+  `agent_loop`, the workflow runtime chapter, and the LLM quickref now build
+  options through the typed aliases.
+
+### Changed
+
+- `harn models lora plan` now calls out Gemma 4 native-tool serving risk on vLLM and records parser/template
+  pinning guidance in the plan.
+- **LoRA planning.** `harn models lora plan` now reports a model-aware corpus
+  selection and refinement contract for tool-calling adapters.
+- **LoRA planning now emits post-training receipt and probe commands.** `harn
+  models lora plan` includes the `harn models lora manifest` handoff step and a
+  served-route `harn provider tool-probe` command so external trainers can return
+  auditable adapter metadata to Harn before inspection, launch, and promotion
+  evals.
+- Internal (pure refactor, no behavior change): extracted the workflow stage
+  attempt loop's mechanisms into four runtime-only host builtins —
+  `__host_stage_select_artifacts`, `__host_stage_execute_once`,
+  `__host_stage_record_attempt`, and `__host_llm_usage_snapshot` /
+  `__host_llm_usage_delta` — as inversion pre-work for moving the retry loop
+  itself into `std/workflow/stage.harn` (design D5 step 1). The Rust loop in
+  `stage.rs::execute_stage_attempts` now drives through the same internal
+  functions the builtins wrap; replay, records, and all stage outcomes are
+  byte-identical.
+
+### Fixed
+
+- **`llm_call` now excludes inline `<think>` reasoning from `text`, `prose`, and
+  `visible_text` for local/open-weight routes that emit reasoning inline (#4021).**
+  Routes whose capability matrix marks them as inline-reasoning emitters (Qwen3 via
+  vLLM, local Ollama / llama.cpp reasoning models, Kimi) have their `<think>...</think>`
+  blocks split out of the visible answer channels and folded into the `thinking`
+  reasoning channel, mirroring how hosted-provider thinking is already surfaced. The
+  split is capability-gated on `emits_inline_reasoning` (derived from
+  `thinking_block_style = "inline"`, data-driven — never a provider-name match), so a
+  provider that never emits inline think (Anthropic, OpenAI) passes any literal
+  `<think>` in its output through untouched. An unclosed `<think>` with no matching
+  `</think>` consumes the remainder as reasoning, the safe reading for a truncated
+  trace with no committed answer.
+- **Agent read-only stance.** Read-only tool filtering now honors policy-level
+  tool annotations when host-provided registry entries omit direct metadata.
+- Advertise `stance_transition` in ACP/Harn protocol artifacts so hosts can render read-only stance lifecycle
+  updates through generated bindings.
+
 ## v0.9.11
 
 ### Added
