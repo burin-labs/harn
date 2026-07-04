@@ -2853,7 +2853,7 @@ dependencies = [
 
 [[package]]
 name = "harn-secret-catalog"
-version = "0.9.9"
+version = "0.9.10"
 
 [[package]]
 name = "harn-serve"
