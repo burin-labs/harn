@@ -1,0 +1,185 @@
+import { command_run } from "std/command"
+import "std/path"
+import { with_temp_dir } from "std/testing"
+import { qmode_inspect_task_dir } from "../qmode_inspect"
+
+fn first_group(pattern: string, text: string) {
+  let matches = regex_captures(pattern, text)
+  if len(matches) == 0 {
+    return nil
+  }
+  return matches[0].groups[0]
+}
+
+fn repo_root() -> string {
+  var dir = cwd()
+  var depth = 0
+  while depth < 8 {
+    if harness.fs.exists(path_join(dir, "Cargo.toml"))
+      && harness.fs.exists(path_join(dir, "experiments")) {
+      return dir
+    }
+    let parent = dirname(dir) ?? dir
+    if parent == dir {
+      break
+    }
+    dir = parent
+    depth = depth + 1
+  }
+  throw "could not find repo root from " + cwd()
+}
+
+fn resolve_harn_bin(root: string) -> string {
+  let explicit = harness.env.get("HARN_BIN")
+  if explicit {
+    return explicit
+  }
+  let env_target_dir = harness.env.get("CARGO_TARGET_DIR")
+  if env_target_dir {
+    return path_join(env_target_dir, "debug/harn")
+  }
+  let cargo_config = path_join(root, ".cargo/config.toml")
+  if harness.fs.exists(cargo_config) {
+    let config = harness.fs.read_text(cargo_config) ?? ""
+    let configured = first_group("(?m)^target-dir\\s*=\\s*\\\"([^\\\"]+)\\\"", config)
+    if configured {
+      let configured_bin = path_join(configured, "debug/harn")
+      if harness.fs.exists(configured_bin) {
+        return configured_bin
+      }
+    }
+  }
+  let default_bin = path_join(root, "target/debug/harn")
+  if harness.fs.exists(default_bin) {
+    return default_bin
+  }
+  return "harn"
+}
+
+fn write_json(path: string, value) -> nil {
+  harness.fs.write_text(path, json_stringify(value) + "\n")
+  return nil
+}
+
+fn write_valid_fixture(task_dir: string) -> nil {
+  write_json(path_join(task_dir, "task.json"), {task: "add per-IP rate limiting"})
+  harness.fs
+    .write_text(
+    path_join(task_dir, "qa.jsonl"),
+    json_stringify(
+      {
+        question: "Which backing store should rate limits use?",
+        answer: "Use Redis.",
+        answered_at: "2026-04-25T00:00:00Z",
+      },
+    )
+      + "\n",
+  )
+  write_json(
+    path_join(task_dir, "plan.json"),
+    {
+      mode: "fast_execute",
+      direction: "Use Redis-backed rate limiting.",
+      tasks: ["Wire the limiter"],
+      ready: true,
+    },
+  )
+  harness.fs
+    .write_text(
+    path_join(task_dir, "llm-mock.jsonl"),
+    json_stringify(
+      {
+        input_tokens: 100,
+        messages: [
+          {role: "system", content: "## Question-at-a-time planner\nUse tools."},
+          {role: "user", content: "add per-IP rate limiting"},
+        ],
+        tool_calls: [{name: "ask_question", args: {question: "Which backing store should rate limits use?"}}],
+      },
+    )
+      + "\n"
+      + json_stringify(
+      {
+        input_tokens: 140,
+        messages: [
+          {role: "system", content: "## Question-at-a-time planner\nUse tools."},
+          {role: "user", content: "Use Redis."},
+        ],
+        tool_calls: [{name: "exit_plan_mode", args: {plan: "{}"}}],
+      },
+    )
+      + "\n",
+  )
+  write_json(path_join(task_dir, "step.json"), {tool_calls: [{name: "exit_plan_mode"}]})
+  harness.fs
+    .write_text(
+    path_join(task_dir, "last-prompt.txt"),
+    "- Q: Which backing store should rate limits use?\n  A: Use Redis.\n",
+  )
+  return nil
+}
+
+fn finding_messages(result: dict) -> string {
+  var lines: list<string> = []
+  for finding in result.findings {
+    lines = lines + [to_string(finding?.level ?? "") + ": " + to_string(finding?.message ?? "")]
+  }
+  return join(lines, "\n")
+}
+
+pipeline test_qmode_inspect_valid_fixture_passes(_task) {
+  with_temp_dir(
+    { task_dir ->
+      write_valid_fixture(task_dir)
+      let result = qmode_inspect_task_dir(task_dir)
+      let output = finding_messages(result)
+      assert(result.exit_code == 0, "valid fixture should pass: " + output)
+      assert(output.contains("OK: task.json has task text"), "task text finding should be emitted")
+      assert(!output.contains("FAIL:"), "valid fixture should not fail: " + output)
+    },
+  )
+}
+
+pipeline test_qmode_inspect_terminal_double_call_fails(_task) {
+  with_temp_dir(
+    { task_dir ->
+      write_json(path_join(task_dir, "task.json"), {task: "improve performance"})
+      harness.fs
+        .write_text(
+        path_join(task_dir, "llm-mock.jsonl"),
+        json_stringify(
+          {
+            tool_calls: [{name: "ask_question", args: {question: "Where?"}}, {name: "exit_plan_mode", args: {plan: "{}"}}],
+          },
+        )
+          + "\n",
+      )
+      let result = qmode_inspect_task_dir(task_dir)
+      let output = finding_messages(result)
+      assert(result.exit_code == 1, "double terminal tool call must fail")
+      assert(
+        output.contains("multiple terminal tools"),
+        "failure should name terminal tool collision: " + output,
+      )
+    },
+  )
+}
+
+pipeline test_qmode_inspect_cli_exit_code_and_output(_task) {
+  with_temp_dir(
+    { task_dir ->
+      write_valid_fixture(task_dir)
+      let root = repo_root()
+      let harn_bin = resolve_harn_bin(root)
+      let child = command_run(
+        [harn_bin, "run", "--no-sandbox", "experiments/burin-mini/qmode_inspect.harn", "--", task_dir],
+        {cwd: root, capture: {max_inline_bytes: 200000}},
+      )
+      assert(child.success, "CLI should exit zero: " + to_string(child?.combined ?? ""))
+      assert(
+        to_string(child?.stdout ?? "").contains("OK: task.json has task text"),
+        "CLI should print findings: " + to_string(child?.stdout ?? ""),
+      )
+    },
+  )
+}
