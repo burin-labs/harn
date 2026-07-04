@@ -675,6 +675,7 @@ aws_secret_access_key = dev-secret
             prefill: None,
             session_id: None,
             reminder_lifecycle: Vec::new(),
+            cli_llm_mock_scope: None,
         }
     }
 }

@@ -668,6 +668,7 @@ pub fn install_cli_llm_mock_mode(mode: &CliLlmMockMode) -> Result<(), String> {
 
 pub fn persist_cli_llm_mock_recording(mode: &CliLlmMockMode) -> Result<(), String> {
     let CliLlmMockMode::Record { fixture_path } = mode else {
+        harn_vm::llm::clear_cli_llm_mock_mode();
         return Ok(());
     };
     if let Some(parent) = fixture_path.parent() {
@@ -690,8 +691,10 @@ pub fn persist_cli_llm_mock_recording(mode: &CliLlmMockMode) -> Result<(), Strin
     } else {
         format!("{}\n", lines.join("\n"))
     };
-    fs::write(fixture_path, body)
-        .map_err(|error| format!("failed to write {}: {error}", fixture_path.display()))
+    let result = fs::write(fixture_path, body)
+        .map_err(|error| format!("failed to write {}: {error}", fixture_path.display()));
+    harn_vm::llm::clear_cli_llm_mock_mode();
+    result
 }
 
 pub(crate) async fn run_file(

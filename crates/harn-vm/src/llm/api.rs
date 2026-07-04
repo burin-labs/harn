@@ -173,7 +173,7 @@ pub(crate) async fn vm_call_llm_full_streaming_offthread(
     super::cost::check_llm_preflight_budget(opts)?;
     let request = LlmRequestPayload::from(opts);
     let cached = super::trigger_predicate::lookup_cached_result(&request).is_some();
-    let intercepted = crate::llm::providers::MockProvider::should_intercept(&request.provider)
+    let intercepted = crate::llm::providers::MockProvider::should_intercept_request(&request)
         || crate::llm::fake::FakeLlmProvider::should_intercept(&request.provider);
     let replay_mode = get_replay_mode();
     if !cached && !intercepted && replay_mode == LlmReplayMode::Replay {
@@ -222,7 +222,7 @@ async fn vm_call_llm_full_inner_request(
 ) -> Result<LlmResult, VmError> {
     if let Some(result) = super::trigger_predicate::lookup_cached_result(request) {
         request.emit_reminder_lifecycle();
-        record_cli_llm_result(&result);
+        record_cli_llm_result(request, &result);
         if let Some(tx) = delta_tx {
             if !result.text.is_empty() {
                 let _ = tx.send(result.text.clone());
@@ -231,11 +231,11 @@ async fn vm_call_llm_full_inner_request(
         return Ok(result);
     }
 
-    if crate::llm::providers::MockProvider::should_intercept(&request.provider) {
+    if crate::llm::providers::MockProvider::should_intercept_request(request) {
         request.emit_reminder_lifecycle();
         let result = mock_llm_response(request)?;
         super::trigger_predicate::note_result(request, &result);
-        record_cli_llm_result(&result);
+        record_cli_llm_result(request, &result);
         if let Some(tx) = delta_tx {
             if !result.text.is_empty() {
                 let _ = tx.send(result.text.clone());
@@ -252,7 +252,7 @@ async fn vm_call_llm_full_inner_request(
             .chat_impl(request, delta_tx)
             .await?;
         super::trigger_predicate::note_result(request, &result);
-        record_cli_llm_result(&result);
+        record_cli_llm_result(request, &result);
         return Ok(result);
     }
 
@@ -285,7 +285,7 @@ async fn vm_call_llm_full_inner_request(
         save_fixture(&hash, &result);
     }
     super::trigger_predicate::note_result(request, &result);
-    record_cli_llm_result(&result);
+    record_cli_llm_result(request, &result);
 
     Ok(result)
 }
@@ -295,14 +295,14 @@ async fn vm_call_llm_full_inner_offthread(
     delta_tx: Option<DeltaSender>,
 ) -> Result<LlmResult, OffthreadLlmError> {
     if let Some(result) = super::trigger_predicate::lookup_cached_result(request) {
-        record_cli_llm_result(&result);
+        record_cli_llm_result(request, &result);
         return Ok(result);
     }
 
-    if crate::llm::providers::MockProvider::should_intercept(&request.provider) {
+    if crate::llm::providers::MockProvider::should_intercept_request(request) {
         let result = mock_llm_response(request).map_err(OffthreadLlmError::from_vm_error)?;
         super::trigger_predicate::note_result(request, &result);
-        record_cli_llm_result(&result);
+        record_cli_llm_result(request, &result);
         return Ok(result);
     }
 
@@ -312,7 +312,7 @@ async fn vm_call_llm_full_inner_offthread(
             .await
             .map_err(OffthreadLlmError::from_vm_error)?;
         super::trigger_predicate::note_result(request, &result);
-        record_cli_llm_result(&result);
+        record_cli_llm_result(request, &result);
         return Ok(result);
     }
 
@@ -339,7 +339,7 @@ async fn vm_call_llm_full_inner_offthread(
                 save_fixture(&hash, &result);
             }
             super::trigger_predicate::note_result(request, &result);
-            record_cli_llm_result(&result);
+            record_cli_llm_result(request, &result);
             return Ok(result);
         }
         Err(primary_error) => OffthreadLlmError::from_vm_error(primary_error),
@@ -354,7 +354,7 @@ async fn vm_call_llm_full_inner_offthread(
         save_fixture(&hash, &result);
     }
     super::trigger_predicate::note_result(request, &result);
-    record_cli_llm_result(&result);
+    record_cli_llm_result(request, &result);
 
     Ok(result)
 }

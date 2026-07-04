@@ -601,6 +601,11 @@ pub(crate) struct LlmRequestPayload {
     /// reminder text and this is local audit routing metadata.
     #[serde(skip_serializing)]
     pub reminder_lifecycle: Vec<ReminderLifecycleEmission>,
+    /// CLI `--llm-mock` replay/recording scope captured before any provider
+    /// work crosses onto Tokio's multithreaded scheduler. Skipped in serialized
+    /// transport snapshots because it is an in-process harness handle.
+    #[serde(skip_serializing)]
+    pub cli_llm_mock_scope: Option<u64>,
 }
 
 impl LlmRequestPayload {
@@ -663,6 +668,7 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
             prefill: opts.prefill.clone(),
             session_id: opts.session_id.clone(),
             reminder_lifecycle: opts.reminder_lifecycle.clone(),
+            cli_llm_mock_scope: crate::llm::mock::current_cli_llm_mock_scope(),
         };
         apply_thinking_disable_directive(&mut payload);
         payload

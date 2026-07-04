@@ -1,6 +1,8 @@
 use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{LazyLock, Mutex, MutexGuard};
 
 use super::api::{LlmResult, ProviderTelemetry};
 use crate::orchestration::ToolCallRecord;
@@ -14,12 +16,24 @@ pub enum LlmReplayMode {
     Replay,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 enum CliLlmMockMode {
+    #[default]
     Off,
     Replay,
     Record,
 }
+
+#[derive(Default)]
+struct CliLlmMockState {
+    mode: CliLlmMockMode,
+    mocks: Vec<LlmMock>,
+    recordings: Vec<LlmMock>,
+}
+
+static CLI_LLM_MOCK_NEXT_SCOPE: AtomicU64 = AtomicU64::new(1);
+static CLI_LLM_MOCK_SCOPES: LazyLock<Mutex<BTreeMap<u64, CliLlmMockState>>> =
+    LazyLock::new(|| Mutex::new(BTreeMap::new()));
 
 /// Categorized error injected by a mock. When present, the mock
 /// short-circuits the provider call and surfaces as
@@ -217,12 +231,31 @@ thread_local! {
     static LLM_FIXTURE_DIR: RefCell<String> = const { RefCell::new(String::new()) };
     static TOOL_RECORDINGS: RefCell<Vec<ToolCallRecord>> = const { RefCell::new(Vec::new()) };
     static LLM_MOCKS: RefCell<Vec<LlmMock>> = const { RefCell::new(Vec::new()) };
-    static CLI_LLM_MOCK_MODE: RefCell<CliLlmMockMode> = const { RefCell::new(CliLlmMockMode::Off) };
-    static CLI_LLM_MOCKS: RefCell<Vec<LlmMock>> = const { RefCell::new(Vec::new()) };
-    static CLI_LLM_RECORDINGS: RefCell<Vec<LlmMock>> = const { RefCell::new(Vec::new()) };
+    static CLI_LLM_MOCK_SCOPE: RefCell<Option<u64>> = const { RefCell::new(None) };
     static LLM_MOCK_CALLS: RefCell<Vec<LlmMockCall>> = const { RefCell::new(Vec::new()) };
     static LLM_PROMPT_CACHE: RefCell<BTreeSet<String>> = const { RefCell::new(BTreeSet::new()) };
     static LLM_MOCK_SCOPES: RefCell<Vec<LlmMockScope>> = const { RefCell::new(Vec::new()) };
+}
+
+fn cli_llm_mock_scopes() -> MutexGuard<'static, BTreeMap<u64, CliLlmMockState>> {
+    CLI_LLM_MOCK_SCOPES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn next_cli_llm_mock_scope_id() -> u64 {
+    CLI_LLM_MOCK_NEXT_SCOPE.fetch_add(1, Ordering::Relaxed)
+}
+
+pub(crate) fn current_cli_llm_mock_scope() -> Option<u64> {
+    CLI_LLM_MOCK_SCOPE.with(|scope| *scope.borrow())
+}
+
+fn install_cli_llm_mock_scope(state: CliLlmMockState) {
+    clear_cli_llm_mock_mode();
+    let scope = next_cli_llm_mock_scope_id();
+    cli_llm_mock_scopes().insert(scope, state);
+    CLI_LLM_MOCK_SCOPE.with(|slot| *slot.borrow_mut() = Some(scope));
 }
 
 pub(crate) fn push_llm_mock(mock: LlmMock) {
@@ -239,9 +272,7 @@ pub(crate) fn builtin_llm_mock_active() -> bool {
 
 pub(crate) fn reset_llm_mock_state() {
     LLM_MOCKS.with(|v| v.borrow_mut().clear());
-    CLI_LLM_MOCK_MODE.with(|v| *v.borrow_mut() = CliLlmMockMode::Off);
-    CLI_LLM_MOCKS.with(|v| v.borrow_mut().clear());
-    CLI_LLM_RECORDINGS.with(|v| v.borrow_mut().clear());
+    clear_cli_llm_mock_mode();
     LLM_MOCK_CALLS.with(|v| v.borrow_mut().clear());
     LLM_PROMPT_CACHE.with(|v| v.borrow_mut().clear());
     LLM_MOCK_SCOPES.with(|v| v.borrow_mut().clear());
@@ -277,29 +308,49 @@ pub(crate) fn pop_llm_mock_scope() -> bool {
 }
 
 pub fn clear_cli_llm_mock_mode() {
-    CLI_LLM_MOCK_MODE.with(|v| *v.borrow_mut() = CliLlmMockMode::Off);
-    CLI_LLM_MOCKS.with(|v| v.borrow_mut().clear());
-    CLI_LLM_RECORDINGS.with(|v| v.borrow_mut().clear());
+    let scope = CLI_LLM_MOCK_SCOPE.with(|slot| slot.borrow_mut().take());
+    if let Some(scope) = scope {
+        cli_llm_mock_scopes().remove(&scope);
+    }
 }
 
 pub fn install_cli_llm_mocks(mocks: Vec<LlmMock>) {
-    CLI_LLM_MOCK_MODE.with(|v| *v.borrow_mut() = CliLlmMockMode::Replay);
-    CLI_LLM_MOCKS.with(|v| *v.borrow_mut() = mocks);
-    CLI_LLM_RECORDINGS.with(|v| v.borrow_mut().clear());
+    install_cli_llm_mock_scope(CliLlmMockState {
+        mode: CliLlmMockMode::Replay,
+        mocks,
+        recordings: Vec::new(),
+    });
 }
 
 pub fn enable_cli_llm_mock_recording() {
-    CLI_LLM_MOCK_MODE.with(|v| *v.borrow_mut() = CliLlmMockMode::Record);
-    CLI_LLM_MOCKS.with(|v| v.borrow_mut().clear());
-    CLI_LLM_RECORDINGS.with(|v| v.borrow_mut().clear());
+    install_cli_llm_mock_scope(CliLlmMockState {
+        mode: CliLlmMockMode::Record,
+        mocks: Vec::new(),
+        recordings: Vec::new(),
+    });
 }
 
 pub fn take_cli_llm_recordings() -> Vec<LlmMock> {
-    CLI_LLM_RECORDINGS.with(|v| std::mem::take(&mut *v.borrow_mut()))
+    let Some(scope) = current_cli_llm_mock_scope() else {
+        return Vec::new();
+    };
+    cli_llm_mock_scopes()
+        .get_mut(&scope)
+        .map(|state| std::mem::take(&mut state.recordings))
+        .unwrap_or_default()
 }
 
 pub(crate) fn cli_llm_mock_replay_active() -> bool {
-    CLI_LLM_MOCK_MODE.with(|v| *v.borrow() == CliLlmMockMode::Replay)
+    cli_llm_mock_replay_active_for_scope(current_cli_llm_mock_scope())
+}
+
+pub(crate) fn cli_llm_mock_replay_active_for_scope(scope: Option<u64>) -> bool {
+    let Some(scope) = scope else {
+        return false;
+    };
+    cli_llm_mock_scopes()
+        .get(&scope)
+        .is_some_and(|state| state.mode == CliLlmMockMode::Replay)
 }
 
 fn record_llm_mock_call(request: &super::api::LlmRequestPayload) {
@@ -580,34 +631,45 @@ fn try_match_builtin_mock(match_text: &str) -> Option<Result<LlmResult, VmError>
     LLM_MOCKS.with(|mocks| try_match_mock_queue(&mut mocks.borrow_mut(), match_text))
 }
 
-fn try_match_cli_mock(match_text: &str) -> Option<Result<LlmResult, VmError>> {
-    CLI_LLM_MOCKS.with(|mocks| try_match_mock_queue(&mut mocks.borrow_mut(), match_text))
+fn try_match_cli_mock(scope: Option<u64>, match_text: &str) -> Option<Result<LlmResult, VmError>> {
+    let scope = scope?;
+    let mut scopes = cli_llm_mock_scopes();
+    let state = scopes.get_mut(&scope)?;
+    if state.mode != CliLlmMockMode::Replay {
+        return None;
+    }
+    try_match_mock_queue(&mut state.mocks, match_text)
 }
 
-pub(crate) fn record_cli_llm_result(result: &LlmResult) {
+pub(crate) fn record_cli_llm_result(request: &super::api::LlmRequestPayload, result: &LlmResult) {
     record_unified_tape_llm_call(result);
-    if !CLI_LLM_MOCK_MODE.with(|mode| *mode.borrow() == CliLlmMockMode::Record) {
+    let Some(scope) = request.cli_llm_mock_scope else {
+        return;
+    };
+    let mut scopes = cli_llm_mock_scopes();
+    let Some(state) = scopes.get_mut(&scope) else {
+        return;
+    };
+    if state.mode != CliLlmMockMode::Record {
         return;
     }
-    CLI_LLM_RECORDINGS.with(|recordings| {
-        recordings.borrow_mut().push(LlmMock {
-            text: result.text.clone(),
-            tool_calls: result.tool_calls.clone(),
-            match_pattern: None,
-            consume_on_match: false,
-            input_tokens: Some(result.input_tokens),
-            output_tokens: Some(result.output_tokens),
-            cache_read_tokens: Some(result.cache_read_tokens),
-            cache_write_tokens: Some(result.cache_write_tokens),
-            thinking: result.thinking.clone(),
-            thinking_summary: result.thinking_summary.clone(),
-            stop_reason: result.stop_reason.clone(),
-            model: result.model.clone(),
-            provider: Some(result.provider.clone()),
-            blocks: Some(result.blocks.clone()),
-            logprobs: result.logprobs.clone(),
-            error: None,
-        });
+    state.recordings.push(LlmMock {
+        text: result.text.clone(),
+        tool_calls: result.tool_calls.clone(),
+        match_pattern: None,
+        consume_on_match: false,
+        input_tokens: Some(result.input_tokens),
+        output_tokens: Some(result.output_tokens),
+        cache_read_tokens: Some(result.cache_read_tokens),
+        cache_write_tokens: Some(result.cache_write_tokens),
+        thinking: result.thinking.clone(),
+        thinking_summary: result.thinking_summary.clone(),
+        stop_reason: result.stop_reason.clone(),
+        model: result.model.clone(),
+        provider: Some(result.provider.clone()),
+        blocks: Some(result.blocks.clone()),
+        logprobs: result.logprobs.clone(),
+        error: None,
     });
 }
 
@@ -881,7 +943,7 @@ pub(crate) fn mock_llm_response(
     let prompt_text = mock_last_prompt_text(messages);
     let cache_key = mock_prompt_cache_key(&request.model, messages, system);
 
-    if let Some(matched) = try_match_cli_mock(&match_text) {
+    if let Some(matched) = try_match_cli_mock(request.cli_llm_mock_scope, &match_text) {
         return matched.map(|mut result| {
             if request.cache {
                 apply_mock_prompt_cache(&mut result, &cache_key);
@@ -899,7 +961,7 @@ pub(crate) fn mock_llm_response(
         });
     }
 
-    if cli_llm_mock_replay_active() {
+    if cli_llm_mock_replay_active_for_scope(request.cli_llm_mock_scope) {
         return Err(unmatched_cli_prompt_error(&match_text));
     }
 
@@ -997,4 +1059,70 @@ pub(crate) fn mock_llm_response(
 /// Take all recorded tool calls, leaving the buffer empty.
 pub fn drain_tool_recordings() -> Vec<ToolCallRecord> {
     TOOL_RECORDINGS.with(|v| std::mem::take(&mut *v.borrow_mut()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::llm::api::LlmRequestPayload;
+
+    fn text_mock(text: &str) -> LlmMock {
+        LlmMock {
+            text: text.to_string(),
+            tool_calls: Vec::new(),
+            match_pattern: None,
+            consume_on_match: false,
+            input_tokens: None,
+            output_tokens: None,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
+            thinking: None,
+            thinking_summary: None,
+            stop_reason: None,
+            model: "fixture-model".to_string(),
+            provider: None,
+            blocks: None,
+            logprobs: Vec::new(),
+            error: None,
+        }
+    }
+
+    #[test]
+    fn cli_llm_mock_replay_scope_survives_provider_worker_thread() {
+        reset_llm_mock_state();
+        install_cli_llm_mocks(vec![text_mock("cross-thread replay")]);
+        let request = LlmRequestPayload::from(&crate::llm::api::options::base_opts("anthropic"));
+
+        assert!(request.cli_llm_mock_scope.is_some());
+        assert!(crate::llm::providers::MockProvider::should_intercept_request(&request));
+
+        let result = std::thread::spawn(move || {
+            assert!(crate::llm::providers::MockProvider::should_intercept_request(&request));
+            mock_llm_response(&request)
+        })
+        .join()
+        .expect("provider worker thread")
+        .expect("mock response");
+
+        assert_eq!(result.text, "cross-thread replay");
+        clear_cli_llm_mock_mode();
+    }
+
+    #[test]
+    fn cli_llm_mock_record_scope_collects_provider_worker_thread_results() {
+        reset_llm_mock_state();
+        enable_cli_llm_mock_recording();
+        let request = LlmRequestPayload::from(&crate::llm::api::options::base_opts("anthropic"));
+        let result = build_mock_result(&text_mock("cross-thread record"), 7);
+
+        assert!(request.cli_llm_mock_scope.is_some());
+        std::thread::spawn(move || record_cli_llm_result(&request, &result))
+            .join()
+            .expect("provider worker thread");
+
+        let recordings = take_cli_llm_recordings();
+        assert_eq!(recordings.len(), 1);
+        assert_eq!(recordings[0].text, "cross-thread record");
+        clear_cli_llm_mock_mode();
+    }
 }
