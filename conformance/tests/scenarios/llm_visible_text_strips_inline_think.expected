@@ -1,0 +1,7 @@
+inline.visible=The answer is 4
+inline.prose=The answer is 4
+inline.text=The answer is 4
+inline.thinking=secret reasoning
+plain.text=<think>secret reasoning</think>The answer is 4
+plain.prose=<think>secret reasoning</think>The answer is 4
+plain.thinking=(none)

@@ -1171,6 +1171,24 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
         assert_eq!(caps.structured_output_mode, "delimited");
         assert!(!caps.prefers_xml_tools);
         assert_eq!(caps.thinking_block_style, "inline");
+        // Inline thinking_block_style routes emit their reasoning as inline
+        // `<think>` blocks in the text channel, so the derived quirk is on.
+        assert!(caps.emits_inline_reasoning);
+    }
+
+    #[test]
+    fn emits_inline_reasoning_tracks_inline_thinking_block_style() {
+        reset();
+        // Inline-style local/open-weight routes emit inline `<think>` in text.
+        assert!(lookup("ollama", "qwen3.6:35b-a3b-coding-nvfp4").emits_inline_reasoning);
+        assert!(lookup("moonshot", "moonshot/kimi-k2.6").emits_inline_reasoning);
+        assert!(lookup("cerebras", "zai-glm-4.7").emits_inline_reasoning);
+        // Hosted providers surface reasoning in a dedicated channel, not inline
+        // `<think>` in the text body — the quirk stays off so their text passes
+        // through the envelope untouched.
+        assert!(!lookup("anthropic", "claude-sonnet-5").emits_inline_reasoning);
+        assert!(!lookup("openai", "gpt-5.4").emits_inline_reasoning);
+        assert!(!lookup("ollama", "llava:latest").emits_inline_reasoning);
     }
 
     #[test]

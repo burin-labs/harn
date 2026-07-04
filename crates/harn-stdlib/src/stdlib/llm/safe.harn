@@ -1,8 +1,70 @@
 // @harn-entrypoint-category llm.stdlib
 //
 // std/llm/safe — DRY consolidations for envelope-shaped llm_call results,
-// case-insensitive dict access, and judge-payload reconstruction.
+// case-insensitive dict access, judge-payload reconstruction, and free-text
+// cleanup of model output.
 import { agent_session_messages } from "std/agent/state"
+
+// -------------------------------------------------------------------------------------------------
+
+// Text cleanup
+//
+// Free-text post-processing for LLM output that reaches a human or a strict
+// downstream parser. These are the manual escape hatch for raw text that did
+// NOT flow through the `llm_call` envelope (a hand-assembled string, a cached
+// blob, a provider Harn has not yet catalogued). Harn already strips inline
+// `<think>` reasoning from the envelope's text/prose/visible_text for routes
+// whose capability matrix marks them as inline-reasoning emitters, so envelope
+// consumers do not need these.
+//
+// A later PR (PR-I4) adds JSON-coercion promotions to this module; keep that
+// concern in its own section, separate from this text-cleanup family.
+
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * Remove inline `<think>...</think>` (and `<thinking>...</thinking>`)
+ * reasoning blocks from free-text model output, returning the trimmed
+ * remainder. Non-greedy and dotall, so multiple blocks and multi-line
+ * reasoning are all removed. Text with no think block is returned trimmed but
+ * otherwise unchanged. This is the free-text counterpart to the capability-
+ * gated inline-reasoning split the `llm_call` envelope already performs.
+ *
+ * @effects: []
+ * @errors: []
+ * @example: strip_think_blocks("<think>reasoning</think>The answer is 4")
+ */
+pub fn strip_think_blocks(text) {
+  let raw = to_string(text ?? "")
+  let no_think = regex_replace("(?s)<think>.*?</think>", "", raw)
+  let no_thinking = regex_replace("(?s)<thinking>.*?</thinking>", "", no_think)
+  return trim(no_thinking)
+}
+
+/**
+ * Strip whole-line Markdown code-fence delimiters — lines whose trimmed
+ * content is a bare ``` fence, with or without a trailing language hint — from
+ * a document, returning the trimmed remainder. Use when a model wraps an
+ * ENTIRE document in a fence despite instructions not to and a downstream
+ * validator rejects any stray fence delimiter. Inline single-backtick code and
+ * the content between fences are preserved; only the delimiter lines are
+ * removed. Mirrors harn-bump-fleet's release_audit `strip_code_fence_lines`.
+ *
+ * @effects: []
+ * @errors: []
+ * @example: strip_code_fences("```md\n# Title\n```")
+ */
+pub fn strip_code_fences(text) {
+  let raw = to_string(text ?? "")
+  var out = []
+  for line in raw.split("\n") {
+    if starts_with(trim(line), "```") {
+      continue
+    }
+    out = out.push(line)
+  }
+  return trim(out.join("\n"))
+}
 
 /**
  * Try-wrap llm_call into the canonical envelope shape:

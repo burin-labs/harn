@@ -1,0 +1,14 @@
+// std/llm/safe.strip_code_fences removes whole-line code-fence delimiters when
+// a model wraps an entire document in a fence. Inline single-backtick code and
+// the content between fences are preserved.
+import { strip_code_fences } from "std/llm/safe"
+
+pipeline default() {
+  __io_println(strip_code_fences("```md\n# Title\n\nBody text.\n```"))
+  __io_println("---")
+  __io_println(strip_code_fences("```\nplain\n```"))
+  __io_println("---")
+  __io_println(strip_code_fences("has `inline` code, no fence"))
+  __io_println("---")
+  __io_println("[" + strip_code_fences(nil) + "]")
+}
