@@ -171,6 +171,23 @@ pub(super) async fn vm_call_llm_api(
         )?;
     }
 
+    // OpenAI `*-codex` routes are served ONLY by the Responses API and return
+    // HTTP 404 ("Use the v1/responses endpoint instead") on
+    // `/v1/chat/completions`. Route them through the Responses provider even
+    // when the caller did not explicitly request `api_mode: "responses"`, so a
+    // codex model can never be a silent 404. This lives in the shared
+    // `vm_call_llm_api` funnel (not `chat_impl`) because `openai` is a built-in
+    // dialect, not a `provider_register`-ed provider, so it takes the
+    // unregistered fallback below and never reaches `chat_impl`. Pure
+    // capability lookup — the `*-codex` match lives in the OpenAI capability
+    // rows, no model-name branch here.
+    if provider == "openai"
+        && (opts.api_mode == crate::llm::api::LlmApiMode::Responses
+            || crate::llm::capabilities::lookup(provider, &opts.model).chat_completions_unsupported)
+    {
+        return crate::llm::providers::OpenAiResponsesProvider::call(opts, delta_tx).await;
+    }
+
     if crate::llm::provider::is_provider_registered(provider) {
         return dispatch_to_registered_provider(opts, delta_tx).await;
     }

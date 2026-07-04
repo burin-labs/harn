@@ -46,7 +46,7 @@ No benchmark summary is baked into this checked-in page. To layer local empirica
 | `Vertex` | Gemini generateContent | `vertex:gemini-*` | `native` | yes | yes | `none` / `native_json` | none | no | `provider_default` | `not_recorded` |
 | `Vllm` | OpenAI-compatible chat completions | `vllm` | `text` | no | yes | `none` / `none` | none | no | `local_zero_cost` | `not_recorded` |
 | `Xai` | OpenAI-compatible chat completions | `xai:grok-build-0.1` | `native` | yes | yes | `native` / `native_json` | `adaptive` | yes | `high` | `not_recorded` |
-| `Zai` | OpenAI-compatible chat completions | `zai:glm-4.7-flash` | `text` | yes | yes | `native` / `native_json` | `enabled` | no | `provider_default` | `not_recorded` |
+| `Zai` | OpenAI-compatible chat completions | `zai:glm-4.6` | `text` | yes | yes | `native` / `native_json` | `enabled` | yes | `high` | `not_recorded` |
 
 ## Recommended options
 
@@ -317,13 +317,13 @@ Caveats:
 ### Zai
 
 - catalog provider: `zai`
-- recommended route: `zai:glm-4.7-flash` (`glm-4.7-flash`)
+- recommended route: `zai:glm-4.6` (`glm-4.6`)
 - endpoint style: OpenAI-compatible chat completions
 - recommended Harn options:
 
 ```toml
 provider = "zai"
-model = "glm-4.7-flash"
+model = "glm-4.6"
 tool_format = "text"
 structured_output_mode = "native_json"
 ```

@@ -354,7 +354,16 @@ impl OpenAiCompatibleProvider {
         request: &LlmRequestPayload,
         delta_tx: Option<DeltaSender>,
     ) -> Result<LlmResult, VmError> {
-        if request.api_mode == crate::llm::api::LlmApiMode::Responses {
+        // Responses-API routing (explicit `api_mode: "responses"` and the
+        // `*-codex` responses-only auto-route) is owned by the shared
+        // `vm_call_llm_api` transport funnel, which every OpenAI path passes
+        // through (built-in `openai` is not `provider_register`-ed, so it takes
+        // the unregistered fallback and never reaches here). This guard stays
+        // as defense-in-depth for any registered OpenAI-family provider.
+        if request.api_mode == crate::llm::api::LlmApiMode::Responses
+            || crate::llm::capabilities::lookup(&request.provider, &request.model)
+                .chat_completions_unsupported
+        {
             return crate::llm::providers::OpenAiResponsesProvider::call(request, delta_tx).await;
         }
 

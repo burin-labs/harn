@@ -1344,6 +1344,10 @@ pub(crate) fn capabilities_to_vm_value(
         VmValue::Bool(caps.requires_completion_tokens),
     );
     dict.insert(
+        crate::value::intern_key("chat_completions_unsupported"),
+        VmValue::Bool(caps.chat_completions_unsupported),
+    );
+    dict.insert(
         crate::value::intern_key("requires_streaming"),
         VmValue::Bool(caps.requires_streaming),
     );
