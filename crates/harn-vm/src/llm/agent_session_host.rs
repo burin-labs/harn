@@ -1272,26 +1272,38 @@ fn screenshot_user_message_for_provider(
 
 /// The neutral screenshot dict a computer-use tool returns (`ScreenImage`:
 /// `{base64, media_type, width, height, scale_factor}`), pulled off a raw tool
-/// result so it can ride back to the model as an image content block. Looks under
-/// the `screenshot` and `image` keys of the handler's return value and only
-/// accepts a dict that actually carries `base64` + `scale_factor`, so a tool with
-/// an unrelated `image`/`screenshot` field never misfires. Returns the dict as a
-/// `VmValue` (unconverted) — the provider content mappers do the image-block
-/// projection at egress.
+/// result so it can ride back to the model as an image content block. Searches
+/// the WHOLE result tree for a dict that actually carries a non-empty `base64`
+/// plus `scale_factor` (the distinctive ScreenImage signature). A recursive
+/// search — not a fixed `result.screenshot` path — because the live dispatch
+/// wraps the handler's return through the tool-caller middleware stack
+/// (redaction/summary layers nest it under `result`/`value`), so the screenshot
+/// sits at a path the caller cannot assume. The `scale_factor` + non-empty
+/// `base64` pair is distinctive enough not to misfire on an unrelated field, and
+/// the base64 the model needs is elided to a marker string in the rendered TEXT,
+/// so this never matches that. Returns the dict as a `VmValue` (unconverted) —
+/// the provider content mappers do the image-block projection at egress.
 fn screenshot_from_tool_result(result: &VmValue) -> Option<VmValue> {
-    let raw = dict_get(result, "result")?;
-    for key in ["screenshot", "image"] {
-        if let Some(candidate) = dict_get(raw, key) {
-            let has_base64 = dict_get(candidate, "base64")
-                .map(|v| !v.display().is_empty())
-                .unwrap_or(false);
-            let has_scale = dict_get(candidate, "scale_factor").is_some();
-            if has_base64 && has_scale {
-                return Some(candidate.clone());
+    fn find(value: &serde_json::Value) -> Option<&serde_json::Value> {
+        match value {
+            serde_json::Value::Object(map) => {
+                let has_base64 = map
+                    .get("base64")
+                    .and_then(|v| v.as_str())
+                    .map(|s| !s.is_empty())
+                    .unwrap_or(false);
+                let has_scale = map.contains_key("scale_factor");
+                if has_base64 && has_scale {
+                    return Some(value);
+                }
+                map.values().find_map(find)
             }
+            serde_json::Value::Array(items) => items.iter().find_map(find),
+            _ => None,
         }
     }
-    None
+    let json = vm_to_json(result);
+    find(&json).map(crate::stdlib::json_to_vm_value)
 }
 
 /// The `(id, name)` of one provider-native tool-call block carried on an
