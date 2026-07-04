@@ -14,18 +14,20 @@ use super::{
     PermissionState, PermissionStatus, ScreenImage, ScrollDirection, UiTree,
 };
 
-/// Default advertised screenshot size. Captures are resized to exactly this,
-/// so the screenshot space, the coordinate space the model returns, and the
-/// size advertised in the provider tool spec are all identical — no cross-call
-/// coordinate state. Matches the harn-vm computer-tool projection default
-/// (1024x768, Anthropic's recommended XGA). Overridable via
-/// `BURIN_COMPUTER_USE_WIDTH` / `BURIN_COMPUTER_USE_HEIGHT` (e.g. to send
-/// higher-resolution frames to OpenAI, which prefers original detail).
-const DEFAULT_TARGET_WIDTH: u32 = 1024;
-const DEFAULT_TARGET_HEIGHT: u32 = 768;
+/// Default screenshot BOX. The capture is fitted INSIDE this box preserving
+/// aspect ratio (never upscaled), so the advertised screenshot size is the
+/// fitted size, and the screenshot space == the coordinate space the model
+/// returns == that fitted size — no cross-call coordinate state. The box is
+/// sized to stay under Anthropic's vision limits (long edge <= 1568 px, total
+/// <= ~1.15 MP) so the provider does not re-downscale and blur the frame; for a
+/// 16:9 display this fits to 1400x787 (~1.1 MP). Bigger than the old 1024x768
+/// XGA so dense UI text survives the downscale. Overridable via
+/// `BURIN_COMPUTER_USE_WIDTH` / `BURIN_COMPUTER_USE_HEIGHT`.
+const DEFAULT_TARGET_WIDTH: u32 = 1400;
+const DEFAULT_TARGET_HEIGHT: u32 = 1050;
 
-/// Resolve the target screenshot size from the environment, falling back to
-/// the XGA default.
+/// Resolve the target screenshot box from the environment, falling back to the
+/// default. The capture is fitted INSIDE this box (aspect-preserving).
 fn target_dims() -> (u32, u32) {
     let read = |key: &str, fallback: u32| {
         std::env::var(key)
@@ -38,6 +40,21 @@ fn target_dims() -> (u32, u32) {
         read("BURIN_COMPUTER_USE_WIDTH", DEFAULT_TARGET_WIDTH),
         read("BURIN_COMPUTER_USE_HEIGHT", DEFAULT_TARGET_HEIGHT),
     )
+}
+
+/// Fit `(width, height)` inside `(max_w, max_h)` preserving aspect ratio and
+/// never upscaling. Returns at least 1x1. This keeps the screenshot's geometry
+/// faithful to the display instead of stretching a 16:9 screen into a 4:3 box.
+fn fit_within(width: u32, height: u32, max_w: u32, max_h: u32) -> (u32, u32) {
+    if width == 0 || height == 0 {
+        return (width.max(1), height.max(1));
+    }
+    let scale_w = f64::from(max_w) / f64::from(width);
+    let scale_h = f64::from(max_h) / f64::from(height);
+    let scale = scale_w.min(scale_h).min(1.0);
+    let out_w = ((f64::from(width) * scale).round() as u32).max(1);
+    let out_h = ((f64::from(height) * scale).round() as u32).max(1);
+    (out_w, out_h)
 }
 
 /// Local capture/input backend. Cheap to construct; captures a fresh `Enigo`
@@ -101,15 +118,25 @@ impl ComputerBackend for LocalBackend {
             .capture_image()
             .map_err(|err| format!("capture screen: {err}"))?;
         let physical_width = captured.width();
+        let physical_height = captured.height();
 
-        // Resize to exactly the advertised target so screenshot space ==
-        // model-coordinate space == advertised tool size.
-        let (target_width, target_height) = target_dims();
+        // Fit the capture inside the target box PRESERVING ASPECT RATIO. The old
+        // code resized to EXACTLY the box (e.g. a 16:9 5K display squished into
+        // 4:3 1024x768), which distorted every window and, combined with a
+        // bilinear filter at ~5x downscale, turned dense UI text into aliased
+        // mush the model could not read. Fitting keeps geometry correct, and
+        // Lanczos3 (a windowed-sinc kernel) preserves far more high-frequency
+        // detail — i.e. small text — than Triangle when downscaling by a large
+        // factor. The box defaults stay under Anthropic's vision limits (<=1568
+        // px long edge, ~1.15 MP) so the provider does not re-downscale.
+        let (box_width, box_height) = target_dims();
+        let (target_width, target_height) =
+            fit_within(physical_width, physical_height, box_width, box_height);
         let resized = image::imageops::resize(
             &captured,
             target_width,
             target_height,
-            image::imageops::FilterType::Triangle,
+            image::imageops::FilterType::Lanczos3,
         );
 
         // enigo takes input in logical points; target maps to logical by
