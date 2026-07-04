@@ -32,7 +32,6 @@ pub struct HarnConfig {
     pub replay: ReplayConfig,
     pub limits: RuntimeLimitsConfig,
     pub policy: ManagedPolicyConfig,
-    pub security: SecurityConfig,
     pub identity: IdentityConfig,
 }
 
@@ -52,7 +51,6 @@ impl Default for HarnConfig {
             replay: ReplayConfig::default(),
             limits: RuntimeLimitsConfig::default(),
             policy: ManagedPolicyConfig::default(),
-            security: SecurityConfig::default(),
             identity: IdentityConfig::default(),
         }
     }
@@ -298,9 +296,12 @@ impl SecurityMode {
     }
 }
 
-/// `[security]` configuration. The runtime substrate lives in
-/// [`crate::security`]; this is the typed, layerable shape hosts persist and
-/// merge. Defaults are on (deterministic, free) so the runtime is
+/// Prompt-injection defense posture. The runtime substrate lives in
+/// [`crate::security`]; this is the typed shape [`crate::security::SecurityPolicy::from_config`]
+/// resolves into an installed policy. Hosts drive it per-run through the
+/// `security_policy(...)` pipeline surface, not a persisted config section — so
+/// there is a single source of truth for the posture and no silently-inert
+/// persisted copy. Defaults are on (deterministic, free) so the runtime is
 /// secure-by-default; the trifecta gate only takes effect where an interactive
 /// approval policy is installed.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1067,27 +1068,6 @@ pub fn schema_json() -> JsonValue {
                     "denied_fields": {"type": "array", "items": {"type": "string"}}
                 }
             },
-            "security": {
-                "type": "object",
-                "additionalProperties": false,
-                "properties": {
-                    "mode": {"enum": ["off", "spotlight", "strict", "local-ml"]},
-                    "spotlight_external": {"type": "boolean"},
-                    "neutralize_special_tokens": {"type": "boolean"},
-                    "destyle_untrusted": {"type": "boolean"},
-                    "trifecta_gate": {"type": "boolean"},
-                    "pin_mcp_schemas": {"type": "boolean"},
-                    "authenticate_directives": {"type": "boolean"},
-                    "taint_file_provenance": {"type": "boolean"},
-                    "taint_command_reads": {"type": "boolean"},
-                    "precise_exfil_gate": {"type": "boolean"},
-                    "gate_secret_reads": {"type": "boolean"},
-                    "detect_injection": {"type": "boolean"},
-                    "guard_threshold_percent": {"type": "integer", "minimum": 0, "maximum": 100},
-                    "guard_model": {"type": "string"},
-                    "trusted_mcp_servers": {"type": "array", "items": {"type": "string"}}
-                }
-            },
             "identity": {
                 "type": "object",
                 "additionalProperties": false,
@@ -1824,10 +1804,6 @@ alert_on_violation = false
             schema["properties"]["identity"]["properties"]["scope_attenuation"]["properties"]
                 ["mode"]["enum"][1],
             "non-increasing"
-        );
-        assert_eq!(
-            schema["properties"]["security"]["properties"]["mode"]["enum"][1],
-            "spotlight"
         );
     }
 
