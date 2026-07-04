@@ -1,0 +1,45 @@
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * A `models:` ladder passed through `agent_loop` options survives the loop's
+ * option plumbing (`llm_call_options` projects `models`/`ladder` onto the
+ * accepted-key list) and lowers onto the routing chain for the turn's
+ * `llm_call`. The cheap rung hits a 429 transport failure, the ladder
+ * advances to the frontier rung, which serves the `<done>` completion — so
+ * the loop finishes and exactly one `models_advance` trace event is recorded.
+ *
+ * NOTE: the ladder owns provider/model selection, so NO top-level `provider:`
+ * pin is set here — a standalone pin alongside `models:` is a hard conflict.
+ */
+pipeline default() {
+  with_llm_script(
+    [
+      {
+        error: {category: "rate_limit", message: "HTTP 429", retry_after_ms: 10},
+        model: "mock-cheap",
+        provider: "mock",
+      },
+      llm_text("<done>##DONE##</done>"),
+    ],
+    { ->
+      let result = agent_loop(
+        "finish quickly",
+        nil,
+        {
+          tool_format: "text",
+          loop_until_done: true,
+          max_iterations: 3,
+          max_nudges: 3,
+          models: [
+            {model: "mock-cheap", provider: "mock", label: "cheap"},
+            {model: "mock-strong", provider: "mock", label: "frontier"},
+          ],
+        },
+      )
+      let advances = agent_trace().filter({ e -> e.type == "models_advance" })
+      __io_println(result.status)
+      __io_println(len(advances))
+      __io_println(advances[0].to_model)
+    },
+  )
+}

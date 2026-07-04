@@ -35,7 +35,7 @@ pub type LlmBudget = {
  * option; the alias is defined ahead of that option so downstream schemas
  * can converge on one shape).
  */
-pub type ModelLadderStep = {provider?: string, model?: string, options?: dict, when?: string}
+pub type ModelLadderStep = {provider?: string, model?: string, options?: dict, label?: string}
 
 /**
  * Ordered fallback ladder for `llm_call` model routing. Advance happens on
@@ -60,6 +60,8 @@ pub type LlmCallOptions = {
   model_tier?: string,
   route_policy?: string,
   fallback_chain?: list<string>,
+  models?: ModelLadder,
+  ladder?: string,
   api_mode?: string,
   max_tokens?: int,
   temperature?: float,

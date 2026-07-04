@@ -4077,8 +4077,10 @@ Composition rules:
 - **Schema retries re-ask the same rung.** With `output_schema` /
   `llm_call_structured*`, a schema failure re-asks the SAME step's model via
   the existing `schema_retries` mechanism — it does not escalate the ladder.
-- **`models:` + `ladder:` and `models:`/`ladder:` + explicit
-  `model:`/`provider:` are errors** — the ladder already declares every rung.
+- **`models:` + `ladder:`, `models:`/`ladder:` + explicit `model:`/`provider:`,
+  and `models:`/`ladder:` + an explicit `routing:` policy are all errors** — the
+  ladder already declares every rung, so any second model-selection surface is
+  ambiguous.
 - **Observability.** Each step advance emits an `llm_models_advance` trace
   event (`agent_trace()`) with `{from_index, from_model, to_model, category}`,
   and the winning rung is surfaced on the existing `result.routing` block

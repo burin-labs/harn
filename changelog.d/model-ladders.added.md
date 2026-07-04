@@ -9,4 +9,8 @@
   retries re-ask the same step's model. Each advance emits an
   `llm_models_advance` trace event (`agent_trace()`), and the winning model is
   surfaced on the existing `routing` result block. `models:`/`ladder:` cannot be
-  combined with each other or with an explicit `model:`/`provider:` pin.
+  combined with each other, with an explicit `model:`/`provider:` pin, or with an
+  explicit `routing:` policy — any second model-selection surface is a hard error.
+  The typed `LlmCallOptions` / `AgentLoopOptions` aliases and the `ModelLadderStep`
+  alias (`{model, provider?, options?, label?}`) accept the option too, so ladders
+  compose through `agent_loop`.

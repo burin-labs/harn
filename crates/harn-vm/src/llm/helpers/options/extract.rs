@@ -54,6 +54,18 @@ pub(crate) fn extract_llm_options(
 
     let mut routing_policy = crate::llm::routing::extract_routing_policy(options.as_ref())?;
     let explicit_routing_policy = routing_policy.is_some();
+    // A `models:`/`ladder:` ladder and an explicit `routing:` policy both drive
+    // model selection, so combining them is doubly-ambiguous. Reject it loudly
+    // rather than silently ignoring the ladder (the ladder lowering below only
+    // runs when no explicit routing policy is present).
+    if has_ladder_option && explicit_routing_policy {
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+            "llm_call: `models:`/`ladder:` cannot be combined with an explicit \
+             `routing:` policy — both drive model selection. Use one: a ladder \
+             for a linear transport-failover chain, or `routing:` for the full \
+             routing policy.",
+        ))));
+    }
     let route_policy = parse_route_policy_option(options.as_ref())?;
     let mut provider = vm_resolve_provider(&options);
     let mut model = vm_resolve_model(&options, &provider);
@@ -67,8 +79,9 @@ pub(crate) fn extract_llm_options(
     // the exact transport-failover classification, the routing envelope
     // trace, and the schema-retry composition rather than hand-rolling a
     // fallback loop (subsumes the copies in harn-bump-fleet / harn-cloud /
-    // burin-code). A ladder is only built when no explicit `routing:` policy
-    // is already in play (that would be doubly-ambiguous).
+    // burin-code). The `models:`/`ladder:` + explicit `routing:` combination is
+    // already rejected above, so this `is_none()` guard is a belt-and-suspenders
+    // check — the ladder never coexists with an explicit routing policy.
     if routing_policy.is_none() {
         if let Some(options_dict) = options.as_ref() {
             if let Some(ladder_policy) =
