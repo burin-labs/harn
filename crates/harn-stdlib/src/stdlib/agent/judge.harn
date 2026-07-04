@@ -1,4 +1,11 @@
-import { __judge_apply_llm_overrides, __judge_classify_verdict } from "std/agent/judge_internals"
+import {
+  __completion_gate_apply_budget,
+  __completion_gate_classify_writes,
+  __completion_gate_combine_verify,
+  __completion_gate_ladder,
+  __judge_apply_llm_overrides,
+  __judge_classify_verdict,
+} from "std/agent/judge_internals"
 import { agent_typed_output_checkpoint } from "std/agent/primitives"
 import { completion_judge_user_prompt } from "std/agent/prompts"
 import {
@@ -283,4 +290,233 @@ pub fn agent_verify_or_continue(session, opts, stop_reason, text, iteration = 0)
     verify_completion_judge_cap_reached: completion_judge_cap_reached,
     done_judge_cap_reached: done_judge_cap_reached,
   }
+}
+
+// -------------------------------------------------------------------------------------------------
+
+// completion_gate — a configured done-time gate built by composing the existing
+// `verify_completion` (deterministic) + `verify_completion_judge` / `done_judge`
+// (bounded LLM) seams. It generalizes burin-code's completion-verification
+// machinery (`lib/runtime/completion-judge.harn` — the veto arithmetic, the
+// source-vs-cosmetic write gate ⛔#5, the bounded judge budget) while keeping
+// every DOMAIN FACT (write classification, verifier verdict) a host CALLBACK.
+// The deterministic ladder rides `verify_completion` because that is the seam the
+// loop consults for a closure at done-time; the optional LLM judge rides the
+// existing capped `verify_completion_judge`/`done_judge` seam. No new loop seam
+// is added. Never keys any decision on a done-sentinel string (ledger ⛔#3).
+
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * A host write-classification label. `"source"` and `"cosmetic"` are load-bearing; other kinds are treated as non-source.
+ */
+pub type WriteKind = string
+
+/** One host-supplied write fact. */
+pub type CompletionWriteFact = {path?: string, diff?: string, kind?: WriteKind}
+
+/** A host-supplied verifier verdict. `findings` is optional red-detail text. */
+pub type CompletionVerifyVerdict = {ok?: bool, findings?: string}
+
+/**
+ * Facts a host supplies (via the `facts` callback) for one gate evaluation.
+ * All fields optional: absent write facts disable the evidence gate for that
+ * turn (never a fabricated pass), absent `verify` falls back to the
+ * `verify_command` callback. Rust twin: none — stdlib-owned.
+ */
+pub type CompletionFacts = {
+  source_write_count?: int,
+  cosmetic_write_count?: int,
+  writes?: list<CompletionWriteFact>,
+  verify?: CompletionVerifyVerdict | list<CompletionVerifyVerdict>,
+  requires_write?: bool,
+}
+
+/**
+ * Options for `completion_gate`. Domain facts enter as callbacks; policy knobs
+ * are plain data. Rust twin: none — stdlib-owned.
+ *
+ * Host-fact callbacks (all optional):
+ * - `facts(ctx) -> CompletionFacts` — the primary fact supplier. `ctx` carries
+ *   `{session_id, task, stop_reason, text, messages}`.
+ * - `classify_write(path, diff?) -> WriteKind` — classifies a single write when
+ *   `facts` returns a `writes` list without counts.
+ * - `verify_command() -> CompletionVerifyVerdict` — runs the verifier oracle when
+ *   `facts` does not carry a `verify` verdict.
+ *
+ * Policy knobs:
+ * - `require_source_write` (default true) — enforce the evidence gate ⛔#5.
+ * - `requires_write` — override the per-task "needs a source change" fact.
+ * - `max_vetoes` (default 3, burin `COMPLETION_GATE_MAX_VETOES`) — per-session
+ *   soft-veto budget; 0 disables.
+ * - `veto_combine(verdicts) -> CompletionVerifyVerdict` — override the default
+ *   AND-of-oracles arithmetic for combining multiple verifier verdicts.
+ * - `judge` (default off) — attach a bounded LLM completion judge (`true` or a
+ *   JudgeConfig-shaped dict); defaults its cap to burin's 5.
+ * - `judge_seam` (default `"verify_completion_judge"`) — which capped LLM seam
+ *   the judge rides (`"verify_completion_judge"` or `"done_judge"`).
+ */
+pub type CompletionGateOptions = {
+  facts?: any,
+  classify_write?: any,
+  verify_command?: any,
+  require_source_write?: bool,
+  requires_write?: bool,
+  max_vetoes?: int,
+  veto_combine?: any,
+  judge?: any,
+  judge_seam?: string,
+}
+
+/** Session-store key for the completion-gate per-session veto counter. */
+fn __completion_gate_veto_key(session_id) {
+  return "harn.completion_gate." + session_id + ".veto_count"
+}
+
+/** Per-session vetoes charged so far (0 without a session id). */
+fn __completion_gate_vetoes_used(session_id) {
+  if session_id == "" {
+    return 0
+  }
+  return to_int(store_get(__completion_gate_veto_key(session_id)) ?? 0) ?? 0
+}
+
+/**
+ * Derive `{source_write_count?, cosmetic_write_count?, source_known}` from host
+ * facts. `source_known` is false only when the host supplied neither counts nor a
+ * `writes` list — in which case the evidence gate abstains for that turn.
+ */
+fn __completion_gate_write_counts(raw, classify_write) {
+  if raw?.source_write_count != nil {
+    return {
+      source_write_count: to_int(raw.source_write_count) ?? 0,
+      cosmetic_write_count: to_int(raw?.cosmetic_write_count ?? 0) ?? 0,
+      source_known: true,
+    }
+  }
+  if raw?.writes != nil {
+    let counts = __completion_gate_classify_writes(raw.writes, classify_write)
+    return counts + {source_known: true}
+  }
+  return {source_write_count: 0, cosmetic_write_count: 0, source_known: false}
+}
+
+/**
+ * The deterministic gate closure body: turn a `__judge_payload` payload into a
+ * `verify_completion` verdict (`{confirm, message?, reason}` — nil-safe for the
+ * `__judge_invoke_closure` contract). Degrades to judge-only (abstain) with a
+ * surfaced `completion_gate` event when the host supplied no facts at all.
+ */
+fn __completion_gate_evaluate(payload, opts, facts_available) {
+  let session_id = to_string(payload?.session_id ?? "")
+  let classify_write = opts?.classify_write
+  let verify_command = opts?.verify_command
+  let facts = opts?.facts
+  let max_vetoes = to_int(opts?.max_vetoes ?? 3) ?? 3
+  if !facts_available {
+    // No host facts: the deterministic gate cannot assert anything, so it
+    // abstains (allow). Any configured LLM judge still runs — judge-only mode.
+    // The degraded mode is NOT silent: the bundle carries
+    // `_completion_gate.facts_available = false` and the verdict names the
+    // `facts_unavailable` reason, so a harness never mistakes it for a real pass.
+    return {confirm: true, reason: "facts_unavailable"}
+  }
+  let messages = json_parse(to_string(payload?.transcript ?? "[]")) ?? []
+  let ctx = {
+    session_id: session_id,
+    task: to_string(payload?.task ?? ""),
+    stop_reason: to_string(payload?.stop_reason ?? ""),
+    text: to_string(payload?.text ?? ""),
+    messages: messages,
+  }
+  let raw = if facts != nil {
+    facts(ctx) ?? {}
+  } else {
+    {}
+  }
+  let counts = __completion_gate_write_counts(raw, classify_write)
+  let verify_raw = if raw?.verify != nil {
+    raw.verify
+  } else if verify_command != nil {
+    verify_command()
+  } else {
+    nil
+  }
+  let verify = __completion_gate_combine_verify(verify_raw, opts?.veto_combine)
+  let requires_write = if opts?.requires_write != nil {
+    opts.requires_write
+  } else if raw?.requires_write != nil {
+    raw.requires_write
+  } else {
+    opts?.require_source_write ?? true
+  }
+  let derived = {
+    source_known: counts.source_known,
+    source_write_count: counts.source_write_count,
+    cosmetic_write_count: counts.cosmetic_write_count,
+    requires_write: requires_write,
+    verify: verify,
+    oracle_expected: verify_command != nil || raw?.verify != nil,
+  }
+  let verdict = __completion_gate_ladder(derived)
+  let vetoes_used = __completion_gate_vetoes_used(session_id)
+  let budgeted = __completion_gate_apply_budget(verdict, vetoes_used, max_vetoes)
+  if budgeted.charge && session_id != "" {
+    store_set(__completion_gate_veto_key(session_id), vetoes_used + 1)
+  }
+  let resolved = budgeted.verdict
+  if resolved?.ok ?? false {
+    return {confirm: true, reason: resolved?.reason ?? ""}
+  }
+  return {confirm: false, message: to_string(resolved?.feedback ?? ""), reason: resolved?.reason ?? ""}
+}
+
+/**
+ * agent_completion_gate.
+ *
+ * Build a completion-gate option bundle to spread into `agent_loop` options. The
+ * returned dict configures the done-time gate: a deterministic `verify_completion`
+ * closure implementing the ported veto arithmetic + source-write evidence
+ * requirement + per-session veto budget, plus (when `judge` is set) a bounded LLM
+ * judge on the existing capped seam. Compose it with base options:
+ *
+ * ```harn,ignore
+ * agent_loop(task, system, base_opts + agent_completion_gate({
+ *   facts: fn(ctx) { return host_completion_facts(ctx.session_id) },
+ *   verify_command: fn() { return host_run_verify() },
+ * }))
+ * ```
+ *
+ * With no host-fact callbacks the gate degrades to judge-only mode and surfaces a
+ * `completion_gate` `degraded` event rather than fabricating a pass.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_completion_gate({facts: host_facts, verify_command: host_verify})
+ */
+pub fn agent_completion_gate(options: CompletionGateOptions = {}) {
+  let opts = options ?? {}
+  let facts_available = opts.facts != nil || opts.verify_command != nil || opts.classify_write != nil
+  let gate = fn(payload) { return __completion_gate_evaluate(payload, opts, facts_available) }
+  var out = {
+    verify_completion: gate,
+    _completion_gate: {
+      facts_available: facts_available,
+      max_vetoes: to_int(opts.max_vetoes ?? 3) ?? 3,
+      require_source_write: opts.require_source_write ?? true,
+    },
+  }
+  let judge = opts.judge
+  if judge != nil && judge {
+    let judge_cfg = if type_of(judge) == "dict" {
+      judge
+    } else {
+      {}
+    }
+    let seam = opts.judge_seam ?? "verify_completion_judge"
+    let cap = judge_cfg?.max_invocations ?? judge_cfg?.max_feedback ?? __VERIFY_COMPLETION_JUDGE_DEFAULT_CAP
+    out = out + {[seam]: judge_cfg + {max_invocations: cap}}
+  }
+  return out
 }

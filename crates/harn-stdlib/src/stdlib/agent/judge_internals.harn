@@ -140,3 +140,211 @@ pub fn __judge_classify_verdict(raw_verdict, pass_tokens, feedback_candidates, f
   }
   return {vetoed: true, feedback: feedback, verdict: normalized}
 }
+
+// -------------------------------------------------------------------------------------------------
+
+// Completion-gate policy (pure). These implement the deterministic veto
+// arithmetic that `std/agent/judge::completion_gate` rides on `verify_completion`.
+// They are PURE (no store / no LLM / no host calls) so the parity fixtures can
+// pin burin-code's decisions on synthetic verdict sets. All host facts
+// (source-vs-cosmetic write classification, verifier verdict) enter as data —
+// the split from burin-code's harn#3817 principle "Harn owns orchestration
+// policy; hosts supply facts". NEVER key any decision on a done-sentinel string
+// (ledger ⛔#3): the gate reads only write/verify facts.
+
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * Reduce a list of host write facts to `{source_write_count, cosmetic_write_count,
+ * other_write_count}`. Each write is classified by `classify_write(path, diff?)`
+ * when the callback is supplied, else by the write's own `kind` field, else
+ * conservatively as `"source"` (an unclassified write counts as source progress,
+ * so the evidence gate never manufactures a false veto — ledger ⛔#5's spirit).
+ * Only the literal kind `"cosmetic"` is excluded from source progress; any other
+ * non-`"source"` kind (e.g. `"test"`, `"doc"`) is counted as `other`.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn __completion_gate_classify_writes(writes, classify_write) {
+  var source = 0
+  var cosmetic = 0
+  var other = 0
+  for write in writes ?? [] {
+    let path = to_string(write?.path ?? "")
+    let kind = if classify_write != nil && path != "" {
+      to_string(classify_write(path, write?.diff) ?? "source")
+    } else {
+      to_string(write?.kind ?? "source")
+    }
+    if kind == "cosmetic" {
+      cosmetic = cosmetic + 1
+    } else if kind == "source" {
+      source = source + 1
+    } else {
+      other = other + 1
+    }
+  }
+  return {source_write_count: source, cosmetic_write_count: cosmetic, other_write_count: other}
+}
+
+/**
+ * Combine one or more host verifier verdicts (`{ok, findings?}`) into a single
+ * verdict. A caller-supplied `veto_combine(verdicts)` overrides the default; the
+ * default is explicit AND-of-oracles arithmetic — the combined verdict is green
+ * only when EVERY verdict is green, and red findings are concatenated. Returns
+ * nil when there is no verdict to combine (verifier state unknown).
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn __completion_gate_combine_verify(verify, veto_combine) {
+  if verify == nil {
+    return nil
+  }
+  let verdicts = if type_of(verify) == "list" {
+    verify
+  } else {
+    [verify]
+  }
+  if len(verdicts) == 0 {
+    return nil
+  }
+  if veto_combine != nil {
+    return veto_combine(verdicts)
+  }
+  var all_ok = true
+  var findings = []
+  for verdict in verdicts {
+    if !(verdict?.ok ?? false) {
+      all_ok = false
+      let finding = to_string(verdict?.findings ?? "")
+      if finding != "" {
+        findings = findings.push(finding)
+      }
+    }
+  }
+  return {ok: all_ok, findings: join(findings, "; ")}
+}
+
+/**
+ * The default completion-gate veto arithmetic: an ordered precedence ladder over
+ * derived facts, ported from burin-code `completion_gate_uncapped_status`. First
+ * matching rule wins.
+ *
+ * `derived` fields: `source_known` (whether write facts were supplied),
+ * `source_write_count`, `cosmetic_write_count`, `requires_write` (task needs a
+ * source change), `verify` (`{ok, findings}` or nil = unknown), `oracle_expected`
+ * (a verifier is configured).
+ *
+ * Returns `{ok, reason, strict?, feedback?}`. `strict: true` marks a veto that the
+ * per-session veto budget may NEVER convert to an allow — the post-write-red
+ * class, matching burin's carve-out that a source write always needs a fresh
+ * green verifier before completion.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn __completion_gate_ladder(derived) {
+  let source_known = derived?.source_known ?? false
+  let source_writes = to_int(derived?.source_write_count ?? 0) ?? 0
+  let cosmetic_writes = to_int(derived?.cosmetic_write_count ?? 0) ?? 0
+  let saw_source = source_known && source_writes > 0
+  let requires_write = derived?.requires_write ?? true
+  let verify = derived?.verify
+  let verify_known = verify != nil
+  let verify_ok = verify_known && (verify?.ok ?? false)
+  let findings = to_string(verify?.findings ?? "")
+  let oracle_expected = derived?.oracle_expected ?? false
+  // 1. Evidence requirement (ledger ⛔#5): a task that must change source may not
+  // finish with zero SOURCE writes. Cosmetic/test-scaffold writes are not progress.
+  if source_known && requires_write && !saw_source {
+    let message = if cosmetic_writes > 0 {
+      "This task expects a source-code change, but only cosmetic / non-source writes have been made. Make the required change to a source file before finishing."
+    } else {
+      "This task expects a source-code change, but no source file has been written yet. Make the required change before finishing."
+    }
+    return {ok: false, reason: "no_source_write", strict: false, feedback: message}
+  }
+  // 2. Post-write verification: a source write (or an unclassified write set) with
+  // a RED verifier blocks, and this class is strict — the budget can never let it
+  // through; only a fresh green verifier ends it.
+  if verify_known && !verify_ok && (saw_source || !source_known) {
+    let detail = if findings != "" {
+      " Findings: " + findings + "."
+    } else {
+      ""
+    }
+    return {
+      ok: false,
+      reason: "verification_after_write_red",
+      strict: true,
+      feedback: "Verification is still failing after your change." + detail
+        + " Fix the specific failure and re-run the verifier before finishing.",
+    }
+  }
+  // 3. Green verifier -> completion is honorable.
+  if verify_ok {
+    return {
+      ok: true,
+      reason: if saw_source {
+        "verified_after_write"
+      } else {
+        "verified"
+      },
+    }
+  }
+  // 4. Source written, a verifier is configured, but it has not run yet.
+  if saw_source && oracle_expected && !verify_known {
+    return {
+      ok: false,
+      reason: "missing_verification",
+      strict: false,
+      feedback: "You changed source but have not run the verifier yet. Run the narrowest verification for your change before finishing.",
+    }
+  }
+  // 5. Nothing left to gate.
+  if source_known && !saw_source && !requires_write {
+    return {ok: true, reason: "no_workspace_write"}
+  }
+  if saw_source {
+    return {ok: true, reason: "wrote_source_no_oracle"}
+  }
+  // Facts too thin for a deterministic verdict (unknown writes, no verifier
+  // signal): the deterministic gate ABSTAINS and lets any configured LLM judge
+  // decide. Never a silent fabricated pass — the caller surfaces the degraded mode.
+  return {ok: true, reason: "gate_abstain"}
+}
+
+/**
+ * Apply the per-session veto budget to a ladder verdict. Pure: the caller reads
+ * `vetoes_used` from the store and persists the charge. After `max_vetoes`
+ * non-strict vetoes the gate converts a would-be veto into an attributable allow
+ * (`veto_budget_exhausted`), so a run that a weak model can never satisfy still
+ * ends with a named reason instead of riding vetoes to the wall-clock timeout.
+ * A `strict` veto (post-write-red) is NEVER converted. `max_vetoes <= 0` disables
+ * the budget (unbounded vetoes).
+ *
+ * Returns `{verdict, charge}` — `charge: true` means the caller should increment
+ * the session veto counter.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn __completion_gate_apply_budget(verdict, vetoes_used, max_vetoes) {
+  if verdict?.ok ?? false {
+    return {verdict: verdict, charge: false}
+  }
+  let strict = verdict?.strict ?? false
+  if !strict && max_vetoes > 0 && vetoes_used >= max_vetoes {
+    return {
+      verdict: {ok: true, reason: "veto_budget_exhausted", converted_from: verdict?.reason ?? ""},
+      charge: false,
+    }
+  }
+  return {verdict: verdict, charge: true}
+}

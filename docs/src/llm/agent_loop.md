@@ -921,6 +921,54 @@ agent_loop(task, system, judged_opts)
 policy hook used by stall diagnostics so completion checks happen on a signal
 rather than a fixed "are you done?" prompt.
 
+### Completion gate (`agent_completion_gate`)
+
+`agent_completion_gate(options)` (from `std/agent/judge`) builds a ready-made
+done-time gate by **composing** the seams above: it returns a `verify_completion`
+closure carrying a deterministic veto ladder plus an optional bounded LLM judge
+on the `verify_completion_judge` / `done_judge` seam. Spread it into your loop
+options. It generalizes the completion-verification policy proven out in
+burin-code — the source-write evidence requirement, the per-session veto budget,
+and AND-of-oracles verify composition — while keeping every **domain fact** a
+host callback (the "Harn owns orchestration policy; hosts supply facts" split).
+
+The gate never keys on a done-sentinel string: it decides purely from write and
+verifier facts. Its default veto ladder (first match wins):
+
+| Reason | Result | Condition |
+| --- | --- | --- |
+| `no_source_write` | veto (soft) | task requires a source change, but only cosmetic / zero source writes so far |
+| `verification_after_write_red` | veto (**strict**) | a source write with a red verifier — never released by the budget |
+| `verified_after_write` / `verified` | allow | verifier is green |
+| `missing_verification` | veto (soft) | source written, verifier configured, not yet run |
+| `no_workspace_write` | allow | task does not require a source change |
+| `veto_budget_exhausted` | allow | a soft veto after `max_vetoes` (default 3) — an attributable end |
+
+Only **source** writes count as progress toward "done" — a cosmetic final write
+(a comment, a `.md` typo) is not evidence, so it cannot flip an already-passed
+run back to unverified, and a run that only wrote cosmetics cannot claim done.
+
+Host-fact callbacks (all optional): `facts(ctx)` returns
+`{source_write_count?, cosmetic_write_count?, writes?, verify?, requires_write?}`;
+`classify_write(path, diff?)` labels one write `"source"`/`"cosmetic"`/…;
+`verify_command()` runs the verifier oracle. With **no** callbacks the gate
+degrades to judge-only mode and emits a `completion_gate` `degraded` event rather
+than fabricating a pass.
+
+```harn,ignore
+import { agent_completion_gate } from "std/agent/judge"
+
+agent_loop(task, system, base_opts + agent_completion_gate({
+  facts: fn(ctx) { return host_completion_facts(ctx.session_id) },
+  verify_command: fn() { return host_run_verify() },
+  judge: true,          // optional bounded LLM judge, capped at 5 by default
+}))
+```
+
+Presets can carry a default gate: the `completion_gate` pack row holds a
+`CompletionGateOptions` spec that a consumer lowers with
+`agent_completion_gate(...)`.
+
 ## Editing source from inside an agent loop
 
 Agent loops that mutate code should reach for the AST-precise primitives in
