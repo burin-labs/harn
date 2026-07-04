@@ -43,6 +43,7 @@ exempt_checks = [
   "check",                          # the umbrella `check: all` alias
   "check-vm-rss-soak",              # perf/RSS soak, not a sync guard
   "check-ported-handler-loc",       # LOC ratchet (epic #2293), not a sync guard
+  "check-python-boundary",          # repo-language boundary ratchet, not a sync guard
   "check-trigger-examples",         # validates example projects parse, not a mirror
   "check-docs-model-refs",          # validates docs track provider aliases, not a mirror
   "check-docs-snippets",            # validates ```harn blocks parse, not a mirror
