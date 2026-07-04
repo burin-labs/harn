@@ -292,10 +292,7 @@ pub(super) fn elide_image_base64(value: &serde_json::Value) -> serde_json::Value
                         if data.len() > RENDERED_IMAGE_BASE64_ELIDE_THRESHOLD {
                             out.insert(
                                 key.clone(),
-                                serde_json::json!(format!(
-                                    "<base64 elided: {} bytes>",
-                                    data.len()
-                                )),
+                                serde_json::json!(format!("<base64 elided: {} bytes>", data.len())),
                             );
                             continue;
                         }

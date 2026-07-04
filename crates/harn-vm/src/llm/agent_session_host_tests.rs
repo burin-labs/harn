@@ -7,8 +7,8 @@ use super::{
     canonical_provider_stop_reason, dict_get, initial_user_content, is_length_truncation,
     last_assistant_text, list_items, pair_orphaned_tool_use, reset_agent_session_host_state,
     screenshot_from_tool_result, seed_host_session_provider_model, synthesize_orphan_tool_results,
-    text_has_tool_call_prefix, tool_result_message_for_provider, truncated_tool_call_should_continue,
-    vm_to_json,
+    text_has_tool_call_prefix, tool_result_message_for_provider,
+    truncated_tool_call_should_continue, vm_to_json,
 };
 
 /// Execution policy that annotates the file-provenance test vocabulary so

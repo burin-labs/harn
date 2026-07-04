@@ -482,7 +482,8 @@ pub(crate) fn anthropic_content(content: &serde_json::Value) -> serde_json::Valu
                     out.push(anthropic_file_block(block, file));
                 } else if let Some(text) = normalized_text_block(block) {
                     out.push(text);
-                } else if block.get("type").and_then(|value| value.as_str()) == Some("tool_result") {
+                } else if block.get("type").and_then(|value| value.as_str()) == Some("tool_result")
+                {
                     // A `tool_result` block carries its own nested content list
                     // (Anthropic's tool-result shape). An image tool result puts a
                     // neutral screenshot dict in that nested list, so recurse to
