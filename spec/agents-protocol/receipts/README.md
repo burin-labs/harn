@@ -8,7 +8,7 @@ side-effect evidence without exposing every private trace span by default.
 Until a standalone specification site exists, the public URL for this artifact
 is:
 
-<https://github.com/burin-labs/harn/tree/main/agents-protocol-receipts>
+<https://github.com/burin-labs/harn/tree/main/spec/agents-protocol/receipts>
 
 ## Version marker
 
@@ -114,7 +114,7 @@ artifact directly:
 components:
   schemas:
     Receipt:
-      $ref: ../agents-protocol-receipts/schemas/receipt-2026-04-25.schema.json
+      $ref: ../spec/agents-protocol/receipts/schemas/receipt-2026-04-25.schema.json
 ```
 
 Task, Outcome, Event, and Artifact resources should continue to carry

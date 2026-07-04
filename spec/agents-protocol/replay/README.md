@@ -7,7 +7,7 @@ verb without exposing private runtime internals.
 Until a standalone specification site exists, the public URL for this artifact
 is:
 
-<https://github.com/burin-labs/harn/tree/main/agents-protocol-replay>
+<https://github.com/burin-labs/harn/tree/main/spec/agents-protocol/replay>
 
 ## REST entrypoint
 

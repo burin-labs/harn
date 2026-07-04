@@ -339,7 +339,7 @@ Optional fields include `approvals`, `redactions`, `signatures`, and
 `metadata`.
 
 The normative JSON Schema lives in
-`agents-protocol-receipts/schemas/receipt-2026-04-25.schema.json`. The Agents
+`spec/agents-protocol/receipts/schemas/receipt-2026-04-25.schema.json`. The Agents
 Protocol OpenAPI `Receipt` component MUST reference that schema instead of
 duplicating it.
 
