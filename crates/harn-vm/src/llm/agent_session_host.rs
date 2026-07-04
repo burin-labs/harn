@@ -291,6 +291,49 @@ fn initial_user_content(
         .unwrap_or_else(|| serde_json::Value::String(fallback_message.to_string()))
 }
 
+/// Parse the caller-managed `history` option into validated transcript
+/// messages. Each entry must be a dict carrying a string `role`; the remaining
+/// fields of the canonical `llm_call` message shape (`content`, `tool_calls`,
+/// `tool_call_id`, …) pass through untouched. A malformed seed is a hard error
+/// so prior context is never silently dropped.
+///
+/// This is TRANSIENT seeding: the caller owns the history. The returned turns
+/// are injected as ordinary transcript turns by `host_agent_session_init`,
+/// visible to the model exactly as `llm_call`'s `messages` array would be, and
+/// are otherwise indistinguishable from turns the loop produced itself —
+/// done_judge, compaction, and projection all treat them normally.
+fn seed_history_messages(opts_map: &crate::value::DictMap) -> Result<Vec<VmValue>, VmError> {
+    let Some(value) = opts_map.get("history") else {
+        return Ok(Vec::new());
+    };
+    if matches!(value, VmValue::Nil) {
+        return Ok(Vec::new());
+    }
+    let VmValue::List(list) = value else {
+        return Err(VmError::Runtime(format!(
+            "agent_loop: `history` must be a list of message dicts; got {}",
+            value.type_name()
+        )));
+    };
+    let mut out = Vec::with_capacity(list.len());
+    for (index, entry) in list.iter().enumerate() {
+        let Some(dict) = entry.as_dict() else {
+            return Err(VmError::Runtime(format!(
+                "agent_loop: `history[{index}]` must be a message dict; got {}",
+                entry.type_name()
+            )));
+        };
+        if !matches!(dict.get("role"), Some(VmValue::String(_))) {
+            return Err(VmError::Runtime(format!(
+                "agent_loop: `history[{index}]` must carry a string `role` \
+                 (user|assistant|tool_result|system)"
+            )));
+        }
+        out.push(entry.clone());
+    }
+    Ok(out)
+}
+
 fn now_id() -> String {
     uuid::Uuid::now_v7().to_string()
 }
@@ -407,12 +450,28 @@ async fn host_agent_session_init(
     if pushed_transcript_dir {
         super::agent_observe::push_llm_transcript_dir(&llm_transcript_dir);
     }
-    let user_msg = serde_json::json!({
-        "role": "user",
-        "content": initial_user_content(&opts_map, &message),
-    });
-    crate::agent_sessions::inject_message(&resolved, json_to_vm(&user_msg))
-        .map_err(VmError::Runtime)?;
+    // Seed any caller-managed conversation history BEFORE the fresh user turn,
+    // so the first (and every) provider request presents the prior turns
+    // exactly as `llm_call`'s `messages` array would. The caller owns this
+    // history — it is transient seeding, not session persistence. See
+    // `seed_history_messages`.
+    let seeded_history = seed_history_messages(&opts_map)?;
+    let has_history = !seeded_history.is_empty();
+    for history_msg in seeded_history {
+        crate::agent_sessions::inject_message(&resolved, history_msg).map_err(VmError::Runtime)?;
+    }
+
+    // Inject the fresh user turn. When history is present and the task message
+    // is blank, the caller's history already carries the latest user turn, so
+    // skip appending an empty user turn (providers reject empty content).
+    if !(has_history && message.trim().is_empty()) {
+        let user_msg = serde_json::json!({
+            "role": "user",
+            "content": initial_user_content(&opts_map, &message),
+        });
+        crate::agent_sessions::inject_message(&resolved, json_to_vm(&user_msg))
+            .map_err(VmError::Runtime)?;
+    }
 
     let session = AgentHostSession {
         session_id: resolved.clone(),
