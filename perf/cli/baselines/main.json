@@ -1,1 +1,17 @@
-{}
+{
+  "e4613e8fb4864a1de1dbf6f9880ebffb6cecce5b": {
+    "captured_at": "2026-07-04T16:27:32.235Z",
+    "commands": {
+      "try --help": {
+        "cold_ms": 29.0,
+        "warm_ms": 20.617
+      },
+      "version": {
+        "cold_ms": 53.0,
+        "warm_ms": 39.704
+      }
+    },
+    "harn_version": "harn 0.9.10",
+    "host": "Apple M5 Pro, Darwin arm64 (Darwin 25.5.0)"
+  }
+}

@@ -120,6 +120,28 @@ A `warm_ms` field is allowed alongside `cold_ms` for future use, but
 G5 only writes `cold_ms`. Per-command warm-start tracking is part of
 the W-ticket work, not the G5 skeleton.
 
+## Recorded pre-migration baseline (2026-07-04)
+
+The first real baseline in `baselines/main.json` is the **pre-migration
+reference point** for the VM-heavier re-architecture (stage-loop
+inversion; see `perf/README.md`). Provenance:
+
+- **Host**: Apple M5 Pro, macOS (Darwin 25.5.0, arm64) — the same
+  machine class as the self-hosted `[self-hosted, macos, m5pro]` pool
+  this workflow is slated to move to. The advisory `ubuntu-latest`
+  CI lane measures a different machine class, so treat its
+  baseline-ratio column as informational until the workflow moves to
+  the matching pool.
+- **Cold numbers** (`cold_ms`): produced by the standard runner
+  (`scripts/bench_cli_cold_start.sh`, 20 iterations, monotonic
+  fallback timer) — `HARN_BYTECODE_CACHE=0` plus a wiped
+  `HARN_CACHE_DIR` before every run.
+- **Warm numbers** (`warm_ms`): measured with the same `env -i`
+  isolation and iteration count, but with the bytecode cache left at
+  its default (enabled) and the cache dir persisted across runs after
+  3 warmup invocations, then merged into the same baseline entry by
+  hand. The runner itself still only writes `cold_ms`.
+
 ## Tracked commands (initial set)
 
 The harness starts with the two currently enabled smallest,
