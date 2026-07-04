@@ -259,6 +259,10 @@ pub struct Capabilities {
     pub honors_chat_template_kwargs: bool,
     pub chat_template_options_field: Option<String>,
     pub requires_completion_tokens: bool,
+    /// True when the route is served ONLY by the provider Responses API and
+    /// rejects `/v1/chat/completions` (OpenAI `*-codex` models). Harn routes
+    /// such calls through the Responses provider automatically.
+    pub chat_completions_unsupported: bool,
     pub requires_streaming: bool,
     pub reasoning_effort_supported: bool,
     pub reasoning_effort_levels: Vec<String>,
@@ -347,6 +351,7 @@ impl Default for Capabilities {
             honors_chat_template_kwargs: false,
             chat_template_options_field: None,
             requires_completion_tokens: false,
+            chat_completions_unsupported: false,
             requires_streaming: false,
             reasoning_effort_supported: false,
             reasoning_effort_levels: Vec::new(),

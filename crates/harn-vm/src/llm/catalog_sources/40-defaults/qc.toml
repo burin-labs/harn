@@ -16,8 +16,8 @@ cohere = "command-a-plus-05-2026"
 xai = "grok-build-0.1"
 groq = "llama-3.1-8b-instant"
 minimax = "MiniMax-M2.5-highspeed"
-# GLM-4.7-Flash is Z.AI's free tier — zero-cost QC probes.
-zai = "glm-4.7-flash"
+# GLM-4.6 is Z.AI's cheap coding route, confirmed serving at paas/v4.
+zai = "glm-4.6"
 deepseek = "deepseek-v4-flash"
 gemini = "gemini-2.5-flash-lite"
 

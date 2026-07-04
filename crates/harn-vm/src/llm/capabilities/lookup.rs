@@ -112,6 +112,7 @@ pub fn lookup_with_user_overrides(
     let mut caps = lookup_with(provider, model, builtin(), user_overrides);
     if provider != "openai" && provider != "mock" {
         caps.responses_api = false;
+        caps.chat_completions_unsupported = false;
         caps.hosted_tools.clear();
         caps.remote_mcp = false;
         caps.conversation_state = false;

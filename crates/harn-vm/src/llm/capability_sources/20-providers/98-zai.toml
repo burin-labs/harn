@@ -68,12 +68,12 @@ prefers_xml_tools = false
 thinking_block_style = "inline"
 prompt_caching = true
 
-# GLM-4.7 family (incl. the free glm-4.7-flash tier) — same wire format
-# and `<tool_call>` markup lineage as GLM-5; pinned text for family
+# GLM-4.x family (glm-4.5, glm-4.5-air, glm-4.6, glm-4.7) — same wire
+# format and `<tool_call>` markup lineage as GLM-5; pinned text for family
 # consistency (mirrors the NVIDIA glm-5 family-consistency gate) until a
 # clean zai-direct native probe says otherwise. Without this rule the
-# catalogued glm-4.7-flash row would fall through to the OpenAI-family
-# gpt-* rules and resolve empty capabilities.
+# catalogued glm-4.x rows would fall through to the OpenAI-family gpt-*
+# rules and resolve empty capabilities.
 [[provider.zai]]
 model_match = "glm-4*"
 native_tools = true

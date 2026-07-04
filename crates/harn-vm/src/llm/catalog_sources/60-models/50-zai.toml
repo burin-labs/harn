@@ -1,6 +1,65 @@
-# Z.AI GLM-5 family. GLM-5.2 is the current 1M-context open-weight flagship;
-# GLM-5.1 / GLM-5 are kept for pinned callers. Direct Z.AI tariff via the
-# OpenAI-compatible /v1 endpoint. OpenRouter mirrors live below.
+# Z.AI GLM family, served via the OpenAI-compatible `/api/paas/v4` endpoint
+# (the `.../v1` base 404s). The live `/models` listing on 2026-07-03 reports:
+# glm-4.5, glm-4.5-air, glm-4.6, glm-4.7, glm-5, glm-5-turbo, glm-5.1,
+# glm-5.2. GLM-5.2 is the current 1M-context open-weight flagship; the GLM-4.x
+# line stays catalogued as the cheap independent-bucket coding/judge routes
+# (glm-4.6 is confirmed serving 200 at paas/v4). Pricing per docs.z.ai.
+
+# GLM-4.6 — 200K-context coding model, confirmed serving at paas/v4.
+[models."glm-4.6"]
+name = "GLM 4.6"
+provider = "zai"
+context_window = 204800
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.60, output_per_mtok = 2.20, cache_read_per_mtok = 0.11 }
+tier = "mid"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "cheap"]
+
+# GLM-4.5 — prior-generation coding flagship; GLM-4.5-Air is the lighter
+# MoE variant. Kept as cheap independent-bucket routes.
+[models."glm-4.5"]
+name = "GLM 4.5"
+provider = "zai"
+context_window = 131072
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.60, output_per_mtok = 2.20, cache_read_per_mtok = 0.11 }
+tier = "mid"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "cheap"]
+[models."glm-4.5-air"]
+name = "GLM 4.5 Air"
+provider = "zai"
+context_window = 131072
+capabilities = ["tools", "streaming", "thinking"]
+pricing = { input_per_mtok = 0.20, output_per_mtok = 1.10, cache_read_per_mtok = 0.03 }
+tier = "small"
+open_weight = true
+strengths = ["speed", "cheap", "coding", "tool_use"]
+
+# GLM-4.7 — current GLM-4.x generation coding model.
+[models."glm-4.7"]
+name = "GLM 4.7"
+provider = "zai"
+context_window = 204800
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.60, output_per_mtok = 2.20, cache_read_per_mtok = 0.11 }
+tier = "mid"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "cheap"]
+
+# GLM-5 family. GLM-5.2 is the current 1M-context open-weight flagship;
+# GLM-5.1 / GLM-5 are kept for pinned callers. glm-5-turbo is the current
+# accelerated tier. OpenRouter mirrors live below.
+[models."glm-5-turbo"]
+name = "GLM 5 Turbo"
+provider = "zai"
+context_window = 202752
+capabilities = ["tools", "streaming", "thinking"]
+pricing = { input_per_mtok = 0.60, output_per_mtok = 2.00, cache_read_per_mtok = 0.11 }
+tier = "mid"
+open_weight = true
+strengths = ["speed", "coding", "agentic", "tool_use", "cheap"]
 [models."glm-5"]
 name = "GLM 5"
 provider = "zai"
@@ -13,20 +72,6 @@ tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use"]
 
-# GLM-4.7-Flash — Z.AI's free API tier (31B dense). Zero-cost route for
-# healthcheck/QC probes and cheap background tasks. Pricing is OMITTED
-# (the unbilled-route convention, like local models) rather than listed
-# as $0/$0: a literal zero rate would win every price-capped selection
-# (complementary reviewer, cheapest-route) and make cost-fallback paths
-# unreachable, which misrepresents a rate-limited free tier.
-[models."glm-4.7-flash"]
-name = "GLM 4.7 Flash"
-provider = "zai"
-context_window = 131072
-capabilities = ["tools", "streaming", "thinking"]
-tier = "small"
-open_weight = true
-strengths = ["speed", "cheap", "coding", "tool_use"]
 [models."glm-5.1"]
 name = "GLM 5.1"
 provider = "zai"

@@ -201,6 +201,14 @@ pub struct ProviderRule {
     /// request field instead of legacy `max_tokens`.
     #[serde(default)]
     pub requires_completion_tokens: Option<bool>,
+    /// Whether this route is served ONLY by the provider's Responses-style
+    /// API and rejects `/v1/chat/completions` (OpenAI `*-codex` models
+    /// return HTTP 404 "Use the v1/responses endpoint instead" on the chat
+    /// endpoint). When set, Harn routes the call through the Responses
+    /// provider even when the caller did not explicitly request
+    /// `api_mode: "responses"`.
+    #[serde(default)]
+    pub chat_completions_unsupported: Option<bool>,
     /// Whether this route rejects non-streaming chat-completion requests.
     /// Harn forces streaming for such routes so callers can keep provider-
     /// neutral `stream` preferences.
@@ -442,6 +450,7 @@ impl ProviderRule {
             honors_chat_template_kwargs,
             chat_template_options_field,
             requires_completion_tokens,
+            chat_completions_unsupported,
             requires_streaming,
             reasoning_effort_supported,
             reasoning_effort_levels,
@@ -528,6 +537,10 @@ impl ProviderRule {
         fill_opt(
             &mut self.requires_completion_tokens,
             requires_completion_tokens,
+        );
+        fill_opt(
+            &mut self.chat_completions_unsupported,
+            chat_completions_unsupported,
         );
         fill_opt(&mut self.requires_streaming, requires_streaming);
         fill_opt(
@@ -861,6 +874,7 @@ fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
         honors_chat_template_kwargs: None,
         chat_template_options_field: None,
         requires_completion_tokens: None,
+        chat_completions_unsupported: None,
         requires_streaming: None,
         reasoning_effort_supported: None,
         reasoning_effort_levels: None,
@@ -966,6 +980,7 @@ fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilitie
         honors_chat_template_kwargs: rule.honors_chat_template_kwargs.unwrap_or(false),
         chat_template_options_field: rule.chat_template_options_field.clone(),
         requires_completion_tokens: rule.requires_completion_tokens.unwrap_or(false),
+        chat_completions_unsupported: rule.chat_completions_unsupported.unwrap_or(false),
         requires_streaming: rule.requires_streaming.unwrap_or(false),
         reasoning_effort_supported: rule.reasoning_effort_supported.unwrap_or(false),
         reasoning_effort_levels: rule.reasoning_effort_levels.clone().unwrap_or_default(),

@@ -358,6 +358,19 @@ impl OpenAiCompatibleProvider {
             return crate::llm::providers::OpenAiResponsesProvider::call(request, delta_tx).await;
         }
 
+        // OpenAI `*-codex` routes are served only by the Responses API and
+        // return HTTP 404 ("Use the v1/responses endpoint instead") on
+        // `/v1/chat/completions`. Auto-route them through the Responses
+        // provider even when the caller did not explicitly request
+        // `api_mode: "responses"`, so a codex model can never be a silent
+        // 404. Pure capability lookup — no model-name branch at the call
+        // site (the `*-codex` match lives in the OpenAI capability rows).
+        if crate::llm::capabilities::lookup(&request.provider, &request.model)
+            .chat_completions_unsupported
+        {
+            return crate::llm::providers::OpenAiResponsesProvider::call(request, delta_tx).await;
+        }
+
         let mut body = Self::build_request_body(request, false);
         self.transform_request(&mut body);
 
