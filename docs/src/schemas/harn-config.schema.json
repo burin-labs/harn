@@ -409,58 +409,6 @@
       "const": 1,
       "type": "integer"
     },
-    "security": {
-      "additionalProperties": false,
-      "properties": {
-        "authenticate_directives": {
-          "type": "boolean"
-        },
-        "destyle_untrusted": {
-          "type": "boolean"
-        },
-        "detect_injection": {
-          "type": "boolean"
-        },
-        "gate_secret_reads": {
-          "type": "boolean"
-        },
-        "neutralize_special_tokens": {
-          "type": "boolean"
-        },
-        "guard_model": {
-          "type": "string"
-        },
-        "guard_threshold_percent": {
-          "maximum": 100,
-          "minimum": 0,
-          "type": "integer"
-        },
-        "mode": {
-          "enum": [
-            "off",
-            "spotlight",
-            "strict",
-            "local-ml"
-          ]
-        },
-        "pin_mcp_schemas": {
-          "type": "boolean"
-        },
-        "spotlight_external": {
-          "type": "boolean"
-        },
-        "trifecta_gate": {
-          "type": "boolean"
-        },
-        "trusted_mcp_servers": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        }
-      },
-      "type": "object"
-    },
     "skills": {
       "additionalProperties": false,
       "properties": {
