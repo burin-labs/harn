@@ -415,7 +415,7 @@ check-connector-schemas:
 
 check-burin-protocol-artifacts:
 	@echo "=== Checking Burin Code vendored protocol bindings match Harn ==="
-	@python3 scripts/check_burin_protocol_bindings.py --required
+	@$(HARN_CLI_CMD) run --no-sandbox scripts/check_burin_protocol_bindings.harn -- --required
 	@echo "    Burin protocol bindings OK."
 
 # Round-trip the published JSON fixture through the Python and Go protocol

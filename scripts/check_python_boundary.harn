@@ -22,12 +22,6 @@ let PYTHON_ALLOWLIST = [
   },
   {
     kind: "exact",
-    pattern: "scripts/check_burin_protocol_bindings.py",
-    category: "foreign-artifact-check",
-    reason: "Compares generated Swift and TypeScript artifacts for a downstream host.",
-  },
-  {
-    kind: "exact",
     pattern: "scripts/check_protocol_bindings.py",
     category: "foreign-artifact-check",
     reason: "Imports the generated Python protocol binding it validates.",
