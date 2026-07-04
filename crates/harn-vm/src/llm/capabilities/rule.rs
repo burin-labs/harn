@@ -913,6 +913,12 @@ fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
 
 fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilities {
     let thinking_modes = rule_thinking_modes(rule);
+    let thinking_block_style = rule_thinking_block_style(rule);
+    // A route that represents reasoning as inline `<think>` blocks in prompt
+    // context is exactly the one that emits inline `<think>` in its responses,
+    // so derive the response-splitting quirk from the resolved style rather
+    // than adding a second, drift-prone catalog field.
+    let emits_inline_reasoning = thinking_block_style == "inline";
     Capabilities {
         native_tools: rule.native_tools.unwrap_or(false),
         message_wire_format: WireDialect::from_message_wire_format(
@@ -963,7 +969,8 @@ fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilitie
         supports_assistant_prefill: rule.supports_assistant_prefill.unwrap_or(false),
         prefers_role_developer: rule.prefers_role_developer.unwrap_or(false),
         prefers_xml_tools: rule.prefers_xml_tools.unwrap_or(false),
-        thinking_block_style: rule_thinking_block_style(rule),
+        thinking_block_style,
+        emits_inline_reasoning,
         thinking_modes,
         interleaved_thinking_supported: rule.interleaved_thinking_supported.unwrap_or(false),
         anthropic_beta_features: rule.anthropic_beta_features.clone().unwrap_or_default(),

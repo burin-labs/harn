@@ -1,0 +1,12 @@
+// std/llm/safe.strip_think_blocks removes inline <think>/<thinking> reasoning
+// blocks from free-text model output.
+import { strip_think_blocks } from "std/llm/safe"
+
+pipeline default() {
+  __io_println(strip_think_blocks("<think>secret reasoning</think>The answer is 4"))
+  __io_println(strip_think_blocks("<thinking>alt tag</thinking>Hello"))
+  __io_println(strip_think_blocks("<think>a</think>one <think>b</think>two"))
+  __io_println(strip_think_blocks("<think>line one\nline two</think>Done"))
+  __io_println(strip_think_blocks("no tags here"))
+  __io_println("[" + strip_think_blocks(nil) + "]")
+}

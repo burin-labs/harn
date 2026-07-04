@@ -1,0 +1,51 @@
+// llm_call splits inline `<think>` reasoning out of the text channel for
+// routes whose capability matrix marks them as inline-reasoning emitters
+// (thinking_block_style = "inline", e.g. local Qwen3), folding the reasoning
+// into the thinking channel so `text`/`prose`/`visible_text` carry only the
+// answer. A route WITHOUT the quirk (Anthropic) passes the literal `<think>`
+// through the `text`/`prose` channels untouched — the split is
+// capability-gated, not a blanket text rewrite.
+//
+// (`visible_text` is separately and unconditionally sanitized of internal
+// protocol blocks — think/tool_call/done markers — so it excludes `<think>`
+// on every route regardless of the quirk; the capability gate governs the
+// `text`/`prose`/`thinking` channels.)
+import { with_llm_script } from "std/testing"
+
+pipeline default() {
+  // Inline-reasoning emitter: reasoning stripped from text/prose/visible_text
+  // and surfaced on the thinking channel.
+  with_llm_script(
+    [
+      {
+        text: "<think>secret reasoning</think>The answer is 4",
+        provider: "ollama",
+        model: "qwen3.6:35b-a3b-coding-nvfp4",
+      },
+    ],
+    { ->
+      let r = llm_call("hi", nil, {provider: "mock", model: "mock-model"})
+      __io_println("inline.visible=" + r.visible_text)
+      __io_println("inline.prose=" + r.prose)
+      __io_println("inline.text=" + r.text)
+      __io_println("inline.thinking=" + (r.thinking ?? "(none)"))
+    },
+  )
+  // Non-inline route: the literal `<think>` block is preserved on the text and
+  // prose channels, and nothing is added to the thinking channel.
+  with_llm_script(
+    [
+      {
+        text: "<think>secret reasoning</think>The answer is 4",
+        provider: "anthropic",
+        model: "claude-sonnet-5",
+      },
+    ],
+    { ->
+      let r = llm_call("hi", nil, {provider: "mock", model: "mock-model"})
+      __io_println("plain.text=" + r.text)
+      __io_println("plain.prose=" + r.prose)
+      __io_println("plain.thinking=" + (r.thinking ?? "(none)"))
+    },
+  )
+}

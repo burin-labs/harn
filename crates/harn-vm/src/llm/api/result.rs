@@ -123,6 +123,60 @@ fn build_usage_dict(result: &LlmResult) -> crate::value::DictMap {
     usage
 }
 
+/// Some local/open-weight routes emit their reasoning INLINE in the text
+/// channel as `<think>...</think>` blocks (Qwen3 via vLLM, local Ollama /
+/// llama.cpp reasoning models, Kimi) instead of in a separate provider
+/// reasoning field. When the route's capability matrix marks it as an
+/// inline-reasoning emitter, split those blocks out of the visible text so
+/// `text`/`prose`/`visible_text` carry only the answer, and return the
+/// extracted reasoning so it can be folded into the reasoning channel —
+/// mirroring how hosted-provider thinking is already surfaced.
+///
+/// Gated on the `emits_inline_reasoning` capability (data-driven, never a
+/// provider-name match): a route that never emits inline `<think>` (Anthropic,
+/// OpenAI) passes any literal `<think>` in its output through untouched.
+///
+/// Malformed-tag rule (inherited from [`split_openai_thinking_blocks`]): a
+/// leading/embedded well-formed `<think>...</think>` block is moved to the
+/// reasoning channel; a `<think>` with no matching `</think>` consumes the
+/// remainder as reasoning (visible becomes empty), which is the safe reading
+/// for a truncated reasoning trace with no committed answer. Text with no
+/// `<think>` is returned verbatim. The real streaming and openai-compat/ollama
+/// batch paths already strip inline think upstream, so for those routes this is
+/// an idempotent no-op (the text arrives with the tags already gone).
+fn split_inline_reasoning_if_capable(result: &LlmResult) -> (String, Option<String>) {
+    if !result.text.contains("<think>") {
+        return (result.text.clone(), None);
+    }
+    let caps = crate::llm::capabilities::lookup(&result.provider, &result.model);
+    if !caps.emits_inline_reasoning {
+        return (result.text.clone(), None);
+    }
+    let (visible, thinking) = crate::llm::api::split_openai_thinking_blocks(&result.text);
+    let thinking = (!thinking.trim().is_empty()).then_some(thinking);
+    (visible, thinking)
+}
+
+/// Merge an existing provider reasoning field with reasoning extracted from
+/// inline `<think>` blocks. In practice only one side is populated for any
+/// given call (a route either surfaces a separate reasoning field or emits
+/// inline think, not both), but merge defensively so neither is dropped.
+fn merge_reasoning_channels(existing: &Option<String>, inline: Option<String>) -> Option<String> {
+    match (existing.as_deref(), inline) {
+        (None, inline) => inline,
+        (Some(existing), None) => Some(existing.to_string()),
+        (Some(existing), Some(inline)) => {
+            if existing.trim().is_empty() {
+                Some(inline)
+            } else if inline.trim().is_empty() {
+                Some(existing.to_string())
+            } else {
+                Some(format!("{existing}\n{inline}"))
+            }
+        }
+    }
+}
+
 pub(crate) fn vm_build_llm_result(
     result: &LlmResult,
     parsed_json: Option<VmValue>,
@@ -131,8 +185,14 @@ pub(crate) fn vm_build_llm_result(
 ) -> VmValue {
     use crate::stdlib::json_to_vm_value;
 
+    // Capability-gated split of inline `<think>` reasoning out of the visible
+    // text channel. `visible_text_src` is the answer with inline reasoning
+    // removed (or the original text unchanged for non-inline routes);
+    // `inline_reasoning` is the extracted reasoning to fold into the channel.
+    let (visible_text_src, inline_reasoning) = split_inline_reasoning_if_capable(result);
+
     let mut dict = crate::value::DictMap::new();
-    dict.put_str("text", result.text.as_str());
+    dict.put_str("text", visible_text_src.as_str());
     dict.put_str("model", result.model.as_str());
     dict.put_str("provider", result.provider.as_str());
     dict.insert(
@@ -201,14 +261,14 @@ pub(crate) fn vm_build_llm_result(
         "<tool_call>",
     ]
     .iter()
-    .any(|tag| result.text.contains(tag));
+    .any(|tag| visible_text_src.contains(tag));
     let has_text_tool_protocol =
         tools_val.is_some() || !result.tool_calls.is_empty() || has_tagged_blocks;
     // Keep parsing available for tool-calling responses so llm_call can
     // expose canonical/prose/tool metadata, but do not surface tagged-protocol
     // violations for ordinary plain-text completions with no tools.
     let tagged = has_text_tool_protocol
-        .then(|| crate::llm::tools::parse_text_tool_calls_with_tools(&result.text, tools_val));
+        .then(|| crate::llm::tools::parse_text_tool_calls_with_tools(&visible_text_src, tools_val));
 
     let merged_tool_calls: Vec<serde_json::Value> = if !result.tool_calls.is_empty() {
         result.tool_calls.clone()
@@ -267,16 +327,16 @@ pub(crate) fn vm_build_llm_result(
         // single reliable "the answer" key regardless of whether the model
         // used the tagged protocol.
         let prose = if parse.prose.is_empty() {
-            result.text.clone()
+            visible_text_src.clone()
         } else {
             parse.prose.clone()
         };
         dict.put_str("prose", prose.as_str());
     } else {
-        dict.put_str("prose", result.text.as_str());
+        dict.put_str("prose", visible_text_src.as_str());
     }
 
-    if let Some(ref thinking) = result.thinking {
+    if let Some(thinking) = merge_reasoning_channels(&result.thinking, inline_reasoning) {
         dict.put_str("thinking", thinking.as_str());
         dict.put_str("private_reasoning", thinking.as_str());
     }
@@ -299,10 +359,10 @@ pub(crate) fn vm_build_llm_result(
     // applies the same semantics on its final iteration.
     let visible_text = if tools_val.is_some() && result.tool_calls.is_empty() {
         let parse_result =
-            crate::llm::tools::parse_text_tool_calls_with_tools(&result.text, tools_val);
+            crate::llm::tools::parse_text_tool_calls_with_tools(&visible_text_src, tools_val);
         parse_result.prose
     } else {
-        crate::visible_text::sanitize_visible_assistant_text(&result.text, false)
+        crate::visible_text::sanitize_visible_assistant_text(&visible_text_src, false)
     };
     dict.put_str("visible_text", visible_text.as_str());
     dict.insert(

@@ -303,6 +303,16 @@ pub struct Capabilities {
     pub prefers_role_developer: bool,
     pub prefers_xml_tools: bool,
     pub thinking_block_style: String,
+    /// Whether this route emits its reasoning INLINE in the text channel as
+    /// `<think>...</think>` blocks (local Ollama/llama.cpp reasoning models,
+    /// Qwen3 via vLLM, Kimi) rather than in a separate provider reasoning
+    /// field. When true, the `llm_call` envelope builder splits those blocks
+    /// out of `text`/`prose`/`visible_text` and folds them into the reasoning
+    /// channel, mirroring how hosted providers surface a dedicated thinking
+    /// field. Derived from `thinking_block_style == "inline"` — the same
+    /// population that represents reasoning as inline `<think>` in prompt
+    /// context is the one that emits it that way in responses.
+    pub emits_inline_reasoning: bool,
     pub thinking_modes: Vec<String>,
     pub interleaved_thinking_supported: bool,
     pub anthropic_beta_features: Vec<String>,
@@ -395,6 +405,7 @@ impl Default for Capabilities {
             prefers_role_developer: false,
             prefers_xml_tools: false,
             thinking_block_style: "none".to_string(),
+            emits_inline_reasoning: false,
             thinking_modes: Vec::new(),
             interleaved_thinking_supported: false,
             anthropic_beta_features: Vec::new(),
