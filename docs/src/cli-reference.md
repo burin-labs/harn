@@ -1419,7 +1419,10 @@ present, `distill` when only a teacher is present, and `audit-only` otherwise.
 The report lists provenance manifest fields, hard-negative slices, and holdout
 gates so generated data cannot silently contaminate evaluation fixtures. It
 also lists the trainer contract Harn expects for tool-calling SFT, including
-assistant-only loss masks, `messages`/`tools` columns, and packing boundaries.
+assistant-only loss masks, `messages`/`tools` columns, packing boundaries, and
+method-specific target modules. QLoRA plans use PEFT's `all-linear` target
+module shorthand; full LoRA plans keep explicit attention projection modules in
+`training.target_modules`.
 The JSON report exposes the same machine-readable contract under
 `training.contract` for automation that prepares TRL/PEFT trainer configs.
 The launch block includes the matching `harn models lora export` command so the

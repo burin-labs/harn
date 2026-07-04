@@ -84,6 +84,13 @@ fn __render_human(harness: Harness, report: dict) {
   harness.stdio.println("  quantization: " + safe_string(training["quantization"], ""))
   harness.stdio.println("  loss scope: " + safe_string(training["loss_scope"], ""))
   harness.stdio.println("  packing: " + safe_string(training["packing"], ""))
+  let target_modules = safe_list(training["target_modules"])
+  if len(target_modules) > 0 {
+    harness.stdio
+      .println(
+      "  target modules: " + join(target_modules.map({ item -> safe_string(item, "") }), ", "),
+    )
+  }
   harness.stdio
     .println("  assistant mask: " + safe_string(training_contract["assistant_mask_policy"], ""))
   harness.stdio
