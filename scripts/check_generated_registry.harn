@@ -18,8 +18,7 @@
 //     the all: recipe (so `make all` would not catch it);
 //   - a declared output file that does not exist on disk.
 //
-// Port of scripts/check_generated_registry.py. Pure validation logic lives
-// in the pub fns; main does the filesystem reads.
+// Pure validation logic lives in the pub fns; main does the filesystem reads.
 let REGISTRY = "scripts/generated_artifacts.toml"
 
 let MAKEFILE = "Makefile"

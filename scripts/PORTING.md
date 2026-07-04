@@ -52,14 +52,6 @@ pure helpers, run by `make test-harn-scripts`.
   crates, to compute the nextest filter. Running it via `cargo run --bin harn`
   would force a multi-minute `harn` build on every PR — including a cold
   Windows build — purely to decide what to test, defeating its entire purpose.
-- **`check_generated_registry.py`** — the Harn port remains as a tested reference,
-  but the wired `make check-generated-registry` path is Python. This check is
-  intentionally a hook/bootstrap guard for Makefile/workflow/hook drift; running
-  it through `harn run` makes hook-only pushes and release recovery builds pay a
-  cold Harn compile before the fast-only pre-push escape can take effect.
-  Python3 is present on all runners with zero build cost. Revisit only if a
-  cheap prebuilt-`harn` is available in PR CI.
-
 ## Out of scope — stays in its current language
 
 External-toolchain or foreign-artifact reasons; porting would defeat the
