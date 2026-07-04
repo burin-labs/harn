@@ -908,6 +908,9 @@ fn models_lora_export_check_reports_native_shape() {
         "contract assistant mask: require_chat_template_generation_masks",
         "contract parser owner: provider_tokenizer_runtime",
         "contract split policy: train_tune_holdout_disjoint_no_eval_holdout_training",
+        "provenance defaults: split=train license=unknown",
+        "required example metadata:",
+        "- tool_schema_hash",
         "adapter binding: runtime_lora_adapter",
         "LoRA module format: json_with_base_model",
         "promotion minimum trials: 5",
@@ -1173,6 +1176,26 @@ fn models_lora_export_json_writes_dataset_and_manifest() {
         report["contract"]["training_contract"]["dataset_split_policy"],
         "train_tune_holdout_disjoint_no_eval_holdout_training"
     );
+    let required_metadata = report["contract"]["training_contract"]["required_example_metadata"]
+        .as_array()
+        .expect("required example metadata");
+    for field in [
+        "source_record_id",
+        "source_transcript_id",
+        "teacher_model",
+        "teacher_provider",
+        "target_base_model",
+        "target_tool_format",
+        "tool_schema_hash",
+        "prompt_template_hash",
+        "split",
+        "license",
+    ] {
+        assert!(
+            required_metadata.iter().any(|value| value == field),
+            "required metadata missing {field}: {required_metadata:?}"
+        );
+    }
     assert_eq!(report["serving"]["request_model"], "burin-tools");
     assert_eq!(report["serving"]["adapter_binding"], "runtime_lora_adapter");
     assert_eq!(
@@ -1225,6 +1248,21 @@ fn models_lora_export_json_writes_dataset_and_manifest() {
         "tools={tools:?}"
     );
     assert_eq!(row["metadata"]["source_tool_format"], "json");
+    assert_eq!(row["metadata"]["source_record_id"], "tiny-read");
+    assert_eq!(row["metadata"]["source_transcript_id"], "tiny-read");
+    assert_eq!(row["metadata"]["teacher_model"], "manual");
+    assert_eq!(row["metadata"]["teacher_provider"], "");
+    assert_eq!(row["metadata"]["target_base_model"], "gemma-4-e4b-it");
+    assert_eq!(row["metadata"]["target_tool_format"], "native");
+    assert_eq!(row["metadata"]["split"], "train");
+    assert_eq!(row["metadata"]["license"], "unknown");
+    for field in ["tool_schema_hash", "prompt_template_hash"] {
+        let hash = row["metadata"][field].as_str().expect("metadata hash");
+        assert!(
+            hash.starts_with("sha256:") && hash.len() == "sha256:".len() + 64,
+            "{field}={hash}"
+        );
+    }
     assert_eq!(row["metadata"]["lora_contract_id"], contract_id);
     assert_eq!(row["metadata"]["lora_target"]["contract_id"], contract_id);
     let manifest_value = parse_json(
@@ -1241,6 +1279,23 @@ fn models_lora_export_json_writes_dataset_and_manifest() {
         "provider_tokenizer_runtime"
     );
     assert_eq!(manifest_value["target"]["contract_id"], contract_id);
+    assert_eq!(
+        manifest_value["provenance"]["default_split"],
+        serde_json::Value::String("train".to_string())
+    );
+    assert_eq!(
+        manifest_value["provenance"]["default_license"],
+        serde_json::Value::String("unknown".to_string())
+    );
+    assert!(
+        manifest_value["provenance"]["required_example_metadata"]
+            .as_array()
+            .expect("manifest provenance fields")
+            .iter()
+            .any(|field| field == "tool_schema_hash"),
+        "manifest provenance={:?}",
+        manifest_value["provenance"]
+    );
     assert_eq!(manifest_value["serving"]["request_model"], "burin-tools");
     assert_eq!(
         manifest_value["serving"]["adapter_binding"],

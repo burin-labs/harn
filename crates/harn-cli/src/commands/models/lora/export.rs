@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use regex::Regex;
 use serde::Serialize;
 use serde_json::{json, Map, Value};
+use sha2::{Digest as _, Sha256};
 
 use crate::cli::ModelsLoraExportArgs;
 
@@ -94,6 +95,8 @@ fn export_report(args: &ModelsLoraExportArgs) -> Result<LoraExportReport, String
         adapter_name: args.adapter_name.clone(),
         harn_tool_format: decision.effective.clone(),
         chat_template: args.chat_template.clone(),
+        default_split: non_empty_or_default(&args.default_split, "train"),
+        default_license: non_empty_or_default(&args.default_license, "unknown"),
         contract_id: contract_id.clone(),
         metadata: parse_target_metadata(&args.target_metadata)?,
     };
@@ -280,6 +283,8 @@ fn export_report(args: &ModelsLoraExportArgs) -> Result<LoraExportReport, String
             dataset_format,
             corpus: corpus_path.display().to_string(),
             check: args.check,
+            default_split: target.default_split.clone(),
+            default_license: target.default_license.clone(),
         },
         tool_calling: ToolCallingReport {
             native_tools: capabilities.native_tools,
@@ -381,6 +386,8 @@ struct ExportTarget {
     adapter_name: Option<String>,
     harn_tool_format: String,
     chat_template: Option<String>,
+    default_split: String,
+    default_license: String,
     contract_id: String,
     metadata: BTreeMap<String, String>,
 }
@@ -485,7 +492,14 @@ fn convert_structured_record(
         "task_type": record_string(record, "task_type"),
         "messages": structured_messages,
         "tools": tools,
-        "metadata": export_metadata(record, target, "hf_trl_tool_calls_v1", "messages_with_tool_calls"),
+        "metadata": export_metadata(
+            record,
+            target,
+            "hf_trl_tool_calls_v1",
+            "messages_with_tool_calls",
+            &tools,
+            &system_text,
+        ),
     });
     Ok(ConvertedExport {
         rows: vec![row],
@@ -546,6 +560,7 @@ fn convert_text_records(
                 } else {
                     tool_call_count += block_count as u64;
                 }
+                let tools = tool_schemas(&available_tools, &calls_by_tool);
                 rows.push(json!({
                     "id": format!("{}#turn-{index}", record_id(record, index + 1)),
                     "source_id": record_string(record, "id"),
@@ -553,9 +568,16 @@ fn convert_text_records(
                     "language": record_string(record, "language"),
                     "task_type": record_string(record, "task_type"),
                     "messages": context,
-                    "tools": tool_schemas(&available_tools, &calls_by_tool),
+                    "tools": tools,
                     "assistant_tool_text": content,
-                    "metadata": export_metadata(record, target, "harn_text_tool_calls_v1", dataset_format),
+                    "metadata": export_metadata(
+                        record,
+                        target,
+                        "harn_text_tool_calls_v1",
+                        dataset_format,
+                        &tools,
+                        &system_text,
+                    ),
                 }));
             }
         }
@@ -847,6 +869,8 @@ fn export_metadata(
     target: &ExportTarget,
     exporter: &str,
     dataset_format: &str,
+    tools: &[Value],
+    system_text: &str,
 ) -> Value {
     let mut metadata = record
         .get("metadata")
@@ -865,12 +889,153 @@ fn export_metadata(
         "source_tool_format".to_string(),
         Value::String(source_tool_format(record)),
     );
+    metadata.insert(
+        "source_record_id".to_string(),
+        Value::String(first_record_string(
+            record,
+            &metadata,
+            &["source_record_id", "source_id", "id"],
+        )),
+    );
+    metadata.insert(
+        "source_transcript_id".to_string(),
+        Value::String(first_record_string(
+            record,
+            &metadata,
+            &[
+                "source_transcript_id",
+                "transcript_id",
+                "conversation_id",
+                "session_id",
+                "id",
+            ],
+        )),
+    );
+    metadata.insert(
+        "teacher_model".to_string(),
+        Value::String(first_record_string(
+            record,
+            &metadata,
+            &["teacher_model", "model", "source_model"],
+        )),
+    );
+    metadata.insert(
+        "teacher_provider".to_string(),
+        Value::String(first_record_string(
+            record,
+            &metadata,
+            &["teacher_provider", "provider", "source_provider"],
+        )),
+    );
+    metadata.insert(
+        "target_base_model".to_string(),
+        Value::String(target.base_model.clone()),
+    );
+    metadata.insert(
+        "target_tool_format".to_string(),
+        Value::String(target.harn_tool_format.clone()),
+    );
+    metadata.insert(
+        "tool_schema_hash".to_string(),
+        Value::String(canonical_json_sha256(&Value::Array(tools.to_vec()))),
+    );
+    metadata.insert(
+        "prompt_template_hash".to_string(),
+        Value::String(prompt_template_hash(target, dataset_format, system_text)),
+    );
+    metadata.insert(
+        "split".to_string(),
+        Value::String(string_or_default(
+            first_record_string(record, &metadata, &["split"]),
+            &target.default_split,
+        )),
+    );
+    metadata.insert(
+        "license".to_string(),
+        Value::String(string_or_default(
+            first_record_string(record, &metadata, &["license"]),
+            &target.default_license,
+        )),
+    );
     metadata.insert("lora_target".to_string(), export_target_value(target));
     metadata.insert(
         "lora_contract_id".to_string(),
         Value::String(target.contract_id.clone()),
     );
     Value::Object(metadata)
+}
+
+fn first_record_string(
+    record: &Map<String, Value>,
+    metadata: &Map<String, Value>,
+    keys: &[&str],
+) -> String {
+    for key in keys {
+        if let Some(value) = metadata
+            .get(*key)
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+        {
+            return value.trim().to_string();
+        }
+        if let Some(value) = record
+            .get(*key)
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+        {
+            return value.trim().to_string();
+        }
+    }
+    String::new()
+}
+
+fn string_or_default(value: String, default: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        default.to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn non_empty_or_default(value: &str, default: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        default.to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn prompt_template_hash(target: &ExportTarget, dataset_format: &str, system_text: &str) -> String {
+    canonical_json_sha256(&json!({
+        "chat_template": target.chat_template.as_deref().unwrap_or(""),
+        "dataset_format": dataset_format,
+        "harn_tool_format": target.harn_tool_format.as_str(),
+        "system": system_text,
+    }))
+}
+
+fn canonical_json_sha256(value: &Value) -> String {
+    let canonical = canonical_json_value(value);
+    let bytes = serde_json::to_vec(&canonical).unwrap_or_default();
+    format!("sha256:{}", hex::encode(Sha256::digest(bytes)))
+}
+
+fn canonical_json_value(value: &Value) -> Value {
+    match value {
+        Value::Array(items) => Value::Array(items.iter().map(canonical_json_value).collect()),
+        Value::Object(object) => {
+            let mut sorted = Map::new();
+            let mut entries = object.iter().collect::<Vec<_>>();
+            entries.sort_by_key(|(key, _)| *key);
+            for (key, value) in entries {
+                sorted.insert(key.clone(), canonical_json_value(value));
+            }
+            Value::Object(sorted)
+        }
+        value => value.clone(),
+    }
 }
 
 fn export_target_value(target: &ExportTarget) -> Value {
@@ -1004,6 +1169,11 @@ fn write_export_manifest(path: &Path, manifest: ExportManifestWrite<'_>) -> Resu
         "stats": manifest.stats,
         "target": export_target_value(manifest.target),
         "contract": manifest.contract,
+        "provenance": {
+            "required_example_metadata": &manifest.contract.training_contract.required_example_metadata,
+            "default_split": manifest.target.default_split.as_str(),
+            "default_license": manifest.target.default_license.as_str(),
+        },
         "serving": manifest.serving,
         "promotion": manifest.promotion,
         "errors": manifest.errors,
@@ -1041,6 +1211,8 @@ struct ExportRequest {
     dataset_format: String,
     corpus: String,
     check: bool,
+    default_split: String,
+    default_license: String,
 }
 
 #[derive(Debug, Serialize)]

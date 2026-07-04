@@ -391,6 +391,10 @@ fn test_parses_models_lora_export_args() {
         "burin-tools",
         "--chat-template",
         "gemma-4",
+        "--default-split",
+        "tune",
+        "--default-license",
+        "Apache-2.0",
         "--target-metadata",
         "lane=structured",
         "--json",
@@ -425,6 +429,8 @@ fn test_parses_models_lora_export_args() {
     );
     assert_eq!(args.adapter_name.as_deref(), Some("burin-tools"));
     assert_eq!(args.chat_template.as_deref(), Some("gemma-4"));
+    assert_eq!(args.default_split, "tune");
+    assert_eq!(args.default_license, "Apache-2.0");
     assert_eq!(args.target_metadata, vec!["lane=structured"]);
     assert!(args.json);
 }

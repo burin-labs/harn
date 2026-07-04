@@ -57,6 +57,18 @@ fn __render_human(harness: Harness, report: dict) {
     "  contract split policy: "
       + safe_string(training_contract["dataset_split_policy"], ""),
   )
+  harness.stdio
+    .println(
+    "  provenance defaults: split="
+      + safe_string(request["default_split"], "")
+      + " license="
+      + safe_string(request["default_license"], ""),
+  )
+  print_list(
+    harness,
+    "required example metadata",
+    safe_list(training_contract["required_example_metadata"]),
+  )
   harness.stdio.println("  target base: " + safe_string(target["base_model"], ""))
   let adapter = safe_string(target["adapter_name"], "")
   if adapter != "" {
