@@ -60,7 +60,7 @@ impl crate::vm::Vm {
                     .join(&sep);
                 Ok(VmValue::String(arcstr::ArcStr::from(joined)))
             }
-            "contains" => {
+            "contains" | "includes" => {
                 let needle = args.first().unwrap_or(&VmValue::Nil);
                 Ok(VmValue::Bool(items.iter().any(|v| values_equal(v, needle))))
             }
