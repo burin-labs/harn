@@ -1,0 +1,90 @@
+// Run: harn test tests/agent/post_turn_callback_stop_test.harn
+//
+// Post-turn callbacks are host-policy decisions, not ordinary model completion
+// proposals. A stop verdict from a policy callback must terminate the loop
+// without letting `verify_completion` convert the stop into repair feedback.
+import { llm_text, with_llm_script } from "std/testing"
+
+pipeline test_post_turn_policy_stop_bypasses_completion_verify(task) {
+  with_llm_script(
+    [
+      llm_text("I am still looping without making progress."),
+      llm_text("This turn should be unreachable. ##DONE##"),
+    ],
+    { ->
+      let verify_calls = shared_cell({scope: "task_group", key: "post-turn-stop-verify-calls", initial: 0})
+      let result = agent_loop(
+        "Finish the task.",
+        nil,
+        {
+          provider: "mock",
+          loop_until_done: true,
+          max_iterations: 4,
+          done_sentinel: "##DONE##",
+          verify_completion: { info ->
+            let count = shared_snapshot(verify_calls)
+            shared_set(verify_calls, count.value + 1)
+            if info.stop_reason == "pace_cutoff" {
+              return "policy stops must not be completion-verified"
+            }
+            return nil
+          },
+          post_turn_callback: { info ->
+            if info.iteration == 0 {
+              return {stop: true, stop_reason: "pace_cutoff", message: "Run stopped by host policy."}
+            }
+            return nil
+          },
+        },
+      )
+      assert_eq(result?.stop_reason, "pace_cutoff")
+      assert_eq(result?.llm?.iterations, 1)
+      assert_eq(shared_snapshot(verify_calls).value, 0)
+      assert(
+        json_stringify(transcript_messages(result?.transcript)).contains("Run stopped by host policy."),
+        "policy stop message should be recorded as runtime feedback",
+      )
+    },
+  )
+}
+
+pipeline test_post_turn_policy_stop_can_request_completion_verify(task) {
+  with_llm_script(
+    [llm_text("Policy wants an external completion check."), llm_text("Verified now. ##DONE##")],
+    { ->
+      let policy_verify_calls = shared_cell({scope: "task_group", key: "post-turn-stop-opt-in-verify-calls", initial: 0})
+      let result = agent_loop(
+        "Finish the task.",
+        nil,
+        {
+          provider: "mock",
+          loop_until_done: true,
+          max_iterations: 4,
+          done_sentinel: "##DONE##",
+          verify_completion: { info ->
+            if info.stop_reason == "pace_cutoff" {
+              let count = shared_snapshot(policy_verify_calls)
+              shared_set(policy_verify_calls, count.value + 1)
+              return "policy requested one verification pass"
+            }
+            return nil
+          },
+          post_turn_callback: { info ->
+            if info.iteration == 0 {
+              return {
+                stop: true,
+                stop_reason: "pace_cutoff",
+                needs_verify: true,
+                message: "Policy stop requested verification.",
+              }
+            }
+            return nil
+          },
+        },
+      )
+      assert_eq(result?.stop_reason, "sentinel")
+      assert_eq(result?.llm?.iterations, 2)
+      assert_eq(shared_snapshot(policy_verify_calls).value, 1)
+    },
+  )
+}
