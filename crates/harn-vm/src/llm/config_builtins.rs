@@ -452,18 +452,19 @@ pub(crate) fn llm_provider_status_value() -> VmValue {
         entry.put_str("name", name.clone());
 
         // Providers with `auth_style = "none"` (e.g. local Ollama) and
-        // the multi-step auth providers (Bedrock/Vertex) report
+        // the multi-step auth providers (`credential_resolution =
+        // "platform_managed"`, e.g. Bedrock/Vertex) report
         // `credential_status = "not_required"` / `"deferred"` rather
         // than `"ok"` so callers can distinguish a successfully
         // resolved API key from a deferred resolution. `mock` always
         // reports `"not_required"`.
         let (available, credential_status) = if name == "mock" {
             (true, "not_required")
-        } else if matches!(name.as_str(), "bedrock" | "vertex") {
-            (true, "deferred")
         } else if let Some(pdef) = llm_config::provider_config(&name) {
             if pdef.auth_style == "none" {
                 (true, "not_required")
+            } else if pdef.is_credential_resolution_platform_managed() {
+                (true, "deferred")
             } else {
                 match super::helpers::resolve_api_key(&name) {
                     Ok(_) => (true, "ok"),
@@ -1832,6 +1833,41 @@ mod tests {
             Some(VmValue::Int(value)) => assert_eq!(*value, want, "{key}"),
             other => panic!("expected Int({want}) for {key}, got {other:?}"),
         }
+    }
+
+    fn credential_status_for(entries: &VmValue, provider: &str) -> String {
+        let VmValue::List(list) = entries else {
+            panic!("expected a list of provider status dicts");
+        };
+        for entry in list.iter() {
+            let VmValue::Dict(dict) = entry else {
+                continue;
+            };
+            if dict.get("name").map(|v| v.display()) == Some(provider.to_string()) {
+                return dict
+                    .get("credential_status")
+                    .map(|v| v.display())
+                    .expect("credential_status present");
+            }
+        }
+        panic!("provider {provider} not present in status list");
+    }
+
+    #[test]
+    fn provider_status_reports_deferred_for_platform_managed_providers() {
+        // Bedrock and Vertex both declare `credential_resolution =
+        // "platform_managed"` in providers.toml. They reach the same
+        // "deferred" status through that shared field, not a hardcoded
+        // `matches!(name, "bedrock" | "vertex")` arm in this function — a
+        // third platform-managed provider would get the same treatment by
+        // declaring the field, without touching this code.
+        let _guard = crate::llm::env_guard();
+        std::env::remove_var("VERTEX_AI_ACCESS_TOKEN");
+        std::env::remove_var("GOOGLE_OAUTH_ACCESS_TOKEN");
+        std::env::remove_var("GOOGLE_APPLICATION_CREDENTIALS");
+        let status = llm_provider_status_value();
+        assert_eq!(credential_status_for(&status, "bedrock"), "deferred");
+        assert_eq!(credential_status_for(&status, "vertex"), "deferred");
     }
 
     #[test]

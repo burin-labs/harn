@@ -20,6 +20,16 @@ pub struct ProviderDef {
     pub auth_style: String,
     pub auth_header: Option<String>,
     pub auth_env: AuthEnv,
+    /// How this provider's credentials are resolved. `"env"` (default) means
+    /// the generic `auth_env` lookup is authoritative: missing env vars are a
+    /// hard "missing API key" error. `"platform_managed"` means the provider's
+    /// own shim resolves credentials through a multi-step chain the generic
+    /// `auth_env` lookup cannot see (e.g. Bedrock's AWS credential chain —
+    /// env/profile/container/instance-role — or Vertex's bearer token /
+    /// service-account JSON / ADC). Callers must skip the generic `auth_env`
+    /// requirement for these providers and let the shim fail on its own if
+    /// credentials are truly absent, instead of hardcoding provider names.
+    pub credential_resolution: String,
     pub extra_headers: BTreeMap<String, String>,
     pub chat_endpoint: String,
     pub completion_endpoint: Option<String>,
@@ -76,6 +86,8 @@ struct ProviderDefWire {
     auth_header: Option<String>,
     #[serde(default)]
     auth_env: AuthEnv,
+    #[serde(default)]
+    credential_resolution: Option<String>,
     #[serde(default)]
     extra_headers: BTreeMap<String, String>,
     #[serde(default)]
@@ -134,6 +146,9 @@ impl<'de> Deserialize<'de> for ProviderDef {
             auth_style: wire.auth_style.unwrap_or_else(default_bearer),
             auth_header: wire.auth_header,
             auth_env: wire.auth_env,
+            credential_resolution: wire
+                .credential_resolution
+                .unwrap_or_else(default_credential_resolution),
             extra_headers: wire.extra_headers,
             chat_endpoint: wire.chat_endpoint,
             completion_endpoint: wire.completion_endpoint,
@@ -170,6 +185,7 @@ impl Default for ProviderDef {
             auth_style: default_bearer(),
             auth_header: None,
             auth_env: AuthEnv::None,
+            credential_resolution: default_credential_resolution(),
             extra_headers: BTreeMap::new(),
             chat_endpoint: String::new(),
             completion_endpoint: None,
@@ -215,6 +231,9 @@ impl ProviderDef {
         if !overlay.auth_env.is_none() {
             self.auth_env = overlay.auth_env.clone();
         }
+        if overlay.credential_resolution != default_credential_resolution() {
+            self.credential_resolution = overlay.credential_resolution.clone();
+        }
         self.extra_headers.extend(overlay.extra_headers.clone());
         merge_string(&mut self.chat_endpoint, &overlay.chat_endpoint);
         merge_option(&mut self.completion_endpoint, &overlay.completion_endpoint);
@@ -258,6 +277,22 @@ fn merge_vec<T: Clone>(base: &mut Vec<T>, overlay: &[T]) {
 
 fn default_bearer() -> String {
     "bearer".to_string()
+}
+
+fn default_credential_resolution() -> String {
+    "env".to_string()
+}
+
+impl ProviderDef {
+    /// Whether this provider resolves its own credentials through a
+    /// multi-step chain (AWS SigV4 credential chain, GCP ADC / service
+    /// account JSON, etc.) rather than the generic `auth_env` lookup.
+    /// Callers that would otherwise hardcode a provider-name match (e.g.
+    /// "does this provider need the generic missing-API-key error") should
+    /// read this instead.
+    pub fn is_credential_resolution_platform_managed(&self) -> bool {
+        self.credential_resolution == "platform_managed"
+    }
 }
 
 /// Auth env var name(s) for the provider. Can be a single string or an array

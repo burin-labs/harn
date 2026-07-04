@@ -427,15 +427,6 @@ pub fn resolve_api_key(provider: &str) -> Result<String, VmError> {
         return Ok(String::new());
     }
 
-    // These providers use multi-step platform auth that is resolved inside
-    // their provider shims: Bedrock walks the AWS credential chain and Vertex
-    // accepts bearer tokens or service-account JSON. Returning an empty string
-    // here keeps generic option extraction from rejecting valid profile /
-    // instance-role / ADC setups before the provider can inspect them.
-    if matches!(provider, "bedrock" | "vertex") {
-        return Ok(String::new());
-    }
-
     // Explain provenance (env vs llm.toml vs default) and how to opt into mock.
     let selection_hint = {
         let config_path = llm_config::loaded_config_path()
@@ -449,6 +440,17 @@ pub fn resolve_api_key(provider: &str) -> Result<String, VmError> {
 
     if let Some(pdef) = llm_config::provider_config(provider) {
         if pdef.auth_style == "none" {
+            return Ok(String::new());
+        }
+        // Providers declaring `credential_resolution = "platform_managed"`
+        // resolve auth inside their own shim through a multi-step chain the
+        // generic `auth_env` lookup cannot see (Bedrock's AWS credential
+        // chain — env/profile/container/instance-role — or Vertex's bearer
+        // token / service-account JSON / ADC). Returning an empty string
+        // here keeps generic option extraction from rejecting valid setups
+        // not captured by the declared `auth_env` list before the provider
+        // shim can inspect them itself.
+        if pdef.is_credential_resolution_platform_managed() {
             return Ok(String::new());
         }
         let aggregate_hint = no_credentials_message();
@@ -558,5 +560,69 @@ mod no_credentials_tests {
         assert!(msg.contains("harn doctor"));
         assert!(msg.contains("harn models recommend"));
         assert!(msg.contains("local Ollama"));
+    }
+}
+
+#[cfg(test)]
+mod platform_managed_credential_resolution_tests {
+    use super::resolve_api_key;
+
+    /// `resolve_api_key` must defer to the provider shim for ANY provider
+    /// declaring `credential_resolution = "platform_managed"` in
+    /// `providers.toml`, with no per-provider name match in this function.
+    /// This asserts the behavior for two independent providers (Bedrock and
+    /// Vertex) that reach the same outcome through the shared capability
+    /// field rather than a hardcoded `matches!(provider, "bedrock" |
+    /// "vertex")` branch — a new platform-managed provider gets correct
+    /// behavior by declaring the field in its `providers.toml` entry, not by
+    /// adding a third arm here.
+    #[test]
+    fn bedrock_defers_to_provider_shim_with_no_env_vars_set() {
+        // Bedrock declares no `auth_env` at all (its shim walks the AWS
+        // credential chain), so even with zero relevant env vars set,
+        // `resolve_api_key` must succeed with an empty placeholder rather
+        // than reporting a missing API key.
+        let result = resolve_api_key("bedrock");
+        assert!(
+            result.is_ok(),
+            "expected bedrock to defer to its provider shim, got {result:?}"
+        );
+        assert_eq!(result.unwrap(), "");
+    }
+
+    #[test]
+    fn vertex_defers_to_provider_shim_even_though_it_declares_auth_env() {
+        // Vertex DOES declare an `auth_env` list (VERTEX_AI_ACCESS_TOKEN /
+        // GOOGLE_OAUTH_ACCESS_TOKEN / GOOGLE_APPLICATION_CREDENTIALS), which
+        // would make the generic `AuthEnv::Multiple` path fail closed if none
+        // of those three are set (e.g. a real ADC-only setup that resolves
+        // credentials through gcloud's local metadata server instead). The
+        // `credential_resolution = "platform_managed"` declaration must win
+        // over the generic auth_env check.
+        std::env::remove_var("VERTEX_AI_ACCESS_TOKEN");
+        std::env::remove_var("GOOGLE_OAUTH_ACCESS_TOKEN");
+        std::env::remove_var("GOOGLE_APPLICATION_CREDENTIALS");
+        let result = resolve_api_key("vertex");
+        assert!(
+            result.is_ok(),
+            "expected vertex to defer to its provider shim, got {result:?}"
+        );
+        assert_eq!(result.unwrap(), "");
+    }
+
+    #[test]
+    fn non_platform_managed_provider_still_enforces_auth_env() {
+        // Sanity check the other side of the field: a provider that has NOT
+        // opted into `credential_resolution = "platform_managed"` (Azure
+        // OpenAI, which resolves through a plain multi-env bearer lookup)
+        // still fails closed when none of its declared env vars are set.
+        std::env::remove_var("AZURE_OPENAI_API_KEY");
+        std::env::remove_var("AZURE_OPENAI_AD_TOKEN");
+        std::env::remove_var("AZURE_OPENAI_BEARER_TOKEN");
+        let result = resolve_api_key("azure_openai");
+        assert!(
+            result.is_err(),
+            "expected azure_openai to require one of its declared env vars"
+        );
     }
 }
