@@ -1,0 +1,374 @@
+// Goal object: a typed, long-running objective the agent converges on. A goal
+// bundles an `objective`, machine-checkable `success_criteria`, `constraints`,
+// and a `budget`. It renders into the outbound prompt through the existing
+// per-turn context-profile fragment channel (#2631) — NO new hook surface —
+// composes a done-judge via the core `done_judge` agent_loop seam
+// (`std/agent/judge`), and re-loops on "not yet met" by reusing agent_loop's own
+// bounded completion loop (`verify_completion` veto -> feedback -> re-run),
+// never a hand-written loop. Generalizes Burin's `session_goal` + `goal-judge`
+// (design-only there; built here).
+import { pin } from "std/agent/pins"
+import { system_prompt_part } from "std/llm/prompts"
+
+// Bounded re-loop cap: if the goal is not met at loop end, re-enter with
+// findings at most this many times before stopping honestly. Mirrors Burin's
+// GOAL_JUDGE_MAX_RELOOPS.
+let __GOAL_MAX_RELOOPS = 3
+
+// Default done_sentinel for goal_reloop: the completion signal the agent emits
+// to claim it is finished. Each emission triggers a `verify_completion` check;
+// an unmet goal vetoes it and drives another bounded attempt.
+let __GOAL_DONE_MARKER = "<<GOAL-DONE>>"
+
+/**
+ * A `check` may be an anonymous closure or a named `fn`; the runtime reports
+ * these as "closure", "function", or "fn" (mirrors std/agent/loop callable
+ * detection). Gating on "closure" alone silently skips named-fn criteria.
+ */
+fn __goal_callable(value) {
+  let kind = type_of(value)
+  return kind == "closure" || kind == "function" || kind == "fn"
+}
+
+/**
+ * A single success criterion. `description` is the human/LLM-checkable statement;
+ * `check` is an OPTIONAL host-fact callback `(facts) -> bool` that makes the
+ * criterion machine-checkable (deterministic floor) instead of LLM-judged.
+ */
+pub type GoalCriterion = {id?: string, description: string, check?: any}
+
+/** GoalSpec is the normalized shape returned by `goal(spec)`. */
+pub type GoalSpec = {
+  objective: string,
+  success_criteria?: list<GoalCriterion>,
+  constraints?: list<string>,
+  budget?: dict,
+}
+
+fn __string_list(value) {
+  if type_of(value) != "list" {
+    return []
+  }
+  var out = []
+  for item in value {
+    out = out.push(to_string(item))
+  }
+  return out
+}
+
+fn __normalize_criteria(value) {
+  if type_of(value) != "list" {
+    return []
+  }
+  var out = []
+  var index = 0
+  for raw in value {
+    let entry = if type_of(raw) == "dict" {
+      raw
+    } else {
+      {description: to_string(raw)}
+    }
+    let description = to_string(entry?.description ?? "")
+    if description == "" {
+      throw "goal: each success criterion needs a non-empty description"
+    }
+    out = out
+      .push(
+      {check: entry?.check, description: description, id: entry?.id ?? ("sc_" + to_string(index))},
+    )
+    index = index + 1
+  }
+  return out
+}
+
+/**
+ * goal(spec) validates and normalizes a GoalSpec. `spec.objective` is required
+ * and non-empty. `success_criteria` may be strings or `{description, check?}`
+ * dicts; `constraints` is a list of strings; `budget` is a free dict.
+ *
+ * @effects: []
+ * @errors: [runtime]
+ * @api_stability: experimental
+ * @example: goal({objective: "Fix the flaky test", success_criteria: ["suite green twice"]})
+ */
+pub fn goal(spec) {
+  if type_of(spec) != "dict" {
+    throw "goal(spec): spec must be a dict"
+  }
+  let objective = to_string(spec?.objective ?? "")
+  if objective == "" {
+    throw "goal(spec): spec.objective is required and must be non-empty"
+  }
+  return {
+    budget: if type_of(spec?.budget) == "dict" {
+      spec.budget
+    } else {
+      {}
+    },
+    constraints: __string_list(spec?.constraints),
+    objective: objective,
+    success_criteria: __normalize_criteria(spec?.success_criteria),
+  }
+}
+
+fn __render_goal_text(g) {
+  var lines = ["## Goal", "Objective: " + g.objective]
+  if len(g.success_criteria) > 0 {
+    lines = lines.push("Success criteria:")
+    for crit in g.success_criteria {
+      lines = lines.push("- " + crit.description)
+    }
+  }
+  if len(g.constraints) > 0 {
+    lines = lines.push("Constraints:")
+    for c in g.constraints {
+      lines = lines.push("- " + c)
+    }
+  }
+  if len(g.budget.keys()) > 0 {
+    lines = lines.push("Budget: " + json_stringify(g.budget))
+  }
+  return join(lines, "\n")
+}
+
+/**
+ * goal_text(goal) renders the goal into its canonical prompt block. Exposed for
+ * callers that assemble prompts by hand.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn goal_text(g) {
+  return __render_goal_text(g)
+}
+
+/**
+ * goal_prompt_part(goal) returns an `llm::prompt` reducer system-prompt part
+ * (position "before") rendering the goal. Feed it through
+ * `with_system_prompt_parts` for direct `llm_call` callers; for `agent_loop` use
+ * `with_goal(...)`, which routes through the context-profile fragment channel
+ * the loop assembles per turn.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn goal_prompt_part(g) {
+  return system_prompt_part(__render_goal_text(g), {label: "goal", position: "before"})
+}
+
+/**
+ * goal_context_fragment(goal) returns the goal as a context-profile prompt
+ * fragment (`{body, id, source}`) — the channel `agent_loop` folds into its
+ * per-turn system prompt (preflight `context_profile.prompt_fragments`).
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn goal_context_fragment(g) {
+  return {body: __render_goal_text(g), id: "goal", source: "goal"}
+}
+
+/**
+ * with_goal(agent_options, goal) renders the goal into the agent_loop options so
+ * the objective/criteria/constraints appear in every outbound request, using the
+ * existing `context_profile.prompt_fragments` channel (the same per-turn
+ * fragment reducer, #2631) — preserving any fragments/profile the caller already
+ * set. No new hook surface.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_loop(task, nil, with_goal({provider: "anthropic"}, g))
+ */
+pub fn with_goal(agent_options, g) {
+  let opts = if type_of(agent_options) == "dict" {
+    agent_options
+  } else {
+    {}
+  }
+  let profile = if type_of(opts?.context_profile) == "dict" {
+    opts.context_profile
+  } else {
+    {}
+  }
+  let existing = if type_of(profile?.prompt_fragments) == "list" {
+    profile.prompt_fragments
+  } else {
+    []
+  }
+  return opts + {context_profile: profile + {prompt_fragments: existing + [goal_context_fragment(g)]}}
+}
+
+/**
+ * goal_pin(goal) returns a self-replacing `goal`-kind PinSpec carrying the
+ * rendered goal, so the goal survives compaction as a pin.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn goal_pin(g) {
+  return pin("goal", __render_goal_text(g), {dedupe_key: "pin/goal"})
+}
+
+/**
+ * goal_check(goal, facts?) evaluates the machine-checkable success criteria
+ * (those carrying a `check` host-fact callback) against `facts`. Returns
+ * `{checkable, done, met, unmet}` where `met`/`unmet` are criterion ids and
+ * `done` is true when no checkable criterion is unmet. Criteria without a
+ * `check` are LLM-judged (see `goal_judge`) and excluded from this floor.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn goal_check(g, facts = nil) {
+  let bindings = if type_of(facts) == "dict" {
+    facts
+  } else {
+    {}
+  }
+  var met = []
+  var unmet = []
+  for crit in g.success_criteria {
+    if __goal_callable(crit?.check) {
+      if crit.check(bindings) {
+        met = met.push(crit.id)
+      } else {
+        unmet = unmet.push(crit.id)
+      }
+    }
+  }
+  return {checkable: len(met) + len(unmet), done: len(unmet) == 0, met: met, unmet: unmet}
+}
+
+fn __goal_judge_system(g) {
+  var lines = [
+    "You are the goal completion judge. Decide whether the stated goal is fully met by the work so far.",
+    "Reply `done` ONLY if every success criterion is satisfied; otherwise reply `continue` with one concrete next_step.",
+    "",
+    __render_goal_text(g),
+  ]
+  return join(lines, "\n")
+}
+
+/**
+ * goal_judge(goal, opts?) returns a `done_judge` JudgeConfig (see
+ * `std/agent/judge`) whose system prompt embeds the goal. Spread it into
+ * agent_loop options as `done_judge:` — it composes with the existing
+ * `agent_verify_or_continue` done-judge seam (the semantic ceiling). Pair with
+ * `goal_check` host-fact callbacks for the deterministic floor. `opts` may carry
+ * `model`, `provider`, `max_invocations`, and `fail_open`.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_loop(task, nil, {done_judge: goal_judge(g), loop_until_done: true})
+ */
+pub fn goal_judge(g, opts = nil) {
+  let o = if type_of(opts) == "dict" {
+    opts
+  } else {
+    {}
+  }
+  return {
+    enabled: true,
+    fail_open: o?.fail_open ?? false,
+    feedback_fallback: o?.feedback_fallback ?? "The goal is not yet met; keep working toward the success criteria.",
+    max_invocations: o?.max_invocations ?? __GOAL_MAX_RELOOPS,
+    model: o?.model,
+    provider: o?.provider,
+    system: __goal_judge_system(g),
+  }
+}
+
+// Feedback that threads the unmet success criteria (the findings) into the next
+// attempt. agent_verify_or_continue injects this into the transcript on a vetoed
+// completion, so the re-run agent sees exactly which criteria remain.
+fn __goal_unmet_feedback(g, unmet_ids) {
+  var lines = ["The goal is not yet met. Address these unmet success criteria before finishing:"]
+  var any = false
+  for crit in g.success_criteria {
+    if contains(unmet_ids, crit.id) {
+      lines = lines.push("- " + crit.description)
+      any = true
+    }
+  }
+  if !any {
+    lines = lines.push("- " + g.objective)
+  }
+  return join(lines, "\n")
+}
+
+// Reloop-only control keys that must NOT leak into the agent_loop options.
+let __GOAL_RELOOP_CONTROL_KEYS = ["done_sentinel", "facts_fn", "judge", "max_attempts"]
+
+fn __goal_without_control_keys(o) {
+  var out = {}
+  for key in o.keys() {
+    if !contains(__GOAL_RELOOP_CONTROL_KEYS, key) {
+      out = out + {[key]: o[key]}
+    }
+  }
+  return out
+}
+
+/**
+ * goal_reloop(goal, opts?) returns agent_loop options that drive a BOUNDED
+ * re-loop over the goal using agent_loop's OWN completion loop — NOT a
+ * hand-written loop, and NOT the workflow stage tier (a producing stage cannot
+ * re-run the agent on a verify gate on current main; a `kind:"verify"` stage
+ * evaluates its gate once and terminates without re-running the producer). Each
+ * completion attempt is gated by `verify_completion`, which runs `goal_check`
+ * against the facts `opts.facts_fn(payload)` extracts; an unmet goal vetoes the
+ * completion, threads the unmet criteria (the findings) into the transcript as
+ * feedback, and the agent re-runs — up to `opts.max_attempts` (default 3) times
+ * (the iteration bound). Spread the result into
+ * `agent_loop(task, nil, goal_reloop(g, opts))`.
+ *
+ * `opts`: `facts_fn` (`(payload) -> facts` dict for `goal_check`; required for
+ * machine-checkable convergence), `max_attempts`, `done_sentinel` (the
+ * completion signal that triggers each gate check), `judge` (set true to also
+ * compose the semantic `goal_judge` ceiling), plus any agent_loop options to
+ * pass through (caller wins). The goal renders into the system prompt via the
+ * existing context-profile fragment channel.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_loop(task, nil, goal_reloop(g, {facts_fn: read_facts, max_attempts: 3}))
+ */
+pub fn goal_reloop(g, opts = nil) {
+  let o = if type_of(opts) == "dict" {
+    opts
+  } else {
+    {}
+  }
+  let max_attempts = o?.max_attempts ?? __GOAL_MAX_RELOOPS
+  let facts_fn = o?.facts_fn
+  let verify_completion = { payload ->
+    let facts = if __goal_callable(facts_fn) {
+      facts_fn(payload)
+    } else {
+      {}
+    }
+    let check = goal_check(g, facts)
+    if check.done {
+      return {confirm: true}
+    }
+    return {confirm: false, feedback: __goal_unmet_feedback(g, check.unmet)}
+  }
+  var base = {
+    done_sentinel: o?.done_sentinel ?? __GOAL_DONE_MARKER,
+    loop_until_done: true,
+    max_iterations: max_attempts,
+    verify_completion: verify_completion,
+  }
+  if o?.judge == true {
+    base = base + {done_judge: goal_judge(g, o)}
+  }
+  return with_goal(base + __goal_without_control_keys(o), g)
+}

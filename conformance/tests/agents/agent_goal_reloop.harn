@@ -1,0 +1,72 @@
+// goal_reloop is a GENUINELY-LIVE bounded re-loop, not a passive struct: an
+// unmet goal vetoes the completion, threads the unmet criteria into the
+// transcript, and the agent RE-RUNS — driven through agent_loop's own
+// completion loop (no hand-written loop, no workflow stage — a producing stage
+// cannot re-run the agent on a verify gate on current main). Deterministic, no
+// LLM and no filesystem: a capturing mock caller fails the goal on attempt 1 and
+// satisfies it on attempt 2 only after seeing the injected findings.
+import { goal, goal_reloop } from "std/agent/goal"
+import { agent_session_messages } from "std/agent/state"
+
+pipeline test() {
+  let g = goal(
+    {
+      objective: "make CI green",
+      success_criteria: [{check: { f -> return f?.ci_green == true }, description: "CI is green", id: "green"}],
+    },
+  )
+  // Live facts: the goal is met once the agent's latest output reports CI_IS_GREEN.
+  let facts_fn = { payload -> return {ci_green: to_string(payload?.visible_text ?? "").contains("CI_IS_GREEN")} }
+  // Mock agent: reports success only once it has SEEN the unmet-criteria feedback.
+  let caller = { call ->
+    var saw_findings = false
+    for m in call.opts.messages {
+      if to_string(m?.content ?? "").contains("CI is green") {
+        saw_findings = true
+      }
+    }
+    let body = if saw_findings {
+      "fixed the flaky step, CI_IS_GREEN"
+    } else {
+      "first attempt, not done yet"
+    }
+    return {
+      ok: true,
+      value: {input_tokens: 0, model: "mock", output_tokens: 0, provider: "mock", text: body + " <<GOAL-DONE>>"},
+    }
+  }
+  let session = "agent-goal-reloop-conformance"
+  let result = agent_loop(
+    "achieve the goal",
+    nil,
+    goal_reloop(
+      g,
+      {facts_fn: facts_fn, llm_caller: caller, max_attempts: 4, provider: "mock", session_id: session},
+    ),
+  )
+  // Converged by satisfying the goal (not by exhausting the iteration bound).
+  assert(
+    result.stop_reason == "sentinel",
+    "goal converged on completion; got " + to_string(result.stop_reason),
+  )
+  let messages = agent_session_messages(session)
+  var assistant_turns = 0
+  for m in messages {
+    if m?.role == "assistant" {
+      assistant_turns = assistant_turns + 1
+    }
+  }
+  assert(
+    assistant_turns == 2,
+    "the agent re-ran once (2 attempts); got " + to_string(assistant_turns),
+  )
+  var findings_threaded = false
+  for m in messages {
+    if to_string(m?.content ?? "").contains("CI is green") {
+      findings_threaded = true
+    }
+  }
+  assert(findings_threaded, "the unmet criteria were threaded into the attempt-2 prompt")
+  assert(result.visible_text.contains("CI_IS_GREEN"), "final answer satisfies the goal")
+  log("agent goal reloop test passed")
+}

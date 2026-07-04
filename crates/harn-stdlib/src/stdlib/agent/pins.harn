@@ -1,0 +1,266 @@
+// Compaction pins as DATA: a typed pin taxonomy that generalizes Burin's
+// structural working-set. A pin is a small typed value `{kind, content, ...}`
+// that (a) survives compaction by construction — it lowers to a
+// `preserve_on_compact` system reminder AND a compaction `preserve` directive —
+// and (b) doubles as a reachability-GC ROOT so any transcript message a pin
+// references is never garbage-collected. Pins are plain data the caller threads
+// through the existing seams (`transcript`/`agent_session_*` reminders,
+// `compaction_policy`, `transcript_project`); this module adds NO new host
+// surface. Burin's legacy `[no-compact]` heading marker is supported as a
+// documented ingestion format via `recognize_no_compact`.
+import { compaction_policy } from "std/agent/autocompact"
+import { agent_session_inject_reminder } from "std/agent/state"
+
+// -------------------------------------------------------------------------------------------------
+
+// Pin taxonomy (alphabetical). Generalized from Burin's structural working-set
+// categories: `goal` (session objective), `constraint` (guardrails / open
+// task-contract clauses), `decision` (a durable choice the agent must not
+// relitigate), `artifact_ref` (a live file-view / path the work hinges on), and
+// `no_compact` (a raw block the caller marked keep-verbatim — the generalization
+// of the `[no-compact]` marker). `role_hint` mirrors Burin: binding context is
+// "system", live evidence is "developer".
+
+// -------------------------------------------------------------------------------------------------
+
+let __PIN_KINDS = ["artifact_ref", "constraint", "decision", "goal", "no_compact"]
+
+let __NO_COMPACT_MARKER = "[no-compact]"
+
+/**
+ * PinSpec is the normalized shape returned by `pin(...)`: a typed pin the
+ * caller threads through the compaction/reachability seams. `kind` is one of
+ * `pin_kinds()`; `content` is the verbatim text to preserve; `dedupe_key` makes
+ * a pin self-replacing across re-injection; `role_hint` selects the reminder
+ * lane ("system" | "developer").
+ */
+pub type PinSpec = {
+  id?: string,
+  kind: string,
+  content: string,
+  dedupe_key?: string,
+  role_hint?: string,
+  meta?: dict,
+}
+
+/**
+ * pin_kinds returns the registered pin taxonomy (sorted). Discovery surface for
+ * tooling and validation.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn pin_kinds() {
+  return __PIN_KINDS
+}
+
+// kind -> reminder lane, as data. Binding context (goal/constraint/no_compact)
+// rides the "system" lane so the model treats it as governing; live evidence
+// (artifact_ref/decision) rides the "developer" lane. Mirrors Burin's
+// structural working-set role_hints.
+let __PIN_ROLE_HINTS = {
+  artifact_ref: "developer",
+  constraint: "system",
+  decision: "developer",
+  goal: "system",
+  no_compact: "system",
+}
+
+fn __pin_role_hint(kind) {
+  return __PIN_ROLE_HINTS[kind] ?? "system"
+}
+
+/**
+ * pin(kind, content, opts?) builds a normalized PinSpec. `kind` must be one of
+ * `pin_kinds()`; `content` must be a non-empty string. `opts` may carry
+ * `id`, `dedupe_key`, `role_hint`, and `meta`. `dedupe_key` defaults to a
+ * per-pin key; pass a stable value (e.g. `"pin/goal"`) for a self-replacing
+ * singleton pin.
+ *
+ * @effects: []
+ * @errors: [runtime]
+ * @api_stability: experimental
+ * @example: pin("goal", "Ship the migration", {dedupe_key: "pin/goal"})
+ */
+pub fn pin(kind, content, opts = nil) {
+  if type_of(kind) != "string" || !contains(__PIN_KINDS, kind) {
+    throw "pin(kind, content, opts?): kind must be one of " + join(__PIN_KINDS, ", ") + "; got "
+      + to_string(kind)
+  }
+  if type_of(content) != "string" || content == "" {
+    throw "pin(\"" + kind + "\", content): content must be a non-empty string"
+  }
+  let options = if type_of(opts) == "dict" {
+    opts
+  } else {
+    {}
+  }
+  let id = options?.id ?? ("pin_" + uuid_v7())
+  return {
+    content: content,
+    dedupe_key: options?.dedupe_key ?? ("pin/" + kind + "/" + id),
+    id: id,
+    kind: kind,
+    meta: options?.meta ?? {},
+    role_hint: options?.role_hint ?? __pin_role_hint(kind),
+  }
+}
+
+/**
+ * unpin(pins, pin_id) returns the pin collection with the pin whose `id`
+ * matches removed. Pure list operation over a caller-held collection.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn unpin(pins, pin_id) {
+  var out = []
+  for p in pins ?? [] {
+    if p?.id != pin_id {
+      out = out.push(p)
+    }
+  }
+  return out
+}
+
+/**
+ * pin_reachability_roots(pins) returns the list of pin contents to feed into a
+ * `reachability_gc` projection as caller-supplied roots. Any stale tool result
+ * whose identifiers appear in a pinned content string is then kept, not
+ * garbage-collected. Extends the existing `roots` config of
+ * `transcript_project`/`agent_session_project_turn` — not a parallel mechanism.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn pin_reachability_roots(pins) {
+  var roots = []
+  for p in pins ?? [] {
+    if type_of(p?.content) == "string" && p.content != "" {
+      roots = roots.push(p.content)
+    }
+  }
+  return roots
+}
+
+/**
+ * with_pin_roots(project_options, pins) merges the pins' reachability roots into
+ * a `transcript_project`/`agent_session_project_turn` options dict (policy
+ * `reachability_gc`), preserving any roots the caller already supplied.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: transcript_project(t, with_pin_roots({policy: "reachability_gc"}, pins))
+ */
+pub fn with_pin_roots(project_options, pins) {
+  let opts = if type_of(project_options) == "dict" {
+    project_options
+  } else {
+    {}
+  }
+  var existing = []
+  if type_of(opts?.roots) == "list" {
+    existing = opts.roots
+  } else if type_of(opts?.roots) == "string" {
+    existing = [opts.roots]
+  }
+  return opts + {roots: existing + pin_reachability_roots(pins)}
+}
+
+/**
+ * pin_compaction_policy(pins, opts?) builds a `compaction_policy` whose
+ * `preserve` directives instruct the summarizer to keep every pinned block
+ * verbatim — so pins survive LLM-summarizing compaction by construction. Wires
+ * the pins into the existing `CompactionPolicy.preserve` seam.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn pin_compaction_policy(pins, opts = nil) {
+  let base = if type_of(opts) == "dict" {
+    opts
+  } else {
+    {}
+  }
+  var preserve = []
+  for p in pins ?? [] {
+    if type_of(p?.content) == "string" && p.content != "" {
+      preserve = preserve.push("Preserve the pinned " + to_string(p?.kind ?? "note") + ": " + p.content)
+    }
+  }
+  return compaction_policy(
+    base?.instructions,
+    base
+      + {author: base?.author ?? "pins", mode: base?.mode ?? "pins", preserve: base?.preserve ?? preserve},
+  )
+}
+
+/**
+ * pin_reminder(pin) lowers a PinSpec to a system-reminder options dict with
+ * `preserve_on_compact: true`, `tags: ["pin", <kind>]`, the pin's `dedupe_key`,
+ * and its `role_hint`. Spread it into `transcript.inject_reminder(...)` or
+ * `agent_session_inject_reminder(...)` — this is the "survives compaction by
+ * construction" mechanism (the structured-metadata twin of `[no-compact]`).
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn pin_reminder(pin) {
+  return {
+    body: pin.content,
+    dedupe_key: pin?.dedupe_key ?? ("pin/" + to_string(pin?.kind ?? "note")),
+    preserve_on_compact: true,
+    role_hint: pin?.role_hint ?? __pin_role_hint(to_string(pin?.kind ?? "note")),
+    tags: ["pin", to_string(pin?.kind ?? "note")],
+  }
+}
+
+/**
+ * agent_pin(session_id, pin) persists a pin into a live session by injecting its
+ * `preserve_on_compact` reminder. Returns the reminder id. The pin re-renders
+ * each turn and is carried across compaction by the reminder lifecycle.
+ *
+ * @effects: [host]
+ * @errors: [runtime]
+ * @api_stability: experimental
+ */
+pub fn agent_pin(session_id, pin) {
+  return agent_session_inject_reminder(session_id, pin_reminder(pin))
+}
+
+/**
+ * strip_no_compact(text) removes Burin's `[no-compact]` heading marker and the
+ * double-space it leaves at end-of-line. Documented ingestion adapter, mirrors
+ * Burin's `strip_no_compact_marker`.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn strip_no_compact(text) {
+  return to_string(text).replace(__NO_COMPACT_MARKER, "").replace("  \n", "\n")
+}
+
+/**
+ * recognize_no_compact(text, opts?) is an input adapter for Burin's `[no-compact]`
+ * message-text marker: if `text` carries the marker it returns a `no_compact`
+ * pin whose content is the marker-stripped text, else nil. This is an ingestion
+ * FORMAT recognizer (not a back-compat shim for a removed API).
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: recognize_no_compact("## Session goal [no-compact]\nObjective: X")
+ */
+pub fn recognize_no_compact(text, opts = nil) {
+  if type_of(text) != "string" || !text.contains(__NO_COMPACT_MARKER) {
+    return nil
+  }
+  return pin("no_compact", strip_no_compact(text), opts)
+}
