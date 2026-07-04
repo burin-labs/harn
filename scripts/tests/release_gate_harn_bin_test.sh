@@ -67,4 +67,6 @@ if grep -q "cargo run .*harn" "$tmp_root/make-dry-run.txt"; then
   exit 1
 fi
 
+"$repo_root/scripts/tests/hook_harn_build_env_test.sh"
+
 echo "release_gate_harn_bin_test: ok"
