@@ -454,9 +454,8 @@ fn is_empty_completion_retry_error(err: &VmError) -> bool {
 ///    only onto a private reasoning channel. Surfaced by
 ///    [`super::api::is_billed_noncommittal_completion`] /
 ///    `billed_noncommittal_completion_error` (`response.rs`). This is the
-///    canonical cheap-model "vanishing call" signature; the 2026-06 transcript
-///    sweep observed it 13× on `deepinfra/openai/gpt-oss-120b` (tf=native), and
-///    the error message itself prescribes a "Harn text/json tool format".
+///    canonical cheap-model "vanishing call" signature, and the error message
+///    itself prescribes a "Harn text/json tool format".
 /// 2. **Native function-call protocol refusal** — the provider rejects a native
 ///    tool request with a 4xx whose body says the function call did not complete
 ///    (the observed SambaNova shape: HTTP 400 `Model started a function call but
@@ -1715,7 +1714,7 @@ pub(crate) async fn observed_llm_call(
         // arms below branch into retry/return/error, so the slot accounting can
         // never leak. Detection (L0) also emits a `provider_throttle` record on
         // a throttle signal. `empty_under_load` fires only when this provider is
-        // ALREADY throttled — the 24/24-empties soft-throttle signature.
+        // already throttled, so a lone empty completion is not misclassified.
         record_governor_call_outcome(
             &opts.provider,
             &governor_org_key,
@@ -2269,8 +2268,7 @@ mod retry_tests {
     #[test]
     fn billed_noncommittal_throw_matches_vanish_and_function_call_refusal() {
         // (1) The billed-noncommittal contract violation (reasoning-channel-only
-        // vanish) — the canonical cheap-model vanishing-call signature, observed
-        // 13x on deepinfra gpt-oss-120b (tf=native) in the 2026-06 sweep.
+        // vanish): the canonical cheap-model vanishing-call signature.
         assert!(is_billed_noncommittal_throw(&thrown(
             "provider deepinfra model openai/gpt-oss-120b returned billed output \
              (completion_tokens=86) with no dispatchable tool call or answer \

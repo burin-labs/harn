@@ -325,10 +325,8 @@ top_k_supported = false
 #                    circuit-breaker OPEN window (exp backoff + full jitter,
 #                    Retry-After always wins)
 #
-# Anthropic is the first configured limit because the 2026-07-03 org-wide
-# throttle is what motivated the governor, but the mechanism is provider-generic:
-# any provider gets a row here, and providers without one use the built-in
-# default (max_concurrency=8, min=1, adaptive, 1s→60s x2 backoff with jitter).
+# Providers without an explicit row use the built-in default
+# (max_concurrency=8, min=1, adaptive, 1s→60s x2 backoff with jitter).
 [provider_limits.anthropic]
 max_concurrency = 12
 min_concurrency = 1
