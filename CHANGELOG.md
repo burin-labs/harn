@@ -9,6 +9,21 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.9.10
+
+### Added
+
+- Added `harn models lora manifest` for writing canonical LoRA training-run manifests that share the existing
+  Harn route, tool-call, serving, and promotion contracts.
+- Added a Harn-based Python boundary guard for repository tooling so new Python files must be explicit
+  bootstrap, platform, generated-binding, or fixture code.
+
+### Changed
+
+- Port the Burin protocol artifact drift check from Python to Harn.
+- Port the CLI cold-start benchmark controller from Python to Harn and keep the measured subprocess isolated.
+- Port the tree-sitter parse sweep release-gate helper from Python to Harn.
+
 ## v0.9.9
 
 ### Added
