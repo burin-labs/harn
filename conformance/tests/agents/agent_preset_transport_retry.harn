@@ -1,0 +1,39 @@
+/**
+ * agent_preset bakes a bounded default transport retry onto the `llm_caller:`
+ * seam (item 4). v0.10 removed the per-call `llm_retries` budget, so a bare
+ * agent_loop is fail-fast on transient transport errors
+ * (agent_loop_llm_transient_fail_fast). A preset-built loop instead retries the
+ * transient failure and succeeds. `retry: false` opts back into fail-fast.
+ */
+import { agent_preset } from "std/agent/presets"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn preset_agent(kind, prompt, options = nil) {
+  let opts = agent_preset(kind, options)
+  return agent_loop(prompt, opts?.system, opts)
+}
+
+pipeline default() {
+  // Baked retry: transient failure is retried, second attempt succeeds.
+  with_llm_script(
+    [{error: {category: "rate_limit", message: "429 transient"}}, llm_text("Recovered. ##DONE##")],
+    { ->
+      let ok = preset_agent("summary", "finish", {provider: "mock", retry: {base_ms: 1}})
+      __io_println(ok.status)
+      __io_println(ok.text)
+      __io_println(len(llm_mock_calls()))
+    },
+  )
+  // retry: false opts out — the loop stays fail-fast on the transient error.
+  with_llm_script(
+    [
+      {error: {category: "rate_limit", message: "429 transient"}},
+      llm_text("unreachable without a composed retry handler."),
+    ],
+    { ->
+      let ff = preset_agent("summary", "finish", {provider: "mock", retry: false})
+      __io_println(ff.status)
+      __io_println(len(llm_mock_calls()))
+    },
+  )
+}

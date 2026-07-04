@@ -1,0 +1,29 @@
+/**
+ * Fill-nil pack precedence (item 3): the per-kind pack rows (provider,
+ * timeout_ms, budget, model_ladder) fill ONLY nil/absent option keys and NEVER
+ * override explicit caller input. This is the data-over-code default layer —
+ * defaults are data rows one lower-priority seam under the caller.
+ */
+import { agent_preset } from "std/agent/presets"
+
+pipeline default() {
+  // Pack fills absent keys.
+  let filled = agent_preset("audit")
+  __io_println(filled.provider)
+  __io_println(filled.timeout_ms)
+  __io_println(filled.budget.total_budget_usd == 5.0)
+  __io_println(len(filled.model_ladder) > 0)
+  // Caller input wins over the pack at every key.
+  let overridden = agent_preset(
+    "audit",
+    {provider: "mock", timeout_ms: 42, budget: {total_budget_usd: 9.5}, model_ladder: ["only-mine"]},
+  )
+  __io_println(overridden.provider)
+  __io_println(overridden.timeout_ms)
+  __io_println(overridden.budget.total_budget_usd == 9.5)
+  __io_println(overridden.model_ladder[0])
+  // A different kind pulls its own (cheaper) pack.
+  let summary = agent_preset("summary")
+  __io_println(summary.provider)
+  __io_println(summary.timeout_ms)
+}

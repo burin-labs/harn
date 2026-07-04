@@ -642,14 +642,59 @@ for decision in result.adaptive_budget.decisions {
 }
 ```
 
-### Generic role presets
+### Presets: how you build agent_loop options
 
-`std/agent/presets` packages the common harness shapes — audit, repair,
-summary, verify — so script authors don't have to hand-tune `max_iterations`,
-`max_nudges`, `done_sentinel`, `done_judge`, `turn_policy`, and `thinking` on
-every call. Presets compose with `agent_loop`: `agent_preset(kind, options?)`
-returns an ordinary options dict (caller overrides always win) that you pass
-to `agent_loop` directly.
+`agent_preset(kind, options?)` from `std/agent/presets` is how you build
+`agent_loop` options — not a separate tier, just the constructor for the
+agent-cell option dict. It packages the common harness shapes — audit,
+repair, summary, verify, and the four captains — so script authors don't
+hand-tune `max_iterations`, `max_nudges`, `done_sentinel`, `done_judge`,
+`turn_policy`, provider/timeout/budget defaults, and transport retry on every
+call. The returned value is an ordinary options dict (caller overrides always
+win) that you pass to `agent_loop` directly.
+
+> **llm-tier doctrine**: there is deliberately no preset machinery at the
+> `llm_call` tier. An "llm preset" is just a plain typed `LlmCallOptions`
+> value (`llm_options({...})`) you spread per call. Budgets, completion
+> policy, middleware stacks, and transport retry belong to the agent cell —
+> `agent_preset` — only.
+
+Every preset kind layers three things under your explicit input:
+
+1. **Behavior template** — profile, iteration budget, turn policy, reasoning
+   defaults (and, for captains, the opt-in middleware layers below).
+2. **Fill-nil pack rows** — per-kind defaults for `provider`, `timeout_ms`,
+   `budget` (session-cumulative `total_budget_usd`), and `model_ladder`.
+   Pack rows fill **only** nil/absent keys at one lower-priority seam; they
+   never override explicit caller input. Defaults are data rows, not code
+   branches.
+3. **Default transport retry** — v0.10 removed the per-call `llm_retries`
+   budget, making a bare `agent_loop` fail-fast on transient transport
+   errors. Presets bake bounded resilience back in by wrapping the effective
+   `llm_caller:` (yours, the captain-composed router, or the stdlib default)
+   with `with_retry` from `std/llm/handlers` (default `max_attempts: 3`,
+   exponential backoff). The default predicate retries transport-class
+   failures only (transient / rate-limited / timeout / network / 5xx /
+   stream interrupt) and never schema-validation, auth, budget,
+   context-window, or policy failures. Opt out with `retry: false`; tune
+   with `retry: {max_attempts, base_ms, ...}` (any `with_retry` config).
+
+Kinds live in a registry: `agent_preset_kinds()` lists them, and
+`agent_preset_register(kind, {family?, pack?})` adds your own — user-defined
+kinds are first-class and go through the same spec validation the built-ins
+are registered with. `family` is `"generic"` or `"captain"` (captains compose
+the middleware layers below); `pack` carries the fill-nil rows.
+
+```harn
+import {agent_preset, agent_preset_register} from "std/agent/presets"
+
+agent_preset_register("triage", {
+  family: "captain",
+  pack: {provider: "openai", timeout_ms: 90000, budget: {total_budget_usd: 5.0}},
+})
+let opts = agent_preset("triage", {tools: triage_tools})
+let run = agent_loop("Triage the queue.", opts?.system, opts)
+```
 
 ```harn
 import {agent_preset} from "std/agent/presets"
