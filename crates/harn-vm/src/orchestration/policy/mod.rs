@@ -570,6 +570,12 @@ pub fn enforce_current_policy_for_tool(tool_name: &str) -> Result<(), PolicyDeni
         if requested_level != SideEffectLevel::None
             && !policy_allows_side_effect(&policy, requested_level.as_str())
         {
+            eprintln!(
+                "[CEILING-DIAG] tool={tool_name} requested={} policy.side_effect_level={:?} policy.tools_len={}",
+                requested_level.as_str(),
+                policy.side_effect_level,
+                policy.tools.len(),
+            );
             return reject_tool(
                 DenialGate::SideEffectCeiling,
                 None,
