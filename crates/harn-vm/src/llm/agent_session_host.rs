@@ -243,7 +243,7 @@ fn json_to_vm(value: &serde_json::Value) -> VmValue {
     crate::stdlib::json_to_vm_value(value)
 }
 
-fn vm_to_json(value: &VmValue) -> serde_json::Value {
+pub(crate) fn vm_to_json(value: &VmValue) -> serde_json::Value {
     crate::llm::vm_value_to_json(value)
 }
 
@@ -1212,15 +1212,19 @@ fn tool_result_message_for_provider(
         }
     }
     // A tool that returned a screenshot (the computer tool) carries the image
-    // back to the model as a content block. On a native channel the content
-    // becomes a `[text, screenshot]` block list — the provider content mappers
-    // (`anthropic_content`/`openai_content`) convert the neutral screenshot dict
-    // into the provider's image block. The text channel has no image affordance
-    // (and computer use requires a vision/native model anyway), so it keeps the
-    // plain-string observation. A result with no screenshot is byte-identical to
-    // before (plain-string content), so every other tool is unaffected.
+    // back to the model. Anthropic accepts image blocks INSIDE a `tool_result`,
+    // so the content becomes a `[text, screenshot]` block list and
+    // `anthropic_content` projects the neutral screenshot dict into an image
+    // block. OpenAI/Ollama chat completions reject image content on a `tool`
+    // role message (images are only allowed on `user` messages), so those
+    // providers keep a plain-text tool result here and the screenshot rides in a
+    // SEPARATE follow-up `user` message that `record_tool_results` injects (see
+    // `screenshot_user_message_for_provider`). The text channel has no image
+    // affordance at all. A result with no screenshot is byte-identical to before.
+    let embed_image_in_tool_result = screenshot.is_some()
+        && crate::llm::provider::provider_uses_anthropic_messages(provider, model);
     match screenshot {
-        Some(image) if !is_text_channel => {
+        Some(image) if embed_image_in_tool_result => {
             let mut text_block = crate::value::DictMap::new();
             text_block.put_str("type", "text");
             text_block.put_str("text", observation);
@@ -1232,6 +1236,38 @@ fn tool_result_message_for_provider(
         }
     }
     VmValue::dict(msg)
+}
+
+/// A follow-up `user` message carrying a screenshot as an image content block,
+/// used for providers that do NOT accept image content on a tool-result message
+/// (OpenAI/Ollama chat completions). Returns `None` for Anthropic (the image
+/// already rode inside the `tool_result`) and for the text channel (no image
+/// affordance). The `[text, screenshot]` content list is projected to the
+/// provider's image block by `openai_content` at egress.
+fn screenshot_user_message_for_provider(
+    provider: &str,
+    model: &str,
+    tool_format: &str,
+    screenshot: &VmValue,
+) -> Option<VmValue> {
+    let is_text_channel = matches!(
+        crate::llm_config::tool_format_channel(tool_format),
+        Some(crate::llm_config::ToolFormatChannel::Text)
+    );
+    if is_text_channel || crate::llm::provider::provider_uses_anthropic_messages(provider, model) {
+        return None;
+    }
+    let mut text_block = crate::value::DictMap::new();
+    text_block.put_str("type", "text");
+    text_block.put_str(
+        "text",
+        "Screenshot from the computer tool (the current screen):",
+    );
+    let content = vec![VmValue::dict(text_block), screenshot.clone()];
+    let mut msg = crate::value::DictMap::new();
+    msg.put_str("role", "user");
+    msg.put("content", VmValue::List(std::sync::Arc::new(content)));
+    Some(VmValue::dict(msg))
 }
 
 /// The neutral screenshot dict a computer-use tool returns (`ScreenImage`:
@@ -1843,6 +1879,17 @@ fn host_agent_session_record_tool_results_builtin(
             ),
         )
         .map_err(VmError::Runtime)?;
+        // Providers that reject image content on a tool-result message (OpenAI /
+        // Ollama) get the screenshot in a follow-up `user` message instead, so
+        // the model still sees the current screen.
+        if let Some(image) = screenshot.as_ref() {
+            if let Some(user_message) =
+                screenshot_user_message_for_provider(&provider, &model, &tool_format, image)
+            {
+                crate::agent_sessions::inject_message(&session_id, user_message)
+                    .map_err(VmError::Runtime)?;
+            }
+        }
     }
     let _ = with_session(&session_id, HOST_SESSION_RECORD_TOOL_RESULTS, |session| {
         session.successful_tools.extend(successful);

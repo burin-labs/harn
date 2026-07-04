@@ -481,13 +481,63 @@ impl AnthropicProvider {
         request: &LlmRequestPayload,
         delta_tx: Option<DeltaSender>,
     ) -> Result<LlmResult, VmError> {
+        let body = Self::build_request_body(request);
+        // TEMP DIAGNOSTIC: dump the outgoing request (with a summary of any image
+        // blocks) so we can confirm exactly what pixels reach the model.
+        if let Ok(path) = std::env::var("BURIN_DEBUG_REQUEST_FILE") {
+            let mut summary = Vec::new();
+            if let Some(messages) = body.get("messages").and_then(|m| m.as_array()) {
+                for (mi, message) in messages.iter().enumerate() {
+                    collect_image_summaries(message.get("content"), mi, &mut summary);
+                }
+            }
+            let dump = serde_json::json!({
+                "image_blocks": summary,
+                "body": body,
+            });
+            let _ = std::fs::write(&path, serde_json::to_vec(&dump).unwrap_or_default());
+        }
         crate::llm::api::vm_call_llm_api_with_body(
             request,
             delta_tx,
-            Self::build_request_body(request),
+            body,
             crate::llm::capabilities::WireDialect::Anthropic,
         )
         .await
+    }
+}
+
+/// TEMP DIAGNOSTIC helper: walk a message's content and record `(message_index,
+/// media_type, data_len, data_head, data_tail)` for every base64 image source.
+fn collect_image_summaries(
+    content: Option<&serde_json::Value>,
+    message_index: usize,
+    out: &mut Vec<serde_json::Value>,
+) {
+    let Some(content) = content else { return };
+    match content {
+        serde_json::Value::Array(items) => {
+            for item in items {
+                // Recurse into tool_result blocks' nested content.
+                if item.get("type").and_then(|t| t.as_str()) == Some("tool_result") {
+                    collect_image_summaries(item.get("content"), message_index, out);
+                }
+                if item.get("type").and_then(|t| t.as_str()) == Some("image") {
+                    if let Some(source) = item.get("source") {
+                        let data = source.get("data").and_then(|d| d.as_str()).unwrap_or("");
+                        out.push(serde_json::json!({
+                            "message_index": message_index,
+                            "media_type": source.get("media_type"),
+                            "source_type": source.get("type"),
+                            "data_len": data.len(),
+                            "data_head": data.chars().take(48).collect::<String>(),
+                            "data_tail": data.chars().rev().take(24).collect::<String>().chars().rev().collect::<String>(),
+                        }));
+                    }
+                }
+            }
+        }
+        _ => {}
     }
 }
 
@@ -984,6 +1034,103 @@ mod tests {
             reminder_lifecycle: Vec::new(),
             cli_llm_mock_scope: None,
         }
+    }
+
+    // Full live-path diagnostic: a computer screenshot recorded through the real
+    // `record_tool_results` path must reach the Anthropic request body as an
+    // image block whose base64 is BYTE-IDENTICAL to the captured PNG. Reproduces
+    // the exact flow burin-headless uses (record -> transcript -> egress).
+    #[test]
+    fn live_computer_screenshot_reaches_anthropic_body_byte_perfect() {
+        use base64::Engine;
+        // A large synthetic image payload (~300 KB, the size of a real 1024x768
+        // screenshot) so the test exercises byte preservation of a big base64
+        // string through the whole record -> transcript -> egress path.
+        let bytes: Vec<u8> = (0..300_000u32).map(|i| (i.wrapping_mul(2654435761) >> 16) as u8).collect();
+        let src_b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+
+        crate::llm::agent_session_host::reset_agent_session_host_state();
+        let session_id = crate::agent_sessions::open_or_create(Some("cu-live-diag".to_string()));
+        crate::llm::agent_session_host::seed_host_session_provider_model(
+            &session_id,
+            "anthropic",
+            "claude-opus-4-8",
+        );
+        // Pair the tool_result with an assistant tool_use so egress keeps it.
+        crate::agent_sessions::inject_message(
+            &session_id,
+            crate::stdlib::json_to_vm_value(&serde_json::json!({
+                "role": "user", "content": "take a screenshot"
+            })),
+        )
+        .unwrap();
+        crate::agent_sessions::inject_message(
+            &session_id,
+            crate::stdlib::json_to_vm_value(&serde_json::json!({
+                "role": "assistant",
+                "content": [{"type": "tool_use", "id": "tc1", "name": "computer", "input": {"action": "screenshot"}}],
+            })),
+        )
+        .unwrap();
+        let dispatch = crate::stdlib::json_to_vm_value(&serde_json::json!([{
+            "tool_name": "computer",
+            "tool_call_id": "tc1",
+            "ok": true,
+            "observation": "Captured screenshot 1024x768.",
+            "result": {
+                "ok": true,
+                "text": "Captured screenshot 1024x768.",
+                "screenshot": {
+                    "base64": src_b64,
+                    "media_type": "image/png",
+                    "width": 1024, "height": 768, "scale_factor": 2.0,
+                },
+            },
+        }]));
+        crate::llm::agent_session_host::record_tool_results_for_test(&session_id, dispatch);
+
+        let transcript = crate::agent_sessions::transcript(&session_id).expect("transcript");
+        let transcript_json = crate::llm::agent_session_host::vm_to_json(&transcript);
+        let messages_json = transcript_json
+            .get("messages")
+            .cloned()
+            .unwrap_or(transcript_json.clone());
+        let messages = messages_json.as_array().cloned().unwrap_or_default();
+
+        let mut opts = base_payload();
+        opts.model = "claude-opus-4-8".to_string();
+        opts.messages = messages;
+        let body = AnthropicProvider::build_request_body(&opts);
+
+        // Find the image block anywhere in the outgoing body.
+        fn find_image_data(v: &serde_json::Value) -> Option<String> {
+            match v {
+                serde_json::Value::Object(map) => {
+                    if map.get("type").and_then(|t| t.as_str()) == Some("image") {
+                        if let Some(data) = map
+                            .get("source")
+                            .and_then(|s| s.get("data"))
+                            .and_then(|d| d.as_str())
+                        {
+                            return Some(data.to_string());
+                        }
+                    }
+                    map.values().find_map(find_image_data)
+                }
+                serde_json::Value::Array(items) => items.iter().find_map(find_image_data),
+                _ => None,
+            }
+        }
+        let out_b64 = find_image_data(&body).expect("an image block in the Anthropic body");
+        let out_bytes = base64::engine::general_purpose::STANDARD
+            .decode(&out_b64)
+            .expect("valid base64");
+        assert_eq!(
+            out_bytes, bytes,
+            "the screenshot in the Anthropic body must be byte-identical to the capture (len {} vs {})",
+            out_bytes.len(),
+            bytes.len()
+        );
     }
 
     #[test]

@@ -121,11 +121,53 @@ pub(crate) fn openai_computer_tool(
 /// orchestrator should pass the captured `ScreenImage { width, height }`
 /// (scaled per [`scale_screenshot`]) so the advertised size matches the image
 /// the model actually receives.
+/// Whether to project the neutral computer tool onto the provider's native
+/// computer-use surface. Default OFF (the universal function-tool path is used);
+/// opt in with `BURIN_COMPUTER_USE_NATIVE=1|on|true` once a route's native
+/// action lowering is wired.
+fn native_computer_projection_enabled() -> bool {
+    matches!(
+        std::env::var("BURIN_COMPUTER_USE_NATIVE")
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase()
+            .as_str(),
+        "1" | "on" | "true"
+    )
+}
+
 pub(crate) fn project_computer_tools(
     caps: &Capabilities,
     native_tools: &mut Option<Vec<Value>>,
     provider_tools: &mut Vec<Value>,
 ) {
+    // Native provider computer tools (Anthropic `computer_20251124`, OpenAI
+    // Responses `computer`) are an OPT-IN optimization, not the default. The
+    // universal path is the plain function-schema `computer` tool + the neutral
+    // screenshot round-trip: it uses ONE action schema (x/y, not the provider's
+    // `coordinate[]`), works on every vision model regardless of whether the
+    // provider supports native computer use (so a cheap model never 400s on an
+    // unsupported `computer_20251124`), and carries screenshots back through the
+    // verified image-block path. Native projection also swaps in the provider's
+    // own action vocabulary, which the harn `computer` handler does not parse —
+    // so keep it behind an explicit opt-in until that lowering is wired.
+    project_computer_tools_with(
+        caps,
+        native_tools,
+        provider_tools,
+        native_computer_projection_enabled(),
+    )
+}
+
+fn project_computer_tools_with(
+    caps: &Capabilities,
+    native_tools: &mut Option<Vec<Value>>,
+    provider_tools: &mut Vec<Value>,
+    enable_native: bool,
+) {
+    if !enable_native {
+        return;
+    }
     let style = match caps.computer_use_style.as_deref() {
         Some(style @ ("native_anthropic" | "native_openai")) => style,
         // `function` / `grounded` / none: leave the function-schema tool as-is.
@@ -375,7 +417,7 @@ mod tests {
         let caps = caps_with_style("native_anthropic");
         let mut native = Some(vec![function_tool("read_file"), function_tool("computer")]);
         let mut provider = Vec::new();
-        project_computer_tools(&caps, &mut native, &mut provider);
+        project_computer_tools_with(&caps, &mut native, &mut provider, true);
 
         // The plain `computer` function copy is gone; other tools remain.
         let remaining = native.unwrap();
@@ -392,7 +434,7 @@ mod tests {
         let caps = caps_with_style("native_openai");
         let mut native = Some(vec![function_tool("computer")]);
         let mut provider = Vec::new();
-        project_computer_tools(&caps, &mut native, &mut provider);
+        project_computer_tools_with(&caps, &mut native, &mut provider, true);
 
         assert!(native.unwrap().is_empty());
         assert_eq!(provider.len(), 1);
@@ -406,7 +448,7 @@ mod tests {
             let caps = caps_with_style(style);
             let mut native = Some(vec![function_tool("computer")]);
             let mut provider = Vec::new();
-            project_computer_tools(&caps, &mut native, &mut provider);
+            project_computer_tools_with(&caps, &mut native, &mut provider, true);
             assert_eq!(native.as_ref().unwrap().len(), 1, "{style}");
             assert!(provider.is_empty(), "{style}");
         }
@@ -417,10 +459,10 @@ mod tests {
         let caps = caps_with_style("native_anthropic");
         let mut native = Some(vec![function_tool("computer")]);
         let mut provider = Vec::new();
-        project_computer_tools(&caps, &mut native, &mut provider);
+        project_computer_tools_with(&caps, &mut native, &mut provider, true);
         // Second pass: the native tool already lives in provider_tools and the
         // function copy is gone, so nothing changes.
-        project_computer_tools(&caps, &mut native, &mut provider);
+        project_computer_tools_with(&caps, &mut native, &mut provider, true);
         assert!(native.unwrap().is_empty());
         assert_eq!(provider.len(), 1);
     }
