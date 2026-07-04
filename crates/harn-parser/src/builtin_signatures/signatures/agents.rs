@@ -222,6 +222,12 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_DICT,
     ),
     BuiltinSignature::simple(
+        "agent_preset_register",
+        &[Param::new("kind", TY_STRING), Param::new("spec", TY_DICT)],
+        TY_STRING,
+    ),
+    BuiltinSignature::simple("agent_preset_kinds", &[], TY_LIST),
+    BuiltinSignature::simple(
         "agent_name",
         &[Param::new("agent", TY_DICT)],
         TY_STRING_OR_NIL,
