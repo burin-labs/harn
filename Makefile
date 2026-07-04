@@ -424,8 +424,7 @@ check-burin-protocol-artifacts:
 # without Go installed locally are not blocked, but CI requires both.
 check-bindings:
 	@echo "=== Checking Harn protocol bindings round-trip the published fixture ==="
-	@python3 -m py_compile spec/protocol-artifacts/python/harn_protocol.py
-	@python3 scripts/check_protocol_bindings.py
+	@$(HARN_CLI_CMD) run scripts/check_protocol_bindings.harn
 	@if command -v go >/dev/null 2>&1; then \
 		stale=$$(gofmt -l spec/protocol-artifacts/go/harnprotocol); \
 		if [ -n "$$stale" ]; then \

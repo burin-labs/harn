@@ -22,12 +22,6 @@ let PYTHON_ALLOWLIST = [
   },
   {
     kind: "exact",
-    pattern: "scripts/check_protocol_bindings.py",
-    category: "foreign-artifact-check",
-    reason: "Imports the generated Python protocol binding it validates.",
-  },
-  {
-    kind: "exact",
     pattern: "tests/bridge_mock_host.py",
     category: "test-harness-adapter",
     reason: "Out-of-process bridge test host intentionally runs as a foreign subprocess.",

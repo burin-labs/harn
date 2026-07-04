@@ -1,0 +1,139 @@
+import { with_temp_dir } from "std/testing"
+import "../check_protocol_bindings.harn"
+
+let FAKE_PYTHON_BINDING = """
+HARN_PROTOCOL_ARTIFACT_VERSION = "{VERSION}"
+HARN_AGENT_EVENT_METHOD = "harn/agent_event"
+HARN_PROVIDER_CATALOG_METHOD = "harn/provider_catalog"
+
+
+class _RoundTrip:
+    def __init__(self, payload):
+        self.payload = payload
+
+    @classmethod
+    def from_wire(cls, payload):
+        return cls(payload)
+
+    def to_wire(self):
+        return self.payload
+
+
+ACPRequest = _RoundTrip
+ACPResponse = _RoundTrip
+ACPSessionUpdateNotification = _RoundTrip
+HarnAgentEventNotification = _RoundTrip
+A2ATask = _RoundTrip
+MCPTool = _RoundTrip
+MCPDiscoverResult = _RoundTrip
+MCPInputRequiredResult = _RoundTrip
+MCPUnsupportedProtocolVersionError = _RoundTrip
+ToolCallReceipt = _RoundTrip
+"""
+
+fn mkdirs(path: string) -> nil {
+  let parts = split(path_normalize(path), "/")
+  var current = if path.starts_with("/") {
+    "/"
+  } else {
+    ""
+  }
+  for part in parts {
+    if part == "" {
+      continue
+    }
+    current = if current == "" || current == "/" {
+      current + part
+    } else {
+      path_join(current, part)
+    }
+    if !harness.fs.exists(current) {
+      harness.fs.mkdir(current)
+    }
+  }
+  return nil
+}
+
+fn write_text(root: string, rel: string, text: string) -> nil {
+  let path = path_join(root, rel)
+  mkdirs(dirname(path) ?? root)
+  harness.fs.write_text(path, text)
+  return nil
+}
+
+fn fixture_payload(version: string) -> dict {
+  let envelopes = {
+    request: {jsonrpc: "2.0", id: 1, method: "session/new", params: {project: "demo"}},
+    response: {jsonrpc: "2.0", id: 1, result: {ok: true}},
+    errorResponse: {jsonrpc: "2.0", id: 2, error: {code: -1, message: "bad"}},
+    sessionUpdateNotification: {jsonrpc: "2.0", method: "session/update", params: {state: "ready"}},
+    agentEventNotification: {jsonrpc: "2.0", method: "harn/agent_event", params: {event: "tick"}},
+  }
+  return {
+    artifactVersion: version,
+    harnAgentEventMethod: "harn/agent_event",
+    harnProviderCatalogMethod: "harn/provider_catalog",
+    envelopes: envelopes,
+    a2aTask: {id: "task-1", state: "completed"},
+    mcpTool: {name: "read_file", description: "Read"},
+    mcpDiscoverResult: {tools: []},
+    mcpInputRequiredResult: {schema: {type: "object"}},
+    mcpUnsupportedProtocolVersionError: {supported: ["1.0"]},
+    toolCallReceipt: {id: "call-1", name: "read_file"},
+  }
+}
+
+fn write_fake_artifacts(root: string, binding_version: string, fixture_version: string) -> nil {
+  write_text(
+    root,
+    "spec/protocol-artifacts/python/harn_protocol.py",
+    FAKE_PYTHON_BINDING.replace("{VERSION}", binding_version),
+  )
+  write_text(
+    root,
+    "spec/protocol-artifacts/fixtures/round_trip.json",
+    json_stringify_pretty(fixture_payload(fixture_version)) + "\n",
+  )
+  return nil
+}
+
+@test
+pipeline test_probe_args_pass_artifact_root_to_python(task) {
+  let args = python_binding_probe_args("/tmp/artifacts")
+  assert_eq(args[0], "-c")
+  assert(args[1].contains("python bindings: OK"))
+  assert_eq(args[2], "/tmp/artifacts")
+}
+
+@test
+pipeline test_fake_python_binding_round_trip_passes(task) {
+  with_temp_dir(
+    { root ->
+      write_fake_artifacts(root, "test-version", "test-version")
+      let report = check_python_protocol_bindings("python3", root)
+      assert_eq(report.ok, true)
+      assert_eq(report.stage, "ok")
+      assert(to_string(report.stdout).contains("python bindings: OK"))
+    },
+  )
+}
+
+@test
+pipeline test_version_drift_is_reported_as_round_trip_failure(task) {
+  with_temp_dir(
+    { root ->
+      write_fake_artifacts(root, "binding-version", "fixture-version")
+      let report = check_python_protocol_bindings("python3", root)
+      assert_eq(report.ok, false)
+      assert_eq(report.stage, "round_trip")
+      assert(to_string(report.stderr).contains("version drift"))
+    },
+  )
+}
+
+@test
+pipeline test_current_repo_python_binding_round_trips(task) {
+  let report = check_python_protocol_bindings()
+  assert_eq(report.ok, true)
+  assert_eq(report.stage, "ok")
+}
