@@ -346,6 +346,7 @@ diagnostic_codes! {
     LintAmbientNetBuiltin, "HARN-LNT-057", Lnt, "ambient net builtin replaced by `harness.net.*`";
     LintVacuousCondition, "HARN-LNT-058", Lnt, "if / while / guard condition is statically known to always succeed or always fail";
     LintRuleEngine, "HARN-LNT-059", Lnt, "project rule-engine or native lint rule";
+    LintUnnormalizedOptions, "HARN-LNT-060", Lnt, "inline options dict bypasses the typed option constructors";
     SandboxCapabilityDenied, "HARN-CAP-201", Cap, "harness capability denied by active sandbox profile";
     FormatterParseFailed, "HARN-FMT-001", Fmt, "formatter could not parse the source";
     FormatterWouldReformat, "HARN-FMT-002", Fmt, "source is not in canonical format";
@@ -516,6 +517,9 @@ impl Code {
             Code::MutableNeverReassigned => &[Code::LintMutableNeverReassigned],
             // Lint pairs (drift between lint and runtime/typecheck codes).
             Code::LintDeprecatedLlmOptions => &[Code::DeprecatedLlmOption, Code::UnknownLlmOption],
+            Code::LintUnnormalizedOptions => {
+                &[Code::LintDeprecatedLlmOptions, Code::LintUntypedDictAccess]
+            }
             Code::LintPromptInjectionRisk => &[Code::PromptInjectionRisk],
             Code::LintTemplateVariantExplosion => &[Code::PromptVariantExplosion],
             Code::LintTemplateProviderIdentityBranch => &[Code::PromptProviderIdentityBranch],
@@ -848,6 +852,7 @@ impl Code {
             Code::LintMissingHarndoc => Some(&REPAIR_DOC_ADD_HARNDOC),
             Code::LintDuplicateMatchArm => Some(&REPAIR_MATCH_REMOVE_DUPLICATE_ARM),
             Code::LintUntypedDictAccess => Some(&REPAIR_TYPES_ADD_SHAPE_ANNOTATION),
+            Code::LintUnnormalizedOptions => Some(&REPAIR_TYPES_ADD_SHAPE_ANNOTATION),
             Code::LintMcpToolAnnotations => Some(&REPAIR_MANUAL_NEEDS_HUMAN),
             Code::LintTemplateVariantExplosion | Code::LintLongRunningWithoutCleanup => {
                 Some(&REPAIR_MANUAL_NEEDS_HUMAN)

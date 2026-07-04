@@ -30,6 +30,8 @@ each node. Each tool carries its own capability policy so validation can
 enforce them automatically:
 
 ```harn
+import { StageSpec } from "std/workflow/options"
+
 fn review_tools() {
   var tools = tool_registry()
   tools = tool_define(tools, "read", "Read a file", {
@@ -67,14 +69,17 @@ fn review_tools() {
   return tools
 }
 
+// Build each node through the typed `StageSpec` alias (or the
+// `workflow_stage_spec(...)` constructor) from `std/workflow/options`
+// so stage-spec typos fail at check time.
+let act: StageSpec = {kind: "stage", mode: "agent", tools: review_tools()}
+let verify: StageSpec = {kind: "verify", mode: "agent", tools: tool_select(review_tools(), ["run"])}
+let repair: StageSpec = {kind: "stage", mode: "agent", tools: tool_select(review_tools(), ["edit", "run"])}
+
 let graph = workflow_graph({
   name: "repair_loop",
   entry: "act",
-  nodes: {
-    act: {kind: "stage", mode: "agent", tools: review_tools()},
-    verify: {kind: "verify", mode: "agent", tools: tool_select(review_tools(), ["run"])},
-    repair: {kind: "stage", mode: "agent", tools: tool_select(review_tools(), ["edit", "run"])}
-  },
+  nodes: {act: act, verify: verify, repair: repair},
   edges: [
     {from: "act", to: "verify"},
     {from: "verify", to: "repair", branch: "failed"},
@@ -184,12 +189,19 @@ let context = artifact_context([selection, plan], {
 `workflow_execute(task, graph, artifacts?, options?)` executes a typed
 workflow and persists a structured run record.
 
+Build run options through the typed `WorkflowExecuteOptions` alias from
+`std/workflow/options` (inline dict literals in the options slot are
+flagged by the `unnormalized-options` lint):
+
 ```harn
+import { WorkflowExecuteOptions } from "std/workflow/options"
+
+let run_options: WorkflowExecuteOptions = {max_steps: 8}
 let run = workflow_execute(
   "Fix the diagnostic regression and verify the tests.",
   graph,
   [selection, plan],
-  {max_steps: 8}
+  run_options,
 )
 
 log(run.status)
@@ -266,7 +278,8 @@ verify: {
 }
 ```
 
-Options currently include:
+Options currently include (typed as `WorkflowExecuteOptions` in
+`std/workflow/options`):
 
 - `max_steps`
 - `persist_path`

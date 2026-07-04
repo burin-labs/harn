@@ -1,6 +1,145 @@
 // @harn-entrypoint-category llm.stdlib
 import { pick_keys } from "std/collections"
 
+// -------------------------------------------------------------------------------------------------
+
+// Typed option aliases (the documented way to build llm_call options).
+//
+// These structural aliases are co-located with the option normalizers below
+// so the alias, the accepted-key list, and the projection logic stay in one
+// file. Rust twins live in `crates/harn-vm/src/llm/cost.rs`
+// (`LlmBudgetEnvelope`) and — for the workflow-facing policies — in
+// `crates/harn-vm/src/orchestration/policy/types.rs`; key parity is pinned by
+// `crates/harn-vm/tests/typed_options_parity.rs`.
+
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * Pre-flight LLM budget envelope accepted by the `budget:` option on
+ * `llm_call` and `agent_loop`.
+ *
+ * Rust twin: `LlmBudgetEnvelope` in `crates/harn-vm/src/llm/cost.rs`.
+ */
+pub type LlmBudget = {
+  max_cost_usd?: float,
+  max_input_tokens?: int,
+  max_output_tokens?: int,
+  total_budget_usd?: float,
+}
+
+/**
+ * One explicit step of a model ladder. String entries in a `ModelLadder`
+ * are shorthand for `{model: <string>}` (or `provider:model` selectors).
+ *
+ * Rust twin: `LadderSpec` (ships with the `models:` / `ladder:` llm_call
+ * option; the alias is defined ahead of that option so downstream schemas
+ * can converge on one shape).
+ */
+pub type ModelLadderStep = {provider?: string, model?: string, options?: dict, when?: string}
+
+/**
+ * Ordered fallback ladder for `llm_call` model routing. Advance happens on
+ * transport-class failures only, never on schema-validation failures.
+ */
+pub type ModelLadder = list<string | ModelLadderStep>
+
+/**
+ * The public `llm_call` options surface. Mirrors the options table in
+ * `docs/src/llm/llm_call.md`; the runtime accepted-key list is
+ * `__llm_call_option_keys()` below and parity is pinned by
+ * `typed_options_parity.rs`.
+ *
+ * Deprecated keys (`llm_retries`, `llm_backoff_ms`) are intentionally
+ * absent: the typed path is the clean path — compose retries with
+ * `with_retry` from `std/llm/handlers` instead.
+ */
+pub type LlmCallOptions = {
+  provider?: string,
+  model?: string,
+  model_role?: string,
+  model_tier?: string,
+  route_policy?: string,
+  fallback_chain?: list<string>,
+  api_mode?: string,
+  max_tokens?: int,
+  temperature?: float,
+  top_p?: float,
+  top_k?: int,
+  stop?: list<string>,
+  seed?: int,
+  frequency_penalty?: float,
+  presence_penalty?: float,
+  logprobs?: bool,
+  top_logprobs?: int,
+  response_format?: string,
+  output_format?: string | dict,
+  schema?: any,
+  json_schema?: any,
+  output_schema?: any,
+  output_validation?: string,
+  schema_retries?: int,
+  schema_stream_abort?: bool,
+  retries?: int,
+  repair?: bool | dict,
+  schema_recover?: any,
+  reasoning_policy?: string | bool,
+  thinking_policy?: string | bool,
+  reasoning_scale?: string,
+  problem_scale?: string,
+  reasoning_task?: string,
+  reasoning_effort?: string,
+  thinking?: bool | dict,
+  interleaved_thinking?: bool,
+  anthropic_beta_features?: string | list<string>,
+  vision?: bool,
+  tools?: any,
+  tool_choice?: string | dict,
+  tool_search?: bool | string | dict,
+  tool_format?: string,
+  provider_tools?: list,
+  hosted_tools?: list,
+  max_tool_calls?: int,
+  previous_response_id?: string,
+  response_store?: bool,
+  responses_store?: bool,
+  store?: any,
+  background?: bool,
+  truncation?: string,
+  compact?: bool,
+  include?: list,
+  budget?: LlmBudget,
+  cache?: bool,
+  fast?: bool,
+  speed?: string,
+  stream?: bool,
+  timeout?: int,
+  timeout_ms?: int,
+  messages?: list,
+  transcript?: dict,
+  session_id?: string,
+  system?: string,
+  system_preamble?: string,
+  system_prefix?: string,
+  system_context?: string,
+  system_prompt_parts?: list,
+  system_appendix?: string,
+  system_suffix?: string,
+  structural_experiment?: any,
+  metadata?: dict,
+}
+
+/**
+ * Routing and model selection.
+ * Sampling and generation.
+ * Structured output.
+ * Reasoning.
+ * Media.
+ * Tools.
+ * OpenAI Responses surface.
+ * Cost, caching, and transport.
+ * Conversation state and system prompt composition.
+ * Diagnostics and experiments.
+ */
 fn __llm_call_option_keys() {
   return [
     "model",
@@ -131,4 +270,27 @@ fn __llm_call_option_keys() {
  */
 pub fn llm_call_options(options = nil) {
   return pick_keys(options ?? {}, __llm_call_option_keys(), {drop_nil: true})
+}
+
+/**
+ * llm_options is the typed constructor for `llm_call` options. Direct dict
+ * literals are checked against `LlmCallOptions`, so option typos fail at
+ * check time instead of being silently ignored at the provider boundary.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn llm_options(options: LlmCallOptions = {}) -> LlmCallOptions {
+  return options
+}
+
+/**
+ * model_ladder is the typed constructor for ordered model-fallback ladders.
+ * Entries are model selector strings or `ModelLadderStep` dicts.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn model_ladder(ladder: ModelLadder = []) -> ModelLadder {
+  return ladder
 }

@@ -1,0 +1,3 @@
+pipeline main(task) {
+  agent_loop(task, nil, {loop_until_done: true, max_iterations: 2, provider: "mock"})
+}

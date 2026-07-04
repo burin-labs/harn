@@ -1,5 +1,153 @@
 import { pick_keys } from "std/collections"
 
+// -------------------------------------------------------------------------------------------------
+
+// Typed option aliases (the documented way to build workflow stage specs).
+//
+// Co-located with the stage-option normalizers below so the alias and the
+// normalization logic stay in one file. Rust twins live in
+// `crates/harn-vm/src/orchestration/policy/types.rs` (`RetryPolicy`,
+// `ModelPolicy`, `StageContract`) and
+// `crates/harn-vm/src/orchestration/workflow.rs` (`WorkflowNode`); key
+// parity is pinned by `crates/harn-vm/tests/typed_options_parity.rs`.
+
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * Per-stage retry policy (`retry_policy:` on a stage spec).
+ *
+ * Rust twin: `RetryPolicy` in
+ * `crates/harn-vm/src/orchestration/policy/types.rs`. The
+ * `repair_prompt_builder` and `feedback` keys are the retry-with-feedback
+ * surface: a builder callback (or bounded template) that threads the prior
+ * attempt's verification findings into the next attempt's prompt. They are
+ * typed ahead of the stage-loop inversion that executes them.
+ */
+pub type WorkflowRetryPolicy = {
+  max_attempts?: int,
+  verify?: bool,
+  repair?: bool,
+  backoff_ms?: int,
+  backoff_multiplier?: float,
+  repair_prompt_builder?: any,
+  feedback?: string | dict,
+}
+
+/**
+ * Stage input/output artifact contract (`input_contract:` /
+ * `output_contract:` on a stage spec).
+ *
+ * Rust twin: `StageContract` in
+ * `crates/harn-vm/src/orchestration/policy/types.rs`.
+ */
+pub type StageContract = {
+  input_kinds?: list<string>,
+  output_kinds?: list<string>,
+  min_inputs?: int,
+  max_inputs?: int,
+  require_transcript?: bool,
+  schema?: dict,
+}
+
+/**
+ * Per-stage model and tool-loop policy (`model_policy:` on a stage spec).
+ * Mirrors the Rust struct field-for-field; the broader normalizer input
+ * shape (which also accepts reasoning/thinking hints) is
+ * `WorkflowModelPolicy` below.
+ *
+ * Rust twin: `ModelPolicy` in
+ * `crates/harn-vm/src/orchestration/policy/types.rs`.
+ */
+pub type ModelPolicySpec = {
+  provider?: string,
+  model?: string,
+  model_tier?: string,
+  temperature?: float,
+  max_tokens?: int,
+  max_iterations?: int,
+  iteration_budget?: string | dict,
+  max_nudges?: int,
+  nudge?: string,
+  tool_examples?: string,
+  post_turn_callback?: any,
+  stop_after_successful_tools?: list<string>,
+  require_successful_tools?: list,
+  turn_policy?: {require_action_or_yield?: bool, allow_done_sentinel?: bool, max_prose_chars?: int},
+  tool_format?: string,
+  native_tool_fallback?: string,
+}
+
+// Inline copy of `TurnPolicy` (std/agent/options) — cross-module type
+// references do not structurally resolve for importing consumers yet.
+/**
+ * One workflow stage node as accepted by `workflow_execute` graphs.
+ *
+ * Rust twin: `WorkflowNode` in
+ * `crates/harn-vm/src/orchestration/workflow.rs`. `context_assembler` has
+ * no serde twin (it can carry closures and is preserved as a raw value on
+ * the Rust side).
+ */
+pub type StageSpec = {
+  id?: string,
+  kind?: string,
+  mode?: string,
+  prompt?: string,
+  system?: string,
+  task_label?: string,
+  done_sentinel?: string,
+  tools?: any,
+  model_policy?: ModelPolicySpec,
+  auto_compact?: bool | dict,
+  output_visibility?: string,
+  context_policy?: dict,
+  retry_policy?: WorkflowRetryPolicy,
+  capability_policy?: dict,
+  approval_policy?: any,
+  input_contract?: StageContract,
+  output_contract?: StageContract,
+  branch_semantics?: dict,
+  map_policy?: dict,
+  join_policy?: dict,
+  reduce_policy?: dict,
+  escalation_policy?: dict,
+  verify?: any,
+  exit_when_verified?: bool,
+  metadata?: dict,
+  context_assembler?: dict,
+}
+
+/**
+ * Run-level options accepted by `workflow_execute(task, graph, artifacts?,
+ * options?)`. See `docs/src/workflow-runtime.md` for semantics.
+ *
+ * Rust twin: none — these are consumed by the workflow driver in
+ * `std/workflow/execute` and the persistence layer key-by-key.
+ */
+pub type WorkflowExecuteOptions = {
+  max_steps?: int,
+  persist_path?: string,
+  resume_path?: string,
+  resume_run?: any,
+  replay_path?: string,
+  replay_run?: any,
+  replay_mode?: string,
+  audit?: bool | dict,
+  mutation_scope?: string | dict,
+  approval_policy?: any,
+}
+
+/**
+ * workflow_execute_options is the typed constructor for `workflow_execute`
+ * run options. Direct dict literals are checked against
+ * `WorkflowExecuteOptions`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn workflow_execute_options(options: WorkflowExecuteOptions = {}) -> WorkflowExecuteOptions {
+  return options
+}
+
 /** Allowed values for `WorkflowAutonomyPolicyConfig.autonomy_tier`. */
 type WorkflowAutonomyTier = "shadow" | "suggest" | "act_with_approval" | "act_auto"
 
@@ -194,6 +342,19 @@ fn __workflow_agent_loop_options(
     options = options + {done_sentinel: config.done_sentinel}
   }
   return options + pick_keys(model_policy, loop_option_keys, {drop_nil: true})
+}
+
+/**
+ * workflow_stage_spec is the typed constructor for one workflow stage node.
+ * Direct dict literals are checked against `StageSpec`, so stage-spec typos
+ * fail at check time instead of being silently dropped by graph
+ * normalization.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn workflow_stage_spec(spec: StageSpec = {}) -> StageSpec {
+  return spec
 }
 
 /**

@@ -15,11 +15,14 @@ The return value is the normal `agent_loop` result with two extra summaries:
 (`[{iteration, verdict, reasoning, next_step, judge_duration_ms, trigger?}]`).
 
 ```harn
-let result = agent_turn("Summarize the current project risks.", {
+import { AgentLoopOptions } from "std/agent/options"
+
+let turn_opts: AgentLoopOptions = {
   system: "Be concise and cite concrete evidence.",
   provider: "openai",
   model: "gpt-5-mini",
-})
+}
+let result = agent_turn("Summarize the current project risks.", turn_opts)
 log(result.visible_text)
 log(result.judge_decisions[0].verdict)
 ```
@@ -33,11 +36,19 @@ use the completion sentinel `<done>##DONE##</done>`, and no-tool sentinel loops
 use bare `##DONE##`. Returns a dict with canonical visible text, tool usage,
 transcript state, and any deferred queued human messages.
 
+Build the options through the typed `AgentLoopOptions` alias from
+`std/agent/options` (or an `agent_preset(...)` constructor). This is the
+documented path: option typos surface at `harn check` time, and the
+`unnormalized-options` lint flags inline dict literals that bypass it.
+
 ```harn
+import { AgentLoopOptions } from "std/agent/options"
+
+let opts: AgentLoopOptions = {loop_until_done: true}
 let result = agent_loop(
   "Write a function that sorts a list, then write tests for it.",
   "You are a senior engineer.",
-  {loop_until_done: true}
+  opts,
 )
 log(result.text)           // the accumulated output
 log(result.status)         // "done", "stuck", "budget_exhausted", "idle", "watchdog", or "failed"
@@ -135,6 +146,7 @@ that can be wired into an agent as an `ask_user` tool, or as a post-turn callbac
 for agents that ask clarification questions in plain text.
 
 ```harn,ignore
+import { AgentLoopOptions } from "std/agent/options"
 import {
   agentic_user,
   simulated_user_read_tools,
@@ -149,14 +161,15 @@ let answerer = agentic_user(
   {max_replies: 4, max_llm_calls: 8, max_iterations: 4},
 )
 
-let result = agent_loop(task, system, {
+let opts: AgentLoopOptions = {
   provider: "openai",
   model: "gpt-5-mini",
   tools: user_tools(answerer, coding_tools),
   tool_format: "native",
   loop_until_done: true,
   max_iterations: 20,
-})
+}
+let result = agent_loop(task, system, opts)
 ```
 
 For deterministic eval fixtures, use `scripted_user(...)` or its alias
@@ -164,6 +177,7 @@ For deterministic eval fixtures, use `scripted_user(...)` or its alias
 `reply`, `action: "stop"`, or `action: "fail"`.
 
 ```harn,ignore
+import { AgentLoopOptions } from "std/agent/options"
 import { scripted_user, user_tools } from "std/agent/user"
 
 let answerer = scripted_user([
@@ -171,11 +185,12 @@ let answerer = scripted_user([
   {match: "*done*", action: "stop", reason: "complete"},
 ], {max_replies: 2})
 
-agent_loop(task, system, {
+let opts: AgentLoopOptions = {
   tools: user_tools(answerer),
   tool_format: "native",
   loop_until_done: true,
-})
+}
+agent_loop(task, system, opts)
 ```
 
 When the target agent does not have an explicit user-question tool, use
@@ -275,6 +290,13 @@ full agent loop (tools, judges, compaction) without losing the conversation.
 
 ### agent_loop options
 
+The typed shape of this surface is `AgentLoopOptions` from
+`std/agent/options` — every `llm_call` option plus the loop-control
+keys below. Annotate a binding
+(`let opts: AgentLoopOptions = {...}`) or build the dict via
+`agent_preset(...)` / `agent_options(...)`; inline dict literals still
+execute but are flagged by the `unnormalized-options` lint.
+
 Same as `llm_call`, plus additional options:
 
 | Key | Type | Default | Description |
@@ -369,13 +391,16 @@ structured reorganization pass every three continuing turns. The reorganizer may
 use a different provider or model:
 
 ```harn
-agent_loop(task, system, {
+import { AgentLoopOptions } from "std/agent/options"
+
+let scratchpad_opts: AgentLoopOptions = {
   loop_until_done: true,
   scratchpad: {
     reorganize_every: 2,
     reorganizer: {provider: "ollama", model: "devstral-small-2"},
   },
-})
+}
+agent_loop(task, system, scratchpad_opts)
 ```
 
 The scratchpad is capped at 16 KiB and is stored as live session state, not as a
@@ -410,16 +435,18 @@ closure that wraps the per-turn `llm_call(...)` and the loop will
 route every turn through it:
 
 ```harn,ignore
+import { AgentLoopOptions } from "std/agent/options"
 import {default_llm_caller, with_retry, with_fallback, compose} from "std/llm/handlers"
 
 let caller = compose([
   with_retry({max_attempts: 4, backoff: "exponential"}),
 ])(default_llm_caller())
 
-let result = agent_loop(task, system, {
+let opts: AgentLoopOptions = {
   loop_until_done: true,
   llm_caller: caller,
-})
+}
+let result = agent_loop(task, system, opts)
 ```
 
 Caller contract: `fn(call) -> {ok, value | status, error?}` where
@@ -439,11 +466,14 @@ verbatim, summarize older messages, and fall back to truncation if the summary
 still exceeds the hard limit.
 
 ```harn
-let result = agent_loop(task, system, {
+import { AgentLoopOptions } from "std/agent/options"
+
+let compaction_opts: AgentLoopOptions = {
   provider: "openai",
   model: "gpt-4o",
-  compaction: {strategy: "hybrid", keep_last_n: 10}
-})
+  compaction: {strategy: "hybrid", keep_last_n: 10},
+}
+let result = agent_loop(task, system, compaction_opts)
 ```
 
 Available strategies:
@@ -474,8 +504,9 @@ the next model-visible summary unless `scope` is `"model_visible"`,
 
 ```harn
 import {compact_for_bug_fix_resumption} from "std/agent/autocompact"
+import { AgentLoopOptions } from "std/agent/options"
 
-let result = agent_loop(task, system, {
+let auto_compact_opts: AgentLoopOptions = {
   provider: "mock",
   compact_threshold: 1,
   compact_strategy: "custom",
@@ -485,7 +516,8 @@ let result = agent_loop(task, system, {
   compact_callback: { archived, _reminders, policy ->
     {summary: "resume with " + policy.mode + " over " + to_string(len(archived)) + " messages"}
   },
-})
+}
+let result = agent_loop(task, system, auto_compact_opts)
 ```
 
 Stdlib helpers cover common host commands:
@@ -508,9 +540,11 @@ evidence of forward progress, instead of forcing harness authors to guess a
 single number.
 
 ```harn
-let result = agent_loop(prompt, system, {
-  iteration_budget: {mode: "adaptive", initial: 4, max: 16, extend_by: 2},
-})
+import { AgentLoopOptions, IterationBudget } from "std/agent/options"
+
+let budget: IterationBudget = {mode: "adaptive", initial: 4, max: 16, extend_by: 2}
+let budget_opts: AgentLoopOptions = {iteration_budget: budget}
+let result = agent_loop(prompt, system, budget_opts)
 ```
 
 Fields:
@@ -598,7 +632,10 @@ All decisions are recorded:
   also surfaced to ACP/A2A bridges.
 
 ```harn
-let result = agent_loop(prompt, system, {iteration_budget: {mode: "adaptive", initial: 4, max: 12}})
+import { AgentLoopOptions } from "std/agent/options"
+
+let adaptive_opts: AgentLoopOptions = {iteration_budget: {mode: "adaptive", initial: 4, max: 12}}
+let result = agent_loop(prompt, system, adaptive_opts)
 log(result.adaptive_budget.extensions_used)
 log(result.adaptive_budget.final_limit)
 for decision in result.adaptive_budget.decisions {
@@ -801,12 +838,15 @@ stall feedback injection path in place. The corresponding `JudgeDecision`
 event carries `trigger: "stalled"`.
 
 ```harn
-agent_loop(task, system, {
+import { AgentLoopOptions } from "std/agent/options"
+
+let judged_opts: AgentLoopOptions = {
   loop_until_done: true,
   done_judge: {
     cadence: {every: 5, when: "always", max_invocations: 3},
   },
-})
+}
+agent_loop(task, system, judged_opts)
 ```
 
 `when: "stalled"` does not fire on ordinary completion candidates. It is the
@@ -897,6 +937,8 @@ Example: hide older assistant messages so the model mostly sees user intent,
 tool results, and the latest assistant turn.
 
 ```harn
+import { AgentLoopOptions } from "std/agent/options"
+
 fn hide_old_assistant_turns(ctx) {
   var kept = []
   var latest_assistant = nil
@@ -913,10 +955,11 @@ fn hide_old_assistant_turns(ctx) {
   return {messages: kept}
 }
 
-let result = agent_loop(task, "You are a coding assistant.", {
+let callback_opts: AgentLoopOptions = {
   loop_until_done: true,
-  context_callback: hide_old_assistant_turns
-})
+  context_callback: hide_old_assistant_turns,
+}
+let result = agent_loop(task, "You are a coding assistant.", callback_opts)
 ```
 
 ### Post-turn callback
@@ -978,18 +1021,17 @@ fn finalize_after_read(turn) {
 ### Example with retry
 
 ```harn
+import { AgentLoopOptions } from "std/agent/options"
+
+let retry_opts: AgentLoopOptions = {
+  loop_until_done: true,
+  max_iterations: 30,
+  max_nudges: 5,
+  provider: "anthropic",
+  model: "claude-sonnet-5",
+}
 retry 3 {
-  let result = agent_loop(
-    task,
-    "You are a coding assistant.",
-    {
-      loop_until_done: true,
-      max_iterations: 30,
-      max_nudges: 5,
-      provider: "anthropic",
-      model: "claude-sonnet-5"
-    }
-  )
+  let result = agent_loop(task, "You are a coding assistant.", retry_opts)
   log(result.text)
 }
 ```
@@ -1077,6 +1119,8 @@ scaffolding.
 ### Example
 
 ```harn,ignore
+import { AgentLoopOptions } from "std/agent/options"
+
 skill ship {
   description "Ship a production release"
   when_to_use "User says ship/release/deploy"
@@ -1085,15 +1129,16 @@ skill ship {
   prompt "Follow the deploy runbook. One command at a time."
 }
 
+let ship_opts: AgentLoopOptions = {
+  provider: "anthropic",
+  tools: tools(),
+  skills: ship,
+  working_files: ["infra/terraform/cluster.tf"],
+}
 let result = agent_loop(
   "Ship the new release to production",
   "You are a staff deploy engineer.",
-  {
-    provider: "anthropic",
-    tools: tools(),
-    skills: ship,
-    working_files: ["infra/terraform/cluster.tf"],
-  }
+  ship_opts,
 )
 ```
 

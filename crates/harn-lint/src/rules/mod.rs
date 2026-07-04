@@ -17,3 +17,4 @@ pub(crate) mod template_provider_identity;
 pub(crate) mod template_variant_explosion;
 pub(crate) mod trailing_comma;
 pub(crate) mod unnecessary_parentheses;
+pub(crate) mod unnormalized_options;
