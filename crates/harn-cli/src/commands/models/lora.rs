@@ -584,7 +584,7 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
         provider_supports_lora_launch,
         &lora_module_value_format,
     );
-    let warnings = plan_warnings(
+    let mut warnings = plan_warnings(
         &provider,
         &decision,
         provider_supports_lora_launch,
@@ -594,6 +594,15 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
         &effective_corpus_strategy,
         teacher.as_ref(),
     );
+    if decision.effective == "native"
+        && provider == "vllm"
+        && is_gemma4_route(&resolved.id, &resolved.family, &resolved.lineage)
+    {
+        warnings.push(
+            "Gemma 4 native tool parsing under vLLM is part of the serving contract; serialize validation/eval traffic or pin a parser version proven concurrency-safe"
+                .to_string(),
+        );
+    }
     Ok(LoraPlanReport {
         ok: true,
         base: BaseModelReport {
@@ -1274,6 +1283,16 @@ fn tool_call_serving_notes(base_model: &str, provider: &str, tool_format: &str) 
             "Gemma 4 native routes must keep the tokenizer/provider tool declaration, call, and response template identical between training and serving"
                 .to_string(),
         );
+        if provider == "vllm" {
+            notes.push(
+                "serialize Gemma 4 native-tool validation traffic or pin a vLLM release whose gemma4 parser is concurrency-safe before promotion"
+                    .to_string(),
+            );
+            notes.push(
+                "record the vLLM gemma4 tool-call parser and chat-template revision in the LoRA manifest"
+                    .to_string(),
+            );
+        }
     }
     notes
 }
