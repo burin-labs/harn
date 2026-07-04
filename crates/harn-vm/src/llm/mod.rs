@@ -136,6 +136,7 @@ pub use mock::drain_tool_recordings;
 mod healthcheck;
 pub(crate) mod provider;
 pub(crate) mod providers;
+pub mod rate_governor;
 pub(crate) mod rate_limit;
 pub mod receipts;
 pub(crate) mod route;

@@ -32,6 +32,60 @@ pub struct CapabilitiesFile {
     /// their own fall through to the named family (recursively).
     #[serde(default)]
     pub provider_family: BTreeMap<String, String>,
+    /// Per-provider adaptive rate/concurrency governor limits, keyed by
+    /// provider id. Consumed by `crate::llm::rate_governor` when the
+    /// `llm.rate_governor` flag is enabled, so provider limits stay catalog
+    /// data instead of call-site branches.
+    #[serde(default)]
+    pub provider_limits: BTreeMap<String, ProviderLimits>,
+}
+
+/// Adaptive-governor limits for one provider. Every field is optional so a
+/// catalog fragment can pin just the axes it knows; unset axes fall back to the
+/// governor's conservative built-in defaults.
+#[derive(Debug, Clone, Deserialize, Default, PartialEq)]
+pub struct ProviderLimits {
+    /// Ceiling the AIMD concurrency limiter additively climbs toward on
+    /// sustained success.
+    #[serde(default)]
+    pub max_concurrency: Option<u32>,
+    /// Floor the AIMD limiter multiplicatively decreases toward on a throttle
+    /// signal.
+    #[serde(default)]
+    pub min_concurrency: Option<u32>,
+    /// Requests-per-minute token bucket. `None` disables the RPM bucket.
+    #[serde(default)]
+    pub rpm: Option<u32>,
+    /// Tokens-per-minute token bucket, charged by estimated input + output
+    /// tokens. `None` disables the TPM bucket.
+    #[serde(default)]
+    pub tpm: Option<u64>,
+    /// Whether the AIMD adaptive concurrency loop is active. When `false`, the
+    /// concurrency limit is pinned at `max_concurrency`.
+    #[serde(default)]
+    pub adaptive: Option<bool>,
+    /// Circuit-breaker / backoff parameters. Absent means built-in defaults.
+    #[serde(default)]
+    pub backoff: Option<GovernorBackoff>,
+}
+
+/// Exponential-backoff-with-jitter parameters for the governor circuit breaker.
+/// Provider `Retry-After` values always take precedence over the computed
+/// window.
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+pub struct GovernorBackoff {
+    /// First OPEN window, in milliseconds.
+    #[serde(default)]
+    pub base_ms: Option<u64>,
+    /// Ceiling for the OPEN window, in milliseconds.
+    #[serde(default)]
+    pub max_ms: Option<u64>,
+    /// Growth factor applied per consecutive OPEN cycle.
+    #[serde(default)]
+    pub multiplier: Option<f64>,
+    /// Full-jitter toggle.
+    #[serde(default)]
+    pub jitter: Option<bool>,
 }
 
 /// Provider-wide default fields merged into matching rules.

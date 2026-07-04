@@ -37,6 +37,28 @@ pub(crate) enum ProviderCommand {
     /// claude-sonnet route native?" instantly, without running an eval.
     #[command(name = "dispatch-explain")]
     DispatchExplain(ProviderDispatchExplainArgs),
+    /// Report the LLM rate/concurrency governor's live state: the resolved
+    /// per-provider limits from the catalog, and — when the `llm.rate_governor`
+    /// flag is on and calls have flowed — each (provider, org_key)'s AIMD
+    /// concurrency limit, circuit state, in-flight count, and last throttle
+    /// signal. Deterministic, no network, no LLM. The one-call answer to "is a
+    /// provider being throttled right now, and how is the governor reacting?" —
+    /// the sibling of `dispatch-explain`.
+    Limits(ProviderLimitsArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ProviderLimitsArgs {
+    /// Restrict the report to a single provider id (e.g. `anthropic`). Omit to
+    /// report every provider with a catalog limit row plus every live governor.
+    #[arg(
+        value_parser = llm_provider_completion_parser(),
+        hide_possible_values = true
+    )]
+    pub provider: Option<String>,
+    /// Emit the structured report as JSON.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]

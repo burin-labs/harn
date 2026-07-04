@@ -865,6 +865,9 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
             ProviderCommand::DispatchExplain(explain) => {
                 commands::dispatch_explain::run(&explain);
             }
+            ProviderCommand::Limits(limits) => {
+                commands::provider_limits::run(&limits);
+            }
         },
         Command::Scan(args) => commands::scan::run(args).await,
         Command::Codemod(args) => commands::codemod::run(args).await,

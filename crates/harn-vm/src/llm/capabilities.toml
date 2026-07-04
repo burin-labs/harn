@@ -305,6 +305,39 @@ top_k_supported = false
 [provider_defaults.atlas]
 top_k_supported = false
 
+# --- source: 10-defaults/provider-limits.toml ---
+# Adaptive rate/concurrency governor limits (Layer 1 of the LLM rate governor).
+#
+# `[provider_limits.<provider>]` rows configure the per-(provider, org_key)
+# governor in `crate::llm::rate_governor`, consumed only when the
+# `llm.rate_governor` flag (`HARN_LLM_RATE_GOVERNOR=1`) is on. Keeping limits in
+# the catalog (not at call sites) makes them provider-decoupled and overridable
+# by the same catalog/flags delivery path as every other capability fact.
+#
+# Fields (all optional; unset axes fall back to the conservative built-in
+# default in rate_governor.rs):
+#   max_concurrency  ceiling the AIMD limiter climbs toward on sustained success
+#   min_concurrency  floor the AIMD limiter halves toward on a throttle signal
+#   rpm              requests-per-minute token bucket (omit to disable)
+#   tpm              tokens-per-minute token bucket (omit to disable)
+#   adaptive         AIMD on/off; false pins the limit at max_concurrency
+#   [provider_limits.<p>.backoff]  base_ms / max_ms / multiplier / jitter for the
+#                    circuit-breaker OPEN window (exp backoff + full jitter,
+#                    Retry-After always wins)
+#
+# Providers without an explicit row use the built-in default
+# (max_concurrency=8, min=1, adaptive, 1s→60s x2 backoff with jitter).
+[provider_limits.anthropic]
+max_concurrency = 12
+min_concurrency = 1
+adaptive = true
+
+[provider_limits.anthropic.backoff]
+base_ms = 1000
+max_ms = 60000
+multiplier = 2.0
+jitter = true
+
 # --- source: 20-providers/00-anthropic.toml ---
 # ---------- Anthropic (Claude) ------------------------------------------------
 

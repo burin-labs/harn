@@ -6,11 +6,12 @@
 //! value via the resolution engine in `super::rule`.
 
 use std::cell::RefCell;
+use std::collections::BTreeSet;
 use std::sync::OnceLock;
 
 use serde::Deserialize;
 
-use super::model::{Capabilities, CapabilitiesFile};
+use super::model::{Capabilities, CapabilitiesFile, ProviderLimits};
 use super::rule::lookup_with;
 use super::BUILTIN_TOML;
 
@@ -38,6 +39,44 @@ pub(super) fn builtin() -> &'static CapabilitiesFile {
 /// [`crate::llm::capability_audit`] can audit exactly what Harn ships.
 pub fn builtin_file() -> &'static CapabilitiesFile {
     builtin()
+}
+
+/// Resolve adaptive-governor limits for a provider. Thread-local user override
+/// rows win over the built-in catalog, and provider ids match
+/// case-insensitively like the rest of the capability matrix.
+pub fn provider_limits_for(provider: &str) -> Option<ProviderLimits> {
+    let key = provider.trim().to_ascii_lowercase();
+    let from_map = |file: &CapabilitiesFile| -> Option<ProviderLimits> {
+        file.provider_limits
+            .iter()
+            .find(|(name, _)| name.to_ascii_lowercase() == key)
+            .map(|(_, limits)| limits.clone())
+    };
+    USER_OVERRIDES
+        .with(|cell| cell.borrow().as_ref().and_then(from_map))
+        .or_else(|| from_map(builtin()))
+}
+
+/// Provider ids that have explicit governor limit rows in the effective
+/// catalog. Used by status surfaces so they do not hard-code a provider list.
+pub fn provider_limit_providers() -> Vec<String> {
+    let mut providers = BTreeSet::new();
+    providers.extend(
+        builtin()
+            .provider_limits
+            .keys()
+            .map(|provider| provider.to_ascii_lowercase()),
+    );
+    USER_OVERRIDES.with(|cell| {
+        if let Some(file) = cell.borrow().as_ref() {
+            providers.extend(
+                file.provider_limits
+                    .keys()
+                    .map(|provider| provider.to_ascii_lowercase()),
+            );
+        }
+    });
+    providers.into_iter().collect()
 }
 
 /// Install project-level overrides for the current thread. Usually
