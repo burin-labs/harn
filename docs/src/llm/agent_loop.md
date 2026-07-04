@@ -255,7 +255,11 @@ let result = agent_loop(
 ```
 
 `history` is **transient seeding, not session persistence** — the caller owns
-the history and passes it in on every call; nothing is stored across loops.
+the history and passes it in on every call. Seeding is additive to the target
+session's transcript, so give each call a fresh session (the default when you
+omit `session_id`): reusing a `session_id` keeps the prior turns *and* seeds the
+history again, double-counting the conversation. Persistence and seeding are
+alternatives, not layers — pick one.
 When `history` is non-empty and the task `message` is blank, the loop treats the
 last history turn as the current turn and does not append an empty user message.
 The seeded turns are ordinary transcript turns thereafter: `done_judge`,
