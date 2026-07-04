@@ -134,6 +134,7 @@ const RUNTIME_ONLY_EXCEPTIONS: &[&str] = &[
     "__host_code_mode_run",
     "__host_drain_file_edits",
     "__host_fire_session_hook",
+    "__host_llm_stream_collect",
     "__host_llm_usage_delta",
     "__host_llm_usage_snapshot",
     "__host_mcp_bootstrap",

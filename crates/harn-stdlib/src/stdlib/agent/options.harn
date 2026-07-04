@@ -1078,6 +1078,15 @@ fn __validate_llm_caller(value) {
   }
 }
 
+fn __validate_on_delta(value) {
+  if value == nil {
+    return
+  }
+  if type_of(value) != "closure" {
+    throw "agent_loop: `on_delta` must be a closure or nil; got " + type_of(value)
+  }
+}
+
 fn __validate_tool_caller(value) {
   if value == nil {
     return
@@ -1420,6 +1429,9 @@ fn __validate_agent_loop_callback_options(opts) {
   if __has_key(opts, "llm_caller") {
     __validate_llm_caller(opts.llm_caller)
   }
+  if __has_key(opts, "on_delta") {
+    __validate_on_delta(opts.on_delta)
+  }
   if __has_key(opts, "tool_caller") {
     __validate_tool_caller(opts.tool_caller)
   }
@@ -1636,6 +1648,7 @@ pub fn agent_loop_options(options = nil) {
   __validate_agent_loop_completion_options(opts)
   __validate_agent_loop_callback_options(opts)
   let llm_caller = opts?.llm_caller
+  let on_delta = opts?.on_delta
   let tool_caller = opts?.tool_caller
   let structural_validator = opts?.structural_validator
   let pre_turn_scope_classifier = opts?.pre_turn_scope_classifier
@@ -1695,6 +1708,7 @@ pub fn agent_loop_options(options = nil) {
   opts = opts
     + {
     _llm_caller: llm_caller,
+    _on_delta: on_delta,
     _tool_caller: tool_caller,
     _structural_validator: structural_validator,
     _pre_turn_scope_classifier: pre_turn_scope_classifier,

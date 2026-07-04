@@ -1523,6 +1523,7 @@ mod tests {
             blocks: None,
             logprobs: Vec::new(),
             error: None,
+            stream_chunks: Vec::new(),
         });
 
         let spec = SubAgentRunSpec {

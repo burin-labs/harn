@@ -66,6 +66,18 @@ pub fn parse_llm_mock_value(value: &serde_json::Value) -> Result<LlmMock, String
     let logprobs = optional_vec_field(object, "logprobs")?.unwrap_or_default();
     let tool_calls = parse_llm_tool_calls(object.get("tool_calls"))?;
     let error = parse_llm_mock_error(object.get("error"))?;
+    let stream_chunks = match object.get("stream_chunks") {
+        None | Some(serde_json::Value::Null) => Vec::new(),
+        Some(serde_json::Value::Array(items)) => items
+            .iter()
+            .map(|item| {
+                item.as_str()
+                    .map(|s| s.to_string())
+                    .ok_or_else(|| "stream_chunks entries must be strings".to_string())
+            })
+            .collect::<Result<Vec<_>, String>>()?,
+        Some(_) => return Err("stream_chunks must be an array of strings".to_string()),
+    };
 
     Ok(LlmMock {
         text,
@@ -84,6 +96,7 @@ pub fn parse_llm_mock_value(value: &serde_json::Value) -> Result<LlmMock, String
         blocks,
         logprobs,
         error,
+        stream_chunks,
     })
 }
 
@@ -99,6 +112,17 @@ pub fn serialize_llm_mock(mock: LlmMock) -> Result<String, String> {
     }
     if !mock.text.is_empty() {
         object.insert("text".to_string(), serde_json::Value::String(mock.text));
+    }
+    if !mock.stream_chunks.is_empty() {
+        object.insert(
+            "stream_chunks".to_string(),
+            serde_json::Value::Array(
+                mock.stream_chunks
+                    .into_iter()
+                    .map(serde_json::Value::String)
+                    .collect(),
+            ),
+        );
     }
     if !mock.tool_calls.is_empty() {
         let tool_calls = mock

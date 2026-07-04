@@ -52,6 +52,7 @@ pub fn should_handle(event: TriggerEvent) -> bool {
                 blocks: None,
                 logprobs: Vec::new(),
                 error: None,
+                stream_chunks: Vec::new(),
             });
 
             let outcome = dispatcher
@@ -137,6 +138,7 @@ pub fn should_handle(event: TriggerEvent) -> bool {
                 blocks: None,
                 logprobs: Vec::new(),
                 error: None,
+                stream_chunks: Vec::new(),
             });
 
             let first = dispatcher
@@ -390,6 +392,7 @@ pub fn should_handle(event: TriggerEvent) -> bool {
                 blocks: None,
                 logprobs: Vec::new(),
                 error: None,
+                stream_chunks: Vec::new(),
             });
 
             let event = trigger_event("issues.opened", "delivery-replay-cache");

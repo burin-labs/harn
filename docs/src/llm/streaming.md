@@ -58,6 +58,25 @@ flushes only safe visible suffixes, and `agent_stream_call(...)` returns a
 terminal `{ok, status, text, visible_text}` envelope on both success and stream
 interruption.
 
+When the harness runs a full `agent_loop` (tools, transcript, completion policy)
+rather than a single `llm_stream_call`, use the loop's own
+[`on_delta` streaming seam](agent_loop.md#streaming-visible-text-deltas) instead
+of dropping to a raw stream. Each per-turn call is issued through the streaming
+transport, and the closure sees one delta per chunk of the assistant's visible
+text — fold each delta through `agent_private_stream_delta` from
+`std/agent/stream` inside the callback to mask a `<secret>` span while it renders.
+The callback is observational and the turn still returns a complete result, so
+tool dispatch is unaffected; providers that do not stream fall back to a single
+full-text delta:
+
+```harn,ignore
+agent_loop("summarize the diff", nil, {
+  provider: "anthropic",
+  model: "claude-sonnet-5",
+  on_delta: { delta -> print(delta) },
+})
+```
+
 ## Partial deltas and usage
 
 Streaming transports emit text deltas as soon as the provider sends them. Native

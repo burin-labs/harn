@@ -203,6 +203,13 @@ pub struct LlmMock {
     /// When `Some`, this mock synthesizes an error instead of an
     /// `LlmResult`. `text`/`tool_calls` are ignored for error mocks.
     pub error: Option<MockError>,
+    /// Ordered visible-text chunks emitted as separate streaming deltas when
+    /// this mock is consumed through a streaming caller (e.g. `agent_loop`'s
+    /// `on_delta` seam). Empty = the default single-delta behavior, where the
+    /// full `text` is delivered as one delta. When non-empty and `text` is
+    /// empty, `text` is derived from the concatenation of the chunks so the
+    /// non-streaming result and the streamed transcript agree exactly.
+    pub stream_chunks: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -235,6 +242,25 @@ thread_local! {
     static LLM_MOCK_CALLS: RefCell<Vec<LlmMockCall>> = const { RefCell::new(Vec::new()) };
     static LLM_PROMPT_CACHE: RefCell<BTreeSet<String>> = const { RefCell::new(BTreeSet::new()) };
     static LLM_MOCK_SCOPES: RefCell<Vec<LlmMockScope>> = const { RefCell::new(Vec::new()) };
+    // Scripted streaming chunks for the most recently matched builtin mock,
+    // stashed by `build_mock_result` and drained by the streaming delta pump in
+    // `api.rs`. Per-call and same-thread: set during `mock_llm_response` and
+    // taken immediately after in the same synchronous call on the LocalSet.
+    static LLM_MOCK_STREAM_CHUNKS: RefCell<Option<Vec<String>>> = const { RefCell::new(None) };
+}
+
+/// Record the scripted streaming chunks for the mock response currently being
+/// assembled. Overwrites any prior value; cleared at the top of each
+/// `mock_llm_response` so a chunk-less response never inherits stale chunks.
+pub(crate) fn set_mock_stream_chunks(chunks: Option<Vec<String>>) {
+    LLM_MOCK_STREAM_CHUNKS.with(|slot| *slot.borrow_mut() = chunks);
+}
+
+/// Take (and clear) the scripted streaming chunks for the just-produced mock
+/// response. Returns `None` when the response scripted no chunks, in which case
+/// the streaming pump falls back to a single full-text delta.
+pub(crate) fn take_mock_stream_chunks() -> Option<Vec<String>> {
+    LLM_MOCK_STREAM_CHUNKS.with(|slot| slot.borrow_mut().take())
 }
 
 fn cli_llm_mock_scopes() -> MutexGuard<'static, BTreeMap<u64, CliLlmMockState>> {
@@ -389,6 +415,24 @@ fn record_llm_mock_call(request: &super::api::LlmRequestPayload) {
 
 /// Build an LlmResult from a matched mock.
 fn build_mock_result(mock: &LlmMock, last_msg_len: usize) -> LlmResult {
+    // A mock may script an ordered list of visible-text chunks for streaming
+    // callers. Derive the flat `text` from their concatenation when `text` was
+    // left empty, so the non-streaming result and the streamed transcript agree
+    // byte-for-byte, and stash the chunks for the streaming delta pump.
+    let effective_text = if !mock.stream_chunks.is_empty() && mock.text.is_empty() {
+        mock.stream_chunks.concat()
+    } else {
+        mock.text.clone()
+    };
+    set_mock_stream_chunks(if mock.stream_chunks.is_empty() {
+        None
+    } else {
+        Some(mock.stream_chunks.clone())
+    });
+    let mock = &LlmMock {
+        text: effective_text,
+        ..mock.clone()
+    };
     let (tool_calls, blocks) = if let Some(blocks) = &mock.blocks {
         (mock.tool_calls.clone(), blocks.clone())
     } else {
@@ -670,6 +714,7 @@ pub(crate) fn record_cli_llm_result(request: &super::api::LlmRequestPayload, res
         blocks: Some(result.blocks.clone()),
         logprobs: result.logprobs.clone(),
         error: None,
+        stream_chunks: Vec::new(),
     });
 }
 
@@ -936,6 +981,9 @@ pub(crate) fn mock_llm_response(
     request: &super::api::LlmRequestPayload,
 ) -> Result<LlmResult, VmError> {
     record_llm_mock_call(request);
+    // Reset per-call so a response that scripts no chunks (auto tool calls,
+    // generated prose, error mocks) never inherits a prior mock's chunks.
+    set_mock_stream_chunks(None);
 
     let messages = &request.messages;
     let system = request.system.as_deref();
@@ -1084,6 +1132,7 @@ mod tests {
             blocks: None,
             logprobs: Vec::new(),
             error: None,
+            stream_chunks: Vec::new(),
         }
     }
 

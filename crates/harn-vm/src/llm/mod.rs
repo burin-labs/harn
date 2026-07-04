@@ -202,7 +202,7 @@ use std::sync::Arc;
 
 use self::api::{vm_build_llm_result, vm_call_completion_full};
 use self::call::{llm_call_impl, llm_safe_envelope_err, llm_safe_envelope_ok};
-use self::stream_builtins::{llm_stream_builtin, llm_stream_call_impl};
+use self::stream_builtins::{llm_stream_builtin, llm_stream_call_impl, llm_stream_collect_impl};
 use self::trace::trace_llm_call;
 
 pub use self::api::{
@@ -374,6 +374,24 @@ async fn llm_stream_call_builtin(
     llm_stream_call_impl(args).await
 }
 
+/// Streaming seam under `agent_loop`'s `on_delta:` option: run one LLM call
+/// through the streaming transport, forward each visible-text delta to the
+/// `on_delta` closure, and return the same normalized result dict as `llm_call`
+/// (tool calls + usage preserved so tool dispatch is unaffected). Internal
+/// primitive — the public surface is the `on_delta:` agent-loop option.
+#[harn_builtin(
+    sig = "__host_llm_stream_collect(prompt: string, system?: string|nil, options?: dict|nil, on_delta?: any|nil) -> dict",
+    kind = "async",
+    category = "llm.host",
+    runtime_only = true
+)]
+async fn llm_stream_collect_builtin(
+    ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    llm_stream_collect_impl(&ctx, args).await
+}
+
 /// Rank a tool registry for Harn-managed client-mode tool search.
 #[harn_builtin(
     sig = "__host_tool_search_score(query: string, registry: dict, opts?: dict|nil) -> list",
@@ -474,6 +492,7 @@ const LLM_RUNTIME_PRIMITIVE_BUILTINS: &[&VmBuiltinDef] = &[
     &COST_ROUTE_BUILTIN_DEF,
     &LLM_CALL_BUILTIN_DEF,
     &LLM_STREAM_CALL_BUILTIN_DEF,
+    &LLM_STREAM_COLLECT_BUILTIN_DEF,
     &LLM_CALL_SAFE_BUILTIN_DEF,
     // llm.structured
     &LLM_CALL_STRUCTURED_BUILTIN_DEF,
@@ -930,6 +949,7 @@ mod tests {
             blocks: None,
             logprobs: Vec::new(),
             error: None,
+            stream_chunks: Vec::new(),
         });
         mock::push_llm_mock(mock::LlmMock {
             text: "{\"name\":\"Ada\"}".to_string(),
@@ -948,6 +968,7 @@ mod tests {
             blocks: None,
             logprobs: Vec::new(),
             error: None,
+            stream_chunks: Vec::new(),
         });
 
         let response = execute_llm_call(None, base_opts(), None, None)
