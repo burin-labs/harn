@@ -397,7 +397,7 @@ jobs:
           cache-on-failure: true
           cache-bin: false
       - run: make lint-diagnostic-codes
-      # Pure-Python sync guards. check-generated-registry is the meta-guard
+      # Sync guards. check-generated-registry is the meta-guard
       # that keeps scripts/generated_artifacts.toml in agreement with the
       # Makefile `all:` recipe and the workflows; check-receipt-structs and
       # check-tree-sitter-keywords are cross-crate sync guards that need no
