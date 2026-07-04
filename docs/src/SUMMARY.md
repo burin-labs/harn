@@ -154,6 +154,7 @@
   - [Profile bulletins](./personas/profile-bulletins.md)
   - [Merge captain](./personas/merge-captain.md)
 - [Skill provenance](./skill-provenance.md)
+- [Skill activation evidence](./skill-activation-evidence.md)
 - [Sessions](./sessions.md)
 - [Workspace anchor cache contract](./agents/cache_contract.md)
 - [Session bundles](./session-bundles.md)
