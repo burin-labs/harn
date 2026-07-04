@@ -61,6 +61,20 @@ fn is_disallowed_ipv4(ip: Ipv4Addr, allow_loopback: bool) -> bool {
     if a == 198 && (b == 18 || b == 19) {
         return true;
     }
+    let [_, _, c, _] = ip.octets();
+    // IETF protocol assignments 192.0.0/24 (RFC 6890); is_documentation()
+    // only covers TEST-NET-1 192.0.2/24.
+    if a == 192 && b == 0 && c == 0 {
+        return true;
+    }
+    // 6to4 relay anycast 192.88.99/24 (RFC 7526, deprecated).
+    if a == 192 && b == 88 && c == 99 {
+        return true;
+    }
+    // Reserved class E 240/4 (is_broadcast only covers 255.255.255.255).
+    if a >= 240 {
+        return true;
+    }
     false
 }
 
@@ -304,6 +318,19 @@ mod tests {
         assert!(!is_disallowed_ip(v4("100.128.0.1"), false));
         assert!(is_disallowed_ip(v4("198.18.0.1"), false));
         assert!(is_disallowed_ip(v4("198.19.255.254"), false));
+    }
+
+    #[test]
+    fn ipv4_blocks_remaining_reserved_ranges() {
+        assert!(is_disallowed_ip(v4("192.0.0.1"), false)); // IETF protocol assignments
+        assert!(is_disallowed_ip(v4("192.0.0.255"), false));
+        assert!(is_disallowed_ip(v4("192.88.99.1"), false)); // 6to4 relay anycast
+        assert!(is_disallowed_ip(v4("240.0.0.1"), false)); // class E
+        assert!(is_disallowed_ip(v4("250.10.20.30"), false));
+        // Nearest public neighbours stay open.
+        assert!(!is_disallowed_ip(v4("192.0.1.1"), false));
+        assert!(!is_disallowed_ip(v4("192.88.98.1"), false));
+        assert!(!is_disallowed_ip(v4("192.88.100.1"), false));
     }
 
     #[test]
