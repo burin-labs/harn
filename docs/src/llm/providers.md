@@ -190,7 +190,13 @@ new buckets or regress no-write/non-tool behavior. The
 and manifests with a stable contract id derived from the base model, provider,
 effective tool format, dataset format, and chat template, plus
 `contract.training_contract` fields for assistant mask, packing, parser
-ownership, and split policy.
+ownership, and split policy. The plan's `launch` block also emits the
+post-training `harn models lora manifest` command that records the adapter path,
+request model, trainer, teacher, precision metadata, and export manifest before
+inspection or serving. Treat that manifest as the handoff receipt from any
+external trainer back into Harn; the same block includes a
+`harn provider tool-probe` command for validating the served adapter route before
+promotion evals.
 
 Harn maintains local runtime risk profiles for hybrid-cache families
 (Qwen3.6, Gemma4). The profile table records preferred runtimes,

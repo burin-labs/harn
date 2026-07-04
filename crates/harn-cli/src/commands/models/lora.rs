@@ -563,7 +563,7 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
         "--tool-format".to_string(),
         decision.effective.clone(),
         "--corpus".to_string(),
-        export_corpus_arg,
+        export_corpus_arg.clone(),
         "--out".to_string(),
         "ADAPTER_DATASET.jsonl".to_string(),
         "--manifest".to_string(),
@@ -574,6 +574,59 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
         template.name.clone(),
     ];
     export_command.extend(precision_target_metadata(&precision));
+    let mut manifest_command = vec![
+        "harn".to_string(),
+        "models".to_string(),
+        "lora".to_string(),
+        "manifest".to_string(),
+        "--base".to_string(),
+        args.base_model.clone(),
+        "--provider".to_string(),
+        provider.clone(),
+        "--tool-format".to_string(),
+        decision.effective.clone(),
+        "--dataset".to_string(),
+        "ADAPTER_DATASET.jsonl".to_string(),
+        "--corpus".to_string(),
+        export_corpus_arg,
+        "--export-manifest".to_string(),
+        "ADAPTER_DATASET.manifest.json".to_string(),
+        "--adapter-name".to_string(),
+        adapter_name.clone(),
+        "--adapter-path".to_string(),
+        adapter_ref,
+        "--request-model".to_string(),
+        request_model.clone(),
+        "--chat-template".to_string(),
+        template.name.clone(),
+        "--trainer".to_string(),
+        "trl_sft_trainer".to_string(),
+        "--method".to_string(),
+        method.clone(),
+        "--rank".to_string(),
+        rank.to_string(),
+        "--alpha".to_string(),
+        alpha.to_string(),
+        "--dropout".to_string(),
+        dropout.to_string(),
+    ];
+    if let Some(teacher) = &teacher {
+        manifest_command.extend(["--teacher".to_string(), teacher.selector.clone()]);
+    }
+    manifest_command.extend(precision_target_metadata(&precision));
+    let tool_probe_command = vec![
+        "harn".to_string(),
+        "provider".to_string(),
+        "tool-probe".to_string(),
+        provider.clone(),
+        "--model".to_string(),
+        request_model.clone(),
+        "--mode".to_string(),
+        "both".to_string(),
+        "--repeat".to_string(),
+        "5".to_string(),
+        "--json".to_string(),
+    ];
     let serving = serving_recipe(
         &resolved.id,
         &provider,
@@ -666,8 +719,10 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
         launch: PlanLaunchHints {
             preflight_command,
             export_command,
+            manifest_command,
             inspect_command,
             local_launch_command: launch_command,
+            tool_probe_command,
             request_model,
         },
         warnings,
@@ -1906,8 +1961,10 @@ struct ServingRecipe {
 struct PlanLaunchHints {
     preflight_command: Vec<String>,
     export_command: Vec<String>,
+    manifest_command: Vec<String>,
     inspect_command: Vec<String>,
     local_launch_command: Vec<String>,
+    tool_probe_command: Vec<String>,
     request_model: String,
 }
 
@@ -2166,6 +2223,63 @@ mod tests {
             .stop_conditions
             .iter()
             .any(|item| item.contains("no-write")));
+    }
+
+    #[test]
+    fn lora_plan_emits_post_training_receipt_and_probe_commands() {
+        let args = ModelsLoraPlanArgs {
+            base_model: "local-gemma4-e4b".to_string(),
+            provider: Some("vllm".to_string()),
+            tool_format: "json".to_string(),
+            corpus: Some("lora-corpus".to_string()),
+            teacher: Some("dashscope/qwen3-coder-next".to_string()),
+            corpus_strategy: "refresh".to_string(),
+            method: "qlora".to_string(),
+            rank: 24,
+            alpha: Some(48),
+            dropout: 0.1,
+            json: true,
+        };
+        let report = plan_report(&args).expect("report");
+        assert!(report
+            .launch
+            .manifest_command
+            .windows(2)
+            .any(|pair| pair == ["--export-manifest", "ADAPTER_DATASET.manifest.json"]));
+        assert!(report
+            .launch
+            .manifest_command
+            .windows(2)
+            .any(|pair| pair == ["--chat-template", "harn_text_tool_calls_json_fences"]));
+        assert!(report
+            .launch
+            .manifest_command
+            .windows(2)
+            .any(|pair| pair == ["--teacher", "dashscope/qwen3-coder-next"]));
+        assert!(report.launch.manifest_command.windows(2).any(|pair| pair
+            == [
+                "--target-metadata",
+                "serving_base_precision=same_quantization_family_as_training_or_revalidate"
+            ]));
+        assert_eq!(
+            report.launch.tool_probe_command,
+            [
+                "harn",
+                "provider",
+                "tool-probe",
+                "vllm",
+                "--model",
+                "ADAPTER_MODEL",
+                "--mode",
+                "both",
+                "--repeat",
+                "5",
+                "--json",
+            ]
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+        );
     }
 
     #[test]
