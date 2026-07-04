@@ -449,12 +449,18 @@ impl TypeChecker {
                     Some(TypeExpr::Named("dict".into()))
                 }
             }
-            Node::Closure { params, body, .. } => {
-                // If all params are typed and we can infer a return type, produce FnType
+            Node::Closure {
+                params,
+                return_type,
+                body,
+                ..
+            } => {
                 let all_typed = params.iter().all(|p| p.type_expr.is_some());
-                if all_typed && !params.is_empty() {
-                    let param_types: Vec<TypeExpr> =
-                        params.iter().filter_map(|p| p.type_expr.clone()).collect();
+                if all_typed || return_type.is_some() {
+                    let param_types: Vec<TypeExpr> = params
+                        .iter()
+                        .map(|p| p.type_expr.clone().unwrap_or_else(Self::wildcard_type))
+                        .collect();
                     // Infer return type in a scope that includes the
                     // closure's typed params; otherwise the body's
                     // last-expression reference to a param is treated
@@ -465,9 +471,9 @@ impl TypeChecker {
                     for param in params {
                         closure_scope.define_var(&param.name, param.type_expr.clone());
                     }
-                    let ret = body
-                        .last()
-                        .and_then(|last| self.infer_type(last, &closure_scope));
+                    let ret = return_type
+                        .clone()
+                        .or_else(|| self.infer_closure_body_return(body, &closure_scope));
                     if let Some(ret_type) = ret {
                         return Some(TypeExpr::FnType {
                             params: param_types,
@@ -1587,7 +1593,15 @@ impl TypeChecker {
         scope: &TypeScope,
     ) -> InferredType {
         match &arg.node {
-            Node::Closure { params, body, .. } => {
+            Node::Closure {
+                params,
+                return_type,
+                body,
+                ..
+            } => {
+                if let Some(return_type) = return_type {
+                    return Some(return_type.clone());
+                }
                 let mut closure_scope = scope.child();
                 for (i, param) in params.iter().enumerate() {
                     let param_ty = param
@@ -1739,7 +1753,12 @@ impl TypeChecker {
         }
 
         match &right.node {
-            Node::Closure { params, body, .. } => {
+            Node::Closure {
+                params,
+                return_type,
+                body,
+                ..
+            } => {
                 let mut closure_scope = scope.child();
                 for (idx, param) in params.iter().enumerate() {
                     let ty = if idx == 0 {
@@ -1749,7 +1768,9 @@ impl TypeChecker {
                     };
                     closure_scope.define_var(&param.name, ty);
                 }
-                self.infer_block_type(body, &closure_scope)
+                return_type
+                    .clone()
+                    .or_else(|| self.infer_block_type(body, &closure_scope))
             }
             Node::Identifier(name) => {
                 if let Some(sig) = scope.get_fn(name).cloned() {

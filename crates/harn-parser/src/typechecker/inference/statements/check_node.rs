@@ -1,6 +1,25 @@
 use super::*;
 
 impl TypeChecker {
+    fn defer_forbidden_transfer(body: &[SNode]) -> Option<(&'static str, Span)> {
+        body.iter().find_map(Self::node_defer_forbidden_transfer)
+    }
+
+    fn node_defer_forbidden_transfer(node: &SNode) -> Option<(&'static str, Span)> {
+        match &node.node {
+            Node::ReturnStmt { .. } => Some(("return", node.span)),
+            Node::YieldExpr { .. } => Some(("yield", node.span)),
+            Node::Closure { .. }
+            | Node::FnDecl { .. }
+            | Node::ToolDecl { .. }
+            | Node::Pipeline { .. }
+            | Node::OverrideDecl { .. } => None,
+            _ => crate::visit::immediate_children(node)
+                .into_iter()
+                .find_map(Self::node_defer_forbidden_transfer),
+        }
+    }
+
     pub(in crate::typechecker) fn check_node(&mut self, snode: &SNode, scope: &mut TypeScope) {
         let span = snode.span;
         match &snode.node {
@@ -384,6 +403,14 @@ impl TypeChecker {
                         refs.apply_falsy(scope);
                     }
                 }
+                if !Self::block_definitely_exits(then_body) {
+                    Self::invalidate_assigned_narrowings(scope, then_body);
+                }
+                if let Some(else_body) = else_body {
+                    if !Self::block_definitely_exits(else_body) {
+                        Self::invalidate_assigned_narrowings(scope, else_body);
+                    }
+                }
             }
 
             Node::ForIn {
@@ -395,7 +422,7 @@ impl TypeChecker {
                 let mut loop_scope = scope.child();
                 // Narrowing established before the loop only holds for the
                 // first iteration if the subject is reassigned in the body.
-                Self::invalidate_loop_assigned_narrowings(&mut loop_scope, body);
+                Self::invalidate_assigned_narrowings(&mut loop_scope, body);
                 let iter_type = self.infer_type(iterable, scope);
                 if let BindingPattern::Identifier(variable) = pattern {
                     let elem_type = iter_type
@@ -434,7 +461,7 @@ impl TypeChecker {
                 }
                 self.check_block(body, &mut loop_scope);
                 // Statements after the loop see the post-reassignment types.
-                Self::invalidate_loop_assigned_narrowings(scope, body);
+                Self::invalidate_assigned_narrowings(scope, body);
             }
 
             Node::WhileLoop { condition, body } => {
@@ -445,11 +472,11 @@ impl TypeChecker {
                 // first, then apply the loop condition's own refinements —
                 // the condition is re-tested every iteration, so its
                 // narrowing stays trustworthy inside the body.
-                Self::invalidate_loop_assigned_narrowings(&mut loop_scope, body);
+                Self::invalidate_assigned_narrowings(&mut loop_scope, body);
                 refs.apply_truthy(&mut loop_scope);
                 self.check_block(body, &mut loop_scope);
                 // Statements after the loop see the post-reassignment types.
-                Self::invalidate_loop_assigned_narrowings(scope, body);
+                Self::invalidate_assigned_narrowings(scope, body);
             }
 
             Node::RequireStmt { condition, message } => {
@@ -1278,7 +1305,19 @@ impl TypeChecker {
                 self.check_block(body, &mut block_scope);
             }
 
-            Node::ScopeBlock { body } | Node::DeferStmt { body } => {
+            Node::ScopeBlock { body } => {
+                let mut block_scope = scope.child();
+                self.check_block(body, &mut block_scope);
+            }
+
+            Node::DeferStmt { body } => {
+                if let Some((keyword, transfer_span)) = Self::defer_forbidden_transfer(body) {
+                    self.error_at(
+                        Code::OrchestrationType,
+                        format!("`{keyword}` cannot be used inside `defer`"),
+                        transfer_span,
+                    );
+                }
                 let mut block_scope = scope.child();
                 self.check_block(body, &mut block_scope);
             }
@@ -1304,7 +1343,12 @@ impl TypeChecker {
                 self.check_block(body, &mut route_scope);
             }
 
-            Node::Closure { params, body, .. } => {
+            Node::Closure {
+                params,
+                return_type,
+                body,
+                ..
+            } => {
                 let mut closure_scope = scope.child();
                 for p in params {
                     closure_scope.define_var(&p.name, p.type_expr.clone());
@@ -1321,12 +1365,40 @@ impl TypeChecker {
                 let saved_stream_emit_types = self.stream_emit_types.clone();
                 self.stream_fn_depth = 0;
                 self.stream_emit_types.clear();
-                self.expected_return_types.push(None);
-                self.check_block(body, &mut closure_scope);
+                self.expected_return_types.push(return_type.clone());
+                self.check_block_with_expected_tail(body, return_type.as_ref(), &mut closure_scope);
                 self.expected_return_types.pop();
                 self.stream_fn_depth = saved_stream_depth;
                 self.stream_emit_types = saved_stream_emit_types;
                 self.fn_depth -= 1;
+
+                if let Some(expected_return) = return_type {
+                    let mut ret_scope = closure_scope.clone();
+                    ret_scope.restore_narrowed_vars();
+                    for stmt in body {
+                        self.check_return_type(stmt, expected_return, span, &mut ret_scope);
+                    }
+                    if !self.body_cannot_fall_through(body, &ret_scope) {
+                        let actual_return = self
+                            .infer_closure_body_return(body, &ret_scope)
+                            .unwrap_or_else(|| TypeExpr::Named("nil".into()));
+                        if !self.types_compatible(expected_return, &actual_return, &ret_scope) {
+                            let value_span = body.last().map(|stmt| stmt.span).unwrap_or(span);
+                            self.type_mismatch_at(
+                                Code::ClosureReturnTypeMismatch,
+                                "closure return value",
+                                expected_return,
+                                &actual_return,
+                                value_span,
+                                (
+                                    Some((span, "closure return type declared here".to_string())),
+                                    Some(value_span),
+                                ),
+                                &ret_scope,
+                            );
+                        }
+                    }
+                }
             }
 
             Node::ListLiteral(elements) => {

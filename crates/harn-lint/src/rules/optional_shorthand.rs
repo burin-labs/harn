@@ -92,8 +92,16 @@ impl<'a, 'd> State<'a, 'd> {
                 }
                 self.visit_block(body);
             }
-            Node::Closure { params, body, .. } => {
+            Node::Closure {
+                params,
+                return_type,
+                body,
+                ..
+            } => {
                 self.visit_typed_params(params, span);
+                if let Some(ty) = return_type {
+                    self.visit_type(ty, span);
+                }
                 self.visit_block(body);
             }
             Node::TypeDecl { type_expr, .. } => {

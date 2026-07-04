@@ -272,9 +272,11 @@ impl TypeChecker {
             HitlKind::DualControl => self
                 .hitl_named_or_positional(args, "action", 2)
                 .and_then(|node| match &node.node {
-                    Node::Closure { body, .. } => {
-                        body.last().and_then(|last| self.infer_type(last, scope))
-                    }
+                    Node::Closure {
+                        return_type, body, ..
+                    } => return_type
+                        .clone()
+                        .or_else(|| body.last().and_then(|last| self.infer_type(last, scope))),
                     Node::Identifier(name) => {
                         scope.get_fn(name).and_then(|sig| sig.return_type.clone())
                     }

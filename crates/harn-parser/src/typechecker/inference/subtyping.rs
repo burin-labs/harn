@@ -4,9 +4,9 @@
 //! checks called from every assignment / argument / return position.
 //! `resolve_alias` flattens named type aliases before subtype dispatch so
 //! aliases never reach the match arms in `types_compatible_at`.
-//! `satisfies_interface` / `interface_mismatch_reason` implement implicit
-//! interface satisfaction by structurally matching impl-block method
-//! signatures against the interface declaration.
+//! `interface_mismatch_reason_for_type` implements implicit interface
+//! satisfaction by structurally matching impl-block method signatures against
+//! the interface declaration.
 
 use std::collections::{BTreeMap, HashSet};
 
@@ -30,26 +30,78 @@ fn open_shape_tail_is_gradual(rests: &[TypeExpr]) -> bool {
 }
 
 impl TypeChecker {
-    /// Check if a type satisfies an interface (Go-style implicit satisfaction).
-    /// A type satisfies an interface if its impl block has all the required methods.
-    pub(in crate::typechecker) fn satisfies_interface(
+    /// Return a detailed reason why a type does not satisfy an interface, or
+    /// `None` if it does satisfy it. Used for actionable diagnostics.
+    pub(in crate::typechecker) fn interface_mismatch_reason_for_type(
         &self,
-        type_name: &str,
-        interface_name: &str,
-        interface_bindings: &BTreeMap<String, TypeExpr>,
+        concrete_type: &TypeExpr,
+        bound: &TypeExpr,
         scope: &TypeScope,
-    ) -> bool {
-        self.interface_mismatch_reason(type_name, interface_name, interface_bindings, scope)
-            .is_none()
+    ) -> Option<String> {
+        let Some(type_name) = Self::base_type_name(concrete_type) else {
+            return Some("only named types can satisfy interfaces".into());
+        };
+        let Some(interface_name) = Self::base_type_name(bound) else {
+            return Some(format!("'{}' is not an interface type", format_type(bound)));
+        };
+
+        let interface_bindings = self.interface_type_bindings(bound, interface_name, scope);
+        let impl_bindings = self.impl_type_bindings(concrete_type, type_name, scope);
+        self.interface_mismatch_reason_with_bindings(
+            type_name,
+            interface_name,
+            &interface_bindings,
+            &impl_bindings,
+            scope,
+        )
     }
 
-    /// Return a detailed reason why a type does not satisfy an interface, or None
-    /// if it does satisfy it. Used for producing actionable warning messages.
-    pub(in crate::typechecker) fn interface_mismatch_reason(
+    fn interface_type_bindings(
+        &self,
+        interface_type: &TypeExpr,
+        interface_name: &str,
+        scope: &TypeScope,
+    ) -> BTreeMap<String, TypeExpr> {
+        let mut bindings = BTreeMap::new();
+        let Some(interface_info) = scope.get_interface(interface_name) else {
+            return bindings;
+        };
+        if let TypeExpr::Applied { args, .. } = interface_type {
+            for (type_param, arg) in interface_info.type_params.iter().zip(args.iter()) {
+                bindings.insert(type_param.name.clone(), arg.clone());
+            }
+        }
+        bindings
+    }
+
+    fn impl_type_bindings(
+        &self,
+        concrete_type: &TypeExpr,
+        type_name: &str,
+        scope: &TypeScope,
+    ) -> BTreeMap<String, TypeExpr> {
+        let mut bindings = BTreeMap::new();
+        let TypeExpr::Applied { args, .. } = concrete_type else {
+            return bindings;
+        };
+        if let Some(struct_info) = scope.get_struct(type_name) {
+            for (type_param, arg) in struct_info.type_params.iter().zip(args.iter()) {
+                bindings.insert(type_param.name.clone(), arg.clone());
+            }
+        } else if let Some(enum_info) = scope.get_enum(type_name) {
+            for (type_param, arg) in enum_info.type_params.iter().zip(args.iter()) {
+                bindings.insert(type_param.name.clone(), arg.clone());
+            }
+        }
+        bindings
+    }
+
+    fn interface_mismatch_reason_with_bindings(
         &self,
         type_name: &str,
         interface_name: &str,
         interface_bindings: &BTreeMap<String, TypeExpr>,
+        impl_bindings: &BTreeMap<String, TypeExpr>,
         scope: &TypeScope,
     ) -> Option<String> {
         let interface_info = match scope.get_interface(interface_name) {
@@ -102,21 +154,22 @@ impl TypeChecker {
                     &iface_param.type_expr,
                     impl_method.param_types.get(i).and_then(|t| t.as_ref()),
                 ) {
+                    let actual = Self::apply_type_bindings(actual, impl_bindings);
                     if let Err(message) = Self::extract_type_bindings(
                         expected,
-                        actual,
+                        &actual,
                         &associated_type_names,
                         &mut bindings,
                     ) {
                         return Some(message);
                     }
                     let expected = Self::apply_type_bindings(expected, &bindings);
-                    if !self.types_compatible(&expected, actual, scope) {
+                    if !self.types_compatible(&expected, &actual, scope) {
                         return Some(format!(
                             "method '{}' parameter {} has type '{}', expected '{}'",
                             iface_method.name,
                             i + 1,
-                            format_type(actual),
+                            format_type(&actual),
                             format_type(&expected),
                         ));
                     }
@@ -126,20 +179,21 @@ impl TypeChecker {
             if let (Some(expected_ret), Some(actual_ret)) =
                 (&iface_method.return_type, &impl_method.return_type)
             {
+                let actual_ret = Self::apply_type_bindings(actual_ret, impl_bindings);
                 if let Err(message) = Self::extract_type_bindings(
                     expected_ret,
-                    actual_ret,
+                    &actual_ret,
                     &associated_type_names,
                     &mut bindings,
                 ) {
                     return Some(message);
                 }
                 let expected_ret = Self::apply_type_bindings(expected_ret, &bindings);
-                if !self.types_compatible(&expected_ret, actual_ret, scope) {
+                if !self.types_compatible(&expected_ret, &actual_ret, scope) {
                     return Some(format!(
                         "method '{}' returns '{}', expected '{}'",
                         iface_method.name,
-                        format_type(actual_ret),
+                        format_type(&actual_ret),
                         format_type(&expected_ret),
                     ));
                 }
@@ -159,6 +213,46 @@ impl TypeChecker {
             }
         }
         None
+    }
+
+    fn where_bound_covers_interface(
+        &self,
+        bound: &TypeExpr,
+        expected: &TypeExpr,
+        scope: &TypeScope,
+    ) -> bool {
+        let Some(bound_name) = Self::base_type_name(bound) else {
+            return false;
+        };
+        let Some(expected_name) = Self::base_type_name(expected) else {
+            return false;
+        };
+        if bound_name != expected_name {
+            return false;
+        }
+        match (bound, expected) {
+            (
+                TypeExpr::Applied {
+                    args: bound_args, ..
+                },
+                TypeExpr::Applied {
+                    args: expected_args,
+                    ..
+                },
+            ) => {
+                bound_args.len() == expected_args.len()
+                    && expected_args
+                        .iter()
+                        .zip(bound_args.iter())
+                        .all(|(expected, bound)| {
+                            self.types_compatible(expected, bound, scope)
+                                && self.types_compatible(bound, expected, scope)
+                        })
+            }
+            (TypeExpr::Applied { .. }, TypeExpr::Named(_)) => true,
+            (TypeExpr::Named(_), TypeExpr::Applied { .. }) => false,
+            _ => true,
+        }
     }
 
     pub(in crate::typechecker) fn types_compatible(
@@ -258,28 +352,19 @@ impl TypeChecker {
 
         // Interface satisfaction: if expected names an interface, check method compatibility.
         if let Some(iface_name) = Self::base_type_name(&expected) {
-            if let Some(interface_info) = scope.get_interface(iface_name) {
-                let mut interface_bindings = BTreeMap::new();
-                if let TypeExpr::Applied { args, .. } = &expected {
-                    for (type_param, arg) in interface_info.type_params.iter().zip(args.iter()) {
-                        interface_bindings.insert(type_param.name.clone(), arg.clone());
-                    }
-                }
+            if scope.get_interface(iface_name).is_some() {
                 if let Some(type_name) = Self::base_type_name(&actual) {
                     if scope.is_generic_type_param(type_name)
                         && scope
                             .get_where_constraints(type_name)
                             .iter()
-                            .any(|bound| bound == iface_name)
+                            .any(|bound| self.where_bound_covers_interface(bound, &expected, scope))
                     {
                         return true;
                     }
-                    return self.satisfies_interface(
-                        type_name,
-                        iface_name,
-                        &interface_bindings,
-                        scope,
-                    );
+                    return self
+                        .interface_mismatch_reason_for_type(&actual, &expected, scope)
+                        .is_none();
                 }
                 return false;
             }
@@ -491,12 +576,10 @@ impl TypeChecker {
             }
             (TypeExpr::Named(n), TypeExpr::DictType(_, _)) if n == "dict" => true,
             (TypeExpr::DictType(_, _), TypeExpr::Named(n)) if n == "dict" => true,
-            // FnType subtyping: parameters are contravariant (an
-            // `fn(float)` can stand in for an expected `fn(int)`
-            // because floats contain ints); return types remain
-            // covariant. Previously params were checked covariantly,
-            // which let `fn(int)` stand in for `fn(float)` — an
-            // unsound callback substitution.
+            // Function parameters are contravariant (`fn(float)` can stand in
+            // for expected `fn(int)` because floats contain ints), while returns
+            // stay covariant. A function may also accept fewer parameters than
+            // the context supplies; surplus callback arguments are ignored.
             (
                 TypeExpr::FnType {
                     params: ep,
@@ -507,13 +590,14 @@ impl TypeChecker {
                     return_type: ar,
                 },
             ) => {
-                ep.len() == ap.len()
+                ap.len() <= ep.len()
                     && ep.iter().zip(ap.iter()).all(|(e, a)| {
                         self.types_compatible_at(Polarity::Contravariant, e, a, scope)
                     })
                     && self.types_compatible(er, ar, scope)
             }
-            // FnType is compatible with Named("closure") for backward compat
+            // The dynamic `closure` nominal remains compatible with precise
+            // function shapes.
             (TypeExpr::FnType { .. }, TypeExpr::Named(n)) if n == "closure" => true,
             (TypeExpr::Named(n), TypeExpr::FnType { .. }) if n == "closure" => true,
             // Literal types: identical literals match; a literal flows

@@ -1,0 +1,9 @@
+pipeline test(task) {
+  fn bad(box: {value: unknown}) -> string {
+    if type_of(box.value) == "string" {
+      return box.value
+    }
+    unreachable(box.value)
+  }
+  __io_println(bad({value: 1}))
+}

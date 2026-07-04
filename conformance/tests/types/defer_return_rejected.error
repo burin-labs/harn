@@ -1,0 +1,1 @@
+`return` cannot be used inside `defer`

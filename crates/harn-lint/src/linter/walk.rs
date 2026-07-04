@@ -122,7 +122,7 @@ impl<'a> Linter<'a> {
                 }
                 self.record_callable_signature_type_references(params, return_type);
                 for clause in where_clauses {
-                    self.type_references.insert(clause.bound.clone());
+                    self.record_type_expr_references(&clause.bound);
                 }
                 self.check_cyclomatic_complexity(name, body, snode.span);
                 self.push_scope();

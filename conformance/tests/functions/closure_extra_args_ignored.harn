@@ -1,0 +1,9 @@
+pipeline default() {
+  fn call_pair(f: fn(int, int) -> int) -> int {
+    return f(2, 99)
+  }
+  let unary = fn(x: int) -> int { return x + 1 }
+  let callback: fn(int, int) -> int = unary
+  __io_println(call_pair(callback))
+  __io_println(unary(4, 100))
+}

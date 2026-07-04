@@ -83,8 +83,16 @@ consistently across all arguments in the call, and container bindings such as
 `list<T>` propagate the concrete element type instead of collapsing to an
 unconstrained generic.
 
+Bounds are full type expressions, so generic interfaces can be constrained
+with their concrete arguments:
+
+```harn,ignore
+interface Sink<in T> { fn accept(self, value: T) -> nil }
+fn drain<S>(sink: S) where S: Sink<int> { sink.accept(1) }
+```
+
 A type parameter may carry more than one bound, written either as repeated
-clauses or additively — the two forms are equivalent and `T` must satisfy
+clauses or additively -- the two forms are equivalent and `T` must satisfy
 every bound:
 
 ```harn,ignore
@@ -166,4 +174,3 @@ type Box<out T> = fn(T) -> int
 // ERROR: type parameter 'T' is declared 'out' (covariant) but appears
 // in a contravariant position in type alias 'Box'
 ```
-

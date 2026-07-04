@@ -1,5 +1,5 @@
 use harn_lexer::StringSegment;
-use harn_parser::{Node, ParallelMode, SNode, TypedParam};
+use harn_parser::{Node, ParallelMode, SNode, TypeExpr, TypedParam};
 
 use crate::helpers::*;
 
@@ -332,11 +332,12 @@ impl Formatter<'_> {
             }
             Node::Closure {
                 params,
+                return_type,
                 body,
                 fn_syntax,
             } => {
-                if *fn_syntax {
-                    self.format_fn_closure(params, body, indent)
+                if *fn_syntax || return_type.is_some() {
+                    self.format_fn_closure(params, return_type.as_ref(), body, indent)
                 } else {
                     self.format_arrow_closure(params, body, indent)
                 }
@@ -800,13 +801,22 @@ impl Formatter<'_> {
         }
     }
 
-    fn format_fn_closure(&self, params: &[TypedParam], body: &[SNode], indent: usize) -> String {
+    fn format_fn_closure(
+        &self,
+        params: &[TypedParam],
+        return_type: Option<&TypeExpr>,
+        body: &[SNode],
+        indent: usize,
+    ) -> String {
         let params_str = format_typed_params(params);
+        let return_str = return_type
+            .map(|ty| format!(" -> {}", format_type_expr(ty)))
+            .unwrap_or_default();
         if body.len() == 1 && is_simple_expr(&body[0]) {
             let expr = self.format_expr(&body[0], indent);
-            format!("fn({params_str}) {{ {expr} }}")
+            format!("fn({params_str}){return_str} {{ {expr} }}")
         } else {
-            self.format_block_expr(&format!("fn({params_str}) {{"), body, indent)
+            self.format_block_expr(&format!("fn({params_str}){return_str} {{"), body, indent)
         }
     }
 

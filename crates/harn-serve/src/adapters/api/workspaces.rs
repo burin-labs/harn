@@ -293,11 +293,10 @@ fn safe_write_path(root: &Path, relative: &str) -> Option<PathBuf> {
     Some(path)
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 
-    #[cfg(unix)]
     #[test]
     fn workspace_file_paths_reject_parent_and_symlink_escape() {
         let dir = tempfile::tempdir().expect("tempdir");

@@ -22,15 +22,18 @@ impl TypeChecker {
         // its bound interfaces declares the method. Only consider bounds whose
         // interface we can actually resolve — an unknown bound is left to other
         // diagnostics rather than producing a misleading "not found" here.
-        let mut resolved_ifaces: Vec<&str> = Vec::new();
+        let mut resolved_ifaces: Vec<String> = Vec::new();
         for bound in &bounds {
-            let Some(iface_methods) = scope.get_interface(bound) else {
+            let Some(bound_name) = Self::base_type_name(bound) else {
+                continue;
+            };
+            let Some(iface_methods) = scope.get_interface(bound_name) else {
                 continue;
             };
             if iface_methods.methods.iter().any(|m| m.name == method) {
                 return;
             }
-            resolved_ifaces.push(bound.as_str());
+            resolved_ifaces.push(format_type(bound));
         }
         if resolved_ifaces.is_empty() {
             return;

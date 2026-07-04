@@ -45,6 +45,8 @@ statement_sep      ::= NEWLINE+ | ';' NEWLINE*
 fn_decl            ::= ['pub'] 'fn' IDENTIFIER [generic_params]
                        '(' fn_param_list ')' ['->' type_expr]
                        [where_clause] '{' block '}'
+where_clause       ::= 'where' where_bound (',' where_bound)*
+where_bound        ::= IDENTIFIER ':' type_expr ('+' type_expr)*
 type_decl          ::= ['pub'] 'type' IDENTIFIER [generic_params] '=' type_expr
 enum_decl          ::= ['pub'] 'enum' IDENTIFIER [generic_params] '{'
                        (enum_variant | ',' | NEWLINE)* '}'

@@ -95,7 +95,7 @@ pub(super) struct TypeScope {
     /// parameter may carry multiple bounds, written either as repeated clauses
     /// (`where T: A, T: B`) or additively (`where T: A + B`); all of them apply.
     /// Used for definition-site checking of generic function bodies.
-    pub(super) where_constraints: BTreeMap<String, Vec<String>>,
+    pub(super) where_constraints: BTreeMap<String, Vec<TypeExpr>>,
     /// Variables declared with `var` (mutable). Variables not in this set
     /// are immutable (`let`, function params, loop vars, etc.).
     pub(super) mutable_vars: std::collections::BTreeSet<String>,
@@ -162,7 +162,7 @@ pub(super) struct FnSignature {
     /// Number of required parameters (those without defaults).
     pub(super) required_params: usize,
     /// Where-clause constraints: (type_param_name, interface_bound).
-    pub(super) where_clauses: Vec<(String, String)>,
+    pub(super) where_clauses: Vec<(String, TypeExpr)>,
     /// True if the last parameter is a rest parameter.
     pub(super) has_rest: bool,
 }
@@ -411,8 +411,8 @@ impl TypeScope {
     /// A type parameter constrained as `where T: A, T: B` (or `where T: A + B`)
     /// must satisfy every returned bound; method resolution in a generic body
     /// succeeds if the method is declared on *any* of them.
-    pub(super) fn get_where_constraints(&self, type_param: &str) -> Vec<String> {
-        let mut bounds: Vec<String> = self
+    pub(super) fn get_where_constraints(&self, type_param: &str) -> Vec<TypeExpr> {
+        let mut bounds: Vec<TypeExpr> = self
             .where_constraints
             .get(type_param)
             .cloned()

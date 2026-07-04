@@ -1,0 +1,15 @@
+enum Door {
+  Open
+  Closed
+}
+
+fn describe(door: Door) -> string {
+  match door {
+    Open -> { return "matched" }
+  }
+}
+
+pipeline default() {
+  __io_println(describe(Door.Open))
+  __io_println(describe(Door.Closed))
+}

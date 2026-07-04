@@ -7,7 +7,7 @@
 //! `unreachable() / never-returning` exhaustiveness contract. The
 //! generic-binding helpers (`bind_type_param`, `extract_type_bindings`,
 //! `bind_from_arg_node`, `apply_type_bindings`) are also used by
-//! `subtyping::interface_mismatch_reason` and the inferred struct/enum
+//! `subtyping::interface_mismatch_reason_for_type` and the inferred struct/enum
 //! literal types in `expressions.rs`. `visit_for_deprecation` runs once
 //! across the program to catch deprecated calls that hide inside
 //! expression contexts where `check_node` would only trigger `infer_type`.
@@ -27,6 +27,7 @@ use super::super::format::format_type;
 use super::super::schema_inference::schema_type_expr_from_node;
 use super::super::scope::{is_builtin, EnumDeclInfo, FnSignature, StructDeclInfo, TypeScope};
 use super::super::union::collapse_members_opt;
+use super::super::union::reference_path_key;
 use super::super::union::simplify_union;
 use super::super::union::without_nil;
 use super::super::TypeChecker;
@@ -60,7 +61,7 @@ struct CallCheckSignature<'a> {
     params: Vec<CallParam<'a>>,
     required_params: usize,
     type_param_names: Vec<String>,
-    where_clauses: Vec<(String, String)>,
+    where_clauses: Vec<(String, TypeExpr)>,
     has_rest: bool,
     definition_span: Option<Span>,
 }
@@ -75,6 +76,47 @@ impl TypeChecker {
             params.last()
         } else {
             params.get(index)
+        }
+    }
+
+    fn minimum_call_args(required_params: usize, total_params: usize, has_rest: bool) -> usize {
+        if has_rest {
+            required_params.min(total_params.saturating_sub(1))
+        } else {
+            required_params
+        }
+    }
+
+    fn call_signature_arity_ok(
+        kind: CallKind,
+        supplied: usize,
+        required_params: usize,
+        total_params: usize,
+        has_rest: bool,
+    ) -> bool {
+        let minimum = Self::minimum_call_args(required_params, total_params, has_rest);
+        let below_minimum = supplied < minimum;
+        let above_builtin_maximum =
+            matches!(kind, CallKind::Builtin) && !has_rest && supplied > total_params;
+        !below_minimum && !above_builtin_maximum
+    }
+
+    fn call_signature_expected_arity(
+        kind: CallKind,
+        required_params: usize,
+        total_params: usize,
+        has_rest: bool,
+    ) -> (String, bool) {
+        let minimum = Self::minimum_call_args(required_params, total_params, has_rest);
+        if matches!(kind, CallKind::Function) {
+            return (format!("at least {minimum}"), minimum == 1);
+        }
+        if has_rest {
+            (format!("at least {minimum}"), minimum == 1)
+        } else if required_params == total_params {
+            (total_params.to_string(), total_params == 1)
+        } else {
+            (format!("{required_params}-{total_params}"), false)
         }
     }
 
@@ -463,22 +505,20 @@ impl TypeChecker {
 
         if !has_spread {
             let total = sig.params.len();
-            let arity_ok = if sig.has_rest {
-                args.len() >= total.saturating_sub(1)
-            } else {
-                args.len() >= sig.required_params && args.len() <= total
-            };
+            let arity_ok = Self::call_signature_arity_ok(
+                sig.kind,
+                args.len(),
+                sig.required_params,
+                total,
+                sig.has_rest,
+            );
             if !arity_ok {
-                let (expected, single_arg) = if sig.has_rest {
-                    (
-                        format!("at least {}", total.saturating_sub(1)),
-                        total.saturating_sub(1) == 1,
-                    )
-                } else if sig.required_params == total {
-                    (total.to_string(), total == 1)
-                } else {
-                    (format!("{}-{}", sig.required_params, total), false)
-                };
+                let (expected, single_arg) = Self::call_signature_expected_arity(
+                    sig.kind,
+                    sig.required_params,
+                    total,
+                    sig.has_rest,
+                );
                 let arg_word = if single_arg { "argument" } else { "arguments" };
                 let message = format!(
                     "{} '{}' expects {} {}, got {}",
@@ -603,23 +643,25 @@ impl TypeChecker {
         for (type_param, bound) in &sig.where_clauses {
             if let Some(concrete_type) = type_bindings.get(type_param) {
                 let concrete_name = format_type(concrete_type);
-                let Some(base_type_name) = Self::base_type_name(concrete_type) else {
+                let bound = Self::apply_type_bindings(bound, &type_bindings);
+                let bound_name = format_type(&bound);
+                if Self::base_type_name(concrete_type).is_none() {
                     self.error_at(Code::WhereConstraintMismatch,
                         format!(
-                            "Type '{concrete_name}' does not satisfy interface '{bound}': only named types can satisfy interfaces (required by constraint `where {type_param}: {bound}`)"
+                            "Type '{concrete_name}' does not satisfy interface '{bound_name}': only named types can satisfy interfaces (required by constraint `where {type_param}: {bound_name}`)"
                         ),
                         span,
                     );
                     continue;
-                };
+                }
                 if let Some(reason) =
-                    self.interface_mismatch_reason(base_type_name, bound, &BTreeMap::new(), scope)
+                    self.interface_mismatch_reason_for_type(concrete_type, &bound, scope)
                 {
                     self.error_at(
                         Code::WhereConstraintMismatch,
                         format!(
-                            "Type '{concrete_name}' does not satisfy interface '{bound}': {reason} \
-                             (required by constraint `where {type_param}: {bound}`)"
+                            "Type '{concrete_name}' does not satisfy interface '{bound_name}': {reason} \
+                             (required by constraint `where {type_param}: {bound_name}`)"
                         ),
                         span,
                     );
@@ -644,7 +686,11 @@ impl TypeChecker {
             params: Self::builtin_call_params(sig),
             required_params: sig.required_params(),
             type_param_names: sig.type_param_names(),
-            where_clauses: sig.where_clause_strings(),
+            where_clauses: sig
+                .where_clause_strings()
+                .into_iter()
+                .map(|(type_param, bound)| (type_param, TypeExpr::Named(bound)))
+                .collect(),
             has_rest: sig.has_rest,
             definition_span: None,
         };
@@ -1484,11 +1530,11 @@ impl TypeChecker {
                 None => self.warning_at(Code::DeprecatedFunction, msg, span),
             }
         }
-        // Special-case: unreachable(x) — when the argument is a variable,
-        // verify it has been narrowed to `never` (exhaustiveness check).
+        // Special-case: unreachable(x) — when the argument is a variable or
+        // stable reference path, verify it has been narrowed to `never`.
         if name == "unreachable" {
             if let Some(arg) = args.first() {
-                if matches!(&arg.node, Node::Identifier(_)) {
+                if matches!(&arg.node, Node::Identifier(_)) || reference_path_key(arg).is_some() {
                     let arg_type = self.infer_type(arg, scope);
                     if let Some(ref ty) = arg_type {
                         if !matches!(ty, TypeExpr::Never) {

@@ -1,4 +1,65 @@
 ==================
+Generic Interface Where Bounds
+==================
+
+interface Sink<in T> {
+  fn accept(value: T) -> nil
+}
+
+interface Debuggable {
+  fn debug() -> string
+}
+
+fn drain<S>(sink: S) where S: Sink<int> + Debuggable {
+  return sink
+}
+
+---
+
+(source_file
+  (interface_declaration
+    name: (identifier)
+    (generic_params
+      (generic_param
+        (identifier)))
+    (interface_method
+      name: (identifier)
+      (parameter_list
+        (typed_parameter
+          name: (identifier)
+          type: (type_annotation
+            (identifier))))
+      (type_annotation
+        (identifier))))
+  (interface_declaration
+    name: (identifier)
+    (interface_method
+      name: (identifier)
+      (type_annotation
+        (identifier))))
+  (fn_declaration
+    name: (identifier)
+    (generic_params
+      (generic_param
+        (identifier)))
+    (parameter_list
+      (typed_parameter
+        name: (identifier)
+        type: (type_annotation
+          (identifier))))
+    (where_clause
+      (identifier)
+      (type_annotation
+        (identifier)
+        (type_annotation
+          (identifier)))
+      (type_annotation
+        (identifier)))
+    body: (block
+      (return_statement
+        (identifier)))))
+
+==================
 Import And Loop
 ==================
 

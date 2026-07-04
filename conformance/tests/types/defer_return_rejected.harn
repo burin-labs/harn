@@ -1,0 +1,9 @@
+pipeline test(task) {
+  fn bad() -> int {
+    defer {
+      return "wrong"
+    }
+    return 1
+  }
+  __io_println(bad())
+}
