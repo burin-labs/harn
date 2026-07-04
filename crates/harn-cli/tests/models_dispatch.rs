@@ -609,6 +609,7 @@ fn models_lora_plan_human_text_includes_recipe() {
         "serve the adapter as a text-channel route: Harn owns tool-call parsing for this plan",
         "keep provider-native tool parsers disabled unless the proxy maps them back to Harn text tool calls",
         "promotion gates:",
+        "harn models lora preflight --base local-gemma4-e4b --provider vllm --tool-format json --corpus ./lora-corpus --source-tool-format json --check",
         "harn models lora export --base local-gemma4-e4b --provider vllm --tool-format json --corpus ./lora-corpus --out ADAPTER_DATASET.jsonl --manifest ADAPTER_DATASET.manifest.json --adapter-name ADAPTER_NAME --chat-template harn_text_tool_calls_json_fences",
         "harn eval tool-calls --planner ADAPTER_MODEL --tool-format json --dataset ./lora-corpus",
         "harn models lora inspect --base local-gemma4-e4b --provider vllm --name ADAPTER_NAME ADAPTER_PATH_OR_REPO",
@@ -739,6 +740,21 @@ fn models_lora_plan_json_shape_is_stable() {
     let export = report["launch"]["export_command"]
         .as_array()
         .expect("export argv");
+    let preflight = report["launch"]["preflight_command"]
+        .as_array()
+        .expect("preflight argv");
+    assert!(
+        preflight
+            .windows(2)
+            .any(|pair| pair[0] == "--tool-format" && pair[1] == "native"),
+        "preflight argv={preflight:?}"
+    );
+    assert!(
+        preflight
+            .windows(2)
+            .any(|pair| pair[0] == "--source-tool-format" && pair[1] == "json"),
+        "preflight argv={preflight:?}"
+    );
     assert!(
         export
             .windows(2)
@@ -924,6 +940,7 @@ fn models_lora_preflight_human_text_reports_readiness() {
         "LoRA preflight for gemma-4-e4b-it via vllm",
         "target tool format: json",
         "expected source tool format: json",
+        "export-required source tool format: json",
         "max_seq_length: 4096",
         "minimum records: 1",
         "required done marker: ##DONE##",
@@ -941,6 +958,56 @@ fn models_lora_preflight_human_text_reports_readiness() {
             harn.stdout
         );
     }
+}
+
+#[test]
+fn models_lora_preflight_requires_exportable_source_for_target_format() {
+    let corpus = write_lora_corpus_fixture();
+    let config = corpus.path().join("config.yaml");
+    fs::write(&config, "max_seq_length: 4096\nmin_fit_ratio: 1.0\n").expect("write config");
+    let harn = run(
+        &[
+            "models",
+            "lora",
+            "preflight",
+            "--base",
+            "local-gemma4-e4b",
+            "--provider",
+            "vllm",
+            "--tool-format",
+            "text",
+            "--corpus",
+            corpus.path().to_str().expect("utf8 corpus path"),
+            "--config",
+            config.to_str().expect("utf8 config path"),
+            "--source-tool-format",
+            "auto",
+            "--min-records",
+            "1",
+            "--done-marker",
+            "##DONE##",
+            "--check",
+            "--json",
+        ],
+        &[],
+    );
+
+    assert_eq!(harn.exit_code, 1, "harn stdout={}", harn.stdout);
+    let harn_value = parse_json(&harn.stdout, "harn");
+    assert_eq!(harn_value["ok"], serde_json::Value::Bool(false));
+    let details = &harn_value["error"]["details"];
+    assert_eq!(details["request"]["target_tool_format"], "text");
+    assert_eq!(
+        details["thresholds"]["required_export_source_tool_format"],
+        "text"
+    );
+    let errors = details["errors"].as_array().expect("errors");
+    assert!(
+        errors.iter().any(|error| error
+            .as_str()
+            .is_some_and(|text| text.contains("text target requires text source tool calls"))),
+        "errors={errors:?}"
+    );
 }
 
 #[test]

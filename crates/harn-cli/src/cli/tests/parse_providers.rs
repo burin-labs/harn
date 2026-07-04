@@ -492,6 +492,8 @@ fn test_parses_models_lora_preflight_args() {
         "local-gemma4-e4b",
         "--provider",
         "vllm",
+        "--tool-format",
+        "text",
         "--corpus",
         "./lora-corpus",
         "--config",
@@ -525,6 +527,7 @@ fn test_parses_models_lora_preflight_args() {
     };
     assert_eq!(args.base_model, "local-gemma4-e4b");
     assert_eq!(args.provider.as_deref(), Some("vllm"));
+    assert_eq!(args.tool_format, "text");
     assert_eq!(args.corpus, "./lora-corpus");
     assert_eq!(
         args.config

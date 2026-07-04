@@ -46,11 +46,27 @@ fn __render_human(harness: Harness, report: dict) {
   if config_path != "" {
     harness.stdio.println("  config: " + config_path)
   }
-  harness.stdio.println("  target tool format: " + safe_string(request["target_tool_format"], ""))
+  harness.stdio
+    .println(
+    "  target tool format: "
+      + safe_string(request["target_tool_format"], "")
+      + " (requested "
+      + safe_string(request["requested_tool_format"], "auto")
+      + ")",
+  )
+  let correction = safe_string(request["tool_format_correction"], "")
+  if correction != "" {
+    harness.stdio.println("  tool format correction: " + correction)
+  }
   harness.stdio
     .println(
     "  expected source tool format: "
       + safe_string(thresholds["expected_source_tool_format"], ""),
+  )
+  harness.stdio
+    .println(
+    "  export-required source tool format: "
+      + safe_string(thresholds["required_export_source_tool_format"], ""),
   )
   harness.stdio
     .println("  max_seq_length: " + safe_int_string(thresholds["max_seq_length"], "0"))
