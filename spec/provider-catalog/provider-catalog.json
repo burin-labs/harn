@@ -1111,7 +1111,7 @@
       "display_name": "Zai",
       "classification": "hosted",
       "endpoint": {
-        "base_url": "https://api.z.ai/v1",
+        "base_url": "https://api.z.ai/api/paas/v4",
         "base_url_env": "ZAI_BASE_URL",
         "chat_endpoint": "/chat/completions",
         "completion_endpoint": "/completions"
@@ -10516,7 +10516,10 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
-        "tool_search": []
+        "tool_search": [
+          "hosted",
+          "client"
+        ]
       },
       "structured_output": "native",
       "format_preferences": {
@@ -10552,6 +10555,7 @@
       "capability_tags": [
         "streaming",
         "tools",
+        "tool_search",
         "vision",
         "thinking",
         "extended_thinking",
@@ -15664,12 +15668,10 @@
       ]
     },
     {
-      "id": "glm-4.7-flash",
-      "name": "GLM 4.7 Flash",
+      "id": "glm-4.5",
+      "name": "GLM 4.5",
       "provider": "zai",
-      "aliases": [
-        "glm-4.7-flash"
-      ],
+      "aliases": [],
       "context_window": 131072,
       "modalities": {
         "input": [
@@ -15707,6 +15709,82 @@
         "preserve_thinking": false
       },
       "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.6,
+        "output_per_mtok": 2.2,
+        "cache_read_per_mtok": 0.11,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "glm",
+      "lineage": "glm",
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "cheap"
+      ]
+    },
+    {
+      "id": "glm-4.5-air",
+      "name": "GLM 4.5 Air",
+      "provider": "zai",
+      "aliases": [],
+      "context_window": 131072,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "text",
+        "parity": "native_unreliable",
+        "parity_notes": "Family-consistency pin: GLM native channels emit `<tool_call>` markup as content (2026-06-23 Baseten GLM-5.2 probe); no zai-direct GLM-4.7 probe yet, so inherit the family verdict rather than an optimistic native pin.",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.2,
+        "output_per_mtok": 1.1,
+        "cache_read_per_mtok": 0.03,
+        "cache_write_per_mtok": null
+      },
       "deprecation": {
         "status": "active"
       },
@@ -15727,6 +15805,148 @@
         "cheap",
         "coding",
         "tool_use"
+      ]
+    },
+    {
+      "id": "glm-4.6",
+      "name": "GLM 4.6",
+      "provider": "zai",
+      "aliases": [
+        "glm-4.6"
+      ],
+      "context_window": 204800,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "text",
+        "parity": "native_unreliable",
+        "parity_notes": "Family-consistency pin: GLM native channels emit `<tool_call>` markup as content (2026-06-23 Baseten GLM-5.2 probe); no zai-direct GLM-4.7 probe yet, so inherit the family verdict rather than an optimistic native pin.",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.6,
+        "output_per_mtok": 2.2,
+        "cache_read_per_mtok": 0.11,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "glm",
+      "lineage": "glm",
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "cheap"
+      ]
+    },
+    {
+      "id": "glm-4.7",
+      "name": "GLM 4.7",
+      "provider": "zai",
+      "aliases": [],
+      "context_window": 204800,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "text",
+        "parity": "native_unreliable",
+        "parity_notes": "Family-consistency pin: GLM native channels emit `<tool_call>` markup as content (2026-06-23 Baseten GLM-5.2 probe); no zai-direct GLM-4.7 probe yet, so inherit the family verdict rather than an optimistic native pin.",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.6,
+        "output_per_mtok": 2.2,
+        "cache_read_per_mtok": 0.11,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "glm",
+      "lineage": "glm",
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "coding",
+        "agentic",
+        "tool_use",
+        "cheap"
       ]
     },
     {
@@ -15798,6 +16018,77 @@
         "coding",
         "agentic",
         "tool_use"
+      ]
+    },
+    {
+      "id": "glm-5-turbo",
+      "name": "GLM 5 Turbo",
+      "provider": "zai",
+      "aliases": [],
+      "context_window": 202752,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "text",
+        "parity": "native_unreliable",
+        "parity_notes": "GLM-5.x native channel emits `<tool_call><arg_key>...` markup as content instead of OpenAI message.tool_calls (2026-06-23 live Baseten probe, see 39-baseten.toml); heredoc text tools parse cleanly. Same family pinned native_unreliable on Fireworks (glm-5p*) and DeepInfra (*glm-5*).",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "inline"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.6,
+        "output_per_mtok": 2.0,
+        "cache_read_per_mtok": 0.11,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "structured_output"
+      ],
+      "family": "glm",
+      "lineage": "glm",
+      "tier": "mid",
+      "open_weight": true,
+      "strengths": [
+        "speed",
+        "coding",
+        "agentic",
+        "tool_use",
+        "cheap"
       ]
     },
     {
@@ -16111,8 +16402,8 @@
       "tool_format": "text"
     },
     {
-      "name": "glm-4.7-flash",
-      "model_id": "glm-4.7-flash",
+      "name": "glm-4.6",
+      "model_id": "glm-4.6",
       "provider": "zai"
     },
     {
@@ -16732,6 +17023,6 @@
     "openai": "gpt-5.4-nano",
     "openrouter": "google/gemini-2.5-flash",
     "xai": "grok-build-0.1",
-    "zai": "glm-4.7-flash"
+    "zai": "glm-4.6"
   }
 }

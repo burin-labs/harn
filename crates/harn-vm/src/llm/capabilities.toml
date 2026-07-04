@@ -963,12 +963,49 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "none"
 
-# gpt-5.4+ exposes native `tool_search` on the Responses API.
+# OpenAI `*-codex` agentic-coding tunes (gpt-5-codex, gpt-5.1-codex,
+# gpt-5.1-codex-max, gpt-5.1-codex-mini, gpt-5.2-codex, gpt-5.3-codex) are
+# served ONLY by the Responses API; `/v1/chat/completions` returns HTTP 404
+# "Use the v1/responses endpoint instead". Flag them so Harn auto-routes
+# through the Responses provider and never silently 404s on the chat lane.
+# Placed before the generic `gpt-*` version rows so it wins the first-match.
+[[provider.openai]]
+model_match = "gpt-*codex*"
+native_tools = true
+preferred_tool_format = "native"
+responses_api = true
+chat_completions_unsupported = true
+requires_completion_tokens = true
+defer_loading = true
+tool_search = ["hosted", "client"]
+hosted_tools = ["web_search", "web_search_preview", "file_search", "code_interpreter", "image_generation", "computer_use", "mcp", "remote_mcp"]
+remote_mcp = true
+conversation_state = true
+compaction = true
+background_mode = true
+tool_approval_policy = "provider_or_harn"
+vision_supported = true
+structured_output = "native"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+reasoning_none_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
+
+# gpt-5.4+ exposes native `tool_search` on the Responses API. gpt-5.x
+# reasoning models reject the legacy `max_tokens` request field on
+# `/v1/chat/completions` and require `max_completion_tokens` instead.
 [[provider.openai]]
 model_match = "gpt-*"
 version_min = [5, 4]
 native_tools = true
 preferred_tool_format = "native"
+requires_completion_tokens = true
 defer_loading = true
 tool_search = ["hosted", "client"]
 responses_api = true
@@ -996,6 +1033,7 @@ model_match = "gpt-*"
 version_min = [5, 1]
 native_tools = true
 preferred_tool_format = "native"
+requires_completion_tokens = true
 vision_supported = true
 structured_output = "native"
 thinking_modes = ["effort"]
@@ -1014,6 +1052,7 @@ model_match = "gpt-*"
 version_min = [5, 0]
 native_tools = true
 preferred_tool_format = "native"
+requires_completion_tokens = true
 vision_supported = true
 structured_output = "native"
 thinking_modes = ["effort"]
@@ -1121,11 +1160,41 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "none"
 
+# OpenRouter-style provider-prefixed codex ids (responses-only, chat 404).
+[[provider.openai]]
+model_match = "openai/gpt-*codex*"
+native_tools = true
+preferred_tool_format = "native"
+responses_api = true
+chat_completions_unsupported = true
+requires_completion_tokens = true
+defer_loading = true
+tool_search = ["hosted", "client"]
+hosted_tools = ["web_search", "web_search_preview", "file_search", "code_interpreter", "image_generation", "computer_use", "mcp", "remote_mcp"]
+remote_mcp = true
+conversation_state = true
+compaction = true
+background_mode = true
+tool_approval_policy = "provider_or_harn"
+vision_supported = true
+structured_output = "native"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+reasoning_none_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
+
 [[provider.openai]]
 model_match = "openai/gpt-*"
 version_min = [5, 4]
 native_tools = true
 preferred_tool_format = "native"
+requires_completion_tokens = true
 defer_loading = true
 tool_search = ["hosted", "client"]
 responses_api = true
@@ -1153,6 +1222,7 @@ model_match = "openai/gpt-*"
 version_min = [5, 1]
 native_tools = true
 preferred_tool_format = "native"
+requires_completion_tokens = true
 structured_output = "native"
 thinking_modes = ["effort"]
 reasoning_effort_supported = true
@@ -1170,6 +1240,7 @@ model_match = "openai/gpt-*"
 version_min = [5, 0]
 native_tools = true
 preferred_tool_format = "native"
+requires_completion_tokens = true
 structured_output = "native"
 thinking_modes = ["effort"]
 reasoning_effort_supported = true
@@ -4812,12 +4883,12 @@ prefers_xml_tools = false
 thinking_block_style = "inline"
 prompt_caching = true
 
-# GLM-4.7 family (incl. the free glm-4.7-flash tier) — same wire format
-# and `<tool_call>` markup lineage as GLM-5; pinned text for family
+# GLM-4.x family (glm-4.5, glm-4.5-air, glm-4.6, glm-4.7) — same wire
+# format and `<tool_call>` markup lineage as GLM-5; pinned text for family
 # consistency (mirrors the NVIDIA glm-5 family-consistency gate) until a
 # clean zai-direct native probe says otherwise. Without this rule the
-# catalogued glm-4.7-flash row would fall through to the OpenAI-family
-# gpt-* rules and resolve empty capabilities.
+# catalogued glm-4.x rows would fall through to the OpenAI-family gpt-*
+# rules and resolve empty capabilities.
 [[provider.zai]]
 model_match = "glm-4*"
 native_tools = true
