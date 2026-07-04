@@ -1,0 +1,69 @@
+import { workflow_stage_retry_task } from "std/workflow/stage"
+
+/**
+ * Retry-with-feedback (design D5): pins the exact `repair_prompt_builder`
+ * context contract and the bounded `feedback` template that the embedded
+ * stage loop threads into a retry attempt's task.
+ */
+pipeline default() {
+  let prior = {
+    ok: true,
+    result: {status: "failed", visible_text: "boom"},
+    error: "prior error",
+    verification: {kind: "composite", ok: false, checks: [{kind: "expect_status", ok: false, expected: 0, actual: 7}]},
+  }
+  // 1. repair_prompt_builder receives EXACTLY the pinned context keys
+  //    (alphabetical): attempt, error, findings, prior_text, stage, task,
+  //    verification.
+  let seen_keys = { ctx -> return join(keys(ctx), ",") }
+  __io_println(
+    workflow_stage_retry_task(
+      {
+        policy: {repair_prompt_builder: seen_keys},
+        task: "do it",
+        attempt: 1,
+        prior: prior,
+        node: {id: "s"},
+      },
+    ),
+  )
+  // 2. the builder's return becomes the retry task verbatim.
+  let verbatim = { ctx -> return "REPLACEMENT for attempt " + to_string(ctx.attempt) }
+  __io_println(
+    workflow_stage_retry_task(
+      {policy: {repair_prompt_builder: verbatim}, task: "do it", attempt: 2, prior: prior, node: {}},
+    ),
+  )
+  // 3. the builder sees the prior attempt's verification findings.
+  let findings_probe = { ctx -> return join(ctx.findings, "|") }
+  __io_println(
+    workflow_stage_retry_task(
+      {policy: {repair_prompt_builder: findings_probe}, task: "x", attempt: 1, prior: prior, node: {}},
+    ),
+  )
+  // 4. feedback: true appends the bounded template with the prior findings.
+  let fb = workflow_stage_retry_task(
+    {policy: {feedback: true}, task: "do it", attempt: 1, prior: prior, node: {}},
+  )
+  __io_println(contains(fb, "do it"))
+  __io_println(contains(fb, "Previous attempt 1 failed"))
+  __io_println(contains(fb, "expect_status: expected 0, got 7"))
+  // 5. feedback: {max_chars} truncates the injected findings.
+  let big = {
+    result: {visible_text: ""},
+    verification: {
+      kind: "composite",
+      ok: false,
+      checks: [{kind: "assert_text", ok: false, expected: "ABCDEFGHIJKL", actual: ""}],
+    },
+  }
+  let truncated = workflow_stage_retry_task(
+    {policy: {feedback: {max_chars: 4}}, task: "base", attempt: 3, prior: big, node: {}},
+  )
+  __io_println(contains(truncated, "Previous attempt 3 failed: asse"))
+  __io_println(contains(truncated, "assert_text"))
+  // 6. no feedback and no builder → blind retry, task unchanged.
+  __io_println(
+    workflow_stage_retry_task({policy: {}, task: "unchanged", attempt: 1, prior: prior, node: {}}),
+  )
+}

@@ -1,0 +1,37 @@
+/**
+ * Byte-compat pin for the stage-loop inversion (design D5): with the default
+ * retry policy (no feedback, no repair_prompt_builder) the embedded stage loop
+ * records attempts in the exact RunStageRecord shape the legacy Rust loop
+ * produced — dense-monotonic attempt numbers, per-attempt status/outcome/
+ * branch, nil error on settled-but-failed verification, and non-empty
+ * uuid-v7 timestamps.
+ */
+pipeline default() {
+  let graph = workflow_graph(
+    {
+      entry: "verify",
+      nodes: {
+        verify: {
+          kind: "verify",
+          retry_policy: {max_attempts: 3},
+          verify: {command: "echo nope && exit 7", expect_status: 0},
+          output_contract: {output_kinds: ["verification_result"]},
+        },
+      },
+      edges: [],
+    },
+  )
+  let run = workflow_execute("verify", graph, [], {max_steps: 1})
+  let attempts = run.run.stages[0].attempts
+  __io_println(len(attempts))
+  for attempt in attempts {
+    __io_println(
+      to_string(attempt.attempt) + "|" + attempt.status + "|" + attempt.outcome + "|"
+        + to_string(attempt.branch),
+    )
+    __io_println(attempt.error == nil)
+    __io_println(attempt.verification.ok)
+    __io_println(type_of(attempt.started_at) == "string" && attempt.started_at != "")
+    __io_println(type_of(attempt.finished_at) == "string" && attempt.finished_at != "")
+  }
+}

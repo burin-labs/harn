@@ -1,5 +1,6 @@
 import {
   workflow_command_verify_graph,
+  workflow_repair_stage_graph,
   workflow_self_verifying_graph,
   workflow_verification_only_graph,
 } from "std/workflow/patterns"
@@ -27,4 +28,9 @@ pipeline default() {
   let verify_only = workflow_verification_only_graph({verify_id: "gate", verify: {assert_text: "ok"}})
   __io_println(verify_only.entry)
   __io_println(len(verify_only.edges))
+  let repair_stage = workflow_repair_stage_graph({verify: {assert_text: "ok"}, retry_policy: {feedback: true}})
+  __io_println(repair_stage.entry)
+  __io_println(repair_stage.nodes.repair.kind)
+  __io_println(repair_stage.nodes.repair.retry_policy.max_attempts)
+  __io_println(len(repair_stage.edges))
 }

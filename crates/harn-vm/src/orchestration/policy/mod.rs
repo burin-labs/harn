@@ -33,9 +33,9 @@ pub use nested_budget::{
 };
 pub use types::{
     enforce_tool_arg_constraints, AutoCompactPolicy, BranchSemantics, CapabilityPolicy,
-    ContextPolicy, EqIgnored, EscalationPolicy, JoinPolicy, MapPolicy, ModelPolicy,
-    NativeToolFallbackPolicy, ProcessSandboxPolicy, ProcessSandboxPreset, ReducePolicy,
-    RetryPolicy, SandboxProfile, StageContract, ToolArgConstraint, TurnPolicy,
+    ContextPolicy, EqIgnored, EscalationPolicy, FeedbackBounds, FeedbackPolicy, JoinPolicy,
+    MapPolicy, ModelPolicy, NativeToolFallbackPolicy, ProcessSandboxPolicy, ProcessSandboxPreset,
+    ReducePolicy, RetryPolicy, SandboxProfile, StageContract, ToolArgConstraint, TurnPolicy,
 };
 
 thread_local! {

@@ -248,6 +248,51 @@ async fn command_verify_retry_policy_records_each_attempt() {
     );
 }
 
+/// Retry-with-feedback (design D5): enabling `feedback: true` on a failing
+/// stage exercises the embedded loop's retry-task path on attempts 2..N
+/// without changing the attempt-recording contract (still one record per
+/// attempt, all failed). Proves the feedback branch is live end-to-end through
+/// the inverted loop, complementing the `workflow_stage_retry_task` unit
+/// conformance that pins the prompt-building semantics.
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn command_verify_retry_policy_with_feedback_records_each_attempt() {
+    crate::reset_thread_local_state();
+    let node = crate::orchestration::WorkflowNode {
+        id: Some("verify".to_string()),
+        kind: "verify".to_string(),
+        retry_policy: crate::orchestration::RetryPolicy {
+            max_attempts: 3,
+            feedback: Some(crate::orchestration::FeedbackPolicy::Enabled(true)),
+            ..Default::default()
+        },
+        verify: Some(serde_json::json!({
+            "command": "echo nope && exit 7",
+            "expect_status": 0,
+        })),
+        output_contract: crate::orchestration::StageContract {
+            output_kinds: vec!["verification_result".to_string()],
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let mut vm = crate::Vm::new();
+    crate::register_vm_stdlib(&mut vm);
+    let ctx = crate::vm::AsyncBuiltinCtx::for_test(vm);
+    let executed = execute_stage_attempts(&ctx, "run tests", "verify", &node, &[], None)
+        .await
+        .expect("stage executes");
+
+    assert_eq!(executed.status, "failed");
+    assert_eq!(executed.outcome, "verification_failed");
+    assert_eq!(executed.attempts.len(), 3);
+    assert!(executed
+        .attempts
+        .iter()
+        .enumerate()
+        .all(|(index, attempt)| attempt.attempt == index + 1 && attempt.status == "failed"));
+}
+
 /// Stage-loop inversion pre-work (design D5 step 1): a single
 /// `__host_stage_execute_once` round-trip on a static stage must match the
 /// legacy `execute_stage_attempts` path's output shape field-for-field.

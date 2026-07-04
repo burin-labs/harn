@@ -11,7 +11,7 @@ use crate::orchestration::{
 use crate::value::{VmError, VmValue};
 use crate::vm::AsyncBuiltinCtx;
 
-use super::usage::{llm_usage_delta, llm_usage_snapshot};
+use super::convert::to_vm;
 
 #[derive(Debug)]
 pub(super) struct ExecutedStage {
@@ -319,6 +319,122 @@ pub(super) fn stage_record_attempt(
     Ok(())
 }
 
+/// Serialized twin of the executed-stage payload the embedded
+/// `workflow_execute_stage_attempts` loop returns. Everything except the
+/// transcript round-trips through JSON; the transcript is pulled out as a raw
+/// `VmValue` (it may be large or reference session-backed message lists) — the
+/// same handle discipline `__host_stage_execute_once` uses across the seam.
+#[derive(Debug, Deserialize)]
+struct HarnExecutedStage {
+    status: String,
+    outcome: String,
+    branch: Option<String>,
+    result: serde_json::Value,
+    #[serde(default)]
+    artifacts: Vec<ArtifactRecord>,
+    verification: Option<serde_json::Value>,
+    #[serde(default)]
+    usage: LlmUsageRecord,
+    error: Option<String>,
+    #[serde(default)]
+    attempts: Vec<RunStageAttemptRecord>,
+    #[serde(default)]
+    consumed_artifact_ids: Vec<String>,
+}
+
+/// Encode a node for the embedded stage loop, re-attaching the raw VmValue
+/// fields serde drops (`#[serde(skip)]`) so they survive the crossing and can
+/// be re-lifted by `__host_stage_execute_once` via `parse_workflow_node_value`.
+/// Without this the inverted loop would silently lose closure-carrying tools /
+/// model policies and the session-id that surfaces a stage transcript — fields
+/// the pre-inversion Rust loop passed through by reference.
+fn node_to_vm_with_raw(node: &crate::orchestration::WorkflowNode) -> Result<VmValue, VmError> {
+    let encoded = to_vm(node)?;
+    let VmValue::Dict(dict) = encoded else {
+        return Ok(encoded);
+    };
+    let mut dict = (*dict).clone();
+    for (key, raw) in [
+        ("tools", &node.raw_tools),
+        ("model_policy", &node.raw_model_policy),
+        ("context_assembler", &node.raw_context_assembler),
+        ("auto_compact", &node.raw_auto_compact),
+    ] {
+        if let Some(value) = raw {
+            dict.insert(crate::value::intern_key(key), value.clone());
+        }
+    }
+    Ok(VmValue::dict(dict))
+}
+
+/// Build the raw retry-policy dict handed to the embedded stage loop. The
+/// `repair_prompt_builder` closure cannot cross serde, so it travels here as a
+/// raw `VmValue` alongside the typed `feedback`/`max_attempts` fields.
+fn retry_policy_to_vm(policy: &crate::orchestration::RetryPolicy) -> Result<VmValue, VmError> {
+    let mut dict = crate::value::DictMap::new();
+    dict.insert(
+        crate::value::intern_key("max_attempts"),
+        VmValue::Int(policy.max_attempts.max(1) as i64),
+    );
+    if let Some(feedback) = &policy.feedback {
+        dict.insert(crate::value::intern_key("feedback"), to_vm(feedback)?);
+    }
+    if let Some(builder) = &policy.repair_prompt_builder {
+        dict.insert(
+            crate::value::intern_key("repair_prompt_builder"),
+            builder.0.clone(),
+        );
+    }
+    Ok(VmValue::dict(dict))
+}
+
+/// Reconstruct an [`ExecutedStage`] from the embedded loop's return value,
+/// threading the transcript through as a raw handle.
+fn executed_stage_from_vm(value: VmValue) -> Result<ExecutedStage, VmError> {
+    let transcript = value
+        .as_dict()
+        .and_then(|dict| dict.get("transcript"))
+        .filter(|value| !matches!(value, VmValue::Nil))
+        .cloned();
+    let parsed: HarnExecutedStage = serde_json::from_value(crate::llm::vm_value_to_json(&value))
+        .map_err(|error| {
+            VmError::Runtime(format!(
+                "workflow_execute_stage_attempts returned invalid shape: {error}"
+            ))
+        })?;
+    Ok(ExecutedStage {
+        status: parsed.status,
+        outcome: parsed.outcome,
+        branch: parsed.branch,
+        result: parsed.result,
+        artifacts: parsed
+            .artifacts
+            .into_iter()
+            .map(ArtifactRecord::normalize)
+            .collect(),
+        transcript,
+        verification: parsed.verification,
+        usage: parsed.usage,
+        error: parsed.error,
+        attempts: parsed.attempts,
+        consumed_artifact_ids: parsed.consumed_artifact_ids,
+    })
+}
+
+/// Thin Rust shim over the embedded per-stage attempt/retry loop
+/// (`workflow_execute_stage_attempts` in `std/workflow/stage.harn`). The loop
+/// itself — attempt counting, retry-with-feedback prompt threading, stop /
+/// continue — lives in Harn (design D5). Rust keeps only the enforcement /
+/// attestation leaves the loop calls via builtins: capability-enforced leaf
+/// execution (`__host_stage_execute_once`), append-only attempt recording
+/// (`__host_stage_record_attempt`), artifact selection, and usage accounting.
+///
+/// Enforcement placement: the per-stage capability/effect policy is installed
+/// on the thread-local execution-policy stack by `prepare_workflow_stage_state`
+/// *before* this shim runs, and is read at the leaf (`execute_stage_node` /
+/// `execute_delegated_stage`) on every `__host_stage_execute_once` crossing —
+/// which runs on the same thread as the child VM. Moving the loop to Harn
+/// therefore cannot execute anything outside the guard by construction.
 pub(super) async fn execute_stage_attempts(
     ctx: &AsyncBuiltinCtx,
     task: &str,
@@ -327,101 +443,21 @@ pub(super) async fn execute_stage_attempts(
     artifacts: &[ArtifactRecord],
     transcript: Option<VmValue>,
 ) -> Result<ExecutedStage, VmError> {
-    let selection = stage_select_artifacts(ctx, node, artifacts).await?;
-    let mut attempts = Vec::new();
-    let usage_before = llm_usage_snapshot();
-    let max_attempts = node.retry_policy.max_attempts.max(1);
-    for attempt in 1..=max_attempts {
-        let started_at = uuid::Uuid::now_v7().to_string();
-        let execution = stage_execute_once(
-            ctx,
-            node_id,
-            node,
-            task,
-            artifacts,
-            &selection.selected,
-            transcript.as_ref(),
-        )
-        .await;
-
-        match execution {
-            Ok(settled) => {
-                let success = !matches!(settled.branch.as_deref(), Some("failed"));
-                stage_record_attempt(
-                    &mut attempts,
-                    RunStageAttemptRecord {
-                        attempt,
-                        status: if success {
-                            "completed".to_string()
-                        } else {
-                            "failed".to_string()
-                        },
-                        outcome: settled.outcome.clone(),
-                        branch: settled.branch.clone(),
-                        error: None,
-                        verification: settled.verification.clone(),
-                        started_at,
-                        finished_at: Some(uuid::Uuid::now_v7().to_string()),
-                    },
-                )?;
-                if success || attempt == max_attempts {
-                    let usage = llm_usage_delta(&usage_before, &llm_usage_snapshot());
-                    return Ok(ExecutedStage {
-                        status: if success {
-                            "completed".to_string()
-                        } else {
-                            "failed".to_string()
-                        },
-                        outcome: settled.outcome,
-                        branch: settled.branch,
-                        result: settled.result,
-                        artifacts: settled.artifacts,
-                        transcript: settled.transcript,
-                        verification: settled.verification,
-                        usage,
-                        error: if success {
-                            None
-                        } else {
-                            Some("verification failed".to_string())
-                        },
-                        attempts,
-                        consumed_artifact_ids: selection.consumed_artifact_ids,
-                    });
-                }
-            }
-            Err(error) => {
-                let error_message = error.to_string();
-                stage_record_attempt(
-                    &mut attempts,
-                    RunStageAttemptRecord {
-                        attempt,
-                        status: "failed".to_string(),
-                        outcome: "error".to_string(),
-                        branch: Some("error".to_string()),
-                        error: Some(error_message.clone()),
-                        verification: None,
-                        started_at,
-                        finished_at: Some(uuid::Uuid::now_v7().to_string()),
-                    },
-                )?;
-                if attempt == max_attempts {
-                    let usage = llm_usage_delta(&usage_before, &llm_usage_snapshot());
-                    return Ok(ExecutedStage {
-                        status: "failed".to_string(),
-                        outcome: "error".to_string(),
-                        branch: Some("error".to_string()),
-                        result: serde_json::json!({"status": "failed", "text": ""}),
-                        artifacts: Vec::new(),
-                        transcript: transcript.clone(),
-                        verification: None,
-                        usage,
-                        error: Some(error_message),
-                        attempts,
-                        consumed_artifact_ids: selection.consumed_artifact_ids,
-                    });
-                }
-            }
-        }
-    }
-    unreachable!("workflow stage retry loop always returns after at least one attempt")
+    let args = vec![
+        VmValue::String(arcstr::ArcStr::from(task)),
+        VmValue::String(arcstr::ArcStr::from(node_id)),
+        node_to_vm_with_raw(node)?,
+        to_vm(&artifacts)?,
+        transcript.unwrap_or(VmValue::Nil),
+        retry_policy_to_vm(&node.retry_policy)?,
+    ];
+    let result = crate::stdlib::harn_entry::call_harn_export_by_name(
+        ctx,
+        "std/workflow/stage",
+        "workflow_execute_stage_attempts",
+        "workflow_execute_stage_attempts",
+        &args,
+    )
+    .await?;
+    executed_stage_from_vm(result)
 }

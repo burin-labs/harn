@@ -3,6 +3,12 @@ import { agent_loop } from "std/agent/loop"
 import { workflow_execute_map_stage } from "std/workflow/map"
 import "std/workflow/prompts"
 import { workflow_join_readiness, workflow_next_edges } from "std/workflow/schedule"
+// Pre-warm: the per-stage attempt loop (`workflow_execute_stage_attempts`) is
+// reached only through the Rust shim's child-VM crossing, so importing it here
+// instantiates `std/workflow/stage` into the driver VM's module cache once per
+// run. Child VMs inherit that cache (Arc copy-on-write), so per-attempt
+// crossings take the warm path instead of re-instantiating the module.
+import "std/workflow/stage"
 
 fn __workflow_execute_list(value) {
   if type_of(value) == "list" {

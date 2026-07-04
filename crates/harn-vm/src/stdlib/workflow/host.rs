@@ -450,8 +450,17 @@ pub(super) async fn host_stage_execute_once_builtin(
                 "{HOST_STAGE_EXECUTE_ONCE_BUILTIN}: missing node id"
             ))
         })?;
-    let node: crate::orchestration::WorkflowNode =
-        parse_json_arg(args.get(1), HOST_STAGE_EXECUTE_ONCE_BUILTIN)?;
+    // Parse via `parse_workflow_node_value` (not `parse_json_arg`) so the raw
+    // VmValue fields serde drops — closure-carrying `tools` / `model_policy` /
+    // `context_assembler` and the session-id that surfaces a stage transcript —
+    // are re-lifted from the dict the shim re-attached them to. This keeps the
+    // inverted stage loop fidelity-equal to the pre-inversion Rust path.
+    let node = crate::orchestration::parse_workflow_node_value(
+        args.get(1).ok_or_else(|| {
+            VmError::Runtime(format!("{HOST_STAGE_EXECUTE_ONCE_BUILTIN}: missing node"))
+        })?,
+        HOST_STAGE_EXECUTE_ONCE_BUILTIN,
+    )?;
     let task = args.get(2).map(|value| value.display()).unwrap_or_default();
     match args.get(3) {
         None | Some(VmValue::Nil) => {}
