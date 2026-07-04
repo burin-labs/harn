@@ -280,6 +280,9 @@ pub const LLM_CALL_OPTIONS: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::optional("fallback_chain", Ty::Union(&[TY_STRING, TY_LIST])),
     ShapeFieldDescriptor::optional("budget_usd", Ty::Union(&[TY_FLOAT, TY_INT])),
     ShapeFieldDescriptor::optional("routing", TY_DICT),
+    // Model ladders: `models:` inline steps, `ladder:` named catalog ladder.
+    ShapeFieldDescriptor::optional("models", TY_LIST),
+    ShapeFieldDescriptor::optional("ladder", TY_STRING),
     // Conversation and system-prompt composition.
     ShapeFieldDescriptor::optional("system", TY_STRING),
     ShapeFieldDescriptor::optional("messages", TY_LIST),

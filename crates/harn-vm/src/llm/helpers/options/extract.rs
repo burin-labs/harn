@@ -21,6 +21,12 @@ pub(crate) fn extract_llm_options(
         }
     });
     let explicit_options = args.get(2).and_then(|a| a.as_dict()).cloned();
+    // Capture whether the CALLER (not injected defaults) pinned a model /
+    // provider before `explicit_options` is consumed by the context merge —
+    // needed to reject `models:`/`ladder:` combined with a standalone route.
+    let user_pinned_route = explicit_options.as_ref().is_some_and(|raw| {
+        option_is_explicitly_set(raw, "model") || option_is_explicitly_set(raw, "provider")
+    });
     let options = crate::llm::cost_route::merge_context_options(explicit_options);
 
     // If we're inside an `@step`-annotated persona function and the
@@ -31,8 +37,35 @@ pub(crate) fn extract_llm_options(
     apply_model_role_defaults(&mut options);
     apply_active_step_defaults(&mut options);
 
+    // A `models:`/`ladder:` ladder owns provider/model selection, so reject a
+    // standalone `model:`/`provider:` pin up front — before provider inference
+    // can emit a spurious "could not infer provider" fallback warning for the
+    // dead-end pin.
+    let has_ladder_option = options.as_ref().is_some_and(|opts| {
+        option_is_explicitly_set(opts, "models") || option_is_explicitly_set(opts, "ladder")
+    });
+    if has_ladder_option && user_pinned_route {
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+            "llm_call: `models:`/`ladder:` cannot be combined with an explicit \
+             `model:` or `provider:` on the same call — the ladder already \
+             declares every rung's model/provider. Drop the standalone pin.",
+        ))));
+    }
+
     let mut routing_policy = crate::llm::routing::extract_routing_policy(options.as_ref())?;
     let explicit_routing_policy = routing_policy.is_some();
+    // A `models:`/`ladder:` ladder and an explicit `routing:` policy both drive
+    // model selection, so combining them is doubly-ambiguous. Reject it loudly
+    // rather than silently ignoring the ladder (the ladder lowering below only
+    // runs when no explicit routing policy is present).
+    if has_ladder_option && explicit_routing_policy {
+        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+            "llm_call: `models:`/`ladder:` cannot be combined with an explicit \
+             `routing:` policy — both drive model selection. Use one: a ladder \
+             for a linear transport-failover chain, or `routing:` for the full \
+             routing policy.",
+        ))));
+    }
     let route_policy = parse_route_policy_option(options.as_ref())?;
     let mut provider = vm_resolve_provider(&options);
     let mut model = vm_resolve_model(&options, &provider);
@@ -40,6 +73,32 @@ pub(crate) fn extract_llm_options(
     if let Some(decision) = routing_decision.as_ref() {
         provider = decision.selected_provider.clone();
         model = decision.selected_model.clone();
+    }
+    // Model ladder: a `models:` (inline steps) or `ladder:` (named catalog
+    // ladder) option lowers onto the first-class routing chain, so it reuses
+    // the exact transport-failover classification, the routing envelope
+    // trace, and the schema-retry composition rather than hand-rolling a
+    // fallback loop (subsumes the copies in harn-bump-fleet / harn-cloud /
+    // burin-code). The `models:`/`ladder:` + explicit `routing:` combination is
+    // already rejected above, so this `is_none()` guard is a belt-and-suspenders
+    // check — the ladder never coexists with an explicit routing policy.
+    if routing_policy.is_none() {
+        if let Some(options_dict) = options.as_ref() {
+            if let Some(ladder_policy) =
+                crate::llm::routing::build_model_ladder_policy(options_dict, &provider, &model)?
+            {
+                // The `models:`/`ladder:` + explicit `model:`/`provider:`
+                // conflict is rejected earlier (before provider inference).
+                routing_policy = Some(ladder_policy);
+                if let Some(first) = routing_policy
+                    .as_ref()
+                    .and_then(|policy| policy.chain.first())
+                {
+                    provider = first.provider.clone();
+                    model = first.model.clone();
+                }
+            }
+        }
     }
     let equivalent_failover_policy = parse_equivalent_failover_option(
         options.as_ref(),
@@ -729,6 +788,13 @@ pub(crate) fn extract_llm_options(
     Ok(opts)
 }
 
+/// True when the caller explicitly set `key` to a non-nil value in the raw
+/// (pre-default-injection) options dict. Used to detect a user-written
+/// `model:`/`provider:` that conflicts with a `models:`/`ladder:` option.
+fn option_is_explicitly_set(options: &crate::value::DictMap, key: &str) -> bool {
+    matches!(options.get(key), Some(value) if !matches!(value, VmValue::Nil))
+}
+
 pub(crate) fn opt_str_list(
     options: &Option<crate::value::DictMap>,
     key: &str,
@@ -884,6 +950,44 @@ mod cache_default_tests {
             !opts_with(options).cache,
             "explicit `cache: false` must opt out"
         );
+    }
+
+    #[test]
+    fn models_ladder_lowers_to_routing_policy() {
+        let mut options = DictMap::new();
+        options.put(
+            "models",
+            VmValue::List(std::sync::Arc::new(vec![
+                VmValue::String(arcstr::ArcStr::from("mock-cheap")),
+                VmValue::String(arcstr::ArcStr::from("mock-strong")),
+            ])),
+        );
+        let opts = opts_with(options);
+        let policy = opts
+            .routing_policy
+            .expect("ladder lowered to routing policy");
+        assert!(policy.is_ladder);
+        assert_eq!(policy.chain.len(), 2);
+        // Base provider/model snap to the first rung.
+        assert_eq!(opts.model, "mock-cheap");
+    }
+
+    #[test]
+    fn models_ladder_conflicts_with_explicit_model() {
+        let mut options = DictMap::new();
+        options.put(
+            "models",
+            VmValue::List(std::sync::Arc::new(vec![VmValue::String(
+                arcstr::ArcStr::from("mock-cheap"),
+            )])),
+        );
+        options.put_str("model", "pinned-model");
+        let result = try_opts_with(options);
+        let err = match result {
+            Ok(_) => panic!("models + model must be rejected as ambiguous"),
+            Err(err) => err,
+        };
+        assert!(format!("{err:?}").contains("cannot be combined"));
     }
 
     #[test]

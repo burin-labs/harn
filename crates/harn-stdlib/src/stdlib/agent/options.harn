@@ -136,6 +136,8 @@ pub type AgentLoopOptions = {
   model_tier?: string,
   route_policy?: string,
   fallback_chain?: list<string>,
+  models?: list<string | {provider?: string, model?: string, options?: dict, label?: string}>,
+  ladder?: string,
   api_mode?: string,
   max_tokens?: int,
   temperature?: float,

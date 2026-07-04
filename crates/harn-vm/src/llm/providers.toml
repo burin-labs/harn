@@ -4311,3 +4311,23 @@ pricing = { input_per_mtok = 2.50, output_per_mtok = 7.50, cache_read_per_mtok =
 tier = "frontier"
 open_weight = false
 strengths = ["coding", "agentic", "tool_use", "long_context", "reasoning"]
+
+# --- source: 62-ladders/00-ladders.toml ---
+# ── Model ladders ────────────────────────────────────────────────────────────
+# Named model-fallback ladders resolved by a `ladder: "<name>"` option on
+# `llm_call`. A ladder lowers onto the first-class routing chain: each step is
+# one transport attempt, and the loop advances to the NEXT step only on a
+# transport-class failure (connection / timeout / 429 / 5xx / throttled-empty).
+# Schema-validation failures never advance — they re-ask the same step's model.
+#
+# Steps are ordered cheapest/first to most-capable/last. `provider` is optional
+# and inferred from the model id (or the call's base provider) when omitted.
+# Model aliases (haiku / sonnet / opus, resolved via `[aliases]`) are allowed.
+
+[model_ladders.frugal]
+label = "frugal: cheap-first with frontier escalation"
+steps = [
+  { model = "haiku", label = "cheap" },
+  { model = "sonnet", label = "mid" },
+  { model = "opus", label = "frontier" },
+]

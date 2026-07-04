@@ -1,0 +1,27 @@
+import { with_llm_script } from "std/testing"
+
+/**
+ * Plain-string ladder sugar: `models: ["model-a", "model-b"]` is shorthand
+ * for `[{model: "model-a"}, {model: "model-b"}]`. The first rung fails with a
+ * retryable transport error and the ladder advances to the second.
+ */
+pipeline test(task) {
+  with_llm_script(
+    [
+      {
+        error: {category: "overloaded", message: "HTTP 503 overloaded", status: 503},
+        model: "mock-cheap",
+        provider: "mock",
+      },
+      {text: "strong wins", model: "mock-strong", provider: "mock"},
+    ],
+    { ->
+      let result = llm_call("hi", nil, {models: ["mock-cheap", "mock-strong"]})
+      __io_println(result.text)
+      let attempts = result.routing.attempts
+      __io_println(len(attempts))
+      __io_println(attempts[0].status)
+      __io_println(attempts[1].status)
+    },
+  )
+}

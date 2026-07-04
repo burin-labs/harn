@@ -1,0 +1,39 @@
+import { with_llm_script } from "std/testing"
+
+/**
+ * A schema-validation failure is the model's answer, not a transport fault:
+ * it must NOT advance the ladder. Instead the existing `schema_retries`
+ * mechanism re-asks the SAME rung's model. The cheap rung first returns
+ * non-JSON (schema fail), then on the schema retry returns valid JSON —
+ * both served by the cheap rung. The frontier rung is never touched, so the
+ * routing trace from the winning pass shows a single cheap attempt.
+ */
+pipeline test(task) {
+  with_llm_script(
+    [
+      {text: "not json at all", model: "mock", provider: "mock"},
+      {text: "{\"answer\": \"forty-two\"}", model: "mock", provider: "mock"},
+    ],
+    { ->
+      let result = llm_call(
+        "q",
+        nil,
+        {
+          models: [
+            {model: "mock", provider: "mock", label: "cheap"},
+            {model: "mock-strong", provider: "mock", label: "frontier"},
+          ],
+          output_schema: {type: "object", required: ["answer"], properties: {answer: {type: "string"}}},
+          output_validation: "error",
+          schema_retries: 1,
+          response_format: "json",
+        },
+      )
+      let attempts = result.routing.attempts
+      __io_println(len(attempts))
+      __io_println(attempts[0].label)
+      __io_println(attempts[0].status)
+      __io_println(result.routing.selected)
+    },
+  )
+}

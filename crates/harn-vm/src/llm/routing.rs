@@ -58,6 +58,7 @@ pub(crate) fn build_equivalent_failover_policy(
         timeout_ms: None,
         label: Some("primary".to_string()),
         region: None,
+        overrides: None,
     }];
 
     for (candidate_model, candidate) in crate::llm_config::equivalent_model_catalog_entries(model) {
@@ -82,6 +83,7 @@ pub(crate) fn build_equivalent_failover_policy(
             timeout_ms: None,
             label: Some(format!("equivalent:{}", candidate.provider)),
             region: None,
+            overrides: None,
         });
     }
 
@@ -103,6 +105,7 @@ pub(crate) fn build_equivalent_failover_policy(
         max_refines_per_link: 0,
         label,
         chain,
+        is_ladder: false,
     }))
 }
 
@@ -154,6 +157,12 @@ pub(crate) struct ChainLink {
     /// compatible. Only multi-region providers (currently Bedrock) act on
     /// it; other providers ignore it gracefully.
     pub region: Option<String>,
+    /// Per-step generation-parameter overrides supplied by a `models:`
+    /// ladder step's `options` dict, applied over the call's base options
+    /// in [`link_options`]. Only the curated scalar keys in
+    /// [`apply_ladder_step_overrides`] are honored; unknown keys are
+    /// rejected at ladder-build time so there is no silent drop.
+    pub overrides: Option<Arc<crate::value::DictMap>>,
 }
 
 impl ChainLink {
@@ -236,6 +245,12 @@ pub(crate) struct RoutingPolicyConfig {
     /// transcripts can correlate attempts back to the policy that drove
     /// them.
     pub label: String,
+    /// True when this policy was synthesized from a `models:`/`ladder:`
+    /// option rather than an explicit `routing_policy(...)`. Ladders emit a
+    /// dedicated `llm_models_advance` trace event on each transport-driven
+    /// step advance; explicit routing policies keep only the existing
+    /// `<dispatch>.attempt` telemetry so their behavior is unchanged.
+    pub is_ladder: bool,
 }
 
 impl RoutingPolicyConfig {
@@ -426,6 +441,7 @@ fn parse_chain_link(value: &VmValue, idx: usize) -> Result<ChainLink, VmError> {
                 timeout_ms: None,
                 label: None,
                 region: None,
+                overrides: None,
             });
         }
         other => {
@@ -471,6 +487,7 @@ fn parse_chain_link(value: &VmValue, idx: usize) -> Result<ChainLink, VmError> {
         timeout_ms,
         label,
         region,
+        overrides: None,
     })
 }
 
@@ -585,6 +602,252 @@ fn parse_observe(value: Option<&VmValue>) -> Result<ObserveRules, VmError> {
 /// Validate a user-facing config dict and return a tagged copy. The
 /// tag (`__routing_policy__: true`) is what `llm_call` looks for when
 /// it decides whether to dispatch through the routing executor.
+/// One resolved rung of a `models:`/`ladder:` ladder, before it is lowered
+/// to a [`ChainLink`]. `provider` may be unset here and inferred later.
+struct LadderStep {
+    model: String,
+    provider: Option<String>,
+    label: Option<String>,
+    overrides: Option<Arc<crate::value::DictMap>>,
+}
+
+/// Build a routing policy from a `models:` (inline steps) or `ladder:`
+/// (named catalog ladder) option. A model ladder lowers onto the SAME
+/// first-class routing chain that `routing_policy(...)` drives, so it
+/// inherits — with zero duplication — the exact transport-failover
+/// classification (`matches_failover`: 429/5xx/timeout/circuit_open, never
+/// schema/auth/4xx), the per-attempt `routing` envelope trace, and the
+/// schema-retry composition in `call.rs` (schema failures re-ask the same
+/// rung; they do not advance the ladder).
+///
+/// Returns `Ok(None)` when neither option is present, so callers can fall
+/// through to their existing single-model / explicit-routing path.
+pub(crate) fn build_model_ladder_policy(
+    options: &crate::value::DictMap,
+    base_provider: &str,
+    base_model: &str,
+) -> Result<Option<Arc<RoutingPolicyConfig>>, VmError> {
+    let has_models = matches!(options.get("models"), Some(v) if !matches!(v, VmValue::Nil));
+    let has_ladder = matches!(options.get("ladder"), Some(v) if !matches!(v, VmValue::Nil));
+    if !has_models && !has_ladder {
+        return Ok(None);
+    }
+    if has_models && has_ladder {
+        return Err(runtime_error(
+            "llm_call: `models:` and `ladder:` are mutually exclusive — pass an \
+             inline step list OR a named catalog ladder, not both"
+                .to_string(),
+        ));
+    }
+
+    let (steps, label) = if has_ladder {
+        resolve_named_ladder(options.get("ladder"))?
+    } else {
+        parse_inline_ladder_steps(options.get("models"))?
+    };
+    if steps.is_empty() {
+        return Err(runtime_error(
+            "llm_call: model ladder must list at least one step".to_string(),
+        ));
+    }
+
+    let mut chain = Vec::with_capacity(steps.len());
+    for step in &steps {
+        chain.push(ladder_step_to_link(step, base_provider, base_model));
+    }
+
+    Ok(Some(Arc::new(RoutingPolicyConfig {
+        failover: FailoverRules {
+            // One transport attempt per rung: try every step once, advancing
+            // only on transport-class failures. Empty explicit rules let
+            // `matches_failover` use the default 429/5xx/timeout/circuit set.
+            max_attempts: Some(chain.len()),
+            ..FailoverRules::default()
+        },
+        latency: LatencyRules::default(),
+        budget: BudgetRules::default(),
+        observe: ObserveRules::default(),
+        escalate_on: Vec::new(),
+        max_refines_per_link: 0,
+        label,
+        chain,
+        is_ladder: true,
+    })))
+}
+
+/// Parse the inline `models:` list into ladder steps. Accepts either
+/// `"model"` / `"provider:model"` strings (sugar) or
+/// `{model, provider?, options?, label?}` dicts.
+fn parse_inline_ladder_steps(
+    value: Option<&VmValue>,
+) -> Result<(Vec<LadderStep>, String), VmError> {
+    let items = match value {
+        Some(VmValue::List(items)) => items.clone(),
+        Some(other) => {
+            return Err(runtime_error(format!(
+                "llm_call: `models:` expects a list of steps, got {}",
+                other.type_name()
+            )));
+        }
+        None => return Ok((Vec::new(), String::new())),
+    };
+    let mut steps = Vec::with_capacity(items.len());
+    for (idx, item) in items.iter().enumerate() {
+        steps.push(parse_ladder_step_value(item, idx)?);
+    }
+    let label = format!("model_ladder(steps={})", steps.len());
+    Ok((steps, label))
+}
+
+/// Parse a single inline ladder step (string sugar or dict).
+fn parse_ladder_step_value(value: &VmValue, idx: usize) -> Result<LadderStep, VmError> {
+    match value {
+        VmValue::String(raw) => {
+            let (provider, model) = split_ladder_target(raw);
+            if model.is_empty() {
+                return Err(runtime_error(format!(
+                    "llm_call: `models:`[{idx}] is an empty model id"
+                )));
+            }
+            Ok(LadderStep {
+                model,
+                provider,
+                label: None,
+                overrides: None,
+            })
+        }
+        VmValue::Dict(dict) => {
+            // Treat a nil field as absent (avoids the literal string "nil").
+            let non_nil = |key: &str| -> Option<String> {
+                dict.get(key)
+                    .filter(|v| !matches!(v, VmValue::Nil))
+                    .map(|v| v.display().trim().to_string())
+                    .filter(|s| !s.is_empty())
+            };
+            let model = non_nil("model").unwrap_or_default();
+            if model.is_empty() {
+                return Err(runtime_error(format!(
+                    "llm_call: `models:`[{idx}] requires a non-empty `model` field"
+                )));
+            }
+            let provider = non_nil("provider");
+            let label = non_nil("label");
+            let overrides = parse_ladder_step_overrides(dict.get("options"), idx)?;
+            Ok(LadderStep {
+                model,
+                provider,
+                label,
+                overrides,
+            })
+        }
+        other => Err(runtime_error(format!(
+            "llm_call: `models:`[{idx}] must be a model string or {{model, provider?, options?}} dict, got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+/// Validate a ladder step's `options` override dict. Every key must be in
+/// [`LADDER_STEP_OVERRIDE_KEYS`]; an unknown key errors here rather than
+/// being silently dropped at dispatch time.
+fn parse_ladder_step_overrides(
+    value: Option<&VmValue>,
+    idx: usize,
+) -> Result<Option<Arc<crate::value::DictMap>>, VmError> {
+    match value {
+        None | Some(VmValue::Nil) => Ok(None),
+        Some(VmValue::Dict(dict)) => {
+            for key in dict.keys() {
+                if !LADDER_STEP_OVERRIDE_KEYS.contains(&key.as_str()) {
+                    return Err(runtime_error(format!(
+                        "llm_call: `models:`[{idx}].options key {key:?} is not a supported \
+                         per-step override; supported keys are {LADDER_STEP_OVERRIDE_KEYS:?}. \
+                         Put structural options (tools, schema, thinking) on the base call."
+                    )));
+                }
+            }
+            Ok(Some(Arc::new(dict.as_ref().clone())))
+        }
+        Some(other) => Err(runtime_error(format!(
+            "llm_call: `models:`[{idx}].options must be a dict, got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+/// Resolve a named `[model_ladders.<name>]` catalog ladder into steps.
+fn resolve_named_ladder(value: Option<&VmValue>) -> Result<(Vec<LadderStep>, String), VmError> {
+    let name = match value {
+        Some(VmValue::String(s)) => s.trim().to_string(),
+        Some(other) => {
+            return Err(runtime_error(format!(
+                "llm_call: `ladder:` expects the name of a catalog ladder (string), got {}",
+                other.type_name()
+            )));
+        }
+        None => return Ok((Vec::new(), String::new())),
+    };
+    let Some(def) = crate::llm_config::model_ladder(&name) else {
+        let known = crate::llm_config::model_ladder_names();
+        let hint = if known.is_empty() {
+            " (no ladders are declared in the catalog)".to_string()
+        } else {
+            format!(" (known ladders: {})", known.join(", "))
+        };
+        return Err(runtime_error(format!(
+            "llm_call: no model ladder named {name:?} in the catalog{hint}"
+        )));
+    };
+    let steps = def
+        .steps
+        .into_iter()
+        .map(|s| LadderStep {
+            model: s.model,
+            provider: s.provider,
+            label: s.label,
+            overrides: None,
+        })
+        .collect();
+    let label = def.label.unwrap_or_else(|| format!("model_ladder:{name}"));
+    Ok((steps, label))
+}
+
+/// Lower a resolved [`LadderStep`] to a [`ChainLink`], resolving model
+/// aliases and inferring the provider when the step left it unset.
+fn ladder_step_to_link(step: &LadderStep, base_provider: &str, _base_model: &str) -> ChainLink {
+    let (resolved_model, alias_provider) = crate::llm_config::resolve_model(&step.model);
+    let provider = step.provider.clone().or(alias_provider).unwrap_or_else(|| {
+        crate::llm::provider::infer_provider_from_model_id(&resolved_model, base_provider).provider
+    });
+    ChainLink {
+        provider,
+        model: resolved_model,
+        timeout_ms: None,
+        label: step.label.clone(),
+        region: None,
+        overrides: step.overrides.clone(),
+    }
+}
+
+/// Split a `models:` string step into an optional provider + model. Only
+/// treats a `prefix:rest` split as `provider:model` when `prefix` is a
+/// registered provider name — otherwise the whole string is a model id
+/// (avoids mis-splitting colon-bearing ids such as Ollama image tags).
+fn split_ladder_target(raw: &str) -> (Option<String>, String) {
+    let raw = raw.trim();
+    if let Some((prefix, rest)) = raw.split_once(':') {
+        let prefix = prefix.trim();
+        let rest = rest.trim();
+        if !prefix.is_empty()
+            && !rest.is_empty()
+            && crate::llm::provider::is_provider_registered(prefix)
+        {
+            return (Some(prefix.to_string()), rest.to_string());
+        }
+    }
+    (None, raw.to_string())
+}
+
 pub(crate) fn build_routing_policy(config: &crate::value::DictMap) -> Result<VmValue, VmError> {
     let chain_value = config.get("chain").ok_or_else(|| {
         runtime_error("routing_policy: `chain` is required (list of {provider, model})".to_string())
@@ -656,6 +919,7 @@ pub(crate) fn build_routing_policy(config: &crate::value::DictMap) -> Result<VmV
         escalate_on,
         max_refines_per_link,
         label,
+        is_ladder: false,
     };
     let handle = intern_policy(parsed);
     summary.insert(HANDLE_KEY.to_string(), VmValue::Int(handle as i64));
@@ -1093,7 +1357,73 @@ fn link_options(
     if let Ok(key) = super::helpers::resolve_api_key(&link.provider) {
         opts.api_key = key;
     }
+    if let Some(overrides) = link.overrides.as_ref() {
+        apply_ladder_step_overrides(&mut opts, overrides);
+    }
     opts
+}
+
+/// Per-step generation-parameter overrides honored by a `models:` ladder
+/// step's `options` dict. Kept deliberately small: these are the scalar
+/// knobs a per-rung override sensibly tweaks (a stronger rung may want more
+/// tokens / lower temperature). Structural options (tools, schema, vision,
+/// thinking mode) belong on the base call and are validated once there; the
+/// ladder builder rejects any override key outside this set so nothing is
+/// silently dropped.
+const LADDER_STEP_OVERRIDE_KEYS: &[&str] = &[
+    "temperature",
+    "max_tokens",
+    "top_p",
+    "top_k",
+    "seed",
+    "frequency_penalty",
+    "presence_penalty",
+    "timeout_ms",
+    "fast",
+];
+
+/// Apply a validated per-step override dict over an already-cloned base
+/// [`LlmCallOptions`]. Keys were checked against
+/// [`LADDER_STEP_OVERRIDE_KEYS`] at build time, so a present value here is
+/// known-supported; type-mismatched values are ignored (the base value
+/// stands) rather than erroring mid-dispatch.
+fn apply_ladder_step_overrides(opts: &mut LlmCallOptions, overrides: &crate::value::DictMap) {
+    let as_f64 = |value: &VmValue| -> Option<f64> {
+        match value {
+            VmValue::Float(f) => Some(*f),
+            VmValue::Int(i) => Some(*i as f64),
+            _ => None,
+        }
+    };
+    if let Some(v) = overrides.get("temperature").and_then(as_f64) {
+        opts.temperature = Some(v);
+    }
+    if let Some(v) = overrides.get("max_tokens").and_then(VmValue::as_int) {
+        opts.max_tokens = v;
+    }
+    if let Some(v) = overrides.get("top_p").and_then(as_f64) {
+        opts.top_p = Some(v);
+    }
+    if let Some(v) = overrides.get("top_k").and_then(VmValue::as_int) {
+        opts.top_k = Some(v);
+    }
+    if let Some(v) = overrides.get("seed").and_then(VmValue::as_int) {
+        opts.seed = Some(v);
+    }
+    if let Some(v) = overrides.get("frequency_penalty").and_then(as_f64) {
+        opts.frequency_penalty = Some(v);
+    }
+    if let Some(v) = overrides.get("presence_penalty").and_then(as_f64) {
+        opts.presence_penalty = Some(v);
+    }
+    if let Some(v) = overrides.get("timeout_ms").and_then(VmValue::as_int) {
+        if v > 0 {
+            opts.timeout = Some(((v as u64) / 1000).max(1));
+        }
+    }
+    if let Some(VmValue::Bool(v)) = overrides.get("fast") {
+        opts.fast = *v;
+    }
 }
 
 /// Pre-flight budget check that handles the policy's `on_exceed` knob.
@@ -1601,6 +1931,7 @@ pub(crate) async fn execute_with_routing(
             }
             Err(err) => {
                 let (eligible, snapshot) = matches_failover(&policy.failover, &err);
+                let failure_category = snapshot.category.clone();
                 if let Some(record) = attempt_records
                     .iter_mut()
                     .find(|rec| matches!(rec.status, AttemptStatus::Failed) && rec.error.is_none())
@@ -1613,6 +1944,24 @@ pub(crate) async fn execute_with_routing(
                 if !eligible {
                     last_error = Some(err);
                     break;
+                }
+                // Model-ladder step advance: emit a dedicated
+                // `llm_models_advance` trace event so cost dashboards can see
+                // which transport-class failure escalated the ladder and to
+                // which rung. Only for ladders; explicit routing policies keep
+                // their existing attempt telemetry unchanged. Skipped when the
+                // failed rung was the last one (nothing to advance to).
+                if policy.is_ladder {
+                    if let Some(next_link) = policy.chain.get(idx + consumed) {
+                        super::trace::emit_agent_event(
+                            super::trace::AgentTraceEvent::ModelsAdvance {
+                                from_index: idx,
+                                from_model: link.model.clone(),
+                                to_model: next_link.model.clone(),
+                                category: failure_category,
+                            },
+                        );
+                    }
                 }
                 last_error = Some(err);
                 idx += consumed;
@@ -1712,6 +2061,7 @@ async fn run_race(
                 timeout_ms: link.timeout_ms,
                 label: Some(backup_label.clone()),
                 region: backup_opts.region.clone(),
+                overrides: None,
             };
             let mut backup_future = Box::pin({
                 let backup_opts = backup_opts.clone();
@@ -2227,5 +2577,148 @@ mod tests {
         let envelope = budget.envelope().unwrap();
         assert_eq!(envelope.max_cost_usd, Some(0.25));
         assert_eq!(envelope.total_budget_usd, Some(5.0));
+    }
+
+    fn str_list(items: &[&str]) -> VmValue {
+        VmValue::List(std::sync::Arc::new(
+            items
+                .iter()
+                .map(|s| VmValue::String(arcstr::ArcStr::from(*s)))
+                .collect(),
+        ))
+    }
+
+    #[test]
+    fn model_ladder_returns_none_without_models_or_ladder() {
+        let options = dict(&[("model", VmValue::String(arcstr::ArcStr::from("x")))]);
+        let policy = build_model_ladder_policy(&options, "anthropic", "x").expect("ok");
+        assert!(policy.is_none());
+    }
+
+    #[test]
+    fn model_ladder_from_string_sugar_builds_ladder_chain() {
+        let options = dict(&[("models", str_list(&["mock-cheap", "mock-strong"]))]);
+        let policy = build_model_ladder_policy(&options, "anthropic", "base")
+            .expect("ok")
+            .expect("ladder present");
+        assert!(policy.is_ladder);
+        assert_eq!(policy.chain.len(), 2);
+        assert_eq!(policy.chain[0].model, "mock-cheap");
+        assert_eq!(policy.chain[1].model, "mock-strong");
+        // One transport attempt per rung.
+        assert_eq!(policy.failover.max_attempts, Some(2));
+    }
+
+    #[test]
+    fn model_ladder_dict_step_honors_explicit_provider() {
+        let step = dict(&[
+            ("model", VmValue::String(arcstr::ArcStr::from("gpt-x"))),
+            ("provider", VmValue::String(arcstr::ArcStr::from("openai"))),
+        ]);
+        let options = dict(&[(
+            "models",
+            VmValue::List(std::sync::Arc::new(vec![VmValue::dict(step)])),
+        )]);
+        let policy = build_model_ladder_policy(&options, "anthropic", "base")
+            .expect("ok")
+            .expect("ladder");
+        assert_eq!(policy.chain[0].provider, "openai");
+        assert_eq!(policy.chain[0].model, "gpt-x");
+    }
+
+    #[test]
+    fn model_ladder_and_ladder_are_mutually_exclusive() {
+        let options = dict(&[
+            ("models", str_list(&["a", "b"])),
+            ("ladder", VmValue::String(arcstr::ArcStr::from("frugal"))),
+        ]);
+        let err = build_model_ladder_policy(&options, "anthropic", "base").unwrap_err();
+        assert!(format!("{err:?}").contains("mutually exclusive"));
+    }
+
+    #[test]
+    fn model_ladder_step_rejects_unknown_override_key() {
+        let step = dict(&[
+            ("model", VmValue::String(arcstr::ArcStr::from("m"))),
+            (
+                "options",
+                VmValue::dict(dict(&[(
+                    "tools",
+                    VmValue::List(std::sync::Arc::new(vec![])),
+                )])),
+            ),
+        ]);
+        let options = dict(&[(
+            "models",
+            VmValue::List(std::sync::Arc::new(vec![VmValue::dict(step)])),
+        )]);
+        let err = build_model_ladder_policy(&options, "anthropic", "base").unwrap_err();
+        assert!(format!("{err:?}").contains("not a supported"));
+    }
+
+    #[test]
+    fn model_ladder_step_accepts_scalar_overrides() {
+        let step = dict(&[
+            ("model", VmValue::String(arcstr::ArcStr::from("m"))),
+            ("provider", VmValue::String(arcstr::ArcStr::from("mock"))),
+            (
+                "options",
+                VmValue::dict(dict(&[
+                    ("max_tokens", VmValue::Int(256)),
+                    ("temperature", VmValue::Float(0.0)),
+                ])),
+            ),
+        ]);
+        let options = dict(&[(
+            "models",
+            VmValue::List(std::sync::Arc::new(vec![VmValue::dict(step)])),
+        )]);
+        let policy = build_model_ladder_policy(&options, "mock", "base")
+            .expect("ok")
+            .expect("ladder");
+        let overrides = policy.chain[0].overrides.as_ref().expect("overrides");
+        assert_eq!(
+            overrides.get("max_tokens").and_then(VmValue::as_int),
+            Some(256)
+        );
+        // The override is applied over the base options at link-dispatch time.
+        let mut base = policy_base_opts();
+        base.max_tokens = 16384;
+        let linked = link_options(&base, &policy, &policy.chain[0]);
+        assert_eq!(linked.max_tokens, 256);
+        assert_eq!(linked.temperature, Some(0.0));
+    }
+
+    /// Minimal `LlmCallOptions` for `link_options` unit tests. Mirrors the
+    /// production `base_opts` constructor closely enough to exercise the
+    /// per-step override application without pulling in option normalization.
+    fn policy_base_opts() -> LlmCallOptions {
+        crate::llm::api::options::base_opts("mock")
+    }
+
+    #[test]
+    fn named_ladder_resolves_from_catalog() {
+        // `frugal` ships in the embedded catalog
+        // (catalog_sources/62-ladders). Resolve it and confirm the chain is
+        // the declared haiku -> sonnet -> opus escalation.
+        let options = dict(&[("ladder", VmValue::String(arcstr::ArcStr::from("frugal")))]);
+        let policy = build_model_ladder_policy(&options, "anthropic", "base")
+            .expect("ok")
+            .expect("frugal ladder present in catalog");
+        assert!(policy.is_ladder);
+        assert_eq!(policy.chain.len(), 3);
+        // Aliases resolve to their canonical anthropic routes.
+        assert_eq!(policy.chain[0].provider, "anthropic");
+        assert!(policy.chain[2].model.contains("opus"));
+    }
+
+    #[test]
+    fn unknown_named_ladder_errors_with_hint() {
+        let options = dict(&[(
+            "ladder",
+            VmValue::String(arcstr::ArcStr::from("does-not-exist")),
+        )]);
+        let err = build_model_ladder_policy(&options, "anthropic", "base").unwrap_err();
+        assert!(format!("{err:?}").contains("no model ladder named"));
     }
 }

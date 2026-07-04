@@ -4024,6 +4024,67 @@ Semantics:
 The policy is a reusable handle: build it once, pass it to many
 `llm_call` invocations.
 
+## Model ladders (`models:` / `ladder:`)
+
+When you just want a **cheap-first, escalate-on-failure** ladder without
+hand-building a `routing_policy`, pass `models:` (or `ladder:`) directly to
+`llm_call`. A ladder is sugar that lowers onto the same routing chain, so it
+inherits the exact failover classifier, the `result.routing` trace block, and
+the schema-retry composition described above.
+
+```harn,ignore
+// Inline ladder: ordered steps, cheapest first.
+let result = llm_call("Summarize this PR.", nil, {
+  models: [
+    "haiku",                                          // string sugar for {model: "haiku"}
+    {model: "sonnet", label: "mid"},
+    {model: "opus", provider: "anthropic", label: "frontier",
+     options: {max_tokens: 4096}},                    // per-step generation overrides
+  ],
+})
+
+// Named ladder resolved from the catalog ([model_ladders.<name>]).
+let result = llm_call("Summarize this PR.", nil, {ladder: "frugal"})
+```
+
+Each step is `{model, provider?, options?, label?}`; a bare string is sugar for
+`{model: "..."}` (a `"provider:model"` string sets both when the prefix is a
+registered provider). `provider` is inferred from the model id (or the call's
+base provider) when omitted, and model aliases resolve normally. Per-step
+`options` accept the scalar generation/transport knobs `temperature`,
+`max_tokens`, `top_p`, `top_k`, `seed`, `frequency_penalty`,
+`presence_penalty`, `timeout_ms`, and `fast`; structural options (tools,
+schema, thinking) belong on the base call and an unsupported per-step key is
+rejected up front.
+
+Composition rules:
+
+- **Advance only on transport-class failures.** The ladder moves to the next
+  step exactly when the routing failover classifier fires
+  (connection/timeout/429/5xx/throttled-empty/`circuit_open`). It never
+  advances on a schema-validation failure (that is the model's answer, not a
+  transport fault) or a 4xx policy error (`auth`, content policy) — those stop
+  the ladder and surface the error.
+- **One attempt per rung by default.** The ladder itself does a single attempt
+  per step. Wrap the whole call with `with_retry` (the caller-seam middleware)
+  if you want per-attempt transport retries around the entire ladder pass.
+- **Schema retries re-ask the same rung.** With `output_schema` /
+  `llm_call_structured*`, a schema failure re-asks the SAME step's model via
+  the existing `schema_retries` mechanism — it does not escalate the ladder.
+- **`models:` + `ladder:`, `models:`/`ladder:` + explicit `model:`/`provider:`,
+  and `models:`/`ladder:` + an explicit `routing:` policy are all errors** — the
+  ladder already declares every rung, so any second model-selection surface is
+  ambiguous.
+- **Observability.** Each step advance emits an `llm_models_advance` trace
+  event (`agent_trace()`) with `{from_index, from_model, to_model, category}`,
+  and the winning rung is surfaced on the existing `result.routing` block
+  (`policy`, `attempts[]`, `selected`).
+
+`ladder:` names a catalog ladder declared under `[model_ladders.<name>]` (for
+example the built-in `frugal` haiku → sonnet → opus escalation), keeping the
+step list data-driven and shared across surfaces instead of hand-rolled at each
+call site.
+
 ## Composable tool middleware
 
 `agent_loop` also accepts `tool_caller:` — the parallel seam for tool

@@ -36,6 +36,11 @@ pub struct ProvidersConfig {
     pub suppress: SuppressDef,
     #[serde(default)]
     pub patch: PatchDef,
+    /// `[model_ladders.<name>]` tables: named model-fallback ladders that a
+    /// `ladder: "<name>"` option on `llm_call` resolves and lowers onto the
+    /// routing chain. Keyed by ladder name.
+    #[serde(default)]
+    pub model_ladders: BTreeMap<String, ModelLadderDef>,
 }
 
 /// Field-wise catalog patches applied on top of merged model rows.
@@ -116,6 +121,7 @@ impl ProvidersConfig {
             && self.model_roles.is_empty()
             && self.suppress.routes.is_empty()
             && self.patch.models.is_empty()
+            && self.model_ladders.is_empty()
             && self.tier_defaults.default == default_mid()
     }
 
@@ -213,6 +219,11 @@ impl ProvidersConfig {
                 self.suppress.routes.push(route.clone());
             }
         }
+
+        // Named model ladders: later layers replace a same-named ladder
+        // wholesale (a ladder is an ordered list; per-step merge has no
+        // sensible meaning), matching `[models]` whole-row replace semantics.
+        self.model_ladders.extend(overlay.model_ladders.clone());
     }
 }
 
