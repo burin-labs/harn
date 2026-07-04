@@ -137,6 +137,20 @@ const SCENARIOS: &[Scenario] = &[
         tape: include_str!("../../assets/demo/command-capture/tape.jsonl"),
     },
     Scenario {
+        id: "agent-edit-tools",
+        title: "agent_edit_tools ships the canonical write/edit/mkdir/delete toolset",
+        description: "Drive the default mutation tools (#PR-D) offline: `write_file`, `edit_file`, \
+                      `create_directory`, and `delete_path` from `std/agent/host_tools`, root-scoped \
+                      wrappers over the hostlib filesystem primitives. Walk the happy paths, the \
+                      guardrails (edit_file refuses an ambiguous match; delete_path refuses a \
+                      non-empty directory unless recursive), and the middleware seam — the same \
+                      named tools wrapped with `with_consent` + `with_audit_log` so an embedder gets \
+                      approval and receipts for free. Honestly annotated as mutating so the \
+                      read-only stance hides them. Fully offline — no LLM, no subprocess.",
+        script: include_str!("../../assets/demo/agent-edit-tools/scenario.harn"),
+        tape: include_str!("../../assets/demo/agent-edit-tools/tape.jsonl"),
+    },
+    Scenario {
         id: "compaction-policy",
         title: "compaction.{policy,check,run} drives a session through the lifecycle",
         description: "Declare a per-session compaction policy with thresholds, call \

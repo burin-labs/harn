@@ -236,6 +236,60 @@ subshells, backgrounded jobs, …) untouched — and is on by default; set
 `list_directory`, `get_file_outline`, `search_files`, and read-only
 `git_inspect`. `agent_host_tools(...)` composes both groups.
 
+### Default mutation tools
+
+`agent_edit_tools(...)` ships the canonical write/edit/delete toolset every
+embedder otherwise hand-rolls, wrapping the same hostlib filesystem primitives
+with the same root resolution and path-scope enforcement as `agent_read_tools`:
+
+- `write_file(path, content)` — create or overwrite a UTF-8 file, creating
+  missing parent directories.
+- `edit_file(path, old_string, new_string, replace_all?)` — exact-string
+  replacement. Errors if `old_string` is absent, or if it occurs more than once
+  unless `replace_all` is true, so the model never silently edits the wrong
+  span (`edit_file` composes read → replace → write in Harn — there is no
+  hostlib string-replacement builtin).
+- `create_directory(path)` — `mkdir -p`; succeeds if the directory exists.
+- `delete_path(path, recursive?)` — refuses a non-empty directory unless
+  `recursive` is true; deleting a missing path is a no-op.
+
+Mutation is opt-in: `agent_edit_tools(...)` is **not** folded into
+`agent_host_tools(...)`. Compose it explicitly over the read/command surface
+when a loop should be allowed to change the workspace:
+
+```harn,ignore
+import { agent_edit_tools, agent_host_tools } from "std/agent/host_tools"
+
+let tools = agent_edit_tools(agent_host_tools(nil, {root: repo_root}), {root: repo_root})
+```
+
+Every edit tool is annotated honestly as mutating (`kind: edit`/`delete`,
+`side_effect_level: workspace_write`), so the read-only stance
+(`agent_loop({read_only_stance: {...}})`) hides them until the loop earns write
+access, and tool-surface narrowing classifies them correctly. Because they are plain named tools, the
+`std/llm/tool_middleware` seams (`with_consent`, `with_audit_log`,
+`with_dry_run`, `with_idempotency`, …) wrap them without any per-tool support:
+
+```harn,ignore
+import { agent_edit_tools } from "std/agent/host_tools"
+import { compose_tool_callers, default_tool_caller, with_audit_log, with_consent } from "std/llm/tool_middleware"
+
+agent_loop(task, system, {
+  tools: agent_edit_tools(nil, {root: repo_root}),
+  tool_format: "native",
+  tool_caller: compose_tool_callers([
+    with_consent(host_approval_fn),
+    with_audit_log({sink: "local"}),
+    default_tool_caller(),
+  ]),
+})
+```
+
+`agent_edit_tools(...)` accepts the same `root`/`cwd`, `names`, `descriptions`,
+`enabled_tools`/`disabled_tools` (group key `edit`), `annotations`,
+`tool_config`, `namespace`, `defer_loading`, and `output_format` options as the
+other host-tool helpers.
+
 Use `std/command` for deterministic script-side harness work, such as "run this
 named step, retry according to this policy, keep a normalized step record, and
 hand a compact failure reference to a recovery agent." Use

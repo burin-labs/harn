@@ -1,0 +1,138 @@
+/**
+ * agent-edit-tools demo: the canonical default mutation toolset every
+ * embedder used to hand-roll.
+ *
+ * `std/agent/host_tools.agent_edit_tools(...)` ships root-scoped `write_file`,
+ * `edit_file`, `create_directory`, and `delete_path` tools that wrap the
+ * existing hostlib filesystem primitives. They reuse the same root resolution,
+ * path-scope enforcement, and rendering plumbing as `agent_read_tools`, and are
+ * annotated honestly as mutating (`kind: edit|delete`,
+ * `side_effect_level: workspace_write`) so the read-only stance hides them and
+ * tool-surface narrowing classifies them correctly.
+ *
+ * This scenario drives each tool through `agent_dispatch_tool_call` under a
+ * temporary root: the happy paths, the deliberate guardrails (edit_file refuses
+ * an ambiguous match; delete_path refuses a non-empty directory unless
+ * recursive), and the middleware seam — the same named tools wrapped with
+ * `with_consent` + `with_audit_log` so an embedder gets approval and receipts
+ * for free. Fully offline: no LLM, no subprocess, no network.
+ */
+import { agent_edit_tools } from "std/agent/host_tools"
+import {
+  compose_tool_callers,
+  default_tool_caller,
+  with_audit_log,
+  with_consent,
+} from "std/llm/tool_middleware"
+
+fn dispatch(tools, name, args) {
+  return agent_dispatch_tool_call({id: name + "-call", name: name, arguments: args}, tools)
+}
+
+pipeline default(_task) {
+  __io_println("=== agent-edit-tools demo ===")
+  __io_println("")
+  let root = path_join(execution_root(), "edit-demo-" + uuid())
+  harness.fs.mkdir(root, true)
+  let tools = agent_edit_tools(nil, {root: root, cwd: root})
+  // 1. write_file: create a file wholesale (parent dirs are created).
+  let wrote = dispatch(tools, "write_file", {path: "src/config.txt", content: "mode = draft\nretries = 3\n"})
+  let wrote_data = json_parse(wrote.rendered_result)
+  __io_println("write_file -> created=" + to_string(wrote_data.created) + " path=" + wrote_data.path)
+  // 2. edit_file: exact-string replacement, unique match required.
+  let edited = dispatch(
+    tools,
+    "edit_file",
+    {path: "src/config.txt", old_string: "mode = draft", new_string: "mode = live"},
+  )
+  let edited_data = json_parse(edited.rendered_result)
+  __io_println("edit_file -> replacements=" + to_string(edited_data.replacements))
+  __io_println(
+    "  file now: " + json_stringify(harness.fs.read_text(path_join(root, "src/config.txt"))),
+  )
+  // 3. edit_file guardrail: an ambiguous match is refused, not silently applied.
+  harness.fs.write_text(path_join(root, "src/dupes.txt"), "todo\ntodo\n")
+  let ambiguous = dispatch(tools, "edit_file", {path: "src/dupes.txt", old_string: "todo", new_string: "done"})
+  __io_println("edit_file (2 matches, no replace_all) -> ok=" + to_string(ambiguous.ok))
+  __io_println("  error: " + ambiguous.error)
+  let all = dispatch(
+    tools,
+    "edit_file",
+    {path: "src/dupes.txt", old_string: "todo", new_string: "done", replace_all: true},
+  )
+  let all_data = json_parse(all.rendered_result)
+  __io_println("edit_file (replace_all) -> replacements=" + to_string(all_data.replacements))
+  __io_println("")
+  // 4. create_directory: mkdir -p semantics.
+  let made = dispatch(tools, "create_directory", {path: "build/artifacts/logs"})
+  __io_println(
+    "create_directory -> ok=" + to_string(made.ok) + " is_dir="
+      + to_string(harness.fs.stat(path_join(root, "build/artifacts/logs")).is_dir),
+  )
+  // 5. delete_path guardrail: a non-empty directory needs recursive:true.
+  let refuse = dispatch(tools, "delete_path", {path: "src"})
+  __io_println("delete_path (non-empty dir) -> ok=" + to_string(refuse.ok))
+  __io_println("  error: " + refuse.error)
+  let purge = dispatch(tools, "delete_path", {path: "src", recursive: true})
+  let purge_data = json_parse(purge.rendered_result)
+  __io_println(
+    "delete_path (recursive) -> removed=" + to_string(purge_data.removed) + " exists="
+      + to_string(harness.fs.exists(path_join(root, "src"))),
+  )
+  __io_println("")
+  // 6. Middleware seam: the SAME named tools, wrapped with consent + audit.
+  //    The embedder composes tool callers; nothing tool-specific is needed.
+  let consent_hits = atomic(0)
+  let audit_hits = atomic(0)
+  let caller = compose_tool_callers(
+    [
+      with_audit_log(
+        { _receipt ->
+          atomic_add(audit_hits, 1)
+          return nil
+        },
+      ),
+      with_consent(
+        { _call ->
+          atomic_add(consent_hits, 1)
+          return true
+        },
+      ),
+      default_tool_caller(),
+    ],
+  )
+  let next = { call -> dispatch(tools, call.tool_name, call.tool_args) }
+  let envelope = {
+    call_id: "mw1",
+    declared_executor: "harn",
+    description: "",
+    schema: nil,
+    tool_args: {content: "audited write\n", path: "audited/note.txt"},
+    tool_name: "write_file",
+    turn: {iteration: 0, session_id: ""},
+  }
+  let mw_result = caller(envelope, next)
+  __io_println("wrapped write_file -> status=" + mw_result.status)
+  __io_println(
+    "  consent fired=" + to_string(atomic_get(consent_hits)) + " audit fired="
+      + to_string(atomic_get(audit_hits)),
+  )
+  __io_println(
+    "  wrote: " + json_stringify(harness.fs.read_text(path_join(root, "audited/note.txt"))),
+  )
+  __io_println("")
+  let receipt = {
+    receipt_kind: "agent_edit_tools_receipt",
+    ambiguous_edit_refused: !ambiguous.ok,
+    audit_fired: atomic_get(audit_hits) == 1,
+    consent_fired: atomic_get(consent_hits) == 1,
+    created_directory: harness.fs.stat(path_join(root, "build/artifacts/logs")).is_dir,
+    delete_dir_needs_recursive: !refuse.ok,
+    recursive_delete_removed: purge_data.removed,
+    replace_all_count: all_data.replacements,
+    tools: ["write_file", "edit_file", "create_directory", "delete_path"],
+    write_created: wrote_data.created,
+  }
+  __io_println(json_stringify(receipt))
+  return receipt
+}
