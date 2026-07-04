@@ -31,6 +31,8 @@
 pub mod ast;
 #[cfg(feature = "ast")]
 pub mod code_index;
+#[cfg(feature = "computer")]
+pub mod computer;
 pub mod embed;
 pub mod error;
 pub mod fs;
@@ -78,6 +80,15 @@ pub fn install_default(vm: &mut harn_vm::Vm) -> HostlibRegistry {
         .with(fs_watch::FsWatchCapability)
         .with(tools::ToolsCapability)
         .with(secret_store::SecretStoreCapability);
+    // Computer use (screenshot + mouse/keyboard) is opt-in at the feature
+    // level; the backend it binds is further gated at runtime by
+    // `BURIN_COMPUTER_USE_TRANSPORT` and, in the product, an off-by-default
+    // setting. Registering the builtins is harmless when disabled — the
+    // NullBackend fails each call with an explanatory message.
+    #[cfg(feature = "computer")]
+    {
+        registry = registry.with(computer::ComputerUseCapability::new());
+    }
     registry.register_into_vm(vm);
     registry
 }
