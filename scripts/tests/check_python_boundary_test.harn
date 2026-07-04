@@ -38,6 +38,7 @@ pipeline test_current_repo_python_boundary_is_explicit(task) {
   let paths = report.allowed.map({ row -> row.path }).to_list()
   assert_eq(paths.contains("scripts/affected-crates.py"), true)
   assert_eq(paths.contains("scripts/check_protocol_bindings.py"), true)
+  assert_eq(paths.contains("scripts/check_burin_protocol_bindings.py"), false)
   assert_eq(paths.contains("spec/protocol-artifacts/python/harn_protocol.py"), true)
 }
 
