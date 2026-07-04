@@ -269,6 +269,81 @@ pub(super) fn render_tool_result(value: &serde_json::Value) -> String {
     }
 }
 
+/// A base64 image payload longer than this is replaced by a `<... N bytes>`
+/// marker in the rendered transcript text. A 1024x768 PNG screenshot is ~1MB of
+/// base64, which would swamp the transcript — but the full payload still travels
+/// to the model as an image content block (see the tool-result recording path),
+/// so eliding it from the *text* rendering is pure hygiene, not data loss.
+const RENDERED_IMAGE_BASE64_ELIDE_THRESHOLD: usize = 512;
+
+/// Return a copy of a tool result with any large `base64` image payload replaced
+/// by a compact `<screenshot base64 elided: N bytes>` marker, so the transcript
+/// text stays small. Recurses through objects and arrays so a screenshot nested
+/// under `screenshot`/`image` (the computer tool's `{ok, text, screenshot:{...}}`
+/// shape) is elided wherever it sits. Non-image results are returned unchanged
+/// (structurally identical), so this is a no-op for every existing tool.
+pub(super) fn elide_image_base64(value: &serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Object(map) => {
+            let mut out = serde_json::Map::with_capacity(map.len());
+            for (key, child) in map {
+                if key == "base64" {
+                    if let Some(data) = child.as_str() {
+                        if data.len() > RENDERED_IMAGE_BASE64_ELIDE_THRESHOLD {
+                            out.insert(
+                                key.clone(),
+                                serde_json::json!(format!("<base64 elided: {} bytes>", data.len())),
+                            );
+                            continue;
+                        }
+                    }
+                }
+                out.insert(key.clone(), elide_image_base64(child));
+            }
+            serde_json::Value::Object(out)
+        }
+        serde_json::Value::Array(items) => {
+            serde_json::Value::Array(items.iter().map(elide_image_base64).collect())
+        }
+        other => other.clone(),
+    }
+}
+
+/// Coerce a Harn tool handler's return value into the tool-result payload.
+///
+/// Handler returns are normally rendered to their display string, because tool
+/// results are text the model reads. But a return that carries a screenshot
+/// (the computer tool's `{ok, text, screenshot: {base64, scale_factor, ...}}`)
+/// MUST keep its structure: display-stringifying it buries the base64 in an
+/// unrecoverable Harn-display string, so the tool-result recorder can never lift
+/// the screenshot into an image content block and the model never sees the
+/// screen (it just gets ~800 KB of base64 as text). When the return carries a
+/// screenshot we keep it as structured JSON — the recorder extracts the image
+/// and the base64 is elided from the rendered TEXT separately. Every other
+/// return is byte-identical to the previous `String(display())` behavior.
+pub(super) fn harn_handler_result_value(val: &VmValue) -> serde_json::Value {
+    let json = crate::llm::vm_value_to_json(val);
+    if json_carries_screenshot(&json) {
+        json
+    } else {
+        serde_json::Value::String(val.display())
+    }
+}
+
+/// Whether a JSON value contains a screenshot dict (`{base64, scale_factor}`
+/// with a non-empty base64) anywhere in its tree — the distinctive `ScreenImage`
+/// signature the computer tool returns.
+fn json_carries_screenshot(value: &serde_json::Value) -> bool {
+    if crate::llm::content::is_screenshot_dict(value) {
+        return true;
+    }
+    match value {
+        serde_json::Value::Object(map) => map.values().any(json_carries_screenshot),
+        serde_json::Value::Array(items) => items.iter().any(json_carries_screenshot),
+        _ => false,
+    }
+}
+
 pub(super) fn is_denied_tool_result(value: &serde_json::Value) -> bool {
     if is_denied_tool_result_object(value) {
         return true;
@@ -505,7 +580,7 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
                     ctx.forward_output(&captured);
                 }
                 match outcome {
-                    Ok(val) => Ok(serde_json::Value::String(val.display())),
+                    Ok(val) => Ok(harn_handler_result_value(&val)),
                     Err(VmError::CategorizedError {
                         message,
                         category: ErrorCategory::ToolRejected,
@@ -575,7 +650,7 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
                 ctx.forward_output(&captured);
             }
             match outcome {
-                Ok(val) => Ok(serde_json::Value::String(val.display())),
+                Ok(val) => Ok(harn_handler_result_value(&val)),
                 Err(VmError::CategorizedError {
                     message,
                     category: ErrorCategory::ToolRejected,

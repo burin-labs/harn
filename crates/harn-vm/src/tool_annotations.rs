@@ -99,16 +99,34 @@ pub enum SideEffectLevel {
     ProcessExec,
     /// Reaches external services over the network.
     Network,
+    /// Drives the physical desktop — synthetic mouse/keyboard input and screen
+    /// capture. The most invasive local class: it can operate ANY application
+    /// (not just a sandboxed subprocess or a single network sink), inject
+    /// keystrokes that paste secrets or dismiss dialogs, and every screenshot
+    /// exfiltrates whatever is on screen to the model. It therefore sits at the
+    /// top of the ceiling ladder — a policy must opt into it explicitly, above
+    /// even network access.
+    DesktopControl,
 }
 
 impl SideEffectLevel {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::None,
         Self::ReadOnly,
         Self::WorkspaceWrite,
         Self::ProcessExec,
         Self::Network,
+        Self::DesktopControl,
     ];
+
+    /// The most-permissive side-effect level — the TOP of the ladder. This is
+    /// the single source of truth for "the outermost / most-autonomous ceiling":
+    /// the runtime's builtin ceiling and the top autonomy tier both reference it,
+    /// so adding a new most-invasive level (as `desktop_control` was added above
+    /// `network`) automatically raises every permissive bound instead of leaving
+    /// hardcoded `"network"` strings that silently cap the new level out. NEVER
+    /// hardcode a specific top level as "the max"; call this.
+    pub const MAX: Self = Self::DesktopControl;
 
     /// Numeric rank used by the policy intersector and side-effect
     /// ceiling check. Higher rank ⇒ more invasive.
@@ -119,6 +137,7 @@ impl SideEffectLevel {
             Self::WorkspaceWrite => 2,
             Self::ProcessExec => 3,
             Self::Network => 4,
+            Self::DesktopControl => 5,
         }
     }
 
@@ -131,7 +150,18 @@ impl SideEffectLevel {
             Self::WorkspaceWrite => "workspace_write",
             Self::ProcessExec => "process_exec",
             Self::Network => "network",
+            Self::DesktopControl => "desktop_control",
         }
+    }
+
+    /// Rank a level given as a string, through the canonical ladder — the single
+    /// source of truth for every ceiling/effect comparison that works with the
+    /// wire strings instead of the typed enum. An unrecognized value ranks as
+    /// `None` (0): tool levels always come from [`Self::as_str`] so they are
+    /// never unknown, and for a ceiling a typo then grants nothing above `none`
+    /// rather than silently widening the ceiling.
+    pub fn rank_str(level: &str) -> usize {
+        Self::parse(level).rank()
     }
 
     /// Parse from the stable string used in policy documents. Unknown
@@ -143,6 +173,7 @@ impl SideEffectLevel {
             "workspace_write" => Self::WorkspaceWrite,
             "process_exec" => Self::ProcessExec,
             "network" => Self::Network,
+            "desktop_control" => Self::DesktopControl,
             _ => Self::None,
         }
     }
@@ -283,6 +314,57 @@ mod tests {
         assert!(SideEffectLevel::ReadOnly.rank() < SideEffectLevel::WorkspaceWrite.rank());
         assert!(SideEffectLevel::WorkspaceWrite.rank() < SideEffectLevel::ProcessExec.rank());
         assert!(SideEffectLevel::ProcessExec.rank() < SideEffectLevel::Network.rank());
+        // Desktop control is the most invasive local class — top of the ladder,
+        // above even network egress.
+        assert!(SideEffectLevel::Network.rank() < SideEffectLevel::DesktopControl.rank());
+        assert_eq!(
+            SideEffectLevel::parse("desktop_control"),
+            SideEffectLevel::DesktopControl
+        );
+        assert_eq!(SideEffectLevel::DesktopControl.as_str(), "desktop_control");
+    }
+
+    #[test]
+    fn max_is_the_unique_top_of_the_ladder() {
+        // Guardrail: `SideEffectLevel::MAX` MUST be the strictly-highest-ranked
+        // level. Adding a new most-invasive variant without updating `MAX` (the
+        // single "most-permissive ceiling" the builtin ceiling and top autonomy
+        // tier both reference) fails here — so the "network was the top" footgun
+        // that silently capped `desktop_control` cannot recur.
+        for level in SideEffectLevel::ALL {
+            assert!(
+                level.rank() <= SideEffectLevel::MAX.rank(),
+                "{level:?} outranks MAX ({:?}); update SideEffectLevel::MAX",
+                SideEffectLevel::MAX
+            );
+        }
+        // And MAX is uniquely the top (exactly one level at the max rank).
+        let at_top = SideEffectLevel::ALL
+            .iter()
+            .filter(|l| l.rank() == SideEffectLevel::MAX.rank())
+            .count();
+        assert_eq!(at_top, 1, "MAX must be the unique top of the ladder");
+
+        // Compiler guardrail on `ALL` completeness: this match is exhaustive
+        // over the TYPE, so adding a variant fails the build here — and the
+        // count assertion then forces that variant into `ALL`. Without both,
+        // a variant omitted from the (hand-maintained) `ALL` array would
+        // silently escape the uniqueness check above.
+        fn _every_variant_accounted_for(level: SideEffectLevel) {
+            match level {
+                SideEffectLevel::None
+                | SideEffectLevel::ReadOnly
+                | SideEffectLevel::WorkspaceWrite
+                | SideEffectLevel::ProcessExec
+                | SideEffectLevel::Network
+                | SideEffectLevel::DesktopControl => {}
+            }
+        }
+        assert_eq!(
+            SideEffectLevel::ALL.len(),
+            6,
+            "a SideEffectLevel variant was added; list it in ALL and bump this count"
+        );
     }
 
     #[test]

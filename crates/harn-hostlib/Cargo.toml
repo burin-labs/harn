@@ -26,6 +26,17 @@ include = [
 default = ["full"]
 full = ["ast"]
 
+# Computer-use host capability (screenshot + mouse/keyboard control). The
+# light `computer` feature compiles the neutral schema, the trait, and the
+# socket/null transports (serde only). `computer-local` adds the real local
+# capture/input backend (`xcap` + `enigo` + `image`) and its per-OS
+# toolchains. Neither is in `default`/`full`, so headless clients and CI
+# without desktop libraries build unchanged; embedders that want native
+# computer use (the TUI engine, the macOS helper, the cloud desktop runner)
+# opt into `computer-local` explicitly.
+computer = []
+computer-local = ["computer", "dep:xcap", "dep:enigo", "dep:image"]
+
 # Code-intelligence layer: tree-sitter parsing + AST edit primitives
 # (`ast`) and the symbol graph / cypher / cross-file rename built on top of
 # it (`code_index`). The two modules reference each other's types — the
@@ -137,6 +148,13 @@ globset = "0.4"
 walkdir = "2"
 base64 = "0.22"
 regex = "1"
+
+# Computer-use local backend (screenshot capture + synthetic input). Optional;
+# only compiled when the `computer-local` feature is enabled. `image` backs PNG
+# encoding of captured frames (and is already xcap's image dependency).
+xcap = { version = "0.9", optional = true }
+enigo = { version = "0.6", optional = true }
+image = { version = "0.25", optional = true }
 
 # Tree-sitter grammars driving `ast::*` (issue #564). Versions match the
 # Swift `ASTEngine` set verbatim — see the `ast` module for the language

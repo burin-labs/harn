@@ -1701,7 +1701,12 @@ pub(super) async fn host_agent_dispatch_tool_call(
 
     match outcome.result {
         Ok(raw_result) => {
-            let rendered_before_hooks = agent_tools::render_tool_result(&raw_result);
+            // Render from a base64-elided copy so a screenshot (or any image)
+            // result does not swamp the transcript text — the full image payload
+            // still travels to the model as an image content block via the
+            // structured `result` field below and the tool-result recording path.
+            let rendered_before_hooks =
+                agent_tools::render_tool_result(&agent_tools::elide_image_base64(&raw_result));
             let (rendered, reports) = crate::orchestration::scope_hook_reminder_reports(
                 crate::agent_sessions::scope_current_tool_call(tool_id.clone(), async {
                     crate::orchestration::run_post_tool_hooks_with_ctx(

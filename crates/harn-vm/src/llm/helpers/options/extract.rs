@@ -404,12 +404,20 @@ pub(crate) fn extract_llm_options(
     } else {
         None
     };
-    let provider_tools = parse_provider_tools_option(options.as_ref())?;
+    let mut provider_tools = parse_provider_tools_option(options.as_ref())?;
     if enforce_capability_gates && !provider_tools.is_empty() && api_mode != LlmApiMode::Responses {
         return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             "provider_tools requires api_mode: \"responses\"",
         ))));
     }
+    // Project the neutral `computer` function tool onto the route's native
+    // computer-use surface: on `native_anthropic` / `native_openai` routes this
+    // suppresses the plain function copy and injects the provider-native tool
+    // into `provider_tools`. Runs AFTER the Responses-only gate above so the
+    // injected native tool (which the Anthropic Messages adapter also folds
+    // into its `tools` array) is not rejected on the non-Responses Anthropic
+    // route. `function` / `grounded` / unset routes keep the plain tool.
+    crate::llm::computer_use::project_computer_tools(&caps, &mut native_tools, &mut provider_tools);
 
     // tool_search option parsing: three shapes accepted.
     //   - shorthand string: "bm25" | "regex" | "hybrid" (mode: auto)

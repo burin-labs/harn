@@ -26,14 +26,23 @@ pub(crate) fn vm_messages_to_json(msg_list: &[VmValue]) -> Result<Vec<serde_json
             };
 
             if role == "tool_result" {
-                // Anthropic tool result format
+                // Anthropic tool result format. The block's `content` may be a
+                // plain string OR an array of content blocks. A computer-use
+                // result rides its screenshot back as a `[text, screenshot]`
+                // block list, and Anthropic's `tool_result.content` accepts that
+                // array natively — so preserve an array verbatim (the egress
+                // `anthropic_content` pass projects the neutral screenshot dict
+                // into a proper image block). Only a genuinely scalar,
+                // non-string content is rendered to text. Stringifying the array
+                // here (the previous behaviour) collapsed the screenshot into
+                // ~1 MB of base64 TEXT, so the model never received an image.
                 let tool_use_id = d
                     .get("tool_use_id")
                     .map(|v| v.display())
                     .unwrap_or_default();
-                let rendered = match &content_json {
-                    serde_json::Value::String(text) => text.clone(),
-                    other => other.to_string(),
+                let rendered = match content_json {
+                    serde_json::Value::String(_) | serde_json::Value::Array(_) => content_json,
+                    other => serde_json::Value::String(other.to_string()),
                 };
                 messages.push(serde_json::json!({
                     "role": "user",

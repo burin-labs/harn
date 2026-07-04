@@ -248,6 +248,118 @@ pub(crate) fn parse_image_block(
     ImageContent::from_block(block)
 }
 
+/// Rewrite a screenshot-shaped tool-result value into a neutral
+/// `{type:"image", base64, media_type}` block so the provider adapters carry it
+/// as an IMAGE content block instead of stringifying the raw dict.
+///
+/// Recognizes two shapes a computer-use tool returns:
+/// - `{image: {base64, media_type}}` — a caller-wrapped image, and
+/// - the hostlib `ScreenImage` shape `{base64, media_type, width, height,
+///   scale_factor}` from `hostlib_computer_screenshot`.
+///
+/// Returns `None` when `value` is not one of those (including when it already
+/// carries an explicit `type`, so typed blocks flow through the normal
+/// [`parse_image_block`] path untouched). `media_type` defaults to `image/png`.
+/// The neutral screenshot payload a computer-use tool returns. This is the ONE
+/// typed definition of the `{base64, media_type, width, height, scale_factor}`
+/// shape that was previously hand-destructured across the detection predicate,
+/// the neutral→image-block converter, and the provider data-URL formatters.
+/// `TryFrom` validates the distinctive signature — a non-empty `base64` paired
+/// with a numeric `scale_factor` — so `ScreenImage::try_from(v).is_ok()` is the
+/// canonical "is this a screenshot dict" test and every projection derives from
+/// this single definition.
+#[derive(Debug, Clone)]
+pub(crate) struct ScreenImage {
+    pub base64: String,
+    pub media_type: String,
+}
+
+impl TryFrom<&serde_json::Value> for ScreenImage {
+    type Error = ();
+
+    fn try_from(value: &serde_json::Value) -> Result<Self, Self::Error> {
+        let obj = value.as_object().ok_or(())?;
+        let base64 = obj
+            .get("base64")
+            .and_then(serde_json::Value::as_str)
+            .filter(|base64| !base64.is_empty())
+            .ok_or(())?;
+        // The `scale_factor` pairing is what distinguishes a ScreenImage from an
+        // unrelated dict that merely carries a `base64` field. It (and the
+        // `width`/`height` geometry) are not needed by the projections below, so
+        // they gate detection here without being stored.
+        obj.get("scale_factor")
+            .and_then(serde_json::Value::as_f64)
+            .ok_or(())?;
+        Ok(Self {
+            base64: base64.to_string(),
+            media_type: obj
+                .get("media_type")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("image/png")
+                .to_string(),
+        })
+    }
+}
+
+impl ScreenImage {
+    /// The neutral image content block (`{type:image, base64, media_type}`) the
+    /// provider content mappers project into each vendor's native image shape.
+    pub(crate) fn to_neutral_image_block(&self) -> serde_json::Value {
+        serde_json::json!({
+            "type": "image",
+            "base64": self.base64,
+            "media_type": self.media_type,
+        })
+    }
+
+    /// A `data:` URL for providers that ingest images as URLs (OpenAI
+    /// `image_url`, Responses `input_image`).
+    pub(crate) fn to_data_url(&self) -> String {
+        format!("data:{};base64,{}", self.media_type, self.base64)
+    }
+}
+
+/// Whether `value` is a screenshot dict that [`screenshot_image_block`] can
+/// render — the canonical single-source predicate. It is DERIVED from the
+/// converter (not a parallel shape check) so the recursive tool-result searchers
+/// (`json_carries_screenshot`, `screenshot_from_tool_result`) recognize exactly
+/// the shapes egress can turn into an image block. Otherwise a shape the
+/// converter accepts (e.g. Shape A `{image:{base64,media_type}}`) would be
+/// rendered on egress but never pulled into the content list by the searchers —
+/// the two ends must agree on one definition.
+pub(crate) fn is_screenshot_dict(value: &serde_json::Value) -> bool {
+    screenshot_image_block(value).is_some()
+}
+
+pub(crate) fn screenshot_image_block(value: &serde_json::Value) -> Option<serde_json::Value> {
+    let obj = value.as_object()?;
+    // An explicitly-typed block is handled by the normal image/file/video
+    // parsers — never reinterpret it here.
+    if obj.contains_key("type") {
+        return None;
+    }
+    let image_block = |base64: &str, media_type: Option<&str>| {
+        serde_json::json!({
+            "type": "image",
+            "base64": base64,
+            "media_type": media_type.unwrap_or("image/png"),
+        })
+    };
+    // Shape A: `{image: {base64, media_type}}`.
+    if let Some(image) = obj.get("image").and_then(|value| value.as_object()) {
+        let base64 = image.get("base64").and_then(|value| value.as_str())?;
+        let media_type = image.get("media_type").and_then(|value| value.as_str());
+        return Some(image_block(base64, media_type));
+    }
+    // Shape B: the neutral `ScreenImage` dict — projected from its one typed
+    // definition.
+    if let Ok(screen) = ScreenImage::try_from(value) {
+        return Some(screen.to_neutral_image_block());
+    }
+    None
+}
+
 pub(crate) fn parse_file_block(block: &serde_json::Value) -> Result<Option<FileContent>, VmError> {
     FileContent::from_block(block)
 }
@@ -418,6 +530,8 @@ pub(crate) fn anthropic_content(content: &serde_json::Value) -> serde_json::Valu
         serde_json::Value::Array(blocks) => {
             let mut out = Vec::new();
             for block in blocks {
+                let normalized = screenshot_image_block(block);
+                let block = normalized.as_ref().unwrap_or(block);
                 if let Ok(Some(image)) = parse_image_block(block) {
                     let source = match (image.base64, image.url) {
                         (Some(data), None) => serde_json::json!({
@@ -438,6 +552,19 @@ pub(crate) fn anthropic_content(content: &serde_json::Value) -> serde_json::Valu
                     out.push(anthropic_file_block(block, file));
                 } else if let Some(text) = normalized_text_block(block) {
                     out.push(text);
+                } else if block.get("type").and_then(|value| value.as_str()) == Some("tool_result")
+                {
+                    // A `tool_result` block carries its own nested content list
+                    // (Anthropic's tool-result shape). An image tool result puts a
+                    // neutral screenshot dict in that nested list, so recurse to
+                    // convert it into an `image` block — otherwise the raw dict
+                    // reaches Anthropic and 400s. A string/plain nested content
+                    // round-trips unchanged through the `_ => content.clone()` arm.
+                    let mut normalized_block = block.clone();
+                    if let Some(inner) = block.get("content") {
+                        normalized_block["content"] = anthropic_content(inner);
+                    }
+                    out.push(normalized_block);
                 } else {
                     out.push(block.clone());
                 }
@@ -445,6 +572,8 @@ pub(crate) fn anthropic_content(content: &serde_json::Value) -> serde_json::Valu
             serde_json::Value::Array(out)
         }
         serde_json::Value::Object(_) => {
+            let normalized = screenshot_image_block(content);
+            let content = normalized.as_ref().unwrap_or(content);
             if let Ok(Some(image)) = parse_image_block(content) {
                 anthropic_content(&serde_json::Value::Array(vec![serde_json::json!(
                     image_to_neutral_json(&image)
@@ -466,6 +595,8 @@ pub(crate) fn openai_content(content: &serde_json::Value) -> serde_json::Value {
         serde_json::Value::Array(blocks) => {
             let mut out = Vec::new();
             for block in blocks {
+                let normalized = screenshot_image_block(block);
+                let block = normalized.as_ref().unwrap_or(block);
                 if let Ok(Some(image)) = parse_image_block(block) {
                     let mut image_url = serde_json::json!({"url": image.openai_url()});
                     if let Some(detail) = image.detail {
@@ -497,6 +628,8 @@ pub(crate) fn openai_content(content: &serde_json::Value) -> serde_json::Value {
             serde_json::Value::Array(out)
         }
         serde_json::Value::Object(_) => {
+            let screenshot = screenshot_image_block(content);
+            let content = screenshot.as_ref().unwrap_or(content);
             if let Ok(Some(image)) = parse_image_block(content) {
                 let mut image_url = serde_json::json!({"url": image.openai_url()});
                 if let Some(detail) = image.detail {
@@ -758,4 +891,119 @@ fn image_to_neutral_json(image: &ImageContent) -> serde_json::Value {
         value["detail"] = serde_json::json!(detail);
     }
     value
+}
+
+#[cfg(test)]
+mod computer_use_tests {
+    use super::{anthropic_content, openai_content, screenshot_image_block};
+
+    #[test]
+    fn hostlib_screenimage_becomes_neutral_image_block() {
+        // The `ScreenImage` shape returned by `hostlib_computer_screenshot`.
+        let screen = serde_json::json!({
+            "base64": "AAAA",
+            "media_type": "image/png",
+            "width": 1920,
+            "height": 1080,
+            "scale_factor": 2.0,
+        });
+        let block = screenshot_image_block(&screen).expect("recognized ScreenImage");
+        assert_eq!(block["type"], "image");
+        assert_eq!(block["base64"], "AAAA");
+        assert_eq!(block["media_type"], "image/png");
+    }
+
+    #[test]
+    fn image_wrapper_shape_is_recognized() {
+        let wrapped = serde_json::json!({"image": {"base64": "BBBB", "media_type": "image/jpeg"}});
+        let block = screenshot_image_block(&wrapped).expect("recognized wrapper");
+        assert_eq!(block["type"], "image");
+        assert_eq!(block["base64"], "BBBB");
+        assert_eq!(block["media_type"], "image/jpeg");
+    }
+
+    #[test]
+    fn typed_and_plain_dicts_are_left_alone() {
+        // Already-typed image block: handled by the normal parser, not here.
+        assert!(screenshot_image_block(&serde_json::json!({
+            "type": "image", "base64": "X", "media_type": "image/png"
+        }))
+        .is_none());
+        // Unrelated dict: not a screenshot.
+        assert!(screenshot_image_block(&serde_json::json!({"ok": true})).is_none());
+    }
+
+    #[test]
+    fn anthropic_tool_result_carries_screenshot_as_image() {
+        // A tool_result whose content is a single ScreenImage dict.
+        let content = serde_json::json!({
+            "base64": "AAAA",
+            "media_type": "image/png",
+            "width": 1024,
+            "height": 768,
+            "scale_factor": 1.0,
+        });
+        let mapped = anthropic_content(&content);
+        let arr = mapped.as_array().expect("array");
+        assert_eq!(arr[0]["type"], "image");
+        assert_eq!(arr[0]["source"]["type"], "base64");
+        assert_eq!(arr[0]["source"]["media_type"], "image/png");
+        assert_eq!(arr[0]["source"]["data"], "AAAA");
+    }
+
+    #[test]
+    fn anthropic_tool_result_array_carries_screenshot_as_image() {
+        // A tool_result whose content is a list containing text + a ScreenImage.
+        let content = serde_json::json!([
+            {"type": "text", "text": "here"},
+            {"base64": "AAAA", "media_type": "image/png", "width": 10, "height": 10, "scale_factor": 1.0}
+        ]);
+        let mapped = anthropic_content(&content);
+        let arr = mapped.as_array().expect("array");
+        assert_eq!(arr.len(), 2);
+        assert_eq!(arr[1]["type"], "image");
+        assert_eq!(arr[1]["source"]["data"], "AAAA");
+    }
+
+    #[test]
+    fn openai_tool_result_carries_screenshot_as_image_url() {
+        let content = serde_json::json!({
+            "base64": "AAAA",
+            "media_type": "image/png",
+            "width": 10,
+            "height": 10,
+            "scale_factor": 1.0,
+        });
+        let mapped = openai_content(&content);
+        let arr = mapped.as_array().expect("array");
+        assert_eq!(arr[0]["type"], "image_url");
+        assert_eq!(arr[0]["image_url"]["url"], "data:image/png;base64,AAAA");
+    }
+
+    #[test]
+    fn anthropic_recurses_into_tool_result_block_content() {
+        // The actual Anthropic egress shape: the tool result is wrapped in a
+        // `{type:"tool_result", content:[...]}` block whose nested content list
+        // holds a text block + a neutral ScreenImage dict. `anthropic_content`
+        // must recurse into the block and convert the screenshot to an `image`
+        // block, or the raw dict reaches Anthropic and 400s.
+        let message_content = serde_json::json!([
+            {
+                "type": "tool_result",
+                "tool_use_id": "call_1",
+                "content": [
+                    {"type": "text", "text": "Captured screenshot 1024x768."},
+                    {"base64": "AAAA", "media_type": "image/png", "width": 1024, "height": 768, "scale_factor": 1.0}
+                ]
+            }
+        ]);
+        let mapped = anthropic_content(&message_content);
+        let arr = mapped.as_array().expect("array");
+        assert_eq!(arr[0]["type"], "tool_result");
+        let inner = arr[0]["content"].as_array().expect("nested content array");
+        assert_eq!(inner[0]["type"], "text");
+        assert_eq!(inner[1]["type"], "image");
+        assert_eq!(inner[1]["source"]["type"], "base64");
+        assert_eq!(inner[1]["source"]["data"], "AAAA");
+    }
 }

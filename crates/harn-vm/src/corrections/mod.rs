@@ -325,20 +325,10 @@ fn correction_applies_to_actor(record: &CorrectionRecord, actor_id: &str) -> boo
 }
 
 fn cap_side_effect_level(policy: &mut CapabilityPolicy, ceiling: &str) {
+    use crate::tool_annotations::SideEffectLevel;
     let current = policy.side_effect_level.as_deref().unwrap_or("network");
-    if side_effect_rank(current) > side_effect_rank(ceiling) {
+    if SideEffectLevel::rank_str(current) > SideEffectLevel::rank_str(ceiling) {
         policy.side_effect_level = Some(ceiling.to_string());
-    }
-}
-
-fn side_effect_rank(value: &str) -> usize {
-    match value {
-        "none" => 0,
-        "read_only" => 1,
-        "workspace_write" => 2,
-        "process_exec" => 3,
-        "network" => 4,
-        _ => 5,
     }
 }
 

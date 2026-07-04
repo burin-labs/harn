@@ -265,6 +265,35 @@ impl WireDialect {
     }
 }
 
+/// How the neutral `computer` tool projects onto a route's native computer-use
+/// surface (the `computer_use_style` capability). A typed enum rather than a raw
+/// string so an unknown value in a capability source is a load-time
+/// deserialize error instead of a silently-disabled computer tool.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ComputerUseStyle {
+    /// Anthropic `computer_20251124` native tool.
+    NativeAnthropic,
+    /// OpenAI Responses `computer` native tool.
+    NativeOpenai,
+    /// Accessibility / set-of-marks grounding over the universal function tool.
+    Grounded,
+    /// The plain function-schema `computer` tool (the universal default).
+    Function,
+}
+
+/// Screenshot downscaling policy applied before an image reaches the model (the
+/// `screenshot_scaling` capability). Typed for the same reason as
+/// [`ComputerUseStyle`] — an unknown value fails the capability load loudly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScreenshotScaling {
+    /// Fit within Anthropic's XGA (1024x768), preserving aspect ratio.
+    Xga,
+    /// Send the capture at its native resolution (OpenAI et al.).
+    Original,
+}
+
 /// Resolved capabilities for a `(provider, model)` pair. Unset rule
 /// fields resolve to `false` / empty / `None` so callers never have to
 /// unwrap an `Option<bool>` for what are really boolean gates.
@@ -369,6 +398,17 @@ pub struct Capabilities {
     /// Serving-quality / precision trust verdict for this route. See
     /// [`ProviderRule::serving_precision`]. `"unverified"` when unset.
     pub serving_precision: String,
+    /// How the neutral `computer` tool projects onto this route's native
+    /// computer-use surface. `None` means the route exposes no computer-use
+    /// surface. See [`ComputerUseStyle`].
+    pub computer_use_style: Option<ComputerUseStyle>,
+    /// Screenshot downscaling policy applied before the image reaches the
+    /// model. `None` means unset. See [`ScreenshotScaling`].
+    pub screenshot_scaling: Option<ScreenshotScaling>,
+    /// Whether this route requires echoing acknowledged safety checks on the
+    /// computer-use follow-up turn (OpenAI Responses `pending_safety_checks`
+    /// → `acknowledged_safety_checks`). See [`ProviderRule::safety_ack_flow`].
+    pub safety_ack_flow: bool,
 }
 
 impl Default for Capabilities {
@@ -446,6 +486,9 @@ impl Default for Capabilities {
             provider_route_denylist: Vec::new(),
             openrouter_provider_order: Vec::new(),
             serving_precision: "unverified".to_string(),
+            computer_use_style: None,
+            screenshot_scaling: None,
+            safety_ack_flow: false,
         }
     }
 }

@@ -242,9 +242,20 @@ fn responses_function_tool(tool: &serde_json::Value) -> serde_json::Value {
 
 fn responses_input_items(opts: &LlmRequestPayload) -> Vec<serde_json::Value> {
     let mut items = Vec::new();
+    // Images stripped off `function_call_output`s (a screenshot rides back on a
+    // tool result, but Responses only accepts images on a `user` item). They are
+    // buffered across the contiguous run of tool results and flushed as one
+    // `user` item when the run ends, so an image never lands *between* two
+    // `function_call_output` items in a parallel tool-call batch.
+    let mut pending_images: Vec<serde_json::Value> = Vec::new();
     for message in &opts.messages {
-        append_responses_message_items(message, &mut items);
+        let is_tool = message.get("role").and_then(serde_json::Value::as_str) == Some("tool");
+        if !is_tool {
+            flush_responses_pending_images(&mut items, &mut pending_images);
+        }
+        append_responses_message_items(message, &mut items, &mut pending_images);
     }
+    flush_responses_pending_images(&mut items, &mut pending_images);
     if let Some(ref prefill) = opts.prefill {
         items.push(serde_json::json!({
             "role": "assistant",
@@ -254,7 +265,29 @@ fn responses_input_items(opts: &LlmRequestPayload) -> Vec<serde_json::Value> {
     items
 }
 
-fn append_responses_message_items(message: &serde_json::Value, items: &mut Vec<serde_json::Value>) {
+/// Emit the buffered tool-result images (if any) as one `user` item; called when
+/// a run of tool results ends so the images land after the whole run, never
+/// between two `function_call_output` items.
+fn flush_responses_pending_images(
+    items: &mut Vec<serde_json::Value>,
+    pending: &mut Vec<serde_json::Value>,
+) {
+    if pending.is_empty() {
+        return;
+    }
+    let mut user_content = vec![serde_json::json!({
+        "type": "input_text",
+        "text": "Screenshot(s) from the preceding tool result(s):",
+    })];
+    user_content.append(pending);
+    items.push(serde_json::json!({"role": "user", "content": user_content}));
+}
+
+fn append_responses_message_items(
+    message: &serde_json::Value,
+    items: &mut Vec<serde_json::Value>,
+    pending_images: &mut Vec<serde_json::Value>,
+) {
     let role = message
         .get("role")
         .and_then(serde_json::Value::as_str)
@@ -265,21 +298,46 @@ fn append_responses_message_items(message: &serde_json::Value, items: &mut Vec<s
             .or_else(|| message.get("call_id"))
             .and_then(serde_json::Value::as_str)
             .unwrap_or("");
-        let output = message
-            .get("content")
-            .and_then(serde_json::Value::as_str)
-            .map(str::to_string)
-            .unwrap_or_else(|| {
-                message
-                    .get("content")
-                    .map(serde_json::Value::to_string)
-                    .unwrap_or_default()
-            });
+        // The Responses API `function_call_output.output` is a string, and it
+        // cannot carry an image. A tool that returns a screenshot rides it back
+        // on its result, so split: text -> `output`, images -> a following user
+        // message as `input_image` items (where the Responses API accepts them).
+        let content = message.get("content");
+        let images: Vec<serde_json::Value> = content
+            .and_then(serde_json::Value::as_array)
+            .map(|parts| {
+                parts
+                    .iter()
+                    .filter_map(responses_image_input_item)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let output = match content {
+            Some(serde_json::Value::String(text)) => text.clone(),
+            Some(serde_json::Value::Array(parts)) => {
+                // Concatenate only the text parts; images move below.
+                let text = parts
+                    .iter()
+                    .filter_map(|part| part.get("text").and_then(serde_json::Value::as_str))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                if text.is_empty() && !images.is_empty() {
+                    "(screenshot returned; see the image in the following message)".to_string()
+                } else {
+                    text
+                }
+            }
+            Some(other) => other.to_string(),
+            None => String::new(),
+        };
         items.push(serde_json::json!({
             "type": "function_call_output",
             "call_id": call_id,
             "output": output,
         }));
+        // Buffer the images; the caller flushes them as a `user` item once this
+        // contiguous run of tool results ends, preserving output adjacency.
+        pending_images.extend(images);
         return;
     }
 
@@ -329,6 +387,42 @@ fn responses_message_content(role: &str, content: &serde_json::Value) -> serde_j
         ),
         other => other.clone(),
     }
+}
+
+/// Build a Responses `input_image` item from a tool-result content part that
+/// carries an image: the neutral screenshot dict the computer tool returns (via
+/// the canonical [`ScreenImage`] definition), or a typed image block
+/// (`image`/`input_image`/`image_url`) carrying a url. Returns `None` for
+/// non-image parts (text, etc.).
+fn responses_image_input_item(item: &serde_json::Value) -> Option<serde_json::Value> {
+    // Neutral screenshot dict -> data URL, keyed off the single ScreenImage
+    // definition (same signature the rest of the pipeline detects).
+    if let Ok(screen) = crate::llm::content::ScreenImage::try_from(item) {
+        return Some(serde_json::json!({
+            "type": "input_image",
+            "image_url": screen.to_data_url(),
+        }));
+    }
+    // Otherwise a typed image block that carries a url directly.
+    let type_tag = item.get("type").and_then(serde_json::Value::as_str);
+    if !matches!(type_tag, Some("image" | "input_image" | "image_url")) {
+        return None;
+    }
+    let image_url = item
+        .get("url")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+        .or_else(|| {
+            item.get("image_url").and_then(|value| {
+                value.as_str().map(str::to_string).or_else(|| {
+                    value
+                        .get("url")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_string)
+                })
+            })
+        })?;
+    Some(serde_json::json!({"type": "input_image", "image_url": image_url}))
 }
 
 fn responses_content_item(role: &str, item: &serde_json::Value) -> Option<serde_json::Value> {
@@ -392,6 +486,82 @@ fn elapsed_ms(clock: &dyn harn_clock::Clock, started_ms: i64) -> u64 {
 mod tests {
     use super::*;
     use crate::llm::api::{LlmApiMode, LlmRequestPayload, OutputFormat};
+
+    #[test]
+    fn responses_tool_result_screenshot_relocated_to_user_input_image() {
+        // A computer-use tool result carries [text, neutral-screenshot-dict].
+        // The Responses `function_call_output.output` is a string, so the image
+        // must move to a following `user` input item as an `input_image`, flushed
+        // by `responses_input_items` after the tool-result run.
+        let mut opts = crate::llm::api::options::base_opts("openai");
+        opts.messages = vec![serde_json::json!({
+            "role": "tool",
+            "tool_call_id": "call_1",
+            "content": [
+                {"type": "text", "text": "Captured screenshot."},
+                {"base64": "AAAB", "media_type": "image/png", "scale_factor": 2.0},
+            ],
+        })];
+        let payload = LlmRequestPayload::from(&opts);
+        let items = responses_input_items(&payload);
+        assert_eq!(
+            items.len(),
+            2,
+            "function_call_output + a user image message"
+        );
+        assert_eq!(items[0]["type"], "function_call_output");
+        assert_eq!(items[0]["output"], "Captured screenshot.");
+        // No image leaked into the string output.
+        assert!(!items[0]["output"].as_str().unwrap().contains("base64"));
+        assert_eq!(items[1]["role"], "user");
+        let content = items[1]["content"].as_array().expect("user content");
+        let img = content
+            .iter()
+            .find(|c| c.get("type").and_then(|t| t.as_str()) == Some("input_image"))
+            .expect("input_image present");
+        assert_eq!(img["image_url"], "data:image/png;base64,AAAB");
+    }
+
+    #[test]
+    fn responses_parallel_tool_results_stay_adjacent_with_image() {
+        // Parallel tool-call batch whose FIRST result carries a screenshot: the
+        // two `function_call_output` items must stay contiguous, with the
+        // relocated `user` image landing AFTER the whole run — never between the
+        // outputs.
+        let mut opts = crate::llm::api::options::base_opts("openai");
+        opts.messages = vec![
+            serde_json::json!({
+                "role": "tool",
+                "tool_call_id": "c1",
+                "content": [
+                    {"type": "text", "text": "shot"},
+                    {"base64": "AAAB", "media_type": "image/png", "scale_factor": 1.0},
+                ],
+            }),
+            serde_json::json!({
+                "role": "tool",
+                "tool_call_id": "c2",
+                "content": [{"type": "text", "text": "read ok"}],
+            }),
+        ];
+        let payload = LlmRequestPayload::from(&opts);
+        let items = responses_input_items(&payload);
+        let kinds: Vec<String> = items
+            .iter()
+            .map(|item| {
+                item.get("type")
+                    .and_then(|t| t.as_str())
+                    .or_else(|| item.get("role").and_then(|r| r.as_str()))
+                    .unwrap_or("")
+                    .to_string()
+            })
+            .collect();
+        assert_eq!(
+            kinds,
+            ["function_call_output", "function_call_output", "user"],
+            "outputs stay adjacent; image flushes after the run: {items:?}"
+        );
+    }
 
     #[test]
     fn responses_body_maps_structured_output_and_controls() {

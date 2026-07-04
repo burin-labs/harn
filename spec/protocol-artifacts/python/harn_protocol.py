@@ -289,6 +289,7 @@ HARN_SIDE_EFFECT_LEVELS: tuple = (
     "workspace_write",
     "process_exec",
     "network",
+    "desktop_control",
 )
 HARN_WORKER_STATUSES: tuple = (
     "running",
@@ -529,6 +530,7 @@ class HarnSideEffectLevel(str, Enum):
     WORKSPACE_WRITE = "workspace_write"
     PROCESS_EXEC = "process_exec"
     NETWORK = "network"
+    DESKTOP_CONTROL = "desktop_control"
 
 
 class HarnWorkerStatus(str, Enum):

@@ -521,7 +521,39 @@ impl LlmCallOptions {
         if let Some(header) = crate::llm::fast_mode::beta_header(&self.model, self.fast) {
             push_unique_anthropic_beta_feature(&mut features, &header);
         }
+        // The `computer-use` beta is required ONLY by the provider-native
+        // computer tool (`computer_20251124`, an Anthropic-typed block). The
+        // universal path's plain function tool named `computer` is an ordinary
+        // function schema that needs no beta — requesting it there would leak an
+        // Anthropic-specific opt-in onto the provider-neutral default path and
+        // fire on any unrelated host tool that happens to be named `computer`.
+        // So gate strictly on the presence of the native TYPED computer tool.
+        if self.request_has_native_computer_tool() {
+            push_unique_anthropic_beta_feature(
+                &mut features,
+                crate::llm::providers::anthropic::COMPUTER_USE_BETA,
+            );
+        }
         features
+    }
+
+    /// Whether the resolved tool surface contains a provider-NATIVE computer
+    /// tool — a block whose `type` starts with `computer` (e.g.
+    /// `computer_20251124`). Deliberately does NOT match a plain function tool
+    /// merely named `computer`: that universal-path tool needs no provider beta
+    /// and matching it would leak the Anthropic beta onto the neutral path.
+    /// Checks both `native_tools` and `provider_tools` so detection is
+    /// order-independent with respect to the native-tool projection.
+    fn request_has_native_computer_tool(&self) -> bool {
+        let is_native_computer = |tool: &serde_json::Value| -> bool {
+            tool.get("type")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|ty| ty.starts_with("computer"))
+        };
+        self.native_tools
+            .as_deref()
+            .is_some_and(|tools| tools.iter().any(&is_native_computer))
+            || self.provider_tools.iter().any(&is_native_computer)
     }
 }
 
@@ -796,6 +828,54 @@ mod tests {
     };
 
     fn assert_send<T: Send>() {}
+
+    #[test]
+    fn computer_use_beta_requested_only_for_native_computer_tool() {
+        let beta = crate::llm::providers::anthropic::COMPUTER_USE_BETA;
+
+        // No computer tool in the surface -> beta absent.
+        let mut opts = base_opts("anthropic");
+        opts.model = "claude-opus-4-8".to_string();
+        opts.thinking = ThinkingConfig::Disabled;
+        assert!(
+            !opts
+                .anthropic_beta_features_for_request()
+                .contains(&beta.to_string()),
+            "beta must be absent without a computer tool"
+        );
+
+        // A plain function-schema `computer` tool is the provider-NEUTRAL
+        // universal path — it needs no Anthropic beta, and requesting one would
+        // leak an Anthropic-specific opt-in onto every route (and fire on any
+        // unrelated tool merely named `computer`). The beta must stay absent.
+        opts.native_tools = Some(vec![serde_json::json!({
+            "type": "function",
+            "function": {"name": "computer"}
+        })]);
+        assert!(
+            !opts
+                .anthropic_beta_features_for_request()
+                .contains(&beta.to_string()),
+            "a plain function `computer` tool must NOT request the Anthropic beta"
+        );
+
+        // The projected native Anthropic computer tool (a `computer_*` typed
+        // block in provider_tools) is what actually needs — and triggers — the
+        // beta, order-independently.
+        opts.native_tools = Some(vec![serde_json::json!({
+            "type": "function",
+            "function": {"name": "read_file"}
+        })]);
+        opts.provider_tools = vec![serde_json::json!({
+            "type": "computer_20251124",
+            "name": "computer"
+        })];
+        assert!(
+            opts.anthropic_beta_features_for_request()
+                .contains(&beta.to_string()),
+            "beta must be requested when the native computer tool is projected"
+        );
+    }
 
     #[test]
     fn resolve_timeout_precedence_explicit_then_env_then_catalog_then_default() {

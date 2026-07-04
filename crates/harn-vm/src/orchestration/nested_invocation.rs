@@ -187,14 +187,7 @@ fn collect_violations(
 }
 
 fn rank(level: &str) -> usize {
-    match level {
-        "none" => 0,
-        "read_only" => 1,
-        "workspace_write" => 2,
-        "process_exec" => 3,
-        "network" => 4,
-        _ => 5,
-    }
+    crate::tool_annotations::SideEffectLevel::rank_str(level)
 }
 
 /// Coarse capability projection for a Harn script source. We look for

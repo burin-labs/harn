@@ -1255,16 +1255,19 @@ fn policy_from_score(
 }
 
 pub fn policy_for_autonomy_tier(tier: AutonomyTier) -> CapabilityPolicy {
+    use crate::tool_annotations::SideEffectLevel;
+    let level = match tier {
+        AutonomyTier::Shadow => SideEffectLevel::None,
+        AutonomyTier::Suggest => SideEffectLevel::ReadOnly,
+        AutonomyTier::ActWithApproval => SideEffectLevel::ReadOnly,
+        // Full autonomy carries the outermost ceiling — the TOP of the ladder,
+        // not a hardcoded level. This must track the ladder so a newly-added
+        // most-invasive level (e.g. `desktop_control`, added above `network`) is
+        // not silently capped out of the fully-autonomous tier.
+        AutonomyTier::ActAuto => SideEffectLevel::MAX,
+    };
     CapabilityPolicy {
-        side_effect_level: Some(
-            match tier {
-                AutonomyTier::Shadow => "none",
-                AutonomyTier::Suggest => "read_only",
-                AutonomyTier::ActWithApproval => "read_only",
-                AutonomyTier::ActAuto => "network",
-            }
-            .to_string(),
-        ),
+        side_effect_level: Some(level.as_str().to_string()),
         recursion_limit: matches!(tier, AutonomyTier::Shadow).then_some(0),
         ..CapabilityPolicy::default()
     }

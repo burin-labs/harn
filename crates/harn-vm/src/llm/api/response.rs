@@ -342,7 +342,7 @@ fn push_openai_responses_hosted_tool_block(
         .get("status")
         .and_then(|value| value.as_str())
         .unwrap_or("");
-    blocks.push(serde_json::json!({
+    let mut block = serde_json::json!({
         "type": "provider_tool_call",
         "id": if call_id.is_empty() { id } else { call_id },
         "provider_tool_id": id,
@@ -354,7 +354,28 @@ fn push_openai_responses_hosted_tool_block(
         "status": status,
         "visibility": "internal",
         "provider_metadata": item,
-    }));
+    });
+    // Computer use: promote the native `action`, `call_id`, and any
+    // `pending_safety_checks` to top-level fields so the tool-call path can
+    // lower the action and surface the safety prompt without digging into
+    // `provider_metadata`. The neutral `computer` tool then executes via
+    // `hostlib_computer_execute`.
+    //
+    // INTEGRATION SEAM — safety-ack echo: on a `safety_ack_flow` route the
+    // orchestrator must, after the user/policy approves, echo these ids back on
+    // the follow-up `computer_call_output` as `acknowledged_safety_checks`
+    // (built in the Responses request assembly). That echo is not yet wired;
+    // the ids are surfaced here so the approval + echo can be added without
+    // re-parsing the response.
+    if item_type == "computer_call" {
+        if let Some(action) = item.get("action") {
+            block["action"] = action.clone();
+        }
+        if let Some(checks) = item.get("pending_safety_checks") {
+            block["pending_safety_checks"] = checks.clone();
+        }
+    }
+    blocks.push(block);
 }
 
 /// Parse OpenAI's native Responses API output into Harn's normal result shape.

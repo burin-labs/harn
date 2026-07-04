@@ -193,20 +193,16 @@ fn policy_allows_capability(policy: &CapabilityPolicy, capability: &str, op: &st
 }
 
 fn policy_allows_side_effect(policy: &CapabilityPolicy, requested: &str) -> bool {
-    fn rank(v: &str) -> usize {
-        match v {
-            "none" => 0,
-            "read_only" => 1,
-            "workspace_write" => 2,
-            "process_exec" => 3,
-            "network" => 4,
-            _ => 5,
-        }
-    }
+    // Rank through the canonical `SideEffectLevel` ladder (single source of
+    // truth). `requested` always comes from a typed `SideEffectLevel::as_str()`,
+    // so it is a known value; a typo'd policy ceiling ranks as `none` (0),
+    // conservatively granting nothing above `none` rather than the previous
+    // `_ => 5` that silently allowed everything.
+    let requested_rank = SideEffectLevel::rank_str(requested);
     policy
         .side_effect_level
         .as_ref()
-        .map(|allowed| rank(allowed) >= rank(requested))
+        .map(|allowed| SideEffectLevel::rank_str(allowed) >= requested_rank)
         .unwrap_or(true)
 }
 
@@ -722,7 +718,16 @@ pub fn builtin_ceiling() -> CapabilityPolicy {
         capabilities: BTreeMap::new(),
         workspace_roots: Vec::new(),
         read_only_roots: Vec::new(),
-        side_effect_level: Some("network".to_string()),
+        // The builtin ceiling is the runtime's OUTERMOST bound — the top of the
+        // side-effect ladder. Every real policy intersects DOWN from here, so this
+        // must be the maximum level or it would silently cap more-invasive tools
+        // out entirely. It tracks the top of the ladder: `desktop_control`. This
+        // does not loosen anything — a normal agent's surface policy still caps at
+        // the max of ITS tools (e.g. `network`); only a surface that actually
+        // carries a `desktop_control` tool (computer use, gated by the off-by-
+        // default flag) can reach the top.
+        // Tracks the ladder top via `SideEffectLevel::MAX` (never a hardcoded level).
+        side_effect_level: Some(SideEffectLevel::MAX.as_str().to_string()),
         recursion_limit: Some(RuntimeLimits::DEFAULT.max_nested_execution_depth),
         tool_arg_constraints: Vec::new(),
         tool_annotations: BTreeMap::new(),
@@ -909,6 +914,35 @@ mod approval_policy_tests {
             )]),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn builtin_ceiling_permits_desktop_control_but_a_lower_ceiling_denies_it() {
+        // The runtime's outer bound must admit the most-invasive level, or a
+        // desktop-control (computer-use) tool would be exposed-but-denied under
+        // the default ceiling.
+        let builtin = builtin_ceiling();
+        assert!(policy_allows_side_effect(
+            &builtin,
+            SideEffectLevel::DesktopControl.as_str()
+        ));
+
+        // A narrower policy (e.g. a normal agent whose tools top out at network)
+        // still denies a desktop-control tool — the level is a real gate, not a
+        // no-op.
+        let network_ceiling = CapabilityPolicy {
+            side_effect_level: Some(SideEffectLevel::Network.as_str().to_string()),
+            ..Default::default()
+        };
+        assert!(!policy_allows_side_effect(
+            &network_ceiling,
+            SideEffectLevel::DesktopControl.as_str()
+        ));
+        // ...but that same network ceiling still admits everything at or below it.
+        assert!(policy_allows_side_effect(
+            &network_ceiling,
+            SideEffectLevel::ProcessExec.as_str()
+        ));
     }
 
     #[test]

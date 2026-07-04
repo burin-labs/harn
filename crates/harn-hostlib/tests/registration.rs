@@ -426,20 +426,25 @@ fn install_default_wires_every_module_into_a_vm() {
     let mut vm = harn_vm::Vm::new();
     let registry = harn_hostlib::install_default(&mut vm);
 
-    assert_eq!(
-        registry.modules(),
-        &[
-            "ast",
-            "code_index",
-            "scanner",
-            "embed",
-            "fs",
-            "fs",
-            "fs_watch",
-            "tools",
-            "secret_store"
-        ]
-    );
+    // `mut` is only needed when the `computer` feature adds a module below; the
+    // allow keeps the no-feature build (CI default) warning-clean.
+    #[cfg_attr(not(feature = "computer"), allow(unused_mut))]
+    let mut expected = vec![
+        "ast",
+        "code_index",
+        "scanner",
+        "embed",
+        "fs",
+        "fs",
+        "fs_watch",
+        "tools",
+        "secret_store",
+    ];
+    // The computer-use module is registered only when the `computer` feature is
+    // compiled in (it is out of default/full so headless/Linux CI is unaffected).
+    #[cfg(feature = "computer")]
+    expected.push("computer");
+    assert_eq!(registry.modules(), expected.as_slice());
     // Builtin count: 15 ast (incl. apply_node + insert_at_anchor) +
     // 29 code_index (incl. add_readonly_roots, #2403 follow-up) + 2 scanner
     // + 4 embed + 4 fs + 4 fs_snapshot + 2 fs_watch + 14 tools
