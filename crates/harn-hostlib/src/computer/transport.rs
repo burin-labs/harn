@@ -228,7 +228,13 @@ impl ComputerBackend for SocketBackend {
         // The remote peer decides what it truly supports; advertise the full
         // surface optimistically and let individual calls report failures.
         BackendCapabilities {
-            name: "socket".to_string(),
+            // Name the concrete endpoint kind (the `helper`/`remote` transports
+            // both resolve to a socket, over a Unix path or TCP respectively).
+            name: match &self.endpoint {
+                #[cfg(unix)]
+                SocketEndpoint::Unix(_) => "socket:unix".to_string(),
+                SocketEndpoint::Tcp(_) => "socket:tcp".to_string(),
+            },
             screenshot: true,
             input: true,
             ui_tree: true,

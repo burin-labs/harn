@@ -779,14 +779,7 @@ fn side_effect_level_for(effect: &EffectRecord) -> &'static str {
 
 fn requested_exceeds_ceiling(requested: &str, ceiling: &str) -> bool {
     fn rank(value: &str) -> usize {
-        match value {
-            "none" => 0,
-            "read_only" => 1,
-            "workspace_write" => 2,
-            "process_exec" => 3,
-            "network" => 4,
-            _ => 5,
-        }
+        crate::tool_annotations::SideEffectLevel::rank_str(value)
     }
     rank(requested) > rank(ceiling)
 }

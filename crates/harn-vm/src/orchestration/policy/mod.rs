@@ -193,20 +193,16 @@ fn policy_allows_capability(policy: &CapabilityPolicy, capability: &str, op: &st
 }
 
 fn policy_allows_side_effect(policy: &CapabilityPolicy, requested: &str) -> bool {
-    fn rank(v: &str) -> usize {
-        match v {
-            "none" => 0,
-            "read_only" => 1,
-            "workspace_write" => 2,
-            "process_exec" => 3,
-            "network" => 4,
-            _ => 5,
-        }
-    }
+    // Rank through the canonical `SideEffectLevel` ladder (single source of
+    // truth). `requested` always comes from a typed `SideEffectLevel::as_str()`,
+    // so it is a known value; a typo'd policy ceiling ranks as `none` (0),
+    // conservatively granting nothing above `none` rather than the previous
+    // `_ => 5` that silently allowed everything.
+    let requested_rank = SideEffectLevel::rank_str(requested);
     policy
         .side_effect_level
         .as_ref()
-        .map(|allowed| rank(allowed) >= rank(requested))
+        .map(|allowed| SideEffectLevel::rank_str(allowed) >= requested_rank)
         .unwrap_or(true)
 }
 

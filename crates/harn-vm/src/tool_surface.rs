@@ -110,17 +110,8 @@ pub fn tool_names_from_spec(value: &serde_json::Value) -> Vec<String> {
 }
 
 fn max_side_effect_level(levels: impl Iterator<Item = String>) -> Option<String> {
-    fn rank(v: &str) -> usize {
-        match v {
-            "none" => 0,
-            "read_only" => 1,
-            "workspace_write" => 2,
-            "process_exec" => 3,
-            "network" => 4,
-            _ => 5,
-        }
-    }
-    levels.max_by_key(|level| rank(level))
+    // Rank through the canonical `SideEffectLevel` ladder (single source of truth).
+    levels.max_by_key(|level| SideEffectLevel::rank_str(level))
 }
 
 fn parse_tool_kind(value: Option<&serde_json::Value>) -> ToolKind {

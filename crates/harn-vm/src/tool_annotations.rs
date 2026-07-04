@@ -99,15 +99,24 @@ pub enum SideEffectLevel {
     ProcessExec,
     /// Reaches external services over the network.
     Network,
+    /// Drives the physical desktop — synthetic mouse/keyboard input and screen
+    /// capture. The most invasive local class: it can operate ANY application
+    /// (not just a sandboxed subprocess or a single network sink), inject
+    /// keystrokes that paste secrets or dismiss dialogs, and every screenshot
+    /// exfiltrates whatever is on screen to the model. It therefore sits at the
+    /// top of the ceiling ladder — a policy must opt into it explicitly, above
+    /// even network access.
+    DesktopControl,
 }
 
 impl SideEffectLevel {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::None,
         Self::ReadOnly,
         Self::WorkspaceWrite,
         Self::ProcessExec,
         Self::Network,
+        Self::DesktopControl,
     ];
 
     /// Numeric rank used by the policy intersector and side-effect
@@ -119,6 +128,7 @@ impl SideEffectLevel {
             Self::WorkspaceWrite => 2,
             Self::ProcessExec => 3,
             Self::Network => 4,
+            Self::DesktopControl => 5,
         }
     }
 
@@ -131,7 +141,18 @@ impl SideEffectLevel {
             Self::WorkspaceWrite => "workspace_write",
             Self::ProcessExec => "process_exec",
             Self::Network => "network",
+            Self::DesktopControl => "desktop_control",
         }
+    }
+
+    /// Rank a level given as a string, through the canonical ladder — the single
+    /// source of truth for every ceiling/effect comparison that works with the
+    /// wire strings instead of the typed enum. An unrecognized value ranks as
+    /// `None` (0): tool levels always come from [`Self::as_str`] so they are
+    /// never unknown, and for a ceiling a typo then grants nothing above `none`
+    /// rather than silently widening the ceiling.
+    pub fn rank_str(level: &str) -> usize {
+        Self::parse(level).rank()
     }
 
     /// Parse from the stable string used in policy documents. Unknown
@@ -143,6 +164,7 @@ impl SideEffectLevel {
             "workspace_write" => Self::WorkspaceWrite,
             "process_exec" => Self::ProcessExec,
             "network" => Self::Network,
+            "desktop_control" => Self::DesktopControl,
             _ => Self::None,
         }
     }
@@ -283,6 +305,14 @@ mod tests {
         assert!(SideEffectLevel::ReadOnly.rank() < SideEffectLevel::WorkspaceWrite.rank());
         assert!(SideEffectLevel::WorkspaceWrite.rank() < SideEffectLevel::ProcessExec.rank());
         assert!(SideEffectLevel::ProcessExec.rank() < SideEffectLevel::Network.rank());
+        // Desktop control is the most invasive local class — top of the ladder,
+        // above even network egress.
+        assert!(SideEffectLevel::Network.rank() < SideEffectLevel::DesktopControl.rank());
+        assert_eq!(
+            SideEffectLevel::parse("desktop_control"),
+            SideEffectLevel::DesktopControl
+        );
+        assert_eq!(SideEffectLevel::DesktopControl.as_str(), "desktop_control");
     }
 
     #[test]

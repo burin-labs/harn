@@ -870,13 +870,26 @@ pub fn spotlight_wrap(
 
 // --- Trifecta classification -------------------------------------------------
 
-/// Whether a tool can carry tainted context outward (network egress, fetch).
+/// Whether a tool can carry tainted context outward (network egress, fetch, or
+/// desktop control). Desktop control is an egress surface in two ways the
+/// GUI-agent security literature flags: a returned screenshot exfiltrates
+/// whatever is on screen to the model, and synthetic keyboard/mouse input can
+/// drive any application (paste into a URL bar, an upload dialog, a chat box) to
+/// send data outward. So the trifecta gate treats it like network egress: once
+/// untrusted content is in context, a desktop-control action is a potential
+/// exfiltration channel and is gated accordingly.
 pub fn is_exfil_capable(annotations: Option<&ToolAnnotations>, tool_name: &str) -> bool {
     if let Some(a) = annotations {
-        if a.side_effect_level == SideEffectLevel::Network || a.kind == ToolKind::Fetch {
+        if a.side_effect_level == SideEffectLevel::Network
+            || a.side_effect_level == SideEffectLevel::DesktopControl
+            || a.kind == ToolKind::Fetch
+        {
             return true;
         }
-        if a.capabilities.keys().any(|k| k == "net" || k == "network") {
+        if a.capabilities
+            .keys()
+            .any(|k| k == "net" || k == "network" || k == "desktop")
+        {
             return true;
         }
     }
@@ -1164,6 +1177,34 @@ mod tests {
         // the hardened default posture, so behaviour is byte-identical until a
         // host opts in.
         assert!(!policy.authenticate_directives);
+    }
+
+    #[test]
+    fn desktop_control_is_exfil_capable_for_the_trifecta_gate() {
+        // A desktop-control tool is an egress surface: screenshots exfiltrate the
+        // screen to the model, and synthetic input can drive any app to send data
+        // out. The trifecta gate must treat it like network egress.
+        let by_level = ToolAnnotations {
+            side_effect_level: SideEffectLevel::DesktopControl,
+            ..Default::default()
+        };
+        assert!(is_exfil_capable(Some(&by_level), "computer"));
+
+        // The `desktop` capability key alone also flags it.
+        let mut caps = BTreeMap::new();
+        caps.insert("desktop".to_string(), vec!["control".to_string()]);
+        let by_capability = ToolAnnotations {
+            capabilities: caps,
+            ..Default::default()
+        };
+        assert!(is_exfil_capable(Some(&by_capability), "computer"));
+
+        // A plain read tool is not an exfil surface.
+        let read = ToolAnnotations {
+            side_effect_level: SideEffectLevel::ReadOnly,
+            ..Default::default()
+        };
+        assert!(!is_exfil_capable(Some(&read), "read_file"));
     }
 
     #[test]

@@ -475,14 +475,7 @@ fn extend_unique(target: &mut Vec<String>, roots: &[String]) {
 
 fn min_side_effect<'a>(a: &'a str, b: &'a str) -> &'a str {
     fn rank(v: &str) -> usize {
-        match v {
-            "none" => 0,
-            "read_only" => 1,
-            "workspace_write" => 2,
-            "process_exec" => 3,
-            "network" => 4,
-            _ => 5,
-        }
+        crate::tool_annotations::SideEffectLevel::rank_str(v)
     }
     if rank(a) <= rank(b) {
         a

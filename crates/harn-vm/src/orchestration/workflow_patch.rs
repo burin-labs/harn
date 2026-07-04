@@ -1002,25 +1002,15 @@ fn collect_ceiling_violations(
 }
 
 fn side_effect_rank(level: &str) -> usize {
-    match level {
-        "none" => 0,
-        "read_only" => 1,
-        "workspace_write" => 2,
-        "process_exec" => 3,
-        "network" => 4,
-        _ => 5,
-    }
+    crate::tool_annotations::SideEffectLevel::rank_str(level)
 }
 
 fn static_side_effect(level: &str) -> &'static str {
-    match level {
-        "none" => "none",
-        "read_only" => "read_only",
-        "workspace_write" => "workspace_write",
-        "process_exec" => "process_exec",
-        "network" => "network",
-        _ => "none",
-    }
+    // Canonical normalization (single source of truth). A previous local table
+    // silently downgraded any level it didn't list (e.g. `desktop_control`) to
+    // `none`; parsing through the ladder keeps every known level intact and maps
+    // only a genuinely-unknown value to `none`.
+    crate::tool_annotations::SideEffectLevel::parse(level).as_str()
 }
 
 fn autonomy_rank(tier: &str) -> usize {
