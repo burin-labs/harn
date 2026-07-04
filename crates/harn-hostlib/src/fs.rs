@@ -296,6 +296,15 @@ pub fn staged_status(session_id: &str) -> Result<StagedStatus, HostlibError> {
     Ok(status)
 }
 
+pub(crate) fn staged_pending_paths(session_id: &str) -> Result<BTreeSet<PathBuf>, HostlibError> {
+    validate_session_id(STATUS_BUILTIN, session_id)?;
+    let mut guard = lock_sessions();
+    let state = state_for_locked(&mut guard, session_id, None)?;
+    let paths = state.entries.keys().cloned().collect();
+    guard.insert(session_id.to_string(), state);
+    Ok(paths)
+}
+
 /// Commit staged changes for all paths or for a filtered path list.
 pub fn commit_staged(session_id: &str, paths: &[String]) -> Result<CommitResult, HostlibError> {
     validate_session_id(COMMIT_BUILTIN, session_id)?;
