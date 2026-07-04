@@ -9,6 +9,81 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.9.11
+
+### Added
+
+- Added a git-hook duration instrument: `.githooks/lib.sh` now appends one
+  NDJSON line per pre-commit/pre-push invocation to `~/.burin/hook-timings.ndjson`
+  (zero-dep, never changes the hook's exit code, degrades silently if the log
+  directory is unavailable). Added `scripts/hook_timings_report.sh` to print
+  p50/p95/max duration per (repo, hook), and `scripts/gha_spend_report.sh` to
+  print estimated GitHub Actions spend per repo/workflow.
+- **LLM provider rate/concurrency governor — Layer 0 detection + Layer 1 adaptive
+  governor, behind the default-off `llm.rate_governor` flag (`HARN_LLM_RATE_GOVERNOR=1`).**
+  When armed, Harn now governs its own concurrency/rate per `(provider, org_key)`
+  against provider throttling instead of retrying blindly into an org-wide wall. Detection
+  classifies each provider outcome into a structured `provider_throttle` transcript
+  record (HTTP 429, 529/503 overload, Anthropic overloaded/rate-limit body, and the
+  empty-completion-under-load heuristic). The governor runs an AIMD concurrency
+  limiter (additive-increase on sustained success, halve-to-floor on a throttle
+  signal), optional RPM/TPM token buckets, and a circuit breaker
+  (CLOSED → OPEN with exponential backoff + full jitter honoring `Retry-After`
+  → HALF-OPEN single probe → CLOSED) so retries wait behind the governor. Limits
+  live in the catalog as `[provider_limits.<provider>]` rows (Anthropic seeded;
+  every provider generic), never at call sites. New `harn provider limits`
+  reports resolved limits and live governor state deterministically, and a
+  `governor_state` record plus a `circuit_is_open` query seam expose whether a
+  run was infra-throttled rather than a capability failure. Byte-identical
+  behavior when the flag is off. Layer 2 (shared-local Harn leases) and
+  Layer 3 (Harn Cloud quota authority) are follow-ups; the `(provider, org_key)`
+  key and serializable governor state leave clean seams for both.
+- Perf pre-work for the VM-heavier re-architecture (measurement only): recorded
+  the pre-migration CLI cold-start baseline in `perf/cli/baselines/main.json`
+  (cold + warm medians, Apple Silicon macOS host), added a criterion benchmark
+  for the Rust↔`.harn` `harn_entry` boundary crossing (`call_harn_export_typed`
+  vs `call_harn_export_by_name`, warm vs cold parent module cache), added a
+  transcript-projection benchmark at ~10k/50k/100k-token transcripts, and added
+  `perf/README.md` documenting these suites as the regression gates for the
+  stage-loop inversion wave.
+- Extracted the canonical secret pattern catalog into a new dependency-free
+  `harn-secret-catalog` crate so off-runtime host consumers can share the single
+  source of truth instead of forking their own detector lists. `harn-vm`'s
+  redaction and `secret_scan` paths now re-export it with byte-identical
+  behavior.
+
+### Changed
+
+- Ported the protocol bindings round-trip checker to Harn while preserving Python
+  execution for the generated Python SDK artifact under test.
+
+### Fixed
+
+- **Git hooks now build their own Harn binary without inherited Rust compiler
+  wrappers (#4015).** Hook-internal Harn builds clear `RUSTC_WRAPPER` and
+  `CARGO_BUILD_RUSTC_WRAPPER`, avoiding sccache/cache-wrapper contention when
+  developer or CI environments set global Rust wrappers.
+- **Agent-loop post-turn policy stops no longer run completion verification by
+  default.** Callback stop verdicts now terminate authoritatively unless they
+  explicitly set `needs_verify: true`, preventing graceful-recovery ripcords
+  from being converted back into repair feedback.
+- Make terminal empty completions under an active provider throttle/circuit
+  failover-eligible instead of returning a final empty response on the same
+  provider.
+- Corrected a stale `harn-secret-catalog` version pin in `Cargo.lock` (0.9.9 →
+  0.9.10) so the workspace lockfile matches the current crate version and cargo
+  no longer re-dirties the tree on build.
+- LLM provider dispatch: `resolve_api_key` and the `harn providers` status
+  builtin no longer special-case Bedrock/Vertex by hardcoded provider name to
+  skip the generic `auth_env` check. Providers now declare
+  `credential_resolution = "platform_managed"` in `providers.toml` when their
+  shim resolves credentials through a multi-step chain (AWS SigV4 credential
+  chain, GCP ADC / service-account JSON) instead of a simple env-var lookup.
+  This also fixes a latent gap where Vertex's declared `auth_env` list (which
+  does not include every valid ADC path) could make `resolve_api_key` report
+  a false "missing API key" outside the code paths that had the hardcoded
+  bypass.
+
 ## v0.9.10
 
 ### Added
