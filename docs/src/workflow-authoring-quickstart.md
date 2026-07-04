@@ -45,7 +45,7 @@ You should see:
   "valid": true,
   "bundle_id": "quickstart-minimal",
   "workflow_id": "quickstart_minimal_workflow",
-  "graph_digest": "sha256:2f16c248cfed40152ac1d24a68fc3196566e0e78cb49f3ab4546aafc1594780b",
+  "graph_digest": "sha256:d89f161d9fe0739394db76ee48c4e0887b2bc2abba43060cb22826c388b90c2e",
   "errors": [],
   "warnings": []
 }
