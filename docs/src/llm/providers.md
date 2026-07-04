@@ -181,7 +181,11 @@ do not silently cross tool-call contracts. The JSON report exposes the
 machine-readable training contract under `training.contract`, and
 `training.target_modules` records the method-specific adapter target: QLoRA uses
 PEFT's `all-linear` shorthand, while full LoRA keeps explicit attention
-projection modules. The
+projection modules. The `corpus_refresh.model_aware_selection` block adds the
+data-selection contract: score candidate examples by target-base failure bucket,
+parser/schema difficulty, and turn-repair state; sample medium-difficulty
+failures; keep holdouts frozen; and stop refresh rounds when they stop clearing
+new buckets or regress no-write/non-tool behavior. The
 `harn models lora export` command carries the same contract into dataset rows
 and manifests with a stable contract id derived from the base model, provider,
 effective tool format, dataset format, and chat template, plus

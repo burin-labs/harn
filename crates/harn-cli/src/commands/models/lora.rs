@@ -1356,6 +1356,65 @@ fn corpus_refresh_recipe(
             "train/tune/holdout splits stay disjoint from Harn and Burin eval holdouts".to_string(),
             "base-versus-adapter eval runs on identical cases before promotion".to_string(),
         ],
+        model_aware_selection: model_aware_selection_recipe(strategy, tool_format, dataset_format),
+    }
+}
+
+fn model_aware_selection_recipe(
+    strategy: &str,
+    tool_format: &str,
+    dataset_format: &str,
+) -> ModelAwareSelectionRecipe {
+    let parser_signal = if matches!(tool_format, "text" | "json") {
+        "Harn text-parser failure class and repair distance"
+    } else {
+        "native tool-call schema validation error class"
+    };
+    let generation_scope = match strategy {
+        "refresh" => "score existing and teacher-repaired records before adding them to train/tune",
+        "distill" => {
+            "score synthetic teacher trajectories before accepting them into a generated corpus"
+        }
+        _ => "score the supplied corpus and report gaps without generating new records",
+    };
+    ModelAwareSelectionRecipe {
+        objective: "train on examples that expose the target base model's tool-use failure modes, not on near-duplicate syntax drills"
+            .to_string(),
+        difficulty_signals: vec![
+            "target base-model outcome bucket: solved, missing_call, malformed_call, wrong_tool, bad_arguments, unsafe_or_unpermitted_call, premature_final_answer"
+                .to_string(),
+            parser_signal.to_string(),
+            "tool schema overlap and argument-shape ambiguity for wrong-tool disambiguation"
+                .to_string(),
+            "turn-repair state: first-call, tool-result follow-up, permission denial, stale observation, or corrective retry"
+                .to_string(),
+            format!("dataset contract `{dataset_format}` sequence-fit and assistant-mask validity"),
+        ],
+        sampling_policy: vec![
+            generation_scope.to_string(),
+            "prioritize medium-difficulty candidates the base model nearly solves; cap already-solved and impossible examples"
+                .to_string(),
+            "balance single-turn calls, multi-turn repair, no-tool final answers, and permission/no-write outcomes"
+                .to_string(),
+            "dedupe by normalized tool name, arguments, outcome class, language, and task type before training"
+                .to_string(),
+        ],
+        refinement_loop: vec![
+            "round 0: preflight the frozen corpus, schemas, template, and split manifest"
+                .to_string(),
+            "round N: run the current base-or-adapter route on tune cases, bucket failures, then add or reweight only parser-valid teacher repairs"
+                .to_string(),
+            "keep holdout frozen before the first scoring pass; never recycle holdout failures into train/tune without changing the split id"
+                .to_string(),
+            "rerun base-versus-adapter eval on identical cases after each accepted refresh round"
+                .to_string(),
+        ],
+        stop_conditions: vec![
+            "no new failure bucket improves after a refresh round".to_string(),
+            "paired tune lift is positive but holdout remains unmeasured; stop before promotion"
+                .to_string(),
+            "adapter regresses non-tool chat, safe refusal, or no-write cases".to_string(),
+        ],
     }
 }
 
@@ -1788,6 +1847,16 @@ struct CorpusRefreshRecipe {
     provenance_manifest_fields: Vec<String>,
     hard_negative_slices: Vec<String>,
     acceptance_gates: Vec<String>,
+    model_aware_selection: ModelAwareSelectionRecipe,
+}
+
+#[derive(Debug, Serialize)]
+struct ModelAwareSelectionRecipe {
+    objective: String,
+    difficulty_signals: Vec<String>,
+    sampling_policy: Vec<String>,
+    refinement_loop: Vec<String>,
+    stop_conditions: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -2043,6 +2112,41 @@ mod tests {
         };
         let explicit = plan_report(&explicit_args).expect("explicit report");
         assert_eq!(explicit.training.alpha, 32);
+    }
+
+    #[test]
+    fn lora_plan_records_model_aware_selection_contract() {
+        let args = ModelsLoraPlanArgs {
+            base_model: "local-gemma4-e4b".to_string(),
+            provider: Some("vllm".to_string()),
+            tool_format: "json".to_string(),
+            corpus: Some("lora-corpus".to_string()),
+            teacher: Some("dashscope/qwen3-coder-next".to_string()),
+            corpus_strategy: "refresh".to_string(),
+            method: "qlora".to_string(),
+            rank: 24,
+            alpha: None,
+            dropout: 0.1,
+            json: true,
+        };
+        let report = plan_report(&args).expect("report");
+        let selection = &report.corpus_refresh.model_aware_selection;
+        assert!(selection
+            .difficulty_signals
+            .iter()
+            .any(|item| item.contains("target base-model outcome bucket")));
+        assert!(selection
+            .sampling_policy
+            .iter()
+            .any(|item| item.contains("medium-difficulty")));
+        assert!(selection
+            .refinement_loop
+            .iter()
+            .any(|item| item.contains("parser-valid teacher repairs")));
+        assert!(selection
+            .stop_conditions
+            .iter()
+            .any(|item| item.contains("no-write")));
     }
 
     #[test]
