@@ -427,6 +427,7 @@ jobs:
       # workflow_dispatch restore) keeps the per-repo 10 GB cache budget
       # focused on the entries we can actually read back.
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        id: rust-cache
         # Cache restore/save is a release latency optimization, not a release
         # precondition. The Windows cache backend has had transient misses and
         # auth/setup failures before the build step; fall back to a cold build
@@ -437,6 +438,29 @@ jobs:
           cache-on-failure: true
           cache-bin: false
           save-if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' }}
+
+      - name: Summarize cache mode
+        shell: bash
+        env:
+          HARN_RELEASE_TARGET: ${{ matrix.target }}
+          HARN_RELEASE_RUNNER_LABEL: ${{ matrix.os }}
+          HARN_RELEASE_SCCACHE_REQUESTED: ${{ matrix.use_sccache }}
+          HARN_RELEASE_CACHE_SAVE_ENABLED: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule') && 'true' || 'false' }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### Release cache mode"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Target | $HARN_RELEASE_TARGET |"
+            echo "| Runner label | $HARN_RELEASE_RUNNER_LABEL |"
+            echo "| Event | $GITHUB_EVENT_NAME |"
+            echo "| Ref | $GITHUB_REF |"
+            echo "| Swatinem cache save enabled | $HARN_RELEASE_CACHE_SAVE_ENABLED |"
+            echo "| sccache requested | $HARN_RELEASE_SCCACHE_REQUESTED |"
+            echo "| sccache path | ${SCCACHE_PATH:-<unset>} |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Install cargo-bloat
         if: matrix.target == 'x86_64-unknown-linux-gnu' && needs.setup.outputs.is_release != 'true'
@@ -509,6 +533,28 @@ jobs:
             echo "| Release codegen units | ${CARGO_PROFILE_RELEASE_CODEGEN_UNITS:-<unset>} |"
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Summarize sccache stats
+        if: always() && matrix.use_sccache == 'true'
+        shell: bash
+        env:
+          HARN_RELEASE_TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          sccache_bin="${SCCACHE_PATH:-sccache}"
+          {
+            echo "### Release sccache stats"
+            echo
+            echo "Target: \`$HARN_RELEASE_TARGET\`"
+            echo
+            echo '```text'
+            if command -v "$sccache_bin" >/dev/null 2>&1; then
+              "$sccache_bin" --show-stats || true
+            else
+              echo "sccache binary not found: $sccache_bin"
+            fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       # Sign the single `harn` Mach-O binary with the Developer ID Application
       # identity (hardened runtime + secure timestamp), then submit it to
       # Apple's notary service. harn-lsp / harn-dap ship as symlinks to this
@@ -530,6 +576,7 @@ jobs:
           TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
+          start=$SECONDS
           KEYCHAIN="$RUNNER_TEMP/sign.keychain-db"
           CERT_FILE="$RUNNER_TEMP/cert.p12"
           KEY_FILE="$RUNNER_TEMP/AuthKey.p8"
@@ -604,6 +651,15 @@ jobs:
 
           notary_submit_with_retry
           rm -f "$KEY_FILE" "$NOTARY_ZIP"
+          duration=$((SECONDS - start))
+          {
+            echo "### macOS signing and notarization"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Target | $TARGET |"
+            echo "| Duration | ${duration}s |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Tear down macOS keychain
         if: always() && runner.os == 'macOS' && needs.setup.outputs.is_release == 'true'
@@ -619,6 +675,7 @@ jobs:
           HARN_RELEASE_TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
+          start=$SECONDS
           mkdir -p dist
           cp "target/${HARN_RELEASE_TARGET}/release/harn" dist/harn
           # harn-lsp / harn-dap are relative symlinks to the single `harn`
@@ -635,11 +692,26 @@ jobs:
           fi
           cd dist
           tar czf "harn-${HARN_RELEASE_TARGET}.tar.gz" "${package_entries[@]}"
+          archive="harn-${HARN_RELEASE_TARGET}.tar.gz"
+          archive_bytes="$(wc -c < "$archive" | tr -d '[:space:]')"
+          duration=$((SECONDS - start))
+          {
+            echo "### Release package"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Target | $HARN_RELEASE_TARGET |"
+            echo "| Archive | $archive |"
+            echo "| Archive bytes | $archive_bytes |"
+            echo "| Duration | ${duration}s |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Package (windows)
         if: runner.os == 'Windows' && needs.setup.outputs.is_release == 'true'
         shell: bash
         run: |
+          set -euo pipefail
+          start=$SECONDS
           mkdir -p dist
           cp target/${{ matrix.target }}/release/harn.exe dist/harn.exe
           # Windows has no dependable unprivileged symlinks, so harn-lsp.exe /
@@ -649,7 +721,20 @@ jobs:
           cp dist/harn.exe dist/harn-lsp.exe
           cp dist/harn.exe dist/harn-dap.exe
           cd dist
-          7z a "harn-${{ matrix.target }}.zip" harn.exe harn-dap.exe harn-lsp.exe
+          archive="harn-${{ matrix.target }}.zip"
+          7z a "$archive" harn.exe harn-dap.exe harn-lsp.exe
+          archive_bytes="$(wc -c < "$archive" | tr -d '[:space:]')"
+          duration=$((SECONDS - start))
+          {
+            echo "### Release package"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Target | ${{ matrix.target }} |"
+            echo "| Archive | $archive |"
+            echo "| Archive bytes | $archive_bytes |"
+            echo "| Duration | ${duration}s |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Check binary size budget
         if: matrix.target == 'x86_64-unknown-linux-gnu'
@@ -754,6 +839,7 @@ jobs:
           REF: ${{ needs.setup.outputs.ref }}
         run: |
           set -euo pipefail
+          start=$SECONDS
           shopt -s nullglob
           archives=(dist/harn-*.tar.gz dist/harn-*.zip)
           if [ ${#archives[@]} -eq 0 ]; then
@@ -763,6 +849,18 @@ jobs:
           archive="${archives[0]}"
           echo "Uploading $archive to release $REF"
           gh release upload "$REF" "$archive" --repo "$GITHUB_REPOSITORY" --clobber
+          archive_bytes="$(wc -c < "$archive" | tr -d '[:space:]')"
+          duration=$((SECONDS - start))
+          {
+            echo "### Release archive upload"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Target | ${{ matrix.target }} |"
+            echo "| Archive | $archive |"
+            echo "| Archive bytes | $archive_bytes |"
+            echo "| Duration | ${duration}s |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   container:
     name: Publish container
@@ -883,6 +981,7 @@ jobs:
           REF: ${{ needs.setup.outputs.ref }}
         run: |
           set -euo pipefail
+          start=$SECONDS
           expected=(
             harn-aarch64-apple-darwin.tar.gz
             harn-aarch64-unknown-linux-gnu.tar.gz
@@ -905,7 +1004,7 @@ jobs:
               fi
             done
             if (( ${#missing[@]} == 0 )); then
-              exit 0
+              break
             fi
             if (( attempt == 12 )); then
               printf '::error::Missing release archives after %s attempts: %s\n' "$attempt" "${missing[*]}"
@@ -915,6 +1014,16 @@ jobs:
             printf '::notice::Release archive(s) not visible yet for %s: %s; retrying download (%s/12).\n' "$REF" "${missing[*]}" "$attempt"
             sleep 10
           done
+          duration=$((SECONDS - start))
+          {
+            echo "### Release archive download"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Ref | $REF |"
+            echo "| Archive count | ${#expected[@]} |"
+            echo "| Duration | ${duration}s |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Render release notes from changelog
         # This job has no Rust toolchain (it only assembles artifacts), so
@@ -922,11 +1031,22 @@ jobs:
         # rather than compiling from source. The tarball packs `harn` at its
         # root; ubuntu-latest is x86_64.
         run: |
+          set -euo pipefail
+          start=$SECONDS
           tar xzf artifacts/harn-x86_64-unknown-linux-gnu.tar.gz harn
           ./harn run scripts/render_release_notes.harn -- \
             --version "${{ needs.setup.outputs.version }}" \
             --output release-notes.md
           rm -f harn
+          duration=$((SECONDS - start))
+          {
+            echo "### Release notes render"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Version | ${{ needs.setup.outputs.version }} |"
+            echo "| Duration | ${duration}s |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Generate SHA256SUMS
         # install.sh and `harn upgrade` fetch this manifest to verify the
@@ -936,6 +1056,7 @@ jobs:
         working-directory: artifacts
         run: |
           set -euo pipefail
+          start=$SECONDS
           expected=(
             harn-aarch64-apple-darwin.tar.gz
             harn-aarch64-unknown-linux-gnu.tar.gz
@@ -957,6 +1078,15 @@ jobs:
           files=("${expected[@]}")
           sha256sum "${files[@]}" | LC_ALL=C sort -k 2 > SHA256SUMS
           cat SHA256SUMS
+          duration=$((SECONDS - start))
+          {
+            echo "### Release checksum generation"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Archive count | ${#files[@]} |"
+            echo "| Duration | ${duration}s |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Generate release-assets.json
         # Per-target download manifest consumed by downstream packagers
@@ -964,6 +1094,8 @@ jobs:
         # Scoop). See docs/src/dev/release-assets-manifest.md for the
         # schema and consumer contract.
         run: |
+          set -euo pipefail
+          start=$SECONDS
           tar xzf artifacts/harn-x86_64-unknown-linux-gnu.tar.gz harn
           ./harn run scripts/build_release_assets_manifest.harn -- \
             --artifacts-dir artifacts \
@@ -971,6 +1103,15 @@ jobs:
             --output artifacts/release-assets.json
           rm -f harn
           cat artifacts/release-assets.json
+          duration=$((SECONDS - start))
+          {
+            echo "### Release asset manifest"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Ref | ${{ needs.setup.outputs.ref }} |"
+            echo "| Duration | ${duration}s |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Finalize GitHub release
         # Every leg has landed. Attach SHA256SUMS + the asset manifest, write
