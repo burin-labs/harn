@@ -196,7 +196,7 @@ plan = "task_local_or_explicit"
 
 [[thread_local]]
 path = "src/llm/mock.rs"
-statics = ["LLM_REPLAY_MODE", "LLM_FIXTURE_DIR", "TOOL_RECORDINGS", "LLM_MOCKS", "CLI_LLM_MOCK_MODE", "CLI_LLM_MOCKS", "CLI_LLM_RECORDINGS", "LLM_MOCK_CALLS", "LLM_PROMPT_CACHE", "LLM_MOCK_SCOPES"]
+statics = ["LLM_REPLAY_MODE", "LLM_FIXTURE_DIR", "TOOL_RECORDINGS", "LLM_MOCKS", "CLI_LLM_MOCK_SCOPE", "LLM_MOCK_CALLS", "LLM_PROMPT_CACHE", "LLM_MOCK_SCOPES"]
 category = "thread_private"
 plan = "thread_private_cache"
 

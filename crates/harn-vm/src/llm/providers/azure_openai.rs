@@ -278,6 +278,7 @@ mod tests {
             prefill: None,
             session_id: None,
             reminder_lifecycle: Vec::new(),
+            cli_llm_mock_scope: None,
         }
     }
 }

@@ -39,6 +39,12 @@ impl MockProvider {
             || crate::llm::mock::builtin_llm_mock_active()
     }
 
+    pub(crate) fn should_intercept_request(request: &LlmRequestPayload) -> bool {
+        request.provider == "mock"
+            || crate::llm::mock::cli_llm_mock_replay_active_for_scope(request.cli_llm_mock_scope)
+            || crate::llm::mock::builtin_llm_mock_active()
+    }
+
     pub(crate) async fn chat_impl(
         &self,
         request: &LlmRequestPayload,

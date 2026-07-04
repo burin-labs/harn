@@ -964,6 +964,7 @@ mod tests {
             max_tool_calls: None,
             prefill: None,
             reminder_lifecycle: Vec::new(),
+            cli_llm_mock_scope: None,
         }
     }
 
