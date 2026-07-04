@@ -1247,6 +1247,215 @@ fn models_lora_export_json_writes_dataset_and_manifest() {
 }
 
 #[test]
+fn models_lora_manifest_json_writes_training_manifest() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let dataset = tmp.path().join("train.jsonl");
+    fs::write(&dataset, "{\"messages\":[]}\n").expect("dataset");
+    let export_manifest = tmp.path().join("export.manifest.json");
+    fs::write(&export_manifest, "{}\n").expect("export manifest");
+    let adapter = write_lora_adapter_fixture();
+    let adapter_path = adapter.path().display().to_string();
+    let out = tmp.path().join("adapter.manifest.json");
+    let harn = run(
+        &[
+            "models",
+            "lora",
+            "manifest",
+            "--base",
+            "local-gemma4-e4b",
+            "--provider",
+            "vllm",
+            "--tool-format",
+            "json",
+            "--dataset",
+            dataset.to_str().expect("utf8 dataset path"),
+            "--export-manifest",
+            export_manifest.to_str().expect("utf8 export manifest path"),
+            "--out",
+            out.to_str().expect("utf8 manifest out path"),
+            "--adapter-name",
+            "burin-tools",
+            "--adapter-path",
+            &adapter_path,
+            "--request-model",
+            "burin-tools",
+            "--trainer",
+            "unsloth_sft",
+            "--method",
+            "qlora",
+            "--rank",
+            "24",
+            "--alpha",
+            "48",
+            "--training-run-id",
+            "run-123",
+            "--teacher",
+            "dashscope/qwen3-coder-next",
+            "--target-metadata",
+            "lane=structured",
+            "--json",
+        ],
+        &[],
+    );
+
+    assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
+    let harn_value = parse_json(&harn.stdout, "harn");
+    let report = success_data(&harn_value);
+    assert_eq!(report["producer"], "harn_models_lora_manifest_v1");
+    assert_eq!(report["base"]["id"], "gemma-4-e4b-it");
+    assert_eq!(report["target"]["adapter_name"], "burin-tools");
+    assert_eq!(report["target"]["request_model"], "burin-tools");
+    assert_eq!(report["target"]["harn_tool_format"], "json");
+    assert_eq!(
+        report["target"]["dataset_format"],
+        "harn_text_tool_calls_json_fences"
+    );
+    assert_eq!(
+        report["target"]["chat_template"],
+        "harn_text_tool_calls_json_fences"
+    );
+    assert_eq!(report["target"]["metadata"]["lane"], "structured");
+    assert_eq!(report["training"]["trainer"], "unsloth_sft");
+    assert_eq!(report["training"]["method"], "qlora");
+    assert_eq!(report["training"]["rank"], 24);
+    assert_eq!(report["training"]["alpha"], 48);
+    assert_eq!(report["training"]["run_id"], "run-123");
+    assert_eq!(
+        report["training"]["contract"]["tool_parser_owner"],
+        "harn_text_tool_parser"
+    );
+    assert_eq!(
+        report["training"]["precision"]["training_base_precision"],
+        "4bit_nf4_or_runtime_equivalent"
+    );
+    assert_eq!(report["inputs"]["dataset"]["exists"], true);
+    assert_eq!(report["inputs"]["dataset"]["kind"], "file");
+    assert!(
+        report["inputs"]["dataset"]["sha256"]
+            .as_str()
+            .is_some_and(|hash| hash.len() == 64),
+        "dataset input={:?}",
+        report["inputs"]["dataset"]
+    );
+    assert_eq!(report["inputs"]["export_manifest"]["exists"], true);
+    assert_eq!(
+        report["inputs"]["teacher"]["id"],
+        "dashscope/qwen3-coder-next"
+    );
+    assert_eq!(report["artifacts"]["adapter_reference"], adapter_path);
+    assert_eq!(report["artifacts"]["local_path"]["kind"], "directory");
+    assert!(
+        report["artifacts"]["adapter_files"]
+            .as_array()
+            .expect("adapter files")
+            .iter()
+            .any(|file| file["path"]
+                .as_str()
+                .is_some_and(|path| path.ends_with("adapter_config.json"))),
+        "artifact files={:?}",
+        report["artifacts"]["adapter_files"]
+    );
+    assert_eq!(report["serving"]["adapter_binding"], "runtime_lora_adapter");
+    assert_eq!(
+        report["serving"]["lora_module_value_format"],
+        "json_with_base_model"
+    );
+    assert_eq!(report["promotion"]["minimum_trials"], 5);
+    assert!(out.is_file(), "manifest file missing");
+
+    let manifest_value = parse_json(
+        &fs::read_to_string(&out).expect("read manifest"),
+        "training manifest",
+    );
+    let contract_id = report["contract"]["id"].as_str().expect("contract id");
+    assert_eq!(manifest_value["contract"]["id"], contract_id);
+    assert_eq!(manifest_value["target"]["contract_id"], contract_id);
+    assert_eq!(manifest_value["serving"]["request_model"], "burin-tools");
+
+    let adapter_with_contract = write_lora_adapter_fixture_with_contract(Some(contract_id));
+    let inspect = run(
+        &[
+            "models",
+            "lora",
+            "inspect",
+            "--base",
+            "local-gemma4-e4b",
+            "--provider",
+            "vllm",
+            "--name",
+            "burin-tools",
+            "--manifest",
+            out.to_str().expect("utf8 manifest path"),
+            adapter_with_contract
+                .path()
+                .to_str()
+                .expect("utf8 adapter path"),
+            "--json",
+        ],
+        &[],
+    );
+    assert_eq!(inspect.exit_code, 0, "inspect stderr={}", inspect.stderr);
+    let inspect_value = parse_json(&inspect.stdout, "inspect");
+    let inspect_report = success_data(&inspect_value);
+    assert_eq!(inspect_report["contract"]["status"], "pass");
+    assert_eq!(inspect_report["contract"]["contract_id"], contract_id);
+}
+
+#[test]
+fn models_lora_manifest_human_text_reports_contract() {
+    let adapter = write_lora_adapter_fixture();
+    let adapter_path = adapter.path().display().to_string();
+    let harn = run(
+        &[
+            "models",
+            "lora",
+            "manifest",
+            "--base",
+            "local-gemma4-e4b",
+            "--provider",
+            "vllm",
+            "--tool-format",
+            "json",
+            "--adapter-name",
+            "burin-tools",
+            "--adapter-path",
+            &adapter_path,
+            "--request-model",
+            "burin-tools",
+        ],
+        &[],
+    );
+
+    assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
+    for fragment in [
+        "LoRA manifest for burin-tools on gemma-4-e4b-it via vllm",
+        "producer: harn_models_lora_manifest_v1",
+        "tool format: json (requested json)",
+        "dataset format: harn_text_tool_calls_json_fences",
+        "chat template: harn_text_tool_calls_json_fences",
+        "contract: sha256:",
+        "request model: burin-tools",
+        "trainer: external_sft_trainer",
+        "training: qlora + peft_lora",
+        "assistant mask: require_chat_template_generation_masks",
+        "parser owner: harn_text_tool_parser",
+        "adapter reference:",
+        "adapter binding: runtime_lora_adapter",
+        "LoRA module format: json_with_base_model",
+        "promotion minimum trials: 5",
+        "harn eval tool-calls --planner burin-tools --tool-format json",
+        "warnings:",
+        "- no --out supplied; manifest report was not written to disk",
+    ] {
+        assert!(
+            harn.stdout.contains(fragment),
+            "harn stdout missing {fragment}: {}",
+            harn.stdout
+        );
+    }
+}
+
+#[test]
 fn models_lora_export_json_structures_grouped_tool_results() {
     let corpus = write_lora_grouped_result_corpus_fixture();
     let corpus_path = corpus.path().join("burin-tool-calling-corpus.jsonl");

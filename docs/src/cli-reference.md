@@ -1358,6 +1358,27 @@ mask policy, packing policy, parser owner, and split policy so trainers can
 verify the SFT setup without scraping human-readable notes.
 `--check` validates conversion without writing JSONL rows.
 
+## harn models lora manifest
+
+Write a canonical LoRA training-run manifest without invoking a trainer:
+
+```bash
+harn models lora manifest --base local-gemma4-e4b --provider vllm \
+  --tool-format json --dataset ./train.jsonl --export-manifest ./train.manifest.json \
+  --adapter-name burin-tools --adapter-path ./adapter --out ./adapter.manifest.json
+harn models lora manifest --base local-gemma4-e4b --provider vllm \
+  --trainer unsloth_sft --method qlora --rank 24 --training-run-id run-123 --json
+```
+
+The command records the resolved base route, effective tool-call format, Harn
+LoRA contract id, trainer hyperparameters, corpus/export inputs, adapter
+artifact paths and hashes when local files exist, serving hints, and the
+promotion/eval recipe. It is intentionally trainer-agnostic: Python, MLX,
+Unsloth, TRL, cloud, or future Harn-native trainers can all call this surface
+after a run and produce the same manifest shape. The resulting JSON is accepted
+by `harn models lora inspect --manifest`, so adapter promotion can compare the
+training contract with the served route before any eval or launch.
+
 ## harn models lora preflight
 
 Check a tool-calling corpus before spending GPU time on LoRA training:

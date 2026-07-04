@@ -430,6 +430,112 @@ fn test_parses_models_lora_export_args() {
 }
 
 #[test]
+fn test_parses_models_lora_manifest_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "models",
+        "lora",
+        "manifest",
+        "--base",
+        "local-gemma4-e4b",
+        "--provider",
+        "vllm",
+        "--tool-format",
+        "json",
+        "--dataset",
+        "./data/tool-calls.jsonl",
+        "--corpus",
+        "./lora-corpus",
+        "--export-manifest",
+        "./data/tool-calls.manifest.json",
+        "--out",
+        "./adapters/burin-tools.manifest.json",
+        "--adapter-name",
+        "burin-tools",
+        "--adapter-path",
+        "./adapters/burin-tools",
+        "--request-model",
+        "burin-tools",
+        "--chat-template",
+        "harn_text_tool_calls_json_fences",
+        "--trainer",
+        "unsloth_sft",
+        "--method",
+        "lora",
+        "--rank",
+        "32",
+        "--alpha",
+        "64",
+        "--dropout",
+        "0.1",
+        "--training-run-id",
+        "run-123",
+        "--teacher",
+        "dashscope/qwen3-coder-next",
+        "--target-metadata",
+        "lane=structured",
+        "--json",
+    ]);
+
+    let Command::Models(args) = cli.command.unwrap() else {
+        panic!("expected models command");
+    };
+    let ModelsCommand::Lora(args) = args.command else {
+        panic!("expected models lora command");
+    };
+    let ModelsLoraCommand::Manifest(args) = args.command else {
+        panic!("expected models lora manifest command");
+    };
+    assert_eq!(args.base_model, "local-gemma4-e4b");
+    assert_eq!(args.provider.as_deref(), Some("vllm"));
+    assert_eq!(args.tool_format, "json");
+    assert_eq!(
+        args.dataset
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .as_deref(),
+        Some("./data/tool-calls.jsonl")
+    );
+    assert_eq!(
+        args.corpus
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .as_deref(),
+        Some("./lora-corpus")
+    );
+    assert_eq!(
+        args.export_manifest
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .as_deref(),
+        Some("./data/tool-calls.manifest.json")
+    );
+    assert_eq!(
+        args.out
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .as_deref(),
+        Some("./adapters/burin-tools.manifest.json")
+    );
+    assert_eq!(args.adapter_name.as_deref(), Some("burin-tools"));
+    assert_eq!(args.adapter_path.as_deref(), Some("./adapters/burin-tools"));
+    assert_eq!(args.request_model.as_deref(), Some("burin-tools"));
+    assert_eq!(
+        args.chat_template.as_deref(),
+        Some("harn_text_tool_calls_json_fences")
+    );
+    assert_eq!(args.trainer, "unsloth_sft");
+    assert_eq!(args.method, "lora");
+    assert_eq!(args.rank, 32);
+    assert_eq!(args.alpha, Some(64));
+    assert_eq!(args.dropout, 0.1);
+    assert_eq!(args.training_run_id.as_deref(), Some("run-123"));
+    assert_eq!(args.teacher.as_deref(), Some("dashscope/qwen3-coder-next"));
+    assert_eq!(args.target_metadata, vec!["lane=structured"]);
+    assert!(args.json);
+}
+
+#[test]
 fn test_parses_models_lora_plan_args() {
     let cli = Cli::parse_from([
         "harn",

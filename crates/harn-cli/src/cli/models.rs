@@ -36,6 +36,8 @@ pub(crate) enum ModelsLoraCommand {
     Export(ModelsLoraExportArgs),
     /// Inspect a PEFT LoRA adapter directory or repo id.
     Inspect(ModelsLoraInspectArgs),
+    /// Write a canonical LoRA training-run manifest for an adapter.
+    Manifest(Box<ModelsLoraManifestArgs>),
     /// Plan a portable LoRA/QLoRA tool-calling fine-tune for a Harn model route.
     Plan(ModelsLoraPlanArgs),
     /// Check a tool-calling corpus before spending GPU time on LoRA training.
@@ -98,6 +100,70 @@ pub(crate) struct ModelsLoraInspectArgs {
     /// Fail when the adapter config omits or mismatches the manifest contract id.
     #[arg(long = "require-contract-id")]
     pub require_contract_id: bool,
+    /// Emit structured JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ModelsLoraManifestArgs {
+    /// Base model alias or provider-native id the adapter targets.
+    #[arg(long = "base", value_parser = llm_model_completion_parser(), hide_possible_values = true)]
+    pub base_model: String,
+    /// Provider/runtime to record instead of inferring from the base model.
+    #[arg(long)]
+    pub provider: Option<String>,
+    /// Tool-call format the adapter was trained to emit (`auto`, `native`, `text`, or `json`).
+    #[arg(long = "tool-format", default_value = "auto")]
+    pub tool_format: String,
+    /// Trainer dataset path used for this run.
+    #[arg(long, value_name = "PATH")]
+    pub dataset: Option<std::path::PathBuf>,
+    /// Source corpus path used to build the trainer dataset.
+    #[arg(long, value_name = "PATH")]
+    pub corpus: Option<std::path::PathBuf>,
+    /// Harn LoRA export manifest that produced the trainer dataset.
+    #[arg(long = "export-manifest", value_name = "PATH")]
+    pub export_manifest: Option<std::path::PathBuf>,
+    /// Write the manifest JSON to this path. Omit to only print the report.
+    #[arg(long, value_name = "PATH")]
+    pub out: Option<std::path::PathBuf>,
+    /// Served LoRA adapter/model name.
+    #[arg(long = "adapter-name")]
+    pub adapter_name: Option<String>,
+    /// Adapter directory, file, or remote repo id to record.
+    #[arg(long = "adapter-path", value_name = "PATH_OR_REPO")]
+    pub adapter_path: Option<String>,
+    /// Request model name clients should use for the adapter.
+    #[arg(long = "request-model")]
+    pub request_model: Option<String>,
+    /// Chat template identifier used for training and serving.
+    #[arg(long = "chat-template")]
+    pub chat_template: Option<String>,
+    /// Trainer/backend name to record in the manifest.
+    #[arg(long, default_value = "external_sft_trainer")]
+    pub trainer: String,
+    /// Adapter training method (`qlora` or `lora`).
+    #[arg(long, default_value = "qlora")]
+    pub method: String,
+    /// LoRA rank used for training and serving.
+    #[arg(long, default_value_t = 16)]
+    pub rank: u32,
+    /// LoRA alpha. Defaults to 2 * --rank.
+    #[arg(long)]
+    pub alpha: Option<u32>,
+    /// LoRA dropout probability.
+    #[arg(long, default_value_t = 0.05)]
+    pub dropout: f64,
+    /// Stable training run id from the trainer or orchestration system.
+    #[arg(long = "training-run-id")]
+    pub training_run_id: Option<String>,
+    /// Optional teacher model route used for corpus refresh or distillation.
+    #[arg(long, value_parser = llm_model_completion_parser(), hide_possible_values = true)]
+    pub teacher: Option<String>,
+    /// Extra target provenance copied into the manifest, as KEY=VALUE.
+    #[arg(long = "target-metadata", value_name = "KEY=VALUE")]
+    pub target_metadata: Vec<String>,
     /// Emit structured JSON.
     #[arg(long)]
     pub json: bool,

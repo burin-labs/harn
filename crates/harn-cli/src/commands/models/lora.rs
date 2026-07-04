@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
@@ -9,6 +10,7 @@ use crate::dispatch;
 use crate::env_guard::ScopedEnvVar;
 
 mod export;
+mod manifest;
 mod preflight;
 
 const LORA_INSPECT_PAYLOAD_ENV: &str = "HARN_MODELS_LORA_INSPECT_PAYLOAD_JSON";
@@ -21,10 +23,11 @@ static LORA_RENDER_DISPATCH_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::c
 
 pub(crate) async fn run(args: ModelsLoraArgs) {
     let exit_code = match args.command {
-        ModelsLoraCommand::Export(args) => export::export_dataset(&args).await,
-        ModelsLoraCommand::Inspect(args) => inspect(&args).await,
-        ModelsLoraCommand::Plan(args) => plan(&args).await,
-        ModelsLoraCommand::Preflight(args) => preflight::preflight(&args).await,
+        ModelsLoraCommand::Export(args) => Box::pin(export::export_dataset(&args)).await,
+        ModelsLoraCommand::Inspect(args) => Box::pin(inspect(&args)).await,
+        ModelsLoraCommand::Manifest(args) => Box::pin(manifest::manifest(&args)).await,
+        ModelsLoraCommand::Plan(args) => Box::pin(plan(&args)).await,
+        ModelsLoraCommand::Preflight(args) => Box::pin(preflight::preflight(&args)).await,
     };
     if exit_code != 0 {
         std::process::exit(exit_code);
@@ -890,6 +893,23 @@ fn normalize_corpus_strategy(raw: &str) -> Result<String, String> {
     }
 }
 
+fn parse_target_metadata(raw: &[String]) -> Result<BTreeMap<String, String>, String> {
+    let mut metadata = BTreeMap::new();
+    for item in raw {
+        let Some((key, value)) = item.split_once('=') else {
+            return Err(format!(
+                "invalid --target-metadata `{item}`; expected KEY=VALUE"
+            ));
+        };
+        let key = key.trim();
+        if key.is_empty() {
+            return Err(format!("invalid --target-metadata `{item}`; key is empty"));
+        }
+        metadata.insert(key.to_string(), value.to_string());
+    }
+    Ok(metadata)
+}
+
 fn effective_corpus_strategy(
     requested: &str,
     corpus: Option<&str>,
@@ -1094,6 +1114,46 @@ pub(super) fn lora_training_contract(
             "lora_contract_id".to_string(),
             "lora_target".to_string(),
         ],
+    }
+}
+
+fn lora_contract_id(
+    base_model: &str,
+    provider: &str,
+    harn_tool_format: &str,
+    dataset_format: &str,
+    chat_template: Option<&str>,
+) -> Result<String, String> {
+    let input = LoraContractHashInput {
+        schema_version: 1,
+        base_model,
+        provider,
+        harn_tool_format,
+        dataset_format,
+        chat_template,
+    };
+    let bytes = serde_json::to_vec(&input)
+        .map_err(|error| format!("failed to render LoRA contract hash input: {error}"))?;
+    Ok(format!("sha256:{}", hex::encode(Sha256::digest(bytes))))
+}
+
+fn lora_contract_report(
+    contract_id: String,
+    base_model: &str,
+    provider: &str,
+    harn_tool_format: &str,
+    dataset_format: &str,
+    chat_template: Option<String>,
+) -> LoraContractReport {
+    LoraContractReport {
+        schema_version: 1,
+        id: contract_id,
+        base_model: base_model.to_string(),
+        provider: provider.to_string(),
+        harn_tool_format: harn_tool_format.to_string(),
+        dataset_format: dataset_format.to_string(),
+        chat_template,
+        training_contract: lora_training_contract(dataset_format, harn_tool_format),
     }
 }
 
@@ -1667,6 +1727,28 @@ pub(super) struct LoraTrainingContract {
     dataset_format: String,
     dataset_split_policy: String,
     required_example_metadata: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub(super) struct LoraContractReport {
+    schema_version: u64,
+    id: String,
+    base_model: String,
+    provider: String,
+    harn_tool_format: String,
+    dataset_format: String,
+    chat_template: Option<String>,
+    training_contract: LoraTrainingContract,
+}
+
+#[derive(Serialize)]
+struct LoraContractHashInput<'a> {
+    schema_version: u64,
+    base_model: &'a str,
+    provider: &'a str,
+    harn_tool_format: &'a str,
+    dataset_format: &'a str,
+    chat_template: Option<&'a str>,
 }
 
 #[derive(Debug, Serialize)]
