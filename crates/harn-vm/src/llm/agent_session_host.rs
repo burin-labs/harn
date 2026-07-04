@@ -1189,7 +1189,7 @@ fn tool_result_message_for_provider(
     name: &str,
     tool_call_id: &str,
     observation: &str,
-    screenshot: Option<&VmValue>,
+    screenshots: &[VmValue],
 ) -> VmValue {
     let mut msg = crate::value::DictMap::new();
     // A text-channel tool_format (`text` or `json`) carries tool results back
@@ -1229,18 +1229,19 @@ fn tool_result_message_for_provider(
     // observation is ~800 KB of base64 (the display-string of the ScreenImage),
     // which would bloat every subsequent turn and is redundant once the image
     // itself rides along. A result with no screenshot is byte-identical to before.
-    match screenshot {
-        Some(image) => {
-            let summary = screenshot_result_summary(observation);
-            let mut text_block = crate::value::DictMap::new();
-            text_block.put_str("type", "text");
-            text_block.put_str("text", &summary);
-            let content = vec![VmValue::dict(text_block), image.clone()];
-            msg.put("content", VmValue::List(std::sync::Arc::new(content)));
-        }
-        None => {
-            msg.put_str("content", observation);
-        }
+    if screenshots.is_empty() {
+        msg.put_str("content", observation);
+    } else {
+        // `[text, image, image, ...]` — a tool that returns more than one frame
+        // (rare today; one-per-action) delivers every image, not just the first.
+        let summary = screenshot_result_summary(observation);
+        let mut text_block = crate::value::DictMap::new();
+        text_block.put_str("type", "text");
+        text_block.put_str("text", &summary);
+        let mut content = Vec::with_capacity(1 + screenshots.len());
+        content.push(VmValue::dict(text_block));
+        content.extend(screenshots.iter().cloned());
+        msg.put("content", VmValue::List(std::sync::Arc::new(content)));
     }
     VmValue::dict(msg)
 }
@@ -1275,21 +1276,35 @@ fn screenshot_result_summary(observation: &str) -> String {
 /// sits at a path the caller cannot assume. The `scale_factor` + non-empty
 /// `base64` pair is distinctive enough not to misfire on an unrelated field, and
 /// the base64 the model needs is elided to a marker string in the rendered TEXT,
-/// so this never matches that. Returns the dict as a `VmValue` (unconverted) —
-/// the provider content mappers do the image-block projection at egress.
-fn screenshot_from_tool_result(result: &VmValue) -> Option<VmValue> {
-    fn find(value: &serde_json::Value) -> Option<&serde_json::Value> {
+/// so this never matches that. Returns EVERY screenshot found (in tree order) as
+/// unconverted `VmValue` dicts — the provider content mappers do the image-block
+/// projection at egress. A tool that returns one frame yields one; a
+/// multi-frame result delivers them all rather than dropping the extras.
+fn screenshots_from_tool_result(result: &VmValue) -> Vec<VmValue> {
+    fn collect(value: &serde_json::Value, out: &mut Vec<serde_json::Value>) {
         if crate::llm::content::is_screenshot_dict(value) {
-            return Some(value);
+            out.push(value.clone());
+            // A screenshot dict has no nested screenshots — don't recurse in.
+            return;
         }
         match value {
-            serde_json::Value::Object(map) => map.values().find_map(find),
-            serde_json::Value::Array(items) => items.iter().find_map(find),
-            _ => None,
+            serde_json::Value::Object(map) => {
+                for nested in map.values() {
+                    collect(nested, out);
+                }
+            }
+            serde_json::Value::Array(items) => {
+                for item in items {
+                    collect(item, out);
+                }
+            }
+            _ => {}
         }
     }
     let json = vm_to_json(result);
-    find(&json).map(crate::stdlib::json_to_vm_value)
+    let mut found = Vec::new();
+    collect(&json, &mut found);
+    found.iter().map(crate::stdlib::json_to_vm_value).collect()
 }
 
 /// The `(id, name)` of one provider-native tool-call block carried on an
@@ -1430,7 +1445,7 @@ fn synthesize_orphan_tool_results(
             feedback,
             // A synthesized orphan-repair result is plain feedback text — never
             // an image.
-            None,
+            &[],
         ));
     }
     out
@@ -1861,9 +1876,9 @@ fn host_agent_session_record_tool_results_builtin(
                 });
             }
         }
-        // A computer-use result carries a screenshot the model must see; ride it
-        // back as an image content block (see `tool_result_message_for_provider`).
-        let screenshot = screenshot_from_tool_result(result);
+        // A computer-use result carries screenshot(s) the model must see; ride
+        // them back as image content blocks (see `tool_result_message_for_provider`).
+        let screenshots = screenshots_from_tool_result(result);
         crate::agent_sessions::inject_message(
             &session_id,
             tool_result_message_for_provider(
@@ -1873,7 +1888,7 @@ fn host_agent_session_record_tool_results_builtin(
                 &name,
                 &tool_call_id,
                 &observation,
-                screenshot.as_ref(),
+                &screenshots,
             ),
         )
         .map_err(VmError::Runtime)?;

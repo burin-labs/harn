@@ -271,6 +271,13 @@ impl ComputerBackend for SocketBackend {
 /// This is the single source of truth for the wire protocol's server side. The
 /// macOS helper and the cloud desktop runner wrap it around their own accept
 /// loop, so neither re-implements request decoding or response shaping.
+///
+/// SECURITY: this handler authenticates nothing — any peer that can send a line
+/// on the transport gets full desktop control. The CALLER MUST enforce isolation
+/// at the transport layer: a filesystem-permission-restricted Unix socket
+/// (mode 0600, owner-only) for the local helper, or network isolation + an auth
+/// token for a remote/TCP runner. Never expose this server on an unauthenticated
+/// network port.
 pub fn handle_request_line(backend: &dyn ComputerBackend, line: &str) -> String {
     let response = match serde_json::from_str::<ServerRequest>(line.trim()) {
         Ok(request) => dispatch(backend, &request),

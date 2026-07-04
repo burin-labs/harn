@@ -47,7 +47,8 @@ pub use lookup::{
     set_user_overrides_from_manifest_toml, set_user_overrides_toml,
 };
 pub use model::{
-    Capabilities, CapabilitiesFile, GovernorBackoff, ProviderDefaults, ProviderLimits, WireDialect,
+    Capabilities, CapabilitiesFile, ComputerUseStyle, GovernorBackoff, ProviderDefaults,
+    ProviderLimits, ScreenshotScaling, WireDialect,
 };
 pub use rule::ProviderRule;
 pub use tool_format::{

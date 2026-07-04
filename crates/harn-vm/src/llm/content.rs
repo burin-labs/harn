@@ -260,21 +260,72 @@ pub(crate) fn parse_image_block(
 /// Returns `None` when `value` is not one of those (including when it already
 /// carries an explicit `type`, so typed blocks flow through the normal
 /// [`parse_image_block`] path untouched). `media_type` defaults to `image/png`.
-/// The distinctive signature of the hostlib `ScreenImage` neutral screenshot
-/// dict: a non-empty `base64` string alongside a `scale_factor` key. This is the
-/// single source of truth for "is this value a computer-use screenshot" — the
+/// The neutral screenshot payload a computer-use tool returns. This is the ONE
+/// typed definition of the `{base64, media_type, width, height, scale_factor}`
+/// shape that was previously hand-destructured across the detection predicate,
+/// the neutral→image-block converter, and the provider data-URL formatters.
+/// `TryFrom` validates the distinctive signature — a non-empty `base64` paired
+/// with a numeric `scale_factor` — so `ScreenImage::try_from(v).is_ok()` is the
+/// canonical "is this a screenshot dict" test and every projection derives from
+/// this single definition.
+#[derive(Debug, Clone)]
+pub(crate) struct ScreenImage {
+    pub base64: String,
+    pub media_type: String,
+}
+
+impl TryFrom<&serde_json::Value> for ScreenImage {
+    type Error = ();
+
+    fn try_from(value: &serde_json::Value) -> Result<Self, Self::Error> {
+        let obj = value.as_object().ok_or(())?;
+        let base64 = obj
+            .get("base64")
+            .and_then(serde_json::Value::as_str)
+            .filter(|base64| !base64.is_empty())
+            .ok_or(())?;
+        // The `scale_factor` pairing is what distinguishes a ScreenImage from an
+        // unrelated dict that merely carries a `base64` field. It (and the
+        // `width`/`height` geometry) are not needed by the projections below, so
+        // they gate detection here without being stored.
+        obj.get("scale_factor")
+            .and_then(serde_json::Value::as_f64)
+            .ok_or(())?;
+        Ok(Self {
+            base64: base64.to_string(),
+            media_type: obj
+                .get("media_type")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("image/png")
+                .to_string(),
+        })
+    }
+}
+
+impl ScreenImage {
+    /// The neutral image content block (`{type:image, base64, media_type}`) the
+    /// provider content mappers project into each vendor's native image shape.
+    pub(crate) fn to_neutral_image_block(&self) -> serde_json::Value {
+        serde_json::json!({
+            "type": "image",
+            "base64": self.base64,
+            "media_type": self.media_type,
+        })
+    }
+
+    /// A `data:` URL for providers that ingest images as URLs (OpenAI
+    /// `image_url`, Responses `input_image`).
+    pub(crate) fn to_data_url(&self) -> String {
+        format!("data:{};base64,{}", self.media_type, self.base64)
+    }
+}
+
+/// Whether `value` is a neutral computer-use screenshot dict — the canonical
+/// single-source predicate, defined in terms of [`ScreenImage`]. Used by the
 /// recursive tool-result searchers (`json_carries_screenshot`,
-/// `screenshot_from_tool_result`) and the neutral-block converter below all key
-/// off it, so the shape is defined once. The pairing is distinctive enough not
-/// to misfire on unrelated dicts.
+/// `screenshot_from_tool_result`) and the neutral-block converter below.
 pub(crate) fn is_screenshot_dict(value: &serde_json::Value) -> bool {
-    let Some(obj) = value.as_object() else {
-        return false;
-    };
-    obj.get("base64")
-        .and_then(|value| value.as_str())
-        .is_some_and(|base64| !base64.is_empty())
-        && obj.contains_key("scale_factor")
+    ScreenImage::try_from(value).is_ok()
 }
 
 pub(crate) fn screenshot_image_block(value: &serde_json::Value) -> Option<serde_json::Value> {
@@ -297,12 +348,10 @@ pub(crate) fn screenshot_image_block(value: &serde_json::Value) -> Option<serde_
         let media_type = image.get("media_type").and_then(|value| value.as_str());
         return Some(image_block(base64, media_type));
     }
-    // Shape B: the hostlib `ScreenImage` shape, recognized by the canonical
-    // screenshot signature (non-empty base64 + scale_factor).
-    if is_screenshot_dict(value) {
-        let base64 = obj.get("base64").and_then(|value| value.as_str())?;
-        let media_type = obj.get("media_type").and_then(|value| value.as_str());
-        return Some(image_block(base64, media_type));
+    // Shape B: the neutral `ScreenImage` dict — projected from its one typed
+    // definition.
+    if let Ok(screen) = ScreenImage::try_from(value) {
+        return Some(screen.to_neutral_image_block());
     }
     None
 }

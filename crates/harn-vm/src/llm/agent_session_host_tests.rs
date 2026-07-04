@@ -6,7 +6,7 @@ use super::{
     agent_turn_made_no_llm_call, assistant_message_from_llm_result, canonical_acp_stop_reason,
     canonical_provider_stop_reason, dict_get, initial_user_content, is_length_truncation,
     last_assistant_text, list_items, pair_orphaned_tool_use, reset_agent_session_host_state,
-    screenshot_from_tool_result, seed_host_session_provider_model, synthesize_orphan_tool_results,
+    screenshots_from_tool_result, seed_host_session_provider_model, synthesize_orphan_tool_results,
     text_has_tool_call_prefix, tool_result_message_for_provider,
     truncated_tool_call_should_continue, vm_to_json,
 };
@@ -598,7 +598,7 @@ fn tool_results_replay_with_provider_appropriate_ids() {
         "release_run",
         "call_001",
         "ok",
-        None,
+        &[],
     ));
     assert_eq!(local["role"], "tool");
     assert_eq!(local["name"], "release_run");
@@ -611,7 +611,7 @@ fn tool_results_replay_with_provider_appropriate_ids() {
         "release_run",
         "call_002",
         "ok",
-        None,
+        &[],
     ));
     assert_eq!(anthropic["role"], "tool_result");
     assert_eq!(anthropic["tool_use_id"], "call_002");
@@ -623,7 +623,7 @@ fn tool_results_replay_with_provider_appropriate_ids() {
         "release_run",
         "call_003",
         "ok",
-        None,
+        &[],
     ));
     assert_eq!(bedrock_claude["role"], "tool_result");
     assert_eq!(bedrock_claude["tool_use_id"], "call_003");
@@ -635,7 +635,7 @@ fn tool_results_replay_with_provider_appropriate_ids() {
         "release_run",
         "call_004",
         "ok",
-        None,
+        &[],
     ));
     assert_eq!(gemini["role"], "tool");
     assert_eq!(gemini["name"], "release_run");
@@ -648,7 +648,7 @@ fn tool_results_replay_with_provider_appropriate_ids() {
         "release_run",
         "call_005",
         "ok",
-        None,
+        &[],
     ));
     assert_eq!(text_mode["role"], "user");
     assert!(text_mode.get("tool_call_id").is_none());
@@ -674,7 +674,8 @@ fn computer_tool_result_carries_screenshot_as_block_list() {
             },
         },
     }));
-    let screenshot = screenshot_from_tool_result(&dispatch_result).expect("screenshot extracted");
+    let screenshots = screenshots_from_tool_result(&dispatch_result);
+    assert_eq!(screenshots.len(), 1, "one screenshot extracted");
 
     // On a native channel the message content is a `[text, screenshot]` list so
     // the provider content mapper can project the screenshot to an image block.
@@ -685,7 +686,7 @@ fn computer_tool_result_carries_screenshot_as_block_list() {
         "computer",
         "call_shot",
         "Captured screenshot 1024x768.",
-        Some(&screenshot),
+        &screenshots,
     ));
     assert_eq!(anthropic["role"], "tool_result");
     let content = anthropic["content"].as_array().expect("block list");
@@ -697,7 +698,41 @@ fn computer_tool_result_carries_screenshot_as_block_list() {
 
     // A result with no screenshot keeps plain-string content (unchanged behavior).
     let plain = crate::stdlib::json_to_vm_value(&json!({"tool_name": "read", "result": "ok"}));
-    assert!(screenshot_from_tool_result(&plain).is_none());
+    assert!(screenshots_from_tool_result(&plain).is_empty());
+}
+
+#[test]
+fn multi_screenshot_tool_result_delivers_every_frame() {
+    // A result carrying more than one ScreenImage must deliver BOTH, not just
+    // the first: the extractor collects all frames and the message content is
+    // `[text, image, image]`.
+    let dispatch_result = crate::stdlib::json_to_vm_value(&json!({
+        "tool_name": "computer",
+        "observation": "Captured two frames.",
+        "result": {
+            "frames": [
+                {"base64": "AAAA", "media_type": "image/png", "scale_factor": 1.0},
+                {"base64": "BBBB", "media_type": "image/png", "scale_factor": 2.0},
+            ],
+        },
+    }));
+    let screenshots = screenshots_from_tool_result(&dispatch_result);
+    assert_eq!(screenshots.len(), 2, "both frames extracted");
+
+    let anthropic = vm_to_json(&tool_result_message_for_provider(
+        "anthropic",
+        "claude-opus-4-8",
+        "native",
+        "computer",
+        "call_multi",
+        "Captured two frames.",
+        &screenshots,
+    ));
+    let content = anthropic["content"].as_array().expect("block list");
+    assert_eq!(content.len(), 3, "text + two images");
+    assert_eq!(content[0]["type"], "text");
+    assert_eq!(content[1]["base64"], "AAAA");
+    assert_eq!(content[2]["base64"], "BBBB");
 }
 
 /// Anthropic's Messages API rejects (non-retryable HTTP 400) any request in

@@ -22,7 +22,7 @@
 
 use serde_json::{json, Value};
 
-use crate::llm::capabilities::Capabilities;
+use crate::llm::capabilities::{Capabilities, ComputerUseStyle, ScreenshotScaling};
 
 /// Audit topic under which computer-use actions are recorded. Mirrors the
 /// vision OCR audit topic pattern (`crate::stdlib::vision::VISION_OCR_AUDIT_TOPIC`).
@@ -168,9 +168,9 @@ fn project_computer_tools_with(
     if !enable_native {
         return;
     }
-    let style = match caps.computer_use_style.as_deref() {
-        Some(style @ ("native_anthropic" | "native_openai")) => style,
-        // `function` / `grounded` / none: leave the function-schema tool as-is.
+    let style = match caps.computer_use_style {
+        Some(style @ (ComputerUseStyle::NativeAnthropic | ComputerUseStyle::NativeOpenai)) => style,
+        // Function / Grounded / none: leave the function-schema tool as-is.
         _ => return,
     };
     let Some(tools) = native_tools.as_mut() else {
@@ -184,8 +184,8 @@ fn project_computer_tools_with(
     // See the INTEGRATION SEAM note above: default to XGA until real dims flow.
     let (width, height) = (DEFAULT_DISPLAY_WIDTH, DEFAULT_DISPLAY_HEIGHT);
     let native = match style {
-        "native_anthropic" => anthropic_computer_tool(width, height),
-        // native_openai
+        ComputerUseStyle::NativeAnthropic => anthropic_computer_tool(width, height),
+        // NativeOpenai (the only other arm that reaches here).
         _ => openai_computer_tool(width, height, environment_for_os()),
     };
     provider_tools.push(native);
@@ -218,9 +218,15 @@ fn fit_within(width: u32, height: u32, max_w: u32, max_h: u32) -> (u32, u32) {
 // follow-up (see the INTEGRATION SEAM notes). `#[allow(dead_code)]` keeps the
 // crate warning-clean until that wiring lands.
 #[allow(dead_code)]
-pub(crate) fn scale_screenshot(width: u32, height: u32, style: Option<&str>) -> (u32, u32) {
+pub(crate) fn scale_screenshot(
+    width: u32,
+    height: u32,
+    style: Option<ScreenshotScaling>,
+) -> (u32, u32) {
     match style {
-        Some("xga") => fit_within(width, height, DEFAULT_DISPLAY_WIDTH, DEFAULT_DISPLAY_HEIGHT),
+        Some(ScreenshotScaling::Xga) => {
+            fit_within(width, height, DEFAULT_DISPLAY_WIDTH, DEFAULT_DISPLAY_HEIGHT)
+        }
         _ => (width, height),
     }
 }
@@ -373,9 +379,9 @@ pub(crate) fn resolve_grounding(
 mod tests {
     use super::*;
 
-    fn caps_with_style(style: &str) -> Capabilities {
+    fn caps_with_style(style: ComputerUseStyle) -> Capabilities {
         Capabilities {
-            computer_use_style: Some(style.to_string()),
+            computer_use_style: Some(style),
             ..Capabilities::default()
         }
     }
@@ -414,7 +420,7 @@ mod tests {
 
     #[test]
     fn projects_native_anthropic_and_suppresses_function_copy() {
-        let caps = caps_with_style("native_anthropic");
+        let caps = caps_with_style(ComputerUseStyle::NativeAnthropic);
         let mut native = Some(vec![function_tool("read_file"), function_tool("computer")]);
         let mut provider = Vec::new();
         project_computer_tools_with(&caps, &mut native, &mut provider, true);
@@ -431,7 +437,7 @@ mod tests {
 
     #[test]
     fn projects_native_openai_and_suppresses_function_copy() {
-        let caps = caps_with_style("native_openai");
+        let caps = caps_with_style(ComputerUseStyle::NativeOpenai);
         let mut native = Some(vec![function_tool("computer")]);
         let mut provider = Vec::new();
         project_computer_tools_with(&caps, &mut native, &mut provider, true);
@@ -444,19 +450,19 @@ mod tests {
 
     #[test]
     fn function_style_leaves_tool_untouched() {
-        for style in ["function", "grounded"] {
+        for style in [ComputerUseStyle::Function, ComputerUseStyle::Grounded] {
             let caps = caps_with_style(style);
             let mut native = Some(vec![function_tool("computer")]);
             let mut provider = Vec::new();
             project_computer_tools_with(&caps, &mut native, &mut provider, true);
-            assert_eq!(native.as_ref().unwrap().len(), 1, "{style}");
-            assert!(provider.is_empty(), "{style}");
+            assert_eq!(native.as_ref().unwrap().len(), 1, "{style:?}");
+            assert!(provider.is_empty(), "{style:?}");
         }
     }
 
     #[test]
     fn projection_is_idempotent() {
-        let caps = caps_with_style("native_anthropic");
+        let caps = caps_with_style(ComputerUseStyle::NativeAnthropic);
         let mut native = Some(vec![function_tool("computer")]);
         let mut provider = Vec::new();
         project_computer_tools_with(&caps, &mut native, &mut provider, true);
@@ -470,18 +476,28 @@ mod tests {
     #[test]
     fn xga_scaling_fits_and_original_is_identity() {
         // 1920x1080 fits within 1024x768 → 1024x576 (letterboxed by width).
-        assert_eq!(scale_screenshot(1920, 1080, Some("xga")), (1024, 576));
+        assert_eq!(
+            scale_screenshot(1920, 1080, Some(ScreenshotScaling::Xga)),
+            (1024, 576)
+        );
         // Already small: no upscaling.
-        assert_eq!(scale_screenshot(800, 600, Some("xga")), (800, 600));
+        assert_eq!(
+            scale_screenshot(800, 600, Some(ScreenshotScaling::Xga)),
+            (800, 600)
+        );
         // original / none / unset: identity.
-        assert_eq!(scale_screenshot(1920, 1080, Some("original")), (1920, 1080));
+        assert_eq!(
+            scale_screenshot(1920, 1080, Some(ScreenshotScaling::Original)),
+            (1920, 1080)
+        );
         assert_eq!(scale_screenshot(1920, 1080, None), (1920, 1080));
     }
 
     #[test]
     fn coordinate_roundtrip_within_one_pixel() {
         let native_dims = (1920, 1080);
-        let target_dims = scale_screenshot(native_dims.0, native_dims.1, Some("xga"));
+        let target_dims =
+            scale_screenshot(native_dims.0, native_dims.1, Some(ScreenshotScaling::Xga));
         for native in [(0, 0), (960, 540), (1919, 1079), (100, 999)] {
             let model = map_coord_to_target(native, native_dims, target_dims);
             let back = map_coord_back(model, target_dims, native_dims);
@@ -495,7 +511,7 @@ mod tests {
     #[test]
     fn original_scaling_coordinate_identity() {
         let dims = (1440, 900);
-        let target = scale_screenshot(dims.0, dims.1, Some("original"));
+        let target = scale_screenshot(dims.0, dims.1, Some(ScreenshotScaling::Original));
         assert_eq!(target, dims);
         assert_eq!(map_coord_back((123, 456), target, dims), (123, 456));
     }

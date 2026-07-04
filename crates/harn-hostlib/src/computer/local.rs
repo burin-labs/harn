@@ -10,7 +10,7 @@ use base64::Engine as _;
 use enigo::{Axis, Button, Coordinate, Direction, Enigo, Key, Keyboard as _, Mouse as _, Settings};
 
 use super::{
-    split_chord, BackendCapabilities, ComputerAction, ComputerBackend, MouseButton,
+    split_chord, BackendCapabilities, ComputerAction, ComputerBackend, Modifier, MouseButton,
     PermissionState, PermissionStatus, ScreenImage, ScrollDirection, UiTree,
 };
 
@@ -125,12 +125,16 @@ impl ComputerBackend for LocalBackend {
     fn screenshot(&self) -> Result<ScreenImage, String> {
         use xcap::Monitor;
 
-        let monitors = Monitor::all().map_err(|err| format!("enumerate monitors: {err}"))?;
-        let monitor = monitors
-            .into_iter()
-            .find(|m| m.is_primary().unwrap_or(false))
-            .or_else(|| Monitor::all().ok().and_then(|mut m| m.drain(..).next()))
-            .ok_or_else(|| "no monitor found".to_string())?;
+        let mut monitors = Monitor::all().map_err(|err| format!("enumerate monitors: {err}"))?;
+        if monitors.is_empty() {
+            return Err("no monitor found".to_string());
+        }
+        // The primary if we can identify one, else the first — enumerated once.
+        let index = monitors
+            .iter()
+            .position(|m| m.is_primary().unwrap_or(false))
+            .unwrap_or(0);
+        let monitor = monitors.swap_remove(index);
 
         let captured = monitor
             .capture_image()
@@ -165,7 +169,14 @@ impl ComputerBackend for LocalBackend {
             f64::from(logical_width) / f64::from(target_width),
             f64::from(logical_height) / f64::from(target_height),
         ));
-        let scale_factor = f64::from(physical_width) / f64::from(logical_width);
+        // Prefer xcap's per-OS backing scale (correct on Windows fractional
+        // scaling, where `monitor.width()` returns physical pels so the
+        // physical/logical ratio would collapse to ~1.0). Fall back to the ratio
+        // if the platform can't report it.
+        let scale_factor = monitor
+            .scale_factor()
+            .map(f64::from)
+            .unwrap_or_else(|_| f64::from(physical_width) / f64::from(logical_width));
 
         let mut png = Vec::new();
         resized
@@ -222,7 +233,7 @@ impl LocalBackend {
                 enigo
                     .move_mouse(x, y, Coordinate::Abs)
                     .map_err(|err| format!("move_mouse: {err}"))?;
-                with_modifiers(enigo, modifiers, |enigo| {
+                with_modifiers(enigo, &modifier_key_names(modifiers), |enigo| {
                     for _ in 0..(*count).max(1) {
                         enigo
                             .button(to_button(*button), Direction::Click)
@@ -259,7 +270,7 @@ impl LocalBackend {
             } => {
                 let (fx, fy) = self.to_input_coords(*from_x, *from_y)?;
                 let (tx, ty) = self.to_input_coords(*to_x, *to_y)?;
-                with_modifiers(enigo, modifiers, |enigo| {
+                with_modifiers(enigo, &modifier_key_names(modifiers), |enigo| {
                     enigo
                         .move_mouse(fx, fy, Coordinate::Abs)
                         .map_err(|err| format!("move_mouse: {err}"))?;
@@ -291,7 +302,7 @@ impl LocalBackend {
                     ScrollDirection::Right => (Axis::Horizontal, *amount),
                     ScrollDirection::Left => (Axis::Horizontal, -*amount),
                 };
-                with_modifiers(enigo, modifiers, |enigo| {
+                with_modifiers(enigo, &modifier_key_names(modifiers), |enigo| {
                     enigo
                         .scroll(magnitude, axis)
                         .map_err(|err| format!("scroll: {err}"))
@@ -342,6 +353,15 @@ fn to_button(button: MouseButton) -> Button {
 
 /// Press the modifier keys named in `modifiers`, run `body`, then release them
 /// in reverse order. Unknown modifier names abort with an error.
+/// The lowercase key names for a set of typed modifiers, as `with_modifiers`
+/// (shared with the string-chord path) expects.
+fn modifier_key_names(modifiers: &[Modifier]) -> Vec<String> {
+    modifiers
+        .iter()
+        .map(|modifier| modifier.as_key_name().to_string())
+        .collect()
+}
+
 fn with_modifiers(
     enigo: &mut Enigo,
     modifiers: &[String],

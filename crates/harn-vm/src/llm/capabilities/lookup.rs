@@ -685,11 +685,15 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
         ] {
             let caps = lookup("anthropic", model);
             assert_eq!(
-                caps.computer_use_style.as_deref(),
-                Some("native_anthropic"),
+                caps.computer_use_style,
+                Some(super::super::ComputerUseStyle::NativeAnthropic),
                 "{model} should project native_anthropic"
             );
-            assert_eq!(caps.screenshot_scaling.as_deref(), Some("xga"), "{model}");
+            assert_eq!(
+                caps.screenshot_scaling,
+                Some(super::super::ScreenshotScaling::Xga),
+                "{model}"
+            );
             assert!(
                 !caps.safety_ack_flow,
                 "{model} does not use the OpenAI safety-ack flow"
@@ -708,22 +712,20 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
         for model in ["gpt-5.4", "gpt-5.4-preview"] {
             let caps = lookup("openai", model);
             assert_eq!(
-                caps.computer_use_style.as_deref(),
-                Some("native_openai"),
+                caps.computer_use_style,
+                Some(super::super::ComputerUseStyle::NativeOpenai),
                 "{model} should project native_openai"
             );
             assert_eq!(
-                caps.screenshot_scaling.as_deref(),
-                Some("original"),
+                caps.screenshot_scaling,
+                Some(super::super::ScreenshotScaling::Original),
                 "{model}"
             );
             assert!(caps.safety_ack_flow, "{model} uses the safety-ack flow");
         }
         assert_eq!(
-            lookup("openai", "openai/gpt-5.4")
-                .computer_use_style
-                .as_deref(),
-            Some("native_openai")
+            lookup("openai", "openai/gpt-5.4").computer_use_style,
+            Some(super::super::ComputerUseStyle::NativeOpenai)
         );
         // Non-computer routes leave the field unset.
         assert!(lookup("openai", "gpt-3.5-turbo")

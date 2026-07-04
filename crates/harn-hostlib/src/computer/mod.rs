@@ -73,6 +73,45 @@ pub enum MouseButton {
     Middle,
 }
 
+/// A keyboard modifier held during a mouse action. A typed enum (rather than a
+/// free string) so an unknown modifier is rejected when the action batch is
+/// DESERIALIZED — before any OS event fires — instead of mid-batch at execution.
+/// Serde aliases accept the common spellings a model emits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Modifier {
+    /// Control.
+    #[serde(alias = "control")]
+    Ctrl,
+    /// Shift.
+    Shift,
+    /// Alt / Option.
+    #[serde(alias = "option")]
+    Alt,
+    /// Command / Meta / Super / Windows.
+    #[serde(
+        alias = "cmd",
+        alias = "command",
+        alias = "meta",
+        alias = "win",
+        alias = "windows"
+    )]
+    Super,
+}
+
+impl Modifier {
+    /// The canonical lowercase key name this modifier maps to, understood by the
+    /// local backend's `parse_key`.
+    pub fn as_key_name(self) -> &'static str {
+        match self {
+            Modifier::Ctrl => "ctrl",
+            Modifier::Shift => "shift",
+            Modifier::Alt => "alt",
+            Modifier::Super => "super",
+        }
+    }
+}
+
 /// Direction of a scroll action.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -117,7 +156,7 @@ pub enum ComputerAction {
         count: u32,
         /// Held modifier keys (e.g. `["shift"]`, `["ctrl"]`, `["super"]`).
         #[serde(default)]
-        modifiers: Vec<String>,
+        modifiers: Vec<Modifier>,
     },
     /// Press a button down (without releasing) at `(x, y)`.
     MouseDown {
@@ -154,7 +193,7 @@ pub enum ComputerAction {
         to_y: i32,
         /// Held modifier keys.
         #[serde(default)]
-        modifiers: Vec<String>,
+        modifiers: Vec<Modifier>,
     },
     /// Scroll at `(x, y)` in `direction` by `amount` wheel steps.
     Scroll {
@@ -169,7 +208,7 @@ pub enum ComputerAction {
         amount: i32,
         /// Held modifier keys.
         #[serde(default)]
-        modifiers: Vec<String>,
+        modifiers: Vec<Modifier>,
     },
     /// Type a literal string.
     Type {
@@ -666,7 +705,7 @@ mod tests {
                 y: 6,
                 direction: ScrollDirection::Down,
                 amount: 4,
-                modifiers: vec!["shift".to_string()],
+                modifiers: vec![Modifier::Shift],
             }
         );
 

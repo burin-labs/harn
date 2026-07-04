@@ -10,7 +10,10 @@ use std::collections::{BTreeMap, HashSet};
 
 use serde::Deserialize;
 
-use super::model::{fill_opt, Capabilities, CapabilitiesFile, ProviderDefaults, WireDialect};
+use super::model::{
+    fill_opt, Capabilities, CapabilitiesFile, ComputerUseStyle, ProviderDefaults,
+    ScreenshotScaling, WireDialect,
+};
 use crate::llm::providers::anthropic::claude_generation;
 use crate::llm::providers::openai_compat::gpt_generation;
 
@@ -398,13 +401,12 @@ pub struct ProviderRule {
     /// resolved locally), and `function` (generic function-schema fallback).
     /// Unset means the route has no computer-use surface.
     #[serde(default)]
-    pub computer_use_style: Option<String>,
+    pub computer_use_style: Option<ComputerUseStyle>,
     /// Screenshot downscaling policy applied before the image reaches the
-    /// model. Known values are `xga` (fit within 1024x768 preserving aspect,
-    /// what Anthropic expects), `original` (identity, what OpenAI expects),
-    /// and `none`. Unset means unset.
+    /// model. `xga` fits within 1024x768 preserving aspect (Anthropic);
+    /// `original` is identity (OpenAI). Unset means unset.
     #[serde(default)]
-    pub screenshot_scaling: Option<String>,
+    pub screenshot_scaling: Option<ScreenshotScaling>,
     /// Whether this route requires echoing acknowledged safety checks on the
     /// computer-use follow-up turn (OpenAI Responses surfaces
     /// `pending_safety_checks` that must be echoed as
@@ -1072,8 +1074,8 @@ fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilitie
             .serving_precision
             .clone()
             .unwrap_or_else(|| "unverified".to_string()),
-        computer_use_style: rule.computer_use_style.clone(),
-        screenshot_scaling: rule.screenshot_scaling.clone(),
+        computer_use_style: rule.computer_use_style,
+        screenshot_scaling: rule.screenshot_scaling,
         safety_ack_flow: rule.safety_ack_flow.unwrap_or(false),
     }
 }

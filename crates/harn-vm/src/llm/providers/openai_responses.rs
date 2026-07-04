@@ -364,20 +364,24 @@ fn responses_message_content(role: &str, content: &serde_json::Value) -> serde_j
 }
 
 /// Build a Responses `input_image` item from a tool-result content part that
-/// carries an image: a typed image block (`image`/`input_image`/`image_url`), or
-/// the neutral screenshot dict (`{base64, media_type, scale_factor, ...}`) the
-/// computer tool returns. Returns `None` for non-image parts (text, etc.).
+/// carries an image: the neutral screenshot dict the computer tool returns (via
+/// the canonical [`ScreenImage`] definition), or a typed image block
+/// (`image`/`input_image`/`image_url`) carrying a url. Returns `None` for
+/// non-image parts (text, etc.).
 fn responses_image_input_item(item: &serde_json::Value) -> Option<serde_json::Value> {
+    // Neutral screenshot dict -> data URL, keyed off the single ScreenImage
+    // definition (same signature the rest of the pipeline detects).
+    if let Ok(screen) = crate::llm::content::ScreenImage::try_from(item) {
+        return Some(serde_json::json!({
+            "type": "input_image",
+            "image_url": screen.to_data_url(),
+        }));
+    }
+    // Otherwise a typed image block that carries a url directly.
     let type_tag = item.get("type").and_then(serde_json::Value::as_str);
-    let is_typed_image = matches!(type_tag, Some("image" | "input_image" | "image_url"));
-    let has_base64 = item
-        .get("base64")
-        .and_then(serde_json::Value::as_str)
-        .is_some_and(|value| !value.is_empty());
-    if !is_typed_image && !has_base64 {
+    if !matches!(type_tag, Some("image" | "input_image" | "image_url")) {
         return None;
     }
-    // Resolve a data/URL string from any of the shapes an image part can take.
     let image_url = item
         .get("url")
         .and_then(serde_json::Value::as_str)
@@ -391,14 +395,6 @@ fn responses_image_input_item(item: &serde_json::Value) -> Option<serde_json::Va
                         .map(str::to_string)
                 })
             })
-        })
-        .or_else(|| {
-            let base64 = item.get("base64").and_then(serde_json::Value::as_str)?;
-            let media_type = item
-                .get("media_type")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("image/png");
-            Some(format!("data:{media_type};base64,{base64}"))
         })?;
     Some(serde_json::json!({"type": "input_image", "image_url": image_url}))
 }
