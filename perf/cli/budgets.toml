@@ -43,4 +43,4 @@ note = "Clap help render only — no LLM dispatch. W2 placeholder."
 # stops handing the script `/tmp` paths. The ported `.harn` impl
 # respects the workspace_roots sandbox; W3's command itself works in
 # real use, this is purely a benchmark-harness issue. See
-# scripts/_bench_cli_cold_start.py for the rationale and re-enable plan.
+# scripts/bench_cli_cold_start.harn for the rationale and re-enable plan.

@@ -25,7 +25,7 @@ on:
       - 'Cargo.toml'
       - 'perf/cli/**'
       - 'scripts/bench_cli_cold_start.sh'
-      - 'scripts/_bench_cli_cold_start.py'
+      - 'scripts/bench_cli_cold_start.harn'
       - '.github/workflows/cli-cold-start-budget.yml'
   workflow_dispatch:
 
