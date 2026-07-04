@@ -1114,6 +1114,184 @@ pub fn agent_composition_tools(registry = nil, options = nil) {
 }
 
 /**
+ * Apply an exact-string edit to a root-scoped file on top of the existing
+ * read/write hostlib primitives — Harn ships no string-replacement builtin,
+ * so `edit_file` composes read -> replace -> write here. `old_string` must
+ * appear exactly once (unless `replace_all`); a missing or ambiguous match
+ * is a hard error so the model never silently edits the wrong span.
+ */
+fn __agent_host_edit_file_apply(args, options) {
+  let opts = __agent_host_options(options)
+  let path = __agent_host_resolve_path(args.path, opts)
+  let old_string = args?.old_string
+  let new_string = args?.new_string ?? ""
+  let replace_all = args?.replace_all ?? false
+  if type_of(old_string) != "string" || old_string == "" {
+    throw "edit_file: old_string must be a non-empty string"
+  }
+  if old_string == new_string {
+    throw "edit_file: old_string and new_string are identical; nothing to change"
+  }
+  let current = hostlib_tools_read_file({path: path})
+  let content = current?.content ?? ""
+  let occurrences = len(split(content, old_string)) - 1
+  if occurrences == 0 {
+    throw "edit_file: old_string not found in " + args.path
+  }
+  if occurrences > 1 && !replace_all {
+    throw "edit_file: old_string is not unique in "
+      + args.path
+      + " ("
+      + to_string(occurrences)
+      + " matches); pass replace_all: true or include more surrounding context to disambiguate"
+  }
+  let updated = replace(content, old_string, new_string)
+  let write = hostlib_tools_write_file({path: path, content: updated, overwrite: true})
+  return {
+    bytes_written: write?.bytes_written,
+    path: write?.path ?? path,
+    replacements: if replace_all {
+      occurrences
+    } else {
+      1
+    },
+  }
+}
+
+/**
+ * agent_edit_tools adds the canonical root-scoped mutation tools every
+ * embedder otherwise hand-rolls: `write_file`, `edit_file`, `create_directory`,
+ * and `delete_path`. They wrap the existing hostlib primitives
+ * (`hostlib_tools_write_file` / `hostlib_tools_delete_file` / `harness.fs.mkdir`)
+ * and reuse the same root resolution, path-scope enforcement, naming,
+ * description, annotation, and rendering plumbing as `agent_read_tools`. Every
+ * tool is annotated honestly as mutating (`kind: edit|delete`,
+ * `side_effect_level: workspace_write`) so the read-only stance hides them and
+ * tool-surface narrowing classifies them correctly. They are plain named tools,
+ * so `std/llm/tool_middleware` (with_consent, with_audit_log, with_dry_run, …)
+ * wraps them without any per-tool support. NOT composed into `agent_host_tools`
+ * — mutation stays opt-in; compose explicitly with
+ * `agent_edit_tools(agent_host_tools(nil, opts), opts)`.
+ *
+ * @effects: [agent]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_edit_tools(registry = nil, options = nil) {
+  let opts = __agent_host_options(options)
+  let _ = hostlib_enable("tools:deterministic")
+  var tools = registry ?? tool_registry()
+  if __agent_host_tool_enabled(opts, "write_file", "edit") {
+    let key = "write_file"
+    tools = tool_define(
+      tools,
+      __agent_host_name(opts, key, "write_file"),
+      __agent_host_description(
+        opts,
+        key,
+        "Create or overwrite a UTF-8 file under the configured root, writing the full content. Missing parent directories are created. Prefer edit_file for a targeted change to an existing file; use this to create a new file or replace one wholesale.",
+      ),
+      __agent_host_config(
+        opts,
+        key,
+        {
+          parameters: {path: {type: "string"}, content: {type: "string"}},
+          returns: {type: "object"},
+          annotations: __agent_host_annotations(opts, key, {kind: "edit", side_effect_level: "workspace_write"}),
+          handler: { args -> __agent_host_render(
+            hostlib_tools_write_file({path: __agent_host_resolve_path(args.path, opts), content: args.content}),
+            opts,
+            key,
+          ) },
+        },
+      ),
+    )
+  }
+  if __agent_host_tool_enabled(opts, "edit_file", "edit") {
+    let key = "edit_file"
+    tools = tool_define(
+      tools,
+      __agent_host_name(opts, key, "edit_file"),
+      __agent_host_description(
+        opts,
+        key,
+        "Replace an exact string in a UTF-8 file under the configured root. old_string must match the file's current text exactly. Errors if old_string is absent, or if it occurs more than once unless replace_all is true; include surrounding context to make the match unique. Set replace_all to change every occurrence.",
+      ),
+      __agent_host_config(
+        opts,
+        key,
+        {
+          parameters: {
+            path: {type: "string"},
+            old_string: {type: "string"},
+            new_string: {type: "string"},
+            replace_all: {type: "boolean", required: false},
+          },
+          returns: {type: "object"},
+          annotations: __agent_host_annotations(opts, key, {kind: "edit", side_effect_level: "workspace_write"}),
+          handler: { args -> __agent_host_render(__agent_host_edit_file_apply(args, opts), opts, key) },
+        },
+      ),
+    )
+  }
+  if __agent_host_tool_enabled(opts, "create_directory", "edit") {
+    let key = "create_directory"
+    tools = tool_define(
+      tools,
+      __agent_host_name(opts, key, "create_directory"),
+      __agent_host_description(
+        opts,
+        key,
+        "Create a directory under the configured root, including any missing parent directories (mkdir -p). Succeeds if the directory already exists.",
+      ),
+      __agent_host_config(
+        opts,
+        key,
+        {
+          parameters: {path: {type: "string"}},
+          returns: {type: "object"},
+          annotations: __agent_host_annotations(opts, key, {kind: "edit", side_effect_level: "workspace_write"}),
+          handler: { args ->
+            let path = __agent_host_resolve_path(args.path, opts)
+            harness.fs.mkdir(path, true)
+            return __agent_host_render({created: true, path: path}, opts, key)
+          },
+        },
+      ),
+    )
+  }
+  if __agent_host_tool_enabled(opts, "delete_path", "edit") {
+    let key = "delete_path"
+    tools = tool_define(
+      tools,
+      __agent_host_name(opts, key, "delete_path"),
+      __agent_host_description(
+        opts,
+        key,
+        "Delete a file or directory under the configured root. Refuses a non-empty directory unless recursive is true. Deleting a path that does not exist is a no-op.",
+      ),
+      __agent_host_config(
+        opts,
+        key,
+        {
+          parameters: {path: {type: "string"}, recursive: {type: "boolean", required: false}},
+          returns: {type: "object"},
+          annotations: __agent_host_annotations(opts, key, {kind: "delete", side_effect_level: "workspace_write"}),
+          handler: { args -> __agent_host_render(
+            hostlib_tools_delete_file(
+              {path: __agent_host_resolve_path(args.path, opts), recursive: args?.recursive ?? false},
+            ),
+            opts,
+            key,
+          ) },
+        },
+      ),
+    )
+  }
+  return tools
+}
+
+/**
  * agent_host_tools adds read/search/git inspection tools and argv-based command tools.
  *
  * @effects: []

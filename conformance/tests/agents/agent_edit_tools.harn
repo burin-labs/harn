@@ -1,0 +1,188 @@
+import { agent_edit_tools, agent_read_tools } from "std/agent/host_tools"
+import {
+  compose_tool_callers,
+  default_tool_caller,
+  with_audit_log,
+  with_consent,
+} from "std/llm/tool_middleware"
+import { with_llm_script } from "std/testing"
+
+fn has_tool(tools, name) {
+  for item in tools ?? [] {
+    if item?.function?.name == name || item?.name == name {
+      return true
+    }
+  }
+  return false
+}
+
+fn scripted_consent(_justification, _session_id) {
+  return {consent: "none", reason: "no consent", verdict: "deny"}
+}
+
+pipeline main() {
+  let root = path_join(harness.fs.temp_dir(), "harn-edit-tools-" + uuid())
+  let outside = path_join(harness.fs.temp_dir(), "harn-edit-tools-outside-" + uuid())
+  harness.fs.mkdir(root, true)
+  harness.fs.mkdir(outside, true)
+  let tools = agent_edit_tools(nil, {root: root, cwd: root})
+  // --- write_file happy path: create + read back ---
+  let wrote = agent_dispatch_tool_call(
+    {id: "w1", name: "write_file", arguments: {path: "notes/hello.txt", content: "alpha\nbeta\n"}},
+    tools,
+  )
+  __io_println(wrote.ok)
+  let wrote_data = json_parse(wrote.rendered_result)
+  __io_println(wrote_data.created)
+  __io_println(harness.fs.read_text(path_join(root, "notes/hello.txt")))
+  // --- edit_file happy path: unique replacement ---
+  let edited = agent_dispatch_tool_call(
+    {
+      id: "e1",
+      name: "edit_file",
+      arguments: {path: "notes/hello.txt", old_string: "beta", new_string: "gamma"},
+    },
+    tools,
+  )
+  __io_println(edited.ok)
+  let edited_data = json_parse(edited.rendered_result)
+  __io_println(edited_data.replacements)
+  __io_println(harness.fs.read_text(path_join(root, "notes/hello.txt")))
+  // --- edit_file replace_all ---
+  harness.fs.write_text(path_join(root, "notes/rep.txt"), "x x x\n")
+  let all = agent_dispatch_tool_call(
+    {
+      id: "e2",
+      name: "edit_file",
+      arguments: {path: "notes/rep.txt", old_string: "x", new_string: "y", replace_all: true},
+    },
+    tools,
+  )
+  let all_data = json_parse(all.rendered_result)
+  __io_println(all_data.replacements)
+  __io_println(harness.fs.read_text(path_join(root, "notes/rep.txt")))
+  // --- edit_file uniqueness error (2 matches, no replace_all) ---
+  let ambiguous = agent_dispatch_tool_call(
+    {id: "e3", name: "edit_file", arguments: {path: "notes/rep.txt", old_string: "y", new_string: "z"}},
+    tools,
+  )
+  __io_println(ambiguous.ok)
+  __io_println(contains(ambiguous.error, "not unique"))
+  // --- edit_file not-found error ---
+  let missing = agent_dispatch_tool_call(
+    {
+      id: "e4",
+      name: "edit_file",
+      arguments: {path: "notes/hello.txt", old_string: "nope", new_string: "q"},
+    },
+    tools,
+  )
+  __io_println(missing.ok)
+  __io_println(contains(missing.error, "not found"))
+  // --- create_directory mkdir -p ---
+  let made = agent_dispatch_tool_call(
+    {id: "d1", name: "create_directory", arguments: {path: "deep/nested/dir"}},
+    tools,
+  )
+  __io_println(made.ok)
+  __io_println(harness.fs.stat(path_join(root, "deep/nested/dir")).is_dir)
+  // --- delete_path: file removed ---
+  let del = agent_dispatch_tool_call({id: "x1", name: "delete_path", arguments: {path: "notes/rep.txt"}}, tools)
+  let del_data = json_parse(del.rendered_result)
+  __io_println(del_data.removed)
+  __io_println(harness.fs.exists(path_join(root, "notes/rep.txt")))
+  // --- delete_path refuses non-empty dir without recursive ---
+  let refuse = agent_dispatch_tool_call({id: "x2", name: "delete_path", arguments: {path: "notes"}}, tools)
+  __io_println(refuse.ok)
+  __io_println(contains(refuse.error, "recursive"))
+  __io_println(harness.fs.exists(path_join(root, "notes/hello.txt")))
+  // --- delete_path recursive removes the tree ---
+  let purge = agent_dispatch_tool_call(
+    {id: "x3", name: "delete_path", arguments: {path: "notes", recursive: true}},
+    tools,
+  )
+  let purge_data = json_parse(purge.rendered_result)
+  __io_println(purge_data.removed)
+  __io_println(harness.fs.exists(path_join(root, "notes")))
+  // --- out-of-roots write refused by existing path resolution ---
+  let escape = agent_dispatch_tool_call(
+    {id: "o1", name: "write_file", arguments: {path: path_join(outside, "evil.txt"), content: "x"}},
+    tools,
+  )
+  __io_println(escape.ok)
+  __io_println(contains(escape.error, "absolute paths are disabled"))
+  __io_println(harness.fs.exists(path_join(outside, "evil.txt")))
+  // --- honest mutating annotations ---
+  __io_println(tool_find(tools, "write_file").annotations.kind)
+  __io_println(tool_find(tools, "write_file").annotations.side_effect_level)
+  __io_println(tool_find(tools, "delete_path").annotations.kind)
+  __io_println(tool_find(tools, "edit_file").annotations.side_effect_level)
+  // --- read-only stance hides every edit tool, keeps read tools ---
+  let surface = agent_edit_tools(agent_read_tools(nil, {root: root}), {root: root})
+  with_llm_script(
+    [{text: "just researching ##DONE##"}],
+    { ->
+      let session = "edit-tools-stance-" + uuid()
+      let _ = agent_loop(
+        "no changes yet, only investigate",
+        nil,
+        {
+          provider: "mock",
+          tools: surface,
+          tool_format: "native",
+          loop_until_done: true,
+          max_iterations: 2,
+          session_id: session,
+          read_only_stance: {enabled: true, armed: true, consent_check: scripted_consent},
+        },
+      )
+      let first_tools = llm_mock_calls()[0].tools
+      __io_println(has_tool(first_tools, "read_file"))
+      __io_println(has_tool(first_tools, "write_file"))
+      __io_println(has_tool(first_tools, "edit_file"))
+      __io_println(has_tool(first_tools, "create_directory"))
+      __io_println(has_tool(first_tools, "delete_path"))
+    },
+  )
+  // --- burin-shaped: with_consent + with_audit_log wrap the canonical tools ---
+  let mw_root = path_join(harness.fs.temp_dir(), "harn-edit-tools-mw-" + uuid())
+  harness.fs.mkdir(mw_root, true)
+  let edit = agent_edit_tools(nil, {root: mw_root, cwd: mw_root})
+  let dispatch_next = { call -> agent_dispatch_tool_call({id: call.call_id, name: call.tool_name, arguments: call.tool_args}, edit) }
+  let consent_hits = atomic(0)
+  let audit_hits = atomic(0)
+  let approve = { _call ->
+    atomic_add(consent_hits, 1)
+    return true
+  }
+  let audit_sink = { _receipt ->
+    atomic_add(audit_hits, 1)
+    return nil
+  }
+  let caller = compose_tool_callers(
+    [with_audit_log({sink: audit_sink}), with_consent(approve), default_tool_caller()],
+  )
+  let envelope = {
+    call_id: "mw1",
+    declared_executor: "harn",
+    description: "",
+    schema: nil,
+    tool_args: {content: "hi from middleware\n", path: "out/mw.txt"},
+    tool_name: "write_file",
+    turn: {iteration: 0, session_id: ""},
+  }
+  let mw_result = caller(envelope, dispatch_next)
+  __io_println(mw_result.status)
+  __io_println(atomic_get(consent_hits))
+  __io_println(atomic_get(audit_hits))
+  __io_println(harness.fs.read_text(path_join(mw_root, "out/mw.txt")))
+  // --- deny path: consent short-circuits, underlying write never runs ---
+  let deny_caller = compose_tool_callers([with_consent({ _call -> false }), default_tool_caller()])
+  let denied = deny_caller(
+    envelope + {call_id: "mw2", tool_args: {content: "nope", path: "out/denied.txt"}},
+    dispatch_next,
+  )
+  __io_println(denied.ok)
+  __io_println(denied.error_category)
+  __io_println(harness.fs.exists(path_join(mw_root, "out/denied.txt")))
+}
