@@ -41,16 +41,13 @@ provider = "anthropic"
 id = "claude-sonnet-5"
 provider = "anthropic"
 
-# Default balanced hosted route for routine coding-agent work. Qwen 3.6 Flash
-# matched Plus on the 2026-07-02 Harn/OpenRouter structured JSON + native-tool
-# + text-tool smoke matrix while landing materially lower latency and token
-# price. OpenAI stays addressable through the provider-scoped tier alias below.
+# Default balanced hosted route for routine coding-agent work.
 [aliases.mid]
-id = "qwen/qwen3.6-flash"
+id = "qwen/qwen3-coder-next"
 provider = "openrouter"
 
 [aliases."tier/mid"]
-id = "qwen/qwen3.6-flash"
+id = "qwen/qwen3-coder-next"
 provider = "openrouter"
 
 [aliases."openai/mid"]

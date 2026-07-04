@@ -49,6 +49,8 @@ import {
   agent_stall_no_net_progress,
   agent_stall_observe_tool_calls,
   agent_stall_repair_config,
+  agent_stall_repeated_verified_pass,
+  agent_stall_verified_write_satisfied,
 } from "std/agent/stall"
 import { agent_stance_apply, agent_stance_post_turn, agent_stance_prepare } from "std/agent/stance"
 import {
@@ -1006,13 +1008,83 @@ fn __maybe_emit_tool_audit(session_id, envelope, audit, receipt = nil) {
 }
 
 fn __visible_text(parsed, raw_text) {
+  var text = raw_text
   if parsed?.user_response != nil && parsed.user_response != "" {
-    return parsed.user_response
+    text = parsed.user_response
+  } else if parsed?.prose != nil && parsed.prose != "" {
+    text = parsed.prose
   }
-  if parsed?.prose != nil && parsed.prose != "" {
-    return parsed.prose
+  return __strip_internal_verdict_json(text)
+}
+
+fn __internal_verdict_object(value) -> bool {
+  if type_of(value) != "dict" {
+    return false
   }
-  return raw_text
+  let verdict = lowercase(trim(to_string(value?.verdict ?? "")))
+  if verdict == "" {
+    return false
+  }
+  let completion = contains(["done", "continue"], verdict)
+    && __dict_has_any(value, ["reasoning", "reason", "next_step", "nextStep"])
+  let judged = contains(["revise", "pass", "fail", "unclear", "allow", "warn", "block"], verdict)
+    && __dict_has_any(value, ["critique", "confidence", "category", "error"])
+  if !(completion || judged) {
+    return false
+  }
+  let allowed = [
+    "verdict",
+    "reasoning",
+    "reason",
+    "next_step",
+    "nextStep",
+    "critique",
+    "confidence",
+    "category",
+    "error",
+  ]
+  for key in value.keys() {
+    if !contains(allowed, key) {
+      return false
+    }
+  }
+  return true
+}
+
+fn __dict_has_any(value, keys) -> bool {
+  for key in keys {
+    if value[key] != nil {
+      return true
+    }
+  }
+  return false
+}
+
+fn __internal_verdict_json(text) -> bool {
+  let parsed = try {
+    json_parse(trim(to_string(text ?? "")))
+  }
+  if is_err(parsed) {
+    return false
+  }
+  return __internal_verdict_object(unwrap(parsed))
+}
+
+fn __strip_internal_verdict_json(text) {
+  let raw = to_string(text ?? "")
+  if __internal_verdict_json(raw) {
+    return ""
+  }
+  let trimmed = trim(raw)
+  let start = trimmed.last_index_of("{")
+  if start < 0 {
+    return raw
+  }
+  let suffix = trimmed[start:len(trimmed)]
+  if !__internal_verdict_json(suffix) {
+    return raw
+  }
+  return trim(trimmed[0:start])
 }
 
 /**
@@ -3750,7 +3822,7 @@ fn __agent_loop_run(message, session, initial_opts) {
         )
         stall_state = stall_observation.state
         stall_enabled_seen = stall_enabled_seen || stall_observation.enabled
-        if stall_state.last_diagnostic_class == "pass" {
+        if agent_stall_verified_write_satisfied(turn_opts?.stall_diagnostics, stall_state) {
           terminal_write_unverified = false
         }
         let stall_warning = stall_observation.warning
@@ -4259,6 +4331,15 @@ fn __agent_loop_run(message, session, initial_opts) {
           }
         }
         if should_continue {
+          let repeated_verified_pass = agent_stall_repeated_verified_pass(turn_opts?.stall_diagnostics, stall_state)
+          if repeated_verified_pass && len(turn_rejected) == 0 && trim(visible_text) == "" {
+            let missing_after_verified_pass = agent_required_tools_missing_from_session(opts, successful_tools_seen)
+            if len(missing_after_verified_pass) == 0 {
+              final_status = "done"
+              stop_reason = "repeated_verified_pass"
+              break
+            }
+          }
           if text_only_nudge_budget_exceeded {
             final_status = "stuck"
             stop_reason = "max_nudges"
@@ -4300,6 +4381,7 @@ fn __agent_loop_run(message, session, initial_opts) {
           }
         }
         let loop_no_net_progress = agent_stall_no_net_progress(turn_opts?.stall_diagnostics, stall_state)
+          || agent_stall_repeated_verified_pass(turn_opts?.stall_diagnostics, stall_state)
         let loop_state = agent_loop_snapshot_state(
           {
             iteration: iteration,

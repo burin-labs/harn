@@ -1,7 +1,14 @@
 # 2026-07-02 OpenRouter Qwen 3.7 Provider Evidence
 
 This note records the evidence behind Harn's Qwen 3.7 OpenRouter catalog
-metadata and why the hosted `mid` preset stays on Qwen 3.6 Flash.
+metadata and the 2026-07-02 decision to keep the hosted `mid` preset on
+Qwen 3.6 Flash.
+
+Update 2026-07-04: the `mid` decision below has been superseded by
+`2026-07-04-burin-value-route.md`. Qwen 3.7 Plus/Max remain catalogued as
+frontier Qwen routes, but the hosted `mid` preset now points at
+`openrouter:qwen/qwen3-coder-next` after Burin headless probes found materially
+better cost and wall-clock behavior for routine coding-agent tasks.
 
 ## Online Sources
 
@@ -37,8 +44,9 @@ structured JSON, native-tool, and Harn text-tool smoke tasks.
 | `qwen/qwen3.7-plus` | schema miss | pass, 1.26s | JSON-shaped text call | 6.06s | $0.000324 |
 | `qwen/qwen3.7-max` | schema miss | pass, 1.52s | JSON-shaped text call | 5.62s | $0.001016 |
 
-Decision: keep Qwen 3.6 Flash as the hosted `mid` value preset. Qwen 3.7
-Plus/Max are catalogued as current Qwen routes and pass native tool dispatch,
-but this probe did not show a latency or cost reason to replace Flash for the
-default value route. Max is the flagship/high-price route, so it belongs in the
-`frontier` tier rather than the `mid` tier.
+Decision at the time: keep Qwen 3.6 Flash as the hosted `mid` value preset.
+This is now superseded by the 2026-07-04 Burin value-route probe. Qwen 3.7
+Plus/Max are still catalogued as current Qwen routes and pass native tool
+dispatch, but neither replaces Qwen3-Coder-Next for the default value route.
+Max is the flagship/high-price route, so it belongs in the `frontier` tier
+rather than the `mid` tier.

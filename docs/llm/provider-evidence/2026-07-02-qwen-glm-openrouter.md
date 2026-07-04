@@ -3,6 +3,12 @@
 This note records the source data used to update Harn's default hosted `mid`
 preset and the Qwen/GLM OpenRouter catalog rows.
 
+Update 2026-07-04: the `mid` decision below has been superseded by
+`2026-07-04-burin-value-route.md`. Qwen 3.6 Flash remains catalogued and useful,
+but the hosted `mid` preset now points at
+`openrouter:qwen/qwen3-coder-next` after Burin headless probes found better
+cost and wall-clock behavior for routine coding-agent tasks.
+
 ## Online Sources
 
 - OpenRouter `/api/v1/models`, fetched 2026-07-02, reported:
@@ -77,11 +83,11 @@ structured JSON, native-tool, and text-tool smoke tasks.
 | `qwen/qwen3.6-35b-a3b` | 2.31s, pass | 7.14s, pass | 0.31s, pass | $0.000246 |
 | `z-ai/glm-5.2` | 2.30s, pass | 0.50s, pass | 0.40s, malformed close | $0.001258 |
 
-Decision: use Qwen 3.6 Flash as the hosted `mid` preset. It matched Plus on
-the smoke matrix, was faster in these probes, keeps a 1M context window, and is
-cheaper than Plus or GLM. Keep GLM 5.2 catalogued and effort-aware, but do not
-promote it to the default until longer agent-loop probes overcome the existing
-GLM tool-call, streaming, and reasoning-channel reliability evidence.
+Decision at the time: use Qwen 3.6 Flash as the hosted `mid` preset. This is
+now superseded by the 2026-07-04 Burin value-route probe. Keep GLM 5.2
+catalogued and effort-aware, but do not promote it to the default until longer
+agent-loop probes overcome the existing GLM tool-call, streaming, and
+reasoning-channel reliability evidence.
 
 Follow-up sanity probe, 2026-07-03: direct OpenRouter chat completions with
 temperature 0 and `reasoning.enabled=false` still passed the tiny structured

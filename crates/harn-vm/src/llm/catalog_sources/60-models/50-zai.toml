@@ -119,10 +119,7 @@ name = "GLM 5.2 (via OpenRouter)"
 provider = "openrouter"
 context_window = 1048576
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-# OpenRouter `/api/v1/models` live snapshot on 2026-07-02 reports
-# $0.93/$3.00 per MTok and native `reasoning_effort` support. A 2026-07-03
-# refresh reports input_cache_read at $0.18/MTok.
-pricing = { input_per_mtok = 0.93, output_per_mtok = 3.00, cache_read_per_mtok = 0.18 }
+pricing = { input_per_mtok = 0.91, output_per_mtok = 2.86, cache_read_per_mtok = 0.169 }
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]

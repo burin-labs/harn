@@ -264,14 +264,7 @@ latency_p50_ms = 1700
 method = "GET"
 path = "/models"
 
-# Z.AI — host of the GLM family (GLM-4.5/4.6/4.7 and the GLM-5 line). The
-# working API base is `https://api.z.ai/api/paas/v4` (verified 2026-07-03:
-# glm-4.6 serves 200 there; the previously catalogued `.../v1` returned 404).
-# The endpoint speaks the OpenAI chat-completions wire format so the shared
-# openai_chat_completions path Just Works. A coding-plan mirror lives at
-# `.../api/coding/paas/v4`; default to paas/v4. Auth is bearer with the raw
-# ZAI_API_KEY token (the legacy `ZHIPU_API_KEY` env var is also accepted; the
-# `auth_env` array tries each in order).
+# Z.AI — OpenAI-compatible GLM API. Override `ZAI_BASE_URL` for custom plans.
 [providers.zai]
 base_url = "https://api.z.ai/api/paas/v4"
 base_url_env = "ZAI_BASE_URL"

@@ -2,8 +2,7 @@
 //!
 //! Provides an `EventSink` trait and a thread-local sink registry so that the
 //! VM (and especially the LLM layer) can emit structured log and span events
-//! instead of raw `eprintln!` calls.  Consumers register one or more sinks;
-//! the default `StderrSink` preserves backward-compatible stderr output.
+//! instead of raw `eprintln!` calls. Consumers register one or more sinks.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -50,6 +49,9 @@ pub struct StderrSink;
 
 impl EventSink for StderrSink {
     fn emit_log(&self, event: &LogEvent) {
+        if !stderr_level_enabled(event.level) {
+            return;
+        }
         let level_str = match event.level {
             EventLevel::Trace => "TRACE",
             EventLevel::Debug => "DEBUG",
@@ -77,6 +79,33 @@ impl EventSink for StderrSink {
     }
 
     fn emit_span_end(&self, _span_id: u64, _metadata: &BTreeMap<String, serde_json::Value>) {}
+}
+
+fn stderr_level_enabled(level: EventLevel) -> bool {
+    let threshold = std::env::var("HARN_LOG_LEVEL")
+        .ok()
+        .map(|value| value.trim().to_ascii_lowercase())
+        .unwrap_or_else(|| "info".to_string());
+    let min_level = match threshold.as_str() {
+        "trace" => EventLevel::Trace,
+        "debug" => EventLevel::Debug,
+        "info" | "" => EventLevel::Info,
+        "warn" | "warning" => EventLevel::Warn,
+        "error" => EventLevel::Error,
+        "off" | "none" | "silent" => return false,
+        _ => EventLevel::Info,
+    };
+    event_level_rank(level) >= event_level_rank(min_level)
+}
+
+fn event_level_rank(level: EventLevel) -> u8 {
+    match level {
+        EventLevel::Trace => 0,
+        EventLevel::Debug => 1,
+        EventLevel::Info => 2,
+        EventLevel::Warn => 3,
+        EventLevel::Error => 4,
+    }
 }
 
 /// A sink that collects events for later retrieval (testing, inspection).
@@ -209,6 +238,15 @@ pub fn log_debug(category: &str, message: &str) {
 /// Log at Info level with metadata.
 pub fn log_info_meta(category: &str, message: &str, metadata: BTreeMap<String, serde_json::Value>) {
     emit_log(EventLevel::Info, category, message, metadata);
+}
+
+/// Log at Debug level with metadata.
+pub fn log_debug_meta(
+    category: &str,
+    message: &str,
+    metadata: BTreeMap<String, serde_json::Value>,
+) {
+    emit_log(EventLevel::Debug, category, message, metadata);
 }
 
 /// Log at Warn level with metadata.
