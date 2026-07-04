@@ -396,6 +396,39 @@ pub struct FastModeDef {
     pub note: Option<String>,
 }
 
+/// A named model-fallback ladder declared in the catalog under
+/// `[model_ladders.<name>]`. A `models`/`ladder` option on `llm_call`
+/// lowers a ladder onto the first-class `routing_policy` chain: each step
+/// is one transport attempt, and the loop advances to the next step ONLY
+/// on transport-class failures (connection/timeout/429/5xx/throttled).
+///
+/// This data-driven declaration follows the same spirit as `fast_mode`
+/// (#4017): a capability/behavior encoded as catalog data rather than
+/// hand-rolled at each downstream call site (harn-bump-fleet,
+/// harn-cloud free_tier_pool, burin-code all shipped their own copy).
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct ModelLadderDef {
+    /// Ordered ladder steps, cheapest/first to most-capable/last.
+    #[serde(default)]
+    pub steps: Vec<ModelLadderStepDef>,
+    /// Optional human-readable label surfaced on the routing envelope.
+    #[serde(default)]
+    pub label: Option<String>,
+}
+
+/// One rung of a [`ModelLadderDef`]. Mirrors the `{model, provider?}` shape
+/// accepted by the `models:` option and the `model_ladder(...)` std
+/// constructor. Provider is optional: when omitted it is inferred from the
+/// model id (or the call's base provider) at lowering time.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct ModelLadderStepDef {
+    pub model: String,
+    #[serde(default)]
+    pub provider: Option<String>,
+    #[serde(default)]
+    pub label: Option<String>,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct ModelDef {
     pub name: String,

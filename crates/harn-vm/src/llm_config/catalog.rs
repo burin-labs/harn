@@ -235,6 +235,19 @@ pub fn model_rate_limits(model_id: &str) -> Option<RateLimitsDef> {
     model_catalog_entry(model_id).and_then(|model| model.rate_limits)
 }
 
+/// Resolve a named model ladder declared under `[model_ladders.<name>]`.
+/// Returns `None` when no ladder with that name exists in the effective
+/// (base + overlay) catalog.
+pub fn model_ladder(name: &str) -> Option<ModelLadderDef> {
+    effective_config().model_ladders.get(name).cloned()
+}
+
+/// Sorted names of every declared model ladder — used to build a helpful
+/// "did you mean" error when a `ladder:` option names an unknown ladder.
+pub fn model_ladder_names() -> Vec<String> {
+    effective_config().model_ladders.keys().cloned().collect()
+}
+
 pub fn wire_model_id(model_id: &str) -> String {
     model_catalog_entry(model_id)
         .and_then(|model| model.wire_model)

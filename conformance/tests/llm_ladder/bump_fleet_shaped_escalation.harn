@@ -1,0 +1,44 @@
+import { with_llm_script } from "std/testing"
+
+/**
+ * Downstream-shaped regression: the cheap-model -> frontier escalation
+ * ladder that harn-bump-fleet / harn-cloud free_tier_pool hand-rolled today.
+ * The cheap rung carries a tighter per-step `options` override; when it hits
+ * an overloaded (503) transport failure the ladder escalates to the frontier
+ * rung (which raises max_tokens) and the call round-trips.
+ */
+pipeline test(task) {
+  with_llm_script(
+    [
+      {
+        error: {category: "overloaded", message: "HTTP 503", status: 503},
+        model: "mock-cheap",
+        provider: "mock",
+      },
+      {text: "frontier completed the release", model: "mock-frontier", provider: "mock"},
+    ],
+    { ->
+      let result = llm_call(
+        "cut the release",
+        nil,
+        {
+          models: [
+            {
+              model: "mock-cheap",
+              provider: "mock",
+              label: "cheap",
+              options: {max_tokens: 256, temperature: 0.0},
+            },
+            {model: "mock-frontier", provider: "mock", label: "frontier", options: {max_tokens: 4096}},
+          ],
+        },
+      )
+      __io_println(result.text)
+      __io_println(result.model)
+      __io_println(len(result.routing.attempts))
+      __io_println(result.routing.attempts[0].status)
+      __io_println(result.routing.attempts[1].status)
+      __io_println(result.routing.selected)
+    },
+  )
+}

@@ -156,6 +156,8 @@ fn __llm_call_option_keys() {
     "fallback_chain",
     "budget_usd",
     "routing",
+    "models",
+    "ladder",
     "system",
     "messages",
     "session_id",

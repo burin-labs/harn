@@ -163,6 +163,18 @@ pub enum AgentTraceEvent {
         attempt: usize,
         error: String,
     },
+    /// Emitted when a `models:`/`ladder:` model ladder advances from one rung
+    /// to the next because the current rung hit a transport-class failure
+    /// (connection/timeout/429/5xx/circuit_open). Schema-validation failures
+    /// never emit this — they re-ask the SAME rung's model. `from_index` is
+    /// the 0-based ladder position that failed; `category` is the failover
+    /// error category that drove the advance.
+    ModelsAdvance {
+        from_index: usize,
+        from_model: String,
+        to_model: String,
+        category: String,
+    },
 }
 
 thread_local! {
@@ -196,6 +208,7 @@ pub fn agent_trace_summary() -> serde_json::Value {
         let mut native_text_tool_fallbacks = 0usize;
         let mut native_text_tool_fallback_rejections = 0usize;
         let mut empty_completion_retries = 0usize;
+        let mut models_advances = 0usize;
         let mut schema_stream_aborts = 0usize;
         let mut typed_checkpoints = 0usize;
         let mut typed_checkpoint_failures = 0usize;
@@ -271,6 +284,9 @@ pub fn agent_trace_summary() -> serde_json::Value {
                 AgentTraceEvent::EmptyCompletionRetry { .. } => {
                     empty_completion_retries += 1;
                 }
+                AgentTraceEvent::ModelsAdvance { .. } => {
+                    models_advances += 1;
+                }
             }
         }
 
@@ -286,6 +302,7 @@ pub fn agent_trace_summary() -> serde_json::Value {
             "native_text_tool_fallbacks": native_text_tool_fallbacks,
             "native_text_tool_fallback_rejections": native_text_tool_fallback_rejections,
             "empty_completion_retries": empty_completion_retries,
+            "models_advances": models_advances,
             "schema_stream_aborts": schema_stream_aborts,
             "typed_checkpoints": typed_checkpoints,
             "typed_checkpoint_failures": typed_checkpoint_failures,

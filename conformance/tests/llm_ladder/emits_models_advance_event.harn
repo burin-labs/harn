@@ -1,0 +1,32 @@
+import { with_llm_script } from "std/testing"
+
+/**
+ * A ladder step advance emits a dedicated `llm_models_advance` trace event
+ * (surfaced through `agent_trace()`) carrying the from/to models and the
+ * transport failure category that drove the escalation.
+ */
+pipeline test(task) {
+  with_llm_script(
+    [
+      {
+        error: {category: "rate_limit", message: "HTTP 429", retry_after_ms: 10},
+        model: "mock",
+        provider: "mock",
+      },
+      {text: "ok", model: "mock-strong", provider: "mock"},
+    ],
+    { ->
+      let _ = llm_call(
+        "hi",
+        nil,
+        {models: [{model: "mock", provider: "mock"}, {model: "mock-strong", provider: "mock"}]},
+      )
+      let advances = agent_trace().filter({ e -> e.type == "models_advance" })
+      __io_println(len(advances))
+      __io_println(advances[0].from_index)
+      __io_println(advances[0].from_model)
+      __io_println(advances[0].to_model)
+      __io_println(advances[0].category)
+    },
+  )
+}
