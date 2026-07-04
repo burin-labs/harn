@@ -172,9 +172,9 @@ pub(crate) use portal::PortalArgs;
 pub use precompile::PrecompileArgs;
 pub(crate) use profile::ProfileArgs;
 pub(crate) use provider::{
-    refresh_provider_catalog_if_requested, ProviderArgs, ProviderCapabilitiesArgs,
-    ProviderCapabilitiesCommand, ProviderCapabilitiesPromoteFromEvalArgs, ProviderCommand,
-    ProviderDispatchExplainArgs, ProviderProbeArgs, ProviderToolProbeArgs,
+    refresh_provider_catalog_if_requested, ProviderArgs, ProviderCacheProbeArgs,
+    ProviderCapabilitiesArgs, ProviderCapabilitiesCommand, ProviderCapabilitiesPromoteFromEvalArgs,
+    ProviderCommand, ProviderDispatchExplainArgs, ProviderProbeArgs, ProviderToolProbeArgs,
     ProviderToolProbeModeArg,
 };
 pub(crate) use providers::{

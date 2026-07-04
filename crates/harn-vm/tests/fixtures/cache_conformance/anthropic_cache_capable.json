@@ -1,0 +1,38 @@
+{
+  "provider": "anthropic",
+  "model": "claude-sonnet-5",
+  "runs": [
+    {
+      "request": {
+        "task": "stable-prefix-cache-probe",
+        "prefix_sha256": "0000000000000000000000000000000000000000000000000000000000000001",
+        "prefix_tokens_estimate": 3800,
+        "tool_schema_sha256": "0000000000000000000000000000000000000000000000000000000000000002",
+        "settings_sha256": "0000000000000000000000000000000000000000000000000000000000000003"
+      },
+      "elapsed_ms": 2100,
+      "usage": {
+        "input_tokens": 3840,
+        "output_tokens": 96,
+        "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": 3800
+      }
+    },
+    {
+      "request": {
+        "task": "stable-prefix-cache-probe",
+        "prefix_sha256": "0000000000000000000000000000000000000000000000000000000000000001",
+        "prefix_tokens_estimate": 3800,
+        "tool_schema_sha256": "0000000000000000000000000000000000000000000000000000000000000002",
+        "settings_sha256": "0000000000000000000000000000000000000000000000000000000000000003"
+      },
+      "elapsed_ms": 900,
+      "usage": {
+        "input_tokens": 3840,
+        "output_tokens": 96,
+        "cache_read_input_tokens": 3800,
+        "cache_creation_input_tokens": 0
+      }
+    }
+  ]
+}

@@ -25,6 +25,11 @@ pub(crate) enum ProviderCommand {
     Probe(ProviderProbeArgs),
     /// Run one-tool provider conformance and classify native/text fallback.
     ToolProbe(ProviderToolProbeArgs),
+    /// Classify prompt-cache conformance from a saved repeat-run usage fixture:
+    /// resolve capability support, normalize each run's usage, and emit one
+    /// cache verdict. Live repeat probing is not yet wired; pass
+    /// `--usage-fixture`.
+    CacheProbe(ProviderCacheProbeArgs),
     /// Deterministically explain how a (provider, model) pair would dispatch:
     /// resolved wire format (anthropic-native vs openai-compat), base URL host,
     /// native-tool support, and thinking eligibility — a pure capability-registry
@@ -233,4 +238,43 @@ pub(crate) enum ProviderToolProbeModeArg {
     Both,
     NonStreaming,
     Streaming,
+}
+
+/// Surface for `harn provider cache-probe`: classify a saved repeat-run
+/// prompt-cache usage fixture into one cache verdict. The classifier is the
+/// stable contract Burin dogfood and Harn Cloud receipts consume; live probing
+/// is deliberately fixture-first so committed conformance carries no keys.
+#[derive(Debug, Args)]
+pub(crate) struct ProviderCacheProbeArgs {
+    /// Provider id from Harn provider config. Optional when the fixture object
+    /// carries its own `provider`.
+    #[arg(
+        value_parser = llm_provider_completion_parser(),
+        hide_possible_values = true,
+        default_value = ""
+    )]
+    pub provider: String,
+    /// Model alias or provider-native model id. Optional when the fixture object
+    /// carries its own `model`.
+    #[arg(
+        long,
+        value_parser = llm_model_completion_parser(),
+        hide_possible_values = true,
+        default_value = ""
+    )]
+    pub model: String,
+    /// Saved repeat-run usage fixture: a JSON runs array, or an object with a
+    /// `runs` array plus optional `provider`/`model`.
+    #[arg(long = "usage-fixture")]
+    pub usage_fixture: Option<PathBuf>,
+    /// Emit JSON. Defaults to true because evals and dogfood gates consume the
+    /// structured conformance report.
+    #[arg(
+        long,
+        default_value_t = true,
+        num_args = 0..=1,
+        default_missing_value = "true",
+        action = ArgAction::Set
+    )]
+    pub json: bool,
 }
