@@ -680,6 +680,42 @@ pub struct RetryPolicy {
     /// Defaults to 2.0 when `backoff_ms` is set and this field is `None`.
     #[serde(default)]
     pub backoff_multiplier: Option<f64>,
+    /// Retry-with-feedback: when set, a failed attempt's verification findings
+    /// are threaded into the next attempt's task via a bounded default
+    /// template. `feedback: true` uses the default budget; `feedback:
+    /// {max_chars}` bounds the injected findings. `None` = today's blind
+    /// retry (byte-identical replay). Interpreted by the embedded stage loop
+    /// in `std/workflow/stage.harn`, not by Rust.
+    #[serde(default)]
+    pub feedback: Option<FeedbackPolicy>,
+    /// Retry-with-feedback: an optional Harn closure that receives the full
+    /// retry context (`{task, attempt, findings, verification, error,
+    /// prior_text, stage}`) and returns the replacement task for the next
+    /// attempt. Carries a closure, so it is `#[serde(skip)]` (absent from the
+    /// serialized default) and travels to the embedded stage loop as a raw
+    /// value — Rust never invokes it. Wrapped in `EqIgnored` so it does not
+    /// affect `PartialEq` derivation.
+    #[serde(skip)]
+    pub repair_prompt_builder: Option<EqIgnored<VmValue>>,
+}
+
+/// Retry-with-feedback bounding for `RetryPolicy.feedback`. `true` enables
+/// the default-budget template; `{max_chars}` bounds the injected findings.
+/// Untagged so `feedback: true` and `feedback: {max_chars: 500}` both parse.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum FeedbackPolicy {
+    Enabled(bool),
+    Bounded(FeedbackBounds),
+}
+
+/// Bounded feedback budget shape (`feedback: {max_chars}`).
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct FeedbackBounds {
+    /// Maximum characters of prior-attempt findings to inject into the retry
+    /// task. Defaults (in the stage loop) to ~2000 when unset.
+    pub max_chars: Option<usize>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]

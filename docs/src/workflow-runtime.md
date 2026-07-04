@@ -245,6 +245,56 @@ the normalized policy shape but deterministic workflow execution does not sleep
 between attempts yet; use host/orchestrator retry policy for scheduled delivery
 retries and provider failover rather than relying on workflow backoff fields.
 
+### Retry with feedback
+
+By default a retry re-issues the *unmodified* task on every attempt (a blind
+retry — replayed runs are byte-identical). Two `retry_policy` keys turn the
+retry into a repair loop that threads the prior attempt's verification findings
+into the next attempt's task:
+
+- `feedback: true` appends a bounded default template to the retry task —
+  `Previous attempt N failed: <findings>`, where the findings are the failed
+  verification checks (or the prior attempt's error/output when there are no
+  structured checks). `feedback: {max_chars: N}` bounds the injected findings
+  (default ~2000 characters).
+- `repair_prompt_builder` is a closure that receives the full retry context and
+  returns the complete replacement task. Its return value becomes the next
+  attempt's task verbatim (it takes precedence over `feedback`). The context
+  dict has exactly these keys:
+
+  ```harn,ignore
+  {
+    task,          // the original (base) task string
+    attempt,       // the just-failed attempt number (its return runs as attempt N+1)
+    findings,      // list<string> of failed verification checks
+    verification,  // the prior attempt's verification dict
+    error,         // the prior attempt's error message, if any
+    prior_text,    // the prior attempt's visible text
+    stage,         // the stage node
+  }
+  ```
+
+  ```harn,ignore
+  verify_stage: {
+    kind: "subagent",
+    retry_policy: {
+      max_attempts: 3,
+      repair_prompt_builder: { ctx ->
+        return ctx.task + "\n\nFix these findings from attempt " +
+          to_string(ctx.attempt) + ":\n" + join(ctx.findings, "\n")
+      },
+    },
+  }
+  ```
+
+Retry-with-feedback applies to the VM-executed stage paths that consume the
+task (subagent stages, and deterministic execute stages) — the same paths that
+honor `max_attempts`. The mechanism lives in the embedded stage loop
+(`std/workflow/stage.harn`), so the closure runs in Harn and never crosses into
+the host. `workflow_repair_stage_graph` (`std/workflow/patterns`) is the
+one-stage sugar over this policy: a single delegated goal stage that retries
+with feedback until it settles.
+
 Verifier requirements can also be published as structured contract inputs for
 earlier planning and execution stages. Harn injects these contracts into the
 stage prompt automatically so the model sees exact verifier-owned identifiers,

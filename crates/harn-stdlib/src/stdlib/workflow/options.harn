@@ -30,7 +30,7 @@ pub type WorkflowRetryPolicy = {
   backoff_ms?: int,
   backoff_multiplier?: float,
   repair_prompt_builder?: any,
-  feedback?: string | dict,
+  feedback?: bool | {max_chars?: int},
 }
 
 /**

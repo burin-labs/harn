@@ -725,3 +725,237 @@ pub fn workflow_prepare_static_stage(config = nil) {
   }
   return {handled: false}
 }
+
+/** True when a value is an invokable closure / function. */
+fn __stage_is_callable(value) -> bool {
+  let kind = type_of(value)
+  return kind == "function" || kind == "closure" || kind == "fn"
+}
+
+fn __stage_max_attempts(policy, node) {
+  let from_policy = __stage_i64(policy?.max_attempts)
+  let from_node = __stage_i64(node?.retry_policy?.max_attempts)
+  let value = from_policy ?? from_node ?? 1
+  if value < 1 {
+    return 1
+  }
+  return value
+}
+
+fn __stage_feedback_enabled(policy) -> bool {
+  let feedback = policy?.feedback
+  if type_of(feedback) == "dict" {
+    return true
+  }
+  return type_of(feedback) == "bool" && feedback
+}
+
+fn __stage_feedback_max_chars(policy) {
+  let feedback = policy?.feedback
+  if type_of(feedback) == "dict" {
+    return __stage_i64(feedback?.max_chars) ?? 2000
+  }
+  return 2000
+}
+
+/**
+ * Extract human-readable findings from a settled attempt's verification. A
+ * verification carries `{kind, ok, checks: [{kind, ok, expected, actual}]}`
+ * (see workflow_evaluate_verification), or an explicit `findings` list.
+ */
+fn __stage_verification_findings(verification) {
+  if type_of(verification) != "dict" {
+    return []
+  }
+  if type_of(verification?.findings) == "list" {
+    return __stage_string_list(verification.findings)
+  }
+  var out = []
+  for check in __stage_list(verification?.checks) {
+    if !__stage_bool(check?.ok, true) {
+      let kind = __stage_string(check?.kind, "check")
+      out = out.push(kind + ": expected " + to_string(check?.expected) + ", got " + to_string(check?.actual))
+    }
+  }
+  return out
+}
+
+fn __stage_truncate(text, max_chars) {
+  let value = to_string(text)
+  if max_chars <= 0 || len(value) <= max_chars {
+    return value
+  }
+  return value.substring(0, max_chars)
+}
+
+/**
+ * The exact retry-context contract passed to `repair_prompt_builder`. Keys are
+ * pinned by conformance: {task, attempt, findings, verification, error,
+ * prior_text, stage}. `attempt` is the just-failed attempt number whose
+ * findings are threaded forward; the returned string runs as attempt N+1.
+ */
+fn __stage_retry_context(config) {
+  let prior = config?.prior ?? {}
+  return {
+    task: __stage_string(config?.task, ""),
+    attempt: __stage_i64(config?.attempt) ?? 1,
+    findings: __stage_verification_findings(prior?.verification),
+    verification: prior?.verification,
+    error: prior?.error,
+    prior_text: __stage_visible_text(prior?.result),
+    stage: config?.node ?? {},
+  }
+}
+
+/**
+ * workflow_stage_retry_task computes the task string for a retry attempt.
+ *
+ * `config` = {policy, task, attempt, prior, node} where `attempt` is the
+ * just-failed attempt number and `prior` is its settled payload. Precedence:
+ * a callable `policy.repair_prompt_builder` (receives the full retry context
+ * and returns the replacement task verbatim) wins; otherwise `policy.feedback`
+ * appends a bounded "Previous attempt N failed: <findings>" template; with
+ * neither set the original task is returned unchanged (blind retry).
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn workflow_stage_retry_task(config = nil) {
+  let cfg = config ?? {}
+  let policy = cfg?.policy ?? {}
+  let base_task = __stage_string(cfg?.task, "")
+  let builder = policy?.repair_prompt_builder
+  if __stage_is_callable(builder) {
+    return to_string(builder(__stage_retry_context(cfg)))
+  }
+  if __stage_feedback_enabled(policy) {
+    let failed_attempt = __stage_i64(cfg?.attempt) ?? 1
+    let context = __stage_retry_context(cfg)
+    let findings = context.findings
+    let detail = if len(findings) > 0 {
+      join(findings, "\n")
+    } else {
+      __stage_string(context.error, context.prior_text)
+    }
+    let bounded = __stage_truncate(detail, __stage_feedback_max_chars(policy))
+    return base_task + "\n\nPrevious attempt " + to_string(failed_attempt) + " failed: " + bounded
+  }
+  return base_task
+}
+
+fn __stage_attempt_record(attempt, status, outcome, branch, error, verification) {
+  return {
+    attempt: attempt,
+    status: status,
+    outcome: outcome,
+    branch: branch,
+    error: error,
+    verification: verification,
+    started_at: uuid_v7(),
+    finished_at: uuid_v7(),
+  }
+}
+
+/**
+ * workflow_execute_stage_attempts drives the per-stage attempt/retry loop.
+ *
+ * Called by the Rust shim `execute_stage_attempts` (stage.rs) with the node,
+ * task, artifacts, input transcript, and the raw retry policy (which carries
+ * the `repair_prompt_builder` closure). Returns the executed-stage payload the
+ * shim reconstructs into an `ExecutedStage`. Default policy (no feedback, no
+ * builder) re-issues the unmodified task on every attempt — byte-identical to
+ * the legacy Rust loop.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn workflow_execute_stage_attempts(
+  task,
+  node_id,
+  node = nil,
+  artifacts = nil,
+  transcript = nil,
+  retry_policy = nil,
+) {
+  let node_dict = node ?? {}
+  let base_task = __stage_string(task, "")
+  let arts = __stage_list(artifacts)
+  let policy = retry_policy ?? {}
+  let selection = __host_stage_select_artifacts(node_dict, arts)
+  let selected = __stage_list(selection?.artifacts)
+  let consumed_artifact_ids = __stage_string_list(selection?.consumed_artifact_ids)
+  let usage_before = __host_llm_usage_snapshot()
+  let max_attempts = __stage_max_attempts(policy, node_dict)
+  var attempts = []
+  var attempt = 1
+  var prior = nil
+  while attempt <= max_attempts {
+    let attempt_task = if attempt == 1 {
+      base_task
+    } else {
+      workflow_stage_retry_task(
+        {policy: policy, task: base_task, attempt: attempt - 1, prior: prior, node: node_dict},
+      )
+    }
+    let settled = __host_stage_execute_once(node_id, node_dict, attempt_task, attempt, arts, selected, transcript)
+    if __stage_bool(settled?.ok, false) {
+      let branch = settled?.branch
+      let success = branch != "failed"
+      let status = if success {
+        "completed"
+      } else {
+        "failed"
+      }
+      attempts = __host_stage_record_attempt(
+        attempts,
+        __stage_attempt_record(attempt, status, settled?.outcome, branch, nil, settled?.verification),
+      )
+      if success || attempt == max_attempts {
+        return {
+          status: status,
+          outcome: settled?.outcome,
+          branch: branch,
+          result: settled?.result,
+          artifacts: __stage_list(settled?.artifacts),
+          transcript: settled?.transcript,
+          verification: settled?.verification,
+          usage: __host_llm_usage_delta(usage_before, nil),
+          error: if success {
+            nil
+          } else {
+            "verification failed"
+          },
+          attempts: attempts,
+          consumed_artifact_ids: consumed_artifact_ids,
+        }
+      }
+      prior = settled
+    } else {
+      let error_message = __stage_string(settled?.error, "")
+      attempts = __host_stage_record_attempt(
+        attempts,
+        __stage_attempt_record(attempt, "failed", "error", "error", error_message, nil),
+      )
+      if attempt == max_attempts {
+        return {
+          status: "failed",
+          outcome: "error",
+          branch: "error",
+          result: {status: "failed", text: ""},
+          artifacts: [],
+          transcript: transcript,
+          verification: nil,
+          usage: __host_llm_usage_delta(usage_before, nil),
+          error: error_message,
+          attempts: attempts,
+          consumed_artifact_ids: consumed_artifact_ids,
+        }
+      }
+      prior = settled
+    }
+    attempt = attempt + 1
+  }
+  throw "workflow_execute_stage_attempts: retry loop exited without settling"
+}

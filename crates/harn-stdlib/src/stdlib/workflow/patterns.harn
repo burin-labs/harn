@@ -181,6 +181,54 @@ pub fn workflow_command_verify_graph(config = nil) {
 }
 
 /**
+ * Build a single-stage validate→repair graph — sugar over the per-stage retry
+ * policy (`std/workflow/stage.harn`). One delegated goal stage retries with
+ * feedback until it settles: on a failed attempt the retry policy threads the
+ * prior attempt's findings into the next attempt's task (via `feedback: true`
+ * / `{max_chars}` or a `repair_prompt_builder` closure). This is the shape a
+ * hand-rolled "do the work → check → repair with feedback" loop collapses
+ * into.
+ *
+ * Config: `{task?, prompt?, retry_policy, id?, name?, model_policy?, tools?,
+ * verify?, output_kind?}`. The goal runs as a `subagent` stage — the one kind
+ * that both consumes the (feedback-threaded) task and retries through the
+ * inverted attempt loop — so `retry_policy.max_attempts` bounds the repair
+ * budget (defaulted to 2 so repair actually engages). `retry_policy` accepts
+ * the full retry-with-feedback surface (`WorkflowRetryPolicy` in
+ * std/workflow/options).
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn workflow_repair_stage_graph(config = nil) {
+  let cfg = __patterns_dict(config)
+  let stage_id = __patterns_non_empty_string(cfg?.id) ?? "repair"
+  let retry_policy = __patterns_dict(cfg?.retry_policy)
+  let policy = if retry_policy?.max_attempts == nil {
+    retry_policy + {max_attempts: 2}
+  } else {
+    retry_policy
+  }
+  let goal = __patterns_stage_node(
+    cfg,
+    "goal",
+    {
+      kind: "subagent",
+      mode: cfg?.mode ?? "agent",
+      prompt: cfg?.prompt,
+      tools: cfg?.tools,
+      retry_policy: policy,
+      verify: cfg?.verify ?? {},
+      output_contract: __patterns_output_contract(cfg?.output_kind ?? "result", cfg?.goal),
+    },
+  )
+  return workflow_graph(
+    {name: cfg?.name ?? "repair_stage", entry: stage_id, nodes: {[stage_id]: goal}, edges: []},
+  )
+}
+
+/**
  * Build a graph with only a verification stage. Useful for replaying a
  * deterministic verifier against supplied artifacts.
  *

@@ -171,10 +171,12 @@ fn workflow_retry_policy_matches_retry_policy() {
         "WorkflowRetryPolicy ↔ RetryPolicy",
         &harn_alias_keys(workflow_options_harn(), "WorkflowRetryPolicy"),
         &serde_default_keys::<RetryPolicy>(),
-        // Retry-with-feedback surface: typed ahead of the stage-loop
-        // inversion that executes it (the D5 `repair_prompt_builder`
-        // callback + bounded `feedback` template).
-        &["repair_prompt_builder", "feedback"],
+        // `repair_prompt_builder` is a real `RetryPolicy` field but carries a
+        // closure, so it is `#[serde(skip)]` and absent from the serialized
+        // default (same pattern as `ModelPolicy::post_turn_callback`). The
+        // bounded `feedback` template is now a serde-visible `RetryPolicy`
+        // field, so it drops out of the allowlist.
+        &["repair_prompt_builder"],
         &[],
     );
 }

@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     new_id, now_rfc3339, redact_transcript_visibility, ArtifactRecord, AutoCompactPolicy,
-    BranchSemantics, CapabilityPolicy, ContextPolicy, EscalationPolicy, JoinPolicy, MapPolicy,
-    ModelPolicy, ReducePolicy, RetryPolicy, StageContract,
+    BranchSemantics, CapabilityPolicy, ContextPolicy, EqIgnored, EscalationPolicy, JoinPolicy,
+    MapPolicy, ModelPolicy, ReducePolicy, RetryPolicy, StageContract,
 };
 use crate::llm::{extract_llm_options, vm_call_llm_full, vm_value_to_json};
 use crate::tool_surface::{tool_capability_policy_from_spec, tool_names_from_spec};
@@ -501,6 +501,22 @@ pub struct WorkflowValidationReport {
     pub reachable_nodes: Vec<String>,
 }
 
+/// Extract the raw `retry_policy.repair_prompt_builder` closure from a node's
+/// source dict. The builder carries a Harn closure that cannot round-trip
+/// through serde, so — like `raw_model_policy`'s `post_turn_callback` — it is
+/// lifted onto the typed `RetryPolicy` here and travels to the embedded stage
+/// loop (`std/workflow/stage.harn`) as a raw value.
+fn retry_repair_prompt_builder_from_dict(
+    dict: Option<&crate::value::DictMap>,
+) -> Option<EqIgnored<VmValue>> {
+    dict.and_then(|d| d.get("retry_policy"))
+        .and_then(|policy| policy.as_dict())
+        .and_then(|policy| policy.get("repair_prompt_builder"))
+        .filter(|value| !matches!(value, VmValue::Nil))
+        .cloned()
+        .map(EqIgnored)
+}
+
 pub fn parse_workflow_node_value(value: &VmValue, label: &str) -> Result<WorkflowNode, VmError> {
     let mut node: WorkflowNode = super::parse_json_payload(vm_value_to_json(value), label)?;
     let dict = value.as_dict();
@@ -508,6 +524,7 @@ pub fn parse_workflow_node_value(value: &VmValue, label: &str) -> Result<Workflo
     node.raw_auto_compact = dict.and_then(|d| d.get("auto_compact")).cloned();
     node.raw_model_policy = dict.and_then(|d| d.get("model_policy")).cloned();
     node.raw_context_assembler = dict.and_then(|d| d.get("context_assembler")).cloned();
+    node.retry_policy.repair_prompt_builder = retry_repair_prompt_builder_from_dict(dict);
     Ok(node)
 }
 
@@ -650,14 +667,17 @@ pub fn normalize_workflow_value(value: &VmValue) -> Result<WorkflowGraph, VmErro
             .unwrap_or_else(|| "act".to_string());
     }
     for (node_id, node) in &mut graph.nodes {
+        let raw_node = as_dict
+            .get("nodes")
+            .and_then(|nodes| nodes.as_dict())
+            .and_then(|nodes| nodes.get(node_id.as_str()))
+            .and_then(|node_value| node_value.as_dict());
         if node.raw_tools.is_none() {
-            node.raw_tools = as_dict
-                .get("nodes")
-                .and_then(|nodes| nodes.as_dict())
-                .and_then(|nodes| nodes.get(node_id.as_str()))
-                .and_then(|node_value| node_value.as_dict())
-                .and_then(|raw_node| raw_node.get("tools"))
-                .cloned();
+            node.raw_tools = raw_node.and_then(|raw_node| raw_node.get("tools")).cloned();
+        }
+        if node.retry_policy.repair_prompt_builder.is_none() {
+            node.retry_policy.repair_prompt_builder =
+                retry_repair_prompt_builder_from_dict(raw_node);
         }
         if node.id.is_none() {
             node.id = Some(node_id.clone());
