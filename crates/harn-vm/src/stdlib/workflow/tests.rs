@@ -248,6 +248,79 @@ async fn command_verify_retry_policy_records_each_attempt() {
     );
 }
 
+/// Stage-loop inversion pre-work (design D5 step 1): a single
+/// `__host_stage_execute_once` round-trip on a static stage must match the
+/// legacy `execute_stage_attempts` path's output shape field-for-field.
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn host_stage_execute_once_matches_legacy_static_stage_shape() {
+    crate::reset_thread_local_state();
+    let node = WorkflowNode {
+        id: Some("gate".to_string()),
+        kind: "join".to_string(),
+        retry_policy: crate::orchestration::RetryPolicy {
+            max_attempts: 1,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let mut vm = crate::Vm::new();
+    crate::register_vm_stdlib(&mut vm);
+    let ctx = crate::vm::AsyncBuiltinCtx::for_test(vm);
+
+    let legacy = execute_stage_attempts(&ctx, "join stage", "gate", &node, &[], None)
+        .await
+        .expect("legacy path executes");
+
+    let args = vec![
+        crate::value::VmValue::String(arcstr::ArcStr::from("gate")),
+        super::convert::to_vm(&node).expect("node encodes"),
+        crate::value::VmValue::String(arcstr::ArcStr::from("join stage")),
+        crate::value::VmValue::Int(1),
+        crate::value::VmValue::List(std::sync::Arc::new(Vec::new())),
+        crate::value::VmValue::List(std::sync::Arc::new(Vec::new())),
+        crate::value::VmValue::Nil,
+    ];
+    let out = super::host::host_stage_execute_once_builtin(ctx.clone(), args)
+        .await
+        .expect("builtin executes");
+    let dict = out.as_dict().expect("builtin returns a dict");
+
+    assert!(
+        matches!(dict.get("ok"), Some(crate::value::VmValue::Bool(true))),
+        "builtin must report ok: true"
+    );
+    assert_eq!(
+        dict.get("outcome").map(|value| value.display()),
+        Some(legacy.outcome.clone())
+    );
+    assert_eq!(
+        dict.get("branch").map(|value| value.display()),
+        legacy.branch.clone()
+    );
+    assert_eq!(
+        crate::llm::vm_value_to_json(dict.get("result").expect("result present")),
+        legacy.result
+    );
+    // A static join stage produces no artifacts / verification and passes
+    // the (absent) transcript through in-process.
+    assert!(legacy.artifacts.is_empty());
+    assert_eq!(
+        crate::llm::vm_value_to_json(dict.get("artifacts").expect("artifacts present")),
+        serde_json::json!([])
+    );
+    assert!(
+        matches!(dict.get("verification"), Some(crate::value::VmValue::Nil)),
+        "static join stage carries no verification"
+    );
+    assert!(legacy.verification.is_none());
+    assert!(
+        matches!(dict.get("transcript"), Some(crate::value::VmValue::Nil)),
+        "absent transcript passes through as nil"
+    );
+    assert!(legacy.transcript.is_none());
+}
+
 #[test]
 fn workflow_verification_contracts_collect_exact_requirements() {
     let graph = WorkflowGraph {
