@@ -11,7 +11,7 @@ against:
 
 ```toml
 [dependencies]
-harn-serve = { git = "https://github.com/burin-labs/harn", tag = "v0.9.10" }
+harn-serve = { git = "https://github.com/burin-labs/harn", tag = "v0.9.11" }
 serde_json = "1"
 tokio = { version = "1", features = ["rt", "sync"] }
 ```
@@ -56,10 +56,10 @@ start.
 
 ```toml
 # Parity-critical eval harness
-harn-serve = { git = "...", tag = "v0.9.10", features = ["full"] }
+harn-serve = { git = "...", tag = "v0.9.11", features = ["full"] }
 
 # Lean smoke-test harness
-harn-serve = { git = "...", tag = "v0.9.10", features = ["hostlib"] }
+harn-serve = { git = "...", tag = "v0.9.11", features = ["hostlib"] }
 ```
 
 Finer control is available one layer down: `harn-hostlib` exposes per-family
