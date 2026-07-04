@@ -265,21 +265,53 @@ fn append_responses_message_items(message: &serde_json::Value, items: &mut Vec<s
             .or_else(|| message.get("call_id"))
             .and_then(serde_json::Value::as_str)
             .unwrap_or("");
-        let output = message
-            .get("content")
-            .and_then(serde_json::Value::as_str)
-            .map(str::to_string)
-            .unwrap_or_else(|| {
-                message
-                    .get("content")
-                    .map(serde_json::Value::to_string)
-                    .unwrap_or_default()
-            });
+        // The Responses API `function_call_output.output` is a string, and it
+        // cannot carry an image. A tool that returns a screenshot rides it back
+        // on its result, so split: text -> `output`, images -> a following user
+        // message as `input_image` items (where the Responses API accepts them).
+        let content = message.get("content");
+        let images: Vec<serde_json::Value> = content
+            .and_then(serde_json::Value::as_array)
+            .map(|parts| {
+                parts
+                    .iter()
+                    .filter_map(responses_image_input_item)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let output = match content {
+            Some(serde_json::Value::String(text)) => text.clone(),
+            Some(serde_json::Value::Array(parts)) => {
+                // Concatenate only the text parts; images move below.
+                let text = parts
+                    .iter()
+                    .filter_map(|part| part.get("text").and_then(serde_json::Value::as_str))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                if text.is_empty() && !images.is_empty() {
+                    "(screenshot returned; see the image in the following message)".to_string()
+                } else {
+                    text
+                }
+            }
+            Some(other) => other.to_string(),
+            None => String::new(),
+        };
         items.push(serde_json::json!({
             "type": "function_call_output",
             "call_id": call_id,
             "output": output,
         }));
+        if !images.is_empty() {
+            let mut user_content = vec![
+                serde_json::json!({"type": "input_text", "text": "Screenshot from the preceding tool result:"}),
+            ];
+            user_content.extend(images);
+            items.push(serde_json::json!({
+                "role": "user",
+                "content": user_content,
+            }));
+        }
         return;
     }
 
@@ -329,6 +361,46 @@ fn responses_message_content(role: &str, content: &serde_json::Value) -> serde_j
         ),
         other => other.clone(),
     }
+}
+
+/// Build a Responses `input_image` item from a tool-result content part that
+/// carries an image: a typed image block (`image`/`input_image`/`image_url`), or
+/// the neutral screenshot dict (`{base64, media_type, scale_factor, ...}`) the
+/// computer tool returns. Returns `None` for non-image parts (text, etc.).
+fn responses_image_input_item(item: &serde_json::Value) -> Option<serde_json::Value> {
+    let type_tag = item.get("type").and_then(serde_json::Value::as_str);
+    let is_typed_image = matches!(type_tag, Some("image" | "input_image" | "image_url"));
+    let has_base64 = item
+        .get("base64")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|value| !value.is_empty());
+    if !is_typed_image && !has_base64 {
+        return None;
+    }
+    // Resolve a data/URL string from any of the shapes an image part can take.
+    let image_url = item
+        .get("url")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+        .or_else(|| {
+            item.get("image_url").and_then(|value| {
+                value.as_str().map(str::to_string).or_else(|| {
+                    value
+                        .get("url")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_string)
+                })
+            })
+        })
+        .or_else(|| {
+            let base64 = item.get("base64").and_then(serde_json::Value::as_str)?;
+            let media_type = item
+                .get("media_type")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("image/png");
+            Some(format!("data:{media_type};base64,{base64}"))
+        })?;
+    Some(serde_json::json!({"type": "input_image", "image_url": image_url}))
 }
 
 fn responses_content_item(role: &str, item: &serde_json::Value) -> Option<serde_json::Value> {
@@ -392,6 +464,39 @@ fn elapsed_ms(clock: &dyn harn_clock::Clock, started_ms: i64) -> u64 {
 mod tests {
     use super::*;
     use crate::llm::api::{LlmApiMode, LlmRequestPayload, OutputFormat};
+
+    #[test]
+    fn responses_tool_result_screenshot_relocated_to_user_input_image() {
+        // A computer-use tool result carries [text, neutral-screenshot-dict].
+        // The Responses `function_call_output.output` is a string, so the image
+        // must move to a following user message as an `input_image`.
+        let message = serde_json::json!({
+            "role": "tool",
+            "tool_call_id": "call_1",
+            "content": [
+                {"type": "text", "text": "Captured screenshot."},
+                {"base64": "AAAB", "media_type": "image/png", "scale_factor": 2.0},
+            ],
+        });
+        let mut items = Vec::new();
+        append_responses_message_items(&message, &mut items);
+        assert_eq!(
+            items.len(),
+            2,
+            "function_call_output + a user image message"
+        );
+        assert_eq!(items[0]["type"], "function_call_output");
+        assert_eq!(items[0]["output"], "Captured screenshot.");
+        // No image leaked into the string output.
+        assert!(!items[0]["output"].as_str().unwrap().contains("base64"));
+        assert_eq!(items[1]["role"], "user");
+        let content = items[1]["content"].as_array().expect("user content");
+        let img = content
+            .iter()
+            .find(|c| c.get("type").and_then(|t| t.as_str()) == Some("input_image"))
+            .expect("input_image present");
+        assert_eq!(img["image_url"], "data:image/png;base64,AAAB");
+    }
 
     #[test]
     fn responses_body_maps_structured_output_and_controls() {
