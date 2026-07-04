@@ -33,6 +33,7 @@ pub const HARN_SESSION_UPDATE_EXTENSIONS: &[&str] = &[
     "skill_deactivated",
     "skill_narrow",
     "skill_scope_tools",
+    "stance_transition",
     "tool_search_query",
     "tool_search_result",
     "transcript_compacted",

@@ -75,6 +75,7 @@ public enum HarnProtocolConstants {
         "skill_deactivated",
         "skill_narrow",
         "skill_scope_tools",
+        "stance_transition",
         "tool_search_query",
         "tool_search_result",
         "transcript_compacted",
@@ -236,6 +237,7 @@ public enum HarnACPSessionUpdate: String, Codable, Sendable, CaseIterable {
     case skillDeactivated = "skill_deactivated"
     case skillNarrow = "skill_narrow"
     case skillScopeTools = "skill_scope_tools"
+    case stanceTransition = "stance_transition"
     case toolSearchQuery = "tool_search_query"
     case toolSearchResult = "tool_search_result"
     case transcriptCompacted = "transcript_compacted"
@@ -269,6 +271,7 @@ public enum HarnACPSessionUpdate: String, Codable, Sendable, CaseIterable {
         "skill_deactivated",
         "skill_narrow",
         "skill_scope_tools",
+        "stance_transition",
         "tool_search_query",
         "tool_search_result",
         "transcript_compacted",

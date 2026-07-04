@@ -126,6 +126,30 @@
       "update": {
         "_meta": {
           "harn": {
+            "allowedTools": [
+              "look",
+              "search",
+              "request_write_access"
+            ],
+            "consent": "express",
+            "escapeTool": "request_write_access",
+            "justification": "User asked me to make the change.",
+            "phase": "write_access_granted",
+            "reason": "The user explicitly asked for the edit."
+          }
+        },
+        "sessionUpdate": "stance_transition"
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "session-1",
+      "update": {
+        "_meta": {
+          "harn": {
             "mode": "client",
             "name": "tool_search",
             "query": {
