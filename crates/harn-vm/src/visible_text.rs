@@ -356,17 +356,7 @@ fn strip_protocol_residue(text: &str) -> String {
         .to_string()
 }
 
-fn looks_like_bare_internal_verdict_json(source: &str) -> bool {
-    let trimmed = source.trim();
-    if !trimmed.starts_with('{') {
-        return false;
-    }
-
-    let Ok(serde_json::Value::Object(map)) = serde_json::from_str::<serde_json::Value>(trimmed)
-    else {
-        return false;
-    };
-
+fn looks_like_internal_verdict_object(map: &serde_json::Map<String, serde_json::Value>) -> bool {
     let Some(verdict) = map
         .get("verdict")
         .and_then(|value| value.as_str())
@@ -410,6 +400,37 @@ fn looks_like_bare_internal_verdict_json(source: &str) -> bool {
     })
 }
 
+fn looks_like_bare_internal_verdict_json(source: &str) -> bool {
+    let trimmed = source.trim();
+    if !trimmed.starts_with('{') {
+        return false;
+    }
+
+    let Ok(serde_json::Value::Object(map)) = serde_json::from_str::<serde_json::Value>(trimmed)
+    else {
+        return false;
+    };
+
+    looks_like_internal_verdict_object(&map)
+}
+
+fn internal_verdict_json_prefix_len(source: &str) -> Option<usize> {
+    let trimmed = source.trim_start();
+    if !trimmed.starts_with('{') {
+        return None;
+    }
+    let leading_ws = source.len() - trimmed.len();
+    let mut stream = serde_json::Deserializer::from_str(trimmed).into_iter::<serde_json::Value>();
+    let parsed = stream.next()?.ok()?;
+    let serde_json::Value::Object(map) = parsed else {
+        return None;
+    };
+    if !looks_like_internal_verdict_object(&map) {
+        return None;
+    }
+    Some(leading_ws + stream.byte_offset())
+}
+
 fn strip_bare_internal_json(text: &str) -> String {
     // A finalized turn whose entire visible body is an internal control object
     // — e.g. the completion judge's `{"verdict":...,"reasoning":...}` — must
@@ -421,6 +442,29 @@ fn strip_bare_internal_json(text: &str) -> String {
     // visible-text sanitizer must not blank those whole messages.
     if looks_like_bare_internal_verdict_json(text) {
         return String::new();
+    }
+    text.to_string()
+}
+
+fn strip_leading_done_marker_control(text: &str) -> String {
+    let trimmed = text.trim_start();
+    let leading_ws = text.len() - trimmed.len();
+    for marker in ["</done>", "<done>", "/done>", "done>"] {
+        if let Some(after_marker) = trimmed.strip_prefix(marker) {
+            let after_marker = after_marker.trim_start();
+            let visible_start = internal_verdict_json_prefix_len(after_marker).unwrap_or(0);
+            return text[..leading_ws].to_string() + after_marker[visible_start..].trim_start();
+        }
+    }
+    text.to_string()
+}
+
+fn strip_trailing_internal_json(text: &str) -> String {
+    let trimmed = text.trim_end();
+    for (idx, ch) in trimmed.char_indices().rev() {
+        if ch == '{' && looks_like_bare_internal_verdict_json(&trimmed[idx..]) {
+            return trimmed[..idx].trim_end().to_string();
+        }
     }
     text.to_string()
 }
@@ -477,6 +521,8 @@ pub fn sanitize_visible_assistant_text(text: &str, partial: bool) -> String {
     // strippers below never run. Bare-JSON check runs on the trimmed body so a
     // verdict blob surrounded by whitespace is still recognized.
     sanitized = strip_protocol_residue(&sanitized);
+    sanitized = strip_leading_done_marker_control(&sanitized);
+    sanitized = strip_trailing_internal_json(&sanitized);
     sanitized = strip_bare_internal_json(sanitized.trim());
     if partial {
         sanitized = strip_unclosed_internal_blocks(&sanitized);
@@ -621,6 +667,35 @@ mod tests {
             sanitize_visible_assistant_text(visible_verdict_rationale, false),
             visible_verdict_rationale
         );
+    }
+
+    #[test]
+    fn sanitize_drops_appended_completion_judge_verdict_json() {
+        let raw = r#"What can I help with today?{"verdict":"done","reasoning":"greeting","next_step":""}"#;
+        assert_eq!(
+            sanitize_visible_assistant_text(raw, false),
+            "What can I help with today?"
+        );
+        let visible_json = r#"Visible answer {"status":"ok","message":"hello"}"#;
+        assert_eq!(
+            sanitize_visible_assistant_text(visible_json, false),
+            visible_json
+        );
+    }
+
+    #[test]
+    fn sanitize_drops_done_marker_prefixed_internal_control() {
+        let raw = r#"/done>{"verdict":"continue","reasoning":"needs final"}Visible answer."#;
+        assert_eq!(
+            sanitize_visible_assistant_text(raw, false),
+            "Visible answer."
+        );
+        assert_eq!(
+            sanitize_visible_assistant_text(r#"done>{"verdict":"done","reasoning":"done"}"#, false),
+            ""
+        );
+        let inline = "The literal /done> marker can be mentioned inline.";
+        assert_eq!(sanitize_visible_assistant_text(inline, false), inline);
     }
 
     #[test]

@@ -52,6 +52,7 @@ pure helpers, run by `make test-harn-scripts`.
   crates, to compute the nextest filter. Running it via `cargo run --bin harn`
   would force a multi-minute `harn` build on every PR — including a cold
   Windows build — purely to decide what to test, defeating its entire purpose.
+
 ## Out of scope — stays in its current language
 
 External-toolchain or foreign-artifact reasons; porting would defeat the
