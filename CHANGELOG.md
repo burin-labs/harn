@@ -9,6 +9,90 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.9.8
+
+### Added
+
+- Add `skills_activation_evidence(registry, options?)` and a Harn-owned
+  activation-evidence payload (schema v1) so hosts can read which skill cards
+  were shown or omitted — and why, plus source, budget cost, and body
+  lifecycle (`eligible`/`shown`/`omitted`/`loaded`/`used`) — without parsing
+  the catalog prompt text. The `skill.loaded` event now carries matching
+  `lifecycle`, `source`, `disable_model_invocation`, and `token_estimate`
+  fields. Documented in `docs/src/skill-activation-evidence.md`, with the
+  migration path from Burin's `skill_activation_report`.
+- `harn provider cache-probe --usage-fixture <path>` classifies a saved
+  repeat-run prompt-cache usage fixture into one cache verdict. It resolves
+  prompt-cache support and cache-control requirements (breakpoint style,
+  minimum useful prefix, TTL notes, usage-field mapping) from the single
+  provider capability path, normalizes each run's usage keeping fresh-input /
+  cache-read / cache-write / output / unknown-missing separate, and buckets
+  every run (`cache_effective`, `cache_supported_miss`, `unsupported_zero`,
+  `support_unknown_zero`, `no_prompt_tokens`, `provider_field_inconsistent`).
+  A missing provider usage field is recorded as an observation, never
+  re-classified as "unsupported". The `provider_capabilities` builtin now also
+  projects a `cache_control` profile for Burin dogfood and Harn Cloud receipts.
+- Added `harn models lora preflight` for CPU-only tool-calling corpus readiness checks before LoRA training.
+
+### Changed
+
+- **Typechecker and parser cutovers tighten callable, generic-bound, and
+  control-flow behavior (#3922).** Harn now supports annotated
+  `fn(...) -> T { ... }` closures, parses full type expressions in generic
+  interface `where` bounds, allows callbacks to ignore surplus user-function
+  arguments while keeping minimum arity enforced, widens branch narrowings after
+  reassignment, and rejects `return`/`yield` from `defer` blocks.
+- Relocated the `agents-protocol-receipts/` and `agents-protocol-replay/`
+  artifact directories under `spec/agents-protocol/{receipts,replay}/`, and
+  folded the hidden `.experiments/` manual-eval scripts into
+  `experiments/manual-evals/`. The public artifact URLs now live under
+  `spec/agents-protocol/`.
+- Split the Harn LLM configuration internals into focused modules without
+  changing provider configuration behavior.
+- Split the Harn LLM capabilities internals into focused modules without
+  changing provider capability behavior.
+- Run the generated-artifact registry guard through its Harn implementation.
+- `harn models lora plan` now includes train/serve precision invariants in
+  the plan and export metadata hints, and uses Gemma 4 LoRA target modules
+  that cover both attention and MLP projections.
+- **LoRA planning.** `harn models lora plan` now emits method-specific adapter
+  target modules, including PEFT `all-linear` targets for QLoRA plans.
+- Port the burin-mini qmode inspector from Python to Harn and run the
+  experiment inspector through `harn run`.
+
+### Removed
+
+- **Removed the never-wired `[security]` config-file section.** Prompt-injection
+  posture is a runtime directive, not a persisted config field: the only code
+  that builds a `SecurityPolicy` reads the `security_policy(...)` pipeline dict
+  (via `std/security`'s `spotlight()`/`strict()`/`local_ml()` helpers), and
+  nothing ever read `HarnConfig.security`. A persisted `[security]` section
+  therefore silently did nothing — a documented-but-inert surface that read as a
+  security fail-open (write `mode = "strict"` in config, still get `spotlight`).
+  The field, its JSON-schema block, the published `harn-config.schema.json`
+  entry, and the misleading config docs are gone; posture is now configured only
+  through `security_policy(...)`. Byte-identical at runtime (the field was never
+  consumed). `HarnConfig` uses `deny_unknown_fields`, so a config that still
+  carries a `[security]` section now fails to load instead of ignoring it.
+
+### Fixed
+
+- **CLI LLM mock replay now survives provider worker threads.** `--llm-mock`
+  replay and recording scopes are carried on each request, so off-thread
+  provider dispatch cannot silently fall through to a real provider.
+- Fixed OpenAI `gpt-5.x` dispatch: reasoning models now send
+  `max_completion_tokens` instead of the rejected legacy `max_tokens`, so
+  `gpt-5.5`/`gpt-5.4`/`gpt-5.2`/`gpt-5.1`/`gpt-5` serve through the chat
+  completions path again.
+- Fixed OpenAI `*-codex` models (responses-endpoint only): they now
+  auto-route through the Responses API instead of returning a silent HTTP 404
+  on `/v1/chat/completions`.
+- Fixed the Z.AI base URL (`https://api.z.ai/api/paas/v4`; the previously
+  catalogued `.../v1` returned 404) and refreshed the GLM catalog to the live
+  lineup (`glm-4.5`, `glm-4.5-air`, `glm-4.6`, `glm-4.7`, `glm-5-turbo`).
+- Keep non-user-visible LLM progress deltas and internal completion-control
+  verdicts out of visible assistant transcript text.
+
 ## v0.9.7
 
 ### Added
