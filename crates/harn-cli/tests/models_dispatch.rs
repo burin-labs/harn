@@ -576,6 +576,7 @@ fn models_lora_plan_human_text_includes_recipe() {
         "training: qlora + peft_lora",
         "trainer: trl_sft_trainer",
         "LoRA hparams: rank=16 alpha=32 dropout=0.05",
+        "target modules: all-linear",
         "assistant mask: require_chat_template_generation_masks",
         "parser owner: harn_text_tool_parser",
         "split policy: train_tune_holdout_disjoint_no_eval_holdout_training",
@@ -648,6 +649,18 @@ fn models_lora_plan_json_shape_is_stable() {
     assert_eq!(report["training"]["alpha"], 32);
     assert_eq!(report["training"]["dropout"], 0.05);
     assert_eq!(report["training"]["quantization"], "base_model_precision");
+    let target_modules = report["training"]["target_modules"]
+        .as_array()
+        .expect("target modules");
+    assert_eq!(
+        target_modules,
+        &[
+            serde_json::Value::from("q_proj"),
+            serde_json::Value::from("k_proj"),
+            serde_json::Value::from("v_proj"),
+            serde_json::Value::from("o_proj"),
+        ]
+    );
     assert_eq!(
         report["training"]["contract"]["assistant_mask_policy"],
         "require_chat_template_generation_masks"

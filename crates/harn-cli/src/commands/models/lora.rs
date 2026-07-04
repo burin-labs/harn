@@ -417,6 +417,7 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
     let alpha = normalize_lora_alpha(args.alpha, rank)?;
     let dropout = normalize_lora_dropout(args.dropout)?;
     let quantization = quantization_for_method(&method).to_string();
+    let target_modules = target_modules_for_method(&method);
     let requested_tool_format = normalize_plan_tool_format(&args.tool_format)?;
     let requested_corpus_strategy = normalize_corpus_strategy(&args.corpus_strategy)?;
     let resolved = harn_vm::llm_config::resolve_model_info(&args.base_model);
@@ -610,12 +611,7 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
             quantization,
             loss_scope: "assistant_tool_calls".to_string(),
             packing: "off_by_default_for_tool_boundaries".to_string(),
-            target_modules: vec![
-                "q_proj".to_string(),
-                "k_proj".to_string(),
-                "v_proj".to_string(),
-                "o_proj".to_string(),
-            ],
+            target_modules,
             contract: lora_training_contract(dataset_format, &decision.effective),
             trainer_contract: trainer_contract_for_dataset(dataset_format, &decision.effective),
             notes: training_notes(&decision.effective),
@@ -824,6 +820,18 @@ fn normalize_lora_dropout(dropout: f64) -> Result<f64, String> {
         return Err("--dropout must be a finite value in [0.0, 1.0)".to_string());
     }
     Ok(dropout)
+}
+
+fn target_modules_for_method(method: &str) -> Vec<String> {
+    match method {
+        "qlora" => vec!["all-linear".to_string()],
+        _ => vec![
+            "q_proj".to_string(),
+            "k_proj".to_string(),
+            "v_proj".to_string(),
+            "o_proj".to_string(),
+        ],
+    }
 }
 
 fn normalize_plan_tool_format(raw: &str) -> Result<String, String> {

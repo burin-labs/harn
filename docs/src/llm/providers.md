@@ -178,7 +178,10 @@ train against: native Gemma 4 or FunctionGemma tool templates stay distinct from
 Harn text/json `<tool_call>` adapters, and the trainer contract calls out
 assistant-only loss masks plus `messages`/`tools` columns, so train and serving
 do not silently cross tool-call contracts. The JSON report exposes the
-machine-readable training contract under `training.contract`. The
+machine-readable training contract under `training.contract`, and
+`training.target_modules` records the method-specific adapter target: QLoRA uses
+PEFT's `all-linear` shorthand, while full LoRA keeps explicit attention
+projection modules. The
 `harn models lora export` command carries the same contract into dataset rows
 and manifests with a stable contract id derived from the base model, provider,
 effective tool format, dataset format, and chat template, plus
