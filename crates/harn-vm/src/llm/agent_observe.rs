@@ -313,23 +313,25 @@ fn record_governor_call_outcome(
     // the call — not after this outcome mutates it.
     let (outcome, throttle) = match llm_result {
         Ok(result) => {
-            // Empty-under-load: billed output but committed nothing, WHILE this
-            // provider is already throttled → soft-throttle, not capability.
-            let committed_nothing = result.text.is_empty()
-                && result.tool_calls.is_empty()
-                && result
-                    .thinking
-                    .as_deref()
-                    .map(str::is_empty)
-                    .unwrap_or(true);
-            let empty_billed = committed_nothing && result.output_tokens > 0;
-            if empty_billed && rate_governor::provider_already_throttled(provider, org_key) {
+            // Empty-under-load: committed nothing WHILE this provider is
+            // already throttled → soft-throttle, not capability. A zero-token
+            // stall under an OPEN/HALF-OPEN circuit is just as much load
+            // evidence as a billed empty response; lone empties on healthy
+            // providers still classify as served/no-signal here and are owned
+            // by the bounded empty-completion retry path.
+            let committed_nothing = llm_result_committed_nothing(result);
+            if let Some(signal) = ThrottleSignal::classify(
+                None,
+                "",
+                committed_nothing,
+                rate_governor::provider_already_throttled(provider, org_key),
+            ) {
                 (
                     GovernorOutcome::Throttled {
-                        signal: ThrottleSignal::EmptyUnderLoad,
+                        signal,
                         retry_after_ms: None,
                     },
-                    Some((ThrottleSignal::EmptyUnderLoad, None)),
+                    Some((signal, None)),
                 )
             } else {
                 (GovernorOutcome::Served, None)
@@ -670,6 +672,16 @@ fn is_errored_actionless_completion(result: &super::api::LlmResult) -> bool {
     result.tool_calls.is_empty() && !has_tool_search_block
 }
 
+fn llm_result_committed_nothing(result: &super::api::LlmResult) -> bool {
+    result.text.is_empty()
+        && result.tool_calls.is_empty()
+        && result
+            .thinking
+            .as_deref()
+            .map(str::is_empty)
+            .unwrap_or(true)
+}
+
 /// Unproductive `Ok` generations the agent loop should retry rather than
 /// advance on: the zero-token empty completion (provider stall) and the
 /// errored-but-actionless completion (`stop_reason == "error"` with no
@@ -677,6 +689,91 @@ fn is_errored_actionless_completion(result: &super::api::LlmResult) -> bool {
 /// advancing burns an iteration on a broken turn.
 fn is_retryable_unproductive_completion(result: &super::api::LlmResult) -> bool {
     is_zero_token_empty_completion(result) || is_errored_actionless_completion(result)
+}
+
+fn terminal_unproductive_completion_failover_error(
+    opts: &super::api::LlmCallOptions,
+    result: &super::api::LlmResult,
+    provider_under_throttle: bool,
+) -> Option<VmError> {
+    if !provider_under_throttle || !is_retryable_unproductive_completion(result) {
+        return None;
+    }
+
+    let detail = if is_zero_token_empty_completion(result) {
+        format!(
+            "returned completion_tokens={} and delivered no content, thinking, or tool calls",
+            result.output_tokens
+        )
+    } else {
+        format!(
+            "ended with stop_reason={} after completion_tokens={} and delivered no dispatchable tool call",
+            result.stop_reason.as_deref().unwrap_or("unknown"),
+            result.output_tokens
+        )
+    };
+
+    Some(VmError::CategorizedError {
+        category: crate::value::ErrorCategory::CircuitOpen,
+        message: format!(
+            "provider {} model {} exhausted empty-completion retry budget while rate governor circuit_open/under throttle: {detail}",
+            opts.provider, opts.model
+        ),
+    })
+}
+
+struct ProviderCallErrorObservation<'a> {
+    iteration: usize,
+    call_id: &'a str,
+    attempt: usize,
+    status: &'a str,
+    opts: &'a super::api::LlmCallOptions,
+    category: &'a crate::value::ErrorCategory,
+    classified: &'a super::api::LlmErrorInfo,
+    message: &'a str,
+    retryable: bool,
+    failover_eligible: bool,
+}
+
+fn append_provider_call_error_observability(observation: ProviderCallErrorObservation<'_>) {
+    let ProviderCallErrorObservation {
+        iteration,
+        call_id,
+        attempt,
+        status,
+        opts,
+        category,
+        classified,
+        message,
+        retryable,
+        failover_eligible,
+    } = observation;
+    let mut fields = serde_json::Map::from_iter([
+        ("iteration".to_string(), serde_json::json!(iteration)),
+        ("call_id".to_string(), serde_json::json!(call_id)),
+        ("attempt".to_string(), serde_json::json!(attempt)),
+        ("status".to_string(), serde_json::json!(status)),
+        ("provider".to_string(), serde_json::json!(opts.provider)),
+        ("model".to_string(), serde_json::json!(opts.model)),
+        ("category".to_string(), serde_json::json!(category.as_str())),
+        (
+            "kind".to_string(),
+            serde_json::json!(classified.kind.as_str()),
+        ),
+        (
+            "reason".to_string(),
+            serde_json::json!(classified.reason.as_str()),
+        ),
+        ("message".to_string(), serde_json::json!(message)),
+        ("retryable".to_string(), serde_json::json!(retryable)),
+    ]);
+    if failover_eligible {
+        fields.insert(
+            "failover_eligible".to_string(),
+            serde_json::json!(failover_eligible),
+        );
+    }
+    append_llm_observability_entry("provider_call_error", fields);
 }
 
 /// Extract retry-after delay from an error message if present.
@@ -1616,6 +1713,11 @@ pub(crate) async fn observed_llm_call(
         let governor_est_tokens = governor_estimated_tokens(opts);
         let governor_reserved =
             await_governor_admission(&opts.provider, &governor_org_key, governor_est_tokens).await;
+        let provider_was_throttled_during_call =
+            crate::llm::rate_governor::provider_already_throttled(
+                &opts.provider,
+                &governor_org_key,
+            );
 
         let call_id = next_call_id();
         let prompt_chars: usize = opts
@@ -1731,9 +1833,12 @@ pub(crate) async fn observed_llm_call(
                 // provider hiccups, not answers: retry within the
                 // empty-completion budget rather than advancing the loop on a
                 // broken turn (which would only reply with a generic
-                // no-progress nag). Once the budget is exhausted, fall through
-                // and return the result unchanged so callers see today's shape
-                // rather than a novel error.
+                // no-progress nag). Once the budget is exhausted, a healthy
+                // provider still falls through and returns the result unchanged
+                // so callers see today's shape. If the rate governor says this
+                // route was already throttled/open, surface a failover-eligible
+                // `circuit_open` error instead; routing can then move to the next
+                // provider rather than retry-storming the dead lane.
                 if is_retryable_unproductive_completion(&result)
                     && attempt < empty_completion_retry_budget(retry_config, &opts.provider)
                 {
@@ -1805,6 +1910,85 @@ pub(crate) async fn observed_llm_call(
                         crate::clock_mock::sleep(std::time::Duration::from_millis(backoff)).await;
                     }
                     continue;
+                }
+                let provider_under_throttle = provider_was_throttled_during_call
+                    || crate::llm::rate_governor::provider_already_throttled(
+                        &opts.provider,
+                        &governor_org_key,
+                    );
+                if let Some(error) = terminal_unproductive_completion_failover_error(
+                    opts,
+                    &result,
+                    provider_under_throttle,
+                ) {
+                    let category = crate::value::error_to_category(&error);
+                    let message = error.to_string();
+                    let classified = super::api::classify_llm_error(category.clone(), &message);
+                    let status = "retries_exhausted";
+                    annotate_current_span(&[
+                        ("status", serde_json::json!(status)),
+                        ("error", serde_json::json!(message.as_str())),
+                        ("retryable", serde_json::json!(false)),
+                        ("failover_eligible", serde_json::json!(true)),
+                        ("attempt", serde_json::json!(attempt)),
+                    ]);
+                    dump_llm_response(
+                        iteration.unwrap_or(0),
+                        &call_id,
+                        &result,
+                        duration_ms,
+                        opts.applied_structural_experiment.as_ref(),
+                        opts.tools.as_ref(),
+                    );
+                    append_provider_call_error_observability(ProviderCallErrorObservation {
+                        iteration: iteration.unwrap_or(0),
+                        call_id: &call_id,
+                        attempt,
+                        status,
+                        opts,
+                        category: &category,
+                        classified: &classified,
+                        message: &message,
+                        retryable: false,
+                        failover_eligible: true,
+                    });
+                    dump_resolved_dispatch(
+                        iteration.unwrap_or(0),
+                        &call_id,
+                        opts,
+                        &effective_tool_format,
+                        &super::resolved_dispatch::DispatchOutcome::from_error_message(&message),
+                    );
+                    if let Some(b) = bridge {
+                        b.send_call_end(
+                            &call_id,
+                            "llm",
+                            "llm_call",
+                            duration_ms,
+                            status,
+                            serde_json::json!({
+                                "error": message,
+                                "retryable": false,
+                                "failover_eligible": true,
+                                "attempt": attempt,
+                                "user_visible": user_visible,
+                            }),
+                        );
+                    }
+                    if let Some(metrics) = crate::active_metrics_registry() {
+                        metrics.record_llm_call(
+                            &result.provider,
+                            &result.model,
+                            status,
+                            super::cost::calculate_cost_for_provider(
+                                &result.provider,
+                                &result.model,
+                                result.input_tokens,
+                                result.output_tokens,
+                            ),
+                        );
+                    }
+                    return Err(error);
                 }
                 let usage = crate::tracing::LlmCallUsage {
                     model: result.model.clone(),
@@ -1988,35 +2172,22 @@ pub(crate) async fn observed_llm_call(
                 };
                 annotate_current_span(&[
                     ("status", serde_json::json!(status)),
-                    ("error", serde_json::json!(message.clone())),
+                    ("error", serde_json::json!(message.as_str())),
                     ("retryable", serde_json::json!(retryable)),
                     ("attempt", serde_json::json!(attempt)),
                 ]);
-                append_llm_observability_entry(
-                    "provider_call_error",
-                    serde_json::Map::from_iter([
-                        (
-                            "iteration".to_string(),
-                            serde_json::json!(iteration.unwrap_or(0)),
-                        ),
-                        ("call_id".to_string(), serde_json::json!(call_id.clone())),
-                        ("attempt".to_string(), serde_json::json!(attempt)),
-                        ("status".to_string(), serde_json::json!(status)),
-                        ("provider".to_string(), serde_json::json!(opts.provider)),
-                        ("model".to_string(), serde_json::json!(opts.model)),
-                        ("category".to_string(), serde_json::json!(category.as_str())),
-                        (
-                            "kind".to_string(),
-                            serde_json::json!(classified.kind.as_str()),
-                        ),
-                        (
-                            "reason".to_string(),
-                            serde_json::json!(classified.reason.as_str()),
-                        ),
-                        ("message".to_string(), serde_json::json!(message.clone())),
-                        ("retryable".to_string(), serde_json::json!(retryable)),
-                    ]),
-                );
+                append_provider_call_error_observability(ProviderCallErrorObservation {
+                    iteration: iteration.unwrap_or(0),
+                    call_id: &call_id,
+                    attempt,
+                    status,
+                    opts,
+                    category: &category,
+                    classified: &classified,
+                    message: &message,
+                    retryable,
+                    failover_eligible: false,
+                });
                 if let Some(b) = bridge {
                     b.send_call_end(
                         &call_id,
@@ -3688,6 +3859,63 @@ mod empty_completion_retry_tests {
             logprobs: Vec::new(),
             telemetry: crate::llm::api::ProviderTelemetry::default(),
         }
+    }
+
+    #[test]
+    fn terminal_empty_completion_failover_requires_provider_throttle() {
+        let opts = fake_opts();
+        let result = empty_result();
+
+        assert!(
+            terminal_unproductive_completion_failover_error(&opts, &result, false).is_none(),
+            "healthy-provider exhausted empties keep the existing Ok-empty behavior"
+        );
+
+        let err = terminal_unproductive_completion_failover_error(&opts, &result, true)
+            .expect("throttled-provider exhausted empty should become failover-eligible");
+        match &err {
+            VmError::CategorizedError { category, message } => {
+                assert_eq!(*category, crate::value::ErrorCategory::CircuitOpen);
+                assert!(
+                    message.contains("completion_tokens=0"),
+                    "message keeps the empty-completion token marker: {message}"
+                );
+                assert!(
+                    message.contains("delivered no content"),
+                    "message keeps the resolved-dispatch empty marker: {message}"
+                );
+                assert!(
+                    message.contains("circuit_open"),
+                    "message names the provider-health circuit: {message}"
+                );
+            }
+            other => panic!("expected categorized circuit-open error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn terminal_errored_actionless_failover_requires_provider_throttle() {
+        let opts = fake_opts();
+        let mut result = empty_result();
+        result.stop_reason = Some("error".to_string());
+        result.text = "I need to edit tests/foo_test.cpp".to_string();
+        result.output_tokens = 17;
+
+        assert!(
+            terminal_unproductive_completion_failover_error(&opts, &result, false).is_none(),
+            "healthy-provider errored actionless turns keep the existing bounded path"
+        );
+
+        let message = terminal_unproductive_completion_failover_error(&opts, &result, true)
+            .expect("throttled-provider actionless error should fail over")
+            .to_string();
+        assert!(message.contains("circuit_open"));
+        assert!(message.contains("completion_tokens=17"));
+        assert!(message.contains("no dispatchable tool call"));
+        assert!(
+            !message.contains("delivered no content, thinking"),
+            "non-empty text should not be mislabeled as a zero-content completion"
+        );
     }
 
     #[test]

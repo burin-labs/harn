@@ -963,8 +963,9 @@ fn matches_failover(rules: &FailoverRules, error: &VmError) -> (bool, RoutingErr
         return (true, snapshot);
     }
 
-    // Sensible defaults: 429 / 5xx and transient categories are always
-    // failover-eligible when the script didn't write explicit rules.
+    // Sensible defaults: 429 / 5xx, transient categories, and provider
+    // health-circuit errors are always failover-eligible when the script didn't
+    // write explicit rules.
     let defaults_active = rules.on_status.is_empty()
         && rules.on_error_kinds.is_empty()
         && rules.on_timeout_ms.is_none();
@@ -978,6 +979,7 @@ fn matches_failover(rules: &FailoverRules, error: &VmError) -> (bool, RoutingErr
                 | ErrorCategory::Overloaded
                 | ErrorCategory::TransientNetwork
                 | ErrorCategory::Timeout
+                | ErrorCategory::CircuitOpen
                 | ErrorCategory::ServerError
         );
         if by_status || by_category {
@@ -2120,6 +2122,18 @@ mod tests {
         let (eligible, snap) = matches_failover(&rules, &err);
         assert!(eligible);
         assert_eq!(snap.status, Some(429));
+    }
+
+    #[test]
+    fn matches_failover_default_circuit_open() {
+        let rules = FailoverRules::default();
+        let err = VmError::CategorizedError {
+            message: "rate governor circuit_open after empty completion budget".to_string(),
+            category: ErrorCategory::CircuitOpen,
+        };
+        let (eligible, snap) = matches_failover(&rules, &err);
+        assert!(eligible);
+        assert_eq!(snap.category, "circuit_open");
     }
 
     #[test]
