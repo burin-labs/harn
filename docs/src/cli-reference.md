@@ -1444,6 +1444,10 @@ assistant-only loss masks, `messages`/`tools` columns, packing boundaries, and
 method-specific target modules. QLoRA plans use PEFT's `all-linear` target
 module shorthand; full LoRA plans keep explicit attention projection modules in
 `training.target_modules`.
+The `corpus_refresh.model_aware_selection` block records base-model failure
+buckets, parser/schema difficulty signals, sampling policy, refinement loops,
+and stop conditions so corpus refresh jobs prioritize failures the target model
+almost solves instead of adding near-duplicate syntax examples.
 The JSON report exposes the same machine-readable contract under
 `training.contract` for automation that prepares TRL/PEFT trainer configs.
 The launch block includes the matching `harn models lora export` command so the

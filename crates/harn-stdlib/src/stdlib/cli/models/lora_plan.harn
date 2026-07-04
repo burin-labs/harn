@@ -150,6 +150,15 @@ fn __render_human(harness: Harness, report: dict) {
   print_list(harness, "provenance manifest", safe_list(corpus_refresh["provenance_manifest_fields"]))
   print_list(harness, "hard negatives", safe_list(corpus_refresh["hard_negative_slices"]))
   print_list(harness, "corpus gates", safe_list(corpus_refresh["acceptance_gates"]))
+  let model_aware = safe_dict(corpus_refresh["model_aware_selection"])
+  let objective = safe_string(model_aware["objective"], "")
+  if objective != "" {
+    harness.stdio.println("  model-aware selection: " + objective)
+  }
+  print_list(harness, "difficulty signals", safe_list(model_aware["difficulty_signals"]))
+  print_list(harness, "sampling policy", safe_list(model_aware["sampling_policy"]))
+  print_list(harness, "refinement loop", safe_list(model_aware["refinement_loop"]))
+  print_list(harness, "selection stop conditions", safe_list(model_aware["stop_conditions"]))
   print_list(harness, "trainer contract", safe_list(training["trainer_contract"]))
   print_list(harness, "precision gates", safe_list(precision["promotion_gates"]))
   print_list(harness, "training notes", safe_list(training["notes"]))
