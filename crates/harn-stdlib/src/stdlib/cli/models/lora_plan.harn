@@ -167,6 +167,7 @@ fn __render_human(harness: Harness, report: dict) {
   harness.stdio.println("  request model: " + safe_string(serving["request_model"], ""))
   print_list(harness, "serving notes", safe_list(serving["runtime_notes"]))
   print_list(harness, "promotion gates", safe_list(serving["promotion_gates"]))
+  render_command(harness, "preflight corpus", safe_list(launch["preflight_command"]))
   render_command(harness, "export dataset", safe_list(launch["export_command"]))
   render_command(harness, "eval", safe_list(evaluation["eval_command"]))
   render_command(harness, "inspect adapter", safe_list(launch["inspect_command"]))

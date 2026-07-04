@@ -531,6 +531,23 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
     let export_corpus_arg = corpus
         .clone()
         .unwrap_or_else(|| "CORPUS_JSONL_OR_DIR".to_string());
+    let preflight_command = vec![
+        "harn".to_string(),
+        "models".to_string(),
+        "lora".to_string(),
+        "preflight".to_string(),
+        "--base".to_string(),
+        args.base_model.clone(),
+        "--provider".to_string(),
+        provider.clone(),
+        "--tool-format".to_string(),
+        decision.effective.clone(),
+        "--corpus".to_string(),
+        export_corpus_arg.clone(),
+        "--source-tool-format".to_string(),
+        source_tool_format_required_for_target(&decision.effective).to_string(),
+        "--check".to_string(),
+    ];
     let mut export_command = vec![
         "harn".to_string(),
         "models".to_string(),
@@ -635,6 +652,7 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
         evaluation: lora_evaluation_recipe(&decision.effective, eval_command),
         serving,
         launch: PlanLaunchHints {
+            preflight_command,
             export_command,
             inspect_command,
             local_launch_command: launch_command,
@@ -991,6 +1009,14 @@ fn validation_steps_for_dataset(dataset_format: &str) -> Vec<String> {
             "reject prose around tool calls unless the target parser explicitly accepts it"
                 .to_string(),
         ],
+    }
+}
+
+pub(super) fn source_tool_format_required_for_target(tool_format: &str) -> &'static str {
+    match tool_format {
+        "text" => "text",
+        "json" | "native" => "json",
+        _ => "auto",
     }
 }
 
@@ -1708,6 +1734,7 @@ struct ServingRecipe {
 
 #[derive(Debug, Serialize)]
 struct PlanLaunchHints {
+    preflight_command: Vec<String>,
     export_command: Vec<String>,
     inspect_command: Vec<String>,
     local_launch_command: Vec<String>,

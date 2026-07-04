@@ -148,6 +148,9 @@ pub(crate) struct ModelsLoraPreflightArgs {
     /// Provider/runtime to check against instead of inferring from the base model.
     #[arg(long)]
     pub provider: Option<String>,
+    /// Tool-call format the exported dataset and adapter route will target (`auto`, `native`, `text`, or `json`).
+    #[arg(long = "tool-format", default_value = "auto")]
+    pub tool_format: String,
     /// Corpus JSONL file, or a directory containing a conventional corpus JSONL.
     #[arg(long, value_name = "PATH")]
     pub corpus: String,

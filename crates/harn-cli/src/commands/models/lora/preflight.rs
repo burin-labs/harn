@@ -12,7 +12,10 @@ use super::export::{
     available_tool_names, parse_json_tool_body, record_id, record_messages, resolve_corpus_path,
     source_tool_format, ExportRegexes,
 };
-use super::{render_embedded_lora_report, BaseModelReport, ToolCallingReport};
+use super::{
+    normalize_plan_tool_format, render_embedded_lora_report,
+    source_tool_format_required_for_target, BaseModelReport, ToolCallingReport,
+};
 
 const LORA_PREFLIGHT_PAYLOAD_ENV: &str = "HARN_MODELS_LORA_PREFLIGHT_PAYLOAD_JSON";
 const LORA_PREFLIGHT_PAYLOAD_PRETTY_ENV: &str = "HARN_MODELS_LORA_PREFLIGHT_PAYLOAD_PRETTY";
@@ -45,6 +48,7 @@ pub(super) async fn preflight(args: &ModelsLoraPreflightArgs) -> i32 {
 
 fn preflight_report(args: &ModelsLoraPreflightArgs) -> Result<LoraPreflightReport, String> {
     let expected_source_format = normalize_source_tool_format(&args.source_tool_format)?;
+    let requested_tool_format = normalize_plan_tool_format(&args.tool_format)?;
     validate_ratio("--min-tool-call-share", args.min_tool_call_share)?;
     if let Some(value) = args.min_fit_ratio {
         validate_ratio("--min-fit-ratio", value)?;
@@ -66,7 +70,22 @@ fn preflight_report(args: &ModelsLoraPreflightArgs) -> Result<LoraPreflightRepor
         .unwrap_or_else(|| resolved.provider.clone());
     let catalog = harn_vm::llm_config::model_catalog_entry(&resolved.id);
     let capabilities = harn_vm::llm::capabilities::lookup(&provider, &resolved.id);
-    let target_tool_format = harn_vm::llm_config::default_tool_format(&resolved.id, &provider);
+    let catalog_default_tool_format =
+        harn_vm::llm_config::default_tool_format(&resolved.id, &provider);
+    let decision = if requested_tool_format == "auto" {
+        harn_vm::llm::capabilities::ToolFormatDecision {
+            effective: catalog_default_tool_format.clone(),
+            correction: None,
+        }
+    } else {
+        harn_vm::llm::capabilities::validate_tool_format(
+            &provider,
+            &resolved.id,
+            &requested_tool_format,
+        )
+    };
+    let target_tool_format = decision.effective.clone();
+    let required_source_format = source_tool_format_required_for_target(&target_tool_format);
     let config = args
         .config
         .as_deref()
@@ -143,12 +162,15 @@ fn preflight_report(args: &ModelsLoraPreflightArgs) -> Result<LoraPreflightRepor
     let breakdown = preflight_breakdown(&examples);
     let problem_examples = problem_examples(&examples);
     let tool_call_share = matching_tool_call_share(&stats.tool_calls, &expected_source_format);
+    let export_ready_tool_call_share =
+        matching_tool_call_share(&stats.tool_calls, required_source_format);
     let thresholds = PreflightThresholds {
         max_seq_length,
         min_fit_ratio,
         hard_token_limit: args.hard_token_limit,
         min_records: args.min_records,
         expected_source_tool_format: expected_source_format.clone(),
+        required_export_source_tool_format: required_source_format.to_string(),
         min_tool_call_share: args.min_tool_call_share,
         done_marker: args.done_marker.clone(),
     };
@@ -170,6 +192,15 @@ fn preflight_report(args: &ModelsLoraPreflightArgs) -> Result<LoraPreflightRepor
         errors.push(format!(
             "{expected_source_format} tool-call share {:.1}% below required floor {:.1}%",
             tool_call_share * 100.0,
+            args.min_tool_call_share * 100.0
+        ));
+    }
+    if required_source_format != expected_source_format
+        && export_ready_tool_call_share < args.min_tool_call_share
+    {
+        errors.push(format!(
+            "{target_tool_format} target requires {required_source_format} source tool calls, but export-ready share {:.1}% is below required floor {:.1}%",
+            export_ready_tool_call_share * 100.0,
             args.min_tool_call_share * 100.0
         ));
     }
@@ -216,6 +247,9 @@ fn preflight_report(args: &ModelsLoraPreflightArgs) -> Result<LoraPreflightRepor
     if args.check {
         warnings.push("check mode: readiness failures exit non-zero".to_string());
     }
+    if let Some(correction) = &decision.correction {
+        warnings.push(correction.clone());
+    }
 
     Ok(LoraPreflightReport {
         ok: errors.is_empty(),
@@ -224,7 +258,7 @@ fn preflight_report(args: &ModelsLoraPreflightArgs) -> Result<LoraPreflightRepor
             id: resolved.id.clone(),
             provider,
             resolved_alias: resolved.alias,
-            tool_format: target_tool_format.clone(),
+            tool_format: catalog_default_tool_format,
             tier: resolved.tier,
             family: resolved.family,
             lineage: resolved.lineage,
@@ -235,7 +269,9 @@ fn preflight_report(args: &ModelsLoraPreflightArgs) -> Result<LoraPreflightRepor
             corpus: corpus_path.display().to_string(),
             config: args.config.as_ref().map(|path| path.display().to_string()),
             check: args.check,
+            requested_tool_format,
             source_tool_format: expected_source_format,
+            tool_format_correction: decision.correction,
             target_tool_format,
         },
         tool_calling: ToolCallingReport {
@@ -631,7 +667,9 @@ struct PreflightRequest {
     corpus: String,
     config: Option<String>,
     check: bool,
+    requested_tool_format: String,
     source_tool_format: String,
+    tool_format_correction: Option<String>,
     target_tool_format: String,
 }
 
@@ -649,6 +687,7 @@ struct PreflightThresholds {
     hard_token_limit: u64,
     min_records: u64,
     expected_source_tool_format: String,
+    required_export_source_tool_format: String,
     min_tool_call_share: f64,
     done_marker: Option<String>,
 }
