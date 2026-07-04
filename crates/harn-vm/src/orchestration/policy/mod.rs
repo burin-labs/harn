@@ -570,23 +570,6 @@ pub fn enforce_current_policy_for_tool(tool_name: &str) -> Result<(), PolicyDeni
         if requested_level != SideEffectLevel::None
             && !policy_allows_side_effect(&policy, requested_level.as_str())
         {
-            let max_over_annot = policy
-                .tool_annotations
-                .values()
-                .map(|a| a.side_effect_level.as_str())
-                .max_by_key(|lvl| crate::tool_annotations::SideEffectLevel::rank_str(lvl));
-            eprintln!(
-                "[CEILING-DIAG] tool={tool_name} requested={} policy.side_effect_level={:?} tools_has_computer={} policy_annot_computer={:?} annot_count={} max_over_annot={:?}",
-                requested_level.as_str(),
-                policy.side_effect_level,
-                policy.tools.iter().any(|t| t == "computer"),
-                policy
-                    .tool_annotations
-                    .get("computer")
-                    .map(|a| a.side_effect_level.as_str()),
-                policy.tool_annotations.len(),
-                max_over_annot,
-            );
             return reject_tool(
                 DenialGate::SideEffectCeiling,
                 None,
@@ -735,7 +718,15 @@ pub fn builtin_ceiling() -> CapabilityPolicy {
         capabilities: BTreeMap::new(),
         workspace_roots: Vec::new(),
         read_only_roots: Vec::new(),
-        side_effect_level: Some("network".to_string()),
+        // The builtin ceiling is the runtime's OUTERMOST bound — the top of the
+        // side-effect ladder. Every real policy intersects DOWN from here, so this
+        // must be the maximum level or it would silently cap more-invasive tools
+        // out entirely. It tracks the top of the ladder: `desktop_control`. This
+        // does not loosen anything — a normal agent's surface policy still caps at
+        // the max of ITS tools (e.g. `network`); only a surface that actually
+        // carries a `desktop_control` tool (computer use, gated by the off-by-
+        // default flag) can reach the top.
+        side_effect_level: Some(SideEffectLevel::DesktopControl.as_str().to_string()),
         recursion_limit: Some(RuntimeLimits::DEFAULT.max_nested_execution_depth),
         tool_arg_constraints: Vec::new(),
         tool_annotations: BTreeMap::new(),
