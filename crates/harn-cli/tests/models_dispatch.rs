@@ -577,6 +577,11 @@ fn models_lora_plan_human_text_includes_recipe() {
         "trainer: trl_sft_trainer",
         "LoRA hparams: rank=16 alpha=32 dropout=0.05",
         "target modules: all-linear",
+        "training base precision: 4bit_nf4_or_runtime_equivalent",
+        "training compute precision: bf16_when_supported_else_fp16",
+        "adapter precision: bf16_or_fp16_lora_weights",
+        "serving base precision: same_quantization_family_as_training_or_revalidate",
+        "precision gates:",
         "assistant mask: require_chat_template_generation_masks",
         "parser owner: harn_text_tool_parser",
         "split policy: train_tune_holdout_disjoint_no_eval_holdout_training",
@@ -659,7 +664,28 @@ fn models_lora_plan_json_shape_is_stable() {
             serde_json::Value::from("k_proj"),
             serde_json::Value::from("v_proj"),
             serde_json::Value::from("o_proj"),
+            serde_json::Value::from("gate_proj"),
+            serde_json::Value::from("up_proj"),
+            serde_json::Value::from("down_proj"),
         ]
+    );
+    assert_eq!(report["precision"]["schema_version"], 1);
+    assert_eq!(
+        report["precision"]["training_base_precision"],
+        "base_model_precision"
+    );
+    assert_eq!(
+        report["precision"]["serving_base_precision"],
+        "same_base_model_precision_as_training_or_revalidate"
+    );
+    let precision_gates = report["precision"]["promotion_gates"]
+        .as_array()
+        .expect("precision promotion gates");
+    assert!(
+        precision_gates.iter().any(|gate| gate
+            .as_str()
+            .is_some_and(|text| text.contains("compute dtype"))),
+        "precision gates={precision_gates:?}"
     );
     assert_eq!(
         report["training"]["contract"]["assistant_mask_policy"],
@@ -729,6 +755,17 @@ fn models_lora_plan_json_shape_is_stable() {
         export
             .windows(2)
             .any(|pair| pair[0] == "--chat-template" && pair[1] == "gemma4_native_function_calling"),
+        "export argv={export:?}"
+    );
+    assert!(
+        export.windows(2).any(|pair| pair[0] == "--target-metadata"
+            && pair[1] == "training_base_precision=base_model_precision"),
+        "export argv={export:?}"
+    );
+    assert!(
+        export.windows(2).any(|pair| pair[0] == "--target-metadata"
+            && pair[1]
+                == "serving_base_precision=same_base_model_precision_as_training_or_revalidate"),
         "export argv={export:?}"
     );
     let serving_notes = report["serving"]["runtime_notes"]

@@ -29,6 +29,7 @@ fn __render_human(harness: Harness, report: dict) {
   let tool_calling = safe_dict(report["tool_calling"])
   let training = safe_dict(report["training"])
   let training_contract = safe_dict(training["contract"])
+  let precision = safe_dict(report["precision"])
   let template = safe_dict(report["template"])
   let data = safe_dict(report["data"])
   let corpus_refresh = safe_dict(report["corpus_refresh"])
@@ -82,6 +83,22 @@ fn __render_human(harness: Harness, report: dict) {
       + safe_number_string(training["dropout"], ""),
   )
   harness.stdio.println("  quantization: " + safe_string(training["quantization"], ""))
+  harness.stdio
+    .println(
+    "  training base precision: "
+      + safe_string(precision["training_base_precision"], ""),
+  )
+  harness.stdio
+    .println(
+    "  training compute precision: "
+      + safe_string(precision["training_compute_precision"], ""),
+  )
+  harness.stdio
+    .println("  adapter precision: " + safe_string(precision["adapter_weight_precision"], ""))
+  harness.stdio
+    .println("  serving base precision: " + safe_string(precision["serving_base_precision"], ""))
+  harness.stdio
+    .println("  precision policy: " + safe_string(precision["compatibility_policy"], ""))
   harness.stdio.println("  loss scope: " + safe_string(training["loss_scope"], ""))
   harness.stdio.println("  packing: " + safe_string(training["packing"], ""))
   let target_modules = safe_list(training["target_modules"])
@@ -134,6 +151,7 @@ fn __render_human(harness: Harness, report: dict) {
   print_list(harness, "hard negatives", safe_list(corpus_refresh["hard_negative_slices"]))
   print_list(harness, "corpus gates", safe_list(corpus_refresh["acceptance_gates"]))
   print_list(harness, "trainer contract", safe_list(training["trainer_contract"]))
+  print_list(harness, "precision gates", safe_list(precision["promotion_gates"]))
   print_list(harness, "training notes", safe_list(training["notes"]))
   harness.stdio
     .println("  holdout policy: " + safe_string(evaluation["holdout_policy"], ""))

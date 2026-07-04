@@ -417,10 +417,12 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
     let alpha = normalize_lora_alpha(args.alpha, rank)?;
     let dropout = normalize_lora_dropout(args.dropout)?;
     let quantization = quantization_for_method(&method).to_string();
-    let target_modules = target_modules_for_method(&method);
+    let precision = precision_contract_for_method(&method);
     let requested_tool_format = normalize_plan_tool_format(&args.tool_format)?;
     let requested_corpus_strategy = normalize_corpus_strategy(&args.corpus_strategy)?;
     let resolved = harn_vm::llm_config::resolve_model_info(&args.base_model);
+    let target_modules =
+        target_modules_for_route(&method, &resolved.id, &resolved.family, &resolved.lineage);
     let provider = args
         .provider
         .as_deref()
@@ -529,7 +531,7 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
     let export_corpus_arg = corpus
         .clone()
         .unwrap_or_else(|| "CORPUS_JSONL_OR_DIR".to_string());
-    let export_command = vec![
+    let mut export_command = vec![
         "harn".to_string(),
         "models".to_string(),
         "lora".to_string(),
@@ -551,6 +553,7 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
         "--chat-template".to_string(),
         template.name.clone(),
     ];
+    export_command.extend(precision_target_metadata(&precision));
     let serving = serving_recipe(
         &resolved.id,
         &provider,
@@ -616,6 +619,7 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
             trainer_contract: trainer_contract_for_dataset(dataset_format, &decision.effective),
             notes: training_notes(&decision.effective),
         },
+        precision,
         template,
         data: DataRecipe {
             dataset_format: dataset_format.to_string(),
@@ -822,9 +826,23 @@ fn normalize_lora_dropout(dropout: f64) -> Result<f64, String> {
     Ok(dropout)
 }
 
-fn target_modules_for_method(method: &str) -> Vec<String> {
+fn target_modules_for_route(
+    method: &str,
+    model_id: &str,
+    family: &str,
+    lineage: &str,
+) -> Vec<String> {
     match method {
         "qlora" => vec!["all-linear".to_string()],
+        _ if is_gemma4_route(model_id, family, lineage) => vec![
+            "q_proj".to_string(),
+            "k_proj".to_string(),
+            "v_proj".to_string(),
+            "o_proj".to_string(),
+            "gate_proj".to_string(),
+            "up_proj".to_string(),
+            "down_proj".to_string(),
+        ],
         _ => vec![
             "q_proj".to_string(),
             "k_proj".to_string(),
@@ -878,6 +896,64 @@ fn quantization_for_method(method: &str) -> &'static str {
         "lora" => "base_model_precision",
         _ => unreachable!("normalize_lora_method returned an unsupported method"),
     }
+}
+
+fn precision_contract_for_method(method: &str) -> PrecisionContract {
+    let (
+        training_base_precision,
+        serving_base_precision,
+        compatibility_policy,
+    ) = match method {
+        "qlora" => (
+            "4bit_nf4_or_runtime_equivalent",
+            "same_quantization_family_as_training_or_revalidate",
+            "changing the base quantization or compute dtype makes a new route until promotion gates pass",
+        ),
+        "lora" => (
+            "base_model_precision",
+            "same_base_model_precision_as_training_or_revalidate",
+            "changing the base or adapter precision makes a new route until promotion gates pass",
+        ),
+        _ => unreachable!("normalize_lora_method returned an unsupported method"),
+    };
+    PrecisionContract {
+        schema_version: 1,
+        training_base_precision: training_base_precision.to_string(),
+        training_compute_precision: "bf16_when_supported_else_fp16".to_string(),
+        adapter_weight_precision: "bf16_or_fp16_lora_weights".to_string(),
+        serving_base_precision: serving_base_precision.to_string(),
+        serving_adapter_precision: "load_adapter_weights_without_merge_until_promotion".to_string(),
+        compatibility_policy: compatibility_policy.to_string(),
+        promotion_gates: vec![
+            "record training base precision, compute precision, adapter precision, and serving base precision in the adapter manifest".to_string(),
+            "compare base versus adapter using the same base precision planned for serving".to_string(),
+            "rerun promotion gates whenever quantization, compute dtype, chat template, or tool format changes".to_string(),
+        ],
+    }
+}
+
+fn precision_target_metadata(precision: &PrecisionContract) -> Vec<String> {
+    [
+        (
+            "training_base_precision",
+            precision.training_base_precision.as_str(),
+        ),
+        (
+            "training_compute_precision",
+            precision.training_compute_precision.as_str(),
+        ),
+        (
+            "adapter_weight_precision",
+            precision.adapter_weight_precision.as_str(),
+        ),
+        (
+            "serving_base_precision",
+            precision.serving_base_precision.as_str(),
+        ),
+    ]
+    .into_iter()
+    .flat_map(|(key, value)| ["--target-metadata".to_string(), format!("{key}={value}")])
+    .collect()
 }
 
 fn dataset_format_for_tool_format(tool_format: &str) -> &'static str {
@@ -1505,6 +1581,7 @@ struct LoraPlanReport {
     request: PlanRequest,
     tool_calling: ToolCallingReport,
     training: TrainingRecipe,
+    precision: PrecisionContract,
     template: TemplateRecipe,
     data: DataRecipe,
     corpus_refresh: CorpusRefreshRecipe,
@@ -1540,6 +1617,18 @@ struct TrainingRecipe {
     contract: LoraTrainingContract,
     trainer_contract: Vec<String>,
     notes: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct PrecisionContract {
+    schema_version: u64,
+    training_base_precision: String,
+    training_compute_precision: String,
+    adapter_weight_precision: String,
+    serving_base_precision: String,
+    serving_adapter_precision: String,
+    compatibility_policy: String,
+    promotion_gates: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
