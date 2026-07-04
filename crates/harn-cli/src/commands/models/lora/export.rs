@@ -6,15 +6,14 @@ use std::path::{Path, PathBuf};
 use regex::Regex;
 use serde::Serialize;
 use serde_json::{json, Map, Value};
-use sha2::{Digest as _, Sha256};
 
 use crate::cli::ModelsLoraExportArgs;
 
 use super::{
-    dataset_format_for_tool_format, expand_home, lora_adapter_binding, lora_evaluation_recipe,
-    lora_modules_value_format, lora_training_contract, normalize_plan_tool_format,
-    render_embedded_lora_report, sha256_file, BaseModelReport, EvaluationRecipe,
-    LoraTrainingContract, ToolCallingReport,
+    dataset_format_for_tool_format, expand_home, lora_adapter_binding, lora_contract_id,
+    lora_contract_report, lora_evaluation_recipe, lora_modules_value_format,
+    normalize_plan_tool_format, parse_target_metadata, render_embedded_lora_report, sha256_file,
+    BaseModelReport, EvaluationRecipe, LoraContractReport, ToolCallingReport,
 };
 
 const LORA_EXPORT_PAYLOAD_ENV: &str = "HARN_MODELS_LORA_EXPORT_PAYLOAD_JSON";
@@ -98,7 +97,14 @@ fn export_report(args: &ModelsLoraExportArgs) -> Result<LoraExportReport, String
         contract_id: contract_id.clone(),
         metadata: parse_target_metadata(&args.target_metadata)?,
     };
-    let contract = export_contract_report(&target, &dataset_format);
+    let contract = lora_contract_report(
+        contract_id.clone(),
+        &target.base_model,
+        &target.provider,
+        &target.harn_tool_format,
+        &dataset_format,
+        target.chat_template.clone(),
+    );
     let mut writer = if args.check {
         None
     } else {
@@ -334,23 +340,6 @@ fn create_jsonl_writer(path: &Path) -> Result<BufWriter<File>, String> {
     let file = File::create(path)
         .map_err(|error| format!("failed to create {}: {error}", path.display()))?;
     Ok(BufWriter::new(file))
-}
-
-fn parse_target_metadata(raw: &[String]) -> Result<BTreeMap<String, String>, String> {
-    let mut metadata = BTreeMap::new();
-    for item in raw {
-        let Some((key, value)) = item.split_once('=') else {
-            return Err(format!(
-                "invalid --target-metadata `{item}`; expected KEY=VALUE"
-            ));
-        };
-        let key = key.trim();
-        if key.is_empty() {
-            return Err(format!("invalid --target-metadata `{item}`; key is empty"));
-        }
-        metadata.insert(key.to_string(), value.to_string());
-    }
-    Ok(metadata)
 }
 
 pub(super) struct ExportRegexes {
@@ -942,39 +931,6 @@ fn export_serving_report(
     }
 }
 
-fn lora_contract_id(
-    base_model: &str,
-    provider: &str,
-    harn_tool_format: &str,
-    dataset_format: &str,
-    chat_template: Option<&str>,
-) -> Result<String, String> {
-    let input = LoraContractHashInput {
-        schema_version: 1,
-        base_model,
-        provider,
-        harn_tool_format,
-        dataset_format,
-        chat_template,
-    };
-    let bytes = serde_json::to_vec(&input)
-        .map_err(|error| format!("failed to render LoRA contract hash input: {error}"))?;
-    Ok(format!("sha256:{}", hex::encode(Sha256::digest(bytes))))
-}
-
-fn export_contract_report(target: &ExportTarget, dataset_format: &str) -> ExportContractReport {
-    ExportContractReport {
-        schema_version: 1,
-        id: target.contract_id.clone(),
-        base_model: target.base_model.clone(),
-        provider: target.provider.clone(),
-        harn_tool_format: target.harn_tool_format.clone(),
-        dataset_format: dataset_format.to_string(),
-        chat_template: target.chat_template.clone(),
-        training_contract: lora_training_contract(dataset_format, &target.harn_tool_format),
-    }
-}
-
 fn record_string(record: &Map<String, Value>, key: &str) -> String {
     record
         .get(key)
@@ -1017,7 +973,7 @@ struct ExportManifestWrite<'a> {
     output_sha256: Option<&'a str>,
     stats: &'a ExportStats,
     target: &'a ExportTarget,
-    contract: &'a ExportContractReport,
+    contract: &'a LoraContractReport,
     serving: &'a ExportServingReport,
     promotion: &'a EvaluationRecipe,
     errors: &'a [String],
@@ -1068,7 +1024,7 @@ struct LoraExportReport {
     request: ExportRequest,
     tool_calling: ToolCallingReport,
     target: ExportTargetReport,
-    contract: ExportContractReport,
+    contract: LoraContractReport,
     serving: ExportServingReport,
     promotion: EvaluationRecipe,
     output: ExportOutput,
@@ -1096,28 +1052,6 @@ struct ExportTargetReport {
     chat_template: Option<String>,
     contract_id: String,
     metadata: BTreeMap<String, String>,
-}
-
-#[derive(Debug, Serialize)]
-struct ExportContractReport {
-    schema_version: u64,
-    id: String,
-    base_model: String,
-    provider: String,
-    harn_tool_format: String,
-    dataset_format: String,
-    chat_template: Option<String>,
-    training_contract: LoraTrainingContract,
-}
-
-#[derive(Serialize)]
-struct LoraContractHashInput<'a> {
-    schema_version: u64,
-    base_model: &'a str,
-    provider: &'a str,
-    harn_tool_format: &'a str,
-    dataset_format: &'a str,
-    chat_template: Option<&'a str>,
 }
 
 #[derive(Debug, Serialize)]

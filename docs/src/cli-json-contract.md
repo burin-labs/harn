@@ -95,6 +95,7 @@ versions.
 | `harn models lora plan --json` | LoRA/QLoRA route, trainer, data, eval, and launch contract |
 | `harn models lora inspect --json` | PEFT adapter compatibility report and launch metadata |
 | `harn models lora export --json` | Trainer dataset export report with contract id and stats |
+| `harn models lora manifest --json` | LoRA training-run manifest with route, data, artifact, serving, and promotion contracts |
 | `harn models lora preflight --json` | Corpus readiness report before LoRA training |
 | `harn connect status --json` / `setup-plan --json` | Connector readiness reports        |
 | `harn skill list --json` / `get --json` | Canonical Harn skill corpus frontmatter        |
