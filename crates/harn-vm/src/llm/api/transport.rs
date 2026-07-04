@@ -181,12 +181,11 @@ pub(super) async fn vm_call_llm_api(
     // unregistered fallback below and never reaches `chat_impl`. Pure
     // capability lookup — the `*-codex` match lives in the OpenAI capability
     // rows, no model-name branch here.
-    if opts.api_mode == crate::llm::api::LlmApiMode::Responses
-        || crate::llm::capabilities::lookup(provider, &opts.model).chat_completions_unsupported
+    if provider == "openai"
+        && (opts.api_mode == crate::llm::api::LlmApiMode::Responses
+            || crate::llm::capabilities::lookup(provider, &opts.model).chat_completions_unsupported)
     {
-        if provider == "openai" {
-            return crate::llm::providers::OpenAiResponsesProvider::call(opts, delta_tx).await;
-        }
+        return crate::llm::providers::OpenAiResponsesProvider::call(opts, delta_tx).await;
     }
 
     if crate::llm::provider::is_provider_registered(provider) {
