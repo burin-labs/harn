@@ -36,6 +36,7 @@ It is a living tracker, not a spec. When you port a script, move its row to
 | `check_generated_registry.harn` | `make check-generated-registry` + pre-push hook | Registry/Makefile/workflow generated-artifact guard. |
 | `check_python_boundary.harn` | `make check-python-boundary` + audit gate | Ratchets Python usage to explicit bootstrap/platform/generated/fixture reasons. |
 | `bench_cli_cold_start.harn` | `scripts/bench_cli_cold_start.sh` + `cli-cold-start-budget.yml` | Cold-start benchmark controller; isolates measured Harn subprocesses with `env -i` so controller runtime state cannot leak into the timed child. |
+| `verify_tree_sitter_parse.harn` | `release_gate.sh` grammar audit | Regenerates/builds the tree-sitter grammar when stale, sweeps positive `.harn` sources, and preserves strict/non-strict failure policy. |
 
 Each ported script has a paired `scripts/tests/<name>_test.harn` exercising its
 pure helpers, run by `make test-harn-scripts`.
@@ -67,10 +68,9 @@ script's purpose or fight a tool that is JS/Python by design.
 - **`spec/protocol-artifacts/*.ts`, `python/harn_protocol.py`,
   `harn-protocol.ts`** — generated multi-language SDK bindings for external
   consumers.
-- **`check_protocol_bindings.py`, `check_burin_protocol_bindings.py`,
-  `verify_tree_sitter_parse.py`** — these *import the generated foreign bindings
-  / compiled grammar and round-trip through them*. Porting to Harn would stop
-  testing the artifact they exist to validate.
+- **`check_protocol_bindings.py`, `check_burin_protocol_bindings.py`** — these
+  *import the generated foreign bindings and round-trip through them*. Porting
+  to Harn would stop testing the artifact they exist to validate.
 - **`conformance/helpers/*.py`** (github/slack/linear/mcp/http mock servers) —
   out-of-process mock servers for the conformance harness; intentionally foreign
   infra spawned as subprocesses.

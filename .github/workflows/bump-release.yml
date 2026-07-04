@@ -147,7 +147,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y ripgrep
 
       - name: Build tree-sitter grammar
-        # grammar-audit's verify_tree_sitter_parse.py loads the
+        # grammar-audit's verify_tree_sitter_parse.harn loads the
         # compiled grammar from tree-sitter-harn/harn.{so,dylib}.
         if: steps.bump.outputs.skip != 'true'
         working-directory: tree-sitter-harn

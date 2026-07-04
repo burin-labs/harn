@@ -426,7 +426,7 @@ jobs:
       - name: Build tree-sitter grammar
         # Only needed when --reaudit re-runs the grammar-audit lane
         # (which loads tree-sitter-harn/harn.{so,dylib} via
-        # verify_tree_sitter_parse.py). The default no-audit finalize
+        # verify_tree_sitter_parse.harn). The default no-audit finalize
         # doesn't touch tree-sitter.
         if: inputs.reaudit
         working-directory: tree-sitter-harn

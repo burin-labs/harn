@@ -34,12 +34,6 @@ let PYTHON_ALLOWLIST = [
   },
   {
     kind: "exact",
-    pattern: "scripts/verify_tree_sitter_parse.py",
-    category: "foreign-artifact-check",
-    reason: "Exercises the compiled tree-sitter grammar through its native CLI.",
-  },
-  {
-    kind: "exact",
     pattern: "tests/bridge_mock_host.py",
     category: "test-harness-adapter",
     reason: "Out-of-process bridge test host intentionally runs as a foreign subprocess.",
