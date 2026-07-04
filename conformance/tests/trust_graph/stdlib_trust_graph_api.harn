@@ -25,7 +25,13 @@ pipeline test(task) {
   __io_println(records[0].chain_index > 0 && records[0].entry_hash != "")
   __io_println(records[0].previous_hash == nil || records[0].previous_hash != "")
   __io_println(score.total == 1 && score.successes == 1 && score.success_rate == 1.0)
-  __io_println(score.policy.side_effect_level == "network")
-  __io_println(policy.side_effect_level == "network")
+  // A fresh agent resolves to the default `act_auto` (full-autonomy) tier, whose
+  // ceiling is the TOP of the side-effect ladder — now `desktop_control` (added
+  // above `network`). This is a ceiling/upper-bound, not a grant: a tool is only
+  // admitted if it advertises that level AND is present, so a normal agent with
+  // no desktop-capable tool is unaffected. If the ladder top changes, update this
+  // deliberately — the full-autonomy ceiling must track the ladder top.
+  __io_println(score.policy.side_effect_level == "desktop_control")
+  __io_println(policy.side_effect_level == "desktop_control")
   __io_println(report.verified && report.root_hash != nil)
 }
