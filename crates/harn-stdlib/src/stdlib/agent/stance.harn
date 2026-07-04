@@ -26,6 +26,7 @@
 // Ships default-OFF and experimental.
 import { __tool_surface_filter_registry, __tool_surface_policy_tools } from "std/agent/postturn"
 import { agent_emit_event, agent_session_messages } from "std/agent/state"
+import { agent_tool_annotations } from "std/agent/tool_annotations"
 
 let __STANCE_READ_ONLY_KINDS = ["read", "search", "think", "fetch"]
 
@@ -58,11 +59,8 @@ fn __stance_entry_name(entry) {
  * annotations explicitly say so — by kind, or by a none/read_only side
  * effect level. Unannotated tools are mutating by default.
  */
-fn __stance_entry_read_only(entry) {
-  let annotations = entry?.annotations ?? entry?.function?.annotations
-  if annotations == nil {
-    return false
-  }
+fn __stance_entry_read_only(entry, policy) {
+  let annotations = agent_tool_annotations(entry, policy, __stance_entry_name(entry))
   let kind = annotations?.kind
   if kind != nil {
     return contains(__STANCE_READ_ONLY_KINDS, to_string(kind))
@@ -74,7 +72,7 @@ fn __stance_entry_read_only(entry) {
   return false
 }
 
-fn __stance_read_only_names(registry, hard_keep, escape_tool) {
+fn __stance_read_only_names(registry, policy, hard_keep, escape_tool) {
   var names = [escape_tool]
   for name in hard_keep ?? [] {
     if !contains(names, name) {
@@ -82,7 +80,7 @@ fn __stance_read_only_names(registry, hard_keep, escape_tool) {
     }
   }
   for entry in __stance_registry_entries(registry) {
-    if __stance_entry_read_only(entry) {
+    if __stance_entry_read_only(entry, policy) {
       let name = __stance_entry_name(entry)
       if name != "" && !contains(names, name) {
         names = names.push(name)
@@ -90,6 +88,18 @@ fn __stance_read_only_names(registry, hard_keep, escape_tool) {
     }
   }
   return names
+}
+
+fn __stance_policy_patch(opts, escape_tool) {
+  let policy = opts?.policy
+  if type_of(policy) != "dict" {
+    return {}
+  }
+  let allowed = policy?.tools
+  if type_of(allowed) != "list" || len(allowed) == 0 || contains(allowed, escape_tool) {
+    return {policy: policy}
+  }
+  return {policy: policy + {tools: allowed.push(escape_tool)}}
 }
 
 fn __stance_recent_user_messages(session_id, limit = 6) {
@@ -263,13 +273,16 @@ pub fn agent_stance_prepare(session, message, opts) {
   // handler has back to the loop.
   let grant_flag = atomic(0)
   let tools = __stance_register_escape_tool(opts, cfg, session.session_id, grant_flag)
-  let allowed = __stance_read_only_names(tools, cfg?.hard_keep, escape_tool)
+  let policy_patch = __stance_policy_patch(opts, escape_tool)
+  let effective_policy = policy_patch?.policy ?? opts?.policy
+  let allowed = __stance_read_only_names(tools, effective_policy, cfg?.hard_keep, escape_tool)
   agent_emit_event(
     session.session_id,
     "stance_armed",
     {escape_tool: escape_tool, allowed_tools: allowed},
   )
   return opts
+    + policy_patch
     + {tools: tools, _read_only_stance_tools: allowed, _read_only_stance_grant: grant_flag}
 }
 

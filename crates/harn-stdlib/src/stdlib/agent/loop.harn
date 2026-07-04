@@ -72,6 +72,7 @@ import {
   agent_session_totals,
 } from "std/agent/state"
 import { agent_step_judge } from "std/agent/step_judge"
+import { agent_tool_annotations, agent_tool_entry_annotations } from "std/agent/tool_annotations"
 import {
   agent_tool_search_emit_queries,
   agent_tool_search_inject_if_needed,
@@ -536,46 +537,8 @@ fn __tool_registry_entry(tools, tool_name) {
   return nil
 }
 
-fn __tool_entry_annotations(entry) {
-  if type_of(entry) != "dict" {
-    return {}
-  }
-  var annotations = {}
-  let policy = entry?.policy
-  if type_of(policy) == "dict" {
-    annotations = annotations + policy
-  }
-  let direct = entry?.annotations
-  if type_of(direct) == "dict" {
-    annotations = annotations + direct
-  }
-  let func = entry?.function
-  if type_of(func) == "dict" && type_of(func?.policy) == "dict" {
-    annotations = annotations + func.policy
-  }
-  if type_of(func) == "dict" && type_of(func?.annotations) == "dict" {
-    annotations = annotations + func.annotations
-  }
-  return annotations
-}
-
-fn __tool_policy_annotations(policy, tool_name) {
-  if type_of(policy) != "dict" {
-    return {}
-  }
-  let registry = policy?.tool_annotations ?? policy?.toolAnnotations ?? {}
-  if type_of(registry) != "dict" {
-    return {}
-  }
-  let annotations = registry[tool_name]
-  if type_of(annotations) == "dict" {
-    return annotations
-  }
-  return {}
-}
-
 fn __tool_resource_annotations(entry, policy, tool_name) {
-  return __tool_policy_annotations(policy, tool_name) + __tool_entry_annotations(entry)
+  return agent_tool_annotations(entry, policy, tool_name)
 }
 
 fn __tool_envelope(call, tools, options) {
@@ -1303,7 +1266,7 @@ fn __inject_feedback_with_tool_repair(session_id, kind, content) {
 }
 
 fn __parse_feedback_tool_annotations(entry) {
-  return __tool_entry_annotations(entry)
+  return agent_tool_entry_annotations(entry)
 }
 
 fn __parse_feedback_annotation_enabled(value) -> bool {
@@ -2289,7 +2252,7 @@ fn __turn_made_edit(dispatch, tools) -> bool {
   }
   for name in __tool_names_by_status(dispatch, true) {
     let entry = __tool_registry_entry(tools, name)
-    let annotations = __tool_entry_annotations(entry)
+    let annotations = agent_tool_entry_annotations(entry)
     let kind = lowercase(to_string(annotations?.kind ?? annotations?.tool_kind ?? annotations?.toolKind ?? ""))
     if contains(__REPAIR_EDIT_KINDS, kind) {
       return true
