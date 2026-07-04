@@ -188,6 +188,7 @@ ACP_SESSION_UPDATES: tuple = (
     "skill_deactivated",
     "skill_narrow",
     "skill_scope_tools",
+    "stance_transition",
     "tool_search_query",
     "tool_search_result",
     "transcript_compacted",
@@ -208,6 +209,7 @@ HARN_ACP_SESSION_UPDATE_EXTENSIONS: tuple = (
     "skill_deactivated",
     "skill_narrow",
     "skill_scope_tools",
+    "stance_transition",
     "tool_search_query",
     "tool_search_result",
     "transcript_compacted",
@@ -480,6 +482,7 @@ class ACPSessionUpdate(str, Enum):
     SKILL_DEACTIVATED = "skill_deactivated"
     SKILL_NARROW = "skill_narrow"
     SKILL_SCOPE_TOOLS = "skill_scope_tools"
+    STANCE_TRANSITION = "stance_transition"
     TOOL_SEARCH_QUERY = "tool_search_query"
     TOOL_SEARCH_RESULT = "tool_search_result"
     TRANSCRIPT_COMPACTED = "transcript_compacted"

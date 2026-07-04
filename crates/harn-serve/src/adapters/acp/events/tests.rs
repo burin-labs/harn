@@ -177,6 +177,19 @@ fn extension_fixture_events() -> Vec<AgentEvent> {
             removed_tool_details: serde_json::Value::Null,
             kept_tool_details: serde_json::Value::Null,
         },
+        AgentEvent::StanceTransition {
+            session_id: "session-1".to_string(),
+            phase: "write_access_granted".to_string(),
+            escape_tool: "request_write_access".to_string(),
+            allowed_tools: vec![
+                "look".to_string(),
+                "search".to_string(),
+                "request_write_access".to_string(),
+            ],
+            justification: "User asked me to make the change.".to_string(),
+            consent: "express".to_string(),
+            reason: "The user explicitly asked for the edit.".to_string(),
+        },
         AgentEvent::ToolSearchQuery {
             session_id: "session-1".to_string(),
             tool_use_id: "search-1".to_string(),
@@ -1196,6 +1209,19 @@ async fn forwarded_agent_events_serialize_as_session_updates() {
             removed_tool_details: serde_json::Value::Null,
             kept_tool_details: serde_json::Value::Null,
         },
+        AgentEvent::StanceTransition {
+            session_id: "session-1".to_string(),
+            phase: "write_access_granted".to_string(),
+            escape_tool: "request_write_access".to_string(),
+            allowed_tools: vec![
+                "look".to_string(),
+                "search".to_string(),
+                "request_write_access".to_string(),
+            ],
+            justification: "User asked me to make the change.".to_string(),
+            consent: "express".to_string(),
+            reason: "The user explicitly asked for the edit.".to_string(),
+        },
         AgentEvent::ToolSearchQuery {
             session_id: "session-1".to_string(),
             tool_use_id: "search-1".to_string(),
@@ -1264,6 +1290,7 @@ async fn forwarded_agent_events_serialize_as_session_updates() {
         "skill_deactivated",
         "skill_scope_tools",
         "skill_narrow",
+        "stance_transition",
         "tool_search_query",
         "tool_search_result",
         "transcript_compacted",
@@ -1772,6 +1799,17 @@ async fn vendor_extension_session_update_fields_live_under_meta_harn() {
         (
             "skill_narrow",
             &["reason", "removedTools", "remainingTools"],
+        ),
+        (
+            "stance_transition",
+            &[
+                "phase",
+                "escapeTool",
+                "allowedTools",
+                "justification",
+                "consent",
+                "reason",
+            ],
         ),
         (
             "tool_search_query",

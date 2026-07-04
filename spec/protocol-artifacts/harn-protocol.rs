@@ -389,6 +389,7 @@ pub const ACP_SESSION_UPDATE_SKILL_ACTIVATED: &str = "skill_activated";
 pub const ACP_SESSION_UPDATE_SKILL_DEACTIVATED: &str = "skill_deactivated";
 pub const ACP_SESSION_UPDATE_SKILL_NARROW: &str = "skill_narrow";
 pub const ACP_SESSION_UPDATE_SKILL_SCOPE_TOOLS: &str = "skill_scope_tools";
+pub const ACP_SESSION_UPDATE_STANCE_TRANSITION: &str = "stance_transition";
 pub const ACP_SESSION_UPDATE_TOOL_SEARCH_QUERY: &str = "tool_search_query";
 pub const ACP_SESSION_UPDATE_TOOL_SEARCH_RESULT: &str = "tool_search_result";
 pub const ACP_SESSION_UPDATE_TRANSCRIPT_COMPACTED: &str = "transcript_compacted";
@@ -423,6 +424,7 @@ pub const ACP_SESSION_UPDATES: &[&str] = &[
     "skill_deactivated",
     "skill_narrow",
     "skill_scope_tools",
+    "stance_transition",
     "tool_search_query",
     "tool_search_result",
     "transcript_compacted",
@@ -443,6 +445,7 @@ pub const HARN_ACP_SESSION_UPDATE_EXTENSION_SKILL_ACTIVATED: &str = "skill_activ
 pub const HARN_ACP_SESSION_UPDATE_EXTENSION_SKILL_DEACTIVATED: &str = "skill_deactivated";
 pub const HARN_ACP_SESSION_UPDATE_EXTENSION_SKILL_NARROW: &str = "skill_narrow";
 pub const HARN_ACP_SESSION_UPDATE_EXTENSION_SKILL_SCOPE_TOOLS: &str = "skill_scope_tools";
+pub const HARN_ACP_SESSION_UPDATE_EXTENSION_STANCE_TRANSITION: &str = "stance_transition";
 pub const HARN_ACP_SESSION_UPDATE_EXTENSION_TOOL_SEARCH_QUERY: &str = "tool_search_query";
 pub const HARN_ACP_SESSION_UPDATE_EXTENSION_TOOL_SEARCH_RESULT: &str = "tool_search_result";
 pub const HARN_ACP_SESSION_UPDATE_EXTENSION_TRANSCRIPT_COMPACTED: &str = "transcript_compacted";
@@ -464,6 +467,7 @@ pub const HARN_ACP_SESSION_UPDATE_EXTENSIONS: &[&str] = &[
     "skill_deactivated",
     "skill_narrow",
     "skill_scope_tools",
+    "stance_transition",
     "tool_search_query",
     "tool_search_result",
     "transcript_compacted",
