@@ -1112,6 +1112,12 @@ log(response.logprobs)       // present when requested and returned
 
 ### `llm_call` options
 
+Typed shape: `LlmCallOptions` from `std/llm/options`. Prefer
+`let opts: LlmCallOptions = {...}` (or the `llm_options({...})`
+constructor, which rejects unknown keys at check time) over bare dict
+literals; `agent_loop` options extend this shape as `AgentLoopOptions`
+from `std/agent/options`.
+
 | Option | Type | Default | Notes |
 |---|---|---|---|
 | `provider` | string | `"auto"` | Explicit provider wins. `"auto"` infers from `model`; see the resolution table below. |
@@ -1828,7 +1834,9 @@ ask the user. Every transition emits a `stance_transition` event
 (`phase`: armed / write_access_granted / write_access_denied / disarmed).
 
 ```harn,ignore
-agent_loop(task, nil, {
+import { AgentLoopOptions } from "std/agent/options"
+
+let stance_opts: AgentLoopOptions = {
   tools: tools,
   read_only_stance: {
     enabled: true,
@@ -1837,7 +1845,8 @@ agent_loop(task, nil, {
     // consent_check: fn(justification, session_id) -> {verdict, reason},
     hard_keep: ["ask_user"],
   },
-})
+}
+agent_loop(task, nil, stance_opts)
 ```
 
 Ships default-OFF. This is the Harn mechanism for the tool-surface
@@ -1922,9 +1931,12 @@ log(cleared.removed_count)
 Opt out per loop:
 
 ```harn
-agent_loop(task, system, {
+import { AgentLoopOptions } from "std/agent/options"
+
+let reminder_opts: AgentLoopOptions = {
   reminders: {providers: ["-token_pressure", "-idle_nudge"]},
-})
+}
+agent_loop(task, system, reminder_opts)
 ```
 
 Configure providers under `reminders.config`, e.g.
@@ -2006,7 +2018,11 @@ log(result.judge_decisions[0].verdict)
 ### `agent_loop`
 
 `agent_loop(prompt, system?, options?)` runs a multi-turn loop with
-tool dispatch. Native-tool loops complete naturally when the model
+tool dispatch. Build the options through the typed `AgentLoopOptions`
+alias from `std/agent/options` (`let opts: AgentLoopOptions = {...}`)
+or an `agent_preset(...)` / `agent_options(...)` constructor — this is
+the documented path, and the `unnormalized-options` lint flags inline
+dict literals that bypass it (they still execute). Native-tool loops complete naturally when the model
 returns final assistant text with no tool calls. Tagged text-tool stages
 use `<done>##DONE##</done>`, and no-tool sentinel loops use bare
 `##DONE##`. Set `done_sentinel` to a non-empty string to require a
@@ -2068,10 +2084,13 @@ Vercel AI SDK's `stopWhen: hasToolCall(name)` and OpenAI Agents SDK's
 agent step:
 
 ```harn
-agent_loop(task, sys, {
+import { AgentLoopOptions } from "std/agent/options"
+
+let stop_opts: AgentLoopOptions = {
   tools: registry,
   stop_after_successful_tools: ["ask_question", "exit_plan_mode"],
-})
+}
+agent_loop(task, sys, stop_opts)
 ```
 
 The check fires after each iteration's tool dispatch, so any other
@@ -2128,7 +2147,9 @@ Use `done_judge.cadence` when completion checks should be signal-gated
 instead of firing on every completion candidate:
 
 ```harn
-agent_loop(task, system, {
+import { AgentLoopOptions } from "std/agent/options"
+
+let cadence_opts: AgentLoopOptions = {
   loop_until_done: true,
   done_judge: {
     cadence: {
@@ -2138,7 +2159,8 @@ agent_loop(task, system, {
       min_iterations_before_first: 2,
     },
   },
-})
+}
+agent_loop(task, system, cadence_opts)
 ```
 
 With `when: "stalled"`, stall diagnostics run the judge when
@@ -2160,15 +2182,17 @@ showing stall symptoms.
 Pass `permissions` to scope one agent below the ambient `policy` ceiling:
 
 ```harn
+import { AgentLoopOptions } from "std/agent/options"
 import { path_scope } from "std/tools"
 
-agent_loop(task, system, {
+let scoped_opts: AgentLoopOptions = {
   permissions: {
     allow: {read_note: path_scope(), write_note: path_scope({mount_modes: ["extend"]})},
     deny: ["dangerous_*"],
     on_escalation: { request -> {grant: "once", approver: "operator"} },
   },
-})
+}
+agent_loop(task, system, scoped_opts)
 ```
 
 `allow` and `deny` accept tool-name globs, argument pattern lists, or VM
@@ -2465,9 +2489,12 @@ appends an `autonomy.tier_transition` trust-graph record from `act_auto`
 to `act_with_approval`:
 
 ```harn
-agent_loop(task, system, {
+import { AgentLoopOptions } from "std/agent/options"
+
+let budgeted_opts: AgentLoopOptions = {
   autonomy_budget: {per_hour: 10, per_day: 100, key: "captain.persona", reviewer: "oncall"},
-})
+}
+agent_loop(task, system, budgeted_opts)
 ```
 
 `key` defaults to the loop's `session_id`; pick a stable identity (e.g.
@@ -3842,6 +3869,7 @@ assert(recovered.error.reason == "upstream_unavailable")
 budget behavior without forking the loop:
 
 ```harn,ignore
+import { AgentLoopOptions } from "std/agent/options"
 import {default_llm_caller, with_retry, with_fallback, compose} from "std/llm/handlers"
 
 let caller = compose([
@@ -3849,7 +3877,8 @@ let caller = compose([
   with_fallback,    // pseudo: with_fallback expects a list of callers
 ])(default_llm_caller())
 
-agent_loop(task, system, {loop_until_done: true, llm_caller: caller})
+let resilient_opts: AgentLoopOptions = {loop_until_done: true, llm_caller: caller}
+agent_loop(task, system, resilient_opts)
 ```
 
 The caller signature is `fn(call) -> {ok, value | status, error?}`
@@ -4016,6 +4045,7 @@ wraps every tool dispatch. Combined with the `tools_use_middleware`
   tool definitions
 
 ```harn,ignore
+import { AgentLoopOptions } from "std/agent/options"
 import {
   with_required_reason, with_audit_log, with_consent,
   compose_tool_callers, tools_use_middleware,
@@ -4030,7 +4060,8 @@ let caller = compose_tool_callers([
   mw.caller,
 ])
 
-agent_loop(task, system, {tools: registry, tool_caller: caller})
+let audited_opts: AgentLoopOptions = {tools: registry, tool_caller: caller}
+agent_loop(task, system, audited_opts)
 ```
 
 `with_audit_log` emits typed `ToolCallReceipt` records with rationale,

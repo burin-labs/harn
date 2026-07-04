@@ -131,7 +131,11 @@ pub fn peek_llm_token_budget() -> Option<u64> {
     LLM_TOKEN_BUDGET.with(|b| *b.borrow())
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
+// `Serialize` exists for the typed-options parity test
+// (`orchestration/typed_options_parity.rs`), which compares this struct's
+// serialized default key set against the `LlmBudget` alias in
+// `std/llm/options.harn`.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize)]
 pub(crate) struct LlmBudgetEnvelope {
     pub max_cost_usd: Option<f64>,
     pub total_budget_usd: Option<f64>,

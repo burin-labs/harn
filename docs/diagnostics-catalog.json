@@ -59,7 +59,7 @@
     {
       "id": "LNT",
       "title": "Lint rules",
-      "count": 59
+      "count": 60
     },
     {
       "id": "FMT",
@@ -2274,6 +2274,24 @@
       "summary": "project rule-engine or native lint rule",
       "repairs": [],
       "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-060",
+      "category": "LNT",
+      "summary": "inline options dict bypasses the typed option constructors",
+      "repairs": [
+        {
+          "id": "types/add-shape-annotation",
+          "safety": "surface-changing",
+          "summary": "Annotate the dict with a concrete shape type"
+        }
+      ],
+      "related": [
+        "HARN-LNT-050",
+        "HARN-LNT-029"
+      ],
       "explanationPresent": true,
       "apiStability": "stable"
     },

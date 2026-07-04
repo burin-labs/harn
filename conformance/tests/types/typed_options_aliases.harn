@@ -1,0 +1,54 @@
+/**
+ * Typed option aliases from std/{llm,agent,workflow}/options are importable,
+ * annotate direct literals, and round-trip through their typed constructors
+ * unchanged. Key parity with the Rust policy structs is pinned separately in
+ * crates/harn-vm/src/orchestration/typed_options_parity.rs.
+ */
+import {
+  AgentLoopOptions,
+  AgentPresetOptions,
+  agent_options,
+  agent_preset_options,
+} from "std/agent/options"
+import { LlmBudget, LlmCallOptions, ModelLadder, llm_options, model_ladder } from "std/llm/options"
+import { StageSpec, WorkflowRetryPolicy, workflow_stage_spec } from "std/workflow/options"
+
+pipeline test(task) {
+  let budget: LlmBudget = {max_cost_usd: 0.25, max_output_tokens: 512}
+  let call_opts: LlmCallOptions = {provider: "mock", model: "mock-small", temperature: 0.0, budget: budget}
+  let projected = llm_options(call_opts)
+  log(
+    "llm provider=" + to_string(projected.provider) + " budget="
+      + to_string(projected.budget?.max_cost_usd),
+  )
+  let ladder: ModelLadder = ["mock-small", {provider: "mock", model: "mock-large", when: "transport_failure"}]
+  log("ladder len=" + to_string(len(model_ladder(ladder))))
+  let loop_opts: AgentLoopOptions = {
+    provider: "mock",
+    loop_until_done: true,
+    iteration_budget: {mode: "adaptive", initial: 2, max: 6, extend_by: 2},
+    stall_diagnostics: {enabled: true, threshold: 3},
+    turn_policy: {require_action_or_yield: true, max_prose_chars: 800},
+  }
+  let typed_loop = agent_options(loop_opts)
+  log(
+    "loop until_done=" + to_string(typed_loop.loop_until_done) + " prose_cap="
+      + to_string(typed_loop.turn_policy?.max_prose_chars),
+  )
+  let preset_overrides: AgentPresetOptions = {provider: "mock", rate_limit: {max_calls: 5}, task_kind: "verify"}
+  log("preset task_kind=" + to_string(agent_preset_options(preset_overrides).task_kind))
+  let stage_retry: WorkflowRetryPolicy = {max_attempts: 3, verify: true, backoff_ms: 100}
+  let stage: StageSpec = {
+    id: "repair",
+    kind: "stage",
+    prompt: "Fix the regression.",
+    retry_policy: stage_retry,
+    model_policy: {provider: "mock", max_iterations: 4, turn_policy: {allow_done_sentinel: false}},
+    output_contract: {output_kinds: ["patch"], min_inputs: 1},
+  }
+  let typed_stage = workflow_stage_spec(stage)
+  log(
+    "stage id=" + to_string(typed_stage.id) + " retries="
+      + to_string(typed_stage.retry_policy?.max_attempts),
+  )
+}

@@ -21,17 +21,22 @@ let result = llm_call(
 log(result.text)
 ```
 
-With options:
+With options — build them through the typed `LlmCallOptions` alias from
+`std/llm/options` (the documented path; option typos then surface at
+`harn check` time instead of being silently ignored):
 
 ```harn
+import { LlmCallOptions } from "std/llm/options"
+
+let opts: LlmCallOptions = {
+  provider: "openai",
+  model: "gpt-4o",
+  max_tokens: 1024,
+}
 let result = llm_call(
   "Translate to French: Hello, world",
   "You are a translator.",
-  {
-    provider: "openai",
-    model: "gpt-4o",
-    max_tokens: 1024
-  }
+  opts,
 )
 log(result.text)
 ```
@@ -40,8 +45,9 @@ With image or video content:
 
 ```harn
 import { image_content, video_content } from "std/llm/media"
+import { LlmCallOptions } from "std/llm/options"
 
-let result = llm_call("", nil, {
+let opts: LlmCallOptions = {
   provider: "minimax",
   model: "MiniMax-M3",
   messages: [{
@@ -52,7 +58,8 @@ let result = llm_call("", nil, {
       video_content("demo.mp4"),
     ],
   }],
-})
+}
+let result = llm_call("", nil, opts)
 log(result.text)
 ```
 
@@ -111,6 +118,14 @@ for routes that declare video support. `std/llm/media` also provides
 | `transcript` | dict | Transcript carrying message history, events, summary, metadata, and id |
 
 ### Options dict
+
+Build options through the typed structural alias `LlmCallOptions` (from
+`std/llm/options`) — either annotate a binding
+(`let opts: LlmCallOptions = {...}`) or pass a literal through the
+`llm_options({...})` constructor so unknown keys are rejected at check
+time. A raw dict still executes unchanged; the typed path is the
+documented one, and the `unnormalized-options` lint nudges agent-loop
+call sites toward it.
 
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -180,7 +195,10 @@ route_policy = "manual"
 ```
 
 ```harn
-let merged = llm_call(prompt, sys, {model_role: "merge", output_schema: schema})
+import { LlmCallOptions } from "std/llm/options"
+
+let merge_opts: LlmCallOptions = {model_role: "merge", output_schema: schema}
+let merged = llm_call(prompt, sys, merge_opts)
 ```
 
 ```harn
@@ -203,13 +221,17 @@ minutes, and LRU size 256. Use `store: {backend: "fs", namespace, path?}` for
 one-file-per-entry storage. Calls with `tools` bypass the cache by default;
 set `skip_when` to a bool or predicate closure to override that policy.
 
-Provider-specific overrides can be passed as sub-dicts:
+Provider-specific overrides can be passed as sub-dicts (provider-named
+keys ride alongside the typed alias):
 
 ```harn
-let result = llm_call("hello", nil, {
+import { LlmCallOptions } from "std/llm/options"
+
+let opts: LlmCallOptions = {
   provider: "ollama",
-  ollama: {num_ctx: 32768}
-})
+  ollama: {num_ctx: 32768},
+}
+let result = llm_call("hello", nil, opts)
 ```
 
 ### OpenAI Responses mode
@@ -219,7 +241,9 @@ use OpenAI's native Responses API instead of the generic
 `/chat/completions` adapter:
 
 ```harn
-let result = llm_call("Search and summarize current docs.", nil, {
+import { LlmCallOptions } from "std/llm/options"
+
+let opts: LlmCallOptions = {
   provider: "openai",
   model: "gpt-5.4",
   api_mode: "responses",
@@ -230,7 +254,8 @@ let result = llm_call("Search and summarize current docs.", nil, {
   ],
   truncation: "auto",
   max_tool_calls: 4,
-})
+}
+let result = llm_call("Search and summarize current docs.", nil, opts)
 ```
 
 Use normal Harn `tools` when Harn should execute, approve, and audit a tool or
@@ -245,10 +270,13 @@ whether to feed the compacted provider window back as input.
 Structural experiments can be enabled directly on a call:
 
 ```harn
-let result = llm_call("Instruction\n\nContext block", nil, {
+import { LlmCallOptions } from "std/llm/options"
+
+let experiment_opts: LlmCallOptions = {
   provider: "mock",
   structural_experiment: "prompt_order_permutation(seed: 42)",
-})
+}
+let result = llm_call("Instruction\n\nContext block", nil, experiment_opts)
 ```
 
 For custom transforms, pass a closure (or a `std/experiments.custom(...)`
@@ -264,6 +292,8 @@ validation failure, return just the parsed data" pattern. It wraps
 callsites stop repeating the same four options.
 
 ```harn
+import { LlmCallOptions } from "std/llm/options"
+
 let schema = {
   type: "object",
   required: ["name", "age"],
@@ -272,10 +302,11 @@ let schema = {
     age: {type: "integer"},
   },
 }
+let structured_opts: LlmCallOptions = {provider: "anthropic", system: "You are precise."}
 let person = llm_call_structured(
   "Extract the speaker's name and age from the transcript.",
   schema,
-  {provider: "anthropic", system: "You are precise."},
+  structured_opts,
 )
 log(person.name)
 log(person.age)
@@ -329,7 +360,9 @@ throws on transport or schema failures — `ok: false` plus
 `error_category` distinguishes the failure mode.
 
 ```harn
-let r = llm_call_structured_result(prompt, schema, {
+import { LlmCallOptions } from "std/llm/options"
+
+let result_opts: LlmCallOptions = {
   provider: "auto",
   schema_retries: 2,
   // Optional repair pass — runs only on malformed JSON or
@@ -339,7 +372,8 @@ let r = llm_call_structured_result(prompt, schema, {
     model: "cheapest_over_quality(low)",
     max_tokens: 600,
   },
-})
+}
+let r = llm_call_structured_result(prompt, schema, result_opts)
 if r.ok {
   let person = r.data
   // ...
@@ -436,10 +470,13 @@ Use `llm_completion` for text continuation and fill-in-the-middle generation.
 It lives at the same abstraction level as `llm_call`.
 
 ```harn
-let result = llm_completion("let total = ", ";", nil, {
+import { LlmCallOptions } from "std/llm/options"
+
+let completion_opts: LlmCallOptions = {
   provider: "ollama",
-  model_tier: "small"
-})
+  model_tier: "small",
+}
+let result = llm_completion("let total = ", ";", nil, completion_opts)
 log(result.text)
 ```
 
@@ -464,20 +501,25 @@ llm_budget(1.00)
 log("Remaining: $${llm_budget_remaining()}")
 ```
 
-For per-call controls, pass a `budget` envelope on `llm_call`:
+For per-call controls, pass a `budget` envelope on `llm_call` (the typed
+shape is `LlmBudget` from `std/llm/options`):
 
 ```harn
+import { LlmBudget, LlmCallOptions } from "std/llm/options"
+
+let budget: LlmBudget = {
+  max_cost_usd: 0.001,
+  max_input_tokens: 8000,
+  max_output_tokens: 1024,
+}
+let budgeted_opts: LlmCallOptions = {
+  provider: "openai",
+  model: "gpt-4o",
+  max_tokens: 1024,
+  budget: budget,
+}
 let result = try {
-  llm_call("Summarize this", nil, {
-    provider: "openai",
-    model: "gpt-4o",
-    max_tokens: 1024,
-    budget: {
-      max_cost_usd: 0.001,
-      max_input_tokens: 8000,
-      max_output_tokens: 1024,
-    },
-  })
+  llm_call("Summarize this", nil, budgeted_opts)
 }
 ```
 

@@ -46,7 +46,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`MOD`](#mod--modules-and-exports) | Modules and exports | 6 |
 | [`RMD`](#rmd--reminder-lifecycle) | Reminder lifecycle | 8 |
 | [`SUS`](#sus--suspend--resume-lifecycle) | Suspend / resume lifecycle | 13 |
-| [`LNT`](#lnt--lint-rules) | Lint rules | 59 |
+| [`LNT`](#lnt--lint-rules) | Lint rules | 60 |
 | [`FMT`](#fmt--formatter) | Formatter | 3 |
 | [`IMP`](#imp--import-resolution) | Import resolution | 3 |
 | [`OWN`](#own--ownership-and-mutability) | Ownership and mutability | 4 |
@@ -307,6 +307,7 @@ Lints are not hard errors. The code compiles, but Harn flags the pattern as like
 | [`HARN-LNT-057`](#harn-lnt-057) | ambient net builtin replaced by `harness.net.*` | `bindings/thread-harness-net` | `scope-local` |
 | [`HARN-LNT-058`](#harn-lnt-058) | if / while / guard condition is statically known to always succeed or always fail | — | — |
 | [`HARN-LNT-059`](#harn-lnt-059) | project rule-engine or native lint rule | — | — |
+| [`HARN-LNT-060`](#harn-lnt-060) | inline options dict bypasses the typed option constructors | `types/add-shape-annotation` | `surface-changing` |
 
 ## FMT — Formatter
 
@@ -3264,6 +3265,38 @@ carry a fix surface it as a machine-applicable lint fix.
 - The rule engine: `harn scan`, `harn codemod`, and the `harn-rules` skill.
 - Project rule discovery: `[rules] ruleDirs` and `nativeRuleDirs` in
   `harn.toml`.
+
+### `HARN-LNT-060`
+
+**Category:** `LNT` (Lint rules) &nbsp;·&nbsp; **API stability:** `stable`
+
+inline options dict bypasses the typed option constructors
+
+- **Repair:** `types/add-shape-annotation` &nbsp;·&nbsp; **Safety:** `surface-changing`
+- Annotate the dict with a concrete shape type
+- **See also:** [`HARN-LNT-050`](#harn-lnt-050), [`HARN-LNT-029`](#harn-lnt-029)
+
+#### What it means
+
+`agent_loop` and `workflow_execute` accept large option surfaces. Passing an
+inline dict literal at the call site skips the typed structural aliases
+(`AgentLoopOptions` from `std/agent/options`, `StageSpec` and friends from
+`std/workflow/options`), so option typos and wrongly-typed values are only
+discovered at runtime — or silently ignored.
+
+The dict still executes exactly as before; this lint is a deprecation-level
+nudge toward the single documented path.
+
+#### How to fix
+
+- Bind the options to an annotated `let` first:
+  `let opts: AgentLoopOptions = {...}` then `agent_loop(task, system, opts)`.
+- Or build the options through a typed constructor:
+  `agent_preset(kind, {...})` / `agent_options({...})` from
+  `std/agent/options`, or `workflow_stage_spec({...})` from
+  `std/workflow/options`.
+- Suppress the lint only for throwaway probes and fixtures where the inline
+  dict is the point.
 
 ### `HARN-FMT-001`
 

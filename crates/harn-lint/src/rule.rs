@@ -86,6 +86,7 @@ pub(crate) fn builtin_rules() -> Vec<Box<dyn Rule>> {
         Box::new(PreferOptionalShorthand),
         Box::new(UnnecessaryParentheses),
         Box::new(DeprecatedLlmOptions),
+        Box::new(UnnormalizedOptions),
         Box::new(ReminderLifecycle),
         Box::new(ReminderProviderCount),
         Box::new(ReminderRoleHint),
@@ -198,6 +199,12 @@ program_rule!(
     "deprecated_llm_options",
     ast,
     crate::rules::deprecated_llm_options::check_deprecated_llm_options
+);
+program_rule!(
+    UnnormalizedOptions,
+    "unnormalized-options",
+    ast,
+    crate::rules::unnormalized_options::check_unnormalized_options
 );
 program_rule!(
     ReminderLifecycle,
