@@ -16,6 +16,7 @@
 //! on top.
 
 pub mod discovery;
+pub mod evidence;
 pub mod frontmatter;
 pub mod runtime;
 pub mod source;
@@ -24,6 +25,11 @@ pub mod substitute;
 use std::path::{Path, PathBuf};
 
 pub use discovery::{DiscoveryOptions, DiscoveryReport, LayeredDiscovery, Shadowed};
+pub use evidence::{
+    build_activation_evidence, fit_catalog, CatalogFit, SkillActivationEvidence,
+    SkillBodyLifecycle, SkillCardEvidence, SkillCardInput, SkillMatchEvidence, SkillOmittedReason,
+    CATALOG_HEADER, SKILL_ACTIVATION_EVIDENCE_SCHEMA_VERSION,
+};
 pub use frontmatter::{parse_frontmatter, split_frontmatter, ParsedFrontmatter, SkillManifest};
 pub use runtime::{
     clear_current_skill_registry, current_skill_registry, install_current_skill_registry,

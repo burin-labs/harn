@@ -25,7 +25,12 @@ The companion language form — `skill NAME { ... }` — is documented in
 [Language basics](./language-basics.md) and the skill builtins
 (`skill_registry`, `skill_define`, `skill_find`, `skill_list`,
 `skill_render`, `load_skill`, `skills_catalog_entries`,
-`render_always_on_catalog`, …) in [Builtin functions](./builtins.md).
+`render_always_on_catalog`, `skills_activation_evidence`, …) in
+[Builtin functions](./builtins.md).
+
+The stable, host-consumable record of *which cards were shown or omitted and
+why* — for Burin, headless runs, cloud, and the portal — is documented in
+[Skill activation evidence](./skill-activation-evidence.md).
 
 ## Layered discovery
 

@@ -355,6 +355,28 @@ fn record_skill_loaded_event(
     metadata.insert("skill_id".to_string(), serde_json::json!(skill_id));
     metadata.insert("signed".to_string(), serde_json::json!(signed));
     metadata.insert("trusted".to_string(), serde_json::json!(trusted));
+    // Lifecycle + costing fields so a host can audit `eligible` vs `loaded`
+    // vs `used` from this event alone, matching the activation-evidence
+    // contract, instead of re-deriving them from prompt text.
+    metadata.insert(
+        "lifecycle".to_string(),
+        serde_json::json!(if error.is_some() { "omitted" } else { "loaded" }),
+    );
+    if let Some(source) = entry.get("source").map(VmValue::display) {
+        if !source.is_empty() {
+            metadata.insert("source".to_string(), serde_json::json!(source));
+        }
+    }
+    metadata.insert(
+        "disable_model_invocation".to_string(),
+        serde_json::json!(vm_bool_field(entry, "disable_model_invocation")),
+    );
+    metadata.insert(
+        "token_estimate".to_string(),
+        serde_json::json!(crate::orchestration::estimate_chunk_tokens(
+            &body_from_entry(entry)
+        )),
+    );
     if let Some(provenance) = provenance {
         for key in [
             "status",

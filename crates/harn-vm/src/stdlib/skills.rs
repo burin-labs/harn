@@ -56,6 +56,30 @@ fn vm_skill_entry_id(entry: &crate::value::DictMap) -> String {
     }
 }
 
+/// The card description a skill entry projects: prefer `short`, fall back to
+/// `description`. Shared by the catalog projection and the always-on renderer
+/// so both agree on which field the model sees.
+fn skill_card_description(entry: &crate::value::DictMap) -> String {
+    entry
+        .get("short")
+        .map(|v| v.display())
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            entry
+                .get("description")
+                .map(|v| v.display())
+                .filter(|value| !value.is_empty())
+        })
+        .unwrap_or_default()
+}
+
+fn skill_card_when_to_use(entry: &crate::value::DictMap) -> String {
+    entry
+        .get("when_to_use")
+        .map(|v| v.display())
+        .unwrap_or_default()
+}
+
 fn vm_skill_catalog_entries(skills: &[VmValue]) -> Vec<VmValue> {
     let mut catalog: Vec<(String, VmValue)> = Vec::new();
     for skill in skills {
@@ -66,25 +90,10 @@ fn vm_skill_catalog_entries(skills: &[VmValue]) -> Vec<VmValue> {
         if id.is_empty() {
             continue;
         }
-        let description = entry
-            .get("short")
-            .map(|v| v.display())
-            .filter(|value| !value.is_empty())
-            .or_else(|| {
-                entry
-                    .get("description")
-                    .map(|v| v.display())
-                    .filter(|value| !value.is_empty())
-            })
-            .unwrap_or_default();
-        let when_to_use = entry
-            .get("when_to_use")
-            .map(|v| v.display())
-            .unwrap_or_default();
         let mut rendered = BTreeMap::new();
         rendered.put_str("name", id.as_str());
-        rendered.put_str("description", description.as_str());
-        rendered.put_str("when_to_use", when_to_use.as_str());
+        rendered.put_str("description", skill_card_description(entry).as_str());
+        rendered.put_str("when_to_use", skill_card_when_to_use(entry).as_str());
         catalog.push((id, VmValue::dict(rendered)));
     }
     catalog.sort_by(|a, b| a.0.cmp(&b.0));
@@ -167,26 +176,14 @@ fn who_signed_entry(entry: &crate::value::DictMap) -> VmValue {
     VmValue::dict(out)
 }
 
-fn render_catalog_entry(entry: &crate::value::DictMap) -> Option<String> {
-    let name = entry.get("name").map(|v| v.display()).unwrap_or_default();
+/// Render one catalog card block (`- \`id\`: description` plus an optional
+/// `when:` line). Shared by the prompt renderer and the activation-evidence
+/// builder so a card's text — and therefore its budget cost — is computed in
+/// exactly one place.
+fn render_catalog_block(name: &str, description: &str, when_to_use: &str) -> Option<String> {
     if name.is_empty() {
         return None;
     }
-    let description = entry
-        .get("short")
-        .map(|v| v.display())
-        .filter(|value| !value.is_empty())
-        .or_else(|| {
-            entry
-                .get("description")
-                .map(|v| v.display())
-                .filter(|value| !value.is_empty())
-        })
-        .unwrap_or_default();
-    let when_to_use = entry
-        .get("when_to_use")
-        .map(|v| v.display())
-        .unwrap_or_default();
     let mut lines = Vec::new();
     if description.is_empty() {
         lines.push(format!("- `{name}`"));
@@ -199,19 +196,21 @@ fn render_catalog_entry(entry: &crate::value::DictMap) -> Option<String> {
     Some(lines.join("\n"))
 }
 
+fn render_catalog_entry(entry: &crate::value::DictMap) -> Option<String> {
+    let name = entry.get("name").map(|v| v.display()).unwrap_or_default();
+    render_catalog_block(
+        &name,
+        &skill_card_description(entry),
+        &skill_card_when_to_use(entry),
+    )
+}
+
 fn render_catalog(entries: &[VmValue], budget: usize) -> String {
-    let header = concat!(
-        "## Available skills\n\n",
-        "These skills are available. Call `load_skill({ name: \"<skill-id>\" })` to load the full body of a skill when it becomes relevant.\n\n",
-    );
+    let header = crate::skills::CATALOG_HEADER;
     if entries.is_empty() {
         return format!("{header}(none)");
     }
-
-    let omission_template = "\n\n... 1 more skill(s) omitted to stay within budget.";
-    let budget = budget.max(header.len() + omission_template.len());
     let mut blocks = Vec::new();
-
     for entry in entries {
         let Some(dict) = entry.as_dict() else {
             continue;
@@ -224,50 +223,7 @@ fn render_catalog(entries: &[VmValue], budget: usize) -> String {
     if blocks.is_empty() {
         return format!("{header}(none)");
     }
-
-    let mut visible = 0usize;
-    let mut rendered = String::from(header);
-    while visible < blocks.len() {
-        let candidate_len = rendered.len()
-            + if visible == 0 {
-                blocks[visible].len()
-            } else {
-                1 + blocks[visible].len()
-            };
-        if candidate_len > budget {
-            break;
-        }
-        if visible > 0 {
-            rendered.push('\n');
-        }
-        rendered.push_str(&blocks[visible]);
-        visible += 1;
-    }
-
-    let mut omitted = blocks.len().saturating_sub(visible);
-    if omitted > 0 {
-        loop {
-            let suffix = format!("\n\n... {omitted} more skill(s) omitted to stay within budget.");
-            if rendered.len() + suffix.len() <= budget {
-                rendered.push_str(&suffix);
-                break;
-            }
-            if visible == 0 {
-                break;
-            }
-            visible -= 1;
-            omitted += 1;
-            rendered = String::from(header);
-            for (index, block) in blocks.iter().take(visible).enumerate() {
-                if index > 0 {
-                    rendered.push('\n');
-                }
-                rendered.push_str(block);
-            }
-        }
-    }
-
-    rendered
+    crate::skills::fit_catalog(header, &blocks, budget).rendered
 }
 
 pub(crate) fn register_skill_builtins(vm: &mut Vm) {
@@ -524,6 +480,252 @@ fn render_always_on_catalog_impl(args: &[VmValue], _out: &mut String) -> Result<
     };
     let rendered = render_catalog(&entries, budget);
     Ok(VmValue::String(arcstr::ArcStr::from(rendered.as_str())))
+}
+
+fn entry_disable_model_invocation(entry: &crate::value::DictMap) -> bool {
+    matches!(
+        entry.get("disable_model_invocation"),
+        Some(VmValue::Bool(true))
+    ) || matches!(
+        entry.get("disable-model-invocation"),
+        Some(VmValue::Bool(true))
+    )
+}
+
+/// Promote any matched evidence a host merged onto the entry (`score` +
+/// `reason`/`trigger`) so it rides on the payload instead of the prompt text.
+fn skill_match_evidence(
+    entry: &crate::value::DictMap,
+) -> Option<crate::skills::SkillMatchEvidence> {
+    let score = match entry.get("score") {
+        Some(VmValue::Float(value)) => Some(*value),
+        Some(VmValue::Int(value)) => Some(*value as f64),
+        _ => None,
+    };
+    let reason = entry
+        .get("reason")
+        .or_else(|| entry.get("trigger"))
+        .map(|value| value.display())
+        .filter(|value| !value.is_empty());
+    if score.is_none() && reason.is_none() {
+        return None;
+    }
+    Some(crate::skills::SkillMatchEvidence {
+        score: score.unwrap_or(0.0),
+        reason: reason.unwrap_or_default(),
+    })
+}
+
+/// Build the structured activation evidence from a skill registry's entries,
+/// reusing the same catalog projection, card rendering, and budget fit the
+/// prompt renderer uses. `catalog_limit` mirrors the loop's `catalog_limit`
+/// (entries past it render as `omitted` with a `catalog_limit` reason);
+/// `loaded` / `used` fold in the runtime lifecycle a host already tracks.
+fn build_registry_evidence(
+    skills: &[VmValue],
+    budget: usize,
+    catalog_limit: Option<usize>,
+    loaded: &[String],
+    used: &[String],
+) -> crate::skills::SkillActivationEvidence {
+    let mut entries: Vec<(String, &crate::value::DictMap)> = Vec::new();
+    for skill in skills {
+        let Some(entry) = skill.as_dict() else {
+            continue;
+        };
+        let id = vm_skill_entry_id(entry);
+        if id.is_empty() {
+            continue;
+        }
+        entries.push((id, entry));
+    }
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let matchable_ids: Vec<String> = entries
+        .iter()
+        .filter(|(_, entry)| !entry_disable_model_invocation(entry))
+        .map(|(id, _)| id.clone())
+        .collect();
+    let in_catalog: std::collections::BTreeSet<String> = match catalog_limit {
+        Some(limit) => matchable_ids.into_iter().take(limit).collect(),
+        None => matchable_ids.into_iter().collect(),
+    };
+
+    let inputs: Vec<crate::skills::SkillCardInput> = entries
+        .iter()
+        .map(|(id, entry)| {
+            let description = skill_card_description(entry);
+            let when_to_use = skill_card_when_to_use(entry);
+            let block = render_catalog_block(id, &description, &when_to_use).unwrap_or_default();
+            let disable = entry_disable_model_invocation(entry);
+            let name = entry
+                .get("name")
+                .map(|value| value.display())
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| id.clone());
+            let source = entry
+                .get("source")
+                .map(|value| value.display())
+                .filter(|value| !value.is_empty());
+            crate::skills::SkillCardInput {
+                id: id.clone(),
+                name,
+                source,
+                description,
+                when_to_use,
+                disable_model_invocation: disable,
+                block,
+                in_catalog: !disable && in_catalog.contains(id),
+                matched: skill_match_evidence(entry),
+            }
+        })
+        .collect();
+
+    crate::skills::build_activation_evidence(&inputs, budget, loaded, used)
+}
+
+fn string_list(values: &[String]) -> VmValue {
+    VmValue::List(std::sync::Arc::new(
+        values
+            .iter()
+            .map(|value| VmValue::String(arcstr::ArcStr::from(value.as_str())))
+            .collect(),
+    ))
+}
+
+fn card_evidence_to_vm(card: &crate::skills::SkillCardEvidence) -> VmValue {
+    let mut out = BTreeMap::new();
+    out.put_str("id", card.id.as_str());
+    out.put_str("name", card.name.as_str());
+    out.put_opt_str("source", card.source.as_deref());
+    out.put_str("description", card.description.as_str());
+    out.put_str("when_to_use", card.when_to_use.as_str());
+    out.put_bool("disable_model_invocation", card.disable_model_invocation);
+    out.put_bool("selected", card.selected);
+    out.put_opt_str(
+        "omitted_reason",
+        card.omitted_reason.map(|reason| reason.label()),
+    );
+    out.insert(
+        "char_estimate".to_string(),
+        VmValue::Int(card.char_estimate as i64),
+    );
+    out.insert(
+        "token_estimate".to_string(),
+        VmValue::Int(card.token_estimate as i64),
+    );
+    out.put_str("lifecycle", card.lifecycle.label());
+    match &card.matched {
+        Some(matched) => {
+            let mut matched_dict = BTreeMap::new();
+            matched_dict.insert("score".to_string(), VmValue::Float(matched.score));
+            matched_dict.put_str("reason", matched.reason.as_str());
+            out.insert("matched".to_string(), VmValue::dict(matched_dict));
+        }
+        None => {
+            out.insert("matched".to_string(), VmValue::Nil);
+        }
+    }
+    VmValue::dict(out)
+}
+
+fn evidence_to_vm(evidence: &crate::skills::SkillActivationEvidence) -> VmValue {
+    let mut out = BTreeMap::new();
+    out.put_str("_type", "skill_activation_evidence");
+    out.insert(
+        "schema_version".to_string(),
+        VmValue::Int(evidence.schema_version as i64),
+    );
+    out.insert(
+        "budget_chars".to_string(),
+        VmValue::Int(evidence.budget_chars as i64),
+    );
+    out.insert(
+        "used_chars".to_string(),
+        VmValue::Int(evidence.used_chars as i64),
+    );
+    out.insert(
+        "budget_tokens".to_string(),
+        VmValue::Int(evidence.budget_tokens as i64),
+    );
+    out.insert(
+        "used_tokens".to_string(),
+        VmValue::Int(evidence.used_tokens as i64),
+    );
+    out.insert("shown".to_string(), string_list(&evidence.shown));
+    out.insert("omitted".to_string(), string_list(&evidence.omitted));
+    out.insert(
+        "cards".to_string(),
+        VmValue::List(std::sync::Arc::new(
+            evidence.cards.iter().map(card_evidence_to_vm).collect(),
+        )),
+    );
+    VmValue::dict(out)
+}
+
+fn parse_string_list(value: Option<&VmValue>) -> Vec<String> {
+    match value {
+        Some(VmValue::List(list)) => list.iter().map(|item| item.display()).collect(),
+        _ => Vec::new(),
+    }
+}
+
+#[harn_builtin(
+    sig = "skills_activation_evidence(registry: dict, options?: dict) -> dict",
+    category = "skills"
+)]
+fn skills_activation_evidence_impl(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let registry = match args.first() {
+        Some(VmValue::Dict(map)) => map,
+        _ => {
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                "skills_activation_evidence: requires a skill registry",
+            ))));
+        }
+    };
+    vm_validate_registry("skills_activation_evidence", registry)?;
+
+    let options = match args.get(1) {
+        Some(VmValue::Dict(map)) => Some(map),
+        Some(VmValue::Nil) | None => None,
+        Some(_) => {
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                "skills_activation_evidence: second argument must be an options dict",
+            ))));
+        }
+    };
+    let budget = match options.and_then(|opts| opts.get("budget")) {
+        Some(VmValue::Int(value)) if *value > 0 => *value as usize,
+        Some(VmValue::Nil) | None => 2000usize,
+        Some(_) => {
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                "skills_activation_evidence: 'budget' must be a positive integer",
+            ))));
+        }
+    };
+    let catalog_limit = match options.and_then(|opts| opts.get("catalog_limit")) {
+        Some(VmValue::Int(value)) if *value > 0 => Some(*value as usize),
+        Some(VmValue::Nil) | None => None,
+        Some(_) => {
+            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                "skills_activation_evidence: 'catalog_limit' must be a positive integer",
+            ))));
+        }
+    };
+    let loaded = parse_string_list(options.and_then(|opts| opts.get("loaded")));
+    let used = parse_string_list(options.and_then(|opts| opts.get("used")));
+
+    let evidence = build_registry_evidence(
+        vm_get_skills(registry),
+        budget,
+        catalog_limit,
+        &loaded,
+        &used,
+    );
+    Ok(evidence_to_vm(&evidence))
 }
 
 #[harn_builtin(
@@ -817,6 +1019,7 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &SKILLS_CATALOG_ENTRIES_IMPL_DEF,
     &SKILL_WHO_SIGNED_IMPL_DEF,
     &RENDER_ALWAYS_ON_CATALOG_IMPL_DEF,
+    &SKILLS_ACTIVATION_EVIDENCE_IMPL_DEF,
     &SKILL_FIND_IMPL_DEF,
     &SKILL_SELECT_IMPL_DEF,
     &SKILL_DESCRIBE_IMPL_DEF,
