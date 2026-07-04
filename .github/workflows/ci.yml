@@ -32,15 +32,16 @@ jobs:
   # to run at all.
   #
   # SAFETY PRINCIPLE — prune for PR fast feedback, run comprehensive on the
-  # merge-queue speculative commit and the post-merge backstop. Coarse
+  # merge-queue speculative commit. Coarse
   # path-filtering is sound for `pull_request` events: a PR that touches only
   # docs/website/markdown cannot regress the Rust build, so the ~45 paid
   # Linux-min those four matrix lanes cost are pure waste. But the merge queue
   # (`merge_group`) builds a speculative merge commit (target + earlier-queued
   # PRs + this PR) and is the ONLY place a cross-PR interaction regression is
-  # caught; `push` to main is the post-merge backstop. On those events we MUST
-  # NOT prune — the `force` step below overrides the filter to `'true'` on
-  # `merge_group` / `push`. Do not wire the downstream `if:`s back to the raw
+  # caught. On that event we MUST NOT prune — the `force` step below overrides
+  # the filter to `'true'` on `merge_group`. Release metadata-only push events
+  # are bookkeeping for a tree the merge queue already tested, so keep them on
+  # the cheap lanes. Do not wire the downstream `if:`s back to the raw
   # `steps.filter.outputs.*`; they must read `steps.force.outputs.*`.
   #
   # The filter is an EXCLUSION list with `predicate-quantifier: every`: a file
@@ -79,6 +80,7 @@ jobs:
           PR_HEAD_REF: ${{ github.event.pull_request.head.ref || '' }}
           PR_BASE_REF: ${{ github.event.pull_request.base.ref || '' }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          BEFORE_SHA: ${{ github.event.before || '' }}
         run: |
           set -euo pipefail
           release_metadata_only=false
@@ -102,31 +104,46 @@ jobs:
             else
               echo "::notice::Could not diff release PR against its base; keeping heavy PR-head lanes enabled."
             fi
+          elif [[ "$EVENT_NAME" == "push" ]]; then
+            changed_files="$RUNNER_TEMP/release-metadata-changed-files.txt"
+
+            if [[ -n "$BEFORE_SHA" && "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ]] \
+              && git diff --name-only "$BEFORE_SHA" HEAD > "$changed_files"; then
+              echo "Push changed files:"
+              sed 's/^/  /' "$changed_files"
+              if [[ "$(./scripts/ci_release_metadata_only.sh "$changed_files")" == "true" ]]; then
+                release_metadata_only=true
+              fi
+            else
+              echo "::notice::Could not diff push against its before SHA; keeping heavy push lanes enabled."
+            fi
           fi
 
           echo "release_metadata_only=$release_metadata_only" >> "$GITHUB_OUTPUT"
           echo "release metadata only: $release_metadata_only"
-      - name: Resolve heavy-lane gate (force on merge_group / push)
+      - name: Resolve heavy-lane gate
         id: force
         # `pull_request`: honour the paths filter — a docs/website/markdown-only
         #   PR skips the heavy Linux Rust lanes for fast, cheap feedback. A
         #   release/vX.Y.Z PR whose diff is only release metadata also skips
         #   those PR-head lanes because `release_harn` already ran the release
-        #   audit locally; merge_group / push below remain full backstops.
-        # `merge_group` / `push`: force `rust=true` — the speculative merge
-        #   commit and the post-merge backstop must run the full suite so a
-        #   cross-PR interaction regression can't slip the queue.
+        #   audit locally; merge_group below remains the full backstop.
+        # `merge_group`: force `rust=true` — the speculative merge commit must
+        #   run the full suite so a cross-PR interaction regression can't slip
+        #   the queue.
+        # `push`: honour release metadata-only detection so a merge queue-tested
+        #   release bookkeeping merge does not rerun the full Rust suite.
         env:
-          FORCE_ALL: ${{ github.event_name == 'merge_group' || github.event_name == 'push' }}
+          FORCE_MERGE_GROUP: ${{ github.event_name == 'merge_group' }}
           F_RUST: ${{ steps.filter.outputs.rust }}
           RELEASE_METADATA_ONLY: ${{ steps.release_metadata.outputs.release_metadata_only }}
         run: |
           set -euo pipefail
-          if [ "${FORCE_ALL}" = "true" ]; then
-            echo "::notice::changes: ${GITHUB_EVENT_NAME} — forcing heavy Linux Rust lanes on (merge-queue / post-merge backstop is never pruned)"
+          if [ "${FORCE_MERGE_GROUP}" = "true" ]; then
+            echo "::notice::changes: ${GITHUB_EVENT_NAME} — forcing heavy Linux Rust lanes on (merge queue is never pruned)"
             echo "rust=true" >> "$GITHUB_OUTPUT"
           elif [ "${RELEASE_METADATA_ONLY}" = "true" ]; then
-            echo "::notice::changes: release metadata-only PR — skipping heavy Linux Rust lanes until merge-queue / post-merge backstop"
+            echo "::notice::changes: release metadata-only ${GITHUB_EVENT_NAME} — skipping heavy Linux Rust lanes"
             echo "rust=false" >> "$GITHUB_OUTPUT"
           else
             echo "::notice::changes: ${GITHUB_EVENT_NAME} — heavy Linux Rust lanes gated by paths filter (rust=${F_RUST})"
@@ -164,8 +181,8 @@ jobs:
     name: ${{ matrix.name }}
     needs: changes
     # Heavy Linux Rust lanes. Skipped on a docs/website/markdown-only PR; forced
-    # on for merge_group / push (see the `changes` job). ci-status treats a skip
-    # here as PASS so branch protection isn't deadlocked.
+    # on for merge_group and non-metadata pushes (see the `changes` job).
+    # ci-status treats a skip here as PASS so branch protection isn't deadlocked.
     if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     # Linux-only: emit line-tables-only debuginfo for dev builds. Trims link
@@ -264,13 +281,13 @@ jobs:
           make lint-no-rust-prompt-prose
           cargo clippy --workspace --all-targets -- -D warnings
       # SAFETY PRINCIPLE — prune for PR fast feedback, run the FULL suite on
-      # the merge queue and post-merge backstop (#2663). On `pull_request`
+      # the merge queue and non-metadata push backstop (#2663). On `pull_request`
       # events we run only the tests in crates affected by the diff, expanded
       # by the reverse-dependency closure (a change to crate X must test X and
       # everything that depends on X). On `merge_group` (the speculative merge
       # commit — the ONLY place a cross-PR interaction regression is caught)
-      # and `push` to main (post-merge backstop) we run the WHOLE workspace
-      # unconditionally — never prune those. Global changes (Cargo.lock,
+      # and non-metadata `push` to main we run the WHOLE workspace
+      # unconditionally. Global changes (Cargo.lock,
       # .cargo/, toolchain, this workflow) auto-fall-back to the full
       # workspace inside `scripts/affected-crates.py`.
       - name: Run affected-crate tests (PR fast feedback)
@@ -289,7 +306,7 @@ jobs:
           # merge-base for the diff.
           git fetch --no-tags origin "$BASE_REF"
           make test-affected
-      - name: Run full test suite (merge queue + push backstop)
+      - name: Run full test suite (merge queue + non-metadata push backstop)
         if: matrix.kind == 'test' && github.event_name != 'pull_request'
         env:
           NEXTEST_PROFILE: ci
@@ -485,9 +502,9 @@ jobs:
               run_windows=true
             else
               cat "$RUNNER_TEMP/windows-changed-files.txt"
-              if [[ "$EVENT_NAME" == "pull_request" && "$PR_HEAD_REF" =~ ^release/v[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+              if [[ ( "$EVENT_NAME" == "pull_request" && "$PR_HEAD_REF" =~ ^release/v[0-9]+\.[0-9]+\.[0-9]+$ ) || "$EVENT_NAME" == "push" ]] \
                 && [[ "$(./scripts/ci_release_metadata_only.sh "$RUNNER_TEMP/windows-changed-files.txt")" == "true" ]]; then
-                echo "windows: release metadata-only PR; skipping Windows smoke until merge-queue / post-merge backstop."
+                echo "windows: release metadata-only $EVENT_NAME; skipping Windows smoke."
               elif grep -E -q "$windows_pattern" "$RUNNER_TEMP/windows-changed-files.txt"; then
                 run_windows=true
               fi
@@ -504,9 +521,9 @@ jobs:
     needs: windows-plan
     # Windows coverage stays off the default PR / merge-queue path, but runs
     # before merge for Windows-sensitive process, sandbox, workflow, and release
-    # smoke changes. Other PRs still rely on the main-push backstop plus the
-    # full windows-nightly.yml surface so routine edits avoid the 15-25 minute
-    # Windows compile long pole.
+    # smoke changes. Other PRs still rely on the non-metadata main-push
+    # backstop plus the full windows-nightly.yml surface so routine edits avoid
+    # the 15-25 minute Windows compile long pole.
     if: needs.windows-plan.outputs.run_windows == 'true'
     # Drop sccache on the Windows job. PR #2114 documented 0% cache-hit
     # rate on the harn-vm Windows compile plus periodic `os error 10054`
@@ -671,9 +688,9 @@ jobs:
               run_macos=true
             else
               cat "$RUNNER_TEMP/macos-changed-files.txt"
-              if [[ "$EVENT_NAME" == "pull_request" && "$PR_HEAD_REF" =~ ^release/v[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+              if [[ ( "$EVENT_NAME" == "pull_request" && "$PR_HEAD_REF" =~ ^release/v[0-9]+\.[0-9]+\.[0-9]+$ ) || "$EVENT_NAME" == "push" ]] \
                 && [[ "$(./scripts/ci_release_metadata_only.sh "$RUNNER_TEMP/macos-changed-files.txt")" == "true" ]]; then
-                echo "macos: release metadata-only PR; skipping macOS check until merge-queue / post-merge backstop."
+                echo "macos: release metadata-only $EVENT_NAME; skipping macOS check."
               elif grep -E -q "$macos_pattern" "$RUNNER_TEMP/macos-changed-files.txt"; then
                 run_macos=true
               fi
