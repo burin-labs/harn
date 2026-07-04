@@ -1,0 +1,65 @@
+/**
+ * Merge annotations carried directly on a tool registry entry. Entry-local
+ * metadata overrides entry policy defaults.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_tool_entry_annotations(entry) {
+  if type_of(entry) != "dict" {
+    return {}
+  }
+  var annotations = {}
+  let policy = entry?.policy
+  if type_of(policy) == "dict" {
+    annotations = annotations + policy
+  }
+  let direct = entry?.annotations
+  if type_of(direct) == "dict" {
+    annotations = annotations + direct
+  }
+  let func = entry?.function
+  if type_of(func) == "dict" && type_of(func?.policy) == "dict" {
+    annotations = annotations + func.policy
+  }
+  if type_of(func) == "dict" && type_of(func?.annotations) == "dict" {
+    annotations = annotations + func.annotations
+  }
+  return annotations
+}
+
+/**
+ * Return policy-level annotations for one tool name. Empty or malformed
+ * policy annotation maps are ignored.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_tool_policy_annotations(policy, tool_name) {
+  if type_of(policy) != "dict" {
+    return {}
+  }
+  let registry = policy?.tool_annotations ?? policy?.toolAnnotations ?? {}
+  if type_of(registry) != "dict" {
+    return {}
+  }
+  let annotations = registry[tool_name]
+  if type_of(annotations) == "dict" {
+    return annotations
+  }
+  return {}
+}
+
+/**
+ * Merge policy-level annotations with registry-entry annotations. Policy
+ * annotations provide defaults; direct registry metadata wins.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_tool_annotations(entry, policy, tool_name) {
+  return agent_tool_policy_annotations(policy, tool_name) + agent_tool_entry_annotations(entry)
+}

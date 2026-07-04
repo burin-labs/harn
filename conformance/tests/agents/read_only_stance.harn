@@ -60,6 +60,29 @@ fn stance_tools() {
   return tools
 }
 
+fn policy_annotated_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "inspect",
+    "inspect project state",
+    {parameters: {}, handler: { _args -> "state" }},
+  )
+  tools = tool_define(
+    tools,
+    "mutate",
+    "mutate project state",
+    {parameters: {}, handler: { _args -> "mutated" }},
+  )
+  tools = tool_define(
+    tools,
+    "unknown",
+    "unannotated project tool",
+    {parameters: {}, handler: { _args -> "?" }},
+  )
+  return tools
+}
+
 /**
  * Deterministic consent check: grant only when the justification cites
  * explicit user consent (stands in for the default LLM verdict).
@@ -122,8 +145,52 @@ pipeline default() {
       __io_println(contains(phases, "disarmed"))
     },
   )
+  with_llm_script(
+    [
+      {
+        tool_calls: [{id: "policy-esc-1", name: "request_write_access", arguments: {justification: "I want to edit"}}],
+      },
+      {text: "done ##DONE##"},
+    ],
+    { ->
+      let session = "read-only-stance-policy-" + uuid()
+      let captured = agent_capture_events(
+        session,
+        fn() { return agent_loop(
+          "inspect only",
+          nil,
+          {
+            provider: "mock",
+            tools: policy_annotated_tools(),
+            tool_format: "native",
+            loop_until_done: true,
+            session_id: session,
+            policy: {
+              tools: ["inspect", "mutate", "unknown"],
+              tool_annotations: {
+                inspect: {kind: "read", side_effect_level: "read_only"},
+                mutate: {kind: "edit", side_effect_level: "workspace_write"},
+              },
+            },
+            read_only_stance: {enabled: true, armed: true, consent_check: scripted_consent},
+          },
+        ) },
+      )
+      let first_tools = llm_mock_calls()[0].tools
+      __io_println(has_tool(first_tools, "inspect"))
+      __io_println(has_tool(first_tools, "mutate"))
+      __io_println(has_tool(first_tools, "unknown"))
+      __io_println(has_tool(first_tools, "request_write_access"))
+      let policy_phases = events_of(captured.events, "stance_transition").map({ event -> event.phase })
+      __io_println(contains(policy_phases, "write_access_denied"))
+    },
+  )
 }
 // Turn 1: armed window — read-only tools + escape hatch only.
 // Turn 3 request denied (no consent) — still narrowed on turn 3's call.
 // Turn 4: grant landed post-turn — edit is back.
 // Events tell the story: one typed stream, distinguished by phase.
+// Policy annotations are honored when registry entries are host/project tools
+// without direct Harn metadata; missing annotations still fail closed.
+// The escape hatch remains policy-admitted even when the host supplied a
+// restrictive policy.tools list.

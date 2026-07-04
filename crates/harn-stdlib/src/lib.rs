@@ -454,6 +454,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/agent/tool_search.harn"),
     },
     StdlibSource {
+        module: "agent/tool_annotations",
+        source: include_str!("stdlib/agent/tool_annotations.harn"),
+    },
+    StdlibSource {
         module: "agent/turn",
         source: include_str!("stdlib/agent/turn.harn"),
     },
