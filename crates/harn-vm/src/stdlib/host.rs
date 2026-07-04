@@ -1157,6 +1157,14 @@ pub(crate) fn register_host_builtins(vm: &mut Vm) {
     }
 }
 
+pub(crate) fn register_missing_host_builtins(vm: &mut Vm) {
+    for def in MODULE_BUILTINS {
+        if vm.builtin_metadata_for(def.sig.name).is_none() {
+            vm.register_builtin_def(def);
+        }
+    }
+}
+
 #[harn_builtin(
     sig = "host_mock(capability: string, op: string, response_or_config?: any, params?: dict) -> nil",
     category = "host"

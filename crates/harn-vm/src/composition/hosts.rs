@@ -59,6 +59,7 @@ impl ClosureCompositionToolHost {
 impl CompositionToolHost for ClosureCompositionToolHost {
     async fn call(&self, binding: &BindingManifestEntry, input: Value) -> CompositionToolOutput {
         let mut vm = self.ctx.child_vm();
+        crate::stdlib::host::register_missing_host_builtins(&mut vm);
         let args = vec![
             VmValue::String(arcstr::ArcStr::from(binding.name.as_str())),
             crate::json_to_vm_value(&input),
