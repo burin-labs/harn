@@ -196,13 +196,32 @@ pub(super) async fn llm_stream_call_impl(args: Vec<VmValue>) -> Result<VmValue, 
 /// should never crash the agent). Errors are therefore swallowed here. Output
 /// buffered on the transient child VM (e.g. `__io_println` inside the callback)
 /// is drained by the caller via `forward_output`.
-async fn fire_on_delta(child_vm: &mut Vm, on_delta: Option<&VmClosure>, delta: String) {
+///
+/// Swallowing silently *forever* is a debuggability trap, though: a callback
+/// that throws on every token would drop every delta without a trace. So the
+/// first swallowed error per collect is logged once (`warned` latches), which
+/// costs nothing on the happy path and still never alters turn behavior.
+async fn fire_on_delta(
+    child_vm: &mut Vm,
+    on_delta: Option<&VmClosure>,
+    delta: String,
+    warned: &mut bool,
+) {
     let Some(closure) = on_delta else {
         return;
     };
-    let _ = child_vm
+    if let Err(err) = child_vm
         .call_closure_pub(closure, &[VmValue::String(arcstr::ArcStr::from(delta))])
-        .await;
+        .await
+    {
+        if !*warned {
+            *warned = true;
+            crate::events::log_warn(
+                "agent.on_delta",
+                &format!("on_delta callback error (swallowed): {err}"),
+            );
+        }
+    }
 }
 
 /// Shared implementation of `__host_llm_stream_collect`: run one LLM call
@@ -232,6 +251,7 @@ pub(super) async fn llm_stream_collect_impl(
     let mut child_vm = ctx.child_vm();
     let mut deltas_open = true;
     let mut delta_count: usize = 0;
+    let mut warned = false;
     let mut call = Box::pin(api::vm_call_llm_full_streaming(&opts, delta_tx));
 
     let call_result = loop {
@@ -240,7 +260,7 @@ pub(super) async fn llm_stream_collect_impl(
                 match maybe_delta {
                     Some(delta) => {
                         delta_count += 1;
-                        fire_on_delta(&mut child_vm, on_delta.as_deref(), delta).await;
+                        fire_on_delta(&mut child_vm, on_delta.as_deref(), delta, &mut warned).await;
                     }
                     None => deltas_open = false,
                 }
@@ -252,7 +272,7 @@ pub(super) async fn llm_stream_collect_impl(
     // that were buffered while the call arm was being polled.
     while let Ok(delta) = delta_rx.try_recv() {
         delta_count += 1;
-        fire_on_delta(&mut child_vm, on_delta.as_deref(), delta).await;
+        fire_on_delta(&mut child_vm, on_delta.as_deref(), delta, &mut warned).await;
     }
 
     let result = match call_result {
@@ -268,7 +288,13 @@ pub(super) async fn llm_stream_collect_impl(
     // with the full visible text, so harnesses get a uniform "at least one
     // delta, and the concatenation equals the visible text" contract.
     if delta_count == 0 && !result.text.is_empty() {
-        fire_on_delta(&mut child_vm, on_delta.as_deref(), result.text.clone()).await;
+        fire_on_delta(
+            &mut child_vm,
+            on_delta.as_deref(),
+            result.text.clone(),
+            &mut warned,
+        )
+        .await;
     }
 
     ctx.forward_output(&child_vm.take_output());
