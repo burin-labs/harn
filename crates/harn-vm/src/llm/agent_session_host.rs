@@ -1225,8 +1225,9 @@ fn tool_result_message_for_provider(
     // observation is ~800 KB of base64 (the display-string of the ScreenImage),
     // which would bloat every subsequent turn and is redundant once the image
     // itself rides along. A result with no screenshot is byte-identical to before.
+    let _ = is_text_channel;
     match screenshot {
-        Some(image) if !is_text_channel => {
+        Some(image) => {
             let summary = screenshot_result_summary(observation);
             let mut text_block = crate::value::DictMap::new();
             text_block.put_str("type", "text");
@@ -1234,7 +1235,7 @@ fn tool_result_message_for_provider(
             let content = vec![VmValue::dict(text_block), image.clone()];
             msg.put("content", VmValue::List(std::sync::Arc::new(content)));
         }
-        _ => {
+        None => {
             msg.put_str("content", observation);
         }
     }
