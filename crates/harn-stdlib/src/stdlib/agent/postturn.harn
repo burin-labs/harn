@@ -97,12 +97,20 @@ fn __interpret_verdict(verdict) {
       kind: "rich",
       stop: stop,
       stop_reason: verdict?.stop_reason,
+      needs_verify: verdict?.needs_verify,
       message: verdict?.message,
       next_options: verdict?.next_options,
       llm_options: llm_options,
     }
   }
   return {kind: "none"}
+}
+
+fn __post_turn_stop_needs_verify(verdict) {
+  if verdict?.needs_verify == nil {
+    return false
+  }
+  return verdict.needs_verify ? true : false
 }
 
 fn __terminal_callback_verdict(opts, payload) {
@@ -585,9 +593,9 @@ fn __completion_result(opts, payload, stop_reason) {
   return {kind: "break", stop_reason: stop_reason, needs_verify: false, done_judge_due: false}
 }
 
-fn __post_turn_verdict_result(session, opts, verdict, feedback_kind = "post_turn") {
+fn __post_turn_verdict_result(session, _opts, verdict, feedback_kind = "post_turn") {
   if verdict.kind == "stop" {
-    return {kind: "break", stop_reason: "post_turn_stop", needs_verify: opts?.verify_completion != nil}
+    return {kind: "break", stop_reason: "post_turn_stop", needs_verify: false}
   }
   if verdict.kind == "inject" {
     agent_session_inject_feedback(session.session_id, feedback_kind, verdict.message)
@@ -608,7 +616,7 @@ fn __post_turn_verdict_result(session, opts, verdict, feedback_kind = "post_turn
     return {
       kind: "break",
       stop_reason: stop_reason,
-      needs_verify: opts?.verify_completion != nil,
+      needs_verify: __post_turn_stop_needs_verify(verdict),
       next_options: verdict?.next_options,
       llm_options: verdict?.llm_options,
     }
