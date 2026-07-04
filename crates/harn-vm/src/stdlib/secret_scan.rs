@@ -18,6 +18,11 @@ pub struct SecretFinding {
     pub detector: String,
     pub source: String,
     pub title: String,
+    /// Detector precision class (`"high"` for self-identifying token shapes,
+    /// `"heuristic"` for keyword/context matches). Lets consumers pick a policy
+    /// per class — e.g. hard-block only `"high"` findings — without hard-coding
+    /// detector names. See [`crate::secret_patterns::SecretPatternSpec`].
+    pub precision: String,
     pub line: usize,
     pub column_start: usize,
     pub column_end: usize,
@@ -63,6 +68,7 @@ pub fn scan_content(content: &str) -> Vec<SecretFinding> {
                 rule.spec.detector,
                 rule.spec.source,
                 rule.spec.title,
+                rule.spec.precision,
                 mat.start(),
                 mat.end(),
                 mat.as_str(),
@@ -83,6 +89,7 @@ pub fn scan_content(content: &str) -> Vec<SecretFinding> {
             "high-entropy-credential-assignment",
             "trufflehog",
             "High-entropy secret assignment",
+            crate::secret_patterns::PRECISION_HEURISTIC,
             secret.start(),
             secret.end(),
             secret.as_str(),
@@ -152,6 +159,7 @@ pub async fn append_secret_scan_audit<L: EventLog + ?Sized>(
                     "detector": finding.detector,
                     "source": finding.source,
                     "title": finding.title,
+                    "precision": finding.precision,
                     "line": finding.line,
                     "column_start": finding.column_start,
                     "column_end": finding.column_end,
@@ -205,9 +213,12 @@ pub(crate) fn register_secret_scan_builtins(vm: &mut Vm) {
             }
             Some(value) => value.display(),
         };
+        let audit = secret_scan_audit_option(args.get(1))?;
 
         let findings = scan_content(&content);
-        audit_secret_scan_active("stdlib.secret_scan", content.len(), &findings).await;
+        if audit {
+            audit_secret_scan_active("stdlib.secret_scan", content.len(), &findings).await;
+        }
 
         let value = serde_json::to_value(findings)
             .map_err(|error| VmError::Runtime(format!("secret_scan: {error}")))?;
@@ -215,12 +226,40 @@ pub(crate) fn register_secret_scan_builtins(vm: &mut Vm) {
     });
 }
 
+/// Parse the optional `{ audit: bool }` second argument. Audit defaults to
+/// `true` (back-compatible with the one-arg form). Callers on a hot path — e.g.
+/// a per-edit or per-command guard that only needs the catalog-backed findings
+/// — pass `{audit: false}` to skip appending an `audit.secret_scan` event on
+/// every call.
+fn secret_scan_audit_option(value: Option<&VmValue>) -> Result<bool, VmError> {
+    let map = match value {
+        None | Some(VmValue::Nil) => return Ok(true),
+        Some(VmValue::Dict(map)) => map,
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "secret_scan: options must be a dict or nil; got {}",
+                other.type_name()
+            )));
+        }
+    };
+    match map.get("audit") {
+        None | Some(VmValue::Nil) => Ok(true),
+        Some(VmValue::Bool(flag)) => Ok(*flag),
+        Some(other) => Err(VmError::Runtime(format!(
+            "secret_scan: options.audit must be a bool; got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn build_finding(
     content: &str,
     line_starts: &[usize],
     detector: &str,
     source: &str,
     title: &str,
+    precision: &str,
     start_offset: usize,
     end_offset: usize,
     matched: &str,
@@ -231,6 +270,7 @@ fn build_finding(
         detector: detector.to_string(),
         source: source.to_string(),
         title: title.to_string(),
+        precision: precision.to_string(),
         line,
         column_start,
         column_end,
@@ -359,6 +399,27 @@ config = { client_secret: "QWxhZGRpbjpPcGVuU2VzYW1lQWNjZXNzVG9rZW4=" }
         let findings = scan_content(r#"token = "ghp_1234567890abcdefghijklmnopqrstuvwxyzAB""#);
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].detector, "github-token");
+    }
+
+    #[test]
+    fn precision_class_splits_token_shapes_from_keyword_heuristics() {
+        let findings = scan_content(
+            "ghp_1234567890abcdefghijklmnopqrstuvwxyzAB\npassword = \"s3cr3t-value-here\"",
+        );
+        let precision = |detector: &str| {
+            findings
+                .iter()
+                .find(|finding| finding.detector == detector)
+                .map(|finding| finding.precision.as_str())
+        };
+        // A self-identifying token shape is high precision (safe to hard-block).
+        assert_eq!(precision("github-token"), Some("high"));
+        // A keyword/context match is heuristic (redaction-only, over-blocks).
+        assert_eq!(precision("sensitive-assignment"), Some("heuristic"));
+        // Every finding is classified.
+        assert!(findings
+            .iter()
+            .all(|finding| finding.precision == "high" || finding.precision == "heuristic"));
     }
 
     #[test]
