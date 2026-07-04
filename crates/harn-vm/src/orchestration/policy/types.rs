@@ -686,7 +686,12 @@ pub struct RetryPolicy {
     /// {max_chars}` bounds the injected findings. `None` = today's blind
     /// retry (byte-identical replay). Interpreted by the embedded stage loop
     /// in `std/workflow/stage.harn`, not by Rust.
-    #[serde(default)]
+    ///
+    /// `skip_serializing_if` keeps the unset default OUT of serialized
+    /// graphs so pre-existing `WorkflowBundle` graph digests (pinned in
+    /// docs/src/workflow-authoring-quickstart.md and enforced by
+    /// scripts/check_docs_workflow_quickstart.harn) stay byte-stable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub feedback: Option<FeedbackPolicy>,
     /// Retry-with-feedback: an optional Harn closure that receives the full
     /// retry context (`{task, attempt, findings, verification, error,

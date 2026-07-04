@@ -171,12 +171,16 @@ fn workflow_retry_policy_matches_retry_policy() {
         "WorkflowRetryPolicy ↔ RetryPolicy",
         &harn_alias_keys(workflow_options_harn(), "WorkflowRetryPolicy"),
         &serde_default_keys::<RetryPolicy>(),
-        // `repair_prompt_builder` is a real `RetryPolicy` field but carries a
-        // closure, so it is `#[serde(skip)]` and absent from the serialized
-        // default (same pattern as `ModelPolicy::post_turn_callback`). The
-        // bounded `feedback` template is now a serde-visible `RetryPolicy`
-        // field, so it drops out of the allowlist.
-        &["repair_prompt_builder"],
+        // Both retry-with-feedback keys are real, runtime-backed `RetryPolicy`
+        // fields (the embedded stage loop in std/workflow/stage.harn executes
+        // them) that are absent from the serialized *default*:
+        // - `repair_prompt_builder` carries a closure, so it is
+        //   `#[serde(skip)]` (same pattern as `ModelPolicy::post_turn_callback`).
+        // - `feedback` is `skip_serializing_if = Option::is_none` so unset
+        //   policies keep pre-existing WorkflowBundle graph digests
+        //   byte-stable (scripts/check_docs_workflow_quickstart.harn pins
+        //   them).
+        &["repair_prompt_builder", "feedback"],
         &[],
     );
 }
