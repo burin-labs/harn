@@ -1,3 +1,3 @@
 # Harn agents protocol replay contract
 
-{{#include ../../../../agents-protocol-replay/README.md:2:}}
+{{#include ../../../../spec/agents-protocol/replay/README.md:2:}}

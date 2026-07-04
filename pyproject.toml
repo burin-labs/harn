@@ -10,7 +10,6 @@ extend-exclude = [
     "target",
     "node_modules",
     ".claude/worktrees",
-    ".experiments",
     "experiments",
     "playground",
 ]

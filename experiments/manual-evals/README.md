@@ -14,8 +14,8 @@ provider config.
 3. Point harn at the experimental provider config and run an eval, e.g.:
 
    ```sh
-   HARN_PROVIDERS_CONFIG=$(pwd)/.experiments/providers.toml \
-     ./target/debug/harn run .experiments/exp2_sentinel_matrix.harn
+   HARN_PROVIDERS_CONFIG=$(pwd)/experiments/manual-evals/providers.toml \
+     ./target/debug/harn run experiments/manual-evals/exp2_sentinel_matrix.harn
    ```
 
    To capture the full request/response transcript for debugging, also
