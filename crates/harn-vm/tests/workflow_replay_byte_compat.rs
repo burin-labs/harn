@@ -76,8 +76,8 @@ fn normalize_attempt_timestamps(attempts: &mut serde_json::Value) {
     for attempt in attempts.as_array_mut().expect("attempts is an array") {
         let object = attempt.as_object_mut().expect("attempt is an object");
         assert!(
-            object.get("started_at").map(|v| v.is_string()) == Some(true)
-                && object.get("finished_at").map(|v| v.is_string()) == Some(true),
+            object.get("started_at").is_some_and(|v| v.is_string())
+                && object.get("finished_at").is_some_and(|v| v.is_string()),
             "attempt records must carry string started_at/finished_at"
         );
         object.insert("started_at".to_string(), serde_json::json!("<ts>"));
