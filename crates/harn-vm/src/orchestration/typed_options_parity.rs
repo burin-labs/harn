@@ -19,10 +19,26 @@ use serde::Serialize;
 use super::{CompactionPolicy, ModelPolicy, RetryPolicy, StageContract, TurnPolicy, WorkflowNode};
 use crate::llm::cost::LlmBudgetEnvelope;
 
-const LLM_OPTIONS_HARN: &str = include_str!("../../../harn-stdlib/src/stdlib/llm/options.harn");
-const AGENT_OPTIONS_HARN: &str = include_str!("../../../harn-stdlib/src/stdlib/agent/options.harn");
-const WORKFLOW_OPTIONS_HARN: &str =
-    include_str!("../../../harn-stdlib/src/stdlib/workflow/options.harn");
+const LLM_OPTIONS_MODULE: &str = "llm/options";
+const AGENT_OPTIONS_MODULE: &str = "agent/options";
+const WORKFLOW_OPTIONS_MODULE: &str = "workflow/options";
+
+fn stdlib_source(module: &str) -> &'static str {
+    harn_stdlib::get_stdlib_source(module)
+        .unwrap_or_else(|| panic!("stdlib source module `{module}` is embedded"))
+}
+
+fn llm_options_harn() -> &'static str {
+    stdlib_source(LLM_OPTIONS_MODULE)
+}
+
+fn agent_options_harn() -> &'static str {
+    stdlib_source(AGENT_OPTIONS_MODULE)
+}
+
+fn workflow_options_harn() -> &'static str {
+    stdlib_source(WORKFLOW_OPTIONS_MODULE)
+}
 
 /// Extract the top-level keys declared by `type <name> = ... { ... }` in a
 /// Harn source file. Handles optional-key markers (`key?:`), nested inline
@@ -142,7 +158,7 @@ fn assert_key_parity(
 fn llm_budget_matches_llm_budget_envelope() {
     assert_key_parity(
         "LlmBudget ↔ LlmBudgetEnvelope",
-        &harn_alias_keys(LLM_OPTIONS_HARN, "LlmBudget"),
+        &harn_alias_keys(llm_options_harn(), "LlmBudget"),
         &serde_default_keys::<LlmBudgetEnvelope>(),
         &[],
         &[],
@@ -153,7 +169,7 @@ fn llm_budget_matches_llm_budget_envelope() {
 fn workflow_retry_policy_matches_retry_policy() {
     assert_key_parity(
         "WorkflowRetryPolicy ↔ RetryPolicy",
-        &harn_alias_keys(WORKFLOW_OPTIONS_HARN, "WorkflowRetryPolicy"),
+        &harn_alias_keys(workflow_options_harn(), "WorkflowRetryPolicy"),
         &serde_default_keys::<RetryPolicy>(),
         // Retry-with-feedback surface: typed ahead of the stage-loop
         // inversion that executes it (the D5 `repair_prompt_builder`
@@ -167,7 +183,7 @@ fn workflow_retry_policy_matches_retry_policy() {
 fn stage_contract_matches_stage_contract() {
     assert_key_parity(
         "StageContract ↔ StageContract",
-        &harn_alias_keys(WORKFLOW_OPTIONS_HARN, "StageContract"),
+        &harn_alias_keys(workflow_options_harn(), "StageContract"),
         &serde_default_keys::<StageContract>(),
         &[],
         &[],
@@ -178,7 +194,7 @@ fn stage_contract_matches_stage_contract() {
 fn model_policy_spec_matches_model_policy() {
     assert_key_parity(
         "ModelPolicySpec ↔ ModelPolicy",
-        &harn_alias_keys(WORKFLOW_OPTIONS_HARN, "ModelPolicySpec"),
+        &harn_alias_keys(workflow_options_harn(), "ModelPolicySpec"),
         &serde_default_keys::<ModelPolicy>(),
         // `post_turn_callback` is a real ModelPolicy field but carries a
         // closure, so it is `#[serde(skip)]` and absent from the
@@ -192,7 +208,7 @@ fn model_policy_spec_matches_model_policy() {
 fn stage_spec_matches_workflow_node() {
     assert_key_parity(
         "StageSpec ↔ WorkflowNode",
-        &harn_alias_keys(WORKFLOW_OPTIONS_HARN, "StageSpec"),
+        &harn_alias_keys(workflow_options_harn(), "StageSpec"),
         &serde_default_keys::<WorkflowNode>(),
         // `context_assembler` is preserved as a raw VmValue on the Rust
         // side (`raw_context_assembler`, `#[serde(skip)]`) because it can
@@ -206,7 +222,7 @@ fn stage_spec_matches_workflow_node() {
 fn turn_policy_matches_turn_policy() {
     assert_key_parity(
         "TurnPolicy ↔ TurnPolicy",
-        &harn_alias_keys(AGENT_OPTIONS_HARN, "TurnPolicy"),
+        &harn_alias_keys(agent_options_harn(), "TurnPolicy"),
         &serde_default_keys::<TurnPolicy>(),
         &[],
         &[],
@@ -217,7 +233,7 @@ fn turn_policy_matches_turn_policy() {
 fn compaction_policy_matches_compaction_policy() {
     assert_key_parity(
         "CompactionPolicy ↔ CompactionPolicy",
-        &harn_alias_keys(AGENT_OPTIONS_HARN, "CompactionPolicy"),
+        &harn_alias_keys(agent_options_harn(), "CompactionPolicy"),
         &serde_default_keys::<CompactionPolicy>(),
         &[],
         &[],
@@ -230,11 +246,12 @@ fn compaction_policy_matches_compaction_policy() {
 /// must be accepted by the runtime projection.
 #[test]
 fn llm_call_options_keys_are_accepted_by_runtime_projection() {
-    let alias_keys = harn_alias_keys(LLM_OPTIONS_HARN, "LlmCallOptions");
-    let fn_start = LLM_OPTIONS_HARN
+    let source = llm_options_harn();
+    let alias_keys = harn_alias_keys(source, "LlmCallOptions");
+    let fn_start = source
         .find("fn __llm_call_option_keys()")
         .expect("__llm_call_option_keys present");
-    let after_fn = &LLM_OPTIONS_HARN[fn_start..];
+    let after_fn = &source[fn_start..];
     let open = after_fn.find('[').expect("key list opens");
     let close = after_fn.find(']').expect("key list closes");
     let accepted: BTreeSet<String> = after_fn[open + 1..close]
@@ -260,7 +277,7 @@ fn llm_call_options_keys_are_accepted_by_runtime_projection() {
 /// them).
 #[test]
 fn llm_call_options_excludes_deprecated_keys() {
-    let alias_keys = harn_alias_keys(LLM_OPTIONS_HARN, "LlmCallOptions");
+    let alias_keys = harn_alias_keys(llm_options_harn(), "LlmCallOptions");
     for deprecated in ["llm_retries", "llm_backoff_ms"] {
         assert!(
             !alias_keys.contains(deprecated),
@@ -275,8 +292,8 @@ fn llm_call_options_excludes_deprecated_keys() {
 /// This pin keeps the inlined copy a strict superset of `LlmCallOptions`.
 #[test]
 fn agent_loop_options_is_superset_of_llm_call_options() {
-    let llm_keys = harn_alias_keys(LLM_OPTIONS_HARN, "LlmCallOptions");
-    let agent_keys = harn_alias_keys(AGENT_OPTIONS_HARN, "AgentLoopOptions");
+    let llm_keys = harn_alias_keys(llm_options_harn(), "LlmCallOptions");
+    let agent_keys = harn_alias_keys(agent_options_harn(), "AgentLoopOptions");
     let missing: Vec<&String> = llm_keys.difference(&agent_keys).collect();
     assert!(
         missing.is_empty(),
@@ -290,7 +307,7 @@ fn agent_loop_options_is_superset_of_llm_call_options() {
 /// unnoticed by CI even before the conformance suite runs.
 #[test]
 fn stdlib_owned_agent_aliases_declare_load_bearing_keys() {
-    let budget = harn_alias_keys(AGENT_OPTIONS_HARN, "IterationBudget");
+    let budget = harn_alias_keys(agent_options_harn(), "IterationBudget");
     for key in [
         "mode",
         "initial",
@@ -300,15 +317,15 @@ fn stdlib_owned_agent_aliases_declare_load_bearing_keys() {
     ] {
         assert!(budget.contains(key), "IterationBudget lost key `{key}`");
     }
-    let stall = harn_alias_keys(AGENT_OPTIONS_HARN, "StallDiagnostics");
+    let stall = harn_alias_keys(agent_options_harn(), "StallDiagnostics");
     for key in ["enabled", "threshold", "inject_feedback", "max_feedback"] {
         assert!(stall.contains(key), "StallDiagnostics lost key `{key}`");
     }
-    let judge = harn_alias_keys(AGENT_OPTIONS_HARN, "JudgeConfig");
+    let judge = harn_alias_keys(agent_options_harn(), "JudgeConfig");
     for key in ["provider", "model", "max_invocations", "cadence"] {
         assert!(judge.contains(key), "JudgeConfig lost key `{key}`");
     }
-    let loop_options = harn_alias_keys(AGENT_OPTIONS_HARN, "AgentLoopOptions");
+    let loop_options = harn_alias_keys(agent_options_harn(), "AgentLoopOptions");
     for key in [
         "loop_until_done",
         "iteration_budget",

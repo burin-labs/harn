@@ -128,11 +128,11 @@ pipeline default(task) {
     #[test]
     fn severity_is_info_not_warning() {
         let diags = lint(
-            r#"
+            r"
 pipeline default(task) {
     agent_loop(task, nil, {loop_until_done: true})
 }
-"#,
+",
         );
         let diag = diags.iter().find(|d| d.rule == RULE_NAME).unwrap();
         assert_eq!(diag.severity, LintSeverity::Info);
@@ -208,14 +208,14 @@ pipeline default(task) {
     #[test]
     fn triggers_inside_nested_bodies() {
         let diags = lint(
-            r#"
+            r"
 fn helper(task) {
     if true {
         return agent_loop(task, nil, {max_iterations: 3})
     }
     return nil
 }
-"#,
+",
         );
         assert_eq!(count_rule(&diags), 1, "diags: {diags:?}");
     }
