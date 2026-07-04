@@ -209,6 +209,31 @@ pub(super) async fn vm_call_llm_api(
         crate::llm::providers::OpenAiCompatibleProvider::build_request_body(opts, false)
     };
 
+    // TEMP DIAGNOSTIC (env-gated, not for commit): dump the input messages and the
+    // egress body with base64 truncated, to trace where a screenshot image block
+    // is lost between agent_build_turn_messages and the wire.
+    if let Ok(path) = std::env::var("BURIN_DUMP_LLM_BODY") {
+        fn truncate_b64(v: &serde_json::Value) -> serde_json::Value {
+            match v {
+                serde_json::Value::String(s) if s.len() > 120 => {
+                    serde_json::Value::String(format!("<{}chars:{}...>", s.len(), &s[..40]))
+                }
+                serde_json::Value::Array(a) => {
+                    serde_json::Value::Array(a.iter().map(truncate_b64).collect())
+                }
+                serde_json::Value::Object(o) => serde_json::Value::Object(
+                    o.iter().map(|(k, val)| (k.clone(), truncate_b64(val))).collect(),
+                ),
+                other => other.clone(),
+            }
+        }
+        let dump = serde_json::json!({
+            "input_messages": opts.messages.iter().map(truncate_b64).collect::<Vec<_>>(),
+            "egress_body": truncate_b64(&body),
+        });
+        let _ = std::fs::write(&path, serde_json::to_string_pretty(&dump).unwrap_or_default());
+    }
+
     vm_call_llm_api_with_body(opts, delta_tx, body, dialect).await
 }
 
