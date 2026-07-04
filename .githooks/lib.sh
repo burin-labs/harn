@@ -10,7 +10,7 @@ HOOK_HIGHLIGHT_PATTERN='(^crates/harn-lexer/|^crates/harn-stdlib/src/stdlib/|^cr
 HOOK_LANGSPEC_PATTERN='(^spec/chapters/.*\.md$|^spec/HARN_SPEC\.md$|^docs/src/language-spec\.md$|^docs/src/spec/language/.*\.md$|^docs/src/SUMMARY\.md$)'
 HOOK_DIAGCATALOG_PATTERN='(^crates/harn-parser/src/diagnostic_codes(\.rs|/)|^docs/src/diagnostics\.md$|^docs/diagnostics-catalog\.json$)'
 HOOK_SESSION_BUNDLE_SCHEMA_PATTERN='(^crates/harn-vm/src/session_bundle\.rs$|^crates/harn-vm/src/session_bundle/|^crates/harn-cli/src/commands/session\.rs$|^spec/schemas/session-bundle\.v1\.schema\.json$)'
-HOOK_RATCHET_PATTERN='(^crates/harn-vm/src/(llm/|orchestration/(workflow|artifacts|compaction)\.rs$)|^conformance/|^scripts/(allowed_long_strings\.txt|check_no_rust_prompt_prose\.sh|check_rust_prompt_prose\.py|check_xfail_count\.harn|xfail_threshold\.txt)$)'
+HOOK_RATCHET_PATTERN='(^crates/harn-vm/src/(llm/|orchestration/(workflow|artifacts|compaction)\.rs$)|^conformance/|^scripts/(allowed_long_strings\.txt|check_no_rust_prompt_prose\.sh|check_rust_prompt_prose\.harn|check_xfail_count\.harn|xfail_threshold\.txt)$)'
 # Lexer KEYWORDS const <-> tree-sitter keyword mirror.
 HOOK_TREESITTER_PATTERN='(^crates/harn-lexer/src/token\.rs$|^tree-sitter-harn/grammar/keywords\.js$)'
 # The generated-artifact registry and the consumers its audit cross-checks:
@@ -18,7 +18,7 @@ HOOK_TREESITTER_PATTERN='(^crates/harn-lexer/src/token\.rs$|^tree-sitter-harn/gr
 # artifact checks, and the hook logic. Other workflows (for example release
 # binary packaging) do not change generated-artifact coverage and should not
 # pay the full Harn compile needed by check-generated-registry.
-HOOK_GENREGISTRY_PATTERN='(^scripts/generated_artifacts\.toml$|^scripts/check_generated_registry\.harn$|^scripts/check_generated_registry\.py$|^Makefile$|^\.github/workflows/ci\.yml$|^\.githooks/)'
+HOOK_GENREGISTRY_PATTERN='(^scripts/generated_artifacts\.toml$|^scripts/check_generated_registry\.harn$|^Makefile$|^\.github/workflows/ci\.yml$|^\.githooks/)'
 HOOK_HARN_FORMAT_SKIP=' semicolon_statements.harn semicolon_if_else_invalid.harn semicolon_try_catch_invalid.harn semicolon_empty_statement_invalid.harn '
 
 hook_paths_match() {

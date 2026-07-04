@@ -15,14 +15,14 @@
  * `Allow-Retroactive-Changelog: <reason>` trailer in any commit between
  * the base and HEAD. The trailer makes the bypass visible in PR review.
  *
- * Ported from scripts/check_changelog_no_retroactive_edits.py. Runs in the
- * pre-push hook.
+ * Runs in the pre-push hook so local pushes reject retroactive CHANGELOG drift
+ * before CI.
  */
 let CHANGELOG_REL = "CHANGELOG.md"
 
 /**
  * True when `line` is exactly a `## vX.Y.Z` version heading (anchored to the
- * whole line, like Python's `^## v([0-9]+\.[0-9]+\.[0-9]+)$`). Returns the
+ * whole line with exactly three dot-separated numeric parts. Returns the
  * captured version (e.g. "0.8.72"), or nil when the line is not a heading.
  */
 pub fn heading_version(line: string) -> string? {

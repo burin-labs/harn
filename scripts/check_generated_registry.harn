@@ -32,7 +32,7 @@ let AUDIT_GATE_RUNNER = "scripts/audit_gates.sh"
 
 /**
  * True when `c` is a word character ([A-Za-z0-9_]) or a hyphen — the set
- * Python's `(?![\w-])` lookahead forbids immediately after a target name.
+ * a whole-target suffix guard forbids immediately after a target name.
  */
 fn is_word_or_hyphen(c: string) -> bool {
   return c == "-" || c == "_"
@@ -40,8 +40,7 @@ fn is_word_or_hyphen(c: string) -> bool {
 }
 
 /**
- * Faithful port of Python's `whole_target(target).search(text)`: match
- * `target` as a substring not followed by another word char or hyphen.
+ * Match `target` as a substring not followed by another word char or hyphen.
  * Prevents `check-provider-catalog` from matching inside
  * `check-provider-catalog-drift`.
  */
@@ -93,7 +92,7 @@ pub fn makefile_targets(text: string) -> list {
 
 /**
  * Return the recipe body of the `all:` target (its tab-indented lines),
- * joined by newlines. Mirrors Python's make_all_recipe.
+ * joined by newlines.
  */
 pub fn make_all_recipe(text: string) -> string {
   var body = []
@@ -130,16 +129,15 @@ pub fn artifact_flag_errors(
 ) -> list {
   let aid = art?.id ?? "<missing id>"
   var errors = []
-  // ci flag must be honoured by a real workflow reference. (Python's
-  // truthy `if art.get("ci")`: nil or false both skip.)
+  // ci flag follows registry truthiness: nil or false both skip.
   if art?.ci && check != "" && !whole_target_search(check, workflow_text) {
     errors = errors
       + [
       "[${aid}] ci = true but `${check}` is not referenced in any .github/workflows/*.yml — drift here would not fail a PR. Add `make ${check}` to a workflow or set ci = false (with a note).",
     ]
   }
-  // Defensive: a check marked ci=false should not silently be in CI.
-  // (Python's `is False`: only an explicit false, not a missing key.)
+  // Defensive: only an explicit false, not a missing key, means "should not be
+  // in CI".
   if art?.ci != nil && !art?.ci && check != "" && whole_target_search(check, workflow_text) {
     errors = errors
       + [
@@ -162,7 +160,7 @@ pub fn artifact_flag_errors(
 
 /**
  * Completeness: no gen-/sync- or check- Makefile target may escape the
- * registry. `targets` must already be sorted (Python iterates sorted).
+ * registry. `targets` must already be sorted for deterministic diagnostics.
  */
 pub fn completeness_errors(
   targets: list,
@@ -191,7 +189,7 @@ pub fn completeness_errors(
 
 /**
  * Exempt-list hygiene: don't exempt a check that is also a registered
- * artifact check. Mirrors Python's `sorted(exempt & registered_checks)`.
+ * artifact check. Report overlap in sorted order.
  */
 pub fn exempt_hygiene_errors(exempt: list, registered_checks: list) -> list {
   var both = []
@@ -266,8 +264,7 @@ pub fn validate(
 
 /**
  * Concatenate the workflow file contents in sorted repo-relative order
- * (each followed by a newline), matching Python's
- * `for wf in sorted(...): text += wf.read_text() + "\n"`.
+ * (each followed by a newline).
  */
 fn read_workflows() -> string {
   let globbed = harness.fs.glob(WORKFLOWS_GLOB)

@@ -3,7 +3,7 @@
 This repo is dogfooding Harn: maintenance/check/codegen scripts that are pure
 logic (read files, regex, validate, emit diagnostics, exit code) are being
 cut over from Python/Bash to `.harn`. This file tracks what has moved, what is
-queued, and what is intentionally staying in another language.
+intentionally staying in another language.
 
 It is a living tracker, not a spec. When you port a script, move its row to
 **Ported** and delete the original; when you add a new check, add it as a
@@ -31,16 +31,12 @@ It is a living tracker, not a spec. When you port a script, move its row to
 | `check_docs_workflow_quickstart.harn` | `make check-docs-workflow-quickstart` | Pinned digest / executed-node / connector-shape assertions via `spawn_captured` (+`cwd` for the connect demo); parity-verified incl. digest-drift failure. |
 | `check_docs_model_refs.harn` | `make check-docs-model-refs` + `release_gate.sh` | `toml_parse` of `aliases.sonnet` replaces the awk section scan; `regex_captures` line numbers replace `rg -n -o`. |
 | `check_site_snippets.harn` | `make check-site-snippets` | Site + demo-gallery snippet `harn check`; child stdout/stderr streamed through. |
+| `check_changelog_no_retroactive_edits.harn` | `.github/workflows/ci.yml` + pre-push hook | Published-version CHANGELOG guard; bypasses require env/trailer review signal. |
+| `check_rust_prompt_prose.harn` | `scripts/check_no_rust_prompt_prose.sh` + pre-commit hook | Rust prompt-prose ratchet with stable allowlist/digest contract. |
+| `check_generated_registry.harn` | `make check-generated-registry` + pre-push hook | Registry/Makefile/workflow generated-artifact guard. |
 
 Each ported script has a paired `scripts/tests/<name>_test.harn` exercising its
 pure helpers, run by `make test-harn-scripts`.
-
-## Queued / deferred
-
-| Script | State | Why |
-| --- | --- | --- |
-| `check_changelog_no_retroactive_edits.py` | deferred → re-port | Ported + parity-verified, but was ~13s on the 472 KB CHANGELOG (O(n²) list build). Unblocked by the O(1)-accumulator fix; re-port once that's on `main` so its pre-push-hook run is fast. |
-| `check_rust_prompt_prose.py` | deferred → re-port | Same: ported + parity-verified but >49s scanning protected Rust files. Re-port post-O(1)-fix. |
 
 ## Kept in Python — toolchain reason
 
@@ -52,6 +48,7 @@ pure helpers, run by `make test-harn-scripts`.
   crates, to compute the nextest filter. Running it via `cargo run --bin harn`
   would force a multi-minute `harn` build on every PR — including a cold
   Windows build — purely to decide what to test, defeating its entire purpose.
+
 ## Out of scope — stays in its current language
 
 External-toolchain or foreign-artifact reasons; porting would defeat the
