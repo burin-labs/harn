@@ -1,0 +1,85 @@
+// LIVE-shape / registration guard: run a REAL agent_loop with the pace governor
+// wired through the EXISTING post_turn_callback seam, and prove it FIRES on the
+// live agent_compute_post_turn payload (positive case) and does NOT fire when
+// under budget (negative case). This is the anti-"dead converter" contract: the
+// governor reads `iteration` / `session_id` / `successful_tool_names` straight
+// off the live payload, and aborts with `budget_governor:payload_shape_drift` if
+// any of those keys is ever renamed or dropped — so a payload-shape drift flips
+// this baseline (positive stop reason changes, positive run no longer stops at
+// the 2nd turn) instead of the governor silently never firing.
+import { governor_post_turn } from "std/agent/governors"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn noop_tools() {
+  let tools = tool_registry()
+  return tool_define(
+    tools,
+    "noop",
+    "Return the same harmless result",
+    {
+      annotations: {kind: "edit"},
+      handler: { _args -> return "noop" },
+      parameters: {},
+      returns: {type: "string"},
+    },
+  )
+}
+
+pipeline default() {
+  // ---- POSITIVE: budget = 2 iterations, hard stop at 1.0x -> aborts on turn 2 ----
+  with_llm_script(
+    [
+      {text: "", tool_calls: [{arguments: {}, id: "n1", name: "noop"}]},
+      {text: "", tool_calls: [{arguments: {}, id: "n2", name: "noop"}]},
+      {text: "", tool_calls: [{arguments: {}, id: "n3", name: "noop"}]},
+    ],
+    { ->
+      let session = "governor-fires-" + uuid()
+      let result = agent_loop(
+        "Work until the budget governor stops you.",
+        nil,
+        {
+          loop_until_done: true,
+          max_iterations: 5,
+          post_turn_callback: governor_post_turn(
+            {budget: 2.0, checkpoint: 1.0, hard: 1.0, over_estimate: 1.0, signal: "iterations"},
+          ),
+          provider: "mock",
+          session_id: session,
+          tool_format: "native",
+          tools: noop_tools(),
+        },
+      )
+      __io_println(result.status)
+      __io_println(result.stop_reason)
+      __io_println(len(llm_mock_calls()))
+    },
+  )
+  // ---- NEGATIVE: budget = 100 iterations -> never fires, run completes ----
+  with_llm_script(
+    [
+      {text: "", tool_calls: [{arguments: {}, id: "m1", name: "noop"}]},
+      {text: "", tool_calls: [{arguments: {}, id: "m2", name: "noop"}]},
+      llm_text("All done."),
+    ],
+    { ->
+      let session = "governor-nofire-" + uuid()
+      let result = agent_loop(
+        "Finish well within the budget.",
+        nil,
+        {
+          loop_until_done: true,
+          max_iterations: 5,
+          post_turn_callback: governor_post_turn({budget: 100.0, signal: "iterations"}),
+          provider: "mock",
+          session_id: session,
+          tool_format: "native",
+          tools: noop_tools(),
+        },
+      )
+      __io_println(result.status)
+      __io_println(result.stop_reason)
+      __io_println(len(llm_mock_calls()))
+    },
+  )
+}

@@ -1,0 +1,446 @@
+import { agent_preset } from "std/agent/presets"
+import { detector_spec_to_stall, unified_detectors_post_turn } from "std/agent/stall"
+import { agent_session_totals } from "std/agent/state"
+
+// std/agent/governors.harn
+//
+// Pace / budget GOVERNORS for `agent_loop`, generalized from burin-code's
+// hand-rolled `lib/runtime/pace-governor.harn`. A governor is a VALUE you
+// compose into the EXISTING `post_turn_callback` seam — it is NEVER a new hook
+// on `agent_loop`. (Institutional constraint, harness-techniques-ledger:2633:
+// do not reintroduce `context_callback` / `on_tool_call` / `on_tool_result`
+// hook surfaces; steering rides the typed post-turn verdict + reminder path.)
+//
+// ONE governance vocabulary, shared with the stall/loop detectors in
+// `std/agent/stall`, collapsed onto the three actions the live post-turn seam
+// can actually take:
+//
+//   "proceed" — do nothing (burin `proceed` / `extend`: keep the run going).
+//   "warn"    — inject a wrap-up reminder and continue (burin `pace_check`).
+//   "abort"   — stop the run before overrun (burin `cut`).
+//
+// The verdict this produces is the ordinary `post_turn_callback` rich dict
+// (`{message, stop, stop_reason}`) that `agent_compute_post_turn` already
+// interprets: `message` is injected as feedback, `stop:true` breaks the loop.
+//
+// GENERALIZATION over burin: burin's pace governor is wall-clock + write
+// progress with injection-count caps (PACE_CHECK_MAX_INJECTIONS=2,
+// PACE_EXTEND_MAX=6). The post-turn seam cannot extend the loop's iteration
+// budget and there is no per-session scratch store in the stdlib, so this is a
+// STATELESS three-fraction generalization: the injection caps become a single
+// `hard` consumption ceiling. It reads a monotone consumption signal
+// (iterations / tokens / cost) against a budget ceiling, and the write-progress
+// veto is preserved verbatim (progress vetoes the soft stop up to `hard`).
+// This is deliberately NOT bit-for-bit parity with burin's stateful
+// per-injection / per-extend counters — it is behavioral parity on the fractions
+// at which the run slows and stops, with the counts collapsed into the
+// thresholds. A host that needs the exact counters keeps them host-side.
+// Burin pace-governor.harn parity constants, exposed for fixtures / callers.
+// (In this stateless generalization they bound the DEFAULT `hard`/`over_estimate`
+// fractions rather than an injection counter.)
+const GOVERNOR_PACE_CHECK_MAX_INJECTIONS = 2
+
+const GOVERNOR_PACE_EXTEND_MAX = 6
+
+// Default consumption fractions (relative to the budget ceiling). `checkpoint`
+// is burin's armed-budget boundary, `over_estimate` its expected-total+checkpoint
+// boundary, `hard` the exhausted-extend cut.
+const GOVERNOR_DEFAULT_CHECKPOINT = 1.0
+
+const GOVERNOR_DEFAULT_OVER_ESTIMATE = 2.0
+
+const GOVERNOR_DEFAULT_HARD = 3.0
+
+/**
+ * governor_pace_check_max_injections / governor_pace_extend_max expose burin's
+ * pace-governor caps as parity accessors (mirroring burin's `pace_extend_max()`
+ * accessor discipline). In this stateless generalization they are advisory — the
+ * caps collapse into the `hard` consumption fraction — but callers building a
+ * burin-faithful policy can reference them instead of hardcoding 2 / 6.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn governor_pace_check_max_injections() -> int {
+  return GOVERNOR_PACE_CHECK_MAX_INJECTIONS
+}
+
+/**
+ * See governor_pace_check_max_injections.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn governor_pace_extend_max() -> int {
+  return GOVERNOR_PACE_EXTEND_MAX
+}
+
+/**
+ * A pace/budget governor policy. Thresholds are DATA rows, not code branches:
+ *   - signal: which monotone consumption to watch — "iterations" (default,
+ *     from the live payload), "tokens" or "cost" (from agent_session_totals).
+ *   - budget: the ceiling in that signal's units (turns / tokens / USD).
+ *   - checkpoint / over_estimate / hard: consumption FRACTIONS of `budget` at
+ *     which the governor starts caring / warns while progressing / hard-stops.
+ *   - progress_tools: optional allowlist of tool names that count as progress.
+ *     When absent, ANY successful tool this turn counts as progress.
+ */
+pub type GovernorPolicy = {
+  budget?: float,
+  checkpoint?: float,
+  hard?: float,
+  over_estimate?: float,
+  progress_tools?: list<string>,
+  signal?: string,
+}
+
+fn __governor_abort(reason: string, signal: string, fraction: float) -> dict {
+  return {action: "abort", fraction: fraction, reason: reason, signal: signal}
+}
+
+fn __governor_warn(reason: string, signal: string, fraction: float) -> dict {
+  return {action: "warn", fraction: fraction, reason: reason, signal: signal}
+}
+
+fn __governor_proceed(reason: string, signal: string, fraction: float) -> dict {
+  return {action: "proceed", fraction: fraction, reason: reason, signal: signal}
+}
+
+/**
+ * governor_decision is the PURE pace/budget core (no I/O). It mirrors burin's
+ * `pace_decision` structure, generalized over the consumption signal and
+ * collapsed onto proceed/warn/abort:
+ *
+ *   fraction >= hard                      -> abort  "budget_hard_stop"
+ *                                            (burin: extend/check budget exhausted -> cut)
+ *   fraction >= checkpoint && !progress   -> abort  "no_progress_at_checkpoint"
+ *                                            (burin: no progress at checkpoint -> cut)
+ *   fraction >= over_estimate (progress)  -> warn   "over_estimate_while_progressing"
+ *                                            (burin: over estimate while progressing -> pace_check)
+ *   otherwise                             -> proceed
+ *                                            (burin: below checkpoint, or progressing
+ *                                             within estimate -> extend)
+ *
+ * `obs` is `{ceiling, consumed, made_progress, signal}`. Returns
+ * `{action, fraction, reason, signal}`.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn governor_decision(policy: GovernorPolicy, obs: dict) -> dict {
+  let signal = to_string(obs?.signal ?? policy.signal ?? "iterations")
+  let ceiling = to_float(obs?.ceiling ?? 0.0)
+  if ceiling <= 0.0 {
+    return __governor_proceed("no_budget", signal, 0.0)
+  }
+  let consumed = to_float(obs?.consumed ?? 0.0)
+  let fraction = consumed / ceiling
+  let checkpoint = to_float(policy.checkpoint ?? GOVERNOR_DEFAULT_CHECKPOINT)
+  let over_estimate = to_float(policy.over_estimate ?? GOVERNOR_DEFAULT_OVER_ESTIMATE)
+  let hard = to_float(policy.hard ?? GOVERNOR_DEFAULT_HARD)
+  let made_progress = obs?.made_progress ?? false
+  if fraction >= hard {
+    return __governor_abort("budget_hard_stop", signal, fraction)
+  }
+  if fraction >= checkpoint && !made_progress {
+    return __governor_abort("no_progress_at_checkpoint", signal, fraction)
+  }
+  if fraction >= over_estimate {
+    return __governor_warn("over_estimate_while_progressing", signal, fraction)
+  }
+  return __governor_proceed("within_budget", signal, fraction)
+}
+
+fn __any_in(values: list, allowlist: list) -> bool {
+  for value in values {
+    if contains(allowlist, value) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * Read the live post-turn payload into a governor observation. For the
+ * "iterations" signal this reads ONLY `payload.iteration` (the live
+ * `agent_compute_post_turn` field), so it is pure. For "tokens"/"cost" it reads
+ * the host-tracked cumulative via `agent_session_totals`.
+ */
+fn __governor_observe(policy: GovernorPolicy, payload: dict) -> dict {
+  let signal = to_string(policy.signal ?? "iterations")
+  let session_id = to_string(payload?.session_id ?? payload?.session?.id ?? "")
+  let consumed = if signal == "tokens" {
+    to_float(agent_session_totals(session_id)?.tokens_used ?? 0)
+  } else if signal == "cost" {
+    to_float(agent_session_totals(session_id)?.cost_usd ?? 0.0)
+  } else {
+    to_float((to_int(payload?.iteration ?? 0) ?? 0) + 1)
+  }
+  let progress_tools = policy.progress_tools
+  let successful = payload?.successful_tool_names ?? []
+  let made_progress = if progress_tools == nil {
+    len(successful) > 0
+  } else {
+    __any_in(successful, progress_tools)
+  }
+  return {
+    ceiling: to_float(policy.budget ?? 0.0),
+    consumed: consumed,
+    made_progress: made_progress,
+    signal: signal,
+  }
+}
+
+// The payload keys the governor depends on from the live agent_compute_post_turn
+// shape. If any is ever renamed or dropped the governor cannot compute its
+// consumption signal, so it aborts LOUDLY with a distinct reason rather than
+// silently defaulting to 0 and never firing (the dead-since-inception class).
+const GOVERNOR_REQUIRED_PAYLOAD_KEYS = ["iteration", "session_id", "successful_tool_names"]
+
+fn __governor_shape_ok(payload) -> bool {
+  let present = keys(payload)
+  for key in GOVERNOR_REQUIRED_PAYLOAD_KEYS {
+    if !contains(present, key) {
+      return false
+    }
+  }
+  return true
+}
+
+fn __governor_verdict(decision: dict) {
+  let signal = to_string(decision?.signal ?? "budget")
+  let fraction = to_string(decision?.fraction ?? 0.0)
+  if decision.action == "abort" {
+    return {
+      message: "Budget governor: stopping this run (" + to_string(decision?.reason ?? "")
+        + "). The "
+        + signal
+        + " budget is spent ("
+        + fraction
+        + "x). Do not start new work; if a step is unfinished, report it as the blocker.",
+      stop: true,
+      stop_reason: "budget_governor:" + to_string(decision?.reason ?? "budget"),
+    }
+  }
+  if decision.action == "warn" {
+    return {
+      message: "Budget governor: you are past the expected " + signal + " budget (" + fraction
+        + "x) and still working. Prioritize FINISHING now — narrow to the single essential remaining step and wrap up.",
+    }
+  }
+  return nil
+}
+
+/**
+ * governor_post_turn(policy) returns a `post_turn_callback` closure that reads
+ * the live per-turn payload, evaluates the pace/budget policy, and returns a
+ * steering verdict (warn message / stop) through the existing seam.
+ *
+ * Live-shape / registration guard (harness-techniques-ledger #3381): before
+ * evaluating, it asserts the payload carries the keys it depends on
+ * (`GOVERNOR_REQUIRED_PAYLOAD_KEYS`). If `agent_compute_post_turn`'s payload
+ * shape ever drifts (a renamed/dropped `session_id` / `iteration` /
+ * `successful_tool_names`) the governor aborts with the distinct
+ * `payload_shape_drift` stop reason, so the conformance baseline goes red
+ * instead of the governor silently defaulting to 0 and never firing.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn governor_post_turn(policy: GovernorPolicy) {
+  return { payload ->
+    if !__governor_shape_ok(payload) {
+      {
+        message: "Budget governor: DISABLED — the live post-turn payload is missing one of "
+          + join(GOVERNOR_REQUIRED_PAYLOAD_KEYS, ", ")
+          + ". Stopping rather than running an unmetered budget.",
+        stop: true,
+        stop_reason: "budget_governor:payload_shape_drift",
+      }
+    } else {
+      __governor_verdict(governor_decision(policy, __governor_observe(policy, payload)))
+    }
+  }
+}
+
+fn __normalize_verdict(verdict) -> dict {
+  if verdict == nil || verdict == "" {
+    return {message: "", stop: false}
+  }
+  if type_of(verdict) == "bool" {
+    return {message: "", stop: verdict}
+  }
+  if type_of(verdict) == "string" {
+    return {message: verdict, stop: false}
+  }
+  if type_of(verdict) == "dict" {
+    return {
+      llm_options: verdict?.llm_options,
+      message: to_string(verdict?.message ?? ""),
+      next_options: verdict?.next_options,
+      prefill: verdict?.prefill,
+      stop: verdict?.stop ?? false,
+      stop_reason: verdict?.stop_reason,
+    }
+  }
+  return {message: "", stop: false}
+}
+
+/**
+ * compose_post_turn(callbacks) chains several `post_turn_callback` closures into
+ * ONE, so a caller can run their own callback alongside a governor / detector
+ * overlay without a new option. The FIRST callback that requests a stop wins
+ * (its `stop_reason` / `next_options` / `llm_options` are preserved) and any
+ * warn messages accumulated before it are prepended; otherwise all non-empty
+ * warn messages are merged. Returns nil when nothing fired.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn compose_post_turn(callbacks: list) {
+  return { payload ->
+    var messages = []
+    var result = nil
+    for callback in callbacks {
+      if callback == nil {
+        continue
+      }
+      let norm = __normalize_verdict(callback(payload))
+      if norm.stop {
+        let prior = if len(messages) > 0 {
+          join(messages, "\n") + "\n"
+        } else {
+          ""
+        }
+        result = norm + {message: prior + norm.message}
+        break
+      }
+      if to_string(norm?.message ?? "") != "" {
+        messages = messages.push(norm.message)
+      }
+    }
+    if result != nil {
+      result
+    } else if len(messages) > 0 {
+      {message: join(messages, "\n")}
+    } else {
+      nil
+    }
+  }
+}
+
+/**
+ * with_governance(opts, config) folds a governor and/or a unified detector spec
+ * into an agent_loop options dict through EXISTING seams only:
+ *   - config.governor  (GovernorPolicy) -> composed into `post_turn_callback`.
+ *   - config.detectors (DetectorSpec)   -> lowered onto `stall_diagnostics`
+ *     (native loop/no-progress/stuck detectors) PLUS a token-runaway overlay
+ *     composed into `post_turn_callback`.
+ * Any pre-existing `post_turn_callback` is preserved (run first) and any
+ * pre-existing `stall_diagnostics` keys are kept unless the spec overrides them.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn with_governance(opts: dict, config: dict) -> dict {
+  var callbacks = []
+  let existing = opts?.post_turn_callback
+  if existing != nil {
+    callbacks = callbacks.push(existing)
+  }
+  if config?.governor != nil {
+    callbacks = callbacks.push(governor_post_turn(config.governor))
+  }
+  var result = opts
+  let detectors = config?.detectors
+  if detectors != nil {
+    let existing_stall = if type_of(opts?.stall_diagnostics) == "dict" {
+      opts.stall_diagnostics
+    } else {
+      {}
+    }
+    result = result + {stall_diagnostics: existing_stall + detector_spec_to_stall(detectors)}
+    let overlay = unified_detectors_post_turn(detectors)
+    if overlay != nil {
+      callbacks = callbacks.push(overlay)
+    }
+  }
+  if len(callbacks) > 0 {
+    result = result + {post_turn_callback: compose_post_turn(callbacks)}
+  }
+  return result
+}
+
+/**
+ * agent_governed_preset(kind, options, governance) is `agent_preset` with a
+ * governor / detector spec folded in, so a durable persona can carry its pace
+ * governor and detector rows by name. Equivalent to
+ * `with_governance(agent_preset(kind, options), governance)`.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_governed_preset(kind, options = nil, governance = {}) -> dict {
+  return with_governance(agent_preset(kind, options), governance)
+}
+
+/**
+ * governors_selftest is the offline live-shape / registration assertion. It
+ * builds the CANONICAL live `agent_compute_post_turn` payload shape, asserts the
+ * keys the governor depends on are present (throws otherwise), and proves the
+ * governor reads them correctly by driving a firing policy end-to-end.
+ * Complements the conformance test that runs a REAL agent_loop turn: together
+ * they catch the "dead-since-inception converter" class where a callback keys on
+ * fields the live payload never carries.
+ *
+ * @effects: []
+ * @errors: [agent_loop]
+ * @api_stability: experimental
+ */
+pub fn governors_selftest() -> dict {
+  let live_payload = {
+    dispatch: {results: []},
+    has_tool_calls: true,
+    iteration: 4,
+    rejected_tool_names: [],
+    session: {id: "governors-selftest"},
+    session_id: "governors-selftest",
+    session_rejected_tools: [],
+    session_successful_tools: ["edit"],
+    successful_tool_names: ["edit"],
+    text: "",
+    tool_count: 0,
+    tool_results: [],
+    visible_text: "",
+  }
+  let required = ["iteration", "session_id", "successful_tool_names"]
+  var missing = []
+  for key in required {
+    if !contains(keys(live_payload), key) {
+      missing = missing.push(key)
+    }
+  }
+  if len(missing) > 0 {
+    throw "governors_selftest: live post_turn payload is missing required keys: " + join(missing, ", ")
+  }
+  // signal=iterations reads ONLY payload.iteration, so this is pure (no live
+  // session). budget 5 turns, iteration 4 -> 5 turns consumed -> fraction 1.0
+  // at hard=1.0 -> abort. If `iteration` ever drifts, consumed collapses to 1
+  // and `ok` flips false.
+  let policy = {budget: 5.0, checkpoint: 1.0, hard: 1.0, over_estimate: 1.0, signal: "iterations"}
+  let obs = __governor_observe(policy, live_payload)
+  let decision = governor_decision(policy, obs)
+  return {
+    decision: decision,
+    observed_keys: keys(live_payload).sort(),
+    ok: decision.action == "abort" && obs.consumed == 5.0,
+    required_keys: required,
+  }
+}

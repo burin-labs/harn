@@ -1,0 +1,78 @@
+// Parity fixture for the unified detector subsystem's token-runaway core and
+// the DetectorSpec -> native stall_diagnostics lowering
+// (std/agent/stall). Derived by reading burin-code's
+// lib/runtime/token-runaway-guard.harn (sigma 2.0, thin-history margin 0.6,
+// hard overshoot multiple 3.0).
+import {
+  detector_spec_to_stall,
+  token_runaway_decision,
+  token_runaway_made_progress,
+  token_runaway_resolve_cap,
+  unified_detectors_post_turn,
+} from "std/agent/stall"
+
+fn cap(median, stddev, sigma, fallback) {
+  return to_string(token_runaway_resolve_cap(median, stddev, sigma, fallback))
+}
+
+fn decide(config, tokens, making_progress) {
+  let decision = token_runaway_decision(config, {making_progress: making_progress, tokens: tokens})
+  return decision.action + ":" + decision.reason + ":" + to_string(to_int(decision.cap))
+}
+
+pipeline default() {
+  // ---- cap resolution ----
+  // No median history -> absolute fallback.
+  __io_println(cap(0.0, 0.0, 2.0, 1000.0))
+  // median + sigma*stddev = 100 + 2*10.
+  __io_println(cap(100.0, 10.0, 2.0, 50.0))
+  // relative cap below the floor -> floor wins.
+  __io_println(cap(100.0, 10.0, 2.0, 500.0))
+  // thin history (stddev 0) -> median * 1.6.
+  __io_println(cap(100.0, 0.0, 2.0, 50.0))
+  // ---- decision (cap = 120, hard = 360) ----
+  let config = {fallback: 0.0, median: 100.0, sigma: 2.0, stddev: 10.0}
+  __io_println(decide(config, 50.0, false))
+  __io_println(decide(config, 120.0, false))
+  __io_println(decide(config, 200.0, true))
+  // EDIT-STORM: over the soft cap with NO verification advance -> soft cap trips
+  // (this is the target case; "any successful tool" would have vetoed it).
+  __io_println(decide(config, 200.0, false))
+  __io_println(decide(config, 400.0, true))
+  // No resolvable cap -> proceed.
+  __io_println(decide({fallback: 0.0, median: 0.0}, 9999.0, false))
+  // ---- progress signal: verification advance, NOT "any tool succeeded" ----
+  // Edit storm: successful edits, no verification result -> no progress.
+  __io_println(
+    token_runaway_made_progress({tool_results: [{ok: true, result: "wrote foo", tool_name: "edit"}]}),
+  )
+  // A passing verification this turn (empty diagnostics list) -> progress.
+  __io_println(
+    token_runaway_made_progress({tool_results: [{diagnostics: [], ok: true, tool_name: "run"}]}),
+  )
+  // A still-failing verification -> gate-bearing failure, NOT progress.
+  __io_println(
+    token_runaway_made_progress(
+      {tool_results: [{diagnostics: [{code: "E1", message: "boom"}], ok: false, tool_name: "run"}]},
+    ),
+  )
+  // ---- DetectorSpec lowering onto native stall_diagnostics ----
+  let spec = {
+    hard_stop_after_trips: 5,
+    loop: {ping_pong_cycles: 4, repeat: 5},
+    no_progress: {messages: 2},
+    stuck: {same_diagnostic: 2, same_error: 3},
+    token_runaway: {fallback: 0.0, median: 100.0, stddev: 10.0},
+  }
+  let stall = detector_spec_to_stall(spec)
+  __io_println(stall.repeat_same_observation)
+  __io_println(stall.ping_pong_cycles)
+  __io_println(stall.no_progress_messages)
+  __io_println(stall.repeat_same_error)
+  __io_println(stall.repair_aware)
+  __io_println(stall.stuck_same_diagnostic_after)
+  __io_println(stall.hard_stop_after_trips)
+  // token-runaway present -> overlay callback; absent -> nil.
+  __io_println(unified_detectors_post_turn(spec) != nil)
+  __io_println(unified_detectors_post_turn({no_progress: {messages: 2}}) == nil)
+}

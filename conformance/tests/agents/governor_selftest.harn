@@ -1,0 +1,14 @@
+// Offline live-shape / registration assertion for the pace governor. Proves the
+// governor reads the CANONICAL agent_compute_post_turn payload shape (not a
+// hand-built convenience payload) and fires on it — the guard against the
+// "dead-since-inception converter" class (harness-techniques-ledger #3381).
+import { governors_selftest } from "std/agent/governors"
+
+pipeline default() {
+  let report = governors_selftest()
+  __io_println(report.ok)
+  __io_println(report.decision.action)
+  __io_println(report.decision.reason)
+  // The keys the governor depends on, proven present on the live shape.
+  __io_println(join(report.required_keys, ","))
+}

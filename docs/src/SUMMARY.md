@@ -129,6 +129,7 @@
 - [Observability stdlib](./stdlib/observability.md)
 - [Timing stdlib](./stdlib/timing.md)
 - [Verification stdlib](./stdlib/verification.md)
+- [Agent governors and detectors](./stdlib/governors.md)
 - [GraphQL stdlib](./stdlib/graphql.md)
 - [Code librarian stdlib](./stdlib/code-librarian.md)
 - [Edit stdlib](./stdlib/edit.md)
