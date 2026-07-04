@@ -237,9 +237,20 @@ async fn vm_call_llm_full_inner_request(
         super::trigger_predicate::note_result(request, &result);
         record_cli_llm_result(request, &result);
         if let Some(tx) = delta_tx {
+            // A mock may script an ordered chunk sequence to emulate a real
+            // token stream; otherwise fall back to a single full-text delta so
+            // streaming callers still see the visible text (the graceful
+            // non-streaming path). `stream_chunks.concat() == result.text`.
+            if let Some(chunks) = super::mock::take_mock_stream_chunks() {
+                for chunk in chunks {
+                    let _ = tx.send(chunk);
+                }
+                return Ok(result);
+            }
             if !result.text.is_empty() {
                 let _ = tx.send(result.text.clone());
             }
+            return Ok(result);
         }
         return Ok(result);
     }

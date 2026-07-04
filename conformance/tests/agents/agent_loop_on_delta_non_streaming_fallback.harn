@@ -1,0 +1,20 @@
+import { llm_text, with_llm_script } from "std/testing"
+
+pipeline default() {
+  with_llm_script(
+    [llm_text("Full response text")],
+    { ->
+      let result = agent_loop(
+        "go",
+        nil,
+        {provider: "mock", max_iterations: 1, on_delta: { delta -> __io_println("delta=[" + delta + "]") }},
+      )
+      __io_println(result.status)
+      __io_println(result.visible_text)
+    },
+  )
+}
+// A non-streaming provider (the mock delivers its whole response at once) still
+// fires `on_delta` exactly once, carrying the full visible text — the documented
+// graceful fallback so harnesses get a uniform "at least one delta" contract
+// regardless of transport.

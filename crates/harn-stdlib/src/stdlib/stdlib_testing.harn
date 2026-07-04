@@ -599,6 +599,21 @@ pub fn llm_text(text: string) -> dict {
 }
 
 /**
+ * Build an assistant turn that streams its visible text as an ordered list of
+ * chunks. When consumed through a streaming caller (e.g. `agent_loop`'s
+ * `on_delta` seam) each chunk is emitted as a separate delta, in order; a
+ * non-streaming caller sees only the flat text, which equals the concatenation
+ * of the chunks. Use it to exercise token-stream harnesses deterministically.
+ *
+ * @effects: []
+ * @errors: []
+ * @example: llm_stream_text(["Hello ", "wor", "ld"])
+ */
+pub fn llm_stream_text(chunks: list) -> dict {
+  return {stream_chunks: chunks}
+}
+
+/**
  * Build the terminal "done" turn for an agent-loop LLM mock script. The
  * default marker matches the `##DONE##` sentinel agent loops recognize;
  * pass a custom marker when the loop under test uses a different one.

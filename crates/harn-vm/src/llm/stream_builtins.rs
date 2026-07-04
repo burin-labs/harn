@@ -3,8 +3,9 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use crate::value::{
-    VmChannelCloseState, VmChannelHandle, VmError, VmStream, VmStreamCancel, VmValue,
+    VmChannelCloseState, VmChannelHandle, VmClosure, VmError, VmStream, VmStreamCancel, VmValue,
 };
+use crate::vm::{AsyncBuiltinCtx, Vm};
 
 use super::api;
 use super::call::build_llm_error_dict;
@@ -186,6 +187,92 @@ pub(super) async fn llm_stream_call_impl(args: Vec<VmValue>) -> Result<VmValue, 
         receiver: Arc::new(tokio::sync::Mutex::new(stream_rx)),
         cancel: Some(cancel),
     }))
+}
+
+/// Fire the observational `on_delta` callback for one visible-text chunk.
+///
+/// The callback is *observational*: its return value is ignored, and a throwing
+/// renderer must not abort the turn (a chat surface's masking/rendering bug
+/// should never crash the agent). Errors are therefore swallowed here. Output
+/// buffered on the transient child VM (e.g. `__io_println` inside the callback)
+/// is drained by the caller via `forward_output`.
+async fn fire_on_delta(child_vm: &mut Vm, on_delta: Option<&VmClosure>, delta: String) {
+    let Some(closure) = on_delta else {
+        return;
+    };
+    let _ = child_vm
+        .call_closure_pub(closure, &[VmValue::String(arcstr::ArcStr::from(delta))])
+        .await;
+}
+
+/// Shared implementation of `__host_llm_stream_collect`: run one LLM call
+/// through the streaming transport, forwarding each visible-text delta to the
+/// `on_delta` closure, and return the *same* normalized result dict as
+/// `llm_call` (tool calls, usage, stop_reason all preserved). This is the
+/// streaming seam under `agent_loop`'s `on_delta:` option — deltas are observed
+/// for rendering while the loop still consumes a complete, structurally
+/// identical turn result, so tool dispatch is unaffected.
+///
+/// Providers that stream emit many deltas in order; providers that return a
+/// complete result without incremental deltas (mock, cached, non-streaming
+/// transports) fall back to a single delta carrying the full visible text.
+pub(super) async fn llm_stream_collect_impl(
+    ctx: &AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    // args: [prompt, system?, options?, on_delta?]. `extract_llm_options` reads
+    // only the first three, so the trailing callback is ignored by it.
+    let on_delta = match args.get(3) {
+        Some(VmValue::Closure(closure)) => Some(closure.clone()),
+        _ => None,
+    };
+    let opts = extract_llm_options(&args)?;
+
+    let (delta_tx, mut delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let mut child_vm = ctx.child_vm();
+    let mut deltas_open = true;
+    let mut delta_count: usize = 0;
+    let mut call = Box::pin(api::vm_call_llm_full_streaming(&opts, delta_tx));
+
+    let call_result = loop {
+        tokio::select! {
+            maybe_delta = delta_rx.recv(), if deltas_open => {
+                match maybe_delta {
+                    Some(delta) => {
+                        delta_count += 1;
+                        fire_on_delta(&mut child_vm, on_delta.as_deref(), delta).await;
+                    }
+                    None => deltas_open = false,
+                }
+            }
+            result = &mut call => break result,
+        }
+    };
+    // The provider future dropped its sender when it resolved; drain any deltas
+    // that were buffered while the call arm was being polled.
+    while let Ok(delta) = delta_rx.try_recv() {
+        delta_count += 1;
+        fire_on_delta(&mut child_vm, on_delta.as_deref(), delta).await;
+    }
+
+    let result = match call_result {
+        Ok(result) => result,
+        Err(err) => {
+            ctx.forward_output(&child_vm.take_output());
+            return Err(err);
+        }
+    };
+
+    // Graceful non-streaming fallback: a provider that produced a complete
+    // result without emitting a single delta still fires `on_delta` exactly once
+    // with the full visible text, so harnesses get a uniform "at least one
+    // delta, and the concatenation equals the visible text" contract.
+    if delta_count == 0 && !result.text.is_empty() {
+        fire_on_delta(&mut child_vm, on_delta.as_deref(), result.text.clone()).await;
+    }
+
+    ctx.forward_output(&child_vm.take_output());
+    Ok(super::agent_config::build_llm_call_result(&result, &opts))
 }
 
 #[cfg(test)]

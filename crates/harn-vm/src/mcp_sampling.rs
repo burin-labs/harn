@@ -810,6 +810,7 @@ mod tests {
             blocks: None,
             logprobs: Vec::new(),
             error: None,
+            stream_chunks: Vec::new(),
         });
 
         // Install an approving bridge that forces provider=mock so the

@@ -542,6 +542,27 @@ behavior:
    compact-and-reclaim, because escalation almost always needs the context that
    triggered it.
 
+### (e) Streaming under the dialect gate — recommendation: stream the VISIBLE-TEXT channel now; defer tool-call-fragment streaming to the dialect phases
+
+`agent_loop`'s `on_delta` seam streams the assistant's **visible-text** channel
+(the content channel), which is dialect-agnostic: it is the same channel whether
+the turn's `tool_format` resolves to `native`, `text`, or `json`. So a streaming
+chat surface can adopt the higher tiers today — the delta callback observes
+visible text while the loop still consumes a complete, structurally identical turn
+result, so the static gate, the stream-integrity guard (§4b2), and the tool-call
+parse all run unchanged on the assembled turn.
+
+What is deliberately **out of scope for v1** is streaming the *tool-call* channel
+as fragments. The text/json dialects encode a call inside the visible text and the
+native dialect carries it on a separate structured channel, so a
+dialect-uniform "partial tool call" event is exactly the vanishing-tool-stream
+integrity problem this RFC is built around (§2, §4b2) — surfacing half-parsed
+call fragments to consumers would re-introduce the ambiguity the format-contract
+invariant exists to remove. Tool-call-fragment streaming therefore waits until the
+integrity guard and the living registry (Phases 1/4) make a *validated* partial
+call a first-class, dialect-normalized event. Until then, `on_delta` fires for
+visible text only, and tool dispatch operates on the complete turn.
+
 ## 5. Phased implementation plan (what ships first, what's the breaking cutover, how each phase is gated)
 
 Each phase is independently shippable and independently valuable. **Every phase

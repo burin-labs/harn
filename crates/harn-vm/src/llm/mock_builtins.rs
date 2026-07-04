@@ -66,6 +66,34 @@ fn llm_mock_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
         }
     };
 
+    // Optional ordered visible-text chunks for streaming callers. Each entry
+    // is emitted as a separate delta by the streaming delta pump; non-streaming
+    // callers see only the flat `text` (derived from the concatenation when
+    // `text` is omitted).
+    let stream_chunks = match config.get("stream_chunks") {
+        Some(VmValue::List(list)) => {
+            let mut chunks = Vec::with_capacity(list.len());
+            for item in list.iter() {
+                match item {
+                    VmValue::String(s) => chunks.push(s.to_string()),
+                    other => {
+                        return Err(VmError::Runtime(format!(
+                            "llm_mock: stream_chunks entries must be strings; got {}",
+                            other.type_name()
+                        )))
+                    }
+                }
+            }
+            chunks
+        }
+        Some(VmValue::Nil) | None => Vec::new(),
+        _ => {
+            return Err(VmError::Runtime(
+                "llm_mock: stream_chunks must be a list of strings".to_string(),
+            ))
+        }
+    };
+
     let match_pattern = config.get("match").and_then(|v| {
         if matches!(v, VmValue::Nil) {
             None
@@ -183,6 +211,7 @@ fn llm_mock_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
         blocks,
         logprobs,
         error,
+        stream_chunks,
     });
     Ok(VmValue::Nil)
 }

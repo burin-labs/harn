@@ -103,8 +103,20 @@ fn __agent_loop_clock_sleep_ms(delay_ms) {
 }
 
 fn __default_invoke_llm(message, turn_system, llm_opts) {
+  // When a harness registers an `on_delta` callback, issue the per-turn call
+  // through the streaming transport so each visible-text chunk is observed as
+  // it arrives (enabling live rendering/masking of the token stream). The
+  // collector returns the SAME normalized result dict as `llm_call` — tool
+  // calls and usage are preserved, so tool dispatch downstream is unaffected.
+  // A custom `llm_caller` short-circuits before this default path, so a
+  // non-streaming caller simply never fires `on_delta`.
+  let on_delta = llm_opts?._on_delta
   let result = try {
-    llm_call(message, turn_system, llm_call_options(llm_opts))
+    if type_of(on_delta) == "closure" {
+      __host_llm_stream_collect(message, turn_system, llm_call_options(llm_opts), on_delta)
+    } else {
+      llm_call(message, turn_system, llm_call_options(llm_opts))
+    }
   }
   if !is_err(result) {
     return {ok: true, value: unwrap(result)}
