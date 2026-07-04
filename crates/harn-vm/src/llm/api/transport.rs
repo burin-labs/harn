@@ -343,15 +343,34 @@ pub(crate) async fn vm_call_llm_api_with_body(
                 "/private/tmp/burin_computer_request_dump.json",
                 serde_json::to_vec_pretty(&dump).unwrap_or_default(),
             );
-        } else if body.get("tools").is_some() || body.get("messages").is_some() {
-            // Record that a request went out with NO image blocks (helps confirm
-            // whether the screenshot is being stripped before send).
+        } else if body.get("messages").and_then(|m| m.as_array()).map(|a| a.len() >= 3).unwrap_or(false)
+        {
+            // No image block but a full turn (>=3 messages) went out — dump the
+            // body with base64 payloads elided so we can see the tool_result
+            // content structure and where the screenshot was lost.
+            fn elide(v: &serde_json::Value) -> serde_json::Value {
+                match v {
+                    serde_json::Value::Object(m) => serde_json::Value::Object(
+                        m.iter()
+                            .map(|(k, val)| {
+                                if val.as_str().map(|s| s.len() > 200).unwrap_or(false) {
+                                    (k.clone(), serde_json::json!(format!("<{} chars>", val.as_str().unwrap().len())))
+                                } else {
+                                    (k.clone(), elide(val))
+                                }
+                            })
+                            .collect(),
+                    ),
+                    serde_json::Value::Array(a) => serde_json::Value::Array(a.iter().map(elide).collect()),
+                    other => other.clone(),
+                }
+            }
             let _ = std::fs::write(
                 "/private/tmp/burin_computer_request_noimage.json",
                 serde_json::to_vec_pretty(&serde_json::json!({
                     "provider": &opts.provider,
                     "model": &opts.model,
-                    "message_count": body.get("messages").and_then(|m| m.as_array()).map(|a| a.len()),
+                    "messages": body.get("messages").map(elide),
                 }))
                 .unwrap_or_default(),
             );
