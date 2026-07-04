@@ -1481,12 +1481,16 @@ impl HostBridge {
                 .get(call_id)
                 .copied()
                 .unwrap_or(true);
-            let mut states = self
-                .visible_call_states
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
-            let state = states.entry(call_id.to_string()).or_default();
-            state.push(delta, stream_publicly)
+            if !user_visible || !stream_publicly {
+                (String::new(), String::new())
+            } else {
+                let mut states = self
+                    .visible_call_states
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
+                let state = states.entry(call_id.to_string()).or_default();
+                state.push(delta, true)
+            }
         };
         self.notify(
             "session/update",
@@ -1786,6 +1790,84 @@ mod tests {
             );
             assert!(pending.lock().await.is_empty());
         });
+    }
+
+    #[test]
+    fn call_progress_hides_non_user_visible_deltas() {
+        let lines = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let captured = lines.clone();
+        let bridge = HostBridge::from_parts_with_writer(
+            Arc::new(Mutex::new(HashMap::new())),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(move |line| {
+                captured
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .push(line.to_string());
+                Ok(())
+            }),
+            1,
+        );
+
+        bridge.send_call_start(
+            "call-1",
+            "llm",
+            "llm_call",
+            serde_json::json!({"stream_publicly": true}),
+        );
+        bridge.send_call_progress(
+            "call-1",
+            r#"{"verdict":"done","reasoning":"internal"}"#,
+            1,
+            false,
+        );
+
+        let lines = lines.lock().unwrap_or_else(|e| e.into_inner());
+        let progress: serde_json::Value =
+            serde_json::from_str(&lines[1]).expect("call_progress notification json");
+        let content = &progress["params"]["update"]["content"];
+        assert_eq!(
+            content["delta"],
+            r#"{"verdict":"done","reasoning":"internal"}"#
+        );
+        assert_eq!(content["user_visible"], false);
+        assert_eq!(content["visible_text"], "");
+        assert_eq!(content["visible_delta"], "");
+    }
+
+    #[test]
+    fn call_progress_hides_non_public_streams() {
+        let lines = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let captured = lines.clone();
+        let bridge = HostBridge::from_parts_with_writer(
+            Arc::new(Mutex::new(HashMap::new())),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(move |line| {
+                captured
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .push(line.to_string());
+                Ok(())
+            }),
+            1,
+        );
+
+        bridge.send_call_start(
+            "call-1",
+            "llm",
+            "llm_call",
+            serde_json::json!({"stream_publicly": false}),
+        );
+        bridge.send_call_progress("call-1", "secret schema bytes", 1, true);
+
+        let lines = lines.lock().unwrap_or_else(|e| e.into_inner());
+        let progress: serde_json::Value =
+            serde_json::from_str(&lines[1]).expect("call_progress notification json");
+        let content = &progress["params"]["update"]["content"];
+        assert_eq!(content["delta"], "secret schema bytes");
+        assert_eq!(content["user_visible"], true);
+        assert_eq!(content["visible_text"], "");
+        assert_eq!(content["visible_delta"], "");
     }
 
     #[test]
