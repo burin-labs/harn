@@ -996,7 +996,9 @@ mod tests {
         // A large synthetic image payload (~300 KB, the size of a real 1024x768
         // screenshot) so the test exercises byte preservation of a big base64
         // string through the whole record -> transcript -> egress path.
-        let bytes: Vec<u8> = (0..300_000u32).map(|i| (i.wrapping_mul(2654435761) >> 16) as u8).collect();
+        let bytes: Vec<u8> = (0..300_000u32)
+            .map(|i| (i.wrapping_mul(2654435761) >> 16) as u8)
+            .collect();
         let src_b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
 
         crate::llm::agent_session_host::reset_agent_session_host_state();
