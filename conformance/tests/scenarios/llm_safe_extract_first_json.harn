@@ -1,0 +1,36 @@
+// std/llm/safe.extract_first_json_object / extract_first_json_value scan
+// sloppy freeform text for the first balanced bracket span, respecting strings
+// and escapes, and return the raw slice or nil.
+import { extract_first_json_object, extract_first_json_value } from "std/llm/safe"
+
+pipeline default() {
+  // Leading prose + trailing garbage.
+  __io_println(extract_first_json_object("Sure! {\"a\": 1} hope that helps"))
+  __io_println("---")
+  // Nested objects: outermost balanced span wins.
+  __io_println(extract_first_json_object("{\"outer\": {\"inner\": [1, 2]}} tail"))
+  __io_println("---")
+  // Braces inside string literals do not affect depth.
+  __io_println(extract_first_json_object("{\"text\": \"a } brace and a { brace\"}"))
+  __io_println("---")
+  // Escaped quotes inside strings do not end the string.
+  __io_println(extract_first_json_object("{\"quote\": \"she said \\\"}\\\" loudly\"}"))
+  __io_println("---")
+  // Unbalanced first opener is skipped; the later balanced object is found.
+  __io_println(extract_first_json_object("broken { oops... {\"ok\": true}"))
+  __io_println("---")
+  // No JSON at all -> nil.
+  __io_println("[" + to_string(extract_first_json_object("no json here") ?? "nil") + "]")
+  __io_println("---")
+  // nil input -> nil.
+  __io_println("[" + to_string(extract_first_json_object(nil) ?? "nil") + "]")
+  __io_println("---")
+  // Value variant: array opens first.
+  __io_println(extract_first_json_value("rows: [1, 2, 3] (3 total)"))
+  __io_println("---")
+  // Value variant: object opens first even when an array follows.
+  __io_println(extract_first_json_value("{\"a\": 1} then [2]"))
+  __io_println("---")
+  // Object variant ignores arrays entirely.
+  __io_println("[" + to_string(extract_first_json_object("[1, 2, 3]") ?? "nil") + "]")
+}

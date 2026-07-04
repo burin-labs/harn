@@ -61,11 +61,14 @@ the way child tasks coordinate with siblings or the parent.
 
 **Workflow.** A typed, inspectable, replayable graph of stages with edges and
 per-node policies. Executed by `workflow_execute`. Lives above `agent_loop` when
-orchestration structure matters.
+orchestration structure matters. See the
+[workflow runtime](../workflow-runtime.md).
 
-**Pipeline.** The top-level `.harn` program with `fn main(harness)` and
+**Pipeline.** The `pipeline` language keyword: a named, callable, function-like
+composition serving as the top-level entrypoint of a `.harn` program, with
 lifecycle callbacks. The container in which agents, workers, and workflows run.
-Not itself agentic.
+Not itself agentic — and not the stage-graph runtime, which is a **workflow**
+(above). See the [pipeline lifecycle](../pipeline-lifecycle.md).
 
 **Workflow session.** The durable execution record of one `workflow_execute`
 run. Holds artifacts, per-stage results, and the replay trace.
