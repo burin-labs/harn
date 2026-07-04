@@ -570,11 +570,22 @@ pub fn enforce_current_policy_for_tool(tool_name: &str) -> Result<(), PolicyDeni
         if requested_level != SideEffectLevel::None
             && !policy_allows_side_effect(&policy, requested_level.as_str())
         {
+            let max_over_annot = policy
+                .tool_annotations
+                .values()
+                .map(|a| a.side_effect_level.as_str())
+                .max_by_key(|lvl| crate::tool_annotations::SideEffectLevel::rank_str(lvl));
             eprintln!(
-                "[CEILING-DIAG] tool={tool_name} requested={} policy.side_effect_level={:?} policy.tools_len={}",
+                "[CEILING-DIAG] tool={tool_name} requested={} policy.side_effect_level={:?} tools_has_computer={} policy_annot_computer={:?} annot_count={} max_over_annot={:?}",
                 requested_level.as_str(),
                 policy.side_effect_level,
-                policy.tools.len(),
+                policy.tools.iter().any(|t| t == "computer"),
+                policy
+                    .tool_annotations
+                    .get("computer")
+                    .map(|a| a.side_effect_level.as_str()),
+                policy.tool_annotations.len(),
+                max_over_annot,
             );
             return reject_tool(
                 DenialGate::SideEffectCeiling,
