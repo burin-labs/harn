@@ -73,6 +73,12 @@ pub(crate) struct ModelsLoraExportArgs {
     /// Chat template identifier to include in row metadata.
     #[arg(long = "chat-template")]
     pub chat_template: Option<String>,
+    /// Split assigned to exported rows when source metadata does not declare one.
+    #[arg(long = "default-split", default_value = "train")]
+    pub default_split: String,
+    /// License assigned to exported rows when source metadata does not declare one.
+    #[arg(long = "default-license", default_value = "unknown")]
+    pub default_license: String,
     /// Extra target provenance copied into row metadata, as KEY=VALUE.
     #[arg(long = "target-metadata", value_name = "KEY=VALUE")]
     pub target_metadata: Vec<String>,

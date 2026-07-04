@@ -190,7 +190,15 @@ new buckets or regress no-write/non-tool behavior. The
 and manifests with a stable contract id derived from the base model, provider,
 effective tool format, dataset format, and chat template, plus
 `contract.training_contract` fields for assistant mask, packing, parser
-ownership, and split policy. The plan's `launch` block also emits the
+ownership, split policy, and required row metadata. Exported rows always carry
+the source record/transcript ids, teacher route, target base/tool format,
+split, license, deterministic tool-schema hash, and deterministic prompt
+template hash. Source metadata wins when it declares those fields; otherwise
+`--default-split` and `--default-license` provide portable defaults. The export
+manifest repeats the required metadata list and defaults, so external trainers
+can prove that a PEFT/QLoRA run used the same frozen cases, schemas, prompt
+template, and Harn tool-call contract that promotion evals will probe. The
+plan's `launch` block also emits the
 post-training `harn models lora manifest` command that records the adapter path,
 request model, trainer, teacher, precision metadata, and export manifest before
 inspection or serving. Treat that manifest as the handoff receipt from any
