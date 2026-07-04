@@ -27,6 +27,73 @@ hook_paths_match() {
   [ -s "$file_list" ] && grep -Eq "$pattern" "$file_list"
 }
 
+# ---------------------------------------------------------------------------
+# Hook duration instrument. Appends one NDJSON line per hook invocation to
+# ~/.burin/hook-timings.ndjson: {ts, repo, hook, duration_ms, exit_code,
+# commit_sha, host}. Zero-dep (POSIX sh + date only), never changes the
+# hook's own exit code, and degrades silently if the log directory can't be
+# created (e.g. no ~/.burin on this machine). Usage from a hook script:
+#
+#   . "$hook_dir/lib.sh"
+#   hook_timing_start pre-commit
+#   trap 'hook_timing_finish $?' EXIT
+#   ...rest of the hook...
+#
+# The trap re-propagates $? verbatim on every exit path, including `set -e`
+# early exits, so this can wrap hooks (like pre-commit/pre-push here) that
+# rely on `set -e` failing fast partway through.
+# ---------------------------------------------------------------------------
+HOOK_TIMING_LOG_DIR="${HOOK_TIMING_LOG_DIR:-$HOME/.burin}"
+HOOK_TIMING_LOG_FILE="$HOOK_TIMING_LOG_DIR/hook-timings.ndjson"
+
+# Nanoseconds-since-epoch as a plain integer. Both GNU date and BSD/macOS
+# date support `+%s%N` (BSD date zero-pads %N to 9 digits even though its
+# actual clock resolution is coarser), so this is portable across the
+# platforms this repo targets. Falls back to seconds-only (x10^9) if `%N`
+# ever comes back literally as "N" (some minimal `date` builds).
+hook_timing_now_ns() {
+  raw=$(date +%s%N 2>/dev/null) || raw=""
+  case "$raw" in
+    *N) raw="$(date +%s)000000000" ;;
+    "") raw="0" ;;
+  esac
+  printf '%s' "$raw"
+}
+
+# Call at the very top of a hook, right after sourcing lib.sh.
+#   $1 = hook name, e.g. "pre-commit" or "pre-push"
+hook_timing_start() {
+  HOOK_TIMING_HOOK_NAME=$1
+  HOOK_TIMING_START_NS=$(hook_timing_now_ns)
+}
+
+# Call via `trap 'hook_timing_finish $?' EXIT` immediately after
+# hook_timing_start. Re-exits with the same code so the trap never masks or
+# changes the hook's real outcome.
+hook_timing_finish() {
+  exit_code=$1
+  (
+    end_ns=$(hook_timing_now_ns)
+    start_ns="${HOOK_TIMING_START_NS:-$end_ns}"
+    duration_ms=$(( (end_ns - start_ns) / 1000000 ))
+    [ "$duration_ms" -lt 0 ] 2>/dev/null && duration_ms=0
+
+    repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || repo_root=""
+    repo=$(basename "${repo_root:-unknown}")
+    commit_sha=$(git rev-parse HEAD 2>/dev/null) || commit_sha="unknown"
+    host=$(hostname -s 2>/dev/null || hostname 2>/dev/null || echo unknown)
+    ts=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "")
+
+    mkdir -p "$HOOK_TIMING_LOG_DIR" 2>/dev/null || exit 0
+    [ -d "$HOOK_TIMING_LOG_DIR" ] || exit 0
+
+    printf '{"ts":"%s","repo":"%s","hook":"%s","duration_ms":%s,"exit_code":%s,"commit_sha":"%s","host":"%s"}\n' \
+      "$ts" "$repo" "${HOOK_TIMING_HOOK_NAME:-unknown}" "$duration_ms" "$exit_code" "$commit_sha" "$host" \
+      >> "$HOOK_TIMING_LOG_FILE" 2>/dev/null || true
+  ) || true
+  exit "$exit_code"
+}
+
 # Resolve the workspace target dir. Used by hook_run_harn and
 # scripts/sign_local_macos.sh to find freshly-built binaries after
 # `cargo build`.

@@ -4,11 +4,18 @@ set -e
 hook_dir=$(dirname "$0")
 . "$hook_dir/lib.sh"
 
+hook_timing_start pre-push
+
 changed=$(mktemp)
 harn_format_files=$(mktemp)
 harn_lint_files=$(mktemp)
 changed_packages=$(mktemp)
-trap 'rm -f "$changed" "$harn_format_files" "$harn_lint_files" "$changed_packages"' EXIT
+# Combine into a single EXIT trap (a second `trap ... EXIT` would replace,
+# not stack with, this one): capture the hook's real exit code FIRST (the
+# subsequent `rm` would otherwise clobber $? with its own status), clean up
+# temp files, then let hook_timing_finish append the NDJSON timing line and
+# re-exit with the captured code.
+trap 'hook_timing_exit_code=$?; rm -f "$changed" "$harn_format_files" "$harn_lint_files" "$changed_packages"; hook_timing_finish "$hook_timing_exit_code"' EXIT
 hook_write_push_files "$changed"
 hook_export_cargo_target_dir
 hook_disable_cargo_incremental_if_release_bump "push $(hook_push_base)"
