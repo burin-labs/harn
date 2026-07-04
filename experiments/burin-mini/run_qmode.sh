@@ -9,7 +9,7 @@
 #   answer <task_id> <answer_text>   Record answer for pending question, run next turn.
 #   show <task_id>                   Print pending question or final plan.
 #   reset <task_id>                  Wipe the task dir.
-#   inspect <task_id>                Run qmode_inspect.py on the latest run record.
+#   inspect <task_id>                Run qmode_inspect.harn on the latest run record.
 #
 # Exit codes:
 #   0 = plan emitted (also after `show` of a plan, or `reset`)
@@ -177,7 +177,10 @@ case "$cmd" in
   inspect)
     [[ $# -ge 1 ]] || usage
     task_id="$1"
-    python3 "$EXPERIMENT_DIR/qmode_inspect.py" "$(task_dir "$task_id")"
+    pushd "$REPO_ROOT" >/dev/null
+    cargo run --quiet --bin harn -- run --no-sandbox \
+      "$EXPERIMENT_DIR/qmode_inspect.harn" -- "$(task_dir "$task_id")"
+    popd >/dev/null
     ;;
   chat)
     [[ $# -ge 1 ]] || usage

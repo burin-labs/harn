@@ -315,6 +315,7 @@ fmt-harn:
 test-harn-scripts:
 	@echo "=== Running Harn script test suite ==="
 	@$(HARN_CMD) test scripts/tests/
+	@$(HARN_CMD) test experiments/burin-mini/tests/
 	@echo "    Harn script tests OK."
 
 # Agent-loop Harn unit tests (stall detector, loop control, judge verdict,
