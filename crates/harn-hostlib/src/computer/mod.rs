@@ -53,7 +53,7 @@ use crate::error::HostlibError;
 use crate::registry::{BuiltinRegistry, HostlibCapability, RegisteredBuiltin, SyncHandler};
 use crate::tools::args::{build_dict, dict_arg};
 
-pub use transport::{NullBackend, SocketBackend};
+pub use transport::{handle_request_line, NullBackend, SocketBackend};
 
 const MODULE: &str = "computer";
 const SCREENSHOT_BUILTIN: &str = "hostlib_computer_screenshot";
@@ -209,22 +209,24 @@ fn default_wait_ms() -> u64 {
     500
 }
 
-/// A captured screenshot at native resolution.
+/// A captured screenshot, already resized to the advertised target size.
 ///
-/// Per-provider downscaling (Anthropic wants XGA; OpenAI wants original) is a
-/// `harn-vm` concern, so this always carries the native pixels plus the
-/// geometry needed to map coordinates back.
+/// The `LocalBackend` resizes captures to a fixed target (default XGA
+/// 1024x768) so the screenshot space, the coordinate space the model returns,
+/// and the size advertised in the provider tool spec are identical — the
+/// backend maps returned coordinates back to native input space internally.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ScreenImage {
     /// Base64-encoded PNG bytes.
     pub base64: String,
     /// MIME type (always `image/png`).
     pub media_type: String,
-    /// Native image width in pixels.
+    /// Image width in pixels (the advertised target width).
     pub width: u32,
-    /// Native image height in pixels.
+    /// Image height in pixels (the advertised target height).
     pub height: u32,
-    /// Backing-scale factor of the captured display (e.g. 2.0 on Retina).
+    /// Backing-scale factor of the captured display (e.g. 2.0 on Retina),
+    /// informational only.
     pub scale_factor: f64,
 }
 

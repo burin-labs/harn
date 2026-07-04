@@ -672,6 +672,67 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
     }
 
     #[test]
+    fn computer_use_style_projects_per_provider() {
+        reset();
+        // Anthropic vision models get the native-Anthropic projection style,
+        // XGA screenshot scaling, and advertise the `computer_use` hosted tool.
+        for model in [
+            "claude-opus-4-8",
+            "claude-sonnet-5",
+            "claude-sonnet-4-6",
+            "claude-fable-5",
+            "claude-haiku-4-7",
+        ] {
+            let caps = lookup("anthropic", model);
+            assert_eq!(
+                caps.computer_use_style.as_deref(),
+                Some("native_anthropic"),
+                "{model} should project native_anthropic"
+            );
+            assert_eq!(caps.screenshot_scaling.as_deref(), Some("xga"), "{model}");
+            assert!(
+                !caps.safety_ack_flow,
+                "{model} does not use the OpenAI safety-ack flow"
+            );
+        }
+        // OpenAI keeps `computer_use` in its Responses hosted-tool list; the
+        // Anthropic surface is gated by `computer_use_style` instead, since
+        // `hosted_tools` is a Responses-only concept `lookup` strips for
+        // non-OpenAI providers.
+        assert!(lookup("openai", "gpt-5.4")
+            .hosted_tools
+            .iter()
+            .any(|t| t == "computer_use"));
+        // OpenAI Responses computer models get the native-OpenAI projection,
+        // identity screenshot scaling, and the safety-ack flow.
+        for model in ["gpt-5.4", "gpt-5.4-preview"] {
+            let caps = lookup("openai", model);
+            assert_eq!(
+                caps.computer_use_style.as_deref(),
+                Some("native_openai"),
+                "{model} should project native_openai"
+            );
+            assert_eq!(
+                caps.screenshot_scaling.as_deref(),
+                Some("original"),
+                "{model}"
+            );
+            assert!(caps.safety_ack_flow, "{model} uses the safety-ack flow");
+        }
+        assert_eq!(
+            lookup("openai", "openai/gpt-5.4")
+                .computer_use_style
+                .as_deref(),
+            Some("native_openai")
+        );
+        // Non-computer routes leave the field unset.
+        assert!(lookup("openai", "gpt-3.5-turbo")
+            .computer_use_style
+            .is_none());
+        assert!(lookup("openai", "gpt-4o").computer_use_style.is_none());
+    }
+
+    #[test]
     fn openrouter_gemini_explicit_cache_uses_block_breakpoints() {
         reset();
         let caps = lookup("openrouter", "google/gemini-2.5-flash");

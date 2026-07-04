@@ -10,6 +10,12 @@ use crate::value::VmError;
 
 pub(crate) const ANTHROPIC_INTERLEAVED_THINKING_BETA: &str = "interleaved-thinking-2025-05-14";
 
+/// Anthropic beta header value that unlocks the native `computer_20251124`
+/// computer-use tool. Requested via the `anthropic-beta` header whenever a
+/// `computer` tool is present in the request surface on a `native_anthropic`
+/// route. See [`crate::llm::api::options::LlmCallOptions::anthropic_beta_features_for_request`].
+pub(crate) const COMPUTER_USE_BETA: &str = "computer-use-2025-11-24";
+
 thread_local! {
     static ANTHROPIC_PREFILL_WARN_ONCE: RefCell<HashSet<String>> =
         RefCell::new(HashSet::new());
@@ -384,6 +390,18 @@ impl AnthropicProvider {
                     .collect();
                 body["tools"] = serde_json::json!(sanitized);
             }
+        }
+        // Provider-native tools (e.g. the projected `computer_20251124` tool
+        // from `crate::llm::computer_use::project_computer_tools`) ride in
+        // `provider_tools`. The Messages API expects them in the SAME `tools`
+        // array as function tools, so fold them in here. Unlike OpenAI
+        // Responses, Anthropic has no separate provider-tool channel.
+        if !opts.provider_tools.is_empty() {
+            let mut tools = body["tools"].as_array().cloned().unwrap_or_default();
+            for tool in &opts.provider_tools {
+                tools.push(sanitize_anthropic_tool_for_request(tool));
+            }
+            body["tools"] = serde_json::json!(tools);
         }
         if let Some(ref tc) = opts.tool_choice {
             // Anthropic requires `tool_choice` to be an OBJECT (e.g.

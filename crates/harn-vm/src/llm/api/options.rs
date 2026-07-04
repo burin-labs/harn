@@ -521,7 +521,44 @@ impl LlmCallOptions {
         if let Some(header) = crate::llm::fast_mode::beta_header(&self.model, self.fast) {
             push_unique_anthropic_beta_feature(&mut features, &header);
         }
+        // Native computer use requires an explicit beta opt-in. Request it
+        // whenever a `computer` tool is present in the surface (either the
+        // plain function copy or the projected native `computer_20251124`
+        // tool). Transport only emits `anthropic-beta` on Anthropic-style
+        // routes, so gating on the tool's presence is sufficient; the
+        // `native_anthropic` style is what caused the projection in the first
+        // place. See `crate::llm::computer_use::project_computer_tools`.
+        if self.request_has_computer_tool() {
+            push_unique_anthropic_beta_feature(
+                &mut features,
+                crate::llm::providers::anthropic::COMPUTER_USE_BETA,
+            );
+        }
         features
+    }
+
+    /// Whether the resolved tool surface contains a `computer` tool — either a
+    /// plain function-schema tool named `computer` or a projected provider
+    /// native computer tool (`type` starting with `computer`). Checks both
+    /// `native_tools` and `provider_tools` so detection is order-independent
+    /// with respect to the native-tool projection.
+    fn request_has_computer_tool(&self) -> bool {
+        let is_computer = |tool: &serde_json::Value| -> bool {
+            let named_computer = tool
+                .get("name")
+                .or_else(|| tool.get("function").and_then(|f| f.get("name")))
+                .and_then(serde_json::Value::as_str)
+                == Some("computer");
+            let typed_computer = tool
+                .get("type")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|ty| ty.starts_with("computer"));
+            named_computer || typed_computer
+        };
+        self.native_tools
+            .as_deref()
+            .is_some_and(|tools| tools.iter().any(&is_computer))
+            || self.provider_tools.iter().any(&is_computer)
     }
 }
 
@@ -796,6 +833,49 @@ mod tests {
     };
 
     fn assert_send<T: Send>() {}
+
+    #[test]
+    fn computer_use_beta_requested_only_when_computer_tool_present() {
+        let beta = crate::llm::providers::anthropic::COMPUTER_USE_BETA;
+
+        // No computer tool in the surface -> beta absent.
+        let mut opts = base_opts("anthropic");
+        opts.model = "claude-opus-4-8".to_string();
+        opts.thinking = ThinkingConfig::Disabled;
+        assert!(
+            !opts
+                .anthropic_beta_features_for_request()
+                .contains(&beta.to_string()),
+            "beta must be absent without a computer tool"
+        );
+
+        // A plain function-schema `computer` tool -> beta requested.
+        opts.native_tools = Some(vec![serde_json::json!({
+            "type": "function",
+            "function": {"name": "computer"}
+        })]);
+        assert!(
+            opts.anthropic_beta_features_for_request()
+                .contains(&beta.to_string()),
+            "beta must be requested when a function `computer` tool is present"
+        );
+
+        // The projected native Anthropic computer tool (in provider_tools)
+        // also triggers the beta, order-independently.
+        opts.native_tools = Some(vec![serde_json::json!({
+            "type": "function",
+            "function": {"name": "read_file"}
+        })]);
+        opts.provider_tools = vec![serde_json::json!({
+            "type": "computer_20251124",
+            "name": "computer"
+        })];
+        assert!(
+            opts.anthropic_beta_features_for_request()
+                .contains(&beta.to_string()),
+            "beta must be requested when the native computer tool is projected"
+        );
+    }
 
     #[test]
     fn resolve_timeout_precedence_explicit_then_env_then_catalog_then_default() {

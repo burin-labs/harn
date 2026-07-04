@@ -14,38 +14,58 @@ use super::{
     PermissionState, PermissionStatus, ScreenImage, ScrollDirection, UiTree,
 };
 
+/// Default advertised screenshot size. Captures are resized to exactly this,
+/// so the screenshot space, the coordinate space the model returns, and the
+/// size advertised in the provider tool spec are all identical — no cross-call
+/// coordinate state. Matches the harn-vm computer-tool projection default
+/// (1024x768, Anthropic's recommended XGA). Overridable via
+/// `BURIN_COMPUTER_USE_WIDTH` / `BURIN_COMPUTER_USE_HEIGHT` (e.g. to send
+/// higher-resolution frames to OpenAI, which prefers original detail).
+const DEFAULT_TARGET_WIDTH: u32 = 1024;
+const DEFAULT_TARGET_HEIGHT: u32 = 768;
+
+/// Resolve the target screenshot size from the environment, falling back to
+/// the XGA default.
+fn target_dims() -> (u32, u32) {
+    let read = |key: &str, fallback: u32| {
+        std::env::var(key)
+            .ok()
+            .and_then(|value| value.parse::<u32>().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or(fallback)
+    };
+    (
+        read("BURIN_COMPUTER_USE_WIDTH", DEFAULT_TARGET_WIDTH),
+        read("BURIN_COMPUTER_USE_HEIGHT", DEFAULT_TARGET_HEIGHT),
+    )
+}
+
 /// Local capture/input backend. Cheap to construct; captures a fresh `Enigo`
 /// per action batch and enumerates monitors per screenshot.
 pub struct LocalBackend {
-    /// Backing-scale factor of the last captured display. Screenshots are
-    /// physical pixels but some platforms (macOS) take synthetic input in
-    /// logical points, so we divide incoming coordinates by this. The agent
-    /// loop always screenshots before acting, so the cached value is fresh;
-    /// defaults to 1.0.
-    last_scale: Mutex<f64>,
+    /// Cached transform from screenshot (target) space to the logical-point
+    /// space `enigo` expects, as `(x_ratio, y_ratio)` where
+    /// `logical = target * ratio`. Refreshed on every screenshot (the agent
+    /// loop always screenshots before acting); defaults to identity.
+    transform: Mutex<(f64, f64)>,
 }
 
 impl LocalBackend {
     /// Construct a local backend.
     pub fn new() -> Self {
         Self {
-            last_scale: Mutex::new(1.0),
+            transform: Mutex::new((1.0, 1.0)),
         }
     }
 
-    /// Map an action coordinate (physical pixels, screenshot space) into the
-    /// coordinate space `enigo` expects for this platform.
+    /// Map a screenshot-space coordinate (target pixels, what the model sees
+    /// and returns) into the logical-point space `enigo` uses for input.
     fn to_input_coords(&self, x: i32, y: i32) -> (i32, i32) {
-        if cfg!(target_os = "macos") {
-            let scale = *self.last_scale.lock().expect("scale mutex");
-            if scale > 0.0 {
-                return (
-                    (f64::from(x) / scale).round() as i32,
-                    (f64::from(y) / scale).round() as i32,
-                );
-            }
-        }
-        (x, y)
+        let (rx, ry) = *self.transform.lock().expect("transform mutex");
+        (
+            (f64::from(x) * rx).round() as i32,
+            (f64::from(y) * ry).round() as i32,
+        )
     }
 }
 
@@ -77,18 +97,33 @@ impl ComputerBackend for LocalBackend {
             .or_else(|| Monitor::all().ok().and_then(|mut m| m.drain(..).next()))
             .ok_or_else(|| "no monitor found".to_string())?;
 
-        let image = monitor
+        let captured = monitor
             .capture_image()
             .map_err(|err| format!("capture screen: {err}"))?;
-        let (width, height) = (image.width(), image.height());
+        let physical_width = captured.width();
 
-        // scale_factor = captured (physical) width / reported (logical) width.
-        let logical_width = monitor.width().unwrap_or(width).max(1);
-        let scale_factor = f64::from(width) / f64::from(logical_width);
-        *self.last_scale.lock().expect("scale mutex") = scale_factor;
+        // Resize to exactly the advertised target so screenshot space ==
+        // model-coordinate space == advertised tool size.
+        let (target_width, target_height) = target_dims();
+        let resized = image::imageops::resize(
+            &captured,
+            target_width,
+            target_height,
+            image::imageops::FilterType::Triangle,
+        );
+
+        // enigo takes input in logical points; target maps to logical by
+        // logical_dim / target_dim (this folds in the Retina backing scale).
+        let logical_width = monitor.width().unwrap_or(physical_width).max(1);
+        let logical_height = monitor.height().unwrap_or(captured.height()).max(1);
+        *self.transform.lock().expect("transform mutex") = (
+            f64::from(logical_width) / f64::from(target_width),
+            f64::from(logical_height) / f64::from(target_height),
+        );
+        let scale_factor = f64::from(physical_width) / f64::from(logical_width);
 
         let mut png = Vec::new();
-        image
+        resized
             .write_to(&mut Cursor::new(&mut png), image::ImageFormat::Png)
             .map_err(|err| format!("encode png: {err}"))?;
         let base64 = base64::engine::general_purpose::STANDARD.encode(&png);
@@ -96,8 +131,8 @@ impl ComputerBackend for LocalBackend {
         Ok(ScreenImage {
             base64,
             media_type: "image/png".to_string(),
-            width,
-            height,
+            width: target_width,
+            height: target_height,
             scale_factor,
         })
     }

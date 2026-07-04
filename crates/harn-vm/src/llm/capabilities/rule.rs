@@ -389,6 +389,28 @@ pub struct ProviderRule {
     /// `unverified`.
     #[serde(default)]
     pub serving_precision: Option<String>,
+    /// How the neutral `computer` tool projects onto this route's native
+    /// computer-use surface. `harn-vm` reads this to decide whether to inject
+    /// a provider-native computer tool (and suppress the plain function copy)
+    /// or leave the function-schema tool untouched. Known values are
+    /// `native_anthropic` (Anthropic `computer_20251124`), `native_openai`
+    /// (OpenAI Responses `computer`), `grounded` (element/mark addressing
+    /// resolved locally), and `function` (generic function-schema fallback).
+    /// Unset means the route has no computer-use surface.
+    #[serde(default)]
+    pub computer_use_style: Option<String>,
+    /// Screenshot downscaling policy applied before the image reaches the
+    /// model. Known values are `xga` (fit within 1024x768 preserving aspect,
+    /// what Anthropic expects), `original` (identity, what OpenAI expects),
+    /// and `none`. Unset means unset.
+    #[serde(default)]
+    pub screenshot_scaling: Option<String>,
+    /// Whether this route requires echoing acknowledged safety checks on the
+    /// computer-use follow-up turn (OpenAI Responses surfaces
+    /// `pending_safety_checks` that must be echoed as
+    /// `acknowledged_safety_checks`). Unset resolves to `false`.
+    #[serde(default)]
+    pub safety_ack_flow: Option<bool>,
 }
 
 impl ProviderRule {
@@ -480,6 +502,9 @@ impl ProviderRule {
             provider_route_denylist,
             openrouter_provider_order,
             serving_precision,
+            computer_use_style,
+            screenshot_scaling,
+            safety_ack_flow,
         } = other;
         fill_opt(&mut self.native_tools, native_tools);
         fill_opt(&mut self.message_wire_format, message_wire_format);
@@ -610,6 +635,9 @@ impl ProviderRule {
             openrouter_provider_order,
         );
         fill_opt(&mut self.serving_precision, serving_precision);
+        fill_opt(&mut self.computer_use_style, computer_use_style);
+        fill_opt(&mut self.screenshot_scaling, screenshot_scaling);
+        fill_opt(&mut self.safety_ack_flow, safety_ack_flow);
         // Legacy alias pairs resolve as ONE logical capability
         // (`rule_structured_output`, `rule_thinking_modes`, `rule_vision`),
         // so they fill as a unit: when the accumulated chain has explicitly
@@ -904,6 +932,9 @@ fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
         provider_route_denylist: None,
         openrouter_provider_order: None,
         serving_precision: None,
+        computer_use_style: None,
+        screenshot_scaling: None,
+        safety_ack_flow: None,
     };
     let mut caps = rule_to_caps(&empty, defaults);
     caps.preferred_tool_format = None;
@@ -1041,6 +1072,9 @@ fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilitie
             .serving_precision
             .clone()
             .unwrap_or_else(|| "unverified".to_string()),
+        computer_use_style: rule.computer_use_style.clone(),
+        screenshot_scaling: rule.screenshot_scaling.clone(),
+        safety_ack_flow: rule.safety_ack_flow.unwrap_or(false),
     }
 }
 

@@ -369,6 +369,20 @@ pub struct Capabilities {
     /// Serving-quality / precision trust verdict for this route. See
     /// [`ProviderRule::serving_precision`]. `"unverified"` when unset.
     pub serving_precision: String,
+    /// How the neutral `computer` tool projects onto this route's native
+    /// computer-use surface. See [`ProviderRule::computer_use_style`]. Known
+    /// values are `native_anthropic`, `native_openai`, `grounded`, and
+    /// `function`. `None` means the route exposes no computer-use surface.
+    pub computer_use_style: Option<String>,
+    /// Screenshot downscaling policy applied before the image reaches the
+    /// model. See [`ProviderRule::screenshot_scaling`]. Known values are `xga`
+    /// (fit within 1024x768, Anthropic), `original` (identity, OpenAI), and
+    /// `none`. `None` means unset.
+    pub screenshot_scaling: Option<String>,
+    /// Whether this route requires echoing acknowledged safety checks on the
+    /// computer-use follow-up turn (OpenAI Responses `pending_safety_checks`
+    /// → `acknowledged_safety_checks`). See [`ProviderRule::safety_ack_flow`].
+    pub safety_ack_flow: bool,
 }
 
 impl Default for Capabilities {
@@ -446,6 +460,9 @@ impl Default for Capabilities {
             provider_route_denylist: Vec::new(),
             openrouter_provider_order: Vec::new(),
             serving_precision: "unverified".to_string(),
+            computer_use_style: None,
+            screenshot_scaling: None,
+            safety_ack_flow: false,
         }
     }
 }
