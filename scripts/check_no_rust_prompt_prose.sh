@@ -7,7 +7,7 @@ resolve_harn_bin() {
     return
   fi
 
-  cargo build --quiet --bin harn
+  RUSTC_WRAPPER= CARGO_BUILD_RUSTC_WRAPPER= cargo build --quiet --bin harn
   target_dir="$(cargo metadata --format-version=1 --no-deps \
     | python3 -c 'import json, sys; print(json.load(sys.stdin)["target_directory"])')"
   suffix=""

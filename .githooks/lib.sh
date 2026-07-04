@@ -136,6 +136,10 @@ hook_export_cargo_target_dir() {
   printf '=== Hook: using Cargo target dir %s ===\n' "$CARGO_TARGET_DIR" >&2
 }
 
+hook_build_harn_bin() {
+  RUSTC_WRAPPER= CARGO_BUILD_RUSTC_WRAPPER= cargo build --quiet --bin harn
+}
+
 # Build the workspace `harn` binary and re-apply the local codesign so
 # the freshly re-linked binary keeps its ad-hoc signature — otherwise
 # Gatekeeper shows a multi-second "Verifying 'harn'..." popup the first
@@ -154,7 +158,7 @@ hook_ensure_harn() {
   fi
 
   hook_export_cargo_target_dir
-  cargo build --quiet --bin harn >&2
+  hook_build_harn_bin >&2
   if [ "$(uname)" = "Darwin" ] && [ -x "scripts/sign_local_macos.sh" ]; then
     HARN_LOCAL_SIGN_QUIET=1 ./scripts/sign_local_macos.sh >&2
   fi
