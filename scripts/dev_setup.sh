@@ -22,11 +22,23 @@ derive_target_dir() {
   printf '%s/harn-target/%s-%s\n' "${TMPDIR:-/tmp}" "${worktree_parent}" "${worktree_leaf}"
 }
 
+derive_build_dir() {
+  # One shared build-dir per machine (per-user on macOS, where $TMPDIR is
+  # per-user), NOT per-worktree: Cargo's own fingerprinting dedupes
+  # intermediate artifacts (registry deps, build scripts) across every
+  # worktree that shares the path, while the per-worktree target-dir above
+  # keeps final binaries isolated. sccache cannot provide this cross-worktree
+  # dedup because its Rust hash is target-dir-path-dependent.
+  printf '%s/cargo-build-shared\n' "${TMPDIR:-/tmp}"
+}
+
 write_build_config() {
   local rustc_wrapper="${1:-}"
   local target_dir="${2:-}"
+  local build_dir="${3:-}"
   local config_path=".cargo/config.toml"
   local drop_generated_target_dir=0
+  local drop_generated_build_dir=0
   local source_path="/dev/null"
   local tmp_path
 
@@ -34,7 +46,11 @@ write_build_config() {
     drop_generated_target_dir=1
   fi
 
-  if [[ -z "${rustc_wrapper}" && -z "${target_dir}" && ! -f "${config_path}" ]]; then
+  if [[ -z "${build_dir}" ]]; then
+    drop_generated_build_dir=1
+  fi
+
+  if [[ -z "${rustc_wrapper}" && -z "${target_dir}" && -z "${build_dir}" && ! -f "${config_path}" ]]; then
     return 0
   fi
 
@@ -47,7 +63,9 @@ write_build_config() {
   awk \
     -v rustc_wrapper="${rustc_wrapper}" \
     -v target_dir="${target_dir}" \
+    -v build_dir="${build_dir}" \
     -v drop_generated_target_dir="${drop_generated_target_dir}" \
+    -v drop_generated_build_dir="${drop_generated_build_dir}" \
     '
     function extract_toml_string(line, value) {
       value = line
@@ -62,6 +80,11 @@ write_build_config() {
         value ~ "/T/+harn-target/[^/]+$"
     }
 
+    function is_generated_build_dir(value) {
+      return value ~ "^(/private)?/tmp/cargo-build-shared$" || \
+        value ~ "/T/+cargo-build-shared$"
+    }
+
     function print_missing_build_values() {
       if (rustc_wrapper != "" && !saw_rustc_wrapper) {
         print "rustc-wrapper = \"" rustc_wrapper "\""
@@ -71,6 +94,10 @@ write_build_config() {
         print "target-dir = \"" target_dir "\""
         saw_target_dir = 1
       }
+      if (build_dir != "" && !saw_build_dir) {
+        print "build-dir = \"" build_dir "\""
+        saw_build_dir = 1
+      }
     }
 
     BEGIN {
@@ -78,6 +105,7 @@ write_build_config() {
       saw_build = 0
       saw_rustc_wrapper = 0
       saw_target_dir = 0
+      saw_build_dir = 0
     }
 
     /^\[build\][[:space:]]*$/ {
@@ -110,6 +138,17 @@ write_build_config() {
       if (in_build && drop_generated_target_dir && $0 ~ /^[[:space:]]*target-dir[[:space:]]*=/) {
         if (is_generated_target_dir(extract_toml_string($0))) {
           saw_target_dir = 1
+          next
+        }
+      }
+      if (in_build && build_dir != "" && $0 ~ /^[[:space:]]*build-dir[[:space:]]*=/) {
+        print "build-dir = \"" build_dir "\""
+        saw_build_dir = 1
+        next
+      }
+      if (in_build && drop_generated_build_dir && $0 ~ /^[[:space:]]*build-dir[[:space:]]*=/) {
+        if (is_generated_build_dir(extract_toml_string($0))) {
+          saw_build_dir = 1
           next
         }
       }
@@ -235,18 +274,27 @@ if [[ -z "${target_dir}" ]]; then
   target_dir="$(derive_target_dir || true)"
 fi
 
+build_dir="${HARN_DEV_BUILD_DIR:-}"
+if [[ -z "${build_dir}" ]]; then
+  build_dir="$(derive_build_dir)"
+fi
+
 rustc_wrapper=""
 if command -v sccache >/dev/null 2>&1; then
   rustc_wrapper="sccache"
 fi
 
-write_build_config "${rustc_wrapper}" "${target_dir}"
+write_build_config "${rustc_wrapper}" "${target_dir}" "${build_dir}"
 if [[ -n "${rustc_wrapper}" ]]; then
   echo "Configured sccache as rustc wrapper in .cargo/config.toml"
 fi
 if [[ -n "${target_dir}" ]]; then
   mkdir -p "${target_dir}"
   echo "Configured Cargo target dir -> ${target_dir}"
+fi
+if [[ -n "${build_dir}" ]]; then
+  mkdir -p "${build_dir}"
+  echo "Configured shared Cargo build dir -> ${build_dir}"
 fi
 
 mkdir -p "${SETUP_STATE_DIR}"
