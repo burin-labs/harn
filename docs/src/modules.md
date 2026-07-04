@@ -1436,19 +1436,15 @@ Small deterministic workflow recipes:
 | `workflow_verification_only_graph(config?)` | Build a graph with only a verifier node |
 | `workflow_failover(config)` | Run typed failover over opaque route handles with caller-owned evaluation/classification callbacks |
 
-### std/agent/stack
+### std/agent/options (model-option resolution)
 
-Canonical composition helpers for the common agent runtime cell:
+Model-option resolution helpers (moved here from the removed
+`std/agent/stack` in 0.10 — see [Migrating to 0.10](./migrations/v0.10.md)):
 
 | Function | Description |
 |---|---|
 | `agent_model_options(config?)` | Resolve explicit options, role/env provider-model overrides, model-aware option packs, tool format, and capability cleanup |
 | `agent_sanitize_model_options(options?, policy?)` | Strip unsupported provider-specific keys such as `reasoning_effort` and prompt-cache hints; `{mode: "healthcheck"}` also drops deliberate-reasoning knobs for probes |
-| `agent_llm_caller(config?)` | Compose `default_llm_caller` with retry by default and optional logging/cache/budget wrappers |
-| `agent_tool_stack(tools?, config?)` | Compose required-reason, binder, and custom tool middleware |
-| `agent_stack(config?)` | Return a complete `agent_loop` options bundle with model options, callers, tools, and audit metadata |
-| `agent_stack_audit_line(stack)` | Render a stable one-line provider/model/tooling summary |
-| `agent_stack_model_policy(stack)` | Project provider/model/task fields into a workflow `model_policy` dict |
 
 ### std/agent/stream
 

@@ -78,10 +78,10 @@ These bit the implementing agents and will bite users:
 6. **Streaming is out of scope for `llm_caller`.** `llm_stream_call`
    keeps its own surface; a future `llm_streaming_caller` may parallel
    this.
-7. **Off-by-one in retry semantics.** `llm_retries: 3` historically
-   meant 4 total attempts; `with_retry`'s `max_attempts: N` means N
-   total attempts. Migrations adjusting `llm_retries: K` should pass
-   `max_attempts: K + 1`.
+7. **Off-by-one in retry semantics.** The removed `llm_retries: 3`
+   historically meant 4 total attempts; `with_retry`'s `max_attempts: N`
+   means N total attempts. Migrations adjusting `llm_retries: K` should
+   pass `max_attempts: K + 1`.
 
 ---
 
@@ -135,26 +135,23 @@ let result = agent_loop(task, system, {
 })
 ```
 
-### Canonical agent stack
+### Model-option resolution
 
-For the common case where a script needs model defaults, role/env overrides,
-retry/logging/budget middleware, and tool middleware, use `std/agent/stack`
-instead of rebuilding the same options dict in each app:
+For role/env model resolution, use `agent_model_options` from
+`std/agent/options` (the pre-0.10 `std/agent/stack` bundle was removed;
+compose retry/logging/budget middleware explicitly with the handlers above and
+tool middleware from `std/llm/tool_middleware`):
 
 ```harn,ignore
-import {agent_stack, agent_stack_audit_line} from "std/agent/stack"
+import {agent_model_options} from "std/agent/options"
+import {compose, default_llm_caller, with_logging, with_retry} from "std/llm/handlers"
 
-let stack = agent_stack({
+let route = agent_model_options({
   role: "planner",
   defaults: {provider: "anthropic", model: "claude-sonnet-5", task: "agent"},
-  retry: {max_attempts: 3},
-  logging: true,
-  budget: {max_calls: 40},
-  required_reason: true,
 })
-
-log(agent_stack_audit_line(stack))
-let result = agent_loop(task, system, stack.options + {loop_until_done: true})
+let caller = compose([with_retry({max_attempts: 3}), with_logging({})])(default_llm_caller())
+let result = agent_loop(task, system, route.options + {loop_until_done: true, llm_caller: caller})
 ```
 
 `agent_model_options(config?)` resolves explicit options first, then role
@@ -162,12 +159,8 @@ environment prefixes (`HARN_AGENT_PLANNER_*`, `HARN_LLM_PLANNER_*`,
 `HARN_PLANNER_*`), then shared `HARN_AGENT_*` / `HARN_LLM_*`, then defaults. If
 a model is present it calls `pack_for(...)`, resolves `tool_format: "auto"`,
 and strips unsupported provider-specific keys such as `reasoning_effort` or
-prompt-cache hints before the call reaches a provider.
-
-`agent_llm_caller(config?)` composes `default_llm_caller` with retry by default
-and optional logging/cache/budget wrappers. `agent_tool_stack(tools?, config?)`
-centralizes required-reason and natural-language binder middleware, including
-`HARN_BINDER_*` env overrides.
+prompt-cache hints before the call reaches a provider
+(`agent_sanitize_model_options` exposes the stripping step directly).
 
 ### Persona-shaped example: cost moat substrate
 

@@ -6,11 +6,7 @@ fn handler(event: TriggerEvent) -> dict {
 }
 
 fn classify(event: TriggerEvent) -> bool {
-  let result = llm_call(
-    "predicate fires " + event.kind,
-    nil,
-    {provider: "mock", model: "gpt-4o-mini", llm_retries: 0},
-  )
+  let result = llm_call("predicate fires " + event.kind, nil, {provider: "mock", model: "gpt-4o-mini"})
   return contains(result.text, "yes")
 }
 

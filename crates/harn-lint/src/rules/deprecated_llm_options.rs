@@ -1,9 +1,11 @@
-//! `deprecated_llm_options` rule: warn on `llm_retries` /
+//! `deprecated_llm_options` rule: hard-error on `llm_retries` /
 //! `llm_backoff_ms` keys passed in dict-literal options to
-//! `llm_call`-family surfaces. These options still work on v0.8.x but
-//! are slated for removal in v0.9; the lint nudges users toward the
+//! `llm_call`-family surfaces. These options were REMOVED in v0.10 —
+//! the runtime no longer reads them — so any occurrence is dead config
+//! at best and a silent behavior change at worst. The migration is the
 //! `with_retry(default_llm_caller(), {...})` handler in
-//! `std/llm/handlers`.
+//! `std/llm/handlers`; mind the off-by-one (`llm_retries: K` retried K
+//! times after the first attempt ⇒ `max_attempts: K + 1`).
 
 use harn_lexer::Span;
 use harn_parser::{DiagnosticCode as Code, DictEntry, MatchArm, Node, SNode, SelectCase};
@@ -23,7 +25,7 @@ const TARGET_CALLEES: &[&str] = &[
 ];
 
 /// Walk the program looking for calls to LLM surfaces whose dict-literal
-/// argument(s) contain deprecated keys. Emits one Warn per offending
+/// argument(s) contain removed keys. Emits one Error per offending
 /// key occurrence, anchored to the key's span.
 pub(crate) fn check_deprecated_llm_options(
     program: &[SNode],
@@ -297,7 +299,7 @@ fn visit_select_case(case: &SelectCase, diagnostics: &mut Vec<LintDiagnostic>) {
 }
 
 /// Scan a dict-literal's entries (one of an LLM call's args) and emit
-/// a Warn for every key matching a deprecated name. Also recurses into
+/// an Error for every key matching a removed name. Also recurses into
 /// each value so a nested `{opts: {llm_retries: ...}}` is still flagged
 /// in the unlikely case it appears at this level.
 fn scan_entries(entries: &[DictEntry], diagnostics: &mut Vec<LintDiagnostic>) {
@@ -315,17 +317,17 @@ fn scan_entries(entries: &[DictEntry], diagnostics: &mut Vec<LintDiagnostic>) {
 
 fn make_diagnostic(key: &str, span: Span) -> LintDiagnostic {
     let message = format!(
-        "`{key}` is deprecated; use `with_retry(default_llm_caller(), {{max_attempts: N+1}})` from `std/llm/handlers` (see CHANGELOG migration note)."
+        "`{key}` was removed in v0.10 and is no longer read; use `with_retry(default_llm_caller(), {{...}})` from `std/llm/handlers`. Note the off-by-one: `llm_retries: K` retried K times after the first attempt, so pass `with_retry(..., {{max_attempts: K + 1}})`. See docs/src/migrations/v0.10.md."
     );
     let suggestion = Some(format!(
-        "remove `{key}` from this options dict and wrap the call with `with_retry(default_llm_caller(), {{max_attempts: N+1}})` from `std/llm/handlers`."
+        "remove `{key}` from this options dict and wrap the call with `with_retry(default_llm_caller(), {{max_attempts: K + 1}})` from `std/llm/handlers` (K = the old `llm_retries` value)."
     ));
     LintDiagnostic {
         code: Code::LintDeprecatedLlmOptions,
         rule: RULE_NAME.into(),
         message,
         span,
-        severity: LintSeverity::Warning,
+        severity: LintSeverity::Error,
         suggestion,
         fix: None,
     }
@@ -370,8 +372,13 @@ pipeline default(task) {
         );
         assert_eq!(count_rule(&diags), 1, "diags: {diags:?}");
         assert!(
-            message_for(&diags, 0).contains("`llm_retries` is deprecated"),
+            message_for(&diags, 0).contains("`llm_retries` was removed in v0.10"),
             "msg: {}",
+            message_for(&diags, 0)
+        );
+        assert!(
+            message_for(&diags, 0).contains("max_attempts: K + 1"),
+            "message must carry the off-by-one migration hint: {}",
             message_for(&diags, 0)
         );
     }
@@ -387,7 +394,7 @@ pipeline default(task) {
         );
         assert_eq!(count_rule(&diags), 1, "diags: {diags:?}");
         assert!(
-            message_for(&diags, 0).contains("`llm_backoff_ms` is deprecated"),
+            message_for(&diags, 0).contains("`llm_backoff_ms` was removed in v0.10"),
             "msg: {}",
             message_for(&diags, 0)
         );
@@ -491,7 +498,7 @@ pipeline default(task) {
     }
 
     #[test]
-    fn severity_is_warn_not_error() {
+    fn severity_is_hard_error() {
         let diags = lint(
             r#"
 pipeline default(task) {
@@ -503,6 +510,6 @@ pipeline default(task) {
             .iter()
             .find(|d| d.rule == RULE_NAME)
             .expect("diagnostic present");
-        assert_eq!(our_diag.severity, LintSeverity::Warning);
+        assert_eq!(our_diag.severity, LintSeverity::Error);
     }
 }

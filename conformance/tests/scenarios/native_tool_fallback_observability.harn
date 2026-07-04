@@ -42,6 +42,10 @@ pipeline default() {
       __io_println(!fallback_events[1]?.metadata?.accepted)
     },
   )
+  // The built-in empty-completion retry applies to provider-shaped routes
+  // only. The mock provider replays scripted turns deterministically, so the
+  // thrown empty-completion shape surfaces on the first attempt with no
+  // silent retry (pre-v0.10, `llm_retries` could opt mock into a budget).
   with_llm_script(
     [
       {
@@ -53,12 +57,14 @@ pipeline default() {
       llm_text("<done>##DONE##</done>"),
     ],
     { ->
-      let retried = agent_loop(
+      let surfaced = agent_loop(
         "Finish the task",
         "You are helpful",
-        {provider: "mock", loop_until_done: true, max_iterations: 1, llm_retries: 1},
+        {provider: "mock", loop_until_done: true, max_iterations: 1},
       )
-      __io_println(retried?.trace?.empty_completion_retries == 1)
+      __io_println(surfaced.status)
+      __io_println(surfaced?.trace?.empty_completion_retries == 0)
+      __io_println(len(llm_mock_calls()) == 1)
     },
   )
 }

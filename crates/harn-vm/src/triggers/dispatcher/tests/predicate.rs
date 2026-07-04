@@ -17,7 +17,7 @@ pub fn should_handle(event: TriggerEvent) -> bool {
   let result = llm_call(
     "budget gate " + event.kind,
     nil,
-    {provider: "mock", model: "gpt-4o-mini", llm_retries: 0},
+    {provider: "mock", model: "gpt-4o-mini"},
   )
   return contains(result.text, "yes")
 }
@@ -106,7 +106,7 @@ pub fn should_handle(event: TriggerEvent) -> bool {
   let result = llm_call(
     "daily gate " + event.kind,
     nil,
-    {provider: "mock", model: "gpt-4o-mini", llm_retries: 0},
+    {provider: "mock", model: "gpt-4o-mini"},
   )
   return contains(result.text, "yes")
 }
@@ -206,7 +206,7 @@ pub fn should_handle(event: TriggerEvent) -> bool {
   let result = llm_call(
     "warn gate " + event.kind,
     nil,
-    {provider: "mock", model: "gpt-4o-mini", llm_retries: 0},
+    {provider: "mock", model: "gpt-4o-mini"},
   )
   return contains(result.text, "yes")
 }
@@ -362,7 +362,7 @@ pub fn should_handle(event: TriggerEvent) -> bool {
   let result = llm_call(
     "replay gate " + event.kind,
     nil,
-    {provider: "mock", model: "gpt-4o-mini", llm_retries: 0},
+    {provider: "mock", model: "gpt-4o-mini"},
   )
   return contains(result.text, "yes")
 }

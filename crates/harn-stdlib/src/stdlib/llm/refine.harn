@@ -38,8 +38,6 @@ fn __llm_options(options) {
     "temperature",
     "max_tokens",
     "timeout_ms",
-    "llm_retries",
-    "llm_backoff_ms",
     "schema_retries",
     "repair",
     "stream",

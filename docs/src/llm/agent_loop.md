@@ -310,9 +310,7 @@ Same as `llm_call`, plus additional options:
 | `loop_control` | closure | nil | Per-iteration policy callback `state -> command`. Receives a normalized loop-state snapshot and returns a command (`extend`/`stop`/`none`). See [Adaptive iteration budget](#adaptive-iteration-budget) |
 | `max_nudges` | int | `8` | Max consecutive text-only responses before stopping |
 | `nudge` | string | see below | Custom message to send when nudging the agent |
-| `llm_caller` | closure | nil | Custom caller wrapping the per-turn `llm_call`. Preferred resilience surface. See [Composable callers and middleware](../stdlib/llm-handlers.md). |
-| `llm_retries` | int | `2` | (deprecated; prefer `llm_caller` with `with_retry` from `std/llm/handlers`) Retries on transient HTTP / provider errors. Off-by-one: `llm_retries: K` ≈ `with_retry(..., {max_attempts: K + 1})`. |
-| `llm_backoff_ms` | int | `2000` | (deprecated; prefer `with_retry`) Base exponential backoff in ms between LLM retries |
+| `llm_caller` | closure | nil | Custom caller wrapping the per-turn `llm_call`. The resilience surface: compose `with_retry` / `with_fallback` from `std/llm/handlers` here. See [Composable callers and middleware](../stdlib/llm-handlers.md). |
 | `reasoning_policy` / `thinking_policy` | string/bool | `"auto"` | Provider-aware reasoning policy. `auto` chooses a task/scale-appropriate setting; `off` disables thinking where possible and otherwise uses the provider's lowest reasoning floor; `minimal`, `low`, `medium`, `high`, and `xhigh` request explicit levels. Caller-supplied `thinking` or `reasoning_effort` always wins |
 | `reasoning_scale` / `problem_scale` | string | `"medium"` | Scale hint for `reasoning_policy: "auto"`: `small`, `medium`, or `large` |
 | `reasoning_task` | string | inferred | Task hint for `reasoning_policy: "auto"`: `chat`, `agent`, `code`, `verify`, or `summarize` |
@@ -451,9 +449,10 @@ let result = agent_loop(task, system, opts)
 
 Caller contract: `fn(call) -> {ok, value | status, error?}` where
 `call = {prompt, system, opts, turn: {iteration, session_id, attempt}}`.
-The legacy `llm_retries` / `llm_backoff_ms` options are still accepted
-for back-compat and will be removed in v0.9; the lint rule
-`deprecated_llm_options` warns on usage. See
+The pre-0.10 `llm_retries` / `llm_backoff_ms` options were removed —
+the loop is fail-fast on transient provider errors unless a composed
+`llm_caller` retries them; the `deprecated_llm_options` lint hard-errors
+on usage (see [Migrating to 0.10](../migrations/v0.10.md)). See
 [Composable callers and middleware](../stdlib/llm-handlers.md) for the
 full middleware catalog.
 
@@ -525,12 +524,12 @@ Stdlib helpers cover common host commands:
 `compact_preserving_test_failures(...)`, and
 `compact_retaining_current_plan(...)`.
 
-| Profile | `max_iterations` | `max_nudges` | `tool_retries` | `llm_retries` | `schema_retries` |
-|---|---:|---:|---:|---:|---:|
-| `tool_using` | 50 | 8 | 0 | 2 | 0 |
-| `researcher` | 30 | 4 | 0 | 2 | 0 |
-| `verifier` | 5 | 0 | 0 | 2 | 3 |
-| `completer` | 1 | 0 | 0 | 2 | 0 |
+| Profile | `max_iterations` | `max_nudges` | `tool_retries` | `schema_retries` |
+|---|---:|---:|---:|---:|
+| `tool_using` | 50 | 8 | 0 | 0 |
+| `researcher` | 30 | 4 | 0 | 0 |
+| `verifier` | 5 | 0 | 0 | 3 |
+| `completer` | 1 | 0 | 0 | 0 |
 
 ### Adaptive iteration budget
 
@@ -648,41 +647,34 @@ for decision in result.adaptive_budget.decisions {
 `std/agent/presets` packages the common harness shapes — audit, repair,
 summary, verify — so script authors don't have to hand-tune `max_iterations`,
 `max_nudges`, `done_sentinel`, `done_judge`, `turn_policy`, and `thinking` on
-every call. Presets compose with `agent_loop`: they return ordinary options
-dicts (caller overrides always win) and the `*_agent` helpers call
-`agent_loop` directly.
+every call. Presets compose with `agent_loop`: `agent_preset(kind, options?)`
+returns an ordinary options dict (caller overrides always win) that you pass
+to `agent_loop` directly.
 
 ```harn
-import {audit_agent, repair_agent, summary_agent, agent_preset} from "std/agent/presets"
+import {agent_preset} from "std/agent/presets"
 
 // Inspect / read-only audit. Native completion, no done sentinel,
 // adaptive budget {initial: 4, max: 12}, max_nudges: 1.
-let audit = audit_agent("Audit the release", {
+let audit_opts = agent_preset("audit", {
   provider: "anthropic",
   model: "claude-opus-4-7",
   tools: release_tools,
   require_successful_tools: ["release_run"],
 })
+let audit = agent_loop("Audit the release", audit_opts?.system, audit_opts)
 
 // Tool-using repair. Wider budget {initial: 4, max: 16}, max_nudges: 2.
-let repair = repair_agent("Fix the regression", {
-  provider: "openai",
-  model: "o3",
-  tools: repair_tools,
-})
-
-// Cheap one-shot summary. tool_choice="none", iteration_budget fixed at 1.
-let summary = summary_agent("Summarize the audit findings.", {
-  provider: "openai",
-  model: "gpt-4o-mini",
-})
-
-// Customize a preset before passing to agent_loop directly:
+// Customize before passing to agent_loop:
 let opts = agent_preset("repair", {
   tools: repair_tools,
   iteration_budget: {mode: "adaptive", initial: 6, max: 20},
 })
 let result = agent_loop(prompt, system, opts)
+
+// Cheap one-shot summary. tool_choice="none", iteration_budget fixed at 1.
+let summary_opts = agent_preset("summary", {provider: "openai", model: "gpt-4o-mini"})
+let summary = agent_loop("Summarize the audit findings.", nil, summary_opts)
 ```
 
 Preset roles, defaults summarized:
@@ -709,36 +701,33 @@ are the substrate the persona template pack (harn#463) ships entries
 on top of.
 
 ```harn
-import {
-  merge_captain_agent,
-  oncall_captain_agent,
-  release_captain_agent,
-  review_captain_agent,
-} from "std/agent/presets"
+import {agent_preset} from "std/agent/presets"
 
 // Merge Captain: long adaptive budget; default consent layer auto-
 // approves tools annotated `read`/`search`/`fetch`/`think` and denies
 // everything else unless the caller passes a `consent` callable.
-let sweep = merge_captain_agent("Sweep open PRs.", {
+let sweep_opts = agent_preset("merge_captain", {
   provider: "anthropic",
   model: "claude-opus-4-7",
   tools: github_tools,
   consent: { call -> approval_bridge.prompt(call) },     // HITL bridge
   audit_sink: { record -> receipts.append(record) },     // captain ledger
 })
+let sweep = agent_loop("Sweep open PRs.", sweep_opts?.system, sweep_opts)
 
 // Oncall Captain: defaults `with_rate_limit({max_calls: 50})` so an
 // alert-storm loop can't fan out unbounded. Override via `rate_limit`.
-let triaged = oncall_captain_agent("Triage paging alerts.", {
+let triage_opts = agent_preset("oncall_captain", {
   provider: "openai",
   model: "gpt-5.4",
   tools: oncall_tools,
   rate_limit: {max_calls: 100, message: "alert-loop cap"},
 })
+let triaged = agent_loop("Triage paging alerts.", triage_opts?.system, triage_opts)
 
 // Release Captain: long checkpointed budget; pass `dry_run: true` (or
 // a `with_dry_run` opts dict) to layer a shadow-run gate.
-let shipping = release_captain_agent("Cut v0.9.0.", {
+let ship_opts = agent_preset("release_captain", {
   provider: "anthropic",
   model: "claude-opus-4-7",
   tools: release_tools,
@@ -748,6 +737,7 @@ let shipping = release_captain_agent("Cut v0.9.0.", {
   escalate_predicate: { call -> call?.opts?.task_kind == "judge" },
   logging_sink: { record -> receipts.llm_call(record) },
 })
+let shipping = agent_loop("Cut v0.9.0.", ship_opts?.system, ship_opts)
 ```
 
 Captain layers are opt-in: the preset only adds an `audit_sink` /
@@ -770,14 +760,6 @@ Caller-supplied `thinking`, `reasoning_effort`, `reasoning_policy`,
 `reasoning_scale`, `reasoning_task`, and `iteration_budget` always win. Sugar:
 `iteration_budget: "adaptive"` keeps the preset's numeric defaults and
 explicitly switches the mode to adaptive.
-
-`agent_budget(kind_or_options, overrides?)` returns a budget shape suitable for
-embedding directly:
-
-```harn
-{iteration_budget: agent_budget("repair", {max: 24})}
-{iteration_budget: agent_budget("adaptive", {initial: 2, max: 6})}
-```
 
 When `daemon: true`, the loop transitions `active -> idle -> active` instead of
 terminating on a text-only turn. Idle daemons can be woken by queued human

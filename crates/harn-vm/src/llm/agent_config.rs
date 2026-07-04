@@ -9,12 +9,10 @@ use crate::stdlib::macros::{harn_builtin, register_builtin_defs, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::{Vm, VmBuiltinArity, VmBuiltinMetadata};
 
-use super::agent_observe::{
-    observed_llm_call, LlmRetryConfig, DEFAULT_LLM_CALL_BACKOFF_MS, DEFAULT_LLM_CALL_RETRIES,
-};
+use super::agent_observe::observed_llm_call;
 use super::helpers::{
-    extract_llm_options, opt_bool, opt_int, opt_str, system_prompt_event_metadata,
-    system_prompt_metadata, transcript_event, transcript_to_vm_with_event_prefix,
+    extract_llm_options, opt_bool, opt_str, system_prompt_event_metadata, system_prompt_metadata,
+    transcript_event, transcript_to_vm_with_event_prefix,
 };
 use super::tools::build_assistant_response_message;
 
@@ -404,17 +402,6 @@ pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Arc<crate::bridge::Hos
             let mut opts = extract_llm_options(&args)?;
             let options = args.get(2).and_then(|a| a.as_dict()).cloned();
             let user_visible = opt_bool(&options, "user_visible");
-            // Match the non-bridge `llm_call` default (see
-            // `crate::llm::execute_llm_call`): fail fast unless the caller
-            // opts into transient HTTP/provider retries.
-            let retry_config = LlmRetryConfig {
-                retries: opt_int(&options, "llm_retries")
-                    .unwrap_or(DEFAULT_LLM_CALL_RETRIES as i64)
-                    .max(0) as usize,
-                backoff_ms: opt_int(&options, "llm_backoff_ms")
-                    .unwrap_or(DEFAULT_LLM_CALL_BACKOFF_MS as i64)
-                    .max(0) as u64,
-            };
             let _ = crate::llm::structural_experiments::apply_structural_experiment(
                 Some(&ctx),
                 &mut opts,
@@ -426,7 +413,6 @@ pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Arc<crate::bridge::Hos
                 &opts,
                 opt_str(&options, "tool_format").as_deref(),
                 Some(&bridge),
-                &retry_config,
                 None,
                 user_visible,
                 true,

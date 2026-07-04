@@ -148,8 +148,6 @@ call sites toward it.
 | `output_validation` | string | `"off"` | `"error"` throws after exhausted schema retries; `"warn"` logs and returns the final envelope; `"off"` returns the final envelope without a warning |
 | `schema_retries` | int | `1` | Re-prompt on schema validation failure with a corrective user message. Applies to direct and `routing_policy` calls. |
 | `schema_stream_abort` | bool | inferred | Defaults to `true` when `output_schema` is set. Aborts impossible streaming JSON early and consumes one `schema_retries` slot. |
-| `llm_retries` | int | `0` | (deprecated; prefer `with_retry` from `std/llm/handlers`) Retries on transient HTTP / provider errors. Raw `llm_call` is fail-fast by default; set to N to allow N retries after the first attempt. Off-by-one: `llm_retries: 3` ≈ `with_retry(..., {max_attempts: 4})` |
-| `llm_backoff_ms` | int | `250` | (deprecated; prefer `with_retry`) Base exponential backoff in ms between LLM retries |
 | `reasoning_policy` / `thinking_policy` | string/bool | nil | Provider-aware reasoning policy. Values: `auto`, `off`, `minimal`, `low`, `medium`, `high`, `xhigh`; `none`, `disabled`, and `no_think` alias to `off`. Harn lowers this to the selected route's native thinking shape. Explicit `thinking` or `reasoning_effort` wins. |
 | `reasoning_scale` / `problem_scale` | string | `"medium"` | Scale hint for `reasoning_policy: "auto"`: `small`, `medium`, or `large`. |
 | `reasoning_task` | string | inferred | Task hint for `reasoning_policy: "auto"`: `chat`, `agent`, `code`, `verify`, or `summarize`. |
@@ -457,8 +455,9 @@ fn(call) -> {ok: true, value: <llm dict>}
 ```
 
 `with_retry`'s `max_attempts: N` counts total attempts. Migrating
-`llm_retries: K` (deprecated): pass `max_attempts: K + 1` — the legacy
-option counted retries *after* the first attempt.
+`llm_retries: K` (removed in 0.10): pass `max_attempts: K + 1` — the
+removed option counted retries *after* the first attempt. See
+[Migrating to 0.10](../migrations/v0.10.md).
 
 See [Composable callers and middleware](../stdlib/llm-handlers.md)
 for the full module catalog (`handlers`, `ensemble`, `refine`,

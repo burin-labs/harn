@@ -57,7 +57,7 @@ async fn run_mock_llm_prompt(
                 "sessionId": session_id,
                 "prompt": [{
                     "type": "text",
-                    "text": "llm_mock_clear()\nllm_mock({text: \"ok\", input_tokens: 1, output_tokens: 1, model: \"mock\", provider: \"mock\"})\nlet r = llm_call(\"hello\", nil, {provider: \"mock\", model: \"mock\", llm_retries: 0})\n__io_println(r.text)",
+                    "text": "llm_mock_clear()\nllm_mock({text: \"ok\", input_tokens: 1, output_tokens: 1, model: \"mock\", provider: \"mock\"})\nlet r = llm_call(\"hello\", nil, {provider: \"mock\", model: \"mock\"})\n__io_println(r.text)",
                 }],
             },
         }))

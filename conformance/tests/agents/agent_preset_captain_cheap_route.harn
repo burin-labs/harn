@@ -1,6 +1,7 @@
 /**
  * Captain preset wired into the cheap-model conformance harness:
- * `release_captain_agent` accepts a `cheap_caller` + `frontier_caller`
+ * `agent_preset("release_captain", ...)` accepts a `cheap_caller` +
+ * `frontier_caller`
  * + `escalate_predicate` and composes them into a `with_routing`-backed
  * `llm_caller` that defaults to the cheap caller and escalates on the
  * predicate (mirrors the cost-moat substrate from `std/llm/handlers`
@@ -14,7 +15,12 @@
  *   - the captain preset's defaults (long adaptive budget, persona
  *     iteration scope) flow through to the agent_loop result.
  */
-import { release_captain_agent } from "std/agent/presets"
+import { agent_preset } from "std/agent/presets"
+
+fn preset_agent(kind, prompt, options = nil) {
+  let opts = agent_preset(kind, options)
+  return agent_loop(prompt, opts?.system, opts)
+}
 
 pipeline default() {
   let cheap_calls = atomic(0)
@@ -51,7 +57,8 @@ pipeline default() {
     let _ = atomic_add(log_records, 1)
   }
   // Default route: cheap caller handles the call without escalation.
-  let cheap_run = release_captain_agent(
+  let cheap_run = preset_agent(
+    "release_captain",
     "Cheap path.",
     {
       provider: "mock",
@@ -69,7 +76,8 @@ pipeline default() {
   __io_println(atomic_get(frontier_calls))
   __io_println(atomic_get(log_records))
   // Escalated route: predicate matches via `escalate: true` in opts.
-  let frontier_run = release_captain_agent(
+  let frontier_run = preset_agent(
+    "release_captain",
     "Frontier path.",
     {
       provider: "mock",

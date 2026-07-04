@@ -569,7 +569,7 @@ pub struct ModelPolicy {
     /// Adaptive iteration budget for this stage. Surfaced on the per-stage
     /// `agent_loop` so the runtime emits `loop_control_decision` events
     /// when extending or stopping the loop. Pipelines author this through
-    /// `agent_preset(...) / agent_budget(...)` from `std/agent/presets`,
+    /// `agent_preset(...)` from `std/agent/presets`,
     /// or as a literal dict like `{mode: "adaptive", initial: 4, max: 16, extend_by: 2}`.
     /// Stored as a free-form JSON value so the std/agent budget shapes
     /// can evolve without churn here; `__normalize_iteration_budget` in

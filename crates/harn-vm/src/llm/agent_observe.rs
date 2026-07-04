@@ -1511,19 +1511,15 @@ async fn run_detector_loop(
     }
 }
 
-/// Configuration for LLM call retries.
+/// Base exponential backoff (ms) for the built-in provider-hiccup retries
+/// below (empty completions, tool-channel / stream-transport degrades).
 ///
-/// Default 0: a raw `llm_call` is fail-fast by default (documented contract;
-/// see the quickref), and the `llm_retries` option is deprecated in favor of
-/// `with_retry` (removed in v0.9.0). Resilience for the agent/eval path comes
-/// from the agent options presets (`agent/options.harn` sets `llm_retries: 2`)
-/// and the proactive per-route rate limiter (sliding-window + cooldown), NOT
-/// from a global default — flipping this to >=2 silently retried transient
-/// errors for EVERY caller (one-shot library calls, conformance scenarios, the
-/// CLI playground replay), changing the documented fail-fast semantics. Callers
-/// that want retries opt in via `llm_retries`/`with_retry`; only *retryable*
-/// errors would consume the budget (`is_retryable_llm_error`).
-pub(crate) const DEFAULT_LLM_CALL_RETRIES: usize = 0;
+/// A raw `llm_call` is fail-fast on transient errors (documented contract; see
+/// the quickref). The pre-v0.10 `llm_retries` / `llm_backoff_ms` options were
+/// removed; transient-retry policy is composed in Harn via
+/// `with_retry(default_llm_caller(), {...})` from `std/llm/handlers` (note the
+/// off-by-one: `llm_retries: K` retried K times after the first attempt, so it
+/// maps to `with_retry(..., {max_attempts: K + 1})`).
 pub(crate) const DEFAULT_LLM_CALL_BACKOFF_MS: u64 = 250;
 
 /// Built-in retry budget for zero-token empty completions. Applies even when
@@ -1534,43 +1530,20 @@ pub(crate) const DEFAULT_LLM_CALL_BACKOFF_MS: u64 = 250;
 /// *errors*, so an empty Ok would otherwise sail through untouched.
 const EMPTY_COMPLETION_BUILTIN_RETRIES: usize = 1;
 
-/// Effective retry budget for zero-token empty completions: the caller's
-/// transient budget, floored at [`EMPTY_COMPLETION_BUILTIN_RETRIES`] for real
-/// providers. Deterministic in-process providers (mock/fake) replay scripted
-/// turns — a built-in silent retry would consume turns tests rely on — so
-/// they only honor an explicit `llm_retries` opt-in.
-fn empty_completion_retry_budget(retry_config: &LlmRetryConfig, provider: &str) -> usize {
-    if crate::llm::providers::MockProvider::should_intercept(provider)
-        || crate::llm::fake::FakeLlmProvider::should_intercept(provider)
-    {
-        retry_config.retries
+/// Effective retry budget for zero-token empty completions:
+/// [`EMPTY_COMPLETION_BUILTIN_RETRIES`] for provider-shaped routes (including
+/// the crate-internal `fake` provider, which exists to simulate them). The
+/// user-facing `mock` provider replays scripted turns — a built-in silent
+/// retry would consume turns conformance tests rely on — so it gets none.
+fn empty_completion_retry_budget(provider: &str) -> usize {
+    if crate::llm::providers::MockProvider::should_intercept(provider) {
+        0
     } else {
-        retry_config.retries.max(EMPTY_COMPLETION_BUILTIN_RETRIES)
+        EMPTY_COMPLETION_BUILTIN_RETRIES
     }
 }
 
-pub(crate) struct LlmRetryConfig {
-    /// Maximum number of retries for transient errors (429, 5xx, connection).
-    pub retries: usize,
-    /// Base backoff in milliseconds between retries.
-    pub backoff_ms: u64,
-}
-
-impl Default for LlmRetryConfig {
-    fn default() -> Self {
-        Self {
-            retries: DEFAULT_LLM_CALL_RETRIES,
-            backoff_ms: DEFAULT_LLM_CALL_BACKOFF_MS,
-        }
-    }
-}
-
-fn llm_retry_backoff_ms(
-    error: &VmError,
-    retry_config: &LlmRetryConfig,
-    attempt: usize,
-    provider: &str,
-) -> u64 {
+fn llm_retry_backoff_ms(error: &VmError, attempt: usize, provider: &str) -> u64 {
     if crate::llm::providers::MockProvider::should_intercept(provider) {
         return 0;
     }
@@ -1580,7 +1553,7 @@ fn llm_retry_backoff_ms(
     // and re-stampede the provider the instant the window opens.
     match extract_retry_after_ms(error) {
         Some(retry_after_ms) => retry_after_ms.saturating_add(retry_after_jitter_ms()),
-        None => base_retry_backoff_ms(retry_config, attempt),
+        None => base_retry_backoff_ms(attempt),
     }
 }
 
@@ -1592,8 +1565,8 @@ fn llm_retry_backoff_ms(
 /// the near-zero waits that pure "full jitter" can produce, while randomizing
 /// the upper half desynchronizes retries across concurrent same-key processes
 /// (avoids the thundering herd that the old zero-jitter `ceil` produced).
-fn base_retry_backoff_ms(retry_config: &LlmRetryConfig, attempt: usize) -> u64 {
-    let ceil = retry_config.backoff_ms.saturating_mul(1 << attempt.min(4));
+fn base_retry_backoff_ms(attempt: usize) -> u64 {
+    let ceil = DEFAULT_LLM_CALL_BACKOFF_MS.saturating_mul(1 << attempt.min(4));
     equal_jitter_ms(ceil, &mut rand::rng())
 }
 
@@ -1663,7 +1636,6 @@ pub(crate) async fn observed_llm_call(
     opts: &super::api::LlmCallOptions,
     tool_format: Option<&str>,
     bridge: Option<&Arc<crate::bridge::HostBridge>>,
-    retry_config: &LlmRetryConfig,
     iteration: Option<usize>,
     user_visible: bool,
     offthread: bool,
@@ -1840,7 +1812,7 @@ pub(crate) async fn observed_llm_call(
                 // `circuit_open` error instead; routing can then move to the next
                 // provider rather than retry-storming the dead lane.
                 if is_retryable_unproductive_completion(&result)
-                    && attempt < empty_completion_retry_budget(retry_config, &opts.provider)
+                    && attempt < empty_completion_retry_budget(&opts.provider)
                 {
                     let errored_actionless = is_errored_actionless_completion(&result);
                     annotate_current_span(&[
@@ -1900,7 +1872,7 @@ pub(crate) async fn observed_llm_call(
                         if crate::llm::providers::MockProvider::should_intercept(&opts.provider) {
                             0
                         } else {
-                            base_retry_backoff_ms(retry_config, attempt)
+                            base_retry_backoff_ms(attempt)
                         };
                     crate::events::log_warn(
                         "llm",
@@ -2113,12 +2085,13 @@ pub(crate) async fn observed_llm_call(
                 // transient-retry budget is 0. This unifies the thrown shape
                 // onto the existing empty-completion retry path rather than
                 // hard-breaking the loop as a silent `provider_error`; it does
-                // NOT change `DEFAULT_LLM_CALL_RETRIES`. Once the budget is
+                // NOT retry ordinary transient errors (those stay fail-fast;
+                // compose `with_retry` for policy). Once the budget is
                 // exhausted the loud thrown error (which names the
                 // `upstream contract violation`) is surfaced unchanged, so the
                 // eval layer can still classify it as infra, not capability.
                 let empty_completion_retry = is_empty_completion_retry_error(&error)
-                    && attempt < empty_completion_retry_budget(retry_config, &opts.provider);
+                    && attempt < empty_completion_retry_budget(&opts.provider);
                 // Runtime tool_format fallback: a native-channel request whose
                 // failure fingerprint says the provider's native tool-call
                 // channel itself is broken for this route cannot be rescued by
@@ -2159,8 +2132,11 @@ pub(crate) async fn observed_llm_call(
                     && !native_tool_channel_degrade
                     && is_stream_transport_failure(&error)
                     && can_degrade_stream_transport(opts);
-                let can_retry = (retryable && attempt < retry_config.retries)
-                    || empty_completion_retry
+                // Transient errors are fail-fast here: retry policy is composed
+                // in Harn via `with_retry` / routing policies, never a hidden
+                // in-call budget. Only the bounded provider-hiccup recoveries
+                // (empty completion, one-shot channel/transport degrades) loop.
+                let can_retry = empty_completion_retry
                     || native_tool_channel_degrade
                     || stream_transport_degrade;
                 let status = if can_retry {
@@ -2258,12 +2234,11 @@ pub(crate) async fn observed_llm_call(
                 let stream_degraded_options = stream_transport_degrade
                     .then(|| degrade_options_to_non_streaming_transport(opts));
                 attempt += 1;
-                let backoff = llm_retry_backoff_ms(&error, retry_config, attempt, &opts.provider);
+                let backoff = llm_retry_backoff_ms(&error, attempt, &opts.provider);
                 crate::events::log_warn(
                     "llm",
                     &format!(
-                        "LLM call failed ({}), retrying in {}ms (attempt {}/{})",
-                        error, backoff, attempt, retry_config.retries
+                        "LLM call failed ({error}), retrying in {backoff}ms (attempt {attempt})"
                     ),
                 );
                 if let Some(degraded) = degraded_options {
@@ -2801,14 +2776,7 @@ mod retry_tests {
 
     #[test]
     fn mock_provider_retry_backoff_is_zero() {
-        let config = LlmRetryConfig {
-            retries: 1,
-            backoff_ms: 2000,
-        };
-        assert_eq!(
-            llm_retry_backoff_ms(&thrown("HTTP 503"), &config, 1, "mock"),
-            0
-        );
+        assert_eq!(llm_retry_backoff_ms(&thrown("HTTP 503"), 1, "mock"), 0);
     }
 
     #[test]
@@ -2864,14 +2832,10 @@ mod retry_tests {
         // A provider Retry-After is honored as a floor; the layered jitter never
         // exceeds `retry_after + backoff_base`, so the wait stays in a tight band
         // around the requested cooldown while desynchronizing siblings.
-        let config = LlmRetryConfig {
-            retries: 3,
-            backoff_ms: DEFAULT_LLM_CALL_BACKOFF_MS,
-        };
         let err = thrown("HTTP 429 rate_limited retry-after: 5");
         let base = extract_retry_after_ms(&err).expect("retry-after parsed");
         for _ in 0..256 {
-            let wait = llm_retry_backoff_ms(&err, &config, 1, "openai");
+            let wait = llm_retry_backoff_ms(&err, 1, "openai");
             assert!(
                 wait >= base && wait <= base + DEFAULT_LLM_CALL_BACKOFF_MS,
                 "retry-after jitter {wait} out of [{base}, {}]",
@@ -2883,15 +2847,11 @@ mod retry_tests {
     #[test]
     fn base_backoff_real_provider_respects_exponential_ceiling() {
         // The live (un-seamed) path must still land in the equal-jitter band for
-        // the configured base, exercising `rand::rng()` rather than the test RNG.
-        let config = LlmRetryConfig {
-            retries: 5,
-            backoff_ms: DEFAULT_LLM_CALL_BACKOFF_MS,
-        };
+        // the built-in base, exercising `rand::rng()` rather than the test RNG.
         for attempt in 1..=6usize {
             let ceil = DEFAULT_LLM_CALL_BACKOFF_MS.saturating_mul(1 << attempt.min(4));
             for _ in 0..64 {
-                let wait = base_retry_backoff_ms(&config, attempt);
+                let wait = base_retry_backoff_ms(attempt);
                 assert!(
                     wait >= ceil / 2 && wait <= ceil,
                     "attempt={attempt} wait={wait} out of [{}, {ceil}]",
@@ -3215,13 +3175,6 @@ mod empty_completion_retry_tests {
         ])
     }
 
-    fn retry_config(retries: usize) -> LlmRetryConfig {
-        LlmRetryConfig {
-            retries,
-            backoff_ms: 0,
-        }
-    }
-
     /// The *thrown* billed-noncommittal failure. The response/transport parsers
     /// raise `billed_noncommittal_completion_error` when a clean-finish turn
     /// bills output but commits no tool call or visible text (the action went
@@ -3249,18 +3202,9 @@ mod empty_completion_retry_tests {
                     FakeLlmEvent::Done(FakeStopReason::EndTurn),
                 ]),
             ));
-            let result = observed_llm_call(
-                &fake_opts(),
-                None,
-                None,
-                &retry_config(1),
-                None,
-                false,
-                false,
-                None,
-            )
-            .await
-            .expect("empty completion retry should recover");
+            let result = observed_llm_call(&fake_opts(), None, None, None, false, false, None)
+                .await
+                .expect("empty completion retry should recover");
             assert_eq!(result.text, "recovered");
 
             let retries: Vec<usize> = peek_agent_trace()
@@ -3293,18 +3237,9 @@ mod empty_completion_retry_tests {
                         FakeLlmEvent::Done(FakeStopReason::EndTurn),
                     ]),
                 ));
-            let result = observed_llm_call(
-                &fake_opts(),
-                None,
-                None,
-                &retry_config(1),
-                None,
-                false,
-                false,
-                None,
-            )
-            .await
-            .expect("errored-actionless retry should recover");
+            let result = observed_llm_call(&fake_opts(), None, None, None, false, false, None)
+                .await
+                .expect("errored-actionless retry should recover");
             assert_eq!(result.text, "recovered");
 
             let retries: Vec<usize> = peek_agent_trace()
@@ -3331,18 +3266,9 @@ mod empty_completion_retry_tests {
                     .push(errored_actionless_turn())
                     .push(errored_actionless_turn()),
             );
-            let result = observed_llm_call(
-                &fake_opts(),
-                None,
-                None,
-                &retry_config(1),
-                None,
-                false,
-                false,
-                None,
-            )
-            .await
-            .expect("exhausted retries must return Ok, not a new error");
+            let result = observed_llm_call(&fake_opts(), None, None, None, false, false, None)
+                .await
+                .expect("exhausted retries must return Ok, not a new error");
             assert!(result.tool_calls.is_empty());
             assert_eq!(result.stop_reason.as_deref(), Some("error"));
 
@@ -3361,18 +3287,9 @@ mod empty_completion_retry_tests {
             reset_agent_trace_state();
             let _guard =
                 install_fake_llm_script(FakeLlmScript::new().push(empty_turn()).push(empty_turn()));
-            let result = observed_llm_call(
-                &fake_opts(),
-                None,
-                None,
-                &retry_config(1),
-                None,
-                false,
-                false,
-                None,
-            )
-            .await
-            .expect("exhausted empty-completion retries must return Ok, not a new error");
+            let result = observed_llm_call(&fake_opts(), None, None, None, false, false, None)
+                .await
+                .expect("exhausted empty-completion retries must return Ok, not a new error");
             assert!(result.text.is_empty());
             assert!(result.tool_calls.is_empty());
             assert_eq!(result.output_tokens, 0);
@@ -3396,18 +3313,9 @@ mod empty_completion_retry_tests {
                         FakeLlmEvent::Done(FakeStopReason::EndTurn),
                     ])),
             );
-            let result = observed_llm_call(
-                &fake_opts(),
-                None,
-                None,
-                &retry_config(1),
-                None,
-                false,
-                false,
-                None,
-            )
-            .await
-            .expect("billed-noncommittal retry should recover");
+            let result = observed_llm_call(&fake_opts(), None, None, None, false, false, None)
+                .await
+                .expect("billed-noncommittal retry should recover");
             assert_eq!(result.text, "recovered");
 
             let retries: Vec<usize> = peek_agent_trace()
@@ -3440,18 +3348,9 @@ mod empty_completion_retry_tests {
                     .push(billed_noncommittal_turn())
                     .push(billed_noncommittal_turn()),
             );
-            let err = observed_llm_call(
-                &fake_opts(),
-                None,
-                None,
-                &retry_config(1),
-                None,
-                false,
-                false,
-                None,
-            )
-            .await
-            .expect_err("exhausted billed-noncommittal retries must surface the loud error");
+            let err = observed_llm_call(&fake_opts(), None, None, None, false, false, None)
+                .await
+                .expect_err("exhausted billed-noncommittal retries must surface the loud error");
             let message = err.to_string();
             assert!(
                 message.contains("upstream contract violation"),
@@ -3472,73 +3371,11 @@ mod empty_completion_retry_tests {
     }
 
     #[test]
-    fn fake_provider_without_retry_budget_does_not_silently_retry() {
-        // Mock/fake providers replay scripted turns, so the built-in
-        // empty-completion floor must not apply to them — only an explicit
-        // budget. One scripted turn, zero retries: the guard would panic on
-        // drop if a hidden retry consumed a second turn.
-        current_thread_runtime().block_on(async {
-            let _guard = install_fake_llm_script(FakeLlmScript::new().push(empty_turn()));
-            let result = observed_llm_call(
-                &fake_opts(),
-                None,
-                None,
-                &retry_config(0),
-                None,
-                false,
-                false,
-                None,
-            )
-            .await
-            .expect("empty completion without budget returns as today");
-            assert!(result.text.is_empty());
-        });
-    }
-
-    #[test]
-    fn rate_limit_429_with_retry_after_triggers_bounded_retry() {
-        // A 429 carrying a Retry-After hint must engage the dormant backoff
-        // loop (retries > 0) and recover on the next turn, rather than failing
-        // hard on the first transient error. The _guard drop asserts BOTH
-        // scripted turns were consumed — i.e. the retry actually fired.
-        current_thread_runtime().block_on(async {
-            reset_agent_trace_state();
-            let _guard = install_fake_llm_script(
-                FakeLlmScript::new()
-                    .push(FakeLlmTurn::Error(
-                        crate::llm::fake::FakeLlmError::new(
-                            crate::value::ErrorCategory::RateLimit,
-                            "429 too many requests",
-                        )
-                        .with_retry_after_ms(10),
-                    ))
-                    .push(FakeLlmTurn::stream(vec![
-                        FakeLlmEvent::Token("recovered".into()),
-                        FakeLlmEvent::Done(FakeStopReason::EndTurn),
-                    ])),
-            );
-            let result = observed_llm_call(
-                &fake_opts(),
-                None,
-                None,
-                &retry_config(2),
-                None,
-                false,
-                false,
-                None,
-            )
-            .await
-            .expect("429 with retry-after should retry and recover");
-            assert_eq!(result.text, "recovered");
-            reset_agent_trace_state();
-        });
-    }
-
-    #[test]
-    fn rate_limit_429_fails_hard_when_retry_budget_is_zero() {
-        // Regression guard: at retries=0 the same 429 is a hard failure (this
-        // is exactly the gap the default bump to >=2 closes). Only one turn is
-        // scripted, so a hidden retry would panic the guard on drop.
+    fn rate_limit_429_fails_fast() {
+        // Transient errors have NO in-call retry budget: a 429 (even with a
+        // Retry-After hint) surfaces immediately. Retry policy is composed via
+        // `with_retry` in `std/llm/handlers`. Only one turn is scripted, so a
+        // hidden retry would panic the guard on drop.
         current_thread_runtime().block_on(async {
             let _guard = install_fake_llm_script(
                 FakeLlmScript::new().push(FakeLlmTurn::Error(
@@ -3549,18 +3386,9 @@ mod empty_completion_retry_tests {
                     .with_retry_after_ms(10),
                 )),
             );
-            let err = observed_llm_call(
-                &fake_opts(),
-                None,
-                None,
-                &retry_config(0),
-                None,
-                false,
-                false,
-                None,
-            )
-            .await
-            .expect_err("429 with no retry budget must surface as an error");
+            let err = observed_llm_call(&fake_opts(), None, None, None, false, false, None)
+                .await
+                .expect_err("429 must surface immediately (no in-call transient retry)");
             assert!(
                 is_retryable_llm_error(&err),
                 "the surfaced 429 should classify as retryable"
@@ -3579,9 +3407,9 @@ mod empty_completion_retry_tests {
     fn native_tool_channel_failure_degrades_to_text_and_recovers() {
         // The runtime tool_format fallback: a native-pinned tool call whose
         // server-side parser 500/EOFs degrades to the text channel and recovers
-        // on the retry. Crucially this fires at retries=0 (the transient budget
-        // is spent) — retrying native would re-feed the broken parser forever;
-        // the productive move is to switch channels. The _guard drop asserts the
+        // on the retry. Crucially this needs no transient-retry budget —
+        // retrying native would re-feed the broken parser forever; the
+        // productive move is to switch channels. The _guard drop asserts the
         // second (text-channel) turn was actually consumed.
         current_thread_runtime().block_on(async {
             let _guard = install_fake_llm_script(
@@ -3602,7 +3430,6 @@ mod empty_completion_retry_tests {
                 &native_opts(),
                 Some("native"),
                 None,
-                &retry_config(0),
                 None,
                 false,
                 false,
@@ -3620,9 +3447,9 @@ mod empty_completion_retry_tests {
     #[test]
     fn native_tool_channel_failure_degrade_fires_at_most_once() {
         // The degrade is one-shot per call: if the text-channel retry ALSO
-        // fails (a different problem), the loop does not keep re-degrading. With
-        // retries=0 and two failing turns scripted, only the FIRST degrade may
-        // fire; the second failure must surface as a hard error. Exactly two
+        // fails (a different problem), the loop does not keep re-degrading.
+        // With two failing turns scripted, only the FIRST degrade may fire;
+        // the second failure must surface as a hard error. Exactly two
         // turns are scripted, so a third call would panic the guard on drop.
         current_thread_runtime().block_on(async {
             let _guard = install_fake_llm_script(
@@ -3640,7 +3467,6 @@ mod empty_completion_retry_tests {
                 &native_opts(),
                 Some("native"),
                 None,
-                &retry_config(0),
                 None,
                 false,
                 false,
@@ -3677,18 +3503,9 @@ mod empty_completion_retry_tests {
                         FakeLlmEvent::Done(FakeStopReason::EndTurn),
                     ])),
             );
-            let result = observed_llm_call(
-                &opts,
-                None,
-                None,
-                &retry_config(0),
-                None,
-                false,
-                false,
-                None,
-            )
-            .await
-            .expect("stream body failure should degrade transport and recover");
+            let result = observed_llm_call(&opts, None, None, None, false, false, None)
+                .await
+                .expect("stream body failure should degrade transport and recover");
             assert_eq!(result.text, "recovered");
 
             let calls = fake_llm_captured_calls();
@@ -3717,18 +3534,9 @@ mod empty_completion_retry_tests {
                         "llamacpp stream error (mid-stream read): error decoding response body",
                     ))),
             );
-            let err = observed_llm_call(
-                &opts,
-                None,
-                None,
-                &retry_config(0),
-                None,
-                false,
-                false,
-                None,
-            )
-            .await
-            .expect_err("second transport failure after degrade must surface");
+            let err = observed_llm_call(&opts, None, None, None, false, false, None)
+                .await
+                .expect_err("second transport failure after degrade must surface");
             assert!(
                 err.to_string().contains("stream error"),
                 "surface the post-degrade provider error, got: {err}"
@@ -3771,7 +3579,6 @@ mod empty_completion_retry_tests {
                 &native_opts(),
                 Some("native"),
                 None,
-                &retry_config(0),
                 None,
                 false,
                 false,
@@ -3814,7 +3621,6 @@ mod empty_completion_retry_tests {
                 &native_opts(),
                 Some("native"),
                 None,
-                &retry_config(0),
                 None,
                 false,
                 false,
@@ -3830,14 +3636,10 @@ mod empty_completion_retry_tests {
     }
 
     #[test]
-    fn builtin_empty_retry_budget_floors_real_providers_only() {
-        let zero = retry_config(0);
-        assert_eq!(empty_completion_retry_budget(&zero, "openrouter"), 1);
-        assert_eq!(empty_completion_retry_budget(&zero, "fake"), 0);
-        assert_eq!(empty_completion_retry_budget(&zero, "mock"), 0);
-        let three = retry_config(3);
-        assert_eq!(empty_completion_retry_budget(&three, "openrouter"), 3);
-        assert_eq!(empty_completion_retry_budget(&three, "fake"), 3);
+    fn builtin_empty_retry_budget_excludes_mock_only() {
+        assert_eq!(empty_completion_retry_budget("openrouter"), 1);
+        assert_eq!(empty_completion_retry_budget("fake"), 1);
+        assert_eq!(empty_completion_retry_budget("mock"), 0);
     }
 
     fn empty_result() -> crate::llm::api::LlmResult {

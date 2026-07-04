@@ -17,7 +17,11 @@ import {
   agent_mcp_bootstrap_if_needed,
   agent_mcp_mount_additional,
 } from "std/agent/mcp"
-import { agent_loop_options, agent_tool_format } from "std/agent/options"
+import {
+  agent_loop_options,
+  agent_sanitize_model_options,
+  agent_tool_format,
+} from "std/agent/options"
 import {
   agent_apply_tool_surface_narrowing,
   agent_compute_post_turn,
@@ -39,7 +43,6 @@ import {
 } from "std/agent/required_tools"
 import { agent_scratchpad_init, agent_scratchpad_reorganize_if_due } from "std/agent/scratchpad"
 import { agent_skills_match } from "std/agent/skills"
-import { agent_sanitize_model_options } from "std/agent/stack"
 import {
   agent_stall_apply_result,
   agent_stall_clear_current_failure,

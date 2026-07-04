@@ -699,8 +699,6 @@ fn __copy_top_level_llm_options(opts, base) {
     "temperature",
     "max_tokens",
     "timeout_ms",
-    "llm_retries",
-    "llm_backoff_ms",
     "budget",
     "response_format",
     "schema_retries",

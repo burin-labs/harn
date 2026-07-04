@@ -217,8 +217,6 @@ fn __llm_call_option_keys() {
     "tool_format",
     "cache",
     "budget",
-    "llm_retries",
-    "llm_backoff_ms",
     "timeout",
     "timeout_ms",
     "idle_timeout",

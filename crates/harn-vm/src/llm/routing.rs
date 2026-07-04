@@ -1195,30 +1195,16 @@ fn duration_ms(elapsed: Duration) -> u64 {
     elapsed.as_millis().try_into().unwrap_or(u64::MAX)
 }
 
-/// Lightweight wrapper that observes one provider call. We deliberately
-/// bypass the standard transient-retry loop because the policy itself
-/// owns retry semantics (max_attempts across the chain plus per-link
-/// failover rules); doubling them up here would slow the chain past
-/// the user-visible budget.
+/// Lightweight wrapper that observes one provider call. `observed_llm_call`
+/// is fail-fast on transient errors, which is exactly what the policy wants:
+/// the policy itself owns retry semantics (max_attempts across the chain plus
+/// per-link failover rules), so nothing may retry underneath it.
 async fn execute_link(
     opts: &LlmCallOptions,
     bridge: Option<&Arc<crate::bridge::HostBridge>>,
 ) -> Result<super::api::LlmResult, VmError> {
-    let retry_config = super::agent_observe::LlmRetryConfig {
-        retries: 0,
-        backoff_ms: 0,
-    };
-    super::agent_observe::observed_llm_call(
-        opts,
-        None,
-        bridge,
-        &retry_config,
-        None,
-        false,
-        bridge.is_some(),
-        None,
-    )
-    .await
+    super::agent_observe::observed_llm_call(opts, None, bridge, None, false, bridge.is_some(), None)
+        .await
 }
 
 fn pending_attempt_record(

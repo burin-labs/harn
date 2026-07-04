@@ -152,8 +152,6 @@ pub const SUB_AGENT_OPTIONS: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::optional("nudge", TY_STRING),
     ShapeFieldDescriptor::optional("llm_caller", TY_ANY),
     ShapeFieldDescriptor::optional("tool_caller", TY_ANY),
-    ShapeFieldDescriptor::optional("llm_retries", TY_INT),
-    ShapeFieldDescriptor::optional("llm_backoff_ms", TY_INT),
     ShapeFieldDescriptor::optional("reasoning_policy", TY_ANY),
     ShapeFieldDescriptor::optional("thinking_policy", TY_ANY),
     ShapeFieldDescriptor::optional("reasoning_scale", TY_STRING),
@@ -349,8 +347,6 @@ pub const LLM_CALL_OPTIONS: Ty = Ty::Shape(&[
     // Caching, budgets, retries, and transport.
     ShapeFieldDescriptor::optional("cache", Ty::Union(&[TY_BOOL, TY_DICT])),
     ShapeFieldDescriptor::optional("budget", Ty::Union(&[TY_FLOAT, TY_INT, TY_DICT])),
-    ShapeFieldDescriptor::optional("llm_retries", TY_INT),
-    ShapeFieldDescriptor::optional("llm_backoff_ms", TY_INT),
     ShapeFieldDescriptor::optional("timeout", TY_INT),
     ShapeFieldDescriptor::optional("timeout_ms", TY_INT),
     ShapeFieldDescriptor::optional("idle_timeout", TY_INT),

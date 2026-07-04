@@ -1,6 +1,7 @@
 import { completion_judge_feedback_prompt, completion_judge_system_prompt } from "std/agent/prompts"
 import { agent_reasoning_apply } from "std/agent/reasoning"
 import { agent_scratchpad_options } from "std/agent/scratchpad"
+import { pack_for } from "std/llm/defaults"
 import { project_context_profile } from "std/project"
 
 // -------------------------------------------------------------------------------------------------
@@ -307,16 +308,16 @@ pub type AgentPresetOptions = AgentLoopOptions & {consent?: any, audit_sink?: an
 
 fn __profile_defaults(profile) {
   if profile == "tool_using" {
-    return {max_iterations: 50, max_nudges: 8, tool_retries: 0, llm_retries: 2, schema_retries: 0}
+    return {max_iterations: 50, max_nudges: 8, tool_retries: 0, schema_retries: 0}
   }
   if profile == "researcher" {
-    return {max_iterations: 30, max_nudges: 4, tool_retries: 0, llm_retries: 2, schema_retries: 0}
+    return {max_iterations: 30, max_nudges: 4, tool_retries: 0, schema_retries: 0}
   }
   if profile == "verifier" {
-    return {max_iterations: 5, max_nudges: 0, tool_retries: 0, llm_retries: 2, schema_retries: 3}
+    return {max_iterations: 5, max_nudges: 0, tool_retries: 0, schema_retries: 3}
   }
   if profile == "completer" {
-    return {max_iterations: 1, max_nudges: 0, tool_retries: 0, llm_retries: 2, schema_retries: 0}
+    return {max_iterations: 1, max_nudges: 0, tool_retries: 0, schema_retries: 0}
   }
   throw "agent_loop: profile must be one of tool_using, researcher, verifier, completer"
 }
@@ -1699,4 +1700,378 @@ pub fn agent_loop_options(options = nil) {
     _pre_turn_scope_classifier: pre_turn_scope_classifier,
   }
   return opts
+}
+
+// -------------------------------------------------------------------------------------------------
+
+// Model-option resolution (moved from the deleted std/agent/stack in v0.10).
+// `agent_model_options` resolves explicit config > role env prefixes >
+// defaults into a capability-sanitized options dict;
+// `agent_sanitize_model_options` strips provider-unsupported knobs.
+
+// -------------------------------------------------------------------------------------------------
+
+fn __stack_dict(value) {
+  if type_of(value) == "dict" {
+    return value
+  }
+  return {}
+}
+
+fn __stack_list(value) {
+  if type_of(value) == "list" {
+    return value
+  }
+  return []
+}
+
+fn __stack_has_key(d, key) -> bool {
+  return type_of(d) == "dict" && contains(d.keys(), key)
+}
+
+fn __stack_non_empty_string(value) {
+  if type_of(value) != "string" {
+    return nil
+  }
+  let trimmed = trim(value)
+  if trimmed == "" {
+    return nil
+  }
+  return trimmed
+}
+
+fn __stack_env_token(value) -> string {
+  let text = __stack_non_empty_string(value)
+  if text == nil {
+    return ""
+  }
+  let cleaned = regex_replace_all("[^A-Za-z0-9]+", "_", text)
+  return uppercase(regex_replace_all("^_+|_+$", "", cleaned))
+}
+
+fn __stack_env_value(name) {
+  let key = __stack_non_empty_string(name)
+  if key == nil {
+    return nil
+  }
+  let value = harness.env.get(key)
+  return __stack_non_empty_string(value)
+}
+
+fn __stack_first_non_empty(values) {
+  for value in values {
+    let text = __stack_non_empty_string(value)
+    if text != nil {
+      return text
+    }
+  }
+  return nil
+}
+
+fn __stack_env_prefixes(config, role) {
+  let cfg = __stack_dict(config)
+  var prefixes = []
+  let explicit = cfg?.env_prefixes ?? cfg?.env_prefix
+  if type_of(explicit) == "list" {
+    for prefix in explicit {
+      let token = __stack_env_token(prefix)
+      if token != "" && !contains(prefixes, token) {
+        prefixes = prefixes + [token]
+      }
+    }
+  } else {
+    let token = __stack_env_token(explicit)
+    if token != "" {
+      prefixes = prefixes + [token]
+    }
+  }
+  let role_token = __stack_env_token(role)
+  if role_token != "" {
+    for prefix in ["HARN_AGENT_" + role_token, "HARN_LLM_" + role_token, "HARN_" + role_token] {
+      if !contains(prefixes, prefix) {
+        prefixes = prefixes + [prefix]
+      }
+    }
+  }
+  for prefix in ["HARN_AGENT", "HARN_LLM"] {
+    if !contains(prefixes, prefix) {
+      prefixes = prefixes + [prefix]
+    }
+  }
+  return prefixes
+}
+
+fn __stack_first_env(prefixes, suffix) {
+  for prefix in prefixes {
+    let value = __stack_env_value(prefix + "_" + suffix)
+    if value != nil {
+      return value
+    }
+  }
+  return nil
+}
+
+fn __stack_provider_model_pair(opts) {
+  let provider = __stack_non_empty_string(opts?.provider)
+  let model = __stack_non_empty_string(opts?.model)
+  if provider != nil && model != nil {
+    return {provider: provider, model: model}
+  }
+  if model != nil {
+    let info = try {
+      llm_model_info(model)
+    }
+    if !is_err(info) && type_of(unwrap(info)) == "dict" {
+      let resolved = unwrap(info)
+      return {
+        provider: __stack_non_empty_string(resolved?.provider) ?? provider ?? "auto",
+        model: __stack_non_empty_string(resolved?.id ?? resolved?.model) ?? model,
+      }
+    }
+  }
+  return nil
+}
+
+fn __stack_capabilities(opts) {
+  let pair = __stack_provider_model_pair(opts)
+  if pair == nil {
+    return nil
+  }
+  let caps = try {
+    provider_capabilities(pair.provider ?? "auto", pair.model ?? "")
+  }
+  if is_err(caps) || type_of(unwrap(caps)) != "dict" {
+    return nil
+  }
+  return unwrap(caps)
+}
+
+fn __stack_sanitize_mode(policy) {
+  let raw = __stack_non_empty_string(__stack_dict(policy)?.mode)
+  if raw == nil {
+    return "request"
+  }
+  return lowercase(raw)
+}
+
+fn __stack_thinking_mode(value) {
+  if value == nil {
+    return "disabled"
+  }
+  let kind = type_of(value)
+  if kind == "bool" {
+    if value {
+      return "enabled"
+    }
+    return "disabled"
+  }
+  if kind == "string" {
+    let raw = lowercase(trim(value))
+    if raw == "disabled" || raw == "off" || raw == "none" {
+      return "disabled"
+    }
+    if raw == "adaptive" {
+      return "adaptive"
+    }
+    if raw == "minimal" || raw == "low" || raw == "medium" || raw == "high" || raw == "xhigh" {
+      return "effort"
+    }
+    return "enabled"
+  }
+  if kind == "dict" {
+    if __stack_has_key(value, "enabled") && !(value.enabled ?? false) {
+      return "disabled"
+    }
+    let raw = lowercase(to_string(value?.mode ?? "enabled"))
+    if raw == "disabled" || raw == "off" || raw == "none" {
+      return "disabled"
+    }
+    if raw == "adaptive" {
+      return "adaptive"
+    }
+    if raw == "effort" {
+      return "effort"
+    }
+    return "enabled"
+  }
+  return "enabled"
+}
+
+fn __stack_thinking_supported(caps, thinking) {
+  let mode = __stack_thinking_mode(thinking)
+  if mode == "disabled" {
+    return true
+  }
+  let modes = __stack_list(caps?.thinking_modes)
+  if mode == "enabled" {
+    return contains(modes, "enabled") || contains(modes, "adaptive")
+  }
+  return contains(modes, mode)
+}
+
+fn __stack_strip_option_keys(options, stripped, keys) {
+  var out = options
+  var removed = stripped
+  for key in keys {
+    if __stack_has_key(out, key) {
+      out = out.remove(key)
+      removed = removed + [key]
+    }
+  }
+  return {options: out, stripped: removed}
+}
+
+fn __stack_sanitize_result(options, policy = nil) {
+  var out = __stack_dict(options)
+  var stripped = []
+  let mode = __stack_sanitize_mode(policy)
+  if mode == "healthcheck" || mode == "preflight" || mode == "probe" {
+    let deliberation = __stack_strip_option_keys(out, stripped, ["reasoning_effort", "thinking", "effort"])
+    out = deliberation.options
+    stripped = deliberation.stripped
+  }
+  let caps = __stack_capabilities(out)
+  if caps == nil {
+    return {options: out, stripped: stripped}
+  }
+  if __stack_has_key(out, "reasoning_effort") && !(caps?.reasoning_effort_supported ?? false) {
+    out = out.remove("reasoning_effort")
+    stripped = stripped + ["reasoning_effort"]
+  }
+  if __stack_has_key(out, "thinking") && !__stack_thinking_supported(caps, out.thinking) {
+    out = out.remove("thinking")
+    stripped = stripped + ["thinking"]
+  }
+  if !(caps?.prompt_caching ?? false) {
+    let cache = __stack_strip_option_keys(out, stripped, ["prompt_cache", "prompt_caching", "cache_control"])
+    out = cache.options
+    stripped = cache.stripped
+  }
+  return {options: out, stripped: stripped}
+}
+
+fn __stack_pack_options(base) {
+  let opts = __stack_dict(base)
+  if __stack_non_empty_string(opts?.model) == nil {
+    return opts
+  }
+  let packed = try {
+    pack_for(opts)
+  }
+  if is_err(packed) {
+    return opts
+  }
+  return unwrap(packed)
+}
+
+fn __stack_configured_model_options(cfg, prefixes) {
+  let defaults = __stack_dict(cfg?.defaults) + __stack_dict(cfg?.model_defaults)
+  let user = __stack_dict(cfg?.options) + __stack_dict(cfg?.llm_options)
+  let provider = __stack_first_non_empty(
+    [cfg?.provider, user?.provider, __stack_first_env(prefixes, "PROVIDER"), defaults?.provider],
+  )
+  let model = __stack_first_non_empty(
+    [cfg?.model, user?.model, __stack_first_env(prefixes, "MODEL"), defaults?.model],
+  )
+  let model_role = __stack_first_non_empty(
+    [cfg?.model_role, user?.model_role, __stack_first_env(prefixes, "MODEL_ROLE"), defaults?.model_role],
+  )
+  let task = __stack_first_non_empty(
+    [cfg?.task, user?.task, __stack_first_env(prefixes, "TASK"), defaults?.task],
+  )
+  let effort = __stack_first_non_empty(
+    [cfg?.effort, user?.effort, __stack_first_env(prefixes, "EFFORT"), defaults?.effort],
+  )
+  let tool_format = __stack_first_non_empty(
+    [
+      cfg?.tool_format,
+      user?.tool_format,
+      __stack_first_env(prefixes, "TOOL_FORMAT"),
+      defaults?.tool_format,
+    ],
+  )
+  var base = defaults + user
+  if provider != nil {
+    base = base + {provider: provider}
+  }
+  if model != nil {
+    base = base + {model: model}
+  }
+  if model_role != nil {
+    base = base + {model_role: model_role}
+  }
+  if task != nil {
+    base = base + {task: task}
+  }
+  if effort != nil {
+    base = base + {effort: effort}
+  }
+  if tool_format != nil {
+    base = base + {tool_format: tool_format}
+  }
+  return base
+}
+
+/**
+ * Return a capability-sanitized options dict for a provider/model route.
+ * Unsupported provider-specific knobs are dropped instead of leaking to the
+ * wire. Currently strips unsupported `reasoning_effort`, `thinking`, and prompt-cache
+ * request keys. Pass `{mode: "healthcheck"}` (or `"preflight"` / `"probe"`)
+ * to also drop deliberate-reasoning knobs for cheap readiness probes even
+ * when the full route supports them.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_sanitize_model_options(options = nil, policy = nil) {
+  return __stack_sanitize_result(options, policy).options
+}
+
+/**
+ * Resolve model options for an agent role.
+ *
+ * Precedence: explicit config/options > env prefixes > defaults. Env prefixes
+ * are supplied via `env_prefix`/`env_prefixes`; when omitted, role-derived
+ * prefixes such as `HARN_AGENT_PLANNER`, `HARN_LLM_PLANNER`, and
+ * `HARN_PLANNER` are checked before shared `HARN_AGENT`/`HARN_LLM`.
+ *
+ * Returns `{role, env_prefixes, provider, model, options, tool_format,
+ * tool_format_source, stripped, audit}`.
+ *
+ * @effects: [env.read]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_model_options(config = nil) {
+  let cfg = __stack_dict(config)
+  let role = __stack_non_empty_string(cfg?.role) ?? "agent"
+  let prefixes = __stack_env_prefixes(cfg, role)
+  let configured = __stack_configured_model_options(cfg, prefixes)
+  let packed = __stack_pack_options(configured)
+  let sanitized = __stack_sanitize_result(packed)
+  var options = sanitized.options
+  let resolution = agent_tool_format_resolution(options)
+  if resolution.tool_format != nil {
+    options = options + {tool_format: resolution.tool_format}
+  }
+  return {
+    role: role,
+    env_prefixes: prefixes,
+    provider: options?.provider,
+    model: options?.model,
+    model_role: options?.model_role,
+    options: options,
+    tool_format: options?.tool_format,
+    tool_format_source: resolution.source ?? "unresolved",
+    stripped: sanitized.stripped,
+    audit: {
+      kind: "agent_model_options",
+      role: role,
+      provider: options?.provider,
+      model: options?.model,
+      tool_format: options?.tool_format,
+      stripped: sanitized.stripped,
+    },
+  }
 }

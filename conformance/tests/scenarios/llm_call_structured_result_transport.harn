@@ -11,7 +11,7 @@ pipeline default() {
   with_llm_script(
     [{error: {category: "rate_limit", message: "429 slow down"}}],
     { ->
-      let r = llm_call_structured_result("Q", schema, {provider: "mock", llm_retries: 0, repair: {enabled: true}})
+      let r = llm_call_structured_result("Q", schema, {provider: "mock", repair: {enabled: true}})
       __io_println(r.ok)
       __io_println(r.data == nil)
       __io_println(r.error_category)

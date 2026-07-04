@@ -29,7 +29,7 @@ pipeline default() {
   with_llm_script(
     [{error: {category: "rate_limit", message: "429 slow down"}}],
     { ->
-      let rate = llm_call_structured_safe("Grade", schema, {provider: "mock", llm_retries: 0})
+      let rate = llm_call_structured_safe("Grade", schema, {provider: "mock"})
       __io_println(rate.ok)
       __io_println(rate.error.category)
       __io_println(contains(rate.error.message, "429"))

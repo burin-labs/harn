@@ -8,13 +8,13 @@ import { with_llm_script } from "std/testing"
  * dict or string); scripts can dispatch directly on `e.kind`/`e.reason`.
  */
 pipeline default(task) {
-  // `llm_retries: 0` disables the llm_call-internal transient retry so
-  // a single injected error surfaces as a throw on the first attempt.
+  // llm_call is fail-fast on transient errors, so a single injected error
+  // surfaces as a throw on the first attempt.
   with_llm_script(
     [{error: {category: "rate_limit", message: "429 Too Many Requests", retry_after_ms: 2500}}],
     { ->
       try {
-        llm_call("hello", nil, {provider: "mock", model: "mock-model", llm_retries: 0})
+        llm_call("hello", nil, {provider: "mock", model: "mock-model"})
       } catch (e) {
         __io_println(error_category(e))
         __io_println(is_rate_limited(e))
@@ -31,7 +31,7 @@ pipeline default(task) {
     [{error: {category: "overloaded", message: "529 overloaded"}}],
     { ->
       try {
-        llm_call("hello again", nil, {provider: "mock", llm_retries: 0})
+        llm_call("hello again", nil, {provider: "mock"})
       } catch (e2) {
         __io_println(error_category(e2))
         __io_println(e2.kind)
