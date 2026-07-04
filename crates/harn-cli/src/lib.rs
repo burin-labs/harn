@@ -859,6 +859,9 @@ async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMode) {
             ProviderCommand::ToolProbe(tool_probe) => {
                 commands::provider::run_provider_tool_probe(tool_probe).await;
             }
+            ProviderCommand::CacheProbe(cache_probe) => {
+                commands::provider::run_provider_cache_probe(cache_probe).await;
+            }
             ProviderCommand::DispatchExplain(explain) => {
                 commands::dispatch_explain::run(&explain);
             }

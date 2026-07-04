@@ -18,6 +18,7 @@ mod agent_tools;
 pub mod api;
 pub(crate) mod autonomy_budget;
 pub(crate) mod cache;
+pub mod cache_conformance;
 mod call;
 pub mod capabilities;
 pub mod capability_audit;

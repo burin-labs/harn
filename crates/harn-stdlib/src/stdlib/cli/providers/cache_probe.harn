@@ -1,0 +1,125 @@
+/**
+ * `harn provider cache-probe` render layer — see harn#3927.
+ *
+ * The classifier (support resolution + per-run normalization + verdict) stays
+ * in Rust (`crates/harn-vm/src/llm/cache_conformance.rs`) because it is the
+ * stable contract Burin dogfood (#3532) and Harn Cloud receipts (#1106)
+ * consume. The Rust shim classifies the saved usage fixture and hands the JSON
+ * `CacheConformanceReport` here for rendering only.
+ *
+ * Inputs (from the dispatch shim):
+ *   HARN_PROVIDER_CACHE_PROBE_PAYLOAD_JSON — JSON envelope matching the
+ *     `CacheConformanceReport` shape.
+ *   HARN_PROVIDER_CACHE_PROBE_PAYLOAD_PRETTY — pretty-printed companion,
+ *     forwarded verbatim in JSON mode to preserve serde float fidelity.
+ *   HARN_OUTPUT_JSON — "1" for the JSON envelope, else the human summary.
+ */
+fn __safe_string(value, fallback: string) -> string {
+  if type_of(value) == "string" {
+    return value
+  }
+  return fallback
+}
+
+fn __safe_dict(value) -> dict {
+  if type_of(value) == "dict" {
+    return value
+  }
+  return {}
+}
+
+fn __safe_list(value) -> list {
+  if type_of(value) == "list" {
+    return value
+  }
+  return []
+}
+
+fn __safe_int(value, fallback: int) -> int {
+  if type_of(value) == "int" {
+    return value
+  }
+  return fallback
+}
+
+fn __render_human(report: dict) -> string {
+  let provider = __safe_string(report["provider"], "")
+  let model = __safe_string(report["model"], "")
+  let support = __safe_dict(report["support"])
+  let profile = __safe_dict(support["profile"])
+  let verdict = __safe_string(report["verdict"], "")
+  let counts = __safe_dict(report["bucket_counts"])
+  var out = provider + " " + model
+    + " support="
+    + __safe_string(support["status"], "")
+    + " breakpoint="
+    + __safe_string(profile["cache_breakpoint_style"], "none")
+    + " verdict="
+    + verdict
+    + " dogfood_failure="
+    + to_string(report["dogfood_failure"])
+    + "\n"
+  out = out + "  buckets:"
+    + " cache_effective="
+    + to_string(__safe_int(counts["cache_effective"], 0))
+    + " cache_supported_miss="
+    + to_string(__safe_int(counts["cache_supported_miss"], 0))
+    + " unsupported_zero="
+    + to_string(__safe_int(counts["unsupported_zero"], 0))
+    + " support_unknown_zero="
+    + to_string(__safe_int(counts["support_unknown_zero"], 0))
+    + " no_prompt_tokens="
+    + to_string(__safe_int(counts["no_prompt_tokens"], 0))
+    + " provider_field_inconsistent="
+    + to_string(__safe_int(counts["provider_field_inconsistent"], 0))
+    + "\n"
+  let runs = __safe_list(report["runs"])
+  for run in runs {
+    if type_of(run) != "dict" {
+      continue
+    }
+    let usage = __safe_dict(run["usage"])
+    out = out + "  run " + to_string(__safe_int(run["run_index"], 0)) + ": "
+      + __safe_string(run["classification"], "")
+      + " input="
+      + to_string(__safe_int(usage["input_tokens"], 0))
+      + " fresh="
+      + to_string(__safe_int(usage["fresh_input_tokens"], 0))
+      + " cache_read="
+      + to_string(__safe_int(usage["cache_read_tokens"], 0))
+      + " cache_write="
+      + to_string(__safe_int(usage["cache_write_tokens"], 0))
+      + "\n"
+  }
+  return out
+}
+
+fn main(harness: Harness) -> int {
+  let raw = harness.env.get_or("HARN_PROVIDER_CACHE_PROBE_PAYLOAD_JSON", "")
+  if raw == "" {
+    harness.stdio
+      .eprintln("internal error: HARN_PROVIDER_CACHE_PROBE_PAYLOAD_JSON not set by dispatch shim")
+    return 70
+  }
+  let json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
+  if json_mode {
+    let pretty = harness.env.get_or("HARN_PROVIDER_CACHE_PROBE_PAYLOAD_PRETTY", raw)
+    harness.stdio.println(pretty)
+  } else {
+    let report = try {
+      json_parse(raw)
+    } catch (e) {
+      harness.stdio
+        .eprintln("internal error: failed to parse provider-cache-probe payload: " + to_string(e))
+      return 70
+    }
+    let text = __render_human(report)
+    let trimmed = if len(text) > 0 && text[len(text) - 1] == "\n" {
+      text[0:len(text) - 1]
+    } else {
+      text
+    }
+    harness.stdio.println(trimmed)
+  }
+  return 0
+}

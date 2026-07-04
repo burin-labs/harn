@@ -1196,6 +1196,47 @@ pub(crate) fn capabilities_to_vm_value(
         "cache_breakpoint_style",
         caps.cache_breakpoint_style.as_str(),
     );
+    // Full cache-control profile (min useful prefix, TTL notes, usage-field
+    // mapping) derived from this one capability path, so Burin dogfood (#3532)
+    // and Harn Cloud receipts (#1106) read cache requirements without a
+    // provider-specific branch of their own.
+    let cache_profile = crate::llm::cache_conformance::CacheControlProfile::from_capabilities(caps);
+    let mut cache_control = crate::value::DictMap::new();
+    cache_control.insert(
+        crate::value::intern_key("prompt_caching"),
+        VmValue::Bool(cache_profile.prompt_caching),
+    );
+    cache_control.put_str(
+        "cache_breakpoint_style",
+        &cache_profile.cache_breakpoint_style,
+    );
+    cache_control.insert(
+        crate::value::intern_key("min_useful_prefix_tokens"),
+        cache_profile
+            .min_useful_prefix_tokens
+            .map(|n| VmValue::Int(n as i64))
+            .unwrap_or(VmValue::Nil),
+    );
+    cache_control.insert(
+        crate::value::intern_key("ttl_notes"),
+        cache_profile
+            .ttl_notes
+            .as_deref()
+            .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
+            .unwrap_or(VmValue::Nil),
+    );
+    cache_control.put_str(
+        "cache_read_usage_field",
+        &cache_profile.cache_read_usage_field,
+    );
+    cache_control.put_str(
+        "cache_write_usage_field",
+        &cache_profile.cache_write_usage_field,
+    );
+    dict.insert(
+        crate::value::intern_key("cache_control"),
+        VmValue::dict(cache_control),
+    );
     dict.insert(
         crate::value::intern_key("prefers_xml_scaffolding"),
         VmValue::Bool(caps.prefers_xml_scaffolding),

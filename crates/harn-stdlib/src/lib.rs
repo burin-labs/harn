@@ -1056,6 +1056,10 @@ pub const STDLIB_CLI_SCRIPTS: &[StdlibCliScript] = &[
         source: include_str!("stdlib/cli/precompile.harn"),
     },
     StdlibCliScript {
+        name: "providers/cache_probe",
+        source: include_str!("stdlib/cli/providers/cache_probe.harn"),
+    },
+    StdlibCliScript {
         name: "providers/catalog",
         source: include_str!("stdlib/cli/providers/catalog.harn"),
     },

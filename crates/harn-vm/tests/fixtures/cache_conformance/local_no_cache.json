@@ -1,0 +1,30 @@
+{
+  "provider": "openrouter",
+  "model": "qwen/qwen3.6-35b-a3b",
+  "runs": [
+    {
+      "request": {
+        "task": "stable-prefix-cache-probe",
+        "prefix_sha256": "0000000000000000000000000000000000000000000000000000000000000001",
+        "prefix_tokens_estimate": 3800
+      },
+      "elapsed_ms": 4200,
+      "usage": {
+        "input_tokens": 3840,
+        "output_tokens": 96
+      }
+    },
+    {
+      "request": {
+        "task": "stable-prefix-cache-probe",
+        "prefix_sha256": "0000000000000000000000000000000000000000000000000000000000000001",
+        "prefix_tokens_estimate": 3800
+      },
+      "elapsed_ms": 4100,
+      "usage": {
+        "input_tokens": 3840,
+        "output_tokens": 96
+      }
+    }
+  ]
+}

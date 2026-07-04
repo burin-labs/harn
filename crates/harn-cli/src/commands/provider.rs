@@ -20,7 +20,9 @@ use harn_vm::llm::readiness::{probe_provider_readiness, ProviderReadiness};
 use harn_vm::llm_config;
 use serde::Serialize;
 
-use crate::cli::{ProviderProbeArgs, ProviderToolProbeArgs, ProviderToolProbeModeArg};
+use crate::cli::{
+    ProviderCacheProbeArgs, ProviderProbeArgs, ProviderToolProbeArgs, ProviderToolProbeModeArg,
+};
 use crate::commands::local::runtime::{fetch_ollama_ps, LoadedModel, LOCAL_PROVIDERS};
 use crate::dispatch;
 use crate::env_guard::ScopedEnvVar;
@@ -43,10 +45,19 @@ const TOOL_PROBE_PAYLOAD_ENV: &str = "HARN_PROVIDER_TOOL_PROBE_PAYLOAD_JSON";
 /// rationale as [`PROBE_PAYLOAD_PRETTY_ENV`].
 const TOOL_PROBE_PAYLOAD_PRETTY_ENV: &str = "HARN_PROVIDER_TOOL_PROBE_PAYLOAD_PRETTY";
 
+/// Env var carrying the JSON `CacheConformanceReport` envelope handed across
+/// to the embedded `cli/providers/cache_probe` render script.
+const CACHE_PROBE_PAYLOAD_ENV: &str = "HARN_PROVIDER_CACHE_PROBE_PAYLOAD_JSON";
+
+/// Pretty-printed companion to [`CACHE_PROBE_PAYLOAD_ENV`] — same rationale as
+/// [`PROBE_PAYLOAD_PRETTY_ENV`].
+const CACHE_PROBE_PAYLOAD_PRETTY_ENV: &str = "HARN_PROVIDER_CACHE_PROBE_PAYLOAD_PRETTY";
+
 /// Serialises the dispatch path so concurrent in-process callers
 /// don't race on the global env vars the shim sets.
 static DISPATCH_PROBE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 static DISPATCH_TOOL_PROBE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+static DISPATCH_CACHE_PROBE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[derive(Debug, Serialize)]
 struct ProviderProbe {
@@ -236,6 +247,73 @@ async fn aggregate_tool_conformance_report(
         options.timeout_secs = args.timeout_secs;
         Ok(harn_vm::llm::tool_conformance::run_tool_conformance_probe(options).await)
     }
+}
+
+pub(crate) async fn run_provider_cache_probe(args: ProviderCacheProbeArgs) {
+    let exit_code = dispatch_provider_cache_probe(args).await;
+    if exit_code != 0 {
+        process::exit(exit_code);
+    }
+}
+
+async fn dispatch_provider_cache_probe(args: ProviderCacheProbeArgs) -> i32 {
+    let Some(fixture_path) = args.usage_fixture.as_ref() else {
+        eprintln!(
+            "error: live prompt-cache probing is not yet wired; pass --usage-fixture <path> \
+             with a saved repeat-run usage fixture"
+        );
+        return 2;
+    };
+    let raw = match std::fs::read_to_string(fixture_path) {
+        Ok(raw) => raw,
+        Err(error) => {
+            eprintln!("error: failed to read {}: {error}", fixture_path.display());
+            return 1;
+        }
+    };
+    let report = match harn_vm::llm::cache_conformance::classify_cache_conformance_fixture(
+        args.provider.clone(),
+        args.model.clone(),
+        &raw,
+    ) {
+        Ok(report) => report,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return 1;
+        }
+    };
+    let dogfood_failure = report.dogfood_failure;
+    let payload_json = match serde_json::to_string(&report) {
+        Ok(json) => json,
+        Err(error) => {
+            eprintln!("error: failed to serialise cache-probe payload: {error}");
+            return 1;
+        }
+    };
+    let payload_pretty = match serde_json::to_string_pretty(&report) {
+        Ok(json) => json,
+        Err(error) => {
+            eprintln!("error: failed to render cache-probe payload: {error}");
+            return 1;
+        }
+    };
+    let _guard = DISPATCH_CACHE_PROBE_LOCK.lock().await;
+    let _payload_guard = ScopedEnvVar::set(CACHE_PROBE_PAYLOAD_ENV, &payload_json);
+    let _pretty_guard = ScopedEnvVar::set(CACHE_PROBE_PAYLOAD_PRETTY_ENV, &payload_pretty);
+    let outcome =
+        dispatch::run_embedded_script("providers/cache_probe", Vec::new(), args.json).await;
+    if !outcome.stderr.is_empty() {
+        let _ = std::io::stderr().write_all(outcome.stderr.as_bytes());
+    }
+    if !outcome.stdout.is_empty() {
+        let _ = std::io::stdout().write_all(outcome.stdout.as_bytes());
+    }
+    if outcome.exit_code != 0 {
+        return outcome.exit_code;
+    }
+    // A supported route that never caches, or contradictory provider fields, is
+    // a real conformance failure; a non-cache provider is not.
+    i32::from(dogfood_failure)
 }
 
 fn modes_for_arg(
