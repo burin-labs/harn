@@ -1276,19 +1276,11 @@ fn screenshot_result_summary(observation: &str) -> String {
 /// the provider content mappers do the image-block projection at egress.
 fn screenshot_from_tool_result(result: &VmValue) -> Option<VmValue> {
     fn find(value: &serde_json::Value) -> Option<&serde_json::Value> {
+        if crate::llm::content::is_screenshot_dict(value) {
+            return Some(value);
+        }
         match value {
-            serde_json::Value::Object(map) => {
-                let has_base64 = map
-                    .get("base64")
-                    .and_then(|v| v.as_str())
-                    .map(|s| !s.is_empty())
-                    .unwrap_or(false);
-                let has_scale = map.contains_key("scale_factor");
-                if has_base64 && has_scale {
-                    return Some(value);
-                }
-                map.values().find_map(find)
-            }
+            serde_json::Value::Object(map) => map.values().find_map(find),
             serde_json::Value::Array(items) => items.iter().find_map(find),
             _ => None,
         }

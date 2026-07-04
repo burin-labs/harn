@@ -260,6 +260,23 @@ pub(crate) fn parse_image_block(
 /// Returns `None` when `value` is not one of those (including when it already
 /// carries an explicit `type`, so typed blocks flow through the normal
 /// [`parse_image_block`] path untouched). `media_type` defaults to `image/png`.
+/// The distinctive signature of the hostlib `ScreenImage` neutral screenshot
+/// dict: a non-empty `base64` string alongside a `scale_factor` key. This is the
+/// single source of truth for "is this value a computer-use screenshot" — the
+/// recursive tool-result searchers (`json_carries_screenshot`,
+/// `screenshot_from_tool_result`) and the neutral-block converter below all key
+/// off it, so the shape is defined once. The pairing is distinctive enough not
+/// to misfire on unrelated dicts.
+pub(crate) fn is_screenshot_dict(value: &serde_json::Value) -> bool {
+    let Some(obj) = value.as_object() else {
+        return false;
+    };
+    obj.get("base64")
+        .and_then(|value| value.as_str())
+        .is_some_and(|base64| !base64.is_empty())
+        && obj.contains_key("scale_factor")
+}
+
 pub(crate) fn screenshot_image_block(value: &serde_json::Value) -> Option<serde_json::Value> {
     let obj = value.as_object()?;
     // An explicitly-typed block is handled by the normal image/file/video
@@ -280,9 +297,9 @@ pub(crate) fn screenshot_image_block(value: &serde_json::Value) -> Option<serde_
         let media_type = image.get("media_type").and_then(|value| value.as_str());
         return Some(image_block(base64, media_type));
     }
-    // Shape B: the hostlib `ScreenImage` shape. `scale_factor` + `base64`
-    // together are distinctive enough not to misfire on other dicts.
-    if obj.contains_key("scale_factor") {
+    // Shape B: the hostlib `ScreenImage` shape, recognized by the canonical
+    // screenshot signature (non-empty base64 + scale_factor).
+    if is_screenshot_dict(value) {
         let base64 = obj.get("base64").and_then(|value| value.as_str())?;
         let media_type = obj.get("media_type").and_then(|value| value.as_str());
         return Some(image_block(base64, media_type));

@@ -334,18 +334,11 @@ pub(super) fn harn_handler_result_value(val: &VmValue) -> serde_json::Value {
 /// with a non-empty base64) anywhere in its tree — the distinctive `ScreenImage`
 /// signature the computer tool returns.
 fn json_carries_screenshot(value: &serde_json::Value) -> bool {
+    if crate::llm::content::is_screenshot_dict(value) {
+        return true;
+    }
     match value {
-        serde_json::Value::Object(map) => {
-            let has_base64 = map
-                .get("base64")
-                .and_then(|v| v.as_str())
-                .map(|s| !s.is_empty())
-                .unwrap_or(false);
-            if has_base64 && map.contains_key("scale_factor") {
-                return true;
-            }
-            map.values().any(json_carries_screenshot)
-        }
+        serde_json::Value::Object(map) => map.values().any(json_carries_screenshot),
         serde_json::Value::Array(items) => items.iter().any(json_carries_screenshot),
         _ => false,
     }
