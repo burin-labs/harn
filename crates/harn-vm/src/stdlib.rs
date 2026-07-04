@@ -254,6 +254,9 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
     register_core_stdlib(vm);
     register_io_stdlib(vm);
     register_agent_stdlib(vm);
+    if vm.global("harness").is_none() {
+        vm.set_harness(crate::harness::Harness::real());
+    }
     harn_builtin_registry::install_builtin_signatures(all_builtin_signatures());
 }
 
@@ -440,4 +443,35 @@ pub fn reset_stdlib_state() {
     template::reset_prompt_registry();
     crate::triggers::clear_webhook_intake_state();
     crate::llm::cache::reset_in_process_cache_state();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn register_vm_stdlib_installs_default_harness_handle() {
+        let chunk = crate::compile_source(
+            r"
+fn __probe_global_harness_clock() {
+  let now = harness.clock.now_ms()
+  return now >= 0
+}
+
+fn main(harness: Harness) {
+  return __probe_global_harness_clock()
+}
+",
+        )
+        .expect("compile harness clock probe");
+        let mut vm = Vm::new();
+        register_vm_stdlib(&mut vm);
+
+        assert!(vm.global("harness").is_some());
+        let result = vm
+            .execute(&chunk)
+            .await
+            .expect("execute harness clock probe");
+        assert!(matches!(result, crate::value::VmValue::Bool(true)));
+    }
 }
