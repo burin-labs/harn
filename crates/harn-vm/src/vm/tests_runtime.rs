@@ -685,6 +685,19 @@ log("hello".substring(1, 3)) }"#,
 }
 
 #[test]
+fn test_includes_aliases_membership_methods() {
+    let out = run_output(
+        r#"pipeline t(task) {
+log("hello world".includes("world"))
+log(["alpha", "beta"].includes("beta"))
+log(set("read", "write").includes("write"))
+log((1 to 4).includes(3))
+}"#,
+    );
+    assert_eq!(out, "[harn] true\n[harn] true\n[harn] true\n[harn] true");
+}
+
+#[test]
 fn test_string_length_fast_paths_keep_unicode_scalar_semantics() {
     let out = run_output(
         r#"pipeline t(task) {

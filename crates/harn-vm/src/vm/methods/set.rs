@@ -11,7 +11,7 @@ impl crate::vm::Vm {
         let result = match method {
             "count" | "len" => Ok(VmValue::Int(set.len() as i64)),
             "empty" => Ok(VmValue::Bool(set.is_empty())),
-            "contains" => {
+            "contains" | "includes" => {
                 let needle = args.first().unwrap_or(&VmValue::Nil);
                 Ok(VmValue::Bool(set.contains(needle)))
             }

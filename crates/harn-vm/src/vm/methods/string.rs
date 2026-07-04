@@ -9,7 +9,7 @@ impl crate::vm::Vm {
         match method {
             "count" => Ok(VmValue::Int(string_char_count(s) as i64)),
             "empty" => Ok(VmValue::Bool(s.is_empty())),
-            "contains" => Ok(VmValue::Bool(
+            "contains" | "includes" => Ok(VmValue::Bool(
                 s.contains(&*args.first().map(|a| a.as_str_cow()).unwrap_or_default()),
             )),
             "replace" if args.len() >= 2 => Ok(VmValue::String(arcstr::ArcStr::from(

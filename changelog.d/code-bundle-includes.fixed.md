@@ -1,0 +1,1 @@
+- Added `includes()` as a membership alias for Harn strings and collections.

@@ -457,13 +457,13 @@ impl super::super::Vm {
             VmValue::List(_) => match (method, argc) {
                 ("count", 0) => Some(MethodCacheTarget::ListCount),
                 ("empty", 0) => Some(MethodCacheTarget::ListEmpty),
-                ("contains", 1) => Some(MethodCacheTarget::ListContains),
+                ("contains" | "includes", 1) => Some(MethodCacheTarget::ListContains),
                 _ => None,
             },
             VmValue::String(_) => match (method, argc) {
                 ("count" | "len", 0) => Some(MethodCacheTarget::StringCount),
                 ("empty", 0) => Some(MethodCacheTarget::StringEmpty),
-                ("contains", 1) => Some(MethodCacheTarget::StringContains),
+                ("contains" | "includes", 1) => Some(MethodCacheTarget::StringContains),
                 _ => None,
             },
             VmValue::Dict(_) => match (method, argc) {
@@ -483,7 +483,7 @@ impl super::super::Vm {
                 ("count", 0) => Some(MethodCacheTarget::SetCount),
                 ("len", 0) => Some(MethodCacheTarget::SetLen),
                 ("empty", 0) => Some(MethodCacheTarget::SetEmpty),
-                ("contains", 1) => Some(MethodCacheTarget::SetContains),
+                ("contains" | "includes", 1) => Some(MethodCacheTarget::SetContains),
                 _ => None,
             },
             _ => None,
