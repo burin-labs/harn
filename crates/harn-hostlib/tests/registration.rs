@@ -426,6 +426,9 @@ fn install_default_wires_every_module_into_a_vm() {
     let mut vm = harn_vm::Vm::new();
     let registry = harn_hostlib::install_default(&mut vm);
 
+    // `mut` is only needed when the `computer` feature adds a module below; the
+    // allow keeps the no-feature build (CI default) warning-clean.
+    #[cfg_attr(not(feature = "computer"), allow(unused_mut))]
     let mut expected = vec![
         "ast",
         "code_index",
