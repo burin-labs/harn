@@ -177,8 +177,11 @@ start training or inference. The plan also reports the template convention to
 train against: native Gemma 4 or FunctionGemma tool templates stay distinct from
 Harn text/json `<tool_call>` adapters, and the trainer contract calls out
 assistant-only loss masks plus `messages`/`tools` columns, so train and serving
-do not silently cross tool-call contracts. The JSON report exposes the
-machine-readable training contract under `training.contract`, and
+do not silently cross tool-call contracts. `--trainer trl_sft_trainer`,
+`--trainer unsloth_sft`, and `--trainer external_sft_trainer` select
+backend-specific contract notes without moving export, manifests, eval, or
+promotion policy out of Harn. The JSON report exposes the machine-readable
+training contract under `training.contract`, and
 `training.target_modules` records the method-specific adapter target: QLoRA uses
 PEFT's `all-linear` shorthand, while full LoRA keeps explicit attention
 projection modules. The `corpus_refresh.model_aware_selection` block adds the
