@@ -1212,22 +1212,25 @@ fn tool_result_message_for_provider(
         }
     }
     // A tool that returned a screenshot (the computer tool) carries the image
-    // back to the model. Anthropic accepts image blocks INSIDE a `tool_result`,
-    // so the content becomes a `[text, screenshot]` block list and
-    // `anthropic_content` projects the neutral screenshot dict into an image
-    // block. OpenAI/Ollama chat completions reject image content on a `tool`
-    // role message (images are only allowed on `user` messages), so those
-    // providers keep a plain-text tool result here and the screenshot rides in a
-    // SEPARATE follow-up `user` message that `record_tool_results` injects (see
-    // `screenshot_user_message_for_provider`). The text channel has no image
-    // affordance at all. A result with no screenshot is byte-identical to before.
-    let embed_image_in_tool_result = screenshot.is_some()
-        && crate::llm::provider::provider_uses_anthropic_messages(provider, model);
+    // back to the model as a `[text, screenshot]` content list. The provider
+    // content mappers (`anthropic_content`/`openai_content`) project the neutral
+    // screenshot dict into the provider's image block — and Anthropic's egress
+    // wraps BOTH `role:"tool"` and `role:"tool_result"` messages into a
+    // `tool_result` block, so this works regardless of whether the provider was
+    // recognized as Anthropic at record time (the session's last provider/model
+    // is not reliably set when the result is recorded). Gate only on the channel:
+    // the text channel has no image affordance, so it keeps the plain string.
+    //
+    // The text part is a SHORT summary, never the raw observation: a screenshot
+    // observation is ~800 KB of base64 (the display-string of the ScreenImage),
+    // which would bloat every subsequent turn and is redundant once the image
+    // itself rides along. A result with no screenshot is byte-identical to before.
     match screenshot {
-        Some(image) if embed_image_in_tool_result => {
+        Some(image) if !is_text_channel => {
+            let summary = screenshot_result_summary(observation);
             let mut text_block = crate::value::DictMap::new();
             text_block.put_str("type", "text");
-            text_block.put_str("text", observation);
+            text_block.put_str("text", &summary);
             let content = vec![VmValue::dict(text_block), image.clone()];
             msg.put("content", VmValue::List(std::sync::Arc::new(content)));
         }
@@ -1238,36 +1241,23 @@ fn tool_result_message_for_provider(
     VmValue::dict(msg)
 }
 
-/// A follow-up `user` message carrying a screenshot as an image content block,
-/// used for providers that do NOT accept image content on a tool-result message
-/// (OpenAI/Ollama chat completions). Returns `None` for Anthropic (the image
-/// already rode inside the `tool_result`) and for the text channel (no image
-/// affordance). The `[text, screenshot]` content list is projected to the
-/// provider's image block by `openai_content` at egress.
-fn screenshot_user_message_for_provider(
-    provider: &str,
-    model: &str,
-    tool_format: &str,
-    screenshot: &VmValue,
-) -> Option<VmValue> {
-    let is_text_channel = matches!(
-        crate::llm_config::tool_format_channel(tool_format),
-        Some(crate::llm_config::ToolFormatChannel::Text)
-    );
-    if is_text_channel || crate::llm::provider::provider_uses_anthropic_messages(provider, model) {
-        return None;
+/// A short text summary for a screenshot tool result, stripped of the giant
+/// base64 payload that the display-stringified `ScreenImage` carries. Keeps any
+/// leading `[result of ...]` framing and the `text` field's human summary if one
+/// is recoverable, else a generic note; the image itself rides alongside as a
+/// content block, so the text only needs to orient the model.
+fn screenshot_result_summary(observation: &str) -> String {
+    // Pull the handler's short `text: "..."` summary out of the display string
+    // when present (e.g. `text: Clicked left at (100, 200). Captured ...`).
+    if let Some(idx) = observation.find("text: ") {
+        let rest = &observation[idx + "text: ".len()..];
+        let end = rest.find(", screenshot:").unwrap_or(rest.len());
+        let candidate = rest[..end].trim();
+        if !candidate.is_empty() && candidate.len() < 400 {
+            return format!("{candidate} (screenshot attached below)");
+        }
     }
-    let mut text_block = crate::value::DictMap::new();
-    text_block.put_str("type", "text");
-    text_block.put_str(
-        "text",
-        "Screenshot from the computer tool (the current screen):",
-    );
-    let content = vec![VmValue::dict(text_block), screenshot.clone()];
-    let mut msg = crate::value::DictMap::new();
-    msg.put_str("role", "user");
-    msg.put("content", VmValue::List(std::sync::Arc::new(content)));
-    Some(VmValue::dict(msg))
+    "Screenshot captured (attached below).".to_string()
 }
 
 /// The neutral screenshot dict a computer-use tool returns (`ScreenImage`:
@@ -1303,28 +1293,7 @@ fn screenshot_from_tool_result(result: &VmValue) -> Option<VmValue> {
         }
     }
     let json = vm_to_json(result);
-    let found = find(&json).map(crate::stdlib::json_to_vm_value);
-    // TEMP DIAGNOSTIC.
-    if json.get("tool_name").and_then(|v| v.as_str()) == Some("computer") {
-        let result_field = json.get("result");
-        let _ = std::fs::write(
-            "/private/tmp/burin_sshot_diag.json",
-            serde_json::to_vec_pretty(&serde_json::json!({
-                "result_field_type": result_field.map(|v| match v {
-                    serde_json::Value::String(_) => "string",
-                    serde_json::Value::Object(_) => "object",
-                    serde_json::Value::Array(_) => "array",
-                    serde_json::Value::Null => "null",
-                    _ => "other",
-                }),
-                "result_field_keys": result_field.and_then(|v| v.as_object()).map(|m| m.keys().cloned().collect::<Vec<_>>()),
-                "top_keys": json.as_object().map(|m| m.keys().cloned().collect::<Vec<_>>()),
-                "screenshot_found": found.is_some(),
-            }))
-            .unwrap_or_default(),
-        );
-    }
-    found
+    find(&json).map(crate::stdlib::json_to_vm_value)
 }
 
 /// The `(id, name)` of one provider-native tool-call block carried on an
@@ -1912,17 +1881,6 @@ fn host_agent_session_record_tool_results_builtin(
             ),
         )
         .map_err(VmError::Runtime)?;
-        // Providers that reject image content on a tool-result message (OpenAI /
-        // Ollama) get the screenshot in a follow-up `user` message instead, so
-        // the model still sees the current screen.
-        if let Some(image) = screenshot.as_ref() {
-            if let Some(user_message) =
-                screenshot_user_message_for_provider(&provider, &model, &tool_format, image)
-            {
-                crate::agent_sessions::inject_message(&session_id, user_message)
-                    .map_err(VmError::Runtime)?;
-            }
-        }
     }
     let _ = with_session(&session_id, HOST_SESSION_RECORD_TOOL_RESULTS, |session| {
         session.successful_tools.extend(successful);
