@@ -344,6 +344,27 @@ mod tests {
             .filter(|l| l.rank() == SideEffectLevel::MAX.rank())
             .count();
         assert_eq!(at_top, 1, "MAX must be the unique top of the ladder");
+
+        // Compiler guardrail on `ALL` completeness: this match is exhaustive
+        // over the TYPE, so adding a variant fails the build here — and the
+        // count assertion then forces that variant into `ALL`. Without both,
+        // a variant omitted from the (hand-maintained) `ALL` array would
+        // silently escape the uniqueness check above.
+        fn _every_variant_accounted_for(level: SideEffectLevel) {
+            match level {
+                SideEffectLevel::None
+                | SideEffectLevel::ReadOnly
+                | SideEffectLevel::WorkspaceWrite
+                | SideEffectLevel::ProcessExec
+                | SideEffectLevel::Network
+                | SideEffectLevel::DesktopControl => {}
+            }
+        }
+        assert_eq!(
+            SideEffectLevel::ALL.len(),
+            6,
+            "a SideEffectLevel variant was added; list it in ALL and bump this count"
+        );
     }
 
     #[test]

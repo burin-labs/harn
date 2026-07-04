@@ -1291,20 +1291,11 @@ fn is_dev_fd_descriptor(path: &Path) -> bool {
 
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "openbsd"))]
 pub(crate) fn policy_allows_network(policy: &CapabilityPolicy) -> bool {
-    fn rank(value: &str) -> usize {
-        match value {
-            "none" => 0,
-            "read_only" => 1,
-            "workspace_write" => 2,
-            "process_exec" => 3,
-            "network" => 4,
-            _ => 5,
-        }
-    }
+    use crate::tool_annotations::SideEffectLevel;
     policy
         .side_effect_level
         .as_ref()
-        .map(|level| rank(level) >= rank("network"))
+        .map(|level| SideEffectLevel::rank_str(level) >= SideEffectLevel::Network.rank())
         .unwrap_or(true)
 }
 

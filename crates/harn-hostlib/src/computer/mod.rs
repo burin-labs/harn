@@ -248,12 +248,14 @@ fn default_wait_ms() -> u64 {
     500
 }
 
-/// A captured screenshot, already resized to the advertised target size.
+/// A captured screenshot, already fitted to the advertised target size.
 ///
-/// The `LocalBackend` resizes captures to a fixed target (default XGA
-/// 1024x768) so the screenshot space, the coordinate space the model returns,
-/// and the size advertised in the provider tool spec are identical — the
-/// backend maps returned coordinates back to native input space internally.
+/// The `LocalBackend` fits captures aspect-preserving inside a target box
+/// (default 1400x1050, never upscaled), so the screenshot space, the coordinate
+/// space the model returns, and the size advertised in the provider tool spec
+/// are identical — the backend maps returned coordinates back to native input
+/// space internally. The advertised size is therefore the fitted size (variable
+/// per display aspect ratio), not a fixed dimension.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ScreenImage {
     /// Base64-encoded PNG bytes.

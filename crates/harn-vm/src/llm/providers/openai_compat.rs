@@ -659,16 +659,21 @@ fn maybe_remap_tool_call_text(text: &str, remap: bool) -> String {
     }
 }
 
-/// Apply the tool-call delimiter remap to an OpenAI `content` value, which may
-/// be a bare string or an array of typed parts (`{type:"text", text:"…"}`).
-/// OpenAI chat-completions rejects image content parts on a `role:"tool"`
-/// message (`Image URLs are only allowed for messages with role 'user'`). When a
-/// tool result carries image parts (a computer-use screenshot, or any
-/// image-returning tool), split them off: the tool message keeps its text parts
-/// and each relocated image is carried by a fresh `role:"user"` message inserted
-/// immediately after, where OpenAI accepts it. Messages with no tool-message
-/// image content pass through untouched (same Vec order, one extra user message
-/// per split).
+/// Relocate image parts off `role:"tool"` messages onto a following `role:"user"`
+/// message. OpenAI chat-completions rejects image content parts on a tool message
+/// (`Image URLs are only allowed for messages with role 'user'`), so when a tool
+/// result carries image parts (a computer-use screenshot, or any image-returning
+/// tool) the tool message keeps its text parts and the images are carried by a
+/// `user` message where OpenAI accepts them.
+///
+/// The images are NOT inserted inline right after each tool message: OpenAI
+/// requires every tool message answering an assistant's `tool_calls` to be
+/// contiguous, so an intervening `user` message inside a parallel tool-call batch
+/// (`assistant[c1,c2]`, `tool(c1 image)`, `tool(c2)`) would be a 400. Instead the
+/// stripped images are buffered across the contiguous run of tool results and
+/// flushed as a single `user` message once the run ends (the next non-tool
+/// message, or the end of history). Messages with no tool-message image content
+/// pass through untouched.
 fn relocate_tool_message_images_to_user(msgs: Vec<serde_json::Value>) -> Vec<serde_json::Value> {
     fn is_image_part(part: &serde_json::Value) -> bool {
         matches!(
@@ -676,11 +681,33 @@ fn relocate_tool_message_images_to_user(msgs: Vec<serde_json::Value>) -> Vec<ser
             Some("image_url") | Some("image")
         )
     }
-    let mut out = Vec::with_capacity(msgs.len());
+    // Emit the buffered images (if any) as one `user` message; called when a
+    // tool-result run ends so the images land after the whole run, never between
+    // two tool messages.
+    fn flush(out: &mut Vec<serde_json::Value>, pending: &mut Vec<serde_json::Value>) {
+        if pending.is_empty() {
+            return;
+        }
+        let mut user_content = vec![serde_json::json!({
+            "type": "text",
+            "text": "Screenshot(s) from the preceding tool result(s):",
+        })];
+        user_content.append(pending);
+        out.push(serde_json::json!({"role": "user", "content": user_content}));
+    }
+    let mut out = Vec::with_capacity(msgs.len() + 1);
+    let mut pending_images: Vec<serde_json::Value> = Vec::new();
     for message in msgs {
         let is_tool = message.get("role").and_then(|value| value.as_str()) == Some("tool");
+        if !is_tool {
+            // The tool-result run (if any) ended; land the buffered images just
+            // before this non-tool message.
+            flush(&mut out, &mut pending_images);
+            out.push(message);
+            continue;
+        }
         let parts = message.get("content").and_then(|value| value.as_array());
-        let Some(parts) = parts.filter(|_| is_tool) else {
+        let Some(parts) = parts else {
             out.push(message);
             continue;
         };
@@ -701,16 +728,10 @@ fn relocate_tool_message_images_to_user(msgs: Vec<serde_json::Value>) -> Vec<ser
             object.insert("content".to_string(), tool_content);
         }
         out.push(tool_message);
-        // Relocate the images onto a user message right after the tool result.
-        let mut user_content = vec![
-            serde_json::json!({"type": "text", "text": "Screenshot from the preceding tool result:"}),
-        ];
-        user_content.extend(images);
-        out.push(serde_json::json!({
-            "role": "user",
-            "content": user_content,
-        }));
+        pending_images.extend(images);
     }
+    // Flush images from a tool-result run that ran to the end of history.
+    flush(&mut out, &mut pending_images);
     out
 }
 
@@ -3152,6 +3173,73 @@ thinking_modes = ["enabled"]
         assert!(
             body.get("provider").is_none(),
             "non-openrouter gpt-oss route must not be pinned: {body}"
+        );
+    }
+
+    fn part_is_image(part: &serde_json::Value) -> bool {
+        matches!(
+            part.get("type").and_then(|value| value.as_str()),
+            Some("image_url") | Some("image")
+        )
+    }
+
+    #[test]
+    fn relocate_images_keeps_parallel_tool_results_adjacent() {
+        // A parallel tool-call batch whose FIRST tool result carries a
+        // screenshot: the relocated `user` image message must land AFTER the
+        // whole run of tool messages, never between them. OpenAI rejects a
+        // non-tool message interleaved with the tool results answering an
+        // assistant's `tool_calls`, so an inline insert would 400 the turn.
+        let msgs = vec![
+            serde_json::json!({
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [{"id": "c1"}, {"id": "c2"}],
+            }),
+            serde_json::json!({
+                "role": "tool",
+                "tool_call_id": "c1",
+                "content": [
+                    {"type": "text", "text": "shot"},
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
+                ],
+            }),
+            serde_json::json!({
+                "role": "tool",
+                "tool_call_id": "c2",
+                "content": [{"type": "text", "text": "read ok"}],
+            }),
+            serde_json::json!({"role": "assistant", "content": "done"}),
+        ];
+        let out = relocate_tool_message_images_to_user(msgs);
+        let roles: Vec<&str> = out
+            .iter()
+            .map(|m| m.get("role").and_then(|v| v.as_str()).unwrap_or(""))
+            .collect();
+        // assistant, tool(c1 text-only), tool(c2), user(image), assistant.
+        assert_eq!(
+            roles,
+            ["assistant", "tool", "tool", "user", "assistant"],
+            "images must flush after the contiguous tool-result run: {out:?}"
+        );
+        // The image rode onto the user message, stripped off the tool result.
+        let user = out.iter().find(|m| m["role"] == "user").unwrap();
+        assert!(
+            user["content"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(part_is_image),
+            "relocated user message must carry the image: {user}"
+        );
+        assert!(
+            !out[1]["content"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(part_is_image),
+            "image must be stripped off the tool result: {}",
+            out[1]
         );
     }
 }

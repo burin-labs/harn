@@ -32,6 +32,18 @@ const DEFAULT_TARGET_HEIGHT: u32 = 1050;
 /// every sleep is clamped to this cap.
 const MAX_ACTION_DURATION_MS: u64 = 60_000;
 
+/// Upper bound on click repetition. `count` is model-controlled and the neutral
+/// schema only defines 1=single, 2=double, 3=triple; a larger value is a
+/// hallucination or an attempt to flood the OS input queue and wedge the
+/// synchronous executor thread, so it is saturated rather than emitted.
+const MAX_CLICK_COUNT: u32 = 3;
+
+/// Upper bound on a single scroll action's wheel-step magnitude. `amount` is
+/// model-controlled, so one action cannot emit an unbounded wheel-event flood;
+/// the value is clamped into `[-MAX, MAX]` before use (which also removes the
+/// `i32::MIN` negation-overflow hazard on the `Up`/`Left` directions).
+const MAX_SCROLL_MAGNITUDE: i32 = 100;
+
 /// Resolve the target screenshot box from the environment, falling back to the
 /// default. The capture is fitted INSIDE this box (aspect-preserving).
 fn target_dims() -> (u32, u32) {
@@ -234,7 +246,7 @@ impl LocalBackend {
                     .move_mouse(x, y, Coordinate::Abs)
                     .map_err(|err| format!("move_mouse: {err}"))?;
                 with_modifiers(enigo, &modifier_key_names(modifiers), |enigo| {
-                    for _ in 0..(*count).max(1) {
+                    for _ in 0..(*count).clamp(1, MAX_CLICK_COUNT) {
                         enigo
                             .button(to_button(*button), Direction::Click)
                             .map_err(|err| format!("button click: {err}"))?;
@@ -296,11 +308,12 @@ impl LocalBackend {
                 enigo
                     .move_mouse(x, y, Coordinate::Abs)
                     .map_err(|err| format!("move_mouse: {err}"))?;
+                let magnitude = (*amount).clamp(-MAX_SCROLL_MAGNITUDE, MAX_SCROLL_MAGNITUDE);
                 let (axis, magnitude) = match direction {
-                    ScrollDirection::Down => (Axis::Vertical, *amount),
-                    ScrollDirection::Up => (Axis::Vertical, -*amount),
-                    ScrollDirection::Right => (Axis::Horizontal, *amount),
-                    ScrollDirection::Left => (Axis::Horizontal, -*amount),
+                    ScrollDirection::Down => (Axis::Vertical, magnitude),
+                    ScrollDirection::Up => (Axis::Vertical, magnitude.saturating_neg()),
+                    ScrollDirection::Right => (Axis::Horizontal, magnitude),
+                    ScrollDirection::Left => (Axis::Horizontal, magnitude.saturating_neg()),
                 };
                 with_modifiers(enigo, &modifier_key_names(modifiers), |enigo| {
                     enigo
@@ -318,20 +331,32 @@ impl LocalBackend {
                     .iter()
                     .map(|p| parse_key(p).ok_or_else(|| format!("unknown key '{p}'")))
                     .collect::<Result<_, _>>()?;
+                // Track exactly which presses succeeded so we can always release
+                // them — even if a later press or the sleep fails — the same way
+                // `with_modifiers` does. A partial failure must never leave a key
+                // physically held down on the user's live desktop.
+                let mut pressed: Vec<Key> = Vec::with_capacity(resolved.len());
+                let mut press_result: Result<(), String> = Ok(());
                 for key in &resolved {
-                    enigo
-                        .key(*key, Direction::Press)
-                        .map_err(|err| format!("key press: {err}"))?;
+                    match enigo.key(*key, Direction::Press) {
+                        Ok(()) => pressed.push(*key),
+                        Err(err) => {
+                            press_result = Err(format!("key press: {err}"));
+                            break;
+                        }
+                    }
                 }
-                std::thread::sleep(std::time::Duration::from_millis(
-                    (*duration_ms).min(MAX_ACTION_DURATION_MS),
-                ));
-                for key in resolved.iter().rev() {
-                    enigo
-                        .key(*key, Direction::Release)
-                        .map_err(|err| format!("key release: {err}"))?;
+                if press_result.is_ok() {
+                    std::thread::sleep(std::time::Duration::from_millis(
+                        (*duration_ms).min(MAX_ACTION_DURATION_MS),
+                    ));
                 }
-                Ok(())
+                for key in pressed.iter().rev() {
+                    // Best-effort release, ignoring errors, so one failed release
+                    // cannot strand the remaining held keys.
+                    let _ = enigo.key(*key, Direction::Release);
+                }
+                press_result
             }
             ComputerAction::Wait { duration_ms } => {
                 std::thread::sleep(std::time::Duration::from_millis(

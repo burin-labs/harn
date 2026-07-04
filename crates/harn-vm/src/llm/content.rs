@@ -320,12 +320,16 @@ impl ScreenImage {
     }
 }
 
-/// Whether `value` is a neutral computer-use screenshot dict — the canonical
-/// single-source predicate, defined in terms of [`ScreenImage`]. Used by the
-/// recursive tool-result searchers (`json_carries_screenshot`,
-/// `screenshot_from_tool_result`) and the neutral-block converter below.
+/// Whether `value` is a screenshot dict that [`screenshot_image_block`] can
+/// render — the canonical single-source predicate. It is DERIVED from the
+/// converter (not a parallel shape check) so the recursive tool-result searchers
+/// (`json_carries_screenshot`, `screenshot_from_tool_result`) recognize exactly
+/// the shapes egress can turn into an image block. Otherwise a shape the
+/// converter accepts (e.g. Shape A `{image:{base64,media_type}}`) would be
+/// rendered on egress but never pulled into the content list by the searchers —
+/// the two ends must agree on one definition.
 pub(crate) fn is_screenshot_dict(value: &serde_json::Value) -> bool {
-    ScreenImage::try_from(value).is_ok()
+    screenshot_image_block(value).is_some()
 }
 
 pub(crate) fn screenshot_image_block(value: &serde_json::Value) -> Option<serde_json::Value> {
