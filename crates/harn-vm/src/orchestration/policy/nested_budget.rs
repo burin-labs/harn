@@ -16,7 +16,7 @@
 //! uniform.
 
 use super::CapabilityPolicy;
-use crate::events::log_info_meta;
+use crate::events::log_debug_meta;
 use crate::orchestration::{current_execution_policy, pop_execution_policy, push_execution_policy};
 use crate::value::{ErrorCategory, VmError, VmValue};
 
@@ -231,7 +231,7 @@ fn emit_descent_event(
     } else {
         format!("nested execution descent into {}: {}", kind.as_str(), label)
     };
-    log_info_meta("policy.nested_execution_descent", &message, metadata);
+    log_debug_meta("policy.nested_execution_descent", &message, metadata);
 }
 
 fn recursion_limit_to_json(value: Option<usize>) -> serde_json::Value {

@@ -808,7 +808,7 @@ fn test_resolve_tier_model_default_aliases() {
     let (model, provider) =
         resolve_tier_model("mid", None).expect("mid alias must resolve from the embedded catalog");
     assert_eq!(provider, "openrouter");
-    assert_eq!(model, "qwen/qwen3.6-flash");
+    assert_eq!(model, "qwen/qwen3-coder-next");
 }
 
 #[test]

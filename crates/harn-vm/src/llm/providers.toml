@@ -295,14 +295,7 @@ latency_p50_ms = 1700
 method = "GET"
 path = "/models"
 
-# Z.AI — host of the GLM family (GLM-4.5/4.6/4.7 and the GLM-5 line). The
-# working API base is `https://api.z.ai/api/paas/v4` (verified 2026-07-03:
-# glm-4.6 serves 200 there; the previously catalogued `.../v1` returned 404).
-# The endpoint speaks the OpenAI chat-completions wire format so the shared
-# openai_chat_completions path Just Works. A coding-plan mirror lives at
-# `.../api/coding/paas/v4`; default to paas/v4. Auth is bearer with the raw
-# ZAI_API_KEY token (the legacy `ZHIPU_API_KEY` env var is also accepted; the
-# `auth_env` array tries each in order).
+# Z.AI — OpenAI-compatible GLM API. Override `ZAI_BASE_URL` for custom plans.
 [providers.zai]
 base_url = "https://api.z.ai/api/paas/v4"
 base_url_env = "ZAI_BASE_URL"
@@ -879,16 +872,13 @@ provider = "anthropic"
 id = "claude-sonnet-5"
 provider = "anthropic"
 
-# Default balanced hosted route for routine coding-agent work. Qwen 3.6 Flash
-# matched Plus on the 2026-07-02 Harn/OpenRouter structured JSON + native-tool
-# + text-tool smoke matrix while landing materially lower latency and token
-# price. OpenAI stays addressable through the provider-scoped tier alias below.
+# Default balanced hosted route for routine coding-agent work.
 [aliases.mid]
-id = "qwen/qwen3.6-flash"
+id = "qwen/qwen3-coder-next"
 provider = "openrouter"
 
 [aliases."tier/mid"]
-id = "qwen/qwen3.6-flash"
+id = "qwen/qwen3-coder-next"
 provider = "openrouter"
 
 [aliases."openai/mid"]
@@ -2288,15 +2278,13 @@ open_weight = true
 strengths = ["coding", "long_context", "agentic", "tool_use"]
 benchmarks = { swe_bench_verified = 67.0 }
 
-# Qwen3-Coder-Next — 80B/3B MoE non-thinking coder (Apache-2.0), trained
-# against 21 tool schemas (92.7% schema-following per the tech report).
-# OpenRouter serverless rate verified 2026-07-02.
+# Qwen3-Coder-Next — 80B/3B MoE non-thinking coder.
 [models."qwen/qwen3-coder-next"]
 name = "Qwen3 Coder Next"
 provider = "openrouter"
 context_window = 262144
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.11, output_per_mtok = 0.80 }
+pricing = { input_per_mtok = 0.11, output_per_mtok = 0.80, cache_read_per_mtok = 0.07 }
 availability = "serverless"
 architecture = { parameter_count_b = 80.0, active_parameter_count_b = 3.0, moe = true, license = "Apache-2.0", source_url = "https://huggingface.co/Qwen/Qwen3-Coder-Next", last_verified = "2026-07-02" }
 benchmarks = { swe_bench_verified = 70.6, swe_bench_pro = 44.3 }
@@ -2870,10 +2858,7 @@ name = "GLM 5.2 (via OpenRouter)"
 provider = "openrouter"
 context_window = 1048576
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
-# OpenRouter `/api/v1/models` live snapshot on 2026-07-02 reports
-# $0.93/$3.00 per MTok and native `reasoning_effort` support. A 2026-07-03
-# refresh reports input_cache_read at $0.18/MTok.
-pricing = { input_per_mtok = 0.93, output_per_mtok = 3.00, cache_read_per_mtok = 0.18 }
+pricing = { input_per_mtok = 0.91, output_per_mtok = 2.86, cache_read_per_mtok = 0.169 }
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]

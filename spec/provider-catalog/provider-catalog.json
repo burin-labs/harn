@@ -13168,8 +13168,10 @@
       "name": "Qwen3 Coder Next",
       "provider": "openrouter",
       "aliases": [
+        "mid",
         "openrouter-qwen3-coder-next",
-        "qwen3-coder-next"
+        "qwen3-coder-next",
+        "tier/mid"
       ],
       "context_window": 262144,
       "architecture": {
@@ -13217,14 +13219,16 @@
       "pricing": {
         "input_per_mtok": 0.11,
         "output_per_mtok": 0.8,
-        "cache_read_per_mtok": null,
+        "cache_read_per_mtok": 0.07,
         "cache_write_per_mtok": null
       },
       "deprecation": {
         "status": "active"
       },
       "availability": "serverless",
-      "quality_tags": [],
+      "quality_tags": [
+        "balanced"
+      ],
       "capability_tags": [
         "streaming",
         "tools",
@@ -13408,12 +13412,10 @@
       "name": "Qwen3.6 Flash (via OpenRouter)",
       "provider": "openrouter",
       "aliases": [
-        "mid",
         "openrouter-qwen3.6",
         "openrouter-qwen3.6-flash",
         "qwen3.6",
-        "qwen3.6-flash",
-        "tier/mid"
+        "qwen3.6-flash"
       ],
       "context_window": 1000000,
       "modalities": {
@@ -13461,9 +13463,7 @@
         "status": "active"
       },
       "availability": "serverless",
-      "quality_tags": [
-        "balanced"
-      ],
+      "quality_tags": [],
       "capability_tags": [
         "streaming",
         "tools",
@@ -13987,9 +13987,9 @@
       },
       "prompt_cache": true,
       "pricing": {
-        "input_per_mtok": 0.93,
-        "output_per_mtok": 3.0,
-        "cache_read_per_mtok": 0.18,
+        "input_per_mtok": 0.91,
+        "output_per_mtok": 2.86,
+        "cache_read_per_mtok": 0.169,
         "cache_write_per_mtok": null
       },
       "deprecation": {
@@ -16552,7 +16552,7 @@
     },
     {
       "name": "mid",
-      "model_id": "qwen/qwen3.6-flash",
+      "model_id": "qwen/qwen3-coder-next",
       "provider": "openrouter"
     },
     {
@@ -16898,7 +16898,7 @@
     },
     {
       "name": "tier/mid",
-      "model_id": "qwen/qwen3.6-flash",
+      "model_id": "qwen/qwen3-coder-next",
       "provider": "openrouter"
     },
     {
@@ -16965,7 +16965,7 @@
       "id": "balanced",
       "label": "Balanced",
       "description": "Default cost/quality tradeoff for routine coding-agent work.",
-      "model_id": "qwen/qwen3.6-flash",
+      "model_id": "qwen/qwen3-coder-next",
       "provider": "openrouter",
       "source": "alias:mid"
     },

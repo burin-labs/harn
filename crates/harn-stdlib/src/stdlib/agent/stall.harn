@@ -198,6 +198,7 @@ type AgentStallState = {
   failing_verify_turns: int,
   edit_since_failure: bool,
   reverify_owed: bool,
+  verified_write_epoch: int,
 }
 
 type AgentStallObservation = {
@@ -360,6 +361,7 @@ pub fn agent_stall_initial_state() -> AgentStallState {
     failing_verify_turns: 0,
     edit_since_failure: false,
     reverify_owed: false,
+    verified_write_epoch: 0,
   }
 }
 
@@ -635,9 +637,12 @@ fn __agent_stall_fold_diagnostic(state: AgentStallState, prev_dispatch, turn_mad
       }
       return state + {write_epoch: new_write_epoch}
     }
-    if turn_made_edit && state.last_diagnostic_class == "fail" {
-      return state
-        + {write_epoch: new_write_epoch, edit_since_failure: true, reverify_owed: true}
+    if turn_made_edit {
+      if state.last_diagnostic_class == "fail" {
+        return state
+          + {write_epoch: new_write_epoch, edit_since_failure: true, reverify_owed: true}
+      }
+      return state + {write_epoch: new_write_epoch}
     }
     if result == nil {
       // No verification evidence and no edit-on-failure: leave the model alone.
@@ -648,6 +653,11 @@ fn __agent_stall_fold_diagnostic(state: AgentStallState, prev_dispatch, turn_mad
       "ok:" + sha256(json_stringify(delta.current))
     } else {
       __agent_stall_result_outcome(result).signature
+    }
+    let verified_epoch = if state.write_epoch > state.verified_write_epoch {
+      state.write_epoch
+    } else {
+      state.verified_write_epoch
     }
     return state
       + {
@@ -662,6 +672,7 @@ fn __agent_stall_fold_diagnostic(state: AgentStallState, prev_dispatch, turn_mad
       failing_verify_turns: 0,
       edit_since_failure: false,
       reverify_owed: false,
+      verified_write_epoch: verified_epoch,
     }
   }
   // Gate-bearing failure: fold against the prior failure model. The diagnostic
@@ -1478,6 +1489,36 @@ pub fn agent_stall_no_net_progress(raw_config, stall_state: AgentStallState) -> 
 }
 
 /**
+ * True once the latest workspace write has a passing non-edit check.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_stall_verified_write_satisfied(raw_config, stall_state: AgentStallState) -> bool {
+  let config = __agent_stall_config(raw_config)
+  return config.enabled
+    && config.post_edit_reverify
+    && stall_state.write_epoch > 0
+    && stall_state.verified_write_epoch >= stall_state.write_epoch
+    && !stall_state.reverify_owed
+    && stall_state.last_diagnostic_class == "pass"
+}
+
+/**
+ * True when the same passing check is repeated after the latest write is green.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_stall_repeated_verified_pass(raw_config, stall_state: AgentStallState) -> bool {
+  return agent_stall_verified_write_satisfied(raw_config, stall_state)
+    && stall_state.last_outcome_kind == "ok"
+    && stall_state.same_observation_streak >= 2
+}
+
+/**
  * agent_stall_current_failure projects the current-failure model into a
  * stop-payload block (nil when there is no live failure). Used to enrich the
  * terminal `stuck` and budget-exhaustion payloads with WHAT failed, not just
@@ -1523,6 +1564,7 @@ pub fn agent_stall_clear_current_failure(stall_state: AgentStallState) -> AgentS
     same_diagnostic_streak: 0,
     failing_verify_turns: 0,
     reverify_owed: false,
+    verified_write_epoch: stall_state.write_epoch,
   }
 }
 

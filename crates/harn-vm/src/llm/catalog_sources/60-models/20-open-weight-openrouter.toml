@@ -13,15 +13,13 @@ open_weight = true
 strengths = ["coding", "long_context", "agentic", "tool_use"]
 benchmarks = { swe_bench_verified = 67.0 }
 
-# Qwen3-Coder-Next — 80B/3B MoE non-thinking coder (Apache-2.0), trained
-# against 21 tool schemas (92.7% schema-following per the tech report).
-# OpenRouter serverless rate verified 2026-07-02.
+# Qwen3-Coder-Next — 80B/3B MoE non-thinking coder.
 [models."qwen/qwen3-coder-next"]
 name = "Qwen3 Coder Next"
 provider = "openrouter"
 context_window = 262144
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.11, output_per_mtok = 0.80 }
+pricing = { input_per_mtok = 0.11, output_per_mtok = 0.80, cache_read_per_mtok = 0.07 }
 availability = "serverless"
 architecture = { parameter_count_b = 80.0, active_parameter_count_b = 3.0, moe = true, license = "Apache-2.0", source_url = "https://huggingface.co/Qwen/Qwen3-Coder-Next", last_verified = "2026-07-02" }
 benchmarks = { swe_bench_verified = 70.6, swe_bench_pro = 44.3 }
