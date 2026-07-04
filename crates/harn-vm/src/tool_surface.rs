@@ -307,6 +307,14 @@ pub fn tool_capability_policy_from_spec(value: &serde_json::Value) -> Capability
         .filter(|level| level != "none")
         .collect();
     let side_effect_level = max_side_effect_level(side_effect_levels.into_iter());
+    if tool_annotations.contains_key("computer") {
+        eprintln!(
+            "[SPEC-DIAG] from_spec computed side_effect_level={:?} computer_annot={:?} annot_count={}",
+            side_effect_level,
+            tool_annotations.get("computer").map(|a| a.side_effect_level.as_str()),
+            tool_annotations.len(),
+        );
+    }
     CapabilityPolicy {
         tools,
         capabilities,

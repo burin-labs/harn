@@ -916,6 +916,35 @@ mod approval_policy_tests {
     }
 
     #[test]
+    fn builtin_ceiling_permits_desktop_control_but_a_lower_ceiling_denies_it() {
+        // The runtime's outer bound must admit the most-invasive level, or a
+        // desktop-control (computer-use) tool would be exposed-but-denied under
+        // the default ceiling.
+        let builtin = builtin_ceiling();
+        assert!(policy_allows_side_effect(
+            &builtin,
+            SideEffectLevel::DesktopControl.as_str()
+        ));
+
+        // A narrower policy (e.g. a normal agent whose tools top out at network)
+        // still denies a desktop-control tool — the level is a real gate, not a
+        // no-op.
+        let network_ceiling = CapabilityPolicy {
+            side_effect_level: Some(SideEffectLevel::Network.as_str().to_string()),
+            ..Default::default()
+        };
+        assert!(!policy_allows_side_effect(
+            &network_ceiling,
+            SideEffectLevel::DesktopControl.as_str()
+        ));
+        // ...but that same network ceiling still admits everything at or below it.
+        assert!(policy_allows_side_effect(
+            &network_ceiling,
+            SideEffectLevel::ProcessExec.as_str()
+        ));
+    }
+
+    #[test]
     fn read_text_subsumes_exists_probe() {
         // A narrowed worker policy that grants read_text/list (the shape derived
         // from look/edit/scaffold tool annotations) but never declares the
