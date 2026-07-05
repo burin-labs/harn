@@ -1,0 +1,33 @@
+// The goal renders into the OUTBOUND request via the existing system-prompt
+// fragment reducer (with_goal -> with_system_prompt_parts), with no new hook
+// surface. A capturing mock caller echoes the assembled system prompt back so we
+// can assert the goal block actually reached the model request.
+import { goal, with_goal } from "std/agent/goal"
+
+pipeline test() {
+  let g = goal({objective: "Answer with the codeword PIXEL", success_criteria: ["mentions PIXEL"]})
+  let caller = { call -> return {
+    ok: true,
+    value: {
+      input_tokens: 0,
+      model: "mock",
+      output_tokens: 0,
+      provider: "mock",
+      text: "SYS[" + to_string(call.system ?? "") + "]",
+    },
+  } }
+  let opts = with_goal(
+    {llm_caller: caller, max_iterations: 1, provider: "mock", session_id: "goal-fragment-conformance"},
+    g,
+  )
+  let result = agent_loop("Proceed.", nil, opts)
+  assert(
+    result.visible_text.contains("## Goal"),
+    "goal fragment must reach the outbound system prompt; saw: " + result.visible_text,
+  )
+  assert(
+    result.visible_text.contains("Answer with the codeword PIXEL"),
+    "objective must appear in the outbound request",
+  )
+  log("agent goal fragment test passed")
+}

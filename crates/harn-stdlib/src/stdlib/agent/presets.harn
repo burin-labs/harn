@@ -10,6 +10,7 @@
 // contracts by name instead of re-deriving the knobs at every call site. All
 // defaults remain caller-overridable.
 import { agent_tool_format_resolution } from "std/agent/options"
+import { pin_kinds } from "std/agent/pins"
 import {
   compose,
   default_llm_caller,
@@ -47,6 +48,9 @@ import {
 // (std/agent/lanes). `overlay_policy` carries `{rows, mode, lane?, overrides?}` —
 // lowered with `overlay_policy(pack.overlay_policy.rows, pack.overlay_policy.mode,
 // opts, pack.overlay_policy)` (std/agent/overlays).
+// `pin_policy` carries a preset's default compaction-pin policy (see
+// std/agent/pins) — e.g. `{kinds: [...], preserve_on_compact: true}` — filled
+// into `opts.pin_policy` for pin-aware harnesses.
 let __PRESET_PACK_KEYS = [
   "budget",
   "completion_gate",
@@ -54,6 +58,7 @@ let __PRESET_PACK_KEYS = [
   "lane_policy",
   "model_ladder",
   "overlay_policy",
+  "pin_policy",
   "provider",
   "timeout_ms",
 ]
@@ -93,7 +98,38 @@ fn __validate_preset_spec(kind, spec) {
         + join(__PRESET_PACK_KEYS, ", ")
     }
   }
+  __validate_pin_policy(kind, pack?.pin_policy)
   return {family: family, pack: pack}
+}
+
+/**
+ * A pin_policy pack row carries default compaction-pin behavior (see
+ * std/agent/pins). Validate it loudly so a typo like `kinds: ["goals"]` fails at
+ * registration instead of silently carrying an unknown pin kind downstream.
+ */
+fn __validate_pin_policy(kind, pin_policy) {
+  if pin_policy == nil {
+    return nil
+  }
+  if type_of(pin_policy) != "dict" {
+    throw "agent_preset_register(\"" + kind + "\"): spec.pack.pin_policy must be a dict; got "
+      + type_of(pin_policy)
+  }
+  if pin_policy?.kinds != nil {
+    if type_of(pin_policy.kinds) != "list" {
+      throw "agent_preset_register(\"" + kind + "\"): pin_policy.kinds must be a list; got "
+        + type_of(pin_policy.kinds)
+    }
+    for k in pin_policy.kinds {
+      if !contains(pin_kinds(), k) {
+        throw "agent_preset_register(\"" + kind + "\"): pin_policy.kinds has unknown pin kind \""
+          + to_string(k)
+          + "\"; allowed: "
+          + join(pin_kinds(), ", ")
+      }
+    }
+  }
+  return nil
 }
 
 /**
@@ -113,6 +149,9 @@ fn __validate_preset_spec(kind, spec) {
 fn __builtin_preset_specs() {
   let frontier_ladder = ["claude-opus-4-8", "claude-sonnet-4-5"]
   let cheap_ladder = ["gpt-4o-mini"]
+  // Long-running captains pin their binding context (goal, constraints, key
+  // decisions) so it survives compaction by construction (see std/agent/pins).
+  let captain_pins = {kinds: ["constraint", "decision", "goal"], preserve_on_compact: true}
   return {
     audit: {
       family: "generic",
@@ -128,6 +167,7 @@ fn __builtin_preset_specs() {
       pack: {
         budget: {total_budget_usd: 25.0},
         model_ladder: frontier_ladder,
+        pin_policy: captain_pins,
         provider: "anthropic",
         timeout_ms: 300000,
       },
@@ -137,6 +177,7 @@ fn __builtin_preset_specs() {
       pack: {
         budget: {total_budget_usd: 15.0},
         model_ladder: frontier_ladder,
+        pin_policy: captain_pins,
         provider: "anthropic",
         timeout_ms: 180000,
       },
@@ -146,6 +187,7 @@ fn __builtin_preset_specs() {
       pack: {
         budget: {total_budget_usd: 25.0},
         model_ladder: frontier_ladder,
+        pin_policy: captain_pins,
         provider: "anthropic",
         timeout_ms: 300000,
       },
@@ -203,6 +245,7 @@ fn __builtin_preset_specs() {
             },
           ],
         },
+        pin_policy: captain_pins,
         provider: "anthropic",
         timeout_ms: 240000,
       },
@@ -243,9 +286,9 @@ fn __preset_registry() {
  * behavior template (captains additionally compose the opt-in tool/LLM
  * middleware layers), and `pack` supplies fill-nil option defaults
  * (`provider`, `timeout_ms`, `budget`, `fallback_chain`, `model_ladder`,
- * `completion_gate`, `lane_policy`, `overlay_policy`) that
- * fill ONLY nil/absent keys. The spec shape is validated; an invalid family
- * or unknown pack key throws. Returns the normalized kind string.
+ * `completion_gate`, `lane_policy`, `overlay_policy`, `pin_policy`) that fill
+ * ONLY nil/absent keys. The spec shape is validated; an invalid family or
+ * unknown pack key throws. Returns the normalized kind string.
  *
  * @effects: []
  * @errors: []
@@ -753,7 +796,7 @@ fn __apply_default_retry(opts) {
  * spread it into `agent_loop(...)` directly, or merge further overrides
  * on top. Every kind additionally fills its pack rows (provider, transport
  * timeout, cost budget, model ladder, completion_gate, lane_policy,
- * overlay_policy) into nil/absent keys, and bakes a
+ * overlay_policy, pin policy) into nil/absent keys, and bakes a
  * bounded default transport retry onto the `llm_caller:` seam (opt out with
  * `retry: false`). Captain presets additionally compose:
  *   - a `tool_caller` middleware stack from any of `audit_sink`,

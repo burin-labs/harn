@@ -574,6 +574,14 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/agent/presets.harn"),
     },
     StdlibSource {
+        module: "agent/pins",
+        source: include_str!("stdlib/agent/pins.harn"),
+    },
+    StdlibSource {
+        module: "agent/goal",
+        source: include_str!("stdlib/agent/goal.harn"),
+    },
+    StdlibSource {
         module: "agent/task_plan",
         source: include_str!("stdlib/agent/task_plan.harn"),
     },

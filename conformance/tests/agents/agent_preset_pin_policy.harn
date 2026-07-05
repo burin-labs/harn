@@ -1,0 +1,38 @@
+// Preset `pin_policy` pack row (std/agent/pins bridge): long-running captains
+// carry a default compaction-pin policy that fills ONLY a nil/absent
+// `pin_policy` option — explicit caller input always wins — and registration
+// validates `pin_policy.kinds` against the pin taxonomy (loud reject on typos).
+import { pin_kinds } from "std/agent/pins"
+import { agent_preset, agent_preset_register } from "std/agent/presets"
+import { assert_throws } from "std/testing"
+
+pipeline test() {
+  // A captain kind fills its default pin_policy pack row.
+  let captain = agent_preset("merge_captain")
+  assert(contains(captain.pin_policy.kinds, "goal"), "captain pin_policy default is present")
+  assert(captain.pin_policy.preserve_on_compact, "captain pins preserve_on_compact by default")
+  for k in captain.pin_policy.kinds {
+    assert(contains(pin_kinds(), k), "default pin_policy kinds are valid taxonomy members")
+  }
+  // Explicit caller pin_policy wins over the pack row.
+  let overridden = agent_preset("merge_captain", {pin_policy: {kinds: ["decision"], preserve_on_compact: false}})
+  assert(overridden.pin_policy.kinds == ["decision"], "caller pin_policy kinds win over the pack")
+  assert(!overridden.pin_policy.preserve_on_compact, "caller preserve_on_compact wins over the pack")
+  // A kind without a pin_policy pack row leaves the option absent.
+  assert(agent_preset("audit")?.pin_policy == nil, "no pin_policy pack row leaves it absent")
+  // Registration rejects an unknown pin kind in pin_policy.kinds.
+  assert_throws(
+    { -> return agent_preset_register("bad_pins", {family: "generic", pack: {pin_policy: {kinds: ["goals"]}}}) },
+    "unknown pin kind in pin_policy.kinds must throw",
+  )
+  // A valid custom pin_policy registers and fills through.
+  agent_preset_register(
+    "good_pins",
+    {family: "generic", pack: {pin_policy: {kinds: ["constraint", "goal"]}}},
+  )
+  assert(
+    contains(agent_preset("good_pins").pin_policy.kinds, "goal"),
+    "valid custom pin_policy fills through",
+  )
+  log("agent preset pin_policy tests passed")
+}

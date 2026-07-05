@@ -1,0 +1,73 @@
+// Goal object (std/agent/goal): normalization, the machine-checkable success
+// criteria floor (host-fact callbacks, closures AND named fns), done-judge
+// composition, and the bounded re-loop expressed as a verify-gated workflow
+// stage retry_policy (no hand-written loop). The live convergence proof lives in
+// agent_goal_reloop.harn.
+import { goal, goal_check, goal_judge, goal_pin, goal_reloop, goal_text } from "std/agent/goal"
+import { assert_throws } from "std/testing"
+
+fn __ci_is_green(facts) {
+  return facts?.ci_green == true
+}
+
+pipeline test() {
+  let g = goal(
+    {
+      budget: {max_cost_usd: 5.0},
+      constraints: ["do not touch auth.go"],
+      objective: "Fix the flaky login test",
+      success_criteria: [
+        "the suite passes twice in a row",
+        {check: { facts -> return facts?.ci_green == true }, description: "CI is green", id: "green"},
+      ],
+    },
+  )
+  assert(g.objective == "Fix the flaky login test", "objective normalized")
+  assert(len(g.success_criteria) == 2, "criteria normalized")
+  assert(g.constraints[0] == "do not touch auth.go", "constraints normalized")
+  assert_throws({ -> return goal({success_criteria: ["x"]}) }, "goal without objective must throw")
+  // Machine-checkable floor: only criteria carrying a host-fact `check` count.
+  let unmet = goal_check(g, {ci_green: false})
+  assert(!unmet.done && contains(unmet.unmet, "green"), "floor reports unmet criterion")
+  let met = goal_check(g, {ci_green: true})
+  assert(met.done && contains(met.met, "green"), "floor reports met criterion")
+  assert(met.checkable == 1, "only checkable criteria are counted")
+  // A `check` may be a NAMED fn, not just an anonymous closure.
+  let g_named = goal(
+    {
+      objective: "ship",
+      success_criteria: [{check: __ci_is_green, description: "CI is green", id: "ci"}],
+    },
+  )
+  assert(
+    goal_check(g_named, {ci_green: true}).done,
+    "named-fn criterion is honored as machine-checkable",
+  )
+  assert(!goal_check(g_named, {ci_green: false}).done, "named-fn criterion can report unmet")
+  assert(goal_check(g_named, {ci_green: true}).checkable == 1, "named fn counts as checkable")
+  // Done-judge composition through the core done_judge agent_loop seam.
+  let judge = goal_judge(g)
+  assert(judge.enabled, "judge enabled")
+  assert(judge.system.contains("Fix the flaky login test"), "judge system embeds the goal")
+  assert(judge.max_invocations == 3, "bounded done-judge veto cap")
+  // Rendering + pin bridge.
+  assert(goal_text(g).contains("## Goal"), "renders the goal block")
+  assert(goal_pin(g).kind == "goal", "goal lowers to a goal pin")
+  // Bounded re-loop returns agent_loop options that gate completion on the goal
+  // via verify_completion, bounded by max_iterations (the live convergence proof
+  // is in agent_goal_reloop.harn).
+  let reloop = goal_reloop(g, {max_attempts: 2})
+  assert(reloop.loop_until_done, "reloop drives agent_loop's completion loop")
+  assert(reloop.max_iterations == 2, "reloop is bounded by max_attempts")
+  assert(reloop.done_sentinel == "<<GOAL-DONE>>", "reloop sets a completion signal")
+  assert(type_of(reloop.verify_completion) == "closure", "reloop gates completion on the goal")
+  assert(
+    !contains(reloop.keys(), "facts_fn"),
+    "reloop control keys do not leak into agent_loop options",
+  )
+  // verify_completion vetoes an unmet goal and threads the unmet criteria as feedback.
+  let veto = reloop.verify_completion({visible_text: "", session_id: "x", transcript: "[]"})
+  assert(!veto.confirm, "unmet goal vetoes the completion")
+  assert(veto.feedback.contains("CI is green"), "veto feedback carries the unmet criterion")
+  log("agent goal tests passed")
+}
