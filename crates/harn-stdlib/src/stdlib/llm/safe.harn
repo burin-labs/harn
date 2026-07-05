@@ -90,12 +90,20 @@ pub fn strip_code_fences(text) {
  * well-formed JSON because brackets nest properly. An opener that never
  * balances is skipped and the scan resumes at the next opener. Returns
  * {start, end} (end exclusive) or nil.
+ *
+ * Materializes `raw.chars()` ONCE and indexes that O(1)-indexable char list in
+ * the nested scan loops. Direct `raw[i]` string subscript is O(1) only for an
+ * all-ASCII string; for any non-ASCII char it falls back to an O(index) char
+ * walk per access, which would make this nested scan O(n²) on the smart-quote /
+ * emoji / accented text LLM salvage frequently sees. Char indices returned here
+ * line up with `substring`, which is likewise char-indexed.
  */
 fn __first_balanced_span(raw, openers) {
-  let n = len(raw)
+  let cs = raw.chars()
+  let n = len(cs)
   var i = 0
   while i < n {
-    let ch = raw[i]
+    let ch = cs[i]
     if contains(openers, ch) {
       let close = if ch == "{" {
         "}"
@@ -107,7 +115,7 @@ fn __first_balanced_span(raw, openers) {
       var escaped = false
       var j = i
       while j < n {
-        let cj = raw[j]
+        let cj = cs[j]
         if in_string {
           if escaped {
             escaped = false

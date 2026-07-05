@@ -33,4 +33,9 @@ pipeline default() {
   __io_println("---")
   // Object variant ignores arrays entirely.
   __io_println("[" + to_string(extract_first_json_object("[1, 2, 3]") ?? "nil") + "]")
+  __io_println("---")
+  // Non-ASCII prose prefix (smart quotes, accented é, emoji): char indices
+  // must still line up with the returned slice. Also guards the O(n^2) perf
+  // fix that materializes chars() instead of subscripting the string.
+  __io_println(extract_first_json_object("“Résumé” 😀 here: {\"a\": 1} done"))
 }
