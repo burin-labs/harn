@@ -65,6 +65,7 @@ pub type LaneRow = {
 pub fn default_lane_rows() {
   return [
     {
+      match: {explicit_target_paths: {max: 4, min: 1}},
       name: "explicit_patch",
       tool_names: [
         "look",
@@ -76,7 +77,6 @@ pub fn default_lane_rows() {
         "kill_command",
         "read_command_output",
       ],
-      match: {explicit_target_paths: {min: 1, max: 4}},
     },
     {default: true, name: "general"},
   ]
@@ -254,21 +254,28 @@ fn __lane_entry_kind(entry, policy) {
   return to_string(annotations?.kind ?? annotations?.tool_kind ?? "")
 }
 
-fn __lane_resolve_tool_names(row, registry, policy, hard_keep) {
-  var names = []
-  for raw in hard_keep ?? [] {
-    let n = to_string(raw)
-    if n != "" && !contains(names, n) {
-      names = names.push(n)
-    }
+fn __lane_push_unique(names, value) {
+  let n = to_string(value)
+  if n != "" && !contains(names, n) {
+    return names.push(n)
   }
+  return names
+}
+
+/**
+ * The lane's OWN allowed tool set: the union of its explicit `tool_names` and
+ * the registry entries matching its `tool_kinds`. Deliberately does NOT fold
+ * in `hard_keep` — an empty result here means the lane performs no narrowing
+ * (the `general`/default case), and `hard_keep` must not turn that
+ * non-narrowing lane into a restricted one. `lane_policy` unions `hard_keep`
+ * only after confirming the lane actually narrows.
+ */
+fn __lane_own_tool_names(row, registry, policy) {
+  var names = []
   let explicit = row?.tool_names
   if type_of(explicit) == "list" {
     for raw in explicit {
-      let n = to_string(raw)
-      if n != "" && !contains(names, n) {
-        names = names.push(n)
-      }
+      names = __lane_push_unique(names, raw)
     }
   }
   let kinds = row?.tool_kinds
@@ -276,10 +283,7 @@ fn __lane_resolve_tool_names(row, registry, policy, hard_keep) {
     for entry in __lane_registry_entries(registry) {
       let kind = __lane_entry_kind(entry, policy)
       if kind != "" && contains(kinds, kind) {
-        let n = __lane_entry_name(entry)
-        if n != "" && !contains(names, n) {
-          names = names.push(n)
-        }
+        names = __lane_push_unique(names, __lane_entry_name(entry))
       }
     }
   }
@@ -294,10 +298,13 @@ fn __lane_resolve_tool_names(row, registry, policy, hard_keep) {
  * burin's `agent_lane_for_task` (see module docs for why lanes are not
  * reclassified per turn).
  *
- * A row with neither `tool_names` nor `tool_kinds` (and no `options.hard_keep`)
- * performs no narrowing — this is how the built-in `general` lane stays
- * unrestricted. `options.hard_keep` names tools every lane keeps regardless
- * of match. `options.classifier` is forwarded to `agent_lane_classify`.
+ * A row with neither `tool_names` nor `tool_kinds` performs no narrowing —
+ * this is how the built-in `general` lane stays unrestricted, and it stays
+ * unrestricted even when `options.hard_keep` is set. `options.hard_keep`
+ * names tools that additionally survive a lane that IS narrowing (a union
+ * with the matched lane's own tools); it never itself causes narrowing, so a
+ * non-narrowing lane is not turned into a restricted one. `options.classifier`
+ * is forwarded to `agent_lane_classify`.
  *
  * The result carries `_lane_verdict` (`{lane, matched, reason, tool_names?}`)
  * for tests/telemetry; it is metadata only, harmless to leave on `agent_loop`
@@ -325,9 +332,17 @@ pub fn lane_policy(rows, task, agent_options = nil, options = nil) {
     }
   }
   let resolved_row = matched_row ?? validated[0]
-  let names = __lane_resolve_tool_names(resolved_row, opts?.tools, opts?.policy, hard_keep)
-  if len(names) == 0 {
+  let lane_names = __lane_own_tool_names(resolved_row, opts?.tools, opts?.policy)
+  // A lane that contributes no tools of its own performs NO narrowing (the
+  // `general`/default case) — leave the surface untouched. hard_keep only
+  // augments a lane that IS narrowing; with nothing narrowed there is nothing
+  // to keep relative to, so it must not restrict an otherwise-open surface.
+  if len(lane_names) == 0 {
     return opts + {_lane_verdict: verdict}
+  }
+  var names = lane_names
+  for raw in hard_keep {
+    names = __lane_push_unique(names, raw)
   }
   return opts
     + {

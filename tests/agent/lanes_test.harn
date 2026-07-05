@@ -92,6 +92,28 @@ pipeline test_general_lane_leaves_tools_unrestricted(task) {
   assert_eq(len(result.tools.tools), 2)
 }
 
+pipeline test_general_lane_with_hard_keep_stays_unrestricted(task) {
+  // Regression: `hard_keep` must never turn the non-narrowing `general` lane
+  // into a restricted surface. A general classification contributes no lane
+  // tools of its own, so the surface stays fully open even with hard_keep set
+  // — hard_keep only augments a lane that is ALREADY narrowing.
+  var tools = tool_registry()
+  for name in ["look", "edit", "run_codemod", "git", "ask_user"] {
+    tools = tool_define(tools, name, "tool " + name, {handler: { _a -> "ok" }})
+  }
+  let result = lane_policy(
+    default_lane_rows(),
+    "Explain the architecture.",
+    {tools: tools},
+    {hard_keep: ["ask_user"]},
+  )
+  assert_eq(result._lane_verdict.lane, "general")
+  // Untouched: no `tool_names` on the verdict (no narrowing recorded) and every
+  // registered tool still present — NOT collapsed to just ["ask_user"].
+  assert_eq(result._lane_verdict?.tool_names, nil)
+  assert_eq(len(result.tools.tools), 5)
+}
+
 pipeline test_explicit_patch_lane_narrows_tools_and_policy(task) {
   var tools = tool_registry()
   for name in ["look", "search", "edit", "run", "git", "run_codemod", "glob"] {
