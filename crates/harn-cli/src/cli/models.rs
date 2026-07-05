@@ -40,6 +40,8 @@ pub(crate) enum ModelsBatchCommand {
     Plan(ModelsBatchPlanArgs),
     /// Prepare provider-native request files from a model batch manifest.
     Prepare(ModelsBatchPrepareArgs),
+    /// Submit prepared provider-native batch jobs and write a submission receipt.
+    Submit(ModelsBatchSubmitArgs),
 }
 
 #[derive(Debug, Args)]
@@ -84,6 +86,22 @@ pub(crate) struct ModelsBatchPrepareArgs {
     /// Directory for provider-native request files and the prepare receipt.
     #[arg(long = "out-dir", value_name = "DIR")]
     pub out_dir: std::path::PathBuf,
+    /// Emit structured JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ModelsBatchSubmitArgs {
+    /// Prepare receipt produced by `harn models batch prepare`.
+    #[arg(long, value_name = "PATH")]
+    pub receipt: std::path::PathBuf,
+    /// Write the submission receipt JSON to this path.
+    #[arg(long, value_name = "PATH")]
+    pub out: std::path::PathBuf,
+    /// Validate and render provider operations without calling provider APIs.
+    #[arg(long = "dry-run")]
+    pub dry_run: bool,
     /// Emit structured JSON.
     #[arg(long)]
     pub json: bool,
