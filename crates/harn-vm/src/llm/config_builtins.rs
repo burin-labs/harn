@@ -1102,6 +1102,7 @@ pub(crate) fn capabilities_to_vm_value(
     caps: &super::capabilities::Capabilities,
 ) -> VmValue {
     let mut dict = crate::value::DictMap::new();
+    let batch_api = crate::llm_config::effective_batch_api_supported(provider, caps);
     dict.put_str("provider", provider);
     dict.put_str("model", model);
     dict.insert(
@@ -1175,6 +1176,42 @@ pub(crate) fn capabilities_to_vm_value(
     dict.insert(
         crate::value::intern_key("background_mode"),
         VmValue::Bool(caps.background_mode),
+    );
+    dict.insert(
+        crate::value::intern_key("batch_api"),
+        VmValue::Bool(batch_api),
+    );
+    dict.insert(
+        crate::value::intern_key("batch_wire_format"),
+        batch_api
+            .then_some(caps.batch_wire_format.as_deref())
+            .flatten()
+            .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
+            .unwrap_or(VmValue::Nil),
+    );
+    dict.insert(
+        crate::value::intern_key("batch_input_mode"),
+        batch_api
+            .then_some(caps.batch_input_mode.as_deref())
+            .flatten()
+            .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
+            .unwrap_or(VmValue::Nil),
+    );
+    dict.insert(
+        crate::value::intern_key("batch_discount_percent"),
+        batch_api
+            .then_some(caps.batch_discount_percent)
+            .flatten()
+            .map(|value| VmValue::Int(value as i64))
+            .unwrap_or(VmValue::Nil),
+    );
+    dict.insert(
+        crate::value::intern_key("batch_turnaround_hours"),
+        batch_api
+            .then_some(caps.batch_turnaround_hours)
+            .flatten()
+            .map(|value| VmValue::Int(value as i64))
+            .unwrap_or(VmValue::Nil),
     );
     dict.insert(
         crate::value::intern_key("tool_approval_policy"),
@@ -2165,6 +2202,96 @@ mod tests {
             Some(VmValue::String(style)) => assert_eq!(style.as_str(), "inline"),
             other => panic!("expected thinking_block_style string, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn test_provider_capabilities_surfaces_batch_without_family_leakage() {
+        super::super::capabilities::clear_user_overrides();
+        let mut out = String::new();
+
+        let direct_openai = provider_capabilities_builtin(
+            &[
+                VmValue::String(arcstr::ArcStr::from("openai")),
+                VmValue::String(arcstr::ArcStr::from("gpt-4o")),
+            ],
+            &mut out,
+        )
+        .expect("builtin returned error");
+        let direct_openai = direct_openai.as_dict().expect("expected dict");
+        assert!(matches!(
+            direct_openai.get("batch_api"),
+            Some(VmValue::Bool(true))
+        ));
+        match direct_openai.get("batch_wire_format") {
+            Some(VmValue::String(value)) => assert_eq!(value.as_str(), "openai"),
+            other => panic!("expected openai batch wire format, got {other:?}"),
+        }
+        match direct_openai.get("batch_input_mode") {
+            Some(VmValue::String(value)) => assert_eq!(value.as_str(), "jsonl_file"),
+            other => panic!("expected jsonl_file batch input mode, got {other:?}"),
+        }
+        assert!(matches!(
+            direct_openai.get("batch_discount_percent"),
+            Some(VmValue::Int(50))
+        ));
+        assert!(matches!(
+            direct_openai.get("batch_turnaround_hours"),
+            Some(VmValue::Int(24))
+        ));
+
+        let openrouter_family = provider_capabilities_builtin(
+            &[
+                VmValue::String(arcstr::ArcStr::from("openrouter")),
+                VmValue::String(arcstr::ArcStr::from("gpt-4o")),
+            ],
+            &mut out,
+        )
+        .expect("builtin returned error");
+        let openrouter_family = openrouter_family.as_dict().expect("expected dict");
+        assert!(matches!(
+            openrouter_family.get("batch_api"),
+            Some(VmValue::Bool(false))
+        ));
+        assert!(matches!(
+            openrouter_family.get("batch_wire_format"),
+            Some(VmValue::Nil)
+        ));
+        assert!(matches!(
+            openrouter_family.get("batch_discount_percent"),
+            Some(VmValue::Nil)
+        ));
+
+        let together = provider_capabilities_builtin(
+            &[
+                VmValue::String(arcstr::ArcStr::from("together")),
+                VmValue::String(arcstr::ArcStr::from(
+                    "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+                )),
+            ],
+            &mut out,
+        )
+        .expect("builtin returned error");
+        let together = together.as_dict().expect("expected dict");
+        assert!(matches!(
+            together.get("batch_api"),
+            Some(VmValue::Bool(true))
+        ));
+        match together.get("batch_wire_format") {
+            Some(VmValue::String(value)) => assert_eq!(value.as_str(), "openai"),
+            other => panic!("expected openai-compatible batch wire format, got {other:?}"),
+        }
+        match together.get("batch_input_mode") {
+            Some(VmValue::String(value)) => assert_eq!(value.as_str(), "jsonl_file"),
+            other => panic!("expected jsonl_file batch input mode, got {other:?}"),
+        }
+        assert!(matches!(
+            together.get("batch_discount_percent"),
+            Some(VmValue::Nil)
+        ));
+        assert!(matches!(
+            together.get("batch_turnaround_hours"),
+            Some(VmValue::Int(24))
+        ));
     }
 
     #[test]

@@ -79,6 +79,26 @@ pub struct ProviderRule {
     /// Whether provider-side background Responses jobs are available.
     #[serde(default)]
     pub background_mode: Option<bool>,
+    /// Whether this provider/model route can be submitted through an
+    /// asynchronous provider Batch API for offline, non-interactive work.
+    #[serde(default)]
+    pub batch_api: Option<bool>,
+    /// Provider batch request/result family. Known values are `openai`,
+    /// `anthropic_messages`, `gemini`, `mistral`, `fireworks`, and `xai`.
+    #[serde(default)]
+    pub batch_wire_format: Option<String>,
+    /// How a batch accepts work: `jsonl_file`, `inline_requests`, or
+    /// `jsonl_or_inline`.
+    #[serde(default)]
+    pub batch_input_mode: Option<String>,
+    /// Published percent discount versus synchronous inference for equivalent
+    /// model traffic, when known.
+    #[serde(default)]
+    pub batch_discount_percent: Option<u32>,
+    /// Target or maximum turnaround window in hours, when the provider
+    /// publishes one.
+    #[serde(default)]
+    pub batch_turnaround_hours: Option<u32>,
     /// Approval policy modes available when provider-hosted tools execute.
     #[serde(default)]
     pub tool_approval_policy: Option<String>,
@@ -443,6 +463,11 @@ impl ProviderRule {
             conversation_state,
             compaction,
             background_mode,
+            batch_api,
+            batch_wire_format,
+            batch_input_mode,
+            batch_discount_percent,
+            batch_turnaround_hours,
             tool_approval_policy,
             max_tools,
             prompt_caching,
@@ -519,6 +544,11 @@ impl ProviderRule {
         fill_opt(&mut self.conversation_state, conversation_state);
         fill_opt(&mut self.compaction, compaction);
         fill_opt(&mut self.background_mode, background_mode);
+        fill_opt(&mut self.batch_api, batch_api);
+        fill_opt(&mut self.batch_wire_format, batch_wire_format);
+        fill_opt(&mut self.batch_input_mode, batch_input_mode);
+        fill_opt(&mut self.batch_discount_percent, batch_discount_percent);
+        fill_opt(&mut self.batch_turnaround_hours, batch_turnaround_hours);
         fill_opt(&mut self.tool_approval_policy, tool_approval_policy);
         fill_opt(&mut self.max_tools, max_tools);
         fill_opt(&mut self.prompt_caching, prompt_caching);
@@ -874,6 +904,11 @@ fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
         compaction: None,
         background_mode: None,
         tool_approval_policy: None,
+        batch_api: None,
+        batch_wire_format: None,
+        batch_input_mode: None,
+        batch_discount_percent: None,
+        batch_turnaround_hours: None,
         max_tools: None,
         prompt_caching: None,
         cache_breakpoint_style: None,
@@ -974,6 +1009,21 @@ fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilitie
         conversation_state: rule.conversation_state.unwrap_or(false),
         compaction: rule.compaction.unwrap_or(false),
         background_mode: rule.background_mode.unwrap_or(false),
+        batch_api: rule.batch_api.or(defaults.batch_api).unwrap_or(false),
+        batch_wire_format: rule
+            .batch_wire_format
+            .clone()
+            .or_else(|| defaults.batch_wire_format.clone()),
+        batch_input_mode: rule
+            .batch_input_mode
+            .clone()
+            .or_else(|| defaults.batch_input_mode.clone()),
+        batch_discount_percent: rule
+            .batch_discount_percent
+            .or(defaults.batch_discount_percent),
+        batch_turnaround_hours: rule
+            .batch_turnaround_hours
+            .or(defaults.batch_turnaround_hours),
         tool_approval_policy: rule.tool_approval_policy.clone(),
         max_tools: rule.max_tools,
         prompt_caching: rule.prompt_caching.unwrap_or(false),

@@ -3,11 +3,19 @@ message_wire_format = "anthropic"
 native_tool_wire_format = "anthropic"
 file_upload_wire_format = "anthropic"
 files_api_supported = true
+batch_wire_format = "anthropic_messages"
+batch_input_mode = "inline_requests"
+batch_discount_percent = 50
+batch_turnaround_hours = 24
 seed_supported = false
 frequency_penalty_supported = false
 presence_penalty_supported = false
 
 [provider_defaults.openai]
+batch_wire_format = "openai"
+batch_input_mode = "jsonl_file"
+batch_discount_percent = 50
+batch_turnaround_hours = 24
 top_k_supported = false
 
 [provider_defaults.openrouter]
@@ -21,6 +29,9 @@ top_k_supported = false
 top_k_supported = false
 
 [provider_defaults.together]
+batch_wire_format = "openai"
+batch_input_mode = "jsonl_file"
+batch_turnaround_hours = 24
 reasoning_wire_format = "enabled"
 
 [provider_defaults.ollama]
@@ -33,15 +44,31 @@ presence_penalty_supported = false
 message_wire_format = "gemini"
 file_upload_wire_format = "gemini"
 files_api_supported = true
+batch_wire_format = "gemini"
+batch_input_mode = "jsonl_or_inline"
+batch_discount_percent = 50
+batch_turnaround_hours = 24
 
 [provider_defaults.mistral]
+batch_wire_format = "mistral"
+batch_input_mode = "jsonl_or_inline"
+batch_discount_percent = 50
 top_k_supported = false
 
 [provider_defaults.cohere]
 top_k_supported = false
 
 [provider_defaults.xai]
+batch_wire_format = "xai"
+batch_input_mode = "jsonl_or_inline"
+batch_turnaround_hours = 24
 top_k_supported = false
+
+[provider_defaults.fireworks]
+batch_wire_format = "fireworks"
+batch_input_mode = "jsonl_file"
+batch_discount_percent = 50
+batch_turnaround_hours = 24
 
 [provider_defaults.moonshot]
 top_k_supported = false
@@ -75,6 +102,8 @@ top_k_supported = false
 top_k_supported = false
 
 [provider_defaults.parasail]
+batch_wire_format = "openai"
+batch_input_mode = "jsonl_file"
 top_k_supported = false
 
 [provider_defaults.atlas]

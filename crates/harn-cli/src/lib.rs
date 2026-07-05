@@ -1514,6 +1514,8 @@ pub(crate) async fn print_model_info(args: &ModelInfoArgs) -> bool {
         .as_ref()
         .and_then(|entry| entry.runtime_context_window);
     let capabilities = harn_vm::llm::capabilities::lookup(&resolved.provider, &resolved.id);
+    let batch_api =
+        harn_vm::llm_config::effective_batch_api_supported(&resolved.provider, &capabilities);
     let mut payload = serde_json::json!({
         "alias": args.model,
         "id": resolved.id,
@@ -1532,6 +1534,11 @@ pub(crate) async fn print_model_info(args: &ModelInfoArgs) -> bool {
             "tool_search": capabilities.tool_search,
             "max_tools": capabilities.max_tools,
             "prompt_caching": capabilities.prompt_caching,
+            "batch_api": batch_api,
+            "batch_wire_format": if batch_api { capabilities.batch_wire_format } else { None },
+            "batch_input_mode": if batch_api { capabilities.batch_input_mode } else { None },
+            "batch_discount_percent": if batch_api { capabilities.batch_discount_percent } else { None },
+            "batch_turnaround_hours": if batch_api { capabilities.batch_turnaround_hours } else { None },
             "vision": capabilities.vision,
             "vision_supported": capabilities.vision_supported,
             "audio": capabilities.audio,

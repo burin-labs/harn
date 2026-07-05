@@ -544,7 +544,18 @@ fn with_effective_capability_tags(
 /// providers.toml is accepted only for backwards-compatible parsing.
 pub fn effective_model_capability_tags(provider: &str, model_id: &str) -> Vec<String> {
     let caps = crate::llm::capabilities::lookup(provider, model_id);
-    capability_tags_from_capabilities(&caps)
+    let mut tags = capability_tags_from_capabilities(&caps);
+    if effective_batch_api_supported(provider, &caps) && !tags.iter().any(|tag| tag == "batch") {
+        tags.push("batch".to_string());
+    }
+    tags
+}
+
+pub fn effective_batch_api_supported(
+    provider: &str,
+    caps: &crate::llm::capabilities::Capabilities,
+) -> bool {
+    caps.batch_api || provider_has_feature(provider, "batch")
 }
 
 pub(crate) fn capability_tags_from_capabilities(
@@ -574,6 +585,9 @@ pub(crate) fn capability_tags_from_capabilities(
     }
     if caps.files_api_supported {
         tags.push("files".to_string());
+    }
+    if caps.batch_api {
+        tags.push("batch".to_string());
     }
     if caps.prompt_caching {
         tags.push("prompt_caching".to_string());

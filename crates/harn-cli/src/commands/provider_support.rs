@@ -101,6 +101,8 @@ pub(crate) struct SupportCapabilities {
     pub streaming: bool,
     pub reasoning_knobs: Vec<String>,
     pub prompt_or_context_cache: bool,
+    pub batch_api: bool,
+    pub batch_discount_percent: Option<u32>,
     pub usage_accounting_confidence: String,
 }
 
@@ -320,6 +322,7 @@ fn build_entry(
         .and_then(|entry| entry.display_name.clone())
         .or_else(|| provider.map(|provider| provider.display_name.clone()))
         .unwrap_or_else(|| id.to_string());
+    let batch_api = harn_vm::llm_config::effective_batch_api_supported(catalog_provider, &caps);
 
     ProviderSupportEntry {
         id: id.to_string(),
@@ -362,6 +365,8 @@ fn build_entry(
             reasoning_knobs: reasoning_knobs(&caps),
             prompt_or_context_cache: caps.prompt_caching
                 || model.is_some_and(model_has_cache_pricing),
+            batch_api,
+            batch_discount_percent: batch_api.then_some(caps.batch_discount_percent).flatten(),
             usage_accounting_confidence: note
                 .and_then(|entry| entry.usage_confidence.clone())
                 .unwrap_or_else(|| usage_confidence(provider, model)),
@@ -840,11 +845,11 @@ pub(crate) fn render_markdown(report: &ProviderSupportReport) -> String {
             report.sources.empirical.join("`, `")
         ));
     }
-    out.push_str("| Provider | Endpoint style | Recommended selector | Tool mode | Native tools | Text tools | Structured output | Reasoning knobs | Cache | Usage confidence | Empirical |\n");
-    out.push_str("|---|---|---|---|---:|---:|---|---|---:|---|---|\n");
+    out.push_str("| Provider | Endpoint style | Recommended selector | Tool mode | Native tools | Text tools | Structured output | Reasoning knobs | Cache | Batch | Usage confidence | Empirical |\n");
+    out.push_str("|---|---|---|---|---:|---:|---|---|---:|---|---|---|\n");
     for entry in &report.providers {
         out.push_str(&format!(
-            "| `{}` | {} | `{}` | `{}` | {} | {} | `{}` / `{}` | {} | {} | `{}` | {} |\n",
+            "| `{}` | {} | `{}` | `{}` | {} | {} | `{}` / `{}` | {} | {} | {} | `{}` | {} |\n",
             markdown_escape(&entry.display_name),
             markdown_escape(&entry.endpoint_style),
             markdown_escape(&entry.recommended.selector),
@@ -862,6 +867,7 @@ pub(crate) fn render_markdown(report: &ProviderSupportReport) -> String {
                 )
             },
             yes_no(entry.capabilities.prompt_or_context_cache),
+            batch_cell(&entry.capabilities),
             markdown_escape(&entry.capabilities.usage_accounting_confidence),
             empirical_cell(&entry.empirical),
         ));
@@ -914,6 +920,16 @@ fn empirical_cell(summary: &EmpiricalSupportSummary) -> String {
         "`{}` {}/{} pass, best `{}`",
         summary.status, summary.passed_runs, summary.total_runs, best
     )
+}
+
+fn batch_cell(capabilities: &SupportCapabilities) -> String {
+    if !capabilities.batch_api {
+        return "No".to_string();
+    }
+    capabilities
+        .batch_discount_percent
+        .map(|discount| format!("Yes ({discount}%)"))
+        .unwrap_or_else(|| "Yes".to_string())
 }
 
 fn render_bullets(out: &mut String, title: &str, items: &[String]) {
