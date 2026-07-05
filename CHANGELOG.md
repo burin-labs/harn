@@ -9,6 +9,38 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.9.17
+
+### Added
+
+- Added Harn verification HUD model and snapshot-staleness helpers so hosts can
+  render verification status from structured stdlib facts instead of duplicating
+  prompt-text logic.
+- **LoRA promotion evidence contracts (#4111).** `harn models lora plan`,
+  `export`, and `manifest` now include a machine-readable promotion evidence
+  contract with paired base/adapter routes, required receipts, and a
+  batch-ready eval manifest handoff.
+- Added first-class `artifact_emit("artifact_manifest", ...)` validation for
+  `harn.artifacts.v1` document/media bundles.
+- Added a public `harn.artifacts.v1` JSON Schema for document/media artifact manifests and file artifact references.
+
+### Fixed
+
+- **Release gate Cargo isolation (#4108).** Direct `scripts/release_gate.sh`
+  invocations now default to release-local Cargo target/build directories while
+  preserving explicit maintainer overrides.
+- Merge-queue CI skips heavy Rust lanes for stacked docs-only queue tails while preserving the full backstop for code changes.
+- Release container publishing now verifies that the version, major.minor, and
+  latest GHCR tags are publicly pullable without workflow credentials.
+- Run the runtime's own registered reminder-provider and session-hook closures
+  as trusted bridge calls. Under an active execution policy the agent loop
+  previously killed every turn with
+  `tool_rejected: bridged builtin '...' exceeds execution policy` the moment a
+  registered closure's body invoked a host-provided builtin; the trusted-bridge
+  guard is now held across each provider/hook closure invocation so first-party
+  closures the runtime chose to fire are no longer mistaken for model-issued
+  tool calls. Model-issued bridged builtins remain gated.
+
 ## v0.9.16
 
 ### Added
