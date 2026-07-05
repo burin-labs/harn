@@ -15,6 +15,8 @@ pipeline default() {
   __io_println(audit.reasoning_policy)
   __io_println(audit.reasoning_scale)
   __io_println(audit.reasoning_task)
+  __io_println(audit.repair_diagnostics.reserved_terminal_verify)
+  __io_println(audit.repair_diagnostics.reserved_terminal_verify_iterations)
   let json_audit = agent_loop_options(
     agent_preset("audit", {provider: "mock", tools: tool_registry(), tool_format: "json"}),
   )

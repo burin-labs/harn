@@ -241,6 +241,16 @@ fn __agent_stall_int(value, fallback: int, minimum: int) -> int {
   return fallback
 }
 
+fn __agent_stall_repair_value(flat, nested, key: string) {
+  if flat[key] != nil {
+    return flat[key]
+  }
+  if nested == nil {
+    return nil
+  }
+  return nested[key]
+}
+
 fn __agent_stall_default_config() -> AgentStallConfig {
   return {
     enabled: false,
@@ -276,6 +286,11 @@ fn __agent_stall_config(value) -> AgentStallConfig {
   }
   if type_of(value) != "dict" {
     throw "agent_loop: `stall_diagnostics` must be a dict, bool, or nil; got " + type_of(value)
+  }
+  let repair_diagnostics = value?.repair_diagnostics
+  if repair_diagnostics != nil && type_of(repair_diagnostics) != "dict" {
+    throw "agent_loop: stall_diagnostics.repair_diagnostics must be a dict or nil; got "
+      + type_of(repair_diagnostics)
   }
   let {threshold = 3, max_feedback = 1} = value ?? {}
   let exempt_tools = if value?.exempt_tools != nil {
@@ -314,15 +329,43 @@ fn __agent_stall_config(value) -> AgentStallConfig {
     ping_pong_cycles: __agent_stall_int(value?.ping_pong_cycles, STALL_PING_PONG_CYCLES, 2),
     repeat_context_window_error: __agent_stall_int(value?.repeat_context_window_error, STALL_REPEAT_CONTEXT_WINDOW_ERROR, 1),
     hard_stop_after_trips: __agent_stall_int(value?.hard_stop_after_trips, STALL_HARD_STOP_AFTER_TRIPS, 1),
-    repair_aware: __agent_stall_bool(value?.repair_aware, false, "repair_aware"),
-    stuck_same_diagnostic_after: __agent_stall_int(value?.stuck_same_diagnostic_after, STALL_STUCK_SAME_DIAGNOSTIC_AFTER, 2),
-    post_edit_reverify: __agent_stall_bool(value?.post_edit_reverify, true, "post_edit_reverify"),
-    no_net_progress_extend_guard: __agent_stall_bool(value?.no_net_progress_extend_guard, false, "no_net_progress_extend_guard"),
-    no_net_progress_extend_after: __agent_stall_int(value?.no_net_progress_extend_after, STALL_NO_NET_PROGRESS_EXTEND_AFTER, 2),
-    no_net_progress_hard_cap_after: __agent_stall_int(value?.no_net_progress_hard_cap_after, STALL_NO_NET_PROGRESS_HARD_CAP_AFTER, 2),
-    reserved_terminal_verify: __agent_stall_bool(value?.reserved_terminal_verify, false, "reserved_terminal_verify"),
+    repair_aware: __agent_stall_bool(
+      __agent_stall_repair_value(value, repair_diagnostics, "repair_aware"),
+      false,
+      "repair_aware",
+    ),
+    stuck_same_diagnostic_after: __agent_stall_int(
+      __agent_stall_repair_value(value, repair_diagnostics, "stuck_same_diagnostic_after"),
+      STALL_STUCK_SAME_DIAGNOSTIC_AFTER,
+      2,
+    ),
+    post_edit_reverify: __agent_stall_bool(
+      __agent_stall_repair_value(value, repair_diagnostics, "post_edit_reverify"),
+      true,
+      "post_edit_reverify",
+    ),
+    no_net_progress_extend_guard: __agent_stall_bool(
+      __agent_stall_repair_value(value, repair_diagnostics, "no_net_progress_extend_guard"),
+      false,
+      "no_net_progress_extend_guard",
+    ),
+    no_net_progress_extend_after: __agent_stall_int(
+      __agent_stall_repair_value(value, repair_diagnostics, "no_net_progress_extend_after"),
+      STALL_NO_NET_PROGRESS_EXTEND_AFTER,
+      2,
+    ),
+    no_net_progress_hard_cap_after: __agent_stall_int(
+      __agent_stall_repair_value(value, repair_diagnostics, "no_net_progress_hard_cap_after"),
+      STALL_NO_NET_PROGRESS_HARD_CAP_AFTER,
+      2,
+    ),
+    reserved_terminal_verify: __agent_stall_bool(
+      __agent_stall_repair_value(value, repair_diagnostics, "reserved_terminal_verify"),
+      false,
+      "reserved_terminal_verify",
+    ),
     reserved_terminal_verify_iterations: __agent_stall_int(
-      value?.reserved_terminal_verify_iterations,
+      __agent_stall_repair_value(value, repair_diagnostics, "reserved_terminal_verify_iterations"),
       STALL_RESERVED_TERMINAL_VERIFY_ITERATIONS,
       1,
     ),

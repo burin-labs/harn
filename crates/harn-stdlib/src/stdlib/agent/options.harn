@@ -50,6 +50,22 @@ pub type TurnPolicy = {
 }
 
 /**
+ * Nested repair-diagnostics config accepted under `stall_diagnostics`.
+ * Callers may also pass these fields flat on `stall_diagnostics`; flat fields
+ * win when both forms are present.
+ */
+pub type RepairDiagnostics = {
+  repair_aware?: bool,
+  stuck_same_diagnostic_after?: int,
+  post_edit_reverify?: bool,
+  no_net_progress_extend_guard?: bool,
+  no_net_progress_extend_after?: int,
+  no_net_progress_hard_cap_after?: int,
+  reserved_terminal_verify?: bool,
+  reserved_terminal_verify_iterations?: int,
+}
+
+/**
  * Caller-facing `stall_diagnostics:` config. Normalized into the internal
  * `AgentStallConfig` shape by `std/agent/stall`.
  *
@@ -71,6 +87,7 @@ pub type StallDiagnostics = {
   ping_pong_cycles?: int,
   repeat_context_window_error?: int,
   hard_stop_after_trips?: int,
+  repair_diagnostics?: RepairDiagnostics,
   repair_aware?: bool,
   stuck_same_diagnostic_after?: int,
   post_edit_reverify?: bool,
