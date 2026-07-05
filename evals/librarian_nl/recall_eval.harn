@@ -109,7 +109,7 @@ pipeline run(task) {
       },
     ]
   }
-  let sorted_ms = latencies.sort({ a, b -> a - b })
+  let sorted_ms = latencies.sort()
   let p50 = _percentile(sorted_ms, 0.5)
   let p95 = _percentile(sorted_ms, 0.95)
   let p99 = _percentile(sorted_ms, 0.99)
