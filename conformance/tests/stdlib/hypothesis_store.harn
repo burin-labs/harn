@@ -1,0 +1,25 @@
+import "std/agent/hypothesis"
+
+/**
+ * Exercises the hypothesis store over the session-store substrate: open with a
+ * default status, open with an explicit status, get, list (+ status filter),
+ * in-place status update, unknown-id handling, and delete.
+ */
+pipeline default() {
+  let root = path_join(".harn", "tmp", "harn-hyp-" + uuid())
+  let sid = "agent.hypotheses"
+  let o = {root: root}
+  hypothesis_open(sid, {id: "h1", statement: "flaky test is timing"}, o)
+  hypothesis_open(sid, {id: "h2", statement: "cache bug", status: "verifying"}, o)
+  __io_println(hypothesis_get(sid, "h1", o).status)
+  __io_println(hypothesis_get(sid, "h2", o).status)
+  __io_println(len(hypothesis_list(sid, o)))
+  hypothesis_set_status(sid, "h1", "confirmed", o)
+  __io_println(hypothesis_get(sid, "h1", o).status)
+  __io_println(len(hypothesis_list(sid, {root: root, status: "confirmed"})))
+  __io_println(hypothesis_get(sid, "nope", o) == nil)
+  __io_println(hypothesis_set_status(sid, "nope", "x", o).ok)
+  hypothesis_delete(sid, "h2", o)
+  __io_println(len(hypothesis_list(sid, o)))
+  harness.fs.delete(root)
+}

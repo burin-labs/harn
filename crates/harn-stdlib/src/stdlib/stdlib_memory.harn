@@ -102,3 +102,19 @@ pub fn memory_update(namespace, id, patch, options = nil) {
 pub fn memory_list(namespace, options = nil) {
   return __memory_list(namespace, options)
 }
+
+/**
+ * Return the active records flagged to auto-surface as reminders — the ones
+ * whose per-record flag (default `auto_surface`) is true. Deterministic: a
+ * filtered enumeration, safe to call every turn to build the turn's reminders.
+ *
+ * Pass `options.flag` to use a different flag name, plus any `memory_list`
+ * filter (`status`, `scope`, `tag`, `limit`).
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn memory_reminders(namespace, options = nil) {
+  let flag = (options ?? {})?.flag ?? "auto_surface"
+  return memory_list(namespace, (options ?? {}) + {flag: flag})
+}
