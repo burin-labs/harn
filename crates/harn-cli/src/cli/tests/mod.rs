@@ -9,7 +9,7 @@ pub(crate) use super::{
     CanonCommand, CheckOutputFormat, Cli, Command, CompletionShell, ConfigCommand, ConnectCommand,
     ConnectorCommand, CrystallizeCommand, EvalCommand, EvalToolCallsCommand, FlowArchivistCommand,
     FlowCommand, HarnessThreadingMode, LocalCommand, McpCommand, McpMockCommand,
-    MergeCaptainCommand, ModelsCommand, ModelsLoraCommand, OrchestratorCommand,
+    MergeCaptainCommand, ModelsBatchCommand, ModelsCommand, ModelsLoraCommand, OrchestratorCommand,
     OrchestratorDeployProvider, OrchestratorLogFormat, OrchestratorQueueCommand,
     OrchestratorTenantCommand, PackageArtifactsCommand, PackageCacheCommand, PackageCommand,
     PackageScaffoldCommand, PersonaCommand, ProjectTemplate, ProviderCapabilitiesCommand,

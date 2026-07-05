@@ -1,0 +1,332 @@
+/**
+ * `harn models batch plan` renderer.
+ *
+ * Batch APIs are for latency-tolerant, provider-billed work. Interactive
+ * agent turns stay synchronous; this planner only reports catalog routes
+ * whose provider capabilities advertise async batch support.
+ *
+ * Inputs (from the dispatch shim):
+ *   HARN_MODELS_BATCH_PROVIDER                  - optional provider filter.
+ *   HARN_MODELS_BATCH_MODEL                     - optional model/alias filter.
+ *   HARN_MODELS_BATCH_WORKLOAD                  - eval, judge, corpus, or generic.
+ *   HARN_MODELS_BATCH_MIN_DISCOUNT_PERCENT      - optional integer filter.
+ *   HARN_MODELS_BATCH_MAX_TURNAROUND_HOURS      - optional integer filter.
+ *   HARN_OUTPUT_JSON                            - "1" for JSON, else human text.
+ */
+import {
+  cli_json_envelope,
+  print_list,
+  safe_bool,
+  safe_dict,
+  safe_list,
+  safe_string,
+} from "std/cli/render"
+
+const SUPPORTED_WORKLOADS: list = ["eval", "judge", "corpus", "generic"]
+
+fn __safe_int(value) -> int? {
+  if type_of(value) == "int" {
+    return value
+  }
+  return to_int(value)
+}
+
+fn __has_string(items: list, needle: string) -> bool {
+  for item in items {
+    if type_of(item) == "string" && item == needle {
+      return true
+    }
+  }
+  return false
+}
+
+fn __normalize_workload(value: string) -> string {
+  let workload = trim(value)
+  if __has_string(SUPPORTED_WORKLOADS, workload) {
+    return workload
+  }
+  return "generic"
+}
+
+fn __filter_int(value: string) -> int? {
+  let text = trim(value)
+  if text == "" {
+    return nil
+  }
+  return to_int(text)
+}
+
+fn __model_matches(entry: dict, filter: string) -> bool {
+  let model_filter = trim(filter)
+  if model_filter == "" {
+    return true
+  }
+  let provider = safe_string(entry["provider"], "")
+  let id = safe_string(entry["id"], "")
+  let name = safe_string(entry["name"], "")
+  if model_filter == id || model_filter == name || model_filter == provider + "/" + id {
+    return true
+  }
+  let provider_prefix = provider + "/"
+  if len(id) >= len(provider_prefix) && id[0:len(provider_prefix)] == provider_prefix {
+    let unprefixed = id[len(provider_prefix):len(id)]
+    if model_filter == unprefixed || model_filter == provider + "/" + unprefixed {
+      return true
+    }
+  }
+  return false
+}
+
+fn __sorted_strings(items: list) -> list {
+  var out = []
+  for item in items {
+    if type_of(item) != "string" {
+      continue
+    }
+    var idx = 0
+    while idx < len(out) && out[idx] < item {
+      idx = idx + 1
+    }
+    out = out[0:idx].push(item) + out[idx:len(out)]
+  }
+  return out
+}
+
+fn __sort_models_by_provider_id(models: list) -> list {
+  var out = []
+  for model in models {
+    let m = safe_dict(model)
+    let key = safe_string(m["provider"], "") + "/" + safe_string(m["id"], "")
+    var idx = 0
+    while idx < len(out) {
+      let other = safe_dict(out[idx])
+      let other_key = safe_string(other["provider"], "") + "/" + safe_string(other["id"], "")
+      if other_key >= key {
+        break
+      }
+      idx = idx + 1
+    }
+    out = out[0:idx].push(model) + out[idx:len(out)]
+  }
+  return out
+}
+
+fn __workload_recommendation(workload: string) -> string {
+  if workload == "eval" {
+    return "Use for lower-priority eval gauntlets, judge calibration sweeps, and nightly comparisons."
+  }
+  if workload == "judge" {
+    return "Use for asynchronous rubric calibration, transcript mining, and label generation."
+  }
+  if workload == "corpus" {
+    return "Use for corpus refresh, distillation, and large synthetic-data review passes."
+  }
+  return "Use for latency-tolerant bulk inference with stable request ids."
+}
+
+fn __constraints(workload: string) -> list {
+  return [
+    "Use batch only for offline work; interactive agent turns and escalation repairs stay synchronous.",
+    "Group requests by provider, model, batch wire format, and tool-call convention before submission.",
+    "Persist a stable custom id per request so provider results can rejoin eval/corpus rows deterministically.",
+    "Treat provider subscription-plan CLI auth as separate from API/batch credentials; batch jobs need provider API billing.",
+    __workload_recommendation(workload),
+  ]
+}
+
+fn __provider_group(models: list) -> dict {
+  var groups = {}
+  for model in models {
+    let m = safe_dict(model)
+    let provider = safe_string(m["provider"], "")
+    if provider == "" {
+      continue
+    }
+    let prior = if groups[provider] == nil {
+      []
+    } else {
+      groups[provider]
+    }
+    groups = groups + {[provider]: prior.push(m)}
+  }
+  return groups
+}
+
+fn __candidate(entry: dict, workload: string) -> dict {
+  let provider = safe_string(entry["provider"], "")
+  let id = safe_string(entry["id"], "")
+  let discount = __safe_int(entry["batch_discount_percent"])
+  let turnaround = __safe_int(entry["batch_turnaround_hours"])
+  let wire_format = safe_string(entry["batch_wire_format"], "")
+  let input_mode = safe_string(entry["batch_input_mode"], "")
+  let recommended = discount != nil && discount > 0 && (turnaround == nil || turnaround <= 24)
+  var constraints = []
+  if wire_format == "" {
+    constraints = constraints.push("Provider catalog omits batch wire format; submission must probe before enqueue.")
+  }
+  if input_mode == "" {
+    constraints = constraints
+      .push(
+      "Provider catalog omits batch input mode; submission must choose a provider-native packer.",
+    )
+  }
+  if discount == nil {
+    constraints = constraints
+      .push(
+      "Provider catalog does not publish a discount; cost planner must price from live usage tables.",
+    )
+  }
+  if turnaround == nil {
+    constraints = constraints
+      .push(
+      "Provider catalog does not publish a turnaround bound; schedule as best-effort offline work.",
+    )
+  }
+  return {
+    provider: provider,
+    id: id,
+    name: safe_string(entry["name"], ""),
+    capabilities: safe_list(entry["capabilities"]),
+    batch: {
+      api: true,
+      wire_format: wire_format,
+      input_mode: input_mode,
+      discount_percent: discount,
+      turnaround_hours: turnaround,
+    },
+    workload: workload,
+    recommended: recommended,
+    recommendation: __workload_recommendation(workload),
+    constraints: constraints,
+  }
+}
+
+fn __collect(
+  catalog: list,
+  provider_filter: string,
+  model_filter: string,
+  workload: string,
+  min_discount: int?,
+  max_turnaround: int?,
+) -> list {
+  var out = []
+  for raw_entry in catalog {
+    let entry = safe_dict(raw_entry)
+    let provider = safe_string(entry["provider"], "")
+    let id = safe_string(entry["id"], "")
+    if provider == "" || id == "" {
+      continue
+    }
+    if trim(provider_filter) != "" && provider != trim(provider_filter) {
+      continue
+    }
+    if !__model_matches(entry, model_filter) {
+      continue
+    }
+    let capabilities = safe_list(entry["capabilities"])
+    if !safe_bool(entry["batch_api"], false) && !__has_string(capabilities, "batch") {
+      continue
+    }
+    let discount = __safe_int(entry["batch_discount_percent"])
+    if min_discount != nil && (discount == nil || discount < min_discount) {
+      continue
+    }
+    let turnaround = __safe_int(entry["batch_turnaround_hours"])
+    if max_turnaround != nil && (turnaround == nil || turnaround > max_turnaround) {
+      continue
+    }
+    out = out.push(__candidate(entry, workload))
+  }
+  return __sort_models_by_provider_id(out)
+}
+
+fn __render_batch_value(value, suffix: string, fallback: string) -> string {
+  let parsed = __safe_int(value)
+  if parsed == nil {
+    return fallback
+  }
+  return to_string(parsed) + suffix
+}
+
+fn __render_model_line(model: dict) -> string {
+  let batch = safe_dict(model["batch"])
+  let wire = safe_string(batch["wire_format"], "unknown_wire")
+  let input = safe_string(batch["input_mode"], "unknown_input")
+  let discount = __render_batch_value(batch["discount_percent"], "%", "unknown discount")
+  let turnaround = __render_batch_value(batch["turnaround_hours"], "h", "unknown turnaround")
+  return "  "
+    + safe_string(model["id"], "")
+    + "  "
+    + wire
+    + "/"
+    + input
+    + "  discount "
+    + discount
+    + "  turnaround "
+    + turnaround
+}
+
+fn __render_human(harness: Harness, report: dict) {
+  let workload = safe_string(report["workload"], "generic")
+  let models = safe_list(report["models"])
+  if len(models) == 0 {
+    harness.stdio.println("(no batch-capable models match)")
+  } else {
+    harness.stdio.println("Batch-capable models for " + workload)
+    let groups = __provider_group(models)
+    for provider in __sorted_strings(keys(groups)) {
+      harness.stdio.println(provider)
+      for model in groups[provider] {
+        harness.stdio.println(__render_model_line(safe_dict(model)))
+        print_list(harness, "constraints", safe_list(safe_dict(model)["constraints"]))
+      }
+      harness.stdio.println("")
+    }
+  }
+  print_list(harness, "planner constraints", safe_list(report["constraints"]))
+  print_list(harness, "warnings", safe_list(report["warnings"]))
+}
+
+fn __render_json(report: dict) -> string {
+  return json_stringify_pretty(cli_json_envelope({schema_version: 1, ok: true, data: report}))
+}
+
+fn main(harness: Harness) -> int {
+  let provider_filter = trim(harness.env.get_or("HARN_MODELS_BATCH_PROVIDER", ""))
+  let model_filter = trim(harness.env.get_or("HARN_MODELS_BATCH_MODEL", ""))
+  let workload_raw = trim(harness.env.get_or("HARN_MODELS_BATCH_WORKLOAD", "eval"))
+  let workload = __normalize_workload(workload_raw)
+  let min_discount = __filter_int(harness.env.get_or("HARN_MODELS_BATCH_MIN_DISCOUNT_PERCENT", ""))
+  let max_turnaround = __filter_int(harness.env.get_or("HARN_MODELS_BATCH_MAX_TURNAROUND_HOURS", ""))
+  let catalog = harness.llm.catalog()
+  let models = __collect(catalog, provider_filter, model_filter, workload, min_discount, max_turnaround)
+  var warnings = []
+  if workload != workload_raw && workload_raw != "" {
+    warnings = warnings.push("unknown workload '" + workload_raw + "'; using generic policy")
+  }
+  if min_discount == nil && harness.env.get_or("HARN_MODELS_BATCH_MIN_DISCOUNT_PERCENT", "") != "" {
+    warnings = warnings.push("ignored non-integer --min-discount-percent")
+  }
+  if max_turnaround == nil && harness.env.get_or("HARN_MODELS_BATCH_MAX_TURNAROUND_HOURS", "") != "" {
+    warnings = warnings.push("ignored non-integer --max-turnaround-hours")
+  }
+  let report = {
+    schema_version: 1,
+    workload: workload,
+    filters: {
+      provider: provider_filter,
+      model: model_filter,
+      min_discount_percent: min_discount,
+      max_turnaround_hours: max_turnaround,
+    },
+    models: models,
+    constraints: __constraints(workload),
+    warnings: warnings,
+  }
+  if harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1" {
+    harness.stdio.println(__render_json(report))
+  } else {
+    __render_human(harness, report)
+  }
+  return 0
+}

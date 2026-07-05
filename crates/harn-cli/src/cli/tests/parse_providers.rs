@@ -597,6 +597,41 @@ fn test_parses_models_lora_plan_args() {
 }
 
 #[test]
+fn test_parses_models_batch_plan_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "models",
+        "batch",
+        "plan",
+        "--provider",
+        "openai",
+        "--model",
+        "gpt-4o-mini",
+        "--workload",
+        "eval",
+        "--min-discount-percent",
+        "50",
+        "--max-turnaround-hours",
+        "24",
+        "--json",
+    ]);
+
+    let Command::Models(args) = cli.command.unwrap() else {
+        panic!("expected models command");
+    };
+    let ModelsCommand::Batch(args) = args.command else {
+        panic!("expected models batch command");
+    };
+    let ModelsBatchCommand::Plan(args) = args.command;
+    assert_eq!(args.provider.as_deref(), Some("openai"));
+    assert_eq!(args.model.as_deref(), Some("gpt-4o-mini"));
+    assert_eq!(args.workload, "eval");
+    assert_eq!(args.min_discount_percent, Some(50));
+    assert_eq!(args.max_turnaround_hours, Some(24));
+    assert!(args.json);
+}
+
+#[test]
 fn test_parses_models_lora_preflight_args() {
     let cli = Cli::parse_from([
         "harn",

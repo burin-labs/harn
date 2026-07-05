@@ -1040,6 +1040,10 @@ pub const STDLIB_CLI_SCRIPTS: &[StdlibCliScript] = &[
         source: include_str!("stdlib/cli/graph.harn"),
     },
     StdlibCliScript {
+        name: "models/batch_plan",
+        source: include_str!("stdlib/cli/models/batch_plan.harn"),
+    },
+    StdlibCliScript {
         name: "models/list",
         source: include_str!("stdlib/cli/models/list.harn"),
     },
