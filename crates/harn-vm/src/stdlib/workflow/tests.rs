@@ -144,6 +144,94 @@ fn snapshot_trace_spans_returns_completed_trace_tree() {
     set_tracing_enabled(false);
 }
 
+#[test]
+fn enclosing_open_span_survives_workflow_tracing_enable() {
+    // Regression (v0.9.16): a caller holding an OPEN enclosing span across
+    // a workflow run must not have it stranded, nor its completed siblings
+    // erased. `workflow_execute`/`prepare_workflow_state` enables tracing
+    // via `enable_tracing_preserving_open_spans`; simulate the exact
+    // sequence the workflow entrypoint performs.
+    use crate::tracing::{
+        enable_tracing_preserving_open_spans, peek_spans, set_tracing_enabled, span_end,
+        span_start_user_timing, SpanKind,
+    };
+
+    // Start clean.
+    set_tracing_enabled(false);
+    crate::tracing::reset_tracing();
+
+    // Caller opens a run-level user-timing span (like `start_timing`) — note
+    // this records into the collector even though the global tracing flag is
+    // still off, mirroring `std/timing`.
+    let (outer_id, _trace, _parent, _start) =
+        span_start_user_timing("run".to_string(), Default::default());
+    assert_ne!(outer_id, 0, "outer timing span should be recorded");
+
+    // A sibling completes before the workflow runs.
+    let (sib_id, _t, _p, _s) = span_start_user_timing("sibling".to_string(), Default::default());
+    span_end(sib_id).expect("sibling closes");
+    assert_eq!(
+        peek_spans().len(),
+        1,
+        "one completed sibling before workflow"
+    );
+
+    // Workflow entrypoint enables tracing WITHOUT clobbering the open span.
+    enable_tracing_preserving_open_spans();
+
+    // The workflow's own Pipeline span is collected...
+    let wf_span = crate::tracing::span_start(SpanKind::Pipeline, "workflow".to_string());
+    assert_ne!(wf_span, 0, "workflow span records while tracing enabled");
+    span_end(wf_span).expect("workflow span closes");
+
+    // ...the sibling that completed before the workflow is NOT erased...
+    let completed_names: Vec<String> = peek_spans().into_iter().map(|s| s.name).collect();
+    assert!(
+        completed_names.iter().any(|n| n == "sibling"),
+        "completed sibling survives workflow tracing enable: {completed_names:?}"
+    );
+    assert!(
+        completed_names.iter().any(|n| n == "workflow"),
+        "workflow's own span is still collected: {completed_names:?}"
+    );
+
+    // ...and the caller's OPEN span still resolves (no "unknown timing handle").
+    assert!(
+        span_end(outer_id).is_some(),
+        "enclosing open span survives and its end resolves"
+    );
+
+    set_tracing_enabled(false);
+    crate::tracing::reset_tracing();
+}
+
+#[test]
+fn workflow_tracing_enable_resets_when_idle() {
+    // Standalone common case: no open span → collector reset for a clean
+    // slate, identical to `set_tracing_enabled(true)`.
+    use crate::tracing::{
+        enable_tracing_preserving_open_spans, is_tracing_enabled, peek_spans, set_tracing_enabled,
+        span_end, span_start, SpanKind,
+    };
+
+    set_tracing_enabled(true);
+    let stale = span_start(SpanKind::ToolCall, "stale".to_string());
+    span_end(stale).expect("stale closes");
+    assert_eq!(peek_spans().len(), 1, "one completed span present");
+
+    // No OPEN spans remain → workflow enable resets, clearing the stale span.
+    enable_tracing_preserving_open_spans();
+    assert!(is_tracing_enabled(), "tracing is enabled");
+    assert_eq!(
+        peek_spans().len(),
+        0,
+        "idle collector is reset for a clean workflow slate"
+    );
+
+    set_tracing_enabled(false);
+    crate::tracing::reset_tracing();
+}
+
 #[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn verify_stage_reads_transcript_from_session_store() {
     crate::reset_thread_local_state();

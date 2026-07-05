@@ -303,7 +303,15 @@ pub(super) fn prepare_workflow_state(
     options: &crate::value::DictMap,
 ) -> Result<WorkflowRunState, VmError> {
     crate::llm::enable_tracing();
-    crate::tracing::set_tracing_enabled(true);
+    // Preserve any enclosing trace: if the caller already holds an open
+    // span (e.g. a run-level `start_timing` / `timed(...)` handle held
+    // across this workflow run), a plain `set_tracing_enabled(true)` would
+    // reset the collector — stranding that open span (its `end_timing`
+    // then throws "unknown timing handle") and erasing already-completed
+    // sibling spans. Only reset when the collector is idle. When idle
+    // (the standalone common case) this is byte-identical to today; when
+    // nested, the workflow's spans simply attach under the caller's span.
+    crate::tracing::enable_tracing_preserving_open_spans();
     let workflow_span_id = crate::tracing::span_start(
         crate::tracing::SpanKind::Pipeline,
         graph.name.clone().unwrap_or_else(|| graph.id.clone()),

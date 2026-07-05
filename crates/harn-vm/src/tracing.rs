@@ -573,6 +573,25 @@ pub fn set_tracing_enabled(enabled: bool) {
     }
 }
 
+/// Enable VM tracing for the current thread WITHOUT clobbering an
+/// in-flight trace. Unlike [`set_tracing_enabled(true)`], this only
+/// resets the span collector when it is idle (no open spans); when a
+/// caller is mid-trace — e.g. holding an enclosing `timed(...)` /
+/// `start_timing` span across a nested `workflow_execute` run — the
+/// collector is left intact so the caller's open span and its completed
+/// siblings survive. Note that user-timing spans populate the collector
+/// regardless of the enabled flag (see [`span_start_user_timing`]), so
+/// the open-span check (not [`is_tracing_enabled`]) is what distinguishes
+/// "someone is mid-trace" from "clean slate". When idle, behavior is
+/// identical to `set_tracing_enabled(true)`.
+pub fn enable_tracing_preserving_open_spans() {
+    let has_open_spans = COLLECTOR.with(|c| !c.borrow().open.is_empty());
+    TRACING_ENABLED.with(|e| *e.borrow_mut() = true);
+    if !has_open_spans {
+        COLLECTOR.with(|c| c.borrow_mut().reset());
+    }
+}
+
 /// Check if tracing is enabled.
 pub fn is_tracing_enabled() -> bool {
     TRACING_ENABLED.with(|e| *e.borrow())
