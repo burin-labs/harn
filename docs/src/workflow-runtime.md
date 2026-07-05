@@ -252,6 +252,31 @@ Command-based verification records `stdout`, `stderr`, `exit_status`, and a
 derived success flag on the stage result while still flowing through the same
 workflow branch/outcome machinery as LLM-backed verification.
 
+A stage's `verify` may also be a **function** (fn-verify mode) when the check
+is easier to express as Harn logic than as a command or an assertion dict:
+
+```harn,ignore
+goal: {
+  kind: "subagent",
+  retry_policy: {max_attempts: 3, feedback: true},
+  verify: { result ->
+    let text = to_string(result?.artifacts[0]?.text)
+    return {ok: contains(text, "SUMMARY:"), findings: ["output is missing a SUMMARY: section"]}
+  },
+}
+```
+
+The verifier receives the settled attempt result and returns either a bool or a
+verdict dict `{ok, findings?}` (`findings` may be a `list<string>` or a single
+string). A failing fn-verify forces the retry-eligible `failed` branch and its
+findings thread into the next attempt's repair prompt exactly like the
+structured-check findings above. It applies on the same VM-executed stage paths
+that honor `max_attempts` (subagent stages and deterministic execute stages) —
+so a `subagent` stage can self-verify its own output and repair with feedback,
+without a separate `verify` node. Because the verifier is a closure it runs in
+Harn (`workflow_evaluate_verification`, `std/workflow/stage.harn`) and never
+crosses into the host.
+
 `node.retry_policy.max_attempts` uses total-attempt semantics for VM-executed
 stage paths: command/compact/manual stages, subagent, fork/join, condition,
 reduce, escalation, map branches, and deterministic command `verify` nodes.
@@ -311,6 +336,47 @@ honor `max_attempts`. The mechanism lives in the embedded stage loop
 the host. `workflow_repair_stage_graph` (`std/workflow/patterns`) is the
 one-stage sugar over this policy: a single delegated goal stage that retries
 with feedback until it settles.
+
+`workflow_run_repair` (`std/workflow/repair`) goes one step further and *runs*
+that pattern for you — the run→validate→repair loop as a first-class helper:
+
+```harn,ignore
+let out = workflow_run_repair({
+  task: "Write the release notes for v1.2.",
+  model_policy: {provider: "anthropic", model: "claude-sonnet"},
+  verify: {command: "scripts/lint_release_notes.sh", expect_status: 0},
+  max_attempts: 3,
+})
+// out = {ok, status, text, findings, verification, attempts, result, run}
+```
+
+It runs one agent stage, validates its output with the supplied verifier
+(a callable, a `{command, expect_status?}` check, or a
+`{assert_text?, expect_status?}` assertion — command/assertion verifiers are
+wrapped into fn-verify closures so they gate + retry), and re-prompts with the
+findings up to `max_attempts` times. It owns no loop of its own; the retry /
+findings-threading lives entirely in the PR-I2 attempt machinery above.
+
+### Building linear stage graphs
+
+`workflow_stages` (`std/workflow/patterns`) is ergonomic sugar for the common
+case of a linear stage pipeline. It expands a concise `WorkflowStagesSpec`
+(a `list<StageSpec>`, or `{stages, name?, entry?, edges?}`) into the
+`{entry, nodes, edges}` graph `workflow_execute` consumes — each stage's `id`
+becomes the nodes-map key, stages are wired head-to-tail, and `entry` defaults
+to the first stage. It is pure sugar over `workflow_graph`: the result is
+byte-identical to the hand-authored equivalent, so there is no new node shape
+or runtime concept to learn.
+
+```harn,ignore
+let graph = workflow_stages({
+  name: "implement",
+  stages: [
+    {id: "act", kind: "stage", mode: "agent", model_policy: {provider: "mock"}},
+    {id: "check", kind: "verify", mode: "command", verify: {expect_status: 0}},
+  ],
+})
+```
 
 ### Stage option flattening and the capability ceiling
 

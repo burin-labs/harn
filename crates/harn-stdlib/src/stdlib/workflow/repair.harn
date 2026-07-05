@@ -1,0 +1,236 @@
+/**
+ * @harn-entrypoint-category workflow.stdlib
+ *
+ * std/workflow/repair — the single-node run -> validate -> repair helper.
+ *
+ * This is the "do the work, check it, re-prompt with the findings" loop as a
+ * first-class stdlib helper, NOT a new subsystem. It is pure sugar over the
+ * PR-I2 per-stage attempt machinery: `workflow_run_repair` builds a one-stage
+ * repair graph (`workflow_repair_stage_graph`) whose subagent carries a
+ * `WorkflowRetryPolicy`, then runs it through `workflow_execute`. The retry /
+ * findings-threading / repair-prompt logic all lives in
+ * `workflow_execute_stage_attempts` (std/workflow/stage) — this module adds no
+ * loop of its own. It subsumes the hand-rolled validate->repair loops in
+ * callers like harn-bump-fleet.
+ *
+ * Import-only (block-comment category tag, matching std/workflow/patterns): its
+ * exports are reached via `import`, not registered as global runtime builtins.
+ */
+import { command_run } from "std/command"
+import { workflow_execute } from "std/workflow/execute"
+import { workflow_execute_options } from "std/workflow/options"
+import { workflow_repair_stage_graph } from "std/workflow/patterns"
+import { workflow_evaluate_verification } from "std/workflow/stage"
+
+fn __repair_dict(value) {
+  if type_of(value) == "dict" {
+    return value
+  }
+  return {}
+}
+
+fn __repair_list(value) {
+  if type_of(value) == "list" {
+    return value
+  }
+  return []
+}
+
+fn __repair_string(value, fallback) {
+  if type_of(value) == "string" {
+    return value
+  }
+  return fallback
+}
+
+fn __repair_bool(value, fallback) {
+  if type_of(value) == "bool" {
+    return value
+  }
+  return fallback
+}
+
+fn __repair_is_callable(value) -> bool {
+  let kind = type_of(value)
+  return kind == "function" || kind == "closure" || kind == "fn"
+}
+
+fn __repair_int(value) {
+  if type_of(value) == "int" {
+    return value
+  }
+  return nil
+}
+
+/** Findings extracted from a settled verification verdict (fn or composite). */
+fn __repair_verification_findings(verification) {
+  if type_of(verification) != "dict" {
+    return []
+  }
+  if type_of(verification?.findings) == "list" {
+    return verification.findings
+  }
+  var out = []
+  for check in __repair_list(verification?.checks) {
+    if !__repair_bool(check?.ok, true) {
+      let kind = __repair_string(check?.kind, "check")
+      out = out.push(kind + ": expected " + to_string(check?.expected) + ", got " + to_string(check?.actual))
+    }
+  }
+  return out
+}
+
+/**
+ * Adapt a command verifier `{command, expect_status?}` into a fn-verify
+ * closure. A string command runs through the shell; a list runs argv-direct.
+ * The exit status gates the verdict; combined output becomes the finding.
+ */
+fn __repair_command_verifier(spec) {
+  return { _result ->
+    let cmd = spec?.command
+    let run_spec = if type_of(cmd) == "list" {
+      {mode: "argv", argv: cmd}
+    } else {
+      {mode: "shell", command: to_string(cmd)}
+    }
+    let out = command_run(run_spec, {capture: {max_inline_bytes: 65536}})
+    let expected = __repair_int(spec?.expect_status) ?? 0
+    let code = __repair_int(out?.exit_code) ?? __repair_int(out?.exit_status) ?? -1
+    let detail = __repair_string(out?.combined, __repair_string(out?.stdout, ""))
+    return if code == expected {
+      {ok: true, findings: []}
+    } else {
+      {
+        ok: false,
+        findings: ["command exited " + to_string(code) + " (expected " + to_string(expected) + "): " + detail],
+      }
+    }
+  }
+}
+
+/**
+ * Adapt an assertion verifier `{assert_text?, expect_status?}` into a
+ * fn-verify closure by delegating to `workflow_evaluate_verification`. Wrapping
+ * it as a callable is what makes a plain (non-`verify`-kind) stage actually
+ * gate on the assertions and retry — the dict path alone only gates a
+ * `kind: "verify"` node.
+ */
+fn __repair_assertion_verifier(spec) {
+  return { result -> return workflow_evaluate_verification({verify: spec, result: result}) }
+}
+
+/**
+ * Resolve a caller-supplied verifier (callable / command-dict / assertion-dict)
+ * into a single fn-verify closure the attempt loop can gate on. `nil` verify
+ * means "no validation" (the stage settles on its own status).
+ */
+fn __repair_resolve_verify(verify) {
+  if verify == nil {
+    return nil
+  }
+  if __repair_is_callable(verify) {
+    return verify
+  }
+  if type_of(verify) == "dict" {
+    if verify?.command != nil {
+      return __repair_command_verifier(verify)
+    }
+    return __repair_assertion_verifier(verify)
+  }
+  return nil
+}
+
+/**
+ * Caller spec for `workflow_run_repair`. `verify` accepts a callable
+ * (`result -> {ok, findings?}`), a command check (`{command, expect_status?}`),
+ * or an assertion check (`{assert_text?, expect_status?}`). Feedback threading
+ * defaults on: a failing attempt's findings are appended to the next attempt's
+ * task unless a `repair_prompt_builder` closure takes over.
+ */
+pub type ValidateRepairConfig = {
+  task: string,
+  prompt?: string,
+  verify?: any,
+  max_attempts?: int,
+  feedback?: bool | {max_chars?: int},
+  repair_prompt_builder?: any,
+  model_policy?: any,
+  tools?: any,
+  artifacts?: list,
+  max_steps?: int,
+  id?: string,
+  name?: string,
+  output_kind?: string,
+}
+
+/**
+ * workflow_run_repair runs one agent stage, validates its output with the
+ * supplied verifier, and re-prompts with the findings up to `max_attempts`
+ * times — the run -> validate -> repair pattern as a first-class helper.
+ *
+ * It is a thin wrapper over the PR-I2 attempt machinery: it builds a one-stage
+ * repair graph (`workflow_repair_stage_graph`) whose subagent carries a
+ * `WorkflowRetryPolicy` and executes it via `workflow_execute`. All retry /
+ * findings-threading / repair-prompt logic lives in
+ * `workflow_execute_stage_attempts`; this helper owns no loop of its own.
+ *
+ * Returns `{ok, status, text, findings, verification, attempts, result, run}`.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn workflow_run_repair(config: ValidateRepairConfig) {
+  let cfg = __repair_dict(config)
+  let task = __repair_string(cfg?.task, __repair_string(cfg?.prompt, ""))
+  let verify = __repair_resolve_verify(cfg?.verify)
+  let base_retry = {max_attempts: __repair_int(cfg?.max_attempts) ?? 2}
+  // A repair_prompt_builder takes full control of the retry prompt; otherwise
+  // findings are threaded via the bounded feedback template (defaulted on).
+  let retry_repair = if __repair_is_callable(cfg?.repair_prompt_builder) {
+    {repair_prompt_builder: cfg.repair_prompt_builder}
+  } else if cfg?.feedback != nil {
+    {feedback: cfg.feedback}
+  } else {
+    {feedback: true}
+  }
+  let retry_cfg = base_retry + retry_repair
+  let graph = workflow_repair_stage_graph(
+    {
+      id: cfg?.id,
+      name: cfg?.name,
+      prompt: cfg?.prompt,
+      tools: cfg?.tools,
+      model_policy: cfg?.model_policy,
+      retry_policy: retry_cfg,
+      verify: verify,
+      output_kind: cfg?.output_kind,
+    },
+  )
+  let run_options = workflow_execute_options({max_steps: __repair_int(cfg?.max_steps) ?? 8})
+  let run = workflow_execute(task, graph, __repair_list(cfg?.artifacts), run_options)
+  let stage = run?.run?.stages[0]
+  let attempts = __repair_list(stage?.attempts)
+  let last = if len(attempts) > 0 {
+    attempts[len(attempts) - 1]
+  } else {
+    {}
+  }
+  let verification = stage?.verification ?? last?.verification
+  // A subagent stage exposes its final output on the produced artifact, not on
+  // a top-level `result`; fall back through the shapes other stage kinds use.
+  let text = __repair_string(
+    stage?.result?.visible_text,
+    __repair_string(stage?.visible_text, __repair_string(stage?.artifacts[0]?.text, "")),
+  )
+  return {
+    ok: __repair_string(stage?.status, "") == "completed",
+    status: run?.status,
+    text: text,
+    findings: __repair_verification_findings(verification),
+    verification: verification,
+    attempts: attempts,
+    result: stage?.result,
+    run: run?.run,
+  }
+}

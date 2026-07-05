@@ -359,6 +359,9 @@ fn node_to_vm_with_raw(node: &crate::orchestration::WorkflowNode) -> Result<VmVa
         ("model_policy", &node.raw_model_policy),
         ("context_assembler", &node.raw_context_assembler),
         ("auto_compact", &node.raw_auto_compact),
+        // fn-verify: re-attach the live verifier closure so the embedded stage
+        // loop can invoke it against each attempt's result.
+        ("verify", &node.raw_verify),
     ] {
         if let Some(value) = raw {
             dict.insert(crate::value::intern_key(key), value.clone());

@@ -254,6 +254,78 @@ pub fn workflow_verification_only_graph(config = nil) {
   )
 }
 
+/**
+ * Copy `dict_value` without `drop_key` — used to lift a stage's `id` out of
+ * the node body (the id becomes the nodes-map key, matching hand-authored
+ * graphs).
+ */
+fn __patterns_without_key(dict_value, drop_key) {
+  let source = __patterns_dict(dict_value)
+  var out = {}
+  for key in source.keys() {
+    if key != drop_key {
+      out = out + {[key]: source[key]}
+    }
+  }
+  return out
+}
+
+/**
+ * workflow_stages — ergonomic builder that expands a concise, linear list of
+ * stage specs into the `{entry, nodes, edges}` graph `workflow_execute`
+ * consumes.
+ *
+ * `spec` is either a bare `list<StageSpec>` or a `WorkflowStagesSpec`
+ * (`{stages, name?, entry?, edges?}`). Each stage keeps its authored body
+ * verbatim; its `id` (defaulting to `stage_<n>`) becomes the nodes-map key.
+ * Stages are wired head-to-tail unless explicit `edges` are supplied, and
+ * `entry` defaults to the first stage's id. This is pure sugar over
+ * `workflow_graph`: the returned graph is byte-identical to the equivalent
+ * hand-authored `workflow_graph({entry, nodes, edges})` — no new runtime
+ * concept, no new node shape.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn workflow_stages(spec = nil) {
+  let stages = if type_of(spec) == "list" {
+    spec
+  } else {
+    __patterns_list(__patterns_dict(spec)?.stages)
+  }
+  let cfg = if type_of(spec) == "dict" {
+    spec
+  } else {
+    {}
+  }
+  var nodes = {}
+  var order = []
+  for raw in stages {
+    let stage = __patterns_dict(raw)
+    let id = __patterns_non_empty_string(stage?.id) ?? ("stage_" + to_string(len(order) + 1))
+    nodes = nodes + {[id]: __patterns_without_key(stage, "id")}
+    order = order + [id]
+  }
+  let edges = if cfg?.edges != nil {
+    cfg.edges
+  } else {
+    var linear = []
+    var index = 0
+    while index < len(order) - 1 {
+      linear = linear + [{from: order[index], to: order[index + 1]}]
+      index = index + 1
+    }
+    linear
+  }
+  let entry = __patterns_non_empty_string(cfg?.entry) ?? if len(order) > 0 {
+    order[0]
+  } else {
+    nil
+  }
+  return workflow_graph({name: cfg?.name ?? "stages", entry: entry, nodes: nodes, edges: edges})
+}
+
 fn __failover_disposition(value, fallback_action) {
   if value == nil {
     return {action: fallback_action}

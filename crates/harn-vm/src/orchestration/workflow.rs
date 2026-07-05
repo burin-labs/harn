@@ -76,6 +76,14 @@ pub struct WorkflowNode {
     /// are preserved here because they can't round-trip through serde.
     #[serde(skip)]
     pub raw_context_assembler: Option<VmValue>,
+    /// Raw `verify` VmValue — preserved so a *callable* verifier (fn-verify
+    /// mode) survives the builtin seam. The typed `verify` field above is a
+    /// `serde_json::Value`, which drops closures; when `verify` is a Harn
+    /// function the live closure is lifted here and re-attached by
+    /// `node_to_vm_with_raw` (stage.rs) so the embedded stage loop can invoke
+    /// it against each attempt's result (`workflow_evaluate_verification`).
+    #[serde(skip)]
+    pub raw_verify: Option<VmValue>,
 }
 
 impl PartialEq for WorkflowNode {
@@ -524,6 +532,17 @@ pub fn parse_workflow_node_value(value: &VmValue, label: &str) -> Result<Workflo
     node.raw_auto_compact = dict.and_then(|d| d.get("auto_compact")).cloned();
     node.raw_model_policy = dict.and_then(|d| d.get("model_policy")).cloned();
     node.raw_context_assembler = dict.and_then(|d| d.get("context_assembler")).cloned();
+    // Lift a callable verifier (fn-verify mode) so the closure survives; a
+    // plain dict/command verify is left to the typed `verify` field.
+    node.raw_verify = dict
+        .and_then(|d| d.get("verify"))
+        .filter(|value| {
+            matches!(
+                value,
+                VmValue::Closure(_) | VmValue::BuiltinRef(_) | VmValue::BuiltinRefId(_)
+            )
+        })
+        .cloned();
     node.retry_policy.repair_prompt_builder = retry_repair_prompt_builder_from_dict(dict);
     Ok(node)
 }
@@ -674,6 +693,19 @@ pub fn normalize_workflow_value(value: &VmValue) -> Result<WorkflowGraph, VmErro
             .and_then(|node_value| node_value.as_dict());
         if node.raw_tools.is_none() {
             node.raw_tools = raw_node.and_then(|raw_node| raw_node.get("tools")).cloned();
+        }
+        if node.raw_verify.is_none() {
+            // fn-verify: lift a callable verifier off the source dict so the
+            // closure survives the graph round-trip (serde drops it).
+            node.raw_verify = raw_node
+                .and_then(|raw_node| raw_node.get("verify"))
+                .filter(|value| {
+                    matches!(
+                        value,
+                        VmValue::Closure(_) | VmValue::BuiltinRef(_) | VmValue::BuiltinRefId(_)
+                    )
+                })
+                .cloned();
         }
         if node.retry_policy.repair_prompt_builder.is_none() {
             node.retry_policy.repair_prompt_builder =

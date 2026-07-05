@@ -1,0 +1,13 @@
+true
+true
+true
+true
+["stage_1","stage_2","stage_3"]
+stage_1
+2
+stage_1->stage_2
+stage_2->stage_3
+3
+failed
+stage
+true

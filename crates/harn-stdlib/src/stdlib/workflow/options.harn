@@ -148,6 +148,22 @@ pub fn workflow_execute_options(options: WorkflowExecuteOptions = {}) -> Workflo
   return options
 }
 
+/**
+ * Concise spec accepted by `workflow_stages` (std/workflow/patterns) — the
+ * ergonomic builder that expands a linear list of `StageSpec`s into the
+ * `{entry, nodes, edges}` graph shape `workflow_execute` consumes. `stages`
+ * are wired head-to-tail (each stage's `success`/default branch flows to the
+ * next) unless explicit `edges` are supplied; `entry` defaults to the first
+ * stage's id. Pure sugar: the result is byte-identical to the equivalent
+ * hand-authored `workflow_graph({...})`.
+ */
+pub type WorkflowStagesSpec = {
+  stages: list<StageSpec>,
+  name?: string,
+  entry?: string,
+  edges?: list<dict>,
+}
+
 /** Allowed values for `WorkflowAutonomyPolicyConfig.autonomy_tier`. */
 type WorkflowAutonomyTier = "shadow" | "suggest" | "act_with_approval" | "act_auto"
 

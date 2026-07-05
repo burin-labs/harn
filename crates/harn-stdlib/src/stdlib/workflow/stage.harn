@@ -551,6 +551,48 @@ fn __stage_prepare_compact(node_id, node, artifacts, consumed_artifact_ids) {
 }
 
 /**
+ * Normalize a fn-verify verdict into the verification shape the retry loop
+ * threads. A callable verifier receives the attempt result and returns either
+ * a bool, or a dict `{ok: bool, findings?: string | list<string>, ...}`. The
+ * returned `findings` (explicit list/string, or derived from a `checks` list —
+ * so a verdict re-emitted from `workflow_evaluate_verification` keeps its
+ * findings) reach the next attempt's repair prompt via `__stage_retry_context`.
+ */
+fn __stage_evaluate_fn_verify(verify, result) {
+  // A user verifier can throw (e.g. `result.output` on a nil field). Contain it
+  // as a failed verification carrying the throw message so the attempt loop
+  // stays intact and can retry with feedback — a bad verifier must not abort
+  // the whole run.
+  let attempted = try {
+    verify(result)
+  }
+  if is_err(attempted) {
+    return {
+      kind: "fn",
+      ok: false,
+      findings: ["verifier threw: " + __stage_error_message(unwrap_err(attempted))],
+    }
+  }
+  let verdict = unwrap(attempted)
+  if type_of(verdict) == "bool" {
+    return {kind: "fn", ok: verdict, findings: []}
+  }
+  if type_of(verdict) != "dict" {
+    return {kind: "fn", ok: verdict != nil, findings: []}
+  }
+  let findings = if type_of(verdict?.findings) == "string" && trim(verdict.findings) != "" {
+    [verdict.findings]
+  } else {
+    __stage_verification_findings(verdict)
+  }
+  return {
+    kind: __stage_string(verdict?.kind, "fn"),
+    ok: __stage_bool(verdict?.ok, false),
+    findings: findings,
+  }
+}
+
+/**
  * workflow_evaluate_verification.
  *
  * @effects: []
@@ -560,6 +602,12 @@ fn __stage_prepare_compact(node_id, node, artifacts, consumed_artifact_ids) {
 pub fn workflow_evaluate_verification(config = nil) {
   let verify = config?.verify
   let result = config?.result ?? {}
+  // fn-verify mode: a callable verifier composes verification with arbitrary
+  // Harn logic. It receives the attempt result and returns a verdict; a
+  // failing verdict's findings thread into the next attempt's repair prompt.
+  if __stage_is_callable(verify) {
+    return __stage_evaluate_fn_verify(verify, result)
+  }
   if type_of(verify) != "dict" {
     return {kind: "none", ok: true}
   }
@@ -844,6 +892,33 @@ pub fn workflow_stage_retry_task(config = nil) {
   return base_task
 }
 
+/**
+ * Apply a callable (fn-verify) verifier to a settled attempt.
+ *
+ * The dict/command `verify` path is classified inside `__host_stage_execute_once`
+ * (which only gates the branch for `kind: "verify"` nodes). A *callable* verify
+ * is invoked here instead — after the leaf settles, inside this attempt loop —
+ * so it gates whatever stage kind reached the loop (subagent stages and the
+ * deterministic execute stages, i.e. the same paths that honor `max_attempts`),
+ * including a subagent self-verifying its own output. A failing verdict forces
+ * the retry-eligible `failed` branch and carries its findings on the attempt's
+ * `verification`, which `workflow_stage_retry_task` threads into the next
+ * attempt's repair prompt. A passing verdict leaves the host-computed
+ * branch/outcome untouched and just attaches the (findings-empty) verification.
+ * Non-callable verify returns the settled payload unchanged.
+ */
+fn __stage_apply_fn_verify(node, settled) {
+  let verify = node?.verify
+  if !__stage_is_callable(verify) {
+    return settled
+  }
+  let verification = workflow_evaluate_verification({verify: verify, result: settled?.result})
+  if __stage_bool(verification.ok, false) {
+    return settled + {verification: verification}
+  }
+  return settled + {branch: "failed", outcome: "verification_failed", verification: verification}
+}
+
 fn __stage_attempt_record(attempt, status, outcome, branch, error, verification) {
   return {
     attempt: attempt,
@@ -899,7 +974,15 @@ pub fn workflow_execute_stage_attempts(
         {policy: policy, task: base_task, attempt: attempt - 1, prior: prior, node: node_dict},
       )
     }
-    let settled = __host_stage_execute_once(node_id, node_dict, attempt_task, attempt, arts, selected, transcript)
+    let raw_settled = __host_stage_execute_once(node_id, node_dict, attempt_task, attempt, arts, selected, transcript)
+    // fn-verify mode: a callable `verify` gates the settled attempt (any stage
+    // kind) and threads its findings forward. The dict/command verify path is
+    // already classified inside the host call above, so this is a no-op there.
+    let settled = if __stage_bool(raw_settled?.ok, false) {
+      __stage_apply_fn_verify(node_dict, raw_settled)
+    } else {
+      raw_settled
+    }
     if __stage_bool(settled?.ok, false) {
       let branch = settled?.branch
       let success = branch != "failed"
