@@ -579,13 +579,13 @@ fn tagged_parser_recovers_mistral_json_tool_marker_payload() {
 fn tagged_parser_recovers_deepseek_dsml_markers() {
     let tools = sample_tool_registry();
     let text = "I'll inspect first.\n\
-<｜DSML｜function_calls>\n\
+<｜DSML｜tool_calls>\n\
 <｜DSML｜invoke name=\"edit\">\n\
 <｜DSML｜parameter name=\"action\" string=\"true\">create</｜DSML｜parameter>\n\
 <｜DSML｜parameter name=\"path\" string=\"true\">a.rs</｜DSML｜parameter>\n\
 <｜DSML｜parameter name=\"content\" string=\"true\">fn main() {}</｜DSML｜parameter>\n\
 </｜DSML｜invoke>\n\
-</｜DSML｜function_calls><｜DSML｜function_calls>\n\
+</｜DSML｜tool_calls><｜DSML｜function_calls>\n\
 <｜DSML｜invoke name=\"run\">\n\
 <｜DSML｜parameter name=\"command\" string=\"false\">[\"cargo\", \"test\"]</｜DSML｜parameter>\n\
 </｜DSML｜invoke>\n\
@@ -600,8 +600,8 @@ fn tagged_parser_recovers_deepseek_dsml_markers() {
     assert_eq!(result.calls[1]["arguments"]["command"][0], json!("cargo"));
     assert_eq!(result.prose, "I'll inspect first.");
     assert!(
-        result.violations[0].contains("DeepSeek DSML"),
-        "violation should teach canonical protocol: {:?}",
+        result.violations.is_empty(),
+        "accepted DeepSeek DSML must not inject parse-error feedback: {:?}",
         result.violations
     );
     assert!(result.canonical.contains("<tool_call>"));

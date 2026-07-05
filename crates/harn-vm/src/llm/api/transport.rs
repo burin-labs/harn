@@ -654,7 +654,12 @@ fn try_emit_partial_tool_args(
 }
 
 fn canonical_stream_event_tool_name(tool_name: &str) -> String {
-    let (name, _) = crate::llm::tools::normalize_tool_call_shape(tool_name, serde_json::json!({}));
+    let tool_name = match crate::llm::tools::parse_text_tool_call_from_native_name(tool_name) {
+        crate::llm::tools::NativeToolNameTextCall::Parsed { name, .. }
+        | crate::llm::tools::NativeToolNameTextCall::Malformed { name, .. } => name,
+        crate::llm::tools::NativeToolNameTextCall::NotCall => tool_name.to_string(),
+    };
+    let (name, _) = crate::llm::tools::normalize_tool_call_shape(&tool_name, serde_json::json!({}));
     name
 }
 
@@ -811,6 +816,40 @@ fn parse_openai_streamed_tool_argument_values(
             ]
         }
     }
+}
+
+fn streamed_native_tool_name_text_call_parse_error(
+    raw_name: &str,
+    error: &str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "__parse_error": format!(
+            "Could not parse streamed provider tool name as Harn text-tool call: {}. Raw input: {}",
+            error,
+            preview_chars(raw_name, 200)
+        )
+    })
+}
+
+fn push_internal_tool_call(
+    tool_calls: &mut Vec<serde_json::Value>,
+    blocks: &mut Vec<serde_json::Value>,
+    id: String,
+    name: String,
+    arguments: serde_json::Value,
+) {
+    tool_calls.push(serde_json::json!({
+        "id": id,
+        "name": name,
+        "arguments": arguments,
+    }));
+    blocks.push(serde_json::json!({
+        "type": "tool_call",
+        "id": id,
+        "name": name,
+        "arguments": arguments,
+        "visibility": "internal",
+    }));
 }
 
 /// Pure SSE-line consumer used by the response wrapper and by tests
@@ -1312,6 +1351,25 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
     }
 
     for (_, stream) in oai_tool_map {
+        match crate::llm::tools::parse_text_tool_call_from_native_name(&stream.name) {
+            crate::llm::tools::NativeToolNameTextCall::Parsed { name, arguments } => {
+                let (name, arguments) =
+                    crate::llm::tools::normalize_tool_call_shape(&name, arguments);
+                let id = stream.tool_call_id;
+                push_internal_tool_call(&mut tool_calls, &mut blocks, id, name, arguments);
+                continue;
+            }
+            crate::llm::tools::NativeToolNameTextCall::Malformed { name, error } => {
+                let arguments =
+                    streamed_native_tool_name_text_call_parse_error(&stream.name, &error);
+                let (name, arguments) =
+                    crate::llm::tools::normalize_tool_call_shape(&name, arguments);
+                let id = stream.tool_call_id;
+                push_internal_tool_call(&mut tool_calls, &mut blocks, id, name, arguments);
+                continue;
+            }
+            crate::llm::tools::NativeToolNameTextCall::NotCall => {}
+        }
         let args_values = parse_openai_streamed_tool_argument_values(
             &stream.name,
             &stream.args,
@@ -1330,16 +1388,7 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
                 format!("{}_{}", base_tool_call_id, arg_index + 1)
             };
             let (name, args) = crate::llm::tools::normalize_tool_call_shape(&stream.name, args);
-            tool_calls.push(serde_json::json!({
-                "id": id, "name": name, "arguments": args,
-            }));
-            blocks.push(serde_json::json!({
-                "type": "tool_call",
-                "id": id,
-                "name": name,
-                "arguments": args,
-                "visibility": "internal",
-            }));
+            push_internal_tool_call(&mut tool_calls, &mut blocks, id, name, args);
         }
     }
 
@@ -2495,6 +2544,112 @@ EOF
             result.tool_calls[0]["arguments"]
         );
         assert_ne!(result.tool_calls[0]["arguments"], serde_json::json!({}));
+
+        clear_session_sinks(&session_id);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn openai_stream_recovers_text_tool_call_misplaced_into_name() {
+        let raw_name = r#"search({ query: "StatusOr", path: "include" })</arg_value>"#;
+        let frame = |value: serde_json::Value| format!("data: {value}\n");
+        let body = format!(
+            "{}{}data: [DONE]\n",
+            frame(serde_json::json!({
+                "choices": [{
+                    "index": 0,
+                    "delta": {
+                        "tool_calls": [{
+                            "index": 0,
+                            "id": "call_search_text_name",
+                            "function": {"name": raw_name, "arguments": "{}"}
+                        }]
+                    }
+                }]
+            })),
+            frame(serde_json::json!({
+                "choices": [{
+                    "index": 0,
+                    "finish_reason": "tool_calls",
+                    "delta": {}
+                }],
+                "usage": {"prompt_tokens": 4, "completion_tokens": 30}
+            })),
+        );
+        let session_id = fresh_session_id("oai-text-name-recover");
+        let (result, events) = drive(body.as_bytes(), &session_id, false).await;
+
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                AgentEvent::ToolCall {
+                    status: ToolCallStatus::Pending,
+                    tool_name,
+                    ..
+                } if tool_name == "search"
+            )),
+            "pending event should use the recovered tool name; got {events:#?}"
+        );
+        assert_eq!(result.stop_reason.as_deref(), Some("tool_calls"));
+        assert_eq!(result.tool_calls.len(), 1);
+        assert_eq!(result.tool_calls[0]["id"], "call_search_text_name");
+        assert_eq!(result.tool_calls[0]["name"], "search");
+        assert_eq!(result.tool_calls[0]["arguments"]["query"], "StatusOr");
+        assert_eq!(result.tool_calls[0]["arguments"]["path"], "include");
+
+        clear_session_sinks(&session_id);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn openai_stream_rejects_partial_text_tool_call_misplaced_into_name() {
+        let raw_name =
+            r#"edit({ action: "create", path: "tests/page_cache_extra_test.cpp", content: <<EOF"#;
+        let frame = |value: serde_json::Value| format!("data: {value}\n");
+        let body = format!(
+            "{}{}data: [DONE]\n",
+            frame(serde_json::json!({
+                "choices": [{
+                    "index": 0,
+                    "delta": {
+                        "tool_calls": [{
+                            "index": 0,
+                            "id": "call_edit_partial_text_name",
+                            "function": {"name": raw_name, "arguments": "{"}
+                        }]
+                    }
+                }]
+            })),
+            frame(serde_json::json!({
+                "choices": [{
+                    "index": 0,
+                    "finish_reason": "tool_calls",
+                    "delta": {}
+                }],
+                "usage": {"prompt_tokens": 4, "completion_tokens": 30}
+            })),
+        );
+        let session_id = fresh_session_id("oai-text-name-parse-error");
+        let (result, events) = drive(body.as_bytes(), &session_id, false).await;
+
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                AgentEvent::ToolCall {
+                    status: ToolCallStatus::Pending,
+                    tool_name,
+                    ..
+                } if tool_name == "edit"
+            )),
+            "pending event should not expose the malformed provider name; got {events:#?}"
+        );
+        assert_eq!(result.stop_reason.as_deref(), Some("tool_calls"));
+        assert_eq!(result.tool_calls.len(), 1);
+        assert_eq!(result.tool_calls[0]["id"], "call_edit_partial_text_name");
+        assert_eq!(result.tool_calls[0]["name"], "edit");
+        let parse_error = result.tool_calls[0]["arguments"]["__parse_error"]
+            .as_str()
+            .expect("partial text-call name should carry a parse error");
+        assert!(parse_error.contains("streamed provider tool name"));
+        assert!(parse_error.contains("Raw input: edit({ action"));
 
         clear_session_sinks(&session_id);
     }

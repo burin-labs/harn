@@ -754,8 +754,10 @@ fn parse_deepseek_dsml_calls(
     let invoke_re =
         regex::Regex::new(r#"(?s)<｜DSML｜invoke\s+name="([^"]+)"\s*>(.*?)</｜DSML｜invoke>"#)
             .expect("valid DSML invoke regex");
-    let block_re = regex::Regex::new(r"(?s)<｜DSML｜function_calls>.*?</｜DSML｜function_calls>")
-        .expect("valid DSML function_calls regex");
+    let block_re = regex::Regex::new(
+        r"(?s)<｜DSML｜function_calls>.*?</｜DSML｜function_calls>|<｜DSML｜tool_calls>.*?</｜DSML｜tool_calls>",
+    )
+    .expect("valid DSML wrapper regex");
     let param_re = regex::Regex::new(
         r#"(?s)<｜DSML｜parameter\s+name="([^"]+)"(?:\s+string="(true|false)")?\s*>(.*?)</｜DSML｜parameter>"#,
     )
@@ -823,15 +825,6 @@ fn parse_deepseek_dsml_calls(
     }
 
     let prose = prose_without_ranges(src, &ranges);
-    let mut violations = Vec::new();
-    if !calls.is_empty() {
-        violations.push(
-            "Tool call(s) were emitted with DeepSeek DSML markers. Executed this turn so work moves \
-             forward; use `<tool_call>name({ ... })</tool_call>` on subsequent turns."
-                .to_string(),
-        );
-    }
-
     let canonical = canonical_for_recovered_calls(&calls, &prose);
 
     Some(TextToolParseResult {
@@ -839,7 +832,7 @@ fn parse_deepseek_dsml_calls(
         errors,
         prose,
         user_response: None,
-        violations,
+        violations: Vec::new(),
         done_marker: None,
         canonical,
     })
