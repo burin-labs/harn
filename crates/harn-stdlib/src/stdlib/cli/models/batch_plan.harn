@@ -154,6 +154,23 @@ fn __workload_recommendation(workload: string) -> string {
   return "Use for latency-tolerant bulk inference with stable request ids."
 }
 
+fn __live_batch_adapter(provider: string, wire: string) -> dict {
+  let supported = (provider == "anthropic" && wire == "anthropic_messages")
+    || (provider == "openai" && wire == "openai")
+    || (provider == "mistral" && wire == "mistral")
+  return {submit: supported, status: supported, download: supported}
+}
+
+fn __live_batch_operation_error(operation: string, provider: string, wire: string) -> string {
+  return "live batch "
+    + operation
+    + " is not implemented for provider="
+    + provider
+    + " wire="
+    + wire
+    + "; use --dry-run or add a provider adapter"
+}
+
 fn __constraints(workload: string) -> list {
   return [
     "Use batch only for offline work; interactive agent turns and escalation repairs stay synchronous.",
@@ -189,6 +206,7 @@ fn __candidate(entry: dict, workload: string) -> dict {
   let turnaround = __safe_int(entry["batch_turnaround_hours"])
   let wire_format = safe_string(entry["batch_wire_format"], "")
   let input_mode = safe_string(entry["batch_input_mode"], "")
+  let live_adapter = __live_batch_adapter(provider, wire_format)
   let recommended = discount != nil && discount > 0 && (turnaround == nil || turnaround <= 24)
   var constraints = []
   if wire_format == "" {
@@ -212,6 +230,14 @@ fn __candidate(entry: dict, workload: string) -> dict {
       "Provider catalog does not publish a turnaround bound; schedule as best-effort offline work.",
     )
   }
+  if !safe_bool(live_adapter["submit"], false)
+    || !safe_bool(live_adapter["status"], false)
+    || !safe_bool(live_adapter["download"], false) {
+    constraints = constraints
+      .push(
+      "Harn can prepare this provider's batch request files, but live submit/status/download is not implemented; use --dry-run or add a provider adapter.",
+    )
+  }
   return {
     provider: provider,
     id: id,
@@ -223,6 +249,7 @@ fn __candidate(entry: dict, workload: string) -> dict {
       input_mode: input_mode,
       discount_percent: discount,
       turnaround_hours: turnaround,
+      harn_live_adapter: live_adapter,
     },
     workload: workload,
     recommended: recommended,
@@ -284,6 +311,11 @@ fn __render_model_line(model: dict) -> string {
   let input = safe_string(batch["input_mode"], "unknown_input")
   let discount = __render_batch_value(batch["discount_percent"], "%", "unknown discount")
   let turnaround = __render_batch_value(batch["turnaround_hours"], "h", "unknown turnaround")
+  let live = if safe_bool(safe_dict(batch["harn_live_adapter"])["submit"], false) {
+    "live submit"
+  } else {
+    "dry-run only"
+  }
   return "  "
     + safe_string(model["id"], "")
     + "  "
@@ -294,6 +326,8 @@ fn __render_model_line(model: dict) -> string {
     + discount
     + "  turnaround "
     + turnaround
+    + "  "
+    + live
 }
 
 fn __render_human(harness: Harness, report: dict) {
@@ -1536,13 +1570,7 @@ fn __submit_live(harness: Harness, job: dict, payload: dict) -> dict {
   return {
     ok: false,
     job: base_job + {status: "failed"},
-    errors: [
-      "live batch submit is not implemented for provider="
-        + provider
-        + " wire="
-        + wire
-        + "; use --dry-run or add a provider adapter",
-    ],
+    errors: [__live_batch_operation_error("submit", provider, wire)],
   }
 }
 
@@ -1913,13 +1941,7 @@ fn __status_one_job(harness: Harness, job: dict, dry_run: bool) -> dict {
   return {
     ok: false,
     job: __cached_status_job(job, false) + {status: "failed"},
-    errors: [
-      "live batch status is not implemented for provider="
-        + provider
-        + " wire="
-        + wire
-        + "; use --dry-run or add a provider adapter",
-    ],
+    errors: [__live_batch_operation_error("status", provider, wire)],
   }
 }
 
@@ -2349,16 +2371,7 @@ fn __download_one_job(harness: Harness, job: dict, out_dir: string, dry_run: boo
       __download_mistral_file(harness, job, "error", job["error_file"], out_dir, dry_run, max_bytes),
     )
   } else {
-    state = {
-      artifacts: [],
-      errors: [
-        "live batch download is not implemented for provider="
-          + provider
-          + " wire="
-          + wire
-          + "; add a provider adapter",
-      ],
-    }
+    state = {artifacts: [], errors: [__live_batch_operation_error("download", provider, wire)]}
   }
   if len(safe_list(state["artifacts"])) == 0 && len(safe_list(state["errors"])) == 0 {
     state = {artifacts: [], errors: ["job " + safe_string(job["id"], "") + " has no provider result handles"]}

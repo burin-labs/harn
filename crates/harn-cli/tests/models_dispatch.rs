@@ -272,6 +272,50 @@ fn models_test_failure_json_envelope_is_stable() {
 // - models batch ----------------------------------------------------------
 
 #[test]
+fn models_batch_plan_reports_harn_live_adapter_support() {
+    let harn = run(&["models", "batch", "plan", "--json"], &[]);
+    assert_eq!(harn.exit_code, 0, "harn stderr={}", harn.stderr);
+    let harn_value = parse_json(&harn.stdout, "batch plan");
+    let report = success_data(&harn_value);
+    let models = report["models"].as_array().expect("models");
+    let openai = models
+        .iter()
+        .find(|model| model["provider"] == "openai")
+        .expect("openai batch model");
+    assert_eq!(openai["batch"]["wire_format"], "openai");
+    assert_eq!(openai["batch"]["harn_live_adapter"]["submit"], true);
+    assert_eq!(openai["batch"]["harn_live_adapter"]["status"], true);
+    assert_eq!(openai["batch"]["harn_live_adapter"]["download"], true);
+
+    let gemini = models
+        .iter()
+        .find(|model| model["provider"] == "gemini")
+        .expect("gemini batch model");
+    assert_eq!(gemini["batch"]["wire_format"], "gemini");
+    assert_eq!(gemini["batch"]["harn_live_adapter"]["submit"], false);
+    assert_eq!(gemini["batch"]["harn_live_adapter"]["status"], false);
+    assert_eq!(gemini["batch"]["harn_live_adapter"]["download"], false);
+    let constraints = gemini["constraints"].as_array().expect("constraints");
+    assert!(
+        constraints.iter().any(|constraint| constraint
+            .as_str()
+            .is_some_and(|text| text.contains("live submit/status/download is not implemented"))),
+        "gemini constraints={constraints:?}"
+    );
+
+    let human = run(&["models", "batch", "plan", "--provider", "gemini"], &[]);
+    assert_eq!(human.exit_code, 0, "harn stderr={}", human.stderr);
+    assert!(human.stdout.contains("dry-run only"), "{}", human.stdout);
+    assert!(
+        human
+            .stdout
+            .contains("live submit/status/download is not implemented"),
+        "{}",
+        human.stdout
+    );
+}
+
+#[test]
 fn models_batch_manifest_and_prepare_openai_jsonl() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let requests_path = tmp.path().join("requests.jsonl");
@@ -325,6 +369,7 @@ fn models_batch_manifest_and_prepare_openai_jsonl() {
     let job = &report["jobs"].as_array().expect("jobs")[0];
     assert_eq!(job["provider"], "openai");
     assert_eq!(job["batch"]["wire_format"], "openai");
+    assert_eq!(job["batch"]["harn_live_adapter"]["submit"], true);
     assert_eq!(job["endpoint"], "/v1/chat/completions");
     assert_eq!(job["request_format"], "jsonl");
     assert_eq!(job["submit"]["operation"], "POST /v1/batches");

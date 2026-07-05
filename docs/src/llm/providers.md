@@ -481,17 +481,22 @@ effective flag is true. Use batch lanes only for asynchronous work that does
 not need turn-by-turn tool feedback: offline grading, prompt/corpus refreshes,
 distillation jobs, and low-priority eval analysis. Live coding-agent loops
 still need synchronous provider calls because every tool result influences the
-next model turn. `harn models batch manifest` turns a JSONL request ledger into
-a durable, grouped manifest with stable request ids and row hashes. `harn
-models batch prepare` then writes provider-native request files plus a
-deterministic receipt. `harn models batch submit` consumes that receipt, validates
-request-file hashes, dry-runs without network calls when requested, and submits
-supported provider jobs using provider API credentials. `harn models batch
-status` reads the submission receipt and polls provider lifecycle state behind
-the same Harn boundary. `harn models batch download` consumes status receipts
-for completed jobs and writes provider result files plus a durable results
-receipt. Provider batch envelopes, submission state, and poll/download/rejoin
-logic stay in Harn instead of host products.
+next model turn. `harn models batch plan` also reports
+`batch.harn_live_adapter` so provider capability stays distinct from Harn's
+current live submit/status/download implementation: routes without a live
+adapter are still useful for manifest/prepare dry runs, but need a provider
+adapter before Harn will submit them on the network. `harn models batch
+manifest` turns a JSONL request ledger into a durable, grouped manifest with
+stable request ids and row hashes. `harn models batch prepare` then writes
+provider-native request files plus a deterministic receipt. `harn models batch
+submit` consumes that receipt, validates request-file hashes, dry-runs without
+network calls when requested, and submits supported provider jobs using provider
+API credentials. `harn models batch status` reads the submission receipt and
+polls provider lifecycle state behind the same Harn boundary. `harn models
+batch download` consumes status receipts for completed jobs and writes provider
+result files plus a durable results receipt. Provider batch envelopes,
+submission state, and poll/download/rejoin logic stay in Harn instead of host
+products.
 
 ### Packaged provider adapters via `[llm]`
 
