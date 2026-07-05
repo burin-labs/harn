@@ -10,6 +10,8 @@ pub(crate) struct ModelsArgs {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum ModelsCommand {
+    /// Plan discounted/asynchronous provider batch use for offline workloads.
+    Batch(ModelsBatchArgs),
     /// Print resolved metadata for a model alias or model id as JSON.
     Info(ModelInfoArgs),
     /// Inspect LoRA adapter metadata and compatibility with a Harn model route.
@@ -22,6 +24,40 @@ pub(crate) enum ModelsCommand {
     Recommend(ModelRecommendArgs),
     /// Round-trip a small prompt through a model and report timing, tokens, and cost.
     Test(ModelsTestArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ModelsBatchArgs {
+    #[command(subcommand)]
+    pub command: ModelsBatchCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum ModelsBatchCommand {
+    /// Plan discounted/asynchronous provider batch use for model workloads.
+    Plan(ModelsBatchPlanArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ModelsBatchPlanArgs {
+    /// Restrict to a single provider.
+    #[arg(long)]
+    pub provider: Option<String>,
+    /// Restrict to one model alias or provider-native id.
+    #[arg(long, value_parser = llm_model_completion_parser(), hide_possible_values = true)]
+    pub model: Option<String>,
+    /// Offline workload class (`eval`, `judge`, `corpus`, or `generic`).
+    #[arg(long, default_value = "eval")]
+    pub workload: String,
+    /// Require at least this published batch discount percentage.
+    #[arg(long = "min-discount-percent")]
+    pub min_discount_percent: Option<u32>,
+    /// Require provider-published completion within this many hours.
+    #[arg(long = "max-turnaround-hours")]
+    pub max_turnaround_hours: Option<u32>,
+    /// Emit structured JSON.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]

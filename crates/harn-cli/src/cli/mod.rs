@@ -138,9 +138,10 @@ pub(crate) use merge_captain::{
     MergeCaptainMockStatusArgs, MergeCaptainMockStepArgs, MergeCaptainRunArgs,
 };
 pub(crate) use models::{
-    ModelInfoArgs, ModelRecommendArgs, ModelsArgs, ModelsCommand, ModelsInstallArgs,
-    ModelsListArgs, ModelsLoraArgs, ModelsLoraCommand, ModelsLoraExportArgs, ModelsLoraInspectArgs,
-    ModelsLoraManifestArgs, ModelsLoraPlanArgs, ModelsLoraPreflightArgs, ModelsTestArgs,
+    ModelInfoArgs, ModelRecommendArgs, ModelsArgs, ModelsBatchArgs, ModelsBatchCommand,
+    ModelsBatchPlanArgs, ModelsCommand, ModelsInstallArgs, ModelsListArgs, ModelsLoraArgs,
+    ModelsLoraCommand, ModelsLoraExportArgs, ModelsLoraInspectArgs, ModelsLoraManifestArgs,
+    ModelsLoraPlanArgs, ModelsLoraPreflightArgs, ModelsTestArgs,
 };
 pub(crate) use orchestrator::{
     OrchestratorArgs, OrchestratorCommand, OrchestratorDeployArgs, OrchestratorDeployProvider,

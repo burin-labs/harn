@@ -1336,6 +1336,27 @@ Ollama readiness failures use stable `readiness.status` values, including
 `daemon_down`, `bad_status`, `invalid_response`, `model_missing`, and
 `warmup_failed`. `--verify` and `--warm` exit non-zero when readiness fails.
 
+## harn models batch plan
+
+Plan provider Batch API use for latency-tolerant model workloads:
+
+```bash
+harn models batch plan --workload eval
+harn models batch plan --provider openai --min-discount-percent 50 --json
+harn models batch plan --model gpt-4o-mini --max-turnaround-hours 24
+```
+
+The planner reads Harn's provider catalog and lists routes whose provider
+capabilities advertise async batch support. It is intentionally a planning
+surface, not a submission client: batch submission needs durable provider job
+state, stable request ids, result rejoin logic, and provider-specific
+upload/poll/download handlers. The command keeps those constraints explicit so
+Burin or other hosts can route lower-priority eval, judge, and corpus refresh
+workloads to discounted batch lanes without leaking provider-specific policy
+into product code. Subscription-plan CLI auth is reported as separate from API
+batch credentials; providers that expose Batch APIs still require provider API
+billing.
+
 ## harn models lora export
 
 Export a tool-calling corpus into a trainer-ready LoRA dataset:

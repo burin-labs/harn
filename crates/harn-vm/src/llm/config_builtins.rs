@@ -1512,6 +1512,9 @@ pub(crate) fn capabilities_to_vm_value(
 
 fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> VmValue {
     let mut dict = crate::value::DictMap::new();
+    let capabilities = super::capabilities::lookup(&model.provider, id);
+    let batch_api =
+        crate::llm_config::effective_batch_api_supported(&model.provider, &capabilities);
     dict.put_str("id", id);
     dict.put_str("name", model.name.as_str());
     dict.put_str("provider", model.provider.as_str());
@@ -1603,6 +1606,42 @@ fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> VmValue {
     dict.insert(
         crate::value::intern_key("capabilities"),
         string_list_to_vm_value(model.capabilities.clone()),
+    );
+    dict.insert(
+        crate::value::intern_key("batch_api"),
+        VmValue::Bool(batch_api),
+    );
+    dict.insert(
+        crate::value::intern_key("batch_wire_format"),
+        batch_api
+            .then_some(capabilities.batch_wire_format.as_deref())
+            .flatten()
+            .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
+            .unwrap_or(VmValue::Nil),
+    );
+    dict.insert(
+        crate::value::intern_key("batch_input_mode"),
+        batch_api
+            .then_some(capabilities.batch_input_mode.as_deref())
+            .flatten()
+            .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
+            .unwrap_or(VmValue::Nil),
+    );
+    dict.insert(
+        crate::value::intern_key("batch_discount_percent"),
+        batch_api
+            .then_some(capabilities.batch_discount_percent)
+            .flatten()
+            .map(|value| VmValue::Int(value as i64))
+            .unwrap_or(VmValue::Nil),
+    );
+    dict.insert(
+        crate::value::intern_key("batch_turnaround_hours"),
+        batch_api
+            .then_some(capabilities.batch_turnaround_hours)
+            .flatten()
+            .map(|value| VmValue::Int(value as i64))
+            .unwrap_or(VmValue::Nil),
     );
     dict.insert(
         crate::value::intern_key("pricing"),
@@ -2290,6 +2329,39 @@ mod tests {
         ));
         assert!(matches!(
             together.get("batch_turnaround_hours"),
+            Some(VmValue::Int(24))
+        ));
+    }
+
+    #[test]
+    fn test_llm_catalog_surfaces_batch_metadata_for_scripts() {
+        super::super::capabilities::clear_user_overrides();
+        let VmValue::List(entries) = llm_catalog_value() else {
+            panic!("expected model catalog list");
+        };
+        let openai = entries
+            .iter()
+            .filter_map(VmValue::as_dict)
+            .find(|entry| {
+                entry.get("provider").map(VmValue::display) == Some("openai".to_string())
+                    && entry.get("id").map(VmValue::display) == Some("gpt-4o-mini".to_string())
+            })
+            .expect("openai gpt-4o-mini catalog row");
+        assert!(matches!(openai.get("batch_api"), Some(VmValue::Bool(true))));
+        match openai.get("batch_wire_format") {
+            Some(VmValue::String(value)) => assert_eq!(value.as_str(), "openai"),
+            other => panic!("expected openai batch wire format, got {other:?}"),
+        }
+        match openai.get("batch_input_mode") {
+            Some(VmValue::String(value)) => assert_eq!(value.as_str(), "jsonl_file"),
+            other => panic!("expected jsonl_file batch input mode, got {other:?}"),
+        }
+        assert!(matches!(
+            openai.get("batch_discount_percent"),
+            Some(VmValue::Int(50))
+        ));
+        assert!(matches!(
+            openai.get("batch_turnaround_hours"),
             Some(VmValue::Int(24))
         ));
     }
