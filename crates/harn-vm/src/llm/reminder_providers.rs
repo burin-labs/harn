@@ -1520,6 +1520,14 @@ async fn evaluate_vm_provider(
         "options": ctx.options,
         "config": provider_config_json(ctx, &provider.id).cloned().unwrap_or(JsonValue::Null),
     }));
+    // The runtime is invoking a first-party closure it registered itself
+    // (`register_reminder_provider`) as part of the agent loop, so its body's
+    // bridge/builtin calls are a trusted bridge call rather than model-issued
+    // tool calls. Without this the closure trips the active execution policy
+    // (`enforce_current_policy_for_bridge_builtin`) the moment it calls an app
+    // builtin. Mirrors the tool-handler seams in `agent_tools.rs`; held across
+    // the await so the guard is active while the closure body executes.
+    let _trusted_bridge_guard = crate::orchestration::allow_trusted_bridge_calls();
     let raw = vm.call_closure_pub(&provider.evaluate, &[arg]).await?;
     let effects = crate::orchestration::parse_hook_effects(ctx.event, &raw).map_err(|error| {
         let message = error.to_string();
