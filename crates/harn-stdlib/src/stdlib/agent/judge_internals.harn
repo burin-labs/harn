@@ -240,9 +240,11 @@ pub fn __completion_gate_combine_verify(verify, veto_combine) {
  * (a verifier is configured).
  *
  * Returns `{ok, reason, strict?, feedback?}`. `strict: true` marks a veto that the
- * per-session veto budget may NEVER convert to an allow — the post-write-red
- * class, matching burin's carve-out that a source write always needs a fresh
- * green verifier before completion.
+ * per-session veto budget may NEVER convert to an allow — every post-write-not-green
+ * class (a red verifier, or a source write whose expected verifier has not produced a
+ * green verdict yet). This matches burin's carve-out: its budget-exhaustion refuses to
+ * release the whole `saw_write && !verification_after_last_write` set, because a source
+ * write always needs a fresh green verifier before completion.
  *
  * @effects: []
  * @errors: []
@@ -297,12 +299,15 @@ pub fn __completion_gate_ladder(derived) {
       },
     }
   }
-  // 4. Source written, a verifier is configured, but it has not run yet.
+  // 4. Source written, a verifier is configured, but it has not run yet. Strict:
+  // burin never budget-releases a post-write state without a fresh green verifier
+  // (`saw_write && !verification_after_last_write`), so this class — like the red
+  // one above — is never converted to an allow. Only a green verifier ends it.
   if saw_source && oracle_expected && !verify_known {
     return {
       ok: false,
       reason: "missing_verification",
-      strict: false,
+      strict: true,
       feedback: "You changed source but have not run the verifier yet. Run the narrowest verification for your change before finishing.",
     }
   }

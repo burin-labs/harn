@@ -76,6 +76,8 @@ pipeline test_source_write_green_verifier_allows(task) {
 
 pipeline test_source_write_no_verify_run_vetoes(task) {
   // burin missing_verification: wrote source, verifier configured, never ran.
+  // Strict — burin's budget never releases a post-write state without a fresh
+  // green verifier (`saw_write && !verification_after_last_write`).
   let v = __completion_gate_ladder(
     {
       source_known: true,
@@ -87,7 +89,7 @@ pipeline test_source_write_no_verify_run_vetoes(task) {
   )
   assert_eq(v.ok, false)
   assert_eq(v.reason, "missing_verification")
-  assert_eq(v.strict, false)
+  assert_eq(v.strict, true)
 }
 
 pipeline test_non_coding_task_allows_without_write(task) {
@@ -208,6 +210,16 @@ pipeline test_budget_strict_veto_never_converts(task) {
   )
   assert_eq(out.verdict.ok, false)
   assert_eq(out.verdict.reason, "verification_after_write_red")
+  assert_eq(out.charge, true)
+}
+
+pipeline test_budget_missing_verification_never_converts(task) {
+  // The divergence crux: a post-write state with a configured-but-unrun verifier
+  // is strict in burin (`saw_write && !verification_after_last_write` is never
+  // budget-released), so the budget must never convert it to done either.
+  let out = __completion_gate_apply_budget({ok: false, reason: "missing_verification", strict: true}, 9, 3)
+  assert_eq(out.verdict.ok, false)
+  assert_eq(out.verdict.reason, "missing_verification")
   assert_eq(out.charge, true)
 }
 

@@ -404,8 +404,10 @@ fn __completion_gate_write_counts(raw, classify_write) {
 /**
  * The deterministic gate closure body: turn a `__judge_payload` payload into a
  * `verify_completion` verdict (`{confirm, message?, reason}` — nil-safe for the
- * `__judge_invoke_closure` contract). Degrades to judge-only (abstain) with a
- * surfaced `completion_gate` event when the host supplied no facts at all.
+ * `__judge_invoke_closure` contract). Degrades to judge-only (abstain), surfacing
+ * the degraded mode via the bundle's `_completion_gate.facts_available = false`
+ * flag and a `facts_unavailable` verdict reason, when the host supplied no facts
+ * at all (never a silent fabricated pass).
  */
 fn __completion_gate_evaluate(payload, opts, facts_available) {
   let session_id = to_string(payload?.session_id ?? "")
@@ -487,8 +489,9 @@ fn __completion_gate_evaluate(payload, opts, facts_available) {
  * }))
  * ```
  *
- * With no host-fact callbacks the gate degrades to judge-only mode and surfaces a
- * `completion_gate` `degraded` event rather than fabricating a pass.
+ * With no host-fact callbacks the gate degrades to judge-only mode and surfaces
+ * the degraded state on the returned bundle (`_completion_gate.facts_available =
+ * false`) rather than fabricating a pass.
  *
  * @effects: []
  * @errors: []

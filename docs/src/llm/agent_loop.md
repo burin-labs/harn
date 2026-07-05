@@ -940,7 +940,7 @@ verifier facts. Its default veto ladder (first match wins):
 | `no_source_write` | veto (soft) | task requires a source change, but only cosmetic / zero source writes so far |
 | `verification_after_write_red` | veto (**strict**) | a source write with a red verifier — never released by the budget |
 | `verified_after_write` / `verified` | allow | verifier is green |
-| `missing_verification` | veto (soft) | source written, verifier configured, not yet run |
+| `missing_verification` | veto (**strict**) | source written, verifier configured, not yet run — never released by the budget (a source write always needs a fresh green verifier) |
 | `no_workspace_write` | allow | task does not require a source change |
 | `veto_budget_exhausted` | allow | a soft veto after `max_vetoes` (default 3) — an attributable end |
 
@@ -952,8 +952,8 @@ Host-fact callbacks (all optional): `facts(ctx)` returns
 `{source_write_count?, cosmetic_write_count?, writes?, verify?, requires_write?}`;
 `classify_write(path, diff?)` labels one write `"source"`/`"cosmetic"`/…;
 `verify_command()` runs the verifier oracle. With **no** callbacks the gate
-degrades to judge-only mode and emits a `completion_gate` `degraded` event rather
-than fabricating a pass.
+degrades to judge-only mode and surfaces the degraded state on the returned bundle
+(`_completion_gate.facts_available = false`) rather than fabricating a pass.
 
 ```harn,ignore
 import { agent_completion_gate } from "std/agent/judge"
