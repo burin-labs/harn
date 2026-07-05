@@ -4,6 +4,47 @@ Harn ships several agent primitives at different heights on the stack. Use the
 lowest one that covers what you need. Climbing higher costs you control and code
 transparency; climbing too low costs you machinery you'd otherwise get for free.
 
+## The three rungs, in one line
+
+The whole ladder collapses to three primary rungs, chosen by *how many goals*
+the work has:
+
+> [`llm_call`](../llm/llm_call.md) = **one request** <
+> [`agent_loop`](../llm/agent_loop.md) = **one goal** (one transcript, run to
+> completion) < [`workflow`](../workflow-runtime.md) = **more than one goal,
+> attempt, or model**.
+
+Two rules keep you on the right rung:
+
+- **Never hand-write a `while` around `llm_call`.** If a single goal needs
+  several model round-trips — call a tool, read the result, decide what's next —
+  that *is* `agent_loop`. Rolling your own loop re-implements completion
+  detection, budgets, transcript management, and status semantics that the loop
+  already owns. (The rare exceptions are in [When to write your own
+  loop](#when-to-write-your-own-loop).)
+- **Lift to a `workflow` only when the *shape* matters** — a second goal, a
+  retry-with-feedback attempt loop, a different model per stage, a
+  verify/join/fork, or replay and audit. One agent doing one job is never a
+  workflow.
+
+### `agent_preset` is not a rung
+
+[`agent_preset(kind, options?)`](../llm/agent_loop.md#presets-how-you-build-agent_loop-options) is an
+**options-builder for `agent_loop`**, not a tier above or below it. It resolves
+per-kind fill-nil defaults (provider, budget, model ladder, completion gate,
+lanes/overlays…) and returns a plain `agent_loop` options dict — you still call
+`agent_loop` with the result. Reach for it to *configure* the `agent_loop` rung
+consistently, never as a substitute for choosing a rung.
+
+### Model ladders are not a rung either
+
+`models:` / `ladder:` on `llm_call` (and `agent_loop`) is a cheap-first,
+escalate-on-*transport*-failure fallback *within a single request* — see
+[Model ladders](../docs/llm/harn-quickref.md#model-ladders-models--ladder). It
+changes which model answers, not which rung you are on. A ladder never advances
+on a schema-validation failure (that re-asks the same rung), and it is mutually
+exclusive with an explicit `model:`/`routing:`.
+
 ## The ladder
 
 | Reach for | When | What you get | What you give up |
@@ -44,6 +85,31 @@ one model call, parses the result, and returns, it doesn't need a loop. The loop
 machinery adds latency, transcript management, and status semantics you're not
 using.
 
+## The placement contract: where cross-cutting mechanisms live
+
+The rungs answer *how many goals*. A second question — *where does each
+cross-cutting concern live?* — has one canonical answer per concern, so you
+always import the same module rather than re-deriving the behavior inline. Every
+one of these is a plain stdlib module that composes onto `agent_loop` options
+(or, for a preset, is bundled by a [pack row](../llm/agent_loop.md#presets-how-you-build-agent_loop-options)):
+
+| Concern | Lives in | Reach for |
+|---|---|---|
+| **"Are we actually done?"** completion gate | [`std/agent/judge`](../llm/agent_loop.md#completion-gate-agent_completion_gate) | `agent_completion_gate(options)` — a deterministic veto ladder plus an optional bounded LLM judge, spread into `agent_loop`. |
+| **Pace / budget governors** | [`std/agent/governors`](../stdlib/governors.md) | `with_governance(...)`, `governor_decision(...)` — bound cost and cadence. |
+| **Progress / stall detectors** (unified) | [`std/agent/stall`](../stdlib/governors.md#unified-detectors) | `agent_stall_initial_state()` + `agent_stall_observe_tool_calls(...)` / `agent_stall_no_net_progress(...)` — ping-pong, no-net-progress, and repeated-verified-pass detection in one place. |
+| **Tool-surface narrowing** (lanes) | [`std/agent/lanes`](../stdlib/agent-lanes-overlays.md) | `lane_policy(rows, task, opts)` — classify the task, hide the tools it can't need. |
+| **Prompt overlays** (data-driven nudges) | [`std/agent/overlays`](../stdlib/agent-lanes-overlays.md#overlays-data-driven-prompt-nudges) | `overlay_policy(rows, mode, opts)` — fill-nil prompt fragments, never overriding explicit input. |
+| **Auto-compaction** | [`std/agent/autocompact`](../llm/agent_loop.md#agent-loop-compaction) | `compaction_policy(...)`, `agent_autocompact_if_needed(session, opts)` — keep the transcript under the context ceiling. |
+| **Goal recitation / scratchpad** | `std/agent/scratchpad` | `agent_scratchpad_options(...)`, `agent_scratchpad_recitation_fragment(session, opts)` — re-surface the goal and running notes each turn. |
+| **Default mutation toolset** | [`std/agent/host_tools`](../llm/tools.md#default-mutation-tools) | `agent_edit_tools(registry?, opts?)` — the canonical `write_file` / `edit_file` / `create_directory` / `delete_path` set; customize through the existing middleware seams. |
+| **Retry with feedback** (attempt loop) | [`std/workflow` stage `retry_policy`](../workflow-runtime.md#retry-with-feedback) | `retry_policy: {max_attempts, feedback}` or a `repair_prompt_builder` closure — thread findings into the next attempt. This is a *workflow* concern (more than one attempt at a goal). |
+| **Bundling several of the above** | [`std/agent/presets`](../llm/agent_loop.md#presets-how-you-build-agent_loop-options) | `agent_preset(kind, options?)` — one fill-nil pack ships a budget, provider, model ladder, completion gate, lanes, and overlays together. |
+
+The rule of thumb: **if you're about to write governor / detector / gate /
+lane / overlay / compaction logic inline in a loop body, import the module for
+it instead.** These modules are the home; the loop is the caller.
+
 ## When to write your own loop
 
 Rarely. The cases that justify hand-rolling on top of `agent_dispatch_tool_call`
@@ -66,3 +132,12 @@ For interactive user-facing chats, prefer
 [`agent_chat_loop`](../llm/agent_loop.md#interactive-chat-loops) over running
 `agent_loop` in your own input loop. It preserves one session across user turns,
 routes slash commands, and handles the `wait_for_user` terminal tool.
+
+## See also
+
+- [Glossary](./glossary.md) — one-line definitions for every rung and container
+  (LLM call, iteration, agent loop, stage, workflow, session…).
+- [Coming from elsewhere](./sota-comparison.md) — what LangGraph / OpenAI / ACP
+  call the same ideas.
+- [Migrating to 0.10](../migrations/v0.10.md) — the removed resilience options
+  (`llm_retries`, `llm_backoff_ms`, `transcript_policy`) and their replacements.
