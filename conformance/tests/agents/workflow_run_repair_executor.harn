@@ -1,0 +1,78 @@
+import { workflow_run_repair } from "std/workflow/repair"
+
+/**
+ * Inline executor leaf (v0.9.14): `workflow_run_repair` accepts an `executor`
+ * closure that runs as the stage leaf INSTEAD of spawning a delegated worker,
+ * while harn keeps the retry / verify / feedback-threading machinery around it.
+ * This unblocks an embedder with a bespoke in-process agent loop.
+ *
+ * The load-bearing property is repair-feedback threading through the INLINE
+ * path: the executor emits the pass token only once it has SEEN that token in
+ * `ctx.prior_findings`, so a pass on attempt 2 proves the prior attempt's
+ * findings reached the inline leaf. It also echoes whether the feedback-threaded
+ * `ctx.task` carried the "Previous attempt 1 failed" preamble (default
+ * `feedback: true`), proving the task-string threading path fires inline too. A
+ * blind repair would loop to exhaustion and fail the assertions below.
+ */
+pipeline default() {
+  let token = "GOTOKEN"
+  let executor = { ctx ->
+    let saw = contains(json_stringify(ctx.prior_findings), token)
+    let fb = contains(ctx.task, "Previous attempt 1 failed")
+    let body = if saw {
+      token
+    } else {
+      "empty"
+    }
+    let mark = if fb {
+      "|FB"
+    } else {
+      "|NOFB"
+    }
+    return {text: body + mark}
+  }
+  let verifier = { r -> return {ok: contains(to_string(r?.visible_text), token), findings: [token]} }
+  let out = workflow_run_repair({task: "Z", executor: executor, verify: verifier, max_attempts: 2})
+  // Settled successfully after exactly two attempts (fail -> pass).
+  __io_println(out.ok)
+  __io_println(len(out.attempts))
+  __io_println(out.attempts[0].status)
+  __io_println(out.attempts[1].status)
+  // Attempt records are dense-monotonic with the correct shape.
+  __io_println(out.attempts[0].attempt)
+  __io_println(out.attempts[1].attempt)
+  // Attempt 1's recorded verification carries the finding.
+  __io_println(contains(json_stringify(out.attempts[0].verification.findings), token))
+  // The final output carries the pass token AND the feedback preamble marker —
+  // both could only appear on attempt 2, so both threading paths fired inline.
+  __io_println(contains(out.text, token))
+  __io_println(contains(out.text, "|FB"))
+  // --- Attempt count is honored: a never-satisfiable verifier with
+  //     max_attempts: 1 stops after exactly one inline attempt. ---
+  let capped = workflow_run_repair(
+    {
+      task: "u",
+      executor: { _ctx -> return {text: "x"} },
+      verify: { r -> return {ok: false, findings: ["never satisfied"]} },
+      max_attempts: 1,
+    },
+  )
+  __io_println(len(capped.attempts))
+  __io_println(capped.ok)
+  __io_println(contains(json_stringify(capped.findings), "never satisfied"))
+  // --- Containment: a THROWING executor is a failed attempt, not an aborted
+  //     run. Two attempts still recorded and settled. ---
+  let boom = workflow_run_repair(
+    {
+      task: "b",
+      executor: { ctx ->
+        throw "executor boom on attempt " + to_string(ctx.attempt)
+      },
+      verify: { r -> return {ok: contains(to_string(r?.visible_text), token), findings: [token]} },
+      max_attempts: 2,
+    },
+  )
+  __io_println(len(boom.attempts))
+  __io_println(boom.ok)
+  __io_println(boom.attempts[0].status)
+}

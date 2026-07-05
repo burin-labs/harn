@@ -67,6 +67,14 @@ Pair it with [[harn-agent]] for autonomous execution and [[harn-tracing]] for tr
   stage graph — byte-identical to the hand-authored `{entry, nodes, edges}`.
 - `workflow_run_repair(config)` (`std/workflow/repair`) runs the one-node
   run→validate→repair loop for you (owns no loop of its own).
+- **Inline executor**: pass `executor: { ctx -> ... }` to `workflow_run_repair`
+  (or set `executor` on any stage node) to run a caller-supplied closure as the
+  stage leaf *instead of* spawning a delegated worker — the hook for a bespoke
+  in-process agent loop. The closure receives
+  `{task, attempt, prior_findings, prior_verification, prior_text, artifacts}`
+  and returns `{result | text, artifacts?, transcript?, verification?}`; verify,
+  retry, feedback threading, and sole-writer attempt recording run around it
+  unchanged. Omit it to keep the default delegated-worker leaf.
 - JSON-salvage helpers live in `std/llm/safe`: `strip_think_blocks`,
   `strip_code_fences`, `extract_first_json_object`, `extract_first_json_value`,
   `parse_first_json`.

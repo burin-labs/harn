@@ -919,6 +919,87 @@ fn __stage_apply_fn_verify(node, settled) {
   return settled + {branch: "failed", outcome: "verification_failed", verification: verification}
 }
 
+/**
+ * Shape an inline executor's return value into the settled attempt payload
+ * `__host_stage_execute_once` produces (`{ok, result, artifacts, transcript,
+ * outcome, branch, verification}`), so the executor leaf and the delegated
+ * worker leaf are indistinguishable to the retry loop. A bare (non-dict) return
+ * is treated as the visible text; a dict may carry a full `result`, or a `text`
+ * convenience field that is wrapped into `{visible_text}`. `artifacts` defaults
+ * empty; `transcript` falls back to the input transcript; `outcome`/`branch`/
+ * `verification` default to a clean success and are normally decided by the
+ * node's `verify` gate running around this leaf.
+ */
+fn __stage_shape_executor_result(raw, transcript) {
+  if type_of(raw) != "dict" {
+    return {
+      ok: true,
+      result: {status: "completed", visible_text: to_string(raw)},
+      artifacts: [],
+      transcript: transcript,
+      outcome: "completed",
+      branch: nil,
+      verification: nil,
+    }
+  }
+  let result = if type_of(raw?.result) == "dict" {
+    raw.result
+  } else {
+    {status: "completed", visible_text: __stage_string(raw?.text, "")}
+  }
+  return {
+    ok: true,
+    result: result,
+    artifacts: __stage_list(raw?.artifacts),
+    transcript: raw?.transcript ?? transcript,
+    outcome: __stage_string(raw?.outcome, "completed"),
+    branch: raw?.branch,
+    verification: if type_of(raw?.verification) == "dict" {
+      raw.verification
+    } else {
+      nil
+    },
+  }
+}
+
+/**
+ * Inline executor leaf: run a caller-supplied closure as the stage leaf instead
+ * of spawning a delegated worker. The closure receives the retry context
+ * `{task, attempt, prior_findings, prior_verification, prior_text, artifacts}`
+ * — the same feedback-threaded `task` the delegated leaf would run, plus the
+ * prior failed attempt's structured findings/verification so a bespoke executor
+ * can repair without re-parsing the prompt — and returns `{result | text,
+ * artifacts?, transcript?, verification?}`. Its output is shaped into the same
+ * settled payload the host leaf returns, so the SAME fn-verify gate, retry-with-
+ * feedback threading, and (Rust sole-writer) attempt recording run around it
+ * unchanged. A throw is contained as a failed attempt (`{ok: false, error}`),
+ * mirroring the host leaf's Ok/Err discrimination — a bad executor must not
+ * abort the whole run.
+ */
+fn __stage_run_executor(node, task, attempt, prior, selected, transcript) {
+  let context = {
+    task: task,
+    attempt: attempt,
+    prior_findings: __stage_verification_findings(prior?.verification),
+    prior_verification: prior?.verification,
+    prior_text: __stage_visible_text(prior?.result),
+    artifacts: selected,
+  }
+  let executor = node?.executor
+  let attempted = try {
+    executor(context)
+  }
+  if is_err(attempted) {
+    return {
+      ok: false,
+      error: "stage executor threw: " + __stage_error_message(unwrap_err(attempted)),
+      outcome: "error",
+      branch: "error",
+    }
+  }
+  return __stage_shape_executor_result(unwrap(attempted), transcript)
+}
+
 fn __stage_attempt_record(attempt, status, outcome, branch, error, verification) {
   return {
     attempt: attempt,
@@ -974,11 +1055,19 @@ pub fn workflow_execute_stage_attempts(
         {policy: policy, task: base_task, attempt: attempt - 1, prior: prior, node: node_dict},
       )
     }
-    let raw_settled = __host_stage_execute_once(node_id, node_dict, attempt_task, attempt, arts, selected, transcript)
+    // Inline executor leaf: when the node carries a callable `executor`, run it
+    // as the leaf (in-process, this same VM/thread) instead of spawning a
+    // delegated worker. Everything below — fn-verify gate, retry-with-feedback
+    // threading, sole-writer attempt recording — is byte-identical either way.
+    let raw_settled = if __stage_is_callable(node_dict?.executor) {
+      __stage_run_executor(node_dict, attempt_task, attempt, prior, selected, transcript)
+    } else {
+      __host_stage_execute_once(node_id, node_dict, attempt_task, attempt, arts, selected, transcript)
+    }
     // fn-verify mode: a callable `verify` gates the settled attempt (any stage
     // kind) and threads its findings forward. The dict/command verify path is
     // already classified inside the host call above, so this is a no-op there.
-    let settled = if __stage_bool(raw_settled?.ok, false) {
+    let settled = if __stage_bool(raw_settled.ok, false) {
       __stage_apply_fn_verify(node_dict, raw_settled)
     } else {
       raw_settled

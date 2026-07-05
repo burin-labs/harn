@@ -220,6 +220,10 @@ pub fn workflow_repair_stage_graph(config = nil) {
       tools: cfg?.tools,
       retry_policy: policy,
       verify: cfg?.verify ?? {},
+      // Inline executor leaf: when supplied, the goal stage runs this closure
+      // in-process instead of spawning a delegated worker. The retry/verify/
+      // feedback machinery is identical either way.
+      executor: cfg?.executor,
       output_contract: __patterns_output_contract(cfg?.output_kind ?? "result", cfg?.goal),
     },
   )

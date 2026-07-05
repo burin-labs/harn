@@ -30,7 +30,7 @@ pub(in crate::stdlib) fn workflow_graph_to_vm(graph: &WorkflowGraph) -> Result<V
     for (node_id, node) in &graph.nodes {
         // Re-attach raw VmValue fields serde drops so closure-carrying values
         // (tool registries, fn-verify verifiers) survive the graph round-trip.
-        if node.raw_tools.is_none() && node.raw_verify.is_none() {
+        if node.raw_tools.is_none() && node.raw_verify.is_none() && node.raw_executor.is_none() {
             continue;
         }
         let Some(node_value) = nodes.get(node_id.as_str()).cloned() else {
@@ -45,6 +45,10 @@ pub(in crate::stdlib) fn workflow_graph_to_vm(graph: &WorkflowGraph) -> Result<V
         }
         if let Some(raw_verify) = node.raw_verify.clone() {
             node_map.insert(crate::value::intern_key("verify"), raw_verify);
+        }
+        // Inline executor closure: survives the graph round-trip like fn-verify.
+        if let Some(raw_executor) = node.raw_executor.clone() {
+            node_map.insert(crate::value::intern_key("executor"), raw_executor);
         }
         nodes.insert(crate::value::intern_key(node_id), VmValue::dict(node_map));
     }
