@@ -2091,9 +2091,18 @@ fn host_agent_session_totals_builtin(
 ) -> Result<VmValue, VmError> {
     let session_id = args.first().map(|v| v.display()).unwrap_or_default();
     let totals = with_session(&session_id, HOST_SESSION_TOTALS, |session| {
-        Ok((session.tokens_used, session.cost_used))
+        Ok((
+            session.tokens_used,
+            session.cost_used,
+            session.input_tokens,
+            session.output_tokens,
+        ))
     })?;
     let mut out = crate::value::DictMap::new();
+    // `tokens_used` is cumulative input+output. `input_tokens` / `output_tokens`
+    // are the split components — surfaced so budget/detector logic that keys on
+    // the re-sent context size (e.g. std/agent/stall's token-runaway guard) can
+    // read cumulative INPUT tokens rather than the input+output sum.
     out.insert(
         crate::value::intern_key("tokens_used"),
         VmValue::Int(totals.0),
@@ -2101,6 +2110,14 @@ fn host_agent_session_totals_builtin(
     out.insert(
         crate::value::intern_key("cost_usd"),
         VmValue::Float(totals.1),
+    );
+    out.insert(
+        crate::value::intern_key("input_tokens"),
+        VmValue::Int(totals.2),
+    );
+    out.insert(
+        crate::value::intern_key("output_tokens"),
+        VmValue::Int(totals.3),
     );
     Ok(VmValue::dict(out))
 }

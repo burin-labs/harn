@@ -1,4 +1,8 @@
-import { agent_emit_event, agent_session_inject_feedback } from "std/agent/state"
+import {
+  agent_emit_event,
+  agent_session_inject_feedback,
+  agent_session_totals,
+} from "std/agent/state"
 import { verification_gate_input } from "std/verification"
 
 // Deterministic thrash / degenerate-loop detector over the agent's
@@ -1632,4 +1636,314 @@ pub fn agent_stall_done_judge_due(opts, invocations: int, turn_number: int) -> b
     return false
   }
   return true
+}
+
+// -------------------------------------------------------------------------------------------------
+
+//
+// Unified detector subsystem (#rearch R2). The detector conditions above
+// (repeated-observation / ping-pong loops, no-progress monologue, same-error /
+// stuck-diagnostic, context-window, no-net-progress) are the LOOP, NO-PROGRESS
+// and STUCK-TOOL detectors of burin-code's hand-rolled runtime, already native
+// here and riding the `agent_loop_stall_warning` event. The FOURTH burin
+// detector — token-runaway (output growing past a task's typical size without
+// landing progress, burin `lib/runtime/token-runaway-guard.harn`) — is not
+// budget-native, so it is added below as a `post_turn_callback` overlay that
+// emits the SAME `agent_loop_stall_warning` event and speaks the SAME
+// proceed/warn/abort vocabulary. `DetectorSpec` is the ONE typed surface that
+// lowers a unified spec onto native `stall_diagnostics` config PLUS the overlay.
+//
+
+// -------------------------------------------------------------------------------------------------
+
+// burin token-runaway-guard.harn parity constants.
+const TOKEN_RUNAWAY_DEFAULT_SIGMA = 2.0
+
+const TOKEN_RUNAWAY_THIN_HISTORY_MARGIN = 0.6
+
+const TOKEN_RUNAWAY_HARD_OVERSHOOT_MULTIPLE = 3.0
+
+/**
+ * A unified detector spec. Each sub-key is a data row that either lowers onto
+ * the native `stall_diagnostics` config (loop / no_progress / stuck) or drives
+ * the token-runaway overlay. All optional; absent detectors keep their native
+ * defaults.
+ *   - loop:          { ping_pong_cycles?, repeat? }        -> repeated-action loop
+ *   - no_progress:   { messages? }                          -> no-progress monologue
+ *   - stuck:         { same_diagnostic?, same_error? }      -> stuck-tool / repair
+ *   - token_runaway: TokenRunawayConfig                     -> overlay (below)
+ */
+pub type DetectorSpec = {
+  enabled?: bool,
+  hard_stop_after_trips?: int,
+  loop?: {ping_pong_cycles?: int, repeat?: int},
+  no_progress?: {messages?: int},
+  stuck?: {same_diagnostic?: int, same_error?: int},
+  token_runaway?: {
+    fallback?: float,
+    hard_multiple?: float,
+    median?: float,
+    sigma?: float,
+    stddev?: float,
+  },
+}
+
+/**
+ * token_runaway_resolve_cap computes the per-task input-token ceiling exactly as
+ * burin's `token_runaway_resolve_cap`: `median + sigma*stddev` when a stddev is
+ * known, else a thin-history relative margin over the median; never below the
+ * absolute `fallback` floor; `fallback` when there is no median history.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn token_runaway_resolve_cap(median: float, stddev: float, sigma: float, fallback: float) -> float {
+  if median <= 0.0 {
+    return fallback
+  }
+  let relative = if stddev > 0.0 {
+    median + sigma * stddev
+  } else {
+    median * (1.0 + TOKEN_RUNAWAY_THIN_HISTORY_MARGIN)
+  }
+  if relative < fallback {
+    return fallback
+  }
+  return relative
+}
+
+/**
+ * token_runaway_decision is the PURE token-runaway core, mirroring burin's
+ * `token_runaway_decision`. `config` carries `{median, stddev, sigma?,
+ * fallback?, hard_multiple?}`; `obs` carries `{tokens, making_progress}`.
+ *   - no resolvable cap                         -> proceed "no_cap"
+ *   - tokens >= cap * hard_multiple             -> abort   "token_runaway_hard"
+ *   - tokens <= cap                             -> proceed "within_cap"
+ *   - over cap but making progress              -> proceed "over_cap_but_progressing"
+ *   - over cap, no progress evidence            -> abort   "token_runaway_no_progress"
+ * `making_progress` is the veto up to the hard multiple and defaults false
+ * (conservative: over-cap with no progress evidence still bites).
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn token_runaway_decision(config: dict, obs: dict) -> dict {
+  let sigma = to_float(config?.sigma ?? TOKEN_RUNAWAY_DEFAULT_SIGMA)
+  let fallback = to_float(config?.fallback ?? 0.0)
+  let cap = token_runaway_resolve_cap(
+    to_float(config?.median ?? 0.0),
+    to_float(config?.stddev ?? 0.0),
+    sigma,
+    fallback,
+  )
+  if cap <= 0.0 {
+    return {action: "proceed", cap: cap, reason: "no_cap"}
+  }
+  let tokens = to_float(obs?.tokens ?? 0)
+  let hard_multiple = to_float(config?.hard_multiple ?? TOKEN_RUNAWAY_HARD_OVERSHOOT_MULTIPLE)
+  if tokens >= cap * hard_multiple {
+    return {action: "abort", cap: cap, reason: "token_runaway_hard"}
+  }
+  if tokens <= cap {
+    return {action: "proceed", cap: cap, reason: "within_cap"}
+  }
+  if obs?.making_progress ?? false {
+    return {action: "proceed", cap: cap, reason: "over_cap_but_progressing"}
+  }
+  return {action: "abort", cap: cap, reason: "token_runaway_no_progress"}
+}
+
+fn __token_runaway_is_verification_result(result) -> bool {
+  // A verification/check result carries a diagnostics or errors LIST (empty =
+  // clean). A plain tool success (edit/read/write/non-verify run) carries
+  // neither, so it is NOT verification evidence — the gate helper would
+  // otherwise default a previous-less result to "cleared" and wrongly credit an
+  // edit as a passing verification. This mirrors std/verification's own
+  // gate-bearing precondition.
+  return type_of(result?.diagnostics) == "list"
+    || type_of(result?.errors) == "list"
+    || result?.feedsGates == true
+    || result?.classification?.feedsGates == true
+}
+
+/**
+ * token_runaway_made_progress classifies whether THIS turn advanced
+ * verification — the progress signal burin's token-runaway guard vetoes on. It
+ * is deliberately NOT "any tool succeeded": token-runaway exists precisely for
+ * the `edit_applied_but_wrong` thrash where edit/read storms keep succeeding
+ * while verification never passes, so "any successful tool" would let the soft
+ * cap silently never fire. Progress = a result that is actually a verification
+ * (carries a diagnostics/errors list, per
+ * `__token_runaway_is_verification_result`) AND is PASSING this turn (not a
+ * gate-bearing failure, via std/verification's classifier — the same signal the
+ * native stall detector uses). A successful edit/read is advisory (no
+ * diagnostics list) and does NOT count; a still-failing verify is a gate-bearing
+ * failure and does NOT count.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn token_runaway_made_progress(payload) -> bool {
+  let results = if type_of(payload?.tool_results) == "list" {
+    payload.tool_results
+  } else {
+    payload?.dispatch?.results ?? []
+  }
+  for result in results {
+    if !__token_runaway_is_verification_result(result) {
+      continue
+    }
+    // A verification result present this turn that is NOT a gate-bearing
+    // failure = verification passed / advanced = real progress.
+    let gate = __agent_stall_gate_input(nil, result)
+    if !(gate?.gate_bearing_failure ?? false) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * token_runaway_post_turn(config) returns a `post_turn_callback` closure. It
+ * reads the session's cumulative INPUT tokens (`agent_session_totals().input_tokens`
+ * — the re-sent ballooning context burin's guard keys on, NOT the input+output
+ * `tokens_used` sum), classifies progress as a passing verification this turn
+ * (`token_runaway_made_progress`, NOT "any tool succeeded"), and on an abort
+ * emits the SAME `agent_loop_stall_warning` event native trips use (pattern
+ * "token_runaway", hard_stop:true) before returning a stop verdict. This is the
+ * non-native detector implemented over the existing seam, one vocabulary.
+ *
+ * @effects: [agent]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn token_runaway_post_turn(config: dict) {
+  return { payload ->
+    let session_id = to_string(payload?.session_id ?? payload?.session?.id ?? "")
+    let totals = agent_session_totals(session_id)
+    let obs = {making_progress: token_runaway_made_progress(payload), tokens: to_float(totals?.input_tokens ?? 0)}
+    let decision = token_runaway_decision(config, obs)
+    if decision.action != "abort" {
+      nil
+    } else {
+      let warning = {
+        arguments_digest: "",
+        consecutive_trips: 1,
+        count: to_int(obs.tokens),
+        hard_stop: true,
+        iteration: to_int(payload?.iteration ?? 0),
+        pattern: "token_runaway",
+        reason: decision.reason,
+        repeat_count: 0,
+        signature: "token_runaway:" + decision.reason,
+        signature_digest: "",
+        threshold: to_int(decision.cap),
+        tool_name: "",
+      }
+      agent_emit_event(session_id, "agent_loop_stall_warning", warning)
+      {
+        message: "Token-runaway detector: output has grown well past this task's typical size ("
+          + to_string(to_int(obs.tokens))
+          + " input tokens vs a ~"
+          + to_string(to_int(decision.cap))
+          + " ceiling) without landing verified progress. Stop and report the blocker instead of generating more.",
+        stop: true,
+        stop_reason: "token_runaway:" + decision.reason,
+      }
+    }
+  }
+}
+
+/**
+ * detector_spec_to_stall lowers a unified DetectorSpec onto the native
+ * `stall_diagnostics` config keys `__agent_stall_config` parses. Only the
+ * detectors the native subsystem covers are lowered here (loop / no_progress /
+ * stuck); token_runaway is handled by the overlay. Absent sub-keys are left to
+ * the native defaults.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn detector_spec_to_stall(spec: DetectorSpec) -> dict {
+  var config = {enabled: spec.enabled ?? true}
+  let loop = spec.loop
+  if loop != nil {
+    if loop.repeat != nil {
+      config = config + {repeat_same_observation: loop.repeat}
+    }
+    if loop.ping_pong_cycles != nil {
+      config = config + {ping_pong_cycles: loop.ping_pong_cycles}
+    }
+  }
+  let no_progress = spec.no_progress
+  if no_progress?.messages != nil {
+    config = config + {no_progress_messages: no_progress.messages}
+  }
+  let stuck = spec.stuck
+  if stuck != nil {
+    if stuck.same_error != nil {
+      config = config + {repeat_same_error: stuck.same_error}
+    }
+    if stuck.same_diagnostic != nil {
+      config = config + {repair_aware: true, stuck_same_diagnostic_after: stuck.same_diagnostic}
+    }
+  }
+  if spec.hard_stop_after_trips != nil {
+    config = config + {hard_stop_after_trips: spec.hard_stop_after_trips}
+  }
+  return config
+}
+
+/**
+ * detector_spec_token_runaway returns the token-runaway config from a spec (the
+ * one non-native detector), or nil.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn detector_spec_token_runaway(spec: DetectorSpec) {
+  return spec.token_runaway
+}
+
+/**
+ * unified_detectors_post_turn builds the `post_turn_callback` overlay for the
+ * non-native detectors in a spec (currently token-runaway), or nil when none
+ * apply. The native detectors run via `stall_diagnostics` — see
+ * detector_spec_to_stall.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn unified_detectors_post_turn(spec: DetectorSpec) {
+  let token_runaway = detector_spec_token_runaway(spec)
+  if token_runaway == nil {
+    return nil
+  }
+  return token_runaway_post_turn(token_runaway)
+}
+
+/**
+ * detector_action_of maps a native stall warning onto the shared
+ * proceed/warn/abort governance vocabulary: a hard-stop trip is "abort", any
+ * other warning is "warn", and nil (no trip) is "proceed". Lets a host handle
+ * governor decisions and detector trips through one switch.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn detector_action_of(warning) -> string {
+  if warning == nil {
+    return "proceed"
+  }
+  if warning?.hard_stop ?? false {
+    return "abort"
+  }
+  return "warn"
 }

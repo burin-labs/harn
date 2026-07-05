@@ -1,0 +1,50 @@
+// Parity fixture for the pace/budget governor's PURE decision core
+// (std/agent/governors::governor_decision), derived by reading burin-code's
+// lib/runtime/pace-governor.harn `pace_decision`. Each row maps a burin outcome
+// onto the generalized proceed/warn/abort vocabulary:
+//   below checkpoint                         -> proceed  (burin proceed)
+//   at checkpoint, no progress               -> abort    (burin cut: no_progress_at_checkpoint)
+//   at checkpoint..over_estimate, progress   -> proceed  (burin extend: progress_within_estimate)
+//   >= over_estimate, progress               -> warn     (burin pace_check: over_estimate_while_progressing)
+//   >= hard                                  -> abort    (burin cut: extend/check budget exhausted)
+import { governor_decision } from "std/agent/governors"
+
+// burin-shaped policy: checkpoint = armed budget (1.0x), over_estimate =
+// expected_total + checkpoint (~2.0x), hard = exhausted extends/checks (3.0x).
+const POLICY = {budget: 10.0, checkpoint: 1.0, hard: 3.0, over_estimate: 2.0, signal: "iterations"}
+
+fn row(consumed, made_progress) {
+  let decision = governor_decision(
+    POLICY,
+    {ceiling: 10.0, consumed: consumed, made_progress: made_progress, signal: "iterations"},
+  )
+  return decision.action + ":" + decision.reason
+}
+
+pipeline default() {
+  // fraction 0.5, progressing -> proceed (below checkpoint).
+  __io_println(row(5.0, true))
+  // fraction 1.0, no progress -> abort (burin cut at checkpoint).
+  __io_println(row(10.0, false))
+  // fraction 1.0, progressing -> proceed (burin extend within estimate).
+  __io_println(row(10.0, true))
+  // fraction 1.5, progressing -> proceed (still extending).
+  __io_println(row(15.0, true))
+  // fraction 2.0, progressing -> warn (burin pace_check over estimate).
+  __io_println(row(20.0, true))
+  // fraction 2.5, progressing -> warn.
+  __io_println(row(25.0, true))
+  // fraction 2.0, no progress -> abort (no-progress overrides warn).
+  __io_println(row(20.0, false))
+  // fraction 3.0, progressing -> abort (hard stop beats progress veto).
+  __io_println(row(30.0, true))
+  // fraction 3.0, no progress -> abort (hard).
+  __io_println(row(30.0, false))
+  // no budget -> proceed (inert).
+  __io_println(
+    governor_decision(
+      {budget: 0.0},
+      {ceiling: 0.0, consumed: 5.0, made_progress: false, signal: "tokens"},
+    ).action,
+  )
+}

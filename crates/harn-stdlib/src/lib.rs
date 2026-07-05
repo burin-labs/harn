@@ -430,6 +430,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/agent/stall.harn"),
     },
     StdlibSource {
+        module: "agent/governors",
+        source: include_str!("stdlib/agent/governors.harn"),
+    },
+    StdlibSource {
         module: "agent/control",
         source: include_str!("stdlib/agent/control.harn"),
     },
@@ -1423,6 +1427,7 @@ mod tests {
             "personas/bulletins",
             "agent/host_tools",
             "agent/user",
+            "agent/governors",
             "llm/optimize",
             "llm/judge",
             "llm/refine",

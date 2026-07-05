@@ -1480,3 +1480,44 @@ mod nested_budget_tests {
         assert_eq!(json["task"], "go");
     }
 }
+
+/// Finding 1 (R2 review): `__host_agent_session_totals` must expose cumulative
+/// INPUT tokens (and output, for completeness) separately from the input+output
+/// `tokens_used` sum, so the token-runaway detector in `std/agent/stall` keys on
+/// the re-sent ballooning context (input tokens) rather than the total — the
+/// signal burin's guard uses. Records two turns and asserts the split.
+#[test]
+fn session_totals_expose_cumulative_input_and_output_token_split() {
+    reset_agent_session_host_state();
+    let session_id = crate::agent_sessions::open_or_create(Some("totals-token-split".to_string()));
+    seed_host_session_provider_model(&session_id, "anthropic", "claude-sonnet-4-5");
+    // Accumulate two turns of usage on the same accumulator `record_usage` feeds
+    // (input 100+40, output 30+10). Seeding the accumulator directly keeps the
+    // test focused on what `host_agent_session_totals_builtin` exposes, without
+    // record_usage's transcript-append machinery.
+    super::with_session(&session_id, "totals-token-split", |session| {
+        session.input_tokens = 140;
+        session.output_tokens = 40;
+        session.tokens_used = 180;
+        Ok(())
+    })
+    .expect("seed accumulator");
+    let totals = super::host_agent_session_totals_builtin(
+        &[crate::value::VmValue::string(&session_id)],
+        &mut String::new(),
+    )
+    .expect("totals");
+    let json = vm_to_json(&totals);
+    assert_eq!(
+        json["input_tokens"], 140,
+        "cumulative input tokens exposed separately"
+    );
+    assert_eq!(
+        json["output_tokens"], 40,
+        "cumulative output tokens exposed separately"
+    );
+    assert_eq!(
+        json["tokens_used"], 180,
+        "tokens_used remains the input+output sum"
+    );
+}

@@ -1,0 +1,10 @@
+proceed:within_budget
+abort:no_progress_at_checkpoint
+proceed:within_budget
+proceed:within_budget
+warn:over_estimate_while_progressing
+warn:over_estimate_while_progressing
+abort:no_progress_at_checkpoint
+abort:budget_hard_stop
+abort:budget_hard_stop
+proceed
