@@ -98,6 +98,7 @@ impl BedrockProvider {
         if !inference.is_empty() {
             body["inferenceConfig"] = serde_json::Value::Object(inference);
         }
+        strip_anthropic_sampling_params(&mut body, request);
         if let Some(tool_config) = bedrock_tool_config(request.native_tools.as_deref()) {
             body["toolConfig"] = tool_config;
         }
@@ -113,6 +114,7 @@ impl BedrockProvider {
         let credentials = resolve_aws_credentials().await?;
         let mut body = Self::build_request_body(request);
         apply_provider_overrides(&mut body, request.provider_overrides.as_ref());
+        strip_anthropic_sampling_params(&mut body, request);
         let body_bytes = serde_json::to_vec(&body)
             .map_err(|error| vm_err(format!("bedrock request serialization failed: {error}")))?;
         let path = format!(
@@ -174,6 +176,14 @@ impl BedrockProvider {
         maybe_emit_delta(delta_tx, &result.text);
         Ok(result)
     }
+}
+
+fn strip_anthropic_sampling_params(body: &mut serde_json::Value, request: &LlmRequestPayload) {
+    crate::llm::providers::anthropic::strip_unsupported_bedrock_converse_sampling_params(
+        body,
+        &request.model,
+        &request.thinking,
+    );
 }
 
 impl LlmProvider for BedrockProvider {
@@ -490,9 +500,69 @@ mod tests {
         assert_eq!(body["messages"][0]["role"], "user");
         assert_eq!(body["messages"][0]["content"][0]["text"], "hello");
         assert_eq!(body["inferenceConfig"]["maxTokens"], 32);
+        assert_eq!(body["inferenceConfig"]["temperature"], json!(0.1));
+        assert_eq!(body["inferenceConfig"]["topP"], json!(0.9));
         assert_eq!(
             body["toolConfig"]["tools"][0]["toolSpec"]["inputSchema"]["json"]["type"],
             "object"
+        );
+    }
+
+    #[test]
+    fn claude_47_converse_body_strips_sampling_params() {
+        let mut request = base_request();
+        request.model = "anthropic.claude-opus-4-7-v1:0".to_string();
+
+        let body = BedrockProvider::build_request_body(&request);
+
+        assert_eq!(body["inferenceConfig"]["maxTokens"], 32);
+        assert!(body["inferenceConfig"].get("temperature").is_none());
+        assert!(body["inferenceConfig"].get("topP").is_none());
+    }
+
+    #[test]
+    fn non_claude_converse_body_preserves_sampling_params() {
+        let mut request = base_request();
+        request.model = "meta.llama3-70b-instruct-v1:0".to_string();
+        request.thinking = ThinkingConfig::Enabled {
+            budget_tokens: Some(1024),
+        };
+
+        let body = BedrockProvider::build_request_body(&request);
+
+        assert_eq!(body["inferenceConfig"]["temperature"], json!(0.1));
+        assert_eq!(body["inferenceConfig"]["topP"], json!(0.9));
+    }
+
+    #[test]
+    fn claude_converse_override_thinking_strips_reinserted_sampling_params() {
+        let mut request = base_request();
+        request.model = "anthropic.claude-sonnet-4-6-v1:0".to_string();
+        request.temperature = None;
+        request.top_p = None;
+        request.provider_overrides = Some(json!({
+            "inferenceConfig": {
+                "maxTokens": 32,
+                "temperature": 0.0,
+                "topP": 0.9,
+                "topK": 20
+            },
+            "additionalModelRequestFields": {
+                "thinking": {"type": "enabled", "budget_tokens": 1024}
+            }
+        }));
+
+        let mut body = BedrockProvider::build_request_body(&request);
+        apply_provider_overrides(&mut body, request.provider_overrides.as_ref());
+        strip_anthropic_sampling_params(&mut body, &request);
+
+        assert_eq!(body["inferenceConfig"]["maxTokens"], 32);
+        assert!(body["inferenceConfig"].get("temperature").is_none());
+        assert!(body["inferenceConfig"].get("topP").is_none());
+        assert!(body["inferenceConfig"].get("topK").is_none());
+        assert_eq!(
+            body["additionalModelRequestFields"]["thinking"],
+            json!({"type": "enabled", "budget_tokens": 1024})
         );
     }
 

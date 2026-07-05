@@ -31,6 +31,11 @@ pub(crate) async fn vm_stream_llm(
         if let Some(temp) = opts.temperature {
             body["temperature"] = serde_json::json!(temp);
         }
+        crate::llm::providers::anthropic::strip_unsupported_sampling_params(
+            &mut body,
+            &opts.model,
+            &opts.thinking,
+        );
         body
     } else {
         let mut msgs = Vec::new();

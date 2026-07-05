@@ -109,6 +109,13 @@ async fn vm_call_completion_openai_style(
             }
         }
     }
+    if crate::llm::provider::provider_uses_anthropic_messages(&opts.provider, &opts.model) {
+        crate::llm::providers::anthropic::strip_unsupported_sampling_params(
+            &mut body,
+            &opts.model,
+            &opts.thinking,
+        );
+    }
 
     let req = client
         .post(format!("{base_url}{endpoint}"))
