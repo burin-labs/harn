@@ -1643,7 +1643,7 @@ id. Mutating operations stay unavailable unless the toolbox is configured with
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `command_policy(config)` | config: dict | dict | Normalize a command-runner policy with workspace roots, deterministic deny/approval rules, and optional pre/post closures |
+| `command_policy(config)` | config: dict | dict | Normalize a command-runner policy with workspace roots, deterministic deny/approval rules, optional pre/post closures, and an optional `consent` gate |
 | `command_policy_push(policy)` | policy: dict | nil | Install a command policy for the current VM scope |
 | `command_policy_pop()` | — | nil | Remove the most recently installed command policy |
 | `with_autonomy_policy(policy, fn)` | policy: dict, fn: closure | whatever `fn` returns | Run `fn` with a scoped autonomy tier policy; side-effecting builtins are enforced by the VM |
@@ -1660,7 +1660,15 @@ Install policies directly or pass them to `agent_loop` with
 wrap `host_call("process.exec", ...)`: pre-hooks run before spawn, blocked
 decisions return a `status: "blocked"` envelope without starting a child
 process, post-hooks can annotate the command audit, and hook recursion is
-denied unless `allow_recursive: true`.
+denied unless `allow_recursive: true`. A `require_approval` risk class hard-denies
+by default; when the policy carries a `consent` closure (the
+`std/llm/tool_middleware::with_consent` prompt_fn contract — `true` /
+`{decision: "approved"}` to allow, `false` / `{decision: "denied", reason?}` to
+deny), that disposition instead routes through the consent gate: an approval lets
+the command run, a denial returns a `status: "consent_denied"` envelope without
+spawning. The consent closure receives the command context enriched with
+`consent.reason` and `consent.risk_labels` (the deterministic classification) and
+may call `request_approval` / `ask_user` to block on a human.
 
 ## Async and timing
 

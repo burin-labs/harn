@@ -1666,6 +1666,7 @@ mod tests {
                 require_approval: Default::default(),
                 pre: None,
                 post: None,
+                consent: None,
                 allow_recursive: false,
             });
 
