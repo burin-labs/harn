@@ -34,8 +34,44 @@ pub(crate) struct ModelsBatchArgs {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum ModelsBatchCommand {
+    /// Write a durable provider-neutral manifest for offline batch requests.
+    Manifest(ModelsBatchManifestArgs),
     /// Plan discounted/asynchronous provider batch use for model workloads.
     Plan(ModelsBatchPlanArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ModelsBatchManifestArgs {
+    /// JSONL request ledger to group into provider batch jobs.
+    #[arg(long, value_name = "PATH")]
+    pub requests: std::path::PathBuf,
+    /// Write the canonical manifest JSON to this path.
+    #[arg(long, value_name = "PATH")]
+    pub out: std::path::PathBuf,
+    /// Default provider for rows that omit `provider`.
+    #[arg(long)]
+    pub provider: Option<String>,
+    /// Default model alias or provider-native id for rows that omit `model`.
+    #[arg(long, value_parser = llm_model_completion_parser(), hide_possible_values = true)]
+    pub model: Option<String>,
+    /// Offline workload class (`eval`, `judge`, `corpus`, or `generic`).
+    #[arg(long, default_value = "eval")]
+    pub workload: String,
+    /// Default tool-call convention for rows that omit `tool_format`.
+    #[arg(long = "tool-format", default_value = "auto")]
+    pub tool_format: String,
+    /// Prefix for generated custom ids when rows omit `custom_id` / `id`.
+    #[arg(long = "id-prefix", default_value = "harn-batch")]
+    pub id_prefix: String,
+    /// Require at least this published batch discount percentage.
+    #[arg(long = "min-discount-percent")]
+    pub min_discount_percent: Option<u32>,
+    /// Require provider-published completion within this many hours.
+    #[arg(long = "max-turnaround-hours")]
+    pub max_turnaround_hours: Option<u32>,
+    /// Emit structured JSON.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]

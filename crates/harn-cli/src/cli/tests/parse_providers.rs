@@ -622,10 +622,61 @@ fn test_parses_models_batch_plan_args() {
     let ModelsCommand::Batch(args) = args.command else {
         panic!("expected models batch command");
     };
-    let ModelsBatchCommand::Plan(args) = args.command;
+    let ModelsBatchCommand::Plan(args) = args.command else {
+        panic!("expected models batch plan command");
+    };
     assert_eq!(args.provider.as_deref(), Some("openai"));
     assert_eq!(args.model.as_deref(), Some("gpt-4o-mini"));
     assert_eq!(args.workload, "eval");
+    assert_eq!(args.min_discount_percent, Some(50));
+    assert_eq!(args.max_turnaround_hours, Some(24));
+    assert!(args.json);
+}
+
+#[test]
+fn test_parses_models_batch_manifest_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "models",
+        "batch",
+        "manifest",
+        "--requests",
+        "requests.jsonl",
+        "--out",
+        "manifest.json",
+        "--provider",
+        "openai",
+        "--model",
+        "gpt-4o-mini",
+        "--workload",
+        "eval",
+        "--tool-format",
+        "json",
+        "--id-prefix",
+        "eval-holdout",
+        "--min-discount-percent",
+        "50",
+        "--max-turnaround-hours",
+        "24",
+        "--json",
+    ]);
+
+    let Command::Models(args) = cli.command.unwrap() else {
+        panic!("expected models command");
+    };
+    let ModelsCommand::Batch(args) = args.command else {
+        panic!("expected models batch command");
+    };
+    let ModelsBatchCommand::Manifest(args) = args.command else {
+        panic!("expected models batch manifest command");
+    };
+    assert_eq!(args.requests, std::path::PathBuf::from("requests.jsonl"));
+    assert_eq!(args.out, std::path::PathBuf::from("manifest.json"));
+    assert_eq!(args.provider.as_deref(), Some("openai"));
+    assert_eq!(args.model.as_deref(), Some("gpt-4o-mini"));
+    assert_eq!(args.workload, "eval");
+    assert_eq!(args.tool_format, "json");
+    assert_eq!(args.id_prefix, "eval-holdout");
     assert_eq!(args.min_discount_percent, Some(50));
     assert_eq!(args.max_turnaround_hours, Some(24));
     assert!(args.json);

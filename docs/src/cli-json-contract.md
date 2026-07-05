@@ -92,6 +92,7 @@ versions.
 | `harn explain --catalog --json` | Full diagnostic-code catalog                            |
 | `harn session export --json`   | Portable session bundle export                           |
 | `harn provider catalog show --json` | Resolved provider/model catalog snapshot                 |
+| `harn models batch manifest --json` | Durable offline batch manifest summary and request groups |
 | `harn models lora plan --json` | LoRA/QLoRA route, trainer, data, eval, and launch contract |
 | `harn models lora inspect --json` | PEFT adapter compatibility report and launch metadata |
 | `harn models lora export --json` | Trainer dataset export report with contract id and stats |

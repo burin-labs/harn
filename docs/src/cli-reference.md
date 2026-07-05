@@ -1357,6 +1357,29 @@ into product code. Subscription-plan CLI auth is reported as separate from API
 batch credentials; providers that expose Batch APIs still require provider API
 billing.
 
+## harn models batch manifest
+
+Build a durable, provider-neutral manifest for a JSONL request ledger:
+
+```bash
+harn models batch manifest --provider openai --model gpt-4o-mini \
+  --requests ./requests.jsonl --out ./batch-manifest.json
+harn models batch manifest --provider openai --model gpt-4o-mini \
+  --requests ./requests.jsonl --out ./batch-manifest.json --tool-format json --json
+```
+
+Each input row must be a JSON object. Rows can declare `provider`, `model`,
+`tool_format`, `endpoint`, `custom_id`, and `metadata`; omitted provider/model
+fields fall back to the CLI flags. Harn resolves every row through the same
+catalog metadata as `harn models batch plan`, groups requests by provider,
+model, provider batch wire format, endpoint, and tool-call convention, then
+writes a manifest with stable request ids and per-row hashes.
+
+`manifest` still does not submit work to providers. It is the durable planning
+artifact that lower-priority eval, judge, corpus-refresh, and distillation jobs
+can hand to provider-specific upload/poll/download adapters without leaking
+provider batch details into Burin or other host products.
+
 ## harn models lora export
 
 Export a tool-calling corpus into a trainer-ready LoRA dataset:
