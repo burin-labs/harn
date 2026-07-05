@@ -42,7 +42,7 @@ No benchmark summary is baked into this checked-in page. To layer local empirica
 | `Sambanova` | OpenAI-compatible chat completions | `sambanova:sambanova/gpt-oss-120b` | `text` | no | yes | `native` / `native_json` | `effort,reasoning_effort` | no | No | `high` | `not_recorded` |
 | `Siliconflow` | OpenAI-compatible chat completions | `siliconflow` | `text` | no | yes | `none` / `none` | none | no | No | `provider_default` | `not_recorded` |
 | `Tgi` | OpenAI-compatible chat completions | `tgi` | `text` | no | yes | `none` / `none` | none | no | No | `local_zero_cost` | `not_recorded` |
-| `Together` | OpenAI-compatible chat completions | `together:Qwen/Qwen3-Coder-Next-FP8` | `native` | yes | yes | `native` / `delimited` | none | no | Yes | `high` | `not_recorded` |
+| `Together` | OpenAI-compatible chat completions | `together:Qwen/Qwen3-Coder-Next-FP8` | `native` | yes | yes | `native` / `delimited` | none | no | Yes (50%) | `high` | `not_recorded` |
 | `Vertex` | Gemini generateContent | `vertex:gemini-*` | `native` | yes | yes | `none` / `native_json` | none | no | No | `provider_default` | `not_recorded` |
 | `Vllm` | OpenAI-compatible chat completions | `vllm` | `text` | no | yes | `none` / `none` | none | no | No | `local_zero_cost` | `not_recorded` |
 | `Xai` | OpenAI-compatible chat completions | `xai:grok-build-0.1` | `native` | yes | yes | `native` / `native_json` | `adaptive` | yes | Yes | `high` | `not_recorded` |

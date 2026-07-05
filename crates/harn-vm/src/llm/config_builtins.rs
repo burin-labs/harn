@@ -2325,7 +2325,7 @@ mod tests {
         }
         assert!(matches!(
             together.get("batch_discount_percent"),
-            Some(VmValue::Nil)
+            Some(VmValue::Int(50))
         ));
         assert!(matches!(
             together.get("batch_turnaround_hours"),
