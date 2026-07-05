@@ -1,1 +1,0 @@
-- Add a live xAI adapter to `harn models batch` for JSONL file submit, status polling, and result download receipts.
