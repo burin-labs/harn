@@ -105,6 +105,33 @@ const STALL_RESERVED_TERMINAL_VERIFY_ITERATIONS = 2
 // nudging forever.
 const STALL_HARD_STOP_AFTER_TRIPS = 3
 
+// Verify-state progress axis (#burin-cutover seam 1, default OFF — active only
+// when a `progress_signal` callback is supplied). Two cut predicates:
+//   (A) long-stall: the same failure diagnostic has recurred for at least
+//       `verify_state_streak` turns AND the host's monotone best verify-state
+//       scalar has not advanced for at least `verify_state_stall_turns` turns;
+//       OR the same diagnostic has hard-recurred `verify_state_recurrence_hard`
+//       times on its own.
+//   (B) short write-axis cut (closes the pace-governor blind spot where an edit
+//       lands every turn but the verifier never moves): the verify-state scalar
+//       has not advanced for at least `no_verifier_progress_limit` turns AND a
+//       workspace write landed during that non-advancing streak.
+const STALL_VERIFY_STATE_STREAK = 3
+
+const STALL_VERIFY_STATE_STALL_TURNS = 12
+
+const STALL_VERIFY_STATE_RECURRENCE_HARD = 4
+
+const STALL_NO_VERIFIER_PROGRESS_LIMIT = 3
+
+// Delivered-fix trigger (#burin-cutover seam 3, default OFF — active only when a
+// `remediation_delivered` callback is supplied): the same-diagnostic streak at
+// which a delivered-but-not-landing fix escalates to `delivered_fix_not_landing`.
+// Deliberately LOWER than the plain-repeat `stuck_same_diagnostic_after` (3): a
+// fix that was actually attempted and still did not land is a stronger stuck
+// signal than an untouched same-failure repeat, so it fires one turn sooner.
+const STALL_DELIVERED_FIX_AFTER = 2
+
 // Tools that report progress without changing task state. A turn whose only
 // tool call is one of these is "narrating progress without making it": it is
 // counted as a no-progress turn for stall accounting, so a run of them (e.g. a
@@ -154,6 +181,12 @@ type AgentStallConfig = {
   no_net_progress_hard_cap_after: int,
   reserved_terminal_verify: bool,
   reserved_terminal_verify_iterations: int,
+  verify_state_streak: int,
+  verify_state_stall_turns: int,
+  verify_state_recurrence_hard: int,
+  no_verifier_progress_limit: int,
+  progress_signal?: any,
+  remediation_delivered?: any,
 }
 
 type AgentStallWarning = {
@@ -172,6 +205,7 @@ type AgentStallWarning = {
   diagnostic_class?: string,
   diagnostic_signature?: string,
   diagnostic_snippet?: string,
+  remediation_delivered?: bool,
 }
 
 type AgentStallState = {
@@ -203,8 +237,26 @@ type AgentStallState = {
   edit_since_failure: bool,
   reverify_owed: bool,
   verified_write_epoch: int,
+  verify_state_seen: bool,
+  verify_state_high: float,
+  verify_turns_since_advance: int,
+  verify_wrote_since_advance: bool,
 }
 
+/**
+ * Verify-state progress axis (#burin-cutover seam 1). When the host supplies a
+ * `progress_signal` callback, these track the monotone "best verification
+ * state" it reports so the no-net-progress decision can key on "verification
+ * advanced" instead of edit/tool signature deltas ("writes are not progress").
+ * Inert (all default) when no progress_signal is configured.
+ *   - verify_state_seen: has any scalar been observed yet.
+ *   - verify_state_high: high-water mark of the reported scalar.
+ *   - verify_turns_since_advance: consecutive turns whose scalar did NOT exceed
+ *     the high-water mark (i.e. the verifier has not moved).
+ *   - verify_wrote_since_advance: a workspace write landed since the verifier
+ *     last advanced — the "edit lands every turn but the verifier never moves"
+ *     signal that drives the short write-axis cut.
+ */
 type AgentStallObservation = {
   state: AgentStallState,
   enabled: bool,
@@ -251,6 +303,23 @@ fn __agent_stall_repair_value(flat, nested, key: string) {
   return nested[key]
 }
 
+/**
+ * Fact-intake seams (#burin-cutover): `progress_signal` / `remediation_delivered`
+ * are host-supplied CALLBACKS the mechanism invokes — the host owns the
+ * coding-specific fact, harn owns the loop/escalation decision. Both are
+ * optional and validated here so a mistyped value fails loudly at config time
+ * rather than blowing up mid-run when the callback is first invoked.
+ */
+fn __agent_stall_closure(value, field: string) {
+  if value == nil {
+    return nil
+  }
+  if type_of(value) == "closure" {
+    return value
+  }
+  throw "agent_loop: stall_diagnostics." + field + " must be a closure or nil; got " + type_of(value)
+}
+
 fn __agent_stall_default_config() -> AgentStallConfig {
   return {
     enabled: false,
@@ -273,6 +342,12 @@ fn __agent_stall_default_config() -> AgentStallConfig {
     no_net_progress_hard_cap_after: STALL_NO_NET_PROGRESS_HARD_CAP_AFTER,
     reserved_terminal_verify: false,
     reserved_terminal_verify_iterations: STALL_RESERVED_TERMINAL_VERIFY_ITERATIONS,
+    verify_state_streak: STALL_VERIFY_STATE_STREAK,
+    verify_state_stall_turns: STALL_VERIFY_STATE_STALL_TURNS,
+    verify_state_recurrence_hard: STALL_VERIFY_STATE_RECURRENCE_HARD,
+    no_verifier_progress_limit: STALL_NO_VERIFIER_PROGRESS_LIMIT,
+    progress_signal: nil,
+    remediation_delivered: nil,
   }
 }
 
@@ -369,6 +444,34 @@ fn __agent_stall_config(value) -> AgentStallConfig {
       STALL_RESERVED_TERMINAL_VERIFY_ITERATIONS,
       1,
     ),
+    verify_state_streak: __agent_stall_int(
+      __agent_stall_repair_value(value, repair_diagnostics, "verify_state_streak"),
+      STALL_VERIFY_STATE_STREAK,
+      1,
+    ),
+    verify_state_stall_turns: __agent_stall_int(
+      __agent_stall_repair_value(value, repair_diagnostics, "verify_state_stall_turns"),
+      STALL_VERIFY_STATE_STALL_TURNS,
+      1,
+    ),
+    verify_state_recurrence_hard: __agent_stall_int(
+      __agent_stall_repair_value(value, repair_diagnostics, "verify_state_recurrence_hard"),
+      STALL_VERIFY_STATE_RECURRENCE_HARD,
+      1,
+    ),
+    no_verifier_progress_limit: __agent_stall_int(
+      __agent_stall_repair_value(value, repair_diagnostics, "no_verifier_progress_limit"),
+      STALL_NO_VERIFIER_PROGRESS_LIMIT,
+      1,
+    ),
+    progress_signal: __agent_stall_closure(
+      __agent_stall_repair_value(value, repair_diagnostics, "progress_signal"),
+      "progress_signal",
+    ),
+    remediation_delivered: __agent_stall_closure(
+      __agent_stall_repair_value(value, repair_diagnostics, "remediation_delivered"),
+      "remediation_delivered",
+    ),
   }
 }
 
@@ -409,6 +512,10 @@ pub fn agent_stall_initial_state() -> AgentStallState {
     edit_since_failure: false,
     reverify_owed: false,
     verified_write_epoch: 0,
+    verify_state_seen: false,
+    verify_state_high: 0.0,
+    verify_turns_since_advance: 0,
+    verify_wrote_since_advance: false,
   }
 }
 
@@ -796,6 +903,24 @@ fn __agent_stall_feedback_text(warning: AgentStallWarning) -> string {
       + "\nStop retrying the same fix. Re-read the relevant code, form a NEW hypothesis "
       + "about the root cause, or gather different evidence before editing again. If you "
       + "cannot make progress, report this specific blocker instead of repeating."
+  }
+  // Delivered-fix trigger (#burin-cutover seam 3): a repair WAS delivered for
+  // this exact failure and it STILL did not land — a stronger stuck signal than
+  // an untouched same-failure repeat, so the nudge is blunter.
+  if pattern == "delivered_fix_not_landing" {
+    let snippet = to_string(warning.diagnostic_snippet ?? "")
+    let evidence = if snippet != "" {
+      " The failing evidence is unchanged:\n" + snippet
+    } else {
+      ""
+    }
+    return "Repair diagnostic: a fix was delivered for this failure but it did NOT land — the same failure has recurred across "
+      + count
+      + " turns despite the attempted remediation."
+      + evidence
+      + "\nThe current approach is not working. Do NOT re-apply the same fix. Re-read the"
+      + " root cause from scratch, form a materially different hypothesis, or report this"
+      + " specific blocker instead of repeating."
   }
   let core = if pattern == "repeated_same_observation" {
     "the action `" + warning.tool_name + "` produced the same observation " + count
@@ -1377,6 +1502,61 @@ fn __agent_stall_apply_repair(
       hard_stop: true,
     }
   }
+  // Delivered-fix trigger (#burin-cutover seam 3, HIGHEST precedence). When the
+  // host supplies a `remediation_delivered` fact callback and reports that a
+  // repair WAS delivered for the ACTIVE failure signature yet that SAME failure
+  // is still landing, escalate one turn sooner than the plain-repeat stuck nudge
+  // (STALL_DELIVERED_FIX_AFTER = 2 < stuck_same_diagnostic_after = 3): a fix that
+  // was actually attempted and did not land is a stronger stuck signal than an
+  // untouched same-failure repeat. harn owns only the TRIGGER (the distinct
+  // `delivered_fix_not_landing` pattern + warning.remediation_delivered = true);
+  // the host's smart-escalation actuator decides what to do with it. The
+  // callback is invoked ONLY inside the guard below, so an absent callback (or a
+  // turn that does not otherwise qualify) leaves behavior byte-identical. Fires
+  // regardless of `repair_aware` (it keys on the fact, not the repair nudge).
+  let delivered_streak_advanced = folded.same_diagnostic_streak > observation.state.same_diagnostic_streak
+  let delivered_candidate = config.remediation_delivered != nil
+    && folded.last_diagnostic_class == "fail"
+    && folded.same_diagnostic_streak >= STALL_DELIVERED_FIX_AFTER
+    && delivered_streak_advanced
+    && observation.warning == nil
+  if delivered_candidate {
+    let delivered = config
+      .remediation_delivered(
+      {prev_dispatch: prev_dispatch, session_id: session_id, signature: folded.last_diagnostic_signature},
+    )
+    if delivered {
+      let tripped = __agent_stall_register_trip(folded, config)
+      let warning = __agent_stall_warning_record(
+        iteration,
+        "",
+        {},
+        tripped.last_diagnostic_signature,
+        "delivered_fix_not_landing",
+        tripped.same_diagnostic_streak,
+        tripped.consecutive_trips,
+        tripped.hard_stop,
+        config,
+        STALL_DELIVERED_FIX_AFTER,
+      )
+        + {
+        diagnostic_class: tripped.last_diagnostic_class,
+        diagnostic_signature: tripped.last_diagnostic_signature,
+        diagnostic_snippet: tripped.last_diagnostic_snippet,
+        remediation_delivered: true,
+      }
+      let emitted = __agent_stall_maybe_emit(session_id, warning, config, tripped, defer_feedback)
+      let next_state = emitted.state + {warnings: emitted.state.warnings.push(warning)}
+      return {
+        state: next_state,
+        enabled: true,
+        warning: warning,
+        feedback_deferred: emitted.feedback_deferred ?? false,
+        config: config,
+        hard_stop: next_state.hard_stop,
+      }
+    }
+  }
   if !config.repair_aware {
     return observation + {state: folded}
   }
@@ -1434,6 +1614,11 @@ fn __agent_stall_apply_repair(
  * workspace-mutating edit; it is inert unless `post_edit_reverify` or
  * `repair_aware` is set.
  *
+ * `payload` is the full post-turn payload; it is passed to the host's
+ * `progress_signal` verify-state callback (#burin-cutover seam 1) and is
+ * otherwise unused. Absent a `progress_signal` callback it is ignored, so the
+ * default (payload nil / callback unset) is byte-identical to today.
+ *
  * @effects: [agent]
  * @errors: [agent_loop]
  * @api_stability: experimental
@@ -1450,6 +1635,7 @@ pub fn agent_stall_observe_tool_calls(
   had_parse_errors = false,
   turn_made_edit = false,
   turn_stop_reason = "",
+  payload = nil,
 ) -> AgentStallObservation {
   let observation = __agent_stall_observe_core(
     session_id,
@@ -1466,7 +1652,7 @@ pub fn agent_stall_observe_tool_calls(
   if !observation.enabled {
     return observation
   }
-  return __agent_stall_apply_repair(
+  let repaired = __agent_stall_apply_repair(
     session_id,
     observation.config,
     observation,
@@ -1475,6 +1661,13 @@ pub fn agent_stall_observe_tool_calls(
     turn_made_edit,
     defer_feedback,
   )
+  if observation.config.progress_signal == nil {
+    return repaired
+  }
+  return repaired
+    + {
+    state: __agent_stall_fold_verify_state(repaired.state, observation.config, payload, turn_made_edit),
+  }
 }
 
 /**
@@ -1503,21 +1696,85 @@ pub fn agent_stall_repair_config(raw_config) -> dict {
 }
 
 /**
+ * __agent_stall_fold_verify_state folds the host's verify-state fact for one
+ * turn (#burin-cutover seam 1). It is inert unless a `progress_signal` callback
+ * is configured. The callback receives the FULL post-turn payload and returns
+ * the turn's monotone best verify-state scalar (e.g. tests-passing count, or 1
+ * when the build is clean else 0); nil means "no verification evidence this
+ * turn" = FLAT (the high-water mark is preserved and the turn does NOT count as
+ * an advance). `turn_made_edit` reports whether a workspace write landed on the
+ * turn `payload` describes.
+ *
+ *   - scalar > high-water (or first ever) => VERIFIER ADVANCED: raise the
+ *     high-water, reset `verify_turns_since_advance` to 0 and clear
+ *     `verify_wrote_since_advance`. Genuine progress; the axis is quiet again.
+ *   - scalar <= high-water, or nil        => VERIFIER FLAT: increment
+ *     `verify_turns_since_advance`, and set `verify_wrote_since_advance` if a
+ *     write landed this turn (arming the short write-axis cut).
+ */
+fn __agent_stall_fold_verify_state(
+  state: AgentStallState,
+  config: AgentStallConfig,
+  payload,
+  turn_made_edit: bool,
+) -> AgentStallState {
+  if config.progress_signal == nil {
+    return state
+  }
+  let raw = config.progress_signal(payload)
+  if raw == nil {
+    return state
+      + {
+      verify_turns_since_advance: state.verify_turns_since_advance + 1,
+      verify_wrote_since_advance: state.verify_wrote_since_advance || turn_made_edit,
+    }
+  }
+  let scalar = to_float(raw)
+  let advanced = !state.verify_state_seen || scalar > state.verify_state_high
+  if advanced {
+    return state
+      + {
+      verify_state_seen: true,
+      verify_state_high: scalar,
+      verify_turns_since_advance: 0,
+      verify_wrote_since_advance: false,
+    }
+  }
+  return state
+    + {
+    verify_state_seen: true,
+    verify_turns_since_advance: state.verify_turns_since_advance + 1,
+    verify_wrote_since_advance: state.verify_wrote_since_advance || turn_made_edit,
+  }
+}
+
+/**
  * agent_stall_no_net_progress reports whether THIS turn is a no-net-advancement
  * thrash for the purpose of the loop's budget-extension decision. It is the
  * harn-side twin of burin's no-net-progress ripcord: the default extension
  * policy treats any tool-calling turn as "progress" and keeps extending the
  * iteration budget, so a model re-hitting the SAME compile/test failure every
- * turn (no error draining toward a green build) buys unbounded runway. This
- * returns true ONLY when the guard is enabled AND the loop is on the verify-
- * bearing FAILING path (`last_diagnostic_class == "fail"`) AND the same failure
- * signature has recurred for at least `no_net_progress_extend_after` turns OR
- * the hard failing-verify floor has crossed `no_net_progress_hard_cap_after`.
- * The same-signature path catches flat stalls early. The hard floor catches
- * varied/slow-draining failures that keep changing signatures but still never
- * produce a clean verification. It never fires on read-only / explore turns (no
- * failing verification => class != "fail"). Default OFF: when the guard is
- * disabled it always returns false, preserving today's behavior.
+ * turn (no error draining toward a green build) buys unbounded runway.
+ *
+ * VERIFY-STATE AXIS (#burin-cutover seam 1): when the host supplies a
+ * `progress_signal` callback the decision keys on whether the VERIFIER moved,
+ * not on edit/tool signatures ("writes are not progress"). Two cut predicates:
+ *   (A) long-stall: the same failure diagnostic recurred for at least
+ *       `verify_state_streak` turns AND the verify-state scalar has not advanced
+ *       for at least `verify_state_stall_turns` turns; OR the same diagnostic
+ *       hard-recurred `verify_state_recurrence_hard` times on its own.
+ *   (B) write-axis: the verify-state scalar has not advanced for at least
+ *       `no_verifier_progress_limit` turns AND a write landed during that
+ *       non-advancing streak (edit lands every turn but the verifier never
+ *       moves) — no long wait required.
+ *
+ * SIGNATURE AXIS (default, no `progress_signal`): returns true ONLY when the
+ * guard is enabled AND the loop is on the verify-bearing FAILING path
+ * (`last_diagnostic_class == "fail"`) AND the same failure signature has
+ * recurred for at least `no_net_progress_extend_after` turns OR the hard
+ * failing-verify floor has crossed `no_net_progress_hard_cap_after`. Default
+ * OFF: when the guard is disabled and no callback is supplied it always returns
+ * false, preserving today's behavior byte-identically.
  *
  * @effects: []
  * @errors: []
@@ -1525,6 +1782,15 @@ pub fn agent_stall_repair_config(raw_config) -> dict {
  */
 pub fn agent_stall_no_net_progress(raw_config, stall_state: AgentStallState) -> bool {
   let config = __agent_stall_config(raw_config)
+  if config.progress_signal != nil {
+    let streak = stall_state.same_diagnostic_streak
+    let long_stall = streak >= config.verify_state_streak
+      && stall_state.verify_turns_since_advance >= config.verify_state_stall_turns
+    let hard_recurrence = streak >= config.verify_state_recurrence_hard
+    let write_axis = stall_state.verify_turns_since_advance >= config.no_verifier_progress_limit
+      && stall_state.verify_wrote_since_advance
+    return long_stall || hard_recurrence || write_axis
+  }
   if !config.no_net_progress_extend_guard {
     return false
   }

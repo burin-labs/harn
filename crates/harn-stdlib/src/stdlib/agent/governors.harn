@@ -86,6 +86,10 @@ pub fn governor_pace_extend_max() -> int {
  *     which the governor starts caring / warns while progressing / hard-stops.
  *   - progress_tools: optional allowlist of tool names that count as progress.
  *     When absent, ANY successful tool this turn counts as progress.
+ *   - extend_max / pace_check_max: smart-timeout pace caps used only by
+ *     `governor_pace_decision` (#burin-cutover seam 2) — the silent-extend and
+ *     recalibration-check-in budgets; default to GOVERNOR_PACE_EXTEND_MAX /
+ *     GOVERNOR_PACE_CHECK_MAX_INJECTIONS.
  */
 pub type GovernorPolicy = {
   budget?: float,
@@ -94,6 +98,8 @@ pub type GovernorPolicy = {
   over_estimate?: float,
   progress_tools?: list<string>,
   signal?: string,
+  extend_max?: int,
+  pace_check_max?: int,
 }
 
 fn __governor_abort(reason: string, signal: string, fraction: float) -> dict {
@@ -152,6 +158,138 @@ pub fn governor_decision(policy: GovernorPolicy, obs: dict) -> dict {
     return __governor_warn("over_estimate_while_progressing", signal, fraction)
   }
   return __governor_proceed("within_budget", signal, fraction)
+}
+
+/** The checkpoint cadence in ms (one budget window). Defaults to the armed budget. */
+fn __governor_pace_checkpoint_ms(obs: dict, armed: int) -> int {
+  let raw = to_int(obs?.checkpoint_ms ?? 0) ?? 0
+  if raw > 0 {
+    return raw
+  }
+  return armed
+}
+
+/** The estimated total wall in ms. Defaults to the armed budget. */
+fn __governor_pace_expected_total_ms(obs: dict, armed: int) -> int {
+  let raw = to_int(obs?.expected_total_ms ?? 0) ?? 0
+  if raw > 0 {
+    return raw
+  }
+  return armed
+}
+
+/**
+ * governor_pace_decision is the SMART-TIMEOUT pace governor (#burin-cutover seam
+ * 2) — a PURE decision core ported verbatim from burin's
+ * `lib/runtime/pace-governor.harn::pace_decision`. It replaces a blind static
+ * wall-clock kill with progress-based *extend-inside-a-time-bound*: given a
+ * snapshot of the run's pace signals it returns ONE of four actions. It does NO
+ * I/O, reads no flags, touches no session store and calls no model — every input
+ * is passed in, so the caller keeps the wiring (flag gate, epoch tracking, budget
+ * arming, feedback injection, loop stop). This is the token-runaway pattern:
+ * decision in harn, thin wall-deadline actuation stays host-side (harn's
+ * agent_loop never owns the host's wall deadline).
+ *
+ * `policy` (a GovernorPolicy) carries only the bounded caps; both default to the
+ * burin parity constants:
+ *   - extend_max      (default GOVERNOR_PACE_EXTEND_MAX = 6): hard cap on silent
+ *     extends so a slowly-progressing run cannot extend forever.
+ *   - pace_check_max  (default GOVERNOR_PACE_CHECK_MAX_INJECTIONS = 2): bounded
+ *     recalibration check-ins before the run is cut (mirrors the completion-gate
+ *     max-vetoes discipline).
+ *
+ * `obs` (host facts — the caller assembles it from the clock + loop info +
+ * session-stored counters):
+ *   - armed_budget_ms   int  — the wall budget currently armed (ms). 0/absent =>
+ *     not armed; the governor always `proceed`s (the OFF / no-budget no-op path).
+ *   - elapsed_ms        int  — wall ms since the run started.
+ *   - checkpoint_ms     int  — checkpoint cadence (one budget window). Defaults
+ *     to armed_budget_ms so the first decision fires at the budget.
+ *   - expected_total_ms int  — estimated total wall; the pace_check branch fires
+ *     when we blow past it by >= 1 checkpoint while progressing. Defaults to
+ *     armed_budget_ms.
+ *   - made_progress     bool — a workspace write succeeded since the last
+ *     checkpoint (the single progress signal).
+ *   - verifier_signature_unchanged bool — a write landed but the verifier failure
+ *     signature did not improve; a landed write whose verifier signature is
+ *     unchanged is NOT progress (the edit_applied_but_wrong thrash). The stateful
+ *     caller only ever sets it true under its arm, so absent/false is
+ *     byte-identical to a run without the lever.
+ *   - done              bool — the done-judge is satisfied; the governor adds
+ *     zero delta (never extend/pace_check/cut a done run).
+ *   - extends_used      int  — silent extends already granted this run.
+ *   - pace_checks_used  int  — pace_check injections already spent.
+ *   - env_blame_without_infra bool — typed classifier verdict supplied by the
+ *     stateful caller (the pure governor never matches English phrases).
+ *
+ * Returns `{action, ...}`:
+ *   {action: "proceed"}
+ *   {action: "extend", new_budget_ms: int, reason}  (new_budget_ms = elapsed + checkpoint)
+ *   {action: "pace_check", reason}
+ *   {action: "cut", reason}
+ * cut reasons: no_progress_at_checkpoint / no_verifier_progress /
+ * env_blame_without_infra / extend_budget_exhausted / pace_check_budget_exhausted.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn governor_pace_decision(policy: GovernorPolicy, obs: dict) -> dict {
+  let armed = to_int(obs?.armed_budget_ms ?? 0) ?? 0
+  // No budget armed (flag OFF, or a live surface that did not arm one) => the
+  // governor is inert. This is the byte-identical no-op the caller relies on.
+  if armed <= 0 {
+    return {action: "proceed"}
+  }
+  // A satisfied done-judge ends the run on the existing completion path. Zero
+  // delta — never extend, pace_check, or cut a done run.
+  if obs?.done ?? false {
+    return {action: "proceed"}
+  }
+  let elapsed = to_int(obs?.elapsed_ms ?? 0) ?? 0
+  let checkpoint = __governor_pace_checkpoint_ms(obs, armed)
+  // Time-based outer gate: only decide once we have crossed the checkpoint. Below
+  // it the run is inside budget and continues unchanged.
+  if elapsed < checkpoint {
+    return {action: "proceed"}
+  }
+  let made_progress = obs?.made_progress ?? false
+  let env_blame_without_infra = obs?.env_blame_without_infra ?? false
+  // NO PROGRESS, or env-blaming with no real infra marker => CUT.
+  if !made_progress {
+    return {action: "cut", reason: "no_progress_at_checkpoint"}
+  }
+  // A write landed, but the verifier failure signature did NOT improve since the
+  // last checkpoint. Writes are not progress — only a verifier advance is.
+  if obs?.verifier_signature_unchanged ?? false {
+    return {action: "cut", reason: "no_verifier_progress"}
+  }
+  if env_blame_without_infra {
+    return {action: "cut", reason: "env_blame_without_infra"}
+  }
+  // PROGRESS. Decide extend vs pace_check by whether we have blown past the
+  // expected total by at least one checkpoint.
+  let expected_total = __governor_pace_expected_total_ms(obs, armed)
+  let over_estimate = elapsed >= expected_total + checkpoint
+  let extends_used = to_int(obs?.extends_used ?? 0) ?? 0
+  let pace_checks_used = to_int(obs?.pace_checks_used ?? 0) ?? 0
+  let extend_max = to_int(policy.extend_max ?? GOVERNOR_PACE_EXTEND_MAX) ?? GOVERNOR_PACE_EXTEND_MAX
+  let pace_check_max = to_int(policy.pace_check_max ?? GOVERNOR_PACE_CHECK_MAX_INJECTIONS)
+    ?? GOVERNOR_PACE_CHECK_MAX_INJECTIONS
+  if !over_estimate {
+    // Within the estimate and progressing: silently extend the wall to the next
+    // checkpoint, bounded by extend_max. No model interrupt, zero tokens.
+    if extends_used >= extend_max {
+      return {action: "cut", reason: "extend_budget_exhausted"}
+    }
+    return {action: "extend", new_budget_ms: elapsed + checkpoint, reason: "progress_within_estimate"}
+  }
+  // Progressing but past the estimate. Inject a bounded recalibration check-in;
+  // once the pace_check budget is spent, cut.
+  if pace_checks_used >= pace_check_max {
+    return {action: "cut", reason: "pace_check_budget_exhausted"}
+  }
+  return {action: "pace_check", reason: "over_estimate_while_progressing"}
 }
 
 fn __any_in(values: list, allowlist: list) -> bool {

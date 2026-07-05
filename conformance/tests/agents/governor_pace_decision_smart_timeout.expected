@@ -1,0 +1,12 @@
+proceed
+proceed
+proceed
+cut no_progress_at_checkpoint
+cut no_verifier_progress
+cut env_blame_without_infra
+extend progress_within_estimate 2000
+cut extend_budget_exhausted
+pace_check over_estimate_while_progressing
+cut pace_check_budget_exhausted
+cut extend_budget_exhausted
+[harn] governor pace decision ok

@@ -3848,6 +3848,7 @@ fn __agent_loop_run(message, session, initial_opts) {
           had_parse_errors,
           stall_prev_turn_made_edit,
           llm_result?.stop_reason ?? "",
+          {dispatch: stall_prev_dispatch, iteration: iteration_index + 1, session_id: session.session_id},
         )
         stall_state = stall_observation.state
         stall_enabled_seen = stall_enabled_seen || stall_observation.enabled
@@ -4677,6 +4678,9 @@ fn __agent_loop_run(message, session, initial_opts) {
   return unwrap(run)
 }
 
+// Verify-state payload for a host `progress_signal` callback (seam 1).
+// Carries the prior turn's dispatch (the results the callback classifies)
+// — inert unless a progress_signal is configured on stall_diagnostics.
 // Read-only stance runs LAST so neither a skill activation nor a
 // tool-search promotion can re-admit mutating tools while armed.
 // The invalid `agent_await_resumption` call was never dispatched, so

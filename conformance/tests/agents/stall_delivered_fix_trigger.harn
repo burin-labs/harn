@@ -1,0 +1,62 @@
+import { agent_stall_initial_state, agent_stall_observe_tool_calls } from "std/agent/stall"
+
+/**
+ * SEAM 3 (#burin-cutover): the delivered-fix trigger. When the host supplies a
+ * `remediation_delivered` fact callback and reports a repair WAS delivered for
+ * the active failure signature yet the SAME failure keeps landing, the stall
+ * detector escalates one turn sooner (streak 2) with the distinct
+ * `delivered_fix_not_landing` pattern — instead of the plain-repeat
+ * `stuck_same_diagnostic` nudge (streak 3). This proves (a) PARITY — no callback
+ * reproduces today's stuck nudge exactly — and (b) LIVE-SHAPE — the callback
+ * fires, receives the active failure signature, and changes the decision.
+ */
+fn fail_dispatch(error_text) {
+  return [{tool_name: "run", ok: false, error: error_text}]
+}
+
+fn observe(config, state, prev_dispatch) {
+  return agent_stall_observe_tool_calls(
+    "seam3-delivered",
+    [{name: "run", arguments: {cmd: "test"}}],
+    1,
+    config,
+    state,
+    true,
+    prev_dispatch,
+    "",
+    false,
+    false,
+  )
+}
+
+pipeline default() {
+  // ---- PARITY: no remediation_delivered => plain stuck nudge at streak 3 ----
+  let base_cfg = {enabled: true, repair_aware: true, stuck_same_diagnostic_after: 3, post_edit_reverify: true}
+  let p = agent_stall_initial_state()
+  let p1 = observe(base_cfg, p, fail_dispatch("boom"))
+  assert(p1.warning == nil, "parity turn1: no trip at streak 1")
+  let p2 = observe(base_cfg, p1.state, fail_dispatch("boom"))
+  assert(p2.warning == nil, "parity turn2: no trip at streak 2 (stuck waits for 3)")
+  let p3 = observe(base_cfg, p2.state, fail_dispatch("boom"))
+  assert(p3.warning != nil, "parity turn3: trips at streak 3")
+  assert(p3.warning.pattern == "stuck_same_diagnostic", "parity: plain stuck pattern")
+  assert(p3.warning.count == 3, "parity: fires at streak 3")
+  // ---- LIVE-SHAPE: remediation_delivered => delivered_fix_not_landing at 2 ----
+  // The callback returns true ONLY when it received the well-formed context
+  // (the ACTIVE failure signature + session id + prev_dispatch), so a trip is
+  // proof the seam passed the right facts.
+  let remediation = { ctx -> ctx?.signature != nil
+    && ctx.signature != ""
+    && ctx?.session_id == "seam3-delivered"
+    && contains(keys(ctx ?? {}), "prev_dispatch") }
+  let live_cfg = base_cfg + {remediation_delivered: remediation}
+  let s = agent_stall_initial_state()
+  let s1 = observe(live_cfg, s, fail_dispatch("boom"))
+  assert(s1.warning == nil, "live turn1: no trip at streak 1 (below delivered-fix floor)")
+  let s2 = observe(live_cfg, s1.state, fail_dispatch("boom"))
+  assert(s2.warning != nil, "live turn2: delivered-fix trips one turn sooner (streak 2)")
+  assert(s2.warning.pattern == "delivered_fix_not_landing", "live: distinct delivered-fix pattern")
+  assert(s2.warning.count == 2, "live: fires at streak 2, not 3")
+  assert(s2.warning.remediation_delivered, "live: warning carries the delivered-fix fact")
+  log("stall delivered-fix trigger ok")
+}

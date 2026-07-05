@@ -1,0 +1,104 @@
+import { governor_pace_decision } from "std/agent/governors"
+
+/**
+ * SEAM 2 (#burin-cutover): governor_pace_decision is the pure smart-timeout pace
+ * core ported verbatim from burin. This exercises every branch: the no-op
+ * proceed paths (parity — an unarmed / done / within-budget run is untouched)
+ * and each firing decision (extend / pace_check / cut with every reason).
+ */
+fn line(d) {
+  let budget = if contains(keys(d), "new_budget_ms") {
+    " " + to_string(d.new_budget_ms)
+  } else {
+    ""
+  }
+  let reason = if contains(keys(d), "reason") {
+    " " + d.reason
+  } else {
+    ""
+  }
+  return d.action + reason + budget
+}
+
+pipeline default() {
+  // Parity no-ops: unarmed, done, and below-checkpoint all proceed untouched.
+  __io_println(line(governor_pace_decision({}, {armed_budget_ms: 0})))
+  __io_println(
+    line(
+      governor_pace_decision(
+        {},
+        {armed_budget_ms: 1000, elapsed_ms: 5000, done: true, made_progress: false},
+      ),
+    ),
+  )
+  __io_println(line(governor_pace_decision({}, {armed_budget_ms: 1000, elapsed_ms: 500})))
+  // At checkpoint, no progress => cut.
+  __io_println(
+    line(governor_pace_decision({}, {armed_budget_ms: 1000, elapsed_ms: 1000, made_progress: false})),
+  )
+  // A write landed but the verifier signature did not improve => cut.
+  __io_println(
+    line(
+      governor_pace_decision(
+        {},
+        {armed_budget_ms: 1000, elapsed_ms: 1000, made_progress: true, verifier_signature_unchanged: true},
+      ),
+    ),
+  )
+  // Env-blame without an infra marker => cut.
+  __io_println(
+    line(
+      governor_pace_decision(
+        {},
+        {armed_budget_ms: 1000, elapsed_ms: 1000, made_progress: true, env_blame_without_infra: true},
+      ),
+    ),
+  )
+  // Progress within the estimate => silent extend to the next checkpoint.
+  __io_println(
+    line(governor_pace_decision({}, {armed_budget_ms: 1000, elapsed_ms: 1000, made_progress: true})),
+  )
+  // Progress within estimate but the extend budget is spent => cut.
+  __io_println(
+    line(
+      governor_pace_decision(
+        {},
+        {armed_budget_ms: 1000, elapsed_ms: 1000, made_progress: true, extends_used: 6},
+      ),
+    ),
+  )
+  // Progressing past the estimate by >= 1 checkpoint => pace_check.
+  __io_println(
+    line(
+      governor_pace_decision(
+        {},
+        {armed_budget_ms: 1000, elapsed_ms: 3000, expected_total_ms: 1000, made_progress: true},
+      ),
+    ),
+  )
+  // Past estimate, progressing, but the pace_check budget is spent => cut.
+  __io_println(
+    line(
+      governor_pace_decision(
+        {},
+        {
+          armed_budget_ms: 1000,
+          elapsed_ms: 3000,
+          expected_total_ms: 1000,
+          made_progress: true,
+          pace_checks_used: 2,
+        },
+      ),
+    ),
+  )
+  // Policy can lower the caps: extend_max 0 => the first progressing checkpoint cuts.
+  __io_println(
+    line(
+      governor_pace_decision(
+        {extend_max: 0},
+        {armed_budget_ms: 1000, elapsed_ms: 1000, made_progress: true},
+      ),
+    ),
+  )
+  log("governor pace decision ok")
+}
