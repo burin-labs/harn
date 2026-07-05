@@ -875,29 +875,6 @@ fn resolve_node_session_id(node: &WorkflowNode) -> String {
     format!("workflow_stage_{}", uuid::Uuid::now_v7())
 }
 
-fn raw_auto_compact_dict(node: &WorkflowNode) -> Option<&crate::value::DictMap> {
-    node.raw_auto_compact
-        .as_ref()
-        .and_then(|value| value.as_dict())
-}
-
-fn raw_auto_compact_int(node: &WorkflowNode, key: &str) -> Option<usize> {
-    raw_auto_compact_dict(node)
-        .and_then(|dict| dict.get(key))
-        .and_then(|value| value.as_int())
-        .filter(|value| *value >= 0)
-        .map(|value| value as usize)
-}
-
-fn raw_auto_compact_string(node: &WorkflowNode, key: &str) -> Option<String> {
-    raw_auto_compact_dict(node)
-        .and_then(|dict| dict.get(key))
-        .and_then(|value| match value {
-            VmValue::String(text) if !text.trim().is_empty() => Some(text.to_string()),
-            _ => None,
-        })
-}
-
 fn raw_model_policy_dict(node: &WorkflowNode) -> Option<&crate::value::DictMap> {
     node.raw_model_policy
         .as_ref()
@@ -927,23 +904,6 @@ fn merge_raw_model_policy_options(options: &mut crate::value::DictMap, node: &Wo
             }
         }
     }
-}
-
-fn preserve_nested_command_policy(options: &mut crate::value::DictMap, node: &WorkflowNode) {
-    if options.contains_key("command_policy") {
-        return;
-    }
-    let Some(command_policy) = raw_model_policy_dict(node)
-        .and_then(|dict| dict.get("policy"))
-        .and_then(|value| value.as_dict())
-        .and_then(|policy| policy.get("command_policy"))
-    else {
-        return;
-    };
-    options.insert(
-        crate::value::intern_key("command_policy"),
-        command_policy.clone(),
-    );
 }
 
 fn stage_tools_value(node: &WorkflowNode) -> Option<VmValue> {
@@ -983,110 +943,123 @@ fn workflow_stage_llm_options(
     options
 }
 
-fn add_workflow_agent_compaction_options(options: &mut crate::value::DictMap, node: &WorkflowNode) {
-    if !node.auto_compact.enabled {
-        options.insert(
-            crate::value::intern_key("auto_compact"),
-            VmValue::Bool(false),
-        );
-        return;
-    }
-    options.insert(
-        crate::value::intern_key("auto_compact"),
-        VmValue::Bool(true),
-    );
-    if let Some(value) = node.auto_compact.token_threshold {
-        options.insert(
-            crate::value::intern_key("compact_threshold"),
-            VmValue::Int(value as i64),
-        );
-    }
-    if let Some(value) = node.auto_compact.tool_output_max_chars {
-        options.insert(
-            crate::value::intern_key("tool_output_max_chars"),
-            VmValue::Int(value as i64),
-        );
-    }
-    if let Some(value) = node.auto_compact.hard_limit_tokens {
-        options.insert(
-            crate::value::intern_key("hard_limit_tokens"),
-            VmValue::Int(value as i64),
-        );
-    }
-    if let Some(strategy) = node.auto_compact.compact_strategy.as_ref() {
-        options.put_str("compact_strategy", strategy.clone());
-    }
-    if let Some(strategy) = node.auto_compact.hard_limit_strategy.as_ref() {
-        options.put_str("hard_limit_strategy", strategy.clone());
-    }
-    if let Some(value) = raw_auto_compact_int(node, "compact_keep_last")
-        .or_else(|| raw_auto_compact_int(node, "keep_last"))
-    {
-        options.insert(
-            crate::value::intern_key("compact_keep_last"),
-            VmValue::Int(value as i64),
-        );
-    }
-    if let Some(prompt) = raw_auto_compact_string(node, "summarize_prompt") {
-        options.put_str("summarize_prompt", prompt);
-    }
-    if let Some(dict) = raw_auto_compact_dict(node) {
-        for key in ["compress_callback", "mask_callback"] {
-            if let Some(callback) = dict.get(key) {
-                options.insert(crate::value::intern_key(key), callback.clone());
-            }
-        }
-        if let Some(callback) = dict.get("custom_compactor") {
-            options.insert(
-                crate::value::intern_key("compact_callback"),
-                callback.clone(),
-            );
-        }
-    }
-}
-
-fn workflow_stage_agent_loop_options(
+/// Assemble the agent_loop options for one stage.
+///
+/// The policy *flattening* — collapsing the ~15 per-stage policy structs into
+/// the options dict the loop consumes — lives in Harn
+/// (`workflow_flatten_agent_loop_options` in `std/workflow/stage.harn`, design
+/// D5). Rust keeps only the enforcement leaves: it re-derives the capability
+/// ceiling (`tool spec ∩ stage capability_policy`) and, when the flattened
+/// dict re-enters the host, rejects any result whose `policy` *widens* that
+/// ceiling ([`enforce_flattened_ceiling`]). Raw model-policy / tool / compaction
+/// values cross as `VmValue`s so their closures survive the round trip.
+async fn workflow_stage_agent_loop_options(
+    ctx: &crate::vm::AsyncBuiltinCtx,
     node: &WorkflowNode,
     stage_session_id: &str,
     tools_value: &Option<VmValue>,
     tool_names: &[String],
     stage_agent_options: &super::WorkflowStageAgentOptions,
 ) -> Result<crate::value::DictMap, VmError> {
-    let mut options = stage_agent_options.agent_loop_options_vm_dict();
-    merge_raw_model_policy_options(&mut options, node);
-    if let Some(context) = crate::orchestration::current_workflow_skill_context() {
-        if !options.contains_key("skills") {
-            if let Some(registry) = context.registry {
-                options.insert(crate::value::intern_key("skills"), registry);
-            }
-        }
-        if !options.contains_key("skill_match") {
-            if let Some(match_config) = context.match_config {
-                options.insert(crate::value::intern_key("skill_match"), match_config);
-            }
-        }
-    }
-    preserve_nested_command_policy(&mut options, node);
-    add_workflow_agent_compaction_options(&mut options, node);
-    add_stage_tools_option(&mut options, tools_value, tool_names);
+    // Ceiling derivation stays in Rust (enforcement, not flattening): the
+    // Harn flattener may narrow it but never widen it.
     let tool_policy = tool_capability_policy_from_spec(&node.tools);
     let effective_policy = tool_policy
         .intersect(&node.capability_policy)
         .map_err(VmError::Runtime)?;
-    insert_json_vm_option(&mut options, "policy", &effective_policy)?;
-    insert_json_vm_option(&mut options, "approval_policy", &node.approval_policy)?;
-    options.put_str("session_id", stage_session_id);
-    options.put_str("tool_format", stage_agent_options.tool_format.clone());
+
     let stage_label = node
         .id
         .clone()
         .unwrap_or_else(|| stage_session_id.to_string());
-    crate::orchestration::annotate_nested_execution_options(
-        &mut options,
-        crate::orchestration::NestedExecutionKind::WorkflowStage,
-        &stage_label,
+
+    let mut config = crate::value::DictMap::new();
+    config.insert(
+        crate::value::intern_key("base"),
+        VmValue::dict(stage_agent_options.agent_loop_options_vm_dict()),
     );
+    config.insert(
+        crate::value::intern_key("raw_model_policy"),
+        node.raw_model_policy.clone().unwrap_or(VmValue::Nil),
+    );
+    insert_json_vm_option(&mut config, "auto_compact", &node.auto_compact)?;
+    config.insert(
+        crate::value::intern_key("raw_auto_compact"),
+        node.raw_auto_compact.clone().unwrap_or(VmValue::Nil),
+    );
+    // The host only forwards a tool spec when the stage actually exposes tools;
+    // matching the former `add_stage_tools_option` gate keeps the dict identical.
+    config.insert(
+        crate::value::intern_key("tools"),
+        if tool_names.is_empty() {
+            VmValue::Nil
+        } else {
+            tools_value.clone().unwrap_or(VmValue::Nil)
+        },
+    );
+    if let Some(context) = crate::orchestration::current_workflow_skill_context() {
+        if let Some(registry) = context.registry {
+            config.insert(crate::value::intern_key("skills"), registry);
+        }
+        if let Some(match_config) = context.match_config {
+            config.insert(crate::value::intern_key("skill_match"), match_config);
+        }
+    }
+    insert_json_vm_option(&mut config, "policy", &effective_policy)?;
+    insert_json_vm_option(&mut config, "approval_policy", &node.approval_policy)?;
+    config.put_str("session_id", stage_session_id);
+    config.put_str("tool_format", stage_agent_options.tool_format.clone());
+    config.put_str(
+        "nested_kind",
+        crate::orchestration::NestedExecutionKind::WorkflowStage.as_str(),
+    );
+    config.put_str("nested_label", stage_label);
+
+    let flattened = crate::stdlib::harn_entry::call_harn_export_by_name(
+        ctx,
+        "std/workflow/stage",
+        "workflow_flatten_agent_loop_options",
+        "workflow_flatten_agent_loop_options",
+        &[VmValue::dict(config)],
+    )
+    .await?;
+    let VmValue::Dict(options) = flattened else {
+        return Err(VmError::Runtime(
+            "workflow_flatten_agent_loop_options must return a dict".to_string(),
+        ));
+    };
+    let options = (*options).clone();
+    enforce_flattened_ceiling(&options, &effective_policy)?;
     Ok(options)
+}
+
+/// Enforce the ceiling invariant on a Harn-flattened stage options dict: its
+/// `policy` (the capability policy the loop will run under) must never widen
+/// `ceiling`, the workflow-level grant Rust derived. This is the trust
+/// boundary — the Harn flattener is untrusted for *authority*, only for
+/// *shape*, so the host re-checks the returned policy rather than assuming the
+/// flattener narrowed correctly.
+fn enforce_flattened_ceiling(
+    options: &crate::value::DictMap,
+    ceiling: &CapabilityPolicy,
+) -> Result<(), VmError> {
+    let Some(policy_value) = options.get("policy") else {
+        return Err(VmError::Runtime(
+            "flattened stage options are missing the capability policy".to_string(),
+        ));
+    };
+    let requested: CapabilityPolicy = serde_json::from_value(vm_value_to_json(policy_value))
+        .map_err(|error| {
+            VmError::Runtime(format!(
+                "flattened stage capability policy is malformed: {error}"
+            ))
+        })?;
+    ceiling
+        .assert_within_ceiling(&requested)
+        .map_err(|message| VmError::CategorizedError {
+            message,
+            category: crate::value::ErrorCategory::ToolRejected,
+        })
 }
 
 #[derive(Clone, Debug)]
@@ -1243,12 +1216,14 @@ pub async fn prepare_stage_node(
         );
         let agent_loop_options = if stage_agent_options.run_agent_loop {
             workflow_stage_agent_loop_options(
+                ctx,
                 node,
                 &stage_session_id,
                 &tools_value,
                 &tool_names,
                 &stage_agent_options,
-            )?
+            )
+            .await?
         } else {
             crate::value::DictMap::new()
         };
@@ -1462,4 +1437,373 @@ pub fn append_audit_entry(
         reason,
         metadata,
     });
+}
+
+#[cfg(test)]
+mod flatten_tests {
+    use super::*;
+    use crate::orchestration::{CapabilityPolicy, WorkflowNode};
+    use std::collections::BTreeMap;
+
+    fn ceiling_with_tools(tools: &[&str]) -> CapabilityPolicy {
+        CapabilityPolicy {
+            tools: tools.iter().map(|t| t.to_string()).collect(),
+            ..Default::default()
+        }
+    }
+
+    fn options_with_policy(policy: &CapabilityPolicy) -> crate::value::DictMap {
+        let mut options = crate::value::DictMap::new();
+        insert_json_vm_option(&mut options, "policy", policy).unwrap();
+        options
+    }
+
+    #[test]
+    fn ceiling_pass_through_is_within() {
+        let ceiling = ceiling_with_tools(&["read", "edit"]);
+        // The parity path: flattener passes the ceiling through unchanged.
+        assert!(ceiling.assert_within_ceiling(&ceiling).is_ok());
+        let options = options_with_policy(&ceiling);
+        assert!(enforce_flattened_ceiling(&options, &ceiling).is_ok());
+    }
+
+    #[test]
+    fn narrowing_is_allowed() {
+        let ceiling = ceiling_with_tools(&["read", "edit", "run_command"]);
+        let narrowed = ceiling_with_tools(&["read"]);
+        assert!(ceiling.assert_within_ceiling(&narrowed).is_ok());
+    }
+
+    #[test]
+    fn widening_tools_is_rejected() {
+        let ceiling = ceiling_with_tools(&["read"]);
+        let widened = ceiling_with_tools(&["read", "run_command"]);
+        let err = ceiling.assert_within_ceiling(&widened).unwrap_err();
+        assert!(
+            err.contains("run_command"),
+            "error names the widened tool: {err}"
+        );
+
+        // ... and surfaces as a ToolRejected VmError at the flatten seam.
+        let options = options_with_policy(&widened);
+        match enforce_flattened_ceiling(&options, &ceiling) {
+            Err(VmError::CategorizedError { message, category }) => {
+                assert_eq!(category, crate::value::ErrorCategory::ToolRejected);
+                assert!(message.contains("run_command"), "message: {message}");
+            }
+            other => panic!("expected a ToolRejected error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn widening_capability_op_is_rejected() {
+        let mut ceiling = CapabilityPolicy::default();
+        ceiling
+            .capabilities
+            .insert("fs".to_string(), vec!["read".to_string()]);
+        let mut widened = CapabilityPolicy::default();
+        widened.capabilities.insert(
+            "fs".to_string(),
+            vec!["read".to_string(), "write".to_string()],
+        );
+        let err = ceiling.assert_within_ceiling(&widened).unwrap_err();
+        assert!(err.contains("fs") && err.contains("write"), "error: {err}");
+    }
+
+    #[test]
+    fn adding_new_capability_is_rejected() {
+        let mut ceiling = CapabilityPolicy::default();
+        ceiling
+            .capabilities
+            .insert("fs".to_string(), vec!["read".to_string()]);
+        let mut widened = ceiling.clone();
+        widened
+            .capabilities
+            .insert("net".to_string(), vec!["connect".to_string()]);
+        let err = ceiling.assert_within_ceiling(&widened).unwrap_err();
+        assert!(
+            err.contains("net"),
+            "error names the added capability: {err}"
+        );
+    }
+
+    #[test]
+    fn widening_recursion_budget_is_rejected() {
+        let ceiling = CapabilityPolicy {
+            recursion_limit: Some(2),
+            ..Default::default()
+        };
+        let widened = CapabilityPolicy {
+            recursion_limit: Some(9),
+            ..Default::default()
+        };
+        assert!(ceiling.assert_within_ceiling(&widened).is_err());
+        // Dropping the budget entirely is also a widening.
+        let dropped = CapabilityPolicy::default();
+        assert!(ceiling.assert_within_ceiling(&dropped).is_err());
+        // Narrowing the budget is allowed.
+        let narrowed = CapabilityPolicy {
+            recursion_limit: Some(1),
+            ..Default::default()
+        };
+        assert!(ceiling.assert_within_ceiling(&narrowed).is_ok());
+    }
+
+    #[test]
+    fn widening_roots_is_rejected() {
+        let ceiling = CapabilityPolicy {
+            workspace_roots: vec!["/repo".to_string()],
+            ..Default::default()
+        };
+        let widened = CapabilityPolicy {
+            workspace_roots: vec!["/repo".to_string(), "/etc".to_string()],
+            ..Default::default()
+        };
+        let err = ceiling.assert_within_ceiling(&widened).unwrap_err();
+        assert!(err.contains("/etc"), "error: {err}");
+    }
+
+    #[test]
+    fn widening_side_effect_level_is_rejected() {
+        let ceiling = CapabilityPolicy {
+            side_effect_level: Some("read_only".to_string()),
+            ..Default::default()
+        };
+        let widened = CapabilityPolicy {
+            side_effect_level: Some("network".to_string()),
+            ..Default::default()
+        };
+        assert!(ceiling.assert_within_ceiling(&widened).is_err());
+    }
+
+    /// The pinned pre-move Rust flattening algorithm (the deleted
+    /// `workflow_stage_agent_loop_options` body + helpers), preserved verbatim
+    /// as the parity oracle. `flatten_matches_pre_move_rust` asserts the Harn
+    /// flattener reproduces it dict-for-dict.
+    fn legacy_flatten_reference(
+        node: &WorkflowNode,
+        session_id: &str,
+        tool_format: &str,
+        mut options: crate::value::DictMap,
+        tools_value: &Option<VmValue>,
+        tool_names: &[String],
+    ) -> crate::value::DictMap {
+        if let Some(raw) = node.raw_model_policy.as_ref().and_then(|v| v.as_dict()) {
+            for (key, value) in raw {
+                if !matches!(value, VmValue::Nil) {
+                    options.insert(key.clone(), value.clone());
+                }
+            }
+        }
+        if !options.contains_key("command_policy") {
+            if let Some(command_policy) = node
+                .raw_model_policy
+                .as_ref()
+                .and_then(|v| v.as_dict())
+                .and_then(|d| d.get("policy"))
+                .and_then(|v| v.as_dict())
+                .and_then(|p| p.get("command_policy"))
+            {
+                options.insert(
+                    crate::value::intern_key("command_policy"),
+                    command_policy.clone(),
+                );
+            }
+        }
+        if !node.auto_compact.enabled {
+            options.insert(
+                crate::value::intern_key("auto_compact"),
+                VmValue::Bool(false),
+            );
+        } else {
+            options.insert(
+                crate::value::intern_key("auto_compact"),
+                VmValue::Bool(true),
+            );
+            if let Some(v) = node.auto_compact.token_threshold {
+                options.insert(
+                    crate::value::intern_key("compact_threshold"),
+                    VmValue::Int(v as i64),
+                );
+            }
+            if let Some(v) = node.auto_compact.tool_output_max_chars {
+                options.insert(
+                    crate::value::intern_key("tool_output_max_chars"),
+                    VmValue::Int(v as i64),
+                );
+            }
+            if let Some(v) = node.auto_compact.hard_limit_tokens {
+                options.insert(
+                    crate::value::intern_key("hard_limit_tokens"),
+                    VmValue::Int(v as i64),
+                );
+            }
+            if let Some(s) = node.auto_compact.compact_strategy.as_ref() {
+                options.put_str("compact_strategy", s.clone());
+            }
+            if let Some(s) = node.auto_compact.hard_limit_strategy.as_ref() {
+                options.put_str("hard_limit_strategy", s.clone());
+            }
+            let raw = node.raw_auto_compact.as_ref().and_then(|v| v.as_dict());
+            let keep = raw
+                .and_then(|d| d.get("compact_keep_last"))
+                .and_then(|v| v.as_int())
+                .filter(|v| *v >= 0)
+                .or_else(|| {
+                    raw.and_then(|d| d.get("keep_last"))
+                        .and_then(|v| v.as_int())
+                        .filter(|v| *v >= 0)
+                });
+            if let Some(v) = keep {
+                options.insert(
+                    crate::value::intern_key("compact_keep_last"),
+                    VmValue::Int(v),
+                );
+            }
+            if let Some(p) = raw
+                .and_then(|d| d.get("summarize_prompt"))
+                .and_then(|v| match v {
+                    VmValue::String(t) if !t.trim().is_empty() => Some(t.to_string()),
+                    _ => None,
+                })
+            {
+                options.put_str("summarize_prompt", p);
+            }
+            if let Some(d) = raw {
+                for key in ["compress_callback", "mask_callback"] {
+                    if let Some(cb) = d.get(key) {
+                        options.insert(crate::value::intern_key(key), cb.clone());
+                    }
+                }
+                if let Some(cb) = d.get("custom_compactor") {
+                    options.insert(crate::value::intern_key("compact_callback"), cb.clone());
+                }
+            }
+        }
+        if !tool_names.is_empty() {
+            if let Some(v) = tools_value.clone() {
+                options.insert(crate::value::intern_key("tools"), v);
+            }
+        }
+        let tool_policy = tool_capability_policy_from_spec(&node.tools);
+        let effective = tool_policy.intersect(&node.capability_policy).unwrap();
+        insert_json_vm_option(&mut options, "policy", &effective).unwrap();
+        insert_json_vm_option(&mut options, "approval_policy", &node.approval_policy).unwrap();
+        options.put_str("session_id", session_id);
+        options.put_str("tool_format", tool_format);
+        let label = node.id.clone().unwrap_or_else(|| session_id.to_string());
+        crate::orchestration::annotate_nested_execution_options(
+            &mut options,
+            crate::orchestration::NestedExecutionKind::WorkflowStage,
+            &label,
+        );
+        options
+    }
+
+    fn representative_node() -> WorkflowNode {
+        let mut raw_model_policy = BTreeMap::new();
+        raw_model_policy.insert(
+            "provider".to_string(),
+            VmValue::String(arcstr::ArcStr::from("anthropic")),
+        );
+        raw_model_policy.insert("temperature".to_string(), VmValue::Float(0.2));
+        // Nested command policy hoisted to the top level by the flattener.
+        let mut nested_policy = BTreeMap::new();
+        nested_policy.insert(
+            "command_policy".to_string(),
+            VmValue::String(arcstr::ArcStr::from("worktree")),
+        );
+        raw_model_policy.insert("policy".to_string(), VmValue::dict(nested_policy));
+        // A nil entry must be skipped by the merge.
+        raw_model_policy.insert("nudge".to_string(), VmValue::Nil);
+
+        let mut raw_auto_compact = BTreeMap::new();
+        raw_auto_compact.insert("keep_last".to_string(), VmValue::Int(4));
+        raw_auto_compact.insert(
+            "summarize_prompt".to_string(),
+            VmValue::String(arcstr::ArcStr::from("summarize tersely")),
+        );
+
+        WorkflowNode {
+            id: Some("act".to_string()),
+            kind: "stage".to_string(),
+            mode: Some("agent".to_string()),
+            tools: serde_json::json!(["read", "edit"]),
+            auto_compact: crate::orchestration::AutoCompactPolicy {
+                enabled: true,
+                token_threshold: Some(8000),
+                tool_output_max_chars: Some(2000),
+                hard_limit_tokens: Some(20000),
+                compact_strategy: Some("summary".to_string()),
+                hard_limit_strategy: Some("truncate".to_string()),
+            },
+            capability_policy: CapabilityPolicy {
+                tools: vec!["read".to_string(), "edit".to_string()],
+                recursion_limit: Some(3),
+                ..Default::default()
+            },
+            raw_model_policy: Some(VmValue::dict(raw_model_policy)),
+            raw_auto_compact: Some(VmValue::dict(raw_auto_compact)),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn flatten_matches_pre_move_rust() {
+        crate::reset_thread_local_state();
+        let node = representative_node();
+        let session_id = "session-parity";
+        let tool_format = "text";
+        let tool_names = vec!["read".to_string(), "edit".to_string()];
+        let tools_value = Some(crate::stdlib::json_to_vm_value(&node.tools));
+
+        // Base agent_loop options (as std/workflow/options would normalize).
+        let mut base = crate::value::DictMap::new();
+        base.insert(
+            crate::value::intern_key("loop_until_done"),
+            VmValue::Bool(true),
+        );
+        base.insert(crate::value::intern_key("max_iterations"), VmValue::Int(16));
+
+        let stage_agent_options = super::super::WorkflowStageAgentOptions {
+            run_agent_loop: true,
+            tool_format: tool_format.to_string(),
+            llm_options: BTreeMap::new(),
+            agent_loop_options: base
+                .iter()
+                .map(|(k, v)| (k.to_string(), vm_value_to_json(v)))
+                .collect(),
+        };
+
+        let mut vm = crate::Vm::new();
+        crate::register_vm_stdlib(&mut vm);
+        let ctx = crate::vm::AsyncBuiltinCtx::for_test(vm);
+
+        let flattened = workflow_stage_agent_loop_options(
+            &ctx,
+            &node,
+            session_id,
+            &tools_value,
+            &tool_names,
+            &stage_agent_options,
+        )
+        .await
+        .expect("harn flatten succeeds");
+
+        let expected = legacy_flatten_reference(
+            &node,
+            session_id,
+            tool_format,
+            base,
+            &tools_value,
+            &tool_names,
+        );
+
+        let flattened_json = vm_value_to_json(&VmValue::dict(flattened));
+        let expected_json = vm_value_to_json(&VmValue::dict(expected));
+        assert_eq!(
+            flattened_json, expected_json,
+            "Harn flatten must be dict-equal to the pre-move Rust flatten"
+        );
+    }
 }

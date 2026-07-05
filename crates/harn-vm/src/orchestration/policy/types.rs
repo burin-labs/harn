@@ -417,6 +417,148 @@ impl CapabilityPolicy {
             process_sandbox,
         })
     }
+
+    /// Enforce the ceiling invariant on a `requested` policy: every
+    /// capability / budget / permission dimension must stay within (or
+    /// narrower than) `self`, the workflow-level grant. Used where a
+    /// Harn-computed flattened stage policy re-enters Rust: the flattener may
+    /// *narrow* a ceiling but must never *widen* one. Returns a categorized
+    /// error naming the widened dimension.
+    ///
+    /// "Empty means unbounded" matches [`intersect`](Self::intersect): an
+    /// empty `tools` / `workspace_roots` / `read_only_roots` / `capabilities`
+    /// ceiling imposes no bound on that dimension, so anything passes.
+    pub fn assert_within_ceiling(&self, requested: &CapabilityPolicy) -> Result<(), String> {
+        if !self.tools.is_empty() {
+            let widened: Vec<String> = requested
+                .tools
+                .iter()
+                .filter(|tool| !self.tools.contains(*tool))
+                .cloned()
+                .collect();
+            if !widened.is_empty() {
+                return Err(format!(
+                    "flattened stage policy widened tools beyond the stage grant: {}",
+                    widened.join(", ")
+                ));
+            }
+        }
+
+        for (capability, requested_ops) in &requested.capabilities {
+            match self.capabilities.get(capability) {
+                Some(allowed_ops) => {
+                    let widened: Vec<String> = requested_ops
+                        .iter()
+                        .filter(|op| !allowed_ops.contains(*op))
+                        .cloned()
+                        .collect();
+                    if !widened.is_empty() {
+                        return Err(format!(
+                            "flattened stage policy widened capability `{capability}` beyond the stage grant: {}",
+                            widened.join(",")
+                        ));
+                    }
+                }
+                None if !self.capabilities.is_empty() => {
+                    return Err(format!(
+                        "flattened stage policy added capability `{capability}` beyond the stage grant"
+                    ));
+                }
+                None => {}
+            }
+        }
+
+        for (label, ceiling_roots, requested_roots) in [
+            (
+                "workspace_roots",
+                &self.workspace_roots,
+                &requested.workspace_roots,
+            ),
+            (
+                "read_only_roots",
+                &self.read_only_roots,
+                &requested.read_only_roots,
+            ),
+        ] {
+            if !ceiling_roots.is_empty() {
+                let widened: Vec<String> = requested_roots
+                    .iter()
+                    .filter(|root| !ceiling_roots.contains(*root))
+                    .cloned()
+                    .collect();
+                if !widened.is_empty() {
+                    return Err(format!(
+                        "flattened stage policy widened {label} beyond the stage grant: {}",
+                        widened.join(", ")
+                    ));
+                }
+            }
+        }
+
+        // Recursion budget can only be narrowed: a lower ceiling forbids a
+        // higher request, and once the stage carries a budget the flattener
+        // may not drop it (which would disable the nested-execution gate).
+        if let Some(ceiling_limit) = self.recursion_limit {
+            match requested.recursion_limit {
+                Some(requested_limit) if requested_limit <= ceiling_limit => {}
+                Some(requested_limit) => {
+                    return Err(format!(
+                        "flattened stage policy widened the recursion budget beyond the stage grant: {requested_limit} > {ceiling_limit}"
+                    ));
+                }
+                None => {
+                    return Err(
+                        "flattened stage policy dropped the recursion budget granted by the stage"
+                            .to_string(),
+                    );
+                }
+            }
+        }
+
+        // Side-effect level can only be narrowed (a lower rank). Once the
+        // stage carries a ceiling the flattener may not remove it.
+        if let Some(ceiling_level) = &self.side_effect_level {
+            match &requested.side_effect_level {
+                Some(requested_level)
+                    if side_effect_rank(requested_level) <= side_effect_rank(ceiling_level) => {}
+                Some(requested_level) => {
+                    return Err(format!(
+                        "flattened stage policy widened the side-effect level beyond the stage grant: {requested_level} > {ceiling_level}"
+                    ));
+                }
+                None => {
+                    return Err(
+                        "flattened stage policy dropped the side-effect ceiling granted by the stage"
+                            .to_string(),
+                    );
+                }
+            }
+        }
+
+        // Sandbox confinement can only stay the same or grow stricter.
+        if sandbox_profile_strictness(requested.sandbox_profile)
+            < sandbox_profile_strictness(self.sandbox_profile)
+        {
+            return Err(
+                "flattened stage policy loosened the sandbox profile below the stage grant"
+                    .to_string(),
+            );
+        }
+
+        Ok(())
+    }
+}
+
+/// Rank a side-effect level for ceiling comparison (higher = more powerful).
+fn side_effect_rank(level: &str) -> usize {
+    match level {
+        "none" => 0,
+        "read_only" => 1,
+        "workspace_write" => 2,
+        "process_exec" => 3,
+        "network" => 4,
+        _ => 5,
+    }
 }
 
 /// Intersect two root allowlists with the same "empty means unbounded"

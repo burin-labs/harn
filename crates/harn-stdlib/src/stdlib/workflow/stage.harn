@@ -959,3 +959,158 @@ pub fn workflow_execute_stage_attempts(
   }
   throw "workflow_execute_stage_attempts: retry loop exited without settling"
 }
+
+// -------------------------------------------------------------------------------------------------
+
+// Stage -> agent_loop policy flattening (design D5).
+//
+// The ~15 per-stage policy structs (model policy, auto-compaction, tool spec,
+// capability + approval policy, workflow skill registry, nested-execution
+// attribution) collapse into the single options dict the agent loop consumes.
+// This flattening used to live in Rust (`workflow_stage_agent_loop_options`);
+// it now lives here — Harn decides *what options the loop gets*. Rust keeps
+// only enforcement: it re-derives the capability ceiling
+// (`tool spec ∩ stage capability_policy`) and rejects the flattened result if
+// `flattened.policy` widens it (`enforce_flattened_ceiling`, stage.rs).
+
+// -------------------------------------------------------------------------------------------------
+
+fn __stage_compact_keep_last(raw) {
+  let primary = __stage_i64(raw?.compact_keep_last)
+  if primary != nil && primary >= 0 {
+    return primary
+  }
+  let fallback = __stage_i64(raw?.keep_last)
+  if fallback != nil && fallback >= 0 {
+    return fallback
+  }
+  return nil
+}
+
+/**
+ * Flatten the stage's auto-compaction policy into `options`. Mirrors the
+ * former Rust `add_workflow_agent_compaction_options`: a disabled policy pins
+ * `auto_compact: false` and stops; an enabled policy layers the token / hard
+ * limit knobs (typed) plus the raw keep-last / summarize-prompt / callback
+ * fields the typed struct cannot carry.
+ */
+fn __stage_flatten_compaction(options, typed, raw) {
+  if !__stage_bool(typed?.enabled, false) {
+    return options + {auto_compact: false}
+  }
+  var out = options + {auto_compact: true}
+  let threshold = __stage_i64(typed?.token_threshold)
+  if threshold != nil {
+    out = out + {compact_threshold: threshold}
+  }
+  let tool_output = __stage_i64(typed?.tool_output_max_chars)
+  if tool_output != nil {
+    out = out + {tool_output_max_chars: tool_output}
+  }
+  let hard_limit = __stage_i64(typed?.hard_limit_tokens)
+  if hard_limit != nil {
+    out = out + {hard_limit_tokens: hard_limit}
+  }
+  if type_of(typed?.compact_strategy) == "string" {
+    out = out + {compact_strategy: typed.compact_strategy}
+  }
+  if type_of(typed?.hard_limit_strategy) == "string" {
+    out = out + {hard_limit_strategy: typed.hard_limit_strategy}
+  }
+  let keep_last = __stage_compact_keep_last(raw)
+  if keep_last != nil {
+    out = out + {compact_keep_last: keep_last}
+  }
+  if type_of(raw?.summarize_prompt) == "string" && trim(raw.summarize_prompt) != "" {
+    out = out + {summarize_prompt: raw.summarize_prompt}
+  }
+  if type_of(raw) == "dict" {
+    for key in ["compress_callback", "mask_callback"] {
+      if __stage_has_key(raw, key) {
+        out = out + {[key]: raw[key]}
+      }
+    }
+    if __stage_has_key(raw, "custom_compactor") {
+      out = out + {compact_callback: raw.custom_compactor}
+    }
+  }
+  return out
+}
+
+/**
+ * workflow_flatten_agent_loop_options collapses a stage's policy structs into
+ * the agent_loop options dict.
+ *
+ * `config` = {
+ *   base,             // normalized agent_loop options (std/workflow/options)
+ *   raw_model_policy, // stage model_policy as a raw value (may carry closures)
+ *   auto_compact,     // typed AutoCompactPolicy
+ *   raw_auto_compact, // stage auto_compact as a raw value (callbacks, keep_last)
+ *   tools,            // tool spec, or nil when the stage exposes no tools
+ *   skills,           // workflow-level skill registry (default only)
+ *   skill_match,      // workflow-level skill match config (default only)
+ *   policy,           // host-computed capability ceiling (tool spec ∩ stage)
+ *   approval_policy,  // stage tool-approval policy
+ *   session_id, tool_format,
+ *   nested_kind, nested_label, // nested-execution attribution
+ * }
+ *
+ * Precedence mirrors the former Rust flattener: the raw model policy overrides
+ * the normalized base, workflow skill defaults and a nested command policy
+ * fill only unset keys, then compaction / tools / capability ceiling / approval
+ * policy / session / attribution are layered on top. Rust enforces
+ * `result.policy ⊆ config.policy` when the dict re-enters the host, so a buggy
+ * flatten cannot widen a ceiling.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn workflow_flatten_agent_loop_options(config = nil) {
+  let cfg = config ?? {}
+  var options = cfg?.base ?? {}
+  // 1. Raw model-policy entries override the normalized base. Nil-valued keys
+  //    are skipped so an explicit `foo: nil` does not shadow a base default.
+  let raw_model_policy = cfg?.raw_model_policy
+  if type_of(raw_model_policy) == "dict" {
+    for key in raw_model_policy.keys() {
+      if raw_model_policy[key] != nil {
+        options = options + {[key]: raw_model_policy[key]}
+      }
+    }
+  }
+  // 2. Workflow-level skill registry defaults (only when the stage left them unset).
+  if !contains(options.keys(), "skills") && cfg?.skills != nil {
+    options = options + {skills: cfg.skills}
+  }
+  if !contains(options.keys(), "skill_match") && cfg?.skill_match != nil {
+    options = options + {skill_match: cfg.skill_match}
+  }
+  // 3. Hoist a command policy declared under `model_policy.policy` (unless the
+  //    stage already set a top-level command_policy).
+  if !contains(options.keys(), "command_policy") {
+    let nested_command_policy = raw_model_policy?.policy?.command_policy
+    if nested_command_policy != nil {
+      options = options + {command_policy: nested_command_policy}
+    }
+  }
+  // 4. Auto-compaction.
+  options = __stage_flatten_compaction(options, cfg?.auto_compact ?? {}, cfg?.raw_auto_compact)
+  // 5. Tool spec (host forwards a value only when the stage exposes tools).
+  if cfg?.tools != nil {
+    options = options + {tools: cfg.tools}
+  }
+  // 6. Capability ceiling + approval policy. `policy` is the host-computed
+  //    ceiling; the host re-checks the returned value never widens it.
+  options = options + {policy: cfg?.policy ?? {}, approval_policy: cfg?.approval_policy}
+  // 7. Session + tool format.
+  options = options
+    + {session_id: __stage_string(cfg?.session_id, ""), tool_format: __stage_string(cfg?.tool_format, "")}
+  // 8. Nested-execution attribution.
+  options = options
+    + {
+    _nested_kind: __stage_string(cfg?.nested_kind, ""),
+    _nested_label: __stage_string(cfg?.nested_label, ""),
+  }
+  return options
+}
