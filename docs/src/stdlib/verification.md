@@ -229,6 +229,44 @@ Pass the returned list to `verification_ladder_plan` with
 per row. This keeps slow-toolchain scheduling in Harn profile data instead of
 embedding stack-specific string heuristics in a host product.
 
+## Warm-State Lifecycle
+
+`verification_start_warm_state(row, options)` and
+`verification_teardown_warm_state(receipt, options)` manage reusable verifier
+processes without inventing a second process manager. The row stays data:
+`warmMode.startCommand` / `start_command` / `spawnCommand` is a normal
+`std/command` spec, `readyProbe` remains the readiness fact, and optional
+`teardownCommand` / `stopCommand` handles stack-specific cleanup. Harn owns the
+receipt shape and scheduler policy; hostlib owns the background process handle,
+process-group cancellation, and session cleanup.
+
+```harn
+import {
+  verification_start_warm_state,
+  verification_teardown_warm_state,
+} from "std/verification"
+
+pipeline default() {
+  let row = {
+    id: "scala/build-server",
+    warmMode: {
+      mode: "build-server",
+      startCommand: {mode: "shell", command: "sbt --client"},
+      readyProbe: {spec: {mode: "shell", command: "test -S .bloop/socket"}},
+    },
+  }
+  let receipt = verification_start_warm_state(row)
+  // Later, or during test teardown:
+  return verification_teardown_warm_state(receipt).cancelled
+}
+```
+
+If the readiness probe is already warm, `verification_start_warm_state`
+returns `status: "ready"` and does not spawn. Pass a prior receipt as
+`existing` or `receipt` to reuse an already-started handle while the process is
+still warming. Teardown cancels the stored background handle through
+`std/command::command_cancel` and then runs any declared stop command.
+
 ## Ladder Planning
 
 `verification_profile_matches(query, dir?)` returns every profile row that
