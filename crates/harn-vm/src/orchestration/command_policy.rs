@@ -34,6 +34,16 @@ pub struct CommandPolicy {
     pub require_approval: BTreeSet<String>,
     pub pre: Option<Arc<VmClosure>>,
     pub post: Option<Arc<VmClosure>>,
+    /// Optional consent gate for the `require_approval` disposition. When set,
+    /// a command whose risk class is in `require_approval` (or a pre-hook
+    /// `require_approval` decision) is routed through this closure — the
+    /// `std/llm/tool_middleware::with_consent` prompt_fn contract — instead of
+    /// being hard-blocked: `true` / `{decision: "approved"}` lets the command
+    /// run; `false` / `{decision: "denied", reason?}` (and any non-bool,
+    /// non-dict verdict) blocks it with a `consent_denied` disposition. When
+    /// unset, `require_approval` keeps its legacy hard-block behavior so the
+    /// default (no consent) path stays byte-identical.
+    pub consent: Option<Arc<VmClosure>>,
     pub allow_recursive: bool,
 }
 
@@ -135,6 +145,7 @@ pub fn parse_command_policy_value(
             .collect(),
         pre: closure_field(map, "pre")?,
         post: closure_field(map, "post")?,
+        consent: closure_field(map, "consent")?,
         allow_recursive: bool_field(map, "allow_recursive")?.unwrap_or(false),
     }))
 }
@@ -302,10 +313,11 @@ pub async fn run_command_policy_preflight_with_ctx(
     }
 
     let risk_labels = risk_labels_from_scan(&scan);
-    if let Some(label) = risk_labels
+    let matched_approval = risk_labels
         .iter()
         .find(|label| policy.require_approval.contains(label.as_str()))
-    {
+        .cloned();
+    if let Some(label) = matched_approval {
         let msg = format!("command requires approval for risk class {label}");
         decisions.push(decision(
             "require_approval",
@@ -314,12 +326,40 @@ pub async fn run_command_policy_preflight_with_ctx(
             risk_labels.clone(),
             0.9,
         ));
-        return Ok(CommandPolicyPreflight::Blocked {
-            status: "blocked",
-            message: msg,
-            context,
-            decisions,
-        });
+        match command_consent_verdict(ctx, &policy, &context, &risk_labels, &msg).await? {
+            ConsentVerdict::NoGate => {
+                return Ok(CommandPolicyPreflight::Blocked {
+                    status: "blocked",
+                    message: msg,
+                    context,
+                    decisions,
+                });
+            }
+            ConsentVerdict::Denied(reason) => {
+                decisions.push(decision(
+                    "consent_denied",
+                    Some(reason.clone()),
+                    "consent",
+                    risk_labels.clone(),
+                    1.0,
+                ));
+                return Ok(CommandPolicyPreflight::Blocked {
+                    status: "consent_denied",
+                    message: reason,
+                    context,
+                    decisions,
+                });
+            }
+            ConsentVerdict::Approved => {
+                decisions.push(decision(
+                    "consent_granted",
+                    Some(format!("consent granted for {msg}")),
+                    "consent",
+                    risk_labels.clone(),
+                    1.0,
+                ));
+            }
+        }
     }
 
     if let Some(pre) = policy.pre.as_ref() {
@@ -346,16 +386,45 @@ pub async fn run_command_policy_preflight_with_ctx(
                     action: "require_approval".to_string(),
                     reason: Some(message.clone()),
                     source: "pre_hook".to_string(),
-                    risk_labels,
+                    risk_labels: risk_labels.clone(),
                     confidence: 1.0,
                     display,
                 });
-                return Ok(CommandPolicyPreflight::Blocked {
-                    status: "blocked",
-                    message,
-                    context,
-                    decisions,
-                });
+                match command_consent_verdict(ctx, &policy, &context, &risk_labels, &message).await?
+                {
+                    ConsentVerdict::NoGate => {
+                        return Ok(CommandPolicyPreflight::Blocked {
+                            status: "blocked",
+                            message,
+                            context,
+                            decisions,
+                        });
+                    }
+                    ConsentVerdict::Denied(reason) => {
+                        decisions.push(decision(
+                            "consent_denied",
+                            Some(reason.clone()),
+                            "consent",
+                            risk_labels,
+                            1.0,
+                        ));
+                        return Ok(CommandPolicyPreflight::Blocked {
+                            status: "consent_denied",
+                            message: reason,
+                            context,
+                            decisions,
+                        });
+                    }
+                    ConsentVerdict::Approved => {
+                        decisions.push(decision(
+                            "consent_granted",
+                            Some(format!("consent granted for {message}")),
+                            "consent",
+                            risk_labels,
+                            1.0,
+                        ));
+                    }
+                }
             }
             ParsedPreHookAction::DryRun(message) => {
                 decisions.push(decision(
@@ -421,24 +490,53 @@ pub async fn run_command_policy_preflight_with_ctx(
             });
         }
         let risk_labels = risk_labels_from_scan(&scan);
-        if let Some(label) = risk_labels
+        let matched_approval = risk_labels
             .iter()
             .find(|label| policy.require_approval.contains(label.as_str()))
-        {
+            .cloned();
+        if let Some(label) = matched_approval {
             let msg = format!("rewritten command requires approval for risk class {label}");
             decisions.push(decision(
                 "require_approval",
                 Some(msg.clone()),
                 "deterministic",
-                risk_labels,
+                risk_labels.clone(),
                 0.9,
             ));
-            return Ok(CommandPolicyPreflight::Blocked {
-                status: "blocked",
-                message: msg,
-                context,
-                decisions,
-            });
+            match command_consent_verdict(ctx, &policy, &context, &risk_labels, &msg).await? {
+                ConsentVerdict::NoGate => {
+                    return Ok(CommandPolicyPreflight::Blocked {
+                        status: "blocked",
+                        message: msg,
+                        context,
+                        decisions,
+                    });
+                }
+                ConsentVerdict::Denied(reason) => {
+                    decisions.push(decision(
+                        "consent_denied",
+                        Some(reason.clone()),
+                        "consent",
+                        risk_labels,
+                        1.0,
+                    ));
+                    return Ok(CommandPolicyPreflight::Blocked {
+                        status: "consent_denied",
+                        message: reason,
+                        context,
+                        decisions,
+                    });
+                }
+                ConsentVerdict::Approved => {
+                    decisions.push(decision(
+                        "consent_granted",
+                        Some(format!("consent granted for {msg}")),
+                        "consent",
+                        risk_labels,
+                        1.0,
+                    ));
+                }
+            }
         }
     }
 
@@ -601,6 +699,81 @@ async fn invoke_command_hook(
     let _guard = HookDepthGuard;
     let arg = crate::stdlib::json_to_vm_value(payload);
     vm.call_closure_pub(closure, &[arg]).await
+}
+
+/// Outcome of routing a `require_approval` disposition through the policy's
+/// optional consent gate (`CommandPolicy.consent`). Mirrors the
+/// `std/llm/tool_middleware::with_consent` prompt_fn contract.
+#[derive(Clone, Debug)]
+enum ConsentVerdict {
+    /// No consent gate is configured — preserve the legacy hard-block so the
+    /// default (no consent) path stays byte-identical.
+    NoGate,
+    /// The consent callback approved the command; let it run.
+    Approved,
+    /// The consent callback (or a fail-closed default) denied the command.
+    Denied(String),
+}
+
+/// Consult the policy's consent gate for a command that landed on a
+/// `require_approval` disposition. The consent closure receives the command
+/// context enriched with the deterministic classification (`consent.reason`
+/// and `consent.risk_labels`) and returns the `with_consent` prompt_fn shape:
+/// `true` / `{decision: "approved"}` to allow, `false` /
+/// `{decision: "denied", reason?}` to deny. Any non-bool, non-dict verdict is
+/// treated as a denial (fail closed), matching `with_consent`.
+async fn command_consent_verdict(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
+    policy: &CommandPolicy,
+    context: &JsonValue,
+    risk_labels: &[String],
+    reason: &str,
+) -> Result<ConsentVerdict, VmError> {
+    let Some(consent) = policy.consent.as_ref() else {
+        return Ok(ConsentVerdict::NoGate);
+    };
+    let mut consent_ctx = context.clone();
+    if let Some(obj) = consent_ctx.as_object_mut() {
+        obj.insert(
+            "consent".to_string(),
+            serde_json::json!({
+                "reason": reason,
+                "risk_labels": risk_labels,
+            }),
+        );
+    }
+    let outcome = invoke_command_hook(ctx, consent, &consent_ctx).await?;
+    Ok(parse_consent_outcome(outcome, reason))
+}
+
+fn parse_consent_outcome(value: VmValue, reason: &str) -> ConsentVerdict {
+    match value {
+        VmValue::Bool(true) => ConsentVerdict::Approved,
+        VmValue::Bool(false) => ConsentVerdict::Denied(default_consent_denial(reason)),
+        VmValue::Dict(map) => {
+            let verdict = map
+                .get("decision")
+                .map(|value| value.display())
+                .unwrap_or_else(|| "denied".to_string());
+            if verdict == "denied" {
+                let message = map
+                    .get("reason")
+                    .or_else(|| map.get("message"))
+                    .map(|value| value.display())
+                    .unwrap_or_else(|| default_consent_denial(reason));
+                ConsentVerdict::Denied(message)
+            } else {
+                ConsentVerdict::Approved
+            }
+        }
+        // Mirror `with_consent`: a verdict that is neither a bool nor a dict
+        // carries no `decision` key, so it resolves to a denial. Fail closed.
+        _ => ConsentVerdict::Denied(default_consent_denial(reason)),
+    }
+}
+
+fn default_consent_denial(reason: &str) -> String {
+    format!("consent denied: {reason}")
 }
 
 #[derive(Clone, Debug)]
@@ -1912,6 +2085,7 @@ mod tests {
             require_approval: BTreeSet::new(),
             pre: None,
             post: None,
+            consent: None,
             allow_recursive: false,
         };
         assert_eq!(
