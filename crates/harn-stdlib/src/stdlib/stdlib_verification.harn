@@ -8,7 +8,7 @@
  * can bind diagnostics and background check results to file snapshots without
  * duplicating hostlib plumbing or inventing product-specific hash logic.
  */
-import { command_run, command_wait } from "std/command"
+import { command_cancel, command_run, command_wait } from "std/command"
 import { shell_quote } from "std/runtime"
 import { regex_first_capture, truncate_text } from "std/text"
 
@@ -82,6 +82,8 @@ type VerificationWarmStateFact = {
   cache_identity: dict,
   probe: dict,
 }
+
+type VerificationWarmStateLifecycleReceipt = dict
 
 type VerificationAffectedTarget = dict
 
@@ -327,6 +329,45 @@ fn __verification_warm_state_probe(row) {
   return probe
 }
 
+fn __verification_warm_state_start_spec(row) {
+  let mode = __verification_warm_state_mode(row) ?? {}
+  let start = mode?.startCommand
+    ?? mode?.start_command
+    ?? mode?.spawnCommand
+    ?? mode?.spawn_command
+    ?? mode?.command
+    ?? row?.startCommand
+    ?? row?.start_command
+    ?? row?.spawnCommand
+    ?? row?.spawn_command
+  if start == nil {
+    return nil
+  }
+  if type_of(start) == "dict" && start?.spec != nil {
+    return start.spec
+  }
+  return start
+}
+
+fn __verification_warm_state_teardown_spec(row) {
+  let mode = __verification_warm_state_mode(row) ?? {}
+  let stop = mode?.teardownCommand
+    ?? mode?.teardown_command
+    ?? mode?.stopCommand
+    ?? mode?.stop_command
+    ?? row?.teardownCommand
+    ?? row?.teardown_command
+    ?? row?.stopCommand
+    ?? row?.stop_command
+  if stop == nil {
+    return nil
+  }
+  if type_of(stop) == "dict" && stop?.spec != nil {
+    return stop.spec
+  }
+  return stop
+}
+
 fn __verification_warm_state_probe_options(row, opts) {
   let mode = __verification_warm_state_mode(row) ?? {}
   let probe = mode?.readyProbe ?? mode?.ready_probe ?? mode?.readinessProbe ?? mode?.readiness_probe
@@ -339,6 +380,37 @@ fn __verification_warm_state_probe_options(row, opts) {
     ?? {}
   return (opts?.command_options ?? {})
     + (probe?.command_options ?? mode?.command_options ?? row?.command_options ?? {})
+}
+
+fn __verification_warm_state_start_options(row, opts) {
+  let mode = __verification_warm_state_mode(row) ?? {}
+  let start = mode?.startCommand
+    ?? mode?.start_command
+    ?? mode?.spawnCommand
+    ?? mode?.spawn_command
+    ?? mode?.command
+    ?? row?.startCommand
+    ?? row?.start_command
+    ?? row?.spawnCommand
+    ?? row?.spawn_command
+    ?? {}
+  return (opts?.command_options ?? {})
+    + (start?.command_options ?? mode?.command_options ?? row?.command_options ?? {})
+}
+
+fn __verification_warm_state_teardown_options(row, opts) {
+  let mode = __verification_warm_state_mode(row) ?? {}
+  let stop = mode?.teardownCommand
+    ?? mode?.teardown_command
+    ?? mode?.stopCommand
+    ?? mode?.stop_command
+    ?? row?.teardownCommand
+    ?? row?.teardown_command
+    ?? row?.stopCommand
+    ?? row?.stop_command
+    ?? {}
+  return (opts?.command_options ?? {})
+    + (stop?.command_options ?? mode?.command_options ?? row?.command_options ?? {})
 }
 
 fn __verification_warm_state_cache_identity(row, opts) -> dict {
@@ -378,6 +450,39 @@ fn __verification_warm_state_probe_receipt(result) -> dict {
     stdout: result?.stdout ?? "",
     stderr: result?.stderr ?? "",
   }
+}
+
+fn __verification_warm_state_first_fact(row, opts) {
+  let facts = verification_warm_state_facts([row], opts)
+  return len(facts) == 0 ? nil : facts[0]
+}
+
+fn __verification_warm_state_receipt_handle(value) {
+  if value == nil {
+    return nil
+  }
+  if value?.handle_id != nil {
+    let handle = trim(to_string(value.handle_id))
+    return handle == "" ? nil : handle
+  }
+  if value?.started?.handle_id != nil {
+    let handle = trim(to_string(value.started.handle_id))
+    return handle == "" ? nil : handle
+  }
+  return nil
+}
+
+fn __verification_warm_state_cancel_options(opts) -> dict {
+  var out = {}
+  if opts?.wait_result_ms != nil {
+    out = out + {wait_result_ms: opts.wait_result_ms}
+  } else {
+    out = out + {wait_result_ms: 2000}
+  }
+  if opts?.timed_out != nil {
+    out = out + {timed_out: opts.timed_out}
+  }
+  return out
 }
 
 fn __verification_string_list(value) -> list<string> {
@@ -2076,4 +2181,124 @@ pub fn verification_warm_state_facts(rows: list<dict>, options = nil) -> list<Ve
     index = index + 1
   }
   return facts
+}
+
+/**
+ * Ensure a declared warm-state process is running, returning a reusable
+ * lifecycle receipt. This composes the existing hostlib-owned background
+ * command handle machinery: Harn owns the data contract and policy, while
+ * hostlib owns process groups, cancellation, and session cleanup.
+ *
+ * Rows may declare `warmMode.startCommand` / `start_command` / `spawnCommand`
+ * as a normal `std/command` spec. If the readiness probe already reports
+ * warm, no process is spawned. Pass a prior receipt as `existing`/`receipt` to
+ * make reuse explicit; the helper will return that handle instead of spawning
+ * a duplicate while the row is still cold.
+ *
+ * @effects: [process]
+ * @errors: [backend, invalid_argument]
+ * @api_stability: experimental
+ */
+pub fn verification_start_warm_state(row: dict, options = nil) -> VerificationWarmStateLifecycleReceipt {
+  let opts = __verification_opts(options)
+  let id = __verification_warm_state_id(row, 0)
+  let name = __verification_warm_state_name(row, id)
+  let existing = opts?.existing ?? opts?.receipt
+  let existing_handle = __verification_warm_state_receipt_handle(existing)
+  let before = __verification_warm_state_first_fact(row, opts)
+  let before_warm = before?.warm ?? false
+  if before_warm {
+    return {
+      id: id,
+      name: name,
+      status: "ready",
+      reused: existing_handle != nil,
+      handle_id: existing_handle,
+      started: existing?.started,
+      initial_fact: before,
+      fact: before,
+      row: row,
+    }
+  }
+  if existing_handle != nil && opts?.reuse_existing != false {
+    return {
+      id: id,
+      name: name,
+      status: "starting",
+      reused: true,
+      handle_id: existing_handle,
+      started: existing?.started,
+      initial_fact: before,
+      fact: before,
+      row: row,
+    }
+  }
+  let spec = __verification_warm_state_start_spec(row)
+  if spec == nil {
+    return {
+      id: id,
+      name: name,
+      status: "not_configured",
+      reused: false,
+      handle_id: nil,
+      started: nil,
+      initial_fact: before,
+      fact: before,
+      row: row,
+    }
+  }
+  let started = command_run(spec, __verification_warm_state_start_options(row, opts) + {background: true})
+  let fact = __verification_warm_state_first_fact(row, opts)
+  let fact_warm = fact?.warm ?? false
+  return {
+    id: id,
+    name: name,
+    status: fact_warm ? "ready" : "starting",
+    reused: false,
+    handle_id: started?.handle_id,
+    started: started,
+    initial_fact: before,
+    fact: fact,
+    row: row,
+  }
+}
+
+/**
+ * Tear down a warm-state lifecycle receipt produced by
+ * `verification_start_warm_state`. If the receipt contains a hostlib
+ * background handle, it is cancelled through `std/command::command_cancel`;
+ * rows may additionally declare `warmMode.teardownCommand` / `stopCommand`
+ * for stack-specific cleanup.
+ *
+ * @effects: [process]
+ * @errors: [backend, invalid_argument]
+ * @api_stability: experimental
+ */
+pub fn verification_teardown_warm_state(receipt: dict, options = nil) -> VerificationWarmStateLifecycleReceipt {
+  let opts = __verification_opts(options)
+  let row = opts?.row ?? receipt?.row ?? {}
+  let id = receipt?.id ?? __verification_warm_state_id(row, 0)
+  let name = receipt?.name ?? __verification_warm_state_name(row, id)
+  let handle_id = opts?.handle_id ?? __verification_warm_state_receipt_handle(receipt)
+  var cancel = nil
+  if handle_id != nil {
+    cancel = command_cancel(handle_id, __verification_warm_state_cancel_options(opts))
+  }
+  let spec = __verification_warm_state_teardown_spec(row)
+  var teardown = nil
+  if spec != nil {
+    teardown = command_run(spec, __verification_warm_state_teardown_options(row, opts))
+  }
+  let fact = opts?.probe_after == true ? __verification_warm_state_first_fact(row, opts) : nil
+  return {
+    id: id,
+    name: name,
+    status: "torn_down",
+    handle_id: handle_id,
+    cancelled: cancel?.cancelled ?? false,
+    cancel: cancel,
+    teardown: teardown,
+    fact: fact,
+    row: row,
+  }
 }
