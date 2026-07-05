@@ -1396,10 +1396,11 @@ harn models batch prepare --manifest ./batch-manifest.json --out-dir ./.harn/bat
 
 `prepare` reads the provider-neutral manifest and writes one request artifact
 per batch group plus a deterministic `receipt.json`. The request artifacts use
-the provider's batch envelope (`openai`/`mistral` JSONL, Gemini `{key, request}`
-JSONL, or Anthropic Message Batches JSON) while the receipt records the stable
-manifest hash, request-file hashes, provider operation, upload/create shape, and
-result-rejoin ids. It does not read credentials or call provider APIs;
+the provider's batch envelope (`openai`/`mistral` JSONL, Fireworks
+`{custom_id, body}` JSONL, Gemini `{key, request}` JSONL, or Anthropic Message
+Batches JSON) while the receipt records the stable manifest hash, request-file
+hashes, provider operation, upload/create shape, and result-rejoin ids. It does
+not read credentials or call provider APIs;
 `harn models batch submit` consumes this receipt as its durable input.
 
 ## harn models batch submit
@@ -1417,11 +1418,14 @@ harn models batch submit --receipt ./.harn/batches/eval-001/receipt.json \
 the provider operation with credential names redacted, and writes a durable
 `harn.model_batch_submission_receipt` without network calls. Live submit
 currently supports OpenAI/Groq/Together-compatible and Mistral file-backed batch
-jobs, Gemini File API JSONL batches, Anthropic Message Batches, and xAI batches.
-Provider API keys must be present in the provider's normal environment variable
-(`OPENAI_API_KEY`, `GROQ_API_KEY`, `TOGETHER_AI_API_KEY` or
-`TOGETHER_API_KEY`, `MISTRAL_API_KEY`, `GEMINI_API_KEY` or `GOOGLE_API_KEY`,
-`ANTHROPIC_API_KEY`, or `XAI_API_KEY`); subscription-plan
+jobs, Fireworks dataset-backed batch jobs, Gemini File API JSONL batches,
+Anthropic Message Batches, and xAI batches. Provider API keys must be present
+in the provider's normal environment variable (`OPENAI_API_KEY`,
+`GROQ_API_KEY`, `TOGETHER_AI_API_KEY` or `TOGETHER_API_KEY`,
+`MISTRAL_API_KEY`, `FIREWORKS_API_KEY`, `GEMINI_API_KEY` or `GOOGLE_API_KEY`,
+`ANTHROPIC_API_KEY`, or `XAI_API_KEY`); Fireworks live submit/status/download
+also needs `HARN_BATCH_FIREWORKS_ACCOUNT_ID` or `FIREWORKS_ACCOUNT_ID`.
+Subscription-plan
 auth remains out of scope for provider Batch APIs. The submission receipt
 records provider job ids, status, request file hashes, and result handles for
 later poll/download/rejoin work.
@@ -1439,9 +1443,9 @@ harn models batch status --submission ./.harn/batches/eval-001/submission.json \
 
 `--dry-run` validates the submission receipt and summarizes cached job state
 without network calls. Live status currently polls OpenAI/Groq/Together-
-compatible `batches/{id}`, Gemini `batches/{id}`, Anthropic Message Batches,
-Mistral batch jobs, and xAI batches from the Harn provider adapter boundary,
-then writes a
+compatible `batches/{id}`, Fireworks `batchInferenceJobs/{id}`, Gemini
+`batches/{id}`, Anthropic Message Batches, Mistral batch jobs, and xAI batches
+from the Harn provider adapter boundary, then writes a
 `harn.model_batch_status_receipt` with stable job ids, normalized lifecycle
 state, provider status, and result file pointers.
 
@@ -1459,8 +1463,8 @@ harn models batch download --status ./.harn/batches/eval-001/status.json \
 `--dry-run` validates the status receipt, requires completed jobs, and records
 the redacted provider download operations without network calls. Live download
 currently retrieves OpenAI/Groq/Together-compatible, Gemini, and Mistral file
-content plus Anthropic Message Batch `results_url` and xAI result pages, writes
-provider
+content plus Fireworks output dataset signed URLs, Anthropic Message Batch
+`results_url`, and xAI result pages, writes provider
 JSONL files under `--out-dir`, and emits a `harn.model_batch_results_receipt`
 containing artifact paths, handles, hashes, and source receipt metadata. Use
 `--max-bytes` to cap each provider file response when working with very large

@@ -499,9 +499,9 @@ submission state, and poll/download/rejoin logic stay in Harn instead of host
 products.
 
 Current live batch adapters cover OpenAI, OpenAI-compatible Groq and Together,
-Gemini, Anthropic Messages, Mistral, and xAI. Fireworks and any other
-catalogued batch providers remain prepare/dry-run only until Harn has a
-provider adapter for their submission and result APIs.
+Gemini File API JSONL batches, Anthropic Messages, Mistral, Fireworks dataset
+batches, and xAI. Other catalogued batch providers remain prepare/dry-run only
+until Harn has a provider adapter for their submission and result APIs.
 
 ### Packaged provider adapters via `[llm]`
 

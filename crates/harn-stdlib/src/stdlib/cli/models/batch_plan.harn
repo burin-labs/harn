@@ -170,6 +170,9 @@ fn __live_batch_adapter_key(provider: string, wire: string) -> string {
   if provider == "gemini" && wire == "gemini" {
     return "gemini"
   }
+  if provider == "fireworks" && wire == "fireworks" {
+    return "fireworks"
+  }
   if provider == "mistral" && wire == "mistral" {
     return "mistral"
   }
@@ -705,6 +708,9 @@ fn __provider_request_record(group: dict, request: dict, endpoint: string) -> di
   if wire == "gemini" {
     return {key: custom_id, request: __body_from_row(raw_row, model, false)}
   }
+  if wire == "fireworks" {
+    return {custom_id: custom_id, body: __body_from_row(raw_row, model, false)}
+  }
   return {custom_id: custom_id, method: "POST", url: endpoint, body: __body_from_row(raw_row, model, true)}
 }
 
@@ -749,6 +755,21 @@ fn __submit_contract(group: dict, request_path: string, endpoint: string) -> dic
       model: model,
       input: {mode: "file_api_jsonl", file: request_path},
       request_line_shape: "{key, request}",
+    }
+  }
+  if wire == "fireworks" {
+    return {
+      provider: provider,
+      operation: "POST /v1/accounts/{account_id}/batchInferenceJobs",
+      model: model,
+      upload: {
+        create_dataset: "POST /v1/accounts/{account_id}/datasets",
+        upload_dataset: "POST /v1/accounts/{account_id}/datasets/{dataset_id}:upload",
+        file: request_path,
+      },
+      create_batch: {input_dataset_id: "<input-dataset-id>", output_dataset_id: "<output-dataset-id>"},
+      request_line_shape: "{custom_id, body}",
+      result_stream: "GET /v1/accounts/{account_id}/datasets/{output_dataset_id}:getDownloadEndpoint",
     }
   }
   if wire == "mistral" {
@@ -1243,6 +1264,9 @@ fn __provider_auth_env_candidates(provider: string) -> list {
   if provider == "gemini" {
     return ["GEMINI_API_KEY", "GOOGLE_API_KEY"]
   }
+  if provider == "fireworks" {
+    return ["FIREWORKS_API_KEY"]
+  }
   return [__provider_auth_env(provider)]
 }
 
@@ -1319,6 +1343,15 @@ fn __provider_base_url(harness: Harness, provider: string) -> string {
           "TOGETHER_AI_BASE_URL",
           harness.env.get_or("TOGETHER_BASE_URL", "https://api.together.xyz/v1"),
         ),
+      ),
+    )
+  }
+  if provider == "fireworks" {
+    return trim(
+      harness.env
+        .get_or(
+        "HARN_BATCH_FIREWORKS_BASE_URL",
+        harness.env.get_or("FIREWORKS_BASE_URL", "https://api.fireworks.ai/v1"),
       ),
     )
   }
@@ -1455,6 +1488,58 @@ fn __api_key_for_job(harness: Harness, provider: string) -> dict {
   }
 }
 
+fn __fireworks_account_id(harness: Harness) -> dict {
+  let candidates = ["HARN_BATCH_FIREWORKS_ACCOUNT_ID", "FIREWORKS_ACCOUNT_ID"]
+  for env_name in candidates {
+    var value = trim(harness.env.get_or(env_name, ""))
+    if starts_with(value, "accounts/") {
+      value = value[9:len(value)]
+    }
+    if value != "" {
+      return {ok: true, env: env_name, value: value}
+    }
+  }
+  return {
+    ok: false,
+    env: "HARN_BATCH_FIREWORKS_ACCOUNT_ID",
+    error: "missing Fireworks account id env HARN_BATCH_FIREWORKS_ACCOUNT_ID (accepted: HARN_BATCH_FIREWORKS_ACCOUNT_ID, FIREWORKS_ACCOUNT_ID)",
+  }
+}
+
+fn __fireworks_account_id_or_placeholder(harness: Harness) -> string {
+  let account = __fireworks_account_id(harness)
+  if safe_bool(account["ok"], false) {
+    return safe_string(account["value"], "")
+  }
+  return "{account_id}"
+}
+
+fn __fireworks_dataset_resource(account_id: string, dataset_id: string) -> string {
+  let trimmed = trim(dataset_id)
+  if starts_with(trimmed, "accounts/") {
+    return trimmed
+  }
+  return "accounts/" + account_id + "/datasets/" + trimmed
+}
+
+fn __fireworks_dataset_id(job: dict, suffix: string) -> string {
+  let seed = safe_string(job["id"], "")
+    + ":"
+    + safe_string(job["request_file_sha256"], "")
+    + ":"
+    + suffix
+  return "harn-" + suffix + "-" + substring(sha256(seed), 0, 20)
+}
+
+fn __fireworks_batch_job_id(job: dict) -> string {
+  let seed = safe_string(job["id"], "")
+    + ":"
+    + safe_string(job["model"], "")
+    + ":"
+    + safe_string(job["request_file_sha256"], "")
+  return "harn-job-" + substring(sha256(seed), 0, 24)
+}
+
 fn __submit_anthropic(harness: Harness, job: dict, payload: dict) -> dict {
   let auth = __api_key_for_job(harness, "anthropic")
   let base = __provider_base_url(harness, "anthropic")
@@ -1493,6 +1578,168 @@ fn __submit_anthropic(harness: Harness, job: dict, payload: dict) -> dict {
       provider_batch_id: safe_string(body["id"], ""),
       provider_status: body["processing_status"] ?? nil,
       results_url: body["results_url"] ?? nil,
+      response_status: response["status"],
+      response: body,
+    },
+    errors: [],
+  }
+}
+
+fn __fireworks_create_dataset(
+  harness: Harness,
+  account_id: string,
+  dataset_id: string,
+  api_key: string,
+) -> dict {
+  let response = __http_result(
+    harness,
+    "POST",
+    __join_url(__provider_base_url(harness, "fireworks"), "/accounts/" + account_id + "/datasets"),
+    {
+      headers: {Authorization: "Bearer " + api_key, "content-type": "application/json"},
+      body: json_stringify({datasetId: dataset_id, dataset: {displayName: dataset_id, userUploaded: {}}}),
+      timeout_ms: 120000,
+      max_response_bytes: 1048576,
+    },
+  )
+  let body = safe_dict(response["body"])
+  let status_code = __safe_int(response["status"]) ?? 0
+  if safe_bool(response["ok"], false) || status_code == 409 {
+    return {
+      ok: true,
+      dataset_id: dataset_id,
+      dataset_resource: __fireworks_dataset_resource(account_id, dataset_id),
+      status: response["status"],
+      response: body,
+      already_exists: status_code == 409,
+    }
+  }
+  return {
+    ok: false,
+    error: "fireworks batch dataset create failed for " + dataset_id,
+    status: response["status"],
+    response: body,
+  }
+}
+
+fn __fireworks_upload_dataset(
+  harness: Harness,
+  account_id: string,
+  dataset_id: string,
+  api_key: string,
+  file_path: string,
+) -> dict {
+  let response = __http_result(
+    harness,
+    "POST",
+    __join_url(
+      __provider_base_url(harness, "fireworks"),
+      "/accounts/" + account_id + "/datasets/" + dataset_id + ":upload",
+    ),
+    {
+      headers: {Authorization: "Bearer " + api_key},
+      multipart: [{name: "file", path: file_path, filename: basename(file_path), content_type: "application/jsonl"}],
+      timeout_ms: 120000,
+      max_response_bytes: 1048576,
+    },
+  )
+  let body = safe_dict(response["body"])
+  if !safe_bool(response["ok"], false) {
+    return {
+      ok: false,
+      error: "fireworks batch dataset upload failed for " + dataset_id,
+      status: response["status"],
+      response: body,
+    }
+  }
+  return {ok: true, dataset_id: dataset_id, status: response["status"], response: body}
+}
+
+fn __submit_fireworks(harness: Harness, job: dict, payload: dict) -> dict {
+  let auth = __api_key_for_job(harness, "fireworks")
+  let account = __fireworks_account_id(harness)
+  let base_job = __submission_job_base(harness, job, payload, false)
+  if !safe_bool(auth["ok"], false) {
+    return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
+  }
+  if !safe_bool(account["ok"], false) {
+    return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(account["error"], "")]}
+  }
+  let account_id = safe_string(account["value"], "")
+  let input_dataset_id = __fireworks_dataset_id(job, "input")
+  let output_dataset_id = __fireworks_dataset_id(job, "output")
+  let input_dataset = __fireworks_create_dataset(harness, account_id, input_dataset_id, safe_string(auth["value"], ""))
+  if !safe_bool(input_dataset["ok"], false) {
+    return {
+      ok: false,
+      job: base_job + {status: "failed", input_dataset: input_dataset},
+      errors: [safe_string(input_dataset["error"], "")],
+    }
+  }
+  let upload = __fireworks_upload_dataset(
+    harness,
+    account_id,
+    input_dataset_id,
+    safe_string(auth["value"], ""),
+    safe_string(payload["path"], ""),
+  )
+  if !safe_bool(upload["ok"], false) {
+    return {
+      ok: false,
+      job: base_job + {status: "failed", input_dataset: input_dataset, upload: upload},
+      errors: [safe_string(upload["error"], "")],
+    }
+  }
+  let batch_job_id = __fireworks_batch_job_id(job)
+  let create_body = {
+    model: safe_string(job["model"], ""),
+    inputDatasetId: __fireworks_dataset_resource(account_id, input_dataset_id),
+    outputDatasetId: __fireworks_dataset_resource(account_id, output_dataset_id),
+  }
+  let response = __http_result(
+    harness,
+    "POST",
+    __join_url(
+      __provider_base_url(harness, "fireworks"),
+      "/accounts/" + account_id + "/batchInferenceJobs?batchInferenceJobId=" + batch_job_id,
+    ),
+    {
+      headers: {Authorization: "Bearer " + safe_string(auth["value"], ""), "content-type": "application/json"},
+      body: json_stringify(create_body),
+      timeout_ms: 120000,
+      max_response_bytes: 1048576,
+    },
+  )
+  let body = safe_dict(response["body"])
+  if !safe_bool(response["ok"], false) {
+    return {
+      ok: false,
+      job: base_job
+        + {
+        status: "failed",
+        input_dataset: input_dataset,
+        upload: upload,
+        response_status: response["status"],
+        response: body,
+      },
+      errors: ["fireworks batch job create failed for job " + safe_string(job["id"], "")],
+    }
+  }
+  let provider_batch_id = safe_string(body["name"], batch_job_id)
+  return {
+    ok: true,
+    job: base_job
+      + {
+      status: "submitted",
+      provider_batch_id: provider_batch_id,
+      provider_status: body["state"] ?? nil,
+      input_dataset_id: input_dataset_id,
+      input_dataset_resource: __fireworks_dataset_resource(account_id, input_dataset_id),
+      output_dataset_id: output_dataset_id,
+      output_dataset_resource: __fireworks_dataset_resource(account_id, output_dataset_id),
+      job_progress: body["jobProgress"] ?? nil,
+      input_dataset: input_dataset,
+      upload: upload,
       response_status: response["status"],
       response: body,
     },
@@ -1973,6 +2220,9 @@ fn __submit_live(harness: Harness, job: dict, payload: dict) -> dict {
   if adapter == "gemini" {
     return __submit_gemini(harness, job, payload)
   }
+  if adapter == "fireworks" {
+    return __submit_fireworks(harness, job, payload)
+  }
   if adapter == "mistral" {
     return __submit_mistral(harness, job, payload)
   }
@@ -2209,6 +2459,11 @@ fn __cached_status_job(job: dict, dry_run: bool) -> dict {
     error_file: job["error_file"] ?? nil,
     results_url: job["results_url"] ?? nil,
     responses_file: job["responses_file"] ?? nil,
+    input_dataset_id: job["input_dataset_id"] ?? nil,
+    input_dataset_resource: job["input_dataset_resource"] ?? nil,
+    output_dataset_id: job["output_dataset_id"] ?? nil,
+    output_dataset_resource: job["output_dataset_resource"] ?? nil,
+    job_progress: job["job_progress"] ?? nil,
     response: job["response"] ?? nil,
   }
 }
@@ -2331,6 +2586,82 @@ fn __poll_mistral_status(harness: Harness, job: dict) -> dict {
       status_checked: true,
       output_file: body["output_file"] ?? nil,
       error_file: body["error_file"] ?? nil,
+      response_status: response["status"],
+      response: body,
+    },
+    errors: [],
+  }
+}
+
+fn __fireworks_batch_id_path(provider_batch_id: string) -> string {
+  let trimmed = trim(provider_batch_id)
+  if starts_with(trimmed, "accounts/") {
+    let parts = split(trimmed, "/batchInferenceJobs/")
+    if len(parts) > 1 {
+      return safe_string(parts[1], trimmed)
+    }
+  }
+  return trimmed
+}
+
+fn __poll_fireworks_status(harness: Harness, job: dict) -> dict {
+  let auth = __api_key_for_job(harness, "fireworks")
+  let account = __fireworks_account_id(harness)
+  let base_job = __status_job_base(job, false)
+  if !safe_bool(auth["ok"], false) {
+    return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
+  }
+  if !safe_bool(account["ok"], false) {
+    return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(account["error"], "")]}
+  }
+  let account_id = safe_string(account["value"], "")
+  let batch_id = __fireworks_batch_id_path(safe_string(job["provider_batch_id"], ""))
+  let response = __http_result(
+    harness,
+    "GET",
+    __join_url(
+      __provider_base_url(harness, "fireworks"),
+      "/accounts/" + account_id + "/batchInferenceJobs/" + batch_id,
+    ),
+    {
+      headers: {Authorization: "Bearer " + safe_string(auth["value"], ""), "content-type": "application/json"},
+      timeout_ms: 120000,
+      max_response_bytes: 1048576,
+    },
+  )
+  let body = safe_dict(response["body"])
+  if !safe_bool(response["ok"], false) {
+    return {
+      ok: false,
+      job: base_job + {status: "failed", response_status: response["status"], response: body},
+      errors: ["fireworks batch status failed for job " + safe_string(job["id"], "")],
+    }
+  }
+  let provider_status = body["state"] ?? nil
+  let output_dataset = safe_string(
+    body["outputDatasetId"],
+    safe_string(job["output_dataset_resource"], safe_string(job["output_dataset_id"], "")),
+  )
+  return {
+    ok: true,
+    job: base_job
+      + {
+      status: __provider_batch_status(provider_status),
+      provider_status: provider_status,
+      status_checked: true,
+      input_dataset_id: job["input_dataset_id"] ?? nil,
+      input_dataset_resource: job["input_dataset_resource"] ?? nil,
+      output_dataset_id: if starts_with(output_dataset, "accounts/") {
+        safe_string(job["output_dataset_id"], output_dataset)
+      } else {
+        output_dataset
+      },
+      output_dataset_resource: if starts_with(output_dataset, "accounts/") {
+        output_dataset
+      } else {
+        __fireworks_dataset_resource(account_id, output_dataset)
+      },
+      job_progress: body["jobProgress"] ?? nil,
       response_status: response["status"],
       response: body,
     },
@@ -2480,6 +2811,9 @@ fn __status_one_job(harness: Harness, job: dict, dry_run: bool) -> dict {
   }
   if adapter == "gemini" {
     return __poll_gemini_status(harness, job)
+  }
+  if adapter == "fireworks" {
+    return __poll_fireworks_status(harness, job)
   }
   if adapter == "anthropic" {
     return __poll_anthropic_status(harness, job)
@@ -2650,6 +2984,11 @@ fn __download_status(job: dict, dry_run: bool) -> dict {
     provider_batch_id: safe_string(job["provider_batch_id"], ""),
     provider_status: job["provider_status"] ?? nil,
     responses_file: job["responses_file"] ?? nil,
+    input_dataset_id: job["input_dataset_id"] ?? nil,
+    input_dataset_resource: job["input_dataset_resource"] ?? nil,
+    output_dataset_id: job["output_dataset_id"] ?? nil,
+    output_dataset_resource: job["output_dataset_resource"] ?? nil,
+    job_progress: job["job_progress"] ?? nil,
     source_status: safe_string(job["status"], ""),
     dry_run: dry_run,
   }
@@ -2766,6 +3105,113 @@ fn __dry_run_download_artifact(
     ),
     errors: [],
   }
+}
+
+fn __fireworks_download_endpoint_url(
+  harness: Harness,
+  account_id: string,
+  output_dataset_id: string,
+) -> string {
+  return __join_url(
+    __provider_base_url(harness, "fireworks"),
+    "/" + __fireworks_dataset_resource(account_id, output_dataset_id) + ":getDownloadEndpoint",
+  )
+}
+
+fn __fireworks_artifact_label(filename: string) -> string {
+  let slug = __download_slug(basename(filename))
+  if contains(slug, "error") {
+    return "error"
+  }
+  if contains(slug, "result") || contains(slug, "response") {
+    return "results"
+  }
+  return slug
+}
+
+fn __download_fireworks_results(
+  harness: Harness,
+  job: dict,
+  out_dir: string,
+  dry_run: bool,
+  max_bytes: int,
+) -> dict {
+  var output_dataset_id = safe_string(job["output_dataset_id"], "")
+  if output_dataset_id == "" {
+    output_dataset_id = safe_string(job["output_dataset_resource"], "")
+  }
+  if output_dataset_id == "" {
+    return {ok: true, artifacts: [], errors: []}
+  }
+  let account_id = if dry_run {
+    __fireworks_account_id_or_placeholder(harness)
+  } else {
+    let account = __fireworks_account_id(harness)
+    if !safe_bool(account["ok"], false) {
+      return {ok: false, artifacts: [], errors: [safe_string(account["error"], "")]}
+    }
+    safe_string(account["value"], "")
+  }
+  let endpoint_url = __fireworks_download_endpoint_url(harness, account_id, output_dataset_id)
+  let auth_env = __provider_auth_env("fireworks")
+  if dry_run {
+    let out_path = __download_artifact_path(out_dir, job, "download-endpoint")
+    let artifact = __download_artifact_record(
+      "download-endpoint",
+      output_dataset_id,
+      out_path,
+      __download_operation("fireworks", "GET", endpoint_url, auth_env, out_path),
+      "",
+      true,
+    )
+    return {ok: true, artifacts: [artifact], errors: []}
+  }
+  let auth = __api_key_for_job(harness, "fireworks")
+  if !safe_bool(auth["ok"], false) {
+    return {ok: false, artifacts: [], errors: [safe_string(auth["error"], "")]}
+  }
+  let response = __http_result(
+    harness,
+    "GET",
+    endpoint_url,
+    {
+      headers: {Authorization: "Bearer " + safe_string(auth["value"], "")},
+      body: "{}",
+      timeout_ms: 120000,
+      max_response_bytes: 1048576,
+    },
+  )
+  let body = safe_dict(response["body"])
+  if !safe_bool(response["ok"], false) {
+    return {
+      ok: false,
+      artifacts: [],
+      errors: ["fireworks batch dataset download endpoint failed for " + output_dataset_id],
+      response_status: response["status"],
+      response: body,
+    }
+  }
+  var artifacts = []
+  var errors = []
+  let signed_urls = safe_dict(body["filenameToSignedUrls"])
+  for filename in signed_urls.keys().sort() {
+    let signed_url = safe_string(signed_urls[filename], "")
+    if signed_url == "" {
+      continue
+    }
+    let label = __fireworks_artifact_label(filename)
+    let out_path = __download_artifact_path(out_dir, job, label)
+    let downloaded = __download_text_file(harness, "fireworks", signed_url, {}, "", label, filename, out_path, max_bytes)
+    errors = errors + safe_list(downloaded["errors"])
+    let artifact = downloaded["artifact"] ?? nil
+    if artifact != nil {
+      artifacts = artifacts.push(artifact)
+    }
+  }
+  if len(artifacts) == 0 && len(errors) == 0 {
+    errors = errors.push("fireworks batch download endpoint returned no signed result files")
+  }
+  return {ok: len(errors) == 0, artifacts: artifacts, errors: errors, response: body}
 }
 
 fn __download_openai_file(
@@ -3118,6 +3564,9 @@ fn __download_one_job(harness: Harness, job: dict, out_dir: string, dry_run: boo
       state,
       __download_gemini_responses(harness, job, out_dir, dry_run, max_bytes),
     )
+  } else if adapter == "fireworks" {
+    let fireworks = __download_fireworks_results(harness, job, out_dir, dry_run, max_bytes)
+    state = {artifacts: safe_list(fireworks["artifacts"]), errors: safe_list(fireworks["errors"])}
   } else if adapter == "anthropic" {
     state = __append_download_result(
       state,
