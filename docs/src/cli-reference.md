@@ -1416,6 +1416,23 @@ environment variable (`OPENAI_API_KEY`, `MISTRAL_API_KEY`, or
 Batch APIs. The submission receipt records provider job ids, status, request
 file hashes, and result handles for later poll/download/rejoin work.
 
+## harn models batch status
+
+Poll provider state for submitted model batch jobs:
+
+```bash
+harn models batch status --submission ./.harn/batches/eval-001/submission.json \
+  --out ./.harn/batches/eval-001/status.json --dry-run
+harn models batch status --submission ./.harn/batches/eval-001/submission.json \
+  --out ./.harn/batches/eval-001/status.json --json
+```
+
+`--dry-run` validates the submission receipt and summarizes cached job state
+without network calls. Live status currently polls OpenAI `batches/{id}`,
+Anthropic Message Batches, and Mistral batch jobs from the Harn provider
+adapter boundary, then writes a `harn.model_batch_status_receipt` with stable
+job ids, normalized lifecycle state, provider status, and result file pointers.
+
 ## harn models lora export
 
 Export a tool-calling corpus into a trainer-ready LoRA dataset:

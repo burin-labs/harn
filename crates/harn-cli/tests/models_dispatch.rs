@@ -400,6 +400,46 @@ fn models_batch_manifest_and_prepare_openai_jsonl() {
     );
     assert_eq!(submission_receipt["status"], "dry_run");
     assert_eq!(submission_receipt["jobs"][0]["status"], "ready");
+
+    let status_path = tmp.path().join("status.json");
+    let status = run(
+        &[
+            "models",
+            "batch",
+            "status",
+            "--submission",
+            submission_path.to_str().expect("utf8 submission path"),
+            "--out",
+            status_path.to_str().expect("utf8 status path"),
+            "--dry-run",
+            "--json",
+        ],
+        &[],
+    );
+    assert_eq!(status.exit_code, 0, "harn stderr={}", status.stderr);
+    let status_value = parse_json(&status.stdout, "batch status");
+    let status_report = success_data(&status_value);
+    assert_eq!(status_report["dry_run"], true);
+    assert_eq!(status_report["status"], "dry_run");
+    assert_eq!(status_report["job_count"], 1);
+    assert_eq!(status_report["ready_count"], 1);
+    assert_eq!(status_report["completed_count"], 0);
+    let status_job = &status_report["jobs"].as_array().expect("status jobs")[0];
+    assert_eq!(status_job["status"], "ready");
+    assert_eq!(status_job["status_checked"], false);
+    assert_eq!(status_job["provider"], "openai");
+    assert_eq!(
+        status_job["provider_batch_id"],
+        serde_json::Value::String(String::new())
+    );
+
+    let status_receipt = parse_json(
+        &fs::read_to_string(&status_path).expect("read status receipt"),
+        "status receipt",
+    );
+    assert_eq!(status_receipt["kind"], "harn.model_batch_status_receipt");
+    assert_eq!(status_receipt["status"], "dry_run");
+    assert_eq!(status_receipt["jobs"][0]["status"], "ready");
 }
 
 #[test]

@@ -95,6 +95,7 @@ versions.
 | `harn models batch manifest --json` | Durable offline batch manifest summary and request groups |
 | `harn models batch prepare --json` | Provider-native batch request files and deterministic prepare receipt |
 | `harn models batch submit --json` | Batch submission receipt with provider job ids or dry-run operations |
+| `harn models batch status --json` | Provider batch status receipt with dry-run cached status validation |
 | `harn models lora plan --json` | LoRA/QLoRA route, trainer, data, eval, and launch contract |
 | `harn models lora inspect --json` | PEFT adapter compatibility report and launch metadata |
 | `harn models lora export --json` | Trainer dataset export report with contract id and stats |
