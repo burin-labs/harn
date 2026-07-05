@@ -12,7 +12,7 @@
  *   HARN_MODELS_BATCH_WORKLOAD                  - eval, judge, corpus, or generic.
  *   HARN_MODELS_BATCH_MIN_DISCOUNT_PERCENT      - optional integer filter.
  *   HARN_MODELS_BATCH_MAX_TURNAROUND_HOURS      - optional integer filter.
- *   HARN_MODELS_BATCH_MODE                      - plan, manifest, or prepare.
+ *   HARN_MODELS_BATCH_MODE                      - plan, manifest, prepare, submit, status, or download.
  *   HARN_MODELS_BATCH_REQUESTS                  - manifest-mode input JSONL path.
  *   HARN_MODELS_BATCH_OUT                       - manifest-mode output JSON path.
  *   HARN_MODELS_BATCH_MANIFEST                  - prepare-mode manifest JSON path.
@@ -21,6 +21,9 @@
  *   HARN_MODELS_BATCH_SUBMIT_OUT                - submit-mode submission receipt path.
  *   HARN_MODELS_BATCH_SUBMISSION                - status-mode submission receipt path.
  *   HARN_MODELS_BATCH_STATUS_OUT                - status-mode status receipt path.
+ *   HARN_MODELS_BATCH_STATUS                    - download-mode status receipt path.
+ *   HARN_MODELS_BATCH_RESULTS_OUT_DIR           - download-mode result artifact directory.
+ *   HARN_MODELS_BATCH_MAX_DOWNLOAD_BYTES        - download-mode per-file response cap.
  *   HARN_MODELS_BATCH_DRY_RUN                   - "1" to validate without provider calls.
  *   HARN_MODELS_BATCH_TOOL_FORMAT               - manifest-mode default tool format.
  *   HARN_MODELS_BATCH_ID_PREFIX                 - manifest-mode generated id prefix.
@@ -517,6 +520,38 @@ fn __read_submission_receipt(harness: Harness, receipt_path: string) -> dict {
   }
   if len(safe_list(receipt["jobs"])) == 0 {
     errors = errors.push("batch submission receipt contains no jobs")
+  }
+  return {receipt: receipt, source_sha256: sha256(source), errors: errors}
+}
+
+fn __read_status_receipt(harness: Harness, receipt_path: string) -> dict {
+  var errors = []
+  if receipt_path == "" {
+    return {receipt: {}, source_sha256: "", errors: ["--status is required"]}
+  }
+  if !harness.fs.exists(receipt_path) {
+    return {receipt: {}, source_sha256: "", errors: ["batch status receipt not found: " + receipt_path]}
+  }
+  let source = harness.fs.read_text(receipt_path)
+  let parsed = try {
+    json_parse(source)
+  } catch (e) {
+    return {
+      receipt: {},
+      source_sha256: sha256(source),
+      errors: ["invalid batch status receipt JSON: " + to_string(e)],
+    }
+  }
+  if type_of(parsed) != "dict" {
+    errors = errors.push("batch status receipt must be a JSON object")
+    return {receipt: {}, source_sha256: sha256(source), errors: errors}
+  }
+  let receipt = safe_dict(parsed)
+  if safe_string(receipt["kind"], "") != "harn.model_batch_status_receipt" {
+    errors = errors.push("unsupported batch status receipt kind: " + safe_string(receipt["kind"], ""))
+  }
+  if len(safe_list(receipt["jobs"])) == 0 {
+    errors = errors.push("batch status receipt contains no jobs")
   }
   return {receipt: receipt, source_sha256: sha256(source), errors: errors}
 }
@@ -2029,6 +2064,471 @@ fn __run_status(harness: Harness) -> int {
   return 1
 }
 
+fn __download_status(job: dict, dry_run: bool) -> dict {
+  return {
+    id: safe_string(job["id"], ""),
+    provider: safe_string(job["provider"], ""),
+    model: safe_string(job["model"], ""),
+    workload: safe_string(job["workload"], ""),
+    endpoint: safe_string(job["endpoint"], ""),
+    tool_format: safe_string(job["tool_format"], ""),
+    batch: safe_dict(job["batch"]),
+    provider_batch_id: safe_string(job["provider_batch_id"], ""),
+    provider_status: job["provider_status"] ?? nil,
+    source_status: safe_string(job["status"], ""),
+    dry_run: dry_run,
+  }
+}
+
+fn __download_slug(value: string) -> string {
+  var slug = lowercase(trim(value))
+  slug = regex_replace("[^A-Za-z0-9_.-]+", "-", slug) ?? slug
+  slug = regex_replace("^-+|-+$", "", slug) ?? slug
+  if slug == "" {
+    return "job"
+  }
+  return slug
+}
+
+fn __download_artifact_path(out_dir: string, job: dict, label: string) -> string {
+  let job_id = __download_slug(safe_string(job["id"], safe_string(job["provider_batch_id"], "job")))
+  return path_join(out_dir, job_id + "." + label + ".jsonl")
+}
+
+fn __redact_download_url(url: string) -> string {
+  return regex_replace("[?#].*$", "", url) ?? url
+}
+
+fn __download_operation(
+  provider: string,
+  method: string,
+  url: string,
+  credential_env: string,
+  out_path: string,
+) -> dict {
+  return {
+    provider: provider,
+    operation: method + " " + __redact_download_url(url),
+    credential_env: credential_env,
+    auth: if credential_env == "" {
+      "none"
+    } else {
+      credential_env + "=<redacted>"
+    },
+    out: out_path,
+  }
+}
+
+fn __download_artifact_record(
+  label: string,
+  handle: string,
+  path: string,
+  operation: dict,
+  body_text: string,
+  dry_run: bool,
+) -> dict {
+  var artifact = {label: label, handle: handle, path: path, operation: operation, dry_run: dry_run}
+  if !dry_run {
+    artifact = artifact + {sha256: sha256(body_text), bytes: len(body_text)}
+  }
+  return artifact
+}
+
+fn __download_text_file(
+  harness: Harness,
+  provider: string,
+  url: string,
+  headers: dict,
+  credential_env: string,
+  label: string,
+  handle: string,
+  out_path: string,
+  max_bytes: int,
+) -> dict {
+  let operation = __download_operation(provider, "GET", url, credential_env, out_path)
+  let response = __http_result(
+    harness,
+    "GET",
+    url,
+    {headers: headers, timeout_ms: 120000, max_response_bytes: max_bytes},
+  )
+  let body_text = safe_string(response["body_text"], "")
+  if !safe_bool(response["ok"], false) {
+    return {
+      ok: false,
+      artifact: __download_artifact_record(label, handle, out_path, operation, "", false)
+        + {response_status: response["status"], response: response["body"] ?? nil},
+      errors: [provider + " batch result download failed for " + label + " handle " + handle],
+    }
+  }
+  __mkdirp(harness, dirname(out_path) ?? ".")
+  harness.fs.write_text(out_path, body_text)
+  return {
+    ok: true,
+    artifact: __download_artifact_record(label, handle, out_path, operation, body_text, false)
+      + {response_status: response["status"]},
+    errors: [],
+  }
+}
+
+fn __dry_run_download_artifact(
+  provider: string,
+  url: string,
+  credential_env: string,
+  label: string,
+  handle: string,
+  out_path: string,
+) -> dict {
+  return {
+    ok: true,
+    artifact: __download_artifact_record(
+      label,
+      handle,
+      out_path,
+      __download_operation(provider, "GET", url, credential_env, out_path),
+      "",
+      true,
+    ),
+    errors: [],
+  }
+}
+
+fn __download_openai_file(
+  harness: Harness,
+  job: dict,
+  label: string,
+  file_id,
+  out_dir: string,
+  dry_run: bool,
+  max_bytes: int,
+) -> dict {
+  let handle = safe_string(file_id, "")
+  if handle == "" {
+    return {ok: true, artifact: nil, errors: []}
+  }
+  let auth_env = __provider_auth_env("openai")
+  let out_path = __download_artifact_path(out_dir, job, label)
+  let url = __join_url(__provider_base_url(harness, "openai"), "/files/" + handle + "/content")
+  if dry_run {
+    return __dry_run_download_artifact("openai", url, auth_env, label, handle, out_path)
+  }
+  let auth = __api_key_for_job(harness, "openai")
+  if !safe_bool(auth["ok"], false) {
+    return {ok: false, artifact: nil, errors: [safe_string(auth["error"], "")]}
+  }
+  return __download_text_file(
+    harness,
+    "openai",
+    url,
+    {Authorization: "Bearer " + safe_string(auth["value"], "")},
+    auth_env,
+    label,
+    handle,
+    out_path,
+    max_bytes,
+  )
+}
+
+fn __download_mistral_file(
+  harness: Harness,
+  job: dict,
+  label: string,
+  file_id,
+  out_dir: string,
+  dry_run: bool,
+  max_bytes: int,
+) -> dict {
+  let handle = safe_string(file_id, "")
+  if handle == "" {
+    return {ok: true, artifact: nil, errors: []}
+  }
+  let auth_env = __provider_auth_env("mistral")
+  let out_path = __download_artifact_path(out_dir, job, label)
+  let url = __join_url(__provider_base_url(harness, "mistral"), "/files/" + handle + "/content")
+  if dry_run {
+    return __dry_run_download_artifact("mistral", url, auth_env, label, handle, out_path)
+  }
+  let auth = __api_key_for_job(harness, "mistral")
+  if !safe_bool(auth["ok"], false) {
+    return {ok: false, artifact: nil, errors: [safe_string(auth["error"], "")]}
+  }
+  return __download_text_file(
+    harness,
+    "mistral",
+    url,
+    {Authorization: "Bearer " + safe_string(auth["value"], "")},
+    auth_env,
+    label,
+    handle,
+    out_path,
+    max_bytes,
+  )
+}
+
+fn __download_anthropic_results(
+  harness: Harness,
+  job: dict,
+  out_dir: string,
+  dry_run: bool,
+  max_bytes: int,
+) -> dict {
+  let url = safe_string(job["results_url"], "")
+  if url == "" {
+    return {ok: true, artifact: nil, errors: []}
+  }
+  let auth_env = __provider_auth_env("anthropic")
+  let handle = __redact_download_url(url)
+  let out_path = __download_artifact_path(out_dir, job, "results")
+  if dry_run {
+    return __dry_run_download_artifact("anthropic", url, auth_env, "results", handle, out_path)
+  }
+  let auth = __api_key_for_job(harness, "anthropic")
+  if !safe_bool(auth["ok"], false) {
+    return {ok: false, artifact: nil, errors: [safe_string(auth["error"], "")]}
+  }
+  return __download_text_file(
+    harness,
+    "anthropic",
+    url,
+    {"x-api-key": safe_string(auth["value"], ""), "anthropic-version": "2023-06-01"},
+    auth_env,
+    "results",
+    handle,
+    out_path,
+    max_bytes,
+  )
+}
+
+fn __append_download_result(state: dict, result: dict) -> dict {
+  var artifacts = safe_list(state["artifacts"])
+  var errors = safe_list(state["errors"]) + safe_list(result["errors"])
+  let artifact = result["artifact"] ?? nil
+  if artifact != nil {
+    artifacts = artifacts.push(artifact)
+  }
+  return {artifacts: artifacts, errors: errors}
+}
+
+fn __download_one_job(harness: Harness, job: dict, out_dir: string, dry_run: bool, max_bytes: int) -> dict {
+  let provider = safe_string(job["provider"], "")
+  let wire = safe_string(safe_dict(job["batch"])["wire_format"], "")
+  let source_status = safe_string(job["status"], "")
+  let job_report = __download_status(job, dry_run)
+  if source_status != "completed" {
+    return {
+      ok: false,
+      job: job_report + {status: "not_ready", artifacts: []},
+      errors: [
+        "job " + safe_string(job["id"], "") + " is " + source_status
+          + "; run status after completion",
+      ],
+    }
+  }
+  var state = {artifacts: [], errors: []}
+  if provider == "openai" && wire == "openai" {
+    state = __append_download_result(
+      state,
+      __download_openai_file(harness, job, "output", job["output_file_id"], out_dir, dry_run, max_bytes),
+    )
+    state = __append_download_result(
+      state,
+      __download_openai_file(harness, job, "error", job["error_file_id"], out_dir, dry_run, max_bytes),
+    )
+  } else if provider == "anthropic" && wire == "anthropic_messages" {
+    state = __append_download_result(
+      state,
+      __download_anthropic_results(harness, job, out_dir, dry_run, max_bytes),
+    )
+  } else if provider == "mistral" && wire == "mistral" {
+    state = __append_download_result(
+      state,
+      __download_mistral_file(harness, job, "output", job["output_file"], out_dir, dry_run, max_bytes),
+    )
+    state = __append_download_result(
+      state,
+      __download_mistral_file(harness, job, "error", job["error_file"], out_dir, dry_run, max_bytes),
+    )
+  } else {
+    state = {
+      artifacts: [],
+      errors: [
+        "live batch download is not implemented for provider="
+          + provider
+          + " wire="
+          + wire
+          + "; add a provider adapter",
+      ],
+    }
+  }
+  if len(safe_list(state["artifacts"])) == 0 && len(safe_list(state["errors"])) == 0 {
+    state = {artifacts: [], errors: ["job " + safe_string(job["id"], "") + " has no provider result handles"]}
+  }
+  return {
+    ok: len(safe_list(state["errors"])) == 0,
+    job: job_report
+      + {
+      status: if len(safe_list(state["errors"])) == 0 {
+        if dry_run {
+          "ready"
+        } else {
+          "downloaded"
+        }
+      } else {
+        "failed"
+      },
+      artifacts: safe_list(state["artifacts"]),
+    },
+    errors: safe_list(state["errors"]),
+  }
+}
+
+fn __artifact_count(jobs: list) -> int {
+  var count = 0
+  for job in jobs {
+    count = count + len(safe_list(safe_dict(job)["artifacts"]))
+  }
+  return count
+}
+
+fn __download_status_summary(jobs: list, errors: list, dry_run: bool) -> string {
+  if len(errors) > 0 {
+    if __artifact_count(jobs) > 0 {
+      return "partial"
+    }
+    return "failed"
+  }
+  if dry_run {
+    return "dry_run"
+  }
+  return "downloaded"
+}
+
+fn __render_download_human(harness: Harness, report: dict) {
+  if !safe_bool(report["ok"], false) {
+    harness.stdio.eprintln("Batch download failed")
+  } else if safe_bool(report["dry_run"], false) {
+    harness.stdio.println("Batch download dry run written: " + safe_string(report["receipt"], ""))
+  } else {
+    harness.stdio.println("Batch results receipt written: " + safe_string(report["receipt"], ""))
+  }
+  harness.stdio.println("  jobs: " + safe_int_string(report["job_count"], "0"))
+  harness.stdio.println("  downloaded: " + safe_int_string(report["downloaded_count"], "0"))
+  harness.stdio.println("  ready: " + safe_int_string(report["ready_count"], "0"))
+  harness.stdio.println("  failed: " + safe_int_string(report["failed_count"], "0"))
+  harness.stdio.println("  artifacts: " + safe_int_string(report["artifact_count"], "0"))
+  if safe_string(report["receipt_sha256"], "") != "" {
+    harness.stdio.println("  receipt sha256: " + safe_string(report["receipt_sha256"], ""))
+  }
+  print_list(harness, "errors", safe_list(report["errors"]))
+  print_list(harness, "warnings", safe_list(report["warnings"]))
+}
+
+fn __render_download_json(report: dict) -> string {
+  if safe_bool(report["ok"], false) {
+    return json_stringify_pretty(cli_json_envelope({schema_version: 1, ok: true, data: report}))
+  }
+  return json_stringify_pretty(
+    cli_json_envelope(
+      {
+        schema_version: 1,
+        ok: false,
+        error: {
+          code: "batch_download_failed",
+          message: "Completed batch result files could not be downloaded.",
+          details: report,
+        },
+        warnings: safe_list(report["warnings"]),
+      },
+    ),
+  )
+}
+
+fn __run_download(harness: Harness) -> int {
+  let status_path = trim(harness.env.get_or("HARN_MODELS_BATCH_STATUS", ""))
+  let out_dir = trim(harness.env.get_or("HARN_MODELS_BATCH_RESULTS_OUT_DIR", ""))
+  let dry_run = __truthy_env(harness.env.get_or("HARN_MODELS_BATCH_DRY_RUN", "0"))
+  let max_bytes = __filter_int(harness.env.get_or("HARN_MODELS_BATCH_MAX_DOWNLOAD_BYTES", "268435456")) ?? 268435456
+  let loaded = __read_status_receipt(harness, status_path)
+  var errors = safe_list(loaded["errors"])
+  var warnings = []
+  if out_dir == "" {
+    errors = errors.push("--out-dir is required")
+  }
+  let status_receipt = safe_dict(loaded["receipt"])
+  var jobs = []
+  if len(errors) == 0 {
+    for raw_job in safe_list(status_receipt["jobs"]) {
+      let downloaded = __download_one_job(harness, safe_dict(raw_job), out_dir, dry_run, max_bytes)
+      jobs = jobs.push(safe_dict(downloaded["job"]))
+      errors = errors + safe_list(downloaded["errors"])
+    }
+  }
+  let receipt_path = if out_dir == "" {
+    ""
+  } else {
+    path_join(out_dir, "receipt.json")
+  }
+  let status = __download_status_summary(jobs, errors, dry_run)
+  var receipt = {
+    schemaVersion: 1,
+    kind: "harn.model_batch_results_receipt",
+    producer: "harn models batch download",
+    dryRun: dry_run,
+    source: {
+      path: status_path,
+      sha256: safe_string(loaded["source_sha256"], ""),
+      status: safe_string(status_receipt["status"], ""),
+      submission_source: safe_dict(status_receipt["source"]),
+    },
+    outDir: out_dir,
+    receipt: receipt_path,
+    maxBytes: max_bytes,
+    jobCount: len(jobs),
+    downloadedCount: __count_jobs_with_status(jobs, "downloaded"),
+    readyCount: __count_jobs_with_status(jobs, "ready"),
+    failedCount: __count_jobs_with_status(jobs, "failed") + __count_jobs_with_status(jobs, "not_ready"),
+    artifactCount: __artifact_count(jobs),
+    jobs: jobs,
+    status: status,
+    warnings: warnings,
+    errors: errors,
+  }
+  var report = {
+    schema_version: 1,
+    ok: len(errors) == 0,
+    dry_run: dry_run,
+    receipt: receipt_path,
+    out_dir: out_dir,
+    source: receipt["source"],
+    status: status,
+    max_bytes: max_bytes,
+    job_count: len(jobs),
+    downloaded_count: __count_jobs_with_status(jobs, "downloaded"),
+    ready_count: __count_jobs_with_status(jobs, "ready"),
+    failed_count: __count_jobs_with_status(jobs, "failed") + __count_jobs_with_status(jobs, "not_ready"),
+    artifact_count: __artifact_count(jobs),
+    jobs: jobs,
+    errors: errors,
+    warnings: warnings,
+  }
+  if receipt_path != "" {
+    __mkdirp(harness, out_dir)
+    let receipt_text = json_stringify_pretty(receipt) + "\n"
+    harness.fs.write_text(receipt_path, receipt_text)
+    receipt = receipt + {receipt_sha256: sha256(receipt_text)}
+    report = report + {receipt_sha256: sha256(receipt_text)}
+  }
+  if harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1" {
+    harness.stdio.println(__render_download_json(report))
+  } else {
+    __render_download_human(harness, report)
+  }
+  if len(errors) == 0 {
+    return 0
+  }
+  return 1
+}
+
 fn main(harness: Harness) -> int {
   let provider_filter = trim(harness.env.get_or("HARN_MODELS_BATCH_PROVIDER", ""))
   let model_filter = trim(harness.env.get_or("HARN_MODELS_BATCH_MODEL", ""))
@@ -2057,6 +2557,9 @@ fn main(harness: Harness) -> int {
   }
   if mode == "status" {
     return __run_status(harness)
+  }
+  if mode == "download" {
+    return __run_download(harness)
   }
   if mode == "manifest" {
     return __run_manifest(

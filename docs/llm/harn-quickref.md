@@ -39,6 +39,7 @@ logs and progress always go to stderr.
   - `harn models batch prepare --json` — provider-native batch request files and prepare receipt.
   - `harn models batch submit --dry-run --json` — validate prepared jobs and write a submission receipt.
   - `harn models batch status --dry-run --json` — validate/poll submitted jobs and write a status receipt.
+  - `harn models batch download --dry-run --json` — validate/download completed result files.
 
 ## Files and execution
 

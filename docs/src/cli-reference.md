@@ -1433,6 +1433,25 @@ Anthropic Message Batches, and Mistral batch jobs from the Harn provider
 adapter boundary, then writes a `harn.model_batch_status_receipt` with stable
 job ids, normalized lifecycle state, provider status, and result file pointers.
 
+## harn models batch download
+
+Download result files for completed model batch jobs:
+
+```bash
+harn models batch download --status ./.harn/batches/eval-001/status.json \
+  --out-dir ./.harn/batches/eval-001/results --dry-run
+harn models batch download --status ./.harn/batches/eval-001/status.json \
+  --out-dir ./.harn/batches/eval-001/results --json
+```
+
+`--dry-run` validates the status receipt, requires completed jobs, and records
+the redacted provider download operations without network calls. Live download
+currently retrieves OpenAI and Mistral file content plus Anthropic Message
+Batch `results_url` output, writes provider JSONL files under `--out-dir`, and
+emits a `harn.model_batch_results_receipt` containing artifact paths, handles,
+hashes, and source receipt metadata. Use `--max-bytes` to cap each provider
+file response when working with very large batches.
+
 ## harn models lora export
 
 Export a tool-calling corpus into a trainer-ready LoRA dataset:

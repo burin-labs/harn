@@ -789,6 +789,45 @@ fn test_parses_models_batch_status_args() {
 }
 
 #[test]
+fn test_parses_models_batch_download_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "models",
+        "batch",
+        "download",
+        "--status",
+        ".harn/batches/status.json",
+        "--out-dir",
+        ".harn/batches/results",
+        "--max-bytes",
+        "1048576",
+        "--dry-run",
+        "--json",
+    ]);
+
+    let Command::Models(args) = cli.command.unwrap() else {
+        panic!("expected models command");
+    };
+    let ModelsCommand::Batch(args) = args.command else {
+        panic!("expected models batch command");
+    };
+    let ModelsBatchCommand::Download(args) = args.command else {
+        panic!("expected models batch download command");
+    };
+    assert_eq!(
+        args.status,
+        std::path::PathBuf::from(".harn/batches/status.json")
+    );
+    assert_eq!(
+        args.out_dir,
+        std::path::PathBuf::from(".harn/batches/results")
+    );
+    assert_eq!(args.max_bytes, 1_048_576);
+    assert!(args.dry_run);
+    assert!(args.json);
+}
+
+#[test]
 fn test_parses_models_lora_preflight_args() {
     let cli = Cli::parse_from([
         "harn",

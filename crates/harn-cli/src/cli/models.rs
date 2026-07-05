@@ -34,6 +34,8 @@ pub(crate) struct ModelsBatchArgs {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum ModelsBatchCommand {
+    /// Download provider result files for completed batch jobs.
+    Download(ModelsBatchDownloadArgs),
     /// Write a durable provider-neutral manifest for offline batch requests.
     Manifest(ModelsBatchManifestArgs),
     /// Plan discounted/asynchronous provider batch use for model workloads.
@@ -44,6 +46,25 @@ pub(crate) enum ModelsBatchCommand {
     Status(ModelsBatchStatusArgs),
     /// Submit prepared provider-native batch jobs and write a submission receipt.
     Submit(ModelsBatchSubmitArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ModelsBatchDownloadArgs {
+    /// Status receipt produced by `harn models batch status`.
+    #[arg(long, value_name = "PATH")]
+    pub status: std::path::PathBuf,
+    /// Directory for downloaded provider result files and the result receipt.
+    #[arg(long = "out-dir", value_name = "DIR")]
+    pub out_dir: std::path::PathBuf,
+    /// Maximum response body bytes per downloaded provider file.
+    #[arg(long = "max-bytes", default_value_t = 268_435_456)]
+    pub max_bytes: u64,
+    /// Validate result handles and render provider operations without network calls.
+    #[arg(long = "dry-run")]
+    pub dry_run: bool,
+    /// Emit structured JSON.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]

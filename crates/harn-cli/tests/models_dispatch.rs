@@ -433,13 +433,83 @@ fn models_batch_manifest_and_prepare_openai_jsonl() {
         serde_json::Value::String(String::new())
     );
 
-    let status_receipt = parse_json(
+    let mut status_receipt = parse_json(
         &fs::read_to_string(&status_path).expect("read status receipt"),
         "status receipt",
     );
     assert_eq!(status_receipt["kind"], "harn.model_batch_status_receipt");
     assert_eq!(status_receipt["status"], "dry_run");
     assert_eq!(status_receipt["jobs"][0]["status"], "ready");
+
+    status_receipt["status"] = serde_json::Value::String("completed".to_string());
+    status_receipt["completedCount"] = serde_json::Value::from(1);
+    status_receipt["readyCount"] = serde_json::Value::from(0);
+    {
+        let jobs = status_receipt["jobs"]
+            .as_array_mut()
+            .expect("mutable status jobs");
+        jobs[0]["status"] = serde_json::Value::String("completed".to_string());
+        jobs[0]["provider_batch_id"] = serde_json::Value::String("batch_test".to_string());
+        jobs[0]["provider_status"] = serde_json::Value::String("completed".to_string());
+        jobs[0]["output_file_id"] = serde_json::Value::String("file_output".to_string());
+        jobs[0]["error_file_id"] = serde_json::Value::String("file_error".to_string());
+    }
+    fs::write(
+        &status_path,
+        serde_json::to_string_pretty(&status_receipt).expect("serialize completed status"),
+    )
+    .expect("write completed status receipt");
+
+    let results_dir = tmp.path().join("results");
+    let download = run(
+        &[
+            "models",
+            "batch",
+            "download",
+            "--status",
+            status_path.to_str().expect("utf8 status path"),
+            "--out-dir",
+            results_dir.to_str().expect("utf8 results dir"),
+            "--max-bytes",
+            "1048576",
+            "--dry-run",
+            "--json",
+        ],
+        &[],
+    );
+    assert_eq!(download.exit_code, 0, "harn stderr={}", download.stderr);
+    let download_value = parse_json(&download.stdout, "batch download");
+    let download_report = success_data(&download_value);
+    assert_eq!(download_report["dry_run"], true);
+    assert_eq!(download_report["status"], "dry_run");
+    assert_eq!(download_report["job_count"], 1);
+    assert_eq!(download_report["ready_count"], 1);
+    assert_eq!(download_report["artifact_count"], 2);
+    let download_job = &download_report["jobs"].as_array().expect("download jobs")[0];
+    assert_eq!(download_job["status"], "ready");
+    let artifacts = download_job["artifacts"]
+        .as_array()
+        .expect("download artifacts");
+    assert_eq!(artifacts[0]["label"], "output");
+    assert_eq!(artifacts[0]["handle"], "file_output");
+    assert_eq!(
+        artifacts[0]["operation"]["credential_env"],
+        "OPENAI_API_KEY"
+    );
+    assert_eq!(
+        artifacts[0]["operation"]["auth"],
+        "OPENAI_API_KEY=<redacted>"
+    );
+    assert_eq!(artifacts[1]["label"], "error");
+
+    let results_receipt_path = results_dir.join("receipt.json");
+    let results_receipt = parse_json(
+        &fs::read_to_string(results_receipt_path).expect("read results receipt"),
+        "results receipt",
+    );
+    assert_eq!(results_receipt["kind"], "harn.model_batch_results_receipt");
+    assert_eq!(results_receipt["status"], "dry_run");
+    assert_eq!(results_receipt["artifactCount"], 2);
 }
 
 #[test]
