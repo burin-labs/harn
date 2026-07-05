@@ -1702,7 +1702,7 @@ mod flatten_tests {
             arg_key: Some("path".to_string()),
         };
         let ceiling = CapabilityPolicy {
-            tool_arg_constraints: vec![constraint.clone()],
+            tool_arg_constraints: vec![constraint],
             ..Default::default()
         };
         // A flattener that drops the scope constraint widens edit to anywhere.
@@ -1757,7 +1757,7 @@ mod flatten_tests {
             "edit".to_string(),
             ToolAnnotations {
                 side_effect_level: SideEffectLevel::None,
-                ..strong.clone()
+                ..strong
             },
         );
         assert!(ceiling.assert_within_ceiling(&rewritten).is_err());
