@@ -686,6 +686,21 @@ fn parse_native_tool_call(item: &Value) -> Option<NativeToolCall> {
         .or_else(|| obj.get("name"))
         .and_then(Value::as_str)?
         .to_string();
+    match crate::llm::tools::parse_text_tool_call_from_native_name(&name) {
+        crate::llm::tools::NativeToolNameTextCall::Parsed { name, arguments } => {
+            return Some(NativeToolCall {
+                name,
+                arguments: Some(arguments),
+            });
+        }
+        crate::llm::tools::NativeToolNameTextCall::Malformed { name, .. } => {
+            return Some(NativeToolCall {
+                name,
+                arguments: None,
+            });
+        }
+        crate::llm::tools::NativeToolNameTextCall::NotCall => {}
+    }
     let raw_args = function
         .and_then(|function| function.get("arguments"))
         .or_else(|| obj.get("arguments"));
@@ -928,6 +943,44 @@ mod tests {
         assert_eq!(
             report.cases[0].classification,
             ToolProbeClassification::StructuredNativeToolCall
+        );
+    }
+
+    #[test]
+    fn classify_native_tool_call_with_text_call_in_name_as_pass() {
+        let report = classify_tool_conformance_fixture(
+            "zai",
+            "glm-5",
+            ToolProbeMode::NonStreaming,
+            DEFAULT_TOOL_PROBE_MARKER,
+            r#"{"choices":[{"message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"echo_marker({ value: \"harn_tool_probe_marker\" })</arg_value>","arguments":"{}"}}]}}]}"#,
+        );
+
+        assert_eq!(report.tool_calling.native, ToolProbeStatus::Pass);
+        assert_eq!(
+            report.tool_calling.fallback_mode,
+            ToolProbeFallbackMode::Native
+        );
+        assert_eq!(
+            report.cases[0].classification,
+            ToolProbeClassification::StructuredNativeToolCall
+        );
+    }
+
+    #[test]
+    fn classify_partial_text_call_in_native_name_as_malformed() {
+        let report = classify_tool_conformance_fixture(
+            "zai",
+            "glm-5",
+            ToolProbeMode::NonStreaming,
+            DEFAULT_TOOL_PROBE_MARKER,
+            r#"{"choices":[{"message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"echo_marker({ value: <<EOF","arguments":"{"}}]}}]}"#,
+        );
+
+        assert_eq!(report.tool_calling.native, ToolProbeStatus::Fail);
+        assert_eq!(
+            report.cases[0].classification,
+            ToolProbeClassification::MalformedJsonArguments
         );
     }
 

@@ -122,6 +122,67 @@ pub(crate) fn parse_text_tool_argument_payload(
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum NativeToolNameTextCall {
+    NotCall,
+    Parsed {
+        name: String,
+        arguments: serde_json::Value,
+    },
+    Malformed {
+        name: String,
+        error: String,
+    },
+}
+
+/// Recover Harn text-tool syntax that an OpenAI-compatible provider misplaced
+/// into `tool_calls[].function.name`.
+///
+/// Z.ai/GLM has been observed returning a native-looking tool envelope while
+/// copying the complete text-tool call into the `name` slot and leaving
+/// `arguments` empty, e.g. `look({ file: "a.rs" })</arg_value>`. Treat complete
+/// calls as the structured call they meant, and fail closed on partial calls so
+/// the runtime does not dispatch a bogus tool named `edit({ ...`.
+pub(crate) fn parse_text_tool_call_from_native_name(text: &str) -> NativeToolNameTextCall {
+    let trimmed = strip_native_name_provider_suffixes(text);
+    let Some(name_len) = syntax::ident_length(trimmed.as_bytes()) else {
+        return NativeToolNameTextCall::NotCall;
+    };
+    if trimmed.as_bytes().get(name_len) != Some(&b'(') {
+        return NativeToolNameTextCall::NotCall;
+    }
+
+    let name = trimmed[..name_len].to_string();
+    match syntax::parse_ts_call_from(trimmed, name.clone()) {
+        Ok((arguments, consumed)) => {
+            let trailing = trimmed[consumed..].trim();
+            if trailing.is_empty() {
+                NativeToolNameTextCall::Parsed { name, arguments }
+            } else {
+                NativeToolNameTextCall::Malformed {
+                    name,
+                    error: format!("trailing bytes after tool-call expression at byte {consumed}"),
+                }
+            }
+        }
+        Err(error) => NativeToolNameTextCall::Malformed { name, error },
+    }
+}
+
+fn strip_native_name_provider_suffixes(mut text: &str) -> &str {
+    loop {
+        let trimmed = text.trim();
+        let Some(next) = trimmed
+            .strip_suffix("</arg_value>")
+            .or_else(|| trimmed.strip_suffix("</tool_call>"))
+            .or_else(|| trimmed.strip_suffix("</toolcall>"))
+        else {
+            return trimmed;
+        };
+        text = next;
+    }
+}
+
 /// Result of parsing a prose-interleaved TS tool-call stream.
 ///
 /// The scanner walks the model's text once and splits it into three
@@ -161,7 +222,10 @@ pub(crate) struct TextToolParseResult {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_text_tool_argument_payload;
+    use super::{
+        parse_text_tool_argument_payload, parse_text_tool_call_from_native_name,
+        NativeToolNameTextCall,
+    };
 
     #[test]
     fn text_tool_argument_payload_parses_object_literal_heredoc() {
@@ -210,6 +274,53 @@ EOF
         assert!(
             error.contains("trailing bytes"),
             "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn native_name_text_call_recovers_complete_call_with_provider_suffix() {
+        let parsed = parse_text_tool_call_from_native_name(
+            r#"look({ file: "include/kvdb/status.h", intent: "read" })</arg_value>"#,
+        );
+
+        match parsed {
+            NativeToolNameTextCall::Parsed { name, arguments } => {
+                assert_eq!(name, "look");
+                assert_eq!(
+                    arguments["file"],
+                    serde_json::json!("include/kvdb/status.h")
+                );
+                assert_eq!(arguments["intent"], serde_json::json!("read"));
+            }
+            other => panic!("expected recovered text tool call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn native_name_text_call_rejects_partial_heredoc_call() {
+        let parsed = parse_text_tool_call_from_native_name(
+            r#"edit({ action: "create", path: "tests/page_cache.cpp", content: <<EOF"#,
+        );
+
+        match parsed {
+            NativeToolNameTextCall::Malformed { name, error } => {
+                assert_eq!(name, "edit");
+                assert!(
+                    error.contains("unexpected end of input")
+                        || error.contains("expected newline after heredoc tag")
+                        || error.contains("missing closing `)`"),
+                    "unexpected error: {error}"
+                );
+            }
+            other => panic!("expected malformed text tool call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn native_name_text_call_ignores_plain_native_name() {
+        assert_eq!(
+            parse_text_tool_call_from_native_name("look"),
+            NativeToolNameTextCall::NotCall
         );
     }
 }

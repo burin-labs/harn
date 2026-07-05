@@ -240,17 +240,38 @@ pub(super) fn parse_openai_tool_argument_json_values(
     }
 }
 
-fn parse_openai_tool_argument_values(args_str: &str) -> Vec<serde_json::Value> {
-    parse_openai_tool_argument_json_values(args_str)
-        .unwrap_or_else(|err| vec![tool_argument_parse_error(args_str, err)])
+fn parse_openai_tool_argument_values(tool_name: &str, args_str: &str) -> Vec<serde_json::Value> {
+    parse_openai_tool_argument_json_values(args_str).unwrap_or_else(|json_error| {
+        vec![
+            crate::llm::tools::parse_text_tool_argument_payload(args_str, tool_name)
+                .unwrap_or_else(|text_error| {
+                    tool_argument_parse_error(args_str, json_error, &text_error)
+                }),
+        ]
+    })
 }
 
-fn tool_argument_parse_error(args_str: &str, error: serde_json::Error) -> serde_json::Value {
+fn tool_argument_parse_error(
+    args_str: &str,
+    json_error: serde_json::Error,
+    text_error: &str,
+) -> serde_json::Value {
     serde_json::json!({
         "__parse_error": format!(
-            "Could not parse tool arguments as JSON: {}. Raw input: {}",
-            error,
+            "Could not parse tool arguments as JSON or Harn text-tool arguments: JSON error: {}; Harn text-tool error: {}. Raw input: {}",
+            json_error,
+            text_error,
             preview_chars(args_str, 200)
+        )
+    })
+}
+
+fn native_tool_name_text_call_parse_error(raw_name: &str, error: &str) -> serde_json::Value {
+    serde_json::json!({
+        "__parse_error": format!(
+            "Could not parse provider tool name as Harn text-tool call: {}. Raw input: {}",
+            error,
+            preview_chars(raw_name, 200)
         )
     })
 }
@@ -263,6 +284,27 @@ fn openai_synthetic_tool_call_id(base_id: &str, call_index: usize, arg_index: us
     } else {
         format!("{base_id}_{}", arg_index + 1)
     }
+}
+
+fn push_internal_tool_call(
+    tool_calls: &mut Vec<serde_json::Value>,
+    blocks: &mut Vec<serde_json::Value>,
+    id: String,
+    name: String,
+    arguments: serde_json::Value,
+) {
+    tool_calls.push(serde_json::json!({
+        "id": id,
+        "name": name,
+        "arguments": arguments,
+    }));
+    blocks.push(serde_json::json!({
+        "type": "tool_call",
+        "id": id,
+        "name": name,
+        "arguments": arguments,
+        "visibility": "internal",
+    }));
 }
 
 fn openai_responses_tool_kind(item_type: &str) -> &'static str {
@@ -907,25 +949,32 @@ pub(crate) fn parse_llm_response(
                 let raw_name = call["function"]["name"].as_str().unwrap_or("").to_string();
                 let args_str = call["function"]["arguments"].as_str().unwrap_or("{}");
                 let base_id = call["id"].as_str().unwrap_or("");
-                for (arg_index, arguments) in parse_openai_tool_argument_values(args_str)
+                match crate::llm::tools::parse_text_tool_call_from_native_name(&raw_name) {
+                    crate::llm::tools::NativeToolNameTextCall::Parsed { name, arguments } => {
+                        let (name, arguments) =
+                            crate::llm::tools::normalize_tool_call_shape(&name, arguments);
+                        let id = openai_synthetic_tool_call_id(base_id, call_index, 0);
+                        push_internal_tool_call(&mut tool_calls, &mut blocks, id, name, arguments);
+                        continue;
+                    }
+                    crate::llm::tools::NativeToolNameTextCall::Malformed { name, error } => {
+                        let arguments = native_tool_name_text_call_parse_error(&raw_name, &error);
+                        let (name, arguments) =
+                            crate::llm::tools::normalize_tool_call_shape(&name, arguments);
+                        let id = openai_synthetic_tool_call_id(base_id, call_index, 0);
+                        push_internal_tool_call(&mut tool_calls, &mut blocks, id, name, arguments);
+                        continue;
+                    }
+                    crate::llm::tools::NativeToolNameTextCall::NotCall => {}
+                }
+                for (arg_index, arguments) in parse_openai_tool_argument_values(&raw_name, args_str)
                     .into_iter()
                     .enumerate()
                 {
                     let (name, arguments) =
                         crate::llm::tools::normalize_tool_call_shape(&raw_name, arguments);
                     let id = openai_synthetic_tool_call_id(base_id, call_index, arg_index);
-                    tool_calls.push(serde_json::json!({
-                        "id": id.clone(),
-                        "name": name,
-                        "arguments": arguments,
-                    }));
-                    blocks.push(serde_json::json!({
-                        "type": "tool_call",
-                        "id": id,
-                        "name": name,
-                        "arguments": arguments.clone(),
-                        "visibility": "internal",
-                    }));
+                    push_internal_tool_call(&mut tool_calls, &mut blocks, id, name, arguments);
                 }
             }
         }
@@ -1673,6 +1722,116 @@ mod tests {
             assert_eq!(result.tool_calls[0]["name"], "edit");
             assert_eq!(result.tool_calls[0]["arguments"], serde_json::json!({}));
         }
+    }
+
+    #[test]
+    fn openai_parser_recovers_text_tool_call_misplaced_into_name() {
+        let response = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "call_look_text_name",
+                            "type": "function",
+                            "function": {
+                                "name": "look({ file: \"include/kvdb/status.h\", intent: \"read\" })</arg_value>",
+                                "arguments": "{}"
+                            }
+                        }
+                    ]
+                },
+                "finish_reason": "tool_calls"
+            }],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 30}
+        });
+
+        let result =
+            parse_llm_response(&response, "zai", "glm-5", false, false).expect("parser succeeds");
+
+        assert_eq!(result.stop_reason.as_deref(), Some("tool_calls"));
+        assert_eq!(result.tool_calls.len(), 1);
+        assert_eq!(result.tool_calls[0]["id"], "call_look_text_name");
+        assert_eq!(result.tool_calls[0]["name"], "look");
+        assert_eq!(
+            result.tool_calls[0]["arguments"]["file"],
+            "include/kvdb/status.h"
+        );
+        assert_eq!(result.tool_calls[0]["arguments"]["intent"], "read");
+    }
+
+    #[test]
+    fn openai_parser_recovers_text_tool_arguments_in_native_arguments() {
+        let response = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "call_look_text_arguments",
+                            "type": "function",
+                            "function": {
+                                "name": "look",
+                                "arguments": "{ file: \"include/kvdb/status.h\", intent: \"read\" }"
+                            }
+                        }
+                    ]
+                },
+                "finish_reason": "tool_calls"
+            }],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 30}
+        });
+
+        let result =
+            parse_llm_response(&response, "zai", "glm-5", false, false).expect("parser succeeds");
+
+        assert_eq!(result.stop_reason.as_deref(), Some("tool_calls"));
+        assert_eq!(result.tool_calls.len(), 1);
+        assert_eq!(result.tool_calls[0]["id"], "call_look_text_arguments");
+        assert_eq!(result.tool_calls[0]["name"], "look");
+        assert_eq!(
+            result.tool_calls[0]["arguments"]["file"],
+            "include/kvdb/status.h"
+        );
+        assert_eq!(result.tool_calls[0]["arguments"]["intent"], "read");
+    }
+
+    #[test]
+    fn openai_parser_rejects_partial_text_tool_call_misplaced_into_name() {
+        let response = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "call_edit_partial_name",
+                            "type": "function",
+                            "function": {
+                                "name": "edit({ action: \"create\", path: \"tests/page_cache_extra_test.cpp\", content: <<EOF",
+                                "arguments": "{"
+                            }
+                        }
+                    ]
+                },
+                "finish_reason": "tool_calls"
+            }],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 30}
+        });
+
+        let result =
+            parse_llm_response(&response, "zai", "glm-5", false, false).expect("parser succeeds");
+
+        assert_eq!(result.stop_reason.as_deref(), Some("tool_calls"));
+        assert_eq!(result.tool_calls.len(), 1);
+        assert_eq!(
+            result.tool_calls[0]["name"], "edit",
+            "partial text-call name must not be dispatched as a bogus native name"
+        );
+        let parse_error = result.tool_calls[0]["arguments"]["__parse_error"]
+            .as_str()
+            .expect("partial text-call name should carry a parse error");
+        assert!(parse_error.contains("provider tool name"));
+        assert!(parse_error.contains("Raw input: edit({ action"));
     }
 
     #[test]
