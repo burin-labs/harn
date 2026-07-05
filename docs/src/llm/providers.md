@@ -484,8 +484,11 @@ still need synchronous provider calls because every tool result influences the
 next model turn. `harn models batch manifest` turns a JSONL request ledger into
 a durable, grouped manifest with stable request ids and row hashes. `harn
 models batch prepare` then writes provider-native request files plus a
-deterministic receipt for upload/poll/download adapters, keeping provider batch
-envelopes out of host products.
+deterministic receipt. `harn models batch submit` consumes that receipt, validates
+request-file hashes, dry-runs without network calls when requested, and submits
+supported provider jobs using provider API credentials. Provider batch envelopes,
+submission state, and future poll/download/rejoin logic stay in Harn instead of
+host products.
 
 ### Packaged provider adapters via `[llm]`
 

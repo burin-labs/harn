@@ -1347,14 +1347,12 @@ harn models batch plan --model gpt-4o-mini --max-turnaround-hours 24
 ```
 
 The planner reads Harn's provider catalog and lists routes whose provider
-capabilities advertise async batch support. It is intentionally a planning
-surface, not a submission client: batch submission needs durable provider job
-state, stable request ids, result rejoin logic, and provider-specific
-upload/poll/download handlers. The command keeps those constraints explicit so
-Burin or other hosts can route lower-priority eval, judge, and corpus refresh
-workloads to discounted batch lanes without leaking provider-specific policy
-into product code. Subscription-plan CLI auth is reported as separate from API
-batch credentials; providers that expose Batch APIs still require provider API
+capabilities advertise async batch support. Harn owns the reusable batch
+manifest, prepare, submit, and receipt workflow so Burin or other hosts can
+route lower-priority eval, judge, corpus refresh, and distillation workloads to
+discounted batch lanes without leaking provider-specific policy into product
+code. Subscription-plan CLI auth is reported as separate from API batch
+credentials; providers that expose Batch APIs still require provider API
 billing.
 
 ## harn models batch manifest
@@ -1394,8 +1392,29 @@ per batch group plus a deterministic `receipt.json`. The request artifacts use
 the provider's batch envelope (`openai`/`mistral` JSONL, Gemini `{key, request}`
 JSONL, or Anthropic Message Batches JSON) while the receipt records the stable
 manifest hash, request-file hashes, provider operation, upload/create shape, and
-result-rejoin ids. It does not read credentials or call provider APIs; live
-submit/poll/download adapters consume this receipt as their durable input.
+result-rejoin ids. It does not read credentials or call provider APIs;
+`harn models batch submit` consumes this receipt as its durable input.
+
+## harn models batch submit
+
+Validate and optionally submit prepared provider-native batch jobs:
+
+```bash
+harn models batch submit --receipt ./.harn/batches/eval-001/receipt.json \
+  --out ./.harn/batches/eval-001/submission.json --dry-run
+harn models batch submit --receipt ./.harn/batches/eval-001/receipt.json \
+  --out ./.harn/batches/eval-001/submission.json --json
+```
+
+`--dry-run` verifies the prepare receipt, re-hashes every request file, renders
+the provider operation with credential names redacted, and writes a durable
+`harn.model_batch_submission_receipt` without network calls. Live submit
+currently supports OpenAI and Mistral file-backed batch jobs plus Anthropic
+Message Batches. Provider API keys must be present in the provider's normal
+environment variable (`OPENAI_API_KEY`, `MISTRAL_API_KEY`, or
+`ANTHROPIC_API_KEY`); subscription-plan auth remains out of scope for provider
+Batch APIs. The submission receipt records provider job ids, status, request
+file hashes, and result handles for later poll/download/rejoin work.
 
 ## harn models lora export
 

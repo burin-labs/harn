@@ -37,6 +37,7 @@ logs and progress always go to stderr.
   - `harn doctor --json` — capability matrix for host / targets / providers.
   - `harn models batch manifest --json` — grouped offline batch manifest with stable request ids.
   - `harn models batch prepare --json` — provider-native batch request files and prepare receipt.
+  - `harn models batch submit --dry-run --json` — validate prepared jobs and write a submission receipt.
 
 ## Files and execution
 

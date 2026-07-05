@@ -351,6 +351,55 @@ fn models_batch_manifest_and_prepare_openai_jsonl() {
         receipt["jobs"][0]["request_file_sha256"],
         job["request_file_sha256"]
     );
+
+    let submission_path = tmp.path().join("submission.json");
+    let submitted = run(
+        &[
+            "models",
+            "batch",
+            "submit",
+            "--receipt",
+            receipt_path,
+            "--out",
+            submission_path.to_str().expect("utf8 submission path"),
+            "--dry-run",
+            "--json",
+        ],
+        &[],
+    );
+    assert_eq!(submitted.exit_code, 0, "harn stderr={}", submitted.stderr);
+    let submitted_value = parse_json(&submitted.stdout, "batch submit");
+    let submission = success_data(&submitted_value);
+    assert_eq!(submission["dry_run"], true);
+    assert_eq!(submission["job_count"], 1);
+    assert_eq!(submission["ready_count"], 1);
+    assert_eq!(submission["submitted_count"], 0);
+    let submitted_job = &submission["jobs"].as_array().expect("submitted jobs")[0];
+    assert_eq!(submitted_job["status"], "ready");
+    assert_eq!(submitted_job["provider"], "openai");
+    assert_eq!(
+        submitted_job["request_file_sha256"],
+        job["request_file_sha256"]
+    );
+    assert_eq!(
+        submitted_job["provider_operation"]["credential_env"],
+        "OPENAI_API_KEY"
+    );
+    assert_eq!(
+        submitted_job["provider_operation"]["auth"],
+        "OPENAI_API_KEY=<redacted>"
+    );
+
+    let submission_receipt = parse_json(
+        &fs::read_to_string(&submission_path).expect("read submission receipt"),
+        "submission receipt",
+    );
+    assert_eq!(
+        submission_receipt["kind"],
+        "harn.model_batch_submission_receipt"
+    );
+    assert_eq!(submission_receipt["status"], "dry_run");
+    assert_eq!(submission_receipt["jobs"][0]["status"], "ready");
 }
 
 #[test]
