@@ -136,6 +136,20 @@ pub(crate) enum NativeToolNameTextCall {
 }
 
 /// Recover Harn text-tool syntax that an OpenAI-compatible provider misplaced
+/// into `tool_calls[].function.arguments` under a generic wrapper name such as
+/// `tool_call`.
+///
+/// Some providers surface a wrapper function named `tool_call` while placing
+/// the real text-format call in the arguments string, e.g.
+/// `<tool_call>\nlook({ file: "a.rs" })\n</tool_call>`. This is the same
+/// recovery as [`parse_text_tool_call_from_native_name`], with text-tool wrapper
+/// tags stripped before parsing the inner call expression.
+pub(crate) fn parse_text_tool_call_from_native_arguments(text: &str) -> NativeToolNameTextCall {
+    let unwrapped = syntax::strip_tool_call_wrappers(text);
+    parse_text_tool_call_from_native_name(unwrapped.as_ref())
+}
+
+/// Recover Harn text-tool syntax that an OpenAI-compatible provider misplaced
 /// into `tool_calls[].function.name`.
 ///
 /// Z.ai/GLM has been observed returning a native-looking tool envelope while
