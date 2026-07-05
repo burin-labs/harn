@@ -185,7 +185,7 @@ pub(crate) async fn run_install(args: &GuardInstallArgs) {
         );
     }
 
-    let client = net::http_client("cli.guard.download", std::time::Duration::from_secs(60))
+    let client = net::http_client("cli.guard.download", std::time::Duration::from_mins(1))
         .unwrap_or_else(|error| crate::command_error(&error));
     let mut payload: Vec<(String, Vec<u8>)> = Vec::with_capacity(model.files.len());
     for file in model.files {

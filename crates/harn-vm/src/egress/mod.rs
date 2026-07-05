@@ -1567,8 +1567,6 @@ mod tests {
     #[tokio::test]
     async fn reqwest_redirect_policy_blocks_https_to_http_downgrade() {
         install_rustls_provider();
-        let _guard = test_env_lock();
-        reset_egress_policy_for_tests();
 
         let cert =
             generate_simple_self_signed(vec!["localhost".to_string(), "127.0.0.1".to_string()])
@@ -1612,7 +1610,6 @@ mod tests {
         assert!(!redacted.contains("target-secret"), "{redacted}");
 
         thread.join().expect("tls thread");
-        reset_egress_policy_for_tests();
     }
 
     #[test]

@@ -723,7 +723,7 @@ fn fetch_registry_public_key(
         .map_err(|error| format!("failed to resolve signer URL from {registry_url:?}: {error}"))?;
     let display_url = net::diagnostic_text(url.as_str());
     let client = net::blocking_http_client("cli.skill.provenance", Duration::from_secs(20))?;
-    let response = client.get(url.clone()).send().map_err(|error| {
+    let response = client.get(url).send().map_err(|error| {
         format!(
             "failed to fetch {display_url}: {}",
             net::reqwest_error(&error)
@@ -754,7 +754,7 @@ fn verifying_key_from_source(from: &str) -> Result<VerifyingKey, String> {
         let url = Url::parse(from).map_err(|error| format!("invalid URL {from:?}: {error}"))?;
         let display_url = net::diagnostic_text(url.as_str());
         let client = net::blocking_http_client("cli.skill.provenance", Duration::from_secs(20))?;
-        let response = client.get(url.clone()).send().map_err(|error| {
+        let response = client.get(url).send().map_err(|error| {
             format!(
                 "failed to fetch {display_url}: {}",
                 net::reqwest_error(&error)
