@@ -25,7 +25,7 @@ thread_local! {
     static COMMAND_POLICY_HOOK_DEPTH: RefCell<usize> = const { RefCell::new(0) };
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct CommandPolicy {
     pub tools: Vec<String>,
     pub workspace_roots: Vec<String>,
@@ -265,6 +265,37 @@ pub async fn run_command_policy_preflight_with_ctx(
     caller: JsonValue,
 ) -> Result<CommandPolicyPreflight, VmError> {
     let Some(policy) = current_command_policy() else {
+        // No `command_policy` is on the stack. The catastrophic floor still
+        // applies as a UNIVERSAL backstop — a bare `host_process_exec` must not
+        // be able to run `rm -rf /`, a fork bomb, `mkfs`, or `dd of=<disk>` just
+        // because no policy was pushed. But we enforce ONLY the machine/disk/
+        // data-destruction ("universal") category here: the recoverable git
+        // workflow family (`git reset --hard`, `git clean -fd`, force-push) is
+        // deliberately NOT blocked in the no-policy path so the stdlib
+        // `git.push --force-with-lease` flow and standalone scripts keep
+        // working. When a policy IS pushed, the full floor (both categories)
+        // applies below, unchanged. The scan runs on `floor_command_text`
+        // exactly as the policy path does, so the argv-quoting `sh -c "…"`
+        // wrapper bypass stays closed here too.
+        let default_policy = CommandPolicy::default();
+        let context = command_context_json(params, &default_policy, caller);
+        let scan = command_risk_scan_json(&context, None);
+        let is_universal = scan
+            .get("catastrophic_category")
+            .and_then(|value| value.as_str())
+            == Some("universal");
+        if is_universal {
+            let labels = risk_labels_from_scan(&scan);
+            let deny = hard_deny_decision(&scan, &default_policy, &labels)
+                .expect("universal catastrophic_reason implies a hard-deny decision");
+            let msg = deny.reason.clone().unwrap_or_default();
+            return Ok(CommandPolicyPreflight::Blocked {
+                status: "blocked",
+                message: msg,
+                context,
+                decisions: vec![deny],
+            });
+        }
         return Ok(CommandPolicyPreflight::Proceed {
             params: params.clone(),
             context: JsonValue::Null,
@@ -1074,9 +1105,8 @@ pub fn command_risk_scan_json(ctx: &JsonValue, policy: Option<&CommandPolicy>) -
     // shell-quoting), NOT the lossy `command_text` space-join — otherwise the
     // canonical agent shape `argv:["sh","-c","<script>"]` would evade every
     // token-based rule. See `floor_command_text`.
-    let catastrophic_reason =
-        catastrophic::reason(&floor_command_text(ctx), &scan_workspace_roots(ctx));
-    if catastrophic_reason.is_some() {
+    let catastrophe = catastrophic::reason(&floor_command_text(ctx), &scan_workspace_roots(ctx));
+    if catastrophe.is_some() {
         labels.insert("catastrophic".to_string());
         rationale.push("catastrophic (never-approvable) command detected");
     }
@@ -1156,8 +1186,14 @@ pub fn command_risk_scan_json(ctx: &JsonValue, policy: Option<&CommandPolicy>) -
             rationale.join("; ")
         },
     });
-    if let Some(reason) = catastrophic_reason {
+    if let Some((reason, category)) = catastrophe {
         scan["catastrophic_reason"] = JsonValue::String(reason);
+        // `catastrophic_category` distinguishes the machine/data-destruction
+        // ("universal") floor from the recoverable git-workflow ("workflow")
+        // floor. The no-policy backstop enforces only "universal"; the
+        // policy-present path enforces both (see
+        // `run_command_policy_preflight_with_ctx`).
+        scan["catastrophic_category"] = JsonValue::String(category.as_str().to_string());
     }
     scan
 }
@@ -2176,52 +2212,84 @@ mod catastrophic {
     const PROJECT_DELETE_REASON: &str =
         "destructive recursive deletion of the project root is blocked";
 
+    const FORK_BOMB_REASON: &str =
+        "fork bomb (`:(){ :|:& };:`) is blocked: it would exhaust the machine";
+
+    /// Category of a catastrophic classification. The category controls WHERE
+    /// the floor is enforced:
+    ///
+    /// * [`Category::Universal`] — machine/disk/data destruction that is never
+    ///   legitimate under ANY circumstance (fork bomb, `mkfs`, `dd of=`,
+    ///   `rm -rf` escaping the workspace, `chmod -R 000`, `truncate -s 0` of a
+    ///   source file, redirect-over-source, project-root delete). Enforced
+    ///   everywhere, INCLUDING the no-policy backstop.
+    /// * [`Category::Workflow`] — recoverable-but-dangerous git operations
+    ///   (`git reset --hard`, `git clean -fd`, force-push). Enforced only when
+    ///   a `command_policy` is on the stack; the no-policy backstop deliberately
+    ///   does NOT block these, so the stdlib `git.push --force-with-lease` flow
+    ///   and standalone scripts keep working.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    pub(super) enum Category {
+        Universal,
+        Workflow,
+    }
+
+    impl Category {
+        pub(super) fn as_str(self) -> &'static str {
+            match self {
+                Category::Universal => "universal",
+                Category::Workflow => "workflow",
+            }
+        }
+    }
+
     /// Classify `command` against the floor. `workspace_roots` are the absolute
     /// workspace roots (an `rm -rf` target is an escape unless it resolves
     /// inside one of them); an empty slice means "no root context", under which
-    /// every absolute path is conservatively treated as an escape.
-    pub(super) fn reason(command: &str, workspace_roots: &[String]) -> Option<String> {
+    /// every absolute path is conservatively treated as an escape. Returns the
+    /// blocking reason paired with its [`Category`].
+    pub(super) fn reason(command: &str, workspace_roots: &[String]) -> Option<(String, Category)> {
         reason_inner(command, workspace_roots, 0)
     }
 
-    fn reason_inner(command: &str, roots: &[String], depth: usize) -> Option<String> {
+    fn reason_inner(command: &str, roots: &[String], depth: usize) -> Option<(String, Category)> {
         if depth > MAX_DEPTH {
             return None;
         }
         // Fork bomb is checked on the WHOLE command first: splitting on `;`/`&`
         // would tear `:(){ :|:& };:` apart before it can be recognized.
         if is_fork_bomb(command) {
-            return Some(
-                "fork bomb (`:(){ :|:& };:`) is blocked: it would exhaust the machine".to_string(),
-            );
+            return Some((FORK_BOMB_REASON.to_string(), Category::Universal));
         }
         for segment in split_chained_command(command) {
-            if let Some(reason) = segment_catastrophe(&segment, roots, depth) {
-                return Some(reason);
+            if let Some(hit) = segment_catastrophe(&segment, roots, depth) {
+                return Some(hit);
             }
             if segment_deletes_project(&segment) {
-                return Some(PROJECT_DELETE_REASON.to_string());
+                return Some((PROJECT_DELETE_REASON.to_string(), Category::Universal));
             }
         }
         None
     }
 
-    fn segment_catastrophe(segment: &str, roots: &[String], depth: usize) -> Option<String> {
+    fn segment_catastrophe(
+        segment: &str,
+        roots: &[String],
+        depth: usize,
+    ) -> Option<(String, Category)> {
         // Redirect-onto-source is a whole-segment property → check raw text.
         if let Some(reason) = redirect_over_source_reason(segment) {
-            return Some(reason);
+            return Some((reason, Category::Universal));
         }
         if is_fork_bomb(segment) {
-            return Some(
-                "fork bomb (`:(){ :|:& };:`) is blocked: it would exhaust the machine".to_string(),
-            );
+            return Some((FORK_BOMB_REASON.to_string(), Category::Universal));
         }
         let tokens = shell_words(segment);
         let mut start = 0;
         while start < tokens.len() {
             let end = next_pipeline_boundary(&tokens, start);
-            if let Some(reason) = invocation_catastrophe(&tokens, start, end, roots, depth) {
-                return Some(reason);
+            if let Some(hit) = invocation_catastrophe(&tokens, start, end, roots, depth) {
+                return Some(hit);
             }
             start = end + 1;
         }
@@ -2234,7 +2302,7 @@ mod catastrophic {
         end: usize,
         roots: &[String],
         depth: usize,
-    ) -> Option<String> {
+    ) -> Option<(String, Category)> {
         let command_index = unwrapped_command_index(tokens, start, end);
         if command_index >= end {
             return None;
@@ -2243,27 +2311,31 @@ mod catastrophic {
         let command = command_basename(&argv[0]);
         let args = &argv[1..];
 
-        // bash/sh/zsh -c '<script>' → recurse into the inner script.
+        // bash/sh/zsh -c '<script>' → recurse into the inner script (category
+        // inherited from the inner classification).
         if matches!(command, "bash" | "sh" | "zsh") {
             if let Some(script) = shell_c_script(args) {
-                if let Some(reason) = reason_inner(script, roots, depth + 1) {
-                    return Some(reason);
+                if let Some(hit) = reason_inner(script, roots, depth + 1) {
+                    return Some(hit);
                 }
             }
         }
 
         match command {
-            "git" => git_catastrophe(args),
-            "rm" => rm_escape_catastrophe(args, roots),
-            "dd" => dd_catastrophe(args),
-            "mkfs" | "mke2fs" => Some(format!(
-                "`{command}` (filesystem format) is blocked: it would destroy a device"
+            // Git workflow ops are recoverable/sometimes-legitimate → WORKFLOW.
+            "git" => git_catastrophe(args).map(|reason| (reason, Category::Workflow)),
+            "rm" => rm_escape_catastrophe(args, roots).map(|reason| (reason, Category::Universal)),
+            "dd" => dd_catastrophe(args).map(|reason| (reason, Category::Universal)),
+            "mkfs" | "mke2fs" => Some((
+                format!("`{command}` (filesystem format) is blocked: it would destroy a device"),
+                Category::Universal,
             )),
-            _ if command.starts_with("mkfs.") => Some(format!(
-                "`{command}` (filesystem format) is blocked: it would destroy a device"
+            _ if command.starts_with("mkfs.") => Some((
+                format!("`{command}` (filesystem format) is blocked: it would destroy a device"),
+                Category::Universal,
             )),
-            "chmod" => chmod_catastrophe(args),
-            "truncate" => truncate_catastrophe(args),
+            "chmod" => chmod_catastrophe(args).map(|reason| (reason, Category::Universal)),
+            "truncate" => truncate_catastrophe(args).map(|reason| (reason, Category::Universal)),
             _ => None,
         }
     }
@@ -3812,5 +3884,138 @@ mod tests {
         // destructive/catastrophic.
         assert!(!is_destructive("dd if=/dev/zero bs=1M count=1"));
         assert!(is_cat_root("dd of=/dev/sda"));
+    }
+
+    // ---- Universal no-policy catastrophic backstop ----
+    //
+    // With NO command_policy on the stack, the floor still applies as a
+    // backstop, but enforces ONLY the UNIVERSAL (machine/disk/data-destruction)
+    // category — the recoverable git WORKFLOW family is deliberately allowed so
+    // the stdlib `git.push --force-with-lease` flow and standalone scripts keep
+    // working. With a policy pushed, the FULL floor (both categories) applies
+    // exactly as before.
+
+    fn argv_params(argv: &[&str]) -> crate::value::DictMap {
+        let mut params = crate::value::DictMap::new();
+        params.put_str("mode", "argv");
+        params.insert(
+            crate::value::intern_key("argv"),
+            VmValue::List(std::sync::Arc::new(
+                argv.iter()
+                    .map(|arg| VmValue::String(arcstr::ArcStr::from(*arg)))
+                    .collect(),
+            )),
+        );
+        params
+    }
+
+    fn shell_params(command: &str) -> crate::value::DictMap {
+        let mut params = crate::value::DictMap::new();
+        params.put_str("mode", "shell");
+        params.put_str("command", command);
+        params
+    }
+
+    async fn preflight_argv(argv: &[&str]) -> CommandPolicyPreflight {
+        run_command_policy_preflight(&argv_params(argv), JsonValue::Null)
+            .await
+            .expect("preflight ok")
+    }
+
+    async fn preflight_shell(command: &str) -> CommandPolicyPreflight {
+        run_command_policy_preflight(&shell_params(command), JsonValue::Null)
+            .await
+            .expect("preflight ok")
+    }
+
+    fn assert_floor_blocked(preflight: &CommandPolicyPreflight) {
+        match preflight {
+            CommandPolicyPreflight::Blocked {
+                status, decisions, ..
+            } => {
+                assert_eq!(*status, "blocked");
+                assert!(
+                    decisions.iter().any(|decision| {
+                        decision.source == "catastrophic_floor"
+                            && decision.action == "deny"
+                            && decision.confidence == 1.0
+                    }),
+                    "expected a catastrophic_floor deny decision, got {decisions:?}"
+                );
+            }
+            CommandPolicyPreflight::Proceed { .. } => panic!("expected Blocked, got Proceed"),
+        }
+    }
+
+    fn assert_proceed(preflight: &CommandPolicyPreflight) {
+        assert!(
+            matches!(preflight, CommandPolicyPreflight::Proceed { .. }),
+            "expected Proceed, got {preflight:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn no_policy_backstop_blocks_universal_catastrophes() {
+        clear_command_policies();
+        // `rm -rf /` is an absolute escape from the (execution-root) workspace.
+        assert_floor_blocked(&preflight_shell("rm -rf /").await);
+        // Fork bomb through the canonical `sh -c "<script>"` argv wrapper — the
+        // argv-quoting serializer must run in the no-policy path too.
+        assert_floor_blocked(&preflight_argv(&["sh", "-c", ":(){ :|:& };:"]).await);
+        assert_floor_blocked(&preflight_argv(&["mkfs.ext4", "/dev/sda"]).await);
+        assert_floor_blocked(&preflight_argv(&["dd", "of=/dev/sda", "if=/dev/zero"]).await);
+        clear_command_policies();
+    }
+
+    #[tokio::test]
+    async fn no_policy_backstop_allows_recoverable_git_workflow() {
+        // Regression guard: the WORKFLOW family (reset --hard / clean -fd /
+        // force-push) is NOT blocked in the no-policy path, so the stdlib
+        // `git.push --force-with-lease` flow keeps working. (These SAME
+        // commands are still blocked once a policy is on the stack — see the
+        // policy-present test below.)
+        clear_command_policies();
+        assert_proceed(&preflight_argv(&["git", "reset", "--hard"]).await);
+        assert_proceed(&preflight_argv(&["git", "clean", "-fdx"]).await);
+        assert_proceed(
+            &preflight_argv(&[
+                "git",
+                "push",
+                "--force-with-lease=main:abc123",
+                "origin",
+                "HEAD",
+            ])
+            .await,
+        );
+        clear_command_policies();
+    }
+
+    #[tokio::test]
+    async fn no_policy_backstop_allows_benign_command() {
+        clear_command_policies();
+        assert_proceed(&preflight_argv(&["ls", "-la"]).await);
+        clear_command_policies();
+    }
+
+    #[tokio::test]
+    async fn policy_present_floor_blocks_full_set_including_workflow() {
+        // With a policy on the stack the FULL floor applies, byte-unchanged: the
+        // git workflow family stays blocked alongside the universal set.
+        clear_command_policies();
+        push_command_policy(CommandPolicy::default());
+        assert_floor_blocked(
+            &preflight_argv(&[
+                "git",
+                "push",
+                "--force-with-lease=main:abc123",
+                "origin",
+                "HEAD",
+            ])
+            .await,
+        );
+        assert_floor_blocked(&preflight_argv(&["git", "reset", "--hard"]).await);
+        assert_floor_blocked(&preflight_shell("rm -rf /").await);
+        assert_proceed(&preflight_argv(&["ls", "-la"]).await);
+        clear_command_policies();
     }
 }
