@@ -1070,7 +1070,12 @@ pub fn command_risk_scan_json(ctx: &JsonValue, policy: Option<&CommandPolicy>) -
     // `run_command_policy_preflight_with_ctx`), so it is surfaced both as a
     // distinct `catastrophic` label and as a `catastrophic_reason` string the
     // preflight reads to block the command with burin's verbatim rationale.
-    let catastrophic_reason = catastrophic::reason(&command_text, &scan_workspace_roots(ctx));
+    // The floor is fed `floor_command_text` (argv boundaries preserved via
+    // shell-quoting), NOT the lossy `command_text` space-join — otherwise the
+    // canonical agent shape `argv:["sh","-c","<script>"]` would evade every
+    // token-based rule. See `floor_command_text`.
+    let catastrophic_reason =
+        catastrophic::reason(&floor_command_text(ctx), &scan_workspace_roots(ctx));
     if catastrophic_reason.is_some() {
         labels.insert("catastrophic".to_string());
         rationale.push("catastrophic (never-approvable) command detected");
@@ -1240,6 +1245,68 @@ fn command_text(ctx: &JsonValue) -> String {
         .and_then(|value| value.as_str())
         .unwrap_or_default()
         .to_string()
+}
+
+/// Reconstruct the command line the catastrophic floor classifies, PRESERVING
+/// argv argument boundaries. `command_text` space-joins argv with no quoting,
+/// which is fine for the substring / verb-scan detectors that scan for a verb
+/// anywhere, but silently destroys the boundaries the token-based floor rules
+/// depend on. The canonical agent shape `argv:["sh","-c","git reset --hard"]`
+/// would otherwise flatten to `sh -c git reset --hard`, and `shell_c_script`
+/// would then recover only the bare token `git` after `-c` — evading every
+/// token-based rule (`git reset --hard`, `rm -rf /`, `dd of=`, `mkfs`,
+/// `chmod -R 000`, `git push --force`, `truncate -s 0`). Shell-quoting each argv
+/// element makes argv-mode classify identically to the equivalent shell-mode
+/// string (the `-c` payload survives as a single token and recurses correctly).
+fn floor_command_text(ctx: &JsonValue) -> String {
+    if let Some(argv) = ctx
+        .pointer("/request/argv")
+        .and_then(|value| value.as_array())
+    {
+        let parts = argv
+            .iter()
+            .filter_map(|value| value.as_str())
+            .map(shell_quote_arg)
+            .collect::<Vec<_>>();
+        if !parts.is_empty() {
+            return parts.join(" ");
+        }
+    }
+    ctx.pointer("/request/command")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default()
+        .to_string()
+}
+
+/// Quote a single argv element so that re-joining the elements with spaces
+/// reproduces a shell command line whose tokenization matches the original argv
+/// boundaries. A token made only of shell-neutral characters (no whitespace and
+/// none of the shell metacharacters the floor's tokenizer/splitter act on) is
+/// safe to leave bare; anything else is wrapped in single quotes with embedded
+/// single quotes escaped as `'\''`.
+fn shell_quote_arg(arg: &str) -> String {
+    let is_safe = !arg.is_empty()
+        && arg.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric()
+                || matches!(
+                    byte,
+                    b'_' | b'-' | b'.' | b'/' | b':' | b'=' | b'+' | b',' | b'@' | b'%'
+                )
+        });
+    if is_safe {
+        return arg.to_string();
+    }
+    let mut out = String::with_capacity(arg.len() + 2);
+    out.push('\'');
+    for ch in arg.chars() {
+        if ch == '\'' {
+            out.push_str("'\\''");
+        } else {
+            out.push(ch);
+        }
+    }
+    out.push('\'');
+    out
 }
 
 fn risk_labels_from_scan(scan: &JsonValue) -> Vec<String> {
@@ -3676,6 +3743,66 @@ mod tests {
         assert!(labels.contains(&"network_exfil".to_string()));
         let deny = hard_deny_decision(&scan, &policy, &labels).expect("deny_labels hard deny");
         assert_eq!(deny.source, "deny_labels");
+    }
+
+    fn cat_ctx_argv(argv: &[&str], roots: &[&str]) -> JsonValue {
+        serde_json::json!({
+            "request": {
+                "mode": "argv",
+                "argv": argv,
+                "cwd": roots.first().copied().unwrap_or("/tmp/work"),
+            },
+            "workspace_roots": roots,
+        })
+    }
+
+    fn is_cat_argv(argv: &[&str], roots: &[&str]) -> bool {
+        let scan = command_risk_scan_json(&cat_ctx_argv(argv, roots), None);
+        let is_cat = scan.get("catastrophic_reason").is_some();
+        if is_cat {
+            assert!(
+                labels(&scan).contains(&"catastrophic".to_string()),
+                "catastrophic_reason present but label missing: {argv:?}"
+            );
+        }
+        is_cat
+    }
+
+    #[test]
+    fn floor_blocks_argv_sh_c_wrapper_seam() {
+        // Regression: the canonical agent execution shape is argv mode with an
+        // `sh -c "<script>"` wrapper (agent_host_tools allow_argv_prefixes
+        // [["sh","-c"]]). `command_text`'s lossy space-join used to flatten the
+        // script token so `shell_c_script` recovered only the bare verb after
+        // `-c`, evading every token-based floor rule. The floor now classifies
+        // argv identically to the equivalent shell-mode string.
+        for argv in [
+            ["sh", "-c", "git reset --hard"],
+            ["sh", "-c", "rm -rf /"],
+            ["sh", "-c", "dd of=/dev/sda"],
+            ["sh", "-c", "chmod -R 000 ."],
+            ["sh", "-c", "git push --force"],
+            ["sh", "-c", "mkfs.ext4 /dev/sda1"],
+            ["sh", "-c", "truncate -s 0 src/main.rs"],
+            ["bash", "-lc", "git clean -fdx"],
+            ["sh", "-c", "rm -rf ~"],
+            ["sh", "-c", "echo pwned > lib/foo.ts"],
+        ] {
+            assert!(
+                is_cat_argv(&argv, &[ROOT]),
+                "expected catastrophic (argv sh -c seam): {argv:?}"
+            );
+        }
+        // Direct catastrophic argv (no shell wrapper) must also block, and the
+        // argv seam must not over-flag benign commands.
+        assert!(is_cat_argv(&["git", "reset", "--hard"], &[ROOT]));
+        assert!(is_cat_argv(&["rm", "-rf", "/"], &[ROOT]));
+        assert!(is_cat_argv(&["dd", "of=/dev/sda", "if=/dev/zero"], &[ROOT]));
+        assert!(!is_cat_argv(&["sh", "-c", "cargo build"], &[ROOT]));
+        assert!(!is_cat_argv(&["git", "status"], &[ROOT]));
+        assert!(!is_cat_argv(&["rm", "-rf", "node_modules"], &[ROOT]));
+        // A path argument containing a space stays one token (no false escape).
+        assert!(!is_cat_argv(&["rm", "-rf", "my dir"], &[ROOT]));
     }
 
     #[test]

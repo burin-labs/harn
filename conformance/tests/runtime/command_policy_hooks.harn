@@ -146,6 +146,25 @@ pipeline default() {
   assert(redirect_blocked?.status == "blocked", "redirect onto a source file is hard-denied")
   assert(!harness.fs.exists(floor_marker), "catastrophic command must not spawn")
   assert(atomic_get(floor_asks) == 0, "catastrophic floor never consults the consent gate")
+  // The canonical agent shape is argv mode with an `sh -c "<script>"` wrapper.
+  // A token-based rule inside the wrapped script (`git reset --hard`) must still
+  // hard-deny — the floor preserves argv argument boundaries.
+  let wrapped_marker = path_join(root, "wrapped_should_not_spawn")
+  let wrapped_blocked = host_call(
+    "process.exec",
+    {
+      mode: "argv",
+      argv: ["sh", "-c", "git reset --hard; echo x > \"" + wrapped_marker + "\""],
+      cwd: root,
+    },
+  )
+  assert(wrapped_blocked?.status == "blocked", "argv sh -c wrapped catastrophe is hard-denied")
+  assert(!harness.fs.exists(wrapped_marker), "wrapped catastrophic command must not spawn")
+  assert(
+    contains(wrapped_blocked?.stderr ?? "", "git reset --hard"),
+    "wrapped catastrophic reason is surfaced",
+  )
+  assert(atomic_get(floor_asks) == 0, "wrapped catastrophic floor never consults the consent gate")
   command_policy_pop()
   var tools = tool_registry()
   tools = tool_define(
