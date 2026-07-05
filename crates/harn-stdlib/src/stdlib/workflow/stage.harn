@@ -1067,7 +1067,7 @@ pub fn workflow_execute_stage_attempts(
     // fn-verify mode: a callable `verify` gates the settled attempt (any stage
     // kind) and threads its findings forward. The dict/command verify path is
     // already classified inside the host call above, so this is a no-op there.
-    let settled = if __stage_bool(raw_settled?.ok, false) {
+    let settled = if __stage_bool(raw_settled.ok, false) {
       __stage_apply_fn_verify(node_dict, raw_settled)
     } else {
       raw_settled
