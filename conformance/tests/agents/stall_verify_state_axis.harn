@@ -1,0 +1,96 @@
+import {
+  agent_stall_initial_state,
+  agent_stall_no_net_progress,
+  agent_stall_observe_tool_calls,
+} from "std/agent/stall"
+
+// SEAM 1 (#burin-cutover): the verify-state progress axis. When the host supplies
+// a `progress_signal` callback the no-net-progress decision keys on whether the
+// VERIFIER moved ("writes are not progress"), not on edit/tool signatures. This
+// proves (a) PARITY — with no callback the signature axis is byte-identical — and
+// (b) LIVE-SHAPE — the callback fires and flips the decision via the short
+// write-axis cut (edit lands every turn but the verifier never advances).
+// A verify-state callback that reads this turn's scalar out of the payload;
+// nil when there is no verify evidence (a FLAT turn).
+let PROGRESS_SIGNAL = { p ->
+  if contains(keys(p ?? {}), "verify_score") {
+    to_float(p.verify_score)
+  } else {
+    nil
+  }
+}
+
+fn observe(config, state, score, wrote) {
+  let payload = if score == nil {
+    {}
+  } else {
+    {verify_score: score}
+  }
+  return agent_stall_observe_tool_calls(
+    "verify-state-seam",
+    [{name: "edit", arguments: {}}],
+    1,
+    config,
+    state,
+    false,
+    nil,
+    "",
+    false,
+    wrote,
+    "",
+    payload,
+  )
+}
+
+pipeline default() {
+  // ---- PARITY: no progress_signal => signature axis, unchanged ----
+  let base_state = agent_stall_initial_state()
+  // Guard OFF => always false (today's default).
+  assert(!agent_stall_no_net_progress({enabled: true}, base_state), "parity: guard off => false")
+  // Guard ON + a failing same-diagnostic streak past the extend-after => true.
+  let failing = base_state
+    + {last_diagnostic_class: "fail", same_diagnostic_streak: 3, failing_verify_turns: 3}
+  let sig_cfg = {enabled: true, no_net_progress_extend_guard: true, no_net_progress_extend_after: 3}
+  assert(agent_stall_no_net_progress(sig_cfg, failing), "parity: signature axis still fires")
+  // The SAME stalled-write state, with NO progress_signal and the guard off, does
+  // NOT cut — proving the verify-state cut is what the seam adds, not preexisting.
+  let stalled_writes = base_state + {verify_turns_since_advance: 9, verify_wrote_since_advance: true}
+  assert(
+    !agent_stall_no_net_progress({enabled: true}, stalled_writes),
+    "parity: no verify-state cut without callback",
+  )
+  // ---- LIVE-SHAPE: progress_signal supplied => verify-state axis fires ----
+  let cfg = {
+    enabled: true,
+    post_edit_reverify: false,
+    repair_aware: false,
+    exempt_tools: ["edit"],
+    progress_signal: PROGRESS_SIGNAL,
+  }
+  var s = agent_stall_initial_state()
+  // Turn 1: first verify evidence (score 1) => the high-water is set, advance.
+  s = observe(cfg, s, 1, true).state
+  assert(!agent_stall_no_net_progress(cfg, s), "turn1: first advance is not a stall")
+  // Turns 2-3: writes land but the verifier stays flat (score 1) => accumulating,
+  // but still under the 3-turn no-verifier limit.
+  s = observe(cfg, s, 1, true).state
+  s = observe(cfg, s, 1, true).state
+  assert(!agent_stall_no_net_progress(cfg, s), "turn3: below the write-axis limit")
+  // Turn 4: still flat + a write landed => write-axis cut fires (no long wait).
+  s = observe(cfg, s, 1, true).state
+  assert(
+    agent_stall_no_net_progress(cfg, s),
+    "turn4: write-axis cut fires (seam changed the decision)",
+  )
+  assert(s.verify_turns_since_advance == 3, "turn4: three flat turns since advance")
+  assert(s.verify_wrote_since_advance, "turn4: a write landed during the stall")
+  // Turn 5: the verifier finally advances (score 2) => the axis resets, no cut.
+  s = observe(cfg, s, 2, true).state
+  assert(!agent_stall_no_net_progress(cfg, s), "turn5: a verifier advance clears the stall")
+  assert(s.verify_turns_since_advance == 0, "turn5: counter reset on advance")
+  assert(!s.verify_wrote_since_advance, "turn5: write flag cleared on advance")
+  // A FLAT turn with no verify evidence (nil scalar) still counts as non-advance.
+  s = observe(cfg, s, nil, false).state
+  assert(s.verify_turns_since_advance == 1, "nil scalar counts as flat, not advance")
+  log("stall verify-state axis ok")
+}
