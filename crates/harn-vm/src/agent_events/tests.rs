@@ -155,6 +155,9 @@ fn judge_decision_round_trips_through_jsonl_sink() {
         next_step: Some("run the verifier".into()),
         judge_duration_ms: 17,
         trigger: Some("stalled".into()),
+        reason: Some("missing_verification".into()),
+        confirm: Some(false),
+        converted_from: None,
     });
     sink.flush().unwrap();
 
@@ -170,6 +173,9 @@ fn judge_decision_round_trips_through_jsonl_sink() {
             next_step,
             judge_duration_ms,
             trigger,
+            reason,
+            confirm,
+            converted_from,
         } => {
             assert_eq!(session_id, "s");
             assert_eq!(iteration, 2);
@@ -178,6 +184,9 @@ fn judge_decision_round_trips_through_jsonl_sink() {
             assert_eq!(next_step.as_deref(), Some("run the verifier"));
             assert_eq!(judge_duration_ms, 17);
             assert_eq!(trigger.as_deref(), Some("stalled"));
+            assert_eq!(reason.as_deref(), Some("missing_verification"));
+            assert_eq!(confirm, Some(false));
+            assert_eq!(converted_from, None);
         }
         other => panic!("expected JudgeDecision, got {other:?}"),
     }
@@ -211,6 +220,9 @@ fn jsonl_sink_lines_are_durable_without_drop_or_explicit_flush() {
         next_step: None,
         judge_duration_ms: 11,
         trigger: Some("completion_check".into()),
+        reason: Some("verified_after_write".into()),
+        confirm: Some(true),
+        converted_from: None,
     });
 
     let text = std::fs::read_to_string(&path).unwrap();

@@ -12,7 +12,8 @@ judge; omit it to use the default judge.
 
 The return value is the normal `agent_loop` result with two extra summaries:
 `iterations` (`[{iteration, started, ended?, tool_count?, prose_chars?}]`) and `judge_decisions`
-(`[{iteration, verdict, reasoning, next_step, judge_duration_ms, trigger?}]`).
+(`[{iteration, verdict, reasoning, next_step, judge_duration_ms, trigger?, reason?, confirm?,
+converted_from?}]`).
 
 ```harn
 import { AgentLoopOptions } from "std/agent/options"
@@ -114,6 +115,11 @@ top-level keys before `v0.8`).
 | `suspected_loop` | bool | Present when `stall_diagnostics` is enabled. `true` when at least one stall warning fired |
 | `completion_judge` | dict | Present when `verify_completion_judge` is configured. `{invocations, vetoes, max_invocations, cap_reached}` — the per-session judge call/veto counts, the resolved cap (`nil` when disabled), and whether the cap was hit. Lets a harness report judge churn without transcript mining |
 | `done_judge` | dict | Present when `done_judge` is configured. `{invocations, vetoes, max_invocations, cap_reached}` — the per-session done-judge call/veto counts, the resolved top-level cap (`nil` when disabled or not configured), and whether that cap was hit. This is separate from `done_judge.cadence.max_invocations`, which only gates when the judge is due |
+
+`judge_decision` agent events carry `{verdict, confirm, reason, reasoning,
+next_step, trigger}`. `verify_completion` closures, `verify_completion_judge`,
+and `done_judge` all use this event, so harnesses can measure completion-gate
+class fire rates from structured fields instead of parsing feedback prose.
 
 Nested `llm` fields:
 
@@ -943,6 +949,12 @@ verifier facts. Its default veto ladder (first match wins):
 | `missing_verification` | veto (**strict**) | source written, verifier configured, not yet run — never released by the budget (a source write always needs a fresh green verifier) |
 | `no_workspace_write` | allow | task does not require a source change |
 | `veto_budget_exhausted` | allow | a soft veto after `max_vetoes` (default 3) — an attributable end |
+
+Each deterministic gate decision emits a `judge_decision` event with
+`trigger: "verify_completion"`, `confirm`, and the stable `reason` above. When
+the veto budget converts a soft veto into an allow, the event uses
+`reason: "veto_budget_exhausted"` and also carries `converted_from` with the
+original veto class.
 
 Only **source** writes count as progress toward "done" — a cosmetic final write
 (a comment, a `.md` typo) is not evidence, so it cannot flip an already-passed

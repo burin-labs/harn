@@ -1,0 +1,1 @@
+- Surface completion-gate `judge_decision` reason and confirm fields for fire-rate telemetry.

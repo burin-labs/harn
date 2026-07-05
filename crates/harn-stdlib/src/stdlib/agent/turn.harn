@@ -69,6 +69,9 @@ fn __agent_turn_judge_decisions(events) {
           next_step: event.next_step,
           judge_duration_ms: event.judge_duration_ms,
           trigger: event?.trigger,
+          reason: event?.reason,
+          confirm: event?.confirm,
+          converted_from: event?.converted_from,
         },
       )
     }

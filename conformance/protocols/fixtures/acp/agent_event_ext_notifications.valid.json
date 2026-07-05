@@ -252,10 +252,13 @@
       "jsonrpc": "2.0",
       "method": "_harn/agentEvent",
       "params": {
+        "confirm": false,
+        "convertedFrom": "cosmetic_only",
         "iteration": 0,
         "judgeDurationMs": 42,
         "kind": "judge_decision",
         "nextStep": "run the verifier",
+        "reason": "no_source_write",
         "reasoning": "needs one more concrete action",
         "sessionId": "session-1",
         "trigger": "stalled",
