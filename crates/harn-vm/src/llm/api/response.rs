@@ -276,6 +276,19 @@ fn native_tool_name_text_call_parse_error(raw_name: &str, error: &str) -> serde_
     })
 }
 
+fn native_tool_arguments_text_call_parse_error(
+    raw_arguments: &str,
+    error: &str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "__parse_error": format!(
+            "Could not parse provider tool arguments as Harn text-tool call: {}. Raw input: {}",
+            error,
+            preview_chars(raw_arguments, 200)
+        )
+    })
+}
+
 fn openai_synthetic_tool_call_id(base_id: &str, call_index: usize, arg_index: usize) -> String {
     if base_id.is_empty() {
         format!("call_{call_index}_{}", arg_index + 1)
@@ -966,6 +979,39 @@ pub(crate) fn parse_llm_response(
                         continue;
                     }
                     crate::llm::tools::NativeToolNameTextCall::NotCall => {}
+                }
+                if crate::llm::tools::is_generic_wrapper_name(&raw_name) {
+                    match crate::llm::tools::parse_text_tool_call_from_native_arguments(args_str) {
+                        crate::llm::tools::NativeToolNameTextCall::Parsed { name, arguments } => {
+                            let (name, arguments) =
+                                crate::llm::tools::normalize_tool_call_shape(&name, arguments);
+                            let id = openai_synthetic_tool_call_id(base_id, call_index, 0);
+                            push_internal_tool_call(
+                                &mut tool_calls,
+                                &mut blocks,
+                                id,
+                                name,
+                                arguments,
+                            );
+                            continue;
+                        }
+                        crate::llm::tools::NativeToolNameTextCall::Malformed { name, error } => {
+                            let arguments =
+                                native_tool_arguments_text_call_parse_error(args_str, &error);
+                            let (name, arguments) =
+                                crate::llm::tools::normalize_tool_call_shape(&name, arguments);
+                            let id = openai_synthetic_tool_call_id(base_id, call_index, 0);
+                            push_internal_tool_call(
+                                &mut tool_calls,
+                                &mut blocks,
+                                id,
+                                name,
+                                arguments,
+                            );
+                            continue;
+                        }
+                        crate::llm::tools::NativeToolNameTextCall::NotCall => {}
+                    }
                 }
                 for (arg_index, arguments) in parse_openai_tool_argument_values(&raw_name, args_str)
                     .into_iter()
@@ -1794,6 +1840,80 @@ mod tests {
             "include/kvdb/status.h"
         );
         assert_eq!(result.tool_calls[0]["arguments"]["intent"], "read");
+    }
+
+    #[test]
+    fn openai_parser_recovers_text_tool_call_wrapped_in_native_tool_call_arguments() {
+        let response = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "call_wrapper_args",
+                            "type": "function",
+                            "function": {
+                                "name": "tool_call",
+                                "arguments": "<tool_call>\nlook({ file: \"Sources/App.swift\", intent: \"read\" })\n</tool_call>"
+                            }
+                        }
+                    ]
+                },
+                "finish_reason": "tool_calls"
+            }],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 30}
+        });
+
+        let result = parse_llm_response(&response, "openrouter", "gpt-oss-120b", false, false)
+            .expect("parser succeeds");
+
+        assert_eq!(result.stop_reason.as_deref(), Some("tool_calls"));
+        assert_eq!(result.tool_calls.len(), 1);
+        assert_eq!(result.tool_calls[0]["id"], "call_wrapper_args");
+        assert_eq!(result.tool_calls[0]["name"], "look");
+        assert_eq!(
+            result.tool_calls[0]["arguments"]["file"],
+            "Sources/App.swift"
+        );
+        assert_eq!(result.tool_calls[0]["arguments"]["intent"], "read");
+    }
+
+    #[test]
+    fn openai_parser_rejects_partial_text_tool_call_wrapped_in_native_tool_call_arguments() {
+        let response = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "call_wrapper_partial_args",
+                            "type": "function",
+                            "function": {
+                                "name": "tool_call",
+                                "arguments": "<tool_call>\nedit({ action: \"create\", path: \"tests/page_cache_extra_test.cpp\", content: <<EOF"
+                            }
+                        }
+                    ]
+                },
+                "finish_reason": "tool_calls"
+            }],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 30}
+        });
+
+        let result = parse_llm_response(&response, "openrouter", "gpt-oss-120b", false, false)
+            .expect("parser succeeds");
+
+        assert_eq!(result.stop_reason.as_deref(), Some("tool_calls"));
+        assert_eq!(result.tool_calls.len(), 1);
+        assert_eq!(
+            result.tool_calls[0]["name"], "edit",
+            "partial nested text call must not be dispatched as literal tool_call"
+        );
+        let parse_error = result.tool_calls[0]["arguments"]["__parse_error"]
+            .as_str()
+            .expect("partial nested text call should carry a parse error");
+        assert!(parse_error.contains("provider tool arguments"));
+        assert!(parse_error.contains("Raw input: <tool_call>"));
     }
 
     #[test]
