@@ -477,7 +477,7 @@ line-, token-, or pattern-oriented scan suffices.
 | `.last(n?)` | n: int (optional) | any or list | Last element, or last n elements |
 | `.partition(fn)` | fn: closure | list | Split into `[[truthy], [falsy]]` |
 | `.group_by(fn)` | fn: closure | dict | Group into dict keyed by fn result |
-| `.sort()` / `.sort_by(fn)` | fn: closure (optional) | list | Stable sort (natural or by key function). List-valued keys order lexicographically, so `xs.sort_by({ x -> [x.a, x.b] })` sorts by `a`, then `b` |
+| `.sort()` / `.sort_by(fn)` | fn: closure for `.sort_by` | list | Stable sort (natural or by key function). List-valued keys order lexicographically, so `xs.sort_by({ x -> [x.a, x.b] })` sorts by `a`, then `b`. Use `sort_by` for custom keys; `sort` does not accept a comparator. |
 | `.min()` / `.max()` | none | any | Minimum/maximum value |
 | `.min_by(fn)` / `.max_by(fn)` | fn: closure | any | Min/max by key function |
 | `.chunk(size)` | size: int | list | Split into chunks of size |

@@ -38,6 +38,12 @@ impl crate::vm::Vm {
                 Ok(VmValue::Bool(true))
             }
             "sort" => {
+                if !args.is_empty() {
+                    return Some(Err(VmError::TypeError(
+                        "list.sort takes no arguments; use list.sort_by(fn) for key-based sorting"
+                            .to_string(),
+                    )));
+                }
                 let mut sorted: Vec<VmValue> = items.iter().cloned().collect();
                 sorted.sort_by(|a, b| compare_values(a, b).cmp(&0));
                 Ok(VmValue::List(std::sync::Arc::new(sorted)))

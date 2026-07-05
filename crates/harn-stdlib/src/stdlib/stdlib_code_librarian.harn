@@ -450,7 +450,7 @@ fn __nl_mcts(text, opts) -> dict {
       }
     }
   }
-  let sorted = ranked.sort({ a, b -> b.score - a.score })
+  let sorted = ranked.sort_by({ cand -> -cand.score })
   let unique = __nl_dedupe_candidates(sorted)
   let trimmed = if len(unique) > 10 {
     unique[:10]

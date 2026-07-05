@@ -556,7 +556,7 @@ pub fn parallel_judge(items, judge_fn, opts = nil) {
   // Sort by index to preserve input order. parallel each currently returns
   // results in input-list order, but we sort defensively in case that ever
   // changes.
-  let sorted = raw.sort({ a, b -> a.index - b.index })
+  let sorted = raw.sort_by({ entry -> entry.index })
   var out = []
   for r in sorted {
     let failed = !(r?.ok ?? false)
@@ -569,8 +569,6 @@ pub fn parallel_judge(items, judge_fn, opts = nil) {
   }
   return out
 }
-
-type DebateDebater = string | {name: string?, system: string?, instruction: string?, llm_options: dict?}
 
 type DebateResponse = {
   debater: string,
