@@ -21,6 +21,12 @@ cat > "$fake_harn" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >> "$FAKE_HARN_RECORD"
+if [[ -n "${FAKE_HARN_ENV_RECORD:-}" ]]; then
+  {
+    printf 'CARGO_TARGET_DIR=%s\n' "${CARGO_TARGET_DIR-__unset__}"
+    printf 'CARGO_BUILD_BUILD_DIR=%s\n' "${CARGO_BUILD_BUILD_DIR-__unset__}"
+  } >> "$FAKE_HARN_ENV_RECORD"
+fi
 if [[ "${1:-}" == "run" && "${2:-}" == "scripts/render_release_notes.harn" ]]; then
   printf 'fake release notes\n'
   exit 0
@@ -31,15 +37,55 @@ SH
 chmod +x "$fake_harn"
 
 record="$tmp_root/harn-record.txt"
+env_record="$tmp_root/harn-env-record.txt"
 HARN_RELEASE_ROOT="$release_root" \
   HARN_BIN="$fake_harn" \
   FAKE_HARN_RECORD="$record" \
+  FAKE_HARN_ENV_RECORD="$env_record" \
   "$repo_root/scripts/release_gate.sh" notes --version v1.2.3 > "$tmp_root/notes.txt"
 
 expected="run scripts/render_release_notes.harn -- --version v1.2.3"
 actual=$(cat "$record")
 if [[ "$actual" != "$expected" ]]; then
   printf 'expected release_gate to use HARN_BIN:\n%s\nactual:\n%s\n' "$expected" "$actual" >&2
+  exit 1
+fi
+
+default_tmp="${TMPDIR:-/tmp}"
+default_tmp="${default_tmp%/}"
+expected_target="$default_tmp/harn-release-gate-target-release-root"
+expected_build="$expected_target/build"
+if ! grep -Fxq "CARGO_TARGET_DIR=$expected_target" "$env_record"; then
+  echo "release_gate did not default CARGO_TARGET_DIR to a release-local path" >&2
+  cat "$env_record" >&2
+  exit 1
+fi
+if ! grep -Fxq "CARGO_BUILD_BUILD_DIR=$expected_build" "$env_record"; then
+  echo "release_gate did not default CARGO_BUILD_BUILD_DIR under the target dir" >&2
+  cat "$env_record" >&2
+  exit 1
+fi
+
+: >"$record"
+: >"$env_record"
+custom_target="$tmp_root/custom target"
+custom_build="$tmp_root/custom build"
+HARN_RELEASE_ROOT="$release_root" \
+  HARN_BIN="$fake_harn" \
+  CARGO_TARGET_DIR="$custom_target" \
+  CARGO_BUILD_BUILD_DIR="$custom_build" \
+  FAKE_HARN_RECORD="$record" \
+  FAKE_HARN_ENV_RECORD="$env_record" \
+  "$repo_root/scripts/release_gate.sh" notes --version v1.2.3 > "$tmp_root/notes-custom.txt"
+
+if ! grep -Fxq "CARGO_TARGET_DIR=$custom_target" "$env_record"; then
+  echo "release_gate did not preserve explicit CARGO_TARGET_DIR" >&2
+  cat "$env_record" >&2
+  exit 1
+fi
+if ! grep -Fxq "CARGO_BUILD_BUILD_DIR=$custom_build" "$env_record"; then
+  echo "release_gate did not preserve explicit CARGO_BUILD_BUILD_DIR" >&2
+  cat "$env_record" >&2
   exit 1
 fi
 
