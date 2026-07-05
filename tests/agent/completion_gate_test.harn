@@ -1,0 +1,232 @@
+// Run: harn test tests/agent/completion_gate_test.harn
+//
+// Parity fixtures for the completion-gate veto arithmetic in
+// `std/agent/judge_internals`. These pin burin-code's completion-judge
+// decisions (lib/runtime/completion-judge.harn) on synthetic verdict sets:
+// the source-vs-cosmetic evidence gate (ledger ⛔#5), the strict post-write-red
+// class that the budget may never convert, the per-session veto budget
+// (COMPLETION_GATE_MAX_VETOES = 3), and AND-of-oracles verify composition.
+// Everything here is PURE — no LLM, no host, no store — so the decisions are
+// deterministic and byte-stable.
+import {
+  __completion_gate_apply_budget,
+  __completion_gate_classify_writes,
+  __completion_gate_combine_verify,
+  __completion_gate_ladder,
+} from "std/agent/judge_internals"
+
+fn classify_by_ext(path, _diff) {
+  if lowercase(path).ends_with(".md") {
+    return "cosmetic"
+  }
+  return "source"
+}
+
+pipeline test_no_write_on_coding_task_vetoes(task) {
+  // burin no_write_on_coding_task: a task needing a source change with zero writes.
+  let v = __completion_gate_ladder(
+    {source_known: true, source_write_count: 0, cosmetic_write_count: 0, requires_write: true},
+  )
+  assert_eq(v.ok, false)
+  assert_eq(v.reason, "no_source_write")
+  assert_eq(v.strict, false)
+}
+
+pipeline test_cosmetic_only_write_still_vetoes(task) {
+  // ledger ⛔#5: a cosmetic (.md) final write is NOT source progress; done stays blocked.
+  let v = __completion_gate_ladder(
+    {source_known: true, source_write_count: 0, cosmetic_write_count: 2, requires_write: true},
+  )
+  assert_eq(v.ok, false)
+  assert_eq(v.reason, "no_source_write")
+  assert(v.feedback.contains("cosmetic"), "cosmetic-only feedback names the cosmetic case")
+}
+
+pipeline test_source_write_red_verifier_is_strict_veto(task) {
+  // burin failed_verification / repeated_verification_failures: source write + red verifier.
+  let v = __completion_gate_ladder(
+    {
+      source_known: true,
+      source_write_count: 1,
+      requires_write: true,
+      verify: {ok: false, findings: "error[E0308]"},
+      oracle_expected: true,
+    },
+  )
+  assert_eq(v.ok, false)
+  assert_eq(v.reason, "verification_after_write_red")
+  assert_eq(v.strict, true)
+  assert(v.feedback.contains("E0308"), "red feedback carries the findings")
+}
+
+pipeline test_source_write_green_verifier_allows(task) {
+  // burin verified_after_write.
+  let v = __completion_gate_ladder(
+    {
+      source_known: true,
+      source_write_count: 1,
+      requires_write: true,
+      verify: {ok: true, findings: ""},
+      oracle_expected: true,
+    },
+  )
+  assert_eq(v.ok, true)
+  assert_eq(v.reason, "verified_after_write")
+}
+
+pipeline test_source_write_no_verify_run_vetoes(task) {
+  // burin missing_verification: wrote source, verifier configured, never ran.
+  // Strict — burin's budget never releases a post-write state without a fresh
+  // green verifier (`saw_write && !verification_after_last_write`).
+  let v = __completion_gate_ladder(
+    {
+      source_known: true,
+      source_write_count: 1,
+      requires_write: true,
+      verify: nil,
+      oracle_expected: true,
+    },
+  )
+  assert_eq(v.ok, false)
+  assert_eq(v.reason, "missing_verification")
+  assert_eq(v.strict, true)
+}
+
+pipeline test_non_coding_task_allows_without_write(task) {
+  // burin no_workspace_write: a task that does not require a source change.
+  let v = __completion_gate_ladder(
+    {source_known: true, source_write_count: 0, requires_write: false, verify: nil},
+  )
+  assert_eq(v.ok, true)
+  assert_eq(v.reason, "no_workspace_write")
+}
+
+pipeline test_source_write_no_oracle_allows(task) {
+  let v = __completion_gate_ladder(
+    {
+      source_known: true,
+      source_write_count: 1,
+      requires_write: true,
+      verify: nil,
+      oracle_expected: false,
+    },
+  )
+  assert_eq(v.ok, true)
+  assert_eq(v.reason, "wrote_source_no_oracle")
+}
+
+pipeline test_thin_facts_abstain(task) {
+  // No write facts, no verifier signal: the deterministic gate abstains (judge-only).
+  let v = __completion_gate_ladder({source_known: false, verify: nil})
+  assert_eq(v.ok, true)
+  assert_eq(v.reason, "gate_abstain")
+}
+
+pipeline test_unknown_source_but_red_verifier_still_strict(task) {
+  // Even with source counts unknown, a red verifier blocks (strict).
+  let v = __completion_gate_ladder(
+    {source_known: false, verify: {ok: false, findings: "lint"}, oracle_expected: true},
+  )
+  assert_eq(v.ok, false)
+  assert_eq(v.reason, "verification_after_write_red")
+  assert_eq(v.strict, true)
+}
+
+pipeline test_classify_writes_with_callback(task) {
+  let counts = __completion_gate_classify_writes(
+    [{path: "src/a.rs"}, {path: "README.md"}, {path: "src/b.rs"}],
+    classify_by_ext,
+  )
+  assert_eq(counts.source_write_count, 2)
+  assert_eq(counts.cosmetic_write_count, 1)
+  assert_eq(counts.other_write_count, 0)
+}
+
+pipeline test_classify_writes_uses_kind_field_then_conservative_default(task) {
+  // No callback: honor an explicit kind, default the unclassified write to source.
+  let counts = __completion_gate_classify_writes([{kind: "cosmetic"}, {kind: "source"}, {}], nil)
+  assert_eq(counts.source_write_count, 2)
+  assert_eq(counts.cosmetic_write_count, 1)
+}
+
+pipeline test_classify_writes_other_kind_not_source(task) {
+  let counts = __completion_gate_classify_writes([{kind: "test"}, {kind: "doc"}], nil)
+  assert_eq(counts.source_write_count, 0)
+  assert_eq(counts.other_write_count, 2)
+}
+
+pipeline test_combine_verify_nil_is_nil(task) {
+  assert_eq(__completion_gate_combine_verify(nil, nil), nil)
+}
+
+pipeline test_combine_verify_any_red_blocks(task) {
+  let combined = __completion_gate_combine_verify([{ok: true}, {ok: false, findings: "lint"}], nil)
+  assert_eq(combined.ok, false)
+  assert_eq(combined.findings, "lint")
+}
+
+pipeline test_combine_verify_concatenates_findings(task) {
+  let combined = __completion_gate_combine_verify([{ok: false, findings: "a"}, {ok: false, findings: "b"}], nil)
+  assert_eq(combined.ok, false)
+  assert_eq(combined.findings, "a; b")
+}
+
+pipeline test_combine_verify_custom_combiner_wins(task) {
+  let combiner = fn(_verdicts) { return {ok: true, findings: "overridden"} }
+  let combined = __completion_gate_combine_verify([{ok: false, findings: "x"}], combiner)
+  assert_eq(combined.ok, true)
+  assert_eq(combined.findings, "overridden")
+}
+
+pipeline test_budget_allow_never_charges(task) {
+  let out = __completion_gate_apply_budget({ok: true, reason: "verified_after_write"}, 5, 3)
+  assert_eq(out.verdict.ok, true)
+  assert_eq(out.charge, false)
+}
+
+pipeline test_budget_soft_veto_under_budget_charges(task) {
+  let out = __completion_gate_apply_budget({ok: false, reason: "no_source_write", strict: false}, 1, 3)
+  assert_eq(out.verdict.ok, false)
+  assert_eq(out.verdict.reason, "no_source_write")
+  assert_eq(out.charge, true)
+}
+
+pipeline test_budget_soft_veto_exhausted_converts_to_allow(task) {
+  // At the budget, a non-strict veto converts to an attributable allow.
+  let out = __completion_gate_apply_budget({ok: false, reason: "no_source_write", strict: false}, 3, 3)
+  assert_eq(out.verdict.ok, true)
+  assert_eq(out.verdict.reason, "veto_budget_exhausted")
+  assert_eq(out.verdict.converted_from, "no_source_write")
+  assert_eq(out.charge, false)
+}
+
+pipeline test_budget_strict_veto_never_converts(task) {
+  // burin carve-out: a source write with a red verifier is NEVER let through by
+  // budget exhaustion — only a fresh green verifier ends it.
+  let out = __completion_gate_apply_budget(
+    {ok: false, reason: "verification_after_write_red", strict: true},
+    9,
+    3,
+  )
+  assert_eq(out.verdict.ok, false)
+  assert_eq(out.verdict.reason, "verification_after_write_red")
+  assert_eq(out.charge, true)
+}
+
+pipeline test_budget_missing_verification_never_converts(task) {
+  // The divergence crux: a post-write state with a configured-but-unrun verifier
+  // is strict in burin (`saw_write && !verification_after_last_write` is never
+  // budget-released), so the budget must never convert it to done either.
+  let out = __completion_gate_apply_budget({ok: false, reason: "missing_verification", strict: true}, 9, 3)
+  assert_eq(out.verdict.ok, false)
+  assert_eq(out.verdict.reason, "missing_verification")
+  assert_eq(out.charge, true)
+}
+
+pipeline test_budget_disabled_never_converts(task) {
+  // max_vetoes = 0 disables the budget: soft vetoes stay vetoes forever.
+  let out = __completion_gate_apply_budget({ok: false, reason: "no_source_write", strict: false}, 99, 0)
+  assert_eq(out.verdict.ok, false)
+  assert_eq(out.verdict.reason, "no_source_write")
+  assert_eq(out.charge, true)
+}

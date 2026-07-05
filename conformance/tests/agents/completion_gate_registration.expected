@@ -1,0 +1,10 @@
+A.status=done
+A.gate_calls=4
+B.status=done
+B.session_matches=true
+B.has_task=true
+B.messages_is_list=true
+C.status=budget_exhausted
+C.is_done=false
+D.facts_available=false
+D.status=done
