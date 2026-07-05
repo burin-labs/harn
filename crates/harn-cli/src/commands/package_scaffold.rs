@@ -16,6 +16,7 @@ use crate::commands::scaffold_common::{
     harn_identifier, harn_string_literal, pascal_identifier_from_snake, validate_harn_identifier,
     write_bytes, write_file,
 };
+use crate::net;
 use crate::package::{
     current_harn_range_example, generate_package_docs_impl, toml_string_literal,
     validate_package_alias, PackageError,
@@ -178,37 +179,38 @@ fn loaded_spec_from_bytes(
 }
 
 async fn fetch_spec_url(url: &Url) -> Result<(String, Vec<u8>), PackageError> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(30))
-        .build()
-        .map_err(|error| format!("failed to initialize HTTP client: {error}"))?;
-    let mut response = client
-        .get(url.clone())
-        .send()
-        .await
-        .map_err(|error| format!("failed to fetch OpenAPI spec {url}: {error}"))?;
+    let display_url = net::diagnostic_text(url.as_str());
+    let client = net::http_client("cli.package_scaffold.openapi", Duration::from_secs(30))?;
+    let mut response = client.get(url.clone()).send().await.map_err(|error| {
+        format!(
+            "failed to fetch OpenAPI spec {display_url}: {}",
+            net::reqwest_error(&error)
+        )
+    })?;
     let status = response.status();
     if !status.is_success() {
-        return Err(format!("failed to fetch OpenAPI spec {url}: HTTP {status}").into());
+        return Err(format!("failed to fetch OpenAPI spec {display_url}: HTTP {status}").into());
     }
     if response
         .content_length()
         .is_some_and(|length| length > MAX_SPEC_BYTES)
     {
-        return Err(
-            format!("OpenAPI spec {url} is larger than the {MAX_SPEC_BYTES} byte limit").into(),
-        );
+        return Err(format!(
+            "OpenAPI spec {display_url} is larger than the {MAX_SPEC_BYTES} byte limit"
+        )
+        .into());
     }
     let mut bytes = Vec::new();
-    while let Some(chunk) = response
-        .chunk()
-        .await
-        .map_err(|error| format!("failed to read OpenAPI spec {url}: {error}"))?
-    {
+    while let Some(chunk) = response.chunk().await.map_err(|error| {
+        format!(
+            "failed to read OpenAPI spec {display_url}: {}",
+            net::reqwest_error(&error)
+        )
+    })? {
         let next_len = bytes.len().saturating_add(chunk.len());
         if next_len > MAX_SPEC_BYTES as usize {
             return Err(format!(
-                "OpenAPI spec {url} is larger than the {MAX_SPEC_BYTES} byte limit"
+                "OpenAPI spec {display_url} is larger than the {MAX_SPEC_BYTES} byte limit"
             )
             .into());
         }

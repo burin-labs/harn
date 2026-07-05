@@ -13,6 +13,8 @@ use time::OffsetDateTime;
 use url::Url;
 use uuid::Uuid;
 
+use crate::net;
+
 const PROTOCOL_VERSION: &str = "agents-protocol-2026-04-25";
 const REPORT_SCHEMA: &str = "harn-agents-conformance-2026-04-25";
 
@@ -1161,7 +1163,7 @@ async fn stream_sse_frames(
     let response = request
         .send()
         .await
-        .map_err(|error| format!("GET {path} failed: {error}"))?;
+        .map_err(|error| format!("GET {path} failed: {}", net::reqwest_error(&error)))?;
     if response.status() != StatusCode::OK {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
@@ -1187,7 +1189,9 @@ async fn stream_sse_frames(
         let Some(chunk) = next.ok().flatten() else {
             continue;
         };
-        let chunk = chunk.map_err(|error| format!("SSE read failed for {path}: {error}"))?;
+        let chunk = chunk.map_err(|error| {
+            format!("SSE read failed for {path}: {}", net::reqwest_error(&error))
+        })?;
         buffer.push_str(&String::from_utf8_lossy(&chunk));
         while let Some(idx) = buffer.find("\n\n") {
             let raw = buffer[..idx].to_string();
@@ -1279,10 +1283,15 @@ impl ConformanceClient {
             let path = format!("{}/", base_url.path().trim_end_matches('/'));
             base_url.set_path(&path);
         }
-        let http = reqwest::Client::builder()
+        let http = net::http_client_builder("cli.agents_conformance")
             .timeout(timeout)
             .build()
-            .map_err(|error| format!("failed to create HTTP client: {error}"))?;
+            .map_err(|error| {
+                format!(
+                    "failed to create HTTP client: {}",
+                    net::reqwest_error(&error)
+                )
+            })?;
         Ok(Self {
             http,
             base_url,
@@ -1364,7 +1373,7 @@ impl ConformanceClient {
         let response = request
             .send()
             .await
-            .map_err(|error| format!("{method} {path} failed: {error}"))?;
+            .map_err(|error| format!("{method} {path} failed: {}", net::reqwest_error(&error)))?;
         let status = response.status();
         let headers = response.headers().clone();
         let body_text = response

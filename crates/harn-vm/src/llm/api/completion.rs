@@ -119,8 +119,9 @@ async fn vm_call_completion_openai_style(
 
     let response = req.send().await.map_err(|e| {
         VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-            "{} completion API error: {e}",
-            opts.provider
+            "{} completion API error: {}",
+            opts.provider,
+            crate::egress::redact_reqwest_error(&e)
         ))))
     })?;
 
@@ -226,8 +227,9 @@ async fn vm_call_completion_ollama(
 
     let response = req.send().await.map_err(|e| {
         VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-            "{} completion API error: {e}",
-            opts.provider
+            "{} completion API error: {}",
+            opts.provider,
+            crate::egress::redact_reqwest_error(&e)
         ))))
     })?;
     let json = completion_json_response(&opts.provider, response).await?;

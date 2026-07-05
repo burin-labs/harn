@@ -117,8 +117,9 @@ fn oauth_http_client() -> reqwest::Client {
     reqwest::Client::builder()
         .connect_timeout(OAUTH_HTTP_CONNECT_TIMEOUT)
         .timeout(oauth_http_timeout())
+        .redirect(crate::egress::redirect_policy("mcp_oauth_redirect", 10))
         .build()
-        .unwrap_or_else(|_| reqwest::Client::new())
+        .expect("MCP OAuth HTTP client configuration should be valid")
 }
 
 /// Per-MCP-server opt-in for exchanging the stored subject bearer for a
@@ -801,7 +802,12 @@ async fn dynamic_client_registration(
         .json(&body)
         .send()
         .await
-        .map_err(|error| format!("Dynamic client registration failed: {error}"))?;
+        .map_err(|error| {
+            format!(
+                "Dynamic client registration failed: {}",
+                crate::egress::redact_reqwest_error(&error)
+            )
+        })?;
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
@@ -908,10 +914,12 @@ async fn request_token(
         }
         _ => {}
     }
-    let response = request
-        .send()
-        .await
-        .map_err(|error| TokenRequestError::Other(format!("Token request failed: {error}")))?;
+    let response = request.send().await.map_err(|error| {
+        TokenRequestError::Other(format!(
+            "Token request failed: {}",
+            crate::egress::redact_reqwest_error(&error)
+        ))
+    })?;
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
@@ -1017,10 +1025,12 @@ async fn send_token_exchange_request(
             ))
         }
     }
-    request
-        .send()
-        .await
-        .map_err(|error| format!("Token exchange request failed: {error}"))
+    request.send().await.map_err(|error| {
+        format!(
+            "Token exchange request failed: {}",
+            crate::egress::redact_reqwest_error(&error)
+        )
+    })
 }
 
 fn token_exchange_form(

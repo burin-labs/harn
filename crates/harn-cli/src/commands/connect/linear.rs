@@ -4,6 +4,7 @@ use std::path::Path;
 use serde_json::{json, Value as JsonValue};
 
 use crate::cli::ConnectLinearArgs;
+use crate::net;
 use crate::package;
 use harn_vm::secrets::SecretProvider;
 
@@ -70,7 +71,8 @@ pub(super) async fn run_connect_linear(args: &ConnectLinearArgs) -> Result<(), S
         })
     };
 
-    let response = reqwest::Client::new()
+    let client = net::http_client("cli.connect.linear", std::time::Duration::from_secs(30))?;
+    let response = client
         .post(
             args.api_base_url
                 .clone()
@@ -85,7 +87,12 @@ pub(super) async fn run_connect_linear(args: &ConnectLinearArgs) -> Result<(), S
         }))
         .send()
         .await
-        .map_err(|error| format!("failed to call Linear GraphQL API: {error}"))?;
+        .map_err(|error| {
+            format!(
+                "failed to call Linear GraphQL API: {}",
+                net::reqwest_error(&error)
+            )
+        })?;
 
     let status = response.status();
     let payload = response

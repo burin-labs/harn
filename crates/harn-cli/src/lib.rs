@@ -10,6 +10,7 @@ pub mod dispatch;
 pub mod env_guard;
 pub mod format;
 pub mod json_envelope;
+mod net;
 pub mod package;
 mod provider_bootstrap;
 mod runtime;

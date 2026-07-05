@@ -76,10 +76,11 @@ pub(crate) fn shared_streaming_client() -> &'static reqwest::Client {
         client_builder_for_tests(
             reqwest::Client::builder()
                 .connect_timeout(std::time::Duration::from_secs(30))
+                .redirect(crate::egress::redirect_policy("llm_streaming_redirect", 10))
                 .pool_max_idle_per_host(4),
         )
         .build()
-        .unwrap_or_else(|_| reqwest::Client::new())
+        .expect("LLM streaming HTTP client configuration should be valid")
     })
 }
 
@@ -91,10 +92,11 @@ pub(crate) fn shared_blocking_client() -> &'static reqwest::Client {
             reqwest::Client::builder()
                 .connect_timeout(std::time::Duration::from_secs(30))
                 .timeout(std::time::Duration::from_mins(2))
+                .redirect(crate::egress::redirect_policy("llm_blocking_redirect", 10))
                 .pool_max_idle_per_host(4),
         )
         .build()
-        .unwrap_or_else(|_| reqwest::Client::new())
+        .expect("LLM blocking HTTP client configuration should be valid")
     })
 }
 
@@ -107,10 +109,11 @@ pub(crate) fn shared_utility_client() -> &'static reqwest::Client {
             reqwest::Client::builder()
                 .connect_timeout(std::time::Duration::from_secs(10))
                 .timeout(std::time::Duration::from_secs(15))
+                .redirect(crate::egress::redirect_policy("llm_utility_redirect", 10))
                 .pool_max_idle_per_host(2),
         )
         .build()
-        .unwrap_or_else(|_| reqwest::Client::new())
+        .expect("LLM utility HTTP client configuration should be valid")
     })
 }
 

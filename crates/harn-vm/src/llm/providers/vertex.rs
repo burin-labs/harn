@@ -159,7 +159,12 @@ impl VertexProvider {
             .json(&body)
             .send()
             .await
-            .map_err(|error| vm_err(format!("vertex API error: {error}")))?;
+            .map_err(|error| {
+                vm_err(format!(
+                    "vertex API error: {}",
+                    crate::egress::redact_reqwest_error(&error)
+                ))
+            })?;
         if !response.status().is_success() {
             let status = response.status();
             let retry_after = crate::llm::api::retry_after_header(response.headers());
@@ -307,7 +312,12 @@ async fn exchange_service_account_token(path: &str) -> Result<String, VmError> {
         ])
         .send()
         .await
-        .map_err(|error| vm_err(format!("service account token exchange failed: {error}")))?;
+        .map_err(|error| {
+            vm_err(format!(
+                "service account token exchange failed: {}",
+                crate::egress::redact_reqwest_error(&error)
+            ))
+        })?;
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();

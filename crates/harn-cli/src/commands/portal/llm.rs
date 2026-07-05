@@ -1,5 +1,7 @@
 use harn_vm::llm_config;
 
+use crate::net;
+
 use super::dto::{PortalLlmOptions, PortalLlmProviderOption};
 
 pub(super) async fn build_llm_options() -> PortalLlmOptions {
@@ -145,24 +147,33 @@ async fn discover_provider_models(
     base_url: &str,
     def: &llm_config::ProviderDef,
 ) -> Result<Vec<String>, String> {
-    let client = reqwest::Client::builder()
+    let client = net::http_client_builder("cli.portal.llm")
         .connect_timeout(std::time::Duration::from_secs(2))
         .timeout(std::time::Duration::from_secs(3))
         .build()
-        .map_err(|error| format!("failed to build model discovery client: {error}"))?;
+        .map_err(|error| {
+            format!(
+                "failed to build model discovery client: {}",
+                net::reqwest_error(&error)
+            )
+        })?;
 
     let response = if provider == "ollama" || def.chat_endpoint.contains("/api/chat") {
         client
             .get(format!("{base_url}/api/tags"))
             .send()
             .await
-            .map_err(|error| format!("failed to reach {provider}: {error}"))?
+            .map_err(|error| {
+                format!("failed to reach {provider}: {}", net::reqwest_error(&error))
+            })?
     } else {
         client
             .get(format!("{base_url}/v1/models"))
             .send()
             .await
-            .map_err(|error| format!("failed to reach {provider}: {error}"))?
+            .map_err(|error| {
+                format!("failed to reach {provider}: {}", net::reqwest_error(&error))
+            })?
     };
     if !response.status().is_success() {
         return Ok(Vec::new());

@@ -579,15 +579,7 @@ fn secret_fingerprint(secret: &str) -> String {
 pub(super) fn build_http_client(config: &HttpRequestConfig) -> Result<reqwest::Client, VmError> {
     let redirect_policy = if config.follow_redirects {
         let max_redirects = config.max_redirects;
-        reqwest::redirect::Policy::custom(move |attempt| {
-            if attempt.previous().len() >= max_redirects {
-                attempt.error("too many redirects")
-            } else if crate::egress::redirect_url_allowed("http_redirect", attempt.url().as_str()) {
-                attempt.follow()
-            } else {
-                attempt.error("egress policy blocked redirect target")
-            }
-        })
+        crate::egress::redirect_policy("http_redirect", max_redirects)
     } else {
         reqwest::redirect::Policy::none()
     };
@@ -999,11 +991,12 @@ async fn read_response_text_limited(
     }
 
     let mut body = Vec::new();
-    while let Some(chunk) = response
-        .chunk()
-        .await
-        .map_err(|e| vm_error(format!("http: failed to read response body: {e}")))?
-    {
+    while let Some(chunk) = response.chunk().await.map_err(|error| {
+        vm_error(format!(
+            "http: failed to read response body: {}",
+            crate::egress::redact_reqwest_error(&error)
+        ))
+    })? {
         let next_len = body
             .len()
             .checked_add(chunk.len())
@@ -1159,7 +1152,10 @@ async fn vm_execute_http_request_with_client(
                         .await;
                     continue;
                 }
-                return Err(vm_error(format!("http: request failed: {e}")));
+                return Err(vm_error(format!(
+                    "http: request failed: {}",
+                    crate::egress::redact_reqwest_error(&e)
+                )));
             }
         }
     }
@@ -1300,7 +1296,10 @@ pub(super) async fn vm_http_download(
                         .await;
                     continue;
                 }
-                return Err(vm_error(format!("http_download: request failed: {error}")));
+                return Err(vm_error(format!(
+                    "http_download: request failed: {}",
+                    crate::egress::redact_reqwest_error(&error)
+                )));
             }
         }
     }
@@ -1327,7 +1326,8 @@ async fn write_http_download_response(
     let write_result = async {
         while let Some(chunk) = response.chunk().await.map_err(|error| {
             vm_error(format!(
-                "http_download: failed to read response body: {error}"
+                "http_download: failed to read response body: {}",
+                crate::egress::redact_reqwest_error(&error)
             ))
         })? {
             let next_len = (bytes_written as usize)
@@ -1488,10 +1488,12 @@ pub(super) async fn vm_http_stream_open(
     } else if let Some(body) = parts.body {
         request = request.body(body);
     }
-    let response = request
-        .send()
-        .await
-        .map_err(|error| vm_error(format!("http_stream_open: request failed: {error}")))?;
+    let response = request.send().await.map_err(|error| {
+        vm_error(format!(
+            "http_stream_open: request failed: {}",
+            crate::egress::redact_reqwest_error(&error)
+        ))
+    })?;
     verify_tls_pin(&response, &config.tls.pinned_sha256)?;
     let status = response.status().as_u16() as i64;
     let headers = response_headers(response.headers());
@@ -1541,7 +1543,8 @@ pub(super) async fn vm_http_stream_read(
                 let mut response = response.lock().await;
                 if let Some(chunk) = response.chunk().await.map_err(|error| {
                     vm_error(format!(
-                        "http_stream_read: failed to read response body: {error}"
+                        "http_stream_read: failed to read response body: {}",
+                        crate::egress::redact_reqwest_error(&error)
                     ))
                 })? {
                     pending.extend(chunk);

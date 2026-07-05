@@ -41,9 +41,19 @@ pub(super) async fn deliver_push_config(
     request
         .send()
         .await
-        .map_err(|error| PushDeliveryError::Http(format!("send push notification: {error}")))?
+        .map_err(|error| {
+            PushDeliveryError::Http(format!(
+                "send push notification: {}",
+                harn_vm::egress::redact_reqwest_error(&error)
+            ))
+        })?
         .error_for_status()
-        .map_err(|error| PushDeliveryError::Http(format!("push notification rejected: {error}")))?;
+        .map_err(|error| {
+            PushDeliveryError::Http(format!(
+                "push notification rejected: {}",
+                harn_vm::egress::redact_reqwest_error(&error)
+            ))
+        })?;
     Ok(())
 }
 
@@ -53,18 +63,10 @@ pub(super) async fn push_http_client(
     let mut builder = reqwest::Client::builder()
         .user_agent("harn-a2a-push")
         .timeout(StdDuration::from_secs(20))
-        .redirect(reqwest::redirect::Policy::custom(|attempt| {
-            if attempt.previous().len() >= 5 {
-                attempt.error("too many redirects")
-            } else if harn_vm::egress::redirect_url_allowed(
-                "a2a_push_delivery_redirect",
-                attempt.url().as_str(),
-            ) {
-                attempt.follow()
-            } else {
-                attempt.error("egress policy blocked redirect target")
-            }
-        }));
+        .redirect(harn_vm::egress::redirect_policy(
+            "a2a_push_delivery_redirect",
+            5,
+        ));
 
     if let Some(auth) = auth {
         if let Some(ca_path) = string_field(auth, &["ca_cert", "caCert", "ca_bundle", "caBundle"]) {
@@ -214,10 +216,18 @@ pub(super) async fn fetch_oauth2_access_token(
     let response = request
         .send()
         .await
-        .map_err(|error| PushDeliveryError::Http(format!("fetch OAuth2 token: {error}")))?
+        .map_err(|error| {
+            PushDeliveryError::Http(format!(
+                "fetch OAuth2 token: {}",
+                harn_vm::egress::redact_reqwest_error(&error)
+            ))
+        })?
         .error_for_status()
         .map_err(|error| {
-            PushDeliveryError::Http(format!("OAuth2 token endpoint rejected request: {error}"))
+            PushDeliveryError::Http(format!(
+                "OAuth2 token endpoint rejected request: {}",
+                harn_vm::egress::redact_reqwest_error(&error)
+            ))
         })?
         .json::<JsonValue>()
         .await
@@ -332,10 +342,18 @@ pub(super) async fn fetch_oauth2_token_response(
     request
         .send()
         .await
-        .map_err(|error| PushDeliveryError::Http(format!("fetch OIDC token: {error}")))?
+        .map_err(|error| {
+            PushDeliveryError::Http(format!(
+                "fetch OIDC token: {}",
+                harn_vm::egress::redact_reqwest_error(&error)
+            ))
+        })?
         .error_for_status()
         .map_err(|error| {
-            PushDeliveryError::Http(format!("OIDC token endpoint rejected request: {error}"))
+            PushDeliveryError::Http(format!(
+                "OIDC token endpoint rejected request: {}",
+                harn_vm::egress::redact_reqwest_error(&error)
+            ))
         })?
         .json::<JsonValue>()
         .await
@@ -399,10 +417,18 @@ pub(super) async fn oidc_metadata(
         .get(&discovery_url)
         .send()
         .await
-        .map_err(|error| PushDeliveryError::Http(format!("fetch OIDC metadata: {error}")))?
+        .map_err(|error| {
+            PushDeliveryError::Http(format!(
+                "fetch OIDC metadata: {}",
+                harn_vm::egress::redact_reqwest_error(&error)
+            ))
+        })?
         .error_for_status()
         .map_err(|error| {
-            PushDeliveryError::Http(format!("OIDC metadata endpoint rejected request: {error}"))
+            PushDeliveryError::Http(format!(
+                "OIDC metadata endpoint rejected request: {}",
+                harn_vm::egress::redact_reqwest_error(&error)
+            ))
         })?
         .json::<JsonValue>()
         .await

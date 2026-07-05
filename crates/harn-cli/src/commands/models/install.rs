@@ -3,7 +3,7 @@ use std::process::Stdio;
 
 use tokio::io::{AsyncBufReadExt, BufReader};
 
-use crate::cli::ModelsInstallArgs;
+use crate::{cli::ModelsInstallArgs, net};
 
 pub(crate) async fn run(args: ModelsInstallArgs) {
     let resolved = harn_vm::llm_config::resolve_model_info(&args.model);
@@ -205,10 +205,11 @@ async fn estimate_size_gb(model: &str) -> Option<u64> {
     // Best-effort `/api/show` query against the local Ollama daemon.
     let url = std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string());
     let body = serde_json::json!({"name": model});
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(2))
-        .build()
-        .ok()?;
+    let client = net::http_client(
+        "cli.models.install.ollama",
+        std::time::Duration::from_secs(2),
+    )
+    .ok()?;
     let resp = client
         .post(format!("{url}/api/show"))
         .json(&body)

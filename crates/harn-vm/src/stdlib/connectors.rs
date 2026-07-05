@@ -188,7 +188,7 @@ async fn connector_shared_verify_jwt_inline_impl(
         ))))
     })?;
     let verify_options = jwt_verify_options(&options)?;
-    let http = reqwest::Client::new();
+    let http = crate::connectors::outbound_http_client("harn-connector-jwt-inline");
     let result = crate::connectors::shared::verify_jwt_json(
         &http,
         &token,

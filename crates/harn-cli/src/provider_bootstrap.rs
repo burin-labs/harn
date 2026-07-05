@@ -6,6 +6,8 @@ use std::time::Duration;
 
 use harn_parser::{BindingPattern, Node, SNode};
 
+use crate::net;
+
 const OLLAMA_TAGS_URL: &str = "http://127.0.0.1:11434/api/tags";
 const PROVIDER_BACKED_LLM_BUILTINS: &[&str] = &[
     "agent_loop",
@@ -133,9 +135,7 @@ fn default_providers_path() -> Option<PathBuf> {
 }
 
 async fn ollama_tags_ready(url: &str) -> bool {
-    let client = match reqwest::Client::builder()
-        .timeout(Duration::from_millis(750))
-        .build()
+    let client = match net::http_client("cli.provider_bootstrap.ollama", Duration::from_millis(750))
     {
         Ok(client) => client,
         Err(_) => return false,

@@ -526,13 +526,13 @@ async fn fetch_agent_card(
             match response {
                 Ok(response) => Ok(response),
                 Err(error) if error.is_timeout() => Err(AgentCardFetchError::Timeout(
-                    format!("A2A HTTP request timed out: {error}")
+                    format!("A2A HTTP request timed out: {}", crate::egress::redact_reqwest_error(&error))
                 )),
                 Err(error) if is_connect_refused(&error) => Err(AgentCardFetchError::ConnectRefused(
-                    format!("A2A HTTP request failed: {error}")
+                    format!("A2A HTTP request failed: {}", crate::egress::redact_reqwest_error(&error))
                 )),
                 Err(error) => Err(AgentCardFetchError::Discovery(
-                    format!("A2A HTTP request failed: {error}")
+                    format!("A2A HTTP request failed: {}", crate::egress::redact_reqwest_error(&error))
                 )),
             }
         }
@@ -550,15 +550,18 @@ async fn fetch_agent_card(
         )));
     }
     if !response.status().is_success() {
+        let card_url = crate::egress::redact_diagnostic_text(card_url);
         return Err(AgentCardFetchError::Discovery(format!(
             "GET {card_url} returned HTTP {}",
             response.status()
         )));
     }
-    response
-        .json::<Value>()
-        .await
-        .map_err(|error| AgentCardFetchError::Discovery(format!("parse {card_url}: {error}")))
+    response.json::<Value>().await.map_err(|error| {
+        AgentCardFetchError::Discovery(format!(
+            "parse {}: {error}",
+            crate::egress::redact_diagnostic_text(card_url)
+        ))
+    })
 }
 
 fn endpoint_from_card(
@@ -730,7 +733,10 @@ fn resolve_declared_url(
     label: &str,
 ) -> Result<Url, A2aClientError> {
     let url = Url::parse(raw_url).map_err(|error| {
-        A2aClientError::Discovery(format!("invalid A2A {label} '{raw_url}': {error}"))
+        A2aClientError::Discovery(format!(
+            "invalid A2A {label} '{}': {error}",
+            crate::egress::redact_diagnostic_text(raw_url)
+        ))
     })?;
     ensure_cleartext_allowed(&url, allow_cleartext, label)?;
     let declared_authority = url_authority(&url)?;
@@ -932,9 +938,15 @@ async fn send_http(
     tokio::select! {
         response = request.send() => response.map_err(|error| {
             if error.is_timeout() {
-                A2aClientError::Timeout(format!("A2A HTTP request timed out: {error}"))
+                A2aClientError::Timeout(format!(
+                    "A2A HTTP request timed out: {}",
+                    crate::egress::redact_reqwest_error(&error)
+                ))
             } else {
-                A2aClientError::Protocol(format!("A2A HTTP request failed: {error}"))
+                A2aClientError::Protocol(format!(
+                    "A2A HTTP request failed: {}",
+                    crate::egress::redact_reqwest_error(&error)
+                ))
             }
         }),
         _ = recv_cancel(cancel_rx) => Err(A2aClientError::Cancelled(cancelled_message.to_string())),

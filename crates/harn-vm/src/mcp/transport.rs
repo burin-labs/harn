@@ -421,10 +421,12 @@ pub(crate) async fn send_http_request(
             continue;
         }
 
-        let body = response
-            .text()
-            .await
-            .map_err(|e| VmError::Runtime(format!("MCP HTTP read error: {e}")))?;
+        let body = response.text().await.map_err(|e| {
+            VmError::Runtime(format!(
+                "MCP HTTP read error: {}",
+                crate::egress::redact_reqwest_error(&e)
+            ))
+        })?;
 
         if body.trim().is_empty() {
             if should_fallback_to_legacy_http_discovery(inner.protocol_mode, method, status) {
@@ -565,11 +567,12 @@ pub(crate) async fn send_http_request_once(
         &inner.tool_headers,
     );
 
-    request
-        .timeout(MCP_TIMEOUT)
-        .send()
-        .await
-        .map_err(|e| VmError::Runtime(format!("MCP HTTP request error: {e}")))
+    request.timeout(MCP_TIMEOUT).send().await.map_err(|e| {
+        VmError::Runtime(format!(
+            "MCP HTTP request error: {}",
+            crate::egress::redact_reqwest_error(&e)
+        ))
+    })
 }
 
 async fn resolve_http_request_auth_token(
@@ -688,7 +691,10 @@ pub(crate) async fn run_http_get_stream(config: HttpStreamConfig) {
                 }
             }
             Err(error) => {
-                tracing::debug!("MCP HTTP GET stream ended with error: {error}");
+                tracing::debug!(
+                    "MCP HTTP GET stream ended with error: {}",
+                    crate::egress::redact_diagnostic_text(&error.to_string())
+                );
                 break;
             }
         }
@@ -718,10 +724,12 @@ pub(crate) async fn post_http_jsonrpc_payload(
         None,
         &BTreeMap::new(),
     );
-    let response = request
-        .send()
-        .await
-        .map_err(|e| VmError::Runtime(format!("MCP HTTP response POST error: {e}")))?;
+    let response = request.send().await.map_err(|e| {
+        VmError::Runtime(format!(
+            "MCP HTTP response POST error: {}",
+            crate::egress::redact_reqwest_error(&e)
+        ))
+    })?;
     if response.status().is_success() {
         Ok(())
     } else {
@@ -853,10 +861,12 @@ pub(crate) async fn reinitialize_http_client(
         }
     }
     let status = initialize.status().as_u16();
-    let body = initialize
-        .text()
-        .await
-        .map_err(|e| VmError::Runtime(format!("MCP HTTP read error: {e}")))?;
+    let body = initialize.text().await.map_err(|e| {
+        VmError::Runtime(format!(
+            "MCP HTTP read error: {}",
+            crate::egress::redact_reqwest_error(&e)
+        ))
+    })?;
     let msg = parse_http_response_body(inner, "", &body, status, Some(0)).await?;
     if status >= 400 {
         return Err(jsonrpc_error_to_vm_error(msg.get("error").unwrap_or(&msg)));
@@ -886,10 +896,12 @@ pub(crate) async fn reinitialize_http_client(
             inner.session_id = Some(session_id.to_string());
         }
     }
-    let body = response
-        .text()
-        .await
-        .map_err(|e| VmError::Runtime(format!("MCP HTTP read error: {e}")))?;
+    let body = response.text().await.map_err(|e| {
+        VmError::Runtime(format!(
+            "MCP HTTP read error: {}",
+            crate::egress::redact_reqwest_error(&e)
+        ))
+    })?;
     if body.trim().is_empty() || status < 400 {
         return Ok(());
     }

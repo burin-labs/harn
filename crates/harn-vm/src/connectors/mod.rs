@@ -70,18 +70,7 @@ pub(crate) fn outbound_http_client(user_agent: &'static str) -> reqwest::Client 
     reqwest::Client::builder()
         .user_agent(user_agent)
         .timeout(OUTBOUND_CONNECTOR_HTTP_TIMEOUT)
-        .redirect(reqwest::redirect::Policy::custom(|attempt| {
-            if attempt.previous().len() >= 10 {
-                attempt.error("too many redirects")
-            } else if crate::egress::redirect_url_allowed(
-                "connector_redirect",
-                attempt.url().as_str(),
-            ) {
-                attempt.follow()
-            } else {
-                attempt.error("egress policy blocked redirect target")
-            }
-        }))
+        .redirect(crate::egress::redirect_policy("connector_redirect", 10))
         .build()
         .expect("connector HTTP client configuration should be valid")
 }

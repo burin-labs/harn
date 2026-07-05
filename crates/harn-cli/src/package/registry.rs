@@ -1,5 +1,6 @@
 use super::errors::PackageError;
 use super::*;
+use crate::net;
 use semver::{Version, VersionReq};
 
 const PRESERVED_GIT_ENV: &[&str] = &[
@@ -694,19 +695,26 @@ pub(crate) fn read_registry_source(source: &str) -> Result<String, PackageError>
 }
 
 fn fetch_registry_blocking(url: Url, source: &str) -> Result<String, PackageError> {
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(20))
-        .build()
-        .map_err(|error| format!("failed to build package registry client: {error}"))?;
+    let display_source = net::diagnostic_text(source);
+    let client = net::blocking_http_client("cli.package.registry", Duration::from_secs(20))
+        .map_err(PackageError::Registry)?;
     let response = apply_package_registry_auth(client.get(url))
         .send()
-        .map_err(|error| format!("failed to fetch package registry {source}: {error}"))?;
+        .map_err(|error| {
+            format!(
+                "failed to fetch package registry {display_source}: {}",
+                net::reqwest_error(&error)
+            )
+        })?;
     let status = response.status();
     if !status.is_success() {
-        return Err(format!("GET {source} returned HTTP {status}").into());
+        return Err(format!("GET {display_source} returned HTTP {status}").into());
     }
     response.text().map_err(|error| {
-        PackageError::Registry(format!("failed to read package registry response: {error}"))
+        PackageError::Registry(format!(
+            "failed to read package registry response: {}",
+            net::reqwest_error(&error)
+        ))
     })
 }
 
@@ -750,32 +758,39 @@ pub(crate) fn read_package_archive_bytes(source: &str) -> Result<Vec<u8>, Packag
 }
 
 fn fetch_package_archive_blocking(url: Url, source: &str) -> Result<Vec<u8>, PackageError> {
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(30))
-        .build()
-        .map_err(|error| format!("failed to build package archive client: {error}"))?;
+    let display_source = net::diagnostic_text(source);
+    let client = net::blocking_http_client("cli.package.archive", Duration::from_secs(30))
+        .map_err(PackageError::Registry)?;
     let response = apply_package_registry_auth(client.get(url))
         .send()
-        .map_err(|error| format!("failed to fetch package archive {source}: {error}"))?;
+        .map_err(|error| {
+            format!(
+                "failed to fetch package archive {display_source}: {}",
+                net::reqwest_error(&error)
+            )
+        })?;
     let status = response.status();
     if !status.is_success() {
-        return Err(format!("GET {source} returned HTTP {status}").into());
+        return Err(format!("GET {display_source} returned HTTP {status}").into());
     }
     if response
         .content_length()
         .is_some_and(|length| length > PACKAGE_ARCHIVE_MAX_BYTES)
     {
         return Err(format!(
-            "package archive {source} is larger than the {PACKAGE_ARCHIVE_MAX_BYTES} byte limit"
+            "package archive {display_source} is larger than the {PACKAGE_ARCHIVE_MAX_BYTES} byte limit"
         )
         .into());
     }
-    let bytes = response
-        .bytes()
-        .map_err(|error| format!("failed to read package archive response: {error}"))?;
+    let bytes = response.bytes().map_err(|error| {
+        format!(
+            "failed to read package archive response: {}",
+            net::reqwest_error(&error)
+        )
+    })?;
     if bytes.len() as u64 > PACKAGE_ARCHIVE_MAX_BYTES {
         return Err(format!(
-            "package archive {source} is larger than the {PACKAGE_ARCHIVE_MAX_BYTES} byte limit"
+            "package archive {display_source} is larger than the {PACKAGE_ARCHIVE_MAX_BYTES} byte limit"
         )
         .into());
     }

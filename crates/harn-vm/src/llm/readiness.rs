@@ -125,14 +125,16 @@ pub async fn probe_provider_readiness_with_options(
         .filter(|value| !value.trim().is_empty())
         .map(|value| value.trim().to_string())
         .unwrap_or_else(|| llm_config::resolve_base_url(&def));
+    let diagnostic_base_url = crate::egress::redact_diagnostic_text(&base_url);
     let url = match models_url(&def, &base_url) {
         Ok(url) => url,
         Err(message) => {
+            let message = crate::egress::redact_diagnostic_text(&message);
             return ProviderReadiness::fail(
                 provider,
                 ReadinessStatus::InvalidUrl,
                 message,
-                Some(base_url),
+                Some(diagnostic_base_url),
                 None,
                 options.requested_model.map(ToOwned::to_owned),
                 options.requested_model.map(ToOwned::to_owned),
@@ -140,6 +142,7 @@ pub async fn probe_provider_readiness_with_options(
             );
         }
     };
+    let diagnostic_url = crate::egress::redact_diagnostic_text(&url);
 
     let (raw_model, resolved_model) = options
         .requested_model
@@ -175,12 +178,13 @@ pub async fn probe_provider_readiness_with_options(
     let response = match request.send().await {
         Ok(response) => response,
         Err(error) => {
+            let error = crate::egress::redact_reqwest_error(&error);
             return ProviderReadiness::fail(
                 provider,
                 ReadinessStatus::Unreachable,
-                format!("{provider} server is not reachable at {base_url}: {error}"),
-                Some(base_url),
-                Some(url),
+                format!("{provider} server is not reachable at {diagnostic_base_url}: {error}"),
+                Some(diagnostic_base_url),
+                Some(diagnostic_url),
                 resolved_model,
                 raw_model,
                 None,
@@ -193,9 +197,9 @@ pub async fn probe_provider_readiness_with_options(
         return ProviderReadiness::fail(
             provider,
             ReadinessStatus::BadStatus,
-            format!("{provider} returned HTTP {http_status} at {url}"),
-            Some(base_url),
-            Some(url),
+            format!("{provider} returned HTTP {http_status} at {diagnostic_url}"),
+            Some(diagnostic_base_url),
+            Some(diagnostic_url),
             resolved_model,
             raw_model,
             Some(http_status),
@@ -205,12 +209,13 @@ pub async fn probe_provider_readiness_with_options(
     let body = match response.text().await {
         Ok(body) => body,
         Err(error) => {
+            let error = crate::egress::redact_reqwest_error(&error);
             return ProviderReadiness::fail(
                 provider,
                 ReadinessStatus::BadResponse,
                 format!("{provider} returned an unreadable /models response: {error}"),
-                Some(base_url),
-                Some(url),
+                Some(diagnostic_base_url),
+                Some(diagnostic_url),
                 resolved_model,
                 raw_model,
                 Some(http_status),
@@ -224,8 +229,8 @@ pub async fn probe_provider_readiness_with_options(
                 provider,
                 ReadinessStatus::BadResponse,
                 format!("{provider} /models response did not include any model ids"),
-                Some(base_url),
-                Some(url),
+                Some(diagnostic_base_url),
+                Some(diagnostic_url),
                 resolved_model,
                 raw_model,
                 Some(http_status),
@@ -236,8 +241,8 @@ pub async fn probe_provider_readiness_with_options(
                 provider,
                 ReadinessStatus::BadResponse,
                 format!("{provider} returned an unparsable /models response: {error}"),
-                Some(base_url),
-                Some(url),
+                Some(diagnostic_base_url),
+                Some(diagnostic_url),
                 resolved_model,
                 raw_model,
                 Some(http_status),
@@ -260,11 +265,11 @@ pub async fn probe_provider_readiness_with_options(
                 ok: false,
                 status: ReadinessStatus::ModelMissing,
                 message: format!(
-                    "{model_label} is not served by {provider} at {base_url}. Currently served: {}",
+                    "{model_label} is not served by {provider} at {diagnostic_base_url}. Currently served: {}",
                     served_models.join(", ")
                 ),
-                base_url: Some(base_url),
-                url: Some(url),
+                base_url: Some(diagnostic_base_url),
+                url: Some(diagnostic_url),
                 model: resolved_model,
                 requested_model: raw_model,
                 served_models,
@@ -275,11 +280,13 @@ pub async fn probe_provider_readiness_with_options(
 
     let message = match (resolved_model.as_deref(), readiness_model.as_deref()) {
         (Some(model), Some(wire_model)) if model != wire_model => format!(
-            "{provider} is ready at {base_url}; model '{model}' is served as '{wire_model}'"
+            "{provider} is ready at {diagnostic_base_url}; model '{model}' is served as '{wire_model}'"
         ),
-        (Some(model), _) => format!("{provider} is ready at {base_url}; model '{model}' is served"),
+        (Some(model), _) => {
+            format!("{provider} is ready at {diagnostic_base_url}; model '{model}' is served")
+        }
         (None, _) => format!(
-            "{provider} is reachable at {base_url}; served models: {}",
+            "{provider} is reachable at {diagnostic_base_url}; served models: {}",
             served_models.join(", ")
         ),
     };
@@ -289,8 +296,8 @@ pub async fn probe_provider_readiness_with_options(
         ok: true,
         status: ReadinessStatus::Ok,
         message,
-        base_url: Some(base_url),
-        url: Some(url),
+        base_url: Some(diagnostic_base_url),
+        url: Some(diagnostic_url),
         model: resolved_model,
         requested_model: raw_model,
         served_models,

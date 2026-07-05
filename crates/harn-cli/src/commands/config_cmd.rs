@@ -3,7 +3,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use crate::cli::{ConfigArgs, ConfigCommand, ConfigInspectArgs, ConfigValidateArgs};
+use crate::{
+    cli::{ConfigArgs, ConfigCommand, ConfigInspectArgs, ConfigValidateArgs},
+    net,
+};
 
 const PROJECT_CONFIG: &str = "harn.config.toml";
 const MANIFEST: &str = "harn.toml";
@@ -331,17 +334,24 @@ fn remote_defaults_url(args: &ConfigInspectArgs, include_env: bool) -> Option<St
 async fn fetch_remote_defaults(url: &str) -> Result<harn_vm::config::ConfigLayer, String> {
     ensure_remote_trusted(url)?;
     let display_url = redacted_url(url);
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(15))
-        .build()
-        .map_err(|error| format!("failed to create config HTTP client: {error}"))?;
+    let client = net::http_client("cli.config.remote_defaults", Duration::from_secs(15))?;
     let response = client
         .get(url)
         .send()
         .await
-        .map_err(|error| format!("failed to fetch remote defaults {display_url}: {error}"))?
+        .map_err(|error| {
+            format!(
+                "failed to fetch remote defaults {display_url}: {}",
+                net::reqwest_error(&error)
+            )
+        })?
         .error_for_status()
-        .map_err(|error| format!("failed to fetch remote defaults {display_url}: {error}"))?;
+        .map_err(|error| {
+            format!(
+                "failed to fetch remote defaults {display_url}: {}",
+                net::reqwest_error(&error)
+            )
+        })?;
     let text = response
         .text()
         .await

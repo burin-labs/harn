@@ -9,7 +9,10 @@ use std::path::PathBuf;
 
 use harn_guard::{catalog, GuardStore};
 
-use crate::cli::{GuardInstallArgs, GuardListArgs, GuardRemoveArgs, GuardStatusArgs};
+use crate::{
+    cli::{GuardInstallArgs, GuardListArgs, GuardRemoveArgs, GuardStatusArgs},
+    net,
+};
 
 fn store() -> GuardStore {
     let home = harn_vm::user_dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
@@ -35,7 +38,7 @@ async fn fetch_file(
     let response = request
         .send()
         .await
-        .map_err(|error| format!("download failed for {dest}: {error}"))?;
+        .map_err(|error| format!("download failed for {dest}: {}", net::reqwest_error(&error)))?;
     if !response.status().is_success() {
         return Err(format!(
             "download failed for {dest} (HTTP {})",
@@ -182,7 +185,8 @@ pub(crate) async fn run_install(args: &GuardInstallArgs) {
         );
     }
 
-    let client = reqwest::Client::new();
+    let client = net::http_client("cli.guard.download", std::time::Duration::from_mins(1))
+        .unwrap_or_else(|error| crate::command_error(&error));
     let mut payload: Vec<(String, Vec<u8>)> = Vec::with_capacity(model.files.len());
     for file in model.files {
         println!("  fetching {}", file.dest);
