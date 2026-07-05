@@ -12,6 +12,7 @@ import {
   agent_stall_initial_state,
   agent_stall_no_net_progress,
   agent_stall_observe_tool_calls,
+  agent_stall_repair_config,
 } from "std/agent/stall"
 
 const CONFIG = {enabled: true, no_progress_messages: 3}
@@ -320,6 +321,47 @@ pipeline test_fold_productive_edit_resets_streak(task) {
   assert(of.warning == nil)
   // The verification result satisfied the owed re-verify.
   assert(!of.state.reverify_owed)
+}
+
+pipeline test_repair_diagnostics_nested_config_lowers_to_stall_fields(task) {
+  let parsed = agent_stall_repair_config(
+    {
+      enabled: true,
+      repair_diagnostics: {
+        repair_aware: true,
+        stuck_same_diagnostic_after: 4,
+        post_edit_reverify: true,
+        no_net_progress_extend_guard: true,
+        no_net_progress_extend_after: 5,
+        no_net_progress_hard_cap_after: 12,
+        reserved_terminal_verify: true,
+        reserved_terminal_verify_iterations: 3,
+      },
+    },
+  )
+  assert(parsed.repair_aware)
+  assert_eq(parsed.stuck_same_diagnostic_after, 4)
+  assert(parsed.post_edit_reverify)
+  assert(parsed.no_net_progress_extend_guard)
+  assert_eq(parsed.no_net_progress_extend_after, 5)
+  assert_eq(parsed.no_net_progress_hard_cap_after, 12)
+  assert(parsed.reserved_terminal_verify)
+  assert_eq(parsed.reserved_terminal_verify_iterations, 3)
+}
+
+pipeline test_repair_diagnostics_flat_fields_override_nested(task) {
+  let parsed = agent_stall_repair_config(
+    {
+      enabled: true,
+      repair_aware: false,
+      post_edit_reverify: false,
+      reserved_terminal_verify: false,
+      repair_diagnostics: {repair_aware: true, post_edit_reverify: true, reserved_terminal_verify: true},
+    },
+  )
+  assert(!parsed.repair_aware)
+  assert(!parsed.post_edit_reverify)
+  assert(!parsed.reserved_terminal_verify)
 }
 
 pipeline test_fold_edit_retest_thrash_increments_streak(task) {

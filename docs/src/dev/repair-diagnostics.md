@@ -139,6 +139,13 @@ tool-using defaults preset (`presets.harn`), default-safe-off:
 - `no_net_progress_extend_guard` (bool, default `false`)
 - `no_net_progress_extend_after` (int, default `3`)
 - `no_net_progress_hard_cap_after` (int, default `16`)
+- `reserved_terminal_verify` (bool, default `false`)
+- `reserved_terminal_verify_iterations` (int, default `2`)
+
+Callers may pass these fields either flat on `stall_diagnostics` or nested under
+`stall_diagnostics.repair_diagnostics`. Flat fields win when both forms are
+present, which lets product hosts opt into one knob without replacing a shared
+repair-diagnostics block.
 
 When `no_net_progress_extend_guard` is enabled, Harn now uses two complementary
 signals. The same-diagnostic threshold catches flat stalls early and suppresses

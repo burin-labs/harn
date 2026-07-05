@@ -500,6 +500,8 @@ fn __tool_using_defaults(kind) {
       no_net_progress_extend_guard: false,
       no_net_progress_extend_after: 3,
       no_net_progress_hard_cap_after: 16,
+      reserved_terminal_verify: false,
+      reserved_terminal_verify_iterations: 2,
     },
   }
 }
