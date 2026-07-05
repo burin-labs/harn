@@ -114,6 +114,39 @@ pipeline default() {
   let bool_refused = host_call("process.exec", {mode: "argv", argv: ["cat", path_join(root, ".env")], cwd: root})
   assert(bool_refused?.status == "consent_denied", "bool-false consent blocks execution")
   command_policy_pop()
+  // ---- Catastrophic (never-approvable) command floor ----
+  // A catastrophic command is HARD-DENIED before the child spawns and is NEVER
+  // routed to the consent gate — even when a would-approve consent closure is
+  // configured AND `catastrophic` is listed in require_approval. This is the
+  // floor burin's twin command-safety checkers collapse onto.
+  let floor_asks = atomic(0)
+  let floor_policy = command_policy(
+    {
+      workspace_roots: [root],
+      require_approval: ["catastrophic", "credential_file_read"],
+      consent: { ctx ->
+        atomic_add(floor_asks, 1)
+        return {decision: "approved"}
+      },
+    },
+  )
+  command_policy_push(floor_policy)
+  // argv-mode catastrophe: `git reset --hard` is blocked even though a consent
+  // closure would approve it.
+  let reset_blocked = host_call("process.exec", {mode: "argv", argv: ["git", "reset", "--hard"], cwd: root})
+  assert(reset_blocked?.status == "blocked", "catastrophic git reset --hard is hard-denied")
+  assert(reset_blocked?.status != "consent_denied", "catastrophic is not a consent disposition")
+  assert(contains(reset_blocked?.stderr ?? "", "git reset --hard"), "catastrophic reason is surfaced")
+  // Redirection onto a source file is catastrophic and must not spawn.
+  let floor_marker = path_join(root, "floor_should_not_spawn.rs")
+  let redirect_blocked = host_call(
+    "process.exec",
+    {mode: "argv", argv: ["sh", "-c", "echo pwned > \"" + floor_marker + "\""], cwd: root},
+  )
+  assert(redirect_blocked?.status == "blocked", "redirect onto a source file is hard-denied")
+  assert(!harness.fs.exists(floor_marker), "catastrophic command must not spawn")
+  assert(atomic_get(floor_asks) == 0, "catastrophic floor never consults the consent gate")
+  command_policy_pop()
   var tools = tool_registry()
   tools = tool_define(
     tools,
