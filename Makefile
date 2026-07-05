@@ -327,6 +327,7 @@ test-agent-scripts:
 	@echo "    Harn agent-loop tests OK."
 
 test-pr-gate-scripts:
+	./scripts/tests/ci_docs_only_test.sh
 	./scripts/tests/ci_release_metadata_only_test.sh
 	./scripts/tests/changelog_fragment_check_test.sh
 	./scripts/tests/nextest_filters_from_paths_test.sh
