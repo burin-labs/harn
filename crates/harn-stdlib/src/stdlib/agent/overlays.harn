@@ -1,0 +1,199 @@
+// Overlays: a flag-free, data-driven prompt-nudge overlay generalizing
+// burin-code's `mode_overlay_lines` (`lib/runtime/agent-loop.harn`) —
+// mode-specific (and optionally lane-specific) guidance lines appended to
+// the outbound system prompt.
+//
+// Burin's real mechanism is a `match active_mode` returning a base line list
+// with independently-gated extra lines APPENDED after it — never replacing
+// or removing base content. This module reuses that same "append, never
+// override" shape but expresses it through the EXISTING per-turn
+// prompt-fragment channel `agent_loop` already folds into every outbound
+// request: `context_profile.prompt_fragments` (harn#2631,
+// `std/agent/preflight::agent_build_turn_system_fragments`). No new hook
+// surface.
+//
+// "Fill nil at a lower-priority seam, never override explicit input" here
+// means two things, both enforced below:
+//   1. An overlay ONLY ever ADDS a fragment alongside whatever the caller
+//      already set (`agent_options.system`, `system_prefix`, other
+//      `context_profile.prompt_fragments` entries, ...) — it never touches
+//      or replaces them.
+//   2. Within the overlay's own content, an explicit `options.overrides`
+//      entry for a `(mode, lane)` slot wins over that slot's row default —
+//      the row only fills the slot when the caller left it nil.
+/**
+ * A single overlay row: `lines` render for `mode` (and, when `lane` is set,
+ * only when the active lane also matches). `enabled: false` disables a row
+ * without removing it from the table (still data, not an `if`).
+ */
+pub type OverlayRow = {mode: string, lane?: string, lines: list<string>, enabled?: bool}
+
+/**
+ * default_overlay_rows() — a small starter table generalizing burin's
+ * per-mode nudge lines: a base `agent`-mode economy nudge, a narrower
+ * reminder for the `explicit_patch` lane (see `std/agent/lanes`), and a
+ * `plan`-mode nudge to produce a concrete plan before editing.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn default_overlay_rows() {
+  return [
+    {
+      lines: [
+        "Batch related read-only tool calls together before acting; avoid narrating between them.",
+        "Prefer acting on information the task and current tools already provide over asking a clarifying question.",
+      ],
+      mode: "agent",
+    },
+    {
+      lane: "explicit_patch",
+      lines: [
+        "This turn is scoped to a narrow patch lane: stay inside the named target files and avoid broad workspace exploration.",
+      ],
+      mode: "agent",
+    },
+    {lines: ["Produce a concrete, reviewable plan before making any edits."], mode: "plan"},
+  ]
+}
+
+fn __overlay_validate_rows(rows) {
+  if type_of(rows) != "list" || len(rows) == 0 {
+    throw "overlay_policy: rows must be a non-empty list of overlay rows"
+  }
+  for row in rows {
+    if type_of(row) != "dict" {
+      throw "overlay_policy: each overlay row must be a dict"
+    }
+    if to_string(row?.mode ?? "") == "" {
+      throw "overlay_policy: each overlay row needs a non-empty `mode`"
+    }
+    if type_of(row?.lines) != "list" {
+      throw "overlay_policy: overlay row for mode \"" + to_string(row.mode) + "\" needs a `lines` list"
+    }
+  }
+  return rows
+}
+
+fn __overlay_row_enabled(row) {
+  return row?.enabled ?? true
+}
+
+fn __overlay_row_key(mode, lane) {
+  let mode_text = to_string(mode ?? "")
+  let lane_text = to_string(lane ?? "")
+  if lane_text == "" {
+    return mode_text
+  }
+  return mode_text + ":" + lane_text
+}
+
+/**
+ * agent_overlay_match(rows, mode, lane?) — pick the most specific enabled
+ * row for `(mode, lane)`: a row whose `lane` equals the given `lane` wins
+ * over a `lane`-less row for the same `mode`; returns `nil` when nothing
+ * matches (silence is valid — an overlay never invents content).
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_overlay_match(rows, mode, lane = nil) {
+  let mode_text = to_string(mode ?? "")
+  let lane_text = to_string(lane ?? "")
+  var mode_only = nil
+  for row in rows {
+    if !__overlay_row_enabled(row) {
+      continue
+    }
+    if to_string(row?.mode ?? "") != mode_text {
+      continue
+    }
+    let row_lane = row?.lane
+    if row_lane != nil && lane_text != "" && to_string(row_lane) == lane_text {
+      return row
+    }
+    if row_lane == nil && mode_only == nil {
+      mode_only = row
+    }
+  }
+  return mode_only
+}
+
+/**
+ * overlay_context_fragment(rows, mode, lane?, overrides?) — render the
+ * matched overlay row (or an explicit `overrides` entry, keyed by
+ * `"<mode>"` or `"<mode>:<lane>"`) as a `context_profile` prompt fragment
+ * `{body, id, source}`, or `nil` when there is nothing to add. An
+ * `overrides` entry fills the SAME slot a row would fill and wins over it —
+ * it never stacks with the row.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn overlay_context_fragment(rows, mode, lane = nil, overrides = nil) {
+  let key = __overlay_row_key(mode, lane)
+  let override_table = if type_of(overrides) == "dict" {
+    overrides
+  } else {
+    {}
+  }
+  let override_lines = override_table?[key] ?? override_table?[to_string(mode ?? "")]
+  let lines = if type_of(override_lines) == "list" {
+    override_lines
+  } else {
+    let row = agent_overlay_match(rows, mode, lane)
+    row?.lines
+  }
+  if type_of(lines) != "list" || len(lines) == 0 {
+    return nil
+  }
+  let body = trim(join(lines, "\n"))
+  if body == "" {
+    return nil
+  }
+  return {body: body, id: "overlay:" + key, source: "overlay_policy"}
+}
+
+/**
+ * overlay_policy(rows, mode, agent_options?, options?) — layer a
+ * mode/lane-specific prompt-nudge overlay onto `agent_options` via the
+ * existing `context_profile.prompt_fragments` channel, preserving any
+ * fragments the caller already set. `rows` is DATA (see `OverlayRow`);
+ * `options.lane` narrows matching to a `(mode, lane)` row (see
+ * `std/agent/lanes`); `options.overrides` supplies caller lines that fill
+ * (and win over) a row's slot — see `overlay_context_fragment`. Never
+ * touches `agent_options.system` or any other explicit system-prompt
+ * option; it only adds a fragment alongside them.
+ *
+ * @effects: []
+ * @errors: [runtime]
+ * @api_stability: experimental
+ * @example: agent_loop(task, nil, overlay_policy(default_overlay_rows(), "agent", {provider: "anthropic"}))
+ */
+pub fn overlay_policy(rows, mode, agent_options = nil, options = nil) {
+  let validated = __overlay_validate_rows(rows)
+  let opts = if type_of(agent_options) == "dict" {
+    agent_options
+  } else {
+    {}
+  }
+  let extra = options ?? {}
+  let fragment = overlay_context_fragment(validated, mode, extra?.lane, extra?.overrides)
+  if fragment == nil {
+    return opts
+  }
+  let profile = if type_of(opts?.context_profile) == "dict" {
+    opts.context_profile
+  } else {
+    {}
+  }
+  let existing = if type_of(profile?.prompt_fragments) == "list" {
+    profile.prompt_fragments
+  } else {
+    []
+  }
+  return opts + {context_profile: profile + {prompt_fragments: existing + [fragment]}}
+}

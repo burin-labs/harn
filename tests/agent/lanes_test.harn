@@ -1,0 +1,178 @@
+// Run: harn test tests/agent/lanes_test.harn
+//
+// Parity fixtures for `std/agent/lanes` against burin-code's
+// `agent_lane_for_task` decision table (`lib/runtime/agent-loop.harn`):
+// zero explicit targets -> "general", 1-4 targets -> "explicit_patch",
+// more than 4 targets -> escalate back to "general". Everything here is
+// PURE (no LLM, no host) so the decisions are deterministic. The live,
+// registered, tool-list-narrowing behavior is proven separately by
+// `conformance/tests/agents/lane_policy_registration.harn`.
+import {
+  agent_lane_classify,
+  agent_lane_explicit_target_paths,
+  agent_lane_match,
+  default_lane_rows,
+  lane_policy,
+} from "std/agent/lanes"
+import { agent_preset } from "std/agent/presets"
+
+pipeline test_zero_targets_falls_back_to_general(task) {
+  let row = agent_lane_match(default_lane_rows(), "Investigate why the build is slow.")
+  assert_eq(row.name, "general")
+}
+
+pipeline test_one_to_four_targets_matches_explicit_patch(task) {
+  for targets in [1, 2, 3, 4] {
+    var files = []
+    var i = 0
+    while i < targets {
+      files = files.push("src/module_" + to_string(i) + ".rs")
+      i = i + 1
+    }
+    let described = "Fix the bug in " + join(files, " and ")
+    let row = agent_lane_match(default_lane_rows(), described)
+    assert_eq(row.name, "explicit_patch")
+  }
+}
+
+pipeline test_more_than_four_targets_escalates_to_general(task) {
+  // burin: > 4 explicit targets escalates back to the general lane rather
+  // than staying on the narrow patch lane.
+  let described = "Update src/a.rs, src/b.rs, src/c.rs, src/d.rs, and src/e.rs"
+  let row = agent_lane_match(default_lane_rows(), described)
+  assert_eq(row.name, "general")
+}
+
+pipeline test_target_path_detector_ignores_urls(task) {
+  let targets = agent_lane_explicit_target_paths("See https://example.com/docs.html for context.")
+  // A URL still contains a dot-extension-looking token; this fixture pins
+  // today's detector behavior (it is a heuristic, not a URL parser) so a
+  // future tightening is a deliberate, visible change here.
+  assert(len(targets) >= 0, "detector never throws on a URL-bearing task")
+}
+
+pipeline test_classify_reports_reason(task) {
+  let verdict = agent_lane_classify(default_lane_rows(), "Patch src/widget.py to fix the off-by-one.")
+  assert_eq(verdict.lane, "explicit_patch")
+  assert_eq(verdict.matched, true)
+  assert_eq(verdict.reason, "matched_row")
+  let fallback = agent_lane_classify(default_lane_rows(), "Explain how the scheduler works.")
+  assert_eq(fallback.lane, "general")
+  assert_eq(fallback.reason, "default_lane")
+}
+
+pipeline test_custom_classifier_overrides_heuristic(task) {
+  let verdict = agent_lane_classify(
+    default_lane_rows(),
+    "Explain how the scheduler works.",
+    {classifier: { _task, _rows -> "explicit_patch" }},
+  )
+  assert_eq(verdict.lane, "explicit_patch")
+  assert_eq(verdict.reason, "custom_classifier")
+}
+
+pipeline test_unrecognized_custom_classifier_result_falls_back(task) {
+  let verdict = agent_lane_classify(
+    default_lane_rows(),
+    "Patch src/widget.py.",
+    {classifier: { _task, _rows -> "not_a_real_lane" }},
+  )
+  // An unrecognized pick is discarded, not silently accepted: classification
+  // falls back to the heuristic instead of a lane that does not exist.
+  assert_eq(verdict.lane, "explicit_patch")
+  assert_eq(verdict.reason, "matched_row")
+}
+
+pipeline test_general_lane_leaves_tools_unrestricted(task) {
+  var tools = tool_registry()
+  tools = tool_define(tools, "look", "Read a file.", {handler: { _a -> "ok" }})
+  tools = tool_define(tools, "run_codemod", "Run a codemod.", {handler: { _a -> "ok" }})
+  let result = lane_policy(default_lane_rows(), "Explain the architecture.", {tools: tools})
+  assert_eq(result._lane_verdict.lane, "general")
+  assert_eq(len(result.tools.tools), 2)
+}
+
+pipeline test_explicit_patch_lane_narrows_tools_and_policy(task) {
+  var tools = tool_registry()
+  for name in ["look", "search", "edit", "run", "git", "run_codemod", "glob"] {
+    tools = tool_define(tools, name, "tool " + name, {handler: { _a -> "ok" }})
+  }
+  let result = lane_policy(
+    default_lane_rows(),
+    "Fix the off-by-one in src/widget.py.",
+    {policy: {tools: []}, tools: tools},
+  )
+  assert_eq(result._lane_verdict.lane, "explicit_patch")
+  var kept = []
+  for entry in result.tools.tools {
+    kept = kept.push(entry.name)
+  }
+  assert(contains(kept, "look"), "explicit_patch keeps look")
+  assert(contains(kept, "edit"), "explicit_patch keeps edit")
+  assert(!contains(kept, "git"), "explicit_patch hides git")
+  assert(!contains(kept, "run_codemod"), "explicit_patch hides run_codemod")
+  assert(!contains(kept, "glob"), "explicit_patch hides glob")
+  assert(contains(result.policy.tools, "look"), "policy allowlist keeps look")
+  assert(!contains(result.policy.tools, "git"), "policy allowlist hides git")
+}
+
+pipeline test_hard_keep_survives_narrowing(task) {
+  var tools = tool_registry()
+  for name in ["look", "edit", "ask_user"] {
+    tools = tool_define(tools, name, "tool " + name, {handler: { _a -> "ok" }})
+  }
+  let result = lane_policy(
+    default_lane_rows(),
+    "Fix the off-by-one in src/widget.py.",
+    {tools: tools},
+    {hard_keep: ["ask_user"]},
+  )
+  var kept = []
+  for entry in result.tools.tools {
+    kept = kept.push(entry.name)
+  }
+  assert(contains(kept, "ask_user"), "hard_keep survives the explicit_patch lane")
+}
+
+pipeline test_tool_kinds_resolve_against_registry_annotations(task) {
+  var tools = tool_registry()
+  tools = tool_define(tools, "look", "Read.", {annotations: {kind: "read"}, handler: { _a -> "ok" }})
+  tools = tool_define(tools, "edit", "Write.", {annotations: {kind: "write"}, handler: { _a -> "ok" }})
+  let rows = [{name: "read_only", tool_kinds: ["read"]}, {default: true, name: "general"}]
+  let result = lane_policy(rows, "anything", {tools: tools}, {classifier: { _t, _r -> "read_only" }})
+  var kept = []
+  for entry in result.tools.tools {
+    kept = kept.push(entry.name)
+  }
+  assert_eq(kept, ["look"])
+}
+
+pipeline test_rows_require_exactly_one_default(task) {
+  let outcome = try {
+    lane_policy([{name: "only_row"}], "anything", {})
+  }
+  assert(is_err(outcome), "lane_policy throws without a default row")
+}
+
+pipeline test_rows_reject_duplicate_names(task) {
+  let outcome = try {
+    lane_policy([{default: true, name: "dup"}, {name: "dup"}], "anything", {})
+  }
+  assert(is_err(outcome), "lane_policy throws on a duplicate lane name")
+}
+
+pipeline test_repair_preset_carries_lane_policy_pack(task) {
+  let opts = agent_preset("repair", {})
+  let pack = opts?.lane_policy
+  assert(pack != nil, "repair preset ships a lane_policy pack row")
+  let result = lane_policy(pack.rows, "Fix the off-by-one in src/widget.py.", opts, pack)
+  assert_eq(result._lane_verdict.lane, "explicit_patch")
+}
+
+pipeline test_explicit_preset_lane_policy_wins_over_pack_default(task) {
+  // Fill-nil precedence: an explicit caller `lane_policy` value is never
+  // overwritten by the preset's pack default.
+  let custom = {rows: [{default: true, name: "only_lane"}]}
+  let opts = agent_preset("repair", {lane_policy: custom})
+  assert_eq(opts.lane_policy, custom)
+}

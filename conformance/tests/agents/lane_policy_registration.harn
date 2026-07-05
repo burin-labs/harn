@@ -1,0 +1,187 @@
+// Live-shape / registration proof for `lane_policy` (std/agent/lanes).
+//
+// Catches dead-since-inception drift: a pure function returning the right
+// dict is not enough (that class of bug got sibling R2 PRs bounced). This
+// drives a REAL `agent_loop` mock-provider turn and inspects the actual
+// outbound request the loop sent (`llm_mock_calls()[i].tools`), proving
+// `lane_policy`'s narrowing reaches the wire — not just that
+// `lane_policy(...)` computes a plausible-looking dict nobody consults.
+//
+//   A. explicit_patch lane: the outbound tool list on the FIRST call already
+//      excludes tools outside the lane (registration + narrowing live).
+//   B. general lane (no explicit targets): the outbound tool list is
+//      unrestricted — narrowing is lane-conditional, not blanket.
+//   C. hidden-tools-not-named: the model attempts a tool the lane hid; the
+//      denial feedback the loop injects lists the available tools by name
+//      (so the model can recover) but never names the OTHER hidden tools —
+//      only the one the model itself already typed appears. This is the
+//      exact rule the task calls out, and it falls out for free from
+//      harn-vm's native tool-ceiling/name-resolution denial path because
+//      lane_policy narrows via the same `tools`/`policy.tools` seam
+//      `std/agent/stance` already uses.
+//   D. lane_scope_classifier registration: spread alongside lane_policy, it
+//      actually fires on the `pre_turn_scope_classifier` seam every turn and
+//      emits a real `scope_classifier_verdict` event carrying the lane — not
+//      a config value nobody consults.
+import { agent_capture_events } from "std/agent/events"
+import { default_lane_rows, lane_policy, lane_scope_classifier } from "std/agent/lanes"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn lane_test_tools() {
+  var tools = tool_registry()
+  for name in [
+    "look",
+    "search",
+    "edit",
+    "run",
+    "poll_command",
+    "wait_command",
+    "kill_command",
+    "read_command_output",
+    "git",
+    "run_codemod",
+    "glob",
+  ] {
+    tools = tool_define(tools, name, "tool " + name, {handler: { _args -> "ok:" + name }, parameters: {}})
+  }
+  return tools
+}
+
+fn tool_names(tools) {
+  var names = []
+  for entry in tools ?? [] {
+    names = names.push(entry?.name ?? entry?.function?.name ?? "")
+  }
+  return names
+}
+
+pipeline default() {
+  // --- A. explicit_patch lane narrows the FIRST outbound call ---
+  with_llm_script(
+    [llm_text("done ##DONE##")],
+    { ->
+      let opts = lane_policy(
+        default_lane_rows(),
+        "Fix the off-by-one bug in src/widget.py.",
+        {
+          done_sentinel: "##DONE##",
+          loop_until_done: true,
+          max_iterations: 3,
+          provider: "mock",
+          tools: lane_test_tools(),
+        },
+      )
+      let result = agent_loop("Fix the off-by-one bug in src/widget.py.", nil, opts)
+      let first_tools = tool_names(llm_mock_calls()[0].tools)
+      __io_println("A.status=" + result.status)
+      __io_println("A.lane=" + opts._lane_verdict.lane)
+      __io_println("A.has_edit=" + to_string(contains(first_tools, "edit")))
+      __io_println("A.has_look=" + to_string(contains(first_tools, "look")))
+      __io_println("A.has_git=" + to_string(contains(first_tools, "git")))
+      __io_println("A.has_run_codemod=" + to_string(contains(first_tools, "run_codemod")))
+      __io_println("A.has_glob=" + to_string(contains(first_tools, "glob")))
+    },
+  )
+  // --- B. general lane (no explicit target) leaves tools unrestricted ---
+  with_llm_script(
+    [llm_text("done ##DONE##")],
+    { ->
+      let opts = lane_policy(
+        default_lane_rows(),
+        "Explain how the retry policy works.",
+        {
+          done_sentinel: "##DONE##",
+          loop_until_done: true,
+          max_iterations: 3,
+          provider: "mock",
+          tools: lane_test_tools(),
+        },
+      )
+      let result = agent_loop("Explain how the retry policy works.", nil, opts)
+      let first_tools = tool_names(llm_mock_calls()[0].tools)
+      __io_println("B.status=" + result.status)
+      __io_println("B.lane=" + opts._lane_verdict.lane)
+      __io_println("B.has_git=" + to_string(contains(first_tools, "git")))
+      __io_println("B.has_run_codemod=" + to_string(contains(first_tools, "run_codemod")))
+    },
+  )
+  // --- C. a hidden tool is never NAMED to the model as an alternative ---
+  with_llm_script(
+    [
+      {tool_calls: [{arguments: {}, id: "hidden-1", name: "git"}]},
+      {tool_calls: [{arguments: {}, id: "edit-1", name: "edit"}]},
+      llm_text("done ##DONE##"),
+    ],
+    { ->
+      let session = "lane-hidden-" + uuid()
+      let opts = lane_policy(
+        default_lane_rows(),
+        "Fix the off-by-one bug in src/widget.py.",
+        {
+          done_sentinel: "##DONE##",
+          loop_until_done: true,
+          max_iterations: 5,
+          provider: "mock",
+          session_id: session,
+          tool_format: "native",
+          tools: lane_test_tools(),
+        },
+      )
+      let result = agent_loop("Fix the off-by-one bug in src/widget.py.", nil, opts)
+      let feedback = json_stringify(llm_mock_calls()[1].messages)
+      __io_println("C.status=" + result.status)
+      __io_println("C.feedback_lists_available=" + to_string(contains(feedback, "Available tools")))
+      __io_println("C.feedback_offers_edit=" + to_string(contains(feedback, "edit")))
+      __io_println("C.feedback_names_run_codemod=" + to_string(contains(feedback, "run_codemod")))
+      __io_println("C.feedback_names_glob=" + to_string(contains(feedback, "glob")))
+    },
+  )
+  // --- D. lane_scope_classifier fires live on the pre_turn_scope_classifier seam ---
+  with_llm_script(
+    [llm_text("still working"), llm_text("done ##DONE##")],
+    { ->
+      let session = "lane-scope-classifier-" + uuid()
+      let opts = lane_policy(
+        default_lane_rows(),
+        "Fix the off-by-one bug in src/widget.py.",
+        {
+          done_sentinel: "##DONE##",
+          loop_until_done: true,
+          max_iterations: 3,
+          provider: "mock",
+          session_id: session,
+          tools: lane_test_tools(),
+        },
+      )
+        + lane_scope_classifier(default_lane_rows())
+      let captured = agent_capture_events(
+        session,
+        fn() { return agent_loop("Fix the off-by-one bug in src/widget.py.", nil, opts) },
+      )
+      let verdict_events = captured.events.filter({ event -> event.type == "scope_classifier_verdict" })
+      __io_println("D.status=" + captured.result.status)
+      __io_println("D.verdict_count=" + to_string(len(verdict_events)))
+      __io_println(
+        "D.evidence_names_lane="
+          + to_string(contains(verdict_events[0].evidence, "lane=explicit_patch")),
+      )
+      __io_println("D.label=" + verdict_events[0].label)
+    },
+  )
+}
+// A: explicit_patch lane keeps look/edit, hides git/run_codemod/glob from the
+//    very first outbound call — no one-turn lag, since lane_policy narrows
+//    the registry the caller hands to agent_loop before the run starts.
+// B: the same task shape with no explicit file target stays on "general" and
+//    keeps every tool — narrowing is conditional on the lane, not a blanket.
+// C: `git` was hidden by the lane (removed from both `tools` and
+//    `policy.tools`), so dispatch treats the attempt as unresolvable and
+//    injects a recovery message that lists what IS available (so the model
+//    can retry) without ever mentioning the OTHER hidden tools
+//    (`run_codemod`, `glob`) by name.
+// D: two turns run under `lane_scope_classifier`, and both fire a real
+//    `scope_classifier_verdict` event whose `evidence` names the lane —
+//    proving the observability builder is actually consulted by
+//    `agent_loop` every turn, not a config value nobody reads. (The native
+//    event has a fixed shape and drops unrecognized keys, so `evidence` is
+//    the only channel that carries custom data through live.)
