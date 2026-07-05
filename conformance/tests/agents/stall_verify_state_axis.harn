@@ -42,6 +42,27 @@ fn observe(config, state, score, wrote) {
   )
 }
 
+/**
+ * Drive one gate-bearing verification FAILURE (for the total-recurrence axis):
+ * a substantive "run" call whose prior dispatch failed with `error_text`.
+ */
+fn observe_fail(config, state, error_text) {
+  return agent_stall_observe_tool_calls(
+    "verify-state-churn",
+    [{name: "run", arguments: {cmd: "test"}}],
+    1,
+    config,
+    state,
+    false,
+    [{tool_name: "run", ok: false, error: error_text}],
+    "",
+    false,
+    false,
+    "",
+    {verify_score: 1},
+  )
+}
+
 pipeline default() {
   // ---- PARITY: no progress_signal => signature axis, unchanged ----
   let base_state = agent_stall_initial_state()
@@ -92,5 +113,44 @@ pipeline default() {
   // A FLAT turn with no verify evidence (nil scalar) still counts as non-advance.
   s = observe(cfg, s, nil, false).state
   assert(s.verify_turns_since_advance == 1, "nil scalar counts as flat, not advance")
+  // ---- LIVE-SHAPE: TOTAL (non-consecutive) recurrence catches interleaved churn ----
+  // The same failure signature recurs 3x with an OFF-signature failure churning
+  // between each recurrence, so the CONSECUTIVE same-diagnostic streak keeps
+  // resetting to 1 and never reaches the hard threshold — but the per-signature
+  // TOTAL counter climbs to 3 and trips the hard-recurrence cut. This is the class
+  // a consecutive-streak-only predicate misses.
+  let churn_cfg = {
+    enabled: true,
+    post_edit_reverify: true,
+    repair_aware: false,
+    progress_signal: { _p -> 1.0 },
+    verify_state_recurrence_hard: 3,
+    verify_state_streak: 99,
+    verify_state_stall_turns: 99,
+    no_verifier_progress_limit: 99,
+    repeat_same_error: 99,
+    repeat_same_observation: 99,
+    ping_pong_cycles: 99,
+    no_progress_messages: 99,
+  }
+  var c = agent_stall_initial_state()
+  c = observe_fail(churn_cfg, c, "error A").state
+  c = observe_fail(churn_cfg, c, "error B").state
+  c = observe_fail(churn_cfg, c, "error A").state
+  assert(c.same_diagnostic_streak == 1, "churn: consecutive streak stays 1 (interleaved)")
+  assert(
+    !agent_stall_no_net_progress(churn_cfg, c),
+    "churn: A total 2 is below the hard-recurrence threshold",
+  )
+  c = observe_fail(churn_cfg, c, "error B").state
+  c = observe_fail(churn_cfg, c, "error A").state
+  assert(
+    c.same_diagnostic_streak == 1,
+    "churn: STILL no consecutive streak (proves the TOTAL axis fired)",
+  )
+  assert(
+    agent_stall_no_net_progress(churn_cfg, c),
+    "churn: total recurrence (A x3) trips despite off-signature churn",
+  )
   log("stall verify-state axis ok")
 }

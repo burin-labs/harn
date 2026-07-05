@@ -241,6 +241,7 @@ type AgentStallState = {
   verify_state_high: float,
   verify_turns_since_advance: int,
   verify_wrote_since_advance: bool,
+  verify_signature_counts: dict,
 }
 
 /**
@@ -256,6 +257,9 @@ type AgentStallState = {
  *   - verify_wrote_since_advance: a workspace write landed since the verifier
  *     last advanced — the "edit lands every turn but the verifier never moves"
  *     signal that drives the short write-axis cut.
+ *   - verify_signature_counts: per-signature TOTAL (non-consecutive) failure
+ *     recurrence across the run — the interleaved-churn axis that the consecutive
+ *     `same_diagnostic_streak` misses; drives the hard-recurrence cut.
  */
 type AgentStallObservation = {
   state: AgentStallState,
@@ -516,6 +520,7 @@ pub fn agent_stall_initial_state() -> AgentStallState {
     verify_state_high: 0.0,
     verify_turns_since_advance: 0,
     verify_wrote_since_advance: false,
+    verify_signature_counts: {},
   }
 }
 
@@ -841,6 +846,16 @@ fn __agent_stall_fold_diagnostic(state: AgentStallState, prev_dispatch, turn_mad
     1
   }
   let failing_turns = state.failing_verify_turns + 1
+  // Total (non-consecutive) recurrence per signature (#burin-cutover seam 1). The
+  // consecutive `same_diagnostic_streak` above RESETS whenever an off-signature
+  // failure interposes, so it misses interleaved churn: a dead API / wrong error
+  // re-proposed N times with different failures churning between recurrences
+  // never builds a consecutive streak yet is provably stuck. This per-signature
+  // TOTAL counter never resets on a signature change, so the verify-state axis
+  // can trip a hard-recurrence cut on total occurrences regardless of ordering.
+  // Always maintained (cheap); consulted only when a progress_signal is supplied.
+  let sig_counts = state.verify_signature_counts ?? {}
+  let sig_total = (to_int(sig_counts[signature] ?? 0) ?? 0) + 1
   // This is a verification result, so the post-edit re-verify mandate (if any)
   // has now been satisfied: clear reverify_owed and the edit-since marker. The
   // NEXT edit after this failure re-arms them.
@@ -857,6 +872,7 @@ fn __agent_stall_fold_diagnostic(state: AgentStallState, prev_dispatch, turn_mad
     failing_verify_turns: failing_turns,
     edit_since_failure: false,
     reverify_owed: false,
+    verify_signature_counts: sig_counts + {[signature]: sig_total},
   }
 }
 
@@ -1786,7 +1802,16 @@ pub fn agent_stall_no_net_progress(raw_config, stall_state: AgentStallState) -> 
     let streak = stall_state.same_diagnostic_streak
     let long_stall = streak >= config.verify_state_streak
       && stall_state.verify_turns_since_advance >= config.verify_state_stall_turns
+    // Hard-recurrence trips on EITHER a consecutive same-diagnostic streak OR the
+    // TOTAL (non-consecutive) occurrences of the CURRENT failure signature across
+    // the run. The total counter catches interleaved churn (the same dead API /
+    // error re-proposed N times with off-signature failures churning between, so
+    // the consecutive streak keeps resetting and never trips). Both predicates
+    // share `verify_state_recurrence_hard`.
+    let sig_total = to_int((stall_state.verify_signature_counts ?? {})[stall_state.last_diagnostic_signature] ?? 0)
+      ?? 0
     let hard_recurrence = streak >= config.verify_state_recurrence_hard
+      || sig_total >= config.verify_state_recurrence_hard
     let write_axis = stall_state.verify_turns_since_advance >= config.no_verifier_progress_limit
       && stall_state.verify_wrote_since_advance
     return long_stall || hard_recurrence || write_axis
