@@ -100,6 +100,7 @@ enum MemoryEvent {
     Store(MemoryRecord),
     Forget(ForgetEvent),
     Open(OpenEvent),
+    Update(UpdateEvent),
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -115,6 +116,39 @@ struct MemoryRecord {
     stored_at: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     provenance: Option<JsonValue>,
+    // Additive record metadata. All three skip serialization when unset, so
+    // records written without them stay byte-identical to pre-existing logs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    scope: Option<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    flags: BTreeMap<String, bool>,
+}
+
+/// An in-place, append-only mutation to a stored record identified by `id`.
+/// Only the fields present in the patch are overlaid at projection time; the
+/// append-only log is never edited. `value` also refreshes the derived search
+/// `text`. `flags` are merged key-by-key (set `false` to disable a flag).
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct UpdateEvent {
+    id: String,
+    namespace: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    value: Option<JsonValue>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    text: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    tags: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    scope: Option<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    flags: BTreeMap<String, bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    provenance: Option<JsonValue>,
+    updated_at: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -193,6 +227,8 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &MEMORY_OPEN_IMPL_DEF,
     &MEMORY_SUMMARIZE_IMPL_DEF,
     &MEMORY_FORGET_IMPL_DEF,
+    &MEMORY_UPDATE_IMPL_DEF,
+    &MEMORY_LIST_IMPL_DEF,
 ];
 
 #[harn_builtin(
@@ -223,6 +259,9 @@ async fn memory_store_impl(
         provenance: options
             .and_then(|opts| opts.get("provenance"))
             .map(crate::llm::vm_value_to_json),
+        status: option_string(options, "status"),
+        scope: option_string(options, "scope"),
+        flags: parse_flags(options.and_then(|opts| opts.get("flags"))),
     };
     append_event(&root, &namespace, &MemoryEvent::Store(record.clone()))?;
 
@@ -386,6 +425,140 @@ fn memory_forget_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     };
     append_event(&root, &namespace, &MemoryEvent::Forget(event.clone()))?;
     Ok(forget_result_to_vm(&event))
+}
+
+#[harn_builtin(
+    sig = "__memory_update(namespace: string, id: string, patch: dict, options?: dict) -> dict",
+    category = "memory"
+)]
+fn memory_update_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let namespace = required_string(args, 0, "__memory_update", "namespace")?;
+    let id = required_string(args, 1, "__memory_update", "id")?;
+    let patch = args.get(2).and_then(VmValue::as_dict);
+    let options = args.get(3).and_then(VmValue::as_dict);
+    let root = memory_root(options);
+
+    // Ignore a patch that targets an unknown/forgotten id: nothing to overlay.
+    let exists = active_records(&root, &namespace)?
+        .iter()
+        .any(|(_, record)| record.id == id);
+    if !exists {
+        return Ok(VmValue::Nil);
+    }
+
+    let value = patch.and_then(|p| p.get("value")).cloned();
+    let text = value.as_ref().map(value_to_search_text);
+    let event = UpdateEvent {
+        id: id.clone(),
+        namespace: namespace.clone(),
+        value: value.as_ref().map(crate::llm::vm_value_to_json),
+        text,
+        tags: match patch.and_then(|p| p.get("tags")) {
+            Some(tags) => Some(parse_tags(Some(tags), "__memory_update")?),
+            None => None,
+        },
+        status: patch
+            .and_then(|p| p.get("status"))
+            .map(VmValue::display)
+            .filter(|value| !value.trim().is_empty()),
+        scope: patch
+            .and_then(|p| p.get("scope"))
+            .map(VmValue::display)
+            .filter(|value| !value.trim().is_empty()),
+        flags: parse_flags(patch.and_then(|p| p.get("flags"))),
+        provenance: patch
+            .and_then(|p| p.get("provenance"))
+            .map(crate::llm::vm_value_to_json),
+        updated_at: option_string(options, "now").unwrap_or_else(now_rfc3339),
+    };
+    append_event(&root, &namespace, &MemoryEvent::Update(event))?;
+
+    Ok(active_records(&root, &namespace)?
+        .into_iter()
+        .find(|(_, record)| record.id == id)
+        .map(|(_, record)| memory_record_to_vm(&record, None))
+        .unwrap_or(VmValue::Nil))
+}
+
+#[harn_builtin(
+    sig = "__memory_list(namespace: string, options?: dict) -> list",
+    category = "memory"
+)]
+fn memory_list_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let namespace = required_string(args, 0, "__memory_list", "namespace")?;
+    let options = args.get(1).and_then(VmValue::as_dict);
+    let root = memory_root(options);
+
+    let status_filter = option_string(options, "status");
+    let scope_filter = option_string(options, "scope");
+    let tag_filter = option_string(options, "tag");
+    let flag_filter = option_string(options, "flag");
+    let limit = options
+        .and_then(|opts| opts.get("limit"))
+        .and_then(coerce_usize);
+
+    let mut records = active_records(&root, &namespace)?;
+    // Enumerate newest-first (by stored_at, then log order) — a stable, full
+    // listing distinct from the query-ranked `memory_recall`.
+    records.sort_by(|left, right| {
+        right
+            .1
+            .stored_at
+            .cmp(&left.1.stored_at)
+            .then_with(|| right.0.cmp(&left.0))
+    });
+
+    let filtered = records
+        .into_iter()
+        .filter(|(_, record)| match &status_filter {
+            Some(status) => record.status.as_deref() == Some(status.as_str()),
+            None => true,
+        })
+        .filter(|(_, record)| match &scope_filter {
+            Some(scope) => record.scope.as_deref() == Some(scope.as_str()),
+            None => true,
+        })
+        .filter(|(_, record)| match &tag_filter {
+            Some(tag) => record.tags.iter().any(|candidate| candidate == tag),
+            None => true,
+        })
+        .filter(|(_, record)| match &flag_filter {
+            Some(flag) => record.flags.get(flag).copied().unwrap_or(false),
+            None => true,
+        })
+        .map(|(_, record)| memory_record_to_vm(&record, None));
+
+    let items: Vec<VmValue> = match limit {
+        Some(limit) => filtered.take(limit).collect(),
+        None => filtered.collect(),
+    };
+    Ok(VmValue::List(std::sync::Arc::new(items)))
+}
+
+/// Parse an `options.flags` value into a `{name: bool}` map. Accepts a dict of
+/// string→bool, or a list of flag names (each treated as `true`). Anything
+/// else yields an empty map.
+fn parse_flags(value: Option<&VmValue>) -> BTreeMap<String, bool> {
+    let mut flags = BTreeMap::new();
+    match value {
+        Some(VmValue::Dict(map)) => {
+            for (key, val) in map.iter() {
+                if let VmValue::Bool(flag) = val {
+                    flags.insert(key.to_string(), *flag);
+                }
+            }
+        }
+        Some(VmValue::List(items)) => {
+            for item in items.iter() {
+                let name = item.display();
+                if !name.trim().is_empty() {
+                    flags.insert(name, true);
+                }
+            }
+        }
+        _ => {}
+    }
+    flags
 }
 
 fn required_string(
@@ -695,7 +868,8 @@ fn read_events(root: &Path, namespace: &str) -> Result<Vec<MemoryEvent>, VmError
 
 fn active_records(root: &Path, namespace: &str) -> Result<Vec<(usize, MemoryRecord)>, VmError> {
     let events = read_events(root, namespace)?;
-    let mut records = Vec::new();
+    let mut records: Vec<(usize, MemoryRecord)> = Vec::new();
+    let mut position: HashMap<String, usize> = HashMap::new();
     let mut forgotten = BTreeSet::new();
     for event in &events {
         if let MemoryEvent::Forget(event) = event {
@@ -703,13 +877,46 @@ fn active_records(root: &Path, namespace: &str) -> Result<Vec<(usize, MemoryReco
         }
     }
     for (idx, event) in events.into_iter().enumerate() {
-        if let MemoryEvent::Store(record) = event {
-            if !forgotten.contains(&record.id) {
+        match event {
+            MemoryEvent::Store(record) if !forgotten.contains(&record.id) => {
+                position.insert(record.id.clone(), records.len());
                 records.push((idx, record));
             }
+            MemoryEvent::Update(update) if !forgotten.contains(&update.id) => {
+                if let Some(&pos) = position.get(&update.id) {
+                    apply_update(&mut records[pos].1, &update);
+                }
+            }
+            _ => {}
         }
     }
     Ok(records)
+}
+
+/// Overlay an update's present fields onto a record. Absent patch fields leave
+/// the record untouched; `flags` are merged key-by-key.
+fn apply_update(record: &mut MemoryRecord, update: &UpdateEvent) {
+    if let Some(value) = &update.value {
+        record.value = value.clone();
+    }
+    if let Some(text) = &update.text {
+        record.text = text.clone();
+    }
+    if let Some(tags) = &update.tags {
+        record.tags = tags.clone();
+    }
+    if update.status.is_some() {
+        record.status = update.status.clone();
+    }
+    if update.scope.is_some() {
+        record.scope = update.scope.clone();
+    }
+    for (key, value) in &update.flags {
+        record.flags.insert(key.clone(), *value);
+    }
+    if update.provenance.is_some() {
+        record.provenance = update.provenance.clone();
+    }
 }
 
 fn read_namespace_config(root: &Path, namespace: &str) -> Result<NamespaceConfig, VmError> {
@@ -1300,6 +1507,27 @@ fn memory_record_to_vm(record: &MemoryRecord, score: Option<f64>) -> VmValue {
             .map(crate::stdlib::json_to_vm_value)
             .unwrap_or(VmValue::Nil),
     );
+    map.insert(
+        crate::value::intern_key("status"),
+        record
+            .status
+            .as_deref()
+            .map(|status| VmValue::String(arcstr::ArcStr::from(status)))
+            .unwrap_or(VmValue::Nil),
+    );
+    map.insert(
+        crate::value::intern_key("scope"),
+        record
+            .scope
+            .as_deref()
+            .map(|scope| VmValue::String(arcstr::ArcStr::from(scope)))
+            .unwrap_or(VmValue::Nil),
+    );
+    let mut flag_map = crate::value::DictMap::new();
+    for (key, value) in &record.flags {
+        flag_map.insert(crate::value::intern_key(key), VmValue::Bool(*value));
+    }
+    map.insert(crate::value::intern_key("flags"), VmValue::dict(flag_map));
     if let Some(score) = score {
         map.insert(crate::value::intern_key("score"), VmValue::Float(score));
     }
@@ -1440,6 +1668,9 @@ mod tests {
             tags: vec!["profile".to_string()],
             stored_at: "2026-04-29T00:00:00Z".to_string(),
             provenance: None,
+            status: None,
+            scope: None,
+            flags: BTreeMap::new(),
         };
         let second = MemoryRecord {
             id: "mem-2".to_string(),
@@ -1450,6 +1681,9 @@ mod tests {
             tags: vec!["profile".to_string()],
             stored_at: "2026-04-29T00:00:01Z".to_string(),
             provenance: None,
+            status: None,
+            scope: None,
+            flags: BTreeMap::new(),
         };
         append_event(&root, namespace, &MemoryEvent::Store(first)).unwrap();
         append_event(&root, namespace, &MemoryEvent::Store(second)).unwrap();
@@ -1585,5 +1819,104 @@ mod tests {
         let err = parse_embedding_response(VmValue::dict(bad), "fallback")
             .expect_err("dim mismatch must error");
         assert!(err.to_string().contains("dim=2"));
+    }
+
+    fn record(id: &str, key: &str, at: &str) -> MemoryRecord {
+        MemoryRecord {
+            id: id.to_string(),
+            namespace: "agent/mem".to_string(),
+            key: key.to_string(),
+            value: serde_json::json!({"text": key}),
+            text: key.to_string(),
+            tags: Vec::new(),
+            stored_at: at.to_string(),
+            provenance: None,
+            status: None,
+            scope: None,
+            flags: BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn store_without_new_fields_is_byte_identical() {
+        // A record that sets none of status/scope/flags must serialize exactly
+        // as it did before these fields existed (no new keys on the line).
+        let line = serde_json::to_string(&MemoryEvent::Store(record(
+            "m1",
+            "alice",
+            "2026-04-29T00:00:00Z",
+        )))
+        .unwrap();
+        assert!(!line.contains("status"), "line: {line}");
+        assert!(!line.contains("scope"), "line: {line}");
+        assert!(!line.contains("flags"), "line: {line}");
+    }
+
+    #[test]
+    fn update_overlays_fields_and_merges_flags() {
+        let root = temp_root("update");
+        let ns = "agent/mem";
+        let mut rec = record("m1", "alice", "2026-04-29T00:00:00Z");
+        rec.status = Some("pending".to_string());
+        rec.flags.insert("auto_surface".to_string(), false);
+        append_event(&root, ns, &MemoryEvent::Store(rec)).unwrap();
+
+        let update = UpdateEvent {
+            id: "m1".to_string(),
+            namespace: ns.to_string(),
+            value: None,
+            text: None,
+            tags: None,
+            status: Some("accepted".to_string()),
+            scope: Some("project".to_string()),
+            flags: BTreeMap::from([("auto_surface".to_string(), true)]),
+            provenance: None,
+            updated_at: "2026-04-29T00:00:01Z".to_string(),
+        };
+        append_event(&root, ns, &MemoryEvent::Update(update)).unwrap();
+
+        let records = active_records(&root, ns).unwrap();
+        assert_eq!(records.len(), 1);
+        let projected = &records[0].1;
+        assert_eq!(projected.status.as_deref(), Some("accepted"));
+        assert_eq!(projected.scope.as_deref(), Some("project"));
+        assert_eq!(projected.flags.get("auto_surface"), Some(&true));
+    }
+
+    #[test]
+    fn update_to_forgotten_or_unknown_id_is_ignored() {
+        let root = temp_root("update-missing");
+        let ns = "agent/mem";
+        // No store for m9 → active_records still empty after the update.
+        let update = UpdateEvent {
+            id: "m9".to_string(),
+            namespace: ns.to_string(),
+            value: None,
+            text: None,
+            tags: None,
+            status: Some("accepted".to_string()),
+            scope: None,
+            flags: BTreeMap::new(),
+            provenance: None,
+            updated_at: "2026-04-29T00:00:01Z".to_string(),
+        };
+        append_event(&root, ns, &MemoryEvent::Update(update)).unwrap();
+        assert!(active_records(&root, ns).unwrap().is_empty());
+    }
+
+    #[test]
+    fn parse_flags_accepts_dict_and_list() {
+        let mut dict = crate::value::DictMap::new();
+        dict.insert(crate::value::intern_key("a"), VmValue::Bool(true));
+        dict.insert(crate::value::intern_key("b"), VmValue::Bool(false));
+        let from_dict = parse_flags(Some(&VmValue::dict(dict)));
+        assert_eq!(from_dict.get("a"), Some(&true));
+        assert_eq!(from_dict.get("b"), Some(&false));
+
+        let list = VmValue::List(std::sync::Arc::new(vec![VmValue::String(
+            arcstr::ArcStr::from("auto_surface"),
+        )]));
+        let from_list = parse_flags(Some(&list));
+        assert_eq!(from_list.get("auto_surface"), Some(&true));
     }
 }

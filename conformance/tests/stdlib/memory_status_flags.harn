@@ -1,0 +1,59 @@
+import "std/memory"
+
+/**
+ * Exercises the richer memory surface: per-record status/scope/flags on store,
+ * full enumeration via memory_list (with status/flag filters), in-place update
+ * by id, and "rejected stays queryable" (status, not tombstone).
+ */
+pipeline default() {
+  let root = path_join(".harn", "tmp", "harn-mem-richer-" + uuid())
+  let ns = "agent/notes"
+  memory_store(
+    ns,
+    "note-a",
+    {text: "alpha"},
+    ["x"],
+    {
+      root: root,
+      id: "a1",
+      now: "2026-04-29T00:00:00Z",
+      status: "pending",
+      scope: "project",
+      flags: {auto_surface: true},
+    },
+  )
+  memory_store(
+    ns,
+    "note-b",
+    {text: "beta"},
+    nil,
+    {root: root, id: "b1", now: "2026-04-29T00:00:01Z", status: "pending", scope: "user"},
+  )
+  // Full enumeration, newest first.
+  let all = memory_list(ns, {root: root})
+  __io_println(len(all))
+  __io_println(all[0].id)
+  __io_println(all[0].scope)
+  __io_println(all[1].flags.auto_surface)
+  // Filters.
+  __io_println(len(memory_list(ns, {root: root, status: "pending"})))
+  let surfaced = memory_list(ns, {root: root, flag: "auto_surface"})
+  __io_println(len(surfaced))
+  __io_println(surfaced[0].id)
+  // In-place update by id.
+  let upd = memory_update(
+    ns,
+    "a1",
+    {status: "accepted", flags: {auto_surface: false}},
+    {root: root, now: "2026-04-29T00:00:02Z"},
+  )
+  __io_println(upd.status)
+  __io_println(upd.flags.auto_surface)
+  // Rejected records stay queryable (soft status, not a tombstone).
+  memory_update(ns, "b1", {status: "rejected"}, {root: root})
+  __io_println(len(memory_list(ns, {root: root})))
+  __io_println(len(memory_list(ns, {root: root, status: "rejected"})))
+  // Update to an unknown id is a no-op returning nil.
+  __io_println(memory_update(ns, "nope", {status: "x"}, {root: root}) == nil)
+  harness.fs.delete(root)
+}
