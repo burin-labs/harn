@@ -137,7 +137,12 @@ fn manifest_report(args: &ModelsLoraManifestArgs) -> Result<LoraManifestReport, 
         .map(|path| path.display().to_string())
         .unwrap_or_else(|| "TOOL_CALL_EVAL_DATASET".to_string());
     let promotion = lora_evaluation_recipe(
+        &contract_id,
+        &resolved.id,
+        &provider,
+        &request_model,
         &decision.effective,
+        &eval_dataset,
         vec![
             "harn".to_string(),
             "eval".to_string(),
@@ -147,7 +152,7 @@ fn manifest_report(args: &ModelsLoraManifestArgs) -> Result<LoraManifestReport, 
             "--tool-format".to_string(),
             decision.effective.clone(),
             "--dataset".to_string(),
-            eval_dataset,
+            eval_dataset.clone(),
         ],
     );
     let teacher = args

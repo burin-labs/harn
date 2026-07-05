@@ -206,21 +206,28 @@ fn export_report(args: &ModelsLoraExportArgs) -> Result<LoraExportReport, String
         provider_supports_lora_launch,
         &lora_module_value_format,
     );
+    let request_model = target
+        .adapter_name
+        .clone()
+        .unwrap_or_else(|| "ADAPTER_MODEL".to_string());
+    let eval_dataset = corpus_path.display().to_string();
     let promotion = lora_evaluation_recipe(
+        &contract_id,
+        &target.base_model,
+        &target.provider,
+        &request_model,
         &target.harn_tool_format,
+        &eval_dataset,
         vec![
             "harn".to_string(),
             "eval".to_string(),
             "tool-calls".to_string(),
             "--planner".to_string(),
-            target
-                .adapter_name
-                .clone()
-                .unwrap_or_else(|| "ADAPTER_MODEL".to_string()),
+            request_model.clone(),
             "--tool-format".to_string(),
             target.harn_tool_format.clone(),
             "--dataset".to_string(),
-            corpus_path.display().to_string(),
+            eval_dataset.clone(),
         ],
     );
     let manifest_path = if let Some(path) = args.manifest.as_deref() {
