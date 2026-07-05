@@ -1,7 +1,7 @@
 //! VM/JSON conversion helpers for workflow graphs.
 
-use crate::orchestration::WorkflowGraph;
-use crate::value::{VmError, VmValue};
+use crate::orchestration::{WorkflowGraph, WorkflowNode};
+use crate::value::{DictMap, VmError, VmValue};
 
 pub(super) fn to_vm<T: serde::Serialize>(value: &T) -> Result<VmValue, VmError> {
     let json = serde_json::to_value(value)
@@ -29,8 +29,12 @@ pub(in crate::stdlib) fn workflow_graph_to_vm(graph: &WorkflowGraph) -> Result<V
     let mut nodes = (*nodes_dict).clone();
     for (node_id, node) in &graph.nodes {
         // Re-attach raw VmValue fields serde drops so closure-carrying values
-        // (tool registries, fn-verify verifiers) survive the graph round-trip.
-        if node.raw_tools.is_none() && node.raw_verify.is_none() && node.raw_executor.is_none() {
+        // survive the graph round-trip.
+        if node.raw_tools.is_none()
+            && node.raw_verify.is_none()
+            && node.raw_executor.is_none()
+            && node.retry_policy.repair_prompt_builder.is_none()
+        {
             continue;
         }
         let Some(node_value) = nodes.get(node_id.as_str()).cloned() else {
@@ -50,10 +54,27 @@ pub(in crate::stdlib) fn workflow_graph_to_vm(graph: &WorkflowGraph) -> Result<V
         if let Some(raw_executor) = node.raw_executor.clone() {
             node_map.insert(crate::value::intern_key("executor"), raw_executor);
         }
+        reattach_retry_prompt_builder(&mut node_map, node);
         nodes.insert(crate::value::intern_key(node_id), VmValue::dict(node_map));
     }
     graph_dict.insert(crate::value::intern_key("nodes"), VmValue::dict(nodes));
     Ok(VmValue::dict(graph_dict))
+}
+
+fn reattach_retry_prompt_builder(node_map: &mut DictMap, node: &WorkflowNode) {
+    let Some(builder) = &node.retry_policy.repair_prompt_builder else {
+        return;
+    };
+    let retry_policy_key = crate::value::intern_key("retry_policy");
+    let mut retry_policy = match node_map.get("retry_policy") {
+        Some(VmValue::Dict(existing)) => (**existing).clone(),
+        _ => DictMap::new(),
+    };
+    retry_policy.insert(
+        crate::value::intern_key("repair_prompt_builder"),
+        builder.0.clone(),
+    );
+    node_map.insert(retry_policy_key, VmValue::dict(retry_policy));
 }
 
 pub(super) fn filter_workflow_tools(

@@ -1,0 +1,44 @@
+import { workflow_run_repair } from "std/workflow/repair"
+
+/**
+ * Contract: `workflow_run_repair` preserves a caller-supplied
+ * `repair_prompt_builder` closure across the one-stage graph normalization
+ * boundary. The executor only passes after seeing the builder's replacement
+ * task, so a dropped builder exhausts attempts and fails.
+ */
+pipeline default() {
+  let token = "REPAIRED"
+  let executor = { ctx ->
+    if contains(ctx.task, token) {
+      return {text: ctx.task + "|PASS"}
+    }
+    return {text: "first attempt"}
+  }
+  let verifier = { r -> return {ok: contains(to_string(r?.visible_text), token), findings: ["need " + token]} }
+  let builder = { ctx -> return token
+    + "|attempt="
+    + to_string(ctx.attempt)
+    + "|findings="
+    + join(ctx.findings, ",")
+    + "|prior="
+    + ctx.prior_text }
+  let out = workflow_run_repair(
+    {
+      task: "base",
+      executor: executor,
+      verify: verifier,
+      repair_prompt_builder: builder,
+      max_attempts: 2,
+    },
+  )
+  __io_println(out.ok)
+  __io_println(len(out.attempts))
+  __io_println(out.attempts[0].status)
+  __io_println(out.attempts[1].status)
+  __io_println(contains(out.text, token))
+  __io_println(contains(out.text, "attempt=1"))
+  __io_println(contains(out.text, "need " + token))
+  __io_println(contains(out.text, "prior=first attempt"))
+  // The builder takes precedence over the default feedback template.
+  __io_println(contains(out.text, "Previous attempt"))
+}
