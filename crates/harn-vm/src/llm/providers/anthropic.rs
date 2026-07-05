@@ -37,8 +37,13 @@ thread_local! {
 /// including non-numeric tails like `claude-mythos-preview`.
 pub(crate) fn claude_generation(model: &str) -> Option<(u32, u32)> {
     let lower = model.to_lowercase();
-    if !lower.starts_with("claude-") && !lower.contains("/claude-") {
+    if !is_claude_model_id(&lower) {
         return None;
+    }
+    if let Some(tail) = lower.split("claude-").nth(1) {
+        if tail.as_bytes().first().is_some_and(u8::is_ascii_digit) {
+            return parse_major_minor_tail(tail);
+        }
     }
     // fable/mythos (the Mythos-class tier above Opus, generation 5+) share
     // the Opus 4.7+ request surface, so the >= (4, 6) / (4, 7) guards below
@@ -50,6 +55,11 @@ pub(crate) fn claude_generation(model: &str) -> Option<(u32, u32)> {
         }
     }
     None
+}
+
+fn is_claude_model_id(model: &str) -> bool {
+    let lower = model.to_lowercase();
+    lower.starts_with("claude-") || lower.contains("/claude-") || lower.contains(".claude-")
 }
 
 /// Canonical message-level keys the Anthropic Messages API accepts on an
@@ -186,13 +196,119 @@ fn warn_sampling_stripped(model: &str) {
             crate::events::log_warn(
                 "llm.sampling",
                 &format!(
-                    "temperature/top_p/top_k supplied for {model}, but Anthropic \
-                     Opus 4.7+ rejects non-default sampling params with HTTP 400; \
-                     stripping them from the request",
+                    "temperature/top_p/top_k supplied for {model}, but this Anthropic \
+                     request surface rejects non-default sampling params on newer \
+                     Claude models or when thinking is active; stripping them from \
+                     the request",
                 ),
             );
         }
     });
+}
+
+/// Remove Anthropic sampling parameters when the resolved Claude request
+/// surface rejects them. This is the single egress policy used by the primary
+/// Messages builder and by legacy/override paths that can otherwise reinsert
+/// provider options after provider-specific body construction.
+pub(crate) fn strip_unsupported_sampling_params(
+    body: &mut serde_json::Value,
+    model: &str,
+    thinking: &ThinkingConfig,
+) {
+    let strip_sampling = model_rejects_sampling_params(model)
+        || !thinking.is_disabled()
+        || body_activates_anthropic_thinking(body);
+    if !strip_sampling {
+        return;
+    }
+
+    let Some(object) = body.as_object_mut() else {
+        return;
+    };
+    let had_sampling = object.contains_key("temperature")
+        || object.contains_key("top_p")
+        || object.contains_key("top_k");
+    if had_sampling {
+        warn_sampling_stripped(model);
+        object.remove("temperature");
+        object.remove("top_p");
+        object.remove("top_k");
+    }
+}
+
+/// Bedrock Converse nests sampling parameters under `inferenceConfig`, but
+/// Bedrock-hosted Claude follows the same Anthropic sampling restrictions as
+/// direct Claude request surfaces.
+pub(crate) fn strip_unsupported_bedrock_converse_sampling_params(
+    body: &mut serde_json::Value,
+    model: &str,
+    thinking: &ThinkingConfig,
+) {
+    if !is_claude_model_id(model) {
+        return;
+    }
+    let strip_sampling = model_rejects_sampling_params(model)
+        || !thinking.is_disabled()
+        || body_activates_anthropic_thinking(body);
+    if !strip_sampling {
+        return;
+    }
+
+    let Some(body_object) = body.as_object_mut() else {
+        return;
+    };
+    let Some(inference) = body_object
+        .get_mut("inferenceConfig")
+        .and_then(serde_json::Value::as_object_mut)
+    else {
+        return;
+    };
+
+    let had_temperature = inference.remove("temperature").is_some();
+    let had_top_p = inference.remove("topP").is_some();
+    let had_top_k = inference.remove("topK").is_some();
+    let had_sampling = had_temperature || had_top_p || had_top_k;
+    if had_sampling {
+        warn_sampling_stripped(model);
+    }
+    if inference.is_empty() {
+        body_object.remove("inferenceConfig");
+    }
+}
+
+fn body_activates_anthropic_thinking(body: &serde_json::Value) -> bool {
+    value_activates_anthropic_thinking(body.get("thinking"))
+        || output_config_activates_thinking(body.get("output_config"))
+        || body
+            .get("additionalModelRequestFields")
+            .is_some_and(|fields| {
+                value_activates_anthropic_thinking(fields.get("thinking"))
+                    || output_config_activates_thinking(fields.get("output_config"))
+            })
+}
+
+fn value_activates_anthropic_thinking(value: Option<&serde_json::Value>) -> bool {
+    match value {
+        Some(serde_json::Value::Bool(enabled)) => *enabled,
+        Some(serde_json::Value::String(mode)) => {
+            !mode.eq_ignore_ascii_case("disabled") && !mode.eq_ignore_ascii_case("none")
+        }
+        Some(serde_json::Value::Object(object)) => object
+            .get("type")
+            .and_then(serde_json::Value::as_str)
+            .is_none_or(|mode| {
+                !mode.eq_ignore_ascii_case("disabled") && !mode.eq_ignore_ascii_case("none")
+            }),
+        Some(serde_json::Value::Null) | None => false,
+        Some(_) => true,
+    }
+}
+
+fn output_config_activates_thinking(value: Option<&serde_json::Value>) -> bool {
+    value
+        .and_then(|config| config.get("effort"))
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|effort| !effort.eq_ignore_ascii_case("none") && !effort.is_empty())
 }
 
 fn warn_adaptive_thinking_rewrite(model: &str) {
@@ -351,34 +467,16 @@ impl AnthropicProvider {
         if let Some(ref sys) = opts.system {
             body["system"] = serde_json::json!(sys);
         }
-        // Claude Opus 4.7+ rejects non-default sampling parameters with
-        // HTTP 400. We strip them transparently and warn once per model
-        // so pipeline authors don't have to special-case each release.
-        //
-        // Anthropic also rejects `temperature != 1` when thinking is
-        // active (adaptive, effort, or enabled): "temperature may only
-        // be set to 1 when thinking is enabled". Strip sampling params
-        // in that case too so callers can default to temperature=0 for
-        // determinism without having to know which models silently
-        // auto-enable thinking.
-        let thinking_active = !matches!(opts.thinking, ThinkingConfig::Disabled);
-        let strip_sampling = model_rejects_sampling_params(&opts.model) || thinking_active;
-        let any_sampling_supplied =
-            opts.temperature.is_some() || opts.top_p.is_some() || opts.top_k.is_some();
-        if strip_sampling && any_sampling_supplied {
-            warn_sampling_stripped(&opts.model);
+        if let Some(temp) = opts.temperature {
+            body["temperature"] = serde_json::json!(temp);
         }
-        if !strip_sampling {
-            if let Some(temp) = opts.temperature {
-                body["temperature"] = serde_json::json!(temp);
-            }
-            if let Some(top_p) = opts.top_p {
-                body["top_p"] = serde_json::json!(top_p);
-            }
-            if let Some(top_k) = opts.top_k {
-                body["top_k"] = serde_json::json!(top_k);
-            }
+        if let Some(top_p) = opts.top_p {
+            body["top_p"] = serde_json::json!(top_p);
         }
+        if let Some(top_k) = opts.top_k {
+            body["top_k"] = serde_json::json!(top_k);
+        }
+        strip_unsupported_sampling_params(&mut body, &opts.model, &opts.thinking);
         if let Some(ref stop) = opts.stop {
             body["stop_sequences"] = serde_json::json!(stop);
         }
@@ -1793,6 +1891,14 @@ mod tests {
         assert_eq!(claude_generation("claude-fable-5"), Some((5, 0)));
         assert_eq!(claude_generation("claude-mythos-5"), Some((5, 0)));
         assert_eq!(claude_generation("anthropic/claude-fable-5"), Some((5, 0)));
+        assert_eq!(
+            claude_generation("anthropic.claude-opus-4-7-v1:0"),
+            Some((4, 7))
+        );
+        assert_eq!(
+            claude_generation("anthropic.claude-3-5-sonnet-20240620-v1:0"),
+            Some((3, 5))
+        );
         // Mythos Preview has no numeric generation — stays unrecognized.
         assert_eq!(claude_generation("claude-mythos-preview"), None);
         assert!(claude_model_supports_tool_search("claude-fable-5"));
@@ -1969,6 +2075,106 @@ mod tests {
         payload2.thinking = ThinkingConfig::Disabled;
         let body2 = AnthropicProvider::build_request_body(&payload2);
         assert_eq!(body2["temperature"], serde_json::json!(0.0));
+    }
+
+    #[test]
+    fn sampling_params_stripped_by_shared_helper_for_rejecting_models() {
+        let mut body = serde_json::json!({
+            "model": "claude-opus-4-7",
+            "temperature": 0.2,
+            "top_p": 0.9,
+            "top_k": 20,
+        });
+
+        strip_unsupported_sampling_params(&mut body, "claude-opus-4-7", &ThinkingConfig::Disabled);
+
+        assert!(body.get("temperature").is_none());
+        assert!(body.get("top_p").is_none());
+        assert!(body.get("top_k").is_none());
+        assert_eq!(body["model"], serde_json::json!("claude-opus-4-7"));
+    }
+
+    #[test]
+    fn sampling_params_stripped_by_shared_helper_when_thinking_active() {
+        let mut body = serde_json::json!({
+            "model": "claude-sonnet-4-6",
+            "temperature": 0.0,
+            "top_p": 0.9,
+            "top_k": 20,
+        });
+
+        strip_unsupported_sampling_params(
+            &mut body,
+            "claude-sonnet-4-6",
+            &ThinkingConfig::Adaptive,
+        );
+
+        assert!(body.get("temperature").is_none());
+        assert!(body.get("top_p").is_none());
+        assert!(body.get("top_k").is_none());
+    }
+
+    #[test]
+    fn sampling_params_preserved_by_shared_helper_for_supported_disabled_thinking() {
+        let mut body = serde_json::json!({
+            "model": "claude-sonnet-4-6",
+            "temperature": 0.2,
+            "top_p": 0.9,
+            "top_k": 20,
+        });
+
+        strip_unsupported_sampling_params(
+            &mut body,
+            "claude-sonnet-4-6",
+            &ThinkingConfig::Disabled,
+        );
+
+        assert_eq!(body["temperature"], serde_json::json!(0.2));
+        assert_eq!(body["top_p"], serde_json::json!(0.9));
+        assert_eq!(body["top_k"], serde_json::json!(20));
+    }
+
+    #[test]
+    fn sampling_params_stripped_when_body_thinking_override_is_active() {
+        let mut body = serde_json::json!({
+            "model": "claude-sonnet-4-6",
+            "temperature": 0.2,
+            "top_p": 0.9,
+            "thinking": {"type": "enabled", "budget_tokens": 1024},
+        });
+
+        strip_unsupported_sampling_params(
+            &mut body,
+            "claude-sonnet-4-6",
+            &ThinkingConfig::Disabled,
+        );
+
+        assert!(body.get("temperature").is_none());
+        assert!(body.get("top_p").is_none());
+        assert_eq!(
+            body["thinking"],
+            serde_json::json!({"type": "enabled", "budget_tokens": 1024})
+        );
+    }
+
+    #[test]
+    fn sampling_params_stripped_when_body_output_config_effort_override_is_active() {
+        let mut body = serde_json::json!({
+            "model": "claude-sonnet-4-6",
+            "temperature": 0.2,
+            "top_p": 0.9,
+            "output_config": {"effort": "high"},
+        });
+
+        strip_unsupported_sampling_params(
+            &mut body,
+            "claude-sonnet-4-6",
+            &ThinkingConfig::Disabled,
+        );
+
+        assert!(body.get("temperature").is_none());
+        assert!(body.get("top_p").is_none());
+        assert_eq!(body["output_config"], serde_json::json!({"effort": "high"}));
     }
 
     #[test]

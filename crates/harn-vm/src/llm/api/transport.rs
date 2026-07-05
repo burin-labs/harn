@@ -393,6 +393,13 @@ async fn vm_call_llm_api_with_body_inner(
             }
         }
     }
+    if is_anthropic_style {
+        crate::llm::providers::anthropic::strip_unsupported_sampling_params(
+            &mut body,
+            model,
+            &opts.thinking,
+        );
+    }
     if provider == "openrouter"
         && (body.get("response_format").is_some() || body.get("top_k").is_some())
     {
