@@ -1416,12 +1416,13 @@ harn models batch submit --receipt ./.harn/batches/eval-001/receipt.json \
 `--dry-run` verifies the prepare receipt, re-hashes every request file, renders
 the provider operation with credential names redacted, and writes a durable
 `harn.model_batch_submission_receipt` without network calls. Live submit
-currently supports OpenAI and Mistral file-backed batch jobs plus Anthropic
-Message Batches. Provider API keys must be present in the provider's normal
-environment variable (`OPENAI_API_KEY`, `MISTRAL_API_KEY`, or
-`ANTHROPIC_API_KEY`); subscription-plan auth remains out of scope for provider
-Batch APIs. The submission receipt records provider job ids, status, request
-file hashes, and result handles for later poll/download/rejoin work.
+currently supports OpenAI/Groq-compatible and Mistral file-backed batch jobs
+plus Anthropic Message Batches and xAI batches. Provider API keys must be
+present in the provider's normal environment variable (`OPENAI_API_KEY`,
+`GROQ_API_KEY`, `MISTRAL_API_KEY`, `ANTHROPIC_API_KEY`, or `XAI_API_KEY`);
+subscription-plan auth remains out of scope for provider Batch APIs. The
+submission receipt records provider job ids, status, request file hashes, and
+result handles for later poll/download/rejoin work.
 
 ## harn models batch status
 
@@ -1435,10 +1436,11 @@ harn models batch status --submission ./.harn/batches/eval-001/submission.json \
 ```
 
 `--dry-run` validates the submission receipt and summarizes cached job state
-without network calls. Live status currently polls OpenAI `batches/{id}`,
-Anthropic Message Batches, and Mistral batch jobs from the Harn provider
-adapter boundary, then writes a `harn.model_batch_status_receipt` with stable
-job ids, normalized lifecycle state, provider status, and result file pointers.
+without network calls. Live status currently polls OpenAI/Groq-compatible
+`batches/{id}`, Anthropic Message Batches, Mistral batch jobs, and xAI batches
+from the Harn provider adapter boundary, then writes a
+`harn.model_batch_status_receipt` with stable job ids, normalized lifecycle
+state, provider status, and result file pointers.
 
 ## harn models batch download
 
@@ -1453,11 +1455,12 @@ harn models batch download --status ./.harn/batches/eval-001/status.json \
 
 `--dry-run` validates the status receipt, requires completed jobs, and records
 the redacted provider download operations without network calls. Live download
-currently retrieves OpenAI and Mistral file content plus Anthropic Message
-Batch `results_url` output, writes provider JSONL files under `--out-dir`, and
-emits a `harn.model_batch_results_receipt` containing artifact paths, handles,
-hashes, and source receipt metadata. Use `--max-bytes` to cap each provider
-file response when working with very large batches.
+currently retrieves OpenAI/Groq-compatible and Mistral file content plus
+Anthropic Message Batch `results_url` and xAI result pages, writes provider
+JSONL files under `--out-dir`, and emits a `harn.model_batch_results_receipt`
+containing artifact paths, handles, hashes, and source receipt metadata. Use
+`--max-bytes` to cap each provider file response when working with very large
+batches.
 
 ## harn models lora export
 

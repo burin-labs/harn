@@ -296,6 +296,16 @@ fn models_batch_plan_reports_harn_live_adapter_support() {
     assert_eq!(xai["batch"]["harn_live_adapter"]["status"], true);
     assert_eq!(xai["batch"]["harn_live_adapter"]["download"], true);
 
+    let groq = models
+        .iter()
+        .find(|model| model["provider"] == "groq")
+        .expect("groq batch model");
+    assert_eq!(groq["batch"]["wire_format"], "openai");
+    assert_eq!(groq["batch"]["discount_percent"], 50);
+    assert_eq!(groq["batch"]["harn_live_adapter"]["submit"], true);
+    assert_eq!(groq["batch"]["harn_live_adapter"]["status"], true);
+    assert_eq!(groq["batch"]["harn_live_adapter"]["download"], true);
+
     let gemini = models
         .iter()
         .find(|model| model["provider"] == "gemini")
@@ -321,6 +331,177 @@ fn models_batch_plan_reports_harn_live_adapter_support() {
             .contains("live submit/status/download is not implemented"),
         "{}",
         human.stdout
+    );
+}
+
+#[test]
+fn models_batch_manifest_and_dry_run_groq_openai_compatible() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let requests_path = tmp.path().join("requests.jsonl");
+    let manifest_path = tmp.path().join("manifest.json");
+    let out_dir = tmp.path().join("prepared");
+    fs::write(
+        &requests_path,
+        r#"{"custom_id":"groq-case-1","messages":[{"role":"user","content":"grade this"}],"max_tokens":16}
+"#,
+    )
+    .expect("write requests");
+
+    let manifest = run(
+        &[
+            "models",
+            "batch",
+            "manifest",
+            "--provider",
+            "groq",
+            "--model",
+            "llama-3.1-8b-instant",
+            "--requests",
+            requests_path.to_str().expect("utf8 requests path"),
+            "--out",
+            manifest_path.to_str().expect("utf8 manifest path"),
+            "--json",
+        ],
+        &[],
+    );
+    assert_eq!(manifest.exit_code, 0, "harn stderr={}", manifest.stderr);
+
+    let prepared = run(
+        &[
+            "models",
+            "batch",
+            "prepare",
+            "--manifest",
+            manifest_path.to_str().expect("utf8 manifest path"),
+            "--out-dir",
+            out_dir.to_str().expect("utf8 out dir"),
+            "--json",
+        ],
+        &[],
+    );
+    assert_eq!(prepared.exit_code, 0, "harn stderr={}", prepared.stderr);
+    let prepared_value = parse_json(&prepared.stdout, "groq batch prepare");
+    let report = success_data(&prepared_value);
+    let job = &report["jobs"].as_array().expect("jobs")[0];
+    assert_eq!(job["provider"], "groq");
+    assert_eq!(job["batch"]["wire_format"], "openai");
+    assert_eq!(job["batch"]["discount_percent"], 50);
+    assert_eq!(job["batch"]["harn_live_adapter"]["submit"], true);
+    assert_eq!(job["endpoint"], "/v1/chat/completions");
+    assert_eq!(job["submit"]["operation"], "POST /v1/batches");
+
+    let request_file = job["request_file"].as_str().expect("request_file");
+    let request_text = fs::read_to_string(request_file).expect("read request file");
+    let request = parse_json(
+        request_text.lines().next().expect("groq line"),
+        "groq batch line",
+    );
+    assert_eq!(request["custom_id"], "groq-case-1");
+    assert_eq!(request["method"], "POST");
+    assert_eq!(request["url"], "/v1/chat/completions");
+    assert_eq!(request["body"]["model"], "llama-3.1-8b-instant");
+
+    let receipt_path = report["receipt"].as_str().expect("receipt path");
+    let submission_path = tmp.path().join("submission.json");
+    let submitted = run(
+        &[
+            "models",
+            "batch",
+            "submit",
+            "--receipt",
+            receipt_path,
+            "--out",
+            submission_path.to_str().expect("utf8 submission path"),
+            "--dry-run",
+            "--json",
+        ],
+        &[],
+    );
+    assert_eq!(submitted.exit_code, 0, "harn stderr={}", submitted.stderr);
+    let submitted_value = parse_json(&submitted.stdout, "groq batch submit");
+    let submission = success_data(&submitted_value);
+    let submitted_job = &submission["jobs"].as_array().expect("submitted jobs")[0];
+    assert_eq!(submitted_job["status"], "ready");
+    assert_eq!(submitted_job["provider"], "groq");
+    assert_eq!(
+        submitted_job["provider_operation"]["credential_env"],
+        "GROQ_API_KEY"
+    );
+    assert_eq!(
+        submitted_job["provider_operation"]["base_url"],
+        "https://api.groq.com/openai/v1"
+    );
+
+    let status_path = tmp.path().join("status.json");
+    let status = run(
+        &[
+            "models",
+            "batch",
+            "status",
+            "--submission",
+            submission_path.to_str().expect("utf8 submission path"),
+            "--out",
+            status_path.to_str().expect("utf8 status path"),
+            "--dry-run",
+            "--json",
+        ],
+        &[],
+    );
+    assert_eq!(status.exit_code, 0, "harn stderr={}", status.stderr);
+
+    let mut status_receipt = parse_json(
+        &fs::read_to_string(&status_path).expect("read status receipt"),
+        "groq status receipt",
+    );
+    status_receipt["status"] = serde_json::Value::String("completed".to_string());
+    status_receipt["completedCount"] = serde_json::Value::from(1);
+    status_receipt["readyCount"] = serde_json::Value::from(0);
+    {
+        let jobs = status_receipt["jobs"]
+            .as_array_mut()
+            .expect("mutable status jobs");
+        jobs[0]["status"] = serde_json::Value::String("completed".to_string());
+        jobs[0]["provider_batch_id"] = serde_json::Value::String("batch_groq".to_string());
+        jobs[0]["provider_status"] = serde_json::Value::String("completed".to_string());
+        jobs[0]["output_file_id"] = serde_json::Value::String("file_groq_output".to_string());
+    }
+    fs::write(
+        &status_path,
+        serde_json::to_string_pretty(&status_receipt).expect("serialize groq status"),
+    )
+    .expect("write groq status receipt");
+
+    let results_dir = tmp.path().join("results");
+    let download = run(
+        &[
+            "models",
+            "batch",
+            "download",
+            "--status",
+            status_path.to_str().expect("utf8 status path"),
+            "--out-dir",
+            results_dir.to_str().expect("utf8 results dir"),
+            "--dry-run",
+            "--json",
+        ],
+        &[],
+    );
+    assert_eq!(download.exit_code, 0, "harn stderr={}", download.stderr);
+    let download_value = parse_json(&download.stdout, "groq batch download");
+    let download_report = success_data(&download_value);
+    assert_eq!(download_report["dry_run"], true);
+    assert_eq!(download_report["artifact_count"], 1);
+    let download_job = &download_report["jobs"].as_array().expect("download jobs")[0];
+    let artifacts = download_job["artifacts"]
+        .as_array()
+        .expect("download artifacts");
+    assert_eq!(artifacts[0]["label"], "output");
+    assert_eq!(artifacts[0]["handle"], "file_groq_output");
+    assert_eq!(artifacts[0]["operation"]["provider"], "groq");
+    assert_eq!(artifacts[0]["operation"]["credential_env"], "GROQ_API_KEY");
+    assert_eq!(
+        artifacts[0]["operation"]["operation"],
+        "GET https://api.groq.com/openai/v1/files/file_groq_output/content"
     );
 }
 

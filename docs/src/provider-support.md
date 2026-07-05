@@ -24,7 +24,7 @@ No benchmark summary is baked into this checked-in page. To layer local empirica
 | `Fireworks` | OpenAI-compatible chat completions | `fireworks:accounts/fireworks/models/gpt-oss-120b` | `text` | no | yes | `none` / `native_json` | `effort,reasoning_effort` | no | Yes (50%) | `high` | `not_recorded` |
 | `Flexai` | OpenAI-compatible chat completions | `flexai` | `text` | no | yes | `none` / `none` | none | no | No | `provider_default` | `not_recorded` |
 | `Gemini API` | Gemini generateContent | `gemini:gemini-2.5-flash` | `native` | yes | yes | `native` / `native_json` | `adaptive,effort,enabled` | yes | Yes (50%) | `medium` | `not_recorded` |
-| `Groq` | OpenAI-compatible chat completions | `groq:llama-3.1-8b-instant` | `native` | yes | yes | `native` / `native_json` | none | no | No | `high` | `not_recorded` |
+| `Groq` | OpenAI-compatible chat completions | `groq:llama-3.1-8b-instant` | `native` | yes | yes | `native` / `native_json` | none | no | Yes (50%) | `high` | `not_recorded` |
 | `Huggingface` | OpenAI-compatible chat completions | `huggingface:qwen/qwen3.6*` | `native` | yes | yes | `native` / `delimited` | `disable_directive:/no_think,enabled` | no | No | `provider_default` | `not_recorded` |
 | `Hyperbolic` | OpenAI-compatible chat completions | `hyperbolic` | `text` | no | yes | `none` / `none` | none | no | No | `provider_default` | `not_recorded` |
 | `llama.cpp server` | OpenAI-compatible llama-server | `llamacpp-qwen3.6-q4` | `native` | yes | yes | `native` / `native_json` | `disable_directive:/no_think,enabled` | no | No | `medium` | `not_recorded` |

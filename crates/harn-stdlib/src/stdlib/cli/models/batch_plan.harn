@@ -161,6 +161,9 @@ fn __live_batch_adapter_key(provider: string, wire: string) -> string {
   if provider == "openai" && wire == "openai" {
     return "openai"
   }
+  if provider == "groq" && wire == "openai" {
+    return "groq"
+  }
   if provider == "mistral" && wire == "mistral" {
     return "mistral"
   }
@@ -1253,6 +1256,15 @@ fn __provider_base_url(harness: Harness, provider: string) -> string {
       ),
     )
   }
+  if provider == "groq" {
+    return trim(
+      harness.env
+        .get_or(
+        "HARN_BATCH_GROQ_BASE_URL",
+        harness.env.get_or("GROQ_BASE_URL", "https://api.groq.com/openai/v1"),
+      ),
+    )
+  }
   return ""
 }
 
@@ -1458,16 +1470,16 @@ fn __upload_jsonl_file(
   return {ok: true, file_id: file_id, status: response["status"], response: body}
 }
 
-fn __submit_openai(harness: Harness, job: dict, payload: dict) -> dict {
-  let auth = __api_key_for_job(harness, "openai")
-  let base = __provider_base_url(harness, "openai")
+fn __submit_openai_compatible(harness: Harness, job: dict, payload: dict, provider: string) -> dict {
+  let auth = __api_key_for_job(harness, provider)
+  let base = __provider_base_url(harness, provider)
   let base_job = __submission_job_base(harness, job, payload, false)
   if !safe_bool(auth["ok"], false) {
     return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
   }
   let upload = __upload_jsonl_file(
     harness,
-    "openai",
+    provider,
     __join_url(base, "/files"),
     safe_string(auth["env"], ""),
     safe_string(auth["value"], ""),
@@ -1502,7 +1514,7 @@ fn __submit_openai(harness: Harness, job: dict, payload: dict) -> dict {
       ok: false,
       job: base_job
         + {status: "failed", upload: upload, response_status: response["status"], response: body},
-      errors: ["openai batch create failed for job " + safe_string(job["id"], "")],
+      errors: [provider + " batch create failed for job " + safe_string(job["id"], "")],
     }
   }
   return {
@@ -1674,7 +1686,10 @@ fn __submit_live(harness: Harness, job: dict, payload: dict) -> dict {
     return __submit_anthropic(harness, job, payload)
   }
   if adapter == "openai" {
-    return __submit_openai(harness, job, payload)
+    return __submit_openai_compatible(harness, job, payload, "openai")
+  }
+  if adapter == "groq" {
+    return __submit_openai_compatible(harness, job, payload, "groq")
   }
   if adapter == "mistral" {
     return __submit_mistral(harness, job, payload)
@@ -1902,8 +1917,8 @@ fn __cached_status_job(job: dict, dry_run: bool) -> dict {
   }
 }
 
-fn __poll_openai_status(harness: Harness, job: dict) -> dict {
-  let auth = __api_key_for_job(harness, "openai")
+fn __poll_openai_compatible_status(harness: Harness, job: dict, provider: string) -> dict {
+  let auth = __api_key_for_job(harness, provider)
   let base_job = __status_job_base(job, false)
   if !safe_bool(auth["ok"], false) {
     return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
@@ -1912,7 +1927,7 @@ fn __poll_openai_status(harness: Harness, job: dict) -> dict {
   let response = __http_result(
     harness,
     "GET",
-    __join_url(__provider_base_url(harness, "openai"), "/batches/" + batch_id),
+    __join_url(__provider_base_url(harness, provider), "/batches/" + batch_id),
     {
       headers: {Authorization: "Bearer " + safe_string(auth["value"], ""), "content-type": "application/json"},
       timeout_ms: 120000,
@@ -1924,7 +1939,7 @@ fn __poll_openai_status(harness: Harness, job: dict) -> dict {
     return {
       ok: false,
       job: base_job + {status: "failed", response_status: response["status"], response: body},
-      errors: ["openai batch status failed for job " + safe_string(job["id"], "")],
+      errors: [provider + " batch status failed for job " + safe_string(job["id"], "")],
     }
   }
   let provider_status = body["status"] ?? nil
@@ -2117,7 +2132,10 @@ fn __status_one_job(harness: Harness, job: dict, dry_run: bool) -> dict {
   }
   let adapter = __live_batch_adapter_key(provider, wire)
   if adapter == "openai" {
-    return __poll_openai_status(harness, job)
+    return __poll_openai_compatible_status(harness, job, "openai")
+  }
+  if adapter == "groq" {
+    return __poll_openai_compatible_status(harness, job, "groq")
   }
   if adapter == "anthropic" {
     return __poll_anthropic_status(harness, job)
@@ -2408,6 +2426,7 @@ fn __dry_run_download_artifact(
 fn __download_openai_file(
   harness: Harness,
   job: dict,
+  provider: string,
   label: string,
   file_id,
   out_dir: string,
@@ -2418,19 +2437,19 @@ fn __download_openai_file(
   if handle == "" {
     return {ok: true, artifact: nil, errors: []}
   }
-  let auth_env = __provider_auth_env("openai")
+  let auth_env = __provider_auth_env(provider)
   let out_path = __download_artifact_path(out_dir, job, label)
-  let url = __join_url(__provider_base_url(harness, "openai"), "/files/" + handle + "/content")
+  let url = __join_url(__provider_base_url(harness, provider), "/files/" + handle + "/content")
   if dry_run {
-    return __dry_run_download_artifact("openai", url, auth_env, label, handle, out_path)
+    return __dry_run_download_artifact(provider, url, auth_env, label, handle, out_path)
   }
-  let auth = __api_key_for_job(harness, "openai")
+  let auth = __api_key_for_job(harness, provider)
   if !safe_bool(auth["ok"], false) {
     return {ok: false, artifact: nil, errors: [safe_string(auth["error"], "")]}
   }
   return __download_text_file(
     harness,
-    "openai",
+    provider,
     url,
     {Authorization: "Bearer " + safe_string(auth["value"], "")},
     auth_env,
@@ -2634,11 +2653,56 @@ fn __download_one_job(harness: Harness, job: dict, out_dir: string, dry_run: boo
   if adapter == "openai" {
     state = __append_download_result(
       state,
-      __download_openai_file(harness, job, "output", job["output_file_id"], out_dir, dry_run, max_bytes),
+      __download_openai_file(
+        harness,
+        job,
+        "openai",
+        "output",
+        job["output_file_id"],
+        out_dir,
+        dry_run,
+        max_bytes,
+      ),
     )
     state = __append_download_result(
       state,
-      __download_openai_file(harness, job, "error", job["error_file_id"], out_dir, dry_run, max_bytes),
+      __download_openai_file(
+        harness,
+        job,
+        "openai",
+        "error",
+        job["error_file_id"],
+        out_dir,
+        dry_run,
+        max_bytes,
+      ),
+    )
+  } else if adapter == "groq" {
+    state = __append_download_result(
+      state,
+      __download_openai_file(
+        harness,
+        job,
+        "groq",
+        "output",
+        job["output_file_id"],
+        out_dir,
+        dry_run,
+        max_bytes,
+      ),
+    )
+    state = __append_download_result(
+      state,
+      __download_openai_file(
+        harness,
+        job,
+        "groq",
+        "error",
+        job["error_file_id"],
+        out_dir,
+        dry_run,
+        max_bytes,
+      ),
     )
   } else if adapter == "anthropic" {
     state = __append_download_result(
