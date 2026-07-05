@@ -2462,3 +2462,154 @@ fn workflow_node_exit_when_verified_accepts_missing_field_for_backcompat() {
         "nodes serialized before this field was added must deserialize with the default"
     );
 }
+
+// --- Trusted-bridge scope for the runtime's own registered closures ---------
+//
+// The agent loop runs under an active execution policy. When the runtime
+// invokes a closure IT registered (a reminder provider or a session hook) and
+// that closure's body calls an app-provided bridged builtin, the call must be
+// treated as a trusted bridge call rather than a model-issued tool call.
+// Otherwise `enforce_current_policy_for_bridge_builtin` rejects it with
+// "exceeds execution policy" and kills the turn — the regression these tests
+// lock. Trust is narrowed to the runtime's own registered-closure seams, not
+// the whole policy (see the negative control below).
+
+/// Run `source` through a real VM under an active execution policy. The VM
+/// exposes:
+///   * `__probe_bridge_gate()` — a stand-in for an app-provided bridged
+///     builtin. It runs the exact gate the model's bridged-builtin calls hit
+///     at `dispatch.rs` (`enforce_current_policy_for_bridge_builtin`) using the
+///     real Burin reminder builtin name from the bug, and counts each call.
+///   * `__test_fire_reminders(session_id)` — drives the reminder-provider
+///     evaluation seam (`evaluate_and_inject` -> `evaluate_vm_provider`).
+///
+/// Returns the script result (Ok output / Err message) and the probe count.
+fn run_registered_closure_probe(source: &str) -> (Result<String, String>, usize) {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    clear_execution_policy_stacks();
+    crate::llm::reminder_providers::clear_reminder_providers();
+    clear_session_hooks();
+
+    let probe_calls = Arc::new(AtomicUsize::new(0));
+    let probe_for_rt = Arc::clone(&probe_calls);
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let result = rt.block_on(async move {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async move {
+                let chunk = crate::compile_source(source)?;
+                let mut vm = crate::Vm::new();
+                crate::stdlib::register_vm_stdlib(&mut vm);
+
+                let probe = Arc::clone(&probe_for_rt);
+                vm.register_builtin("__probe_bridge_gate", move |_args, _out| {
+                    probe.fetch_add(1, Ordering::SeqCst);
+                    crate::orchestration::enforce_current_policy_for_bridge_builtin(
+                        "evaluate_burin_user_reminder_rules",
+                    )?;
+                    Ok(crate::value::VmValue::String(arcstr::ArcStr::from("ok")))
+                });
+
+                vm.register_async_builtin("__test_fire_reminders", |ctx, args| async move {
+                    let session_id = args
+                        .first()
+                        .map(crate::value::VmValue::display)
+                        .unwrap_or_default();
+                    let report = crate::llm::reminder_providers::evaluate_and_inject(
+                        Some(&ctx),
+                        crate::orchestration::HookEvent::SessionStart,
+                        &session_id,
+                        serde_json::json!({}),
+                        serde_json::json!({}),
+                    )
+                    .await?;
+                    Ok(crate::json_to_vm_value(&report))
+                });
+
+                push_execution_policy(CapabilityPolicy {
+                    tools: vec!["read".to_string()],
+                    ..Default::default()
+                });
+                let outcome = vm.execute(&chunk).await;
+                pop_execution_policy();
+                outcome
+                    .map(|_| vm.output().to_string())
+                    .map_err(|error| error.to_string())
+            })
+            .await
+    });
+
+    clear_execution_policy_stacks();
+    crate::llm::reminder_providers::clear_reminder_providers();
+    clear_session_hooks();
+    (result, probe_calls.load(Ordering::SeqCst))
+}
+
+// A registered reminder provider AND a registered session hook, both whose
+// bodies call a bridged builtin, must evaluate cleanly while the agent loop's
+// execution policy is active. Before the trusted-bridge guard was added at the
+// provider/hook invocation seams, the first such call died with
+// `tool_rejected: ... exceeds execution policy`, taking down every turn.
+#[test]
+fn registered_provider_and_session_hook_evaluate_under_execution_policy() {
+    let script = r#"pipeline main() {
+  let session = agent_session_open("trusted-bridge-probe")
+  agent_session_reset(session)
+  register_reminder_provider({
+    id: "probe-provider",
+    subscribes_to: ["session_start"],
+    evaluate: { ctx ->
+      __probe_bridge_gate()
+      return []
+    },
+  })
+  register_session_hook("session_start", { _payload ->
+    __probe_bridge_gate()
+    return {control: "allow"}
+  })
+  __test_fire_reminders(session)
+  __host_fire_session_hook("session_start", {session: {id: session}, event: "session_start"})
+}"#;
+
+    let (result, probe_calls) = run_registered_closure_probe(script);
+    result.expect(
+        "a registered reminder provider and session hook must evaluate under an active \
+         execution policy without tripping the bridged-builtin gate",
+    );
+    assert_eq!(
+        probe_calls, 2,
+        "both the reminder-provider closure and the session-hook closure must have executed \
+         the bridged-builtin probe exactly once each"
+    );
+}
+
+// Negative control: a bridged builtin invoked OUTSIDE any registered
+// provider/hook closure (i.e. at the top of the pipeline, the way a
+// model-issued tool/builtin call reaches `dispatch.rs`) must STILL be rejected
+// under the same policy. This proves the guard narrows trust to the runtime's
+// own registered-closure seams rather than weakening the policy globally.
+#[test]
+fn bridged_builtin_outside_registered_closure_is_still_rejected_under_policy() {
+    let script = r"pipeline main() {
+  __probe_bridge_gate()
+}";
+
+    let (result, probe_calls) = run_registered_closure_probe(script);
+    let error = result.expect_err(
+        "a bridged builtin invoked outside a registered provider/hook closure must remain \
+         rejected while an execution policy is active",
+    );
+    assert!(
+        error.contains("exceeds execution policy"),
+        "rejection must come from the execution-policy gate, got: {error}"
+    );
+    assert_eq!(
+        probe_calls, 1,
+        "the probe should have run once and been rejected by the gate"
+    );
+}

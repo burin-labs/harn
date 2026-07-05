@@ -876,6 +876,11 @@ async fn invoke_vm_hook_handler(
         _ => return Ok(None),
     };
     let arg = crate::stdlib::json_to_vm_value(payload);
+    // First-party registered hook (`register_session_hook` /
+    // `register_checkpoint_hook`): the runtime chose to invoke this closure,
+    // so its body's bridge/builtin calls are a trusted bridge call and must
+    // not trip the agent loop's active execution policy. Held across the await.
+    let _trusted_bridge_guard = crate::orchestration::allow_trusted_bridge_calls();
     let result = vm.call_closure_pub(&closure, &[arg]).await;
     if let Some(ctx) = ctx {
         ctx.forward_output(&vm.take_output());
@@ -902,6 +907,11 @@ async fn invoke_vm_lifecycle_hooks(
         .unwrap_or("")
         .to_string();
     for registration in registrations {
+        // First-party registered lifecycle hook: the runtime chose to invoke
+        // this closure, so its body's bridge/builtin calls are a trusted bridge
+        // call and must not trip the agent loop's active execution policy. Held
+        // across resolution and the invocation await for this registration.
+        let _trusted_bridge_guard = crate::orchestration::allow_trusted_bridge_calls();
         record_hook_call(&session_id, event, &registration.handler_name, payload);
         let closure = resolve_lifecycle_handler(&mut vm, &registration.handler).await?;
         let raw = vm.call_closure_pub(&closure, &[arg.clone()]).await?;
@@ -1641,6 +1651,11 @@ pub async fn run_lifecycle_hooks_with_control_with_ctx(
     let mut current_payload = payload.clone();
     let mut accumulated_modify: Option<serde_json::Value> = None;
     for registration in registrations {
+        // First-party registered lifecycle hook (see `invoke_vm_lifecycle_hooks`):
+        // the runtime chose to invoke this closure, so its body's bridge/builtin
+        // calls are a trusted bridge call and must not trip the agent loop's
+        // active execution policy. Held across the invocation await.
+        let _trusted_bridge_guard = crate::orchestration::allow_trusted_bridge_calls();
         let arg = crate::stdlib::json_to_vm_value(&current_payload);
         record_hook_call(
             &session_id,
