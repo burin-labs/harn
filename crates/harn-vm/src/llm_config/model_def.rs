@@ -416,10 +416,14 @@ pub struct ModelLadderDef {
     pub label: Option<String>,
 }
 
-/// One rung of a [`ModelLadderDef`]. Mirrors the `{model, provider?}` shape
-/// accepted by the `models:` option and the `model_ladder(...)` std
-/// constructor. Provider is optional: when omitted it is inferred from the
-/// model id (or the call's base provider) at lowering time.
+/// One rung of a [`ModelLadderDef`]. Mirrors the
+/// `{model, provider?, label?, family?, capabilities?}` shape accepted by the
+/// `models:` option and the `model_ladder(...)` std constructor. Provider is
+/// optional: when omitted it is inferred from the model id (or the call's base
+/// provider) at lowering time. `family`/`capabilities` are optional,
+/// serde-absent-when-unset informational fields carried for downstream
+/// selectors (e.g. harn-cloud free-tier routing); they do not affect Harn's
+/// own transport failover.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct ModelLadderStepDef {
     pub model: String,
@@ -427,6 +431,17 @@ pub struct ModelLadderStepDef {
     pub provider: Option<String>,
     #[serde(default)]
     pub label: Option<String>,
+    /// Normalized model-family token (e.g. `"haiku"`, `"sonnet"`) carried for
+    /// downstream selectors such as harn-cloud's free-tier routing. Purely
+    /// informational to Harn's own ladder lowering — it does not affect
+    /// transport failover. Absent from serialized output when unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub family: Option<String>,
+    /// Capability tags this rung claims (e.g. `["vision", "tools"]`). Carried
+    /// for downstream capability-aware routing; informational to Harn's own
+    /// ladder lowering. Absent from serialized output when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub capabilities: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
@@ -582,5 +597,58 @@ impl ModelAvailability {
             "unknown" => Some(Self::Unknown),
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod ladder_step_tests {
+    use super::ModelLadderStepDef;
+
+    #[test]
+    fn family_and_capabilities_round_trip() {
+        let step = ModelLadderStepDef {
+            model: "claude-haiku-4-5".to_string(),
+            provider: Some("anthropic".to_string()),
+            label: Some("cheap".to_string()),
+            family: Some("haiku".to_string()),
+            capabilities: vec!["vision".to_string(), "tools".to_string()],
+        };
+        let json = serde_json::to_string(&step).expect("serialize");
+        let back: ModelLadderStepDef = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(step, back);
+        assert!(json.contains("\"family\":\"haiku\""));
+        assert!(json.contains("\"capabilities\":[\"vision\",\"tools\"]"));
+    }
+
+    #[test]
+    fn unset_family_and_capabilities_are_absent_from_serialized_output() {
+        // A step that sets neither new field must serialize byte-identically
+        // to the pre-existing {model, provider?, label?} shape: the new keys
+        // are entirely absent (not `null`, not `[]`), so already-serialized
+        // catalog bundles/records stay unchanged.
+        let step = ModelLadderStepDef {
+            model: "mock-cheap".to_string(),
+            provider: Some("mock".to_string()),
+            label: None,
+            family: None,
+            capabilities: Vec::new(),
+        };
+        let json = serde_json::to_string(&step).expect("serialize");
+        assert_eq!(
+            json,
+            r#"{"model":"mock-cheap","provider":"mock","label":null}"#
+        );
+        assert!(!json.contains("family"));
+        assert!(!json.contains("capabilities"));
+    }
+
+    #[test]
+    fn deserializes_without_new_fields() {
+        // Records written before this change (no family/capabilities keys)
+        // still deserialize, defaulting the new fields.
+        let step: ModelLadderStepDef =
+            serde_json::from_str(r#"{"model":"mock-cheap"}"#).expect("deserialize legacy");
+        assert_eq!(step.family, None);
+        assert!(step.capabilities.is_empty());
     }
 }

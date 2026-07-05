@@ -21,7 +21,16 @@ pipeline test(task) {
     "llm provider=" + to_string(projected.provider) + " budget="
       + to_string(projected.budget?.max_cost_usd),
   )
-  let ladder: ModelLadder = ["mock-small", {provider: "mock", model: "mock-large", when: "transport_failure"}]
+  let ladder: ModelLadder = [
+    "mock-small",
+    {
+      provider: "mock",
+      model: "mock-large",
+      when: "transport_failure",
+      family: "large",
+      capabilities: ["tools"],
+    },
+  ]
   log("ladder len=" + to_string(len(model_ladder(ladder))))
   let loop_opts: AgentLoopOptions = {
     provider: "mock",
