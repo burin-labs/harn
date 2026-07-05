@@ -295,6 +295,26 @@ the host. `workflow_repair_stage_graph` (`std/workflow/patterns`) is the
 one-stage sugar over this policy: a single delegated goal stage that retries
 with feedback until it settles.
 
+### Stage option flattening and the capability ceiling
+
+Before a stage runs its agent loop, its policy structs — model policy,
+auto-compaction, tool spec, capability + approval policy, the workflow skill
+registry, and nested-execution attribution — are *flattened* into the single
+options dict the loop consumes. That flattening lives in Harn
+(`workflow_flatten_agent_loop_options` in `std/workflow/stage.harn`): Harn
+decides *what options the loop gets*.
+
+The host keeps exactly one thing here — enforcement. Rust re-derives the
+stage's capability ceiling (the intersection of the tool spec's implied policy
+with the stage `capability_policy`) and, when the flattened dict crosses back
+into the host, checks that its `policy` never *widens* that ceiling. A
+flattener may narrow a capability, budget (`recursion_limit`), root allowlist,
+side-effect level, or sandbox profile, but any attempt to add a tool or
+capability, raise a budget, add a root, or loosen the sandbox is rejected with
+a `tool_rejected` error naming the widened dimension. The ceiling is authority;
+Harn is trusted only for shape, so the host re-checks rather than assuming the
+flattener narrowed correctly.
+
 Verifier requirements can also be published as structured contract inputs for
 earlier planning and execution stages. Harn injects these contracts into the
 stage prompt automatically so the model sees exact verifier-owned identifiers,
