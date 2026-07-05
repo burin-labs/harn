@@ -113,6 +113,16 @@ pub struct ProviderDefaults {
     #[serde(default)]
     pub files_api_supported: Option<bool>,
     #[serde(default)]
+    pub batch_api: Option<bool>,
+    #[serde(default)]
+    pub batch_wire_format: Option<String>,
+    #[serde(default)]
+    pub batch_input_mode: Option<String>,
+    #[serde(default)]
+    pub batch_discount_percent: Option<u32>,
+    #[serde(default)]
+    pub batch_turnaround_hours: Option<u32>,
+    #[serde(default)]
     pub seed_supported: Option<bool>,
     #[serde(default)]
     pub top_k_supported: Option<bool>,
@@ -160,6 +170,17 @@ macro_rules! merge_provider_defaults {
         );
         $op(&mut $dst.reasoning_wire_format, &$src.reasoning_wire_format);
         $op(&mut $dst.files_api_supported, &$src.files_api_supported);
+        $op(&mut $dst.batch_api, &$src.batch_api);
+        $op(&mut $dst.batch_wire_format, &$src.batch_wire_format);
+        $op(&mut $dst.batch_input_mode, &$src.batch_input_mode);
+        $op(
+            &mut $dst.batch_discount_percent,
+            &$src.batch_discount_percent,
+        );
+        $op(
+            &mut $dst.batch_turnaround_hours,
+            &$src.batch_turnaround_hours,
+        );
         $op(&mut $dst.seed_supported, &$src.seed_supported);
         $op(&mut $dst.top_k_supported, &$src.top_k_supported);
         $op(&mut $dst.temperature_supported, &$src.temperature_supported);
@@ -191,6 +212,11 @@ impl ProviderDefaults {
             || self.file_upload_wire_format.is_some()
             || self.reasoning_wire_format.is_some()
             || self.files_api_supported.is_some()
+            || self.batch_api.is_some()
+            || self.batch_wire_format.is_some()
+            || self.batch_input_mode.is_some()
+            || self.batch_discount_percent.is_some()
+            || self.batch_turnaround_hours.is_some()
             || self.seed_supported.is_some()
             || self.top_k_supported.is_some()
             || self.temperature_supported.is_some()
@@ -310,6 +336,11 @@ pub struct Capabilities {
     pub conversation_state: bool,
     pub compaction: bool,
     pub background_mode: bool,
+    pub batch_api: bool,
+    pub batch_wire_format: Option<String>,
+    pub batch_input_mode: Option<String>,
+    pub batch_discount_percent: Option<u32>,
+    pub batch_turnaround_hours: Option<u32>,
     pub tool_approval_policy: Option<String>,
     pub max_tools: Option<u32>,
     pub prompt_caching: bool,
@@ -425,6 +456,11 @@ impl Default for Capabilities {
             conversation_state: false,
             compaction: false,
             background_mode: false,
+            batch_api: false,
+            batch_wire_format: None,
+            batch_input_mode: None,
+            batch_discount_percent: None,
+            batch_turnaround_hours: None,
             tool_approval_policy: None,
             max_tools: None,
             prompt_caching: false,

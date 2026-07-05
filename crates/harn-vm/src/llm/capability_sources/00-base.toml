@@ -47,6 +47,22 @@
 #   compaction      : whether provider-side truncation/compaction controls are
 #                     available.
 #   background_mode : whether provider-side background jobs are available.
+#   batch_api       : whether this route can be submitted through a
+#                     provider-side asynchronous Batch API for offline,
+#                     non-interactive work such as eval grading, corpus
+#                     refreshes, distillation, or bulk analysis.
+#   batch_wire_format:
+#                     provider batch request/result family. Known values:
+#                     openai, anthropic_messages, gemini, mistral, fireworks,
+#                     xai.
+#   batch_input_mode:
+#                     how work is submitted: jsonl_file, inline_requests, or
+#                     jsonl_or_inline.
+#   batch_discount_percent:
+#                     published discount versus equivalent synchronous API
+#                     traffic, when known.
+#   batch_turnaround_hours:
+#                     published target or maximum turnaround window, in hours.
 #   tool_approval_policy:
 #                     approval policy story for provider-executed tools.
 #   max_tools       : cap on tool-definition count the provider will accept.

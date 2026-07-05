@@ -32,7 +32,8 @@
       ],
       "features": [
         "prompt_caching",
-        "thinking"
+        "thinking",
+        "batch"
       ],
       "caveats": [],
       "latency_p50_ms": 2500
@@ -334,7 +335,9 @@
       "protocols": [
         "openai_chat_completions"
       ],
-      "features": [],
+      "features": [
+        "batch"
+      ],
       "caveats": [],
       "latency_p50_ms": 1400
     },
@@ -394,7 +397,9 @@
       "protocols": [
         "gemini_generate_content"
       ],
-      "features": [],
+      "features": [
+        "batch"
+      ],
       "caveats": [],
       "latency_p50_ms": 1800
     },
@@ -625,7 +630,8 @@
         "openai_chat_completions"
       ],
       "features": [
-        "native_tools"
+        "native_tools",
+        "batch"
       ],
       "caveats": [],
       "latency_p50_ms": 1800
@@ -824,7 +830,9 @@
       "protocols": [
         "openai_chat_completions"
       ],
-      "features": [],
+      "features": [
+        "batch"
+      ],
       "caveats": [],
       "latency_p50_ms": 1800
     },
@@ -995,7 +1003,9 @@
       "protocols": [
         "openai_chat_completions"
       ],
-      "features": [],
+      "features": [
+        "batch"
+      ],
       "caveats": [],
       "latency_p50_ms": 1600
     },
@@ -1101,7 +1111,8 @@
       "features": [
         "responses_api",
         "native_tools",
-        "reasoning"
+        "reasoning",
+        "batch"
       ],
       "caveats": [],
       "latency_p50_ms": 1600

@@ -10,7 +10,7 @@ auth_style = "header"
 auth_header = "x-api-key"
 auth_env = "ANTHROPIC_API_KEY"
 chat_endpoint = "/messages"
-features = ["prompt_caching", "thinking"]
+features = ["prompt_caching", "thinking", "batch"]
 cost_per_1k_in = 0.003
 cost_per_1k_out = 0.015
 latency_p50_ms = 2500
@@ -27,6 +27,7 @@ auth_style = "bearer"
 auth_env = "OPENAI_API_KEY"
 chat_endpoint = "/chat/completions"
 completion_endpoint = "/completions"
+features = ["batch"]
 cost_per_1k_in = 0.0025
 cost_per_1k_out = 0.010
 latency_p50_ms = 1800
@@ -89,6 +90,7 @@ auth_style = "header"
 auth_header = "x-goog-api-key"
 auth_env = ["GEMINI_API_KEY", "GOOGLE_API_KEY"]
 chat_endpoint = "/v1beta/models"
+features = ["batch"]
 cost_per_1k_in = 0.00125
 cost_per_1k_out = 0.005
 latency_p50_ms = 1800
@@ -107,7 +109,7 @@ completion_endpoint = "/completions"
 cost_per_1k_in = 0.0005
 cost_per_1k_out = 0.0015
 latency_p50_ms = 1800
-features = ["native_tools"]
+features = ["native_tools", "batch"]
 
 [providers.mistral.healthcheck]
 method = "GET"
@@ -139,7 +141,7 @@ completion_endpoint = "/completions"
 cost_per_1k_in = 0.001
 cost_per_1k_out = 0.002
 latency_p50_ms = 1600
-features = ["responses_api", "native_tools", "reasoning"]
+features = ["responses_api", "native_tools", "reasoning", "batch"]
 
 [providers.xai.healthcheck]
 method = "GET"
@@ -155,6 +157,7 @@ completion_endpoint = "/completions"
 cost_per_1k_in = 0.0002
 cost_per_1k_out = 0.0006
 latency_p50_ms = 1600
+features = ["batch"]
 
 [providers.together.healthcheck]
 method = "GET"
@@ -225,6 +228,7 @@ completion_endpoint = "/completions"
 cost_per_1k_in = 0.0002
 cost_per_1k_out = 0.0006
 latency_p50_ms = 1400
+features = ["batch"]
 
 [providers.fireworks.healthcheck]
 method = "GET"

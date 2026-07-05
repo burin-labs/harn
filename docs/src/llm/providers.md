@@ -316,6 +316,11 @@ let caps = provider_capabilities("anthropic", "claude-opus-4-7")
 //   structured_output_mode: "xml_tagged",
 //   supports_assistant_prefill: false,
 //   prefers_xml_tools: true,
+//   batch_api: true,
+//   batch_wire_format: "anthropic_messages",
+//   batch_input_mode: "inline_requests",
+//   batch_discount_percent: 50,
+//   batch_turnaround_hours: 24,
 //   thinking_block_style: "thinking_blocks",
 // }
 
@@ -334,9 +339,9 @@ if caps.tools && "bm25" in caps.tool_search {
 }
 ```
 
-OpenAI Responses-capable rows also expose `responses_api`, `hosted_tools`,
-`remote_mcp`, `conversation_state`, `compaction`, `background_mode`, and
-`tool_approval_policy`.
+Provider-specific rows also expose `responses_api`, `hosted_tools`,
+`remote_mcp`, `conversation_state`, `compaction`, `background_mode`,
+`batch_api`, and `tool_approval_policy` when that provider supports them.
 
 The same matrix is the source of truth for Harn's default tool-calling
 mode. Alias-level `tool_format` still wins when set explicitly, but
@@ -422,6 +427,11 @@ accepts these fields:
 | `conversation_state` | bool | Provider-managed previous-response chaining is available. |
 | `compaction` | bool | Provider-side truncation/compaction controls are available. |
 | `background_mode` | bool | Provider-side background jobs are available. |
+| `batch_api` | bool | The route can be submitted through a provider-side asynchronous Batch API for offline, non-interactive work. |
+| `batch_wire_format` | string | Provider batch request/result family: `openai`, `anthropic_messages`, `gemini`, `mistral`, `fireworks`, or `xai`. |
+| `batch_input_mode` | string | Batch submission mode: `jsonl_file`, `inline_requests`, or `jsonl_or_inline`. |
+| `batch_discount_percent` | int | Published discount versus equivalent synchronous traffic, when known. |
+| `batch_turnaround_hours` | int | Published target or maximum turnaround window, in hours, when known. |
 | `tool_approval_policy` | string | Approval policy story for provider-executed tools, for example `provider_or_harn`. |
 | `max_tools` | int | Cap on tool count. `harn lint` will warn if a registry exceeds the smallest cap any active provider advertises. |
 | `prompt_caching` | bool | Provider-side prompt caching is available. |
@@ -462,6 +472,16 @@ editing the manifest is awkward:
   `capabilities.` prefix: just `[[provider.<name>]]`). Useful when a
   script detects a proxied endpoint at runtime.
 - `provider_capabilities_clear()` — revert to shipped defaults.
+
+Batch APIs are modeled as Harn provider capability data instead of Burin eval
+branches. `provider_capabilities(provider, model)` reports an effective
+`batch_api` flag from the provider catalog's `batch` feature plus any
+model-specific capability row, and only reports wire/input details when that
+effective flag is true. Use batch lanes only for asynchronous work that does
+not need turn-by-turn tool feedback: offline grading, prompt/corpus refreshes,
+distillation jobs, and low-priority eval analysis. Live coding-agent loops
+still need synchronous provider calls because every tool result influences the
+next model turn.
 
 ### Packaged provider adapters via `[llm]`
 

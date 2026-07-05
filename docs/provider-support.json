@@ -42,6 +42,8 @@
           "enabled"
         ],
         "prompt_or_context_cache": true,
+        "batch_api": true,
+        "batch_discount_percent": 50,
         "usage_accounting_confidence": "high"
       },
       "empirical": {
@@ -97,6 +99,8 @@
         "streaming": true,
         "reasoning_knobs": [],
         "prompt_or_context_cache": false,
+        "batch_api": false,
+        "batch_discount_percent": null,
         "usage_accounting_confidence": "provider_default"
       },
       "empirical": {
@@ -148,6 +152,8 @@
         "streaming": true,
         "reasoning_knobs": [],
         "prompt_or_context_cache": false,
+        "batch_api": false,
+        "batch_discount_percent": null,
         "usage_accounting_confidence": "provider_default"
       },
       "empirical": {
@@ -201,6 +207,8 @@
           "reasoning_effort"
         ],
         "prompt_or_context_cache": true,
+        "batch_api": false,
+        "batch_discount_percent": null,
         "usage_accounting_confidence": "high"
       },
       "empirical": {
@@ -248,6 +256,8 @@
         "streaming": true,
         "reasoning_knobs": [],
         "prompt_or_context_cache": false,
+        "batch_api": false,
+        "batch_discount_percent": null,
         "usage_accounting_confidence": "provider_default"
       },
       "empirical": {
@@ -301,6 +311,8 @@
           "reasoning_effort"
         ],
         "prompt_or_context_cache": false,
+        "batch_api": false,
+        "batch_discount_percent": null,
         "usage_accounting_confidence": "high"
       },
       "empirical": {
@@ -360,6 +372,8 @@
           "adaptive"
         ],
         "prompt_or_context_cache": false,
+        "batch_api": false,
+        "batch_discount_percent": null,
         "usage_accounting_confidence": "high"
       },
       "empirical": {
@@ -413,6 +427,8 @@
           "enabled"
         ],
         "prompt_or_context_cache": true,
+        "batch_api": false,
+        "batch_discount_percent": null,
         "usage_accounting_confidence": "high"
       },
       "empirical": {
@@ -466,6 +482,8 @@
           "enabled"
         ],
         "prompt_or_context_cache": true,
+        "batch_api": false,
+        "batch_discount_percent": null,
         "usage_accounting_confidence": "high"
       },
       "empirical": {
@@ -518,6 +536,8 @@
           "enabled"
         ],
         "prompt_or_context_cache": true,
+        "batch_api": false,
+        "batch_discount_percent": null,
         "usage_accounting_confidence": "high"
       },
       "empirical": {
@@ -571,6 +591,8 @@
           "reasoning_effort"
         ],
         "prompt_or_context_cache": false,
+        "batch_api": true,
+        "batch_discount_percent": 50,
         "usage_accounting_confidence": "high"
       },
       "empirical": {
@@ -618,6 +640,8 @@
         "streaming": true,
         "reasoning_knobs": [],
         "prompt_or_context_cache": false,
+        "batch_api": false,
+        "batch_discount_percent": null,
         "usage_accounting_confidence": "provider_default"
       },
       "empirical": {
@@ -673,6 +697,8 @@
           "enabled"
         ],
         "prompt_or_context_cache": true,
+        "batch_api": true,
+        "batch_discount_percent": 50,
         "usage_accounting_confidence": "medium"
       },
       "empirical": {
@@ -730,6 +756,8 @@
         "streaming": true,
         "reasoning_knobs": [],
         "prompt_or_context_cache": false,
+        "batch_api": false,
+        "batch_discount_percent": null,
         "usage_accounting_confidence": "high"
       },
       "empirical": {
@@ -783,6 +811,8 @@
           "enabled"
         ],
         "prompt_or_context_cache": false,
+        "batch_api": false,
+        "batch_discount_percent": null,
         "usage_accounting_confidence": "provider_default"
       },
       "empirical": {
@@ -830,6 +860,8 @@
         "streaming": true,
         "reasoning_knobs": [],
         "prompt_or_context_cache": false,
+        "batch_api": false,
+        "batch_discount_percent": null,
         "usage_accounting_confidence": "provider_default"
       },
       "empirical": {
@@ -881,6 +913,8 @@
           "enabled"
         ],
         "prompt_or_context_cache": false,
+        "batch_api": false,
+        "batch_discount_percent": null,
         "usage_accounting_confidence": "medium"
       },
       "empirical": {
@@ -937,6 +971,8 @@
           "enabled"
         ],
         "prompt_or_context_cache": false,
+        "batch_api": false,
+        "batch_discount_percent": null,
         "usage_accounting_confidence": "low"
       },
       "empirical": {
@@ -997,6 +1033,8 @@
           "enabled"
         ],
         "prompt_or_context_cache": true,
+        "batch_api": false,
+        "batch_discount_percent": null,
         "usage_accounting_confidence": "high"
       },
       "empirical": {
@@ -1046,6 +1084,8 @@
         "streaming": true,
         "reasoning_knobs": [],
         "prompt_or_context_cache": true,
+        "batch_api": false,
+        "batch_discount_percent": null,
         "usage_accounting_confidence": "medium"
       },
       "empirical": {
@@ -1103,6 +1143,8 @@
           "enabled"
         ],
         "prompt_or_context_cache": false,
+        "batch_api": false,
+        "batch_discount_percent": null,
         "usage_accounting_confidence": "medium"
       },
       "empirical": {
@@ -1163,6 +1205,8 @@
           "enabled"
         ],
         "prompt_or_context_cache": true,
+        "batch_api": false,
+        "batch_discount_percent": null,
         "usage_accounting_confidence": "high"
       },
       "empirical": {
@@ -1210,6 +1254,8 @@
         "streaming": true,
         "reasoning_knobs": [],
         "prompt_or_context_cache": false,
+        "batch_api": false,
+        "batch_discount_percent": null,
         "usage_accounting_confidence": "provider_default"
       },
       "empirical": {
@@ -1263,6 +1309,8 @@
           "enabled"
         ],
         "prompt_or_context_cache": true,
+        "batch_api": false,
+        "batch_discount_percent": null,
         "usage_accounting_confidence": "high"
       },
       "empirical": {
@@ -1311,6 +1359,8 @@
         "streaming": true,
         "reasoning_knobs": [],
         "prompt_or_context_cache": false,
+        "batch_api": false,
+        "batch_discount_percent": null,
         "usage_accounting_confidence": "high"
       },
       "empirical": {
@@ -1370,6 +1420,8 @@
         "streaming": true,
         "reasoning_knobs": [],
         "prompt_or_context_cache": false,
+        "batch_api": true,
+        "batch_discount_percent": 50,
         "usage_accounting_confidence": "high"
       },
       "empirical": {
@@ -1430,6 +1482,8 @@
           "enabled"
         ],
         "prompt_or_context_cache": true,
+        "batch_api": false,
+        "batch_discount_percent": null,
         "usage_accounting_confidence": "high"
       },
       "empirical": {
@@ -1477,6 +1531,8 @@
         "streaming": true,
         "reasoning_knobs": [],
         "prompt_or_context_cache": false,
+        "batch_api": true,
+        "batch_discount_percent": null,
         "usage_accounting_confidence": "provider_default"
       },
       "empirical": {
@@ -1530,6 +1586,8 @@
           "reasoning_effort"
         ],
         "prompt_or_context_cache": false,
+        "batch_api": false,
+        "batch_discount_percent": null,
         "usage_accounting_confidence": "high"
       },
       "empirical": {
@@ -1579,6 +1637,8 @@
         "streaming": true,
         "reasoning_knobs": [],
         "prompt_or_context_cache": false,
+        "batch_api": false,
+        "batch_discount_percent": null,
         "usage_accounting_confidence": "provider_default"
       },
       "empirical": {
@@ -1624,6 +1684,8 @@
         "streaming": true,
         "reasoning_knobs": [],
         "prompt_or_context_cache": false,
+        "batch_api": false,
+        "batch_discount_percent": null,
         "usage_accounting_confidence": "local_zero_cost"
       },
       "empirical": {
@@ -1674,6 +1736,8 @@
         "streaming": true,
         "reasoning_knobs": [],
         "prompt_or_context_cache": false,
+        "batch_api": true,
+        "batch_discount_percent": null,
         "usage_accounting_confidence": "high"
       },
       "empirical": {
@@ -1725,6 +1789,8 @@
         "streaming": true,
         "reasoning_knobs": [],
         "prompt_or_context_cache": false,
+        "batch_api": false,
+        "batch_discount_percent": null,
         "usage_accounting_confidence": "provider_default"
       },
       "empirical": {
@@ -1770,6 +1836,8 @@
         "streaming": true,
         "reasoning_knobs": [],
         "prompt_or_context_cache": false,
+        "batch_api": false,
+        "batch_discount_percent": null,
         "usage_accounting_confidence": "local_zero_cost"
       },
       "empirical": {
@@ -1822,6 +1890,8 @@
           "adaptive"
         ],
         "prompt_or_context_cache": true,
+        "batch_api": true,
+        "batch_discount_percent": null,
         "usage_accounting_confidence": "high"
       },
       "empirical": {
@@ -1875,6 +1945,8 @@
           "enabled"
         ],
         "prompt_or_context_cache": true,
+        "batch_api": false,
+        "batch_discount_percent": null,
         "usage_accounting_confidence": "high"
       },
       "empirical": {
