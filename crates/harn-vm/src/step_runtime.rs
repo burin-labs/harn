@@ -63,6 +63,10 @@ pub struct PersonaDefinition {
     /// so a `Vec` keeps insertion order and matches the manifest's authored
     /// ordering.
     pub stages: Vec<StageDecl>,
+    /// The persona's declared output style (how it shapes its prose), surfaced
+    /// to Harn via `persona_output_style()`. `None` when the persona declares
+    /// no style.
+    pub output_style: Option<harn_modules::personas::PersonaOutputStyle>,
 }
 
 impl StepDefinition {
@@ -253,9 +257,87 @@ pub fn register_persona_from_dict(args: Vec<VmValue>) -> Result<VmValue, VmError
             .map(str::to_string)
             .unwrap_or_else(|| function.clone()),
         stages: parse_stage_decls(meta.get("stages"))?,
+        output_style: parse_output_style(meta.get("output_style")),
     };
     register_persona(&function, definition);
     Ok(VmValue::Nil)
+}
+
+/// Parse an `output_style` metadata value into a [`PersonaOutputStyle`].
+/// Accepts a bare string (a named style) or a dict with `name`/`instructions`.
+/// Returns `None` for nil or an empty style.
+fn parse_output_style(
+    value: Option<&VmValue>,
+) -> Option<harn_modules::personas::PersonaOutputStyle> {
+    use harn_modules::personas::PersonaOutputStyle;
+    let style = match value? {
+        VmValue::Nil => return None,
+        VmValue::String(name) => PersonaOutputStyle::from_name(name.to_string()),
+        VmValue::Dict(_) => {
+            let dict = value?.as_dict()?;
+            PersonaOutputStyle {
+                name: dict.get("name").and_then(vm_str).map(str::to_string),
+                instructions: dict
+                    .get("instructions")
+                    .and_then(vm_str)
+                    .map(str::to_string),
+            }
+        }
+        _ => return None,
+    };
+    (!style.is_empty()).then_some(style)
+}
+
+/// Build the Harn dict shape for a persona output style.
+fn output_style_to_vm(style: &harn_modules::personas::PersonaOutputStyle) -> VmValue {
+    use crate::value::{intern_key, DictMap};
+    let mut map = DictMap::new();
+    map.insert(
+        intern_key("name"),
+        style
+            .name
+            .as_deref()
+            .map(|name| VmValue::String(arcstr::ArcStr::from(name)))
+            .unwrap_or(VmValue::Nil),
+    );
+    map.insert(
+        intern_key("instructions"),
+        style
+            .instructions
+            .as_deref()
+            .map(|text| VmValue::String(arcstr::ArcStr::from(text)))
+            .unwrap_or(VmValue::Nil),
+    );
+    VmValue::dict(map)
+}
+
+/// Look up a persona's declared output style. With no argument (or nil), reads
+/// the currently-active persona (top of the persona stack); with a persona
+/// function name, reads that persona from the registry. Returns
+/// `{name, instructions}` or nil.
+pub fn persona_output_style(args: Vec<VmValue>) -> VmValue {
+    if let Some(function) = args.first().and_then(vm_str) {
+        return PERSONA_REGISTRY.with(|registry| {
+            registry
+                .borrow()
+                .get(function)
+                .and_then(|definition| definition.output_style.as_ref().map(output_style_to_vm))
+                .unwrap_or(VmValue::Nil)
+        });
+    }
+    PERSONA_STACK.with(|stack| {
+        stack
+            .borrow()
+            .last()
+            .and_then(|active| {
+                active
+                    .definition
+                    .output_style
+                    .as_ref()
+                    .map(output_style_to_vm)
+            })
+            .unwrap_or(VmValue::Nil)
+    })
 }
 
 fn parse_stage_decls(value: Option<&VmValue>) -> Result<Vec<StageDecl>, VmError> {
@@ -964,8 +1046,11 @@ pub fn register_step_builtins(vm: &mut crate::vm::Vm) {
     }
 }
 
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] =
-    &[&__REGISTER_STEP_DEF, &__REGISTER_PERSONA_DEF];
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &__REGISTER_STEP_DEF,
+    &__REGISTER_PERSONA_DEF,
+    &__PERSONA_OUTPUT_STYLE_DEF,
+];
 
 #[harn_builtin(category = "step_runtime", runtime_only = true)]
 fn __register_step(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -977,6 +1062,15 @@ fn __register_persona(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     register_persona_from_dict(args.to_vec())
 }
 
+#[harn_builtin(
+    sig = "__persona_output_style(function?: string) -> dict",
+    category = "step_runtime",
+    runtime_only = true
+)]
+fn __persona_output_style(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    Ok(persona_output_style(args.to_vec()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -984,6 +1078,46 @@ mod tests {
 
     fn fresh_state() {
         reset_thread_local_state();
+    }
+
+    #[test]
+    fn persona_output_style_reads_registry_and_active_stack() {
+        use crate::value::{intern_key, DictMap};
+        fresh_state();
+
+        // Register a persona whose metadata carries a table-form output style.
+        let mut style = DictMap::new();
+        style.put_str("name", "concise");
+        style.put_str("instructions", "Be terse.");
+        let mut meta = DictMap::new();
+        meta.put_str("name", "Reviewer");
+        meta.insert(intern_key("output_style"), VmValue::dict(style));
+        register_persona_from_dict(vec![
+            VmValue::String(arcstr::ArcStr::from("reviewer_fn")),
+            VmValue::dict(meta),
+        ])
+        .expect("persona registers");
+
+        // Lookup by function name returns the declared style.
+        let by_name =
+            persona_output_style(vec![VmValue::String(arcstr::ArcStr::from("reviewer_fn"))]);
+        let dict = by_name.as_dict().expect("dict");
+        assert_eq!(
+            dict.get("name").map(VmValue::display).as_deref(),
+            Some("concise")
+        );
+        assert_eq!(
+            dict.get("instructions").map(VmValue::display).as_deref(),
+            Some("Be terse.")
+        );
+
+        // No active persona on the stack → nil.
+        assert!(matches!(persona_output_style(vec![]), VmValue::Nil));
+        // Unknown persona → nil.
+        assert!(matches!(
+            persona_output_style(vec![VmValue::String(arcstr::ArcStr::from("nope"))]),
+            VmValue::Nil
+        ));
     }
 
     #[test]

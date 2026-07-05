@@ -1062,3 +1062,18 @@ pub fn persona_crystallization_bundle(history, options = nil) {
     warnings: [],
   }
 }
+
+/**
+ * Return the declared output style of a persona as `{name, instructions}`, or
+ * nil when none is declared.
+ *
+ * With no argument, reads the currently-active persona (the one whose `@step`
+ * is executing). Pass a persona function name to read that persona from the
+ * registry regardless of what is active.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn persona_output_style(function = nil) {
+  return __persona_output_style(function)
+}

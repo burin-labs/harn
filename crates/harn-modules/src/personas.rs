@@ -12,6 +12,60 @@ pub struct PersonaManifestDocument {
     pub personas: Vec<PersonaManifestEntry>,
 }
 
+/// A persona's declared output style — how it should shape its prose (tone,
+/// verbosity, formatting). Accepts either a bare string (a named style) or a
+/// table with `name` and/or `instructions`. This is the persona-manifest field
+/// behind Burin's output-style surface; Harn owns the declaration + accessor,
+/// Burin owns any editor/workbench UI over it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct PersonaOutputStyle {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instructions: Option<String>,
+}
+
+impl PersonaOutputStyle {
+    /// Build a style from a bare name (the `output_style = "concise"` form).
+    pub fn from_name(name: impl Into<String>) -> Self {
+        Self {
+            name: Some(name.into()),
+            instructions: None,
+        }
+    }
+
+    /// True when the style carries no name and no instructions.
+    pub fn is_empty(&self) -> bool {
+        self.name.is_none() && self.instructions.is_none()
+    }
+}
+
+impl<'de> Deserialize<'de> for PersonaOutputStyle {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        // Accept `output_style = "concise"` (a named style) or a table with
+        // `name` / `instructions`. Unknown table keys are rejected so a typo
+        // surfaces rather than being silently dropped.
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Repr {
+            Name(String),
+            Table {
+                #[serde(default)]
+                name: Option<String>,
+                #[serde(default)]
+                instructions: Option<String>,
+            },
+        }
+        Ok(match Repr::deserialize(deserializer)? {
+            Repr::Name(name) => PersonaOutputStyle::from_name(name),
+            Repr::Table { name, instructions } => PersonaOutputStyle { name, instructions },
+        })
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct PersonaManifestEntry {
     #[serde(default)]
@@ -57,6 +111,10 @@ pub struct PersonaManifestEntry {
     /// runs.
     #[serde(default)]
     pub stages: Vec<PersonaStageDecl>,
+    /// How this persona should shape its output prose. A bare string names a
+    /// style; a table carries `name` and/or inline `instructions`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_style: Option<PersonaOutputStyle>,
     #[serde(flatten, default)]
     pub extra: BTreeMap<String, toml::Value>,
 }
@@ -380,6 +438,8 @@ pub fn extract_personas_from_program(program: &[SNode]) -> PersonaManifestDocume
                 .or(Some(PersonaReceiptPolicy::Optional)),
             steps,
             stages: attr_stage_list(persona_attr),
+            output_style: attr_string(persona_attr, "output_style")
+                .map(PersonaOutputStyle::from_name),
             ..PersonaManifestEntry::default()
         });
     }
@@ -1302,6 +1362,51 @@ receipt_policy = "optional"
             Path::new("harn.toml"),
             &parsed.personas,
             &context(&["merge_captain", "review_captain"]),
+        )
+        .expect("manifest validates");
+    }
+
+    #[test]
+    fn parses_output_style_as_string_and_table() {
+        let parsed = parse_persona_manifest_str(
+            r#"
+[[personas]]
+name = "concise_bot"
+description = "Terse."
+entry_workflow = "workflows/x.harn#run"
+tools = ["github"]
+autonomy = "suggest"
+receipts = "optional"
+output_style = "concise"
+
+[[personas]]
+name = "styled_bot"
+description = "Styled."
+entry_workflow = "workflows/y.harn#run"
+tools = ["github"]
+autonomy = "suggest"
+receipts = "optional"
+output_style = { name = "friendly", instructions = "Use warm, plain language." }
+"#,
+        )
+        .expect("manifest parses");
+
+        let first = parsed.personas[0].output_style.as_ref().expect("style set");
+        assert_eq!(first.name.as_deref(), Some("concise"));
+        assert_eq!(first.instructions, None);
+
+        let second = parsed.personas[1].output_style.as_ref().expect("style set");
+        assert_eq!(second.name.as_deref(), Some("friendly"));
+        assert_eq!(
+            second.instructions.as_deref(),
+            Some("Use warm, plain language.")
+        );
+
+        // A persona without the field leaves it None and validates fine.
+        validate_persona_manifests(
+            Path::new("harn.toml"),
+            &parsed.personas,
+            &context(&["concise_bot", "styled_bot"]),
         )
         .expect("manifest validates");
     }

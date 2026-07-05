@@ -431,6 +431,7 @@ impl TypeChecker {
             "model",
             "owner",
             "stages",
+            "output_style",
         ];
         for arg in &attr.args {
             let Some(name) = self.require_named_arg("@persona", arg) else {
@@ -453,6 +454,21 @@ impl TypeChecker {
                 }
                 "budget" => self.expect_budget_dict("@persona", name, &arg.value, arg.span),
                 "stages" => self.expect_persona_stages("@persona", &arg.value, arg.span),
+                "output_style" => {
+                    // A bare style name (string/symbol) or a `{ name,
+                    // instructions }` dict.
+                    if !is_symbol_like(&arg.value.node)
+                        && !matches!(arg.value.node, Node::DictLiteral(_))
+                    {
+                        self.warning_at(
+                            Code::InvalidAttributeArgument,
+                            "`@persona(output_style: ...)` must be a string/symbol or a \
+                             { name, instructions } dict"
+                                .to_string(),
+                            arg.span,
+                        );
+                    }
+                }
                 "receipts" => {
                     if !is_symbol_like(&arg.value.node)
                         && !matches!(arg.value.node, Node::BoolLiteral(_))
