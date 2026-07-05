@@ -9,6 +9,73 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.9.16
+
+### Added
+
+- Add std/verification warm-state lifecycle helpers so verification profiles can start, reuse, and tear down
+  hostlib-owned background verifier processes from data-declared rows.
+- **Local Agents API artifacts.** File artifacts emitted by Harn sessions can now
+  be indexed and served through workspace-scoped artifact metadata and content
+  endpoints (#4096).
+- Added a never-approvable **catastrophic command floor** to `command_policy`.
+  The deterministic command-risk scanner now emits a distinct `catastrophic`
+  label for irreversible destruction — fork bomb; `git reset --hard`;
+  `git clean -fd`; `git push --force`/`-f`/`--force-with-lease`; `rm -rf`
+  escaping the workspace root or wiping it in place; `dd of=…`; `mkfs`;
+  `chmod -R 000`; `truncate -s 0` of a source file; and `>`/`>>` redirection
+  onto a source file — detected through adversarial quoting, chained-command
+  splitting, `bash -c` recursion, and the `sudo`/`env`/`nice`/`nohup`/`time`/
+  `timeout`/`command`/`builtin` wrapper family. A `catastrophic` command is
+  always hard-denied (a `status: "blocked"` envelope, no child spawned)
+  regardless of policy configuration and is never routed to the consent gate —
+  it cannot be approved. Policies may promote other scanner labels to the same
+  never-approvable tier with a new `command_policy({deny_labels: […]})` set.
+  Also fixed the `destructive` heuristic to key on `dd of=` (a raw overwrite)
+  instead of the read-only `dd if=`.
+- Add a live Fireworks Batch API adapter for `harn models batch submit`,
+  `status`, and `download`, including Fireworks-native request JSONL and output
+  dataset download receipts.
+- Added a Gemini Batch API live adapter for `harn models batch` submit, status, and download.
+- Added `std/agent/hypothesis`: a keyed store of human/agent hypotheses (id,
+  statement, a mutable free-form `status`, and provenance) layered on
+  `std/session-store`. `hypothesis_open` / `hypothesis_set_status` /
+  `hypothesis_get` / `hypothesis_list` (with an optional status filter) /
+  `hypothesis_delete` project the append-only stream; events carry the special
+  `{kind: "hypothesis"}` tag.
+- Added `memory_reminders(namespace, options?)` to `std/memory`: a
+  deterministic callable returning the active records flagged to auto-surface
+  as reminders (default flag `auto_surface`, overridable via `options.flag`) —
+  a filtered enumeration safe to call every turn.
+- Extended `std/memory` with mutable record metadata. `memory_store` now accepts
+  `options.status`, `options.scope`, and `options.flags` (a `{name: bool}` map); records
+  written without them stay byte-identical to existing logs. New `memory_update(namespace,
+  id, patch, options?)` appends an in-place, projection-time overlay by record id (value,
+  tags, status, scope, flags, provenance) while keeping the log append-only, and
+  `memory_list(namespace, options?)` enumerates active records newest-first with
+  `status` / `scope` / `tag` / `flag` filters. "Rejected" and similar states are just a
+  `status`, so soft-retired records stay queryable.
+- Add live `harn models batch` submit/status/download adapter support for
+  Parasail's OpenAI-compatible Batch API.
+- Added a persona `output_style` field. A persona manifest (or `.harn`
+  `@persona(...)`) can now declare how the persona shapes its prose — either a
+  bare style name (`output_style = "concise"`) or a `{ name, instructions }`
+  table. The new `persona_output_style(function?)` accessor (from
+  `std/personas/prelude`) returns the active — or a named — persona's style as
+  `{name, instructions}`, or nil when none is declared.
+- Added live `harn models batch` submit/status/download adapter support for Together's Batch API.
+
+### Fixed
+
+- **Nested workflow runs no longer clobber the caller's trace.** Running
+  `workflow_execute` / `workflow_run_repair` inside an enclosing timing span
+  (e.g. a run-level `start_timing` / `timed(...)` held across the run) no longer
+  resets the tracing collector out from under the caller. Previously the
+  enclosing span was stranded — its `end_timing` threw
+  `__timing_end: unknown timing handle` — and already-completed sibling spans
+  were erased. Tracing is now reset only when the collector is idle, so the
+  standalone case is unchanged while nested runs preserve the caller's spans.
+
 ## v0.9.15
 
 ### Added
