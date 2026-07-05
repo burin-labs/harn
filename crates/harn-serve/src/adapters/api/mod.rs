@@ -1158,7 +1158,7 @@ mod tests {
         let server = ApiServer::new(ApiServerConfig::for_pipeline(
             script.to_string_lossy().to_string(),
         ));
-        let state = server.state.clone();
+        let state = server.state;
 
         state.register_session_update(json!({
             "params": {
