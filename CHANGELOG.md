@@ -9,6 +9,265 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.9.13
+
+### Added
+
+- Added code-index `Field` and `EnumCase` graph nodes with normalized `access_level` metadata.
+- Surface completion-gate `judge_decision` reason and confirm fields for fire-rate telemetry.
+- **Model batch manifests.** `harn models batch manifest` now turns JSONL
+  request ledgers into durable provider-neutral batch manifests with grouped
+  requests, stable custom ids, row hashes, and catalog-backed provider/model
+  metadata for offline eval, judge, corpus-refresh, and distillation jobs.
+- Add `harn models batch plan` to discover provider Batch API eligibility and offline workload constraints.
+- Add `harn models batch prepare` to turn model batch manifests into provider-native request files and
+  deterministic prepare receipts without live provider calls.
+- Added `harn models batch status` to validate submission receipts and poll provider batch lifecycle state.
+- Add `harn models batch submit` to validate prepared batch receipts, submit supported provider jobs,
+  and write durable submission receipts.
+- **Model ladders.** `llm_call` (and the `llm_call_structured*` variants) gain
+  a first-class `models:` option — an ordered fallback ladder of
+  `{model, provider?, options?}` steps (plain `["model-a", "model-b"]` strings
+  are sugar) — plus `ladder: "<name>"` to resolve a named `[model_ladders.<name>]`
+  ladder from the catalog. A ladder lowers onto the existing routing chain, so
+  it advances to the next step **only** on transport-class failures
+  (connection/timeout/429/5xx/throttled-empty, via the same failover
+  classifier) and never on schema-validation or 4xx policy errors. Schema
+  retries re-ask the same step's model. Each advance emits an
+  `llm_models_advance` trace event (`agent_trace()`), and the winning model is
+  surfaced on the existing `routing` result block. `models:`/`ladder:` cannot be
+  combined with each other, with an explicit `model:`/`provider:` pin, or with an
+  explicit `routing:` policy — any second model-selection surface is a hard error.
+  The typed `LlmCallOptions` / `AgentLoopOptions` aliases and the `ModelLadderStep`
+  alias (`{model, provider?, options?, label?}`) accept the option too, so ladders
+  compose through `agent_loop`.
+- **`std/agent/governors` and a unified detector surface in `std/agent/stall`.**
+  New composable pace/budget GOVERNORS and a one-vocabulary DETECTOR subsystem,
+  generalizing the guardrails a host would otherwise hand-roll on top of
+  `agent_loop`. `governor_post_turn(policy)` returns a `post_turn_callback` that
+  watches a monotone consumption signal (iterations / tokens / cost) against a
+  budget ceiling and steers with a shared `proceed` / `warn` / `abort`
+  vocabulary; `compose_post_turn([...])` chains several callbacks and
+  `with_governance(opts, {governor, detectors})` folds a governor and a
+  `DetectorSpec` into an options dict through existing seams only (no new
+  `agent_loop` hooks). `DetectorSpec` lowers loop / no-progress / stuck rows onto
+  native `stall_diagnostics` and adds a token-runaway overlay
+  (`token_runaway_decision` / `token_runaway_post_turn`) that emits the same
+  `agent_loop_stall_warning` event. `governors_selftest()` plus a live-firing
+  conformance test assert the callback fires on the real `agent_compute_post_turn`
+  payload shape, so a payload drift fails CI instead of silently disabling the
+  governor.
+- Workflow stages gain three ergonomics on top of the retry-with-feedback
+  machinery. A stage's `verify` may now be a **function** (fn-verify): it
+  receives the settled attempt result and returns `{ok, findings?}` (or a
+  bool), gates the retry branch on *any* stage kind, and threads its findings
+  into the next attempt's repair prompt. `workflow_stages`
+  (`std/workflow/patterns`) expands a concise linear `WorkflowStagesSpec` into
+  the `{entry, nodes, edges}` graph `workflow_execute` consumes — pure sugar
+  whose output is byte-identical to the hand-authored `workflow_graph`. And
+  `workflow_run_repair` (new `std/workflow/repair`) runs the
+  run→validate→repair loop as a first-class helper: one agent stage, a
+  caller-supplied verifier (callable / `{command}` / `{assert_text}`), and
+  automatic re-prompting with the findings up to `max_attempts`. All three
+  reuse the embedded PR-I2 attempt loop (`std/workflow/stage.harn`); none adds
+  a loop of its own.
+- **JSON salvage helpers in `std/llm/safe`.** New `extract_first_json_object(text)`,
+  `extract_first_json_value(text)`, and `parse_first_json(text)` promote the
+  balanced-brace scanners downstream repos hand-rolled for pulling the first
+  JSON value out of sloppy freeform LLM text (leading prose, trailing garbage,
+  code fences, braces inside strings, escaped quotes). `parse_first_json`
+  composes with `strip_code_fences` and skips balanced-but-invalid candidates,
+  returning the first span `json_parse` accepts, or nil. These are the
+  salvage path for text you did not produce — prefer `llm_call_structured` /
+  `safe_structured_call` when you control the request. The workflow and
+  pipeline docs also gain a pipeline-vs-workflow glossary box (the `pipeline`
+  keyword vs. the `workflow_execute` stage-graph runtime, plus the
+  llm_call < agent_loop < workflow ladder one-liner).
+- **Added `agent_completion_gate` (`std/agent/judge`)** — a configured done-time
+  completion gate that composes the existing `verify_completion` and bounded
+  `verify_completion_judge` / `done_judge` seams (no new loop seam). It
+  generalizes burin-code's completion-verification policy: an ordered veto ladder,
+  a source-write **evidence** requirement (only source writes count as progress
+  toward "done" — cosmetic/test-scaffold writes do not), a per-session veto budget
+  (`max_vetoes`, default 3) with strict post-write classes (a red verifier, or a
+  source write whose verifier has not gone green) the budget never releases, and
+  AND-of-oracles verify composition (`veto_combine`-configurable). Every domain
+  fact stays a host callback (`facts`, `classify_write`, `verify_command`); with
+  no callbacks the gate degrades to judge-only mode and surfaces the degraded state
+  on the returned bundle (`_completion_gate.facts_available = false`) instead of
+  fabricating a pass. The gate never keys on a done-sentinel string. Presets can
+  carry a default via the new `completion_gate` pack row.
+- **`std/agent/goal`: a typed long-running goal object.** `goal(spec)` normalizes
+  `{objective, success_criteria, constraints, budget}`, where each success
+  criterion may carry a host-fact `check` callback that makes it machine-checkable.
+  `goal_check(goal, facts?)` evaluates that deterministic floor;
+  `goal_judge(goal, opts?)` returns a `done_judge` config (the semantic ceiling)
+  that composes with the existing `agent_verify_or_continue` seam; and
+  `with_goal(opts, goal)` renders the objective/criteria/constraints into every
+  outbound request through the existing per-turn context-profile fragment channel
+  (#2631) — no new hook surface. `goal_reloop(goal, opts?)` returns `agent_loop`
+  options that drive the bounded "not yet met, re-enter with findings" re-loop
+  through `agent_loop`'s own completion loop (a `verify_completion` gate over
+  `goal_check` vetoes an unmet goal, threads the unmet criteria into the
+  transcript, and re-runs the agent up to `max_attempts`, default 3) rather than
+  a hand-written loop, and `goal_pin(goal)` bridges a goal into a self-replacing
+  `std/agent/pins` pin.
+- **`std/agent/lanes` and `std/agent/overlays`: tool-surface lanes and
+  prompt-nudge overlays.** `lane_policy(rows, task, opts?)` classifies a task
+  once into a named lane from a data table (`default_lane_rows()` ports
+  burin-code's `agent_lane_for_task` decision ladder: 1-4 explicit file
+  targets narrows to a `look`/`search`/`edit`/`run`/... `explicit_patch` lane,
+  otherwise the unrestricted `general` lane) and narrows `opts.tools`/
+  `opts.policy` down to that lane's allowed tools for the run, reusing the
+  same tool-surface-narrowing primitives already shared with
+  `std/agent/stance` — no new Rust, no new hook surface. Narrowing via
+  `policy.tools` means a hidden tool is never *named* to the model as an
+  alternative when the model attempts it: harn-vm's native tool-ceiling denial
+  path reports only the tool actually attempted. `lane_scope_classifier(rows)`
+  optionally lowers the same rows onto the existing `pre_turn_scope_classifier`
+  seam for per-turn lane telemetry (never narrows or skips a turn itself).
+  `overlay_policy(rows, mode, opts?)` layers data-driven, mode/lane-specific
+  prompt-nudge lines onto the outbound system prompt through the existing
+  `context_profile.prompt_fragments` channel (#2631) — it only ever adds a
+  fragment alongside the caller's explicit `system`/fragments, never replaces
+  them, and an `options.overrides` entry fills (and wins over) a row's slot.
+  `agent_preset`/`agent_preset_register` gain `lane_policy`/`overlay_policy`
+  pack keys (fill-nil, explicit caller input always wins); the built-in
+  `repair` preset ships a default lane table and `review_captain` ships a
+  default overlay row.
+- **`std/agent/pins`: compaction pins as data.** A new module generalizes
+  Burin's structural working-set into a typed pin taxonomy — `pin(kind, content,
+  opts?)` / `unpin(pins, id)` over the kinds `artifact_ref`, `constraint`,
+  `decision`, `goal`, and `no_compact`. Pins survive compaction by construction:
+  `pin_reminder(pin)` lowers to a `preserve_on_compact` system reminder and
+  `pin_compaction_policy(pins)` emits `compaction_policy` preserve directives.
+  The same pins double as reachability-GC roots — `with_pin_roots(opts, pins)`
+  feeds pin content into the existing `reachability_gc` projection `roots` config
+  so any referenced stale tool result is kept, not reclaimed.
+  `recognize_no_compact(text)` is a documented ingestion adapter for Burin's
+  literal `[no-compact]` heading marker. Agent presets can carry a default
+  `pin_policy` pack row (the long-running captains do). Additive stdlib only — no
+  new host surface.
+- Workflow stages support retry-with-feedback. `retry_policy.feedback`
+  (`true` or `{max_chars}`) appends the prior attempt's verification findings
+  to the next attempt's task, and `retry_policy.repair_prompt_builder` is a
+  closure that returns the full replacement task from the retry context
+  (`{task, attempt, findings, verification, error, prior_text, stage}`). With
+  neither set, retries stay byte-identical to before. The per-stage attempt
+  loop now runs in embedded Harn (`std/workflow/stage.harn`); Rust keeps only
+  the enforcement/attestation leaves. Added `workflow_repair_stage_graph`
+  (`std/workflow/patterns`) — one-stage sugar over the stage retry policy for
+  validate→repair loops.
+
+### Changed
+
+- `harn models lora export` now stamps exported tool-calling rows and manifests
+  with deterministic provenance fields for source ids, split/license defaults,
+  teacher and target route metadata, tool-schema hashes, and prompt-template
+  hashes.
+- `harn models lora plan` now accepts `--trainer` and emits
+  trainer-backend-specific SFT contract notes for TRL, Unsloth, and external
+  trainers.
+- Model capability reports now surface provider Batch API support, input format,
+  published discount, and turnaround metadata for offline orchestration planning.
+- **Promoted `agent_preset` to the stable agent-cell surface** (dropped the
+  stale `@api_stability: experimental` tag): `agent_preset(kind, options?)`
+  is how you build `agent_loop` options. Kinds now live in a registry —
+  `agent_preset_register(kind, {family?, pack?})` makes user-defined kinds
+  first-class (validated through the same path as the built-ins) and
+  `agent_preset_kinds()` discovers them. Each kind carries fill-nil pack rows
+  (per-kind `provider`, `timeout_ms`, session-cumulative `budget`, and
+  `model_ladder` defaults) that fill only nil/absent keys and never override
+  explicit caller input. Presets also bake a bounded default transport retry
+  onto the effective `llm_caller:` seam (`with_retry`, `max_attempts: 3`,
+  transport-class failures only — never schema/auth/budget/policy),
+  restoring the resilience the removed `llm_retries: 2` profile default used
+  to provide; `retry: false` opts out, `retry: {...}` tunes it. Typed alias
+  follow-ups: `AgentPresetOptions` gains `retry` / `model_ladder`, and
+  `AgentLoopOptions` gains `history` (the #4030 caller-managed history
+  seeding option).
+- **Documentation: consolidated the R1 orchestration-primitive guidance.**
+  [Choosing an agent abstraction](docs/src/concepts/abstraction-ladder.md) now
+  opens with the one-line ladder — `llm_call` (one request) < `agent_loop` (one
+  goal, run to completion) < `workflow` (more than one goal, attempt, or model) —
+  spells out the "never hand-write a `while` around `llm_call`" rule, and states
+  explicitly that `agent_preset` and model ladders are *not* rungs. It adds a
+  **placement contract** table naming the canonical home for every cross-cutting
+  mechanism (completion gate → `std/agent/judge`, governors → `std/agent/governors`,
+  unified detectors → `std/agent/stall`, lanes → `std/agent/lanes`, overlays →
+  `std/agent/overlays`, compaction → `std/agent/autocompact`, scratchpad →
+  `std/agent/scratchpad`, default mutation tools → `agent_edit_tools`, and preset
+  packs → `std/agent/presets`). The `harn-orchestration` skill gained the same
+  ladder framing plus the `models:` / `ladder:`, `agent_edit_tools`,
+  retry-with-feedback (`repair_prompt_builder` / `feedback`), fn-verify,
+  `workflow_stages`, and `workflow_run_repair` surfaces. The `llm_call` options
+  reference now documents `models:` / `ladder:` and points to the 0.10 migration
+  for the removed `llm_retries` / `llm_backoff_ms` / `transcript_policy` options.
+- **Stage policy flattening moved to Harn.** The per-stage collapse of the
+  ~15 workflow policy structs (model policy, auto-compaction, tool spec,
+  capability + approval policy, skill registry, nested-execution attribution)
+  into the `agent_loop` options dict now lives in
+  `std/workflow/stage.workflow_flatten_agent_loop_options` instead of Rust
+  (design D5: Harn decides *what options the loop gets*). Rust keeps only the
+  enforcement leaf: it re-derives the capability ceiling
+  (`tool spec ∩ stage capability_policy`) and, when the flattened dict re-enters
+  the host, rejects any result whose `policy` *widens* that ceiling — a buggy or
+  hostile flattener can narrow a capability / budget / permission ceiling but can
+  never widen one (`CapabilityPolicy::assert_within_ceiling`, surfaced as a
+  `tool_rejected` error). Flattening output is byte-compatible with the prior
+  Rust path, so replay records are unchanged.
+- **Dev setup now emits a machine-shared Cargo `build-dir`** (`$TMPDIR/cargo-build-shared`)
+  alongside the per-worktree `target-dir`, so intermediate artifacts are deduped across
+  worktrees (sccache's Rust hash is target-path-dependent and never was). Also fixed
+  `scripts/prune_stale_targets.sh` dying silently under `set -euo pipefail` before it
+  could GC stale per-worktree target dirs; it now always prints its summary line.
+
+### Fixed
+
+- Deduplicate Anthropic sampling-parameter stripping across primary, stream,
+  completion, Bedrock Claude, and provider-override request paths.
+- Break the actionless-200 empty-completion re-dispatch storm. When a
+  route returns HTTP 200 with an empty visible+tool channel
+  (`completion_tokens=8 ... delivered no content` — e.g. an Anthropic
+  escalation target fed a huge cross-provider-bridged context), the
+  agent loop used to re-dispatch the full context and continue, 18-43x
+  per run. Terminal unproductive completions now feed the always-on
+  per-route circuit breaker as a dedicated streak (and no longer reset
+  it as a success); after a small cap the breaker opens and the next
+  dispatch fails fast with `circuit_open` before re-sending the context,
+  so the loop degrades onto the primary/cheap-model result instead of
+  hemorrhaging full-context re-sends. Provider-general and independent of
+  the `llm.rate_governor` flag.
+- Agent escalations now attach catalog-backed equivalent failover routes for
+  non-primary model calls, including no-dispatch failover for actionless
+  completions.
+- **Stage flatten ceiling re-check now covers every widenable dimension.** The
+  Rust re-check that rejects a Harn stage flattener from widening the capability
+  ceiling (`CapabilityPolicy::assert_within_ceiling`) previously guarded only 7
+  of the 10 `CapabilityPolicy` fields, leaving `process_sandbox` (subprocess
+  host-FS read/write roots + presets), `tool_arg_constraints` (per-argument path
+  scoping), and `tool_annotations` (which drive constraint resolution and
+  per-tool side-effect classification) unchecked — a flattener could widen any of
+  them undetected. All three are now enforced with the same
+  narrowing-allowed / widening-rejected semantics and a `tool_rejected` error
+  naming the dimension. The side-effect-level comparison also now ranks through
+  the canonical `SideEffectLevel::rank_str` ladder (fail-closed on unknown
+  levels, and grows at the top) instead of a hand-rolled fail-open rank.
+- The egress SSRF classifier now also blocks the remaining reserved IPv4
+  ranges: IETF protocol assignments `192.0.0/24`, 6to4 relay anycast
+  `192.88.99/24`, and class E `240/4`.
+- Recover provider tool-call dialects that previously looked actionless to the
+  agent loop: OpenAI-compatible responses that misplaced complete Harn text-tool
+  syntax into native `function.name` or `function.arguments`, and DeepSeek DSML
+  `tool_calls` blocks that were already recoverable but still injected
+  parse-error feedback every turn.
+
+### Security
+
+- Block outbound HTTP redirects that downgrade a public HTTPS request to HTTP;
+  loopback downgrade targets remain available only through the explicit
+  `allow_loopback` egress-policy hatch.
+
 ## v0.9.12
 
 ### Breaking
