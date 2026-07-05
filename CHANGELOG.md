@@ -9,6 +9,38 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.9.14
+
+### Added
+
+- `std/agent/canon` now discovers installed single-pack and manifest-backed
+  `harn.canon` package contributions under `.harn/packages` when no explicit
+  canon root is configured.
+- `harn package check` now accepts contribution-only packages as publishable
+  package surfaces instead of requiring a module export or rule pack.
+- Added `harn models batch download` for provider-normalized batch result receipts.
+- Add a live xAI adapter to `harn models batch` for JSONL file submit, status polling, and result download receipts.
+
+### Changed
+
+- **GitHub Actions spend reports now run through Harn.** The spend report
+  helper keeps its existing shell entrypoint, but aggregation, sorting, repo
+  filtering, JSON parsing, and table rendering now live in a Harn script with
+  focused Harn tests instead of inline Python snippets.
+- `harn models batch plan` now reports whether Harn has a live
+  submit/status/download adapter for each provider route instead of only failing
+  at submit time, and the CLI reference/JSON contract document the
+  `batch.harn_live_adapter` field.
+
+### Fixed
+
+- **Agent `on_delta` streaming now uses the canonical `llm_call` wrapper (#4036).**
+  Streaming agent turns inherit routing policies, schema retries, budget checks,
+  and provider observability instead of bypassing them through a raw provider
+  call.
+- Reject arguments passed to `list.sort` instead of silently ignoring custom sort callbacks.
+- Accept `stall_diagnostics.repair_diagnostics` as the documented nested repair-diagnostics config shape.
+
 ## v0.9.13
 
 ### Added

@@ -84,6 +84,17 @@ pub struct WorkflowNode {
     /// it against each attempt's result (`workflow_evaluate_verification`).
     #[serde(skip)]
     pub raw_verify: Option<VmValue>,
+    /// Raw `executor` VmValue — a caller-supplied closure that runs as the
+    /// stage's leaf *instead of* spawning a delegated worker. When set, the
+    /// embedded stage loop (`workflow_execute_stage_attempts`) invokes it with
+    /// the retry context and shapes its return into the same settled payload
+    /// `__host_stage_execute_once` produces, so the SAME retry-with-feedback
+    /// threading, fn-verify gate, and (Rust sole-writer) attempt recording run
+    /// around it. `WorkflowNode` has no typed `executor` field — the closure
+    /// can't round-trip through serde — so it is lifted here and re-attached by
+    /// `node_to_vm_with_raw` (stage.rs), exactly like `raw_verify`.
+    #[serde(skip)]
+    pub raw_executor: Option<VmValue>,
 }
 
 impl PartialEq for WorkflowNode {
@@ -543,6 +554,17 @@ pub fn parse_workflow_node_value(value: &VmValue, label: &str) -> Result<Workflo
             )
         })
         .cloned();
+    // Lift a caller-supplied executor closure (inline stage leaf) so it
+    // survives the serde crossing, mirroring the fn-verify treatment above.
+    node.raw_executor = dict
+        .and_then(|d| d.get("executor"))
+        .filter(|value| {
+            matches!(
+                value,
+                VmValue::Closure(_) | VmValue::BuiltinRef(_) | VmValue::BuiltinRefId(_)
+            )
+        })
+        .cloned();
     node.retry_policy.repair_prompt_builder = retry_repair_prompt_builder_from_dict(dict);
     Ok(node)
 }
@@ -699,6 +721,19 @@ pub fn normalize_workflow_value(value: &VmValue) -> Result<WorkflowGraph, VmErro
             // closure survives the graph round-trip (serde drops it).
             node.raw_verify = raw_node
                 .and_then(|raw_node| raw_node.get("verify"))
+                .filter(|value| {
+                    matches!(
+                        value,
+                        VmValue::Closure(_) | VmValue::BuiltinRef(_) | VmValue::BuiltinRefId(_)
+                    )
+                })
+                .cloned();
+        }
+        if node.raw_executor.is_none() {
+            // Inline executor: lift a callable off the source dict so the
+            // closure survives the graph round-trip (serde drops it).
+            node.raw_executor = raw_node
+                .and_then(|raw_node| raw_node.get("executor"))
                 .filter(|value| {
                     matches!(
                         value,

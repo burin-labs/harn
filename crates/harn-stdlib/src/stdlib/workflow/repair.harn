@@ -146,11 +146,22 @@ fn __repair_resolve_verify(verify) {
  * or an assertion check (`{assert_text?, expect_status?}`). Feedback threading
  * defaults on: a failing attempt's findings are appended to the next attempt's
  * task unless a `repair_prompt_builder` closure takes over.
+ *
+ * `executor` is an optional caller-supplied closure that runs as the stage
+ * leaf *instead of* spawning a delegated worker — the escape hatch for an
+ * embedder with a bespoke in-process agent loop (custom post-turn gates, tool
+ * binders, compaction/session policies) that wants harn's retry-with-feedback
+ * loop wrapped around it. It receives the retry context
+ * `{task, attempt, prior_findings, prior_verification, prior_text, artifacts}`
+ * and returns `{result | text, artifacts?, transcript?, verification?}`; the
+ * `verify`/retry/feedback machinery runs around it exactly as for the delegated
+ * path. `nil` (the default) keeps the delegated-worker leaf.
  */
 pub type ValidateRepairConfig = {
   task: string,
   prompt?: string,
   verify?: any,
+  executor?: any,
   max_attempts?: int,
   feedback?: bool | {max_chars?: int},
   repair_prompt_builder?: any,
@@ -204,6 +215,7 @@ pub fn workflow_run_repair(config: ValidateRepairConfig) {
       model_policy: cfg?.model_policy,
       retry_policy: retry_cfg,
       verify: verify,
+      executor: cfg?.executor,
       output_kind: cfg?.output_kind,
     },
   )

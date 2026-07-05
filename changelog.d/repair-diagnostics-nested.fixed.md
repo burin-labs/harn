@@ -1,1 +1,0 @@
-- Accept `stall_diagnostics.repair_diagnostics` as the documented nested repair-diagnostics config shape.
