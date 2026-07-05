@@ -1,0 +1,32 @@
+import "std/personas/prelude"
+
+@persona(output_style: "concise")
+fn styled_reviewer() {
+  log("reviewing")
+}
+
+@persona(output_style: {name: "friendly", instructions: "Be warm."})
+fn styled_helper() {
+  log("helping")
+}
+
+@persona(name: "styled_plain")
+fn styled_plain() {
+  log("plain")
+}
+
+/**
+ * Reads persona-declared output styles (string form + { name, instructions }
+ * table form) back via persona_output_style(), and confirms personas without
+ * a declared style — and unknown personas — return nil.
+ */
+pipeline default() {
+  let a = persona_output_style("styled_reviewer")
+  __io_println(a.name)
+  __io_println(a.instructions == nil)
+  let b = persona_output_style("styled_helper")
+  __io_println(b.name)
+  __io_println(b.instructions)
+  __io_println(persona_output_style("styled_plain") == nil)
+  __io_println(persona_output_style("unknown") == nil)
+}

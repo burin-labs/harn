@@ -169,6 +169,7 @@ const RUNTIME_ONLY_EXCEPTIONS: &[&str] = &[
     "__host_workflow_stage_prepare",
     "__harn_with_execution_policy_override",
     "__make_struct",
+    "__persona_output_style",
     "__pool_create",
     "__pool_get",
     "__pool_list",

@@ -277,6 +277,12 @@ impl Compiler {
                 entries += 1;
             }
         }
+        if let Some(output_style) = attr.named_arg("output_style") {
+            let key_idx = self.string_constant("output_style");
+            self.chunk.emit_u16(Op::Constant, key_idx, self.line);
+            self.compile_attribute_value(output_style)?;
+            entries += 1;
+        }
         self.chunk.emit_u16(Op::BuildDict, entries, self.line);
         self.chunk.emit_u8(Op::Call, 2, self.line);
         self.chunk.emit(Op::Pop, self.line);
