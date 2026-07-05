@@ -1,0 +1,1 @@
+- Added a public `harn.artifacts.v1` JSON Schema for document/media artifact manifests and file artifact references.
