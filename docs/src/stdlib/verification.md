@@ -319,6 +319,49 @@ When no profile rows match or every row is filtered out, the returned plan sets
 `fallback = true` and leaves current caller behavior unchanged unless the
 caller explicitly opts into consuming the plan.
 
+## Verification HUD Model
+
+`verification_hud_model(state, options)` builds a structured, host-agnostic
+verification status model from explicit host facts and Harn profile rows:
+
+```harn
+import { verification_hud_model, verification_hud_text } from "std/verification"
+
+pipeline default() {
+  let model = verification_hud_model(
+    {
+      started_ms: 1000,
+      last_edit_ms: 61000,
+      path: "src/a.tx",
+      language: "toolchainx",
+      task: "post_edit",
+      current_hashes: {"src/a.tx": "h2"},
+      last_check: {
+        rung: "R2",
+        verdict: "failed",
+        at_ms: 110000,
+        bound_snapshot: {"src/a.tx": "h1"},
+      },
+    },
+    {now_ms: 121000},
+  )
+  return verification_hud_text(model)
+}
+```
+
+The returned `harn.verification.hud_model.v1` shape includes elapsed timing,
+time since last edit, last-check freshness, the next runnable ladder row, the
+full-verify row, and the underlying ladder plans. Hosts should render the
+structured fields directly where possible; `verification_hud_text(model)`
+exists for prompt and transcript surfaces that still need compact text.
+
+`verification_snapshot_staleness(bound_snapshot, current_hashes)` is the pure
+freshness helper used by the HUD model. A missing current hash is treated as
+stale/unverifiable, matching the stricter VM stale-diagnostic contract: a red
+cannot feed user-visible confidence unless every file in its bound snapshot
+still has the same current hash. Gate consumers should continue to use
+`verification_gate_input`, which also enforces rung/timestamp/snapshot binding.
+
 ## Diagnostic Delta
 
 `verification_diagnostic_delta(previous, current, options)` compares previous

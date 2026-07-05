@@ -1,0 +1,66 @@
+import {
+  verification_hud_model,
+  verification_hud_text,
+  verification_snapshot_staleness,
+} from "std/verification"
+
+pipeline test(task) {
+  let fresh = verification_snapshot_staleness({"src/a.tx": "h1"}, {"src/a.tx": "h1"})
+  assert_eq(fresh.status, "bound_fresh")
+  assert_eq(fresh.fresh, true)
+  assert_eq(fresh.stale_files, [])
+  let stale = verification_snapshot_staleness({"src/a.tx": "h1", "src/b.tx": "h2"}, {"src/a.tx": "h9"})
+  assert_eq(stale.status, "bound_stale")
+  assert_eq(stale.stale, true)
+  assert_eq(stale.stale_files, ["src/a.tx", "src/b.tx"])
+  let unbound = verification_snapshot_staleness({}, {"src/a.tx": "h1"})
+  assert_eq(unbound.status, "unbound")
+  assert_eq(unbound.advisory, true)
+  verification_profiles_set(
+    {
+      rows: [
+        {
+          id: "tx/full",
+          scope: {language: "toolchainx"},
+          check: {rung: "R4", command: {mode: "shell", command: "toolchainx test --all"}, resourceClass: "heavy"},
+          timings: {warmMs: {p95: 9000}, coldMs: {p95: 21000}},
+        },
+        {
+          id: "tx/parse",
+          scope: {language: "toolchainx", task: "post_edit"},
+          check: {rung: "R0", command: {mode: "shell", command: "toolchainx parse {file}"}, resourceClass: "cheap"},
+          timings: {warmMs: {p95: 80}},
+        },
+      ],
+    },
+  )
+  let model = verification_hud_model(
+    {
+      started_ms: 1000,
+      last_edit_ms: 61000,
+      path: "src/a.tx",
+      language: "toolchainx",
+      task: "post_edit",
+      current_hashes: {"src/a.tx": "h2"},
+      last_check: {rung: "R2", verdict: "failed", at_ms: 110000, bound_snapshot: {"src/a.tx": "h1"}},
+    },
+    {now_ms: 121000},
+  )
+  assert_eq(model.schema, "harn.verification.hud_model.v1")
+  assert_eq(model.visible, true)
+  assert_eq(model.elapsed, "2m0s")
+  assert_eq(model.since_last_edit, "1m0s")
+  assert_eq(model.last_check.age, "11s")
+  assert_eq(model.last_check.freshness.status, "bound_stale")
+  assert_eq(model.next_check.row_id, "tx/parse")
+  assert_eq(model.next_check.command, "toolchainx parse {file}")
+  assert_eq(model.next_check.p95, "0s")
+  assert_eq(model.full_check.row_id, "tx/full")
+  assert_eq(model.full_check.p95, "9s")
+  let text = verification_hud_text(model)
+  assert(contains(text, "[verification]"), "HUD text has header")
+  assert(contains(text, "last check: R2 -> failed @11s ago - STALE"), "HUD text labels stale red")
+  assert(contains(text, "next check: R0 toolchainx parse {file}"), "HUD text names next check")
+  assert(contains(text, "full verify: R4 toolchainx test --all"), "HUD text names full verify")
+  __io_println("verification hud model ok")
+}

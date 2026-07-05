@@ -1553,6 +1553,181 @@ fn __verification_ladder_candidate(profile_match, opts) {
   }
 }
 
+fn __verification_duration_label(ms_value) -> string {
+  var ms = to_int(ms_value) ?? 0
+  if ms < 0 {
+    ms = 0
+  }
+  let seconds = ms / 1000
+  if seconds < 60 {
+    return to_string(seconds) + "s"
+  }
+  let minutes = seconds / 60
+  let remainder = seconds % 60
+  return to_string(minutes) + "m" + to_string(remainder) + "s"
+}
+
+fn __verification_command_label(command) -> string {
+  if command == nil {
+    return ""
+  }
+  if type_of(command) == "string" {
+    return trim(to_string(command))
+  }
+  if type_of(command) == "dict" {
+    let shell = trim(to_string(command?.command ?? ""))
+    if shell != "" {
+      return shell
+    }
+    let argv = command?.argv ?? command?.args
+    if type_of(argv) == "list" {
+      var parts: list<string> = []
+      for part in argv {
+        parts = parts + [to_string(part)]
+      }
+      return trim(parts.join(" "))
+    }
+  }
+  return trim(json_stringify(command))
+}
+
+fn __verification_hud_query(state, opts) -> dict {
+  var query: dict = {}
+  let path = trim(to_string(state?.path ?? state?.file ?? ""))
+  if path != "" {
+    query = query + {path: path}
+  }
+  let language = trim(to_string(state?.language ?? ""))
+  if language != "" {
+    query = query + {language: language}
+  }
+  let task = trim(to_string(state?.task ?? state?.task_kind ?? ""))
+  if task != "" {
+    query = query + {task: task}
+  }
+  if type_of(state?.query) == "dict" {
+    query = query + state.query
+  }
+  if type_of(opts?.query) == "dict" {
+    query = query + opts.query
+  }
+  return query
+}
+
+fn __verification_hud_plan_options(dir: string, opts) -> dict {
+  var plan_options = opts?.plan_options ?? {}
+  if plan_options?.dir == nil {
+    plan_options = plan_options + {dir: dir}
+  }
+  if opts?.resource_classes != nil && plan_options?.resource_classes == nil {
+    plan_options = plan_options + {resource_classes: opts.resource_classes}
+  }
+  if opts?.allow_stale_prone != nil && plan_options?.allow_stale_prone == nil {
+    plan_options = plan_options + {allow_stale_prone: opts.allow_stale_prone}
+  }
+  if opts?.timing_kind != nil && plan_options?.timing_kind == nil {
+    plan_options = plan_options + {timing_kind: opts.timing_kind}
+  }
+  if opts?.warm_state_facts != nil && plan_options?.warm_state_facts == nil {
+    plan_options = plan_options + {warm_state_facts: opts.warm_state_facts}
+  }
+  return plan_options
+}
+
+fn __verification_hud_entry(entry) {
+  if type_of(entry) != "dict" {
+    return nil
+  }
+  let command = __verification_command_label(entry?.command)
+  return {
+    row_id: entry?.row_id,
+    rung: entry?.rung,
+    command: command,
+    label: trim(to_string(entry?.row?.label ?? entry?.row?.name ?? entry?.row_id ?? "")),
+    p95_ms: entry?.p95_ms,
+    p95: __verification_duration_label(entry?.p95_ms),
+    timing_kind: entry?.timing_kind ?? "warm",
+    resource_class: entry?.resource_class,
+    granularity: entry?.granularity,
+    trust: entry?.trust,
+    row: entry?.row,
+  }
+}
+
+fn __verification_hud_last_check(state, current_hashes, now_ms: int) {
+  let last = state?.last_check ?? state?.lastCheck
+  if type_of(last) != "dict" {
+    return nil
+  }
+  let at_ms = to_int(last?.at_ms ?? last?.atMs ?? last?.ended_ms ?? last?.started_ms ?? now_ms) ?? now_ms
+  let age_ms = now_ms - at_ms
+  let snapshot = last?.bound_snapshot ?? last?.boundSnapshot ?? last?.snapshot
+  let freshness = if type_of(snapshot) == "dict" && type_of(current_hashes) == "dict" {
+    verification_snapshot_staleness(snapshot, current_hashes)
+  } else if type_of(snapshot) == "dict" {
+    {
+      schema: "harn.verification.snapshot_staleness.v1",
+      status: "unknown_current_hashes",
+      stale: false,
+      fresh: false,
+      staleFiles: [],
+      stale_files: [],
+      changed_files: [],
+      advisory: true,
+      reason: "current file hashes unavailable; freshness unknown",
+    }
+  } else {
+    {
+      schema: "harn.verification.snapshot_staleness.v1",
+      status: "unbound",
+      stale: false,
+      fresh: false,
+      staleFiles: [],
+      stale_files: [],
+      changed_files: [],
+      advisory: true,
+      reason: "last check has no snapshot binding",
+    }
+  }
+  return {
+    rung: to_string(last?.rung ?? "R?"),
+    verdict: to_string(last?.verdict ?? last?.status ?? "?"),
+    at_ms: at_ms,
+    age_ms: age_ms,
+    age: __verification_duration_label(age_ms),
+    freshness: freshness,
+  }
+}
+
+fn __verification_hud_last_line(last) -> string {
+  let freshness = last?.freshness ?? {}
+  let suffix = if freshness?.status == "bound_stale" {
+    " - STALE (" + to_string(len(freshness?.stale_files ?? [])) + " file(s) changed since)"
+  } else if freshness?.status == "bound_fresh" {
+    " (current snapshot)"
+  } else {
+    " (freshness unknown)"
+  }
+  return "last check: " + to_string(last?.rung ?? "R?")
+    + " -> "
+    + to_string(last?.verdict ?? "?")
+    + " @"
+    + to_string(last?.age ?? "0s")
+    + " ago"
+    + suffix
+}
+
+fn __verification_hud_next_line(label: string, entry) -> string {
+  return label + ": " + to_string(entry?.rung ?? "R?")
+    + " "
+    + to_string(entry?.command ?? "")
+    + " - est "
+    + to_string(entry?.p95 ?? "0s")
+    + " (p95 "
+    + to_string(entry?.timing_kind ?? "warm")
+    + ")"
+}
+
 /**
  * Capture current on-disk hashes for `paths` under one code-index sequence
  * binding. Unknown-but-readable workspace files are included with
@@ -1567,6 +1742,60 @@ fn __verification_ladder_candidate(profile_match, opts) {
  */
 pub fn verification_file_hash_snapshot(paths: list<string>) -> VerificationFileHashSnapshot {
   return hostlib_code_index_file_hash_snapshot({paths: paths})
+}
+
+/**
+ * Compare a diagnostic/check snapshot against current file hashes and return a
+ * display-facing freshness verdict. Missing current hashes are treated as
+ * stale, matching the stricter VM stale-diagnostic contract: an old red cannot
+ * be considered authoritative unless every bound file still has the same
+ * current hash.
+ *
+ * This helper is deliberately data-only and does not decide whether a
+ * diagnostic feeds gates. Gate consumers should use `verification_gate_input`;
+ * HUDs and host adapters can use this shape to label stale/fresh evidence
+ * without reimplementing path-hash comparison.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn verification_snapshot_staleness(bound_snapshot, current_hashes) -> dict {
+  let bound = __verification_snapshot_map(bound_snapshot)
+  if type_of(bound) != "dict" || len(keys(bound)) == 0 {
+    return {
+      schema: "harn.verification.snapshot_staleness.v1",
+      status: "unbound",
+      stale: false,
+      fresh: false,
+      staleFiles: [],
+      stale_files: [],
+      changed_files: [],
+      advisory: true,
+      reason: "diagnostic carries no file-hash snapshot binding",
+    }
+  }
+  let current = __verification_snapshot_map(current_hashes)
+  let current_available = type_of(current) == "dict"
+  var stale_files: list<string> = []
+  for path in keys(bound).sort() {
+    if !current_available || current[path] != bound[path] {
+      stale_files = stale_files + [path]
+    }
+  }
+  let stale = len(stale_files) > 0
+  return {
+    schema: "harn.verification.snapshot_staleness.v1",
+    status: stale ? "bound_stale" : "bound_fresh",
+    stale: stale,
+    fresh: !stale,
+    staleFiles: stale_files,
+    stale_files: stale_files,
+    changed_files: stale_files,
+    advisory: stale,
+    reason: stale ? "snapshot superseded or unverifiable for " + to_string(len(stale_files))
+      + " file(s); re-check before trusting" : "snapshot matches current file hashes",
+  }
 }
 
 /**
@@ -1712,6 +1941,109 @@ pub fn verification_ladder_plan(query: dict, options = nil) -> VerificationLadde
     fallback: len(selected) == 0,
     reason: reason,
   }
+}
+
+/**
+ * Build a structured verification HUD model from explicit host facts and
+ * Harn verification profile rows. This is the reusable contract for TUI, IDE,
+ * portal, and transcript renderers: hosts can render the structured fields
+ * directly instead of concatenating verification strings in product-specific
+ * code.
+ *
+ * `state` may include:
+ * - `started_ms`, `last_edit_ms`, `now_ms`
+ * - `dir`, `path`, `language`, `task`, or `query`
+ * - `current_hashes` / `current_snapshot`
+ * - `last_check: {rung, verdict|status, at_ms, bound_snapshot|snapshot}`
+ *
+ * Options:
+ * - `now_ms`: deterministic clock override for tests.
+ * - `plan_options`: forwarded to `verification_ladder_plan`.
+ * - `full_plan_options`: extra options for the full-verify row lookup.
+ *
+ * @effects: [state]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn verification_hud_model(state: dict, options = nil) -> dict {
+  let opts = __verification_opts(options)
+  if type_of(state) != "dict" {
+    return {schema: "harn.verification.hud_model.v1", visible: false, reason: "missing_state", lines: []}
+  }
+  let now_ms = to_int(opts?.now_ms ?? state?.now_ms ?? harness.clock.now_ms()) ?? 0
+  let started_ms = to_int(state?.started_ms ?? now_ms) ?? now_ms
+  let last_edit_ms = to_int(state?.last_edit_ms ?? state?.lastEditMs)
+  let dir = trim(to_string(opts?.dir ?? state?.dir ?? "."))
+  let query = __verification_hud_query(state, opts)
+  let plan_options = __verification_hud_plan_options(dir, opts)
+  let next_plan = verification_ladder_plan(query, plan_options + {limit: to_int(opts?.next_limit ?? 1) ?? 1})
+  let next_check = len(next_plan.selected) > 0 ? __verification_hud_entry(next_plan.selected[0]) : nil
+  let full_options = plan_options
+    + {min_rung: opts?.full_min_rung ?? "R4", max_rung: opts?.full_max_rung ?? "R5", limit: 1}
+    + (opts?.full_plan_options ?? {})
+  let full_plan = verification_ladder_plan(query, full_options)
+  let full_check = len(full_plan.selected) > 0 ? __verification_hud_entry(full_plan.selected[0]) : nil
+  let current_hashes = __verification_snapshot_map(
+    opts?.current_hashes ?? opts?.current_snapshot ?? state?.current_hashes
+      ?? state?.current_snapshot
+      ?? state?.currentSnapshot,
+  )
+  let last_check = __verification_hud_last_check(state, current_hashes, now_ms)
+  let elapsed_ms = now_ms - started_ms
+  let since_edit_ms = last_edit_ms == nil ? nil : now_ms - last_edit_ms
+  let visible = last_check != nil || next_check != nil || full_check != nil
+  return {
+    schema: "harn.verification.hud_model.v1",
+    visible: visible,
+    reason: visible ? "verification_facts_available" : "no_verification_facts",
+    dir: dir,
+    query: query,
+    elapsed_ms: elapsed_ms,
+    elapsed: __verification_duration_label(elapsed_ms),
+    since_last_edit_ms: since_edit_ms,
+    since_last_edit: since_edit_ms == nil ? nil : __verification_duration_label(since_edit_ms),
+    last_check: last_check,
+    next_check: next_check,
+    full_check: full_check,
+    plans: {next: next_plan, full: full_plan},
+  }
+}
+
+/**
+ * Render a `verification_hud_model` as compact transcript text. Products should
+ * prefer the structured model when they can; this renderer exists for prompt
+ * surfaces and backward-compatible transcript injection.
+ *
+ * @effects: [state]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn verification_hud_text(model_or_state: dict, options = nil) -> string {
+  let model = if model_or_state?.schema == "harn.verification.hud_model.v1" {
+    model_or_state
+  } else {
+    verification_hud_model(model_or_state, options)
+  }
+  if !(model?.visible ?? false) {
+    return ""
+  }
+  var lines: list<string> = ["[verification]"]
+  let since = if model?.since_last_edit != nil {
+    " - since last edit: " + to_string(model.since_last_edit)
+  } else {
+    ""
+  }
+  lines = lines + ["elapsed: " + to_string(model?.elapsed ?? "0s") + since]
+  if model?.last_check != nil {
+    lines = lines + [__verification_hud_last_line(model.last_check)]
+  }
+  if model?.next_check != nil {
+    lines = lines + [__verification_hud_next_line("next check", model.next_check)]
+  }
+  if model?.full_check != nil {
+    lines = lines + [__verification_hud_next_line("full verify", model.full_check)]
+  }
+  return lines.join("\n")
 }
 
 /**
