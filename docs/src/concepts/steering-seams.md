@@ -147,6 +147,38 @@ These were called out as separate issues in #2211 and are not yet shipped:
 > `finish_step` if you want the model to see the reminder before the loop
 > terminates.
 
+## Host-supplied facts: steering the detectors, not the transcript
+
+Everything above steers the loop by putting *content* into it: a message, a
+reminder, a cancellation. There's a second, quieter way the host influences a
+run, and it's worth understanding as its own thing: feeding the loop's
+detectors the facts they can't observe on their own.
+
+A stall detector can count turns and spot a repeated error. It cannot see your
+test runner. So when the question is "is this agent actually making progress?",
+the honest answer needs a fact only the host holds: did the build get closer to
+green this turn? Harn's design splits that cleanly. Harn owns the *mechanism*:
+the rule for when repetition means "stuck," the budget math for when to extend
+or cut. The host owns the *facts*: whether verification advanced, whether a
+delivered fix landed, how much longer this job deserves.
+
+You supply those facts through callbacks the loop calls each turn, not through
+injected transcript content. The difference matters. An injected reminder is a
+message the model reads and reacts to. A supplied fact is an input to a
+detector's decision; the model never sees it. One steers by persuasion, the
+other by measurement.
+
+This split is why "writes are not progress" is enforceable. The loop cannot tell
+a productive edit from a flailing one, but your host can. It knows whether the
+verifier moved. Hand the loop that one number and its no-progress detector stops
+mistaking motion for progress. The same shape applies to a fix that was
+delivered but didn't land, and to a smart timeout that extends a progressing run
+and cuts a stalled one.
+
+The callbacks, their signatures, and the exact decisions they drive live in
+[Host-supplied facts](../stdlib/fact-intake-seams.md). The mechanism they feed
+(governors and detectors) is [Agent governors and detectors](../stdlib/governors.md).
+
 ## Cross-references
 
 - [System reminders](../system-reminders.md) — the user-facing API for queuing

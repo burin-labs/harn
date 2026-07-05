@@ -8,6 +8,7 @@
 - [Mental model](./concepts/mental-model.md)
 - [Glossary](./concepts/glossary.md)
 - [Choosing an agent abstraction](./concepts/abstraction-ladder.md)
+- [The expressiveness spectrum](./concepts/expressiveness-spectrum.md)
 - [Steering seams](./concepts/steering-seams.md)
 - [Cross-session pattern knowledge](./concepts/cross-session-pattern-knowledge.md)
 - [Coming from elsewhere](./concepts/sota-comparison.md)
@@ -17,6 +18,7 @@
 # Tutorials
 
 - [Getting started](./getting-started.md)
+- [Build your first workflow](./tutorials/build-your-first-workflow.md)
 - [Workflow authoring quickstart](./workflow-authoring-quickstart.md)
 - [Tutorial: code review agent](./tutorial-code-review-agent.md)
 - [Tutorial: MCP server](./tutorial-mcp-server.md)
@@ -131,6 +133,7 @@
 - [Timing stdlib](./stdlib/timing.md)
 - [Verification stdlib](./stdlib/verification.md)
 - [Agent governors and detectors](./stdlib/governors.md)
+- [Host-supplied facts](./stdlib/fact-intake-seams.md)
 - [GraphQL stdlib](./stdlib/graphql.md)
 - [Code librarian stdlib](./stdlib/code-librarian.md)
 - [Edit stdlib](./stdlib/edit.md)
