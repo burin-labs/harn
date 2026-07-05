@@ -34,6 +34,8 @@ fn __render_human(harness: Harness, report: dict) {
   let data = safe_dict(report["data"])
   let corpus_refresh = safe_dict(report["corpus_refresh"])
   let evaluation = safe_dict(report["evaluation"])
+  let evidence = safe_dict(evaluation["evidence_contract"])
+  let batch_ready = safe_dict(evidence["batch_ready"])
   let serving = safe_dict(report["serving"])
   let launch = safe_dict(report["launch"])
   let warnings = safe_list(report["warnings"])
@@ -166,10 +168,14 @@ fn __render_human(harness: Harness, report: dict) {
     .println("  holdout policy: " + safe_string(evaluation["holdout_policy"], ""))
   harness.stdio
     .println("  minimum trials: " + safe_int_string(evaluation["minimum_trials"], "0"))
+  harness.stdio.println("  promotion id: " + safe_string(evidence["promotion_id"], ""))
   harness.stdio
     .println("  comparison baseline: " + safe_string(evaluation["comparison_baseline"], ""))
   print_list(harness, "required metrics", safe_list(evaluation["required_metrics"]))
   print_list(harness, "eval gates", safe_list(evaluation["gates"]))
+  print_list(harness, "required receipts", safe_list(evidence["required_receipts"]))
+  print_list(harness, "optional batch receipts", safe_list(evidence["optional_batch_receipts"]))
+  print_list(harness, "batch group by", safe_list(batch_ready["group_by"]))
   harness.stdio.println("  adapter binding: " + safe_string(serving["adapter_binding"], ""))
   harness.stdio
     .println("  LoRA module format: " + safe_string(serving["lora_module_value_format"], ""))
@@ -179,6 +185,7 @@ fn __render_human(harness: Harness, report: dict) {
   render_command(harness, "preflight corpus", safe_list(launch["preflight_command"]))
   render_command(harness, "export dataset", safe_list(launch["export_command"]))
   render_command(harness, "eval", safe_list(evaluation["eval_command"]))
+  render_command(harness, "batch eval manifest", safe_list(batch_ready["manifest_command"]))
   render_command(harness, "inspect adapter", safe_list(launch["inspect_command"]))
   render_command(harness, "local launch", safe_list(launch["local_launch_command"]))
   for warning in warnings {

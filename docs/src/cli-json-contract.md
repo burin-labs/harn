@@ -98,10 +98,10 @@ versions.
 | `harn models batch submit --json` | Batch submission receipt with provider job ids or dry-run operations |
 | `harn models batch status --json` | Provider batch status receipt with dry-run cached status validation |
 | `harn models batch download --json` | Provider result-file download receipt with artifact paths and hashes |
-| `harn models lora plan --json` | LoRA/QLoRA route, trainer, data, eval, and launch contract |
+| `harn models lora plan --json` | LoRA/QLoRA route, trainer, data, eval, promotion evidence, and launch contract |
 | `harn models lora inspect --json` | PEFT adapter compatibility report and launch metadata |
-| `harn models lora export --json` | Trainer dataset export report with contract id and stats |
-| `harn models lora manifest --json` | LoRA training-run manifest with route, data, artifact, serving, and promotion contracts |
+| `harn models lora export --json` | Trainer dataset export report with contract id, stats, and promotion evidence contract |
+| `harn models lora manifest --json` | LoRA training-run manifest with route, data, artifact, serving, and promotion evidence contracts |
 | `harn models lora preflight --json` | Corpus readiness report before LoRA training |
 | `harn connect status --json` / `setup-plan --json` | Connector readiness reports        |
 | `harn skill list --json` / `get --json` | Canonical Harn skill corpus frontmatter        |

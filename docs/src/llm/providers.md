@@ -201,6 +201,10 @@ template hash. Source metadata wins when it declares those fields; otherwise
 manifest repeats the required metadata list and defaults, so external trainers
 can prove that a PEFT/QLoRA run used the same frozen cases, schemas, prompt
 template, and Harn tool-call contract that promotion evals will probe. The
+promotion recipe carries `evaluation.evidence_contract`, which names the
+preflight/export/manifest/inspect/tool-probe/base-eval/adapter-eval receipts
+required for promotion plus optional `harn models batch` receipts for
+latency-tolerant eval or corpus-refresh sweeps. The
 plan's `launch` block also emits the
 post-training `harn models lora manifest` command that records the adapter path,
 request model, trainer, teacher, precision metadata, and export manifest before

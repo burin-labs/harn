@@ -471,6 +471,19 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
     let dataset_arg = corpus
         .clone()
         .unwrap_or_else(|| "conformance/tool-call-eval".to_string());
+    let template = template_recipe_for_route(
+        &resolved.id,
+        &resolved.family,
+        &resolved.lineage,
+        &decision.effective,
+    );
+    let contract_id = lora_contract_id(
+        &resolved.id,
+        &provider,
+        &decision.effective,
+        dataset_format,
+        Some(&template.name),
+    )?;
     let inspect_command = vec![
         "harn".to_string(),
         "models".to_string(),
@@ -515,6 +528,7 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
     } else {
         Vec::new()
     };
+    let eval_dataset = dataset_arg.clone();
     let eval_command = vec![
         "harn".to_string(),
         "eval".to_string(),
@@ -526,12 +540,6 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
         "--dataset".to_string(),
         dataset_arg,
     ];
-    let template = template_recipe_for_route(
-        &resolved.id,
-        &resolved.family,
-        &resolved.lineage,
-        &decision.effective,
-    );
     let export_corpus_arg = corpus
         .clone()
         .unwrap_or_else(|| "CORPUS_JSONL_OR_DIR".to_string());
@@ -662,7 +670,7 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
         base: BaseModelReport {
             selector: args.base_model.clone(),
             id: resolved.id.clone(),
-            provider,
+            provider: provider.clone(),
             resolved_alias: resolved.alias,
             tool_format: catalog_default_tool_format,
             tier: resolved.tier,
@@ -719,7 +727,15 @@ fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, String> {
             &decision.effective,
             dataset_format,
         ),
-        evaluation: lora_evaluation_recipe(&decision.effective, eval_command),
+        evaluation: lora_evaluation_recipe(
+            &contract_id,
+            &resolved.id,
+            &provider,
+            &request_model,
+            &decision.effective,
+            &eval_dataset,
+            eval_command,
+        ),
         serving,
         launch: PlanLaunchHints {
             preflight_command,
@@ -1549,7 +1565,12 @@ fn model_aware_selection_recipe(
 }
 
 pub(super) fn lora_evaluation_recipe(
+    contract_id: &str,
+    base_model: &str,
+    provider: &str,
+    request_model: &str,
     tool_format: &str,
+    eval_dataset: &str,
     eval_command: Vec<String>,
 ) -> EvaluationRecipe {
     let parser_metric = if matches!(tool_format, "text" | "json") {
@@ -1557,29 +1578,167 @@ pub(super) fn lora_evaluation_recipe(
     } else {
         "native tool-call schema acceptance rate"
     };
+    let minimum_trials = 5;
+    let comparison_baseline =
+        "same base model, provider, tool format, prompt template, and tool schemas without the adapter"
+            .to_string();
+    let required_metrics = vec![
+        "exact tool-name + argument match rate".to_string(),
+        parser_metric.to_string(),
+        "malformed-call and prose-only failure rate".to_string(),
+        "wrong-tool false positive rate".to_string(),
+        "latency and cost per solved tool-call case".to_string(),
+    ];
+    let gates = vec![
+        "compare base versus adapter on identical tool-call cases".to_string(),
+        "require a positive paired lift before promotion; inconclusive movement stays experimental"
+            .to_string(),
+        "require zero contract-id drift between export manifest, adapter metadata, and served route"
+            .to_string(),
+        "require no regression on non-tool chat smoke prompts".to_string(),
+    ];
+    let evidence_contract = lora_promotion_evidence_contract(PromotionEvidenceInput {
+        contract_id,
+        base_model,
+        provider,
+        request_model,
+        tool_format,
+        eval_dataset,
+        minimum_trials,
+        required_metrics: &required_metrics,
+        gates: &gates,
+    });
     EvaluationRecipe {
-        holdout_policy: "keep train/tune/holdout splits disjoint; never train on Harn eval fixtures"
-            .to_string(),
-        minimum_trials: 5,
-        comparison_baseline: "same base model, provider, tool format, prompt template, and tool schemas without the adapter"
-            .to_string(),
-        required_metrics: vec![
-            "exact tool-name + argument match rate".to_string(),
-            parser_metric.to_string(),
-            "malformed-call and prose-only failure rate".to_string(),
-            "wrong-tool false positive rate".to_string(),
-            "latency and cost per solved tool-call case".to_string(),
-        ],
-        gates: vec![
-            "compare base versus adapter on identical tool-call cases".to_string(),
-            "require a positive paired lift before promotion; inconclusive movement stays experimental"
-                .to_string(),
-            "require zero contract-id drift between export manifest, adapter metadata, and served route"
-                .to_string(),
-            "require no regression on non-tool chat smoke prompts".to_string(),
-        ],
+        holdout_policy:
+            "keep train/tune/holdout splits disjoint; never train on Harn eval fixtures".to_string(),
+        minimum_trials,
+        comparison_baseline,
+        required_metrics,
+        gates,
+        evidence_contract,
         eval_command,
     }
+}
+
+fn lora_promotion_evidence_contract(
+    input: PromotionEvidenceInput<'_>,
+) -> PromotionEvidenceContract {
+    let promotion_id = lora_promotion_id(&input);
+    PromotionEvidenceContract {
+        schema_version: 1,
+        promotion_id,
+        lora_contract_id: input.contract_id.to_string(),
+        base_route: PromotionRoute {
+            role: "base".to_string(),
+            provider: input.provider.to_string(),
+            model: input.base_model.to_string(),
+            tool_format: input.tool_format.to_string(),
+        },
+        adapter_route: PromotionRoute {
+            role: "adapter".to_string(),
+            provider: input.provider.to_string(),
+            model: input.request_model.to_string(),
+            tool_format: input.tool_format.to_string(),
+        },
+        eval_dataset: input.eval_dataset.to_string(),
+        minimum_trials: input.minimum_trials,
+        required_receipts: vec![
+            "lora_preflight_report".to_string(),
+            "lora_export_manifest".to_string(),
+            "lora_adapter_manifest".to_string(),
+            "lora_inspect_report".to_string(),
+            "tool_probe_receipt".to_string(),
+            "base_eval_receipt".to_string(),
+            "adapter_eval_receipt".to_string(),
+        ],
+        optional_batch_receipts: vec![
+            "harn.model_batch_manifest".to_string(),
+            "harn.model_batch_prepare_receipt".to_string(),
+            "harn.model_batch_submission_receipt".to_string(),
+            "harn.model_batch_status_receipt".to_string(),
+            "harn.model_batch_results_receipt".to_string(),
+        ],
+        batch_ready: PromotionBatchReady {
+            workload: "eval".to_string(),
+            group_by: vec![
+                "provider".to_string(),
+                "model".to_string(),
+                "tool_format".to_string(),
+                "lora_contract_id".to_string(),
+                "promotion_id".to_string(),
+            ],
+            request_row_contract: vec![
+                "custom_id".to_string(),
+                "provider".to_string(),
+                "model".to_string(),
+                "tool_format".to_string(),
+                "messages".to_string(),
+                "tools".to_string(),
+                "metadata.promotion_id".to_string(),
+                "metadata.lora_contract_id".to_string(),
+                "metadata.route_role".to_string(),
+                "metadata.case_id".to_string(),
+            ],
+            manifest_command: vec![
+                "harn".to_string(),
+                "models".to_string(),
+                "batch".to_string(),
+                "manifest".to_string(),
+                "--workload".to_string(),
+                "eval".to_string(),
+                "--tool-format".to_string(),
+                input.tool_format.to_string(),
+                "--requests".to_string(),
+                "PROMOTION_REQUESTS.jsonl".to_string(),
+                "--out".to_string(),
+                "PROMOTION_BATCH.manifest.json".to_string(),
+                "--id-prefix".to_string(),
+                "lora-promotion".to_string(),
+            ],
+        },
+        acceptance: PromotionAcceptance {
+            required_metrics: input.required_metrics.to_vec(),
+            gates: input.gates.to_vec(),
+        },
+    }
+}
+
+struct PromotionEvidenceInput<'a> {
+    contract_id: &'a str,
+    base_model: &'a str,
+    provider: &'a str,
+    request_model: &'a str,
+    tool_format: &'a str,
+    eval_dataset: &'a str,
+    minimum_trials: u64,
+    required_metrics: &'a [String],
+    gates: &'a [String],
+}
+
+fn lora_promotion_id(input: &PromotionEvidenceInput<'_>) -> String {
+    let mut hasher = Sha256::new();
+    for part in [
+        "harn_lora_promotion_v1",
+        input.contract_id,
+        input.base_model,
+        input.provider,
+        input.request_model,
+        input.tool_format,
+        input.eval_dataset,
+        &input.minimum_trials.to_string(),
+    ] {
+        hasher.update(part.as_bytes());
+        hasher.update([0]);
+    }
+    for metric in input.required_metrics {
+        hasher.update(metric.as_bytes());
+        hasher.update([0]);
+    }
+    for gate in input.gates {
+        hasher.update(gate.as_bytes());
+        hasher.update([0]);
+    }
+    format!("sha256:{}", hex::encode(hasher.finalize()))
 }
 
 fn template_recipe_for_route(
@@ -1996,7 +2155,45 @@ pub(super) struct EvaluationRecipe {
     comparison_baseline: String,
     required_metrics: Vec<String>,
     gates: Vec<String>,
+    evidence_contract: PromotionEvidenceContract,
     eval_command: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct PromotionEvidenceContract {
+    schema_version: u64,
+    promotion_id: String,
+    lora_contract_id: String,
+    base_route: PromotionRoute,
+    adapter_route: PromotionRoute,
+    eval_dataset: String,
+    minimum_trials: u64,
+    required_receipts: Vec<String>,
+    optional_batch_receipts: Vec<String>,
+    batch_ready: PromotionBatchReady,
+    acceptance: PromotionAcceptance,
+}
+
+#[derive(Debug, Serialize)]
+struct PromotionRoute {
+    role: String,
+    provider: String,
+    model: String,
+    tool_format: String,
+}
+
+#[derive(Debug, Serialize)]
+struct PromotionBatchReady {
+    workload: String,
+    group_by: Vec<String>,
+    request_row_contract: Vec<String>,
+    manifest_command: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct PromotionAcceptance {
+    required_metrics: Vec<String>,
+    gates: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -2355,6 +2552,53 @@ mod tests {
             .map(str::to_string)
             .collect::<Vec<_>>()
         );
+        let evidence = &report.evaluation.evidence_contract;
+        assert!(evidence.promotion_id.starts_with("sha256:"));
+        assert_eq!(evidence.base_route.model, report.base.id);
+        assert_eq!(evidence.adapter_route.model, "ADAPTER_MODEL");
+        assert_eq!(evidence.adapter_route.tool_format, "json");
+        assert!(evidence
+            .required_receipts
+            .iter()
+            .any(|receipt| receipt == "lora_adapter_manifest"));
+        assert!(evidence
+            .optional_batch_receipts
+            .iter()
+            .any(|receipt| receipt == "harn.model_batch_results_receipt"));
+        assert_eq!(evidence.batch_ready.workload, "eval");
+        assert!(evidence
+            .batch_ready
+            .manifest_command
+            .windows(2)
+            .any(|pair| pair == ["--id-prefix", "lora-promotion"]));
+    }
+
+    #[test]
+    fn lora_promotion_id_tracks_acceptance_gate_drift() {
+        let metrics = vec!["exact tool-name + argument match rate".to_string()];
+        let original_gates = vec!["require a positive paired lift".to_string()];
+        let tightened_gates = vec![
+            "require a positive paired lift".to_string(),
+            "require no non-tool smoke regression".to_string(),
+        ];
+        let original = PromotionEvidenceInput {
+            contract_id: "sha256:contract",
+            base_model: "base",
+            provider: "vllm",
+            request_model: "adapter",
+            tool_format: "json",
+            eval_dataset: "tool-calls",
+            minimum_trials: 5,
+            required_metrics: &metrics,
+            gates: &original_gates,
+        };
+        let original_id = lora_promotion_id(&original);
+        let tightened = PromotionEvidenceInput {
+            gates: &tightened_gates,
+            ..original
+        };
+
+        assert_ne!(original_id, lora_promotion_id(&tightened));
     }
 
     #[test]

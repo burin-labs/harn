@@ -1590,6 +1590,11 @@ and stop conditions so corpus refresh jobs prioritize failures the target model
 almost solves instead of adding near-duplicate syntax examples.
 The JSON report exposes the same machine-readable contract under
 `training.contract` for automation that prepares TRL/PEFT trainer configs.
+The `evaluation.evidence_contract` block adds the promotion receipt contract:
+stable promotion id, paired base/adapter routes, required preflight, export,
+manifest, inspect, tool-probe, and eval receipts, optional Batch API receipts,
+and a `harn models batch manifest` command for latency-tolerant tool-call eval
+rows.
 The launch block includes the matching `harn models lora export` command so the
 trainer dataset, provenance manifest, eval route, and serving route share the
 same base model, provider, tool format, and chat-template contract.
