@@ -19,6 +19,8 @@ const MAX_STRING_BYTES: usize = 64 * 1024;
 const MAX_TABLE_COLUMNS: usize = 50;
 const MAX_TABLE_ROWS: usize = 500;
 const MAX_MERMAID_BYTES: usize = 64 * 1024;
+const ARTIFACT_MANIFEST_SCHEMA_VERSION: &str = "harn.artifacts.v1";
+const ARTIFACT_MANIFEST_MIME_TYPE: &str = "application/vnd.harn.artifact-manifest+json";
 
 pub fn register_artifact_emit_builtins(vm: &mut Vm) {
     for def in MODULE_BUILTINS {
@@ -34,6 +36,7 @@ enum ArtifactKind {
     Mermaid,
     Table,
     File,
+    ArtifactManifest,
 }
 
 impl ArtifactKind {
@@ -43,8 +46,9 @@ impl ArtifactKind {
             "mermaid" => Ok(Self::Mermaid),
             "table" => Ok(Self::Table),
             "file" => Ok(Self::File),
+            "artifact_manifest" => Ok(Self::ArtifactManifest),
             other => Err(err(format!(
-                "unsupported artifact kind '{other}' (expected one of: vega-lite, mermaid, table, file)"
+                "unsupported artifact kind '{other}' (expected one of: vega-lite, mermaid, table, file, artifact_manifest)"
             ))),
         }
     }
@@ -55,6 +59,7 @@ impl ArtifactKind {
             Self::Mermaid => "mermaid",
             Self::Table => "table",
             Self::File => "file",
+            Self::ArtifactManifest => "artifact_manifest",
         }
     }
 
@@ -64,6 +69,7 @@ impl ArtifactKind {
             Self::Mermaid => "text/vnd.mermaid",
             Self::Table => "application/vnd.harn.table+json",
             Self::File => "application/octet-stream",
+            Self::ArtifactManifest => ARTIFACT_MANIFEST_MIME_TYPE,
         }
     }
 }
@@ -91,7 +97,7 @@ struct ValidatedArtifactSpec {
     sig = "artifact_emit(kind: string, spec: any, options?: dict) -> dict",
     kind = "async",
     category = "agent.artifact",
-    doc = "Validate and emit a declarative renderable artifact or file-reference event for the current agent session."
+    doc = "Validate and emit a declarative renderable artifact, file-reference, or artifact-manifest event for the current agent session."
 )]
 async fn artifact_emit_builtin(
     ctx: AsyncBuiltinCtx,
@@ -280,6 +286,7 @@ fn validate_artifact_spec(
         ArtifactKind::Mermaid => validate_mermaid(spec)?,
         ArtifactKind::Table => validate_table(spec)?,
         ArtifactKind::File => validate_file_ref(spec)?,
+        ArtifactKind::ArtifactManifest => validate_artifact_manifest(spec)?,
     };
     let wire_size_bytes = serialized_size(&spec, max_bytes)?;
     let size_bytes = match kind {
@@ -287,6 +294,7 @@ fn validate_artifact_spec(
             .get("size_bytes")
             .and_then(JsonValue::as_u64)
             .unwrap_or(wire_size_bytes),
+        ArtifactKind::ArtifactManifest => wire_size_bytes,
         _ => wire_size_bytes,
     };
     let mime_type = match kind {
@@ -295,6 +303,7 @@ fn validate_artifact_spec(
             .and_then(JsonValue::as_str)
             .unwrap_or(kind.default_mime_type())
             .to_string(),
+        ArtifactKind::ArtifactManifest => kind.default_mime_type().to_string(),
         _ => kind.default_mime_type().to_string(),
     };
     let fallback = default_fallback(kind, &spec)?;
@@ -502,14 +511,23 @@ fn validate_table(spec: JsonValue) -> Result<JsonValue, VmError> {
 }
 
 fn validate_file_ref(spec: JsonValue) -> Result<JsonValue, VmError> {
+    validate_file_ref_with_options(spec, false)
+}
+
+fn validate_file_ref_with_options(
+    spec: JsonValue,
+    require_name: bool,
+) -> Result<JsonValue, VmError> {
     let object = spec
         .as_object()
         .ok_or_else(|| err("file spec must be a JSON object"))?;
     const ALLOWED_KEYS: &[&str] = &[
         "description",
+        "metadata",
         "mime_type",
         "name",
         "path",
+        "relative_path",
         "sha256",
         "size_bytes",
         "uri",
@@ -533,11 +551,18 @@ fn validate_file_ref(spec: JsonValue) -> Result<JsonValue, VmError> {
     validate_file_uri(&uri)?;
     let mime_type = required_file_string(object, "mime_type")?;
     validate_mime_type(&mime_type)?;
+    let name = optional_file_string(object, "name")?;
+    if require_name && name.is_none() {
+        return Err(err("file spec `name` is required"));
+    }
 
     let mut normalized = serde_json::Map::new();
     normalized.insert("uri".to_string(), JsonValue::String(uri));
     normalized.insert("mime_type".to_string(), JsonValue::String(mime_type));
-    for key in ["name", "path", "description"] {
+    if let Some(value) = name {
+        normalized.insert("name".to_string(), JsonValue::String(value));
+    }
+    for key in ["path", "relative_path", "description"] {
         if let Some(value) = optional_file_string(object, key)? {
             normalized.insert(key.to_string(), JsonValue::String(value));
         }
@@ -554,6 +579,115 @@ fn validate_file_ref(spec: JsonValue) -> Result<JsonValue, VmError> {
             JsonValue::String(normalize_sha256(&hash)?),
         );
     }
+    if let Some(metadata) = optional_spec_object(object, "metadata")? {
+        normalized.insert("metadata".to_string(), metadata);
+    }
+    Ok(JsonValue::Object(normalized))
+}
+
+fn validate_artifact_manifest(spec: JsonValue) -> Result<JsonValue, VmError> {
+    let object = spec
+        .as_object()
+        .ok_or_else(|| err("artifact_manifest spec must be a JSON object"))?;
+    const ALLOWED_KEYS: &[&str] = &[
+        "artifact_count",
+        "artifacts",
+        "created_at",
+        "kind",
+        "metadata",
+        "run_id",
+        "schema_version",
+        "session_id",
+        "title",
+        "total_size_bytes",
+    ];
+    for key in object.keys() {
+        if !ALLOWED_KEYS.contains(&key.as_str()) {
+            return Err(err(format!(
+                "unknown artifact_manifest spec key '{key}' (expected one of: {})",
+                ALLOWED_KEYS.join(", ")
+            )));
+        }
+    }
+    let schema_version = required_file_string(object, "schema_version")?;
+    if schema_version != ARTIFACT_MANIFEST_SCHEMA_VERSION {
+        return Err(err(format!(
+            "artifact_manifest `schema_version` must be {ARTIFACT_MANIFEST_SCHEMA_VERSION}"
+        )));
+    }
+    let manifest_kind = required_file_string(object, "kind")?;
+    if manifest_kind != "artifact_manifest" {
+        return Err(err("artifact_manifest `kind` must be artifact_manifest"));
+    }
+    let artifacts = object
+        .get("artifacts")
+        .and_then(JsonValue::as_array)
+        .ok_or_else(|| err("artifact_manifest `artifacts` must be an array"))?;
+    let artifact_count = required_u64(object, "artifact_count")?;
+    if artifact_count as usize != artifacts.len() {
+        return Err(err(format!(
+            "artifact_manifest `artifact_count` is {artifact_count} but artifacts has {} items",
+            artifacts.len()
+        )));
+    }
+
+    let mut normalized_artifacts = Vec::with_capacity(artifacts.len());
+    let mut total_from_files = 0_u64;
+    let mut all_files_have_size = true;
+    for artifact in artifacts {
+        let normalized = validate_file_ref_with_options(artifact.clone(), true)?;
+        if let Some(size) = normalized.get("size_bytes").and_then(JsonValue::as_u64) {
+            total_from_files = total_from_files.saturating_add(size);
+        } else {
+            all_files_have_size = false;
+        }
+        normalized_artifacts.push(normalized);
+    }
+
+    let mut normalized = serde_json::Map::new();
+    normalized.insert(
+        "schema_version".to_string(),
+        JsonValue::String(ARTIFACT_MANIFEST_SCHEMA_VERSION.to_string()),
+    );
+    normalized.insert(
+        "kind".to_string(),
+        JsonValue::String("artifact_manifest".to_string()),
+    );
+    if let Some(title) = optional_file_string(object, "title")? {
+        normalized.insert("title".to_string(), JsonValue::String(title));
+    }
+    normalized.insert(
+        "artifact_count".to_string(),
+        JsonValue::Number(artifact_count.into()),
+    );
+    if let Some(total_size) = optional_u64(object, "total_size_bytes")? {
+        if all_files_have_size && total_size != total_from_files {
+            return Err(err(format!(
+                "artifact_manifest `total_size_bytes` is {total_size} but artifact sizes sum to {total_from_files}"
+            )));
+        }
+        normalized.insert(
+            "total_size_bytes".to_string(),
+            JsonValue::Number(total_size.into()),
+        );
+    } else if all_files_have_size {
+        normalized.insert(
+            "total_size_bytes".to_string(),
+            JsonValue::Number(total_from_files.into()),
+        );
+    }
+    for key in ["session_id", "run_id", "created_at"] {
+        if let Some(value) = optional_file_string(object, key)? {
+            normalized.insert(key.to_string(), JsonValue::String(value));
+        }
+    }
+    if let Some(metadata) = optional_spec_object(object, "metadata")? {
+        normalized.insert("metadata".to_string(), metadata);
+    }
+    normalized.insert(
+        "artifacts".to_string(),
+        JsonValue::Array(normalized_artifacts),
+    );
     Ok(JsonValue::Object(normalized))
 }
 
@@ -585,6 +719,46 @@ fn optional_file_string(
     }
     scan_string_payload_markers(&format!("spec.{key}"), value)?;
     Ok(Some(value.to_string()))
+}
+
+fn optional_spec_object(
+    object: &serde_json::Map<String, JsonValue>,
+    key: &str,
+) -> Result<Option<JsonValue>, VmError> {
+    let Some(value) = object.get(key) else {
+        return Ok(None);
+    };
+    if !value.is_object() {
+        return Err(err(format!("spec `{key}` must be an object")));
+    }
+    let size = serde_json::to_vec(value)
+        .map_err(|error| err(format!("failed to encode spec `{key}`: {error}")))?
+        .len();
+    if size > MAX_METADATA_BYTES {
+        return Err(err(format!(
+            "spec `{key}` is {size} bytes; max is {MAX_METADATA_BYTES}"
+        )));
+    }
+    scan_string_payload_markers(&format!("spec.{key}"), &value.to_string())?;
+    Ok(Some(value.clone()))
+}
+
+fn optional_u64(
+    object: &serde_json::Map<String, JsonValue>,
+    key: &str,
+) -> Result<Option<u64>, VmError> {
+    let Some(value) = object.get(key) else {
+        return Ok(None);
+    };
+    value.as_u64().map(Some).ok_or_else(|| {
+        err(format!(
+            "artifact_manifest `{key}` must be a non-negative integer"
+        ))
+    })
+}
+
+fn required_u64(object: &serde_json::Map<String, JsonValue>, key: &str) -> Result<u64, VmError> {
+    optional_u64(object, key)?.ok_or_else(|| err(format!("artifact_manifest `{key}` is required")))
 }
 
 fn validate_file_uri(value: &str) -> Result<(), VmError> {
@@ -776,7 +950,45 @@ fn default_fallback(kind: ArtifactKind, spec: &JsonValue) -> Result<String, VmEr
             .to_string()),
         ArtifactKind::Table => default_table_fallback(spec),
         ArtifactKind::File => Ok(default_file_fallback(spec)),
+        ArtifactKind::ArtifactManifest => Ok(default_artifact_manifest_fallback(spec)),
     }
+}
+
+fn default_artifact_manifest_fallback(spec: &JsonValue) -> String {
+    let title = spec
+        .get("title")
+        .and_then(JsonValue::as_str)
+        .unwrap_or("Artifact manifest");
+    let count = spec
+        .get("artifact_count")
+        .and_then(JsonValue::as_u64)
+        .unwrap_or(0);
+    let mut lines = vec![format!("{title}: {count} file artifact(s)")];
+    if let Some(size) = spec.get("total_size_bytes").and_then(JsonValue::as_u64) {
+        lines.push(format!("Total size: {size} bytes"));
+    }
+    if let Some(artifacts) = spec.get("artifacts").and_then(JsonValue::as_array) {
+        for artifact in artifacts.iter().take(10) {
+            let name = artifact
+                .get("name")
+                .and_then(JsonValue::as_str)
+                .unwrap_or("file artifact");
+            let mime_type = artifact
+                .get("mime_type")
+                .and_then(JsonValue::as_str)
+                .unwrap_or("application/octet-stream");
+            let size = artifact
+                .get("size_bytes")
+                .and_then(JsonValue::as_u64)
+                .map(|size| format!(", {size} bytes"))
+                .unwrap_or_default();
+            lines.push(format!("- {name} ({mime_type}{size})"));
+        }
+        if artifacts.len() > 10 {
+            lines.push(format!("... {} more artifacts", artifacts.len() - 10));
+        }
+    }
+    lines.join("\n")
 }
 
 fn default_file_fallback(spec: &JsonValue) -> String {
@@ -941,8 +1153,36 @@ mod tests {
             "uri": "file:///tmp/report.pdf",
             "name": "report.pdf",
             "mime_type": "application/pdf",
+            "relative_path": "report.pdf",
             "size_bytes": 1234,
-            "sha256": "ABCDEFabcdef0123456789abcdef0123456789abcdef0123456789abcdef0123"
+            "sha256": "ABCDEFabcdef0123456789abcdef0123456789abcdef0123456789abcdef0123",
+            "metadata": {"renderer": "typst"}
+        });
+        let manifest = json!({
+            "schema_version": "harn.artifacts.v1",
+            "kind": "artifact_manifest",
+            "title": "Report bundle",
+            "artifact_count": 2,
+            "total_size_bytes": 1536,
+            "metadata": {"producer": "@harn/documents"},
+            "artifacts": [
+                {
+                    "uri": "file:///tmp/report.pdf",
+                    "name": "report.pdf",
+                    "mime_type": "application/pdf",
+                    "relative_path": "report.pdf",
+                    "size_bytes": 1024,
+                    "sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "metadata": {"page_count": 3}
+                },
+                {
+                    "uri": "artifact://session/render.png",
+                    "name": "render.png",
+                    "mime_type": "image/png",
+                    "size_bytes": 512,
+                    "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                }
+            ]
         });
 
         let vega = validate_artifact_spec(ArtifactKind::VegaLite, vega, DEFAULT_MAX_BYTES)
@@ -962,7 +1202,18 @@ mod tests {
             file.spec["sha256"],
             "sha256:abcdefabcdef0123456789abcdef0123456789abcdef0123456789abcdef0123"
         );
+        assert_eq!(file.spec["metadata"]["renderer"], "typst");
         assert!(file.fallback.contains("report.pdf"));
+        let manifest =
+            validate_artifact_spec(ArtifactKind::ArtifactManifest, manifest, DEFAULT_MAX_BYTES)
+                .expect("artifact manifest validates");
+        assert_eq!(manifest.mime_type, ARTIFACT_MANIFEST_MIME_TYPE);
+        assert_eq!(manifest.spec["artifact_count"], 2);
+        assert_eq!(manifest.spec["total_size_bytes"], 1536);
+        assert_eq!(manifest.spec["artifacts"][0]["relative_path"], "report.pdf");
+        assert!(manifest
+            .fallback
+            .contains("report.pdf (application/pdf, 1024 bytes)"));
     }
 
     #[test]
@@ -1014,6 +1265,41 @@ mod tests {
                 DEFAULT_MAX_BYTES,
             ),
             "payloads are not allowed",
+        );
+        assert_error_contains(
+            validate_artifact_spec(
+                ArtifactKind::ArtifactManifest,
+                json!({
+                    "schema_version": "harn.artifacts.v1",
+                    "kind": "artifact_manifest",
+                    "artifact_count": 1,
+                    "artifacts": [{
+                        "uri": "file:///tmp/report.pdf",
+                        "name": "report.pdf",
+                        "mime_type": "application/pdf",
+                        "text": "%PDF-1.7"
+                    }]
+                }),
+                DEFAULT_MAX_BYTES,
+            ),
+            "payloads are not allowed",
+        );
+        assert_error_contains(
+            validate_artifact_spec(
+                ArtifactKind::ArtifactManifest,
+                json!({
+                    "schema_version": "harn.artifacts.v1",
+                    "kind": "artifact_manifest",
+                    "artifact_count": 1,
+                    "artifacts": [{
+                        "uri": "https://example.com/report.pdf",
+                        "name": "report.pdf",
+                        "mime_type": "application/pdf"
+                    }]
+                }),
+                DEFAULT_MAX_BYTES,
+            ),
+            "must not reference a network",
         );
     }
 
@@ -1070,6 +1356,42 @@ mod tests {
                 DEFAULT_MAX_BYTES,
             ),
             "64-character hex digest",
+        );
+        assert_error_contains(
+            validate_artifact_spec(
+                ArtifactKind::ArtifactManifest,
+                json!({
+                    "schema_version": "harn.artifacts.v1",
+                    "kind": "artifact_manifest",
+                    "artifact_count": 2,
+                    "artifacts": [{
+                        "uri": "file:///tmp/report.pdf",
+                        "name": "report.pdf",
+                        "mime_type": "application/pdf"
+                    }]
+                }),
+                DEFAULT_MAX_BYTES,
+            ),
+            "artifact_count",
+        );
+        assert_error_contains(
+            validate_artifact_spec(
+                ArtifactKind::ArtifactManifest,
+                json!({
+                    "schema_version": "harn.artifacts.v1",
+                    "kind": "artifact_manifest",
+                    "artifact_count": 1,
+                    "total_size_bytes": 99,
+                    "artifacts": [{
+                        "uri": "file:///tmp/report.pdf",
+                        "name": "report.pdf",
+                        "mime_type": "application/pdf",
+                        "size_bytes": 10
+                    }]
+                }),
+                DEFAULT_MAX_BYTES,
+            ),
+            "total_size_bytes",
         );
     }
 }
