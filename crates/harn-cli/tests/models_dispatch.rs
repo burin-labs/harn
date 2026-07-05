@@ -321,27 +321,13 @@ fn models_batch_plan_reports_harn_live_adapter_support() {
         .find(|model| model["provider"] == "gemini")
         .expect("gemini batch model");
     assert_eq!(gemini["batch"]["wire_format"], "gemini");
-    assert_eq!(gemini["batch"]["harn_live_adapter"]["submit"], false);
-    assert_eq!(gemini["batch"]["harn_live_adapter"]["status"], false);
-    assert_eq!(gemini["batch"]["harn_live_adapter"]["download"], false);
-    let constraints = gemini["constraints"].as_array().expect("constraints");
-    assert!(
-        constraints.iter().any(|constraint| constraint
-            .as_str()
-            .is_some_and(|text| text.contains("live submit/status/download is not implemented"))),
-        "gemini constraints={constraints:?}"
-    );
+    assert_eq!(gemini["batch"]["harn_live_adapter"]["submit"], true);
+    assert_eq!(gemini["batch"]["harn_live_adapter"]["status"], true);
+    assert_eq!(gemini["batch"]["harn_live_adapter"]["download"], true);
 
     let human = run(&["models", "batch", "plan", "--provider", "gemini"], &[]);
     assert_eq!(human.exit_code, 0, "harn stderr={}", human.stderr);
-    assert!(human.stdout.contains("dry-run only"), "{}", human.stdout);
-    assert!(
-        human
-            .stdout
-            .contains("live submit/status/download is not implemented"),
-        "{}",
-        human.stdout
-    );
+    assert!(human.stdout.contains("live submit"), "{}", human.stdout);
 }
 
 #[test]
@@ -1321,6 +1307,197 @@ fn models_batch_prepare_gemini_and_mistral_request_shapes() {
     );
     assert_eq!(mistral_request["custom_id"], "mistral_1");
     assert_eq!(mistral_request["body"]["model"], "mistral-small-2603");
+}
+
+#[test]
+fn models_batch_prepare_gemini_and_dry_run_lifecycle() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let manifest_path = tmp.path().join("manifest.json");
+    let out_dir = tmp.path().join("prepared");
+    fs::write(
+        &manifest_path,
+        r#"{
+  "schemaVersion": 1,
+  "kind": "harn.model_batch_manifest",
+  "producer": "test",
+  "workload": "corpus",
+  "source": {"path": "fixture.jsonl", "sha256": "fixture", "row_count": 1},
+  "requestCount": 1,
+  "groupCount": 1,
+  "groups": [
+    {
+      "id": "gemini-fixture",
+      "provider": "gemini",
+      "model": "gemini-2.5-flash-lite",
+      "workload": "corpus",
+      "endpoint": "provider_default",
+      "tool_format": "json",
+      "batch": {"api": true, "wire_format": "gemini", "input_mode": "jsonl_or_inline"},
+      "requests": [
+        {
+          "custom_id": "gemini_1",
+          "source_line": 1,
+          "source_sha256": "fixture",
+          "metadata": {},
+          "request": {"contents": [{"role": "user", "parts": [{"text": "refresh"}]}]}
+        }
+      ]
+    }
+  ],
+  "warnings": []
+}
+"#,
+    )
+    .expect("write manifest");
+
+    let prepared = run(
+        &[
+            "models",
+            "batch",
+            "prepare",
+            "--manifest",
+            manifest_path.to_str().expect("utf8 manifest path"),
+            "--out-dir",
+            out_dir.to_str().expect("utf8 out dir"),
+            "--json",
+        ],
+        &[],
+    );
+    assert_eq!(prepared.exit_code, 0, "harn stderr={}", prepared.stderr);
+    let prepared_value = parse_json(&prepared.stdout, "gemini batch prepare");
+    let report = success_data(&prepared_value);
+    let job = &report["jobs"].as_array().expect("jobs")[0];
+    assert_eq!(job["provider"], "gemini");
+    assert_eq!(job["endpoint"], "batchGenerateContent");
+    assert_eq!(job["submit"]["operation"], "batches.create");
+    assert_eq!(job["submit"]["input"]["mode"], "file_api_jsonl");
+    assert_eq!(job["submit"]["input"]["file"], job["request_file"]);
+
+    let request_file = job["request_file"].as_str().expect("request_file");
+    let request_text = fs::read_to_string(request_file).expect("read request file");
+    let request = parse_json(
+        request_text.lines().next().expect("gemini line"),
+        "gemini batch line",
+    );
+    assert_eq!(request["key"], "gemini_1");
+    assert_eq!(
+        request["request"]["contents"][0]["parts"][0]["text"],
+        "refresh"
+    );
+    assert!(
+        request["request"]["model"].is_null(),
+        "Gemini batch rows should keep model at job creation"
+    );
+
+    let receipt_path = report["receipt"].as_str().expect("receipt path");
+    let submission_path = tmp.path().join("submission.json");
+    let submitted = run(
+        &[
+            "models",
+            "batch",
+            "submit",
+            "--receipt",
+            receipt_path,
+            "--out",
+            submission_path.to_str().expect("utf8 submission path"),
+            "--dry-run",
+            "--json",
+        ],
+        &[],
+    );
+    assert_eq!(submitted.exit_code, 0, "harn stderr={}", submitted.stderr);
+    let submitted_value = parse_json(&submitted.stdout, "gemini batch submit");
+    let submission = success_data(&submitted_value);
+    let submitted_job = &submission["jobs"].as_array().expect("submitted jobs")[0];
+    assert_eq!(submitted_job["status"], "ready");
+    assert_eq!(
+        submitted_job["provider_operation"]["credential_env"],
+        "GEMINI_API_KEY"
+    );
+    assert_eq!(
+        submitted_job["provider_operation"]["base_url"],
+        "https://generativelanguage.googleapis.com"
+    );
+
+    let status_path = tmp.path().join("status.json");
+    let status = run(
+        &[
+            "models",
+            "batch",
+            "status",
+            "--submission",
+            submission_path.to_str().expect("utf8 submission path"),
+            "--out",
+            status_path.to_str().expect("utf8 status path"),
+            "--dry-run",
+            "--json",
+        ],
+        &[],
+    );
+    assert_eq!(status.exit_code, 0, "harn stderr={}", status.stderr);
+    let status_value = parse_json(&status.stdout, "gemini batch status");
+    let status_report = success_data(&status_value);
+    assert_eq!(status_report["dry_run"], true);
+    assert_eq!(status_report["ready_count"], 1);
+
+    let mut status_receipt = parse_json(
+        &fs::read_to_string(&status_path).expect("read status receipt"),
+        "gemini status receipt",
+    );
+    status_receipt["status"] = serde_json::Value::String("completed".to_string());
+    status_receipt["completedCount"] = serde_json::Value::from(1);
+    status_receipt["readyCount"] = serde_json::Value::from(0);
+    {
+        let jobs = status_receipt["jobs"]
+            .as_array_mut()
+            .expect("mutable status jobs");
+        jobs[0]["status"] = serde_json::Value::String("completed".to_string());
+        jobs[0]["provider_batch_id"] =
+            serde_json::Value::String("batches/gemini-batch".to_string());
+        jobs[0]["provider_status"] = serde_json::Value::String("JOB_STATE_SUCCEEDED".to_string());
+        jobs[0]["responses_file"] = serde_json::Value::String("files/gemini-output".to_string());
+    }
+    fs::write(
+        &status_path,
+        serde_json::to_string_pretty(&status_receipt).expect("serialize gemini status"),
+    )
+    .expect("write gemini status receipt");
+
+    let results_dir = tmp.path().join("results");
+    let download = run(
+        &[
+            "models",
+            "batch",
+            "download",
+            "--status",
+            status_path.to_str().expect("utf8 status path"),
+            "--out-dir",
+            results_dir.to_str().expect("utf8 results dir"),
+            "--dry-run",
+            "--json",
+        ],
+        &[],
+    );
+    assert_eq!(download.exit_code, 0, "harn stderr={}", download.stderr);
+    let download_value = parse_json(&download.stdout, "gemini batch download");
+    let download_report = success_data(&download_value);
+    assert_eq!(download_report["dry_run"], true);
+    assert_eq!(download_report["ready_count"], 1);
+    assert_eq!(download_report["artifact_count"], 1);
+    let download_job = &download_report["jobs"].as_array().expect("download jobs")[0];
+    let artifacts = download_job["artifacts"]
+        .as_array()
+        .expect("download artifacts");
+    assert_eq!(artifacts[0]["label"], "responses");
+    assert_eq!(artifacts[0]["handle"], "files/gemini-output");
+    assert_eq!(
+        artifacts[0]["operation"]["credential_env"],
+        "GEMINI_API_KEY"
+    );
+    assert_eq!(
+        artifacts[0]["operation"]["operation"],
+        "GET https://generativelanguage.googleapis.com/download/v1beta/files/gemini-output:download"
+    );
 }
 
 // - models lora inspect ---------------------------------------------------

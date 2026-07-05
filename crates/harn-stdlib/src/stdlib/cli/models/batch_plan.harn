@@ -167,6 +167,9 @@ fn __live_batch_adapter_key(provider: string, wire: string) -> string {
   if provider == "together" && wire == "openai" {
     return "together"
   }
+  if provider == "gemini" && wire == "gemini" {
+    return "gemini"
+  }
   if provider == "mistral" && wire == "mistral" {
     return "mistral"
   }
@@ -1237,6 +1240,9 @@ fn __provider_auth_env_candidates(provider: string) -> list {
   if provider == "together" {
     return ["TOGETHER_AI_API_KEY", "TOGETHER_API_KEY"]
   }
+  if provider == "gemini" {
+    return ["GEMINI_API_KEY", "GOOGLE_API_KEY"]
+  }
   return [__provider_auth_env(provider)]
 }
 
@@ -1274,6 +1280,23 @@ fn __provider_base_url(harness: Harness, provider: string) -> string {
         .get_or(
         "HARN_BATCH_XAI_BASE_URL",
         harness.env.get_or("XAI_BASE_URL", "https://api.x.ai/v1"),
+      ),
+    )
+  }
+  if provider == "gemini" {
+    return trim(
+      harness.env
+        .get_or(
+        "HARN_BATCH_GEMINI_BASE_URL",
+        harness.env
+          .get_or(
+          "GEMINI_BASE_URL",
+          harness.env
+            .get_or(
+            "GOOGLE_GENERATIVE_LANGUAGE_BASE_URL",
+            "https://generativelanguage.googleapis.com",
+          ),
+        ),
       ),
     )
   }
@@ -1416,19 +1439,20 @@ fn __dry_run_submission(harness: Harness, job: dict, payload: dict) -> dict {
 }
 
 fn __api_key_for_job(harness: Harness, provider: string) -> dict {
-  let env_names = __provider_auth_env_candidates(provider)
-  for env_name in env_names {
+  let candidates = __provider_auth_env_candidates(provider)
+  for env_name in candidates {
     let value = trim(harness.env.get_or(env_name, ""))
     if value != "" {
       return {ok: true, env: env_name, value: value}
     }
   }
   let primary = __provider_auth_env(provider)
-  var error = "missing provider API key env " + primary
-  if len(env_names) > 1 {
-    error = error + " (also checked " + join(env_names[1:len(env_names)], ", ") + ")"
+  let aliases = join(candidates, ", ")
+  return {
+    ok: false,
+    env: primary,
+    error: "missing provider API key env " + primary + " (accepted: " + aliases + ")",
   }
-  return {ok: false, env: primary, error: error}
 }
 
 fn __submit_anthropic(harness: Harness, job: dict, payload: dict) -> dict {
@@ -1743,6 +1767,193 @@ fn __submit_xai(harness: Harness, job: dict, payload: dict) -> dict {
   }
 }
 
+fn __header_value(headers: dict, name: string) -> string {
+  let exact = headers[name] ?? headers[lowercase(name)] ?? nil
+  if exact != nil {
+    return trim(to_string(exact))
+  }
+  let target = lowercase(name)
+  for key in headers.keys() {
+    if lowercase(to_string(key)) == target {
+      return trim(to_string(headers[key]))
+    }
+  }
+  return ""
+}
+
+fn __gemini_model_path(model: string) -> string {
+  let trimmed = trim(model)
+  if starts_with(trimmed, "models/") {
+    return trimmed
+  }
+  return "models/" + trimmed
+}
+
+fn __gemini_provider_status(body: dict) -> string {
+  let metadata = safe_dict(body["metadata"])
+  let response = safe_dict(body["response"])
+  let status = body["state"] ?? metadata["state"] ?? response["state"] ?? nil
+  let text = safe_string(status, "")
+  if text != "" {
+    return text
+  }
+  if safe_bool(body["done"], false) {
+    if body["error"] != nil {
+      return "JOB_STATE_FAILED"
+    }
+    return "JOB_STATE_SUCCEEDED"
+  }
+  return ""
+}
+
+fn __gemini_responses_file(body: dict) -> string {
+  let response = safe_dict(body["response"])
+  let output = safe_dict(body["output"])
+  return safe_string(response["responsesFile"], safe_string(output["responsesFile"], ""))
+}
+
+fn __upload_gemini_jsonl_file(
+  harness: Harness,
+  job: dict,
+  payload: dict,
+  credential_env: string,
+  api_key: string,
+) -> dict {
+  let base = __provider_base_url(harness, "gemini")
+  let file_path = safe_string(payload["path"], "")
+  let text = safe_string(payload["text"], "")
+  let start = __http_result(
+    harness,
+    "POST",
+    __join_url(base, "/upload/v1beta/files"),
+    {
+      headers: {
+        "x-goog-api-key": api_key,
+        "X-Goog-Upload-Protocol": "resumable",
+        "X-Goog-Upload-Command": "start",
+        "X-Goog-Upload-Header-Content-Length": to_string(len(text)),
+        "X-Goog-Upload-Header-Content-Type": "application/jsonl",
+        "Content-Type": "application/json",
+      },
+      body: json_stringify({file: {displayName: safe_string(job["id"], "harn-batch")}}),
+      timeout_ms: 120000,
+      max_response_bytes: 1048576,
+    },
+  )
+  let upload_url = __header_value(safe_dict(start["headers"]), "x-goog-upload-url")
+  if !safe_bool(start["ok"], false) || upload_url == "" {
+    return {
+      ok: false,
+      error: "gemini batch file upload start failed using " + credential_env,
+      status: start["status"],
+      response: start["body"] ?? nil,
+    }
+  }
+  let upload = __http_result(
+    harness,
+    "POST",
+    upload_url,
+    {
+      headers: {
+        "Content-Length": to_string(len(text)),
+        "X-Goog-Upload-Offset": "0",
+        "X-Goog-Upload-Command": "upload, finalize",
+        "Content-Type": "application/jsonl",
+      },
+      body: text,
+      timeout_ms: 120000,
+      max_response_bytes: 1048576,
+    },
+  )
+  let body = safe_dict(upload["body"])
+  let file = safe_dict(body["file"])
+  let file_name = safe_string(file["name"], "")
+  if !safe_bool(upload["ok"], false) || file_name == "" {
+    return {
+      ok: false,
+      error: "gemini batch file upload finalize failed using " + credential_env,
+      status: upload["status"],
+      response: body,
+    }
+  }
+  return {
+    ok: true,
+    file_name: file_name,
+    file_uri: file["uri"] ?? nil,
+    path: file_path,
+    start_status: start["status"],
+    status: upload["status"],
+    response: body,
+  }
+}
+
+fn __submit_gemini(harness: Harness, job: dict, payload: dict) -> dict {
+  let auth = __api_key_for_job(harness, "gemini")
+  let base = __provider_base_url(harness, "gemini")
+  let base_job = __submission_job_base(harness, job, payload, false)
+  if !safe_bool(auth["ok"], false) {
+    return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
+  }
+  let upload = __upload_gemini_jsonl_file(
+    harness,
+    job,
+    payload,
+    safe_string(auth["env"], ""),
+    safe_string(auth["value"], ""),
+  )
+  if !safe_bool(upload["ok"], false) {
+    return {
+      ok: false,
+      job: base_job + {status: "failed", upload: upload},
+      errors: [safe_string(upload["error"], "")],
+    }
+  }
+  let create_body = {
+    batch: {
+      displayName: safe_string(job["id"], "harn-batch"),
+      inputConfig: {fileName: safe_string(upload["file_name"], "")},
+    },
+  }
+  let response = __http_result(
+    harness,
+    "POST",
+    __join_url(
+      base,
+      "/v1beta/" + __gemini_model_path(safe_string(job["model"], "")) + ":batchGenerateContent",
+    ),
+    {
+      headers: {"x-goog-api-key": safe_string(auth["value"], ""), "content-type": "application/json"},
+      body: json_stringify(create_body),
+      timeout_ms: 120000,
+      max_response_bytes: 1048576,
+    },
+  )
+  let body = safe_dict(response["body"])
+  if !safe_bool(response["ok"], false) {
+    return {
+      ok: false,
+      job: base_job
+        + {status: "failed", upload: upload, response_status: response["status"], response: body},
+      errors: ["gemini batch create failed for job " + safe_string(job["id"], "")],
+    }
+  }
+  return {
+    ok: true,
+    job: base_job
+      + {
+      status: "submitted",
+      provider_batch_id: safe_string(body["name"], ""),
+      provider_status: __gemini_provider_status(body),
+      input_file_name: safe_string(upload["file_name"], ""),
+      responses_file: __gemini_responses_file(body),
+      upload: upload,
+      response_status: response["status"],
+      response: body,
+    },
+    errors: [],
+  }
+}
+
 fn __submit_live(harness: Harness, job: dict, payload: dict) -> dict {
   let provider = safe_string(job["provider"], "")
   let wire = safe_string(safe_dict(job["batch"])["wire_format"], "")
@@ -1758,6 +1969,9 @@ fn __submit_live(harness: Harness, job: dict, payload: dict) -> dict {
   }
   if adapter == "together" {
     return __submit_openai_compatible(harness, job, payload, "together")
+  }
+  if adapter == "gemini" {
+    return __submit_gemini(harness, job, payload)
   }
   if adapter == "mistral" {
     return __submit_mistral(harness, job, payload)
@@ -1940,7 +2154,12 @@ fn __provider_batch_status(raw_status) -> string {
   if status == "ready" {
     return "ready"
   }
-  if status == "completed" || status == "succeeded" || status == "success" || status == "ended" {
+  if status == "completed"
+    || status == "succeeded"
+    || status == "success"
+    || status == "ended"
+    || status == "job_state_succeeded"
+    || status == "batch_state_succeeded" {
     return "completed"
   }
   if status == "failed"
@@ -1948,7 +2167,15 @@ fn __provider_batch_status(raw_status) -> string {
     || status == "errored"
     || status == "expired"
     || status == "cancelled"
-    || status == "canceled" {
+    || status == "canceled"
+    || status == "job_state_failed"
+    || status == "job_state_cancelled"
+    || status == "job_state_canceled"
+    || status == "job_state_expired"
+    || status == "batch_state_failed"
+    || status == "batch_state_cancelled"
+    || status == "batch_state_canceled"
+    || status == "batch_state_expired" {
     return "failed"
   }
   return "running"
@@ -1981,6 +2208,7 @@ fn __cached_status_job(job: dict, dry_run: bool) -> dict {
     output_file: job["output_file"] ?? nil,
     error_file: job["error_file"] ?? nil,
     results_url: job["results_url"] ?? nil,
+    responses_file: job["responses_file"] ?? nil,
     response: job["response"] ?? nil,
   }
 }
@@ -2180,6 +2408,48 @@ fn __poll_xai_status(harness: Harness, job: dict) -> dict {
   }
 }
 
+fn __poll_gemini_status(harness: Harness, job: dict) -> dict {
+  let auth = __api_key_for_job(harness, "gemini")
+  let base_job = __status_job_base(job, false)
+  if !safe_bool(auth["ok"], false) {
+    return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
+  }
+  let batch_id = safe_string(job["provider_batch_id"], "")
+  let response = __http_result(
+    harness,
+    "GET",
+    __join_url(__provider_base_url(harness, "gemini"), "/v1beta/" + batch_id),
+    {
+      headers: {"x-goog-api-key": safe_string(auth["value"], ""), "content-type": "application/json"},
+      timeout_ms: 120000,
+      max_response_bytes: 1048576,
+    },
+  )
+  let body = safe_dict(response["body"])
+  if !safe_bool(response["ok"], false) {
+    return {
+      ok: false,
+      job: base_job + {status: "failed", response_status: response["status"], response: body},
+      errors: ["gemini batch status failed for job " + safe_string(job["id"], "")],
+    }
+  }
+  let provider_status = __gemini_provider_status(body)
+  return {
+    ok: true,
+    job: base_job
+      + {
+      status: __provider_batch_status(provider_status),
+      provider_status: provider_status,
+      status_checked: true,
+      input_file_name: job["input_file_name"] ?? nil,
+      responses_file: __gemini_responses_file(body),
+      response_status: response["status"],
+      response: body,
+    },
+    errors: [],
+  }
+}
+
 fn __status_one_job(harness: Harness, job: dict, dry_run: bool) -> dict {
   if dry_run {
     return {ok: true, job: __cached_status_job(job, true), errors: []}
@@ -2207,6 +2477,9 @@ fn __status_one_job(harness: Harness, job: dict, dry_run: bool) -> dict {
   }
   if adapter == "together" {
     return __poll_openai_compatible_status(harness, job, "together")
+  }
+  if adapter == "gemini" {
+    return __poll_gemini_status(harness, job)
   }
   if adapter == "anthropic" {
     return __poll_anthropic_status(harness, job)
@@ -2376,6 +2649,7 @@ fn __download_status(job: dict, dry_run: bool) -> dict {
     batch: safe_dict(job["batch"]),
     provider_batch_id: safe_string(job["provider_batch_id"], ""),
     provider_status: job["provider_status"] ?? nil,
+    responses_file: job["responses_file"] ?? nil,
     source_status: safe_string(job["status"], ""),
     dry_run: dry_run,
   }
@@ -2694,6 +2968,43 @@ fn __download_xai_results(
   }
 }
 
+fn __download_gemini_responses(
+  harness: Harness,
+  job: dict,
+  out_dir: string,
+  dry_run: bool,
+  max_bytes: int,
+) -> dict {
+  let handle = safe_string(job["responses_file"], "")
+  if handle == "" {
+    return {ok: true, artifact: nil, errors: []}
+  }
+  let auth_env = __provider_auth_env("gemini")
+  let out_path = __download_artifact_path(out_dir, job, "responses")
+  let url = __join_url(
+    __provider_base_url(harness, "gemini"),
+    "/download/v1beta/" + handle + ":download?alt=media",
+  )
+  if dry_run {
+    return __dry_run_download_artifact("gemini", url, auth_env, "responses", handle, out_path)
+  }
+  let auth = __api_key_for_job(harness, "gemini")
+  if !safe_bool(auth["ok"], false) {
+    return {ok: false, artifact: nil, errors: [safe_string(auth["error"], "")]}
+  }
+  return __download_text_file(
+    harness,
+    "gemini",
+    url,
+    {"x-goog-api-key": safe_string(auth["value"], "")},
+    auth_env,
+    "responses",
+    handle,
+    out_path,
+    max_bytes,
+  )
+}
+
 fn __append_download_result(state: dict, result: dict) -> dict {
   var artifacts = safe_list(state["artifacts"])
   var errors = safe_list(state["errors"]) + safe_list(result["errors"])
@@ -2801,6 +3112,11 @@ fn __download_one_job(harness: Harness, job: dict, out_dir: string, dry_run: boo
         dry_run,
         max_bytes,
       ),
+    )
+  } else if adapter == "gemini" {
+    state = __append_download_result(
+      state,
+      __download_gemini_responses(harness, job, out_dir, dry_run, max_bytes),
     )
   } else if adapter == "anthropic" {
     state = __append_download_result(
