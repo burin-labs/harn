@@ -577,13 +577,19 @@ fn string_value(value: &str) -> VmValue {
 }
 
 fn now_rfc3339() -> String {
-    chrono::Utc::now().to_rfc3339()
+    rfc3339_from_epoch_ms(crate::stdlib::clock::now_wall_ms())
 }
 
 fn parse_ts_ms(ts: &str) -> i64 {
     chrono::DateTime::parse_from_rfc3339(ts)
         .map(|dt| dt.timestamp_millis())
-        .unwrap_or_else(|_| chrono::Utc::now().timestamp_millis())
+        .unwrap_or_else(|_| crate::stdlib::clock::now_wall_ms())
+}
+
+fn rfc3339_from_epoch_ms(ms: i64) -> String {
+    chrono::DateTime::<chrono::Utc>::from_timestamp_millis(ms)
+        .unwrap_or(chrono::DateTime::<chrono::Utc>::UNIX_EPOCH)
+        .to_rfc3339()
 }
 
 #[cfg(test)]

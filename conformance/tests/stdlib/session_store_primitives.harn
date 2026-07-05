@@ -7,7 +7,7 @@ import "std/session-store"
  * {session_id, event_id, payload, prev_hash}; ts is pinned via options.now).
  */
 pipeline default() {
-  let root = path_join(harness.fs.temp_dir(), "harn-session-store-" + uuid())
+  let root = path_join(".harn", "tmp", "harn-session-store-" + uuid())
   let sid = "burin.agent_context.memories.project"
   let opts = {root: root, now: "2026-04-29T00:00:00Z", kind_type: "AgentMemory"}
   let first = session_store_append(sid, {operation: "upsert", record: {id: "m1", title: "one"}}, opts)
