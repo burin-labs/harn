@@ -2595,9 +2595,9 @@ fn registered_provider_and_session_hook_evaluate_under_execution_policy() {
 // own registered-closure seams rather than weakening the policy globally.
 #[test]
 fn bridged_builtin_outside_registered_closure_is_still_rejected_under_policy() {
-    let script = r#"pipeline main() {
+    let script = r"pipeline main() {
   __probe_bridge_gate()
-}"#;
+}";
 
     let (result, probe_calls) = run_registered_closure_probe(script);
     let error = result.expect_err(
