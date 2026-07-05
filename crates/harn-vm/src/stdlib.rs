@@ -88,6 +88,7 @@ mod review;
 mod runtime_scope;
 pub(crate) mod sandbox;
 pub mod secret_scan;
+pub(crate) mod session_store;
 mod sets;
 pub(crate) mod shapes;
 mod skills;
@@ -176,6 +177,7 @@ pub fn register_io_stdlib(vm: &mut Vm) {
     vision::register_vision_builtins(vm);
     agent_state::register_agent_state_builtins(vm);
     memory::register_memory_builtins(vm);
+    session_store::register_session_store_builtins(vm);
     net::register_net_builtins(vm);
     process::register_process_builtins(vm);
     process::register_path_builtins(vm);

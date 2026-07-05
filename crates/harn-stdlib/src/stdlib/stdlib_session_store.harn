@@ -1,0 +1,99 @@
+// std/session-store — the canonical append-only, hash-chained session event
+// store other agent stores layer on.
+//
+// Import: import "std/session-store"
+//
+// Each stream is a JSONL file at `<root>/.harn/session-store/<session_id>.jsonl`.
+// Every line is a session event whose shape mirrors harn-serve's StoredEvent
+// (event_id, session_id, tenant_id, parent_event_id, actor, kind, payload,
+// tags, headers, ts_ms, ts, record_hash, prev_hash). The record hash is
+// `"sha256:" + sha256(json_stringify({session_id, event_id, payload, prev_hash}))`,
+// computed with the same serializer the `json_stringify` / `sha256` builtins
+// use, so native appends interoperate byte-for-byte with equivalent Harn
+// pipelines and with Burin's Swift session store.
+//
+// A `payload` is treated as a mutation: `{operation: "upsert", record}`,
+// `{operation: "delete", id}`, `{operation: "replace", records}`, or
+// `{operation: "clear"}`. `session_store_project` folds these to the latest
+// surviving record per id (first-seen order); `session_store_project_value`
+// folds `replace`/`clear` to a single value.
+/**
+ * Append an event to `session_id`'s stream and return the stored event dict
+ * (including `event_id`, `record_hash`, and `prev_hash`).
+ *
+ * `options.root` overrides the storage root (default: project root, or
+ * `HARN_SESSION_STORE_ROOT`). `options.kind` = "hypothesis" tags the event as
+ * `{kind: "hypothesis"}`; otherwise the event is `{kind: "custom", type:
+ * options.kind_type}` (default type "LibrarianEntry"). `options.tenant_id`,
+ * `options.actor` (default "harn"), `options.tags`, `options.headers`, and
+ * `options.now` (RFC3339 timestamp override) are optional.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn session_store_append(session_id, payload, options = nil) {
+  return __session_store_append(session_id, payload, options)
+}
+
+/**
+ * Return every event dict in `session_id`'s stream, in append order.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn session_store_events(session_id, options = nil) {
+  return __session_store_events(session_id, options)
+}
+
+/**
+ * Return the non-nil `payload` of every event in append order.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn session_store_payloads(session_id, options = nil) {
+  return __session_store_payloads(session_id, options)
+}
+
+/**
+ * Project the stream's mutation payloads to the latest surviving record per
+ * id, in first-seen order (`upsert`/`delete`/`replace`/`clear`).
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn session_store_project(session_id, options = nil) {
+  return __session_store_project(session_id, options)
+}
+
+/**
+ * Project the stream's `replace`/`clear` mutations to a single value, falling
+ * back to `default_value`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn session_store_project_value(session_id, default_value = nil, options = nil) {
+  return __session_store_project_value(session_id, default_value, options)
+}
+
+/**
+ * Verify the hash chain of `session_id`. Returns `{ok, session_id, count}`;
+ * on the first break also `broken_at` (event index) and `reason`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn session_store_verify(session_id, options = nil) {
+  return __session_store_verify(session_id, options)
+}
+
+/**
+ * Return the absolute JSONL path backing `session_id`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn session_store_path(session_id, options = nil) {
+  return __session_store_path(session_id, options)
+}

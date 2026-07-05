@@ -594,6 +594,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/stdlib_memory.harn"),
     },
     StdlibSource {
+        module: "session-store",
+        source: include_str!("stdlib/stdlib_session_store.harn"),
+    },
+    StdlibSource {
         module: "coordination",
         source: include_str!("stdlib/stdlib_coordination.harn"),
     },
