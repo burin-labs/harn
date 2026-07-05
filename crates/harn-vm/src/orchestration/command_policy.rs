@@ -3655,7 +3655,7 @@ mod tests {
             "rm -rf \"$PWD\"/{*,.*}",
             "rm -rf ${PWD}/*",
             "rm -rf ${PWD:?missing}/*",
-            "rm -rf ${PWD:-.}/.",
+            concat!("rm -rf $", "{PWD:-.}/."),
             // Wrapped and chained forms — the dangerous verb is not token 0.
             "echo ok | rm -rf .",
             "echo ok\nrm -rf ./*",
@@ -3715,7 +3715,7 @@ mod tests {
             workspace_roots: vec![ROOT.to_string()],
             default_shell_mode: DEFAULT_SHELL_MODE.to_string(),
             deny_patterns: Vec::new(),
-            require_approval: ["catastrophic".to_string()].into_iter().collect(),
+            require_approval: std::iter::once("catastrophic".to_string()).collect(),
             deny_labels: BTreeSet::new(),
             pre: None,
             post: None,
@@ -3731,7 +3731,7 @@ mod tests {
         // deny_labels promotes an otherwise consent-eligible label to a hard
         // deny with the deny_labels source.
         let policy = CommandPolicy {
-            deny_labels: ["network_exfil".to_string()].into_iter().collect(),
+            deny_labels: std::iter::once("network_exfil".to_string()).collect(),
             require_approval: BTreeSet::new(),
             ..policy
         };
