@@ -11,6 +11,11 @@
  *   HARN_MODELS_BATCH_WORKLOAD                  - eval, judge, corpus, or generic.
  *   HARN_MODELS_BATCH_MIN_DISCOUNT_PERCENT      - optional integer filter.
  *   HARN_MODELS_BATCH_MAX_TURNAROUND_HOURS      - optional integer filter.
+ *   HARN_MODELS_BATCH_MODE                      - plan or manifest.
+ *   HARN_MODELS_BATCH_REQUESTS                  - manifest-mode input JSONL path.
+ *   HARN_MODELS_BATCH_OUT                       - manifest-mode output JSON path.
+ *   HARN_MODELS_BATCH_TOOL_FORMAT               - manifest-mode default tool format.
+ *   HARN_MODELS_BATCH_ID_PREFIX                 - manifest-mode generated id prefix.
  *   HARN_OUTPUT_JSON                            - "1" for JSON, else human text.
  */
 import {
@@ -18,6 +23,7 @@ import {
   print_list,
   safe_bool,
   safe_dict,
+  safe_int_string,
   safe_list,
   safe_string,
 } from "std/cli/render"
@@ -291,6 +297,355 @@ fn __render_json(report: dict) -> string {
   return json_stringify_pretty(cli_json_envelope({schema_version: 1, ok: true, data: report}))
 }
 
+fn __resolve_candidate(
+  catalog: list,
+  provider_filter: string,
+  model_filter: string,
+  workload: string,
+) -> dict {
+  let matches = __collect(catalog, provider_filter, model_filter, workload, nil, nil)
+  if len(matches) == 0 {
+    return {
+      ok: false,
+      error: "no batch-capable model matches provider='" + provider_filter + "' model='" + model_filter
+        + "'",
+    }
+  }
+  if len(matches) > 1 && trim(provider_filter) == "" {
+    return {
+      ok: false,
+      error: "model '" + model_filter + "' matches multiple batch-capable providers; set provider",
+    }
+  }
+  return {ok: true, candidate: safe_dict(matches[0])}
+}
+
+fn __row_string(row: dict, key: string, fallback: string) -> string {
+  let value = safe_string(row[key], "")
+  if trim(value) == "" {
+    return fallback
+  }
+  return trim(value)
+}
+
+fn __custom_id(row: dict, line_no: int, id_prefix: string) -> string {
+  let explicit = __row_string(row, "custom_id", __row_string(row, "id", ""))
+  if explicit != "" {
+    return explicit
+  }
+  return id_prefix + "-" + to_string(line_no) + "-" + sha256(json_stringify(row)).substring(0, 12)
+}
+
+fn __request_entry(row: dict, line_no: int, id_prefix: string) -> dict {
+  let custom_id = __custom_id(row, line_no, id_prefix)
+  return {
+    custom_id: custom_id,
+    source_line: line_no,
+    source_sha256: sha256(json_stringify(row)),
+    metadata: safe_dict(row["metadata"]),
+    request: row,
+  }
+}
+
+fn __group_key(provider: string, model: string, batch: dict, tool_format: string, endpoint: string) -> string {
+  return provider
+    + "\t"
+    + model
+    + "\t"
+    + safe_string(batch["wire_format"], "")
+    + "\t"
+    + safe_string(batch["input_mode"], "")
+    + "\t"
+    + tool_format
+    + "\t"
+    + endpoint
+}
+
+fn __group_summary(group: dict) -> dict {
+  return {
+    id: safe_string(group["id"], ""),
+    provider: safe_string(group["provider"], ""),
+    model: safe_string(group["model"], ""),
+    tool_format: safe_string(group["tool_format"], ""),
+    endpoint: safe_string(group["endpoint"], ""),
+    request_count: len(safe_list(group["requests"])),
+  }
+}
+
+fn __read_request_rows(harness: Harness, requests_path: string) -> dict {
+  var rows = []
+  var errors = []
+  if requests_path == "" {
+    return {rows: rows, errors: ["--requests is required"]}
+  }
+  if !harness.fs.exists(requests_path) {
+    return {rows: rows, errors: ["request JSONL not found: " + requests_path]}
+  }
+  let source = harness.fs.read_text(requests_path)
+  var line_no = 0
+  for line in source.split("\n") {
+    line_no = line_no + 1
+    let trimmed = trim(line)
+    if trimmed == "" {
+      continue
+    }
+    let parsed = try {
+      json_parse(trimmed)
+    } catch (e) {
+      errors = errors.push("line " + to_string(line_no) + ": invalid JSON: " + to_string(e))
+      continue
+    }
+    if type_of(parsed) != "dict" {
+      errors = errors.push("line " + to_string(line_no) + ": expected a JSON object")
+      continue
+    }
+    rows = rows.push({line_no: line_no, row: parsed})
+  }
+  return {rows: rows, errors: errors, source_sha256: sha256(source)}
+}
+
+fn __build_manifest(
+  catalog: list,
+  request_rows: list,
+  source_path: string,
+  source_sha256: string,
+  out_path: string,
+  provider_filter: string,
+  model_filter: string,
+  workload: string,
+  default_tool_format: string,
+  id_prefix: string,
+  min_discount: int?,
+  max_turnaround: int?,
+) -> dict {
+  var errors = []
+  var warnings = []
+  var groups = {}
+  var group_keys = []
+  var request_count = 0
+  for item in request_rows {
+    let entry = safe_dict(item)
+    let line_no = __safe_int(entry["line_no"]) ?? 0
+    let row = safe_dict(entry["row"])
+    let provider = __row_string(row, "provider", provider_filter)
+    let model = __row_string(row, "model", model_filter)
+    if provider == "" && model == "" {
+      errors = errors.push("line " + to_string(line_no) + ": provider/model missing")
+      continue
+    }
+    if model == "" {
+      errors = errors.push("line " + to_string(line_no) + ": model missing")
+      continue
+    }
+    let resolved = __resolve_candidate(catalog, provider, model, workload)
+    if !safe_bool(resolved["ok"], false) {
+      errors = errors
+        .push(
+        "line " + to_string(line_no) + ": " + safe_string(resolved["error"], "unresolved model"),
+      )
+      continue
+    }
+    let candidate = safe_dict(resolved["candidate"])
+    let batch = safe_dict(candidate["batch"])
+    let discount = __safe_int(batch["discount_percent"])
+    if min_discount != nil && (discount == nil || discount < min_discount) {
+      errors = errors
+        .push(
+        "line "
+          + to_string(line_no)
+          + ": model discount below --min-discount-percent for "
+          + safe_string(candidate["provider"], "")
+          + "/"
+          + safe_string(candidate["id"], ""),
+      )
+      continue
+    }
+    let turnaround = __safe_int(batch["turnaround_hours"])
+    if max_turnaround != nil && (turnaround == nil || turnaround > max_turnaround) {
+      errors = errors
+        .push(
+        "line "
+          + to_string(line_no)
+          + ": model turnaround exceeds --max-turnaround-hours for "
+          + safe_string(candidate["provider"], "")
+          + "/"
+          + safe_string(candidate["id"], ""),
+      )
+      continue
+    }
+    let tool_format = __row_string(row, "tool_format", default_tool_format)
+    let endpoint = __row_string(row, "endpoint", safe_string(batch["wire_format"], "provider_default"))
+    let key = __group_key(
+      safe_string(candidate["provider"], ""),
+      safe_string(candidate["id"], ""),
+      batch,
+      tool_format,
+      endpoint,
+    )
+    let request = __request_entry(row, line_no, id_prefix)
+    let current = safe_dict(groups[key])
+    if current == {} {
+      let group_id = "batch_group_" + sha256(key).substring(0, 16)
+      let group = {
+        id: group_id,
+        provider: safe_string(candidate["provider"], ""),
+        model: safe_string(candidate["id"], ""),
+        model_name: safe_string(candidate["name"], ""),
+        workload: workload,
+        endpoint: endpoint,
+        tool_format: tool_format,
+        batch: batch,
+        requests: [request],
+      }
+      groups = groups + {[key]: group}
+      group_keys = group_keys.push(key)
+    } else {
+      let updated = current + {requests: safe_list(current["requests"]).push(request)}
+      groups = groups + {[key]: updated}
+    }
+    request_count = request_count + 1
+  }
+  var group_list = []
+  for key in group_keys {
+    let group = safe_dict(groups[key])
+    group_list = group_list.push(group + {request_count: len(safe_list(group["requests"]))})
+  }
+  if len(request_rows) == 0 {
+    errors = errors.push("request JSONL contains no request rows")
+  }
+  if out_path == "" {
+    errors = errors.push("--out is required")
+  }
+  let manifest = {
+    schemaVersion: 1,
+    kind: "harn.model_batch_manifest",
+    producer: "harn models batch manifest",
+    workload: workload,
+    source: {path: source_path, sha256: source_sha256, row_count: len(request_rows)},
+    constraints: __constraints(workload),
+    requestCount: request_count,
+    groupCount: len(group_list),
+    groups: group_list,
+    warnings: warnings,
+  }
+  return {manifest: manifest, errors: errors, warnings: warnings}
+}
+
+fn __render_manifest_human(harness: Harness, report: dict) {
+  if !safe_bool(report["ok"], false) {
+    harness.stdio.eprintln("Batch manifest failed")
+    print_list(harness, "errors", safe_list(report["errors"]))
+    print_list(harness, "warnings", safe_list(report["warnings"]))
+    return
+  }
+  harness.stdio.println("Batch manifest written: " + safe_string(report["out"], ""))
+  harness.stdio.println("  requests: " + safe_int_string(report["request_count"], "0"))
+  harness.stdio.println("  groups: " + safe_int_string(report["group_count"], "0"))
+  harness.stdio.println("  manifest sha256: " + safe_string(report["manifest_sha256"], ""))
+  for group in safe_list(report["groups"]) {
+    let g = safe_dict(group)
+    harness.stdio
+      .println(
+      "  "
+        + safe_string(g["id"], "")
+        + " "
+        + safe_string(g["provider"], "")
+        + "/"
+        + safe_string(g["model"], "")
+        + " "
+        + safe_string(g["tool_format"], "")
+        + " requests="
+        + safe_int_string(g["request_count"], "0"),
+    )
+  }
+  print_list(harness, "warnings", safe_list(report["warnings"]))
+}
+
+fn __render_manifest_json(report: dict) -> string {
+  if safe_bool(report["ok"], false) {
+    return json_stringify_pretty(cli_json_envelope({schema_version: 1, ok: true, data: report}))
+  }
+  return json_stringify_pretty(
+    cli_json_envelope(
+      {
+        schema_version: 1,
+        ok: false,
+        error: {
+          code: "batch_manifest_failed",
+          message: "Batch manifest request rows could not be resolved into provider batch groups.",
+          details: report,
+        },
+        warnings: safe_list(report["warnings"]),
+      },
+    ),
+  )
+}
+
+fn __run_manifest(
+  harness: Harness,
+  catalog: list,
+  provider_filter: string,
+  model_filter: string,
+  workload: string,
+  min_discount: int?,
+  max_turnaround: int?,
+  planner_warnings: list,
+) -> int {
+  let requests_path = trim(harness.env.get_or("HARN_MODELS_BATCH_REQUESTS", ""))
+  let out_path = trim(harness.env.get_or("HARN_MODELS_BATCH_OUT", ""))
+  let default_tool_format = trim(harness.env.get_or("HARN_MODELS_BATCH_TOOL_FORMAT", "auto"))
+  let id_prefix_raw = trim(harness.env.get_or("HARN_MODELS_BATCH_ID_PREFIX", "harn-batch"))
+  let id_prefix = if id_prefix_raw == "" {
+    "harn-batch"
+  } else {
+    id_prefix_raw
+  }
+  let loaded = __read_request_rows(harness, requests_path)
+  let built = __build_manifest(
+    catalog,
+    safe_list(loaded["rows"]),
+    requests_path,
+    safe_string(loaded["source_sha256"], ""),
+    out_path,
+    provider_filter,
+    model_filter,
+    workload,
+    default_tool_format,
+    id_prefix,
+    min_discount,
+    max_turnaround,
+  )
+  let errors = safe_list(loaded["errors"]) + safe_list(built["errors"])
+  let warnings = safe_list(planner_warnings) + safe_list(built["warnings"])
+  let manifest = safe_dict(built["manifest"]) + {warnings: warnings}
+  var report = {
+    schema_version: 1,
+    ok: len(errors) == 0,
+    out: out_path,
+    source: safe_dict(manifest["source"]),
+    workload: workload,
+    request_count: __safe_int(manifest["requestCount"]) ?? 0,
+    group_count: __safe_int(manifest["groupCount"]) ?? 0,
+    groups: safe_list(manifest["groups"]).map({ group -> __group_summary(safe_dict(group)) }),
+    errors: errors,
+    warnings: warnings,
+  }
+  if len(errors) == 0 {
+    let manifest_text = json_stringify_pretty(manifest) + "\n"
+    harness.fs.write_text(out_path, manifest_text)
+    report = report + {manifest_sha256: sha256(manifest_text)}
+  }
+  if harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1" {
+    harness.stdio.println(__render_manifest_json(report))
+  } else {
+    __render_manifest_human(harness, report)
+  }
+  if len(errors) == 0 {
+    return 0
+  }
+  return 1
+}
+
 fn main(harness: Harness) -> int {
   let provider_filter = trim(harness.env.get_or("HARN_MODELS_BATCH_PROVIDER", ""))
   let model_filter = trim(harness.env.get_or("HARN_MODELS_BATCH_MODEL", ""))
@@ -309,6 +664,18 @@ fn main(harness: Harness) -> int {
   }
   if max_turnaround == nil && harness.env.get_or("HARN_MODELS_BATCH_MAX_TURNAROUND_HOURS", "") != "" {
     warnings = warnings.push("ignored non-integer --max-turnaround-hours")
+  }
+  if harness.env.get_or("HARN_MODELS_BATCH_MODE", "plan") == "manifest" {
+    return __run_manifest(
+      harness,
+      catalog,
+      provider_filter,
+      model_filter,
+      workload,
+      min_discount,
+      max_turnaround,
+      warnings,
+    )
   }
   let report = {
     schema_version: 1,
