@@ -1355,6 +1355,13 @@ code. Subscription-plan CLI auth is reported as separate from API batch
 credentials; providers that expose Batch APIs still require provider API
 billing.
 
+Human output marks each route as `live submit` or `dry-run only`. JSON output
+includes `batch.harn_live_adapter.{submit,status,download}` so provider Batch
+API capability stays separate from Harn's current live adapter coverage. Routes
+with `batch_api: true` but no Harn live adapter can still be planned,
+manifested, and prepared for offline adapter work; `submit`, `status`, and
+`download` fail before network calls until that provider adapter exists.
+
 ## harn models batch manifest
 
 Build a durable, provider-neutral manifest for a JSONL request ledger:

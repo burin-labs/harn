@@ -92,6 +92,7 @@ versions.
 | `harn explain --catalog --json` | Full diagnostic-code catalog                            |
 | `harn session export --json`   | Portable session bundle export                           |
 | `harn provider catalog show --json` | Resolved provider/model catalog snapshot                 |
+| `harn models batch plan --json` | Provider Batch API candidates plus `batch.harn_live_adapter` support |
 | `harn models batch manifest --json` | Durable offline batch manifest summary and request groups |
 | `harn models batch prepare --json` | Provider-native batch request files and deterministic prepare receipt |
 | `harn models batch submit --json` | Batch submission receipt with provider job ids or dry-run operations |
