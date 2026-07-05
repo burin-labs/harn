@@ -28,9 +28,11 @@ pub(in crate::stdlib) fn workflow_graph_to_vm(graph: &WorkflowGraph) -> Result<V
     };
     let mut nodes = (*nodes_dict).clone();
     for (node_id, node) in &graph.nodes {
-        let Some(raw_tools) = node.raw_tools.clone() else {
+        // Re-attach raw VmValue fields serde drops so closure-carrying values
+        // (tool registries, fn-verify verifiers) survive the graph round-trip.
+        if node.raw_tools.is_none() && node.raw_verify.is_none() {
             continue;
-        };
+        }
         let Some(node_value) = nodes.get(node_id.as_str()).cloned() else {
             continue;
         };
@@ -38,7 +40,12 @@ pub(in crate::stdlib) fn workflow_graph_to_vm(graph: &WorkflowGraph) -> Result<V
             continue;
         };
         let mut node_map = (*node_dict).clone();
-        node_map.insert(crate::value::intern_key("tools"), raw_tools);
+        if let Some(raw_tools) = node.raw_tools.clone() {
+            node_map.insert(crate::value::intern_key("tools"), raw_tools);
+        }
+        if let Some(raw_verify) = node.raw_verify.clone() {
+            node_map.insert(crate::value::intern_key("verify"), raw_verify);
+        }
         nodes.insert(crate::value::intern_key(node_id), VmValue::dict(node_map));
     }
     graph_dict.insert(crate::value::intern_key("nodes"), VmValue::dict(nodes));

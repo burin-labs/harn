@@ -1,0 +1,61 @@
+import { workflow_stages } from "std/workflow/patterns"
+
+/**
+ * workflow_stages (design D5): the ergonomic linear-stage-graph builder is
+ * pure sugar over `workflow_graph`. Its output must be BYTE-IDENTICAL to the
+ * equivalent hand-authored `workflow_graph({entry, nodes, edges})` — no new
+ * node shape, no new runtime concept.
+ */
+pipeline default() {
+  // 1. Byte-identical to a hand-authored two-stage graph (linear edge auto-wired).
+  let sugar = workflow_stages(
+    {
+      name: "demo",
+      stages: [
+        {id: "act", kind: "stage", mode: "agent", model_policy: {provider: "mock"}},
+        {id: "check", kind: "verify", mode: "command", verify: {expect_status: 0}},
+      ],
+    },
+  )
+  let hand = workflow_graph(
+    {
+      name: "demo",
+      entry: "act",
+      nodes: {
+        act: {kind: "stage", mode: "agent", model_policy: {provider: "mock"}},
+        check: {kind: "verify", mode: "command", verify: {expect_status: 0}},
+      },
+      edges: [{from: "act", to: "check"}],
+    },
+  )
+  // The substantive graph — node dicts, edges, entry, name — is byte-identical.
+  // (Only the auto-generated top-level `id` differs, being a fresh uuid.)
+  __io_println(json_stringify(sugar.nodes) == json_stringify(hand.nodes))
+  __io_println(json_stringify(sugar.edges) == json_stringify(hand.edges))
+  __io_println(sugar.entry == hand.entry)
+  __io_println(sugar.name == hand.name)
+  // 2. Bare-list form + default ids (`stage_<n>`) + first-stage entry.
+  let bare = workflow_stages([{kind: "stage"}, {kind: "stage"}, {kind: "stage"}])
+  __io_println(json_stringify(keys(bare.nodes)))
+  __io_println(bare.entry)
+  __io_println(len(bare.edges))
+  __io_println(bare.edges[0].from + "->" + bare.edges[0].to)
+  __io_println(bare.edges[1].from + "->" + bare.edges[1].to)
+  // 3. Explicit edges override the linear default (branching graphs).
+  let branched = workflow_stages(
+    {
+      name: "loop",
+      stages: [{id: "impl", kind: "stage"}, {id: "verify", kind: "verify"}, {id: "repair", kind: "stage"}],
+      edges: [
+        {from: "impl", to: "verify"},
+        {from: "verify", to: "repair", branch: "failed"},
+        {from: "repair", to: "verify"},
+      ],
+    },
+  )
+  __io_println(len(branched.edges))
+  __io_println(branched.edges[1].branch)
+  // 4. The authored node body is preserved verbatim (id lifts to the map key).
+  __io_println(branched.nodes["impl"].kind)
+  __io_println(contains(json_stringify(keys(branched.nodes)), "impl"))
+}

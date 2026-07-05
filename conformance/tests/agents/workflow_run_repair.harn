@@ -1,0 +1,36 @@
+import { workflow_run_repair } from "std/workflow/repair"
+
+/**
+ * workflow_run_repair (design D5): the single-node run -> validate -> repair
+ * helper. It is pure sugar over the PR-I2 attempt machinery — a one-stage
+ * repair graph run through `workflow_execute` — so the attempt count is
+ * honored, a failing attempt's findings thread into the next prompt, and it
+ * terminates on the first passing attempt.
+ */
+pipeline default() {
+  let token = "GOTOKEN"
+  // The finding IS the token the mock must echo back to pass — so a pass on
+  // attempt 2 proves the finding reached attempt 2's (feedback-threaded) prompt.
+  let verifier = { r -> return {ok: contains(to_string(r?.artifacts[0]?.text), token), findings: [token]} }
+  let out = workflow_run_repair(
+    {task: "Z", model_policy: {provider: "mock"}, verify: verifier, max_attempts: 2},
+  )
+  __io_println(out.ok)
+  __io_println(len(out.attempts))
+  __io_println(out.attempts[0].status)
+  __io_println(out.attempts[1].status)
+  __io_println(contains(out.text, token))
+  // Attempt count is honored: a never-satisfiable verifier with max_attempts: 1
+  // stops after exactly one attempt (no runaway loop) and surfaces findings.
+  let capped = workflow_run_repair(
+    {
+      task: "unsatisfiable",
+      model_policy: {provider: "mock"},
+      verify: { r -> return {ok: false, findings: ["never satisfied"]} },
+      max_attempts: 1,
+    },
+  )
+  __io_println(len(capped.attempts))
+  __io_println(capped.ok)
+  __io_println(contains(json_stringify(capped.findings), "never satisfied"))
+}

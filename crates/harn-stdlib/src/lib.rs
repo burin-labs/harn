@@ -778,6 +778,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/workflow/execute.harn"),
     },
     StdlibSource {
+        module: "workflow/repair",
+        source: include_str!("stdlib/workflow/repair.harn"),
+    },
+    StdlibSource {
         module: "security",
         source: include_str!("stdlib/stdlib_security.harn"),
     },
