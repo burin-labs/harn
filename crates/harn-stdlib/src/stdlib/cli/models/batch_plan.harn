@@ -164,6 +164,9 @@ fn __live_batch_adapter_key(provider: string, wire: string) -> string {
   if provider == "groq" && wire == "openai" {
     return "groq"
   }
+  if provider == "together" && wire == "openai" {
+    return "together"
+  }
   if provider == "mistral" && wire == "mistral" {
     return "mistral"
   }
@@ -762,6 +765,14 @@ fn __submit_contract(group: dict, request_path: string, endpoint: string) -> dic
       result_stream: "GET /v1/batches/{batch_id}/results after state.num_pending reaches 0",
     }
   }
+  if provider == "together" && wire == "openai" {
+    return {
+      provider: provider,
+      operation: "POST /v1/batches",
+      upload: {purpose: "batch-api", file: request_path},
+      create_batch: {endpoint: endpoint, input_file_id: "<uploaded-file-id>"},
+    }
+  }
   return {
     provider: provider,
     operation: "POST /v1/batches",
@@ -1216,7 +1227,17 @@ fn __provider_auth_env(provider: string) -> string {
   if provider == "xai" {
     return "XAI_API_KEY"
   }
+  if provider == "together" {
+    return "TOGETHER_AI_API_KEY"
+  }
   return uppercase(provider) + "_API_KEY"
+}
+
+fn __provider_auth_env_candidates(provider: string) -> list {
+  if provider == "together" {
+    return ["TOGETHER_AI_API_KEY", "TOGETHER_API_KEY"]
+  }
+  return [__provider_auth_env(provider)]
 }
 
 fn __provider_base_url(harness: Harness, provider: string) -> string {
@@ -1262,6 +1283,19 @@ fn __provider_base_url(harness: Harness, provider: string) -> string {
         .get_or(
         "HARN_BATCH_GROQ_BASE_URL",
         harness.env.get_or("GROQ_BASE_URL", "https://api.groq.com/openai/v1"),
+      ),
+    )
+  }
+  if provider == "together" {
+    return trim(
+      harness.env
+        .get_or(
+        "HARN_BATCH_TOGETHER_BASE_URL",
+        harness.env
+          .get_or(
+          "TOGETHER_AI_BASE_URL",
+          harness.env.get_or("TOGETHER_BASE_URL", "https://api.together.xyz/v1"),
+        ),
       ),
     )
   }
@@ -1382,12 +1416,19 @@ fn __dry_run_submission(harness: Harness, job: dict, payload: dict) -> dict {
 }
 
 fn __api_key_for_job(harness: Harness, provider: string) -> dict {
-  let env_name = __provider_auth_env(provider)
-  let value = trim(harness.env.get_or(env_name, ""))
-  if value == "" {
-    return {ok: false, env: env_name, error: "missing provider API key env " + env_name}
+  let env_names = __provider_auth_env_candidates(provider)
+  for env_name in env_names {
+    let value = trim(harness.env.get_or(env_name, ""))
+    if value != "" {
+      return {ok: true, env: env_name, value: value}
+    }
   }
-  return {ok: true, env: env_name, value: value}
+  let primary = __provider_auth_env(provider)
+  var error = "missing provider API key env " + primary
+  if len(env_names) > 1 {
+    error = error + " (also checked " + join(env_names[1:len(env_names)], ", ") + ")"
+  }
+  return {ok: false, env: primary, error: error}
 }
 
 fn __submit_anthropic(harness: Harness, job: dict, payload: dict) -> dict {
@@ -1443,6 +1484,11 @@ fn __upload_jsonl_file(
   api_key: string,
   file_path: string,
 ) -> dict {
+  let purpose = if provider == "together" {
+    "batch-api"
+  } else {
+    "batch"
+  }
   let response = __http_result(
     harness,
     "POST",
@@ -1450,7 +1496,7 @@ fn __upload_jsonl_file(
     {
       headers: {Authorization: "Bearer " + api_key},
       multipart: [
-        {name: "purpose", value: "batch"},
+        {name: "purpose", value: purpose},
         {name: "file", path: file_path, filename: basename(file_path), content_type: "application/jsonl"},
       ],
       timeout_ms: 120000,
@@ -1468,6 +1514,24 @@ fn __upload_jsonl_file(
     }
   }
   return {ok: true, file_id: file_id, status: response["status"], response: body}
+}
+
+fn __openai_compatible_create_body(provider: string, upload: dict, endpoint: string) -> dict {
+  let body = {input_file_id: safe_string(upload["file_id"], ""), endpoint: endpoint}
+  if provider == "together" {
+    return body
+  }
+  return body + {completion_window: "24h"}
+}
+
+fn __openai_compatible_batch_body(provider: string, body: dict) -> dict {
+  if provider == "together" {
+    let wrapped = safe_dict(body["job"])
+    if wrapped != {} {
+      return wrapped
+    }
+  }
+  return body
 }
 
 fn __submit_openai_compatible(harness: Harness, job: dict, payload: dict, provider: string) -> dict {
@@ -1492,11 +1556,11 @@ fn __submit_openai_compatible(harness: Harness, job: dict, payload: dict, provid
       errors: [safe_string(upload["error"], "")],
     }
   }
-  let create_body = {
-    input_file_id: safe_string(upload["file_id"], ""),
-    endpoint: safe_string(job["endpoint"], "/v1/chat/completions"),
-    completion_window: "24h",
-  }
+  let create_body = __openai_compatible_create_body(
+    provider,
+    upload,
+    safe_string(job["endpoint"], "/v1/chat/completions"),
+  )
   let response = __http_result(
     harness,
     "POST",
@@ -1509,6 +1573,7 @@ fn __submit_openai_compatible(harness: Harness, job: dict, payload: dict, provid
     },
   )
   let body = safe_dict(response["body"])
+  let batch_body = __openai_compatible_batch_body(provider, body)
   if !safe_bool(response["ok"], false) {
     return {
       ok: false,
@@ -1522,11 +1587,11 @@ fn __submit_openai_compatible(harness: Harness, job: dict, payload: dict, provid
     job: base_job
       + {
       status: "submitted",
-      provider_batch_id: safe_string(body["id"], ""),
-      provider_status: body["status"] ?? nil,
+      provider_batch_id: safe_string(batch_body["id"], ""),
+      provider_status: batch_body["status"] ?? nil,
       input_file_id: safe_string(upload["file_id"], ""),
-      output_file_id: body["output_file_id"] ?? nil,
-      error_file_id: body["error_file_id"] ?? nil,
+      output_file_id: batch_body["output_file_id"] ?? nil,
+      error_file_id: batch_body["error_file_id"] ?? nil,
       upload: upload,
       response_status: response["status"],
       response: body,
@@ -1690,6 +1755,9 @@ fn __submit_live(harness: Harness, job: dict, payload: dict) -> dict {
   }
   if adapter == "groq" {
     return __submit_openai_compatible(harness, job, payload, "groq")
+  }
+  if adapter == "together" {
+    return __submit_openai_compatible(harness, job, payload, "together")
   }
   if adapter == "mistral" {
     return __submit_mistral(harness, job, payload)
@@ -2136,6 +2204,9 @@ fn __status_one_job(harness: Harness, job: dict, dry_run: bool) -> dict {
   }
   if adapter == "groq" {
     return __poll_openai_compatible_status(harness, job, "groq")
+  }
+  if adapter == "together" {
+    return __poll_openai_compatible_status(harness, job, "together")
   }
   if adapter == "anthropic" {
     return __poll_anthropic_status(harness, job)
@@ -2697,6 +2768,33 @@ fn __download_one_job(harness: Harness, job: dict, out_dir: string, dry_run: boo
         harness,
         job,
         "groq",
+        "error",
+        job["error_file_id"],
+        out_dir,
+        dry_run,
+        max_bytes,
+      ),
+    )
+  } else if adapter == "together" {
+    state = __append_download_result(
+      state,
+      __download_openai_file(
+        harness,
+        job,
+        "together",
+        "output",
+        job["output_file_id"],
+        out_dir,
+        dry_run,
+        max_bytes,
+      ),
+    )
+    state = __append_download_result(
+      state,
+      __download_openai_file(
+        harness,
+        job,
+        "together",
         "error",
         job["error_file_id"],
         out_dir,
