@@ -3436,11 +3436,18 @@ components:
             uri:
               type: [string, "null"]
               format: uri-reference
+            title:
+              type: [string, "null"]
+            name:
+              type: [string, "null"]
             visibility:
               $ref: "#/components/schemas/PartVisibility"
             sha256:
               type: [string, "null"]
               pattern: "^[a-fA-F0-9]{64}$"
+            size_bytes:
+              type: [integer, "null"]
+              minimum: 0
             workspace_id:
               type: [string, "null"]
             session_id:
@@ -3469,11 +3476,18 @@ components:
           type: string
         uri:
           type: [string, "null"]
+        title:
+          type: [string, "null"]
+        name:
+          type: [string, "null"]
         visibility:
           $ref: "#/components/schemas/PartVisibility"
         sha256:
           type: [string, "null"]
           pattern: "^[a-fA-F0-9]{64}$"
+        size_bytes:
+          type: [integer, "null"]
+          minimum: 0
         workspace_id:
           type: [string, "null"]
         session_id:

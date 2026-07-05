@@ -30,7 +30,19 @@ pipeline main() {
         {columns: ["name", "count"], rows: [{name: "a", count: 2}]},
         {session_id: session, artifact_id: "artifact-table"},
       )
-      return [mermaid, vega, table]
+      let file = artifact_emit(
+        "file",
+        {
+          uri: "file:///tmp/report.pdf",
+          path: "/tmp/report.pdf",
+          name: "report.pdf",
+          mime_type: "application/pdf",
+          size_bytes: 1234,
+          sha256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        },
+        {session_id: session, artifact_id: "artifact-file", title: "Report PDF"},
+      )
+      return [mermaid, vega, table, file]
     },
   )
   __io_println(len(captured.events))
@@ -40,7 +52,12 @@ pipeline main() {
   __io_println(captured.events[1].kind)
   __io_println(captured.events[1].metadata.unit)
   __io_println(captured.events[2].mime_type)
-  __io_println(captured.result[2].ok)
+  __io_println(captured.events[3].kind)
+  __io_println(captured.events[3].mime_type)
+  __io_println(captured.events[3].size_bytes)
+  __io_println(captured.events[3].spec.sha256)
+  __io_println(captured.events[3].fallback.contains("report.pdf"))
+  __io_println(captured.result[3].ok)
   let snapshot_events = transcript_events_by_kind(agent_session_snapshot(session), "artifact")
   __io_println(len(snapshot_events))
   __io_println(snapshot_events[0].metadata.artifactId)
@@ -49,6 +66,7 @@ pipeline main() {
   let imported_events = transcript_events_by_kind(imported, "artifact")
   __io_println(len(imported_events))
   __io_println(imported_events[2].metadata.kind)
+  __io_println(imported_events[3].metadata.mimeType)
   let svg_rejected = try {
     artifact_emit("mermaid", "flowchart TD\n  A[<svg onload=alert(1)>]", {session_id: session})
     false
@@ -75,7 +93,29 @@ pipeline main() {
   } catch (e) {
     contains(json_stringify(e), "unsupported artifact kind")
   }
+  let file_http_rejected = try {
+    artifact_emit(
+      "file",
+      {uri: "https://example.invalid/report.pdf", mime_type: "application/pdf"},
+      {session_id: session},
+    )
+    false
+  } catch (e) {
+    contains(json_stringify(e), "must not reference a network")
+  }
+  let file_payload_rejected = try {
+    artifact_emit(
+      "file",
+      {uri: "file:///tmp/report.pdf", mime_type: "application/pdf", base64: "JVBERi0xLjQ="},
+      {session_id: session},
+    )
+    false
+  } catch (e) {
+    contains(json_stringify(e), "payloads are not allowed")
+  }
   __io_println(svg_rejected)
   __io_println(external_rejected)
   __io_println(raw_svg_kind_rejected)
+  __io_println(file_http_rejected)
+  __io_println(file_payload_rejected)
 }
