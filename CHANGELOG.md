@@ -9,6 +9,85 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.9.15
+
+### Added
+
+- **`std/agent/stall` gains a host verify-state progress axis.** A new optional
+  `stall_diagnostics.progress_signal` callback (`{payload -> float?}`) lets the
+  host report a monotone "best verification state" scalar so
+  `agent_stall_no_net_progress` keys on whether the verifier actually advanced
+  ("writes are not progress") instead of edit/tool signatures. It expresses both
+  a long-stall cut (`verify_state_streak` + `verify_state_stall_turns`, or a
+  `verify_state_recurrence_hard` recurrence) and a short write-axis cut
+  (`no_verifier_progress_limit` non-advancing turns with a write landed). Absent
+  the callback, behavior is byte-identical to before.
+- **`std/agent/stall` gains a delivered-fix-not-landing trigger.** A new optional
+  `stall_diagnostics.remediation_delivered` callback
+  (`{ {session_id, signature, prev_dispatch} -> bool }`) lets the host report
+  that a repair was delivered for the active failure signature; when it still
+  recurs, the detector escalates one turn sooner via the new
+  `delivered_fix_not_landing` warning pattern. Absent the callback, the plain
+  `stuck_same_diagnostic` nudge is unchanged.
+- **`std/agent/governors` gains `governor_pace_decision(policy, obs)`.** A pure
+  smart-timeout pace core (proceed / extend / pace_check / cut) that decides
+  progress-based *extend-inside-a-time-bound*, returning `new_budget_ms` for
+  host-side wall-budget re-stamping. Bounded by `extend_max` /`pace_check_max`
+  (default the existing `GOVERNOR_PACE_EXTEND_MAX` / `GOVERNOR_PACE_CHECK_MAX_INJECTIONS`).
+  It reads no clock, store, or flags — every input is passed in.
+- Added `std/agent/canon` helpers for routing agent iteration events into harn-canon feedback from changed
+  paths and observed-symbol evidence.
+- **Command policy can now REQUEST CONSENT instead of only allow/deny.** A
+  `command_policy({...})` may carry a `consent` closure — the
+  `std/llm/tool_middleware::with_consent` prompt_fn contract (`true` /
+  `{decision: "approved"}` to allow, `false` / `{decision: "denied", reason?}`
+  to deny). When a command lands on a `require_approval` risk class (a
+  deterministic risk label listed in `require_approval`, or a pre-hook
+  `require_approval` decision), it now routes through the consent gate instead
+  of hard-denying: an approval lets the command run, a denial returns a
+  `status: "consent_denied"` envelope without ever spawning a child process.
+  The consent closure receives the command context enriched with
+  `consent.reason` and `consent.risk_labels` and may call `request_approval` /
+  `ask_user` to block on a human. Policies without a `consent` closure keep the
+  legacy hard-block behavior byte-for-byte, so the default path is unchanged.
+- Added Groq to `harn models batch` planning, submit/status/download dry-runs,
+  and the OpenAI-compatible live batch adapter path.
+- Workflow stages can now run a caller-supplied `executor` closure as their leaf instead of spawning a delegated
+  worker. Pass `executor: { ctx -> ... }` to `workflow_run_repair` (or set `executor` on any stage node) to wrap
+  harn's retry-with-feedback / verify / attempt-recording machinery around a bespoke in-process agent loop. The
+  closure receives `{task, attempt, prior_findings, prior_verification, prior_text, artifacts}` and returns
+  `{result | text, artifacts?, transcript?, verification?}`; failing attempts thread their findings into the next
+  call exactly like the delegated path. Omitting `executor` keeps the existing delegated-worker leaf unchanged.
+- Added the `std/session-store` primitive: an append-only, SHA-256 hash-chained session event store at
+  `.harn/session-store/<session_id>.jsonl`. `session_store_append` writes events (mirroring the harn-serve
+  `StoredEvent` shape) with a canonical `record_hash` over `{session_id, event_id, payload, prev_hash}`;
+  `session_store_project` / `session_store_project_value` fold `upsert`/`delete`/`replace`/`clear` mutation
+  payloads to the latest-by-id records or a single value; and `session_store_verify` proves chain integrity.
+  This is the durable substrate agent memory, hypothesis, and learned-context stores layer on.
+- **`std/agent/stall` verify-state hard-recurrence now also trips on TOTAL
+  (non-consecutive) failure recurrence.** The `verify_state_recurrence_hard` cut
+  (active only when a `progress_signal` callback is supplied) previously keyed
+  only on a consecutive same-diagnostic streak, which resets whenever an
+  off-signature failure interposes — missing interleaved churn (the same dead
+  API / wrong error re-proposed N times with different failures churning between
+  recurrences). A per-signature TOTAL count (`verify_signature_counts`) that
+  never resets on a signature change now trips the same cut on total
+  occurrences, so interleaved-churn stalls are caught. Maintained cheaply on the
+  default path but consulted only when a `progress_signal` is supplied, so
+  behavior is byte-identical without the callback.
+
+### Changed
+
+- Record Together's provider batch discount in the built-in capability catalog.
+
+### Fixed
+
+- **OpenAI-compatible tool-call parsing.** Harn now unwraps native
+  `tool_call` wrapper functions whose `arguments` string contains a Harn
+  text-tool call, preventing providers from dispatching a bogus literal
+  `tool_call` when they nest `<tool_call>look(...)` inside the native
+  arguments field.
+
 ## v0.9.14
 
 ### Added
