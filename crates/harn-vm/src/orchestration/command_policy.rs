@@ -390,7 +390,8 @@ pub async fn run_command_policy_preflight_with_ctx(
                     confidence: 1.0,
                     display,
                 });
-                match command_consent_verdict(ctx, &policy, &context, &risk_labels, &message).await?
+                match command_consent_verdict(ctx, &policy, &context, &risk_labels, &message)
+                    .await?
                 {
                     ConsentVerdict::NoGate => {
                         return Ok(CommandPolicyPreflight::Blocked {
