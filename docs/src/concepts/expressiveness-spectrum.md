@@ -139,7 +139,7 @@ let run = agent_loop(task, opts?.system, opts)
 
 Every one of those lines is opt-in. Governors bound spend
 ([`std/agent/governors`](../stdlib/governors.md)). Detectors catch loops and
-stalls. The completion gate ([`std/agent/judge`](../llm/agent_loop.md#completion-gate-agent_completion_gate))
+stalls. The completion gate ([`std/agent/judge`](../stdlib/agent-judge.md))
 is a deterministic veto plus an optional bounded judge, so "done" is a fact you
 control, not a mood the model is in. Lanes narrow the tool surface; overlays add
 data-driven prompt nudges ([`std/agent/lanes` and `std/agent/overlays`](../stdlib/agent-lanes-overlays.md)).
