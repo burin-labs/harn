@@ -27,6 +27,39 @@ pub fn no_bad(slice, _ctx, _repo_at_base) {
 }
 """
 
+fn write_latex_canon_package(dir) {
+  harness.fs.mkdir(path_join(dir, ".harn/packages/latex-canon/canon/latex"))
+  harness.fs
+    .write_text(
+    path_join(dir, ".harn/packages/latex-canon/harn.toml"),
+    "version = 1\n[package]\nname = \"latex-canon\"\npermissions = [\"workspace:read_text\"]\n\n[[contributes]]\nkind = \"harn.canon\"\nid = \"latex\"\ntitle = \"LaTeX\"\npath = \"canon/latex\"\nextensions = [\"tex\"]\n",
+  )
+  harness.fs
+    .write_text(
+    path_join(dir, ".harn/packages/latex-canon/canon/latex/invariants.harn"),
+    INVARIANTS,
+  )
+}
+
+fn write_manifest_canon_package(dir) {
+  harness.fs.mkdir(path_join(dir, ".harn/packages/canon-manifest/canon/latex"))
+  harness.fs
+    .write_text(
+    path_join(dir, ".harn/packages/canon-manifest/harn.toml"),
+    "version = 1\n[package]\nname = \"canon-manifest\"\npermissions = [\"workspace:read_text\"]\n\n[[contributes]]\nkind = \"harn.canon\"\nmanifest = \"canon/canon-packs.json\"\n",
+  )
+  harness.fs
+    .write_text(
+    path_join(dir, ".harn/packages/canon-manifest/canon/canon-packs.json"),
+    "{\"schema_version\":1,\"packs\":[{\"id\":\"latex\",\"title\":\"LaTeX\",\"invariants\":\"latex/invariants.harn\",\"extensions\":[\"tex\"]}]}",
+  )
+  harness.fs
+    .write_text(
+    path_join(dir, ".harn/packages/canon-manifest/canon/latex/invariants.harn"),
+    INVARIANTS,
+  )
+}
+
 pipeline main(task) {
   let manifest = {
     schema_version: 1,
@@ -80,6 +113,17 @@ pipeline main(task) {
       __io_println(to_string(auto_injected.injected))
       __io_println(to_string(contains(auto_messages[len(auto_messages) - 1].content, "no_bad")))
       agent_session_close(auto_session_id)
+      let package_session_id = agent_session_open("canon-package-feedback-" + uuid_v7())
+      write_latex_canon_package(dir)
+      harness.fs.write_text(path_join(dir, "paper.tex"), "bad macro")
+      let package_injected = canon_inject_paths_feedback(package_session_id, ["paper.tex"], {root: dir, project_root: dir})
+      let package_messages = agent_session_snapshot(package_session_id).messages
+      __io_println(to_string(package_injected.selected_pack_ids == ["latex"]))
+      __io_println(to_string(package_injected.injected))
+      __io_println(
+        to_string(contains(package_messages[len(package_messages) - 1].content, "[latex] LaTeX")),
+      )
+      agent_session_close(package_session_id)
       let reminder_session_id = agent_session_open("canon-reminder-feedback-" + uuid_v7())
       let reminder_injected = canon_inject_feedback(
         reminder_session_id,
@@ -97,6 +141,42 @@ pipeline main(task) {
       agent_session_close(reminder_session_id)
       agent_session_close(path_session_id)
       agent_session_close(session_id)
+    },
+  )
+  with_fs(
+    {"paper.tex": "bad macro"},
+    { dir ->
+      write_latex_canon_package(dir)
+      let package_only_session_id = agent_session_open("canon-package-only-feedback-" + uuid_v7())
+      let package_only_injected = canon_inject_paths_feedback(package_only_session_id, ["paper.tex"], {root: dir, project_root: dir})
+      let package_only_messages = agent_session_snapshot(package_only_session_id).messages
+      __io_println(to_string(package_only_injected.selected_pack_ids == ["latex"]))
+      __io_println(to_string(package_only_injected.injected))
+      __io_println(
+        to_string(contains(package_only_messages[len(package_only_messages) - 1].content, "[latex] LaTeX")),
+      )
+      agent_session_close(package_only_session_id)
+    },
+  )
+  with_fs(
+    {"paper.tex": "bad macro"},
+    { dir ->
+      write_manifest_canon_package(dir)
+      let package_manifest_session_id = agent_session_open("canon-package-manifest-feedback-" + uuid_v7())
+      let package_manifest_injected = canon_inject_paths_feedback(
+        package_manifest_session_id,
+        ["paper.tex"],
+        {root: dir, project_root: dir},
+      )
+      let package_manifest_messages = agent_session_snapshot(package_manifest_session_id).messages
+      __io_println(to_string(package_manifest_injected.selected_pack_ids == ["latex"]))
+      __io_println(to_string(package_manifest_injected.injected))
+      __io_println(
+        to_string(
+          contains(package_manifest_messages[len(package_manifest_messages) - 1].content, "[latex] LaTeX"),
+        ),
+      )
+      agent_session_close(package_manifest_session_id)
     },
   )
 }

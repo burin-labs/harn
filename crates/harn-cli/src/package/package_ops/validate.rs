@@ -176,11 +176,11 @@ pub(crate) fn validate_exports_for_publish(
     warnings: &mut Vec<PackageCheckDiagnostic>,
 ) -> Vec<PackageExportReport> {
     if ctx.manifest.exports.is_empty() {
-        if ctx.manifest.rules.rule_dirs.is_empty() {
+        if ctx.manifest.rules.rule_dirs.is_empty() && ctx.manifest.contributes.is_empty() {
             push_error(
                 errors,
                 "[exports]",
-                "publishable packages require at least one stable export or `[rules] ruleDirs`",
+                "publishable packages require at least one stable export, `[rules] ruleDirs`, or `[[contributes]]` surface",
             );
         }
         return Vec::new();
