@@ -218,7 +218,8 @@ impl GeminiProvider {
         let req = crate::llm::api::apply_auth_headers(req, &request.api_key, pdef.as_ref());
         let response = req.send().await.map_err(|error| {
             VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-                "gemini API error: {error}"
+                "gemini API error: {}",
+                crate::egress::redact_reqwest_error(&error)
             ))))
         })?;
         if !response.status().is_success() {

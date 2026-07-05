@@ -12,6 +12,8 @@ use jsonwebtoken::{decode, decode_header, DecodingKey, Validation};
 use serde::Deserialize;
 use serde_json::{json, Value as JsonValue};
 
+use crate::net;
+
 const AUTHORIZATION_SERVERS_ENV: &str = "HARN_MCP_OAUTH_AUTHORIZATION_SERVERS";
 const RESOURCE_ENV: &str = "HARN_MCP_OAUTH_RESOURCE";
 const SCOPES_ENV: &str = "HARN_MCP_OAUTH_SCOPES";
@@ -147,10 +149,7 @@ impl OAuthResourceServer {
                 issuer: env_nonempty(ISSUER_ENV),
                 audiences,
             },
-            client: reqwest::Client::builder()
-                .timeout(OAUTH_HTTP_TIMEOUT)
-                .build()
-                .map_err(|error| format!("failed to build OAuth HTTP client: {error}"))?,
+            client: net::http_client("cli.mcp.oauth_resource", OAUTH_HTTP_TIMEOUT)?,
             jwks_cache: Arc::new(Mutex::new(None)),
         }))
     }
@@ -247,7 +246,10 @@ impl OAuthResourceServer {
             }
         }
         let response = request.send().await.map_err(|error| {
-            OAuthTokenError::InvalidToken(format!("introspection request failed: {error}"))
+            OAuthTokenError::InvalidToken(format!(
+                "introspection request failed: {}",
+                net::reqwest_error(&error)
+            ))
         })?;
         if !response.status().is_success() {
             return Err(OAuthTokenError::InvalidToken(format!(
@@ -335,9 +337,19 @@ impl OAuthResourceServer {
             .get(&jwt.jwks_url)
             .send()
             .await
-            .map_err(|error| OAuthTokenError::InvalidToken(format!("JWKS fetch failed: {error}")))?
+            .map_err(|error| {
+                OAuthTokenError::InvalidToken(format!(
+                    "JWKS fetch failed: {}",
+                    net::reqwest_error(&error)
+                ))
+            })?
             .error_for_status()
-            .map_err(|error| OAuthTokenError::InvalidToken(format!("JWKS fetch failed: {error}")))?
+            .map_err(|error| {
+                OAuthTokenError::InvalidToken(format!(
+                    "JWKS fetch failed: {}",
+                    net::reqwest_error(&error)
+                ))
+            })?
             .json::<JwkSet>()
             .await
             .map_err(|error| OAuthTokenError::InvalidToken(format!("invalid JWKS: {error}")))?;

@@ -12,6 +12,7 @@ use reqwest::Method;
 use serde_json::Value as JsonValue;
 
 use crate::cli::{OrchestratorDeployArgs, OrchestratorDeployProvider, OrchestratorLocalArgs};
+use crate::net;
 use crate::package::{Manifest, TriggerKind};
 
 use super::common;
@@ -551,10 +552,9 @@ fn optional_api_token(
 
 fn run_secret_sync(plan: SecretSyncPlan) -> Result<(), OrchestratorError> {
     println!("running: {}", plan.display());
-    let client = Client::builder()
-        .timeout(Duration::from_secs(30))
-        .build()
-        .map_err(|error| format!("failed to create provider API client: {error}"))?;
+    let client =
+        net::blocking_http_client("cli.orchestrator.deploy.secrets", Duration::from_secs(30))
+            .map_err(|error| format!("failed to create provider API client: {error}"))?;
     match plan.provider {
         OrchestratorDeployProvider::Render => sync_render_secrets(&client, &plan),
         OrchestratorDeployProvider::Fly => sync_fly_secrets(&client, &plan),
@@ -578,7 +578,12 @@ fn sync_render_secrets(client: &Client, plan: &SecretSyncPlan) -> Result<(), Orc
             .header(CONTENT_TYPE, "application/json")
             .json(&body)
             .send()
-            .map_err(|error| format!("failed to sync Render secret {key}: {error}"))?;
+            .map_err(|error| {
+                format!(
+                    "failed to sync Render secret {key}: {}",
+                    net::reqwest_error(&error)
+                )
+            })?;
         ensure_success(response, &format!("sync Render secret {key}"))?;
     }
     Ok(())
@@ -603,7 +608,7 @@ fn sync_fly_secrets(client: &Client, plan: &SecretSyncPlan) -> Result<(), Orches
         .header(CONTENT_TYPE, "application/json")
         .json(&body)
         .send()
-        .map_err(|error| format!("failed to sync Fly secrets: {error}"))?;
+        .map_err(|error| format!("failed to sync Fly secrets: {}", net::reqwest_error(&error)))?;
     ensure_success(response, "sync Fly secrets")
 }
 
@@ -642,7 +647,12 @@ fn sync_railway_secrets(client: &Client, plan: &SecretSyncPlan) -> Result<(), Or
         .header(CONTENT_TYPE, "application/json")
         .json(&body)
         .send()
-        .map_err(|error| format!("failed to sync Railway secrets: {error}"))?;
+        .map_err(|error| {
+            format!(
+                "failed to sync Railway secrets: {}",
+                net::reqwest_error(&error)
+            )
+        })?;
     let payload = ensure_success_json(response, "sync Railway secrets")?;
     if let Some(errors) = payload.get("errors") {
         return Err(format!("Railway GraphQL secret sync failed: {errors}").into());
@@ -820,14 +830,15 @@ fn ensure_success_json(
 }
 
 fn probe_health(url: &str) -> Result<(), OrchestratorError> {
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(20))
-        .build()
-        .map_err(|error| format!("failed to create health probe client: {error}"))?;
-    let response = client
-        .get(url)
-        .send()
-        .map_err(|error| format!("health probe failed for {url}: {error}"))?;
+    let client =
+        net::blocking_http_client("cli.orchestrator.deploy.health", Duration::from_secs(20))
+            .map_err(|error| format!("failed to create health probe client: {error}"))?;
+    let response = client.get(url).send().map_err(|error| {
+        format!(
+            "health probe failed for {url}: {}",
+            net::reqwest_error(&error)
+        )
+    })?;
     if response.status().is_success() {
         println!("health check passed: {url}");
         Ok(())

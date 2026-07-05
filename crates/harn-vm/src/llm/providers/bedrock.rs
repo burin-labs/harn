@@ -146,10 +146,12 @@ impl BedrockProvider {
         if let Some(token) = signed.security_token {
             req = req.header("X-Amz-Security-Token", token);
         }
-        let response = req
-            .send()
-            .await
-            .map_err(|error| vm_err(format!("bedrock API error: {error}")))?;
+        let response = req.send().await.map_err(|error| {
+            vm_err(format!(
+                "bedrock API error: {}",
+                crate::egress::redact_reqwest_error(&error)
+            ))
+        })?;
         if !response.status().is_success() {
             let status = response.status();
             let retry_after = crate::llm::api::retry_after_header(response.headers());

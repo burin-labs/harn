@@ -2,6 +2,7 @@ use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use base64::Engine;
 use ed25519_dalek::pkcs8::{
@@ -14,7 +15,7 @@ use sha2::{Digest, Sha256};
 use time::format_description::well_known::Rfc3339;
 use url::Url;
 
-use crate::package::load_skills_config;
+use crate::{net, package::load_skills_config};
 
 pub(crate) const SIGNER_REGISTRY_URL_ENV: &str = "HARN_SKILL_SIGNER_REGISTRY_URL";
 const SIG_SCHEMA: &str = "harn-skill-sig/v2";
@@ -720,18 +721,29 @@ fn fetch_registry_public_key(
     let url = base
         .join(&filename)
         .map_err(|error| format!("failed to resolve signer URL from {registry_url:?}: {error}"))?;
-    let response = reqwest::blocking::get(url.clone())
-        .map_err(|error| format!("failed to fetch {url}: {error}"))?;
+    let display_url = net::diagnostic_text(url.as_str());
+    let client = net::blocking_http_client("cli.skill.provenance", Duration::from_secs(20))?;
+    let response = client.get(url.clone()).send().map_err(|error| {
+        format!(
+            "failed to fetch {display_url}: {}",
+            net::reqwest_error(&error)
+        )
+    })?;
     if response.status() == reqwest::StatusCode::NOT_FOUND {
         return Ok(None);
     }
-    let response = response
-        .error_for_status()
-        .map_err(|error| format!("failed to fetch {url}: {error}"))?;
-    response
-        .text()
-        .map(Some)
-        .map_err(|error| format!("failed to read {url}: {error}"))
+    let response = response.error_for_status().map_err(|error| {
+        format!(
+            "failed to fetch {display_url}: {}",
+            net::reqwest_error(&error)
+        )
+    })?;
+    response.text().map(Some).map_err(|error| {
+        format!(
+            "failed to read {display_url}: {}",
+            net::reqwest_error(&error)
+        )
+    })
 }
 
 fn verifying_key_from_source(from: &str) -> Result<VerifyingKey, String> {
@@ -740,14 +752,26 @@ fn verifying_key_from_source(from: &str) -> Result<VerifyingKey, String> {
             .map_err(|error| format!("failed to read {}: {error}", path.display()))?
     } else {
         let url = Url::parse(from).map_err(|error| format!("invalid URL {from:?}: {error}"))?;
-        let response = reqwest::blocking::get(url.clone())
-            .map_err(|error| format!("failed to fetch {url}: {error}"))?;
-        let response = response
-            .error_for_status()
-            .map_err(|error| format!("failed to fetch {url}: {error}"))?;
-        response
-            .text()
-            .map_err(|error| format!("failed to read {url}: {error}"))?
+        let display_url = net::diagnostic_text(url.as_str());
+        let client = net::blocking_http_client("cli.skill.provenance", Duration::from_secs(20))?;
+        let response = client.get(url.clone()).send().map_err(|error| {
+            format!(
+                "failed to fetch {display_url}: {}",
+                net::reqwest_error(&error)
+            )
+        })?;
+        let response = response.error_for_status().map_err(|error| {
+            format!(
+                "failed to fetch {display_url}: {}",
+                net::reqwest_error(&error)
+            )
+        })?;
+        response.text().map_err(|error| {
+            format!(
+                "failed to read {display_url}: {}",
+                net::reqwest_error(&error)
+            )
+        })?
     };
     VerifyingKey::from_public_key_pem(&raw)
         .map_err(|error| format!("failed to parse Ed25519 public key: {error}"))

@@ -144,8 +144,10 @@ fn load_from_path(source: &str) -> Result<Value, CardError> {
 async fn fetch_over_http(url: &str) -> Result<Value, CardError> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
+        .redirect(crate::egress::redirect_policy("mcp_card_redirect", 10))
         .build()
         .map_err(|e| CardError::Http(format!("client build: {e}")))?;
+    let redacted_url = crate::redact::current_policy().redact_url(url);
     let primary = match client.get(url).send().await {
         Ok(resp) if resp.status().is_success() => Some(resp),
         Ok(_) => None,
@@ -159,21 +161,23 @@ async fn fetch_over_http(url: &str) -> Result<Value, CardError> {
         let fallback = with_well_known_suffix(url);
         if fallback.as_deref() == Some(url) {
             return Err(CardError::Http(format!(
-                "GET {url} did not return a Server Card"
+                "GET {redacted_url} did not return a Server Card"
             )));
         }
         let Some(fallback) = fallback else {
-            return Err(CardError::Http(format!("GET {url} failed")));
+            return Err(CardError::Http(format!("GET {redacted_url} failed")));
         };
-        client
-            .get(&fallback)
-            .send()
-            .await
-            .map_err(|e| CardError::Http(format!("GET {fallback}: {e}")))?
+        let redacted_fallback = crate::redact::current_policy().redact_url(&fallback);
+        client.get(&fallback).send().await.map_err(|e| {
+            CardError::Http(format!(
+                "GET {redacted_fallback}: {}",
+                crate::egress::redact_reqwest_error(&e)
+            ))
+        })?
     };
     if !resp.status().is_success() {
         return Err(CardError::Http(format!(
-            "GET {url} returned HTTP {}",
+            "GET {redacted_url} returned HTTP {}",
             resp.status()
         )));
     }

@@ -103,6 +103,10 @@ pub async fn run_provider_healthcheck_with_options(
         Some(client) => client,
         None => match reqwest::Client::builder()
             .timeout(Duration::from_secs(DEFAULT_HEALTHCHECK_TIMEOUT_SECS))
+            .redirect(crate::egress::redirect_policy(
+                "llm_healthcheck_redirect",
+                5,
+            ))
             .build()
         {
             Ok(client) => client,
@@ -163,8 +167,12 @@ pub async fn run_provider_healthcheck_with_options(
         Err(error) => {
             let mut metadata = base_metadata("request_failed");
             metadata.insert("provider".to_string(), json!(provider));
-            metadata.insert("url".to_string(), json!(url));
+            metadata.insert(
+                "url".to_string(),
+                json!(crate::egress::redact_diagnostic_text(&url)),
+            );
             metadata.insert("method".to_string(), json!(method.as_str()));
+            let error = crate::egress::redact_reqwest_error(&error);
             ProviderHealthcheckResult::new(
                 provider,
                 false,

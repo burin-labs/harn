@@ -11,7 +11,7 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 
-use crate::cli::OrchestratorReloadArgs;
+use crate::{cli::OrchestratorReloadArgs, net};
 
 const STATE_SNAPSHOT_FILE: &str = "orchestrator-state.json";
 const ADMIN_RELOAD_PATH: &str = "/admin/reload";
@@ -44,19 +44,21 @@ pub(crate) async fn run(args: OrchestratorReloadArgs) -> Result<(), Orchestrator
         "source": "cli",
     }))
     .map_err(|error| format!("failed to encode reload request: {error}"))?;
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(args.timeout.max(1)))
-        .build()
-        .map_err(|error| format!("failed to build HTTP client: {error}"))?;
+    let client = net::http_client(
+        "cli.orchestrator.reload",
+        Duration::from_secs(args.timeout.max(1)),
+    )?;
     let mut request = client
         .post(&url)
         .header(CONTENT_TYPE, "application/json")
         .body(body.clone());
     request = authorize_request(request, &url, &body)?;
-    let response = request
-        .send()
-        .await
-        .map_err(|error| format!("failed to request orchestrator reload at {url}: {error}"))?;
+    let response = request.send().await.map_err(|error| {
+        format!(
+            "failed to request orchestrator reload at {url}: {}",
+            net::reqwest_error(&error)
+        )
+    })?;
     let status = response.status();
     let text = response
         .text()

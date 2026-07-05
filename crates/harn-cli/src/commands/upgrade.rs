@@ -18,6 +18,7 @@ use sha2::{Digest, Sha256};
 
 use crate::cli::UpgradeArgs;
 use crate::json_envelope::{self, JsonEnvelope};
+use crate::net;
 
 /// Schema version for `harn upgrade --json`.
 pub(crate) const UPGRADE_SCHEMA_VERSION: u32 = 1;
@@ -353,11 +354,16 @@ fn normalize_version(input: &str) -> Result<String, String> {
 }
 
 fn http_client() -> Result<reqwest::blocking::Client, String> {
-    reqwest::blocking::Client::builder()
+    net::blocking_http_client_builder("cli.upgrade")
         .user_agent(USER_AGENT)
         .timeout(REQUEST_TIMEOUT)
         .build()
-        .map_err(|error| format!("failed to build HTTP client: {error}"))
+        .map_err(|error| {
+            format!(
+                "failed to build HTTP client: {}",
+                net::reqwest_error(&error)
+            )
+        })
 }
 
 fn fetch_latest_tag() -> Result<String, String> {
@@ -368,7 +374,12 @@ fn fetch_latest_tag() -> Result<String, String> {
         ))
         .header("Accept", "application/vnd.github+json")
         .send()
-        .map_err(|error| format!("failed to query latest release: {error}"))?;
+        .map_err(|error| {
+            format!(
+                "failed to query latest release: {}",
+                net::reqwest_error(&error)
+            )
+        })?;
     if !response.status().is_success() {
         return Err(format!(
             "GitHub API returned status {} when resolving latest release",
@@ -387,13 +398,17 @@ fn fetch_latest_tag() -> Result<String, String> {
 
 fn download(url: &str, dest: &Path) -> Result<(), String> {
     let client = http_client()?;
-    let mut response = client
-        .get(url)
-        .send()
-        .map_err(|error| format!("failed to download {url}: {error}"))?;
+    let mut response = client.get(url).send().map_err(|error| {
+        format!(
+            "failed to download {}: {}",
+            net::diagnostic_text(url),
+            net::reqwest_error(&error)
+        )
+    })?;
     if !response.status().is_success() {
         return Err(format!(
-            "download {url} returned status {}",
+            "download {} returned status {}",
+            net::diagnostic_text(url),
             response.status()
         ));
     }
@@ -410,7 +425,7 @@ fn verify_checksum(checksums_url: &str, asset: &str, path: &Path) -> Result<(), 
     let response = client
         .get(checksums_url)
         .send()
-        .map_err(|error| format!("failed to fetch SHA256SUMS: {error}"))?;
+        .map_err(|error| format!("failed to fetch SHA256SUMS: {}", net::reqwest_error(&error)))?;
     if !response.status().is_success() {
         // Releases predating the SHA256SUMS workflow step won't have
         // this manifest. Match install.sh's behavior and warn-and-skip
@@ -421,9 +436,12 @@ fn verify_checksum(checksums_url: &str, asset: &str, path: &Path) -> Result<(), 
         );
         return Ok(());
     }
-    let manifest = response
-        .text()
-        .map_err(|error| format!("failed to read SHA256SUMS body: {error}"))?;
+    let manifest = response.text().map_err(|error| {
+        format!(
+            "failed to read SHA256SUMS body: {}",
+            net::reqwest_error(&error)
+        )
+    })?;
 
     let expected = find_expected_sha(&manifest, asset)
         .ok_or_else(|| format!("SHA256SUMS does not include an entry for {asset}"))?;

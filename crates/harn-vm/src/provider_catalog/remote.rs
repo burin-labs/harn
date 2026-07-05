@@ -305,16 +305,22 @@ async fn fetch_remote_catalog(
 ) -> Result<FetchedCatalog, String> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(5))
+        .redirect(crate::egress::redirect_policy(
+            "provider_catalog_redirect",
+            5,
+        ))
         .build()
         .map_err(|error| format!("failed to build HTTP client: {error}"))?;
     let mut request = client.get(url);
     if let Some(etag) = metadata.and_then(|meta| meta.etag.as_deref()) {
         request = request.header(reqwest::header::IF_NONE_MATCH, etag);
     }
-    let response = request
-        .send()
-        .await
-        .map_err(|error| format!("failed to fetch runtime provider catalog: {error}"))?;
+    let response = request.send().await.map_err(|error| {
+        format!(
+            "failed to fetch runtime provider catalog: {}",
+            crate::egress::redact_reqwest_error(&error)
+        )
+    })?;
     if response.status() == reqwest::StatusCode::NOT_MODIFIED {
         return Ok(FetchedCatalog::NotModified);
     }

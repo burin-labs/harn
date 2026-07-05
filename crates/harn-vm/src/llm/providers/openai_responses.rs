@@ -58,7 +58,8 @@ impl OpenAiResponsesProvider {
         let req = resolved.apply_headers(req, &request.api_key);
         let response = req.send().await.map_err(|error| {
             VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-                "openai Responses API error: {error}"
+                "openai Responses API error: {}",
+                crate::egress::redact_reqwest_error(&error)
             ))))
         })?;
 

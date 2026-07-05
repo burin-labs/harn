@@ -712,11 +712,12 @@ fn reqwest_send_error(provider: &str, phase: &str, error: reqwest::Error) -> VmE
         ("unknown", None)
     };
     // "unknown" uses Debug repr to surface the inner cause.
-    let message = if kind == "unknown" {
-        format!("{provider} {phase} error ({kind}): {error:?}")
+    let error = if kind == "unknown" {
+        crate::egress::redact_diagnostic_text(&format!("{error:?}"))
     } else {
-        format!("{provider} {phase} error ({kind}): {error}")
+        crate::egress::redact_reqwest_error(&error)
     };
+    let message = format!("{provider} {phase} error ({kind}): {error}");
     match category {
         Some(category) => VmError::CategorizedError { message, category },
         None => VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message))),
@@ -907,6 +908,7 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
                 // as a transient stream error rather than a truncated
                 // zero-token success that the agent loop accepts as an empty
                 // assistant turn.
+                let error = crate::egress::redact_diagnostic_text(&error.to_string());
                 return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                     format!("{provider} stream error (mid-stream read): {error}"),
                 ))));
@@ -1537,6 +1539,7 @@ where
         let line = next_ollama_ndjson_line(&mut lines, model, unload_grace, warmup_gate)
             .await
             .map_err(|error| {
+                let error = crate::egress::redact_diagnostic_text(&error.to_string());
                 VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
                     "ollama stream error: unexpected EOF or read failure before done=true: {error}"
                 ))))

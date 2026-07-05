@@ -73,6 +73,10 @@ pub async fn discover_mcp_json(input: &str) -> Result<Option<McpJsonDiscovery>, 
     let source = mcp_json_url_for(input)?;
     let client = reqwest::Client::builder()
         .timeout(MCP_JSON_DISCOVERY_TIMEOUT)
+        .redirect(crate::egress::redirect_policy(
+            "mcp_json_discovery_redirect",
+            10,
+        ))
         .build()
         .map_err(|error| format!("failed to build MCP discovery client: {error}"))?;
     discover_mcp_json_with_client(&client, source).await
@@ -82,15 +86,19 @@ async fn discover_mcp_json_with_client(
     client: &reqwest::Client,
     source: Url,
 ) -> Result<Option<McpJsonDiscovery>, String> {
+    let display_source = crate::egress::redact_diagnostic_text(source.as_str());
     let response = client.get(source.clone()).send().await.map_err(|error| {
-        format!("failed to fetch MCP discovery descriptor at {source}: {error}")
+        format!(
+            "failed to fetch MCP discovery descriptor at {display_source}: {}",
+            crate::egress::redact_reqwest_error(&error)
+        )
     })?;
     if response.status() == reqwest::StatusCode::NOT_FOUND {
         return Ok(None);
     }
     if !response.status().is_success() {
         return Err(format!(
-            "MCP discovery descriptor at {source} returned {}",
+            "MCP discovery descriptor at {display_source} returned {}",
             response.status()
         ));
     }

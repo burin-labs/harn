@@ -274,9 +274,19 @@ async fn fetch_uncached_jwks(
         .get(jwks_url)
         .send()
         .await
-        .map_err(|error| ConnectorError::Activation(format!("fetch JWKS: {error}")))?
+        .map_err(|error| {
+            ConnectorError::Activation(format!(
+                "fetch JWKS: {}",
+                crate::egress::redact_reqwest_error(&error)
+            ))
+        })?
         .error_for_status()
-        .map_err(|error| ConnectorError::Activation(format!("fetch JWKS: {error}")))?
+        .map_err(|error| {
+            ConnectorError::Activation(format!(
+                "fetch JWKS: {}",
+                crate::egress::redact_reqwest_error(&error)
+            ))
+        })?
         .json::<JwkSet>()
         .await
         .map_err(|error| ConnectorError::Activation(format!("decode JWKS: {error}")))?;

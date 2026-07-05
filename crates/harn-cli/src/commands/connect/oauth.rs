@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use url::Url;
 
 use crate::cli::{ConnectGenericArgs, ConnectLinearArgs, ConnectOAuthArgs};
+use crate::net;
 use crate::package::{self, ProviderOAuthManifest};
 
 use super::callback::{bind_loopback_listener, wait_for_oauth_response};
@@ -456,8 +457,9 @@ pub(super) async fn run_connect_refresh(
         validate_issuer_binding(stored_issuer, &discovery.issuer)?;
         token_endpoint = discovery.metadata.token_endpoint;
     }
+    let client = net::http_client("cli.connect.oauth", std::time::Duration::from_secs(30))?;
     let refreshed = request_token(
-        &reqwest::Client::new(),
+        &client,
         &token_endpoint,
         &stored.token_endpoint_auth_method,
         &stored.client_id,
@@ -492,7 +494,10 @@ pub(super) async fn run_connect_refresh(
 }
 
 pub(super) async fn discover_oauth_server(resource: &str) -> Result<OAuthDiscoveryResult, String> {
-    let client = reqwest::Client::new();
+    let client = net::http_client(
+        "cli.connect.oauth.discovery",
+        std::time::Duration::from_secs(30),
+    )?;
     let discovery = discover_mcp_oauth(&client, resource)
         .await
         .map_err(|error| error.to_string())?;
@@ -512,14 +517,22 @@ pub(super) async fn dynamic_client_registration(
     redirect_uri: &str,
     scopes: Option<&str>,
 ) -> Result<DynamicClientRegistrationResponse, String> {
-    let client = reqwest::Client::new();
+    let client = net::http_client(
+        "cli.connect.oauth.registration",
+        std::time::Duration::from_secs(30),
+    )?;
     let body = dynamic_client_registration_body("Harn CLI", [redirect_uri], scopes);
     let response = client
         .post(registration_endpoint)
         .json(&body)
         .send()
         .await
-        .map_err(|error| format!("Dynamic client registration failed: {error}"))?;
+        .map_err(|error| {
+            format!(
+                "Dynamic client registration failed: {}",
+                net::reqwest_error(&error)
+            )
+        })?;
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
@@ -575,7 +588,10 @@ pub(super) async fn exchange_authorization_code(
     token_endpoint: &str,
     request: AuthorizationCodeExchange<'_>,
 ) -> Result<TokenResponse, String> {
-    let client = reqwest::Client::new();
+    let client = net::http_client(
+        "cli.connect.oauth.token",
+        std::time::Duration::from_secs(30),
+    )?;
     let mut form = vec![
         ("grant_type", "authorization_code".to_string()),
         ("code", request.code.to_string()),
@@ -637,7 +653,7 @@ pub(super) async fn request_token(
     let response = request
         .send()
         .await
-        .map_err(|error| format!("Token request failed: {error}"))?;
+        .map_err(|error| format!("Token request failed: {}", net::reqwest_error(&error)))?;
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();

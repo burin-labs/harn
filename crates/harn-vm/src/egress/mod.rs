@@ -155,8 +155,8 @@ pub async fn enforce_url_allowed(surface: &str, url: &str) -> Result<(), VmError
     Ok(())
 }
 
-pub fn redirect_url_allowed(surface: &str, url: &str) -> bool {
-    match check_url(surface, url) {
+pub fn redirect_url_allowed(surface: &str, previous_url: Option<&str>, url: &str) -> bool {
+    match check_redirect_url(surface, previous_url, url) {
         Ok(Some(blocked)) => {
             audit_blocked_background(blocked);
             false
@@ -164,6 +164,82 @@ pub fn redirect_url_allowed(surface: &str, url: &str) -> bool {
         Ok(None) => true,
         Err(_) => false,
     }
+}
+
+pub fn redirect_policy(surface: &'static str, max_redirects: usize) -> reqwest::redirect::Policy {
+    reqwest::redirect::Policy::custom(move |attempt| {
+        if attempt.previous().len() >= max_redirects {
+            attempt.error("too many redirects")
+        } else if redirect_url_allowed(
+            surface,
+            attempt.previous().last().map(|url| url.as_str()),
+            attempt.url().as_str(),
+        ) {
+            attempt.follow()
+        } else {
+            attempt.error("egress policy blocked redirect target")
+        }
+    })
+}
+
+pub fn redact_reqwest_error(error: &reqwest::Error) -> String {
+    redact_diagnostic_text(&error.to_string())
+}
+
+pub fn redact_diagnostic_text(raw: &str) -> String {
+    let policy = crate::redact::current_policy();
+    let urls_redacted = policy.redact_urls_in_text(raw);
+    policy.redact_string(urls_redacted.as_ref()).into_owned()
+}
+
+fn check_redirect_url(
+    surface: &str,
+    previous_url: Option<&str>,
+    raw_url: &str,
+) -> Result<Option<EgressBlocked>, VmError> {
+    if let Some(blocked) = insecure_redirect_downgrade_block(surface, previous_url, raw_url)? {
+        return Ok(Some(blocked));
+    }
+    check_url(surface, raw_url)
+}
+
+fn insecure_redirect_downgrade_block(
+    surface: &str,
+    previous_url: Option<&str>,
+    raw_url: &str,
+) -> Result<Option<EgressBlocked>, VmError> {
+    let Some(previous_url) = previous_url else {
+        return Ok(None);
+    };
+    let previous = Url::parse(previous_url).map_err(|error| {
+        vm_error(format!(
+            "egress: invalid redirect source `{previous_url}`: {error}"
+        ))
+    })?;
+    if previous.scheme() != "https" {
+        return Ok(None);
+    }
+    let target_url = Url::parse(raw_url)
+        .map_err(|error| vm_error(format!("egress: invalid URL `{raw_url}`: {error}")))?;
+    if target_url.scheme() != "http" {
+        return Ok(None);
+    }
+
+    let target = EgressTarget::parse(raw_url)?;
+    if insecure_redirect_loopback_exempt(&target) {
+        return Ok(None);
+    }
+    Ok(Some(blocked(
+        surface,
+        raw_url,
+        &target,
+        "https redirect target downgrades to insecure http".to_string(),
+    )))
+}
+
+fn insecure_redirect_loopback_exempt(target: &EgressTarget) -> bool {
+    let (_, allow_loopback) = current_ssrf_client_settings();
+    allow_loopback && target.is_loopback_host()
 }
 
 pub fn client_error_for_url(surface: &str, url: &str) -> Option<crate::connectors::ClientError> {
@@ -1200,6 +1276,19 @@ impl EgressTarget {
             port: parsed.port_or_known_default(),
         })
     }
+
+    fn is_loopback_host(&self) -> bool {
+        self.host == "localhost"
+            || self.ip.is_some_and(|ip| match ip {
+                IpAddr::V4(v4) => v4.is_loopback(),
+                IpAddr::V6(v6) => {
+                    v6.is_loopback()
+                        || v6
+                            .to_ipv4_mapped()
+                            .is_some_and(|mapped| mapped.is_loopback())
+                }
+            })
+    }
 }
 
 fn parse_rule_host_port(raw: &str) -> Result<(String, Option<u16>), VmError> {
@@ -1301,6 +1390,12 @@ impl std::fmt::Display for EgressBlocked {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rcgen::generate_simple_self_signed;
+    use rustls::pki_types::PrivatePkcs8KeyDer;
+    use rustls::{ServerConfig, ServerConnection, StreamOwned};
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::{Arc, Once};
 
     fn install(config: &[(&str, VmValue)]) -> std::sync::MutexGuard<'static, ()> {
         let guard = test_env_lock();
@@ -1467,6 +1562,215 @@ mod tests {
         std::env::remove_var(HARN_EGRESS_DENY_ENV);
         std::env::remove_var(HARN_EGRESS_DEFAULT_ENV);
         reset_egress_policy_for_tests();
+    }
+
+    #[tokio::test]
+    async fn reqwest_redirect_policy_blocks_https_to_http_downgrade() {
+        install_rustls_provider();
+        let _guard = test_env_lock();
+        reset_egress_policy_for_tests();
+
+        let cert =
+            generate_simple_self_signed(vec!["localhost".to_string(), "127.0.0.1".to_string()])
+                .expect("generate cert");
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind tls listener");
+        let port = listener.local_addr().expect("tls addr").port();
+        let server_config = Arc::new(
+            ServerConfig::builder()
+                .with_no_client_auth()
+                .with_single_cert(
+                    vec![cert.cert.der().clone()],
+                    PrivatePkcs8KeyDer::from(cert.signing_key.serialize_der()).into(),
+                )
+                .expect("build tls config"),
+        );
+        let thread = std::thread::spawn(move || {
+            let (tcp, _) = listener.accept().expect("accept tls client");
+            let conn = ServerConnection::new(server_config).expect("server connection");
+            let mut stream = StreamOwned::new(conn, tcp);
+            let request = read_http_request(&mut stream);
+            assert!(request.starts_with("GET /start HTTP/1.1\r\n"));
+            write_http_redirect_response(
+                &mut stream,
+                "http://public.example.com/next?access_token=target-secret",
+            );
+        });
+
+        let client = reqwest::Client::builder()
+            .danger_accept_invalid_certs(true)
+            .timeout(std::time::Duration::from_secs(2))
+            .redirect(redirect_policy("test_redirect", 10))
+            .build()
+            .expect("client builds");
+        let error = client
+            .get(format!("https://localhost:{port}/start"))
+            .send()
+            .await
+            .expect_err("downgrade redirect should be blocked by policy");
+        assert!(error.is_redirect(), "{error}");
+        let redacted = redact_reqwest_error(&error);
+        assert!(!redacted.contains("target-secret"), "{redacted}");
+
+        thread.join().expect("tls thread");
+        reset_egress_policy_for_tests();
+    }
+
+    #[test]
+    fn redirect_blocks_public_https_to_http_downgrade() {
+        let _guard = test_env_lock();
+        reset_egress_policy_for_tests();
+        let blocked = check_redirect_url(
+            "http_redirect",
+            Some("https://api.example.com/start?access_token=source-secret"),
+            "http://public.example.com/next?access_token=target-secret",
+        )
+        .unwrap()
+        .expect("public https-to-http redirect is blocked");
+
+        assert_eq!(blocked.host, "public.example.com");
+        assert_eq!(blocked.port, Some(80));
+        assert_eq!(
+            blocked.reason,
+            "https redirect target downgrades to insecure http"
+        );
+        assert!(!blocked.url.contains("target-secret"), "{}", blocked.url);
+        reset_egress_policy_for_tests();
+    }
+
+    #[test]
+    fn redirect_allows_same_scheme_and_secure_upgrade() {
+        let _guard = test_env_lock();
+        reset_egress_policy_for_tests();
+
+        for (previous, target) in [
+            (
+                "https://api.example.com/start",
+                "https://cdn.example.com/next",
+            ),
+            (
+                "http://api.example.com/start",
+                "http://cdn.example.com/next",
+            ),
+            (
+                "http://api.example.com/start",
+                "https://cdn.example.com/next",
+            ),
+        ] {
+            assert!(
+                check_redirect_url("http_redirect", Some(previous), target)
+                    .unwrap()
+                    .is_none(),
+                "{previous} -> {target} should be allowed"
+            );
+        }
+
+        reset_egress_policy_for_tests();
+    }
+
+    #[test]
+    fn loopback_https_to_http_redirect_requires_loopback_hatch() {
+        let _guard = test_env_lock();
+        reset_egress_policy_for_tests();
+        assert!(
+            check_redirect_url(
+                "http_redirect",
+                Some("https://api.example.com/start"),
+                "http://127.0.0.1:7777/callback",
+            )
+            .unwrap()
+            .is_some(),
+            "loopback downgrade is blocked without the explicit loopback hatch"
+        );
+
+        install_test_policy(&[
+            (
+                "block_private",
+                VmValue::String(arcstr::ArcStr::from("private")),
+            ),
+            ("allow_loopback", VmValue::Bool(true)),
+        ]);
+        assert!(
+            check_redirect_url(
+                "http_redirect",
+                Some("https://api.example.com/start"),
+                "http://127.0.0.1:7777/callback",
+            )
+            .unwrap()
+            .is_none(),
+            "explicit allow_loopback keeps loopback redirect workflows available"
+        );
+        assert!(
+            check_redirect_url(
+                "http_redirect",
+                Some("https://api.example.com/start"),
+                "http://LOCALHOST.:7777/callback",
+            )
+            .unwrap()
+            .is_none(),
+            "localhost follows the same explicit loopback hatch after normalization"
+        );
+        assert!(
+            check_redirect_url(
+                "http_redirect",
+                Some("https://api.example.com/start"),
+                "http://[::1]:7777/callback",
+            )
+            .unwrap()
+            .is_none(),
+            "IPv6 loopback follows the same explicit loopback hatch"
+        );
+        assert!(
+            check_redirect_url(
+                "http_redirect",
+                Some("https://api.example.com/start"),
+                "http://[::ffff:127.0.0.1]:7777/callback",
+            )
+            .unwrap()
+            .is_none(),
+            "IPv4-mapped IPv6 loopback follows the same explicit loopback hatch"
+        );
+        assert!(
+            check_redirect_url(
+                "http_redirect",
+                Some("https://api.example.com/start"),
+                "http://public.example.com/callback",
+            )
+            .unwrap()
+            .is_some(),
+            "allow_loopback does not exempt public insecure redirects"
+        );
+
+        reset_egress_policy_for_tests();
+    }
+
+    fn install_rustls_provider() {
+        static INSTALL: Once = Once::new();
+        INSTALL.call_once(|| {
+            let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        });
+    }
+
+    fn read_http_request<T: Read>(stream: &mut T) -> String {
+        let mut buffer = Vec::new();
+        let mut chunk = [0u8; 4096];
+        loop {
+            let read = stream.read(&mut chunk).expect("read request");
+            assert!(read > 0, "request closed before headers");
+            buffer.extend_from_slice(&chunk[..read]);
+            if buffer.windows(4).any(|window| window == b"\r\n\r\n") {
+                return String::from_utf8_lossy(&buffer).into_owned();
+            }
+        }
+    }
+
+    fn write_http_redirect_response<T: Write>(stream: &mut T, location: &str) {
+        let response = format!(
+            "HTTP/1.1 302 Found\r\ncontent-length: 0\r\nconnection: close\r\nlocation: {location}\r\n\r\n"
+        );
+        stream
+            .write_all(response.as_bytes())
+            .expect("write redirect response");
+        stream.flush().expect("flush redirect response");
     }
 
     // --- SSRF private-address block (literal IPs; host-name DNS is covered by

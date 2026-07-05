@@ -10,6 +10,8 @@ use harn_vm::llm::readiness::{probe_provider_readiness, ProviderReadiness, Readi
 use harn_vm::llm_config::{self, ProviderDef};
 use serde::Serialize;
 
+use crate::net;
+
 use super::state::{read_pid_record, PidRecord};
 
 /// Provider ids Harn treats as "local LLM runtimes" for lifecycle purposes.
@@ -321,11 +323,16 @@ pub(crate) fn resolve_provider_def(provider: &str) -> Result<ProviderDef, String
 /// from the CLI side and we want deterministic timeouts independent of the
 /// streaming/transport client settings.
 fn local_http_client() -> Result<reqwest::Client, String> {
-    reqwest::Client::builder()
+    net::http_client_builder("cli.local.runtime")
         .connect_timeout(Duration::from_secs(2))
         .timeout(Duration::from_secs(10))
         .build()
-        .map_err(|error| format!("failed to build HTTP client: {error}"))
+        .map_err(|error| {
+            format!(
+                "failed to build HTTP client: {}",
+                net::reqwest_error(&error)
+            )
+        })
 }
 
 #[cfg(test)]

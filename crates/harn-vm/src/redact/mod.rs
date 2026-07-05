@@ -281,6 +281,44 @@ impl RedactionPolicy {
         }
     }
 
+    /// Redact sensitive credentials and query parameters from HTTP(S) URLs
+    /// embedded in free-form diagnostic text. This is intentionally separate
+    /// from [`Self::redact_string`]: broad text tokenization is useful for
+    /// transport errors that include URLs inside prose, while normal string
+    /// redaction keeps its lower-perturbation standalone-URL behavior.
+    pub fn redact_urls_in_text<'a>(&self, value: &'a str) -> Cow<'a, str> {
+        let mut scan_cursor = 0;
+        let mut emit_cursor = 0;
+        let mut output: Option<String> = None;
+
+        while let Some(relative_start) = find_http_url_start(&value[scan_cursor..]) {
+            let start = scan_cursor + relative_start;
+            let token_end = http_url_token_end(value, start);
+            let token = &value[start..token_end];
+            let Some((url, suffix)) = split_url_token(token) else {
+                scan_cursor = token_end;
+                continue;
+            };
+            let redacted = self.redact_url(url);
+            if redacted != url {
+                let output = output.get_or_insert_with(|| String::with_capacity(value.len()));
+                output.push_str(&value[emit_cursor..start]);
+                output.push_str(&redacted);
+                output.push_str(suffix);
+                emit_cursor = token_end;
+            }
+            scan_cursor = token_end;
+        }
+
+        match output {
+            Some(mut output) => {
+                output.push_str(&value[emit_cursor..]);
+                Cow::Owned(output)
+            }
+            None => Cow::Borrowed(value),
+        }
+    }
+
     /// Conservative predicate for fields that must contain logical
     /// secret references rather than raw credential material.
     ///
@@ -358,6 +396,67 @@ impl RedactionPolicy {
         self.redact_json_in_place(&mut clone);
         clone
     }
+}
+
+fn find_http_url_start(value: &str) -> Option<usize> {
+    match (value.find("http://"), value.find("https://")) {
+        (Some(http), Some(https)) => Some(http.min(https)),
+        (Some(http), None) => Some(http),
+        (None, Some(https)) => Some(https),
+        (None, None) => None,
+    }
+}
+
+fn http_url_token_end(value: &str, start: usize) -> usize {
+    value[start..]
+        .char_indices()
+        .find_map(|(offset, character)| {
+            (offset > 0 && is_url_text_delimiter(character)).then_some(start + offset)
+        })
+        .unwrap_or(value.len())
+}
+
+fn is_url_text_delimiter(character: char) -> bool {
+    character.is_whitespace() || matches!(character, '"' | '\'' | '<' | '>' | '`')
+}
+
+fn split_url_token(token: &str) -> Option<(&str, &str)> {
+    let mut prose_end = token.len();
+    while prose_end > 0 {
+        let candidate = &token[..prose_end];
+        let last = candidate.chars().last()?;
+        if !is_trailing_prose_punctuation(last) {
+            break;
+        }
+        prose_end -= last.len_utf8();
+    }
+    if prose_end > 0 {
+        let candidate = &token[..prose_end];
+        if Url::parse(candidate).is_ok() {
+            return Some((candidate, &token[prose_end..]));
+        }
+    }
+
+    let mut end = token.len();
+    while end > 0 {
+        let candidate = &token[..end];
+        if Url::parse(candidate).is_ok() {
+            return Some((candidate, &token[end..]));
+        }
+        let last = candidate.chars().last()?;
+        if !is_trailing_prose_punctuation(last) {
+            return None;
+        }
+        end -= last.len_utf8();
+    }
+    None
+}
+
+fn is_trailing_prose_punctuation(character: char) -> bool {
+    matches!(
+        character,
+        '.' | ',' | ';' | ':' | '!' | '?' | ')' | ']' | '}'
+    )
 }
 
 fn default_safe_headers() -> BTreeSet<String> {
@@ -604,6 +703,23 @@ mod tests {
         let policy = RedactionPolicy::default();
         let url = "https://api.example.com/v1?page=2";
         assert_eq!(policy.redact_url(url), url);
+    }
+
+    #[test]
+    fn redact_urls_in_text_strips_embedded_sensitive_urls() {
+        let policy = RedactionPolicy::default();
+        let redacted = policy.redact_urls_in_text(
+            "clean https://status.example.com/health then \
+             redirect from (https://user:pw@api.example.com/start?access_token=source-secret) \
+             to http://public.example.com/next?client_secret=target-secret.",
+        );
+        assert!(redacted.starts_with("clean https://status.example.com/health then "));
+        assert!(redacted.contains("access_token=%5Bredacted%5D"));
+        assert!(redacted.contains("client_secret=%5Bredacted%5D"));
+        assert!(!redacted.contains("source-secret"));
+        assert!(!redacted.contains("target-secret"));
+        assert!(!redacted.contains("user:pw@"));
+        assert!(redacted.ends_with('.'));
     }
 
     #[test]

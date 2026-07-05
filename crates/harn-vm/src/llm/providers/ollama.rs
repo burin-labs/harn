@@ -232,7 +232,8 @@ impl OllamaProvider {
         let started = Instant::now();
         let response = req.send().await.map_err(|error| {
             VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-                "ollama raw generate API error: {error}"
+                "ollama raw generate API error: {}",
+                crate::egress::redact_reqwest_error(&error)
             ))))
         })?;
         if !response.status().is_success() {
