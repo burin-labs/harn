@@ -72,3 +72,33 @@ pub fn memory_summarize(namespace, window = nil, options = nil) {
 pub fn memory_forget(namespace, predicate, options = nil) {
   return __memory_forget(namespace, predicate, options)
 }
+
+/**
+ * Append an in-place update to the record with `id` and return the updated
+ * record (or nil if the id is unknown or forgotten).
+ *
+ * `patch` may set any of `value`, `tags`, `status`, `scope`, `flags` (a
+ * `{name: bool}` map merged key-by-key), and `provenance`. Absent keys leave
+ * the record unchanged; updating `value` refreshes the derived search text.
+ * The event log stays append-only — the update is overlaid at projection.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn memory_update(namespace, id, patch, options = nil) {
+  return __memory_update(namespace, id, patch, options)
+}
+
+/**
+ * Enumerate active records in a namespace, newest first.
+ *
+ * Unlike `memory_recall` (query-ranked), this returns the full listing.
+ * Filter with `options.status`, `options.scope`, `options.tag`, `options.flag`
+ * (a flag name that must be true), and `options.limit`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn memory_list(namespace, options = nil) {
+  return __memory_list(namespace, options)
+}
