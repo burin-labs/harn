@@ -23,6 +23,10 @@
           "type": "string",
           "description": "Lowercase symbol kind. See schemas/ast/symbols.response.json."
         },
+        "access_level": {
+          "type": ["string", "null"],
+          "description": "Normalized declaration access level when known, otherwise null."
+        },
         "signature": { "type": "string" },
         "start_row": { "type": "integer", "minimum": 0 },
         "end_row": { "type": "integer", "minimum": 0 },
@@ -31,7 +35,15 @@
           "items": { "$ref": "#/$defs/OutlineItem" }
         }
       },
-      "required": ["name", "kind", "signature", "start_row", "end_row", "children"],
+      "required": [
+        "name",
+        "kind",
+        "access_level",
+        "signature",
+        "start_row",
+        "end_row",
+        "children"
+      ],
       "additionalProperties": false
     }
   }

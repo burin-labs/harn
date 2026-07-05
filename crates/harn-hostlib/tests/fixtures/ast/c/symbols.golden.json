@@ -1,8 +1,12 @@
 [
-  {"name":"Greeter", "kind":"struct", "container":null, "signature":"struct Greeter", "start_row":2, "start_col":0, "end_row":4, "end_col":1},
-  {"name":"Color", "kind":"enum", "container":null, "signature":"enum Color", "start_row":6, "start_col":0, "end_row":10, "end_col":1},
-  {"name":"Counter", "kind":"type", "container":null, "signature":"typedef Counter", "start_row":12, "start_col":0, "end_row":12, "end_col":20},
-  {"name":"add", "kind":"function", "container":null, "signature":"add(int a, int b)", "start_row":14, "start_col":0, "end_row":16, "end_col":1},
-  {"name":"greet", "kind":"function", "container":null, "signature":"greet(struct Greeter *g)", "start_row":18, "start_col":0, "end_row":20, "end_col":1},
-  {"name":"Greeter", "kind":"struct", "container":null, "signature":"struct Greeter", "start_row":18, "start_col":11, "end_row":18, "end_col":25}
+  {"name":"Greeter", "kind":"struct", "container":null, "access_level":null, "signature":"struct Greeter", "start_row":2, "start_col":0, "end_row":4, "end_col":1},
+  {"name":"name", "kind":"field", "container":"Greeter", "access_level":null, "signature":"char name", "start_row":3, "start_col":4, "end_row":3, "end_col":21},
+  {"name":"Color", "kind":"enum", "container":null, "access_level":null, "signature":"enum Color", "start_row":6, "start_col":0, "end_row":10, "end_col":1},
+  {"name":"RED", "kind":"enum_case", "container":"Color", "access_level":null, "signature":"case RED", "start_row":7, "start_col":4, "end_row":7, "end_col":7},
+  {"name":"GREEN", "kind":"enum_case", "container":"Color", "access_level":null, "signature":"case GREEN", "start_row":8, "start_col":4, "end_row":8, "end_col":9},
+  {"name":"BLUE", "kind":"enum_case", "container":"Color", "access_level":null, "signature":"case BLUE", "start_row":9, "start_col":4, "end_row":9, "end_col":8},
+  {"name":"Counter", "kind":"type", "container":null, "access_level":null, "signature":"typedef Counter", "start_row":12, "start_col":0, "end_row":12, "end_col":20},
+  {"name":"add", "kind":"function", "container":null, "access_level":null, "signature":"add(int a, int b)", "start_row":14, "start_col":0, "end_row":16, "end_col":1},
+  {"name":"greet", "kind":"function", "container":null, "access_level":null, "signature":"greet(struct Greeter *g)", "start_row":18, "start_col":0, "end_row":20, "end_col":1},
+  {"name":"Greeter", "kind":"struct", "container":null, "access_level":null, "signature":"struct Greeter", "start_row":18, "start_col":11, "end_row":18, "end_col":25}
 ]

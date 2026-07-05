@@ -707,6 +707,10 @@ fn outline_get_populates_symbols_after_rebuild() {
         other => panic!("expected string kind, got {other:?}"),
     };
     assert_eq!(kind, "function", "`helper` should be a function symbol");
+    assert!(
+        matches!(helper_dict.get("access_level"), Some(VmValue::Nil)),
+        "function without known access should expose access_level:null"
+    );
     let start_line = extract_int(helper_dict.get("start_line").expect("start_line"));
     assert!(
         start_line >= 1,

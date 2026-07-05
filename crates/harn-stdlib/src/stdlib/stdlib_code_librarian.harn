@@ -31,6 +31,7 @@ type LibrarianCypherResult = {rows: list<LibrarianRecord>, overlay: string?}
 type LibrarianOutlineSymbol = {
   name: string,
   kind: string,
+  access_level: string?,
   start_line: int,
   end_line: int,
   signature: string,
@@ -362,6 +363,8 @@ fn __nl_emit_fallback(opts, text, attempted_cypher, mcts) {
 const __CYPHER_TEMPLATES = [
   "MATCH (f:Function {name: '<NAME>'}) RETURN f.path AS path",
   "MATCH (t:Type {name: '<NAME>'}) RETURN t.path AS path",
+  "MATCH (e:EnumCase {name: '<NAME>'}) RETURN e.path AS path, e.container AS enum",
+  "MATCH (f:Field {name: '<NAME>'}) RETURN f.path AS path, f.container AS container, f.access_level AS access_level",
   "MATCH (m:Module) WHERE m.path = '<PATH>' RETURN m.name AS name",
   "MATCH (f:Function {name: '<NAME>'})<-[:CALLS]-(c:CallSite) RETURN c.path AS path",
   "MATCH (i:Import)<-[:IMPORTS]-(m:Module) WHERE i.name = '<IMPORT>' RETURN m.path AS path",
@@ -370,7 +373,7 @@ const __CYPHER_TEMPLATES = [
   "MATCH (f:Function)-[:CALLS*1..3]->(g:Function {name: '<NAME>'}) RETURN f.name AS name, f.path AS path",
 ]
 
-const __CYPHER_PROMPT_PREAMBLE = "You translate code-graph questions into a small Cypher dialect over a typed symbol graph.\n\nNode kinds: Function, Type, Module, Import, CallSite, Macro.\nEdge kinds: CALLS, REFS, IMPORTS, CONTAINS, OVERRIDES (each also has an inverse such as CALLED_BY / IMPORTED_BY).\nNode properties: name, path, language, kind, container, signature, line, file_id, id.\n\nThe dialect supports MATCH … [WHERE …] RETURN. Variable-length traversal up to depth 4 via `*1..N`. WHERE supports =, <>, !=, <, <=, >, >=, AND, OR, NOT. Always alias every projection with AS.\n\nReturn exactly one Cypher query that answers the question. No prose, no markdown, no leading explanation. Aliases on every projected column.\n\nCanonical templates (substitute literal values):\n"
+const __CYPHER_PROMPT_PREAMBLE = "You translate code-graph questions into a small Cypher dialect over a typed symbol graph.\n\nNode kinds: Function, Type, Field, EnumCase, Module, Import, CallSite, Macro.\nEdge kinds: CALLS, REFS, IMPORTS, CONTAINS, OVERRIDES (each also has an inverse such as CALLED_BY / IMPORTED_BY).\nNode properties: name, path, language, kind, container, access_level, signature, line, file_id, id.\n\nThe dialect supports MATCH … [WHERE …] RETURN. Variable-length traversal up to depth 4 via `*1..N`. WHERE supports =, <>, !=, <, <=, >, >=, AND, OR, NOT. Always alias every projection with AS.\n\nReturn exactly one Cypher query that answers the question. No prose, no markdown, no leading explanation. Aliases on every projected column.\n\nCanonical templates (substitute literal values):\n"
 
 fn __nl_compile(text, opts) -> dict {
   let prompt = __nl_compile_prompt(text)

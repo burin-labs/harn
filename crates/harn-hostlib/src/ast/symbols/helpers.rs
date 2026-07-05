@@ -119,10 +119,22 @@ pub(super) fn sym(
     signature: String,
     pos: NodePos,
 ) -> Symbol {
+    sym_with_access_level(name, kind, container, None, signature, pos)
+}
+
+pub(super) fn sym_with_access_level(
+    name: &str,
+    kind: SymbolKind,
+    container: Option<&str>,
+    access_level: Option<&str>,
+    signature: String,
+    pos: NodePos,
+) -> Symbol {
     Symbol {
         name: name.to_string(),
         kind,
         container: container.map(str::to_string),
+        access_level: access_level.map(str::to_string),
         signature,
         start_row: pos.start_row,
         start_col: pos.start_col,

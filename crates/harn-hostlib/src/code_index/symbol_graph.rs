@@ -1,8 +1,8 @@
 //! Typed symbol graph layered on top of the flat code index.
 //!
-//! Nodes are typed by [`NodeKind`] (Function, Type, Module, Import,
-//! CallSite, Macro) and edges by [`EdgeKind`] (Calls, Refs, Imports,
-//! Contains, Overrides). The graph is built lazily from the AST symbol
+//! Nodes are typed by [`NodeKind`] (Function, Type, Field, EnumCase,
+//! Module, Import, CallSite, Macro) and edges by [`EdgeKind`] (Calls,
+//! Refs, Imports, Contains, Overrides). The graph is built lazily from the AST symbol
 //! extractor and the existing import [`super::DepGraph`]; it does not
 //! duplicate the trigram or word indexes.
 //!
@@ -31,6 +31,10 @@ pub enum NodeKind {
     Function,
     /// Classes, structs, enums, interfaces, protocols, type aliases.
     Type,
+    /// Struct/class/interface fields and properties.
+    Field,
+    /// Individual enum cases / variants.
+    EnumCase,
     /// One per indexed file; acts as the container for top-level decls.
     Module,
     /// One per raw import string surfaced by the import extractor.
@@ -47,6 +51,8 @@ impl NodeKind {
         match self {
             NodeKind::Function => "Function",
             NodeKind::Type => "Type",
+            NodeKind::Field => "Field",
+            NodeKind::EnumCase => "EnumCase",
             NodeKind::Module => "Module",
             NodeKind::Import => "Import",
             NodeKind::CallSite => "CallSite",
@@ -59,6 +65,8 @@ impl NodeKind {
         match label {
             "Function" => Some(NodeKind::Function),
             "Type" => Some(NodeKind::Type),
+            "Field" => Some(NodeKind::Field),
+            "EnumCase" => Some(NodeKind::EnumCase),
             "Module" => Some(NodeKind::Module),
             "Import" => Some(NodeKind::Import),
             "CallSite" => Some(NodeKind::CallSite),
@@ -145,6 +153,8 @@ pub struct Node {
     pub signature: String,
     /// Enclosing container name (class/struct/module), if any.
     pub container: Option<String>,
+    /// Normalized declaration access level when known.
+    pub access_level: Option<String>,
     /// Tree-sitter language name (e.g. `"rust"`, `"typescript"`).
     pub language: String,
 }
@@ -344,6 +354,7 @@ impl SymbolGraph {
                 line: sym.start_row.saturating_add(1),
                 signature: sym.signature.clone(),
                 container: sym.container.clone(),
+                access_level: sym.access_level.clone(),
                 language: language.name().to_string(),
             });
             if matches!(kind, NodeKind::Type | NodeKind::Module) {
@@ -371,6 +382,7 @@ impl SymbolGraph {
                     line,
                     signature: format!("{callee_name}(…)"),
                     container: None,
+                    access_level: None,
                     language: language.name().to_string(),
                 });
                 self.add_edge(module_id, call_id, EdgeKind::Contains);
@@ -404,6 +416,7 @@ impl SymbolGraph {
                 line: 1,
                 signature: format!("import {raw}"),
                 container: None,
+                access_level: None,
                 language: language.name().to_string(),
             });
             self.add_edge(module_id, imp_id, EdgeKind::Imports);
@@ -513,6 +526,7 @@ impl SymbolGraph {
             line: 1,
             signature: format!("module {path}"),
             container: None,
+            access_level: None,
             language: language.name().to_string(),
         })
     }
@@ -545,6 +559,8 @@ pub fn module_name_from_path(path: &str) -> String {
 fn map_symbol_kind(kind: SymbolKind) -> Option<NodeKind> {
     match kind {
         SymbolKind::Function | SymbolKind::Method => Some(NodeKind::Function),
+        SymbolKind::Field => Some(NodeKind::Field),
+        SymbolKind::EnumCase => Some(NodeKind::EnumCase),
         SymbolKind::Class
         | SymbolKind::Struct
         | SymbolKind::Enum
@@ -661,6 +677,37 @@ mod tests {
             .filter(|n| n.kind == NodeKind::CallSite && n.name == "alpha")
             .collect();
         assert!(!beta_calls.is_empty(), "expected a CallSite for alpha()");
+    }
+
+    #[test]
+    fn rebuild_file_emits_fields_and_enum_cases() {
+        let mut g = SymbolGraph::new();
+        let src = "pub struct Greeter {\n    pub name: String,\n}\n\nenum Color {\n    Red,\n}\n";
+        g.rebuild_file(9, "src/lib.rs", Language::Rust, src, &[]);
+
+        let field = g
+            .iter_nodes()
+            .find(|n| n.kind == NodeKind::Field && n.name == "name")
+            .expect("expected public field node");
+        assert_eq!(field.container.as_deref(), Some("Greeter"));
+        assert_eq!(field.access_level.as_deref(), Some("public"));
+
+        let case = g
+            .iter_nodes()
+            .find(|n| n.kind == NodeKind::EnumCase && n.name == "Red")
+            .expect("expected enum case node");
+        assert_eq!(case.container.as_deref(), Some("Color"));
+
+        let color = g
+            .iter_nodes()
+            .find(|n| n.kind == NodeKind::Type && n.name == "Color")
+            .expect("expected enum type node");
+        assert!(
+            g.outgoing(color.id)
+                .iter()
+                .any(|edge| edge.kind == EdgeKind::Contains && edge.to == case.id),
+            "enum type should contain its case"
+        );
     }
 
     #[test]

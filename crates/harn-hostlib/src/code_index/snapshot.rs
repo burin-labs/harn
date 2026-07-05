@@ -51,6 +51,9 @@ pub struct SnapshotSymbol {
     pub name: String,
     /// Language-specific kind tag.
     pub kind: String,
+    /// Normalized declaration access level when known.
+    #[serde(default)]
+    pub access_level: Option<String>,
     /// 1-based start line.
     pub start_line: u32,
     /// 1-based inclusive end line.
@@ -196,6 +199,7 @@ impl IndexState {
                     .map(|s| SnapshotSymbol {
                         name: s.name.clone(),
                         kind: s.kind.clone(),
+                        access_level: s.access_level.clone(),
                         start_line: s.start_line,
                         end_line: s.end_line,
                         signature: s.signature.clone(),
@@ -249,6 +253,7 @@ impl IndexState {
                     .map(|s| IndexedSymbol {
                         name: s.name,
                         kind: s.kind,
+                        access_level: s.access_level,
                         start_line: s.start_line,
                         end_line: s.end_line,
                         signature: s.signature,

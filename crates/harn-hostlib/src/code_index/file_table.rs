@@ -21,6 +21,8 @@ pub struct IndexedSymbol {
     pub name: String,
     /// Language-specific kind (`"function"`, `"struct"`, …).
     pub kind: String,
+    /// Normalized declaration access level when known.
+    pub access_level: Option<String>,
     /// 1-based start line.
     pub start_line: u32,
     /// 1-based inclusive end line.

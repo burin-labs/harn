@@ -1,11 +1,17 @@
 [
-  {"name":"Task", "kind":"struct", "container":null, "signature":"struct Task", "start_row":0, "start_col":0, "end_row":3, "end_col":1},
-  {"name":"Runner", "kind":"interface", "container":null, "signature":"interface Runner", "start_row":5, "start_col":0, "end_row":7, "end_col":1},
-  {"name":"run", "kind":"method", "container":"Runner", "signature":"fn run(task: Task)", "start_row":6, "start_col":2, "end_row":6, "end_col":28},
-  {"name":"_execute", "kind":"function", "container":null, "signature":"fn _execute(runner: Runner, task: Task)", "start_row":9, "start_col":0, "end_row":11, "end_col":1},
-  {"name":"Task", "kind":"module", "container":null, "signature":"impl Task", "start_row":13, "start_col":0, "end_row":17, "end_col":1},
-  {"name":"summary", "kind":"method", "container":"Task", "signature":"fn summary(title: string)", "start_row":14, "start_col":2, "end_row":16, "end_col":3},
-  {"name":"normalize", "kind":"function", "container":null, "signature":"fn normalize(task)", "start_row":19, "start_col":0, "end_row":21, "end_col":1},
-  {"name":"review", "kind":"function", "container":null, "signature":"pipeline review(task)", "start_row":23, "start_col":0, "end_row":26, "end_col":1},
-  {"name":"_notify", "kind":"function", "container":null, "signature":"tool _notify(message)", "start_row":28, "start_col":0, "end_row":31, "end_col":1}
+  {"name":"Task", "kind":"struct", "container":null, "access_level":null, "signature":"struct Task", "start_row":0, "start_col":0, "end_row":4, "end_col":1},
+  {"name":"id", "kind":"field", "container":"Task", "access_level":null, "signature":"id: string", "start_row":1, "start_col":2, "end_row":1, "end_col":12},
+  {"name":"title", "kind":"field", "container":"Task", "access_level":null, "signature":"title: string", "start_row":2, "start_col":2, "end_row":2, "end_col":15},
+  {"name":"status", "kind":"field", "container":"Task", "access_level":null, "signature":"status: Status", "start_row":3, "start_col":2, "end_row":3, "end_col":16},
+  {"name":"Status", "kind":"enum", "container":null, "access_level":null, "signature":"enum Status", "start_row":6, "start_col":0, "end_row":9, "end_col":1},
+  {"name":"Pending", "kind":"enum_case", "container":"Status", "access_level":null, "signature":"case Pending", "start_row":7, "start_col":2, "end_row":7, "end_col":9},
+  {"name":"Done", "kind":"enum_case", "container":"Status", "access_level":null, "signature":"case Done", "start_row":8, "start_col":2, "end_row":8, "end_col":6},
+  {"name":"Runner", "kind":"interface", "container":null, "access_level":null, "signature":"interface Runner", "start_row":11, "start_col":0, "end_row":13, "end_col":1},
+  {"name":"run", "kind":"method", "container":"Runner", "access_level":null, "signature":"fn run(task: Task)", "start_row":12, "start_col":2, "end_row":12, "end_col":28},
+  {"name":"_execute", "kind":"function", "container":null, "access_level":null, "signature":"fn _execute(runner: Runner, task: Task)", "start_row":15, "start_col":0, "end_row":17, "end_col":1},
+  {"name":"Task", "kind":"module", "container":null, "access_level":null, "signature":"impl Task", "start_row":19, "start_col":0, "end_row":23, "end_col":1},
+  {"name":"summary", "kind":"method", "container":"Task", "access_level":null, "signature":"fn summary(title: string)", "start_row":20, "start_col":2, "end_row":22, "end_col":3},
+  {"name":"normalize", "kind":"function", "container":null, "access_level":null, "signature":"fn normalize(task)", "start_row":25, "start_col":0, "end_row":27, "end_col":1},
+  {"name":"review", "kind":"function", "container":null, "access_level":null, "signature":"pipeline review(task)", "start_row":29, "start_col":0, "end_row":32, "end_col":1},
+  {"name":"_notify", "kind":"function", "container":null, "access_level":null, "signature":"tool _notify(message)", "start_row":34, "start_col":0, "end_row":37, "end_col":1}
 ]

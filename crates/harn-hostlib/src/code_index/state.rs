@@ -360,6 +360,7 @@ fn indexed_symbol_from_ast(sym: &AstSymbol) -> IndexedSymbol {
     IndexedSymbol {
         name: sym.name.clone(),
         kind: sym.kind.as_str().to_string(),
+        access_level: sym.access_level.clone(),
         start_line: sym.start_row.saturating_add(1),
         end_line: sym.end_row.saturating_add(1),
         signature: sym.signature.clone(),

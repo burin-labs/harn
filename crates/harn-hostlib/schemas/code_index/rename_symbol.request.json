@@ -7,7 +7,7 @@
   "properties": {
     "symbol_ref": {
       "type": "object",
-      "description": "Pointer at the symbol to rename. `name` and `path` are required; `line` (1-based) disambiguates when several symbols in the file share a name; `kind` (Function|Type|Module) narrows by node kind.",
+      "description": "Pointer at the symbol to rename. `name` and `path` are required; `line` (1-based) disambiguates when several symbols in the file share a name; `kind` (Function|Type|Field|EnumCase|Module) narrows by node kind.",
       "properties": {
         "name": { "type": "string", "minLength": 1 },
         "path": { "type": "string", "minLength": 1 },

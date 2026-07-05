@@ -21,6 +21,8 @@ pub enum SymbolKind {
     Class,
     Struct,
     Enum,
+    EnumCase,
+    Field,
     Interface,
     Protocol,
     Type,
@@ -38,6 +40,8 @@ impl SymbolKind {
             SymbolKind::Class => "class",
             SymbolKind::Struct => "struct",
             SymbolKind::Enum => "enum",
+            SymbolKind::EnumCase => "enum_case",
+            SymbolKind::Field => "field",
             SymbolKind::Interface => "interface",
             SymbolKind::Protocol => "protocol",
             SymbolKind::Type => "type",
@@ -70,6 +74,7 @@ pub struct Symbol {
     pub name: String,
     pub kind: SymbolKind,
     pub container: Option<String>,
+    pub access_level: Option<String>,
     pub signature: String,
     pub start_row: u32,
     pub start_col: u32,
@@ -97,6 +102,13 @@ impl Symbol {
             },
         );
         dict.insert(
+            "access_level".into(),
+            match &self.access_level {
+                Some(s) => VmValue::String(arcstr::ArcStr::from(s.as_str())),
+                None => VmValue::Nil,
+            },
+        );
+        dict.insert(
             "signature".into(),
             VmValue::String(arcstr::ArcStr::from(self.signature.as_str())),
         );
@@ -114,6 +126,7 @@ impl Symbol {
 pub struct OutlineItem {
     pub name: String,
     pub kind: SymbolKind,
+    pub access_level: Option<String>,
     pub signature: String,
     pub start_row: u32,
     pub end_row: u32,
@@ -130,6 +143,13 @@ impl OutlineItem {
         dict.insert(
             "kind".into(),
             VmValue::String(arcstr::ArcStr::from(self.kind.as_str())),
+        );
+        dict.insert(
+            "access_level".into(),
+            match &self.access_level {
+                Some(s) => VmValue::String(arcstr::ArcStr::from(s.as_str())),
+                None => VmValue::Nil,
+            },
         );
         dict.insert(
             "signature".into(),

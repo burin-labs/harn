@@ -1,18 +1,24 @@
 [
-  {"name":"Fixture", "kind":"module", "signature":"namespace Fixture", "start_row":0, "end_row":23, "children":
+  {"name":"Fixture", "kind":"module", "access_level":null, "signature":"namespace Fixture", "start_row":0, "end_row":23, "children":
     [
-      {"name":"Greeter", "kind":"class", "signature":"class Greeter", "start_row":2, "end_row":10, "children":
+      {"name":"Greeter", "kind":"class", "access_level":null, "signature":"class Greeter", "start_row":2, "end_row":10, "children":
         [
-          {"name":"Name", "kind":"variable", "signature":"string Name", "start_row":4, "end_row":4, "children":[]},
-          {"name":"Greet", "kind":"method", "signature":"string Greet()", "start_row":6, "end_row":9, "children":[]}
+          {"name":"Name", "kind":"field", "access_level":"public", "signature":"string Name", "start_row":4, "end_row":4, "children":[]},
+          {"name":"Greet", "kind":"method", "access_level":null, "signature":"string Greet()", "start_row":6, "end_row":9, "children":[]}
         ]
       },
-      {"name":"ISpeaker", "kind":"interface", "signature":"interface ISpeaker", "start_row":12, "end_row":15, "children":
+      {"name":"ISpeaker", "kind":"interface", "access_level":null, "signature":"interface ISpeaker", "start_row":12, "end_row":15, "children":
         [
-          {"name":"Speak", "kind":"method", "signature":"string Speak()", "start_row":14, "end_row":14, "children":[]}
+          {"name":"Speak", "kind":"method", "access_level":null, "signature":"string Speak()", "start_row":14, "end_row":14, "children":[]}
         ]
       },
-      {"name":"Color", "kind":"enum", "signature":"enum Color", "start_row":17, "end_row":22, "children":[]}
+      {"name":"Color", "kind":"enum", "access_level":null, "signature":"enum Color", "start_row":17, "end_row":22, "children":
+        [
+          {"name":"Red", "kind":"enum_case", "access_level":null, "signature":"case Red", "start_row":19, "end_row":19, "children":[]},
+          {"name":"Green", "kind":"enum_case", "access_level":null, "signature":"case Green", "start_row":20, "end_row":20, "children":[]},
+          {"name":"Blue", "kind":"enum_case", "access_level":null, "signature":"case Blue", "start_row":21, "end_row":21, "children":[]}
+        ]
+      }
     ]
   }
 ]

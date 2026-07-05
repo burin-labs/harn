@@ -15,3 +15,9 @@ function shout(message: string): string {
 const yell = (message: string) => shout(message);
 
 type Maybe<T> = T | null;
+
+enum Color {
+    Red,
+    Green,
+    Blue,
+}

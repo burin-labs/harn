@@ -1078,6 +1078,7 @@ fn property_value(node: &super::symbol_graph::Node, key: &str) -> Literal {
         "language" => Literal::Str(node.language.clone()),
         "kind" => Literal::Str(node.kind.as_str().to_string()),
         "container" => Literal::Str(node.container.clone().unwrap_or_default()),
+        "access_level" => Literal::Str(node.access_level.clone().unwrap_or_default()),
         "signature" => Literal::Str(node.signature.clone()),
         "line" => Literal::Int(node.line as i64),
         "file_id" => Literal::Int(node.file_id as i64),
