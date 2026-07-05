@@ -1,0 +1,390 @@
+// Lanes: tool-surface narrowing keyed off a data-driven classification of
+// the task, generalizing burin-code's `agent_lane_for_task`
+// (`lib/runtime/agent-loop.harn`). Burin classifies a task ONCE, before the
+// run starts, into a named lane (`"general"` vs a narrow `"explicit_patch"`
+// lane keyed off detected target-file mentions) and hands that lane's tool
+// allowlist to the whole agent_loop call — deliberately NOT reclassifying
+// mid-transcript, because narrowing tool NAMES turn-to-turn risks the model
+// hallucinating a call to a tool it remembers offering but that has since
+// been hidden (burin's own design rationale). `lane_policy` ports that
+// same one-shot-per-task shape.
+//
+// Enforcement reuses the EXISTING tool-surface-narrowing primitives shared
+// with `std/agent/stance` (`__tool_surface_filter_registry` /
+// `__tool_surface_policy_tools`) — no new Rust, no new hook surface. That
+// shared seam is also why a tool a lane hides is never NAMED to the model:
+// narrowing via `policy.tools` means a denied call is rejected by harn-vm's
+// native tool-ceiling check, which reports only the ONE tool name the model
+// just attempted — it never enumerates what else is unavailable.
+//
+// `lane_scope_classifier` additionally lowers lane rows onto the EXISTING
+// `pre_turn_scope_classifier` seam (`std/llm/scope_classifier`, consulted by
+// `agent_loop` every turn) — but purely for per-turn observability/telemetry
+// over a long-running lane-scoped session. It always reports `in_scope` and
+// `skip_main_turn: false`, so it never affects loop control; the tool
+// surface is narrowed exclusively by `lane_policy`. Keeping the two apart
+// avoids a dead mechanism: a `pre_turn_scope_classifier` verdict has no live
+// wiring in `agent_loop` beyond the scope-alert skip check, so a lane
+// classifier that ONLY lived there would never actually narrow anything.
+// The classified lane rides the verdict's `evidence` string, not a custom
+// field: the native `scope_classifier_verdict` event has a fixed shape and
+// silently drops keys it does not recognize.
+import { __tool_surface_filter_registry, __tool_surface_policy_tools } from "std/agent/postturn"
+import { agent_tool_annotations } from "std/agent/tool_annotations"
+
+/**
+ * A single lane row. `tool_names` and `tool_kinds` are unioned to compute
+ * the lane's allowed tool set (`tool_kinds` resolved against the registry's
+ * `annotations.kind`/`annotations.tool_kind`, the same fail-safe annotation
+ * lookup `std/agent/stance` uses). `match` declares which classification
+ * strategies apply — `keywords` (case-insensitive substring OR-match against
+ * the task) and/or `explicit_target_paths` (`{min?, max?}` bounds on the
+ * count of detected file-path-like tokens in the task, mirroring burin's
+ * target-count ladder). Exactly one row must set `default: true`; it is the
+ * fallback used when no other row matches (and it never itself needs a
+ * `match`).
+ */
+pub type LaneRow = {
+  name: string,
+  tool_names?: list<string>,
+  tool_kinds?: list<string>,
+  match?: dict,
+  default?: bool,
+}
+
+/**
+ * default_lane_rows() — the built-in two-lane table ported from burin's
+ * `agent_lane_for_task`: `explicit_patch` (narrow: look/search/edit/run/
+ * poll_command/wait_command/kill_command/read_command_output) when the task
+ * names 1-4 explicit file targets, `general` (unrestricted) otherwise.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn default_lane_rows() {
+  return [
+    {
+      match: {explicit_target_paths: {max: 4, min: 1}},
+      name: "explicit_patch",
+      tool_names: [
+        "look",
+        "search",
+        "edit",
+        "run",
+        "poll_command",
+        "wait_command",
+        "kill_command",
+        "read_command_output",
+      ],
+    },
+    {default: true, name: "general"},
+  ]
+}
+
+fn __lane_row_name(row) {
+  return to_string(row?.name ?? "")
+}
+
+fn __lane_validate_rows(rows) {
+  if type_of(rows) != "list" || len(rows) == 0 {
+    throw "lane_policy: rows must be a non-empty list of lane rows"
+  }
+  var seen_default = false
+  var names = []
+  for row in rows {
+    if type_of(row) != "dict" {
+      throw "lane_policy: each lane row must be a dict"
+    }
+    let name = __lane_row_name(row)
+    if name == "" {
+      throw "lane_policy: each lane row needs a non-empty `name`"
+    }
+    if contains(names, name) {
+      throw "lane_policy: duplicate lane row name \"" + name + "\""
+    }
+    names = names.push(name)
+    if row?.default ?? false {
+      seen_default = true
+    }
+  }
+  if !seen_default {
+    throw "lane_policy: exactly one lane row must set `default: true` (the fallback lane)"
+  }
+  return rows
+}
+
+/**
+ * agent_lane_explicit_target_paths(task) — detect file-path-like tokens in
+ * `task` (a word containing a dot-extension, optionally with slashes), the
+ * same signal burin's `explicit_lane_targets_for_task_with_options` uses to
+ * decide whether a task is a bounded, single-area patch. Exposed for tests
+ * and custom classifiers.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_lane_explicit_target_paths(task) {
+  let found = regex_match("[\\w][\\w./-]*\\.[A-Za-z]{1,5}\\b", to_string(task ?? ""))
+  if type_of(found) != "list" {
+    return []
+  }
+  var out = []
+  for token in found {
+    if !contains(out, token) {
+      out = out.push(token)
+    }
+  }
+  return out
+}
+
+fn __lane_row_matches(row, task, task_lower) {
+  let match_spec = row?.match
+  if type_of(match_spec) != "dict" {
+    return false
+  }
+  let keywords = match_spec?.keywords
+  if type_of(keywords) == "list" && len(keywords) > 0 {
+    for kw in keywords {
+      if contains(task_lower, lowercase(to_string(kw))) {
+        return true
+      }
+    }
+  }
+  let target_rule = match_spec?.explicit_target_paths
+  if type_of(target_rule) == "dict" {
+    let count = len(agent_lane_explicit_target_paths(task))
+    let min_count = target_rule?.min ?? 1
+    let max_count = target_rule?.max ?? 999999999
+    if count >= min_count && count <= max_count {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * agent_lane_match(rows, task) — pure heuristic classification: walks
+ * `rows` IN ORDER and returns the first non-default row whose `match`
+ * strategy accepts `task`; falls back to the row marked `default: true`
+ * when nothing matches. Lanes are DATA rows, not `if` branches — add a
+ * lane by appending a row.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_lane_match(rows, task) {
+  let task_lower = lowercase(to_string(task ?? ""))
+  var fallback = nil
+  for row in rows {
+    if row?.default ?? false {
+      fallback = row
+      continue
+    }
+    if __lane_row_matches(row, task, task_lower) {
+      return row
+    }
+  }
+  return fallback ?? rows[0]
+}
+
+fn __lane_normalize_verdict(row, reason) {
+  return {lane: __lane_row_name(row), matched: true, reason: reason}
+}
+
+/**
+ * agent_lane_classify(rows, task, options?) — classify `task` into a lane.
+ * `options.classifier` may override the heuristic with a custom callable
+ * `(task, rows) -> lane_name_string | nil`; an unrecognized or `nil` result
+ * falls back to `agent_lane_match`. Returns `{lane, matched, reason}`.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_lane_classify(rows, task, options = nil) {
+  let opts = options ?? {}
+  let classifier = opts?.classifier
+  if classifier != nil {
+    let picked = try {
+      classifier(task, rows)
+    } catch (e) {
+      nil
+    }
+    if picked != nil {
+      for row in rows {
+        if __lane_row_name(row) == to_string(picked) {
+          return __lane_normalize_verdict(row, "custom_classifier")
+        }
+      }
+    }
+  }
+  let row = agent_lane_match(rows, task)
+  return __lane_normalize_verdict(
+    row,
+    if row?.default ?? false {
+      "default_lane"
+    } else {
+      "matched_row"
+    },
+  )
+}
+
+fn __lane_registry_entries(registry) {
+  if registry == nil {
+    return []
+  }
+  if type_of(registry) == "dict" {
+    return registry?.tools ?? []
+  }
+  if type_of(registry) == "list" {
+    return registry
+  }
+  return []
+}
+
+fn __lane_entry_name(entry) {
+  return to_string(entry?.name ?? entry?.function?.name ?? "")
+}
+
+fn __lane_entry_kind(entry, policy) {
+  let annotations = agent_tool_annotations(entry, policy, __lane_entry_name(entry))
+  return to_string(annotations?.kind ?? annotations?.tool_kind ?? "")
+}
+
+fn __lane_push_unique(names, value) {
+  let n = to_string(value)
+  if n != "" && !contains(names, n) {
+    return names.push(n)
+  }
+  return names
+}
+
+/**
+ * The lane's OWN allowed tool set: the union of its explicit `tool_names` and
+ * the registry entries matching its `tool_kinds`. Deliberately does NOT fold
+ * in `hard_keep` — an empty result here means the lane performs no narrowing
+ * (the `general`/default case), and `hard_keep` must not turn that
+ * non-narrowing lane into a restricted one. `lane_policy` unions `hard_keep`
+ * only after confirming the lane actually narrows.
+ */
+fn __lane_own_tool_names(row, registry, policy) {
+  var names = []
+  let explicit = row?.tool_names
+  if type_of(explicit) == "list" {
+    for raw in explicit {
+      names = __lane_push_unique(names, raw)
+    }
+  }
+  let kinds = row?.tool_kinds
+  if type_of(kinds) == "list" && len(kinds) > 0 {
+    for entry in __lane_registry_entries(registry) {
+      let kind = __lane_entry_kind(entry, policy)
+      if kind != "" && contains(kinds, kind) {
+        names = __lane_push_unique(names, __lane_entry_name(entry))
+      }
+    }
+  }
+  return names
+}
+
+/**
+ * lane_policy(rows, task, agent_options?, options?) — classify `task` into a
+ * lane from `rows` (DATA, see `LaneRow`), then narrow
+ * `agent_options.tools`/`agent_options.policy` down to that lane's allowed
+ * tool set for the WHOLE `agent_loop` run — a one-shot decision, matching
+ * burin's `agent_lane_for_task` (see module docs for why lanes are not
+ * reclassified per turn).
+ *
+ * A row with neither `tool_names` nor `tool_kinds` performs no narrowing —
+ * this is how the built-in `general` lane stays unrestricted, and it stays
+ * unrestricted even when `options.hard_keep` is set. `options.hard_keep`
+ * names tools that additionally survive a lane that IS narrowing (a union
+ * with the matched lane's own tools); it never itself causes narrowing, so a
+ * non-narrowing lane is not turned into a restricted one. `options.classifier`
+ * is forwarded to `agent_lane_classify`.
+ *
+ * The result carries `_lane_verdict` (`{lane, matched, reason, tool_names?}`)
+ * for tests/telemetry; it is metadata only, harmless to leave on `agent_loop`
+ * options.
+ *
+ * @effects: []
+ * @errors: [runtime]
+ * @api_stability: experimental
+ * @example: agent_loop(task, nil, lane_policy(default_lane_rows(), task, {provider: "anthropic", tools: my_tools}))
+ */
+pub fn lane_policy(rows, task, agent_options = nil, options = nil) {
+  let validated = __lane_validate_rows(rows)
+  let opts = if type_of(agent_options) == "dict" {
+    agent_options
+  } else {
+    {}
+  }
+  let extra = options ?? {}
+  let hard_keep = extra?.hard_keep ?? []
+  let verdict = agent_lane_classify(validated, task, extra)
+  var matched_row = nil
+  for row in validated {
+    if __lane_row_name(row) == verdict.lane {
+      matched_row = row
+    }
+  }
+  let resolved_row = matched_row ?? validated[0]
+  let lane_names = __lane_own_tool_names(resolved_row, opts?.tools, opts?.policy)
+  // A lane that contributes no tools of its own performs NO narrowing (the
+  // `general`/default case) — leave the surface untouched. hard_keep only
+  // augments a lane that IS narrowing; with nothing narrowed there is nothing
+  // to keep relative to, so it must not restrict an otherwise-open surface.
+  if len(lane_names) == 0 {
+    return opts + {_lane_verdict: verdict}
+  }
+  var names = lane_names
+  for raw in hard_keep {
+    names = __lane_push_unique(names, raw)
+  }
+  return opts
+    + {
+    _lane_verdict: verdict + {tool_names: names},
+    policy: __tool_surface_policy_tools(opts?.policy, names),
+    tools: __tool_surface_filter_registry(opts?.tools, names),
+  }
+}
+
+/**
+ * lane_scope_classifier(rows, options?) — build a `pre_turn_scope_classifier`
+ * config (see `std/llm/scope_classifier`) that reclassifies the current
+ * message into a lane EVERY turn purely for observability: it emits the
+ * standard `scope_classifier_verdict` event on every turn, and always
+ * returns `label: "in_scope"`/`skip_main_turn: false` — it never skips a
+ * turn and never narrows the tool surface (that is `lane_policy`'s job).
+ * The classified lane surfaces in the verdict's free-text `evidence` field
+ * (`"lane=<name> reason=<reason>"`) rather than a dedicated `lane` key: the
+ * native `scope_classifier_verdict` event has a fixed Rust-side shape and
+ * silently drops unrecognized keys, so `evidence` (already part of that
+ * shape) is the only channel a custom classifier can use to carry extra
+ * information through live. Spread the result into `agent_loop` options
+ * alongside `lane_policy` when a caller wants a live per-turn audit trail
+ * of lane drift over a long-running lane-scoped session.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_loop(task, nil, lane_policy(rows, task, opts) + lane_scope_classifier(rows))
+ */
+pub fn lane_scope_classifier(rows, options = nil) {
+  let validated = __lane_validate_rows(rows)
+  let extra = options ?? {}
+  let classifier = { payload ->
+    let observed_task = to_string(payload?.user_message ?? payload?.task ?? "")
+    let verdict = agent_lane_classify(validated, observed_task, extra)
+    return {
+      confidence: 1.0,
+      evidence: "lane=" + verdict.lane + " reason=" + verdict.reason,
+      label: "in_scope",
+      skip_main_turn: false,
+    }
+  }
+  return {pre_turn_scope_classifier: classifier}
+}

@@ -1,0 +1,115 @@
+// Run: harn test tests/agent/overlays_test.harn
+//
+// Parity fixtures for `std/agent/overlays` against burin-code's
+// `mode_overlay_lines` shape (`lib/runtime/agent-loop.harn`): a per-mode base
+// row, a narrower per-(mode, lane) row that takes priority when the lane
+// matches, and an explicit `overrides` entry that always wins over both. Pure
+// (no LLM, no host). The live, registered, fragment-reaches-the-outbound-
+// request behavior is proven separately by
+// `conformance/tests/agents/overlay_policy_registration.harn`.
+import {
+  agent_overlay_match,
+  default_overlay_rows,
+  overlay_context_fragment,
+  overlay_policy,
+} from "std/agent/overlays"
+import { agent_preset } from "std/agent/presets"
+
+pipeline test_mode_only_row_matches_without_a_lane(task) {
+  let row = agent_overlay_match(default_overlay_rows(), "agent")
+  assert_eq(row.lane, nil)
+  assert(contains(row.lines[0], "Batch related read-only"), "matched the base agent-mode row")
+}
+
+pipeline test_lane_specific_row_wins_over_mode_only_row(task) {
+  let row = agent_overlay_match(default_overlay_rows(), "agent", "explicit_patch")
+  assert_eq(row.lane, "explicit_patch")
+  assert(contains(row.lines[0], "narrow patch lane"), "matched the lane-specific row")
+}
+
+pipeline test_no_match_returns_nil(task) {
+  let row = agent_overlay_match(default_overlay_rows(), "architect")
+  assert_eq(row, nil)
+}
+
+pipeline test_disabled_row_is_skipped(task) {
+  let rows = [{enabled: false, lines: ["should never render"], mode: "agent"}]
+  assert_eq(agent_overlay_match(rows, "agent"), nil)
+}
+
+pipeline test_fragment_body_joins_lines(task) {
+  let fragment = overlay_context_fragment(default_overlay_rows(), "plan")
+  assert(contains(fragment.body, "concrete, reviewable plan"), "plan-mode fragment renders")
+  assert_eq(fragment.id, "overlay:plan")
+}
+
+pipeline test_no_match_yields_no_fragment(task) {
+  assert_eq(overlay_context_fragment(default_overlay_rows(), "architect"), nil)
+}
+
+pipeline test_override_wins_over_row_default(task) {
+  let fragment = overlay_context_fragment(
+    default_overlay_rows(),
+    "agent",
+    nil,
+    {agent: ["Use the custom nudge instead."]},
+  )
+  assert_eq(fragment.body, "Use the custom nudge instead.")
+}
+
+pipeline test_lane_specific_override_key_wins_over_lane_row(task) {
+  let fragment = overlay_context_fragment(
+    default_overlay_rows(),
+    "agent",
+    "explicit_patch",
+    {"agent:explicit_patch": ["Custom patch-lane nudge."]},
+  )
+  assert_eq(fragment.body, "Custom patch-lane nudge.")
+}
+
+pipeline test_overlay_policy_preserves_existing_fragments(task) {
+  let base_opts = {context_profile: {prompt_fragments: [{body: "caller fragment", id: "caller"}]}}
+  let result = overlay_policy(default_overlay_rows(), "agent", base_opts)
+  let ids = []
+  var out = ids
+  for fragment in result.context_profile.prompt_fragments {
+    out = out.push(fragment.id)
+  }
+  assert(contains(out, "caller"), "caller's existing fragment survives")
+  assert(contains(out, "overlay:agent"), "overlay fragment was appended")
+}
+
+pipeline test_overlay_policy_never_touches_system(task) {
+  let base_opts = {system: "explicit system prompt"}
+  let result = overlay_policy(default_overlay_rows(), "agent", base_opts)
+  assert_eq(result.system, "explicit system prompt")
+}
+
+pipeline test_overlay_policy_is_a_noop_without_a_match(task) {
+  let base_opts = {provider: "anthropic"}
+  let result = overlay_policy(default_overlay_rows(), "architect", base_opts)
+  assert_eq(result?.context_profile, nil)
+}
+
+pipeline test_rows_require_lines(task) {
+  let outcome = try {
+    overlay_policy([{mode: "agent"}], "agent", {})
+  }
+  assert(is_err(outcome), "overlay_policy throws when a row is missing `lines`")
+}
+
+pipeline test_review_captain_preset_carries_overlay_policy_pack(task) {
+  let opts = agent_preset("review_captain", {})
+  let pack = opts?.overlay_policy
+  assert(pack != nil, "review_captain preset ships an overlay_policy pack row")
+  let fragment = overlay_context_fragment(pack.rows, pack.mode)
+  assert(contains(fragment.body, "Batch related read-only"), "pack row renders the agent-mode nudge")
+}
+
+pipeline test_explicit_preset_overlay_policy_wins_over_pack_default(task) {
+  // Fill-nil precedence: an explicit caller `overlay_policy` value is never
+  // overwritten by the preset's pack default.
+  let custom = {mode: "plan", rows: [{lines: ["custom"], mode: "plan"}]}
+  let opts = agent_preset("review_captain", {overlay_policy: custom})
+  assert_eq(opts.overlay_policy, custom)
+}

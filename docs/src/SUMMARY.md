@@ -138,6 +138,7 @@
 - [Prompt library stdlib](./stdlib/prompt-library.md)
 - [Identity stdlib](./stdlib/identity.md)
 - [Disclosure stdlib](./stdlib/disclosure.md)
+- [Lanes and prompt overlays](./stdlib/agent-lanes-overlays.md)
 - [Human in the loop](./hitl.md)
 - [Trust graph](./trust-graph.md)
   - [Autonomy tiers](./autonomy.md)

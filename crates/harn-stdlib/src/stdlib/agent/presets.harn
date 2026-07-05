@@ -41,7 +41,22 @@ import {
 // `completion_gate` carries a `CompletionGateOptions` spec so a preset can ship a
 // default done-time gate; a consumer lowers it with `agent_completion_gate(...)`
 // (std/agent/judge) and spreads the result into `agent_loop` options.
-let __PRESET_PACK_KEYS = ["budget", "completion_gate", "fallback_chain", "model_ladder", "provider", "timeout_ms"]
+// `lane_policy` carries `{rows, task_key?, hard_keep?}` — a consumer reads the
+// task text out of its own opts (e.g. `opts.task_key`) and lowers it with
+// `lane_policy(pack.lane_policy.rows, task, opts, pack.lane_policy)`
+// (std/agent/lanes). `overlay_policy` carries `{rows, mode, lane?, overrides?}` —
+// lowered with `overlay_policy(pack.overlay_policy.rows, pack.overlay_policy.mode,
+// opts, pack.overlay_policy)` (std/agent/overlays).
+let __PRESET_PACK_KEYS = [
+  "budget",
+  "completion_gate",
+  "fallback_chain",
+  "lane_policy",
+  "model_ladder",
+  "overlay_policy",
+  "provider",
+  "timeout_ms",
+]
 
 fn __preset_kind_string(value) {
   if value == nil {
@@ -139,6 +154,30 @@ fn __builtin_preset_specs() {
       family: "generic",
       pack: {
         budget: {total_budget_usd: 10.0},
+        // Mirrors `std/agent/lanes::default_lane_rows()` inline (presets.harn
+        // intentionally does not import std/agent/lanes — see the pack-key
+        // comment above `__PRESET_PACK_KEYS`); a consumer may just as well
+        // pass `default_lane_rows()` directly instead of this row.
+        lane_policy: {
+          hard_keep: [],
+          rows: [
+            {
+              match: {explicit_target_paths: {max: 4, min: 1}},
+              name: "explicit_patch",
+              tool_names: [
+                "look",
+                "search",
+                "edit",
+                "run",
+                "poll_command",
+                "wait_command",
+                "kill_command",
+                "read_command_output",
+              ],
+            },
+            {default: true, name: "general"},
+          ],
+        },
         model_ladder: frontier_ladder,
         provider: "anthropic",
         timeout_ms: 180000,
@@ -149,6 +188,21 @@ fn __builtin_preset_specs() {
       pack: {
         budget: {total_budget_usd: 15.0},
         model_ladder: frontier_ladder,
+        // Mirrors `std/agent/overlays::default_overlay_rows()`'s `agent` row
+        // inline (see the lane_policy comment above on why presets.harn
+        // avoids importing the sibling module).
+        overlay_policy: {
+          mode: "agent",
+          rows: [
+            {
+              lines: [
+                "Batch related read-only tool calls together before acting; avoid narrating between them.",
+                "Prefer acting on information the task and current tools already provide over asking a clarifying question.",
+              ],
+              mode: "agent",
+            },
+          ],
+        },
         provider: "anthropic",
         timeout_ms: 240000,
       },
@@ -189,7 +243,7 @@ fn __preset_registry() {
  * behavior template (captains additionally compose the opt-in tool/LLM
  * middleware layers), and `pack` supplies fill-nil option defaults
  * (`provider`, `timeout_ms`, `budget`, `fallback_chain`, `model_ladder`,
- * `completion_gate`) that
+ * `completion_gate`, `lane_policy`, `overlay_policy`) that
  * fill ONLY nil/absent keys. The spec shape is validated; an invalid family
  * or unknown pack key throws. Returns the normalized kind string.
  *
@@ -698,7 +752,8 @@ fn __apply_default_retry(opts) {
  * The returned dict is a plain `agent_loop` options dict. Callers can
  * spread it into `agent_loop(...)` directly, or merge further overrides
  * on top. Every kind additionally fills its pack rows (provider, transport
- * timeout, cost budget, model ladder, completion_gate) into nil/absent keys, and bakes a
+ * timeout, cost budget, model ladder, completion_gate, lane_policy,
+ * overlay_policy) into nil/absent keys, and bakes a
  * bounded default transport retry onto the `llm_caller:` seam (opt out with
  * `retry: false`). Captain presets additionally compose:
  *   - a `tool_caller` middleware stack from any of `audit_sink`,
