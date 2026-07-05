@@ -19,6 +19,8 @@
  *   HARN_MODELS_BATCH_OUT_DIR                   - prepare-mode artifact directory.
  *   HARN_MODELS_BATCH_RECEIPT                   - submit-mode prepare receipt path.
  *   HARN_MODELS_BATCH_SUBMIT_OUT                - submit-mode submission receipt path.
+ *   HARN_MODELS_BATCH_SUBMISSION                - status-mode submission receipt path.
+ *   HARN_MODELS_BATCH_STATUS_OUT                - status-mode status receipt path.
  *   HARN_MODELS_BATCH_DRY_RUN                   - "1" to validate without provider calls.
  *   HARN_MODELS_BATCH_TOOL_FORMAT               - manifest-mode default tool format.
  *   HARN_MODELS_BATCH_ID_PREFIX                 - manifest-mode generated id prefix.
@@ -483,6 +485,38 @@ fn __read_prepare_receipt(harness: Harness, receipt_path: string) -> dict {
   }
   if len(safe_list(receipt["jobs"])) == 0 {
     errors = errors.push("batch prepare receipt contains no jobs")
+  }
+  return {receipt: receipt, source_sha256: sha256(source), errors: errors}
+}
+
+fn __read_submission_receipt(harness: Harness, receipt_path: string) -> dict {
+  var errors = []
+  if receipt_path == "" {
+    return {receipt: {}, source_sha256: "", errors: ["--submission is required"]}
+  }
+  if !harness.fs.exists(receipt_path) {
+    return {receipt: {}, source_sha256: "", errors: ["batch submission receipt not found: " + receipt_path]}
+  }
+  let source = harness.fs.read_text(receipt_path)
+  let parsed = try {
+    json_parse(source)
+  } catch (e) {
+    return {
+      receipt: {},
+      source_sha256: sha256(source),
+      errors: ["invalid batch submission receipt JSON: " + to_string(e)],
+    }
+  }
+  if type_of(parsed) != "dict" {
+    errors = errors.push("batch submission receipt must be a JSON object")
+    return {receipt: {}, source_sha256: sha256(source), errors: errors}
+  }
+  let receipt = safe_dict(parsed)
+  if safe_string(receipt["kind"], "") != "harn.model_batch_submission_receipt" {
+    errors = errors.push("unsupported batch submission receipt kind: " + safe_string(receipt["kind"], ""))
+  }
+  if len(safe_list(receipt["jobs"])) == 0 {
+    errors = errors.push("batch submission receipt contains no jobs")
   }
   return {receipt: receipt, source_sha256: sha256(source), errors: errors}
 }
@@ -1636,6 +1670,365 @@ fn __run_submit(harness: Harness) -> int {
   return 1
 }
 
+fn __provider_batch_status(raw_status) -> string {
+  let status = lowercase(trim(to_string(raw_status ?? "")))
+  if status == "" {
+    return "unknown"
+  }
+  if status == "ready" {
+    return "ready"
+  }
+  if status == "completed" || status == "succeeded" || status == "success" || status == "ended" {
+    return "completed"
+  }
+  if status == "failed"
+    || status == "error"
+    || status == "errored"
+    || status == "expired"
+    || status == "cancelled"
+    || status == "canceled" {
+    return "failed"
+  }
+  return "running"
+}
+
+fn __status_job_base(job: dict, dry_run: bool) -> dict {
+  return {
+    id: safe_string(job["id"], ""),
+    provider: safe_string(job["provider"], ""),
+    model: safe_string(job["model"], ""),
+    workload: safe_string(job["workload"], ""),
+    endpoint: safe_string(job["endpoint"], ""),
+    tool_format: safe_string(job["tool_format"], ""),
+    batch: safe_dict(job["batch"]),
+    request_count: __safe_int(job["request_count"]) ?? 0,
+    provider_batch_id: safe_string(job["provider_batch_id"], ""),
+    dry_run: dry_run,
+  }
+}
+
+fn __cached_status_job(job: dict, dry_run: bool) -> dict {
+  let provider_status = job["provider_status"] ?? job["status"] ?? nil
+  return __status_job_base(job, dry_run)
+    + {
+    status: __provider_batch_status(provider_status),
+    provider_status: provider_status,
+    status_checked: false,
+    output_file_id: job["output_file_id"] ?? nil,
+    error_file_id: job["error_file_id"] ?? nil,
+    output_file: job["output_file"] ?? nil,
+    error_file: job["error_file"] ?? nil,
+    results_url: job["results_url"] ?? nil,
+    response: job["response"] ?? nil,
+  }
+}
+
+fn __poll_openai_status(harness: Harness, job: dict) -> dict {
+  let auth = __api_key_for_job(harness, "openai")
+  let base_job = __status_job_base(job, false)
+  if !safe_bool(auth["ok"], false) {
+    return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
+  }
+  let batch_id = safe_string(job["provider_batch_id"], "")
+  let response = __http_result(
+    harness,
+    "GET",
+    __join_url(__provider_base_url(harness, "openai"), "/batches/" + batch_id),
+    {
+      headers: {Authorization: "Bearer " + safe_string(auth["value"], ""), "content-type": "application/json"},
+      timeout_ms: 120000,
+      max_response_bytes: 1048576,
+    },
+  )
+  let body = safe_dict(response["body"])
+  if !safe_bool(response["ok"], false) {
+    return {
+      ok: false,
+      job: base_job + {status: "failed", response_status: response["status"], response: body},
+      errors: ["openai batch status failed for job " + safe_string(job["id"], "")],
+    }
+  }
+  let provider_status = body["status"] ?? nil
+  return {
+    ok: true,
+    job: base_job
+      + {
+      status: __provider_batch_status(provider_status),
+      provider_status: provider_status,
+      status_checked: true,
+      output_file_id: body["output_file_id"] ?? nil,
+      error_file_id: body["error_file_id"] ?? nil,
+      response_status: response["status"],
+      response: body,
+    },
+    errors: [],
+  }
+}
+
+fn __poll_anthropic_status(harness: Harness, job: dict) -> dict {
+  let auth = __api_key_for_job(harness, "anthropic")
+  let base_job = __status_job_base(job, false)
+  if !safe_bool(auth["ok"], false) {
+    return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
+  }
+  let batch_id = safe_string(job["provider_batch_id"], "")
+  let response = __http_result(
+    harness,
+    "GET",
+    __join_url(__provider_base_url(harness, "anthropic"), "/v1/messages/batches/" + batch_id),
+    {
+      headers: {"x-api-key": safe_string(auth["value"], ""), "anthropic-version": "2023-06-01"},
+      timeout_ms: 120000,
+      max_response_bytes: 1048576,
+    },
+  )
+  let body = safe_dict(response["body"])
+  if !safe_bool(response["ok"], false) {
+    return {
+      ok: false,
+      job: base_job + {status: "failed", response_status: response["status"], response: body},
+      errors: ["anthropic batch status failed for job " + safe_string(job["id"], "")],
+    }
+  }
+  let provider_status = body["processing_status"] ?? nil
+  return {
+    ok: true,
+    job: base_job
+      + {
+      status: __provider_batch_status(provider_status),
+      provider_status: provider_status,
+      status_checked: true,
+      results_url: body["results_url"] ?? nil,
+      response_status: response["status"],
+      response: body,
+    },
+    errors: [],
+  }
+}
+
+fn __poll_mistral_status(harness: Harness, job: dict) -> dict {
+  let auth = __api_key_for_job(harness, "mistral")
+  let base_job = __status_job_base(job, false)
+  if !safe_bool(auth["ok"], false) {
+    return {ok: false, job: base_job + {status: "failed"}, errors: [safe_string(auth["error"], "")]}
+  }
+  let batch_id = safe_string(job["provider_batch_id"], "")
+  let response = __http_result(
+    harness,
+    "GET",
+    __join_url(__provider_base_url(harness, "mistral"), "/batch/jobs/" + batch_id),
+    {
+      headers: {Authorization: "Bearer " + safe_string(auth["value"], "")},
+      timeout_ms: 120000,
+      max_response_bytes: 1048576,
+    },
+  )
+  let body = safe_dict(response["body"])
+  if !safe_bool(response["ok"], false) {
+    return {
+      ok: false,
+      job: base_job + {status: "failed", response_status: response["status"], response: body},
+      errors: ["mistral batch status failed for job " + safe_string(job["id"], "")],
+    }
+  }
+  let provider_status = body["status"] ?? nil
+  return {
+    ok: true,
+    job: base_job
+      + {
+      status: __provider_batch_status(provider_status),
+      provider_status: provider_status,
+      status_checked: true,
+      output_file: body["output_file"] ?? nil,
+      error_file: body["error_file"] ?? nil,
+      response_status: response["status"],
+      response: body,
+    },
+    errors: [],
+  }
+}
+
+fn __status_one_job(harness: Harness, job: dict, dry_run: bool) -> dict {
+  if dry_run {
+    return {ok: true, job: __cached_status_job(job, true), errors: []}
+  }
+  let provider = safe_string(job["provider"], "")
+  let wire = safe_string(safe_dict(job["batch"])["wire_format"], "")
+  let provider_batch_id = safe_string(job["provider_batch_id"], "")
+  if provider_batch_id == "" {
+    return {
+      ok: false,
+      job: __cached_status_job(job, false) + {status: "failed"},
+      errors: [
+        "job "
+          + safe_string(job["id"], "")
+          + " has no provider_batch_id; submit live first or use --dry-run",
+      ],
+    }
+  }
+  if provider == "openai" && wire == "openai" {
+    return __poll_openai_status(harness, job)
+  }
+  if provider == "anthropic" && wire == "anthropic_messages" {
+    return __poll_anthropic_status(harness, job)
+  }
+  if provider == "mistral" && wire == "mistral" {
+    return __poll_mistral_status(harness, job)
+  }
+  return {
+    ok: false,
+    job: __cached_status_job(job, false) + {status: "failed"},
+    errors: [
+      "live batch status is not implemented for provider="
+        + provider
+        + " wire="
+        + wire
+        + "; use --dry-run or add a provider adapter",
+    ],
+  }
+}
+
+fn __aggregate_status(jobs: list, errors: list, dry_run: bool) -> string {
+  if len(errors) > 0 {
+    for job in jobs {
+      let status = safe_string(safe_dict(job)["status"], "")
+      if status == "completed" || status == "running" || status == "ready" || status == "unknown" {
+        return "partial"
+      }
+    }
+    return "failed"
+  }
+  if dry_run {
+    return "dry_run"
+  }
+  let failed = __count_jobs_with_status(jobs, "failed")
+  let running = __count_jobs_with_status(jobs, "running")
+  let ready = __count_jobs_with_status(jobs, "ready")
+  let unknown = __count_jobs_with_status(jobs, "unknown")
+  if failed > 0 {
+    return "partial"
+  }
+  if running > 0 || ready > 0 || unknown > 0 {
+    return "running"
+  }
+  return "completed"
+}
+
+fn __render_status_human(harness: Harness, report: dict) {
+  if !safe_bool(report["ok"], false) {
+    harness.stdio.eprintln("Batch status failed")
+  } else if safe_bool(report["dry_run"], false) {
+    harness.stdio.println("Batch status dry run written: " + safe_string(report["out"], ""))
+  } else {
+    harness.stdio.println("Batch status receipt written: " + safe_string(report["out"], ""))
+  }
+  harness.stdio.println("  jobs: " + safe_int_string(report["job_count"], "0"))
+  harness.stdio.println("  completed: " + safe_int_string(report["completed_count"], "0"))
+  harness.stdio.println("  running: " + safe_int_string(report["running_count"], "0"))
+  harness.stdio.println("  ready: " + safe_int_string(report["ready_count"], "0"))
+  harness.stdio.println("  failed: " + safe_int_string(report["failed_count"], "0"))
+  harness.stdio.println("  unknown: " + safe_int_string(report["unknown_count"], "0"))
+  if safe_string(report["receipt_sha256"], "") != "" {
+    harness.stdio.println("  receipt sha256: " + safe_string(report["receipt_sha256"], ""))
+  }
+  print_list(harness, "errors", safe_list(report["errors"]))
+  print_list(harness, "warnings", safe_list(report["warnings"]))
+}
+
+fn __render_status_json(report: dict) -> string {
+  if safe_bool(report["ok"], false) {
+    return json_stringify_pretty(cli_json_envelope({schema_version: 1, ok: true, data: report}))
+  }
+  return json_stringify_pretty(
+    cli_json_envelope(
+      {
+        schema_version: 1,
+        ok: false,
+        error: {code: "batch_status_failed", message: "Submitted batch jobs could not be polled.", details: report},
+        warnings: safe_list(report["warnings"]),
+      },
+    ),
+  )
+}
+
+fn __run_status(harness: Harness) -> int {
+  let submission_path = trim(harness.env.get_or("HARN_MODELS_BATCH_SUBMISSION", ""))
+  let out_path = trim(harness.env.get_or("HARN_MODELS_BATCH_STATUS_OUT", ""))
+  let dry_run = __truthy_env(harness.env.get_or("HARN_MODELS_BATCH_DRY_RUN", "0"))
+  let loaded = __read_submission_receipt(harness, submission_path)
+  var errors = safe_list(loaded["errors"])
+  var warnings = []
+  if out_path == "" {
+    errors = errors.push("--out is required")
+  }
+  let submission = safe_dict(loaded["receipt"])
+  var jobs = []
+  if len(errors) == 0 {
+    for raw_job in safe_list(submission["jobs"]) {
+      let checked = __status_one_job(harness, safe_dict(raw_job), dry_run)
+      jobs = jobs.push(safe_dict(checked["job"]))
+      errors = errors + safe_list(checked["errors"])
+    }
+  }
+  let status = __aggregate_status(jobs, errors, dry_run)
+  var receipt = {
+    schemaVersion: 1,
+    kind: "harn.model_batch_status_receipt",
+    producer: "harn models batch status",
+    dryRun: dry_run,
+    source: {
+      path: submission_path,
+      sha256: safe_string(loaded["source_sha256"], ""),
+      submission_status: safe_string(submission["status"], ""),
+      prepare_source: safe_dict(safe_dict(submission["source"])["manifest"]),
+    },
+    out: out_path,
+    jobCount: len(jobs),
+    completedCount: __count_jobs_with_status(jobs, "completed"),
+    runningCount: __count_jobs_with_status(jobs, "running"),
+    readyCount: __count_jobs_with_status(jobs, "ready"),
+    failedCount: __count_jobs_with_status(jobs, "failed"),
+    unknownCount: __count_jobs_with_status(jobs, "unknown"),
+    jobs: jobs,
+    status: status,
+    warnings: warnings,
+    errors: errors,
+  }
+  var report = {
+    schema_version: 1,
+    ok: len(errors) == 0,
+    dry_run: dry_run,
+    out: out_path,
+    source: receipt["source"],
+    status: status,
+    job_count: len(jobs),
+    completed_count: __count_jobs_with_status(jobs, "completed"),
+    running_count: __count_jobs_with_status(jobs, "running"),
+    ready_count: __count_jobs_with_status(jobs, "ready"),
+    failed_count: __count_jobs_with_status(jobs, "failed"),
+    unknown_count: __count_jobs_with_status(jobs, "unknown"),
+    jobs: jobs,
+    errors: errors,
+    warnings: warnings,
+  }
+  if out_path != "" {
+    __mkdirp(harness, dirname(out_path) ?? ".")
+    let receipt_text = json_stringify_pretty(receipt) + "\n"
+    harness.fs.write_text(out_path, receipt_text)
+    receipt = receipt + {receipt_sha256: sha256(receipt_text)}
+    report = report + {receipt_sha256: sha256(receipt_text)}
+  }
+  if harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1" {
+    harness.stdio.println(__render_status_json(report))
+  } else {
+    __render_status_human(harness, report)
+  }
+  if len(errors) == 0 {
+    return 0
+  }
+  return 1
+}
+
 fn main(harness: Harness) -> int {
   let provider_filter = trim(harness.env.get_or("HARN_MODELS_BATCH_PROVIDER", ""))
   let model_filter = trim(harness.env.get_or("HARN_MODELS_BATCH_MODEL", ""))
@@ -1661,6 +2054,9 @@ fn main(harness: Harness) -> int {
   }
   if mode == "submit" {
     return __run_submit(harness)
+  }
+  if mode == "status" {
+    return __run_status(harness)
   }
   if mode == "manifest" {
     return __run_manifest(

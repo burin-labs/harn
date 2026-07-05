@@ -753,6 +753,42 @@ fn test_parses_models_batch_submit_args() {
 }
 
 #[test]
+fn test_parses_models_batch_status_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "models",
+        "batch",
+        "status",
+        "--submission",
+        ".harn/batches/submission.json",
+        "--out",
+        ".harn/batches/status.json",
+        "--dry-run",
+        "--json",
+    ]);
+
+    let Command::Models(args) = cli.command.unwrap() else {
+        panic!("expected models command");
+    };
+    let ModelsCommand::Batch(args) = args.command else {
+        panic!("expected models batch command");
+    };
+    let ModelsBatchCommand::Status(args) = args.command else {
+        panic!("expected models batch status command");
+    };
+    assert_eq!(
+        args.submission,
+        std::path::PathBuf::from(".harn/batches/submission.json")
+    );
+    assert_eq!(
+        args.out,
+        std::path::PathBuf::from(".harn/batches/status.json")
+    );
+    assert!(args.dry_run);
+    assert!(args.json);
+}
+
+#[test]
 fn test_parses_models_lora_preflight_args() {
     let cli = Cli::parse_from([
         "harn",

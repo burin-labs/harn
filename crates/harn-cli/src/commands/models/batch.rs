@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use crate::cli::{
     ModelsBatchArgs, ModelsBatchCommand, ModelsBatchManifestArgs, ModelsBatchPlanArgs,
-    ModelsBatchPrepareArgs, ModelsBatchSubmitArgs,
+    ModelsBatchPrepareArgs, ModelsBatchStatusArgs, ModelsBatchSubmitArgs,
 };
 use crate::commands::run::RunSandboxOptions;
 use crate::dispatch;
@@ -29,6 +29,8 @@ const BATCH_MANIFEST_ENV: &str = "HARN_MODELS_BATCH_MANIFEST";
 const BATCH_OUT_DIR_ENV: &str = "HARN_MODELS_BATCH_OUT_DIR";
 const BATCH_RECEIPT_ENV: &str = "HARN_MODELS_BATCH_RECEIPT";
 const BATCH_SUBMIT_OUT_ENV: &str = "HARN_MODELS_BATCH_SUBMIT_OUT";
+const BATCH_SUBMISSION_ENV: &str = "HARN_MODELS_BATCH_SUBMISSION";
+const BATCH_STATUS_OUT_ENV: &str = "HARN_MODELS_BATCH_STATUS_OUT";
 const BATCH_DRY_RUN_ENV: &str = "HARN_MODELS_BATCH_DRY_RUN";
 const BATCH_TOOL_FORMAT_ENV: &str = "HARN_MODELS_BATCH_TOOL_FORMAT";
 const BATCH_ID_PREFIX_ENV: &str = "HARN_MODELS_BATCH_ID_PREFIX";
@@ -40,6 +42,7 @@ pub(crate) async fn run(args: ModelsBatchArgs) {
         ModelsBatchCommand::Manifest(args) => run_manifest(args).await,
         ModelsBatchCommand::Plan(args) => run_plan(args).await,
         ModelsBatchCommand::Prepare(args) => run_prepare(args).await,
+        ModelsBatchCommand::Status(args) => run_status(args).await,
         ModelsBatchCommand::Submit(args) => run_submit(args).await,
     };
     if exit_code != 0 {
@@ -121,6 +124,26 @@ async fn run_submit(args: ModelsBatchSubmitArgs) -> i32 {
     let _mode = ScopedEnvVar::set(BATCH_MODE_ENV, "submit");
     let _receipt = ScopedEnvVar::set(BATCH_RECEIPT_ENV, receipt.trim());
     let _out = ScopedEnvVar::set(BATCH_SUBMIT_OUT_ENV, out.trim());
+    let _dry_run = ScopedEnvVar::set(BATCH_DRY_RUN_ENV, if args.dry_run { "1" } else { "0" });
+
+    run_batch_script(args.json, Some(sandbox)).await
+}
+
+async fn run_status(args: ModelsBatchStatusArgs) -> i32 {
+    let _guard = DISPATCH_BATCH_LOCK.lock().await;
+    let submission_path = absolutize_path(&args.submission);
+    let out_path = absolutize_path(&args.out);
+    let mut sandbox = RunSandboxOptions::default().with_workspace_root(parent_dir(&out_path));
+    let submission_root = parent_dir(&submission_path);
+    if submission_root != parent_dir(&out_path) {
+        sandbox = sandbox.with_read_only_roots(vec![submission_root]);
+    }
+
+    let submission = submission_path.to_string_lossy().to_string();
+    let out = out_path.to_string_lossy().to_string();
+    let _mode = ScopedEnvVar::set(BATCH_MODE_ENV, "status");
+    let _submission = ScopedEnvVar::set(BATCH_SUBMISSION_ENV, submission.trim());
+    let _out = ScopedEnvVar::set(BATCH_STATUS_OUT_ENV, out.trim());
     let _dry_run = ScopedEnvVar::set(BATCH_DRY_RUN_ENV, if args.dry_run { "1" } else { "0" });
 
     run_batch_script(args.json, Some(sandbox)).await
