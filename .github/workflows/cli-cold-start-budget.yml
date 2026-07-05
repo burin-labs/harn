@@ -78,6 +78,10 @@ jobs:
         with:
           shared-key: cli-cold-start-budget
           cache-bin: false
+          # PRs only need to restore the shared budget cache. Saving from every
+          # PR branch adds post-job latency and can wedge an otherwise-passed
+          # advisory benchmark behind cache upload/finalization.
+          save-if: ${{ github.event_name != 'pull_request' }}
       - name: Build release harn
         timeout-minutes: 40
         run: cargo build --release --bin harn
