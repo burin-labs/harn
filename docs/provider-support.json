@@ -1737,7 +1737,7 @@
         "reasoning_knobs": [],
         "prompt_or_context_cache": false,
         "batch_api": true,
-        "batch_discount_percent": null,
+        "batch_discount_percent": 50,
         "usage_accounting_confidence": "high"
       },
       "empirical": {

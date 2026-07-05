@@ -31,6 +31,7 @@ top_k_supported = false
 [provider_defaults.together]
 batch_wire_format = "openai"
 batch_input_mode = "jsonl_file"
+batch_discount_percent = 50
 batch_turnaround_hours = 24
 reasoning_wire_format = "enabled"
 
