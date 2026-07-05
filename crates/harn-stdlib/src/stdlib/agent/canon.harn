@@ -610,3 +610,468 @@ pub fn canon_inject_paths_feedback(session_id: string, paths, options = nil) -> 
   let slice = canon_slice_from_paths(paths, opts)
   return canon_inject_feedback(session_id, slice, opts + {files: slice.files})
 }
+
+fn __canon_event_path(item) -> string {
+  let kind = type_of(item)
+  if kind == "string" {
+    return __canon_text(item)
+  }
+  if kind != "dict" {
+    return ""
+  }
+  return __canon_text(
+    item?.path
+      ?? item?.name
+      ?? item?.file
+      ?? item?.file_path
+      ?? item?.filePath
+      ?? item?.target_path
+      ?? item?.targetPath
+      ?? item?.target,
+  )
+}
+
+fn __canon_event_push_path(items, value) {
+  let path = __canon_event_path(value)
+  if path == "" || contains(items, path) {
+    return items
+  }
+  return items.push(path)
+}
+
+fn __canon_event_push_path_bucket(items, bucket) {
+  if bucket == nil {
+    return items
+  }
+  if type_of(bucket) != "list" {
+    return __canon_event_push_path(items, bucket)
+  }
+  var out = items
+  for item in bucket ?? [] {
+    out = __canon_event_push_path(out, item)
+  }
+  return out
+}
+
+fn __canon_event_strip_path_token(raw) -> string {
+  var token = __canon_text(raw)
+  while starts_with(token, "`") || starts_with(token, "'") || starts_with(token, "\"")
+    || starts_with(token, "(")
+    || starts_with(token, "[") {
+    token = substring(token, 1)
+  }
+  while ends_with(token, "`") || ends_with(token, "'") || ends_with(token, "\"")
+    || ends_with(token, ")")
+    || ends_with(token, "]")
+    || ends_with(token, ":")
+    || ends_with(token, ",")
+    || ends_with(token, ".") {
+    token = substring(token, 0, len(token) - 1)
+  }
+  return token
+}
+
+/**
+ * Extract a likely changed path from a tool-result record.
+ *
+ * Tool hosts should prefer structured `changed_paths` / `files_written` fields;
+ * this helper exists for older edit-result records that only preserve call
+ * arguments or a terse first-line observation.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn canon_event_write_path_from_result(result) -> string {
+  if type_of(result) != "dict" {
+    return ""
+  }
+  for carrier in [
+    result?.params,
+    result?.args,
+    result?.arguments,
+    result?.tool_args,
+    result?.input,
+    result?.raw_input,
+    result?.function?.arguments,
+  ] {
+    if type_of(carrier) == "dict" {
+      let path = __canon_text(
+        carrier?.path
+          ?? carrier?.file
+          ?? carrier?.file_path
+          ?? carrier?.filePath
+          ?? carrier?.target
+          ?? carrier?.target_path
+          ?? carrier?.targetPath
+          ?? carrier?.folder,
+      )
+      if path != "" {
+        return path
+      }
+    }
+  }
+  let body = __canon_text(result?.observation ?? result?.result ?? result?.rendered_result ?? result?.raw_output)
+  let first_line = to_string((body.split("\n") ?? [""])[0] ?? "")
+  for raw_token in first_line.split(" ") {
+    let token = __canon_event_strip_path_token(raw_token)
+    if token == "" {
+      continue
+    }
+    let extension = lowercase(ext(token))
+    if contains(token, "/") || extension != "" {
+      return token
+    }
+  }
+  return ""
+}
+
+fn __canon_event_result_ok(result) -> bool {
+  if result?.ok != nil {
+    return result.ok ? true : false
+  }
+  if result?.success != nil {
+    return result.success ? true : false
+  }
+  let status = lowercase(__canon_text(result?.status))
+  if status == "error" || status == "failed" || status == "failure" {
+    return false
+  }
+  return !(result?.rejected ?? false)
+}
+
+fn __canon_event_push_tool_result_paths(items, result) {
+  if type_of(result) != "dict" {
+    return items
+  }
+  var out = items
+  for bucket in [
+    result?.changed_paths ?? result?.changedPaths,
+    result?.files_written ?? result?.filesWritten,
+    result?.result?.changed_paths ?? result?.result?.changedPaths,
+    result?.result?.files_written ?? result?.result?.filesWritten,
+    result?.raw_output?.changed_paths ?? result?.raw_output?.changedPaths,
+    result?.raw_output?.files_written ?? result?.raw_output?.filesWritten,
+  ] {
+    out = __canon_event_push_path_bucket(out, bucket)
+  }
+  let tool_name = lowercase(__canon_text(result?.tool_name ?? result?.name))
+  if contains(["edit", "scaffold", "run_codemod", "write", "write_file"], tool_name)
+    && __canon_event_result_ok(result) {
+    out = __canon_event_push_path(out, canon_event_write_path_from_result(result))
+  }
+  return out
+}
+
+fn __canon_event_push_tool_results_paths(items, bucket) {
+  if type_of(bucket) != "list" {
+    return __canon_event_push_tool_result_paths(items, bucket)
+  }
+  var out = items
+  for result in bucket ?? [] {
+    out = __canon_event_push_tool_result_paths(out, result)
+  }
+  return out
+}
+
+fn __canon_event_observation_field(item, key) -> string {
+  if type_of(item) != "dict" {
+    return ""
+  }
+  return __canon_text(item[key])
+}
+
+fn __canon_event_observation_explicit(item) -> bool {
+  if type_of(item) != "dict" {
+    return false
+  }
+  let schema = __canon_event_observation_field(item, "schema")
+  let kind = lowercase(__canon_event_observation_field(item, "kind"))
+  let event_type = lowercase(__canon_event_observation_field(item, "type"))
+  let mode = lowercase(__canon_event_observation_field(item, "mode"))
+  return schema == "harn.probe.v1"
+    || kind == "observe_output"
+    || kind == "observed_output"
+    || kind == "observation"
+    || event_type == "observe_output"
+    || event_type == "observed_output"
+    || event_type == "observation"
+    || mode == "observe_output"
+}
+
+fn __canon_event_symbol(value) -> string {
+  let kind = type_of(value)
+  if kind == "string" {
+    return __canon_text(value)
+  }
+  if kind != "dict" {
+    return ""
+  }
+  for key in [
+    "symbol",
+    "observed_symbol",
+    "observedSymbol",
+    "target_symbol",
+    "targetSymbol",
+    "callee",
+    "function_name",
+    "functionName",
+  ] {
+    let field = __canon_event_observation_field(value, key)
+    if field != "" {
+      return field
+    }
+  }
+  if __canon_event_observation_explicit(value) {
+    return __canon_event_observation_field(value, "name")
+  }
+  return ""
+}
+
+fn __canon_event_push_symbol(items, value) {
+  let symbol = __canon_event_symbol(value)
+  if symbol == "" || contains(items, symbol) {
+    return items
+  }
+  return items.push(symbol)
+}
+
+fn __canon_event_push_symbol_bucket(items, bucket) {
+  if bucket == nil {
+    return items
+  }
+  if type_of(bucket) != "list" {
+    return __canon_event_push_symbol(items, bucket)
+  }
+  var out = items
+  for item in bucket ?? [] {
+    out = __canon_event_push_symbol(out, item)
+  }
+  return out
+}
+
+fn __canon_event_push_tool_result_symbols(items, bucket) {
+  if type_of(bucket) != "list" {
+    return items
+  }
+  var out = items
+  for result in bucket ?? [] {
+    out = __canon_event_push_symbol(out, result)
+    out = __canon_event_push_symbol(out, result?.result)
+    out = __canon_event_push_symbol(out, result?.raw_output)
+    out = __canon_event_push_symbol_bucket(out, result?.observed_symbols ?? result?.observedSymbols)
+    out = __canon_event_push_symbol_bucket(
+      out,
+      result?.result?.observed_symbols ?? result?.result?.observedSymbols,
+    )
+    out = __canon_event_push_symbol_bucket(
+      out,
+      result?.raw_output?.observed_symbols ?? result?.raw_output?.observedSymbols,
+    )
+  }
+  return out
+}
+
+/**
+ * Extract changed paths already carried on an agent event.
+ *
+ * This is intentionally host-neutral: it reads event payloads and tool-result
+ * records only. Callers that need a host fallback should pass one to
+ * `canon_event_router`.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn canon_event_paths(event) -> list<string> {
+  var paths = []
+  for bucket in [
+    event?.changed_paths ?? [],
+    event?.changedPaths ?? [],
+    event?.files_written ?? [],
+    event?.filesWritten ?? [],
+    event?.paths ?? [],
+    event?.iteration_info?.changed_paths ?? [],
+    event?.iteration_info?.changedPaths ?? [],
+    event?.iteration_info?.files_written ?? [],
+    event?.iteration_info?.filesWritten ?? [],
+    event?.iterationInfo?.changed_paths ?? [],
+    event?.iterationInfo?.changedPaths ?? [],
+    event?.iterationInfo?.files_written ?? [],
+    event?.iterationInfo?.filesWritten ?? [],
+  ] {
+    paths = __canon_event_push_path_bucket(paths, bucket)
+  }
+  return __canon_event_push_tool_results_paths(paths, event?.tool_results ?? event?.toolResults)
+}
+
+/**
+ * Extract explicit producer-output observations from an agent event.
+ *
+ * harn-canon predicates can consume these under `ctx.observed_symbols` to
+ * distinguish assertions grounded in observed output from guessed literals.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn canon_event_observed_symbols(event) -> list<string> {
+  var symbols = []
+  for bucket in [
+    event?.observed_symbols ?? event?.observedSymbols,
+    event?.observed_symbol ?? event?.observedSymbol,
+    event?.observation,
+    event?.observations,
+    event?.probe,
+    event?.probes,
+    event?.iteration_info?.observed_symbols ?? event?.iteration_info?.observedSymbols,
+    event?.iterationInfo?.observed_symbols ?? event?.iterationInfo?.observedSymbols,
+  ] {
+    symbols = __canon_event_push_symbol_bucket(symbols, bucket)
+  }
+  return __canon_event_push_tool_result_symbols(symbols, event?.tool_results ?? event?.toolResults)
+}
+
+fn __canon_event_state_key(session_id: string, suffix: string, options = nil) -> string {
+  let opts = options ?? {}
+  let prefix = __canon_text(opts?.state_key_prefix ?? "harn.canon_feedback")
+  return prefix + "." + __canon_text(session_id) + "." + suffix
+}
+
+fn __canon_event_stored_observed_symbols(session_id: string, options = nil) -> list {
+  let raw = store_get(__canon_event_state_key(session_id, "observed_symbols", options))
+  if type_of(raw) == "list" {
+    return raw
+  }
+  return []
+}
+
+/**
+ * Merge event observations into the per-session harn-canon state.
+ *
+ * @effects: [store]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn canon_event_record_observed_symbols(session_id: string, event, options = nil) -> list<string> {
+  let sid = __canon_text(session_id)
+  let event_symbols = canon_event_observed_symbols(event ?? {})
+  if sid == "" {
+    return event_symbols
+  }
+  var merged = __canon_event_stored_observed_symbols(sid, options)
+  for symbol in event_symbols {
+    merged = __canon_event_push_symbol(merged, symbol)
+  }
+  store_set(__canon_event_state_key(sid, "observed_symbols", options), merged)
+  return merged
+}
+
+fn __canon_event_provider_paths(provider) {
+  if type_of(provider) == "closure" {
+    return provider()
+  }
+  return provider
+}
+
+fn __canon_event_fallback_paths(options = nil) -> list {
+  let opts = options ?? {}
+  let provider = opts?.changed_paths_provider ?? opts?.changedPathsProvider ?? opts?.changed_paths
+    ?? opts?.changedPaths
+  var paths = []
+  for item in __canon_event_provider_paths(provider) ?? [] {
+    paths = __canon_event_push_path(paths, item)
+  }
+  return paths
+}
+
+fn __canon_event_options_with_ctx(options, observed_symbols) {
+  let opts = options ?? {}
+  let existing = opts?.ctx ?? opts?.predicate_ctx ?? {}
+  let ctx = if type_of(existing) == "dict" {
+    existing
+  } else {
+    {}
+  }
+  return opts + {ctx: ctx + {observed_symbols: observed_symbols ?? []}}
+}
+
+fn __canon_event_is_iteration_end(event) -> bool {
+  let event_type = lowercase(__canon_text(event?.type ?? event?.kind))
+  return event_type == "iteration_end"
+    || event_type == "iteration-end"
+    || event_type == "iterationend"
+}
+
+/**
+ * Route one agent event into harn-canon feedback when it carries changed paths.
+ *
+ * Options:
+ *   enabled | active: false short-circuits without reading store or paths
+ *   root | workspace_root | project_root: workspace root for path reads
+ *   canon_root: optional harn-canon root; otherwise project-local package/root
+ *     discovery is used by `canon_resolve_packs`
+ *   inject: "reminder" | "feedback" | "none" (default "reminder")
+ *   changed_paths_provider: optional list or closure fallback when the event
+ *     carries no changed paths
+ *   state_key_prefix: store namespace for observed symbols / last result
+ *
+ * @effects: [fs.read, store, host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn canon_event_router(session_id: string, event, options = nil) {
+  let opts = options ?? {}
+  if !(opts?.enabled ?? opts?.active ?? true) {
+    return nil
+  }
+  let observed_symbols = canon_event_record_observed_symbols(session_id, event ?? {}, opts)
+  if !__canon_event_is_iteration_end(event ?? {}) {
+    return nil
+  }
+  let event_paths = canon_event_paths(event ?? {})
+  let paths = if len(event_paths) > 0 {
+    event_paths
+  } else {
+    __canon_event_fallback_paths(opts)
+  }
+  if len(paths) == 0 {
+    return nil
+  }
+  let workspace_root = __canon_text(opts?.root ?? opts?.workspace_root ?? opts?.project_root ?? project_root() ?? cwd())
+  let inject_options = __canon_event_options_with_ctx(opts, observed_symbols)
+    + {root: workspace_root, project_root: workspace_root, inject: opts?.inject ?? "reminder"}
+  let injected = try {
+    canon_inject_paths_feedback(session_id, paths, inject_options)
+  }
+  if !is_ok(injected) {
+    let message = to_string(injected)
+    store_set(__canon_event_state_key(session_id, "last_error", opts), message)
+    return {ok: false, error: message, paths: paths}
+  }
+  let result = unwrap(injected) + {paths: paths}
+  store_set(__canon_event_state_key(session_id, "last_result", opts), result)
+  return result
+}
+
+/**
+ * Subscribe `canon_event_router` to an agent session once.
+ *
+ * @effects: [store, host]
+ * @errors: [runtime]
+ * @api_stability: experimental
+ */
+pub fn canon_install_feedback_sink(session_id: string, options = nil) -> nil {
+  let opts = options ?? {}
+  if !(opts?.enabled ?? opts?.active ?? true) {
+    return nil
+  }
+  let key = __canon_event_state_key(session_id, "installed", opts)
+  if store_get(key) {
+    return nil
+  }
+  store_set(key, true)
+  let handler = { event -> canon_event_router(session_id, event, opts) }
+  agent_subscribe(session_id, handler)
+  return nil
+}

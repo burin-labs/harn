@@ -1,8 +1,13 @@
 import {
   canon_evaluate_slice,
+  canon_event_observed_symbols,
+  canon_event_paths,
+  canon_event_router,
+  canon_event_write_path_from_result,
   canon_feedback_text,
   canon_inject_feedback,
   canon_inject_paths_feedback,
+  canon_install_feedback_sink,
   canon_pack_ids_for_path,
   canon_resolve_root,
   canon_slice_from_files,
@@ -60,6 +65,10 @@ fn write_manifest_canon_package(dir) {
   )
 }
 
+fn canon_feedback_state_key(session_id: string, suffix: string) -> string {
+  return "harn.canon_feedback.${session_id}.${suffix}"
+}
+
 pipeline main(task) {
   let manifest = {
     schema_version: 1,
@@ -77,6 +86,42 @@ pipeline main(task) {
   __io_println(join(canon_pack_ids_for_path("src/main.foo", manifest), ","))
   __io_println(join(canon_pack_ids_for_path("Buildfile", manifest), ","))
   __io_println(to_string(len(canon_pack_ids_for_path("src/main.zig", manifest)) == 0))
+  let event_paths = canon_event_paths(
+    {
+      changed_paths: [{path: "src/main.foo"}, "src/main.foo"],
+      changedPaths: [{file: "src/camel.foo"}],
+      files_written: 2,
+      filesWritten: ["src/top.foo"],
+      iteration_info: {changed_paths: ["src/other.foo"], files_written: [{name: "build.foo"}]},
+      iterationInfo: {changedPaths: ["src/main.foo", {file_path: "src/filepath.foo"}], filesWritten: 1},
+      tool_results: [{tool_name: "edit", status: "ok", arguments: {path: "src/from-edit.foo"}}],
+    },
+  )
+  let expected_event_paths = [
+    "src/main.foo",
+    "src/camel.foo",
+    "src/top.foo",
+    "src/other.foo",
+    "build.foo",
+    "src/filepath.foo",
+    "src/from-edit.foo",
+  ]
+  require event_paths == expected_event_paths, "canon_event_paths extracts and dedupes paths"
+  let fallback_path = canon_event_write_path_from_result({tool_name: "edit", observation: "updated src/fallback.foo"})
+  require fallback_path == "src/fallback.foo", "canon_event_write_path_from_result uses terse observations"
+  let event_symbols = canon_event_observed_symbols(
+    {
+      observed_symbols: ["format_value", {symbol: "serialize"}],
+      observedSymbol: "render",
+      observations: [{kind: "observe_output", name: "encode"}],
+      tool_results: [
+        {result: {schema: "harn.probe.v1", name: "decode"}},
+        {raw_output: {observed_symbols: ["print_ini", "format_value"]}},
+      ],
+    },
+  )
+  let expected_symbols = ["format_value", "serialize", "render", "encode", "decode", "print_ini"]
+  require event_symbols == expected_symbols, "canon_event_observed_symbols preserves ordered unique observations"
   with_fs(
     {
       "canon-packs.json": manifest,
@@ -97,11 +142,57 @@ pipeline main(task) {
       __io_println(to_string(contains(feedback, "no_bad")))
       let path_slice = canon_slice_from_paths(["src/main.foo"], {root: dir})
       __io_println(to_string(path_slice.files[0].text == "const bad = true;"))
+      let disabled_session_id = agent_session_open("canon-router-disabled-" + uuid_v7())
+      let disabled = canon_event_router(
+        disabled_session_id,
+        {type: "iteration_end", changed_paths: ["src/main.foo"]},
+        {enabled: false, root: dir, canon_root: dir},
+      )
+      require disabled == nil, "disabled canon_event_router short-circuits"
+      let disabled_symbols = store_get(canon_feedback_state_key(disabled_session_id, "observed_symbols"))
+      require disabled_symbols == nil, "disabled canon_event_router does not touch session state"
+      agent_session_close(disabled_session_id)
       let session_id = agent_session_open("canon-feedback-" + uuid_v7())
       let injected = canon_inject_feedback(session_id, slice, {canon_root: dir, files: slice.files})
       let messages = agent_session_snapshot(session_id).messages
       __io_println(to_string(injected.injected))
       __io_println(to_string(contains(messages[len(messages) - 1].content, "harn-canon")))
+      let router_session_id = agent_session_open("canon-router-" + uuid_v7())
+      let pre_event = canon_event_router(
+        router_session_id,
+        {type: "tool_call_update", observed_symbol: "format_value"},
+        {root: dir, canon_root: dir},
+      )
+      require pre_event == nil, "non-iteration canon events only update observations"
+      let stored_symbols = store_get(canon_feedback_state_key(router_session_id, "observed_symbols"))
+      require stored_symbols == ["format_value"], "canon_event_router stores observed symbols per session"
+      let routed = canon_event_router(
+        router_session_id,
+        {type: "iteration_end", changed_paths: ["src/main.foo"]},
+        {root: dir, canon_root: dir, inject: "reminder"},
+      )
+      let routed_events = transcript_events_by_kind(agent_session_snapshot(router_session_id), "system_reminder")
+      require routed.injected, "canon_event_router injects when routed paths trip a pack"
+      require routed.paths == ["src/main.foo"], "canon_event_router reports routed paths"
+      require len(routed_events) == 1, "canon_event_router injects one reminder"
+      require contains(routed_events[0].reminder.body, "no_bad"), "router feedback reaches reminder"
+      agent_session_close(router_session_id)
+      let fallback_session_id = agent_session_open("canon-router-fallback-" + uuid_v7())
+      let fallback = canon_event_router(
+        fallback_session_id,
+        {type: "iteration_end"},
+        {root: dir, canon_root: dir, changed_paths_provider: { -> ["src/main.foo"] }},
+      )
+      require fallback.injected, "canon_event_router uses changed_paths_provider fallback"
+      agent_session_close(fallback_session_id)
+      let install_session_id = agent_session_open("canon-install-" + uuid_v7())
+      canon_install_feedback_sink(install_session_id, {enabled: false})
+      let disabled_install = store_get(canon_feedback_state_key(install_session_id, "installed"))
+      require disabled_install == nil, "disabled canon_install_feedback_sink does not mark installed"
+      canon_install_feedback_sink(install_session_id, {root: dir, canon_root: dir})
+      canon_install_feedback_sink(install_session_id, {root: dir, canon_root: dir})
+      require store_get(canon_feedback_state_key(install_session_id, "installed")), "canon_install_feedback_sink installs once"
+      agent_session_close(install_session_id)
       let path_session_id = agent_session_open("canon-path-feedback-" + uuid_v7())
       let path_injected = canon_inject_paths_feedback(path_session_id, ["src/main.foo"], {root: dir, canon_root: dir})
       let path_messages = agent_session_snapshot(path_session_id).messages
