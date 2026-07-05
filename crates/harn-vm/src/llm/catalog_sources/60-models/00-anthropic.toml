@@ -100,6 +100,7 @@ benchmarks = { swe_bench_verified = 77.2 }
 name = "Claude Sonnet 4.6"
 provider = "anthropic"
 context_window = 1000000
+equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75 }
 tier = "frontier"
@@ -122,6 +123,7 @@ complementary_with = ["openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
 name = "Claude Sonnet 5"
 provider = "anthropic"
 context_window = 1000000
+equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50 }
 tier = "frontier"
@@ -161,6 +163,7 @@ benchmarks = { swe_bench_pro = 80.3 }
 name = "Claude Sonnet 4.6 (via OpenRouter)"
 provider = "openrouter"
 context_window = 1000000
+equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "vision", "streaming", "prompt_caching"]
 pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75 }
 tier = "frontier"
@@ -171,6 +174,7 @@ complementary_with = ["openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
 name = "Claude Sonnet 5 (via OpenRouter)"
 provider = "openrouter"
 context_window = 1000000
+equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "vision", "streaming", "prompt_caching"]
 pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50 }
 tier = "frontier"

@@ -2473,6 +2473,7 @@
         "sonnet46"
       ],
       "context_window": 1000000,
+      "equivalence_group": "frontier-agent-coding",
       "modalities": {
         "input": [
           "text",
@@ -2571,6 +2572,7 @@
         "tier/frontier"
       ],
       "context_window": 1000000,
+      "equivalence_group": "frontier-agent-coding",
       "modalities": {
         "input": [
           "text",
@@ -11571,6 +11573,7 @@
       "provider": "openrouter",
       "aliases": [],
       "context_window": 1000000,
+      "equivalence_group": "frontier-agent-coding",
       "modalities": {
         "input": [
           "text"
@@ -11646,6 +11649,7 @@
       "provider": "openrouter",
       "aliases": [],
       "context_window": 1000000,
+      "equivalence_group": "frontier-agent-coding",
       "modalities": {
         "input": [
           "text"
@@ -13887,6 +13891,7 @@
       "provider": "openrouter",
       "aliases": [],
       "context_window": 202752,
+      "equivalence_group": "frontier-agent-coding",
       "modalities": {
         "input": [
           "text"
@@ -13961,6 +13966,7 @@
         "openrouter-glm-5.2"
       ],
       "context_window": 1048576,
+      "equivalence_group": "frontier-agent-coding",
       "modalities": {
         "input": [
           "text"
@@ -15059,6 +15065,7 @@
         "together-deepseek-v4-pro"
       ],
       "context_window": 512000,
+      "equivalence_group": "frontier-agent-coding",
       "modalities": {
         "input": [
           "text"
@@ -15353,6 +15360,7 @@
         "together-glm-5.1"
       ],
       "context_window": 202752,
+      "equivalence_group": "frontier-agent-coding",
       "modalities": {
         "input": [
           "text"
@@ -15434,6 +15442,7 @@
         "together-glm-5.2"
       ],
       "context_window": 262144,
+      "equivalence_group": "frontier-agent-coding",
       "modalities": {
         "input": [
           "text"
@@ -16110,6 +16119,7 @@
         "glm-5.1"
       ],
       "context_window": 202752,
+      "equivalence_group": "frontier-agent-coding",
       "modalities": {
         "input": [
           "text"
@@ -16188,6 +16198,7 @@
         "glm-5.2"
       ],
       "context_window": 1048576,
+      "equivalence_group": "frontier-agent-coding",
       "modalities": {
         "input": [
           "text"

@@ -2382,7 +2382,15 @@ fn __apply_post_turn_options(opts, outcome) {
       throw "agent_loop: post_turn_callback `llm_options` must be a dict"
     }
     let base_llm_options = updated?.llm_options ?? {}
-    updated = updated + {llm_options: base_llm_options + llm_patch}
+    let route_patch_has_provider = contains(llm_patch.keys(), "provider")
+    let route_patch_has_model = contains(llm_patch.keys(), "model")
+    let route_patch_seen = route_patch_has_provider || route_patch_has_model
+    updated = updated
+      + {
+      llm_options: base_llm_options + llm_patch,
+      _agent_loop_last_llm_route_patch_seen: route_patch_seen,
+      _agent_loop_last_llm_route_patch_complete: route_patch_has_provider && route_patch_has_model,
+    }
   }
   return updated
 }
@@ -2406,6 +2414,44 @@ fn __agent_loop_route_options(provider, model, tool_format) {
     model: to_string(model ?? ""),
     tool_format: to_string(tool_format ?? ""),
   }
+}
+
+fn __agent_loop_route_differs_from_primary(llm_opts, primary_provider, primary_model) {
+  let provider = to_string(llm_opts?.provider ?? "")
+  let model = to_string(llm_opts?.model ?? "")
+  let has_primary = primary_provider != "" || primary_model != ""
+  let has_current = provider != "" || model != ""
+  return has_primary && has_current && (provider != primary_provider || model != primary_model)
+}
+
+fn __agent_loop_has_explicit_routing_owner(llm_opts) {
+  return llm_opts?.routing != nil
+    || llm_opts?.models != nil
+    || llm_opts?.ladder != nil
+    || llm_opts?.model_ladder != nil
+    || llm_opts?.route_policy != nil
+    || llm_opts?.prefer != nil
+    || llm_opts?.fallback_chain != nil
+    || llm_opts?.fallback_strategy != nil
+    || llm_opts?.strategy != nil
+}
+
+fn __agent_loop_has_partial_route_patch(loop_opts) {
+  return (loop_opts?._agent_loop_last_llm_route_patch_seen ?? false)
+    && !(loop_opts?._agent_loop_last_llm_route_patch_complete ?? false)
+}
+
+fn __agent_loop_enable_escalation_failover(llm_opts, primary_provider, primary_model, loop_opts) {
+  if !__agent_loop_route_differs_from_primary(llm_opts, primary_provider, primary_model) {
+    return llm_opts
+  }
+  if __agent_loop_has_partial_route_patch(loop_opts)
+    || __agent_loop_has_explicit_routing_owner(llm_opts)
+    || llm_opts?.equivalent_failover != nil {
+    return llm_opts
+  }
+  return llm_opts
+    + {equivalent_failover: {max_routes: 3, on_no_dispatch: true}}
 }
 
 fn __agent_loop_with_llm_render_context(opts, render) {
@@ -3536,14 +3582,19 @@ fn __agent_loop_run(message, session, initial_opts) {
           break
         }
         let turn_prompt = __agent_loop_build_turn_prompt(session, turn_llm_opts, iteration_index)
-        let llm_opts = turn_llm_opts
-          + {
-          messages: turn_prompt.messages,
-          session_id: session.session_id,
-          tool_format: turn_llm_opts.tool_format,
-          _iteration: iteration_index + 1,
-          _system_fragments: turn_prompt.fragments,
-        }
+        let llm_opts = __agent_loop_enable_escalation_failover(
+          turn_llm_opts
+            + {
+            messages: turn_prompt.messages,
+            session_id: session.session_id,
+            tool_format: turn_llm_opts.tool_format,
+            _iteration: iteration_index + 1,
+            _system_fragments: turn_prompt.fragments,
+          },
+          primary_provider,
+          primary_model,
+          opts,
+        )
         var call = __invoke_llm_with_autocontinue(
           message,
           turn_prompt.system,

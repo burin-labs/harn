@@ -279,10 +279,7 @@ fn estimate_text_tokens_for_model(text: &str, model: &str) -> i64 {
     super::token_count::estimate_text_tokens(text, Some(model)).tokens
 }
 
-pub(crate) fn project_llm_call_cost(
-    opts: &super::api::LlmCallOptions,
-    session_cost_usd: f64,
-) -> LlmBudgetProjection {
+pub(crate) fn project_llm_call_tokens(opts: &super::api::LlmCallOptions) -> (i64, i64) {
     let system_tokens = opts
         .system
         .as_deref()
@@ -312,6 +309,19 @@ pub(crate) fn project_llm_call_cost(
         .saturating_add(message_tokens)
         .saturating_add(tool_tokens);
     let projected_output_tokens = opts.max_tokens.max(0);
+    (projected_input_tokens, projected_output_tokens)
+}
+
+pub(crate) fn project_llm_call_context_tokens(opts: &super::api::LlmCallOptions) -> u64 {
+    let (input, output) = project_llm_call_tokens(opts);
+    input.max(0) as u64 + output.max(0) as u64
+}
+
+pub(crate) fn project_llm_call_cost(
+    opts: &super::api::LlmCallOptions,
+    session_cost_usd: f64,
+) -> LlmBudgetProjection {
+    let (projected_input_tokens, projected_output_tokens) = project_llm_call_tokens(opts);
     let projected_cost_usd = calculate_cost_for_provider(
         &opts.provider,
         &opts.model,

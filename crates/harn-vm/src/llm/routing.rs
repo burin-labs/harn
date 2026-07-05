@@ -47,6 +47,7 @@ pub(crate) fn build_equivalent_failover_policy(
     model: &str,
     max_routes: usize,
     on_no_dispatch: bool,
+    requirements: crate::llm_config::EquivalentModelRequirements,
 ) -> Option<Arc<RoutingPolicyConfig>> {
     if max_routes < 2 {
         return None;
@@ -61,7 +62,9 @@ pub(crate) fn build_equivalent_failover_policy(
         overrides: None,
     }];
 
-    for (candidate_model, candidate) in crate::llm_config::equivalent_model_catalog_entries(model) {
+    for (candidate_model, candidate) in
+        crate::llm_config::equivalent_model_catalog_entries_for_requirements(model, requirements)
+    {
         if chain.len() >= max_routes {
             break;
         }

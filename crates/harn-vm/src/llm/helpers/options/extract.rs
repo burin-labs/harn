@@ -100,15 +100,6 @@ pub(crate) fn extract_llm_options(
             }
         }
     }
-    let equivalent_failover_policy = parse_equivalent_failover_option(
-        options.as_ref(),
-        &provider,
-        &model,
-        explicit_routing_policy,
-    )?;
-    if routing_policy.is_none() {
-        routing_policy = equivalent_failover_policy;
-    }
     // A routing_policy chain owns provider/model selection: snap the
     // base options to the first link so transcript-only consumers see
     // a sensible placeholder. The executor swaps these per attempt.
@@ -723,7 +714,7 @@ pub(crate) fn extract_llm_options(
         }
     }
 
-    let opts = LlmCallOptions {
+    let mut opts = LlmCallOptions {
         provider,
         model,
         api_key,
@@ -783,6 +774,16 @@ pub(crate) fn extract_llm_options(
         structural_experiment,
         applied_structural_experiment: None,
     };
+    let equivalent_failover_policy = parse_equivalent_failover_option(
+        options.as_ref(),
+        &opts.provider,
+        &opts.model,
+        explicit_routing_policy,
+        equivalent_failover_requirements_for_options(&opts),
+    )?;
+    if opts.routing_policy.is_none() {
+        opts.routing_policy = equivalent_failover_policy;
+    }
 
     validate_options(&opts);
     Ok(opts)

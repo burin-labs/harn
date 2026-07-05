@@ -2,8 +2,15 @@ import { llm_call_options } from "std/llm/options"
 
 fn main(_harness: Harness) {
   let projected = llm_call_options(
-    {output_schema: {type: "object"}, schema_stream_abort: false, internal_only: "drop"},
+    {
+      output_schema: {type: "object"},
+      schema_stream_abort: false,
+      equivalent_failover: {max_routes: 2, on_no_dispatch: true},
+      internal_only: "drop",
+    },
   )
   __io_println(!projected.schema_stream_abort)
+  __io_println(projected.equivalent_failover.max_routes)
+  __io_println(projected.equivalent_failover.on_no_dispatch)
   __io_println(projected.internal_only == nil)
 }

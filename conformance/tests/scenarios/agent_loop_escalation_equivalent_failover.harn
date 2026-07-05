@@ -1,0 +1,85 @@
+/**
+ * Escalated agent-loop turns opt into Harn's provider-equivalent failover.
+ *
+ * Turn 1 runs on a real catalog primary route and dispatches a deterministic
+ * tool. The post-turn callback rebases the next LLM call to a real catalog
+ * stronger route. The custom caller inspects that second turn's options before
+ * returning the done sentinel, proving the loop injected equivalent_failover
+ * without live providers or timing-sensitive behavior.
+ */
+import { AgentLoopOptions } from "std/agent/options"
+
+let calls = atomic(0)
+
+fn tools() {
+  let r = tool_registry()
+  return tool_define(
+    r,
+    "echo",
+    "Echo back the message",
+    {
+      handler: { args -> return "echoed:" + to_string(args?.msg ?? "") },
+      parameters: {msg: {type: "string"}},
+    },
+  )
+}
+
+pipeline default() {
+  let caller = { call ->
+    let _ = atomic_add(calls, 1)
+    let n = atomic_get(calls)
+    if n == 1 {
+      return {
+        ok: true,
+        value: {
+          text: "",
+          tool_calls: [{id: "c1", name: "echo", arguments: {msg: "first"}}],
+          provider: to_string(call.opts?.provider ?? ""),
+          model: to_string(call.opts?.model ?? ""),
+          stop_reason: "tool_calls",
+          input_tokens: 0,
+          output_tokens: 0,
+          usage: {input_tokens: 0, output_tokens: 0},
+        },
+      }
+    }
+    let failover = call.opts?.equivalent_failover ?? {}
+    __io_println("provider=" + to_string(call.opts?.provider ?? ""))
+    __io_println("model=" + to_string(call.opts?.model ?? ""))
+    __io_println("failover.max_routes=" + to_string(failover?.max_routes ?? "nil"))
+    __io_println("failover.on_no_dispatch=" + to_string(failover?.on_no_dispatch ?? false))
+    return {
+      ok: true,
+      value: {
+        text: "##DONE##",
+        provider: to_string(call.opts?.provider ?? ""),
+        model: to_string(call.opts?.model ?? ""),
+        input_tokens: 0,
+        output_tokens: 0,
+        usage: {input_tokens: 0, output_tokens: 0},
+      },
+    }
+  }
+  let opts: AgentLoopOptions = {
+    provider: "fireworks",
+    model: "gpt-oss-120b",
+    tools: tools(),
+    tool_format: "native",
+    max_iterations: 3,
+    loop_until_done: true,
+    done_sentinel: "##DONE##",
+    llm_caller: caller,
+    post_turn_callback: { info ->
+      if info?.iteration == 0 {
+        return {
+          message: "Escalating to the stronger route.",
+          llm_options: {provider: "anthropic", model: "claude-sonnet-4-6"},
+        }
+      }
+      return ""
+    },
+  }
+  let result = agent_loop("do it", nil, opts)
+  __io_println(result.status)
+  __io_println("visible=" + to_string(result.visible_text ?? ""))
+}

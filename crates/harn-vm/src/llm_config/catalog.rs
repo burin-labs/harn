@@ -272,10 +272,79 @@ pub fn model_equivalence_group(model_id: &str) -> Option<String> {
     })
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct EquivalentModelRequirements {
+    pub context_tokens: Option<u64>,
+    pub native_tools: bool,
+    pub text_tool_wire_format: bool,
+    pub provider_tool_types: Vec<String>,
+    pub vision: bool,
+    pub url_images: bool,
+    pub audio: bool,
+    pub pdf: bool,
+    pub video: bool,
+    pub files_api: bool,
+    pub thinking: bool,
+    pub reasoning_effort: bool,
+    pub structured_output: bool,
+    pub structured_output_mode: Option<String>,
+}
+
+impl EquivalentModelRequirements {
+    fn from_source_context(
+        context_tokens: u64,
+        caps: &crate::llm::capabilities::Capabilities,
+    ) -> Self {
+        Self {
+            context_tokens: Some(context_tokens),
+            native_tools: caps.native_tools,
+            text_tool_wire_format: caps.text_tool_wire_format_supported,
+            provider_tool_types: equivalent_provider_tool_types_for_capabilities(caps),
+            vision: caps.vision_supported,
+            url_images: caps.image_url_input_supported,
+            audio: caps.audio,
+            pdf: caps.pdf,
+            video: caps.video,
+            files_api: caps.files_api_supported,
+            thinking: !caps.thinking_modes.is_empty(),
+            reasoning_effort: caps.reasoning_effort_supported,
+            structured_output: caps.structured_output.is_some(),
+            structured_output_mode: Some(caps.structured_output_mode.clone()),
+        }
+    }
+}
+
+fn equivalent_provider_tool_types_for_capabilities(
+    caps: &crate::llm::capabilities::Capabilities,
+) -> Vec<String> {
+    let mut kinds = caps.hosted_tools.clone();
+    if caps.computer_use_style.is_some() {
+        kinds.push("computer_use".to_string());
+    }
+    kinds.sort();
+    kinds.dedup();
+    kinds
+}
+
+fn provider_tool_type_matches(
+    caps: &crate::llm::capabilities::Capabilities,
+    required: &str,
+) -> bool {
+    if required == "computer_use" && caps.computer_use_style.is_some() {
+        return true;
+    }
+    caps.hosted_tools
+        .iter()
+        .any(|kind| kind == required || (required == "computer_use" && kind == "computer"))
+}
+
 /// Return same-logical-model routes that can be considered for explicit
 /// failover or cross-provider experiments. Equivalence is a catalog assertion
 /// about compatible model weights/family, not wire-level identity.
-pub fn equivalent_model_catalog_entries(selector: &str) -> Vec<(String, ModelDef)> {
+pub fn equivalent_model_catalog_entries_for_requirements(
+    selector: &str,
+    requirements: EquivalentModelRequirements,
+) -> Vec<(String, ModelDef)> {
     let resolved = resolve_model_info(selector);
     let Some(group) = model_equivalence_group(&resolved.id) else {
         return Vec::new();
@@ -284,10 +353,10 @@ pub fn equivalent_model_catalog_entries(selector: &str) -> Vec<(String, ModelDef
     let Some(source) = config.models.get(&resolved.id) else {
         return Vec::new();
     };
-    let source_caps = crate::llm::capabilities::lookup(&source.provider, &resolved.id);
     let source_context = source
         .runtime_context_window
         .unwrap_or(source.context_window);
+    let minimum_context = requirements.context_tokens.unwrap_or(source_context);
 
     sorted_model_entries_with_config(&config)
         .into_iter()
@@ -301,12 +370,44 @@ pub fn equivalent_model_catalog_entries(selector: &str) -> Vec<(String, ModelDef
         .filter(|(id, model)| {
             let caps = crate::llm::capabilities::lookup(&model.provider, id);
             let candidate_context = model.runtime_context_window.unwrap_or(model.context_window);
-            candidate_context >= source_context
-                && (!source_caps.native_tools || caps.native_tools)
-                && (!source_caps.text_tool_wire_format_supported
-                    || caps.text_tool_wire_format_supported)
-                && (!source_caps.reasoning_effort_supported || caps.reasoning_effort_supported)
-                && source_caps.structured_output_mode == caps.structured_output_mode
+            let context_matches = candidate_context >= minimum_context;
+            let native_tools_match = !requirements.native_tools || caps.native_tools;
+            let text_tool_format_match =
+                !requirements.text_tool_wire_format || caps.text_tool_wire_format_supported;
+            let provider_tools_match = requirements
+                .provider_tool_types
+                .iter()
+                .all(|required| provider_tool_type_matches(&caps, required));
+            let vision_match = !requirements.vision || caps.vision_supported;
+            let url_images_match = !requirements.url_images
+                || crate::llm::provider::provider_supports_image_urls(&model.provider, id);
+            let audio_match = !requirements.audio || caps.audio;
+            let pdf_match = !requirements.pdf || caps.pdf;
+            let video_match = !requirements.video || caps.video;
+            let files_api_match = !requirements.files_api || caps.files_api_supported;
+            let thinking_match = !requirements.thinking || !caps.thinking_modes.is_empty();
+            let reasoning_effort_match =
+                !requirements.reasoning_effort || caps.reasoning_effort_supported;
+            let structured_output_match =
+                !requirements.structured_output || caps.structured_output.is_some();
+            let structured_output_mode_match = requirements
+                .structured_output_mode
+                .as_ref()
+                .is_none_or(|mode| mode == &caps.structured_output_mode);
+            context_matches
+                && native_tools_match
+                && text_tool_format_match
+                && provider_tools_match
+                && vision_match
+                && url_images_match
+                && audio_match
+                && pdf_match
+                && video_match
+                && files_api_match
+                && thinking_match
+                && reasoning_effort_match
+                && structured_output_match
+                && structured_output_mode_match
         })
         .map(|(id, model)| {
             let provider = model.provider.clone();
@@ -316,6 +417,37 @@ pub fn equivalent_model_catalog_entries(selector: &str) -> Vec<(String, ModelDef
             )
         })
         .collect()
+}
+
+/// Request-shaped equivalent routes: constrain the context window but only
+/// require capabilities the current call actually resolved to use.
+pub fn equivalent_model_catalog_entries_for_context(
+    selector: &str,
+    required_context_tokens: Option<u64>,
+) -> Vec<(String, ModelDef)> {
+    equivalent_model_catalog_entries_for_requirements(
+        selector,
+        EquivalentModelRequirements {
+            context_tokens: required_context_tokens,
+            ..EquivalentModelRequirements::default()
+        },
+    )
+}
+
+pub fn equivalent_model_catalog_entries(selector: &str) -> Vec<(String, ModelDef)> {
+    let resolved = resolve_model_info(selector);
+    let config = effective_config();
+    let Some(source) = config.models.get(&resolved.id) else {
+        return Vec::new();
+    };
+    let source_caps = crate::llm::capabilities::lookup(&source.provider, &resolved.id);
+    let source_context = source
+        .runtime_context_window
+        .unwrap_or(source.context_window);
+    equivalent_model_catalog_entries_for_requirements(
+        selector,
+        EquivalentModelRequirements::from_source_context(source_context, &source_caps),
+    )
 }
 
 pub fn qc_default_model(provider: &str) -> Option<String> {
