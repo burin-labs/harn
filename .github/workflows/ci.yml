@@ -38,10 +38,15 @@ jobs:
   # Linux-min those four matrix lanes cost are pure waste. But the merge queue
   # (`merge_group`) builds a speculative merge commit (target + earlier-queued
   # PRs + this PR) and is the ONLY place a cross-PR interaction regression is
-  # caught. On that event we MUST NOT prune — the `force` step below overrides
-  # the filter to `'true'` on `merge_group`. Release metadata-only push events
-  # are bookkeeping for a tree the merge queue already tested, so keep them on
-  # the cheap lanes. Do not wire the downstream `if:`s back to the raw
+  # caught. On that event the default is still full heavy coverage. The only
+  # merge-queue prune is the stacked docs-only tail case: GitHub encodes the
+  # previous queue head in `gh-readonly-queue/<base>/pr-<n>-<sha>`, and when
+  # the incremental diff from that previous head to the current speculative
+  # commit is provably only docs/website/Markdown, the earlier queue entry is
+  # already running the full code backstop. Any parse/fetch/diff uncertainty
+  # falls back to heavy coverage. Release metadata-only push events are
+  # bookkeeping for a tree the merge queue already tested, so keep them on the
+  # cheap lanes. Do not wire the downstream `if:`s back to the raw
   # `steps.filter.outputs.*`; they must read `steps.force.outputs.*`.
   #
   # The filter is an EXCLUSION list with `predicate-quantifier: every`: a file
@@ -121,6 +126,45 @@ jobs:
 
           echo "release_metadata_only=$release_metadata_only" >> "$GITHUB_OUTPUT"
           echo "release metadata only: $release_metadata_only"
+      - name: Detect merge-group docs-only tail
+        id: merge_group_tail
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          docs_only_tail=false
+
+          if [[ "$EVENT_NAME" == "merge_group" ]]; then
+            previous_sha=""
+            if [[ "$REF_NAME" =~ (^|/)pr-[0-9]+-([0-9a-f]{40})$ ]]; then
+              previous_sha="${BASH_REMATCH[2]}"
+            fi
+
+            if [[ -z "$previous_sha" ]]; then
+              echo "::notice::merge_group: could not parse previous queue head from ref '$REF_NAME'; keeping heavy lanes enabled."
+            else
+              if ! git cat-file -e "${previous_sha}^{commit}" 2>/dev/null; then
+                git fetch --no-tags --depth=1 origin "$previous_sha" || true
+              fi
+
+              changed_files="$RUNNER_TEMP/merge-group-tail-changed-files.txt"
+              if git cat-file -e "${previous_sha}^{commit}" 2>/dev/null \
+                && git diff --name-only "$previous_sha" HEAD > "$changed_files"; then
+                echo "Merge-group incremental changed files from $previous_sha:"
+                sed 's/^/  /' "$changed_files"
+                if [[ "$(./scripts/ci_docs_only.sh "$changed_files")" == "true" ]]; then
+                  docs_only_tail=true
+                fi
+              else
+                echo "::notice::merge_group: could not diff previous queue head $previous_sha to HEAD; keeping heavy lanes enabled."
+              fi
+            fi
+          fi
+
+          echo "docs_only_tail=$docs_only_tail" >> "$GITHUB_OUTPUT"
+          echo "merge-group docs-only tail: $docs_only_tail"
       - name: Resolve heavy-lane gate
         id: force
         # `pull_request`: honour the paths filter — a docs/website/markdown-only
@@ -128,19 +172,24 @@ jobs:
         #   release/vX.Y.Z PR whose diff is only release metadata also skips
         #   those PR-head lanes because `release_harn` already ran the release
         #   audit locally; merge_group below remains the full backstop.
-        # `merge_group`: force `rust=true` — the speculative merge commit must
-        #   run the full suite so a cross-PR interaction regression can't slip
-        #   the queue.
+        # `merge_group`: default to `rust=true` so the speculative merge commit
+        #   catches cross-PR interaction regressions. The only skip is a
+        #   stacked docs-only tail whose incremental diff from the previous
+        #   queue head is provably docs/website/Markdown-only.
         # `push`: honour release metadata-only detection so a merge queue-tested
         #   release bookkeeping merge does not rerun the full Rust suite.
         env:
           FORCE_MERGE_GROUP: ${{ github.event_name == 'merge_group' }}
           F_RUST: ${{ steps.filter.outputs.rust }}
           RELEASE_METADATA_ONLY: ${{ steps.release_metadata.outputs.release_metadata_only }}
+          MERGE_GROUP_DOCS_ONLY_TAIL: ${{ steps.merge_group_tail.outputs.docs_only_tail }}
         run: |
           set -euo pipefail
-          if [ "${FORCE_MERGE_GROUP}" = "true" ]; then
-            echo "::notice::changes: ${GITHUB_EVENT_NAME} — forcing heavy Linux Rust lanes on (merge queue is never pruned)"
+          if [ "${FORCE_MERGE_GROUP}" = "true" ] && [ "${MERGE_GROUP_DOCS_ONLY_TAIL}" = "true" ]; then
+            echo "::notice::changes: ${GITHUB_EVENT_NAME} — skipping heavy Linux Rust lanes for a proven docs-only merge-queue tail"
+            echo "rust=false" >> "$GITHUB_OUTPUT"
+          elif [ "${FORCE_MERGE_GROUP}" = "true" ]; then
+            echo "::notice::changes: ${GITHUB_EVENT_NAME} — forcing heavy Linux Rust lanes on"
             echo "rust=true" >> "$GITHUB_OUTPUT"
           elif [ "${RELEASE_METADATA_ONLY}" = "true" ]; then
             echo "::notice::changes: release metadata-only ${GITHUB_EVENT_NAME} — skipping heavy Linux Rust lanes"
