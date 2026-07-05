@@ -63,19 +63,27 @@ fn __judge_payload(session, opts, stop_reason, text, iteration) {
 fn __judge_invoke_closure(verify_completion, payload) {
   let result = verify_completion(payload)
   if result == nil || result == "" {
-    return {vetoed: false}
+    return {vetoed: false, confirm: true, trigger: "verify_completion"}
   }
   if type_of(result) == "bool" {
-    return {vetoed: !result}
+    return {vetoed: !result, confirm: result, trigger: "verify_completion"}
   }
   if type_of(result) == "string" {
-    return {vetoed: true, feedback: result}
+    return {vetoed: true, feedback: result, confirm: false, trigger: "verify_completion"}
   }
   if type_of(result) == "dict" {
-    let {confirm = false, message = result?.feedback} = result ?? {}
-    return {vetoed: !confirm, feedback: message}
+    let confirm = result?.confirm ?? false
+    let message = result?.message ?? result?.feedback
+    return {
+      vetoed: !confirm,
+      feedback: message,
+      confirm: confirm,
+      reason: result?.reason,
+      converted_from: result?.converted_from,
+      trigger: result?.trigger ?? "verify_completion",
+    }
   }
-  return {vetoed: false}
+  return {vetoed: false, confirm: true, trigger: "verify_completion"}
 }
 
 fn __judge_invoke_structured(harness: Harness, judge_cfg, opts, payload) {
@@ -230,6 +238,9 @@ fn __emit_judge_decision(session_id, iteration, verdict) {
       next_step: verdict?.next_step ?? "",
       judge_duration_ms: verdict?.judge_duration_ms ?? 0,
       trigger: verdict?.trigger ?? nil,
+      reason: verdict?.reason ?? nil,
+      confirm: verdict?.confirm ?? !verdict.vetoed,
+      converted_from: verdict?.converted_from ?? nil,
     },
   )
 }
@@ -246,6 +257,7 @@ pub fn agent_verify_or_continue(session, opts, stop_reason, text, iteration = 0)
   var verdict = {vetoed: false}
   if opts?.verify_completion != nil {
     verdict = __judge_invoke_closure(opts.verify_completion, payload)
+    __emit_judge_decision(session.session_id, iteration, verdict)
   }
   var completion_judge_invoked = false
   var completion_judge_cap_reached = false
@@ -468,7 +480,7 @@ fn __completion_gate_evaluate(payload, opts, facts_available) {
   }
   let resolved = budgeted.verdict
   if resolved?.ok ?? false {
-    return {confirm: true, reason: resolved?.reason ?? ""}
+    return {confirm: true, reason: resolved?.reason ?? "", converted_from: resolved?.converted_from ?? nil}
   }
   return {confirm: false, message: to_string(resolved?.feedback ?? ""), reason: resolved?.reason ?? ""}
 }

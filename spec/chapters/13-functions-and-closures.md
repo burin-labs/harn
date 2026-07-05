@@ -178,9 +178,10 @@ any natural stop. `done_judge` runs after a native-tool loop naturally
 completes or after the model emits the configured done sentinel. The structured
 judge returns `verdict: "done" | "continue"` plus optional `reasoning` and
 `next_step`, and injects judge feedback before continuing when the verdict
-rejects completion. Each built-in judge call emits
-`JudgeDecision {session_id, iteration, verdict, reasoning, next_step,
-judge_duration_ms, trigger?}`. The optional `trigger` is `"stalled"` when a
+rejects completion. Each built-in judge call and deterministic
+`verify_completion` decision emits `JudgeDecision {session_id, iteration,
+verdict, reasoning, next_step, judge_duration_ms, trigger?, reason?, confirm?,
+converted_from?}`. The optional `trigger` is `"stalled"` when a
 `done_judge.cadence.when: "stalled"` judge fires from an
 `agent_loop_stall_warning`; a `done` verdict stops the loop with
 `stalled_done_judge` before the repeated tool call dispatches, and a
@@ -515,4 +516,3 @@ match the function's parameter count, the usual arity error is produced.
 `return value` inside a function/closure unwinds execution via
 `HarnRuntimeError.returnValue`. The closure invocation catches this and returns the value.
 `return` inside a pipeline terminates the pipeline.
-

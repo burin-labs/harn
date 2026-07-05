@@ -1126,6 +1126,9 @@ impl AgentEventSink for AcpAgentEventSink {
                 next_step,
                 judge_duration_ms,
                 trigger,
+                reason,
+                confirm,
+                converted_from,
             } => {
                 self.emit_agent_event_ext(
                     "judge_decision",
@@ -1137,6 +1140,9 @@ impl AgentEventSink for AcpAgentEventSink {
                         "nextStep": next_step,
                         "judgeDurationMs": judge_duration_ms,
                         "trigger": trigger,
+                        "reason": reason,
+                        "confirm": confirm,
+                        "convertedFrom": converted_from,
                     }),
                 );
             }

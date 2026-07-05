@@ -234,6 +234,12 @@ pub enum AgentEvent {
         judge_duration_ms: u64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         trigger: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        confirm: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        converted_from: Option<String>,
     },
     /// Per-step critique decision emitted by `agent_step_judge`.
     /// Sibling of [`JudgeDecision`] but fired BEFORE tool dispatch on

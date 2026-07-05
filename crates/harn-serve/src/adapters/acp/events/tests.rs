@@ -477,6 +477,9 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
             next_step: Some("run the verifier".to_string()),
             judge_duration_ms: 42,
             trigger: Some("stalled".to_string()),
+            reason: Some("no_source_write".to_string()),
+            confirm: Some(false),
+            converted_from: Some("cosmetic_only".to_string()),
         },
         AgentEvent::StructuralValidatorDecision {
             session_id: "session-1".to_string(),

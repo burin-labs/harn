@@ -19,6 +19,14 @@ import { agent_capture_events } from "std/agent/events"
 import { agent_completion_gate } from "std/agent/judge"
 import { llm_text, with_llm_script } from "std/testing"
 
+fn events_of(events, kind) {
+  return events.filter({ event -> event.type == kind })
+}
+
+fn event_field_values(events, field) {
+  return join(events.map({ event -> to_string(event[field] ?? "") }), ",")
+}
+
 fn done_turns(n) {
   var turns = []
   for i in range(0, n) {
@@ -51,8 +59,11 @@ pipeline default() {
           ),
         ) },
       )
+      let decisions = events_of(captured.events, "judge_decision")
       __io_println("A.status=" + captured.result.status)
       __io_println("A.gate_calls=" + to_string(store_get(calls_key)))
+      __io_println("A.reasons=" + event_field_values(decisions, "reason"))
+      __io_println("A.confirms=" + event_field_values(decisions, "confirm"))
     },
   )
   // --- B. source write + green verifier: honored immediately; payload shape seen ---
@@ -79,10 +90,13 @@ pipeline default() {
           ),
         ) },
       )
+      let decisions = events_of(captured.events, "judge_decision")
       __io_println("B.status=" + captured.result.status)
       __io_println("B.session_matches=" + to_string(store_get(probe + ".session_matches")))
       __io_println("B.has_task=" + to_string(store_get(probe + ".has_task")))
       __io_println("B.messages_is_list=" + to_string(store_get(probe + ".messages_is_list")))
+      __io_println("B.reasons=" + event_field_values(decisions, "reason"))
+      __io_println("B.confirms=" + event_field_values(decisions, "confirm"))
     },
   )
   // --- C. source write + red verifier: strict veto the budget never converts ---
@@ -106,6 +120,9 @@ pipeline default() {
       )
       __io_println("C.status=" + captured.result.status)
       __io_println("C.is_done=" + to_string(captured.result.status == "done"))
+      __io_println(
+        "C.reasons=" + event_field_values(events_of(captured.events, "judge_decision"), "reason"),
+      )
     },
   )
   // --- D. no host facts: judge-only degradation, surfaced (never a silent pass) ---
@@ -125,6 +142,12 @@ pipeline default() {
         ) },
       )
       __io_println("D.status=" + captured.result.status)
+      __io_println(
+        "D.reasons=" + event_field_values(events_of(captured.events, "judge_decision"), "reason"),
+      )
+      __io_println(
+        "D.confirms=" + event_field_values(events_of(captured.events, "judge_decision"), "confirm"),
+      )
     },
   )
 }
