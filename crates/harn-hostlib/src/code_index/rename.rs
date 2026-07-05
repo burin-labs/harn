@@ -404,7 +404,11 @@ fn resolve_seed(
         .filter(|node| {
             matches!(
                 node.kind,
-                NodeKind::Function | NodeKind::Type | NodeKind::Module
+                NodeKind::Function
+                    | NodeKind::Type
+                    | NodeKind::Field
+                    | NodeKind::EnumCase
+                    | NodeKind::Module
             )
         })
         .collect();
@@ -500,11 +504,15 @@ fn parse_kind(raw: &str) -> Result<NodeKind, HostlibError> {
     match raw {
         "Function" => Ok(NodeKind::Function),
         "Type" => Ok(NodeKind::Type),
+        "Field" => Ok(NodeKind::Field),
+        "EnumCase" => Ok(NodeKind::EnumCase),
         "Module" => Ok(NodeKind::Module),
         other => Err(HostlibError::InvalidParameter {
             builtin: BUILTIN,
             param: "symbol_ref.kind",
-            message: format!("expected one of [Function, Type, Module], got `{other}`"),
+            message: format!(
+                "expected one of [Function, Type, Field, EnumCase, Module], got `{other}`"
+            ),
         }),
     }
 }

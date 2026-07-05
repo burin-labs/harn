@@ -1,6 +1,12 @@
 pub struct Task {
   id: string
   title: string
+  status: Status
+}
+
+enum Status {
+  Pending
+  Done
 }
 
 interface Runner {

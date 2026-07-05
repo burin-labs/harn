@@ -734,6 +734,13 @@ pub(super) fn run_outline_get(
                 build_dict([
                     ("name", str_value(&sym.name)),
                     ("kind", str_value(&sym.kind)),
+                    (
+                        "access_level",
+                        sym.access_level
+                            .as_deref()
+                            .map(str_value)
+                            .unwrap_or(VmValue::Nil),
+                    ),
                     ("start_line", VmValue::Int(sym.start_line as i64)),
                     ("end_line", VmValue::Int(sym.end_line as i64)),
                     ("signature", str_value(&sym.signature)),

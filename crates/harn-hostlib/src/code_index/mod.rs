@@ -33,7 +33,7 @@
 //!
 //! - **`cypher`**: read-only Cypher executor over the typed graph
 //!   ([`SymbolGraph`]) — `MATCH ... WHERE ... RETURN` with typed
-//!   nodes (Function|Type|Module|Import|CallSite|Macro), typed edges
+//!   nodes (Function|Type|Field|EnumCase|Module|Import|CallSite|Macro), typed edges
 //!   (CALLS|REFS|IMPORTS|CONTAINS|OVERRIDES, plus `_BY` inverses),
 //!   and variable-length hops up to depth 4.
 //! - **`branch_overlay`**: per-branch CDC overlay that layers a delta

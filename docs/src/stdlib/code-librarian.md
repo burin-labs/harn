@@ -31,6 +31,9 @@ The Cypher executor that backs `code_librarian_query` and
 Supported clauses: `MATCH`, `WHERE`, `RETURN`, alias projections
 (`RETURN expr AS name`), single-edge and variable-length traversal up
 to depth 4.
+Supported node labels are `Function`, `Type`, `Field`, `EnumCase`,
+`Module`, `Import`, `CallSite`, and `Macro`; symbols expose
+`access_level` when the grammar can normalize declaration visibility.
 
 ## Worked example: who calls this function?
 

@@ -9,11 +9,12 @@
     "properties": {
       "name": { "type": "string" },
       "kind": { "type": "string" },
+      "access_level": { "type": ["string", "null"] },
       "start_line": { "type": "integer", "minimum": 1 },
       "end_line": { "type": "integer", "minimum": 1 },
       "signature": { "type": "string" }
     },
-    "required": ["name", "kind", "start_line", "end_line", "signature"],
+    "required": ["name", "kind", "access_level", "start_line", "end_line", "signature"],
     "additionalProperties": false
   }
 }

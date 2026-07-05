@@ -89,6 +89,7 @@ pub(super) fn build_outline(symbols: Vec<Symbol>) -> Vec<OutlineItem> {
         let item = OutlineItem {
             name: sym.name,
             kind: sym.kind,
+            access_level: sym.access_level,
             signature: sym.signature,
             start_row: sym.start_row,
             end_row: sym.end_row,
@@ -139,6 +140,7 @@ mod tests {
             name: name.into(),
             kind,
             container: None,
+            access_level: None,
             signature: name.into(),
             start_row: start,
             start_col: 0,
@@ -212,18 +214,21 @@ mod tests {
         let mut items = vec![OutlineItem {
             name: "Outer".into(),
             kind: SymbolKind::Class,
+            access_level: None,
             signature: "class Outer".into(),
             start_row: 0,
             end_row: 10,
             children: vec![OutlineItem {
                 name: "Inner".into(),
                 kind: SymbolKind::Class,
+                access_level: None,
                 signature: "class Inner".into(),
                 start_row: 1,
                 end_row: 5,
                 children: vec![OutlineItem {
                     name: "deep".into(),
                     kind: SymbolKind::Method,
+                    access_level: None,
                     signature: "fn deep".into(),
                     start_row: 2,
                     end_row: 3,

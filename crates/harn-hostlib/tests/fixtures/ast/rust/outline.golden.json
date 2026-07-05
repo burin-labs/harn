@@ -1,8 +1,18 @@
 [
-  {"name":"Greeter", "kind":"struct", "signature":"struct Greeter", "start_row":0, "end_row":2, "children":[]},
-  {"name":"Color", "kind":"enum", "signature":"enum Color", "start_row":4, "end_row":8, "children":[]},
-  {"name":"Speak", "kind":"protocol", "signature":"trait Speak", "start_row":10, "end_row":12, "children":[]},
-  {"name":"greet", "kind":"function", "signature":"fn greet(&self)", "start_row":15, "end_row":17, "children":[]},
-  {"name":"shout", "kind":"function", "signature":"fn shout(s: &str)", "start_row":20, "end_row":22, "children":[]},
-  {"name":"Counter", "kind":"type", "signature":"type Counter", "start_row":24, "end_row":24, "children":[]}
+  {"name":"Greeter", "kind":"struct", "access_level":null, "signature":"struct Greeter", "start_row":0, "end_row":2, "children":
+    [
+      {"name":"name", "kind":"field", "access_level":"private", "signature":"name: String", "start_row":1, "end_row":1, "children":[]}
+    ]
+  },
+  {"name":"Color", "kind":"enum", "access_level":null, "signature":"enum Color", "start_row":4, "end_row":8, "children":
+    [
+      {"name":"Red", "kind":"enum_case", "access_level":null, "signature":"case Red", "start_row":5, "end_row":5, "children":[]},
+      {"name":"Green", "kind":"enum_case", "access_level":null, "signature":"case Green", "start_row":6, "end_row":6, "children":[]},
+      {"name":"Blue", "kind":"enum_case", "access_level":null, "signature":"case Blue", "start_row":7, "end_row":7, "children":[]}
+    ]
+  },
+  {"name":"Speak", "kind":"protocol", "access_level":null, "signature":"trait Speak", "start_row":10, "end_row":12, "children":[]},
+  {"name":"greet", "kind":"function", "access_level":null, "signature":"fn greet(&self)", "start_row":15, "end_row":17, "children":[]},
+  {"name":"shout", "kind":"function", "access_level":null, "signature":"fn shout(s: &str)", "start_row":20, "end_row":22, "children":[]},
+  {"name":"Counter", "kind":"type", "access_level":null, "signature":"type Counter", "start_row":24, "end_row":24, "children":[]}
 ]

@@ -69,6 +69,118 @@ pub(super) fn extract(tree: &Tree, source: &str, language: Language) -> Vec<Symb
     out
 }
 
+fn normalized_access_level(raw: &str) -> Option<&'static str> {
+    match raw.trim().trim_end_matches(':') {
+        "pub" | "public" => Some("public"),
+        "private" | "priv" => Some("private"),
+        "protected" => Some("protected"),
+        "internal" => Some("internal"),
+        "fileprivate" => Some("fileprivate"),
+        "open" => Some("open"),
+        "package" => Some("package"),
+        _ => None,
+    }
+}
+
+fn explicit_access_level(node: Node<'_>, source: &str) -> Option<&'static str> {
+    for child in helpers::children(node) {
+        if let Some(level) = normalized_access_level(&helpers::node_text(child, source)) {
+            return Some(level);
+        }
+        if child.kind().contains("modifier") {
+            for token in helpers::children(child) {
+                if let Some(level) = normalized_access_level(&helpers::node_text(token, source)) {
+                    return Some(level);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn child_text_by_kind(node: Node<'_>, source: &str, kinds: &[&str]) -> Option<String> {
+    helpers::children(node)
+        .find(|child| child.is_named() && kinds.contains(&child.kind()))
+        .map(|child| helpers::node_text(child, source))
+}
+
+fn descendant_text_by_kind(node: Node<'_>, source: &str, kinds: &[&str]) -> Option<String> {
+    for child in helpers::children(node) {
+        if child.is_named() && kinds.contains(&child.kind()) {
+            if let Some(name) = field_text(child, "name", source) {
+                return Some(name);
+            }
+            return Some(helpers::node_text(child, source));
+        }
+        if let Some(found) = descendant_text_by_kind(child, source, kinds) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+fn enum_case_symbol(
+    node: Node<'_>,
+    source: &str,
+    container: Option<&str>,
+    pos: NodePos,
+    out: &mut Vec<Symbol>,
+) {
+    let name = if matches!(
+        node.kind(),
+        "identifier" | "simple_identifier" | "property_identifier" | "field_identifier"
+    ) {
+        Some(helpers::node_text(node, source))
+    } else {
+        field_text(node, "name", source).or_else(|| {
+            child_text_by_kind(
+                node,
+                source,
+                &[
+                    "identifier",
+                    "simple_identifier",
+                    "property_identifier",
+                    "field_identifier",
+                ],
+            )
+        })
+    };
+    let Some(name) = name else {
+        return;
+    };
+    if name.is_empty() {
+        return;
+    }
+    out.push(helpers::sym(
+        &name,
+        SymbolKind::EnumCase,
+        container,
+        format!("case {name}"),
+        pos,
+    ));
+}
+
+fn field_symbol(
+    name: &str,
+    signature: String,
+    container: Option<&str>,
+    access_level: Option<&str>,
+    pos: NodePos,
+    out: &mut Vec<Symbol>,
+) {
+    if name.is_empty() {
+        return;
+    }
+    out.push(helpers::sym_with_access_level(
+        name,
+        SymbolKind::Field,
+        container,
+        access_level,
+        signature,
+        pos,
+    ));
+}
+
 // ---------------------------------------------------------------------------
 // TypeScript / TSX
 // ---------------------------------------------------------------------------
@@ -107,15 +219,15 @@ fn extract_typescript(root: Node<'_>, source: &str, out: &mut Vec<Symbol>) {
                 });
                 None
             }
-            "enum_declaration" => named_decl_with_keyword(NamedDeclArgs {
-                node,
-                source,
-                container,
-                pos,
-                kind: SymbolKind::Enum,
-                keyword: "enum",
-                out,
-            }),
+            "enum_declaration" => extract_ts_enum_declaration(node, source, container, pos, out),
+            "enum_assignment" => {
+                enum_case_symbol(node, source, container, pos, out);
+                None
+            }
+            "public_field_definition" | "field_definition" => {
+                push_ts_field(node, source, container, pos, out);
+                None
+            }
             "function_declaration" => {
                 push_func(PushFuncArgs {
                     node,
@@ -147,6 +259,52 @@ fn extract_typescript(root: Node<'_>, source: &str, out: &mut Vec<Symbol>) {
             _ => None,
         }
     });
+}
+
+fn push_ts_field(
+    node: Node<'_>,
+    source: &str,
+    container: Option<&str>,
+    pos: NodePos,
+    out: &mut Vec<Symbol>,
+) {
+    let Some(name) = field_text(node, "name", source)
+        .or_else(|| child_text_by_kind(node, source, &["property_identifier", "identifier"]))
+    else {
+        return;
+    };
+    let access = explicit_access_level(node, source).or(Some("public"));
+    field_symbol(&name, name.clone(), container, access, pos, out);
+}
+
+fn extract_ts_enum_declaration(
+    node: Node<'_>,
+    source: &str,
+    container: Option<&str>,
+    pos: NodePos,
+    out: &mut Vec<Symbol>,
+) -> Option<String> {
+    let name = named_decl_with_keyword(NamedDeclArgs {
+        node,
+        source,
+        container,
+        pos,
+        kind: SymbolKind::Enum,
+        keyword: "enum",
+        out,
+    })?;
+    push_ts_enum_body(node, source, Some(&name), out);
+    Some(name)
+}
+
+fn push_ts_enum_body(node: Node<'_>, source: &str, container: Option<&str>, out: &mut Vec<Symbol>) {
+    for child in helpers::children(node) {
+        if node.kind() == "enum_body" && child.kind() == "property_identifier" {
+            enum_case_symbol(child, source, container, point_pos(child), out);
+        } else {
+            push_ts_enum_body(child, source, container, out);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -188,6 +346,10 @@ fn extract_javascript(root: Node<'_>, source: &str, out: &mut Vec<Symbol>) {
                     prefix: "",
                     out,
                 });
+                None
+            }
+            "public_field_definition" | "field_definition" => {
+                push_ts_field(node, source, container, pos, out);
                 None
             }
             "lexical_declaration" | "variable_declaration" => {
@@ -291,9 +453,36 @@ fn extract_go(root: Node<'_>, source: &str, out: &mut Vec<Symbol>) {
                 None
             }
             "type_declaration" => extract_go_type_decl(node, source, container, pos, out),
+            "field_declaration" => {
+                push_go_field(node, source, container, pos, out);
+                None
+            }
             _ => None,
         }
     });
+}
+
+fn push_go_field(
+    node: Node<'_>,
+    source: &str,
+    container: Option<&str>,
+    pos: NodePos,
+    out: &mut Vec<Symbol>,
+) {
+    let Some(name) = field_text(node, "name", source)
+        .or_else(|| child_text_by_kind(node, source, &["field_identifier", "identifier"]))
+    else {
+        return;
+    };
+    let access = if name.chars().next().is_some_and(char::is_uppercase) {
+        Some("public")
+    } else {
+        Some("private")
+    };
+    let signature = field_text(node, "type", source)
+        .map(|ty| format!("{name} {ty}"))
+        .unwrap_or_else(|| name.clone());
+    field_symbol(&name, signature, container, access, pos, out);
 }
 
 fn extract_go_package(root: Node<'_>, source: &str, out: &mut Vec<Symbol>) {
@@ -410,6 +599,14 @@ fn extract_rust(root: Node<'_>, source: &str, out: &mut Vec<Symbol>) {
                 keyword: "enum",
                 out,
             }),
+            "enum_variant" => {
+                enum_case_symbol(node, source, container, pos, out);
+                None
+            }
+            "field_declaration" => {
+                push_rust_field(node, source, container, pos, out);
+                None
+            }
             "trait_item" => named_decl_with_keyword(NamedDeclArgs {
                 node,
                 source,
@@ -437,6 +634,25 @@ fn extract_rust(root: Node<'_>, source: &str, out: &mut Vec<Symbol>) {
             _ => None,
         }
     });
+}
+
+fn push_rust_field(
+    node: Node<'_>,
+    source: &str,
+    container: Option<&str>,
+    pos: NodePos,
+    out: &mut Vec<Symbol>,
+) {
+    let Some(name) = field_text(node, "name", source)
+        .or_else(|| child_text_by_kind(node, source, &["field_identifier", "identifier"]))
+    else {
+        return;
+    };
+    let signature = field_text(node, "type", source)
+        .map(|ty| format!("{name}: {ty}"))
+        .unwrap_or_else(|| name.clone());
+    let access = explicit_access_level(node, source).or(Some("private"));
+    field_symbol(&name, signature, container, access, pos, out);
 }
 
 // ---------------------------------------------------------------------------
@@ -526,6 +742,14 @@ fn extract_java(root: Node<'_>, source: &str, out: &mut Vec<Symbol>) {
                 keyword: "enum",
                 out,
             }),
+            "enum_constant" => {
+                enum_case_symbol(node, source, container, pos, out);
+                None
+            }
+            "field_declaration" => {
+                push_jvm_field(node, source, container, pos, "type", Some("package"), out);
+                None
+            }
             "method_declaration" => {
                 push_jvm_method(node, source, container, pos, out);
                 None
@@ -545,6 +769,26 @@ fn extract_java(root: Node<'_>, source: &str, out: &mut Vec<Symbol>) {
             _ => None,
         }
     });
+}
+
+fn push_jvm_field(
+    node: Node<'_>,
+    source: &str,
+    container: Option<&str>,
+    pos: NodePos,
+    type_field: &str,
+    default_access: Option<&str>,
+    out: &mut Vec<Symbol>,
+) {
+    let name = field_text(node, "name", source)
+        .or_else(|| descendant_text_by_kind(node, source, &["variable_declarator", "identifier"]));
+    let Some(name) = name else {
+        return;
+    };
+    let field_type = field_text(node, type_field, source).unwrap_or_default();
+    let signature = format!("{field_type} {name}").trim().to_string();
+    let access = explicit_access_level(node, source).or(default_access);
+    field_symbol(&name, signature, container, access, pos, out);
 }
 
 fn push_jvm_method(
@@ -601,7 +845,15 @@ fn extract_c(root: Node<'_>, source: &str, out: &mut Vec<Symbol>) {
         let pos = point_pos(node);
         match node.kind() {
             "function_definition" => {
-                push_c_function(node, source, container, pos, SymbolKind::Function, out);
+                push_c_function(
+                    node,
+                    source,
+                    container,
+                    None,
+                    pos,
+                    SymbolKind::Function,
+                    out,
+                );
                 None
             }
             "struct_specifier" => push_c_specifier(
@@ -614,7 +866,14 @@ fn extract_c(root: Node<'_>, source: &str, out: &mut Vec<Symbol>) {
                 out,
             ),
             "enum_specifier" => {
-                push_c_specifier(node, source, container, pos, SymbolKind::Enum, "enum", out);
+                push_c_specifier(node, source, container, pos, SymbolKind::Enum, "enum", out)
+            }
+            "enumerator" => {
+                enum_case_symbol(node, source, container, pos, out);
+                None
+            }
+            "field_declaration" => {
+                push_c_field(node, source, container, None, pos, out);
                 None
             }
             "type_definition" => {
@@ -636,7 +895,8 @@ fn extract_cpp(root: Node<'_>, source: &str, out: &mut Vec<Symbol>) {
                 } else {
                     SymbolKind::Function
                 };
-                push_c_function(node, source, container, pos, kind, out);
+                let access = cpp_member_access(node, source);
+                push_c_function(node, source, container, access, pos, kind, out);
                 None
             }
             "class_specifier" => push_c_specifier(
@@ -658,7 +918,15 @@ fn extract_cpp(root: Node<'_>, source: &str, out: &mut Vec<Symbol>) {
                 out,
             ),
             "enum_specifier" => {
-                push_c_specifier(node, source, container, pos, SymbolKind::Enum, "enum", out);
+                push_c_specifier(node, source, container, pos, SymbolKind::Enum, "enum", out)
+            }
+            "enumerator" => {
+                enum_case_symbol(node, source, container, pos, out);
+                None
+            }
+            "field_declaration" => {
+                let access = cpp_member_access(node, source);
+                push_c_field(node, source, container, access, pos, out);
                 None
             }
             "namespace_definition" => named_decl_with_keyword(NamedDeclArgs {
@@ -679,6 +947,7 @@ fn push_c_function(
     node: Node<'_>,
     source: &str,
     container: Option<&str>,
+    access_level: Option<&str>,
     pos: NodePos,
     kind: SymbolKind,
     out: &mut Vec<Symbol>,
@@ -691,7 +960,61 @@ fn push_c_function(
     };
     let params = declarator_params(declarator, source);
     let sig = format!("{name}{}", truncate(&params, 80));
-    out.push(helpers::sym(&name, kind, container, sig, pos));
+    out.push(helpers::sym_with_access_level(
+        &name,
+        kind,
+        container,
+        access_level,
+        sig,
+        pos,
+    ));
+}
+
+fn push_c_field(
+    node: Node<'_>,
+    source: &str,
+    container: Option<&str>,
+    access_level: Option<&str>,
+    pos: NodePos,
+    out: &mut Vec<Symbol>,
+) {
+    let declarator = node
+        .child_by_field_name("declarator")
+        .or_else(|| child_by_kind(node, "field_identifier"));
+    let Some(declarator) = declarator else {
+        return;
+    };
+    let Some(name) = declarator_name(declarator, source) else {
+        return;
+    };
+    let field_type = field_text(node, "type", source).unwrap_or_default();
+    let signature = format!("{field_type} {name}").trim().to_string();
+    field_symbol(&name, signature, container, access_level, pos, out);
+}
+
+fn child_by_kind<'tree>(node: Node<'tree>, kind: &str) -> Option<Node<'tree>> {
+    helpers::children(node).find(|child| child.kind() == kind)
+}
+
+fn cpp_member_access(node: Node<'_>, source: &str) -> Option<&'static str> {
+    let list = node.parent()?;
+    if list.kind() != "field_declaration_list" {
+        return None;
+    }
+    let mut access = list.parent().and_then(|container| match container.kind() {
+        "class_specifier" => Some("private"),
+        "struct_specifier" => Some("public"),
+        _ => None,
+    });
+    for child in helpers::children(list) {
+        if child.id() == node.id() {
+            return access;
+        }
+        if child.kind() == "access_specifier" {
+            access = normalized_access_level(&helpers::node_text(child, source));
+        }
+    }
+    access
 }
 
 fn push_c_specifier(
@@ -829,18 +1152,28 @@ fn extract_csharp(root: Node<'_>, source: &str, out: &mut Vec<Symbol>) {
                 keyword: "enum",
                 out,
             }),
+            "enum_member_declaration" => {
+                enum_case_symbol(node, source, container, pos, out);
+                None
+            }
             "method_declaration" => {
                 push_csharp_method(node, source, container, pos, out);
+                None
+            }
+            "field_declaration" => {
+                push_jvm_field(node, source, container, pos, "type", Some("private"), out);
                 None
             }
             "property_declaration" => {
                 let name_node = node.child_by_field_name("name")?;
                 let name = helpers::node_text(name_node, source);
                 let prop_type = field_text(node, "type", source).unwrap_or_default();
-                out.push(helpers::sym(
+                let access = explicit_access_level(node, source).or(Some("private"));
+                out.push(helpers::sym_with_access_level(
                     &name,
-                    SymbolKind::Variable,
+                    SymbolKind::Field,
                     container,
+                    access,
                     format!("{prop_type} {name}").trim().to_string(),
                     pos,
                 ));
@@ -890,6 +1223,14 @@ fn extract_kotlin(root: Node<'_>, source: &str, out: &mut Vec<Symbol>) {
                 ));
                 Some(name)
             }
+            "enum_entry" => {
+                enum_case_symbol(node, source, container, pos, out);
+                None
+            }
+            "property_declaration" => {
+                push_kotlin_field(node, source, container, pos, out);
+                None
+            }
             "function_declaration" => {
                 let name_node = node.child_by_field_name("name")?;
                 let name = helpers::node_text(name_node, source);
@@ -910,6 +1251,22 @@ fn extract_kotlin(root: Node<'_>, source: &str, out: &mut Vec<Symbol>) {
             _ => None,
         }
     });
+}
+
+fn push_kotlin_field(
+    node: Node<'_>,
+    source: &str,
+    container: Option<&str>,
+    pos: NodePos,
+    out: &mut Vec<Symbol>,
+) {
+    let Some(name) = field_text(node, "name", source)
+        .or_else(|| child_text_by_kind(node, source, &["identifier", "simple_identifier"]))
+    else {
+        return;
+    };
+    let access = explicit_access_level(node, source).or(Some("public"));
+    field_symbol(&name, name.clone(), container, access, pos, out);
 }
 
 // ---------------------------------------------------------------------------
@@ -1013,6 +1370,10 @@ fn extract_php(root: Node<'_>, source: &str, out: &mut Vec<Symbol>) {
                 keyword: "enum",
                 out,
             }),
+            "enum_case" | "case_declaration" => {
+                enum_case_symbol(node, source, container, pos, out);
+                None
+            }
             "function_definition" => {
                 push_func(PushFuncArgs {
                     node,
@@ -1089,6 +1450,12 @@ fn extract_scala(root: Node<'_>, source: &str, out: &mut Vec<Symbol>) {
                 keyword: "enum",
                 out,
             }),
+            "enum_case" | "case_clause" => {
+                if container.is_some() {
+                    enum_case_symbol(node, source, container, pos, out);
+                }
+                None
+            }
             "function_definition" | "function_declaration" => {
                 let name_node = node.child_by_field_name("name")?;
                 let name = helpers::node_text(name_node, source);
@@ -1167,10 +1534,18 @@ fn push_scala_binding(
     if name.len() <= 1 {
         return;
     }
-    out.push(helpers::sym(
+    let symbol_kind = if kind == SymbolKind::Variable && container.is_some() {
+        SymbolKind::Field
+    } else {
+        kind
+    };
+    let access = (symbol_kind == SymbolKind::Field)
+        .then(|| explicit_access_level(node, source).unwrap_or("public"));
+    out.push(helpers::sym_with_access_level(
         &name,
-        kind,
+        symbol_kind,
         container,
+        access,
         format!("{keyword} {name}"),
         pos,
     ));
@@ -1220,6 +1595,10 @@ fn extract_swift(root: Node<'_>, source: &str, out: &mut Vec<Symbol>) {
                 None
             }
             "class_declaration" => extract_swift_class(node, source, container, pos, out),
+            "enum_entry" => {
+                enum_case_symbol(node, source, container, pos, out);
+                None
+            }
             "protocol_declaration" => named_decl_with_keyword(NamedDeclArgs {
                 node,
                 source,
@@ -1232,10 +1611,18 @@ fn extract_swift(root: Node<'_>, source: &str, out: &mut Vec<Symbol>) {
             "property_declaration" => {
                 if let Some(name_node) = node.child_by_field_name("name") {
                     let name = helpers::node_text(name_node, source);
-                    out.push(helpers::sym(
+                    let kind = if container.is_some() {
+                        SymbolKind::Field
+                    } else {
+                        SymbolKind::Variable
+                    };
+                    let access = (kind == SymbolKind::Field)
+                        .then(|| explicit_access_level(node, source).unwrap_or("internal"));
+                    out.push(helpers::sym_with_access_level(
                         &name,
-                        SymbolKind::Variable,
+                        kind,
                         container,
+                        access,
                         name.clone(),
                         pos,
                     ));
@@ -1599,6 +1986,14 @@ fn extract_harn(root: Node<'_>, source: &str, out: &mut Vec<Symbol>) {
             "enum_declaration" => {
                 harn_named_decl(node, source, container, pos, SymbolKind::Enum, "enum", out)
             }
+            "enum_variant" | "enum_case" => {
+                enum_case_symbol(node, source, container, pos, out);
+                None
+            }
+            "struct_field" => {
+                push_harn_field(node, source, container, pos, out);
+                None
+            }
             "interface_declaration" => harn_named_decl(
                 node,
                 source,
@@ -1615,6 +2010,29 @@ fn extract_harn(root: Node<'_>, source: &str, out: &mut Vec<Symbol>) {
             _ => None,
         }
     });
+}
+
+fn push_harn_field(
+    node: Node<'_>,
+    source: &str,
+    container: Option<&str>,
+    pos: NodePos,
+    out: &mut Vec<Symbol>,
+) {
+    let Some(name) = field_text(node, "name", source) else {
+        return;
+    };
+    let signature = field_text(node, "type", source)
+        .map(|ty| format!("{name}: {ty}"))
+        .unwrap_or_else(|| name.clone());
+    field_symbol(
+        &name,
+        signature,
+        container,
+        explicit_access_level(node, source),
+        pos,
+        out,
+    );
 }
 
 fn push_harn_callable(

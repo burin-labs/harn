@@ -21,9 +21,13 @@
         "name": { "type": "string" },
         "kind": {
           "type": "string",
-          "description": "Lowercase symbol kind. One of: function, method, class, struct, enum, interface, protocol, type, variable, module, other."
+          "description": "Lowercase symbol kind. One of: function, method, class, struct, enum, enum_case, field, interface, protocol, type, variable, module, other."
         },
         "container": { "type": ["string", "null"] },
+        "access_level": {
+          "type": ["string", "null"],
+          "description": "Normalized declaration access level when the grammar exposes one (for example public, private, protected, internal, package, fileprivate, open), otherwise null."
+        },
         "signature": {
           "type": "string",
           "description": "Single-line, language-flavored signature (e.g. 'fn parse(input: &str)'). Truncated to 80 chars with an ellipsis."
@@ -37,6 +41,7 @@
         "name",
         "kind",
         "container",
+        "access_level",
         "signature",
         "start_row",
         "start_col",

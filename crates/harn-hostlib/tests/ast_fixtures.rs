@@ -170,10 +170,14 @@ fn symbols_to_json(symbols: &[Symbol]) -> String {
     for (i, sym) in symbols.iter().enumerate() {
         let comma = if i + 1 == symbols.len() { "" } else { "," };
         out.push_str(&format!(
-            "  {{\"name\":{}, \"kind\":\"{}\", \"container\":{}, \"signature\":{}, \"start_row\":{}, \"start_col\":{}, \"end_row\":{}, \"end_col\":{}}}{comma}\n",
+            "  {{\"name\":{}, \"kind\":\"{}\", \"container\":{}, \"access_level\":{}, \"signature\":{}, \"start_row\":{}, \"start_col\":{}, \"end_row\":{}, \"end_col\":{}}}{comma}\n",
             quote(&sym.name),
             sym.kind.as_str(),
             sym.container
+                .as_ref()
+                .map(|s| quote(s))
+                .unwrap_or_else(|| "null".into()),
+            sym.access_level
                 .as_ref()
                 .map(|s| quote(s))
                 .unwrap_or_else(|| "null".into()),
@@ -207,9 +211,13 @@ fn write_outline_items(buf: &mut String, items: &[OutlineItem], depth: usize) {
         let inner = "  ".repeat(depth + 1);
         buf.push_str(&inner);
         buf.push_str(&format!(
-            "{{\"name\":{}, \"kind\":\"{}\", \"signature\":{}, \"start_row\":{}, \"end_row\":{}, \"children\":",
+            "{{\"name\":{}, \"kind\":\"{}\", \"access_level\":{}, \"signature\":{}, \"start_row\":{}, \"end_row\":{}, \"children\":",
             quote(&item.name),
             item.kind.as_str(),
+            item.access_level
+                .as_ref()
+                .map(|s| quote(s))
+                .unwrap_or_else(|| "null".into()),
             quote(&item.signature),
             item.start_row,
             item.end_row,
