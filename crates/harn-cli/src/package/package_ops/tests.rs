@@ -14,6 +14,47 @@ fn package_check_accepts_publishable_package() {
 }
 
 #[test]
+fn package_check_accepts_contribution_only_package() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::create_dir_all(tmp.path().join("docs")).unwrap();
+    fs::write(
+        tmp.path().join(MANIFEST),
+        format!(
+            r#"[package]
+name = "harn-canon"
+version = "0.1.0"
+description = "Canon packs"
+license = "MIT"
+repository = "https://github.com/burin-labs/harn-canon"
+harn = "{}"
+docs_url = "docs/api.md"
+
+[[contributes]]
+kind = "harn.canon"
+id = "harn-canon"
+title = "Harn Canon"
+manifest = "canon-packs.json"
+"#,
+            current_harn_range_example()
+        ),
+    )
+    .unwrap();
+    fs::write(tmp.path().join("README.md"), "# harn-canon\n").unwrap();
+    fs::write(tmp.path().join("LICENSE"), "MIT\n").unwrap();
+    fs::write(tmp.path().join("docs/api.md"), "").unwrap();
+    fs::write(
+        tmp.path().join("canon-packs.json"),
+        r#"{"schema_version":1,"packs":[]}"#,
+    )
+    .unwrap();
+
+    let report = check_package_impl(Some(tmp.path())).unwrap();
+
+    assert!(report.errors.is_empty(), "{:?}", report.errors);
+    assert!(report.exports.is_empty());
+}
+
+#[test]
 fn package_check_rejects_path_dependencies_and_bad_harn_range() {
     let tmp = tempfile::tempdir().unwrap();
     write_publishable_package(tmp.path());

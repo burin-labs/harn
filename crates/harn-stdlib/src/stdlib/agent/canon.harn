@@ -1,5 +1,5 @@
 import { agent_session_inject_feedback, agent_session_inject_reminder } from "std/agent/state"
-import { read_json } from "std/fs"
+import { find_files, read_json, read_toml } from "std/fs"
 import { ext, is_absolute } from "std/path"
 
 fn __canon_text(value) -> string {
@@ -257,6 +257,135 @@ fn __canon_requested_needs_manifest(items) -> bool {
   return false
 }
 
+fn __canon_item_file_names(item) {
+  return item?.file_names ?? item?.fileNames ?? item?["file-names"] ?? []
+}
+
+fn __canon_append_manifest_packs(packs, base_dir, manifest) {
+  if manifest == nil {
+    return packs
+  }
+  var out = packs
+  for pack in manifest?.packs ?? [] {
+    let id = __canon_text(pack?.id)
+    let invariants = __canon_text(pack?.invariants ?? pack?.path ?? pack?.module_path)
+    if id == "" || invariants == "" {
+      continue
+    }
+    out = out
+      .push(
+      {
+        id: id,
+        title: __canon_text(pack?.title ?? id),
+        invariants: __canon_path(base_dir, invariants),
+        extensions: pack?.extensions ?? [],
+        file_names: __canon_item_file_names(pack),
+        predicates: pack?.predicates,
+      },
+    )
+  }
+  return out
+}
+
+fn __canon_manifest_path_for_contribution(package_dir, contribution) -> string {
+  let explicit = __canon_text(contribution?.manifest ?? contribution?.canon_packs ?? contribution?.canonPacks)
+  if explicit != "" {
+    return __canon_path(package_dir, explicit)
+  }
+  let raw_path = __canon_text(contribution?.path)
+  if raw_path == "" {
+    return ""
+  }
+  let manifest_path = path_join(__canon_path(package_dir, raw_path), "canon-packs.json")
+  if harness.fs.exists(manifest_path) {
+    return manifest_path
+  }
+  return ""
+}
+
+fn __canon_manifest_from_installed_packages(project_root_value) -> dict? {
+  let root = __canon_text(project_root_value)
+  if root == "" {
+    return nil
+  }
+  let packages_dir = path_join(root, ".harn", "packages")
+  if !harness.fs.exists(packages_dir) {
+    return nil
+  }
+  var packs = []
+  for manifest_path in find_files(root, ".harn/packages/*/harn.toml").sort() {
+    let manifest = read_toml(manifest_path, nil)
+    if manifest == nil {
+      continue
+    }
+    let package_dir = dirname(manifest_path)
+    for contribution in manifest?.contributes ?? [] {
+      if __canon_text(contribution?.kind) != "harn.canon" {
+        continue
+      }
+      let contribution_manifest_path = __canon_manifest_path_for_contribution(package_dir, contribution)
+      if contribution_manifest_path != "" {
+        packs = __canon_append_manifest_packs(
+          packs,
+          dirname(contribution_manifest_path),
+          read_json(contribution_manifest_path, nil),
+        )
+        continue
+      }
+      let raw_path = __canon_text(contribution?.path ?? contribution?.invariants ?? contribution?.file)
+      if raw_path == "" {
+        continue
+      }
+      let contribution_path = __canon_path(package_dir, raw_path)
+      let invariants = if contribution_path.ends_with(".harn") {
+        contribution_path
+      } else {
+        path_join(contribution_path, "invariants.harn")
+      }
+      let id = __canon_text(contribution?.id ?? basename(contribution_path))
+      if id == "" {
+        continue
+      }
+      packs = packs
+        .push(
+        {
+          id: id,
+          title: __canon_text(contribution?.title ?? id),
+          invariants: invariants,
+          extensions: contribution?.extensions ?? [],
+          file_names: __canon_item_file_names(contribution),
+          predicates: contribution?.predicates,
+        },
+      )
+    }
+  }
+  if len(packs) == 0 {
+    return nil
+  }
+  return {schema_version: 1, packs: packs.sort_by({ pack -> pack.id })}
+}
+
+fn __canon_merge_manifest_packs(primary, secondary) -> dict? {
+  if primary == nil {
+    return secondary
+  }
+  if secondary == nil {
+    return primary
+  }
+  var packs = []
+  for pack in primary?.packs ?? [] {
+    packs = packs.push(pack)
+  }
+  for pack in secondary?.packs ?? [] {
+    let id = __canon_text(pack?.id)
+    if id == "" || __canon_manifest_pack({packs: packs}, id) != nil {
+      continue
+    }
+    packs = packs.push(pack)
+  }
+  return {schema_version: primary?.schema_version ?? secondary?.schema_version ?? 1, packs: packs}
+}
+
 fn __canon_pack_from_item(item, manifest, canon_root) {
   if type_of(item) == "string" {
     let id = __canon_text(item)
@@ -300,13 +429,31 @@ fn __canon_pack_from_item(item, manifest, canon_root) {
  *   packs | pack_ids: strings or `{id, invariants, title?, predicates?}` dicts
  *   files: file records used for language inference when packs are omitted
  *
+ * Default project-local roots are merged with installed `.harn/packages`
+ * contributions of kind `harn.canon`. Explicit `canon_root`, `HARN_CANON_ROOT`,
+ * and `manifest` values stay authoritative.
+ *
  * @effects: [fs.read]
  * @errors: [runtime]
  * @api_stability: experimental
  */
 pub fn canon_resolve_packs(options = nil) -> list<dict> {
   let opts = options ?? {}
-  let canon_root = canon_resolve_root(opts)
+  let project = __canon_text(opts?.project_root ?? project_root() ?? cwd() ?? "")
+  let explicit_root = __canon_text(opts?.canon_root)
+  let env_root = if explicit_root == "" {
+    __canon_root_with_manifest(harness.env.get_or("HARN_CANON_ROOT", ""))
+  } else {
+    ""
+  }
+  let configured_root = explicit_root != "" || env_root != ""
+  let canon_root = if explicit_root != "" {
+    explicit_root
+  } else if env_root != "" {
+    env_root
+  } else {
+    canon_resolve_root(opts)
+  }
   var requested = opts?.packs ?? opts?.pack_ids ?? []
   if type_of(requested) == "string" {
     requested = [requested]
@@ -314,7 +461,14 @@ pub fn canon_resolve_packs(options = nil) -> list<dict> {
   let needs_manifest = len(requested) == 0 || __canon_requested_needs_manifest(requested)
   let manifest = opts?.manifest
     ?? if needs_manifest && canon_root != nil && __canon_text(canon_root) != "" {
-    canon_load_manifest(canon_root)
+    let root_manifest = canon_load_manifest(canon_root)
+    if configured_root {
+      root_manifest
+    } else {
+      __canon_merge_manifest_packs(root_manifest, __canon_manifest_from_installed_packages(project))
+    }
+  } else if needs_manifest {
+    __canon_manifest_from_installed_packages(project)
   } else {
     nil
   }
