@@ -38,6 +38,8 @@ pub(crate) enum ModelsBatchCommand {
     Manifest(ModelsBatchManifestArgs),
     /// Plan discounted/asynchronous provider batch use for model workloads.
     Plan(ModelsBatchPlanArgs),
+    /// Prepare provider-native request files from a model batch manifest.
+    Prepare(ModelsBatchPrepareArgs),
 }
 
 #[derive(Debug, Args)]
@@ -69,6 +71,19 @@ pub(crate) struct ModelsBatchManifestArgs {
     /// Require provider-published completion within this many hours.
     #[arg(long = "max-turnaround-hours")]
     pub max_turnaround_hours: Option<u32>,
+    /// Emit structured JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ModelsBatchPrepareArgs {
+    /// Provider-neutral manifest produced by `harn models batch manifest`.
+    #[arg(long, value_name = "PATH")]
+    pub manifest: std::path::PathBuf,
+    /// Directory for provider-native request files and the prepare receipt.
+    #[arg(long = "out-dir", value_name = "DIR")]
+    pub out_dir: std::path::PathBuf,
     /// Emit structured JSON.
     #[arg(long)]
     pub json: bool,

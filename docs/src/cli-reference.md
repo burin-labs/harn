@@ -1380,6 +1380,23 @@ artifact that lower-priority eval, judge, corpus-refresh, and distillation jobs
 can hand to provider-specific upload/poll/download adapters without leaking
 provider batch details into Burin or other host products.
 
+## harn models batch prepare
+
+Prepare provider-native request artifacts from a model batch manifest:
+
+```bash
+harn models batch prepare --manifest ./batch-manifest.json --out-dir ./.harn/batches/eval-001
+harn models batch prepare --manifest ./batch-manifest.json --out-dir ./.harn/batches/eval-001 --json
+```
+
+`prepare` reads the provider-neutral manifest and writes one request artifact
+per batch group plus a deterministic `receipt.json`. The request artifacts use
+the provider's batch envelope (`openai`/`mistral` JSONL, Gemini `{key, request}`
+JSONL, or Anthropic Message Batches JSON) while the receipt records the stable
+manifest hash, request-file hashes, provider operation, upload/create shape, and
+result-rejoin ids. It does not read credentials or call provider APIs; live
+submit/poll/download adapters consume this receipt as their durable input.
+
 ## harn models lora export
 
 Export a tool-calling corpus into a trainer-ready LoRA dataset:

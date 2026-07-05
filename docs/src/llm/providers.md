@@ -482,9 +482,10 @@ not need turn-by-turn tool feedback: offline grading, prompt/corpus refreshes,
 distillation jobs, and low-priority eval analysis. Live coding-agent loops
 still need synchronous provider calls because every tool result influences the
 next model turn. `harn models batch manifest` turns a JSONL request ledger into
-a durable, grouped manifest with stable request ids and row hashes; provider
-adapters can consume that artifact for upload/poll/download without teaching
-host products provider-specific batch envelopes.
+a durable, grouped manifest with stable request ids and row hashes. `harn
+models batch prepare` then writes provider-native request files plus a
+deterministic receipt for upload/poll/download adapters, keeping provider batch
+envelopes out of host products.
 
 ### Packaged provider adapters via `[llm]`
 

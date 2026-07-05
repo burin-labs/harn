@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 
 use crate::cli::{
     ModelsBatchArgs, ModelsBatchCommand, ModelsBatchManifestArgs, ModelsBatchPlanArgs,
+    ModelsBatchPrepareArgs,
 };
 use crate::commands::run::RunSandboxOptions;
 use crate::dispatch;
@@ -24,6 +25,8 @@ const BATCH_MIN_DISCOUNT_ENV: &str = "HARN_MODELS_BATCH_MIN_DISCOUNT_PERCENT";
 const BATCH_MAX_TURNAROUND_ENV: &str = "HARN_MODELS_BATCH_MAX_TURNAROUND_HOURS";
 const BATCH_REQUESTS_ENV: &str = "HARN_MODELS_BATCH_REQUESTS";
 const BATCH_OUT_ENV: &str = "HARN_MODELS_BATCH_OUT";
+const BATCH_MANIFEST_ENV: &str = "HARN_MODELS_BATCH_MANIFEST";
+const BATCH_OUT_DIR_ENV: &str = "HARN_MODELS_BATCH_OUT_DIR";
 const BATCH_TOOL_FORMAT_ENV: &str = "HARN_MODELS_BATCH_TOOL_FORMAT";
 const BATCH_ID_PREFIX_ENV: &str = "HARN_MODELS_BATCH_ID_PREFIX";
 
@@ -33,6 +36,7 @@ pub(crate) async fn run(args: ModelsBatchArgs) {
     let exit_code = match args.command {
         ModelsBatchCommand::Manifest(args) => run_manifest(args).await,
         ModelsBatchCommand::Plan(args) => run_plan(args).await,
+        ModelsBatchCommand::Prepare(args) => run_prepare(args).await,
     };
     if exit_code != 0 {
         std::process::exit(exit_code);
@@ -75,6 +79,25 @@ async fn run_manifest(args: ModelsBatchManifestArgs) -> i32 {
     let _out = ScopedEnvVar::set(BATCH_OUT_ENV, out.trim());
     let _tool_format = ScopedEnvVar::set(BATCH_TOOL_FORMAT_ENV, args.tool_format.trim());
     let _id_prefix = ScopedEnvVar::set(BATCH_ID_PREFIX_ENV, args.id_prefix.trim());
+
+    run_batch_script(args.json, Some(sandbox)).await
+}
+
+async fn run_prepare(args: ModelsBatchPrepareArgs) -> i32 {
+    let _guard = DISPATCH_BATCH_LOCK.lock().await;
+    let manifest_path = absolutize_path(&args.manifest);
+    let out_dir = absolutize_path(&args.out_dir);
+    let mut sandbox = RunSandboxOptions::default().with_workspace_root(parent_dir(&out_dir));
+    let manifest_root = parent_dir(&manifest_path);
+    if manifest_root != parent_dir(&out_dir) {
+        sandbox = sandbox.with_read_only_roots(vec![manifest_root]);
+    }
+
+    let manifest = manifest_path.to_string_lossy().to_string();
+    let out = out_dir.to_string_lossy().to_string();
+    let _mode = ScopedEnvVar::set(BATCH_MODE_ENV, "prepare");
+    let _manifest = ScopedEnvVar::set(BATCH_MANIFEST_ENV, manifest.trim());
+    let _out = ScopedEnvVar::set(BATCH_OUT_DIR_ENV, out.trim());
 
     run_batch_script(args.json, Some(sandbox)).await
 }

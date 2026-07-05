@@ -269,6 +269,285 @@ fn models_test_failure_json_envelope_is_stable() {
     );
 }
 
+// - models batch ----------------------------------------------------------
+
+#[test]
+fn models_batch_manifest_and_prepare_openai_jsonl() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let requests_path = tmp.path().join("requests.jsonl");
+    let manifest_path = tmp.path().join("manifest.json");
+    let out_dir = tmp.path().join("prepared");
+    fs::write(
+        &requests_path,
+        r#"{"custom_id":"case-1","messages":[{"role":"user","content":"grade this"}],"max_tokens":64}
+{"id":"case-2","body":{"messages":[{"role":"user","content":"grade that"}],"max_tokens":32}}
+"#,
+    )
+    .expect("write requests");
+
+    let manifest = run(
+        &[
+            "models",
+            "batch",
+            "manifest",
+            "--provider",
+            "openai",
+            "--model",
+            "gpt-4o-mini",
+            "--requests",
+            requests_path.to_str().expect("utf8 requests path"),
+            "--out",
+            manifest_path.to_str().expect("utf8 manifest path"),
+            "--json",
+        ],
+        &[],
+    );
+    assert_eq!(manifest.exit_code, 0, "harn stderr={}", manifest.stderr);
+
+    let prepared = run(
+        &[
+            "models",
+            "batch",
+            "prepare",
+            "--manifest",
+            manifest_path.to_str().expect("utf8 manifest path"),
+            "--out-dir",
+            out_dir.to_str().expect("utf8 out dir"),
+            "--json",
+        ],
+        &[],
+    );
+    assert_eq!(prepared.exit_code, 0, "harn stderr={}", prepared.stderr);
+    let prepared_value = parse_json(&prepared.stdout, "batch prepare");
+    let report = success_data(&prepared_value);
+    assert_eq!(report["job_count"], 1);
+    assert_eq!(report["request_count"], 2);
+    let job = &report["jobs"].as_array().expect("jobs")[0];
+    assert_eq!(job["provider"], "openai");
+    assert_eq!(job["batch"]["wire_format"], "openai");
+    assert_eq!(job["endpoint"], "/v1/chat/completions");
+    assert_eq!(job["request_format"], "jsonl");
+    assert_eq!(job["submit"]["operation"], "POST /v1/batches");
+
+    let request_file = job["request_file"].as_str().expect("request_file");
+    let request_text = fs::read_to_string(request_file).expect("read request file");
+    let lines: Vec<&str> = request_text.lines().collect();
+    assert_eq!(lines.len(), 2, "request_text={request_text}");
+    let first = parse_json(lines[0], "first openai batch line");
+    assert_eq!(first["custom_id"], "case-1");
+    assert_eq!(first["method"], "POST");
+    assert_eq!(first["url"], "/v1/chat/completions");
+    assert_eq!(first["body"]["model"], "gpt-4o-mini");
+    assert_eq!(first["body"]["messages"][0]["content"], "grade this");
+
+    let receipt_path = report["receipt"].as_str().expect("receipt path");
+    let receipt = parse_json(
+        &fs::read_to_string(receipt_path).expect("read receipt"),
+        "prepare receipt",
+    );
+    assert_eq!(receipt["kind"], "harn.model_batch_prepare_receipt");
+    assert_eq!(receipt["status"], "prepared");
+    assert_eq!(
+        receipt["jobs"][0]["request_file_sha256"],
+        job["request_file_sha256"]
+    );
+}
+
+#[test]
+fn models_batch_prepare_anthropic_inline_json() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let manifest_path = tmp.path().join("manifest.json");
+    let out_dir = tmp.path().join("prepared");
+    fs::write(
+        &manifest_path,
+        r#"{
+  "schemaVersion": 1,
+  "kind": "harn.model_batch_manifest",
+  "producer": "test",
+  "workload": "judge",
+  "source": {"path": "fixture.jsonl", "sha256": "fixture", "row_count": 1},
+  "requestCount": 1,
+  "groupCount": 1,
+  "groups": [
+    {
+      "id": "anthropic-fixture",
+      "provider": "anthropic",
+      "model": "claude-haiku-4-5-20251001",
+      "workload": "judge",
+      "endpoint": "provider_default",
+      "tool_format": "native",
+      "batch": {"api": true, "wire_format": "anthropic_messages", "input_mode": "inline_requests"},
+      "requests": [
+        {
+          "custom_id": "anth_1",
+          "source_line": 1,
+          "source_sha256": "fixture",
+          "metadata": {},
+          "request": {"max_tokens": 32, "messages": [{"role": "user", "content": "label this"}]}
+        }
+      ]
+    }
+  ],
+  "warnings": []
+}
+"#,
+    )
+    .expect("write manifest");
+
+    let prepared = run(
+        &[
+            "models",
+            "batch",
+            "prepare",
+            "--manifest",
+            manifest_path.to_str().expect("utf8 manifest path"),
+            "--out-dir",
+            out_dir.to_str().expect("utf8 out dir"),
+            "--json",
+        ],
+        &[],
+    );
+    assert_eq!(prepared.exit_code, 0, "harn stderr={}", prepared.stderr);
+    let prepared_value = parse_json(&prepared.stdout, "batch prepare");
+    let report = success_data(&prepared_value);
+    let job = &report["jobs"].as_array().expect("jobs")[0];
+    assert_eq!(job["provider"], "anthropic");
+    assert_eq!(job["request_format"], "json_requests");
+    assert_eq!(job["endpoint"], "/v1/messages/batches");
+    assert_eq!(job["submit"]["operation"], "POST /v1/messages/batches");
+
+    let request_file = job["request_file"].as_str().expect("request_file");
+    let request_value = parse_json(
+        &fs::read_to_string(request_file).expect("read request file"),
+        "anthropic request body",
+    );
+    assert_eq!(request_value["requests"][0]["custom_id"], "anth_1");
+    assert_eq!(
+        request_value["requests"][0]["params"]["model"],
+        "claude-haiku-4-5-20251001"
+    );
+    assert_eq!(
+        request_value["requests"][0]["params"]["messages"][0]["content"],
+        "label this"
+    );
+}
+
+#[test]
+fn models_batch_prepare_gemini_and_mistral_request_shapes() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let manifest_path = tmp.path().join("manifest.json");
+    let out_dir = tmp.path().join("prepared");
+    fs::write(
+        &manifest_path,
+        r#"{
+  "schemaVersion": 1,
+  "kind": "harn.model_batch_manifest",
+  "producer": "test",
+  "workload": "corpus",
+  "source": {"path": "fixture.jsonl", "sha256": "fixture", "row_count": 2},
+  "requestCount": 2,
+  "groupCount": 2,
+  "groups": [
+    {
+      "id": "gemini-fixture",
+      "provider": "gemini",
+      "model": "gemini-2.5-flash-lite",
+      "workload": "corpus",
+      "endpoint": "provider_default",
+      "tool_format": "json",
+      "batch": {"api": true, "wire_format": "gemini", "input_mode": "jsonl_or_inline"},
+      "requests": [
+        {
+          "custom_id": "gemini_1",
+          "source_line": 1,
+          "source_sha256": "fixture-a",
+          "metadata": {},
+          "request": {"contents": [{"role": "user", "parts": [{"text": "refresh"}]}]}
+        }
+      ]
+    },
+    {
+      "id": "mistral-fixture",
+      "provider": "mistral",
+      "model": "mistral-small-2603",
+      "workload": "corpus",
+      "endpoint": "provider_default",
+      "tool_format": "json",
+      "batch": {"api": true, "wire_format": "mistral", "input_mode": "jsonl_or_inline"},
+      "requests": [
+        {
+          "custom_id": "mistral_1",
+          "source_line": 2,
+          "source_sha256": "fixture-b",
+          "metadata": {},
+          "request": {"messages": [{"role": "user", "content": "refresh"}], "max_tokens": 16}
+        }
+      ]
+    }
+  ],
+  "warnings": []
+}
+"#,
+    )
+    .expect("write manifest");
+
+    let prepared = run(
+        &[
+            "models",
+            "batch",
+            "prepare",
+            "--manifest",
+            manifest_path.to_str().expect("utf8 manifest path"),
+            "--out-dir",
+            out_dir.to_str().expect("utf8 out dir"),
+            "--json",
+        ],
+        &[],
+    );
+    assert_eq!(prepared.exit_code, 0, "harn stderr={}", prepared.stderr);
+    let prepared_value = parse_json(&prepared.stdout, "batch prepare");
+    let report = success_data(&prepared_value);
+    let jobs = report["jobs"].as_array().expect("jobs");
+    assert_eq!(jobs.len(), 2);
+    let gemini = jobs
+        .iter()
+        .find(|job| job["provider"] == "gemini")
+        .expect("gemini job");
+    let mistral = jobs
+        .iter()
+        .find(|job| job["provider"] == "mistral")
+        .expect("mistral job");
+
+    assert_eq!(gemini["endpoint"], "batchGenerateContent");
+    assert_eq!(gemini["submit"]["operation"], "batches.create");
+    let gemini_line = fs::read_to_string(gemini["request_file"].as_str().expect("gemini file"))
+        .expect("read gemini file");
+    let gemini_request = parse_json(
+        gemini_line.lines().next().expect("gemini line"),
+        "gemini line",
+    );
+    assert_eq!(gemini_request["key"], "gemini_1");
+    assert_eq!(
+        gemini_request["request"]["contents"][0]["parts"][0]["text"],
+        "refresh"
+    );
+    assert!(
+        gemini_request["request"]["model"].is_null(),
+        "Gemini batch rows should keep model at job creation"
+    );
+
+    assert_eq!(mistral["endpoint"], "/v1/chat/completions");
+    assert_eq!(mistral["submit"]["operation"], "POST /v1/batch/jobs");
+    let mistral_line = fs::read_to_string(mistral["request_file"].as_str().expect("mistral file"))
+        .expect("read mistral file");
+    let mistral_request = parse_json(
+        mistral_line.lines().next().expect("mistral line"),
+        "mistral line",
+    );
+    assert_eq!(mistral_request["custom_id"], "mistral_1");
+    assert_eq!(mistral_request["body"]["model"], "mistral-small-2603");
+}
+
 // - models lora inspect ---------------------------------------------------
 
 #[test]
