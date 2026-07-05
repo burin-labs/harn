@@ -1417,14 +1417,16 @@ harn models batch submit --receipt ./.harn/batches/eval-001/receipt.json \
 `--dry-run` verifies the prepare receipt, re-hashes every request file, renders
 the provider operation with credential names redacted, and writes a durable
 `harn.model_batch_submission_receipt` without network calls. Live submit
-currently supports OpenAI/Groq/Together-compatible and Mistral file-backed batch
-jobs, Fireworks dataset-backed batch jobs, Gemini File API JSONL batches,
-Anthropic Message Batches, and xAI batches. Provider API keys must be present
+currently supports OpenAI-compatible batch jobs for OpenAI, Groq, Together, and
+Parasail; Mistral file-backed batch jobs; Fireworks dataset-backed batch jobs;
+Gemini File API JSONL batches; Anthropic Message Batches; and xAI batches.
+Provider API keys must be present
 in the provider's normal environment variable (`OPENAI_API_KEY`,
 `GROQ_API_KEY`, `TOGETHER_AI_API_KEY` or `TOGETHER_API_KEY`,
-`MISTRAL_API_KEY`, `FIREWORKS_API_KEY`, `GEMINI_API_KEY` or `GOOGLE_API_KEY`,
-`ANTHROPIC_API_KEY`, or `XAI_API_KEY`); Fireworks live submit/status/download
-also needs `HARN_BATCH_FIREWORKS_ACCOUNT_ID` or `FIREWORKS_ACCOUNT_ID`.
+`PARASAIL_API_KEY`, `MISTRAL_API_KEY`, `FIREWORKS_API_KEY`, `GEMINI_API_KEY`
+or `GOOGLE_API_KEY`, `ANTHROPIC_API_KEY`, or `XAI_API_KEY`); Fireworks live
+submit/status/download also needs `HARN_BATCH_FIREWORKS_ACCOUNT_ID` or
+`FIREWORKS_ACCOUNT_ID`.
 Subscription-plan
 auth remains out of scope for provider Batch APIs. The submission receipt
 records provider job ids, status, request file hashes, and result handles for

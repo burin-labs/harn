@@ -1511,6 +1511,190 @@ fn models_batch_prepare_gemini_and_dry_run_lifecycle() {
 }
 
 #[test]
+fn models_batch_prepare_parasail_openai_compatible_lifecycle() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let manifest_path = tmp.path().join("manifest.json");
+    let out_dir = tmp.path().join("prepared");
+    fs::write(
+        &manifest_path,
+        r#"{
+  "schemaVersion": 1,
+  "kind": "harn.model_batch_manifest",
+  "producer": "test",
+  "workload": "eval",
+  "source": {"path": "fixture.jsonl", "sha256": "fixture", "row_count": 1},
+  "requestCount": 1,
+  "groupCount": 1,
+  "groups": [
+    {
+      "id": "parasail-fixture",
+      "provider": "parasail",
+      "model": "openai/gpt-oss-120b",
+      "workload": "eval",
+      "endpoint": "provider_default",
+      "tool_format": "json",
+      "batch": {"api": true, "wire_format": "openai", "input_mode": "jsonl_file"},
+      "requests": [
+        {
+          "custom_id": "parasail_1",
+          "source_line": 1,
+          "source_sha256": "fixture",
+          "metadata": {},
+          "request": {"messages": [{"role": "user", "content": "grade this"}], "max_tokens": 16}
+        }
+      ]
+    }
+  ],
+  "warnings": []
+}
+"#,
+    )
+    .expect("write manifest");
+
+    let prepared = run(
+        &[
+            "models",
+            "batch",
+            "prepare",
+            "--manifest",
+            manifest_path.to_str().expect("utf8 manifest path"),
+            "--out-dir",
+            out_dir.to_str().expect("utf8 out dir"),
+            "--json",
+        ],
+        &[],
+    );
+    assert_eq!(prepared.exit_code, 0, "harn stderr={}", prepared.stderr);
+    let prepared_value = parse_json(&prepared.stdout, "parasail batch prepare");
+    let report = success_data(&prepared_value);
+    let job = &report["jobs"].as_array().expect("jobs")[0];
+    assert_eq!(job["provider"], "parasail");
+    assert_eq!(job["endpoint"], "/v1/chat/completions");
+    assert_eq!(job["batch"]["wire_format"], "openai");
+    assert_eq!(job["submit"]["operation"], "POST /v1/batches");
+    assert_eq!(job["submit"]["upload"]["purpose"], "batch");
+    assert_eq!(job["submit"]["create_batch"]["completion_window"], "24h");
+
+    let request_file = job["request_file"].as_str().expect("request_file");
+    let request_text = fs::read_to_string(request_file).expect("read request file");
+    let request = parse_json(
+        request_text.lines().next().expect("parasail line"),
+        "parasail batch line",
+    );
+    assert_eq!(request["custom_id"], "parasail_1");
+    assert_eq!(request["method"], "POST");
+    assert_eq!(request["url"], "/v1/chat/completions");
+    assert_eq!(request["body"]["model"], "openai/gpt-oss-120b");
+    assert_eq!(request["body"]["messages"][0]["content"], "grade this");
+
+    let receipt_path = report["receipt"].as_str().expect("receipt path");
+    let submission_path = tmp.path().join("submission.json");
+    let submitted = run(
+        &[
+            "models",
+            "batch",
+            "submit",
+            "--receipt",
+            receipt_path,
+            "--out",
+            submission_path.to_str().expect("utf8 submission path"),
+            "--dry-run",
+            "--json",
+        ],
+        &[],
+    );
+    assert_eq!(submitted.exit_code, 0, "harn stderr={}", submitted.stderr);
+    let submitted_value = parse_json(&submitted.stdout, "parasail batch submit");
+    let submission = success_data(&submitted_value);
+    let submitted_job = &submission["jobs"].as_array().expect("submitted jobs")[0];
+    assert_eq!(submitted_job["status"], "ready");
+    assert_eq!(submitted_job["provider"], "parasail");
+    assert_eq!(
+        submitted_job["provider_operation"]["credential_env"],
+        "PARASAIL_API_KEY"
+    );
+    assert_eq!(
+        submitted_job["provider_operation"]["base_url"],
+        "https://api.saas.parasail.io/v1"
+    );
+
+    let status_path = tmp.path().join("status.json");
+    let status = run(
+        &[
+            "models",
+            "batch",
+            "status",
+            "--submission",
+            submission_path.to_str().expect("utf8 submission path"),
+            "--out",
+            status_path.to_str().expect("utf8 status path"),
+            "--dry-run",
+            "--json",
+        ],
+        &[],
+    );
+    assert_eq!(status.exit_code, 0, "harn stderr={}", status.stderr);
+
+    let mut status_receipt = parse_json(
+        &fs::read_to_string(&status_path).expect("read status receipt"),
+        "parasail status receipt",
+    );
+    status_receipt["status"] = serde_json::Value::String("completed".to_string());
+    status_receipt["completedCount"] = serde_json::Value::from(1);
+    status_receipt["readyCount"] = serde_json::Value::from(0);
+    {
+        let jobs = status_receipt["jobs"]
+            .as_array_mut()
+            .expect("mutable status jobs");
+        jobs[0]["status"] = serde_json::Value::String("completed".to_string());
+        jobs[0]["provider_batch_id"] = serde_json::Value::String("batch_parasail".to_string());
+        jobs[0]["provider_status"] = serde_json::Value::String("completed".to_string());
+        jobs[0]["output_file_id"] = serde_json::Value::String("file_parasail_output".to_string());
+    }
+    fs::write(
+        &status_path,
+        serde_json::to_string_pretty(&status_receipt).expect("serialize parasail status"),
+    )
+    .expect("write parasail status receipt");
+
+    let results_dir = tmp.path().join("results");
+    let download = run(
+        &[
+            "models",
+            "batch",
+            "download",
+            "--status",
+            status_path.to_str().expect("utf8 status path"),
+            "--out-dir",
+            results_dir.to_str().expect("utf8 results dir"),
+            "--dry-run",
+            "--json",
+        ],
+        &[],
+    );
+    assert_eq!(download.exit_code, 0, "harn stderr={}", download.stderr);
+    let download_value = parse_json(&download.stdout, "parasail batch download");
+    let download_report = success_data(&download_value);
+    assert_eq!(download_report["dry_run"], true);
+    assert_eq!(download_report["artifact_count"], 1);
+    let download_job = &download_report["jobs"].as_array().expect("download jobs")[0];
+    let artifacts = download_job["artifacts"]
+        .as_array()
+        .expect("download artifacts");
+    assert_eq!(artifacts[0]["label"], "output");
+    assert_eq!(artifacts[0]["handle"], "file_parasail_output");
+    assert_eq!(artifacts[0]["operation"]["provider"], "parasail");
+    assert_eq!(
+        artifacts[0]["operation"]["credential_env"],
+        "PARASAIL_API_KEY"
+    );
+    assert_eq!(
+        artifacts[0]["operation"]["operation"],
+        "GET https://api.saas.parasail.io/v1/files/file_parasail_output/content"
+    );
+}
+
+#[test]
 fn models_batch_prepare_fireworks_and_dry_run_lifecycle() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let manifest_path = tmp.path().join("manifest.json");
