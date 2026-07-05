@@ -1,0 +1,92 @@
+import "../gha_spend_report.harn"
+
+@test
+pipeline test_billing_usage_rows_filters_and_sorts(task) {
+  let rows = billing_usage_rows(
+    {
+      usageItems: [
+        {
+          product: "actions",
+          unitType: "Minutes",
+          repositoryName: "burin-code",
+          quantity: 10.0,
+          netAmount: 1.25,
+        },
+        {
+          product: "storage",
+          unitType: "Gigabytes",
+          repositoryName: "burin-code",
+          quantity: 99.0,
+          netAmount: 99.0,
+        },
+        {product: "actions", unitType: "Minutes", repositoryName: "harn", quantity: 20.0, netAmount: 2.5},
+        {
+          product: "actions",
+          unitType: "Minutes",
+          repositoryName: "burin-code",
+          quantity: 5.0,
+          netAmount: 0.75,
+        },
+      ],
+    },
+  )
+  assert_eq(len(rows), 2)
+  assert_eq(rows[0].label, "repo:harn")
+  assert_eq(rows[0].minutes, 20.0)
+  assert_eq(rows[0].usd, 2.5)
+  assert_eq(rows[1].label, "repo:burin-code")
+  assert_eq(rows[1].minutes, 15.0)
+  assert_eq(rows[1].usd, 2.0)
+  let filtered = billing_usage_rows(
+    {
+      usageItems: [
+        {
+          product: "actions",
+          unitType: "Minutes",
+          repositoryName: "burin-code",
+          quantity: 10.0,
+          netAmount: 1.25,
+        },
+        {product: "actions", unitType: "Minutes", repositoryName: "harn", quantity: 20.0, netAmount: 2.5},
+      ],
+    },
+    ["harn"],
+  )
+  assert_eq(filtered, [{label: "repo:harn", minutes: 20.0, usd: 2.5, source: "billing-usage"}])
+}
+
+@test
+pipeline test_action_run_refs_preserve_workflow_names(task) {
+  let refs = action_run_refs(
+    {workflow_runs: [{id: 123, name: "Rust on Windows (build + smoke test)"}, {name: "missing id"}]},
+  )
+  assert_eq(refs, [{id: "123", name: "Rust on Windows (build + smoke test)"}])
+}
+
+@test
+pipeline test_run_timing_rows_groups_by_repo_workflow(task) {
+  let rows = run_timing_rows(
+    [
+      {
+        repo: "harn",
+        workflow: "CI",
+        timing: {billable: {UBUNTU: {total_ms: 60000}, WINDOWS: {total_ms: 120000}}},
+      },
+      {repo: "harn", workflow: "CI", timing: {billable: {MACOS: {total_ms: 60000}}}},
+      {repo: "burin-code", workflow: "Swift", timing: {billable: {UBUNTU: {total_ms: 60000}}}},
+    ],
+  )
+  assert_eq(rows[0].label, "harn:CI")
+  assert_eq(rows[0].minutes, 4.0)
+  assert_eq(rows[0].usd, 0.12)
+  assert_eq(rows[1].label, "burin-code:Swift")
+}
+
+@test
+pipeline test_render_spend_table(task) {
+  let rendered = render_spend_table([{label: "repo:harn", minutes: 12.345, usd: 1.2, source: "billing-usage"}])
+  assert(rendered.contains("workflow"), "header rendered")
+  assert(rendered.contains("repo:harn"), "row label rendered")
+  assert(rendered.contains("12.35"), "minutes rounded")
+  assert(rendered.contains("1.20"), "usd rounded")
+}
