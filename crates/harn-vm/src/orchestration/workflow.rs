@@ -1576,6 +1576,201 @@ mod flatten_tests {
         assert!(ceiling.assert_within_ceiling(&widened).is_err());
     }
 
+    #[test]
+    fn unknown_side_effect_level_ranks_fail_closed() {
+        // Canonical `rank_str` ranks an unrecognized level as `none` (0), so a
+        // typo/injected level can never outrank a real ceiling. A ceiling of
+        // `none` still rejects a widening to a known-higher level.
+        let ceiling = CapabilityPolicy {
+            side_effect_level: Some("none".to_string()),
+            ..Default::default()
+        };
+        let widened = CapabilityPolicy {
+            side_effect_level: Some("desktop_control".to_string()),
+            ..Default::default()
+        };
+        assert!(ceiling.assert_within_ceiling(&widened).is_err());
+        // An unknown requested level ranks 0 (== none), so it is within a
+        // `none` ceiling rather than fail-open above it.
+        let unknown = CapabilityPolicy {
+            side_effect_level: Some("teleport".to_string()),
+            ..Default::default()
+        };
+        assert!(ceiling.assert_within_ceiling(&unknown).is_ok());
+    }
+
+    #[test]
+    fn widening_process_sandbox_roots_is_rejected() {
+        use crate::orchestration::ProcessSandboxPolicy;
+        let ceiling = CapabilityPolicy {
+            process_sandbox: ProcessSandboxPolicy {
+                write_roots: vec!["/repo/.cache".to_string()],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let widened = CapabilityPolicy {
+            process_sandbox: ProcessSandboxPolicy {
+                write_roots: vec!["/repo/.cache".to_string(), "/etc".to_string()],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let err = ceiling.assert_within_ceiling(&widened).unwrap_err();
+        assert!(
+            err.contains("process_sandbox.write_roots") && err.contains("/etc"),
+            "error: {err}"
+        );
+        // Narrowing (fewer roots) is allowed.
+        assert!(ceiling
+            .assert_within_ceiling(&CapabilityPolicy::default())
+            .is_ok());
+    }
+
+    #[test]
+    fn injecting_process_sandbox_roots_into_empty_ceiling_is_rejected() {
+        use crate::orchestration::ProcessSandboxPolicy;
+        // The common default: a stage that never set process_sandbox has EMPTY
+        // read/write roots — ZERO extra subprocess FS access (additive grants,
+        // no fallback), i.e. MOST restrictive. A flattener injecting any root
+        // must be rejected, not waved through as "unbounded".
+        let ceiling = CapabilityPolicy::default();
+        for (field, requested) in [
+            (
+                "process_sandbox.read_roots",
+                CapabilityPolicy {
+                    process_sandbox: ProcessSandboxPolicy {
+                        read_roots: vec!["/etc".to_string()],
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+            ),
+            (
+                "process_sandbox.write_roots",
+                CapabilityPolicy {
+                    process_sandbox: ProcessSandboxPolicy {
+                        write_roots: vec!["/etc".to_string()],
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+            ),
+        ] {
+            let err = ceiling.assert_within_ceiling(&requested).unwrap_err();
+            assert!(
+                err.contains(field) && err.contains("/etc"),
+                "empty ceiling must reject injected {field}: {err}"
+            );
+        }
+        // Empty requested against empty ceiling stays allowed (∅ ⊆ ∅).
+        assert!(ceiling
+            .assert_within_ceiling(&CapabilityPolicy::default())
+            .is_ok());
+    }
+
+    #[test]
+    fn widening_process_sandbox_presets_is_rejected() {
+        use crate::orchestration::{ProcessSandboxPolicy, ProcessSandboxPreset};
+        let ceiling = CapabilityPolicy {
+            process_sandbox: ProcessSandboxPolicy {
+                presets: Some(vec![ProcessSandboxPreset::SystemRuntime]),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let widened = CapabilityPolicy {
+            process_sandbox: ProcessSandboxPolicy {
+                presets: Some(vec![
+                    ProcessSandboxPreset::SystemRuntime,
+                    ProcessSandboxPreset::DeveloperToolchains,
+                ]),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let err = ceiling.assert_within_ceiling(&widened).unwrap_err();
+        assert!(err.contains("process_sandbox presets"), "error: {err}");
+    }
+
+    #[test]
+    fn dropping_tool_arg_constraint_is_rejected() {
+        use crate::orchestration::ToolArgConstraint;
+        let constraint = ToolArgConstraint {
+            tool: "edit".to_string(),
+            arg_patterns: vec!["src/**".to_string()],
+            arg_key: Some("path".to_string()),
+        };
+        let ceiling = CapabilityPolicy {
+            tool_arg_constraints: vec![constraint.clone()],
+            ..Default::default()
+        };
+        // A flattener that drops the scope constraint widens edit to anywhere.
+        let widened = CapabilityPolicy::default();
+        let err = ceiling.assert_within_ceiling(&widened).unwrap_err();
+        assert!(
+            err.contains("tool_arg_constraints") && err.contains("edit"),
+            "error: {err}"
+        );
+        // Keeping it (and adding more) is allowed.
+        let mut narrowed = ceiling.clone();
+        narrowed.tool_arg_constraints.push(ToolArgConstraint {
+            tool: "run_command".to_string(),
+            arg_patterns: vec!["cargo *".to_string()],
+            arg_key: None,
+        });
+        assert!(ceiling.assert_within_ceiling(&narrowed).is_ok());
+    }
+
+    #[test]
+    fn weakening_tool_annotation_is_rejected() {
+        use crate::tool_annotations::{SideEffectLevel, ToolAnnotations, ToolArgSchema};
+        let strong = ToolAnnotations {
+            side_effect_level: SideEffectLevel::ReadOnly,
+            arg_schema: ToolArgSchema {
+                path_params: vec!["path".to_string()],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut ceiling = CapabilityPolicy {
+            tools: vec!["edit".to_string(), "read".to_string()],
+            ..Default::default()
+        };
+        ceiling
+            .tool_annotations
+            .insert("edit".to_string(), strong.clone());
+
+        // Dropping the annotation for a still-granted tool (loses path_params →
+        // path constraint becomes unresolvable/permissive) is a widening.
+        let mut dropped = ceiling.clone();
+        dropped.tool_annotations.clear();
+        let err = ceiling.assert_within_ceiling(&dropped).unwrap_err();
+        assert!(
+            err.contains("tool_annotations") && err.contains("edit"),
+            "error: {err}"
+        );
+
+        // Rewriting it (e.g. lowering the side-effect level) is also rejected.
+        let mut rewritten = ceiling.clone();
+        rewritten.tool_annotations.insert(
+            "edit".to_string(),
+            ToolAnnotations {
+                side_effect_level: SideEffectLevel::None,
+                ..strong.clone()
+            },
+        );
+        assert!(ceiling.assert_within_ceiling(&rewritten).is_err());
+
+        // But if the flattener narrows the tool set so `edit` is no longer
+        // granted, dropping its annotation is fine.
+        let narrowed_tools = CapabilityPolicy {
+            tools: vec!["read".to_string()],
+            ..Default::default()
+        };
+        assert!(ceiling.assert_within_ceiling(&narrowed_tools).is_ok());
+    }
+
     /// The pinned pre-move Rust flattening algorithm (the deleted
     /// `workflow_stage_agent_loop_options` body + helpers), preserved verbatim
     /// as the parity oracle. `flatten_matches_pre_move_rust` asserts the Harn
