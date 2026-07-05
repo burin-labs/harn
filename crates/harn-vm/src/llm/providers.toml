@@ -1638,6 +1638,7 @@ benchmarks = { swe_bench_verified = 77.2 }
 name = "Claude Sonnet 4.6"
 provider = "anthropic"
 context_window = 1000000
+equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75 }
 tier = "frontier"
@@ -1660,6 +1661,7 @@ complementary_with = ["openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
 name = "Claude Sonnet 5"
 provider = "anthropic"
 context_window = 1000000
+equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50 }
 tier = "frontier"
@@ -1699,6 +1701,7 @@ benchmarks = { swe_bench_pro = 80.3 }
 name = "Claude Sonnet 4.6 (via OpenRouter)"
 provider = "openrouter"
 context_window = 1000000
+equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "vision", "streaming", "prompt_caching"]
 pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75 }
 tier = "frontier"
@@ -1709,6 +1712,7 @@ complementary_with = ["openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]
 name = "Claude Sonnet 5 (via OpenRouter)"
 provider = "openrouter"
 context_window = 1000000
+equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "vision", "streaming", "prompt_caching"]
 pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50 }
 tier = "frontier"
@@ -2453,6 +2457,7 @@ complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen",
 name = "DeepSeek V4 Pro (Together)"
 provider = "together"
 context_window = 512000
+equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 1.74, output_per_mtok = 3.48, cache_read_per_mtok = 0.20 }
 
@@ -2464,6 +2469,7 @@ complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen",
 name = "GLM 5.1 (Together)"
 provider = "together"
 context_window = 202752
+equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 1.40, output_per_mtok = 4.40, cache_read_per_mtok = 0.26 }
 
@@ -2477,6 +2483,7 @@ provider = "together"
 # Together serves GLM-5.2 at 262K (fp4), not the model's full 1M window
 # — per-host context caps differ; verified 2026-07-02 on together.ai.
 context_window = 262144
+equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 1.40, output_per_mtok = 4.40, cache_read_per_mtok = 0.26 }
 tier = "frontier"
@@ -2821,6 +2828,7 @@ strengths = ["coding", "agentic", "tool_use"]
 name = "GLM 5.1"
 provider = "zai"
 context_window = 202752
+equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 1.40, output_per_mtok = 4.40, cache_read_per_mtok = 0.26 }
 tier = "frontier"
@@ -2831,6 +2839,7 @@ benchmarks = { swe_bench_pro_lead = 1.0 }
 name = "GLM 5.2"
 provider = "zai"
 context_window = 1048576
+equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 1.40, output_per_mtok = 4.40, cache_read_per_mtok = 0.26 }
 tier = "frontier"
@@ -2854,6 +2863,7 @@ strengths = ["coding", "agentic"]
 name = "GLM 5.1 (via OpenRouter)"
 provider = "openrouter"
 context_window = 202752
+equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 0.98, output_per_mtok = 3.08 }
 tier = "frontier"
@@ -2863,6 +2873,7 @@ strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
 name = "GLM 5.2 (via OpenRouter)"
 provider = "openrouter"
 context_window = 1048576
+equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.91, output_per_mtok = 2.86, cache_read_per_mtok = 0.169 }
 tier = "frontier"

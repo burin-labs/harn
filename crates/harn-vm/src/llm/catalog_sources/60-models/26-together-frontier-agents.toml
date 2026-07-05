@@ -17,6 +17,7 @@ complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen",
 name = "DeepSeek V4 Pro (Together)"
 provider = "together"
 context_window = 512000
+equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 1.74, output_per_mtok = 3.48, cache_read_per_mtok = 0.20 }
 
@@ -28,6 +29,7 @@ complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen",
 name = "GLM 5.1 (Together)"
 provider = "together"
 context_window = 202752
+equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 1.40, output_per_mtok = 4.40, cache_read_per_mtok = 0.26 }
 
@@ -41,6 +43,7 @@ provider = "together"
 # Together serves GLM-5.2 at 262K (fp4), not the model's full 1M window
 # — per-host context caps differ; verified 2026-07-02 on together.ai.
 context_window = 262144
+equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 1.40, output_per_mtok = 4.40, cache_read_per_mtok = 0.26 }
 tier = "frontier"

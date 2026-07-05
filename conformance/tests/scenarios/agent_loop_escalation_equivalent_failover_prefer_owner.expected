@@ -1,0 +1,6 @@
+provider=anthropic
+model=claude-sonnet-4-6
+prefer.nil=false
+failover.nil=true
+done
+visible=

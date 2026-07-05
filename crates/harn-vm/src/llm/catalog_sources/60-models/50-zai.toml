@@ -76,6 +76,7 @@ strengths = ["coding", "agentic", "tool_use"]
 name = "GLM 5.1"
 provider = "zai"
 context_window = 202752
+equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 1.40, output_per_mtok = 4.40, cache_read_per_mtok = 0.26 }
 tier = "frontier"
@@ -86,6 +87,7 @@ benchmarks = { swe_bench_pro_lead = 1.0 }
 name = "GLM 5.2"
 provider = "zai"
 context_window = 1048576
+equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 1.40, output_per_mtok = 4.40, cache_read_per_mtok = 0.26 }
 tier = "frontier"
@@ -109,6 +111,7 @@ strengths = ["coding", "agentic"]
 name = "GLM 5.1 (via OpenRouter)"
 provider = "openrouter"
 context_window = 202752
+equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 0.98, output_per_mtok = 3.08 }
 tier = "frontier"
@@ -118,6 +121,7 @@ strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
 name = "GLM 5.2 (via OpenRouter)"
 provider = "openrouter"
 context_window = 1048576
+equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 0.91, output_per_mtok = 2.86, cache_read_per_mtok = 0.169 }
 tier = "frontier"

@@ -1,0 +1,6 @@
+provider=anthropic
+model=claude-sonnet-4-6
+failover.max_routes=3
+failover.on_no_dispatch=true
+done
+visible=

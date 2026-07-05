@@ -468,6 +468,38 @@ fn test_equivalent_model_catalog_entries_use_capability_compatible_routes() {
 }
 
 #[test]
+fn frontier_agent_equivalents_use_request_sized_context_for_failover() {
+    reset_overrides();
+
+    let conservative = equivalent_model_catalog_entries("claude-sonnet-4-6");
+    assert!(
+        !conservative
+            .iter()
+            .any(|(id, _)| id == "deepseek-ai/DeepSeek-V4-Pro"),
+        "full-window equivalence should not claim a 512K route covers every 1M Sonnet request"
+    );
+
+    let request_sized =
+        equivalent_model_catalog_entries_for_context("claude-sonnet-4-6", Some(128_000));
+    let ids = request_sized
+        .iter()
+        .map(|(id, _)| id.as_str())
+        .collect::<Vec<_>>();
+
+    assert!(
+        ids.contains(&"deepseek-ai/DeepSeek-V4-Pro"),
+        "Together DeepSeek should be a request-sized Sonnet failover candidate"
+    );
+    assert!(
+        ids.contains(&"glm-5.2") || ids.contains(&"z-ai/glm-5.2"),
+        "GLM 5.2 should stay in the frontier coding failover group"
+    );
+    assert!(request_sized
+        .iter()
+        .all(|(_, model)| { model.equivalence_group.as_deref() == Some("frontier-agent-coding") }));
+}
+
+#[test]
 fn fireworks_gpt_oss_route_has_real_context_window() {
     // Regression: the Fireworks-served `accounts/fireworks/models/gpt-oss-120b`
     // wire id had NO catalog row, so its context window resolved to None and

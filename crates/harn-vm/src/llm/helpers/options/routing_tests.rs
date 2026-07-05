@@ -1,5 +1,6 @@
 use super::extract::*;
 use super::*;
+use crate::llm::helpers::options::routing::equivalent_failover_requirements_for_options;
 use crate::value::VmDictExt;
 
 use crate::llm_config::{
@@ -80,10 +81,18 @@ fn test_provider(url: &str) -> ProviderDef {
 }
 
 fn test_equivalent_model(provider: &str, group: &str) -> ModelDef {
+    test_equivalent_model_with_context(provider, group, 32_000)
+}
+
+fn test_equivalent_model_with_context(
+    provider: &str,
+    group: &str,
+    context_window: u64,
+) -> ModelDef {
     ModelDef {
         name: format!("{provider} equivalent model"),
         provider: provider.to_string(),
-        context_window: 32_000,
+        context_window,
         logical_model: None,
         equivalence_group: Some(group.to_string()),
         served_variant: None,
@@ -593,6 +602,262 @@ fn equivalent_failover_enables_no_dispatch_failover_when_requested() {
 }
 
 #[test]
+fn equivalent_failover_uses_request_context_instead_of_source_max_window() {
+    let mut overlay = ProvidersConfig::default();
+    overlay.providers.insert(
+        "huge-primary".to_string(),
+        test_provider("https://huge-primary.example/v1"),
+    );
+    overlay.providers.insert(
+        "smaller-backup".to_string(),
+        test_provider("https://smaller-backup.example/v1"),
+    );
+    overlay.models.insert(
+        "huge-primary-model".to_string(),
+        test_equivalent_model_with_context(
+            "huge-primary",
+            "request-context-equivalent-test",
+            1_000_000,
+        ),
+    );
+    overlay.models.insert(
+        "smaller-backup-model".to_string(),
+        test_equivalent_model_with_context(
+            "smaller-backup",
+            "request-context-equivalent-test",
+            512_000,
+        ),
+    );
+    crate::llm_config::set_user_overrides(Some(overlay));
+    super::super::reset_provider_key_cache();
+
+    assert!(
+        crate::llm_config::equivalent_model_catalog_entries("huge-primary-model").is_empty(),
+        "the conservative catalog query still preserves full source-window compatibility"
+    );
+
+    let opts = extract_with_options(crate::value::DictMap::from_iter([
+        (
+            crate::value::intern_key("provider"),
+            VmValue::String(arcstr::ArcStr::from("huge-primary")),
+        ),
+        (
+            crate::value::intern_key("model"),
+            VmValue::String(arcstr::ArcStr::from("huge-primary-model")),
+        ),
+        (
+            crate::value::intern_key("equivalent_failover"),
+            VmValue::Bool(true),
+        ),
+    ]))
+    .expect("options");
+
+    let policy = opts.routing_policy.expect("equivalent routing policy");
+    assert_eq!(policy.chain[0].provider, "huge-primary");
+    assert!(policy
+        .chain
+        .iter()
+        .any(|link| link.provider == "smaller-backup" && link.model == "smaller-backup-model"));
+
+    crate::llm_config::clear_user_overrides();
+    super::super::reset_provider_key_cache();
+}
+
+#[test]
+fn equivalent_failover_filters_by_multimodal_requirements() {
+    let mut overlay = ProvidersConfig::default();
+    for provider in ["vision-primary", "text-backup", "vision-backup"] {
+        overlay.providers.insert(
+            provider.to_string(),
+            test_provider(&format!("https://{provider}.example/v1")),
+        );
+    }
+    overlay.models.insert(
+        "vision-primary-model".to_string(),
+        test_equivalent_model("vision-primary", "multimodal-equivalent-test"),
+    );
+    overlay.models.insert(
+        "text-backup-model".to_string(),
+        test_equivalent_model("text-backup", "multimodal-equivalent-test"),
+    );
+    overlay.models.insert(
+        "vision-backup-model".to_string(),
+        test_equivalent_model("vision-backup", "multimodal-equivalent-test"),
+    );
+    crate::llm_config::set_user_overrides(Some(overlay));
+    let capability_overlay = [
+        "[[provider.vision-primary]]",
+        "model_match = \"vision-primary-model\"",
+        "vision_supported = true",
+        "",
+        "[[provider.text-backup]]",
+        "model_match = \"text-backup-model\"",
+        "vision_supported = false",
+        "",
+        "[[provider.vision-backup]]",
+        "model_match = \"vision-backup-model\"",
+        "vision_supported = true",
+    ]
+    .join("\n");
+    crate::llm::capabilities::set_user_overrides_toml(&capability_overlay)
+        .expect("capability override");
+    super::super::reset_provider_key_cache();
+
+    let image_block = VmValue::dict(crate::value::DictMap::from_iter([
+        (
+            crate::value::intern_key("type"),
+            VmValue::String(arcstr::ArcStr::from("image")),
+        ),
+        (
+            crate::value::intern_key("base64"),
+            VmValue::String(arcstr::ArcStr::from("iVBORw0KGgo=")),
+        ),
+        (
+            crate::value::intern_key("media_type"),
+            VmValue::String(arcstr::ArcStr::from("image/png")),
+        ),
+    ]));
+    let message = VmValue::dict(crate::value::DictMap::from_iter([
+        (
+            crate::value::intern_key("role"),
+            VmValue::String(arcstr::ArcStr::from("user")),
+        ),
+        (
+            crate::value::intern_key("content"),
+            VmValue::List(std::sync::Arc::new(vec![image_block])),
+        ),
+    ]));
+    let opts = extract_with_options(crate::value::DictMap::from_iter([
+        (
+            crate::value::intern_key("provider"),
+            VmValue::String(arcstr::ArcStr::from("vision-primary")),
+        ),
+        (
+            crate::value::intern_key("model"),
+            VmValue::String(arcstr::ArcStr::from("vision-primary-model")),
+        ),
+        (
+            crate::value::intern_key("messages"),
+            VmValue::List(std::sync::Arc::new(vec![message])),
+        ),
+        (
+            crate::value::intern_key("equivalent_failover"),
+            VmValue::Bool(true),
+        ),
+    ]))
+    .expect("options");
+
+    let policy = opts.routing_policy.expect("equivalent routing policy");
+    assert_eq!(policy.chain[0].provider, "vision-primary");
+    assert!(policy
+        .chain
+        .iter()
+        .any(|link| link.provider == "vision-backup" && link.model == "vision-backup-model"));
+    assert!(policy
+        .chain
+        .iter()
+        .all(|link| link.provider != "text-backup"));
+
+    crate::llm_config::clear_user_overrides();
+    crate::llm::capabilities::clear_user_overrides();
+    super::super::reset_provider_key_cache();
+}
+
+#[test]
+fn equivalent_failover_filters_by_provider_tool_requirements() {
+    let mut overlay = ProvidersConfig::default();
+    for provider in ["mock", "plain-backup", "openai"] {
+        overlay.providers.insert(
+            provider.to_string(),
+            test_provider(&format!("https://{provider}.example/v1")),
+        );
+    }
+    overlay.models.insert(
+        "tool-primary-model".to_string(),
+        test_equivalent_model("mock", "provider-tool-equivalent-test"),
+    );
+    overlay.models.insert(
+        "plain-backup-model".to_string(),
+        test_equivalent_model("plain-backup", "provider-tool-equivalent-test"),
+    );
+    overlay.models.insert(
+        "tool-backup-model".to_string(),
+        test_equivalent_model("openai", "provider-tool-equivalent-test"),
+    );
+    crate::llm_config::set_user_overrides(Some(overlay));
+    let capability_overlay = [
+        "[[provider.mock]]",
+        "model_match = \"tool-primary-model\"",
+        "native_tools = true",
+        "preferred_tool_format = \"native\"",
+        "responses_api = true",
+        "hosted_tools = [\"web_search\"]",
+        "",
+        "[[provider.plain-backup]]",
+        "model_match = \"plain-backup-model\"",
+        "native_tools = true",
+        "preferred_tool_format = \"native\"",
+        "responses_api = true",
+        "",
+        "[[provider.openai]]",
+        "model_match = \"tool-backup-model\"",
+        "native_tools = true",
+        "preferred_tool_format = \"native\"",
+        "responses_api = true",
+        "hosted_tools = [\"web_search\"]",
+    ]
+    .join("\n");
+    crate::llm::capabilities::set_user_overrides_toml(&capability_overlay)
+        .expect("capability override");
+    super::super::reset_provider_key_cache();
+
+    let opts = extract_with_options(crate::value::DictMap::from_iter([
+        (
+            crate::value::intern_key("provider"),
+            VmValue::String(arcstr::ArcStr::from("mock")),
+        ),
+        (
+            crate::value::intern_key("model"),
+            VmValue::String(arcstr::ArcStr::from("tool-primary-model")),
+        ),
+        (
+            crate::value::intern_key("api_mode"),
+            VmValue::String(arcstr::ArcStr::from("responses")),
+        ),
+        (
+            crate::value::intern_key("provider_tools"),
+            VmValue::List(std::sync::Arc::new(vec![VmValue::String(
+                arcstr::ArcStr::from("web_search"),
+            )])),
+        ),
+        (
+            crate::value::intern_key("equivalent_failover"),
+            VmValue::Bool(true),
+        ),
+    ]))
+    .expect("options");
+
+    let requirements = equivalent_failover_requirements_for_options(&opts);
+    let candidates = crate::llm_config::equivalent_model_catalog_entries_for_requirements(
+        "tool-primary-model",
+        requirements.clone(),
+    );
+    assert!(
+        candidates
+            .iter()
+            .any(|(id, model)| { id == "tool-backup-model" && model.provider == "openai" }),
+        "requirements={requirements:?} candidates={candidates:?}"
+    );
+    assert!(candidates
+        .iter()
+        .all(|(id, model)| { id != "plain-backup-model" && model.provider != "plain-backup" }));
+
+    crate::llm_config::clear_user_overrides();
+    crate::llm::capabilities::clear_user_overrides();
+    super::super::reset_provider_key_cache();
+}
+
+#[test]
 fn equivalent_failover_rejects_non_bool_no_dispatch_option() {
     install_equivalent_routes();
     let mut failover = crate::value::DictMap::new();
@@ -678,6 +943,45 @@ fn equivalent_failover_rejects_explicit_routing_policy() {
             assert!(message.contains("cannot be combined"), "{message}");
         }
         other => panic!("expected thrown ambiguity error, got {other:?}"),
+    }
+
+    crate::llm_config::clear_user_overrides();
+    super::super::reset_provider_key_cache();
+}
+
+#[test]
+fn equivalent_failover_rejects_prefer_route_owner() {
+    install_equivalent_routes();
+
+    let err = match extract_with_options(crate::value::DictMap::from_iter([
+        (
+            crate::value::intern_key("provider"),
+            VmValue::String(arcstr::ArcStr::from("primary")),
+        ),
+        (
+            crate::value::intern_key("model"),
+            VmValue::String(arcstr::ArcStr::from("primary-model")),
+        ),
+        (
+            crate::value::intern_key("prefer"),
+            VmValue::List(std::sync::Arc::new(vec![VmValue::String(
+                arcstr::ArcStr::from("backup-a:backup-a-model"),
+            )])),
+        ),
+        (
+            crate::value::intern_key("equivalent_failover"),
+            VmValue::Bool(true),
+        ),
+    ])) {
+        Ok(_) => panic!("prefer + equivalent_failover should fail"),
+        Err(err) => err,
+    };
+
+    match err {
+        VmError::Thrown(VmValue::String(message)) => {
+            assert!(message.contains("cannot be combined"), "{message}");
+        }
+        other => panic!("expected thrown prefer conflict, got {other:?}"),
     }
 
     crate::llm_config::clear_user_overrides();

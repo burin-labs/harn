@@ -1,0 +1,6 @@
+provider=anthropic
+model=claude-sonnet-4-6
+route_policy=manual
+failover.nil=true
+done
+visible=

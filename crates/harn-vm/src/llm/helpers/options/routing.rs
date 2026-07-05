@@ -185,6 +185,7 @@ pub(super) fn parse_equivalent_failover_option(
     provider: &str,
     model: &str,
     explicit_routing_policy: bool,
+    requirements: crate::llm_config::EquivalentModelRequirements,
 ) -> Result<Option<std::sync::Arc<crate::llm::routing::RoutingPolicyConfig>>, VmError> {
     let Some(raw) = options.and_then(|o| o.get("equivalent_failover")) else {
         return Ok(None);
@@ -252,9 +253,9 @@ pub(super) fn parse_equivalent_failover_option(
     if !enabled {
         return Ok(None);
     }
-    if explicit_routing_policy {
+    if explicit_routing_policy || equivalent_failover_has_route_owner(options) {
         return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            "equivalent_failover cannot be combined with explicit routing_policy(...)",
+            "equivalent_failover cannot be combined with explicit routing policy options",
         ))));
     }
 
@@ -263,7 +264,113 @@ pub(super) fn parse_equivalent_failover_option(
         model,
         max_routes,
         on_no_dispatch,
+        requirements,
     ))
+}
+
+fn equivalent_failover_has_route_owner(options: Option<&crate::value::DictMap>) -> bool {
+    let Some(options) = options else {
+        return false;
+    };
+    [
+        "routing",
+        "models",
+        "ladder",
+        "model_ladder",
+        "route_policy",
+        "prefer",
+        "fallback_chain",
+        "fallback_strategy",
+        "strategy",
+    ]
+    .iter()
+    .any(|key| route_owner_option_present(options, key))
+}
+
+fn route_owner_option_present(options: &crate::value::DictMap, key: &str) -> bool {
+    options
+        .get(key)
+        .is_some_and(|value| !matches!(value, VmValue::Nil | VmValue::Bool(false)))
+}
+
+pub(super) fn equivalent_failover_requirements_for_options(
+    opts: &crate::llm::api::LlmCallOptions,
+) -> crate::llm_config::EquivalentModelRequirements {
+    let native_tools = opts
+        .native_tools
+        .as_ref()
+        .is_some_and(|tools| !tools.is_empty())
+        || !opts.provider_tools.is_empty();
+    let text_tool_wire_format = opts.tools.is_some() && !native_tools;
+    let thinking = opts.thinking.is_enabled();
+    let reasoning_effort = matches!(
+        opts.thinking,
+        crate::llm::api::ThinkingConfig::Effort {
+            level: crate::llm::api::ReasoningEffort::Minimal
+                | crate::llm::api::ReasoningEffort::Low
+                | crate::llm::api::ReasoningEffort::Medium
+                | crate::llm::api::ReasoningEffort::High
+                | crate::llm::api::ReasoningEffort::XHigh
+                | crate::llm::api::ReasoningEffort::Max,
+        }
+    );
+    let structured_output = opts.output_format.is_structured() || opts.output_schema.is_some();
+    let mut provider_tool_types = equivalent_provider_tool_types_for_options(opts);
+
+    provider_tool_types.sort();
+    provider_tool_types.dedup();
+    crate::llm_config::EquivalentModelRequirements {
+        context_tokens: Some(crate::llm::cost::project_llm_call_context_tokens(opts)),
+        native_tools,
+        text_tool_wire_format,
+        provider_tool_types,
+        vision: opts.vision,
+        url_images: crate::llm::content::messages_contain_url_images(&opts.messages)
+            .unwrap_or(false),
+        audio: crate::llm::content::messages_contain_audio(&opts.messages).unwrap_or(false),
+        pdf: crate::llm::content::messages_contain_pdf(&opts.messages).unwrap_or(false),
+        video: crate::llm::content::messages_contain_videos(&opts.messages).unwrap_or(false),
+        files_api: crate::llm::content::messages_contain_file_ids(&opts.messages).unwrap_or(false),
+        thinking,
+        reasoning_effort,
+        structured_output,
+        structured_output_mode: None,
+    }
+}
+
+fn equivalent_provider_tool_types_for_options(
+    opts: &crate::llm::api::LlmCallOptions,
+) -> Vec<String> {
+    let mut kinds = Vec::new();
+    if let Some(native_tools) = opts.native_tools.as_ref() {
+        for tool in native_tools {
+            if provider_tool_type(tool)
+                .as_deref()
+                .is_some_and(|kind| kind == "computer_use")
+            {
+                kinds.push("computer_use".to_string());
+            }
+        }
+    }
+    for tool in &opts.provider_tools {
+        kinds.push(
+            provider_tool_type(tool).unwrap_or_else(|| "__unknown_provider_tool__".to_string()),
+        );
+    }
+    kinds
+}
+
+fn provider_tool_type(tool: &serde_json::Value) -> Option<String> {
+    let raw = tool
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    if raw.starts_with("computer") {
+        Some("computer_use".to_string())
+    } else {
+        Some(raw.to_string())
+    }
 }
 
 pub(super) fn route_alternative(
