@@ -953,6 +953,32 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Verify public container tags
+        env:
+          VERSION: ${{ needs.setup.outputs.version }}
+          MAJOR_MINOR: ${{ needs.setup.outputs.major_minor }}
+        run: |
+          set -euo pipefail
+
+          anonymous_config="${RUNNER_TEMP}/anonymous-docker-config"
+          rm -rf "$anonymous_config"
+          mkdir -p "$anonymous_config"
+
+          for tag in "$VERSION" "$MAJOR_MINOR" latest; do
+            image="ghcr.io/burin-labs/harn:${tag}"
+            if ! docker --config "$anonymous_config" manifest inspect "$image" >/dev/null; then
+              {
+                printf '::error title=Container image is not publicly pullable::'
+                printf 'Anonymous manifest lookup failed for %s. ' "$image"
+                printf 'GHCR packages default to private on first publish; '
+                printf 'set the burin-labs/harn package visibility to public, '
+                printf 'then rerun this workflow.\n'
+              }
+              exit 1
+            fi
+            echo "Verified anonymous pull metadata for ${image}"
+          done
+
   release:
     name: Create GitHub release
     needs: [setup, prepare_release, build]
