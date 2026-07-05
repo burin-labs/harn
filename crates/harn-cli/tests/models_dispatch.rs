@@ -287,6 +287,15 @@ fn models_batch_plan_reports_harn_live_adapter_support() {
     assert_eq!(openai["batch"]["harn_live_adapter"]["status"], true);
     assert_eq!(openai["batch"]["harn_live_adapter"]["download"], true);
 
+    let xai = models
+        .iter()
+        .find(|model| model["provider"] == "xai")
+        .expect("xai batch model");
+    assert_eq!(xai["batch"]["wire_format"], "xai");
+    assert_eq!(xai["batch"]["harn_live_adapter"]["submit"], true);
+    assert_eq!(xai["batch"]["harn_live_adapter"]["status"], true);
+    assert_eq!(xai["batch"]["harn_live_adapter"]["download"], true);
+
     let gemini = models
         .iter()
         .find(|model| model["provider"] == "gemini")
@@ -312,6 +321,195 @@ fn models_batch_plan_reports_harn_live_adapter_support() {
             .contains("live submit/status/download is not implemented"),
         "{}",
         human.stdout
+    );
+}
+
+#[test]
+fn models_batch_prepare_xai_jsonl_and_dry_run_lifecycle() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let manifest_path = tmp.path().join("manifest.json");
+    let out_dir = tmp.path().join("prepared");
+    fs::write(
+        &manifest_path,
+        r#"{
+  "schemaVersion": 1,
+  "kind": "harn.model_batch_manifest",
+  "producer": "test",
+  "workload": "eval",
+  "source": {"path": "fixture.jsonl", "sha256": "fixture", "row_count": 1},
+  "requestCount": 1,
+  "groupCount": 1,
+  "groups": [
+    {
+      "id": "xai-fixture",
+      "provider": "xai",
+      "model": "grok-4",
+      "workload": "eval",
+      "endpoint": "provider_default",
+      "tool_format": "native",
+      "batch": {"api": true, "wire_format": "xai", "input_mode": "jsonl_or_inline"},
+      "requests": [
+        {
+          "custom_id": "xai_1",
+          "source_line": 1,
+          "source_sha256": "fixture",
+          "metadata": {},
+          "request": {"messages": [{"role": "user", "content": "grade this"}], "max_tokens": 16}
+        }
+      ]
+    }
+  ],
+  "warnings": []
+}
+"#,
+    )
+    .expect("write manifest");
+
+    let prepared = run(
+        &[
+            "models",
+            "batch",
+            "prepare",
+            "--manifest",
+            manifest_path.to_str().expect("utf8 manifest path"),
+            "--out-dir",
+            out_dir.to_str().expect("utf8 out dir"),
+            "--json",
+        ],
+        &[],
+    );
+    assert_eq!(prepared.exit_code, 0, "harn stderr={}", prepared.stderr);
+    let prepared_value = parse_json(&prepared.stdout, "xai batch prepare");
+    let report = success_data(&prepared_value);
+    let job = &report["jobs"].as_array().expect("jobs")[0];
+    assert_eq!(job["provider"], "xai");
+    assert_eq!(job["endpoint"], "/v1/chat/completions");
+    assert_eq!(job["submit"]["operation"], "POST /v1/batches");
+    assert_eq!(job["submit"]["upload"]["file"], job["request_file"]);
+    assert_eq!(job["submit"]["upload"]["purpose"], serde_json::Value::Null);
+    assert_eq!(
+        job["submit"]["create_batch"]["input_file_id"],
+        "<uploaded-file-id>"
+    );
+
+    let request_file = job["request_file"].as_str().expect("request_file");
+    let request_text = fs::read_to_string(request_file).expect("read request file");
+    let request = parse_json(
+        request_text.lines().next().expect("xai line"),
+        "xai batch line",
+    );
+    assert_eq!(request["custom_id"], "xai_1");
+    assert_eq!(request["method"], "POST");
+    assert_eq!(request["url"], "/v1/chat/completions");
+    assert_eq!(request["body"]["model"], "grok-4");
+    assert_eq!(request["body"]["messages"][0]["content"], "grade this");
+
+    let receipt_path = report["receipt"].as_str().expect("receipt path");
+    let submission_path = tmp.path().join("submission.json");
+    let submitted = run(
+        &[
+            "models",
+            "batch",
+            "submit",
+            "--receipt",
+            receipt_path,
+            "--out",
+            submission_path.to_str().expect("utf8 submission path"),
+            "--dry-run",
+            "--json",
+        ],
+        &[],
+    );
+    assert_eq!(submitted.exit_code, 0, "harn stderr={}", submitted.stderr);
+    let submitted_value = parse_json(&submitted.stdout, "xai batch submit");
+    let submission = success_data(&submitted_value);
+    let submitted_job = &submission["jobs"].as_array().expect("submitted jobs")[0];
+    assert_eq!(submitted_job["status"], "ready");
+    assert_eq!(
+        submitted_job["provider_operation"]["credential_env"],
+        "XAI_API_KEY"
+    );
+    assert_eq!(
+        submitted_job["provider_operation"]["base_url"],
+        "https://api.x.ai/v1"
+    );
+
+    let status_path = tmp.path().join("status.json");
+    let status = run(
+        &[
+            "models",
+            "batch",
+            "status",
+            "--submission",
+            submission_path.to_str().expect("utf8 submission path"),
+            "--out",
+            status_path.to_str().expect("utf8 status path"),
+            "--dry-run",
+            "--json",
+        ],
+        &[],
+    );
+    assert_eq!(status.exit_code, 0, "harn stderr={}", status.stderr);
+    let status_value = parse_json(&status.stdout, "xai batch status");
+    let status_report = success_data(&status_value);
+    assert_eq!(status_report["dry_run"], true);
+    assert_eq!(status_report["ready_count"], 1);
+
+    let mut status_receipt = parse_json(
+        &fs::read_to_string(&status_path).expect("read status receipt"),
+        "xai status receipt",
+    );
+    status_receipt["status"] = serde_json::Value::String("completed".to_string());
+    status_receipt["completedCount"] = serde_json::Value::from(1);
+    status_receipt["readyCount"] = serde_json::Value::from(0);
+    {
+        let jobs = status_receipt["jobs"]
+            .as_array_mut()
+            .expect("mutable status jobs");
+        jobs[0]["status"] = serde_json::Value::String("completed".to_string());
+        jobs[0]["provider_batch_id"] = serde_json::Value::String("batch_xai".to_string());
+        jobs[0]["provider_status"] = serde_json::Value::String("completed".to_string());
+        jobs[0]["results_url"] = serde_json::Value::String(
+            "https://api.x.ai/v1/batches/batch_xai/results?limit=100".to_string(),
+        );
+    }
+    fs::write(
+        &status_path,
+        serde_json::to_string_pretty(&status_receipt).expect("serialize xai status"),
+    )
+    .expect("write xai status receipt");
+
+    let results_dir = tmp.path().join("results");
+    let download = run(
+        &[
+            "models",
+            "batch",
+            "download",
+            "--status",
+            status_path.to_str().expect("utf8 status path"),
+            "--out-dir",
+            results_dir.to_str().expect("utf8 results dir"),
+            "--dry-run",
+            "--json",
+        ],
+        &[],
+    );
+    assert_eq!(download.exit_code, 0, "harn stderr={}", download.stderr);
+    let download_value = parse_json(&download.stdout, "xai batch download");
+    let download_report = success_data(&download_value);
+    assert_eq!(download_report["dry_run"], true);
+    assert_eq!(download_report["ready_count"], 1);
+    assert_eq!(download_report["artifact_count"], 1);
+    let download_job = &download_report["jobs"].as_array().expect("download jobs")[0];
+    let artifacts = download_job["artifacts"]
+        .as_array()
+        .expect("download artifacts");
+    assert_eq!(artifacts[0]["label"], "results");
+    assert_eq!(artifacts[0]["handle"], "batch_xai");
+    assert_eq!(artifacts[0]["operation"]["credential_env"], "XAI_API_KEY");
+    assert_eq!(
+        artifacts[0]["operation"]["operation"],
+        "GET https://api.x.ai/v1/batches/batch_xai/results"
     );
 }
 
