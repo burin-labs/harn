@@ -306,10 +306,9 @@ pub type AgentLoopOptions = {
   skill_match?: dict,
   working_files?: string | list<string>,
   llm_transcript_dir?: string,
+  on_delta?: any,
 }
 
-// TODO(#4033): add `on_delta?: fn` once the streaming-delta seam (PR #4033)
-// merges to main and this branch rebases onto it.
 // llm_call surface (kept in lockstep with LlmCallOptions in
 // std/llm/options by typed_options_parity.rs).
 // Loop shape and completion.

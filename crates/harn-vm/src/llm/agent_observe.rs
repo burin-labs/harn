@@ -1473,6 +1473,22 @@ pub(super) fn spawn_detector_only_forwarder(
     tx
 }
 
+fn tee_delta_sender(mut senders: Vec<DeltaSender>) -> DeltaSender {
+    if senders.len() == 1 {
+        return senders.pop().expect("len checked above");
+    }
+
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    tokio::task::spawn_local(async move {
+        while let Some(delta) = rx.recv().await {
+            for sender in &senders {
+                let _ = sender.send(delta.clone());
+            }
+        }
+    });
+    tx
+}
+
 /// Inner loop driving a [`StreamingToolCallDetector`] from a delta
 /// channel. Pulled out of `spawn_detector_only_forwarder` so tests can
 /// drive the same logic deterministically (await directly) without
@@ -1655,6 +1671,7 @@ pub(crate) async fn observed_llm_call(
     user_visible: bool,
     offthread: bool,
     streaming_detector: Option<StreamingDetectorContext>,
+    delta_sink: Option<DeltaSender>,
 ) -> Result<super::api::LlmResult, VmError> {
     let _in_flight_guard = super::call::InFlightLlmCallGuard::enter(opts);
     let mut effective_tool_format = tool_format
@@ -1778,6 +1795,10 @@ pub(crate) async fn observed_llm_call(
                 detector_ctx,
                 first_token,
             );
+            let delta_tx = match delta_sink.clone() {
+                Some(sink) => tee_delta_sender(vec![delta_tx, sink]),
+                None => delta_tx,
+            };
             if offthread {
                 vm_call_llm_full_streaming_offthread(opts, delta_tx).await
             } else {
@@ -1785,13 +1806,31 @@ pub(crate) async fn observed_llm_call(
             }
         } else if offthread {
             let delta_tx = match detector_ctx {
-                Some(ctx) => spawn_detector_only_forwarder(ctx, first_token),
+                Some(ctx) => {
+                    let detector_tx = spawn_detector_only_forwarder(ctx, first_token);
+                    match delta_sink.clone() {
+                        Some(sink) => tee_delta_sender(vec![detector_tx, sink]),
+                        None => detector_tx,
+                    }
+                }
+                None if let Some(sink) = delta_sink.clone() => sink,
                 None => {
                     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<String>();
                     tx
                 }
             };
             vm_call_llm_full_streaming_offthread(opts, delta_tx).await
+        } else if let Some(sink) = delta_sink.clone() {
+            let delta_tx = match detector_ctx {
+                Some(ctx) => {
+                    tee_delta_sender(vec![spawn_detector_only_forwarder(ctx, first_token), sink])
+                }
+                None => sink,
+            };
+            vm_call_llm_full_streaming(opts, delta_tx).await
+        } else if let Some(ctx) = detector_ctx {
+            let delta_tx = spawn_detector_only_forwarder(ctx, first_token);
+            vm_call_llm_full_streaming(opts, delta_tx).await
         } else {
             super::api::vm_call_llm_full(opts).await
         };
@@ -3250,9 +3289,10 @@ mod empty_completion_retry_tests {
                     FakeLlmEvent::Done(FakeStopReason::EndTurn),
                 ]),
             ));
-            let result = observed_llm_call(&fake_opts(), None, None, None, false, false, None)
-                .await
-                .expect("empty completion retry should recover");
+            let result =
+                observed_llm_call(&fake_opts(), None, None, None, false, false, None, None)
+                    .await
+                    .expect("empty completion retry should recover");
             assert_eq!(result.text, "recovered");
 
             let retries: Vec<usize> = peek_agent_trace()
@@ -3285,9 +3325,10 @@ mod empty_completion_retry_tests {
                         FakeLlmEvent::Done(FakeStopReason::EndTurn),
                     ]),
                 ));
-            let result = observed_llm_call(&fake_opts(), None, None, None, false, false, None)
-                .await
-                .expect("errored-actionless retry should recover");
+            let result =
+                observed_llm_call(&fake_opts(), None, None, None, false, false, None, None)
+                    .await
+                    .expect("errored-actionless retry should recover");
             assert_eq!(result.text, "recovered");
 
             let retries: Vec<usize> = peek_agent_trace()
@@ -3314,9 +3355,10 @@ mod empty_completion_retry_tests {
                     .push(errored_actionless_turn())
                     .push(errored_actionless_turn()),
             );
-            let result = observed_llm_call(&fake_opts(), None, None, None, false, false, None)
-                .await
-                .expect("exhausted retries must return Ok, not a new error");
+            let result =
+                observed_llm_call(&fake_opts(), None, None, None, false, false, None, None)
+                    .await
+                    .expect("exhausted retries must return Ok, not a new error");
             assert!(result.tool_calls.is_empty());
             assert_eq!(result.stop_reason.as_deref(), Some("error"));
 
@@ -3335,9 +3377,10 @@ mod empty_completion_retry_tests {
             reset_agent_trace_state();
             let _guard =
                 install_fake_llm_script(FakeLlmScript::new().push(empty_turn()).push(empty_turn()));
-            let result = observed_llm_call(&fake_opts(), None, None, None, false, false, None)
-                .await
-                .expect("exhausted empty-completion retries must return Ok, not a new error");
+            let result =
+                observed_llm_call(&fake_opts(), None, None, None, false, false, None, None)
+                    .await
+                    .expect("exhausted empty-completion retries must return Ok, not a new error");
             assert!(result.text.is_empty());
             assert!(result.tool_calls.is_empty());
             assert_eq!(result.output_tokens, 0);
@@ -3361,9 +3404,10 @@ mod empty_completion_retry_tests {
                         FakeLlmEvent::Done(FakeStopReason::EndTurn),
                     ])),
             );
-            let result = observed_llm_call(&fake_opts(), None, None, None, false, false, None)
-                .await
-                .expect("billed-noncommittal retry should recover");
+            let result =
+                observed_llm_call(&fake_opts(), None, None, None, false, false, None, None)
+                    .await
+                    .expect("billed-noncommittal retry should recover");
             assert_eq!(result.text, "recovered");
 
             let retries: Vec<usize> = peek_agent_trace()
@@ -3396,7 +3440,7 @@ mod empty_completion_retry_tests {
                     .push(billed_noncommittal_turn())
                     .push(billed_noncommittal_turn()),
             );
-            let err = observed_llm_call(&fake_opts(), None, None, None, false, false, None)
+            let err = observed_llm_call(&fake_opts(), None, None, None, false, false, None, None)
                 .await
                 .expect_err("exhausted billed-noncommittal retries must surface the loud error");
             let message = err.to_string();
@@ -3434,7 +3478,7 @@ mod empty_completion_retry_tests {
                     .with_retry_after_ms(10),
                 )),
             );
-            let err = observed_llm_call(&fake_opts(), None, None, None, false, false, None)
+            let err = observed_llm_call(&fake_opts(), None, None, None, false, false, None, None)
                 .await
                 .expect_err("429 must surface immediately (no in-call transient retry)");
             assert!(
@@ -3482,6 +3526,7 @@ mod empty_completion_retry_tests {
                 false,
                 false,
                 None,
+                None,
             )
             .await
             .expect("native tool-channel failure should degrade to text and recover");
@@ -3519,6 +3564,7 @@ mod empty_completion_retry_tests {
                 false,
                 false,
                 None,
+                None,
             )
             .await
             .expect_err("a second tool-channel failure after degrade must surface");
@@ -3551,7 +3597,7 @@ mod empty_completion_retry_tests {
                         FakeLlmEvent::Done(FakeStopReason::EndTurn),
                     ])),
             );
-            let result = observed_llm_call(&opts, None, None, None, false, false, None)
+            let result = observed_llm_call(&opts, None, None, None, false, false, None, None)
                 .await
                 .expect("stream body failure should degrade transport and recover");
             assert_eq!(result.text, "recovered");
@@ -3582,7 +3628,7 @@ mod empty_completion_retry_tests {
                         "llamacpp stream error (mid-stream read): error decoding response body",
                     ))),
             );
-            let err = observed_llm_call(&opts, None, None, None, false, false, None)
+            let err = observed_llm_call(&opts, None, None, None, false, false, None, None)
                 .await
                 .expect_err("second transport failure after degrade must surface");
             assert!(
@@ -3631,6 +3677,7 @@ mod empty_completion_retry_tests {
                 false,
                 false,
                 None,
+                None,
             )
             .await
             .expect("billed-noncommittal vanish should degrade to text and recover");
@@ -3672,6 +3719,7 @@ mod empty_completion_retry_tests {
                 None,
                 false,
                 false,
+                None,
                 None,
             )
             .await

@@ -420,6 +420,7 @@ pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Arc<crate::bridge::Hos
                 // agent loop, so the streaming candidate detector
                 // (harn#692) doesn't fire here.
                 None,
+                None,
             )
             .await?;
 
@@ -451,7 +452,8 @@ pub fn register_llm_call_structured_with_bridge(
             let opts = extract_llm_options(&rewritten)?;
             let options = rewritten.get(2).and_then(|a| a.as_dict()).cloned();
             let response =
-                crate::llm::execute_llm_call(Some(&ctx), opts, options, Some(&bridge)).await?;
+                crate::llm::execute_llm_call(Some(&ctx), opts, options, Some(&bridge), None)
+                    .await?;
             Ok(crate::llm::extract_structured_data(response))
         }
     });
@@ -473,7 +475,8 @@ pub fn register_llm_call_structured_with_bridge(
                 Err(err) => return Ok(crate::llm::structured_safe_envelope_err(&err)),
             };
             let options = rewritten.get(2).and_then(|a| a.as_dict()).cloned();
-            match crate::llm::execute_llm_call(Some(&ctx), opts, options, Some(&bridge)).await {
+            match crate::llm::execute_llm_call(Some(&ctx), opts, options, Some(&bridge), None).await
+            {
                 Ok(response) => Ok(crate::llm::structured_safe_envelope_ok(
                     crate::llm::extract_structured_data(response),
                 )),

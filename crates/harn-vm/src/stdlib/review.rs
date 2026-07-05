@@ -153,7 +153,7 @@ async fn self_review_impl(
             VmValue::String(arcstr::ArcStr::from(system.as_str())),
             options.clone(),
         ])?;
-        let response = execute_llm_call(ctx, extracted, Some(options_dict), None).await?;
+        let response = execute_llm_call(ctx, extracted, Some(options_dict), None, None).await?;
         let response_dict = response.as_dict().ok_or_else(|| {
             VmError::Runtime("self_review: expected llm response dict".to_string())
         })?;

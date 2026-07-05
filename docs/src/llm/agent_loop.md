@@ -330,6 +330,11 @@ Semantics:
   full visible text, so harness code sees a uniform "at least one delta, and the
   concatenation equals the visible text" contract. `provider_capabilities(...)`
   reports `requires_streaming` for models that must stream.
+- **Attempts are observable.** Schema retries, routing failover, and
+  context-overflow reissues can each start a fresh provider call. `on_delta`
+  reports visible text from every attempted call in order; callers that render a
+  single final transcript should treat the callback as live progress, not as the
+  authoritative persisted assistant message.
 - **Composes with `llm_caller`.** `on_delta` only affects the *default* per-turn
   caller. A custom `llm_caller` short-circuits before the streaming path, so a
   caller that does not itself stream simply never fires `on_delta`.

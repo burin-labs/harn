@@ -8,7 +8,7 @@ use crate::value::{
 use crate::vm::{AsyncBuiltinCtx, Vm};
 
 use super::api;
-use super::call::build_llm_error_dict;
+use super::call::{build_llm_error_dict, execute_llm_call};
 use super::helpers::extract_llm_options;
 use super::stream::vm_stream_llm;
 
@@ -245,6 +245,7 @@ pub(super) async fn llm_stream_collect_impl(
         Some(VmValue::Closure(closure)) => Some(closure.clone()),
         _ => None,
     };
+    let options = args.get(2).and_then(|a| a.as_dict()).cloned();
     let opts = extract_llm_options(&args)?;
 
     let (delta_tx, mut delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
@@ -252,7 +253,13 @@ pub(super) async fn llm_stream_collect_impl(
     let mut deltas_open = true;
     let mut delta_count: usize = 0;
     let mut warned = false;
-    let mut call = Box::pin(api::vm_call_llm_full_streaming(&opts, delta_tx));
+    let mut call = Box::pin(execute_llm_call(
+        Some(ctx),
+        opts,
+        options,
+        None,
+        Some(delta_tx),
+    ));
 
     let call_result = loop {
         tokio::select! {
@@ -287,18 +294,20 @@ pub(super) async fn llm_stream_collect_impl(
     // result without emitting a single delta still fires `on_delta` exactly once
     // with the full visible text, so harnesses get a uniform "at least one
     // delta, and the concatenation equals the visible text" contract.
-    if delta_count == 0 && !result.text.is_empty() {
-        fire_on_delta(
-            &mut child_vm,
-            on_delta.as_deref(),
-            result.text.clone(),
-            &mut warned,
-        )
-        .await;
+    let final_text = result
+        .as_dict()
+        .and_then(|dict| dict.get("text"))
+        .and_then(|value| match value {
+            VmValue::String(text) => Some(text.to_string()),
+            _ => None,
+        })
+        .unwrap_or_default();
+    if delta_count == 0 && !final_text.is_empty() {
+        fire_on_delta(&mut child_vm, on_delta.as_deref(), final_text, &mut warned).await;
     }
 
     ctx.forward_output(&child_vm.take_output());
-    Ok(super::agent_config::build_llm_call_result(&result, &opts))
+    Ok(result)
 }
 
 #[cfg(test)]
