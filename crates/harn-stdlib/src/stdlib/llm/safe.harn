@@ -1,8 +1,8 @@
 // @harn-entrypoint-category llm.stdlib
 //
 // std/llm/safe — DRY consolidations for envelope-shaped llm_call results,
-// case-insensitive dict access, judge-payload reconstruction, and free-text
-// cleanup of model output.
+// case-insensitive dict access, judge-payload reconstruction, free-text
+// cleanup of model output, and JSON salvage from freeform text.
 import { agent_session_messages } from "std/agent/state"
 
 // -------------------------------------------------------------------------------------------------
@@ -17,8 +17,9 @@ import { agent_session_messages } from "std/agent/state"
 // whose capability matrix marks them as inline-reasoning emitters, so envelope
 // consumers do not need these.
 //
-// A later PR (PR-I4) adds JSON-coercion promotions to this module; keep that
-// concern in its own section, separate from this text-cleanup family.
+// The JSON-salvage section below is the structured sibling of this family:
+// same escape-hatch doctrine, but for recovering a JSON value instead of
+// cleaning prose. Keep the two concerns in their own sections.
 
 // -------------------------------------------------------------------------------------------------
 
@@ -64,6 +65,156 @@ pub fn strip_code_fences(text) {
     out = out.push(line)
   }
   return trim(out.join("\n"))
+}
+
+// -------------------------------------------------------------------------------------------------
+
+// JSON salvage
+//
+// Recovering a JSON value from freeform model text. Prefer `llm_call_structured`
+// (or `safe_structured_call`) on the REQUEST path — it validates against a
+// schema, retries, and repairs, so a caller that controls the LLM call should
+// never need these. Use these helpers only when you can NOT control the caller:
+// a cached blob, a transcript replay, text produced by a foreign harness, or a
+// provider route without structured-output support. This is the promoted form
+// of the `extract_first_json_object` scanners downstream repos used to
+// hand-roll (canonical example: harn-bump-fleet's chat loop).
+
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * Scan `raw` for the first BALANCED bracket-delimited span whose opener is one
+ * of `openers` ("{" and/or "["). String- and escape-aware: brackets inside
+ * double-quoted JSON strings (including escaped quotes) do not affect depth.
+ * Only the opener's own bracket kind is depth-tracked, which is sufficient for
+ * well-formed JSON because brackets nest properly. An opener that never
+ * balances is skipped and the scan resumes at the next opener. Returns
+ * {start, end} (end exclusive) or nil.
+ *
+ * Materializes `raw.chars()` ONCE and indexes that O(1)-indexable char list in
+ * the nested scan loops. Direct `raw[i]` string subscript is O(1) only for an
+ * all-ASCII string; for any non-ASCII char it falls back to an O(index) char
+ * walk per access, which would make this nested scan O(n²) on the smart-quote /
+ * emoji / accented text LLM salvage frequently sees. Char indices returned here
+ * line up with `substring`, which is likewise char-indexed.
+ */
+fn __first_balanced_span(raw, openers) {
+  let cs = raw.chars()
+  let n = len(cs)
+  var i = 0
+  while i < n {
+    let ch = cs[i]
+    if contains(openers, ch) {
+      let close = if ch == "{" {
+        "}"
+      } else {
+        "]"
+      }
+      var depth = 0
+      var in_string = false
+      var escaped = false
+      var j = i
+      while j < n {
+        let cj = cs[j]
+        if in_string {
+          if escaped {
+            escaped = false
+          } else if cj == "\\" {
+            escaped = true
+          } else if cj == "\"" {
+            in_string = false
+          }
+        } else if cj == "\"" {
+          in_string = true
+        } else if cj == ch {
+          depth = depth + 1
+        } else if cj == close {
+          depth = depth - 1
+          if depth == 0 {
+            return {start: i, end: j + 1}
+          }
+        }
+        j = j + 1
+      }
+    }
+    i = i + 1
+  }
+  return nil
+}
+
+/**
+ * Extract the raw text of the first balanced `{...}` object from sloppy
+ * freeform text (leading prose, trailing garbage, fenced or not — the scan is
+ * character-level, so fences do not block it). Balanced-brace scan that
+ * respects strings and escapes; braces inside string literals do not count.
+ * Returns the raw slice (NOT validated as JSON — a balanced `{not json}` span
+ * is still returned) or nil when no balanced object exists. Prefer
+ * `llm_call_structured` / `safe_structured_call` when you control the request;
+ * this is the salvage path for text you did not produce.
+ *
+ * @effects: []
+ * @errors: []
+ * @example: extract_first_json_object("Sure! {\"a\": 1} hope that helps")
+ */
+pub fn extract_first_json_object(text) {
+  let raw = to_string(text ?? "")
+  let span = __first_balanced_span(raw, ["{"])
+  if span == nil {
+    return nil
+  }
+  return substring(raw, span.start, span.end)
+}
+
+/**
+ * Like `extract_first_json_object`, but the first balanced value of EITHER
+ * kind — `{...}` object or `[...]` array — whichever opens first. Same
+ * string/escape awareness, same raw-slice (unvalidated) return, nil when
+ * neither balances.
+ *
+ * @effects: []
+ * @errors: []
+ * @example: extract_first_json_value("rows: [1, 2, 3] (3 total)")
+ */
+pub fn extract_first_json_value(text) {
+  let raw = to_string(text ?? "")
+  let span = __first_balanced_span(raw, ["{", "["])
+  if span == nil {
+    return nil
+  }
+  return substring(raw, span.start, span.end)
+}
+
+/**
+ * Salvage and parse the first JSON value (object or array) from sloppy model
+ * text: strips whole-line code fences (composes with `strip_code_fences`),
+ * then walks balanced candidates left to right and returns the first one that
+ * `json_parse` accepts — so a prose span like `{see below}` before the real
+ * payload is skipped, not fatal. Returns the parsed value, or nil when no
+ * candidate parses. Scalars outside brackets (bare strings/numbers) are out of
+ * scope. Prefer `llm_call_structured` / `safe_structured_call` when you
+ * control the request; use this only for text whose producer you cannot fix.
+ *
+ * @effects: []
+ * @errors: []
+ * @example: parse_first_json("```json\n{\"ok\": true}\n```")
+ */
+pub fn parse_first_json(text) {
+  var rest = strip_code_fences(to_string(text ?? ""))
+  while rest != "" {
+    let span = __first_balanced_span(rest, ["{", "["])
+    if span == nil {
+      return nil
+    }
+    let candidate = substring(rest, span.start, span.end)
+    let parsed = try {
+      json_parse(candidate)
+    }
+    if !is_err(parsed) {
+      return unwrap(parsed)
+    }
+    rest = substring(rest, span.start + 1)
+  }
+  return nil
 }
 
 /**

@@ -1,0 +1,21 @@
+{"a": 1}
+---
+{"outer": {"inner": [1, 2]}}
+---
+{"text": "a } brace and a { brace"}
+---
+{"quote": "she said \"}\" loudly"}
+---
+{"ok": true}
+---
+[nil]
+---
+[nil]
+---
+[1, 2, 3]
+---
+{"a": 1}
+---
+[nil]
+---
+{"a": 1}

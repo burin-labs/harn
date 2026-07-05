@@ -1,5 +1,22 @@
 # Pipeline lifecycle
 
+> **Pipeline vs. workflow.** Two different things that are deliberately not
+> renamed — learn the distinction once:
+>
+> - **`pipeline`** is the *language keyword*: a named, callable, function-like
+>   composition (`pipeline name(args) { ... }`) that serves as a program
+>   entrypoint and container. Not itself agentic. This page describes its
+>   finish-time lifecycle.
+> - **Workflow** is the *stage-graph runtime*: the typed, replayable graph of
+>   stages executed by `workflow_execute`. See the
+>   [workflow runtime](./workflow-runtime.md).
+>
+> On the abstraction ladder: `llm_call` = one request < `agent_loop` = one
+> goal < workflow = multiple goals, attempts, or models. (`agent_preset` is
+> how you build `agent_loop` options, not a tier of its own.) See
+> [Choosing an agent abstraction](./concepts/abstraction-ladder.md) and the
+> [glossary](./concepts/glossary.md).
+
 Pipelines in Harn do not end the moment their declared steps return.
 Between the last statement of the pipeline body and the value the host
 sees, the runtime fires a sequence of lifecycle callbacks: `PreFinish`,

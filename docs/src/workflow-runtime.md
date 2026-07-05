@@ -4,6 +4,23 @@ Harn's workflow runtime is the layer above raw `llm_call()` and
 `agent_loop()`. It gives host applications a typed, inspectable, replayable
 orchestration boundary instead of pushing orchestration logic into app code.
 
+> **Pipeline vs. workflow.** Two different things that are deliberately not
+> renamed — learn the distinction once:
+>
+> - **`pipeline`** is the *language keyword*: a named, callable, function-like
+>   composition (`pipeline name(args) { ... }`) that serves as a program
+>   entrypoint and container. Not itself agentic. See
+>   [Pipeline lifecycle](./pipeline-lifecycle.md).
+> - **Workflow** is the *stage-graph runtime*: the typed, replayable graph of
+>   stages (`stage`, `verify`, `join`, `condition`, `fork`, `map`, `reduce`,
+>   `subagent`, `escalation`) executed by `workflow_execute` — this page.
+>
+> On the abstraction ladder: `llm_call` = one request < `agent_loop` = one
+> goal < workflow = multiple goals, attempts, or models. (`agent_preset` is
+> how you build `agent_loop` options, not a tier of its own.) See
+> [Choosing an agent abstraction](./concepts/abstraction-ladder.md) and the
+> [glossary](./concepts/glossary.md).
+
 ## Core concepts
 
 ### Workflow graphs
