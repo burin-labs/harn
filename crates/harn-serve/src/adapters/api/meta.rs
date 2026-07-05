@@ -48,6 +48,7 @@ pub(super) async fn api_root() -> Response {
             "sessions": "/v1/sessions",
             "session_view": "/v1/sessions/{session_id}/view",
             "tasks": "/v1/tasks",
+            "artifacts": "/v1/artifacts",
             "events": "/v1/events/stream",
             "workflow_trigger_runs": "/v1/workflow-trigger-runs",
             "permission_requests": "/v1/permission-requests",
@@ -141,6 +142,7 @@ fn capability_values() -> Vec<Value> {
     vec![
         json!({"id": "sessions", "description": "Create, inspect, fork, truncate, update, and close ACP-backed Harn sessions."}),
         json!({"id": "tasks", "description": "Submit prompts asynchronously, track task status, and abort active tasks."}),
+        json!({"id": "artifacts", "description": "Register, inspect, list, and safely download local file artifacts."}),
         json!({"id": "events", "description": "Read snapshots and stream live session, task, tool, permission, and runtime events over SSE."}),
         json!({"id": "workflow_trigger_runs", "description": "Read recent Harn trigger dispatches and joined action-graph observations for local workflow operators."}),
         json!({"id": "permissions", "description": "Approve or deny host permission and HITL requests through the same ACP runtime path."}),
@@ -190,6 +192,14 @@ fn tool_values() -> Vec<Value> {
             "name": "events.stream",
             "description": "Stream Harn local API events as Server-Sent Events.",
             "input_schema": {"type": "object"},
+            "output_schema": {"type": "object"}
+        }),
+        json!({
+            "id": "harn.artifact.register",
+            "object": "tool",
+            "name": "artifact.register",
+            "description": "Register durable artifact metadata or a mediated file URI.",
+            "input_schema": {"type": "object", "required": ["kind", "mime_type", "visibility"]},
             "output_schema": {"type": "object"}
         }),
         json!({

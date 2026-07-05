@@ -31,6 +31,7 @@ use crate::permissions::{
 };
 use crate::tls::HttpTlsConfig;
 
+mod artifacts;
 mod events;
 mod meta;
 mod permissions;
@@ -179,6 +180,7 @@ impl ProviderCatalogRuntime {
 struct ApiStateInner {
     sessions: BTreeMap<String, Value>,
     messages: HashMap<String, Vec<Value>>,
+    artifacts: BTreeMap<String, Value>,
     tasks: BTreeMap<String, Value>,
     permissions: BTreeMap<String, PendingPermission>,
     workspaces: BTreeMap<String, Value>,
@@ -212,6 +214,7 @@ impl ApiStateInner {
                     "sessions",
                     "tasks",
                     "events",
+                    "artifacts",
                     "permissions",
                     "workflow_trigger_runs",
                     "workspace.files.read"
@@ -223,6 +226,7 @@ impl ApiStateInner {
         Self {
             sessions: BTreeMap::new(),
             messages: HashMap::new(),
+            artifacts: BTreeMap::new(),
             tasks: BTreeMap::new(),
             permissions: BTreeMap::new(),
             workspaces,
@@ -462,6 +466,18 @@ impl ApiState {
         {
             self.register_hitl_request(session_id.clone(), task_id.clone(), &params);
         }
+        if params
+            .pointer("/update/sessionUpdate")
+            .and_then(Value::as_str)
+            == Some("artifact")
+        {
+            artifacts::register_harn_session_artifact(
+                self,
+                session_id.clone(),
+                task_id.clone(),
+                &params,
+            );
+        }
         self.append_event(session_id, task_id, "session.update", params);
     }
 
@@ -684,6 +700,15 @@ fn api_router(state: ApiState) -> Router {
         .route("/v1/tasks", get(tasks::list_tasks).post(tasks::submit_task))
         .route("/v1/tasks/{task_id}", get(tasks::get_task))
         .route("/v1/tasks/{task_id}/cancel", post(tasks::cancel_task))
+        .route(
+            "/v1/artifacts",
+            get(artifacts::list_artifacts).post(artifacts::register_artifact),
+        )
+        .route("/v1/artifacts/{artifact_id}", get(artifacts::get_artifact))
+        .route(
+            "/v1/artifacts/{artifact_id}/content",
+            get(artifacts::download_artifact_content),
+        )
         .route("/v1/events", get(events::list_events))
         .route(
             "/v1/workflow-trigger-runs",
@@ -1032,6 +1057,148 @@ mod tests {
         assert_eq!(task["object"], "task");
         assert_eq!(task["status"], "WORKING");
         assert_eq!(task["session_id"], session_id);
+    }
+
+    #[tokio::test]
+    async fn local_api_registers_and_downloads_file_artifact() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let script = dir.path().join("agent.harn");
+        std::fs::write(&script, "pipeline main() { __io_println(prompt) }\n")
+            .expect("write script");
+        let report = dir.path().join("report.pdf");
+        std::fs::write(&report, b"%PDF-1.7\n").expect("write report");
+        let report_uri = url::Url::from_file_path(&report)
+            .expect("file url")
+            .to_string();
+        let server = ApiServer::new(ApiServerConfig::for_pipeline(
+            script.to_string_lossy().to_string(),
+        ));
+        let app = api_router(server.state);
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/artifacts")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&json!({
+                            "kind": "file",
+                            "mime_type": "application/pdf",
+                            "uri": report_uri,
+                            "visibility": "public",
+                            "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                            "name": "report.pdf",
+                            "size_bytes": 9
+                        }))
+                        .expect("artifact json"),
+                    ))
+                    .expect("request"),
+            )
+            .await
+            .expect("artifact response");
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        let artifact: Value = serde_json::from_slice(&body).expect("artifact");
+        let artifact_id = artifact["id"].as_str().expect("artifact id");
+        assert_eq!(artifact["object"], "artifact");
+        assert_eq!(artifact["kind"], "file");
+        assert_eq!(artifact["mime_type"], "application/pdf");
+        assert_eq!(artifact["name"], "report.pdf");
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/artifacts")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("list response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        let list: Value = serde_json::from_slice(&body).expect("list");
+        assert_eq!(list["data"].as_array().expect("data").len(), 1);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/v1/artifacts/{artifact_id}/content"))
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("content response");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get(axum::http::header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok()),
+            Some("application/pdf")
+        );
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        assert_eq!(&body[..], b"%PDF-1.7\n");
+    }
+
+    #[tokio::test]
+    async fn local_api_indexes_harn_artifact_updates() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let script = dir.path().join("agent.harn");
+        std::fs::write(&script, "pipeline main() { __io_println(prompt) }\n")
+            .expect("write script");
+        let server = ApiServer::new(ApiServerConfig::for_pipeline(
+            script.to_string_lossy().to_string(),
+        ));
+        let state = server.state;
+
+        state.register_session_update(json!({
+            "params": {
+                "sessionId": "session-1",
+                "update": {
+                    "sessionUpdate": "artifact",
+                    "_meta": {
+                        "harn": {
+                            "artifactId": "artifact-file",
+                            "kind": "file",
+                            "title": "Report PDF",
+                            "mimeType": "application/pdf",
+                            "spec": {
+                                "uri": "file:///tmp/report.pdf",
+                                "name": "report.pdf",
+                                "mime_type": "application/pdf",
+                                "size_bytes": 1234,
+                                "sha256": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+                            },
+                            "fallback": "File artifact: report.pdf"
+                        }
+                    }
+                }
+            }
+        }));
+
+        let inner = state.inner.lock().expect("api state poisoned");
+        let artifact = inner.artifacts.get("artifact-file").expect("artifact");
+        assert_eq!(artifact["kind"], "file");
+        assert_eq!(artifact["mime_type"], "application/pdf");
+        assert_eq!(artifact["name"], "report.pdf");
+        assert_eq!(
+            artifact["sha256"],
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        );
+        assert_eq!(artifact["metadata"]["harn_kind"], "file");
+        assert!(inner
+            .events
+            .iter()
+            .any(|event| event.event == "artifact.created"));
     }
 
     #[tokio::test]

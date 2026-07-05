@@ -33,6 +33,7 @@ enum ArtifactKind {
     VegaLite,
     Mermaid,
     Table,
+    File,
 }
 
 impl ArtifactKind {
@@ -41,8 +42,9 @@ impl ArtifactKind {
             "vega-lite" => Ok(Self::VegaLite),
             "mermaid" => Ok(Self::Mermaid),
             "table" => Ok(Self::Table),
+            "file" => Ok(Self::File),
             other => Err(err(format!(
-                "unsupported artifact kind '{other}' (expected one of: vega-lite, mermaid, table)"
+                "unsupported artifact kind '{other}' (expected one of: vega-lite, mermaid, table, file)"
             ))),
         }
     }
@@ -52,14 +54,16 @@ impl ArtifactKind {
             Self::VegaLite => "vega-lite",
             Self::Mermaid => "mermaid",
             Self::Table => "table",
+            Self::File => "file",
         }
     }
 
-    fn mime_type(self) -> &'static str {
+    fn default_mime_type(self) -> &'static str {
         match self {
             Self::VegaLite => "application/vnd.vegalite.v5+json",
             Self::Mermaid => "text/vnd.mermaid",
             Self::Table => "application/vnd.harn.table+json",
+            Self::File => "application/octet-stream",
         }
     }
 }
@@ -80,6 +84,7 @@ struct ValidatedArtifactSpec {
     spec: JsonValue,
     fallback: String,
     size_bytes: u64,
+    mime_type: String,
 }
 
 #[harn_builtin(
@@ -118,7 +123,7 @@ async fn artifact_emit_builtin(
         artifact_id: options.artifact_id.clone(),
         kind: kind.as_str().to_string(),
         title: options.title.clone(),
-        mime_type: kind.mime_type().to_string(),
+        mime_type: validated.mime_type.clone(),
         spec: validated.spec.clone(),
         fallback: validated.fallback.clone(),
         size_bytes: validated.size_bytes,
@@ -136,7 +141,7 @@ async fn artifact_emit_builtin(
         "artifact_id": options.artifact_id,
         "kind": kind.as_str(),
         "title": options.title,
-        "mime_type": kind.mime_type(),
+        "mime_type": validated.mime_type,
         "size_bytes": validated.size_bytes,
         "metadata": options.metadata,
         "provenance": options.provenance,
@@ -274,13 +279,30 @@ fn validate_artifact_spec(
         ArtifactKind::VegaLite => validate_vega_lite(spec)?,
         ArtifactKind::Mermaid => validate_mermaid(spec)?,
         ArtifactKind::Table => validate_table(spec)?,
+        ArtifactKind::File => validate_file_ref(spec)?,
     };
-    let size_bytes = serialized_size(&spec, max_bytes)?;
+    let wire_size_bytes = serialized_size(&spec, max_bytes)?;
+    let size_bytes = match kind {
+        ArtifactKind::File => spec
+            .get("size_bytes")
+            .and_then(JsonValue::as_u64)
+            .unwrap_or(wire_size_bytes),
+        _ => wire_size_bytes,
+    };
+    let mime_type = match kind {
+        ArtifactKind::File => spec
+            .get("mime_type")
+            .and_then(JsonValue::as_str)
+            .unwrap_or(kind.default_mime_type())
+            .to_string(),
+        _ => kind.default_mime_type().to_string(),
+    };
     let fallback = default_fallback(kind, &spec)?;
     Ok(ValidatedArtifactSpec {
         spec,
         fallback,
         size_bytes,
+        mime_type,
     })
 }
 
@@ -479,6 +501,141 @@ fn validate_table(spec: JsonValue) -> Result<JsonValue, VmError> {
     Ok(spec)
 }
 
+fn validate_file_ref(spec: JsonValue) -> Result<JsonValue, VmError> {
+    let object = spec
+        .as_object()
+        .ok_or_else(|| err("file spec must be a JSON object"))?;
+    const ALLOWED_KEYS: &[&str] = &[
+        "description",
+        "mime_type",
+        "name",
+        "path",
+        "sha256",
+        "size_bytes",
+        "uri",
+    ];
+    const RAW_PAYLOAD_KEYS: &[&str] = &["base64", "bytes", "content", "data", "text"];
+    for key in object.keys() {
+        if RAW_PAYLOAD_KEYS.contains(&key.as_str()) {
+            return Err(err(format!(
+                "file spec must reference an external artifact; `{key}` payloads are not allowed"
+            )));
+        }
+        if !ALLOWED_KEYS.contains(&key.as_str()) {
+            return Err(err(format!(
+                "unknown file spec key '{key}' (expected one of: {})",
+                ALLOWED_KEYS.join(", ")
+            )));
+        }
+    }
+
+    let uri = required_file_string(object, "uri")?;
+    validate_file_uri(&uri)?;
+    let mime_type = required_file_string(object, "mime_type")?;
+    validate_mime_type(&mime_type)?;
+
+    let mut normalized = serde_json::Map::new();
+    normalized.insert("uri".to_string(), JsonValue::String(uri));
+    normalized.insert("mime_type".to_string(), JsonValue::String(mime_type));
+    for key in ["name", "path", "description"] {
+        if let Some(value) = optional_file_string(object, key)? {
+            normalized.insert(key.to_string(), JsonValue::String(value));
+        }
+    }
+    if let Some(size) = object.get("size_bytes") {
+        let size = size
+            .as_u64()
+            .ok_or_else(|| err("file spec `size_bytes` must be a non-negative integer"))?;
+        normalized.insert("size_bytes".to_string(), JsonValue::Number(size.into()));
+    }
+    if let Some(hash) = optional_file_string(object, "sha256")? {
+        normalized.insert(
+            "sha256".to_string(),
+            JsonValue::String(normalize_sha256(&hash)?),
+        );
+    }
+    Ok(JsonValue::Object(normalized))
+}
+
+fn required_file_string(
+    object: &serde_json::Map<String, JsonValue>,
+    key: &str,
+) -> Result<String, VmError> {
+    optional_file_string(object, key)?.ok_or_else(|| err(format!("file spec `{key}` is required")))
+}
+
+fn optional_file_string(
+    object: &serde_json::Map<String, JsonValue>,
+    key: &str,
+) -> Result<Option<String>, VmError> {
+    let Some(value) = object.get(key) else {
+        return Ok(None);
+    };
+    let value = value
+        .as_str()
+        .ok_or_else(|| err(format!("file spec `{key}` must be a string")))?;
+    let value = value.trim();
+    if value.is_empty() {
+        return Ok(None);
+    }
+    if value.len() > MAX_STRING_BYTES {
+        return Err(err(format!(
+            "file spec `{key}` exceeds {MAX_STRING_BYTES} bytes"
+        )));
+    }
+    scan_string_payload_markers(&format!("spec.{key}"), value)?;
+    Ok(Some(value.to_string()))
+}
+
+fn validate_file_uri(value: &str) -> Result<(), VmError> {
+    let lower = value.to_ascii_lowercase();
+    if lower.starts_with("http:")
+        || lower.starts_with("https:")
+        || lower.starts_with("data:")
+        || lower.starts_with("javascript:")
+    {
+        return Err(err(
+            "file spec `uri` must not reference a network or inline payload",
+        ));
+    }
+    if lower.contains("://")
+        && !(lower.starts_with("file://")
+            || lower.starts_with("artifact://")
+            || lower.starts_with("harn-artifact://"))
+    {
+        return Err(err(
+            "file spec `uri` scheme must be file://, artifact://, harn-artifact://, or an urn",
+        ));
+    }
+    if lower.starts_with("urn:") || lower.starts_with("file://") || lower.contains("://") {
+        return Ok(());
+    }
+    Err(err(
+        "file spec `uri` must be an explicit file:// URI or artifact/urn reference",
+    ))
+}
+
+fn validate_mime_type(value: &str) -> Result<(), VmError> {
+    if value.len() > 128 || !value.contains('/') {
+        return Err(err("file spec `mime_type` must be a valid MIME type"));
+    }
+    if value
+        .chars()
+        .any(|ch| ch.is_whitespace() || ch.is_control() || ch == '<' || ch == '>')
+    {
+        return Err(err("file spec `mime_type` contains invalid characters"));
+    }
+    Ok(())
+}
+
+fn normalize_sha256(value: &str) -> Result<String, VmError> {
+    let raw = value.strip_prefix("sha256:").unwrap_or(value);
+    if raw.len() != 64 || !raw.chars().all(|ch| ch.is_ascii_hexdigit()) {
+        return Err(err("file spec `sha256` must be a 64-character hex digest"));
+    }
+    Ok(format!("sha256:{}", raw.to_ascii_lowercase()))
+}
+
 fn table_column_name(column: &JsonValue, index: usize) -> Result<String, VmError> {
     match column {
         JsonValue::String(name) if !name.trim().is_empty() => Ok(name.trim().to_string()),
@@ -568,6 +725,20 @@ fn scan_string(path: &str, value: &str, allow_vega_schema_url: bool) -> Result<(
     if value.len() > MAX_STRING_BYTES {
         return Err(err(format!("{path} exceeds {MAX_STRING_BYTES} bytes")));
     }
+    scan_string_payload_markers(path, value)?;
+    let lower = value.to_ascii_lowercase();
+    if contains_external_url(&lower) {
+        if allow_vega_schema_url && value.starts_with("https://vega.github.io/schema/vega-lite/") {
+            return Ok(());
+        }
+        return Err(err(format!(
+            "{path} contains an external reference; renderers must not fetch network resources"
+        )));
+    }
+    Ok(())
+}
+
+fn scan_string_payload_markers(path: &str, value: &str) -> Result<(), VmError> {
     let lower = value.to_ascii_lowercase();
     for marker in [
         "<script",
@@ -588,14 +759,6 @@ fn scan_string(path: &str, value: &str, allow_vega_schema_url: bool) -> Result<(
             )));
         }
     }
-    if contains_external_url(&lower) {
-        if allow_vega_schema_url && value.starts_with("https://vega.github.io/schema/vega-lite/") {
-            return Ok(());
-        }
-        return Err(err(format!(
-            "{path} contains an external reference; renderers must not fetch network resources"
-        )));
-    }
     Ok(())
 }
 
@@ -612,7 +775,35 @@ fn default_fallback(kind: ArtifactKind, spec: &JsonValue) -> Result<String, VmEr
             .unwrap_or("")
             .to_string()),
         ArtifactKind::Table => default_table_fallback(spec),
+        ArtifactKind::File => Ok(default_file_fallback(spec)),
     }
+}
+
+fn default_file_fallback(spec: &JsonValue) -> String {
+    let name = spec
+        .get("name")
+        .and_then(JsonValue::as_str)
+        .or_else(|| spec.get("path").and_then(JsonValue::as_str))
+        .unwrap_or("file artifact");
+    let uri = spec.get("uri").and_then(JsonValue::as_str).unwrap_or("");
+    let mime_type = spec
+        .get("mime_type")
+        .and_then(JsonValue::as_str)
+        .unwrap_or("application/octet-stream");
+    let mut lines = vec![
+        format!("File artifact: {name}"),
+        format!("MIME: {mime_type}"),
+    ];
+    if let Some(size) = spec.get("size_bytes").and_then(JsonValue::as_u64) {
+        lines.push(format!("Size: {size} bytes"));
+    }
+    if let Some(hash) = spec.get("sha256").and_then(JsonValue::as_str) {
+        lines.push(format!("SHA-256: {hash}"));
+    }
+    if !uri.is_empty() {
+        lines.push(format!("URI: {uri}"));
+    }
+    lines.join("\n")
 }
 
 fn default_vega_fallback(spec: &JsonValue) -> String {
@@ -746,6 +937,13 @@ mod tests {
             "columns": ["name", "count"],
             "rows": [{"name": "a", "count": 2}]
         });
+        let file = json!({
+            "uri": "file:///tmp/report.pdf",
+            "name": "report.pdf",
+            "mime_type": "application/pdf",
+            "size_bytes": 1234,
+            "sha256": "ABCDEFabcdef0123456789abcdef0123456789abcdef0123456789abcdef0123"
+        });
 
         let vega = validate_artifact_spec(ArtifactKind::VegaLite, vega, DEFAULT_MAX_BYTES)
             .expect("vega-lite validates");
@@ -756,6 +954,15 @@ mod tests {
         let table = validate_artifact_spec(ArtifactKind::Table, table, DEFAULT_MAX_BYTES)
             .expect("table validates");
         assert!(table.fallback.contains("name | count"));
+        let file = validate_artifact_spec(ArtifactKind::File, file, DEFAULT_MAX_BYTES)
+            .expect("file validates");
+        assert_eq!(file.mime_type, "application/pdf");
+        assert_eq!(file.size_bytes, 1234);
+        assert_eq!(
+            file.spec["sha256"],
+            "sha256:abcdefabcdef0123456789abcdef0123456789abcdef0123456789abcdef0123"
+        );
+        assert!(file.fallback.contains("report.pdf"));
     }
 
     #[test]
@@ -788,6 +995,26 @@ mod tests {
             ),
             "external reference",
         );
+        assert_error_contains(
+            validate_artifact_spec(
+                ArtifactKind::File,
+                json!({"uri": "https://example.com/report.pdf", "mime_type": "application/pdf"}),
+                DEFAULT_MAX_BYTES,
+            ),
+            "must not reference a network",
+        );
+        assert_error_contains(
+            validate_artifact_spec(
+                ArtifactKind::File,
+                json!({
+                    "uri": "file:///tmp/report.pdf",
+                    "mime_type": "application/pdf",
+                    "base64": "JVBERi0xLjQ="
+                }),
+                DEFAULT_MAX_BYTES,
+            ),
+            "payloads are not allowed",
+        );
     }
 
     #[test]
@@ -815,6 +1042,34 @@ mod tests {
                 10,
             ),
             "max is 10",
+        );
+        assert_error_contains(
+            validate_artifact_spec(
+                ArtifactKind::File,
+                json!({"uri": "/tmp/report.pdf", "mime_type": "application/pdf"}),
+                DEFAULT_MAX_BYTES,
+            ),
+            "must be an explicit file:// URI",
+        );
+        assert_error_contains(
+            validate_artifact_spec(
+                ArtifactKind::File,
+                json!({"uri": "file:///tmp/report.pdf", "mime_type": "not-a-mime"}),
+                DEFAULT_MAX_BYTES,
+            ),
+            "must be a valid MIME type",
+        );
+        assert_error_contains(
+            validate_artifact_spec(
+                ArtifactKind::File,
+                json!({
+                    "uri": "file:///tmp/report.pdf",
+                    "mime_type": "application/pdf",
+                    "sha256": "abc"
+                }),
+                DEFAULT_MAX_BYTES,
+            ),
+            "64-character hex digest",
         );
     }
 }

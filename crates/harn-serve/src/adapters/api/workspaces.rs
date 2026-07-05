@@ -41,7 +41,7 @@ pub(super) async fn create_workspace(
         "host": "local",
         "repository": null,
         "tenant_id": null,
-        "capabilities": ["sessions", "tasks", "events", "permissions", "workspace.files.read"],
+        "capabilities": ["sessions", "tasks", "events", "artifacts", "permissions", "workspace.files.read"],
         "connectors": [],
         "quota_id": null
     });
