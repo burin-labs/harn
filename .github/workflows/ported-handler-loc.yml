@@ -18,6 +18,7 @@ on:
       - 'scripts/check_ported_handler_loc.harn'
       - 'scripts/ported_handlers.toml'
       - '.github/workflows/ported-handler-loc.yml'
+      - '.github/scripts/merge-group-path-gate.sh'
   merge_group:
   workflow_dispatch:
 
@@ -43,17 +44,33 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Resolve merge-group gate scope
+        id: scope
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.merge_group.base_sha || '' }}
+          HEAD_SHA: ${{ github.event.merge_group.head_sha || github.sha }}
+          GATE_NAME: Ported handler LOC ratchet
+          PATH_PATTERN: '^(crates/harn-cli/src/commands/|crates/harn-cli/src/lib\.rs$|scripts/check_ported_handler_loc\.harn$|scripts/ported_handlers\.toml$|\.github/workflows/ported-handler-loc\.yml$|\.github/scripts/merge-group-path-gate\.sh$)'
+        run: .github/scripts/merge-group-path-gate.sh
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        if: steps.scope.outputs.run_gate == 'true'
       - uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
+        if: steps.scope.outputs.run_gate == 'true'
         # sccache is a build-cache optimization, not a build requirement.
         continue-on-error: true
       - name: Configure Cargo to use sccache
-        if: env.SCCACHE_PATH != ''
+        if: steps.scope.outputs.run_gate == 'true' && env.SCCACHE_PATH != ''
         run: echo "RUSTC_WRAPPER=${SCCACHE_PATH}" >> "$GITHUB_ENV"
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        if: steps.scope.outputs.run_gate == 'true'
         continue-on-error: true
         with:
           shared-key: ported-handler-loc
           cache-bin: false
       - name: Run ported-handler LOC ratchet
+        if: steps.scope.outputs.run_gate == 'true'
         run: make check-ported-handler-loc
+      - name: Skip irrelevant merge-group diff
+        if: steps.scope.outputs.run_gate != 'true'
+        run: echo "merge_group diff does not touch the ported-handler LOC surface; no-op pass."
