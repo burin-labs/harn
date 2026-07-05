@@ -65,6 +65,12 @@ batch_input_mode = "jsonl_or_inline"
 batch_turnaround_hours = 24
 top_k_supported = false
 
+[provider_defaults.groq]
+batch_wire_format = "openai"
+batch_input_mode = "jsonl_file"
+batch_discount_percent = 50
+batch_turnaround_hours = 24
+
 [provider_defaults.fireworks]
 batch_wire_format = "fireworks"
 batch_input_mode = "jsonl_file"

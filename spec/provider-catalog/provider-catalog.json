@@ -427,7 +427,10 @@
       "protocols": [
         "openai_chat_completions"
       ],
-      "features": [],
+      "features": [
+        "native_tools",
+        "batch"
+      ],
       "caveats": [],
       "latency_p50_ms": 450
     },
