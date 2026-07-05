@@ -61,6 +61,27 @@ const NETWORK_BREAKER_FAILURE_THRESHOLD: u32 = 4;
 /// Short on purpose: a laptop reconnect or DNS recovery should be retried soon,
 /// we only want to stop burning the per-call retry budget while the link is down.
 const NETWORK_BREAKER_OPEN_MS: u64 = 5_000;
+/// Consecutive terminal *unproductive completions* (a zero-token empty
+/// completion, or a billed-noncommittal turn — the provider served but
+/// committed no content, reasoning, or tool call) on one route that trip the
+/// breaker OPEN. Small on purpose: a route that empties this many times in a
+/// row is not usefully serving, and continuing to dispatch just burns the
+/// escalation/judge budget one dead turn at a time. This is the always-on,
+/// provider-general backstop for the empty-completion storm that harn#4023's
+/// failover-to-`circuit_open` cannot stop for a single-provider model with no
+/// cross-provider alternate (its conversion is also gated behind the
+/// default-OFF `llm.rate_governor` flag). Distinct from the network threshold:
+/// an empty completion is a served-but-useless turn, not an unreachable link.
+const UNPRODUCTIVE_COMPLETION_BREAKER_THRESHOLD: u32 = 3;
+/// Base open window after the breaker trips on unproductive completions. It
+/// grows per consecutive open (doubling, capped) so a genuinely dead escalation
+/// lane is probed only a bounded handful of times over a long trial instead of
+/// storming 18-43x, while a provider that recovers is retried within a window.
+/// Longer than [`NETWORK_BREAKER_OPEN_MS`]: an empty-completing model rarely
+/// self-heals in seconds, and each probe costs a full billed provider call.
+const UNPRODUCTIVE_BREAKER_OPEN_MS: u64 = 30_000;
+/// Ceiling for the (doubling) unproductive open window.
+const UNPRODUCTIVE_BREAKER_OPEN_MS_MAX: u64 = 240_000;
 /// Default shared-cooldown window recorded on a provider-overload failure
 /// (HTTP 529/503, Anthropic `overloaded_error`) when the response carried no
 /// Retry-After header — overload responses rarely do. Recording it in the
@@ -248,10 +269,17 @@ impl SlidingWindow {
 /// admit a single probe, then closes on success or re-opens on another
 /// qualifying failure.
 ///
+/// Also opens on sustained terminal *unproductive completions* (a served turn
+/// that delivered no content, reasoning, or tool call). A single-provider model
+/// with no cross-provider failover alternate cannot be rescued by routing, so
+/// once it empties [`UNPRODUCTIVE_COMPLETION_BREAKER_THRESHOLD`] times in a row
+/// on a route the breaker fails fast (surfaced as `circuit_open`, so the agent
+/// loop degrades onto the primary/cheap result and the judge defers) instead of
+/// re-dispatching the dead lane every turn.
+///
 /// Network reachability is a property of THIS process, so the breaker is
 /// per-process state (not shared via the durable rate-limit DB). It is distinct
-/// from the opt-in routing-policy breaker; this one is always-on and only ever
-/// reacts to transport-level network failures.
+/// from the opt-in routing-policy breaker; this one is always-on.
 #[derive(Debug, Default, PartialEq, Eq)]
 enum BreakerState {
     #[default]
@@ -262,30 +290,53 @@ enum BreakerState {
     HalfOpen,
 }
 
+/// Why the breaker is currently OPEN, so the fail-fast error carries the right
+/// category: an unreachable link is `transient_network`, whereas a route that
+/// keeps serving empty completions is `circuit_open` (failover-eligible where a
+/// chain exists; degraded-onto-primary by the agent loop where it is not).
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+enum BreakerOpenReason {
+    #[default]
+    Network,
+    UnproductiveCompletion,
+}
+
 #[derive(Debug, Default)]
 struct NetworkBreaker {
     state: BreakerState,
     consecutive_network_failures: u32,
+    /// Consecutive terminal unproductive completions on this route. Reset by
+    /// any productive serve; independent of the network-failure streak.
+    consecutive_unproductive_completions: u32,
+    /// How many times the breaker has opened for unproductive completions
+    /// without an intervening productive serve. Drives the doubling open window
+    /// so a persistently dead lane is probed a bounded number of times.
+    unproductive_opens: u32,
+    /// Reason the breaker last opened (drives the fail-fast error category).
+    open_reason: BreakerOpenReason,
 }
 
 impl NetworkBreaker {
     /// Whether a call should be admitted now, transitioning Open→HalfOpen when
     /// the open window has elapsed. Returns `None` to admit (Closed/HalfOpen
-    /// probe), or `Some(remaining)` to fail fast while open.
-    fn admit(&mut self, now_ms: u128) -> Option<Duration> {
+    /// probe), or `Some((remaining, reason))` to fail fast while open.
+    fn admit(&mut self, now_ms: u128) -> Option<(Duration, BreakerOpenReason)> {
         match self.state {
             BreakerState::Closed => None,
             BreakerState::HalfOpen => {
                 // A probe is already in flight; do not admit a second.
-                Some(Duration::from_millis(0))
+                Some((Duration::from_millis(0), self.open_reason))
             }
             BreakerState::Open { until_ms } => {
                 if now_ms >= until_ms {
                     self.state = BreakerState::HalfOpen;
                     None
                 } else {
-                    Some(Duration::from_millis(
-                        until_ms.saturating_sub(now_ms).min(u128::from(u64::MAX)) as u64,
+                    Some((
+                        Duration::from_millis(
+                            until_ms.saturating_sub(now_ms).min(u128::from(u64::MAX)) as u64,
+                        ),
+                        self.open_reason,
                     ))
                 }
             }
@@ -299,14 +350,41 @@ impl NetworkBreaker {
         if matches!(self.state, BreakerState::HalfOpen)
             || self.consecutive_network_failures >= NETWORK_BREAKER_FAILURE_THRESHOLD
         {
+            self.open_reason = BreakerOpenReason::Network;
             self.state = BreakerState::Open {
                 until_ms: now_ms.saturating_add(u128::from(NETWORK_BREAKER_OPEN_MS)),
             };
         }
     }
 
+    /// Record a terminal unproductive completion (empty / billed-noncommittal).
+    /// Trips the breaker OPEN on a failed half-open probe or once the streak
+    /// crosses [`UNPRODUCTIVE_COMPLETION_BREAKER_THRESHOLD`], with a doubling,
+    /// capped open window so a dead lane is probed only a bounded few times.
+    fn record_unproductive_completion(&mut self, now_ms: u128) {
+        self.consecutive_unproductive_completions =
+            self.consecutive_unproductive_completions.saturating_add(1);
+        if matches!(self.state, BreakerState::HalfOpen)
+            || self.consecutive_unproductive_completions
+                >= UNPRODUCTIVE_COMPLETION_BREAKER_THRESHOLD
+        {
+            self.unproductive_opens = self.unproductive_opens.saturating_add(1);
+            let shift = self.unproductive_opens.saturating_sub(1).min(3);
+            let window = UNPRODUCTIVE_BREAKER_OPEN_MS
+                .saturating_mul(1u64 << shift)
+                .min(UNPRODUCTIVE_BREAKER_OPEN_MS_MAX);
+            self.open_reason = BreakerOpenReason::UnproductiveCompletion;
+            self.state = BreakerState::Open {
+                until_ms: now_ms.saturating_add(u128::from(window)),
+            };
+        }
+    }
+
     fn record_success(&mut self) {
         self.consecutive_network_failures = 0;
+        self.consecutive_unproductive_completions = 0;
+        self.unproductive_opens = 0;
+        self.open_reason = BreakerOpenReason::Network;
         self.state = BreakerState::Closed;
     }
 }
@@ -386,13 +464,17 @@ impl RouteLimiter {
         self.cooldown_until_ms = Some(self.cooldown_until_ms.unwrap_or(0).max(until_ms));
     }
 
-    /// Fail-fast wait if the network breaker is open; `None` admits the call.
-    fn breaker_block(&mut self, now_ms: u128) -> Option<Duration> {
+    /// Fail-fast wait + reason if the route breaker is open; `None` admits.
+    fn breaker_block(&mut self, now_ms: u128) -> Option<(Duration, BreakerOpenReason)> {
         self.breaker.admit(now_ms)
     }
 
     fn observe_network_failure(&mut self, now_ms: u128) {
         self.breaker.record_network_failure(now_ms);
+    }
+
+    fn observe_unproductive_completion(&mut self, now_ms: u128) {
+        self.breaker.record_unproductive_completion(now_ms);
     }
 
     fn observe_success(&mut self) {
@@ -976,7 +1058,12 @@ pub(crate) fn observe_retry_after_for_llm_call(
 }
 
 /// Fail-fast error returned when the network breaker is open for a route.
-fn breaker_open_error(provider: &str, model: &str, remaining: Duration) -> crate::value::VmError {
+fn breaker_open_error(
+    provider: &str,
+    model: &str,
+    remaining: Duration,
+    reason: BreakerOpenReason,
+) -> crate::value::VmError {
     let route = if model.trim().is_empty() {
         provider.to_string()
     } else {
@@ -985,13 +1072,27 @@ fn breaker_open_error(provider: &str, model: &str, remaining: Duration) -> crate
             crate::llm_config::normalize_model_id(model)
         )
     };
-    crate::value::VmError::CategorizedError {
-        message: format!(
-            "network circuit breaker open for '{route}': sustained network failures or \
-             provider overload; failing fast for {}ms (a half-open probe will follow)",
-            remaining.as_millis()
-        ),
-        category: crate::value::ErrorCategory::TransientNetwork,
+    match reason {
+        BreakerOpenReason::Network => crate::value::VmError::CategorizedError {
+            message: format!(
+                "network circuit breaker open for '{route}': sustained network failures or \
+                 provider overload; failing fast for {}ms (a half-open probe will follow)",
+                remaining.as_millis()
+            ),
+            category: crate::value::ErrorCategory::TransientNetwork,
+        },
+        // `circuit_open` so routing fails over where a chain exists and the
+        // agent loop degrades onto the primary/cheap result (and the judge
+        // defers) where the model is single-provider with no alternate.
+        BreakerOpenReason::UnproductiveCompletion => crate::value::VmError::CategorizedError {
+            message: format!(
+                "circuit breaker open for '{route}': sustained empty/unproductive completions \
+                 (served but delivered no content, reasoning, or tool call); failing fast for \
+                 {}ms (a half-open probe will follow)",
+                remaining.as_millis()
+            ),
+            category: crate::value::ErrorCategory::CircuitOpen,
+        },
     }
 }
 
@@ -1012,20 +1113,60 @@ pub(crate) fn check_network_breaker_for_llm_call(
     // Use the max remaining-open across the route's keys: if any key is open, the
     // call fails fast. `breaker_block` also performs the Open→HalfOpen
     // transition, so probe admission is consistent across sibling callers.
-    let mut blocked: Option<Duration> = None;
+    // Max remaining-open across the route's keys: if any key is open the call
+    // fails fast. An unproductive-completion open wins the reason tie-break so
+    // its `circuit_open` category (loop degrades onto primary) is not masked by
+    // a coincidental network open on a sibling key.
+    let mut blocked: Option<(Duration, BreakerOpenReason)> = None;
     for key in &keys {
         let limiter = limiter_for_key(&mut registry.limiters, key);
-        if let Some(remaining) = limiter.breaker_block(now_ms) {
+        if let Some((remaining, reason)) = limiter.breaker_block(now_ms) {
             blocked = Some(match blocked {
-                Some(prev) => prev.max(remaining),
-                None => remaining,
+                Some((prev, prev_reason)) => {
+                    let reason = if prev_reason == BreakerOpenReason::UnproductiveCompletion
+                        || reason == BreakerOpenReason::UnproductiveCompletion
+                    {
+                        BreakerOpenReason::UnproductiveCompletion
+                    } else {
+                        reason
+                    };
+                    (prev.max(remaining), reason)
+                }
+                None => (remaining, reason),
             });
         }
     }
     drop(registry);
     match blocked {
-        Some(remaining) => Err(breaker_open_error(&opts.provider, &opts.model, remaining)),
+        Some((remaining, reason)) => Err(breaker_open_error(
+            &opts.provider,
+            &opts.model,
+            remaining,
+            reason,
+        )),
         None => Ok(()),
+    }
+}
+
+/// Feed a terminal unproductive completion (a served turn that delivered no
+/// content, reasoning, or tool call — the zero-token empty completion or the
+/// billed-noncommittal contract violation) to the route's circuit breaker.
+///
+/// Always-on and governor-independent: unlike harn#4023's
+/// throttle-gated failover-to-`circuit_open`, this backstops the storm for a
+/// single-provider model (e.g. an Anthropic-only escalation target or judge)
+/// that has no cross-provider alternate. Once a route empties
+/// [`UNPRODUCTIVE_COMPLETION_BREAKER_THRESHOLD`] times in a row the breaker
+/// opens and subsequent calls fail fast instead of re-dispatching the dead
+/// lane. A productive serve resets the streak.
+pub(crate) fn observe_unproductive_completion_for_llm_call(opts: &super::api::LlmCallOptions) {
+    ensure_initialized_from_config();
+    let keys = limiter_keys(&opts.provider, &opts.model);
+    let now_ms = crate::clock_mock::instant_now().as_millis();
+    let mut registry = registry().lock().expect("rate limiter mutex poisoned");
+    for key in keys {
+        let limiter = limiter_for_key(&mut registry.limiters, &key);
+        limiter.observe_unproductive_completion(now_ms);
     }
 }
 
@@ -1716,11 +1857,125 @@ mod tests {
         }
         // Crossing the threshold opens it.
         b.record_network_failure(100);
-        let blocked = b.admit(100).expect("breaker must be open at threshold");
+        let (blocked, reason) = b.admit(100).expect("breaker must be open at threshold");
+        assert_eq!(reason, BreakerOpenReason::Network);
         assert!(
             blocked.as_millis() > 0 && blocked.as_millis() <= u128::from(NETWORK_BREAKER_OPEN_MS),
             "open window remaining {}ms out of (0, {NETWORK_BREAKER_OPEN_MS}]",
             blocked.as_millis()
+        );
+    }
+
+    #[test]
+    fn breaker_opens_after_threshold_consecutive_unproductive_completions() {
+        let mut b = NetworkBreaker::default();
+        // Below threshold: still closed, calls admitted.
+        for i in 1..UNPRODUCTIVE_COMPLETION_BREAKER_THRESHOLD {
+            b.record_unproductive_completion(u128::from(i));
+            assert!(
+                b.admit(u128::from(i)).is_none(),
+                "must stay closed below threshold ({i} empties)"
+            );
+        }
+        // Crossing the threshold opens it with the circuit_open-flavored reason.
+        b.record_unproductive_completion(100);
+        let (blocked, reason) = b.admit(100).expect("breaker must be open at threshold");
+        assert_eq!(reason, BreakerOpenReason::UnproductiveCompletion);
+        assert!(
+            blocked.as_millis() > 0
+                && blocked.as_millis() <= u128::from(UNPRODUCTIVE_BREAKER_OPEN_MS),
+            "open window remaining {}ms out of (0, {UNPRODUCTIVE_BREAKER_OPEN_MS}]",
+            blocked.as_millis()
+        );
+    }
+
+    #[test]
+    fn unproductive_breaker_open_window_grows_per_reopen() {
+        let mut b = NetworkBreaker::default();
+        // First trip: base window (measured at the instant it opened).
+        for _ in 0..UNPRODUCTIVE_COMPLETION_BREAKER_THRESHOLD {
+            b.record_unproductive_completion(0);
+        }
+        let (first, _) = b.admit(0).expect("open after first trip");
+        assert_eq!(first.as_millis(), u128::from(UNPRODUCTIVE_BREAKER_OPEN_MS));
+        // Elapse the window, admit the half-open probe, then have it empty again:
+        // the window must have grown (doubling), not stayed flat, so a dead lane
+        // is probed a bounded number of times instead of every base window.
+        let after = u128::from(UNPRODUCTIVE_BREAKER_OPEN_MS) + 1;
+        assert!(b.admit(after).is_none(), "half-open probe admitted");
+        b.record_unproductive_completion(after);
+        let (second, reason) = b.admit(after).expect("re-open after failed probe");
+        assert_eq!(reason, BreakerOpenReason::UnproductiveCompletion);
+        assert_eq!(
+            second.as_millis(),
+            u128::from(UNPRODUCTIVE_BREAKER_OPEN_MS.saturating_mul(2)),
+            "window must double on the second unproductive open"
+        );
+    }
+
+    #[test]
+    fn unproductive_breaker_success_resets_streak_and_reason() {
+        let mut b = NetworkBreaker::default();
+        b.record_unproductive_completion(0);
+        b.record_unproductive_completion(0);
+        b.record_success();
+        assert_eq!(b.consecutive_unproductive_completions, 0);
+        assert_eq!(b.unproductive_opens, 0);
+        assert_eq!(b.open_reason, BreakerOpenReason::Network);
+        // One post-success empty must not be enough to re-open (streak reset).
+        b.record_unproductive_completion(0);
+        assert!(
+            b.admit(0).is_none(),
+            "single empty after a productive serve must stay closed"
+        );
+    }
+
+    /// End-to-end wiring for the empty-completion storm fix: feeding a route the
+    /// same terminal unproductive completions `observed_llm_call` surfaces on a
+    /// dead escalation/judge lane opens the always-on route breaker, so the
+    /// NEXT dispatch fails fast with a `circuit_open` error (failover-eligible;
+    /// the agent loop degrades onto the primary/cheap result) instead of
+    /// re-dispatching the lane 18-43x per trial. Governor-independent: no
+    /// `HARN_LLM_RATE_GOVERNOR` here, unlike harn#4023's throttle-gated path.
+    #[test]
+    fn unproductive_completion_feed_opens_route_breaker_and_fails_fast_with_circuit_open() {
+        // Serialize with the other env-guarded rate-limit tests (some of which
+        // globally clear the registry) so none wipes this route mid-run. Use a
+        // dedicated provider id so we never touch — or need to reset — another
+        // test's limiter state (a global reset here would race the concurrency
+        // quota tests, exactly what `reset_runtime_rate_limit_overrides` warns
+        // about).
+        let _guard = crate::llm::env_guard();
+
+        let mut opts = crate::llm::api::options::base_opts("storm-test-provider");
+        opts.model = "storm-test-model".to_string();
+
+        // Below the threshold the route stays admitted (a couple of empties is
+        // tolerated before the lane is declared dead).
+        for _ in 0..UNPRODUCTIVE_COMPLETION_BREAKER_THRESHOLD - 1 {
+            observe_unproductive_completion_for_llm_call(&opts);
+            assert!(
+                check_network_breaker_for_llm_call(&opts).is_ok(),
+                "route must stay admitted below the unproductive-completion threshold"
+            );
+        }
+
+        // Crossing the threshold trips the breaker: the next dispatch fails fast
+        // with `circuit_open`, having made zero further provider calls.
+        observe_unproductive_completion_for_llm_call(&opts);
+        let err = check_network_breaker_for_llm_call(&opts)
+            .expect_err("route breaker must fail fast after the unproductive streak");
+        assert_eq!(
+            crate::value::error_to_category(&err),
+            crate::value::ErrorCategory::CircuitOpen,
+            "sustained empty completions must surface as circuit_open (failover-eligible)"
+        );
+
+        // A genuinely productive serve heals the lane and closes the breaker.
+        observe_network_outcome_for_llm_call(&opts, false);
+        assert!(
+            check_network_breaker_for_llm_call(&opts).is_ok(),
+            "a productive serve must close the breaker"
         );
     }
 

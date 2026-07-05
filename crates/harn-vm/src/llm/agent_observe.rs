@@ -691,6 +691,21 @@ fn is_retryable_unproductive_completion(result: &super::api::LlmResult) -> bool 
     is_zero_token_empty_completion(result) || is_errored_actionless_completion(result)
 }
 
+/// The crate-internal LLM *simulators* — `fake` (scripted streams) and `mock`
+/// (replayed turns) — are test/replay routes, not real provider endpoints. They
+/// are already excluded from the empty-completion retry budget
+/// ([`empty_completion_retry_budget`]) and backoff ([`llm_retry_backoff_ms`]);
+/// exclude them from the unproductive-completion circuit breaker for the same
+/// reason. A scripted empty turn is a fixture, not a dead provider lane, and
+/// tripping the process-global route breaker on the shared `fake` route would
+/// couple otherwise-independent unit tests. The breaker's real target is a live
+/// provider (e.g. an Anthropic-only escalation target or judge) that keeps
+/// serving empty completions with no cross-provider alternate to fail over to.
+fn is_internal_llm_simulator(provider: &str) -> bool {
+    crate::llm::providers::MockProvider::should_intercept(provider)
+        || crate::llm::fake::FakeLlmProvider::should_intercept(provider)
+}
+
 fn terminal_unproductive_completion_failover_error(
     opts: &super::api::LlmCallOptions,
     result: &super::api::LlmResult,
@@ -2052,9 +2067,23 @@ pub(crate) async fn observed_llm_call(
                     duration_ms,
                     iteration: iteration.unwrap_or(0),
                 });
-                // A reachable, answering provider closes the network breaker
-                // (and resets any half-open probe).
-                super::rate_limit::observe_network_outcome_for_llm_call(opts, false);
+                // A terminal unproductive completion (a zero-token empty or a
+                // billed-noncommittal turn that survived the built-in
+                // empty-completion retry budget) is served-but-useless. It must
+                // NOT close the breaker as if the route answered — that reset is
+                // exactly what let the same throttled/empty lane be re-dispatched
+                // every turn, storming 18-43x per trial. Feed the always-on
+                // unproductive-completion streak instead so a route that keeps
+                // empty-completing trips `circuit_open` fast (governor-independent,
+                // and works for a single-provider model harn#4023's failover
+                // cannot rescue). A genuinely answering turn closes the breaker.
+                if is_retryable_unproductive_completion(&result)
+                    && !is_internal_llm_simulator(&opts.provider)
+                {
+                    super::rate_limit::observe_unproductive_completion_for_llm_call(opts);
+                } else {
+                    super::rate_limit::observe_network_outcome_for_llm_call(opts, false);
+                }
                 return Ok(result);
             }
             Err(error) => {
@@ -2068,14 +2097,22 @@ pub(crate) async fn observed_llm_call(
                     opts,
                     shared_cooldown_ms_for_llm_error(&error),
                 );
-                // Feed transport-level network failures (connection/DNS/
-                // timeout) AND provider overload (529/503) to the breaker —
-                // never 429 (rate limit) or generic 5xx (single-request
-                // server fault on a reachable, healthy link).
-                super::rate_limit::observe_network_outcome_for_llm_call(
-                    opts,
-                    is_network_failure_llm_error(&error) || is_overloaded_llm_error(&error),
-                );
+                // A *thrown* empty completion is neither a serve nor a network
+                // failure: it must NOT reset the breaker as a success (that
+                // reset is what let a dead empty-completing lane be re-dispatched
+                // every turn). A terminal one feeds the unproductive-completion
+                // streak below; a still-retryable one touches the breaker not at
+                // all. Everything else feeds transport-level network failures
+                // (connection/DNS/timeout) AND provider overload (529/503) —
+                // never 429 (rate limit) or generic 5xx (single-request server
+                // fault on a reachable, healthy link).
+                let empty_completion_error = is_empty_completion_retry_error(&error);
+                if !empty_completion_error {
+                    super::rate_limit::observe_network_outcome_for_llm_call(
+                        opts,
+                        is_network_failure_llm_error(&error) || is_overloaded_llm_error(&error),
+                    );
+                }
                 let retryable = is_retryable_llm_error(&error);
                 // A *thrown* unproductive completion (zero-token empty, or the
                 // billed-noncommittal contract violation whose tool call went
@@ -2090,7 +2127,7 @@ pub(crate) async fn observed_llm_call(
                 // exhausted the loud thrown error (which names the
                 // `upstream contract violation`) is surfaced unchanged, so the
                 // eval layer can still classify it as infra, not capability.
-                let empty_completion_retry = is_empty_completion_retry_error(&error)
+                let empty_completion_retry = empty_completion_error
                     && attempt < empty_completion_retry_budget(&opts.provider);
                 // Runtime tool_format fallback: a native-channel request whose
                 // failure fingerprint says the provider's native tool-call
@@ -2180,6 +2217,17 @@ pub(crate) async fn observed_llm_call(
                     );
                 }
                 if !can_retry {
+                    if empty_completion_error && !is_internal_llm_simulator(&opts.provider) {
+                        // A thrown empty completion that exhausted its retry
+                        // budget is terminal-unproductive: feed the always-on
+                        // unproductive-completion streak so a route that keeps
+                        // throwing empties trips `circuit_open` fast instead of
+                        // being re-escalated into every turn (the storm harn#4023
+                        // cannot stop for a single-provider model). Mirrors the
+                        // `Ok`-arm terminal-empty feed so both empty shapes bound
+                        // identically.
+                        super::rate_limit::observe_unproductive_completion_for_llm_call(opts);
+                    }
                     if let Some(metrics) = crate::active_metrics_registry() {
                         metrics.record_llm_call(&opts.provider, &opts.model, status, 0.0);
                     }
@@ -2198,7 +2246,7 @@ pub(crate) async fn observed_llm_call(
                     );
                     return Err(error);
                 }
-                if is_empty_completion_retry_error(&error) {
+                if empty_completion_error {
                     // This thrown empty completion is being retried (we passed
                     // the `!can_retry` gate). Count it so a subsequent serve is
                     // recorded as transient-recovered, not a clean serve.
