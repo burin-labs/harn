@@ -558,7 +558,7 @@ async fn run_llm_repair(
         VmValue::dict(merged_options),
     ];
     let opts = extract_llm_options(&args).map_err(|e| e.to_string())?;
-    let outcome = execute_schema_retry_loop(None, opts.clone(), merged_dict, bridge)
+    let outcome = execute_schema_retry_loop(None, opts.clone(), merged_dict, bridge, None)
         .await
         .map_err(|e| e.to_string())?;
     if !outcome.errors.is_empty() {

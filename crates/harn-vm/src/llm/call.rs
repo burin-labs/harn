@@ -374,7 +374,7 @@ pub(super) async fn llm_call_impl(
     // runtime-introspection snapshot — that's the single DRY point for
     // every llm_call path (plain, bridged, structured), so we don't
     // also record here.
-    match execute_llm_call(ctx, opts, options, None).await {
+    match execute_llm_call(ctx, opts, options, None, None).await {
         Ok(v) => Ok(v),
         Err(err) => Err(VmError::Thrown(build_llm_error_dict(
             &err, &provider, &model,
@@ -442,6 +442,7 @@ pub(crate) async fn execute_llm_call(
     opts: api::LlmCallOptions,
     options: Option<crate::value::DictMap>,
     bridge: Option<&Arc<crate::bridge::HostBridge>>,
+    delta_sink: Option<api::DeltaSender>,
 ) -> Result<VmValue, VmError> {
     // Publish the resolved provider/model facts for the introspection
     // tool surface (current_model() / current_provider() / ...). All
@@ -450,9 +451,9 @@ pub(crate) async fn execute_llm_call(
     // `llm_call_impl` — so recording here is the single DRY point.
     super::introspection::record_resolved_llm_call(&opts.provider, &opts.model);
     let outcome = if let Some(policy) = opts.routing_policy.clone() {
-        execute_routing_schema_retry_loop(ctx, policy, opts, options, bridge).await?
+        execute_routing_schema_retry_loop(ctx, policy, opts, options, bridge, delta_sink).await?
     } else {
-        execute_schema_retry_loop(ctx, opts, options, bridge).await?
+        execute_schema_retry_loop(ctx, opts, options, bridge, delta_sink).await?
     };
     if outcome.errors.is_empty() {
         return Ok(outcome.vm_result);
@@ -491,6 +492,7 @@ async fn execute_routing_schema_retry_loop(
     mut opts: api::LlmCallOptions,
     options: Option<crate::value::DictMap>,
     bridge: Option<&Arc<crate::bridge::HostBridge>>,
+    delta_sink: Option<api::DeltaSender>,
 ) -> Result<SchemaLoopOutcome, VmError> {
     let _ = structural_experiments::apply_structural_experiment(ctx, &mut opts, None).await?;
     let schema_retries = helpers::opt_int(&options, "schema_retries")
@@ -503,7 +505,9 @@ async fn execute_routing_schema_retry_loop(
 
     for attempt in 0..=schema_retries {
         let (vm_result, raw_text, errors) =
-            match routing::execute_with_routing(&policy, opts.clone(), bridge).await {
+            match routing::execute_with_routing(&policy, opts.clone(), bridge, delta_sink.clone())
+                .await
+            {
                 Ok((result, trace)) => {
                     let raw_text = result.text.clone();
                     // Snap option metadata to the winning link so transcript / portal
@@ -640,6 +644,7 @@ pub(crate) async fn execute_schema_retry_loop(
     mut opts: api::LlmCallOptions,
     options: Option<crate::value::DictMap>,
     bridge: Option<&Arc<crate::bridge::HostBridge>>,
+    delta_sink: Option<api::DeltaSender>,
 ) -> Result<SchemaLoopOutcome, VmError> {
     let _ = structural_experiments::apply_structural_experiment(ctx, &mut opts, None).await?;
     // Schema retry loop is orthogonal to transport concerns: `llm_call` is
@@ -675,6 +680,7 @@ pub(crate) async fn execute_schema_retry_loop(
             // session_id), so skip candidate detection here. The agent
             // loop's `run_llm_call` is the integration point that owns it.
             None,
+            delta_sink.clone(),
         )
         .await;
 
@@ -1067,6 +1073,14 @@ mod schema_stream_abort_retry_tests {
             .expect("routing policy present")
     }
 
+    fn drain_deltas(rx: &mut tokio::sync::mpsc::UnboundedReceiver<String>) -> Vec<String> {
+        let mut deltas = Vec::new();
+        while let Ok(delta) = rx.try_recv() {
+            deltas.push(delta);
+        }
+        deltas
+    }
+
     // Regression: a truncated structured-output response must be reported as a
     // token-limit hit regardless of provider stop_reason spelling. Gemini /
     // Vertex pass `MAX_TOKENS` (uppercase) through unnormalized; the previous
@@ -1145,13 +1159,29 @@ mod schema_stream_abort_retry_tests {
                     ])),
             );
 
+            let (delta_tx, mut delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
             let opts = fake_opts_with_schema();
-            let outcome =
-                execute_schema_retry_loop(None, opts, Some(options_with_retries(2)), None)
-                    .await
-                    .expect("retry loop runs cleanly");
+            let outcome = execute_schema_retry_loop(
+                None,
+                opts,
+                Some(options_with_retries(2)),
+                None,
+                Some(delta_tx),
+            )
+            .await
+            .expect("retry loop runs cleanly");
 
             assert_eq!(outcome.attempts, 2, "expected the recovery to run twice");
+            let deltas = drain_deltas(&mut delta_rx);
+            assert_eq!(
+                deltas,
+                vec![
+                    "{\"age\": ".to_string(),
+                    "\"twenty".to_string(),
+                    "{\"age\": 20}".to_string()
+                ],
+                "stream sink should receive the aborting attempt and the recovery attempt"
+            );
             assert!(
                 outcome.errors.is_empty(),
                 "final attempt must validate cleanly; got {:?}",
@@ -1232,13 +1262,29 @@ mod schema_stream_abort_retry_tests {
                     ])),
             );
 
+            let (delta_tx, mut delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
             let mut opts = fake_opts_with_schema();
             opts.routing_policy = Some(fake_routing_policy());
-            let result = execute_llm_call(None, opts, Some(options_with_retries(1)), None)
-                .await
-                .expect("routed schema retry should recover");
+            let result = execute_llm_call(
+                None,
+                opts,
+                Some(options_with_retries(1)),
+                None,
+                Some(delta_tx),
+            )
+            .await
+            .expect("routed schema retry should recover");
 
             let dict = result.as_dict().expect("result dict");
+            let deltas = drain_deltas(&mut delta_rx);
+            assert_eq!(
+                deltas,
+                vec![
+                    "{\"age\":\"twenty\"}".to_string(),
+                    "{\"age\":20}".to_string()
+                ],
+                "routed calls should stream through the llm_call wrapper path"
+            );
             let data = dict.get("data").expect("validated data");
             let data = data.as_dict().expect("validated data dict");
             match data.get("age") {
@@ -1277,7 +1323,7 @@ mod schema_stream_abort_retry_tests {
             let mut opts = fake_opts_with_schema();
             opts.schema_stream_abort = false;
             let outcome =
-                execute_schema_retry_loop(None, opts, Some(options_with_retries(0)), None)
+                execute_schema_retry_loop(None, opts, Some(options_with_retries(0)), None, None)
                     .await
                     .expect("retry loop completes");
 

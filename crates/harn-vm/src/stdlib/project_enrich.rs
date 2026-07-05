@@ -139,7 +139,15 @@ async fn project_enrich_impl(
         VmValue::Nil,
         llm_options_value.clone(),
     ])?;
-    match execute_llm_call(ctx, extracted, llm_options_value.as_dict().cloned(), None).await {
+    match execute_llm_call(
+        ctx,
+        extracted,
+        llm_options_value.as_dict().cloned(),
+        None,
+        None,
+    )
+    .await
+    {
         Ok(response) => {
             let response_dict = response.as_dict().ok_or_else(|| {
                 VmError::Thrown(VmValue::String(arcstr::ArcStr::from(

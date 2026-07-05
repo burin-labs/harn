@@ -355,7 +355,7 @@ async fn run_llm_call(
     let (vm_args, options_dict) = build_llm_call_args(parsed, overrides);
 
     let opts = crate::llm::extract_llm_options(&vm_args).map_err(host_error_to_string)?;
-    let result = crate::llm::execute_llm_call(None, opts, Some(options_dict), None)
+    let result = crate::llm::execute_llm_call(None, opts, Some(options_dict), None, None)
         .await
         .map_err(host_error_to_string)?;
 

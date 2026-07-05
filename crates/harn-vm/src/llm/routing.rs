@@ -1535,9 +1535,19 @@ fn duration_ms(elapsed: Duration) -> u64 {
 async fn execute_link(
     opts: &LlmCallOptions,
     bridge: Option<&Arc<crate::bridge::HostBridge>>,
+    delta_sink: Option<super::api::DeltaSender>,
 ) -> Result<super::api::LlmResult, VmError> {
-    super::agent_observe::observed_llm_call(opts, None, bridge, None, false, bridge.is_some(), None)
-        .await
+    super::agent_observe::observed_llm_call(
+        opts,
+        None,
+        bridge,
+        None,
+        false,
+        bridge.is_some(),
+        None,
+        delta_sink,
+    )
+    .await
 }
 
 fn pending_attempt_record(
@@ -1688,6 +1698,7 @@ pub(crate) async fn execute_with_routing(
     policy: &RoutingPolicyConfig,
     mut base_opts: LlmCallOptions,
     bridge: Option<&Arc<crate::bridge::HostBridge>>,
+    delta_sink: Option<super::api::DeltaSender>,
 ) -> Result<(super::api::LlmResult, RoutingTrace), VmError> {
     let dispatch = policy.dispatch_label();
     let mut trace = RoutingTrace {
@@ -1791,6 +1802,10 @@ pub(crate) async fn execute_with_routing(
                 let backup_link = policy.chain[idx + 1].clone();
                 let backup_opts = link_options(&base_opts, policy, &backup_link);
                 let backup_label = backup_link.display_label();
+                // Do not stream deltas from racing attempts: the loser may
+                // emit text before the winner is known. Callers that need an
+                // observational stream still receive the selected result text
+                // through their non-streaming fallback after routing resolves.
                 Some(
                     run_race(
                         &dispatch,
@@ -1817,7 +1832,7 @@ pub(crate) async fn execute_with_routing(
         let (result, mut attempt_records) = if let Some(outcome) = race_outcome {
             outcome
         } else {
-            let result = execute_link(&opts, bridge).await;
+            let result = execute_link(&opts, bridge, delta_sink.clone()).await;
             (
                 result,
                 vec![pending_attempt_record(
@@ -2027,7 +2042,7 @@ async fn run_race(
     let primary_opts = opts.clone();
 
     let mut primary_future = Box::pin(async move {
-        let res = execute_link(&primary_opts, bridge).await;
+        let res = execute_link(&primary_opts, bridge, None).await;
         (res, primary_start.elapsed())
     });
 
@@ -2069,7 +2084,7 @@ async fn run_race(
             let mut backup_future = Box::pin({
                 let backup_opts = backup_opts.clone();
                 async move {
-                    let res = execute_link(&backup_opts, bridge).await;
+                    let res = execute_link(&backup_opts, bridge, None).await;
                     (res, backup_start.elapsed())
                 }
             });

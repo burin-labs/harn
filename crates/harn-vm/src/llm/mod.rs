@@ -975,7 +975,7 @@ mod tests {
             stream_chunks: Vec::new(),
         });
 
-        let response = execute_llm_call(None, base_opts(), None, None)
+        let response = execute_llm_call(None, base_opts(), None, None, None)
             .await
             .expect("structured retry should recover");
         let dict = response.as_dict().expect("dict response");
