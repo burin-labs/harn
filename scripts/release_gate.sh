@@ -5,6 +5,28 @@ ROOT_DIR="${HARN_RELEASE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
 cd "$ROOT_DIR"
 PUBLISH_SCRIPT="${HARN_PUBLISH_SCRIPT:-./scripts/publish.sh}"
 
+release_gate_target_name() {
+  printf '%s' "$(basename "$ROOT_DIR")" | tr -c 'A-Za-z0-9._-' '-'
+}
+
+default_release_gate_target_dir() {
+  local tmp_root
+  tmp_root="${TMPDIR:-/tmp}"
+  tmp_root="${tmp_root%/}"
+  printf '%s/harn-release-gate-target-%s\n' "$tmp_root" "$(release_gate_target_name)"
+}
+
+configure_release_gate_cargo_env() {
+  if [[ -z "${CARGO_TARGET_DIR:-}" ]]; then
+    export CARGO_TARGET_DIR
+    CARGO_TARGET_DIR="$(default_release_gate_target_dir)"
+  fi
+  if [[ -z "${CARGO_BUILD_BUILD_DIR:-}" ]]; then
+    export CARGO_BUILD_BUILD_DIR
+    CARGO_BUILD_BUILD_DIR="$CARGO_TARGET_DIR/build"
+  fi
+}
+
 usage() {
   cat <<'EOF'
 Usage:
@@ -22,6 +44,8 @@ Commands:
   full     Run audit, prepare, and publish in sequence.
 EOF
 }
+
+configure_release_gate_cargo_env
 
 require_clean_tree() {
   if ! git diff --quiet --ignore-submodules HEAD --; then
