@@ -516,11 +516,16 @@ impl CapabilityPolicy {
         }
 
         // Side-effect level can only be narrowed (a lower rank). Once the
-        // stage carries a ceiling the flattener may not remove it.
+        // stage carries a ceiling the flattener may not remove it. Rank through
+        // the canonical `SideEffectLevel` ladder (fail-closed: an unknown value
+        // ranks as `none`/0, and the ladder grows at the top so a future level
+        // above `desktop_control` can never sneak under a lesser ceiling).
+        use crate::tool_annotations::SideEffectLevel;
         if let Some(ceiling_level) = &self.side_effect_level {
             match &requested.side_effect_level {
                 Some(requested_level)
-                    if side_effect_rank(requested_level) <= side_effect_rank(ceiling_level) => {}
+                    if SideEffectLevel::rank_str(requested_level)
+                        <= SideEffectLevel::rank_str(ceiling_level) => {}
                 Some(requested_level) => {
                     return Err(format!(
                         "flattened stage policy widened the side-effect level beyond the stage grant: {requested_level} > {ceiling_level}"
@@ -545,19 +550,104 @@ impl CapabilityPolicy {
             );
         }
 
-        Ok(())
-    }
-}
+        // Process-sandbox filesystem grants (subprocess host-FS read/write
+        // OUTSIDE the workspace) narrow via `intersect_roots` / `intersect_presets`;
+        // re-check the returned policy did not add any. Unlike the workspace /
+        // read-only roots above, these are ADDITIVE grants that
+        // `normalized_process_roots` maps empty→empty with no fallback: empty
+        // roots = ZERO extra subprocess FS access = MOST restrictive, NOT
+        // unbounded. So the subset check is UNCONDITIONAL — an empty ceiling
+        // must reject any non-empty requested roots (the common default-stage
+        // case a `!ceiling_roots.is_empty()` guard would silently wave through).
+        let ceiling_ps = &self.process_sandbox;
+        let requested_ps = &requested.process_sandbox;
+        for (label, ceiling_roots, requested_roots) in [
+            (
+                "process_sandbox.read_roots",
+                &ceiling_ps.read_roots,
+                &requested_ps.read_roots,
+            ),
+            (
+                "process_sandbox.write_roots",
+                &ceiling_ps.write_roots,
+                &requested_ps.write_roots,
+            ),
+        ] {
+            let widened: Vec<String> = requested_roots
+                .iter()
+                .filter(|root| !ceiling_roots.contains(*root))
+                .cloned()
+                .collect();
+            if !widened.is_empty() {
+                return Err(format!(
+                    "flattened stage policy widened {label} beyond the stage grant: {}",
+                    widened.join(", ")
+                ));
+            }
+        }
+        // Presets compose through `effective_presets()` (None resolves to the
+        // defaults), so compare the effective sets: any preset the request would
+        // enable that the ceiling does not is a widening.
+        let ceiling_presets = ceiling_ps.effective_presets();
+        let widened_presets: Vec<String> = requested_ps
+            .effective_presets()
+            .into_iter()
+            .filter(|preset| !ceiling_presets.contains(preset))
+            .map(|preset| format!("{preset:?}"))
+            .collect();
+        if !widened_presets.is_empty() {
+            return Err(format!(
+                "flattened stage policy widened process_sandbox presets beyond the stage grant: {}",
+                widened_presets.join(", ")
+            ));
+        }
 
-/// Rank a side-effect level for ceiling comparison (higher = more powerful).
-fn side_effect_rank(level: &str) -> usize {
-    match level {
-        "none" => 0,
-        "read_only" => 1,
-        "workspace_write" => 2,
-        "process_exec" => 3,
-        "network" => 4,
-        _ => 5,
+        // Argument-level constraints (e.g. edit scoped to `src/**`) compose by
+        // union in `intersect`, so more constraints = stricter. Dropping one the
+        // stage granted widens "scoped" back to "anywhere". Require every ceiling
+        // constraint to survive in the returned policy (adding more is fine).
+        let dropped_constraints: Vec<String> = self
+            .tool_arg_constraints
+            .iter()
+            .filter(|constraint| !requested.tool_arg_constraints.contains(constraint))
+            .map(|constraint| constraint.tool.clone())
+            .collect();
+        if !dropped_constraints.is_empty() {
+            return Err(format!(
+                "flattened stage policy dropped tool_arg_constraints granted by the stage: {}",
+                dropped_constraints.join(", ")
+            ));
+        }
+
+        // Tool annotations drive constraint resolution (`arg_schema.path_params`)
+        // and per-tool side-effect/capability classification. Dropping or
+        // rewriting the annotation for a still-granted tool widens it (a lost
+        // `path_params` makes a path constraint unresolvable → permissive; a
+        // lowered `side_effect_level` slips past the effect ceiling). For every
+        // tool the ceiling still grants, its annotation must survive unchanged.
+        let tool_still_granted = |tool: &str| {
+            requested.tools.is_empty() || requested.tools.iter().any(|granted| granted == tool)
+        };
+        for (tool, annotation) in &self.tool_annotations {
+            if !tool_still_granted(tool) {
+                continue;
+            }
+            match requested.tool_annotations.get(tool) {
+                Some(requested_annotation) if requested_annotation == annotation => {}
+                Some(_) => {
+                    return Err(format!(
+                        "flattened stage policy rewrote tool_annotations for `{tool}` (annotations are authority metadata and may not be weakened by the flattener)"
+                    ));
+                }
+                None => {
+                    return Err(format!(
+                        "flattened stage policy dropped tool_annotations for still-granted tool `{tool}`"
+                    ));
+                }
+            }
+        }
+
+        Ok(())
     }
 }
 
