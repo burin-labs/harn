@@ -132,6 +132,8 @@ call sites toward it.
 | `provider` | string | `"anthropic"` | Any configured provider. Built-in names include `"anthropic"`, `"openai"`, `"openrouter"`, `"huggingface"`, `"ollama"`, `"gemini"`, and `"local"` |
 | `model` | string | varies by provider | Model identifier |
 | `model_role` | string | nil | Fill missing call options from `[model_roles.<role>]` before normal provider/model/routing resolution. Explicit call options win. The `merge`/`fast_apply` roles also read `HARN_LLM_MERGE_*` and `HARN_LLM_FAST_APPLY_*` provider/model/route-policy overrides. |
+| `models` | list | nil | Inline model ladder (`ModelLadder`): a cheap-first fallback tried in order. Entries are model strings or `{provider?, model?, options?, label?}` steps. Advances to the next rung **only on transport-class failures** (429/5xx/timeout/circuit-open), never on schema-validation failures (those re-ask the same rung). Mutually exclusive with `ladder`, with explicit `model`/`provider`, and with `routing`. See [Model ladders](../docs/llm/harn-quickref.md#model-ladders-models--ladder). |
+| `ladder` | string | nil | Name of a catalog ladder declared under `[model_ladders.<name>]`. Same cheap-first, advance-on-transport-failure semantics as `models`; mutually exclusive with the same options. |
 | `max_tokens` | int | `16384` | Maximum tokens in the response |
 | `temperature` | float | provider default | Sampling temperature (0.0-2.0) |
 | `top_p` | float | nil | Nucleus sampling |
@@ -176,6 +178,11 @@ call sites toward it.
 | `structural_experiment` | string/dict/closure | nil | Prompt-structure transform applied immediately before the provider call. Built-ins: `prompt_order_permutation(seed: N)`, `doubled_prompt`, `chain_of_draft`, `inverted_system`. Env: `HARN_STRUCTURAL_EXPERIMENT` |
 | `transcript` | dict | nil | Continue from a previous transcript; prompt is appended as the next user turn |
 | `model_tier` | string | nil | Resolve a configured tier alias such as `"small"`, `"mid"`, or `"frontier"` |
+
+> **Removed in 0.10.** The per-call transient-retry options `llm_retries` and
+> `llm_backoff_ms` are gone — `llm_call` is now fail-fast on transient provider
+> errors, and retry policy is composed on the caller seam with `with_retry` from
+> `std/llm/handlers`. See [Migrating to 0.10](../migrations/v0.10.md).
 
 The `cache` option above enables provider-side prompt caching when a provider
 supports it. It does not memoize full LLM responses. For Harn-owned response
