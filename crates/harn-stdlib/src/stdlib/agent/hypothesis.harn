@@ -1,0 +1,118 @@
+// std/agent/hypothesis — a keyed store of human/agent hypotheses with a
+// mutable status and free-form provenance, layered on std/session-store.
+//
+// Import: import "std/agent/hypothesis"
+//
+// Each hypothesis is a record identified by `id`, persisted as an `upsert`
+// mutation on a session-store stream whose events carry the special
+// `{kind: "hypothesis"}` tag. Reads project the stream to the latest record
+// per id. Status is a free string so callers can use whichever lifecycle
+// vocabulary fits — e.g. `open`/`confirmed`/`refuted`, or
+// `active`/`verifying`/`confirmed`/`disproven`/`stale`/`archived`. The default
+// status for a newly opened hypothesis is `open`.
+//
+// `session_id` names the stream; pass the same id your reader watches (e.g.
+// `agent.hypotheses`, or a product-specific namespace). `options.root`
+// overrides the storage root, exactly as in std/session-store.
+import "std/session-store"
+
+fn hypothesis_stream(session_id) {
+  let sid = to_string(session_id ?? "")
+  if sid == "" {
+    return "agent.hypotheses"
+  }
+  return sid
+}
+
+fn hypothesis_options(options) {
+  return (options ?? {}) + {kind: "hypothesis"}
+}
+
+/**
+ * Open (or overwrite) a hypothesis. `record` must carry an `id`; a missing
+ * `status` defaults to `"open"`. Returns `{ok, record}` on success, or
+ * `{ok: false, error}` when the record has no id.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn hypothesis_open(session_id, record, options = nil) {
+  let id = to_string(record?.id ?? "")
+  if id == "" {
+    return {ok: false, error: "hypothesis record requires an id"}
+  }
+  let normalized = (record ?? {}) + {status: record?.status ?? "open"}
+  session_store_append(
+    hypothesis_stream(session_id),
+    {operation: "upsert", record: normalized},
+    hypothesis_options(options),
+  )
+  return {ok: true, record: normalized}
+}
+
+/**
+ * Return the current record for `id`, or nil if it is unknown or deleted.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn hypothesis_get(session_id, id, options = nil) {
+  let target = to_string(id)
+  for record in session_store_project(hypothesis_stream(session_id), options ?? {}) {
+    if to_string(record?.id ?? "") == target {
+      return record
+    }
+  }
+  return nil
+}
+
+/**
+ * Update a hypothesis's status in place (append-only). Returns `{ok, record}`,
+ * or `{ok: false, error}` when the id is unknown.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn hypothesis_set_status(session_id, id, status, options = nil) {
+  let current = hypothesis_get(session_id, id, options)
+  if current == nil {
+    return {ok: false, error: "unknown hypothesis"}
+  }
+  let updated = current + {status: to_string(status)}
+  session_store_append(
+    hypothesis_stream(session_id),
+    {operation: "upsert", record: updated},
+    hypothesis_options(options),
+  )
+  return {ok: true, record: updated}
+}
+
+/**
+ * List the current hypotheses, optionally filtered by `options.status`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn hypothesis_list(session_id, options = nil) {
+  let records = session_store_project(hypothesis_stream(session_id), options ?? {})
+  let status = to_string((options ?? {})?.status ?? "")
+  if status == "" {
+    return records
+  }
+  return records.filter({ record -> to_string(record?.status ?? "") == status }).to_list()
+}
+
+/**
+ * Remove a hypothesis from the projected collection (append-only tombstone).
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn hypothesis_delete(session_id, id, options = nil) {
+  session_store_append(
+    hypothesis_stream(session_id),
+    {operation: "delete", id: to_string(id)},
+    hypothesis_options(options),
+  )
+  return {ok: true}
+}
