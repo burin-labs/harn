@@ -91,7 +91,7 @@ struct ValidatedArtifactSpec {
     sig = "artifact_emit(kind: string, spec: any, options?: dict) -> dict",
     kind = "async",
     category = "agent.artifact",
-    doc = "Validate and emit a declarative renderable artifact event for the current agent session."
+    doc = "Validate and emit a declarative renderable artifact or file-reference event for the current agent session."
 )]
 async fn artifact_emit_builtin(
     ctx: AsyncBuiltinCtx,
