@@ -1,10 +1,20 @@
-# Workflow authoring quickstart
+# How to run a workflow bundle from the CLI
 
 This guide takes a fresh `harn` install from "I have the binary" to
 "I can author, validate, preview, run, and supervise a portable
 workflow bundle." Every command and fixture below is checked in CI by
 `scripts/check_docs_workflow_quickstart.harn`, so the snippets below
 match what you should see locally.
+
+> **Which "workflow" is this?** Harn has two surfaces that both use the
+> word. This page is the **bundle CLI**: `harn workflow validate` /
+> `preview` / `run` operate on a portable bundle JSON file that a host
+> (an IDE or a cloud orchestrator) later executes. It is not the
+> in-script `workflow_stages` API you call from `.harn` code to run an
+> agent with retry and verify stages. If you want to write a workflow in
+> Harn and run it in-process, start with
+> [Build your first workflow](./tutorials/build-your-first-workflow.md)
+> and the [workflow runtime reference](./workflow-runtime.md) instead.
 
 No paid API credentials are required. The deterministic local runner
 walks the bundle's reachable graph and emits a receipt without calling

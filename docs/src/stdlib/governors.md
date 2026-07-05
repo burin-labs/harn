@@ -55,6 +55,72 @@ This generalizes burin-code's `pace-governor.harn`: `proceed`/`warn`/`abort`
 correspond to burin's `extend`/`pace_check`/`cut`, and burin's write-progress
 veto is preserved (progress vetoes the soft stop up to the `hard` fraction).
 
+### Smart timeout: `governor_pace_decision`
+
+`governor_decision` watches a consumption signal (iterations, tokens, cost)
+against a budget. `governor_pace_decision` watches the **wall clock** instead,
+and it does one thing the consumption governor can't: it lets a run that is
+still making progress buy more time silently, so a job that's one turn from done
+doesn't get killed by a fixed timeout, and a job stalled at the checkpoint gets
+cut there instead of at the wall.
+
+It is a pure function. You feed it a policy and an observation your host
+assembles from the clock plus loop state, and it returns one of four actions.
+Nothing about it touches `agent_loop` — you call it and act on the verdict.
+
+```harn
+import { governor_pace_decision } from "std/agent/governors"
+
+let decision = governor_pace_decision(
+  {extend_max: 6, pace_check_max: 2},
+  {
+    armed_budget_ms: 60000,
+    elapsed_ms: 42000,
+    checkpoint_ms: 30000,
+    expected_total_ms: 55000,
+    made_progress: true,
+    verifier_signature_unchanged: false,
+    done: false,
+    extends_used: 1,
+    pace_checks_used: 0,
+    env_blame_without_infra: false,
+  },
+)
+log(decision.action)
+```
+
+**Policy.** Two bounded caps on the same `GovernorPolicy`: `extend_max`
+(default 6) limits how many silent extensions a run can earn; `pace_check_max`
+(default 2) limits how many recalibration nudges fire before the run is cut.
+
+**Observation.** The host supplies the facts. `armed_budget_ms` (the wall budget
+armed; `0` or absent means "not armed" and the governor always proceeds),
+`elapsed_ms`, `checkpoint_ms` (defaults to the armed budget), `expected_total_ms`
+(defaults to the armed budget), `made_progress`, `verifier_signature_unchanged`
+(a write landed but the verifier failure signature did not improve — not
+progress), `done`, `extends_used`, `pace_checks_used`, and
+`env_blame_without_infra` (a typed classifier verdict the host supplies; the
+pure governor never matches phrases itself).
+
+**The verdict** is `{action, ...}`:
+
+| Action | When | Extra fields |
+| --- | --- | --- |
+| `proceed` | budget inert, run `done`, or checkpoint not yet reached | — |
+| `extend` | progressing and within the estimate — extend the wall silently | `new_budget_ms` (= `elapsed_ms + checkpoint_ms`), `reason` |
+| `pace_check` | progressing but past the estimate — nudge it to wrap up | `reason` |
+| `cut` | stop | `reason` |
+
+`cut` reasons: `no_progress_at_checkpoint`, `no_verifier_progress`,
+`env_blame_without_infra`, `extend_budget_exhausted` (past `extend_max`),
+`pace_check_budget_exhausted` (past `pace_check_max`).
+
+The host owns the actuation — arming the budget, tracking the extend/pace-check
+counters across turns, injecting the pace-check nudge, and stopping the loop.
+The governor only decides. See
+[Host-supplied facts](./fact-intake-seams.md#governor_pace_decision-a-smart-timeout)
+for the full contract on the facts your host feeds in.
+
 ## Unified detectors
 
 A `DetectorSpec` is the single typed surface for all four detectors. The loop,

@@ -986,6 +986,10 @@ Presets can carry a default gate: the `completion_gate` pack row holds a
 `CompletionGateOptions` spec that a consumer lowers with
 `agent_completion_gate(...)`.
 
+See [Completion gate (`std/agent/judge`)](../stdlib/agent-judge.md) for the full
+reference: the option table, the fact types, the veto ladder, and the bounded
+judge.
+
 ## Editing source from inside an agent loop
 
 Agent loops that mutate code should reach for the AST-precise primitives in

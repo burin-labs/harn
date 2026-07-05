@@ -19,7 +19,6 @@
 
 - [Getting started](./getting-started.md)
 - [Build your first workflow](./tutorials/build-your-first-workflow.md)
-- [Workflow authoring quickstart](./workflow-authoring-quickstart.md)
 - [Tutorial: code review agent](./tutorial-code-review-agent.md)
 - [Tutorial: MCP server](./tutorial-mcp-server.md)
 - [Tutorial: eval pipeline](./tutorial-eval-pipeline.md)
@@ -28,6 +27,7 @@
 # How-to guides
 
 - [Common tasks](./common-tasks.md)
+- [Run a workflow bundle from the CLI](./workflow-authoring-quickstart.md)
 - [Cookbook](./cookbook.md)
 - [Scripting cheatsheet](./scripting-cheatsheet.md)
 - [LLM quick reference](./docs/llm/harn-quickref.md)
@@ -133,6 +133,7 @@
 - [Timing stdlib](./stdlib/timing.md)
 - [Verification stdlib](./stdlib/verification.md)
 - [Agent governors and detectors](./stdlib/governors.md)
+- [Completion gate](./stdlib/agent-judge.md)
 - [Host-supplied facts](./stdlib/fact-intake-seams.md)
 - [GraphQL stdlib](./stdlib/graphql.md)
 - [Code librarian stdlib](./stdlib/code-librarian.md)
