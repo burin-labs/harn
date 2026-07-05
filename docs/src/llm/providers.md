@@ -488,8 +488,10 @@ deterministic receipt. `harn models batch submit` consumes that receipt, validat
 request-file hashes, dry-runs without network calls when requested, and submits
 supported provider jobs using provider API credentials. `harn models batch
 status` reads the submission receipt and polls provider lifecycle state behind
-the same Harn boundary. Provider batch envelopes, submission state, and
-poll/download/rejoin logic stay in Harn instead of host products.
+the same Harn boundary. `harn models batch download` consumes status receipts
+for completed jobs and writes provider result files plus a durable results
+receipt. Provider batch envelopes, submission state, and poll/download/rejoin
+logic stay in Harn instead of host products.
 
 ### Packaged provider adapters via `[llm]`
 

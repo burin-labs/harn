@@ -10,8 +10,8 @@ use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use crate::cli::{
-    ModelsBatchArgs, ModelsBatchCommand, ModelsBatchManifestArgs, ModelsBatchPlanArgs,
-    ModelsBatchPrepareArgs, ModelsBatchStatusArgs, ModelsBatchSubmitArgs,
+    ModelsBatchArgs, ModelsBatchCommand, ModelsBatchDownloadArgs, ModelsBatchManifestArgs,
+    ModelsBatchPlanArgs, ModelsBatchPrepareArgs, ModelsBatchStatusArgs, ModelsBatchSubmitArgs,
 };
 use crate::commands::run::RunSandboxOptions;
 use crate::dispatch;
@@ -31,6 +31,9 @@ const BATCH_RECEIPT_ENV: &str = "HARN_MODELS_BATCH_RECEIPT";
 const BATCH_SUBMIT_OUT_ENV: &str = "HARN_MODELS_BATCH_SUBMIT_OUT";
 const BATCH_SUBMISSION_ENV: &str = "HARN_MODELS_BATCH_SUBMISSION";
 const BATCH_STATUS_OUT_ENV: &str = "HARN_MODELS_BATCH_STATUS_OUT";
+const BATCH_STATUS_ENV: &str = "HARN_MODELS_BATCH_STATUS";
+const BATCH_RESULTS_OUT_DIR_ENV: &str = "HARN_MODELS_BATCH_RESULTS_OUT_DIR";
+const BATCH_MAX_DOWNLOAD_BYTES_ENV: &str = "HARN_MODELS_BATCH_MAX_DOWNLOAD_BYTES";
 const BATCH_DRY_RUN_ENV: &str = "HARN_MODELS_BATCH_DRY_RUN";
 const BATCH_TOOL_FORMAT_ENV: &str = "HARN_MODELS_BATCH_TOOL_FORMAT";
 const BATCH_ID_PREFIX_ENV: &str = "HARN_MODELS_BATCH_ID_PREFIX";
@@ -39,15 +42,38 @@ static DISPATCH_BATCH_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_n
 
 pub(crate) async fn run(args: ModelsBatchArgs) {
     let exit_code = match args.command {
-        ModelsBatchCommand::Manifest(args) => run_manifest(args).await,
-        ModelsBatchCommand::Plan(args) => run_plan(args).await,
-        ModelsBatchCommand::Prepare(args) => run_prepare(args).await,
-        ModelsBatchCommand::Status(args) => run_status(args).await,
-        ModelsBatchCommand::Submit(args) => run_submit(args).await,
+        ModelsBatchCommand::Download(args) => Box::pin(run_download(args)).await,
+        ModelsBatchCommand::Manifest(args) => Box::pin(run_manifest(args)).await,
+        ModelsBatchCommand::Plan(args) => Box::pin(run_plan(args)).await,
+        ModelsBatchCommand::Prepare(args) => Box::pin(run_prepare(args)).await,
+        ModelsBatchCommand::Status(args) => Box::pin(run_status(args)).await,
+        ModelsBatchCommand::Submit(args) => Box::pin(run_submit(args)).await,
     };
     if exit_code != 0 {
         std::process::exit(exit_code);
     }
+}
+
+async fn run_download(args: ModelsBatchDownloadArgs) -> i32 {
+    let _guard = DISPATCH_BATCH_LOCK.lock().await;
+    let status_path = absolutize_path(&args.status);
+    let out_dir = absolutize_path(&args.out_dir);
+    let mut sandbox = RunSandboxOptions::default().with_workspace_root(parent_dir(&out_dir));
+    let status_root = parent_dir(&status_path);
+    if status_root != parent_dir(&out_dir) {
+        sandbox = sandbox.with_read_only_roots(vec![status_root]);
+    }
+
+    let status = status_path.to_string_lossy().to_string();
+    let out = out_dir.to_string_lossy().to_string();
+    let max_bytes = args.max_bytes.to_string();
+    let _mode = ScopedEnvVar::set(BATCH_MODE_ENV, "download");
+    let _status = ScopedEnvVar::set(BATCH_STATUS_ENV, status.trim());
+    let _out = ScopedEnvVar::set(BATCH_RESULTS_OUT_DIR_ENV, out.trim());
+    let _max_bytes = ScopedEnvVar::set(BATCH_MAX_DOWNLOAD_BYTES_ENV, max_bytes.trim());
+    let _dry_run = ScopedEnvVar::set(BATCH_DRY_RUN_ENV, if args.dry_run { "1" } else { "0" });
+
+    run_batch_script(args.json, Some(sandbox)).await
 }
 
 async fn run_manifest(args: ModelsBatchManifestArgs) -> i32 {
