@@ -35,6 +35,8 @@ logs and progress always go to stderr.
     reports with the same `CheckDiagnostic` shape.
   - `harn run --json script.harn` — NDJSON event stream (one envelope per line).
   - `harn doctor --json` — capability matrix for host / targets / providers.
+  - `harn models batch manifest --json` — grouped offline batch manifest with stable request ids.
+  - `harn models batch prepare --json` — provider-native batch request files and prepare receipt.
 
 ## Files and execution
 

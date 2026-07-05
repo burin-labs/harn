@@ -683,6 +683,40 @@ fn test_parses_models_batch_manifest_args() {
 }
 
 #[test]
+fn test_parses_models_batch_prepare_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "models",
+        "batch",
+        "prepare",
+        "--manifest",
+        "batch-manifest.json",
+        "--out-dir",
+        ".harn/batches/ready",
+        "--json",
+    ]);
+
+    let Command::Models(args) = cli.command.unwrap() else {
+        panic!("expected models command");
+    };
+    let ModelsCommand::Batch(args) = args.command else {
+        panic!("expected models batch command");
+    };
+    let ModelsBatchCommand::Prepare(args) = args.command else {
+        panic!("expected models batch prepare command");
+    };
+    assert_eq!(
+        args.manifest,
+        std::path::PathBuf::from("batch-manifest.json")
+    );
+    assert_eq!(
+        args.out_dir,
+        std::path::PathBuf::from(".harn/batches/ready")
+    );
+    assert!(args.json);
+}
+
+#[test]
 fn test_parses_models_lora_preflight_args() {
     let cli = Cli::parse_from([
         "harn",
