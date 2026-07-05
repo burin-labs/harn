@@ -289,6 +289,11 @@ retries and provider failover rather than relying on workflow backoff fields.
 
 ### Retry with feedback
 
+A stage's `retry_policy` is the typed `WorkflowRetryPolicy`
+(`std/workflow/options`): `{max_attempts?, feedback?, repair_prompt_builder?,
+verify?, repair?, backoff_ms?, backoff_multiplier?}`. Build it through the
+`StageSpec` alias so a typo fails at check time.
+
 By default a retry re-issues the *unmodified* task on every attempt (a blind
 retry — replayed runs are byte-identical). Two `retry_policy` keys turn the
 retry into a repair loop that threads the prior attempt's verification findings
@@ -354,8 +359,82 @@ It runs one agent stage, validates its output with the supplied verifier
 (a callable, a `{command, expect_status?}` check, or a
 `{assert_text?, expect_status?}` assertion — command/assertion verifiers are
 wrapped into fn-verify closures so they gate + retry), and re-prompts with the
-findings up to `max_attempts` times. It owns no loop of its own; the retry /
-findings-threading lives entirely in the PR-I2 attempt machinery above.
+findings up to `max_attempts` times. It owns no loop of its own; the retry and
+findings-threading run in the same attempt machinery described above.
+
+### The stage executor
+
+By default an agent stage runs its attempt by delegating to a spawned worker.
+Set `executor` on the stage node to run the attempt as an in-process Harn
+closure instead. The closure *is* the attempt: it receives the attempt context
+and returns the attempt result. Reach for it when the work is easier to express
+as Harn code than as a delegated agent (a deterministic transform, a call into
+your own module, a hand-built repair step), while still getting the stage's
+retry, feedback threading, and fn-verify gate for free.
+
+```harn,ignore
+{
+  id: "act",
+  kind: "stage",
+  retry_policy: {max_attempts: 3, feedback: true},
+  executor: { ctx ->
+    let patched = my_patch_step(ctx.task, ctx.prior_findings)
+    return {text: patched.summary, artifacts: patched.artifacts}
+  },
+}
+```
+
+**The context it receives.** The closure is called with one dict of exactly
+these keys:
+
+```harn,ignore
+{
+  task,                // the (possibly repaired) task string for this attempt
+  attempt,             // 1-based attempt number
+  prior_findings,      // list<string> of findings from the previous attempt, [] on the first
+  prior_verification,  // the previous attempt's verification dict, nil on the first
+  prior_text,          // the previous attempt's visible text, "" on the first
+  artifacts,           // the artifacts selected for this stage
+}
+```
+
+The `feedback` / `repair_prompt_builder` policy has already been applied to
+`task` before the closure sees it, so `ctx.task` on attempt 2+ already carries
+the prior findings when feedback is on. The `prior_*` keys are there when you
+want the raw signal rather than the templated task. (Note the distinction from
+the `repair_prompt_builder` context, which keys findings as `findings` and adds
+`error` and `stage`; the executor context uses `prior_findings` and adds
+`artifacts`.)
+
+**What it returns.** Return a dict shaped as:
+
+```harn,ignore
+{
+  result?,        // the full stage result dict; or use `text` for the common case
+  text?,          // convenience: wrapped into {status: "completed", visible_text: text}
+  artifacts?,     // produced artifacts, defaults to []
+  transcript?,    // falls back to the stage's input transcript
+  verification?,  // a verdict dict {ok, findings?} to self-gate this attempt
+}
+```
+
+Supply `result` for a full stage result, or `text` for the common "here's my
+output" case. A returned `verification` runs through the same fn-verify gate as
+any other stage, so an executor can grade its own attempt and drive the retry.
+
+**A throw is a failed attempt.** If the closure throws, the stage contains it as
+`{ok: false, error}` and the attempt fails like any other; it does not abort the
+run. The next attempt fires with the incremented `attempt` and the failure
+threaded into `prior_findings` (and into `task` when feedback is on). This
+mirrors the delegated worker's success/failure contract exactly, so a stage
+behaves identically whether it delegates or runs your closure.
+
+**Where it composes.** `executor` is a field on any agent stage node, so it works
+directly in `workflow_stages` (set `executor` on a stage row) and in
+`workflow_run_repair` (pass `executor` in the config to replace the delegated
+goal stage with your closure). `workflow_repair_stage_graph`
+(`std/workflow/patterns`) wires `executor` onto its single goal stage when you
+supply one.
 
 ### Building linear stage graphs
 

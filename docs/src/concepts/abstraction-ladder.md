@@ -135,6 +135,13 @@ routes slash commands, and handles the `wait_for_user` terminal tool.
 
 ## See also
 
+- [Build your first workflow](../tutorials/build-your-first-workflow.md) — the
+  hands-on path up these rungs: one `llm_call`, then an `agent_loop`, then a
+  `workflow_stages` with a verify stage and retry-with-feedback, runnable end to
+  end on the mock provider.
+- [The expressiveness spectrum](./expressiveness-spectrum.md) — the same task
+  solved at five escalating levels of control, and why you never pay for
+  machinery you don't use.
 - [Glossary](./glossary.md) — one-line definitions for every rung and container
   (LLM call, iteration, agent loop, stage, workflow, session…).
 - [Coming from elsewhere](./sota-comparison.md) — what LangGraph / OpenAI / ACP
