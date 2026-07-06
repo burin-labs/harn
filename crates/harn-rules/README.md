@@ -51,6 +51,12 @@ A rule's kind is derived from its shape: a `fix` makes it a **codemod**; a
   land with the relational tier (#2833).
 - `kind` — a bare tree-sitter node kind (e.g. `"call_expression"`).
 - `regex` — a regular expression over the source text.
+- `query` — a **raw tree-sitter query** (S-expression), used verbatim — the
+  escape hatch for structural selections a `pattern` snippet cannot express,
+  such as capturing an anonymous keyword token. It must bind the matched node
+  to `@__match` (the node re-rooted during matching, and the default replaced
+  span); every other named capture becomes a metavar binding, usable in `fix`
+  and selectable via [`fixTarget`](#surgical-rewrites-with-fixtarget).
 
 A metavar-free `pattern` is a **literal** pattern: `foo()` matches calls to
 `foo` specifically (every non-metavar identifier/literal is constrained to
@@ -110,6 +116,30 @@ regex = "^get[A-Z]"                  # or: comparison = { op = ">", value = 100 
 source = "FN"
 convert = "snake"                    # or: replace = { regex, by } / substring = { start, end }
 ```
+
+### Surgical rewrites with `fixTarget`
+
+By default a `fix` replaces the **whole matched node**, so anything the matcher
+does not capture is lost — rewriting `let x: Int = 1` with a `pattern`/`fix`
+that omits the type annotation silently drops `: Int`. `fixTarget` fixes this
+by splicing the `fix` over **only a named capture's span**, leaving the rest of
+the node byte-for-byte intact. Pair it with a raw `query` that captures the
+sub-node you want to change:
+
+```toml
+id = "let-to-const"
+language = "harn"
+fix = "const"                        # scalar fields stay before [rule]
+fixTarget = "kw"                     # replace only the @kw capture's span
+
+[rule]
+query = '(let_binding "let" @kw) @__match'
+```
+
+This rewrites `let x: Int = 1` → `const x: Int = 1`, touching only the keyword.
+`fixTarget` names any capture the matcher always binds (a raw-`query` capture or
+a `$VAR` metavar); an unbound name is an apply-time error. It composes with
+`where` / `transform` unchanged — only the replaced span moves.
 
 For Harn rules, captures are also enriched with semantic metadata when the
 engine can resolve the node to a local declaration/binding or infer a simple

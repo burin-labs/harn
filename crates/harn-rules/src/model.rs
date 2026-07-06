@@ -142,6 +142,14 @@ pub struct RuleNode {
     pub kind: Option<String>,
     /// A regular expression matched against node text.
     pub regex: Option<String>,
+    /// A raw tree-sitter query (S-expression), matched directly against the
+    /// tree — an escape hatch from `pattern` snippet lowering for structural
+    /// selections a snippet cannot express (e.g. capturing an anonymous
+    /// keyword token). It **must** bind the matched node to `@__match`
+    /// ([`crate::pattern::ROOT_CAPTURE`]); every other named capture becomes a
+    /// metavar binding, usable in `fix` and selectable via the rule's
+    /// `fixTarget` for surgical, sub-node rewrites.
+    pub query: Option<String>,
 
     /// The node must be **inside** a node matching this sub-rule (ancestor).
     pub inside: Option<Box<RuleNode>>,
@@ -201,6 +209,8 @@ pub enum AtomicMatcher {
     Kind(String),
     /// A regex over node text.
     Regex(String),
+    /// A raw tree-sitter query, used verbatim (must bind `@__match`).
+    RawQuery(String),
 }
 
 impl RuleNode {
@@ -211,6 +221,7 @@ impl RuleNode {
             self.pattern.as_ref().map(|_| "pattern"),
             self.kind.as_ref().map(|_| "kind"),
             self.regex.as_ref().map(|_| "regex"),
+            self.query.as_ref().map(|_| "query"),
         ]
         .into_iter()
         .flatten()
@@ -220,6 +231,7 @@ impl RuleNode {
             [one] => Ok(Some(match *one {
                 "pattern" => AtomicMatcher::Pattern(self.pattern.clone().unwrap()),
                 "kind" => AtomicMatcher::Kind(self.kind.clone().unwrap()),
+                "query" => AtomicMatcher::RawQuery(self.query.clone().unwrap()),
                 _ => AtomicMatcher::Regex(self.regex.clone().unwrap()),
             })),
             many => Err(format!(
@@ -235,6 +247,7 @@ impl RuleNode {
         self.regex.is_some()
             && self.pattern.is_none()
             && self.kind.is_none()
+            && self.query.is_none()
             && self.inside.is_none()
             && self.has.is_none()
             && self.follows.is_none()
@@ -251,6 +264,7 @@ impl RuleNode {
         self.pattern.is_none()
             && self.kind.is_none()
             && self.regex.is_none()
+            && self.query.is_none()
             && self.inside.is_none()
             && self.has.is_none()
             && self.follows.is_none()
@@ -296,6 +310,14 @@ pub struct Rule {
     /// Replacement template. Its presence makes the rule a codemod.
     #[serde(default)]
     pub fix: Option<String>,
+    /// When set, the `fix` replaces only the span of this named capture
+    /// instead of the whole matched node — enabling surgical, sub-node
+    /// rewrites (e.g. swap a binding's keyword while preserving its type
+    /// annotation and initializer). Names a capture bound by a raw `query`
+    /// or a `$VAR` metavar; the capture must be present on every match.
+    /// Defaults to the whole match. (TOML `fixTarget` / `target`.)
+    #[serde(default, alias = "fixTarget", alias = "target")]
+    pub fix_target: Option<String>,
 }
 
 /// A `where` predicate on a captured metavar. Exactly one of `regex` /

@@ -153,6 +153,9 @@ pub struct CompiledRule {
     transforms: Vec<(String, CompiledTransform)>,
     /// The `fix` replacement template, if this is a codemod.
     fix: Option<String>,
+    /// When set, the `fix` replaces only this capture's span (surgical
+    /// sub-node rewrite) rather than the whole matched node.
+    fix_target: Option<String>,
     /// The fix's safety tier (gates auto-apply).
     safety: Safety,
     /// The diagnostic message (empty for search-only rules).
@@ -238,6 +241,7 @@ impl CompiledRule {
             constraints,
             transforms,
             fix: rule.fix.clone(),
+            fix_target: rule.fix_target.clone(),
             safety: rule.safety,
             message: rule.message.clone(),
             severity: rule.severity,
@@ -372,20 +376,30 @@ impl CompiledRule {
     pub fn diagnostics(&self, source: &str) -> Result<Vec<Diagnostic>, RulesError> {
         let applicability = self.applicability();
         let matches = self.run(source)?;
-        Ok(matches
+        matches
             .iter()
-            .map(|m| Diagnostic {
-                rule_id: self.rule_id.clone(),
-                message: self.message.clone(),
-                severity: self.severity,
-                span: m.span,
-                applicability,
-                fix: self.fix.as_ref().map(|template| {
-                    let vars = self.metavars_for(m);
-                    interpolate(template, &vars)
-                }),
+            .map(|m| {
+                // With a `fixTarget`, the fix replaces only the target
+                // capture's span, so the diagnostic (which the LSP applies
+                // `fix` over) is anchored there; otherwise the whole match.
+                let span = if self.fix.is_some() && self.fix_target.is_some() {
+                    self.edit_target(m)?.0
+                } else {
+                    m.span
+                };
+                Ok(Diagnostic {
+                    rule_id: self.rule_id.clone(),
+                    message: self.message.clone(),
+                    severity: self.severity,
+                    span,
+                    applicability,
+                    fix: self.fix.as_ref().map(|template| {
+                        let vars = self.metavars_for(m);
+                        interpolate(template, &vars)
+                    }),
+                })
             })
-            .collect())
+            .collect()
     }
 
     /// The core rewrite: run the rule and splice each match's interpolated
@@ -404,14 +418,35 @@ impl CompiledRule {
             .iter()
             .map(|m| {
                 let vars = self.metavars_for(m);
-                AppliedEdit {
-                    span: m.span,
-                    before: m.text.clone(),
+                let (span, before) = self.edit_target(m)?;
+                Ok(AppliedEdit {
+                    span,
+                    before,
                     replacement: interpolate(template, &vars),
-                }
+                })
             })
-            .collect();
+            .collect::<Result<_, RulesError>>()?;
         Ok((splice(source, &edits), edits))
+    }
+
+    /// The span + original text a match's `fix` replaces. Honors `fixTarget`
+    /// (surgical sub-node rewrite); defaults to the whole matched node.
+    fn edit_target(&self, m: &RuleMatch) -> Result<(Span, String), RulesError> {
+        match &self.fix_target {
+            None => Ok((m.span, m.text.clone())),
+            Some(name) => {
+                let binding =
+                    m.bindings
+                        .get(name)
+                        .ok_or_else(|| RulesError::PatternCompile {
+                            rule: self.rule_id.clone(),
+                            message: format!(
+                                "fixTarget `{name}` is not bound by this match; name a capture the matcher always binds"
+                            ),
+                        })?;
+                Ok((binding.span, binding.text.clone()))
+            }
+        }
     }
 
     /// Build the full metavar map for a match: captured bindings plus the
@@ -646,6 +681,76 @@ mod tests {
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].text, "TODO(ken)");
         assert_eq!(matches[0].span.start_row, 1);
+    }
+
+    #[test]
+    fn raw_query_with_fix_target_rewrites_only_the_capture() {
+        // Surgical sub-node rewrite: swap the `let` keyword to `const` while
+        // preserving the type annotation and initializer — the failure mode a
+        // whole-match `pattern`+`fix` cannot avoid (it drops the un-captured
+        // `: Int`). The raw query roots the match at `let_binding` (`@__match`)
+        // and captures the keyword token (`@kw`); `fixTarget` splices only it.
+        let compiled = rule(
+            r#"
+            id = "let-to-const"
+            language = "harn"
+            fix = "const"
+            fixTarget = "kw"
+            [rule]
+            query = '(let_binding "let" @kw) @__match'
+            "#,
+        );
+        let result = compiled
+            .apply("fn f() {\n  let x: Int = 1\n  let y = 2\n}\n")
+            .unwrap();
+        assert_eq!(
+            result.rewritten,
+            "fn f() {\n  const x: Int = 1\n  const y = 2\n}\n"
+        );
+        assert_eq!(result.edits.len(), 2);
+        // Each edit replaced exactly the 3-byte `let` keyword, not the binding.
+        assert!(result.edits.iter().all(|e| e.before == "let"));
+        assert!(result.changed);
+        // Re-running is a no-op (there are no more `let` keywords).
+        assert!(compiled.apply(&result.rewritten).unwrap().rewritten == result.rewritten);
+    }
+
+    #[test]
+    fn raw_query_without_root_capture_is_a_compile_error() {
+        let parsed = Rule::from_toml_str(
+            r#"
+            id = "no-root"
+            language = "harn"
+            fix = "const"
+            [rule]
+            query = '(let_binding "let" @kw)'
+            "#,
+        )
+        .unwrap();
+        let compiled = CompiledRule::compile(&parsed);
+        assert!(
+            matches!(&compiled, Err(RulesError::PatternCompile { message, .. }) if message.contains("__match")),
+            "expected a missing-@__match compile error"
+        );
+    }
+
+    #[test]
+    fn fix_target_naming_an_unbound_capture_errors_on_apply() {
+        let compiled = rule(
+            r#"
+            id = "bad-target"
+            language = "harn"
+            fix = "const"
+            fixTarget = "missing"
+            [rule]
+            query = '(let_binding "let" @kw) @__match'
+            "#,
+        );
+        let result = compiled.apply("fn f() {\n  let x = 1\n}\n");
+        assert!(
+            matches!(&result, Err(RulesError::PatternCompile { message, .. }) if message.contains("missing")),
+            "expected an unbound-fixTarget error"
+        );
     }
 
     #[test]

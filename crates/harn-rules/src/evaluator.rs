@@ -181,6 +181,33 @@ fn compile_node(
         Some(AtomicMatcher::Regex(re)) => Some(CompiledAtomic::Regex(
             Regex::new(&re).map_err(|e| mkerr(format!("regex `{re}` invalid: {e}")))?,
         )),
+        Some(AtomicMatcher::RawQuery(raw)) => {
+            let ts_language = language
+                .ts_language()
+                .ok_or_else(|| mkerr(format!("grammar for `{}` unavailable", language.name())))?;
+            let query = Query::new(&ts_language, &raw).map_err(|e| RulesError::QueryRejected {
+                rule: rule_id.to_string(),
+                message: e.to_string(),
+                query: raw.clone(),
+            })?;
+            // A raw query must mark the matched node with `@__match`: it is the
+            // node re-rooted by `node_satisfies` (so the query re-validates from
+            // the candidate) and the default replaced span. Every *other* named
+            // capture is recorded as a metavar binding (with its span), so it is
+            // available to `fix` interpolation and selectable via `fixTarget`.
+            if !query.capture_names().contains(&ROOT_CAPTURE) {
+                return Err(mkerr(format!(
+                    "raw `query` must bind the matched node to `@{ROOT_CAPTURE}`"
+                )));
+            }
+            let metavars = query
+                .capture_names()
+                .iter()
+                .filter(|name| **name != ROOT_CAPTURE)
+                .map(|name| name.to_string())
+                .collect();
+            Some(CompiledAtomic::Query { query, metavars })
+        }
     };
 
     let rel = |sub: &Option<Box<RuleNode>>| -> Result<Option<Box<CompiledRel>>, RulesError> {
