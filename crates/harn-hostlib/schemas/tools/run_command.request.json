@@ -94,6 +94,17 @@
       "minimum": 0,
       "deprecated": true
     },
+    "sandbox": {
+      "type": "object",
+      "description": "Internal hostlib sandbox scope for trusted stdlib callers. Agent-visible tool schemas should not expose this field.",
+      "properties": {
+        "workspace_roots": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    },
     "policy_context": {
       "type": "object",
       "additionalProperties": true

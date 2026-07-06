@@ -102,6 +102,32 @@ pipeline main(_) {
     );
 }
 
+/// The hostlib command request carries the configured command root as an
+/// internal sandbox scope so hardened subprocesses can use temp workspaces
+/// outside the ambient agent session root without widening model-visible tools.
+#[test]
+fn command_request_carries_root_as_internal_sandbox_scope() {
+    let body = r#"
+import { agent_command_tools } from "std/agent/host_tools"
+
+fn capture(request, args) {
+  return "CWD=" + to_string(request?.cwd) + " SANDBOX=" + json_stringify(request?.sandbox?.workspace_roots)
+}
+
+pipeline main(_) {
+  let opts = {root: "/workspace", command_policy: capture, output_format: "value"}
+  let h = tool_find(agent_command_tools(tool_registry(), opts), "run_command").handler
+  let r = h({argv: ["echo", "hi"]})
+  __io_println("REASON=" + r.reason)
+}
+"#;
+    let stdout = run_script(body);
+    assert!(
+        stdout.contains(r#"REASON=CWD=/workspace SANDBOX=["/workspace"]"#),
+        "run_command should carry the configured root as an internal sandbox scope; got:\n{stdout}"
+    );
+}
+
 /// A command policy can require host approval without throwing or running the command.
 #[test]
 fn command_policy_can_return_require_approval_verdict() {

@@ -427,6 +427,36 @@ fn __agent_host_resolve_argv(args) {
   return nil
 }
 
+fn __agent_host_append_unique_string(values, value) {
+  let text = trim(value ?? "")
+  if text == "" {
+    return values
+  }
+  for existing in values {
+    if existing == text {
+      return values
+    }
+  }
+  return values + [text]
+}
+
+fn __agent_host_command_sandbox_roots(request, options) {
+  let opts = __agent_host_options(options)
+  var roots = []
+  let configured_root = __agent_host_root(opts)
+  if configured_root != nil && trim(configured_root) != "" {
+    if starts_with(trim(configured_root).replace("\\", "/"), "/") {
+      roots = __agent_host_append_unique_string(roots, configured_root)
+    } else {
+      roots = __agent_host_append_unique_string(roots, __agent_host_resolve_path(".", opts))
+    }
+  }
+  if request?.cwd != nil && request.cwd != "" {
+    roots = __agent_host_append_unique_string(roots, request.cwd)
+  }
+  return roots
+}
+
 fn __agent_host_command_request(args, options) {
   let opts = __agent_host_options(options)
   let resolved_argv = __agent_host_resolve_argv(args)
@@ -512,6 +542,10 @@ fn __agent_host_command_request_common(base_request, args, options) {
     if value != nil {
       req = req + {[key]: value}
     }
+  }
+  let sandbox_roots = __agent_host_command_sandbox_roots(req, opts)
+  if len(sandbox_roots) > 0 {
+    req = req + {sandbox: {workspace_roots: sandbox_roots}}
   }
   return req
 }

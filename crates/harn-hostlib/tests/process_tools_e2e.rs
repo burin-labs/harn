@@ -237,6 +237,65 @@ fn real_run_command_points_child_tmpdir_inside_the_workspace() {
 }
 
 #[test]
+fn real_run_command_sandbox_scope_allows_temp_cwd_outside_empty_policy_fallback() {
+    use harn_vm::orchestration::{
+        pop_execution_policy, push_execution_policy, CapabilityPolicy, SandboxProfile,
+    };
+
+    let execution_root = tempfile::tempdir().expect("execution root");
+    let command_root = tempfile::tempdir().expect("command root");
+    let command_root_str = command_root.path().to_string_lossy().into_owned();
+
+    let _env_guard = lock_env();
+    unsafe {
+        std::env::remove_var("HARN_PROJECT_ROOT");
+        std::env::set_var("HARN_HANDLER_SANDBOX", "off");
+    }
+    harn_vm::stdlib::process::set_thread_execution_context(Some(
+        harn_vm::orchestration::RunExecutionRecord {
+            cwd: Some(execution_root.path().to_string_lossy().into_owned()),
+            source_dir: None,
+            env: Default::default(),
+            adapter: None,
+            repo_path: None,
+            worktree_path: None,
+            branch: None,
+            base_ref: None,
+            cleanup: None,
+        },
+    ));
+    push_execution_policy(CapabilityPolicy {
+        sandbox_profile: SandboxProfile::Worktree,
+        ..CapabilityPolicy::default()
+    });
+
+    let mut sandbox = dict();
+    sandbox.insert("workspace_roots".into(), vlist_str(&[&command_root_str]));
+    let mut req = dict();
+    req.insert("argv".into(), vlist_str(&["pwd"]));
+    req.insert("cwd".into(), vstr(&command_root_str));
+    req.insert("sandbox".into(), VmValue::dict(sandbox));
+    let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
+
+    pop_execution_policy();
+    harn_vm::stdlib::process::set_thread_execution_context(None);
+    unsafe {
+        std::env::remove_var("HARN_HANDLER_SANDBOX");
+    }
+
+    assert_eq!(require_int(&resp, "exit_code"), 0);
+    let stdout = require_str(&resp, "stdout");
+    assert_eq!(
+        stdout.trim(),
+        std::fs::canonicalize(command_root.path())
+            .unwrap()
+            .display()
+            .to_string(),
+        "command should run in the scoped temp root, got stdout:\n{stdout}"
+    );
+}
+
+#[test]
 fn real_run_command_respects_a_caller_pinned_tmpdir() {
     // A caller that sets TMPDIR explicitly via `env` keeps it; the injection
     // only fills the value the child would otherwise inherit.

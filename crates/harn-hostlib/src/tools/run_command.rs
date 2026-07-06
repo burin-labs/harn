@@ -17,6 +17,7 @@
 //!   immediately. The result arrives via `agent_inject_feedback` when the
 //!   process exits. See `tools/long_running.rs`.
 
+use harn_vm::process_sandbox::ProcessSandboxScope;
 use harn_vm::VmDictExt;
 use harn_vm::VmValue;
 use std::time::Duration;
@@ -39,6 +40,7 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let stdin = optional_string(NAME, &map, "stdin")?;
     let timeout = optional_timeout(NAME, &map, "timeout_ms")?;
     let capture = parse_capture(&map)?;
+    let sandbox_scope = parse_sandbox_scope(&map)?;
     let env_mode = optional_env_mode(NAME, &map, !env.is_empty())?;
     let background = optional_bool(NAME, &map, "background")?
         .or(optional_bool(NAME, &map, "long_running")?)
@@ -60,6 +62,8 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         }
     };
 
+    let _sandbox_guard = harn_vm::process_sandbox::push_process_sandbox_scope(sandbox_scope)
+        .map_err(sandbox_scope_error_to_hostlib)?;
     if background || background_after_ms.is_some() {
         let session_id = harn_vm::current_agent_session_id().unwrap_or_default();
         let info = super::long_running::spawn_long_running_with_options(
@@ -190,6 +194,77 @@ fn initial_background_snapshot(
         VmValue::Int(line_count as i64),
     );
     VmValue::dict(response)
+}
+
+fn parse_sandbox_scope(map: &harn_vm::value::DictMap) -> Result<ProcessSandboxScope, HostlibError> {
+    let Some(value) = map.get("sandbox") else {
+        return Ok(ProcessSandboxScope::default());
+    };
+    match value {
+        VmValue::Nil => Ok(ProcessSandboxScope::default()),
+        VmValue::Dict(dict) => Ok(ProcessSandboxScope {
+            workspace_roots: optional_nested_string_list(dict, "workspace_roots")?
+                .unwrap_or_default(),
+        }),
+        other => Err(HostlibError::InvalidParameter {
+            builtin: NAME,
+            param: "sandbox",
+            message: format!("expected dict, got {}", other.type_name()),
+        }),
+    }
+}
+
+fn optional_nested_string_list(
+    map: &harn_vm::value::DictMap,
+    key: &'static str,
+) -> Result<Option<Vec<String>>, HostlibError> {
+    let Some(value) = map.get(key) else {
+        return Ok(None);
+    };
+    match value {
+        VmValue::Nil => Ok(None),
+        VmValue::List(values) => {
+            let mut out = Vec::with_capacity(values.len());
+            for value in values.iter() {
+                match value {
+                    VmValue::String(string) => out.push(string.to_string()),
+                    other => {
+                        return Err(HostlibError::InvalidParameter {
+                            builtin: NAME,
+                            param: key,
+                            message: format!(
+                                "expected list of strings, got {} element",
+                                other.type_name()
+                            ),
+                        });
+                    }
+                }
+            }
+            Ok(Some(out))
+        }
+        other => Err(HostlibError::InvalidParameter {
+            builtin: NAME,
+            param: key,
+            message: format!("expected list of strings, got {}", other.type_name()),
+        }),
+    }
+}
+
+fn sandbox_scope_error_to_hostlib(error: harn_vm::VmError) -> HostlibError {
+    match error {
+        harn_vm::VmError::CategorizedError {
+            message,
+            category: harn_vm::value::ErrorCategory::ToolRejected,
+        } => HostlibError::SandboxViolation {
+            builtin: NAME,
+            path: String::new(),
+            message,
+        },
+        other => HostlibError::Backend {
+            builtin: NAME,
+            message: other.to_string(),
+        },
+    }
 }
 
 fn parse_command(map: &harn_vm::value::DictMap) -> Result<(String, Vec<String>), HostlibError> {
