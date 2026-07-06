@@ -10,7 +10,6 @@ use crate::connectors::{
 };
 use crate::event_log::{EventLog, LogEvent, Topic};
 use crate::llm::vm_value_to_json;
-use crate::secrets::{SecretId, SecretVersion};
 use crate::stdlib::macros::{harn_builtin, BuiltinSignature, Param, VmBuiltinDef, TY_ANY};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -78,9 +77,9 @@ async fn secret_get_impl(
             "secret_get: no active Harn connector context",
         )))
     })?;
-    let secret_id = parse_secret_id(raw.as_str()).ok_or_else(|| {
+    let secret_id = crate::secrets::parse_secret_id(raw.as_str()).map_err(|_| {
         VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            "secret_get: expected secret id in namespace/name or namespace/name@version form",
+            "secret_get: expected secret id in namespace/name, namespace/name@version, or harn-secret://namespace/name form",
         )))
     })?;
     let secret = ctx.secrets.get(&secret_id).await.map_err(|error| {
@@ -364,20 +363,4 @@ fn json_type_name(value: &JsonValue) -> &'static str {
         JsonValue::Array(_) => "list",
         JsonValue::Object(_) => "dict",
     }
-}
-
-fn parse_secret_id(raw: &str) -> Option<SecretId> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    let (base, version) = match trimmed.rsplit_once('@') {
-        Some((base, raw_version)) => (base, SecretVersion::Exact(raw_version.parse::<u64>().ok()?)),
-        None => (trimmed, SecretVersion::Latest),
-    };
-    let (namespace, name) = base.split_once('/')?;
-    if namespace.is_empty() || name.is_empty() {
-        return None;
-    }
-    Some(SecretId::new(namespace, name).with_version(version))
 }

@@ -426,22 +426,7 @@ pub(crate) fn parse_trigger_handler_uri(
 }
 
 pub(crate) fn parse_secret_id(raw: &str) -> Option<harn_vm::secrets::SecretId> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    let (base, version) = match trimmed.rsplit_once('@') {
-        Some((base, version_text)) => {
-            let version = version_text.parse::<u64>().ok()?;
-            (base, harn_vm::secrets::SecretVersion::Exact(version))
-        }
-        None => (trimmed, harn_vm::secrets::SecretVersion::Latest),
-    };
-    let (namespace, name) = base.split_once('/')?;
-    if namespace.is_empty() || name.is_empty() {
-        return None;
-    }
-    Some(harn_vm::secrets::SecretId::new(namespace, name).with_version(version))
+    harn_vm::secrets::parse_secret_id(raw).ok()
 }
 
 pub(crate) fn extract_kind_field<'a>(

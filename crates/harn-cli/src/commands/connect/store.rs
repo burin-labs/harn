@@ -1,9 +1,13 @@
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use serde_json::{json, Value as JsonValue};
 
 use crate::cli::ConnectApiKeyArgs;
-use harn_vm::secrets::{KeyringSecretProvider, SecretBytes, SecretId, SecretProvider};
+use harn_vm::secrets::{
+    configured_default_chain, ChainSecretProvider, KeyringSecretProvider, SecretBytes, SecretId,
+    SecretProvider,
+};
 
 use super::workspace::{resolve_manifest_path, secret_namespace_for};
 use super::{
@@ -38,6 +42,7 @@ pub(super) async fn run_connect_api_key(args: &ConnectApiKeyArgs) -> Result<(), 
             provider: args.connector.clone(),
             kind: "api-key".to_string(),
             secret_id: secret_id.to_string(),
+            secret_ids: vec![secret_id.to_string()],
             expires_at_unix: None,
             scopes: args.scopes.clone(),
             connected_at_unix: current_unix_timestamp(),
@@ -83,7 +88,7 @@ pub(super) async fn run_connect_list(json_output: bool) -> Result<(), String> {
                 "{}\t{}\t{}\texpires={}\tlast_used={}",
                 entry.provider,
                 entry.kind,
-                entry.secret_id,
+                display_secret_ids(entry),
                 entry
                     .expires_at_unix
                     .map(format_expiry)
@@ -139,31 +144,26 @@ pub(super) async fn run_connect_revoke(
 }
 
 pub(crate) fn parse_secret_id(raw: &str) -> Option<harn_vm::secrets::SecretId> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    let (base, version) = match trimmed.rsplit_once('@') {
-        Some((base, version_text)) => {
-            let version = version_text.parse::<u64>().ok()?;
-            (base, harn_vm::secrets::SecretVersion::Exact(version))
-        }
-        None => (trimmed, harn_vm::secrets::SecretVersion::Latest),
-    };
-    let (namespace, name) = base.split_once('/')?;
-    if namespace.is_empty() || name.is_empty() {
-        return None;
-    }
-    Some(harn_vm::secrets::SecretId::new(namespace, name).with_version(version))
+    harn_vm::secrets::parse_secret_id(raw).ok()
 }
 
 pub(crate) fn connect_secret_provider() -> Result<KeyringSecretProvider, String> {
-    let manifest_dir = resolve_manifest_path(None)
-        .map(|(_, dir)| dir)
-        .unwrap_or_else(|_| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let manifest_dir = connect_manifest_dir();
     Ok(KeyringSecretProvider::new(secret_namespace_for(
         &manifest_dir,
     )))
+}
+
+pub(crate) fn connect_secret_reader_provider() -> Result<ChainSecretProvider, String> {
+    let manifest_dir = connect_manifest_dir();
+    configured_default_chain(secret_namespace_for(&manifest_dir))
+        .map_err(|error| format!("failed to configure connector secret providers: {error}"))
+}
+
+fn connect_manifest_dir() -> PathBuf {
+    resolve_manifest_path(None)
+        .map(|(_, dir)| dir)
+        .unwrap_or_else(|_| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
 }
 
 pub(crate) async fn load_connect_secret_text(secret_id: &str) -> Result<String, String> {
@@ -192,7 +192,7 @@ pub(super) async fn save_connector_token(token: &StoredConnectorToken) -> Result
         .map_err(|error| format!("failed to store connector OAuth token: {error}"))?;
     provider
         .put(
-            &SecretId::new(token.provider.clone(), "access-token"),
+            &harn_vm::secrets::connector_access_token_id(&token.provider),
             SecretBytes::from(token.access_token.clone()),
         )
         .await
@@ -200,7 +200,7 @@ pub(super) async fn save_connector_token(token: &StoredConnectorToken) -> Result
     if let Some(refresh_token) = token.refresh_token.as_ref() {
         provider
             .put(
-                &SecretId::new(token.provider.clone(), "refresh-token"),
+                &harn_vm::secrets::connector_refresh_token_id(&token.provider),
                 SecretBytes::from(refresh_token.clone()),
             )
             .await
@@ -211,7 +211,8 @@ pub(super) async fn save_connector_token(token: &StoredConnectorToken) -> Result
         ConnectIndexEntry {
             provider: token.provider.clone(),
             kind: "oauth".to_string(),
-            secret_id: format!("{}/access-token", token.provider),
+            secret_id: harn_vm::secrets::connector_access_token_id(&token.provider).to_string(),
+            secret_ids: stored_oauth_secret_ids(token),
             expires_at_unix: token.expires_at_unix,
             scopes: token.scopes.clone(),
             connected_at_unix: token.connected_at_unix,
@@ -239,23 +240,23 @@ pub(super) async fn load_connector_token(
 }
 
 pub(super) fn connector_oauth_token_id(provider: &str) -> SecretId {
-    SecretId::new(provider.to_string(), "oauth-token")
+    harn_vm::secrets::connector_oauth_token_id(provider)
 }
 
 pub(super) fn connector_secret_ids(provider: &str) -> Vec<SecretId> {
     vec![
-        SecretId::new(provider.to_string(), "oauth-token"),
-        SecretId::new(provider.to_string(), "access-token"),
-        SecretId::new(provider.to_string(), "refresh-token"),
+        harn_vm::secrets::connector_oauth_token_id(provider),
+        harn_vm::secrets::connector_access_token_id(provider),
+        harn_vm::secrets::connector_refresh_token_id(provider),
     ]
 }
 
 pub(super) async fn load_connect_index(
-    provider: &KeyringSecretProvider,
+    provider: &dyn SecretProvider,
 ) -> Result<ConnectIndex, String> {
     let secret = match provider.get(&connect_index_id()).await {
         Ok(secret) => secret,
-        Err(harn_vm::secrets::SecretError::NotFound { .. }) => {
+        Err(error) if secret_error_is_not_found(&error) => {
             return Ok(ConnectIndex::default());
         }
         Err(error) => return Err(format!("failed to read connector index: {error}")),
@@ -263,6 +264,14 @@ pub(super) async fn load_connect_index(
     secret
         .with_exposed(|bytes| serde_json::from_slice::<ConnectIndex>(bytes))
         .map_err(|error| format!("connector index was invalid JSON: {error}"))
+}
+
+pub(super) fn secret_error_is_not_found(error: &harn_vm::secrets::SecretError) -> bool {
+    match error {
+        harn_vm::secrets::SecretError::NotFound { .. } => true,
+        harn_vm::secrets::SecretError::All(errors) => errors.iter().all(secret_error_is_not_found),
+        _ => false,
+    }
 }
 
 pub(super) async fn save_connect_index(
@@ -279,9 +288,35 @@ pub(super) async fn save_connect_index(
 
 pub(super) async fn upsert_index_entry(
     provider: &KeyringSecretProvider,
-    entry: ConnectIndexEntry,
+    mut entry: ConnectIndexEntry,
 ) -> Result<(), String> {
     let mut index = load_connect_index(provider).await?;
+    if entry.secret_ids.is_empty() {
+        entry.secret_ids.push(entry.secret_id.clone());
+    }
+    if let Some(existing) = index
+        .providers
+        .iter()
+        .find(|item| item.provider == entry.provider)
+        .cloned()
+    {
+        entry.secret_ids = merged_secret_ids(&existing, &entry);
+        let access_token_id =
+            harn_vm::secrets::connector_access_token_id(&entry.provider).to_string();
+        if entry.secret_id != access_token_id
+            && entry.secret_ids.iter().any(|id| id == &access_token_id)
+        {
+            entry.secret_id = access_token_id;
+        }
+        if entry.scopes.is_none() {
+            entry.scopes = existing.scopes;
+        }
+        if entry.expires_at_unix.is_none() {
+            entry.expires_at_unix = existing.expires_at_unix;
+        }
+        entry.connected_at_unix = existing.connected_at_unix.min(entry.connected_at_unix);
+        entry.last_used_at_unix = entry.last_used_at_unix.or(existing.last_used_at_unix);
+    }
     index
         .providers
         .retain(|item| item.provider != entry.provider);
@@ -307,7 +342,8 @@ pub(super) fn connect_index_id() -> SecretId {
 pub(super) fn connector_token_summary(token: &StoredConnectorToken) -> JsonValue {
     json!({
         "provider": token.provider,
-        "secret_id": format!("{}/access-token", token.provider),
+        "secret_id": harn_vm::secrets::connector_access_token_id(&token.provider).to_string(),
+        "secret_ids": stored_oauth_secret_ids(token),
         "expires_at_unix": token.expires_at_unix,
         "scopes": token.scopes,
         "connected_at_unix": token.connected_at_unix,
@@ -326,4 +362,46 @@ pub(super) fn current_unix_timestamp() -> i64 {
 
 pub(super) fn format_expiry(unix: i64) -> String {
     unix.to_string()
+}
+
+fn display_secret_ids(entry: &ConnectIndexEntry) -> String {
+    let ids = normalized_secret_ids(entry);
+    if ids.is_empty() {
+        entry.secret_id.clone()
+    } else {
+        ids.join(",")
+    }
+}
+
+fn stored_oauth_secret_ids(token: &StoredConnectorToken) -> Vec<String> {
+    let mut ids = vec![
+        harn_vm::secrets::connector_oauth_token_id(&token.provider).to_string(),
+        harn_vm::secrets::connector_access_token_id(&token.provider).to_string(),
+    ];
+    if token.refresh_token.is_some() {
+        ids.push(harn_vm::secrets::connector_refresh_token_id(&token.provider).to_string());
+    }
+    ids
+}
+
+fn merged_secret_ids(existing: &ConnectIndexEntry, next: &ConnectIndexEntry) -> Vec<String> {
+    let mut ids = BTreeSet::new();
+    for id in normalized_secret_ids(existing)
+        .into_iter()
+        .chain(normalized_secret_ids(next))
+    {
+        ids.insert(id);
+    }
+    ids.into_iter().collect()
+}
+
+fn normalized_secret_ids(entry: &ConnectIndexEntry) -> Vec<String> {
+    let mut ids = Vec::new();
+    if !entry.secret_id.is_empty() {
+        ids.push(entry.secret_id.clone());
+    }
+    ids.extend(entry.secret_ids.iter().filter(|id| !id.is_empty()).cloned());
+    ids.sort();
+    ids.dedup();
+    ids
 }

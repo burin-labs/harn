@@ -43,8 +43,13 @@ pub fn try_load_runtime_extensions(anchor: &Path) -> Result<RuntimeExtensions, P
     ));
     let handoff_routes = root_manifest.handoff_routes.clone();
     validate_handoff_routes(&handoff_routes, &root_manifest)?;
-    let provider_connectors =
+    let mut provider_connectors =
         resolved_provider_connectors_from_manifest(&root_manifest, &manifest_dir);
+    provider_connectors.extend(installed_package_provider_connectors(&ManifestContext {
+        manifest: root_manifest.clone(),
+        dir: manifest_dir.clone(),
+    })?);
+    provider_connectors = dedupe_provider_connectors(provider_connectors);
 
     Ok(RuntimeExtensions {
         root_manifest_path: Some(manifest_dir.join(MANIFEST)),
@@ -57,6 +62,54 @@ pub fn try_load_runtime_extensions(anchor: &Path) -> Result<RuntimeExtensions, P
         handoff_routes,
         provider_connectors,
     })
+}
+
+fn installed_package_provider_connectors(
+    ctx: &ManifestContext,
+) -> Result<Vec<ResolvedProviderConnectorConfig>, PackageError> {
+    let Some(lock) = LockFile::load(&ctx.lock_path())? else {
+        return Ok(Vec::new());
+    };
+    let mut providers = Vec::new();
+    let packages_dir = ctx.packages_dir();
+    for entry in &lock.packages {
+        validate_package_alias(&entry.name)?;
+        let package_dir = packages_dir.join(&entry.name);
+        if package_dir.is_dir() {
+            if let Some(manifest) = read_package_manifest_from_dir(&package_dir)? {
+                providers.extend(resolved_provider_connectors_from_manifest(
+                    &manifest,
+                    &package_dir,
+                ));
+            }
+            continue;
+        }
+
+        let package_file = packages_dir.join(format!("{}.harn", entry.name));
+        if package_file.is_file() {
+            continue;
+        }
+
+        return Err(PackageError::Manifest(format!(
+            "installed package {} is missing under {}; run `harn install`",
+            entry.name,
+            packages_dir.display()
+        )));
+    }
+    Ok(providers)
+}
+
+fn dedupe_provider_connectors(
+    providers: Vec<ResolvedProviderConnectorConfig>,
+) -> Vec<ResolvedProviderConnectorConfig> {
+    let mut seen = std::collections::BTreeSet::new();
+    let mut out = Vec::new();
+    for provider in providers {
+        if seen.insert(provider.id.as_str().to_string()) {
+            out.push(provider);
+        }
+    }
+    out
 }
 
 pub fn load_runtime_extensions(anchor: &Path) -> RuntimeExtensions {

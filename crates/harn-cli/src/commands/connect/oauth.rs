@@ -317,8 +317,9 @@ pub(super) async fn run_oauth_connect(mut request: OAuthConnectRequest) -> Resul
         );
     } else {
         println!(
-            "OAuth token stored for {} as {}/access-token.",
-            stored.provider, stored.provider
+            "OAuth token stored for {} as {}.",
+            stored.provider,
+            harn_vm::secrets::connector_access_token_id(&stored.provider)
         );
         println!(
             "Expires: {}",

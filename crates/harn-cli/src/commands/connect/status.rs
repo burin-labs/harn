@@ -9,7 +9,8 @@ use crate::package::{self, ConnectorRecoveryCopy};
 use harn_vm::secrets::SecretProvider;
 
 use super::store::{
-    connect_secret_provider, current_unix_timestamp, load_connect_index, parse_secret_id,
+    connect_secret_reader_provider, current_unix_timestamp, load_connect_index, parse_secret_id,
+    secret_error_is_not_found,
 };
 use super::{
     ConnectIndex, ConnectSetupPlan, ConnectSetupStep, ConnectStatusReport, ConnectorHealthStatus,
@@ -70,7 +71,7 @@ pub(super) async fn connect_status_report(
 ) -> Result<ConnectStatusReport, String> {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let extensions = package::try_load_runtime_extensions(&cwd)?;
-    let provider = connect_secret_provider()?;
+    let provider = connect_secret_reader_provider()?;
     let (index, credential_backend_error) = match load_connect_index(&provider).await {
         Ok(index) => (index, None),
         Err(error) => (ConnectIndex::default(), Some(error)),
@@ -167,6 +168,7 @@ pub(super) async fn connector_status(
     }
 
     let secret_id = entry.map(|entry| entry.secret_id.clone());
+    let secret_ids = entry.map(normalized_secret_ids).unwrap_or_default();
     let expires_at_unix = entry.and_then(|entry| entry.expires_at_unix);
     if status == "healthy" {
         if let Some(expires_at) = expires_at_unix {
@@ -181,7 +183,7 @@ pub(super) async fn connector_status(
             match parse_secret_id(&entry.secret_id) {
                 Some(id) => match provider.get(&id).await {
                     Ok(_) => {}
-                    Err(harn_vm::secrets::SecretError::NotFound { .. }) => {
+                    Err(error) if secret_error_is_not_found(&error) => {
                         status = "revoked_credentials".to_string();
                         reason = format!(
                             "credential index points at missing secret '{}'",
@@ -214,7 +216,7 @@ pub(super) async fn connector_status(
                         status: "pass".to_string(),
                         detail: String::new(),
                     }),
-                    Err(harn_vm::secrets::SecretError::NotFound { .. }) => {
+                    Err(error) if secret_error_is_not_found(&error) => {
                         missing_secrets.push(secret.clone());
                         health_checks.push(ConnectorHealthStatus {
                             id: format!("secret:{secret}"),
@@ -289,6 +291,7 @@ pub(super) async fn connector_status(
         required_secrets,
         missing_secrets,
         secret_id,
+        secret_ids,
         expires_at_unix,
         health_checks,
         recovery,
@@ -309,6 +312,7 @@ pub(super) fn missing_install_status(connector_id: &str) -> ConnectorStatus {
         required_secrets: Vec::new(),
         missing_secrets: Vec::new(),
         secret_id: None,
+        secret_ids: Vec::new(),
         expires_at_unix: None,
         health_checks: Vec::new(),
         recovery: ConnectorRecoveryCopy {
@@ -318,6 +322,17 @@ pub(super) fn missing_install_status(connector_id: &str) -> ConnectorStatus {
             ..ConnectorRecoveryCopy::default()
         },
     }
+}
+
+fn normalized_secret_ids(entry: &super::ConnectIndexEntry) -> Vec<String> {
+    let mut ids = Vec::new();
+    if !entry.secret_id.is_empty() {
+        ids.push(entry.secret_id.clone());
+    }
+    ids.extend(entry.secret_ids.iter().filter(|id| !id.is_empty()).cloned());
+    ids.sort();
+    ids.dedup();
+    ids
 }
 
 pub(super) fn connect_setup_plan_at(

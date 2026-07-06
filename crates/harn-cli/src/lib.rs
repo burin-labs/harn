@@ -2939,7 +2939,16 @@ async fn execute_with_skill_dirs_and_optional_harness(
             });
             skill_loader::emit_loader_warnings(&loaded.loader_warnings);
             skill_loader::install_skills_global(&mut vm, &loaded);
-            vm.set_harness(harness.unwrap_or_else(harn_vm::Harness::real));
+            let runtime_harness = match harness {
+                Some(harness) => harness,
+                None => default_harness_for_base_dir(store_base).map_err(|error| {
+                    ExecError::new(
+                        ExecStage::Runtime,
+                        format!("failed to configure harness secret provider: {error}"),
+                    )
+                })?,
+            };
+            vm.set_harness(runtime_harness);
             if let Some(path) = source_path {
                 let extensions = package::load_runtime_extensions(path);
                 package::install_runtime_extensions(&extensions);
@@ -3052,6 +3061,15 @@ fn connector_secret_namespace(base_dir: &Path) -> String {
             format!("harn/{leaf}")
         }
     }
+}
+
+pub(crate) fn default_harness_for_base_dir(base_dir: &Path) -> Result<harn_vm::Harness, String> {
+    let secret_namespace = connector_secret_namespace(base_dir);
+    let secret_provider = Arc::new(
+        harn_vm::secrets::configured_default_chain(secret_namespace)
+            .map_err(|error| error.to_string())?,
+    );
+    Ok(harn_vm::Harness::real().with_secret_provider(secret_provider))
 }
 
 #[cfg(test)]
