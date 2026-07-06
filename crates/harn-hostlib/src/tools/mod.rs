@@ -61,6 +61,7 @@ mod run_command;
 mod run_test;
 mod search;
 mod test_parsers;
+mod toolchain_facts;
 mod wait_command;
 
 pub use permissions::FEATURE_TOOLS_DETERMINISTIC;
@@ -159,6 +160,12 @@ impl HostlibCapability for ToolsCapability {
             cancel_handle::NAME,
             "cancel_handle",
             cancel_handle::handle,
+        );
+        registry.register_gated_fn(
+            "tools",
+            toolchain_facts::NAME,
+            "toolchain_facts",
+            toolchain_facts::handle,
         );
 
         // The opt-in builtin lives in the `tools` module so embedders that

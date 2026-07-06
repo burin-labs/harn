@@ -23,10 +23,10 @@ use std::time::Duration;
 
 use crate::error::HostlibError;
 use crate::tools::payload::{
-    optional_bool, optional_string, optional_string_list, optional_string_map, optional_timeout,
-    optional_u64, parse_argv_program, require_dict_arg,
+    optional_bool, optional_env_mode, optional_string, optional_string_list, optional_string_map,
+    optional_timeout, optional_u64, parse_argv_program, require_dict_arg,
 };
-use crate::tools::proc::{self, CaptureConfig, EnvMode, SpawnRequest};
+use crate::tools::proc::{self, CaptureConfig, SpawnRequest};
 
 pub(crate) const NAME: &str = "hostlib_tools_run_command";
 
@@ -39,7 +39,7 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let stdin = optional_string(NAME, &map, "stdin")?;
     let timeout = optional_timeout(NAME, &map, "timeout_ms")?;
     let capture = parse_capture(&map)?;
-    let env_mode = parse_env_mode(&map, !env.is_empty())?;
+    let env_mode = optional_env_mode(NAME, &map, !env.is_empty())?;
     let background = optional_bool(NAME, &map, "background")?
         .or(optional_bool(NAME, &map, "long_running")?)
         .unwrap_or(false);
@@ -253,26 +253,6 @@ fn parse_command(map: &harn_vm::value::DictMap) -> Result<(String, Vec<String>),
             param: "mode",
             message: format!("unsupported command mode {other:?}; expected argv or shell"),
         }),
-    }
-}
-
-fn parse_env_mode(
-    map: &harn_vm::value::DictMap,
-    env_supplied: bool,
-) -> Result<EnvMode, HostlibError> {
-    match optional_string(NAME, map, "env_mode")?.as_deref() {
-        Some("inherit_clean") => Ok(EnvMode::InheritClean),
-        Some("replace") => Ok(EnvMode::Replace),
-        Some("patch") => Ok(EnvMode::Patch),
-        Some(other) => Err(HostlibError::InvalidParameter {
-            builtin: NAME,
-            param: "env_mode",
-            message: format!(
-                "unsupported env_mode {other:?}; expected inherit_clean, replace, or patch"
-            ),
-        }),
-        None if env_supplied => Ok(EnvMode::Replace),
-        None => Ok(EnvMode::InheritClean),
     }
 }
 
