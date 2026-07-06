@@ -57,13 +57,17 @@ const PROJECT_LANGUAGE_ORDER: &[&str] = &[
     "c",
     "cpp",
 ];
-const PROJECT_FRAMEWORK_ORDER: &[&str] = &["axum", "next", "react", "django", "fastapi", "rails"];
+const PROJECT_FRAMEWORK_ORDER: &[&str] = &[
+    "axum", "next", "react", "laravel", "django", "fastapi", "rails",
+];
 const PROJECT_PACKAGE_MANAGER_ORDER: &[&str] = &[
-    "cargo", "spm", "pnpm", "npm", "yarn", "uv", "poetry", "pip", "go-mod", "bundler",
+    "cargo", "spm", "composer", "pnpm", "npm", "yarn", "uv", "poetry", "pip", "go-mod", "bundler",
 ];
 const PROJECT_TEST_RUNNER_ORDER: &[&str] = &[
     "nextest",
     "cargo-test",
+    "pest",
+    "phpunit",
     "vitest",
     "jest",
     "mocha",
@@ -75,7 +79,8 @@ const PROJECT_TEST_RUNNER_ORDER: &[&str] = &[
     "minitest",
 ];
 const PROJECT_BUILD_TOOL_ORDER: &[&str] = &[
-    "cargo", "spm", "next", "vite", "uv", "poetry", "pnpm", "npm", "yarn", "go", "bundler", "pip",
+    "cargo", "spm", "composer", "next", "vite", "uv", "poetry", "pnpm", "npm", "yarn", "go",
+    "bundler", "pip",
 ];
 const PROJECT_CI_ORDER: &[&str] = &[
     "github-actions",
@@ -96,6 +101,7 @@ const PROJECT_LOCKFILES: &[(&str, Option<&str>)] = &[
     ("requirements.lock", Some("pip")),
     ("go.sum", Some("go-mod")),
     ("Gemfile.lock", Some("bundler")),
+    ("composer.lock", Some("composer")),
     ("Package.resolved", Some("spm")),
     ("bun.lockb", Some("npm")),
     ("bun.lock", Some("npm")),
@@ -230,6 +236,7 @@ struct FingerprintSignals {
     node_project: bool,
     python_project: bool,
     python_needs_pip: bool,
+    php_project: bool,
     ruby_project: bool,
     has_next_dep: bool,
     has_next_config: bool,
@@ -622,6 +629,13 @@ pub(super) fn detect_project_fingerprint(dir: &Path) -> ProjectFingerprint {
             signals.build_tools.insert("pip".to_string());
         }
     }
+    if signals.php_project {
+        signals.package_managers.insert("composer".to_string());
+        signals.build_tools.insert("composer".to_string());
+        if signals.has_tests && signals.test_runners.is_empty() {
+            signals.test_runners.insert("phpunit".to_string());
+        }
+    }
 
     let languages = ordered_values(&signals.languages, PROJECT_LANGUAGE_ORDER);
     let frameworks = ordered_values(&signals.frameworks, PROJECT_FRAMEWORK_ORDER);
@@ -794,11 +808,7 @@ fn inspect_fingerprint_file(path: &Path, rel: &str, name: &str, signals: &mut Fi
             signals.languages.insert("java".to_string());
             signals.build_tools.insert("maven".to_string());
         }
-        "composer.json" => {
-            signals.languages.insert("php".to_string());
-            signals.package_managers.insert("composer".to_string());
-            signals.build_tools.insert("composer".to_string());
-        }
+        "composer.json" => inspect_composer_json(path, signals),
         "build.zig" | "build.zig.zon" => {
             signals.languages.insert("zig".to_string());
             signals.build_tools.insert("zig".to_string());
@@ -1028,6 +1038,36 @@ fn inspect_python_text(text: Option<&str>, signals: &mut FingerprintSignals) {
     }
 }
 
+fn inspect_composer_json(path: &Path, signals: &mut FingerprintSignals) {
+    signals.languages.insert("php".to_string());
+    signals.php_project = true;
+    signals.package_managers.insert("composer".to_string());
+    signals.build_tools.insert("composer".to_string());
+
+    let Some(parsed) = read_json_object(path.to_path_buf()) else {
+        return;
+    };
+    let deps = collect_composer_dependency_names(&parsed);
+    if deps.contains("laravel/framework") {
+        signals.frameworks.insert("laravel".to_string());
+    }
+    if deps.contains("pestphp/pest") {
+        signals.test_runners.insert("pest".to_string());
+        signals.has_tests = true;
+    }
+    if deps.contains("phpunit/phpunit") {
+        signals.test_runners.insert("phpunit".to_string());
+        signals.has_tests = true;
+    }
+    if let Some(scripts) = parsed.get("scripts").and_then(|value| value.as_object()) {
+        for value in scripts.values() {
+            for command in composer_script_commands(value) {
+                record_command_signal(command, signals);
+            }
+        }
+    }
+}
+
 fn inspect_gemfile(path: &Path, signals: &mut FingerprintSignals) {
     signals.languages.insert("ruby".to_string());
     signals.ruby_project = true;
@@ -1083,6 +1123,24 @@ fn record_command_signal(command: &str, signals: &mut FingerprintSignals) {
         signals.test_runners.insert("pytest".to_string());
         signals.has_tests = true;
     }
+    if normalized.contains("pest") {
+        signals.test_runners.insert("pest".to_string());
+        signals.has_tests = true;
+    }
+    if normalized.contains("php artisan test") {
+        signals.has_tests = true;
+    }
+    if normalized.contains("phpunit") {
+        signals.test_runners.insert("phpunit".to_string());
+        signals.has_tests = true;
+    }
+    if normalized.contains("composer install")
+        || normalized.contains("composer update")
+        || normalized.contains("composer test")
+    {
+        signals.package_managers.insert("composer".to_string());
+        signals.build_tools.insert("composer".to_string());
+    }
     if normalized.contains("python -m unittest") || normalized.contains("unittest") {
         signals.test_runners.insert("unittest".to_string());
         signals.has_tests = true;
@@ -1116,6 +1174,30 @@ fn collect_json_dependency_names(
         names.extend(entries.keys().cloned());
     }
     names
+}
+
+fn collect_composer_dependency_names(
+    parsed: &serde_json::Map<String, serde_json::Value>,
+) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    for key in ["require", "require-dev"] {
+        let Some(entries) = parsed.get(key).and_then(|value| value.as_object()) else {
+            continue;
+        };
+        names.extend(entries.keys().cloned());
+    }
+    names
+}
+
+fn composer_script_commands(value: &serde_json::Value) -> Vec<&str> {
+    match value {
+        serde_json::Value::String(command) => vec![command.as_str()],
+        serde_json::Value::Array(commands) => commands
+            .iter()
+            .filter_map(serde_json::Value::as_str)
+            .collect(),
+        _ => Vec::new(),
+    }
 }
 
 fn collect_toml_keys(parsed: &toml::Value, paths: &[&[&str]]) -> BTreeSet<String> {
@@ -1466,6 +1548,41 @@ fn apply_config_tier(dir: &Path, evidence: &mut ProjectEvidence, build_commands:
         }
     }
 
+    if let Some(composer_json) = read_json_object(dir.join("composer.json")) {
+        if evidence.package_name.is_none() {
+            evidence.package_name = composer_json
+                .get("name")
+                .and_then(|value| value.as_str())
+                .map(str::to_string);
+        }
+        if let Some(scripts) = composer_json
+            .get("scripts")
+            .and_then(|value| value.as_object())
+        {
+            for (name, value) in scripts {
+                let commands = composer_script_commands(value);
+                if commands.is_empty() {
+                    continue;
+                }
+                evidence
+                    .declared_scripts
+                    .insert(format!("composer:{name}"), commands.join(" && "));
+            }
+            for key in ["test", "pest", "phpunit"] {
+                if scripts.contains_key(key) {
+                    push_unique(build_commands, format!("composer {key}"));
+                }
+            }
+        }
+        let deps = collect_composer_dependency_names(&composer_json);
+        if deps.contains("pestphp/pest") {
+            push_unique(build_commands, "vendor/bin/pest".to_string());
+        }
+        if deps.contains("phpunit/phpunit") {
+            push_unique(build_commands, "vendor/bin/phpunit".to_string());
+        }
+    }
+
     if let Some(dockerfile) = read_text_if_exists(dir.join("Dockerfile")) {
         evidence.dockerfile_commands = parse_dockerfile_commands(&dockerfile);
     }
@@ -1490,6 +1607,7 @@ fn apply_config_tier(dir: &Path, evidence: &mut ProjectEvidence, build_commands:
 pub(super) fn detect_package_name(dir: &Path) -> Option<String> {
     package_name_from_pyproject(dir)
         .or_else(|| package_name_from_package_json(dir))
+        .or_else(|| package_name_from_composer_json(dir))
         .or_else(|| package_name_from_go_mod(dir))
         .or_else(|| package_name_from_cargo_toml(dir))
 }
@@ -1514,6 +1632,14 @@ fn package_name_from_pyproject(dir: &Path) -> Option<String> {
 
 fn package_name_from_package_json(dir: &Path) -> Option<String> {
     let parsed = read_json_object(dir.join("package.json"))?;
+    parsed
+        .get("name")
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+}
+
+fn package_name_from_composer_json(dir: &Path) -> Option<String> {
+    let parsed = read_json_object(dir.join("composer.json"))?;
     parsed
         .get("name")
         .and_then(|value| value.as_str())
