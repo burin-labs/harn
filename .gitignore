@@ -15,9 +15,11 @@ __pycache__/
 
 # Local agent/runtime state.
 .burin/
+.burin*/
 .harn-runs/
 .harn/receipts/
 .harn/
+.harn*/
 .remember/
 .serena/
 meta_scratch/
