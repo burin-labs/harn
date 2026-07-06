@@ -6,7 +6,7 @@ use std::io::{IsTerminal, Read, Write};
 use std::sync::atomic::Ordering;
 use std::sync::Mutex;
 #[cfg(unix)]
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::stdlib::options::{self, ErrorKind, OptionsParser};
@@ -399,16 +399,41 @@ impl Drop for TerminalModeGuard {
 }
 
 #[cfg(unix)]
+const READ_LINE_INTERRUPT_POLL: Duration = Duration::from_millis(20);
+
+#[cfg(unix)]
+fn read_line_elapsed_ms(start: Instant) -> u64 {
+    start.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
+}
+
+#[cfg(unix)]
+fn read_line_timeout_remaining_ms(options: &ReadLineOptions, start: Instant) -> Option<u64> {
+    let timeout_ms = options.timeout_ms?;
+    Some(timeout_ms.saturating_sub(read_line_elapsed_ms(start)))
+}
+
+#[cfg(unix)]
+fn read_line_timed_out(options: &ReadLineOptions, start: Instant) -> bool {
+    matches!(read_line_timeout_remaining_ms(options, start), Some(0))
+}
+
+#[cfg(unix)]
+fn read_line_interrupt_poll_ms() -> libc::c_int {
+    READ_LINE_INTERRUPT_POLL
+        .as_millis()
+        .min(libc::c_int::MAX as u128) as libc::c_int
+}
+
+#[cfg(unix)]
 fn poll_timeout(options: &ReadLineOptions, start: Instant) -> libc::c_int {
-    let Some(timeout_ms) = options.timeout_ms else {
-        return -1;
-    };
-    let elapsed_ms = start.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
-    if elapsed_ms >= timeout_ms {
-        0
-    } else {
-        let remaining = timeout_ms - elapsed_ms;
-        remaining.min(libc::c_int::MAX as u64) as libc::c_int
+    let heartbeat = crate::op_interrupt::installed().then_some(read_line_interrupt_poll_ms());
+    match (read_line_timeout_remaining_ms(options, start), heartbeat) {
+        (Some(remaining), Some(heartbeat)) => {
+            remaining.min(heartbeat as u64).min(libc::c_int::MAX as u64) as libc::c_int
+        }
+        (Some(remaining), None) => remaining.min(libc::c_int::MAX as u64) as libc::c_int,
+        (None, Some(heartbeat)) => heartbeat,
+        (None, None) => -1,
     }
 }
 
@@ -429,6 +454,9 @@ fn read_line_from_fd_unix(fd: libc::c_int, options: &ReadLineOptions) -> ReadLin
     let start = Instant::now();
     let mut bytes = Vec::new();
     loop {
+        if crate::op_interrupt::requested() {
+            return ReadLineOutcome::Interrupt;
+        }
         let mut pollfd = libc::pollfd {
             fd,
             events: libc::POLLIN,
@@ -436,7 +464,10 @@ fn read_line_from_fd_unix(fd: libc::c_int, options: &ReadLineOptions) -> ReadLin
         };
         let ready = unsafe { libc::poll(&raw mut pollfd, 1, poll_timeout(options, start)) };
         if ready == 0 {
-            return ReadLineOutcome::Timeout;
+            if read_line_timed_out(options, start) {
+                return ReadLineOutcome::Timeout;
+            }
+            continue;
         }
         if ready < 0 {
             let error = std::io::Error::last_os_error();
@@ -1194,6 +1225,12 @@ fn ansi_colorize(text: &str, name: &str) -> String {
 mod tests {
     use crate::value::VmDictExt;
     use std::collections::BTreeMap;
+    #[cfg(unix)]
+    use std::sync::atomic::{AtomicBool, Ordering};
+    #[cfg(unix)]
+    use std::sync::Arc;
+    #[cfg(unix)]
+    use std::time::{Duration, Instant};
 
     use crate::value::VmValue;
 
@@ -1309,6 +1346,29 @@ mod tests {
         );
 
         assert_eq!(outcome, ReadLineOutcome::Timeout);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_line_from_fd_observes_interrupt_without_stdin_activity() {
+        let (read_fd, _write_fd) = pipe_pair();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let cancel_from_thread = Arc::clone(&cancel);
+        let _guard = crate::op_interrupt::install(Some(cancel), None);
+        let interrupter = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(40));
+            cancel_from_thread.store(true, Ordering::SeqCst);
+        });
+
+        let started = Instant::now();
+        let outcome = super::read_line_from_fd_unix(read_fd.0, &ReadLineOptions::default());
+
+        interrupter.join().expect("interrupter thread joins");
+        assert_eq!(outcome, ReadLineOutcome::Interrupt);
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "interrupt heartbeat should wake idle read_line promptly"
+        );
     }
 
     #[cfg(unix)]

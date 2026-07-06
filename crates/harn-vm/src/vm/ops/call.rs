@@ -1534,9 +1534,11 @@ impl super::super::Vm {
             let method = Self::const_str(&chunk.constants[name_idx as usize])?;
             let args = self.take_stack_args_from(args_start)?;
             self.stack.truncate(obj_idx);
-            let result = if let Some(result) =
+            let sync_result = {
+                let _interrupt = self.sync_builtin_interrupt_guard();
                 Self::call_harness_method_sync_fast(&mut self.output, &handle, method, &args)
-            {
+            };
+            let result = if let Some(result) = sync_result {
                 result?
             } else {
                 self.call_method_async(obj, method, &args).await?
@@ -1546,9 +1548,11 @@ impl super::super::Vm {
             let method = Self::const_str(&chunk.constants[name_idx as usize])?;
             let cache_target = Self::method_cache_target(&obj, method, argc);
             let args = &self.stack[args_start..];
-            let result = if let Some(result) =
+            let sync_result = {
+                let _interrupt = self.sync_builtin_interrupt_guard();
                 Self::try_harness_method_sync_fast(&mut self.output, &obj, method, args)
-            {
+            };
+            let result = if let Some(result) = sync_result {
                 self.stack.truncate(obj_idx);
                 result?
             } else if let Some(result) = Self::call_method_sync(&obj, method, args) {
@@ -1649,12 +1653,16 @@ impl super::super::Vm {
                     ))
                 }
             };
-            if let Some(result) = Self::call_harness_method_sync_fast(
-                &mut self.output,
-                &handle,
-                method,
-                &self.stack[args_start..],
-            ) {
+            let sync_result = {
+                let _interrupt = self.sync_builtin_interrupt_guard();
+                Self::call_harness_method_sync_fast(
+                    &mut self.output,
+                    &handle,
+                    method,
+                    &self.stack[args_start..],
+                )
+            };
+            if let Some(result) = sync_result {
                 return Some(self.finish_method_call_sync(
                     cache_site.cache_set,
                     cache_site.slot_count,
@@ -1683,9 +1691,11 @@ impl super::super::Vm {
                 }
             };
             let args = &self.stack[args_start..];
-            let result = if let Some(result) =
+            let sync_result = {
+                let _interrupt = self.sync_builtin_interrupt_guard();
                 Self::try_harness_method_sync_fast(&mut self.output, obj, method, args)
-            {
+            };
+            let result = if let Some(result) = sync_result {
                 result
             } else {
                 Self::call_method_sync(obj, method, args)?
@@ -1772,9 +1782,11 @@ impl super::super::Vm {
             Self::try_cached_harness_method(cached_method, name_idx, args.len(), &obj)
         {
             let method = Self::const_str(&chunk.constants[name_idx as usize])?;
-            let result = if let Some(result) =
+            let sync_result = {
+                let _interrupt = self.sync_builtin_interrupt_guard();
                 Self::call_harness_method_sync_fast(&mut self.output, &handle, method, &args)
-            {
+            };
+            let result = if let Some(result) = sync_result {
                 result?
             } else {
                 self.call_method_async(obj, method, &args).await?
@@ -1783,9 +1795,11 @@ impl super::super::Vm {
         } else {
             let method = Self::const_str(&chunk.constants[name_idx as usize])?;
             let cache_target = Self::method_cache_target(&obj, method, args.len());
-            let result = if let Some(result) =
+            let sync_result = {
+                let _interrupt = self.sync_builtin_interrupt_guard();
                 Self::try_harness_method_sync_fast(&mut self.output, &obj, method, &args)
-            {
+            };
+            let result = if let Some(result) = sync_result {
                 result?
             } else if let Some(result) = Self::call_method_sync(&obj, method, &args) {
                 result?

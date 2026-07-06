@@ -234,6 +234,25 @@ fn init_chat_dispatch_is_deterministic() {
         None,
     );
     assert_snapshots_match("init chat", &harn_snap, &repeat_snap);
+    let main_harn = String::from_utf8(
+        harn_snap
+            .get("main.harn")
+            .expect("chat scaffold writes main.harn")
+            .clone(),
+    )
+    .expect("main.harn is utf-8");
+    assert!(
+        main_harn.contains("import { read_line } from \"std/io\""),
+        "chat scaffold should use std/io.read_line structured result"
+    );
+    assert!(
+        main_harn.contains("let raw = read_line()"),
+        "chat scaffold should call std/io.read_line"
+    );
+    assert!(
+        !main_harn.contains("harness.stdio.read_line()"),
+        "chat scaffold must not mix legacy harness read_line with structured ok/value handling"
+    );
 }
 
 #[test]

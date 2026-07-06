@@ -444,7 +444,9 @@ impl Vm {
     /// expiry that the async `tokio::select!` wrapper cannot deliver while
     /// the op future is stuck inside a synchronous handler. Returns `None`
     /// (no thread-local traffic) when nothing is armed.
-    fn sync_builtin_interrupt_guard(&self) -> Option<crate::op_interrupt::OpInterruptGuard> {
+    pub(in crate::vm) fn sync_builtin_interrupt_guard(
+        &self,
+    ) -> Option<crate::op_interrupt::OpInterruptGuard> {
         // Mirror `execution.rs::next_deadline`: innermost scope deadline,
         // tightened by the interrupt-handler deadline when that is sooner.
         let scope_deadline = self.deadlines.last().map(|(deadline, _)| *deadline);
