@@ -1,0 +1,100 @@
+// Tests for scripts/affected-crates.harn — exercise pure selection helpers.
+import "../affected-crates.harn"
+
+let WORKSPACE = {
+  crate_dirs: {
+    "harn-core": "/repo/crates/harn-core",
+    "harn-cli": "/repo/crates/harn-cli",
+    "harn-tools": "/repo/crates/harn-tools",
+  },
+  deps: {"harn-core": [], "harn-cli": ["harn-core"], "harn-tools": ["harn-core"]},
+  all_crates: ["harn-cli", "harn-core", "harn-tools"],
+}
+
+@test
+pipeline test_global_hits_include_harn_selector_script(task) {
+  assert_eq(
+    global_hits(["scripts/affected-crates.harn", "docs/a.md"]),
+    ["scripts/affected-crates.harn"],
+  )
+  assert_eq(global_hits(["scripts/affected-crates.py"]), [])
+}
+
+@test
+pipeline test_workspace_from_metadata_extracts_workspace_deps(task) {
+  let meta = {
+    workspace_members: ["id-core", "id-cli"],
+    packages: [
+      {
+        id: "id-core",
+        name: "harn-core",
+        manifest_path: "/repo/crates/harn-core/Cargo.toml",
+        dependencies: [],
+      },
+      {
+        id: "id-cli",
+        name: "harn-cli",
+        manifest_path: "/repo/crates/harn-cli/Cargo.toml",
+        dependencies: [{name: "harn-core"}, {name: "serde"}],
+      },
+      {id: "id-serde", name: "serde", manifest_path: "/cargo/serde/Cargo.toml", dependencies: []},
+    ],
+  }
+  assert_eq(
+    workspace_from_metadata(meta),
+    {
+      crate_dirs: {"harn-cli": "/repo/crates/harn-cli", "harn-core": "/repo/crates/harn-core"},
+      deps: {"harn-cli": ["harn-core"], "harn-core": []},
+      all_crates: ["harn-cli", "harn-core"],
+    },
+  )
+}
+
+@test
+pipeline test_owning_crate_prefers_longest_directory(task) {
+  let dirs = {parent: "/repo/crates", child: "/repo/crates/harn-cli"}
+  assert_eq(owning_crate("crates/harn-cli/src/main.rs", dirs, "/repo"), "child")
+  assert_eq(owning_crate("docs/index.md", dirs, "/repo"), nil)
+}
+
+@test
+pipeline test_reverse_dep_closure_selects_dependents(task) {
+  assert_eq(
+    reverse_dep_closure(["harn-core"], WORKSPACE.deps),
+    ["harn-cli", "harn-core", "harn-tools"],
+  )
+  assert_eq(reverse_dep_closure(["harn-cli"], WORKSPACE.deps), ["harn-cli"])
+}
+
+@test
+pipeline test_selected_packages_global_change_forces_full_workspace(task) {
+  let selected = selected_packages(["Cargo.lock"], WORKSPACE, "/repo")
+  assert_eq(selected.mode, "full")
+  assert_eq(selected.selected, WORKSPACE.all_crates)
+  assert_eq(selected.global_hits, ["Cargo.lock"])
+}
+
+@test
+pipeline test_selected_packages_unowned_change_selects_nothing(task) {
+  let selected = selected_packages(["docs/index.md"], WORKSPACE, "/repo")
+  assert_eq(selected.mode, "empty")
+  assert_eq(selected.selected, [])
+  assert_eq(selected.unowned, ["docs/index.md"])
+}
+
+@test
+pipeline test_selected_packages_crate_change_expands_reverse_deps(task) {
+  let selected = selected_packages(["crates/harn-core/src/lib.rs"], WORKSPACE, "/repo")
+  assert_eq(selected.mode, "partial")
+  assert_eq(selected.directly_changed, ["harn-core"])
+  assert_eq(selected.selected, ["harn-cli", "harn-core", "harn-tools"])
+}
+
+@test
+pipeline test_emit_selection_modes(task) {
+  assert_eq(emit_selection(["harn-cli"], WORKSPACE.all_crates, "filter"), "package(harn-cli)")
+  assert_eq(emit_selection(["harn-cli"], WORKSPACE.all_crates, "args"), "-p harn-cli")
+  assert_eq(emit_selection(["harn-cli"], WORKSPACE.all_crates, "packages"), "harn-cli")
+  assert_eq(emit_selection(WORKSPACE.all_crates, WORKSPACE.all_crates, "filter"), "")
+  assert_eq(emit_selection(WORKSPACE.all_crates, WORKSPACE.all_crates, "args"), "--workspace")
+}

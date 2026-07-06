@@ -16,12 +16,6 @@ let SKIP_SEGMENTS = [
 let PYTHON_ALLOWLIST = [
   {
     kind: "exact",
-    pattern: "scripts/affected-crates.py",
-    category: "ci-bootstrap",
-    reason: "Computes Rust crate selection before Harn is built.",
-  },
-  {
-    kind: "exact",
     pattern: "tests/bridge_mock_host.py",
     category: "test-harness-adapter",
     reason: "Out-of-process bridge test host intentionally runs as a foreign subprocess.",

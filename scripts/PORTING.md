@@ -35,6 +35,7 @@ It is a living tracker, not a spec. When you port a script, move its row to
 | `check_rust_prompt_prose.harn` | `scripts/check_no_rust_prompt_prose.sh` + pre-commit hook | Rust prompt-prose ratchet with stable allowlist/digest contract. |
 | `check_generated_registry.harn` | `make check-generated-registry` + pre-push hook | Registry/Makefile/workflow generated-artifact guard. |
 | `check_python_boundary.harn` | `make check-python-boundary` + audit gate | Ratchets Python usage to explicit bootstrap/platform/generated/fixture reasons. |
+| `affected-crates.harn` | `make test-affected` + `ci.yml` Rust lanes | PR fast-feedback crate selector; Git/Cargo subprocesses stay at the boundary while reverse-dependency logic lives in Harn. |
 | `bench_cli_cold_start.harn` | `scripts/bench_cli_cold_start.sh` + `cli-cold-start-budget.yml` | Cold-start benchmark controller; isolates measured Harn subprocesses with `env -i` so controller runtime state cannot leak into the timed child. |
 | `verify_tree_sitter_parse.harn` | `release_gate.sh` grammar audit | Regenerates/builds the tree-sitter grammar when stale, sweeps positive `.harn` sources, and preserves strict/non-strict failure policy. |
 | `check_burin_protocol_bindings.harn` | `make check-burin-protocol-artifacts` | Cross-repo Swift/TypeScript protocol artifact drift check against a Burin checkout. |
@@ -45,14 +46,10 @@ pure helpers, run by `make test-harn-scripts`.
 
 ## Kept in Python — toolchain reason
 
-- **`affected-crates.py`** — the one repo-owned Python bootstrap exception. It
-  is a CI-*bootstrap* tool: `ci.yml`'s Windows lane and `make test-affected` run
-  it *before* (and specifically to avoid) compiling crates, to compute the
-  nextest filter. Running it via `cargo run --bin harn` would force a
-  multi-minute `harn` build on every PR — including a cold Windows build —
-  purely to decide what to test, defeating its entire purpose. Do not keep an
-  unwired Harn twin; revisit only if all affected lanes can run a prebuilt Harn
-  binary without changing the fast-feedback economics.
+There are no repo-owned Python orchestration scripts left in this category. New
+Python requires a concrete foreign-toolchain, generated-binding, external-spec,
+or subprocess-fixture reason and must be allowlisted in
+`check_python_boundary.harn`.
 
 ## Out of scope — stays in its current language
 

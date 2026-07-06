@@ -36,7 +36,7 @@ pipeline test_current_repo_python_boundary_is_explicit(task) {
   let report = check_python_boundary()
   assert_eq(report.violation_count, 0)
   let paths = report.allowed.map({ row -> row.path }).to_list()
-  assert_eq(paths.contains("scripts/affected-crates.py"), true)
+  assert_eq(paths.contains("scripts/affected-crates.py"), false)
   assert_eq(paths.contains("scripts/check_protocol_bindings.py"), false)
   assert_eq(paths.contains("scripts/check_burin_protocol_bindings.py"), false)
   assert_eq(paths.contains("spec/protocol-artifacts/python/harn_protocol.py"), true)
@@ -44,7 +44,7 @@ pipeline test_current_repo_python_boundary_is_explicit(task) {
 
 @test
 pipeline test_allowlist_exact_and_prefix_rules(task) {
-  assert_eq(python_boundary_rule_for("scripts/affected-crates.py").allowed, true)
+  assert_eq(python_boundary_rule_for("scripts/affected-crates.py").allowed, false)
   assert_eq(python_boundary_rule_for("conformance/helpers/github_mock_server.py").allowed, true)
   assert_eq(python_boundary_rule_for("scripts/_bench_cli_cold_start.py").allowed, false)
   assert_eq(python_boundary_rule_for("scripts/verify_tree_sitter_parse.py").allowed, false)
@@ -66,8 +66,11 @@ pipeline test_temp_tree_reports_only_unclassified_python(task) {
       assert_eq(files.contains(".harn/tmp/ignored.py"), false)
       assert_eq(files.contains("target/generated.py"), false)
       let report = check_python_boundary(root)
-      assert_eq(report.violation_count, 1)
-      assert_eq(report.violations[0].path, "scripts/new_orchestration.py")
+      assert_eq(report.violation_count, 2)
+      assert_eq(
+        report.violations.map({ row -> row.path }).to_list().sort(),
+        ["scripts/affected-crates.py", "scripts/new_orchestration.py"],
+      )
     },
   )
 }

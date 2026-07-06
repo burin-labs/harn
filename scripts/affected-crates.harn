@@ -1,0 +1,321 @@
+import { parse_args } from "std/cli"
+
+// Compute the affected-crate set for PR fast-feedback test selection.
+//
+// This is a PR-only optimization. The merge queue runs the full suite
+// unconditionally; never wire this selector into that path.
+let GLOBAL_PATHS = [
+  "Cargo.toml",
+  "Cargo.lock",
+  ".cargo/",
+  "rust-toolchain.toml",
+  "Makefile",
+  "scripts/affected-crates.harn",
+  ".config/nextest.toml",
+  ".github/workflows/ci.yml",
+]
+
+pub fn unique_sorted(items: list) -> list {
+  var out = []
+  for item in items {
+    if !out.contains(item) {
+      out = out + [item]
+    }
+  }
+  return out.sort()
+}
+
+pub fn global_hits(files: list<string>) -> list<string> {
+  var hits: list<string> = []
+  for file in files {
+    for prefix in GLOBAL_PATHS {
+      if file.starts_with(prefix) {
+        hits = hits + [file]
+        break
+      }
+    }
+  }
+  return unique_sorted(hits)
+}
+
+fn command_stdout(cmd: string, args: list<string>) -> string {
+  let result = harness.process.spawn_captured({cmd: cmd, args: args})
+  if result.exit_code != 0 {
+    throw cmd + " " + args.join(" ") + " failed:\n" + result.stderr
+  }
+  return result.stdout
+}
+
+fn repo_root() -> string {
+  return command_stdout("git", ["rev-parse", "--show-toplevel"]).trim()
+}
+
+fn changed_files(base: string) -> list<string> {
+  let out = command_stdout("git", ["diff", "--name-only", base + "...HEAD"])
+  var files: list<string> = []
+  for line in out.lines() {
+    let trimmed = line.trim()
+    if trimmed != "" {
+      files = files + [trimmed]
+    }
+  }
+  return files
+}
+
+pub fn workspace_from_metadata(meta: dict) -> dict {
+  let members = meta?.workspace_members ?? []
+  var member_ids: list<string> = []
+  for member in members {
+    member_ids = member_ids + [to_string(member)]
+  }
+  var names_by_id = {}
+  for package in meta?.packages ?? [] {
+    names_by_id = names_by_id + {[to_string(package.id)]: to_string(package.name)}
+  }
+  var workspace_names: list<string> = []
+  for member in member_ids {
+    let name = names_by_id[member]
+    if name != nil && !workspace_names.contains(name) {
+      workspace_names = workspace_names + [name]
+    }
+  }
+  var crate_dirs = {}
+  var deps = {}
+  for package in meta?.packages ?? [] {
+    let name = to_string(package.name)
+    if !workspace_names.contains(name) {
+      continue
+    }
+    crate_dirs = crate_dirs + {[name]: dirname(to_string(package.manifest_path)) ?? "."}
+    var direct: list<string> = []
+    for dep in package?.dependencies ?? [] {
+      let dep_name = to_string(dep.name)
+      if workspace_names.contains(dep_name) && !direct.contains(dep_name) {
+        direct = direct + [dep_name]
+      }
+    }
+    deps = deps + {[name]: direct.sort()}
+  }
+  return {crate_dirs: crate_dirs, deps: deps, all_crates: workspace_names.sort()}
+}
+
+fn load_workspace() -> dict {
+  let raw = command_stdout("cargo", ["metadata", "--no-deps", "--format-version", "1"])
+  return workspace_from_metadata(json_parse(raw))
+}
+
+fn normalize_rel(path: string) -> string {
+  return replace(path_normalize(path), "\\", "/")
+}
+
+fn depth(path: string) -> int {
+  var count = 0
+  for part in normalize_rel(path).split("/") {
+    if part != "" {
+      count = count + 1
+    }
+  }
+  return count
+}
+
+pub fn owning_crate(rel_path: string, crate_dirs: dict, root: string) -> string? {
+  let abs_path = normalize_rel(path_join(root, rel_path))
+  var best: string? = nil
+  var best_depth = -1
+  for entry in crate_dirs {
+    let dir = normalize_rel(entry.value)
+    let prefix = dir + "/"
+    if abs_path == dir || abs_path.starts_with(prefix) {
+      let candidate_depth = depth(dir)
+      if candidate_depth > best_depth {
+        best = to_string(entry.key)
+        best_depth = candidate_depth
+      }
+    }
+  }
+  return best
+}
+
+pub fn reverse_dep_closure(seeds: list<string>, deps: dict) -> list<string> {
+  var closure = unique_sorted(seeds)
+  var frontier = unique_sorted(seeds)
+  while frontier.count > 0 {
+    let current = frontier[frontier.count - 1]
+    frontier = frontier[0:frontier.count - 1]
+    for entry in deps {
+      let dependent = to_string(entry.key)
+      let direct = entry.value ?? []
+      if direct.contains(current) && !closure.contains(dependent) {
+        closure = closure + [dependent]
+        frontier = frontier + [dependent]
+      }
+    }
+  }
+  return closure.sort()
+}
+
+pub fn selected_packages(files: list<string>, workspace: dict, root: string) -> dict {
+  let all_crates = workspace.all_crates ?? []
+  let hits = global_hits(files)
+  if hits.count > 0 {
+    return {mode: "full", selected: all_crates, global_hits: hits, directly_changed: [], unowned: []}
+  }
+  var directly_changed: list<string> = []
+  var unowned: list<string> = []
+  for file in files {
+    let crate = owning_crate(file, workspace.crate_dirs ?? {}, root)
+    if crate == nil {
+      unowned = unowned + [file]
+    } else if !directly_changed.contains(crate) {
+      directly_changed = directly_changed + [crate]
+    }
+  }
+  if directly_changed.count == 0 {
+    return {
+      mode: "empty",
+      selected: [],
+      global_hits: [],
+      directly_changed: [],
+      unowned: unique_sorted(unowned),
+    }
+  }
+  return {
+    mode: "partial",
+    selected: reverse_dep_closure(directly_changed, workspace.deps ?? {}),
+    global_hits: [],
+    directly_changed: directly_changed.sort(),
+    unowned: unique_sorted(unowned),
+  }
+}
+
+pub fn emit_selection(selected: list<string>, all_crates: list<string>, output: string) -> string {
+  let sorted = selected.sort()
+  let full = sorted == all_crates.sort()
+  if output == "packages" {
+    return sorted.join("\n")
+  }
+  if full {
+    if output == "args" {
+      return "--workspace"
+    }
+    return ""
+  }
+  if output == "filter" {
+    var parts = []
+    for name in sorted {
+      parts = parts + ["package(" + name + ")"]
+    }
+    return parts.join(" or ")
+  }
+  var args = []
+  for name in sorted {
+    args = args + ["-p " + name]
+  }
+  return args.join(" ")
+}
+
+fn preview(items: list, limit: int) -> string {
+  let sorted = items.sort()
+  let shown = if sorted.count > limit {
+    sorted[0:limit]
+  } else {
+    sorted
+  }
+  return shown.join(", ") + if sorted.count > limit {
+    " ..."
+  } else {
+    ""
+  }
+}
+
+fn arg_spec() -> list {
+  return [
+    {kind: "option", name: "base", flags: ["--base"], parse: "string", default: "origin/main"},
+    {
+      kind: "option",
+      name: "output",
+      flags: ["--output"],
+      parse: "string",
+      default: "filter",
+      choices: ["filter", "packages", "args"],
+    },
+  ]
+}
+
+fn main(harness: Harness) {
+  let parsed = parse_args(argv, arg_spec())
+  if parsed?._help ?? false {
+    harness.stdio
+      .println(
+      "usage: harn run scripts/affected-crates.harn -- [--base REF] [--output filter|packages|args]",
+    )
+    return nil
+  }
+  if len(parsed?._errors ?? []) > 0 || len(parsed?._extras ?? []) > 0 {
+    let errors = (parsed?._errors ?? []) + (parsed?._extras ?? [])
+    harness.stdio.eprintln(join(errors, "\n"))
+    exit(2)
+  }
+  let base = to_string(parsed?.base ?? "origin/main")
+  let output = to_string(parsed?.output ?? "filter")
+  let root = repo_root()
+  let workspace = load_workspace()
+  let files = changed_files(base)
+  if files.count == 0 {
+    harness.stdio
+      .eprintln("affected-crates: no files changed vs " + base + "; selecting nothing.")
+    return nil
+  }
+  let selection = selected_packages(files, workspace, root)
+  if selection.mode == "full" {
+    harness.stdio
+      .eprintln(
+      "affected-crates: global/workspace-level change detected ("
+        + preview(selection.global_hits, 5)
+        + "); selecting the FULL workspace (no pruning).",
+    )
+  } else if selection.mode == "empty" {
+    harness.stdio
+      .eprintln(
+      "affected-crates: changed files touch no Rust crate (e.g. "
+        + preview(selection.unowned, 3)
+        + "); selecting nothing.",
+    )
+  } else {
+    let all_crates = workspace.all_crates ?? []
+    let selected = selection.selected ?? []
+    var pruned = []
+    for crate in all_crates {
+      if !selected.contains(crate) {
+        pruned = pruned + [crate]
+      }
+    }
+    harness.stdio
+      .eprintln(
+      "affected-crates: directly changed: " + (selection.directly_changed ?? []).join(", "),
+    )
+    harness.stdio
+      .eprintln("affected-crates: selected (changed + rdeps closure): " + selected.join(", "))
+    harness.stdio
+      .eprintln(
+      "affected-crates: pruned (not selected): "
+        + if pruned.count == 0 {
+        "(none)"
+      } else {
+        pruned.sort().join(", ")
+      },
+    )
+    if (selection.unowned ?? []).count > 0 {
+      harness.stdio
+        .eprintln(
+        "affected-crates: note: non-crate files also changed (not test-relevant at the crate level): "
+          + preview(selection.unowned, 8),
+      )
+    }
+  }
+  let rendered = emit_selection(selection.selected ?? [], workspace.all_crates ?? [], output)
+  if rendered != "" {
+    harness.stdio.println(rendered)
+  }
+  return nil
+}
