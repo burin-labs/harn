@@ -1534,29 +1534,30 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
     // Install the script's `Harness` capability handle so the auto-call
     // emitted by `Compiler::compile()` for `fn main(harness: Harness)`
     // entrypoints can read it.
-    let runtime_harness = match crate::default_harness_for_base_dir(store_base) {
-        Ok(harness) => harness,
-        Err(error) => {
-            stderr.push_str(&format!(
-                "error: failed to configure harness secret provider: {error}\n"
-            ));
-            return finalize_run_error(
-                stdout,
-                stderr,
-                json_session,
-                summary.as_ref(),
-                phase.as_ref(),
-                rusage.as_ref(),
-                run_started,
-                None,
-                timing.as_deref(),
-                0,
-                cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start)),
-                "harness_secret_provider",
-                error,
-            );
-        }
-    };
+    let runtime_harness =
+        match crate::default_harness_for_manifest_or_base_dir(Path::new(path), store_base) {
+            Ok(harness) => harness,
+            Err(error) => {
+                stderr.push_str(&format!(
+                    "error: failed to configure harness secret provider: {error}\n"
+                ));
+                return finalize_run_error(
+                    stdout,
+                    stderr,
+                    json_session,
+                    summary.as_ref(),
+                    phase.as_ref(),
+                    rusage.as_ref(),
+                    run_started,
+                    None,
+                    timing.as_deref(),
+                    0,
+                    cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start)),
+                    "harness_secret_provider",
+                    error,
+                );
+            }
+        };
     vm.set_harness(runtime_harness);
 
     let extensions = package::load_runtime_extensions(Path::new(path));

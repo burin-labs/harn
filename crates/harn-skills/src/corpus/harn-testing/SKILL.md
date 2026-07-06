@@ -19,6 +19,11 @@ Pair it with [[harn-language]] for syntax contracts and [[harn-tracing]] for rep
 - Use the narrowest package target that protects the changed contract.
 - Expand only when behavior crosses crates or user-facing CLI paths.
 - Prefer deterministic mocks over live services.
+- Use `harness.fs.mkdtemp_in_workspace(prefix?)` for sandbox-local fixtures and
+  scratch files; tests should not require host temp paths, credentials, or
+  Keychain prompts unless that is the behavior under test.
+- Use `HARN_SECRET_PROVIDERS=env` with test-only `HARN_SECRET_*` variables
+  for secret-dependent CLI smokes; never let routine tests hit the OS keychain.
 - Keep fixture names descriptive and stable.
 - Put failure cases next to nearby passing cases.
 
