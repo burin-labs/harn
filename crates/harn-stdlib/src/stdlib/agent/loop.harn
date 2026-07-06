@@ -116,10 +116,13 @@ fn __default_invoke_llm(message, turn_system, llm_opts) {
   // mode fights tool-calling, since the model must choose between emitting a
   // tool call and emitting the schema-shaped final value. So the loop strips
   // it from ordinary turns and re-applies it only at finalize (see
-  // `__agent_loop_apply_output_schema`). The single exception is the terminal
-  // repair call, tagged `_output_schema_repair`, which DOES want llm_call's
-  // built-in structured enforcement + schema-retry repair.
-  let call_opts = if llm_opts?._output_schema_repair ?? false {
+  // `__agent_loop_apply_output_schema`). Two exceptions keep `output_schema` on
+  // the turn: (1) the terminal repair call, tagged `_output_schema_repair`,
+  // which DOES want llm_call's built-in structured enforcement + schema-retry;
+  // and (2) when the caller set `output_validation` (e.g. the `verifier`
+  // profile), which explicitly opts into per-turn schema enforcement at the
+  // llm_call layer — stripping `output_schema` would silently disable it.
+  let call_opts = if (llm_opts?._output_schema_repair ?? false) || (llm_opts?.output_validation != nil) {
     llm_opts
   } else {
     omit(llm_opts, ["output_schema"])
