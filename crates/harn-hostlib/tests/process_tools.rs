@@ -1190,3 +1190,82 @@ fn run_build_command_long_running_returns_handle() {
         let _ = rx.recv();
     }
 }
+
+// -------- universal catastrophic-command floor --------
+//
+// The floor is enforced UNCONDITIONALLY at `spawn_process` (no command_policy
+// pushed), so every hostlib process tool inherits it. UNIVERSAL destruction is
+// blocked before spawn; the recoverable git WORKFLOW family and benign
+// commands proceed. See `harn_vm::orchestration::universal_catastrophic_reason`.
+
+fn run_command_argv(argv: &[&str]) -> (Arc<MockSpawner>, Result<VmValue, HostlibError>) {
+    let (spawner, _guard) = install_mock();
+    // Enqueue a benign completion so that IF the floor were bypassed the call
+    // would succeed via the mock — making an assertion failure unambiguous.
+    spawner.enqueue(MockProcessConfig::with_stdout(0, "ok\n"));
+    let mut req = dict();
+    req.insert("argv".into(), vlist_str(argv));
+    let result = call("hostlib_tools_run_command", req);
+    // Guard drops at end of scope via the tuple; keep spawner for inspection.
+    (spawner, result)
+}
+
+#[test]
+fn run_command_blocks_universal_catastrophes_before_spawn() {
+    for argv in [
+        vec!["rm", "-rf", "/"],
+        vec!["sh", "-c", ":(){ :|:& };:"],
+        vec!["mkfs.ext4", "/dev/sda"],
+        vec!["dd", "of=/dev/sda", "if=/dev/zero"],
+    ] {
+        let (spawner, result) = run_command_argv(&argv);
+        match result {
+            Err(HostlibError::CatastrophicFloor { message, .. }) => {
+                assert!(!message.is_empty(), "floor reason should be non-empty");
+            }
+            other => panic!("expected CatastrophicFloor for {argv:?}, got {other:?}"),
+        }
+        assert!(
+            spawner.captured().is_empty(),
+            "catastrophic command {argv:?} must NEVER be spawned"
+        );
+    }
+}
+
+#[test]
+fn run_command_allows_recoverable_git_workflow_with_no_policy() {
+    // Regression guard: the WORKFLOW family is NOT blocked by the universal
+    // backstop, preserving the stdlib `git.push --force-with-lease` flow.
+    for argv in [
+        vec!["git", "reset", "--hard"],
+        vec!["git", "clean", "-fdx"],
+        vec![
+            "git",
+            "push",
+            "--force-with-lease=main:abc123",
+            "origin",
+            "HEAD",
+        ],
+    ] {
+        let (spawner, result) = run_command_argv(&argv);
+        let resp = require_dict(result.unwrap_or_else(|e| panic!("{argv:?} blocked: {e:?}")));
+        assert_eq!(require_int(&resp, "exit_code"), 0, "{argv:?}");
+        assert_eq!(
+            spawner.captured().len(),
+            1,
+            "workflow command {argv:?} must be spawned"
+        );
+    }
+}
+
+#[test]
+fn run_command_allows_benign_command() {
+    let (spawner, result) = run_command_argv(&["ls", "-la"]);
+    let resp = require_dict(result.unwrap());
+    assert_eq!(require_int(&resp, "exit_code"), 0);
+    assert_eq!(
+        spawner.captured().len(),
+        1,
+        "benign command must be spawned"
+    );
+}

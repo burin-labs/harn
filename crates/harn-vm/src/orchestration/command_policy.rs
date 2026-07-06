@@ -1314,6 +1314,49 @@ fn floor_command_text(ctx: &JsonValue) -> String {
         .to_string()
 }
 
+/// Universal catastrophic-command floor for embedders and the hostlib
+/// command-execution chokepoint. Returns a blocking reason iff the given argv
+/// classifies as a UNIVERSAL catastrophe — the machine/disk/data-destruction
+/// subset that is never legitimate under ANY circumstance (fork bomb, `mkfs`,
+/// `dd of=<device>`, `rm -rf` escaping `workspace_roots`, `chmod -R 000`,
+/// `truncate -s 0` of a source file, redirect-over-source, project-root delete).
+///
+/// This is the load-bearing UNIVERSAL backstop. It is meant to be enforced
+/// UNCONDITIONALLY (no `command_policy` on the stack required) at the point a
+/// process is about to be spawned, so a bare `run_command` / `process.exec` —
+/// on standalone Harn or under any embedder — can never spawn one of these.
+/// Embedders therefore do not (and must not) re-plumb the floor themselves.
+///
+/// It deliberately EXCLUDES the recoverable git WORKFLOW family (`git reset
+/// --hard`, `git clean -fd`, force-push): those stay policy-gated so Harn's own
+/// stdlib `git.push --force-with-lease` flow keeps working. When a
+/// `command_policy` IS on the stack the FULL floor (both categories) still
+/// applies via [`run_command_policy_preflight_with_ctx`].
+///
+/// `program` is argv[0] and `args` the remaining argv elements. A shell-mode
+/// command reaches this as its resolved argv (e.g. `["sh", "-c", "<script>"]`),
+/// which the classifier unwraps and recurses into — the same
+/// `floor_command_text` argv-shell-quoting the policy path uses, so the
+/// `sh -c "<script>"` wrapper bypass stays closed here too. `workspace_roots`
+/// are the absolute roots an `rm -rf` target must stay inside; an empty slice
+/// conservatively treats every absolute path as an escape.
+pub fn universal_catastrophic_reason(
+    program: &str,
+    args: &[String],
+    workspace_roots: &[String],
+) -> Option<String> {
+    let mut parts = Vec::with_capacity(args.len() + 1);
+    parts.push(shell_quote_arg(program));
+    parts.extend(args.iter().map(|arg| shell_quote_arg(arg)));
+    let command = parts.join(" ");
+    match catastrophic::reason(&command, workspace_roots) {
+        Some((reason, catastrophic::Category::Universal)) => Some(reason),
+        // No classification, or the recoverable WORKFLOW category, which the
+        // universal backstop deliberately does not enforce.
+        _ => None,
+    }
+}
+
 /// Quote a single argv element so that re-joining the elements with spaces
 /// reproduces a shell command line whose tokenization matches the original argv
 /// boundaries. A token made only of shell-neutral characters (no whitespace and
@@ -3995,6 +4038,42 @@ mod tests {
         clear_command_policies();
         assert_proceed(&preflight_argv(&["ls", "-la"]).await);
         clear_command_policies();
+    }
+
+    #[test]
+    fn universal_catastrophic_reason_blocks_universal_and_skips_workflow() {
+        let root = vec![ROOT.to_string()];
+        let s = |parts: &[&str]| parts.iter().map(|p| p.to_string()).collect::<Vec<_>>();
+        // UNIVERSAL destruction → reason returned (blocked).
+        assert!(universal_catastrophic_reason("rm", &s(&["-rf", "/"]), &root).is_some());
+        assert!(universal_catastrophic_reason("mkfs.ext4", &s(&["/dev/sda"]), &root).is_some());
+        assert!(
+            universal_catastrophic_reason("dd", &s(&["of=/dev/sda", "if=/dev/zero"]), &root)
+                .is_some()
+        );
+        // Fork bomb through the canonical sh -c argv wrapper.
+        assert!(universal_catastrophic_reason("sh", &s(&["-c", ":(){ :|:& };:"]), &root).is_some());
+        assert!(universal_catastrophic_reason("chmod", &s(&["-R", "000", "."]), &root).is_some());
+        assert!(
+            universal_catastrophic_reason("truncate", &s(&["-s", "0", "src/main.rs"]), &root)
+                .is_some()
+        );
+        // WORKFLOW git family → NOT enforced by the universal backstop.
+        assert!(universal_catastrophic_reason("git", &s(&["reset", "--hard"]), &root).is_none());
+        assert!(universal_catastrophic_reason("git", &s(&["clean", "-fdx"]), &root).is_none());
+        assert!(universal_catastrophic_reason(
+            "git",
+            &s(&["push", "--force-with-lease=main:abc123", "origin", "HEAD"]),
+            &root,
+        )
+        .is_none());
+        // Workflow git through the sh -c wrapper is also not universal.
+        assert!(
+            universal_catastrophic_reason("sh", &s(&["-c", "git reset --hard"]), &root).is_none()
+        );
+        // Benign commands never fire.
+        assert!(universal_catastrophic_reason("ls", &s(&["-la"]), &root).is_none());
+        assert!(universal_catastrophic_reason("rm", &s(&["-rf", "build"]), &root).is_none());
     }
 
     #[tokio::test]

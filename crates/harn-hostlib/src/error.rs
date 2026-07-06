@@ -69,6 +69,22 @@ pub enum HostlibError {
         /// [`harn_vm::process_sandbox::SandboxViolation::message`]).
         message: String,
     },
+
+    /// A never-approvable UNIVERSAL catastrophic command (machine/disk/data
+    /// destruction) was rejected by the floor BEFORE spawning, at the shared
+    /// [`crate::process::spawn_process`] chokepoint. Enforced unconditionally
+    /// (no `command_policy` required), so it is universal across every hostlib
+    /// process tool, embedders, and standalone Harn. Mirrors the
+    /// `catastrophic_floor` disposition the `process.exec` command-policy
+    /// preflight surfaces. See
+    /// [`harn_vm::orchestration::universal_catastrophic_reason`].
+    #[error("{message}")]
+    CatastrophicFloor {
+        /// Fully-qualified builtin name.
+        builtin: &'static str,
+        /// The verbatim floor rationale (never-approvable reason).
+        message: String,
+    },
 }
 
 impl HostlibError {
@@ -80,7 +96,8 @@ impl HostlibError {
             | HostlibError::MissingParameter { builtin, .. }
             | HostlibError::InvalidParameter { builtin, .. }
             | HostlibError::Backend { builtin, .. }
-            | HostlibError::SandboxViolation { builtin, .. } => builtin,
+            | HostlibError::SandboxViolation { builtin, .. }
+            | HostlibError::CatastrophicFloor { builtin, .. } => builtin,
         }
     }
 }
@@ -96,6 +113,7 @@ impl From<HostlibError> for VmError {
             HostlibError::InvalidParameter { .. } => "invalid_parameter",
             HostlibError::Backend { .. } => "backend_error",
             HostlibError::SandboxViolation { .. } => "tool_rejected",
+            HostlibError::CatastrophicFloor { .. } => "catastrophic_floor",
         };
         // Carry the offending path on sandbox violations so `catch` blocks
         // and telemetry can branch on it without re-parsing the message.
