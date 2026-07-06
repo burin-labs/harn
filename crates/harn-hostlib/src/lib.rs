@@ -46,6 +46,7 @@ pub mod schemas;
 pub mod secret_store;
 pub mod tools;
 
+mod json;
 mod registry;
 mod text;
 mod value_args;

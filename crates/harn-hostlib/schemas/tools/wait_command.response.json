@@ -27,6 +27,11 @@
     "byte_count": { "type": "integer", "minimum": 0 },
     "output_sha256": { "type": "string" },
     "process_group_id": { "type": ["integer", "null"] },
+    "snapshot_binding": {
+      "type": "object",
+      "description": "Opaque verification snapshot binding carried from the background run_command request.",
+      "additionalProperties": true
+    },
     "command_or_op_descriptor": { "type": "string" }
   },
   "required": ["handle_id", "status", "timed_out"],
