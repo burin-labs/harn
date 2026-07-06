@@ -1207,6 +1207,7 @@
         "max_input_bytes": 268435456,
         "result_retention_days": 29,
         "security_notes": [
+          "Message Batches are not eligible for Zero Data Retention.",
           "Batch data is scoped to the workspace that owns the API key.",
           "Request and response data is retained for up to 29 days unless deleted after processing."
         ]
@@ -1303,6 +1304,7 @@
         "max_input_bytes": 268435456,
         "result_retention_days": 29,
         "security_notes": [
+          "Message Batches are not eligible for Zero Data Retention.",
           "Batch data is scoped to the workspace that owns the API key.",
           "Request and response data is retained for up to 29 days unless deleted after processing."
         ]
@@ -1399,6 +1401,7 @@
         "max_input_bytes": 268435456,
         "result_retention_days": 29,
         "security_notes": [
+          "Message Batches are not eligible for Zero Data Retention.",
           "Batch data is scoped to the workspace that owns the API key.",
           "Request and response data is retained for up to 29 days unless deleted after processing."
         ]
@@ -1495,6 +1498,7 @@
         "max_input_bytes": 268435456,
         "result_retention_days": 29,
         "security_notes": [
+          "Message Batches are not eligible for Zero Data Retention.",
           "Batch data is scoped to the workspace that owns the API key.",
           "Request and response data is retained for up to 29 days unless deleted after processing."
         ]
@@ -1596,6 +1600,7 @@
         "max_input_bytes": 268435456,
         "result_retention_days": 29,
         "security_notes": [
+          "Message Batches are not eligible for Zero Data Retention.",
           "Batch data is scoped to the workspace that owns the API key.",
           "Request and response data is retained for up to 29 days unless deleted after processing."
         ]
@@ -1708,6 +1713,7 @@
         "max_input_bytes": 268435456,
         "result_retention_days": 29,
         "security_notes": [
+          "Message Batches are not eligible for Zero Data Retention.",
           "Batch data is scoped to the workspace that owns the API key.",
           "Request and response data is retained for up to 29 days unless deleted after processing."
         ]
@@ -1808,6 +1814,7 @@
         "max_input_bytes": 268435456,
         "result_retention_days": 29,
         "security_notes": [
+          "Message Batches are not eligible for Zero Data Retention.",
           "Batch data is scoped to the workspace that owns the API key.",
           "Request and response data is retained for up to 29 days unless deleted after processing."
         ]
@@ -1912,6 +1919,7 @@
         "max_input_bytes": 268435456,
         "result_retention_days": 29,
         "security_notes": [
+          "Message Batches are not eligible for Zero Data Retention.",
           "Batch data is scoped to the workspace that owns the API key.",
           "Request and response data is retained for up to 29 days unless deleted after processing."
         ]
@@ -2016,6 +2024,7 @@
         "max_input_bytes": 268435456,
         "result_retention_days": 29,
         "security_notes": [
+          "Message Batches are not eligible for Zero Data Retention.",
           "Batch data is scoped to the workspace that owns the API key.",
           "Request and response data is retained for up to 29 days unless deleted after processing."
         ]
@@ -2116,6 +2125,7 @@
         "max_input_bytes": 268435456,
         "result_retention_days": 29,
         "security_notes": [
+          "Message Batches are not eligible for Zero Data Retention.",
           "Batch data is scoped to the workspace that owns the API key.",
           "Request and response data is retained for up to 29 days unless deleted after processing."
         ]
@@ -2223,6 +2233,7 @@
         "max_input_bytes": 268435456,
         "result_retention_days": 29,
         "security_notes": [
+          "Message Batches are not eligible for Zero Data Retention.",
           "Batch data is scoped to the workspace that owns the API key.",
           "Request and response data is retained for up to 29 days unless deleted after processing."
         ]
@@ -2346,6 +2357,7 @@
         "max_input_bytes": 268435456,
         "result_retention_days": 29,
         "security_notes": [
+          "Message Batches are not eligible for Zero Data Retention.",
           "Batch data is scoped to the workspace that owns the API key.",
           "Request and response data is retained for up to 29 days unless deleted after processing."
         ]
@@ -2471,6 +2483,7 @@
         "max_input_bytes": 268435456,
         "result_retention_days": 29,
         "security_notes": [
+          "Message Batches are not eligible for Zero Data Retention.",
           "Batch data is scoped to the workspace that owns the API key.",
           "Request and response data is retained for up to 29 days unless deleted after processing."
         ]
@@ -2575,6 +2588,7 @@
         "max_input_bytes": 268435456,
         "result_retention_days": 29,
         "security_notes": [
+          "Message Batches are not eligible for Zero Data Retention.",
           "Batch data is scoped to the workspace that owns the API key.",
           "Request and response data is retained for up to 29 days unless deleted after processing."
         ]
@@ -2680,6 +2694,7 @@
         "max_input_bytes": 268435456,
         "result_retention_days": 29,
         "security_notes": [
+          "Message Batches are not eligible for Zero Data Retention.",
           "Batch data is scoped to the workspace that owns the API key.",
           "Request and response data is retained for up to 29 days unless deleted after processing."
         ]
@@ -2786,6 +2801,7 @@
         "max_input_bytes": 268435456,
         "result_retention_days": 29,
         "security_notes": [
+          "Message Batches are not eligible for Zero Data Retention.",
           "Batch data is scoped to the workspace that owns the API key.",
           "Request and response data is retained for up to 29 days unless deleted after processing."
         ]
@@ -2903,6 +2919,7 @@
         "max_input_bytes": 268435456,
         "result_retention_days": 29,
         "security_notes": [
+          "Message Batches are not eligible for Zero Data Retention.",
           "Batch data is scoped to the workspace that owns the API key.",
           "Request and response data is retained for up to 29 days unless deleted after processing."
         ]
