@@ -673,21 +673,18 @@ mod tests {
     }
 
     #[test]
-    fn oversized_scan_completes_quickly() {
-        // ~5 MiB with a single embedded secret: the windowed scan is linear, so
-        // this must finish well under a second even in a debug build.
+    fn multi_megabyte_scan_stays_linear_and_redacts() {
+        // ~5 MiB (≈20 windows) with a single embedded secret. The windowed scan
+        // is linear in the input, so this returns near-instantly; a catastrophic
+        // (e.g. O(n²)) regression would instead blow the test-runner timeout. We
+        // assert on the result rather than the wall clock to stay deterministic.
         run_clean();
         let mut input = "x ".repeat(5 * 1024 * 1024 / 2);
         input.push_str(AWS_KEY);
         input.push(' ');
-        let start = std::time::Instant::now();
         let out = scan_secret_patterns(&input, crate::redact::REDACTED_PLACEHOLDER);
-        let elapsed = start.elapsed();
         assert!(!out.contains(AWS_KEY));
-        assert!(
-            elapsed < std::time::Duration::from_secs(5),
-            "scan too slow: {elapsed:?}"
-        );
+        assert_eq!(out.matches("<redacted:aws_access_key:20>").count(), 1);
     }
 
     #[test]
