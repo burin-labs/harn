@@ -37,7 +37,7 @@ fn __table_column_from(raw, idx, headers) {
   }
   let col = raw ?? {}
   let key = col?.key ?? col?.name ?? col?.header ?? to_string(idx)
-  let header = col?.header ?? (headers?[idx] ?? key)
+  let header = col?.header ?? (headers?.[idx] ?? key)
   return {
     key: key,
     header: header,
@@ -68,7 +68,7 @@ fn __table_columns(rows, opts) {
     }
     return cols
   }
-  let first = rows?[0]
+  let first = rows?.[0]
   if type_of(first) == "dict" {
     for key in keys(first).sort() {
       cols = cols.push({key: key, header: key, align: "left", index: len(cols)})

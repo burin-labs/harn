@@ -414,8 +414,8 @@ fn __triage_notion_title(value) {
     [
       value?.title,
       value?.name,
-      value?.properties?.title?.title?[0]?.plain_text,
-      value?.properties?.Name?.title?[0]?.plain_text,
+      value?.properties?.title?.title?.[0]?.plain_text,
+      value?.properties?.Name?.title?.[0]?.plain_text,
     ],
   )
 }

@@ -338,7 +338,7 @@ pub fn git_repo_path(repo = ".") -> string {
       return git_repo_path(repo.data.repo)
     }
     for key in ["root", "path", "cwd"] {
-      if type_of(repo?[key]) == "string" && repo[key] != "" {
+      if type_of(repo?.[key]) == "string" && repo[key] != "" {
         return repo[key]
       }
     }
@@ -1076,17 +1076,17 @@ fn __git_tool_enabled(options, key, group) -> bool {
 }
 
 fn __git_tool_name(options, key) -> string {
-  return (options ?? {})?.names?[key] ?? key
+  return (options ?? {})?.names?.[key] ?? key
 }
 
 fn __git_tool_description(options, key, fallback) -> string {
-  return (options ?? {})?.descriptions?[key] ?? fallback
+  return (options ?? {})?.descriptions?.[key] ?? fallback
 }
 
 fn __git_tool_annotations(options, key, defaults) -> dict {
   let opts = options ?? {}
-  let shared = opts?.annotations?["*"] ?? {}
-  let local = opts?.annotations?[key] ?? {}
+  let shared = opts?.annotations?.["*"] ?? {}
+  let local = opts?.annotations?.[key] ?? {}
   return defaults + shared + local
 }
 
@@ -1099,8 +1099,8 @@ fn __git_tool_config(options, key, config) {
   if opts?.namespace != nil {
     out = out + {namespace: opts.namespace}
   }
-  let shared = opts?.tool_config?["*"] ?? {}
-  let local = opts?.tool_config?[key] ?? {}
+  let shared = opts?.tool_config?.["*"] ?? {}
+  let local = opts?.tool_config?.[key] ?? {}
   return out + shared + local
 }
 

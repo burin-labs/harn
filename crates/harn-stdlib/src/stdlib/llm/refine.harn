@@ -243,7 +243,7 @@ fn __refine_prompt_dict(opts) {
   if type_of(session) == "dict" {
     let cache = session?._refine_cache
     if type_of(cache) == "dict" {
-      let hit = cache?[cache_key]
+      let hit = cache?.[cache_key]
       if type_of(hit) == "dict" {
         return hit
       }

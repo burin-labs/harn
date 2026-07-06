@@ -340,7 +340,8 @@ optional_member_access
                     ::= '?.' IDENTIFIER ['(' arg_list ')']
 subscript_access   ::= '[' expression ']'
 optional_subscript_access
-                    ::= '?[' expression ']'
+                    ::= '?.[' expression ']'
+                       | '?[' expression ']'     (* legacy spelling *)
 slice_access       ::= '[' [expression] ':' [expression] ']'
 call               ::= [type_args] '(' arg_list ')'
                        (* only when postfix base is an identifier *)

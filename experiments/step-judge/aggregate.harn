@@ -83,7 +83,7 @@ fn __format_md(groups, results_dir: string) {
   let cell_order = ["baseline-cheap", "symmetric-cheap", "asymmetric", "symmetric-strong"]
   var baseline_pass_rate = nil
   for cell in cell_order {
-    if groups?[cell] != nil {
+    if groups?.[cell] != nil {
       let stats = __cell_stats(groups[cell])
       if cell == "baseline-cheap" {
         baseline_pass_rate = stats.pass_rate_pct
@@ -109,7 +109,7 @@ fn __format_md(groups, results_dir: string) {
     lines = lines.push("| Cell | Lift (pp) |")
     lines = lines.push("|---|---:|")
     for cell in cell_order {
-      if cell != "baseline-cheap" && groups?[cell] != nil {
+      if cell != "baseline-cheap" && groups?.[cell] != nil {
         let stats = __cell_stats(groups[cell])
         let lift = stats.pass_rate_pct - baseline_pass_rate
         lines = lines.push("| " + cell + " | " + to_string(lift) + " |")

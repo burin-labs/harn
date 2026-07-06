@@ -438,7 +438,7 @@ pub fn with_required_reason(opts = nil) {
   let schema_fragment = {type: "string", description: description, required: schema_required}
   let schema_transform = { entry -> return tool_inject_param(entry, field, schema_fragment, {required: schema_required}) }
   let caller = { call, next ->
-    let raw = call.tool_args?[field]
+    let raw = call.tool_args?.[field]
     let value = if type_of(raw) == "string" {
       trim(raw)
     } else {
@@ -1279,7 +1279,7 @@ pub fn with_handoff_artifact(opts = nil) {
       let candidate = __tool_mw_handoff_dict_candidate(result?.result)
       if type_of(candidate) == "dict" {
         for key in candidate_keys {
-          if payload == nil && candidate?[key] != nil {
+          if payload == nil && candidate?.[key] != nil {
             payload = candidate[key]
           }
         }

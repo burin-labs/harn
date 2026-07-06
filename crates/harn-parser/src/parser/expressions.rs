@@ -374,6 +374,19 @@ impl Parser {
                 let optional = self.check(&TokenKind::QuestionDot);
                 let start = expr.span;
                 self.advance();
+                if optional && self.check(&TokenKind::LBracket) {
+                    self.advance();
+                    let index = self.parse_nested_expression("optional subscript index")?;
+                    self.consume(&TokenKind::RBracket, "]")?;
+                    expr = spanned(
+                        Node::OptionalSubscriptAccess {
+                            object: Box::new(expr),
+                            index: Box::new(index),
+                        },
+                        Span::merge(start, self.prev_span()),
+                    );
+                    continue;
+                }
                 let member = self.consume_identifier_or_keyword("member name")?;
                 if self.check(&TokenKind::LParen) {
                     self.advance();
@@ -534,7 +547,7 @@ impl Parser {
                     );
                 }
             } else if self.check(&TokenKind::Question) {
-                // Disambiguate `?[index]` (optional subscript), `expr?`
+                // Disambiguate `?[index]` (legacy optional subscript), `expr?`
                 // (postfix try), and `expr ? a : b` (ternary).
                 if self.question_starts_ternary_branch() {
                     break;

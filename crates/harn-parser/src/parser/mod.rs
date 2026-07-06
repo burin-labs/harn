@@ -263,7 +263,8 @@ pipeline p() {
 let repo_args = repo ? ["--repo", repo] : []
 let selected = repo ? ["--repo", repo][0] : "none"
 let nested = true ? [1, true ? [2] : []] : []
-let first = xs?[0]
+let first = xs?.[0]
+let legacy_first = xs?[0]
 "#;
 
         let program = parse_source(source).expect("should parse");
@@ -295,6 +296,15 @@ let first = xs?[0]
             if matches!(&true_expr.node, Node::ListLiteral(_))));
 
         let Node::LetBinding { value, .. } = &program[3].node else {
+            panic!("expected let binding");
+        };
+        assert!(matches!(
+            &value.node,
+            Node::OptionalSubscriptAccess { object, index }
+                if matches!(&object.node, Node::Identifier(name) if name == "xs")
+                    && matches!(&index.node, Node::IntLiteral(0))
+        ));
+        let Node::LetBinding { value, .. } = &program[4].node else {
             panic!("expected let binding");
         };
         assert!(matches!(

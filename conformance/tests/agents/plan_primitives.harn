@@ -25,7 +25,7 @@ pipeline main() {
   mock_host_response("hitl", "approval", {approved: true, reviewer: "lead", reason: "ready"})
   let approved = request_plan_approval(artifact, {reviewers: ["lead"]})
   require approved.approval.state == "approved", "plan approval should use HITL"
-  require approved.approval.reviewers?[0] == "lead", "reviewer should round-trip"
+  require approved.approval.reviewers?.[0] == "lead", "reviewer should round-trip"
   with_llm_script(
     [
       {

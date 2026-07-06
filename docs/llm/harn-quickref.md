@@ -784,6 +784,11 @@ trailing `finally { ... }` runs once for effect only.
 let parsed = try { json_parse(raw) } catch (e) { default_config() }
 ```
 
+Optional chaining works for properties, methods, and subscripts:
+`obj?.field`, `obj?.method(args)`, and `obj?.["content-type"]` all
+return `nil` when the receiver is `nil`; otherwise they perform the same
+access as `.`, method call, or `[]`.
+
 `??` binds tighter than comparisons/logical operators and looser than
 multiplication. Read `classified == maybe_flag ?? false` as
 `classified == (maybe_flag ?? false)`. `harn fmt` inserts those clarifying

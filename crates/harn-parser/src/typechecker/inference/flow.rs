@@ -109,12 +109,12 @@ fn discriminant_literal_type(value: &DiscriminantValue) -> TypeExpr {
     }
 }
 
-/// Walk an *optional*-access chain (`o?.a`, `o?[i]`, `o?.m()`, and nestings
+/// Walk an *optional*-access chain (`o?.a`, `o?.[i]`, `o?.m()`, and nestings
 /// thereof) down to the base identifier it is rooted on. Returns `None`
 /// unless `node` is itself an optional access whose object resolves — through
 /// further optional links only — to a bare identifier.
 ///
-/// Soundness: by optional-chaining semantics `obj?.x` (and `?[]`/`?.()`)
+/// Soundness: by optional-chaining semantics `obj?.x` (and `?.[]`/`?.()`)
 /// evaluates to `nil` whenever `obj` is `nil`. So if the *outermost* optional
 /// access is non-nil, its object was non-nil; applying that fact down a chain
 /// of optional links proves the base identifier is non-nil. We deliberately
@@ -697,7 +697,7 @@ impl TypeChecker {
         // independent, sound facts combine on the "chain is non-nil" branch:
         let mut refs = Refinements::default();
 
-        // (1) `o?.a != nil` (and `?[]`/`?.()` chains) proves the *base*
+        // (1) `o?.a != nil` (and `?.[]`/`?.()` chains) proves the *base*
         // identifier is non-nil — by optional-chaining semantics the chain
         // is `nil` whenever the base is. This only refines the non-nil branch
         // (`o?.a == nil` is satisfiable with `o` non-nil but `o.a` nil).

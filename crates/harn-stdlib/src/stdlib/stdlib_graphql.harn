@@ -269,7 +269,7 @@ pub fn graphql_assert_ok(envelope) {
  * @errors: []
  */
 pub fn graphql_extract(envelope, field, schema = nil) {
-  let value = envelope?.data?[field]
+  let value = envelope?.data?.[field]
   if schema != nil {
     let checked = schema_check(value, schema)
     if is_err(checked) {

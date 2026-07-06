@@ -243,7 +243,7 @@ impl Formatter<'_> {
                     obj = format!("({obj})");
                 }
                 let idx = self.format_expr(index, indent);
-                format!("{obj}?[{idx}]")
+                format!("{obj}?.[{idx}]")
             }
             Node::SliceAccess { object, start, end } => {
                 let mut obj = self.format_expr(object, indent);

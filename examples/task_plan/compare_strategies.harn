@@ -408,7 +408,7 @@ fn __has_verify_node(plan) {
 fn __deterministic_count(counts) {
   var total = 0
   for kind in __DETERMINISTIC_KINDS {
-    total = total + (counts?[kind] ?? 0)
+    total = total + (counts?.[kind] ?? 0)
   }
   return total
 }

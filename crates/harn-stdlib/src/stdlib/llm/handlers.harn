@@ -139,7 +139,7 @@ fn __llm_handler_cache_options(opts) -> dict {
     "max_age_seconds",
     "max_entries",
   ] {
-    if opts?[key] != nil {
+    if opts?.[key] != nil {
       cache_opts = cache_opts + {[key]: opts[key]}
     }
   }

@@ -283,7 +283,7 @@ pipeline t(task) {
     log(maybe?.name)
   }
   let names: list<string> = ["Ada"]
-  log(names?[0])
+  log(names?.[0])
   log("Ada"?.lowercase())
 }
 "#,

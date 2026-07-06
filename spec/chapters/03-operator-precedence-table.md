@@ -15,7 +15,7 @@ From lowest to highest binding:
 | 9 | `*` `/` `%` | Left | Multiplicative |
 | 10 | `!` `-` (unary) | Right (prefix) | Unary |
 | 11 | `**` | Right | Exponentiation |
-| 12 | `.` `?.` `[]` `?[]` `[:]` `()` `?` | Left | Postfix |
+| 12 | `.` `?.` `[]` `?.[]` `[:]` `()` `?` | Left | Postfix |
 
 Exponentiation binds more tightly than a unary prefix on its **left** operand,
 so `-2 ** 2` parses as `-(2 ** 2)` (`-4`), matching Python, Ruby, and ordinary
@@ -64,4 +64,3 @@ items |> len(_)                    // desugars to: |> { __pipe -> len(__pipe) }
 Without `_`, the pipe passes the value as the sole argument to the callable on
 the right side. Use `_` whenever the piped value should be placed inside a
 larger expression or a specific argument position.
-

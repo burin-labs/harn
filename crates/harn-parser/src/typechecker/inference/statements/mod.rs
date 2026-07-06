@@ -94,7 +94,7 @@ impl AccessForm<'_> {
             Self::Property(name) => {
                 format!("the optional access operator `?.{name}`")
             }
-            Self::Subscript => "the optional subscript operator `?[…]`".to_string(),
+            Self::Subscript => "the optional subscript operator `?.[…]`".to_string(),
             Self::Method(name) => {
                 format!("the optional call operator `?.{name}(…)`")
             }

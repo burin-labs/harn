@@ -77,18 +77,18 @@ fn __agent_host_lifecycle_tool_enabled(options, key) {
 
 fn __agent_host_name(options, key, default_name) {
   let opts = __agent_host_options(options)
-  return opts?.names?[key] ?? opts[key + "_name"] ?? default_name
+  return opts?.names?.[key] ?? opts[key + "_name"] ?? default_name
 }
 
 fn __agent_host_description(options, key, default_description) {
   let opts = __agent_host_options(options)
-  return opts?.descriptions?[key] ?? default_description
+  return opts?.descriptions?.[key] ?? default_description
 }
 
 fn __agent_host_annotations(options, key, defaults) {
   let opts = __agent_host_options(options)
-  let shared = opts?.annotations?["*"] ?? {}
-  let local = opts?.annotations?[key] ?? {}
+  let shared = opts?.annotations?.["*"] ?? {}
+  let local = opts?.annotations?.[key] ?? {}
   return defaults + shared + local
 }
 
@@ -101,8 +101,8 @@ fn __agent_host_config(options, key, config) {
   if opts?.namespace != nil {
     out = out + {namespace: opts.namespace}
   }
-  let shared = opts?.tool_config?["*"] ?? {}
-  let local = opts?.tool_config?[key] ?? {}
+  let shared = opts?.tool_config?.["*"] ?? {}
+  let local = opts?.tool_config?.[key] ?? {}
   out = out + shared + local
   return out
 }
@@ -144,7 +144,7 @@ fn __agent_host_resolve_path(path, options) {
 
 fn __agent_host_render(value, options, key) {
   let opts = __agent_host_options(options)
-  let formatter = opts?.formatters?[key] ?? opts?.result_formatter
+  let formatter = opts?.formatters?.[key] ?? opts?.result_formatter
   if formatter != nil {
     return formatter(value, key)
   }
@@ -234,7 +234,7 @@ fn __agent_host_search_request(args, options) {
     "context_after",
     "include_hidden",
   ] {
-    if args?[key] != nil {
+    if args?.[key] != nil {
       req = req + {[key]: args[key]}
     }
   }
@@ -263,7 +263,7 @@ fn __agent_host_git_request(args, options) {
     req = req + {path: __agent_host_safe_relative_path(args.path)}
   }
   for key in ["rev", "rev_range", "max_count"] {
-    if args?[key] != nil {
+    if args?.[key] != nil {
       req = req + {[key]: args[key]}
     }
   }
@@ -538,7 +538,7 @@ fn __agent_host_command_request_common(base_request, args, options) {
     req = req + {capture: capture}
   }
   for key in ["background", "background_after_ms", "progress_interval_ms", "progress_max_inline_bytes"] {
-    let value = args?[key] ?? behavior[key]
+    let value = args?.[key] ?? behavior[key]
     if value != nil {
       req = req + {[key]: value}
     }

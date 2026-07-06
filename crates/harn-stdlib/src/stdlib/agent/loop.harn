@@ -1737,7 +1737,7 @@ const __INTRA_TURN_FALLBACK_PATH_ARGS = [
 fn __intra_turn_fallback_resource_keys(args) {
   var keys = []
   for name in __INTRA_TURN_FALLBACK_PATH_ARGS {
-    if args?[name] != nil {
+    if args?.[name] != nil {
       keys = __intra_turn_push_resource_value(keys, args[name])
     }
   }
@@ -1755,7 +1755,7 @@ fn __intra_turn_resource_keys(call, tools, options = {}) {
   var keys = []
   for param in __intra_turn_annotation_path_params(annotations) {
     let name = to_string(param)
-    if name != "" && args?[name] != nil {
+    if name != "" && args?.[name] != nil {
       keys = __intra_turn_push_resource_value(keys, args[name])
     }
   }

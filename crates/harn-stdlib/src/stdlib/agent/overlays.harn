@@ -149,7 +149,7 @@ pub fn overlay_context_fragment(rows, mode, lane = nil, overrides = nil) {
   } else {
     {}
   }
-  let override_lines = override_table?[key] ?? override_table?[to_string(mode ?? "")]
+  let override_lines = override_table?.[key] ?? override_table?.[to_string(mode ?? "")]
   let lines = if type_of(override_lines) == "list" {
     override_lines
   } else {
