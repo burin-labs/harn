@@ -1,0 +1,47 @@
+import { assert_error_contains, assert_snapshot, with_temp_dir } from "std/testing"
+
+pipeline test_snapshot(task) {
+  // Default path: assert against a committed golden next to this test. The
+  // golden lives at __snapshots__/snapshot_demo.harn.snap. This proves
+  // source_dir()-anchored path resolution works inside the real test runner
+  // (an embedded stdlib closure resolves source_dir() to the caller's file).
+  let demo = "line one\nline two\nline three"
+  assert_eq(assert_snapshot("snapshot_demo", demo), demo)
+  // Full create -> match -> drift -> update lifecycle in an isolated temp dir.
+  // Writes are driven through the explicit `options.update` seam, which is
+  // honored even under CI, so this exercises the real write branch of the
+  // primitive both locally and in CI. The env trigger (HARN_UPDATE_SNAPSHOTS)
+  // and its CI-suppression are covered by the out-of-process check on the PR,
+  // since a conformance run cannot mutate its own env.
+  with_temp_dir(
+    { dir ->
+      let opts = {dir: dir}
+      let update_opts = {dir: dir, update: true}
+      let content = "alpha\nbeta\n"
+      let missing_err = assert_error_contains({ -> assert_snapshot("case", content, opts) }, "does not exist")
+      assert(contains(missing_err, "HARN_UPDATE_SNAPSHOTS=1"))
+      assert_eq(harness.fs.exists(dir + "/case.harn.snap"), false)
+      assert_eq(assert_snapshot("case", content, update_opts), content)
+      assert(harness.fs.exists(dir + "/case.harn.snap"))
+      assert_eq(harness.fs.read_text(dir + "/case.harn.snap"), content)
+      assert_eq(assert_snapshot("case", content, opts), content)
+      let drift_err = assert_error_contains({ -> assert_snapshot("case", "alpha\nCHANGED\n", opts) }, "mismatch")
+      assert(contains(drift_err, "snapshot (case)"))
+      assert(contains(drift_err, "CHANGED"))
+      assert_eq(assert_snapshot("case", "alpha\nCHANGED\n", update_opts), "alpha\nCHANGED\n")
+      assert_eq(assert_snapshot("case", "alpha\nCHANGED\n", opts), "alpha\nCHANGED\n")
+      let redact_rule = [{pattern: "[0-9a-f]{8}", replacement: "<ID>"}]
+      let redact_opts = {dir: dir, redact: redact_rule}
+      let redact_update_opts = {dir: dir, update: true, redact: redact_rule}
+      assert_eq(assert_snapshot("redacted", "id=deadbeef ok", redact_update_opts), "id=deadbeef ok")
+      assert_eq(harness.fs.read_text(dir + "/redacted.harn.snap"), "id=<ID> ok")
+      assert_eq(assert_snapshot("redacted", "id=cafebabe ok", redact_opts), "id=cafebabe ok")
+      assert_error_contains(
+        { -> assert_snapshot("redacted", "id=deadbeef NOPE", redact_opts) },
+        "mismatch",
+      )
+      dir
+    },
+  )
+  __io_println("ok")
+}
