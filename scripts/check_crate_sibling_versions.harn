@@ -1,0 +1,98 @@
+// Guard published manifests from resolving stale Harn workspace siblings.
+//
+// Cargo strips local `path` entries when publishing crates.io packages, leaving
+// the `version` requirement as the only coupling between sibling crates. That
+// requirement must be exact, or a downstream pinning one Harn crate can resolve
+// older siblings from the same semver line.
+let SIBLING_DEP_RE = r"^\s*((?:harn-[A-Za-z0-9-]+|tree-sitter-harn))\s*=\s*\{(.*)\}\s*$"
+
+let VERSION_RE = r#"version\s*=\s*"([^"]+)""#
+
+let MANIFEST_GLOBS = ["crates/*/Cargo.toml", "tree-sitter-harn/Cargo.toml"]
+
+pub fn workspace_version_from_text(text: string) -> string {
+  let doc = toml_parse(text)
+  let version = doc.get("workspace")?.get("package")?.get("version")
+  if type_of(version) != "string" || version == "" {
+    throw "missing [workspace.package] version in Cargo.toml"
+  }
+  return version
+}
+
+pub fn expected_dependency_version(workspace_version: string) -> string {
+  return "=" + workspace_version
+}
+
+pub fn sibling_dep_errors_from_line(
+  path: string,
+  line_no: int,
+  line: string,
+  expected_version: string,
+) -> list<string> {
+  let dep_match = regex_captures(SIBLING_DEP_RE, line)
+  if dep_match.count == 0 {
+    return []
+  }
+  let name = dep_match[0].groups[0]
+  let body = dep_match[0].groups[1]
+  if !body.contains("path") {
+    return []
+  }
+  let version_match = regex_captures(VERSION_RE, body)
+  if version_match.count == 0 {
+    return ["${path}:${line_no}: ${name} path dependency must set version = \"${expected_version}\""]
+  }
+  let actual = version_match[0].groups[0]
+  if actual != expected_version {
+    return [
+      "${path}:${line_no}: ${name} path dependency version is \"${actual}\", expected \"${expected_version}\"",
+    ]
+  }
+  return []
+}
+
+pub fn sibling_dep_errors_from_text(path: string, text: string, workspace_version: string) -> list<string> {
+  let expected = expected_dependency_version(workspace_version)
+  var errors: list<string> = []
+  var line_no = 1
+  for line in text.lines() {
+    errors = errors + sibling_dep_errors_from_line(path, line_no, line, expected)
+    line_no = line_no + 1
+  }
+  return errors
+}
+
+pub fn manifest_globs() -> list<string> {
+  return MANIFEST_GLOBS
+}
+
+fn checked_manifest_paths() -> list<string> {
+  var paths: list<string> = []
+  for pattern in MANIFEST_GLOBS {
+    for path in harness.fs.glob(pattern) {
+      paths = paths + [path]
+    }
+  }
+  return paths.sort()
+}
+
+pipeline main(task) {
+  let workspace_version = workspace_version_from_text(harness.fs.read_text("Cargo.toml"))
+  var errors: list<string> = []
+  for path in checked_manifest_paths() {
+    errors = errors
+      + sibling_dep_errors_from_text(path, harness.fs.read_text(path), workspace_version)
+  }
+  if errors.count > 0 {
+    __io_eprintln("Harn sibling crate dependency pin check failed:")
+    for error in errors {
+      __io_eprintln("- " + error)
+    }
+    return 1
+  }
+  __io_println(
+    "Harn sibling crate dependency pins match workspace version "
+      + expected_dependency_version(workspace_version),
+  )
+  return 0
+}

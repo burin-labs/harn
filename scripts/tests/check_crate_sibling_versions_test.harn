@@ -1,0 +1,51 @@
+// Tests for scripts/check_crate_sibling_versions.harn.
+import "../check_crate_sibling_versions.harn"
+
+@test
+pipeline test_workspace_version_from_text(task) {
+  let text = "[workspace]\n\n[workspace.package]\nversion = \"0.9.18\"\n"
+  assert_eq(workspace_version_from_text(text), "0.9.18")
+  assert_eq(expected_dependency_version("0.9.18"), "=0.9.18")
+}
+
+@test
+pipeline test_accepts_exact_path_dependency(task) {
+  let text = "harn-vm = { path = \"../harn-vm\", version = \"=0.9.18\" }\n"
+  assert_eq(sibling_dep_errors_from_text("Cargo.toml", text, "0.9.18"), [])
+}
+
+@test
+pipeline test_rejects_loose_path_dependency(task) {
+  let text = "harn-modules = { path = \"../harn-modules\", version = \"0.9\" }\n"
+  let errors = sibling_dep_errors_from_text("crates/harn-vm/Cargo.toml", text, "0.9.18")
+  assert_eq(errors.count, 1)
+  assert_eq(errors[0].contains("harn-modules path dependency version is \"0.9\""), true)
+}
+
+@test
+pipeline test_rejects_missing_version(task) {
+  let text = "harn-parser = { path = \"../harn-parser\" }\n"
+  let errors = sibling_dep_errors_from_text("crates/harn-fmt/Cargo.toml", text, "0.9.18")
+  assert_eq(errors.count, 1)
+  assert_eq(errors[0].contains("must set version = \"=0.9.18\""), true)
+}
+
+@test
+pipeline test_checks_tree_sitter_workspace_sibling(task) {
+  let text = "tree-sitter-harn = { path = \"../../tree-sitter-harn\", version = \"0.9\" }\n"
+  let errors = sibling_dep_errors_from_text("crates/harn-hostlib/Cargo.toml", text, "0.9.18")
+  assert_eq(errors.count, 1)
+  assert_eq(errors[0].contains("tree-sitter-harn"), true)
+}
+
+@test
+pipeline test_ignores_registry_and_third_party_dependencies(task) {
+  let text = "harn-vm = { version = \"0.9\" }\nsqlx-core = { version = \"0.9\" }\n"
+  assert_eq(sibling_dep_errors_from_text("Cargo.toml", text, "0.9.18"), [])
+}
+
+@test
+pipeline test_manifest_globs_cover_workspace_crates(task) {
+  assert_eq(manifest_globs().contains("crates/*/Cargo.toml"), true)
+  assert_eq(manifest_globs().contains("tree-sitter-harn/Cargo.toml"), true)
+}
