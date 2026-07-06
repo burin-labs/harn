@@ -184,7 +184,11 @@ promotion policy out of Harn. The JSON report exposes the machine-readable
 training contract under `training.contract`, and
 `training.target_modules` records the method-specific adapter target: QLoRA uses
 PEFT's `all-linear` shorthand, while full LoRA keeps explicit attention
-projection modules. The `corpus_refresh.model_aware_selection` block adds the
+projection modules. Plan, manifest, and inspect JSON also expose
+`serving.serving_requirements`, a structured serving contract for parser
+ownership, provider flags, chat-template ids, required manifest metadata, and
+promotion gates that cannot safely live only in operator notes. The
+`corpus_refresh.model_aware_selection` block adds the
 data-selection contract: score candidate examples by target-base failure bucket,
 parser/schema difficulty, and turn-repair state; sample medium-difficulty
 failures; keep holdouts frozen; and stop refresh rounds when they stop clearing
