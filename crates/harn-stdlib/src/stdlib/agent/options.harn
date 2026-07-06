@@ -145,6 +145,16 @@ pub type JudgeConfig = {
  * `LlmCallOptions & {...}`) so consumers can import this alias alone and
  * still get structural checking; the parity test pins this copy as a
  * superset of `LlmCallOptions`.
+ *
+ * NOTE ON `output_schema`: unlike on `llm_call`, this is a TERMINAL-answer
+ * contract, not a per-turn one. The loop deliberately does NOT force each
+ * mid-loop turn into structured mode (that fights tool-calling); instead it
+ * validates the FINAL answer against this JSON Schema at finalize, re-asks
+ * ONCE through the `llm_caller` seam if the answer is off-shape, and surfaces
+ * the parsed value on `run.output` with `run.output_valid` recording whether
+ * validation passed. See `docs/src/llm/agent_loop.md` and
+ * `__agent_loop_apply_output_schema` in `agent/loop.harn`. For strict
+ * one-shot structured extraction, use `llm_call_structured` directly.
  */
 pub type AgentLoopOptions = {
   provider?: string,
