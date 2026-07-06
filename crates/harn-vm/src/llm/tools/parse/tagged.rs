@@ -56,6 +56,7 @@ pub(crate) fn parse_text_tool_calls_with_tools(
     let mut user_response_parts: Vec<String> = Vec::new();
     let mut canonical_parts: Vec<String> = Vec::new();
     let mut done_marker: Option<String> = None;
+    let mut recovered_from_stray_count = 0usize;
 
     let mut cursor = 0usize;
     let bytes = src.as_bytes();
@@ -100,6 +101,7 @@ pub(crate) fn parse_text_tool_calls_with_tools(
                 tools_val,
                 &mut calls,
                 &mut canonical_parts,
+                &mut recovered_from_stray_count,
             );
             continue;
         }
@@ -117,6 +119,7 @@ pub(crate) fn parse_text_tool_calls_with_tools(
                 tools_val,
                 &mut calls,
                 &mut canonical_parts,
+                &mut recovered_from_stray_count,
             );
             continue;
         }
@@ -132,6 +135,7 @@ pub(crate) fn parse_text_tool_calls_with_tools(
                 tools_val,
                 &mut calls,
                 &mut canonical_parts,
+                &mut recovered_from_stray_count,
             );
             continue;
         }
@@ -507,6 +511,7 @@ pub(crate) fn parse_text_tool_calls_with_tools(
             .unwrap_or_else(|| assistant_prose_parts.join("\n\n")),
         user_response,
         violations,
+        recovered_from_stray_count,
         done_marker,
         canonical: canonical_parts.join("\n\n"),
     }
@@ -662,6 +667,7 @@ fn parse_mistral_marker_calls(
         prose,
         user_response: None,
         violations,
+        recovered_from_stray_count: 0,
         done_marker: None,
         canonical,
     })
@@ -833,6 +839,7 @@ fn parse_deepseek_dsml_calls(
         prose,
         user_response: None,
         violations: Vec::new(),
+        recovered_from_stray_count: 0,
         done_marker: None,
         canonical,
     })
@@ -1123,6 +1130,7 @@ fn report_stray(
     tools_val: Option<&VmValue>,
     calls: &mut Vec<serde_json::Value>,
     canonical_parts: &mut Vec<String>,
+    recovered_from_stray_count: &mut usize,
 ) {
     let trimmed = fragment.trim();
     if trimmed.is_empty() {
@@ -1152,6 +1160,7 @@ fn report_stray(
             canonical_parts.push(text_tool_call_block(&render_canonical_call(&name, &args)));
             calls.push(call.clone());
         }
+        *recovered_from_stray_count += sniff.calls.len();
         violations.push(format!(
             "Tool call(s) ({}) were emitted as bare text outside `<tool_call>` tags. \
              Executed this turn so work moves forward; please wrap each call in \

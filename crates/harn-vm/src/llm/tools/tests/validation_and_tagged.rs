@@ -669,6 +669,7 @@ fn tagged_parser_executes_bare_tool_call_with_soft_violation() {
             .unwrap_or(""),
         "edit"
     );
+    assert_eq!(result.recovered_from_stray_count, 1);
     assert!(
         !result.violations.is_empty(),
         "bare call still warrants a violation so the model wraps next turn"
@@ -677,6 +678,22 @@ fn tagged_parser_executes_bare_tool_call_with_soft_violation() {
         result.violations[0].contains("bare text") || result.violations[0].contains("<tool_call>"),
         "violation must name the missing wrapper: {}",
         result.violations[0]
+    );
+}
+
+#[test]
+fn tagged_parser_counts_multi_call_top_level_stray_recovery() {
+    let tools = sample_tool_registry();
+    let text = "<|assistant|>\n\
+                edit({ action: \"create\", path: \"a.rs\", content: \"a\" })\n\
+                edit({ action: \"create\", path: \"b.rs\", content: \"b\" })";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert_eq!(result.calls.len(), 2, "calls: {:?}", result.calls);
+    assert_eq!(result.recovered_from_stray_count, 2);
+    assert!(
+        result.violations.iter().any(|v| v.contains("bare text")),
+        "violations: {:?}",
+        result.violations
     );
 }
 

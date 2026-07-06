@@ -1359,10 +1359,51 @@ fn __parse_feedback_diagnostics(parsed, turn_opts) {
   return parse_errors + protocol_violations
 }
 
-fn __maybe_inject_parse_error_feedback(session_id, parsed, tool_calls, turn_opts) -> bool {
+fn __recovered_text_call_dispatch_cap(_turn_opts) -> int {
+  return 1
+}
+
+fn __unsafe_recovered_text_batch_feedback(parsed, tool_calls, turn_opts) {
+  if agent_tool_call_paradigm(turn_opts).kind != "text" {
+    return nil
+  }
+  let recovered_count = to_int(parsed?.recovered_from_stray_count ?? 0) ?? 0
+  let cap = __recovered_text_call_dispatch_cap(turn_opts)
+  if recovered_count <= cap || len(tool_calls) == 0 {
+    return nil
+  }
+  let protocol_violations = __parse_feedback_protocol_violations(parsed, turn_opts)
+  if len(protocol_violations) == 0 {
+    return nil
+  }
+  return {
+    error_summary: "Recovered "
+      + to_string(recovered_count)
+      + " tool calls from top-level stray text or wrapper-corrupted output; none were dispatched because the batch is ambiguous. Retry with exactly one well-formed tool call.",
+    recovered_call_count: recovered_count,
+    dispatch_cap: cap,
+  }
+}
+
+fn __drop_unsafe_recovered_text_batch(parsed, tool_calls, turn_opts) {
+  let feedback = __unsafe_recovered_text_batch_feedback(parsed, tool_calls, turn_opts)
+  if feedback == nil {
+    return {tool_calls: tool_calls, feedback: nil}
+  }
+  return {tool_calls: [], feedback: feedback}
+}
+
+fn __maybe_inject_parse_error_feedback(
+  session_id,
+  parsed,
+  tool_calls,
+  turn_opts,
+  feedback_override = nil,
+) -> bool {
   let protocol_violations = __parse_feedback_protocol_violations(parsed, turn_opts)
   let diagnostics = __parse_feedback_diagnostics(parsed, turn_opts)
-  if len(diagnostics) == 0 {
+  let override_summary = to_string(feedback_override?.error_summary ?? "")
+  if len(diagnostics) == 0 && override_summary == "" {
     return false
   }
   // Some calls parsed AND at least one was dropped: the good calls already
@@ -1370,7 +1411,11 @@ fn __maybe_inject_parse_error_feedback(session_id, parsed, tool_calls, turn_opts
   // so the model only re-emits the malformed call.
   let parsed_count = len(tool_calls)
   let has_partial_success = parsed_count > 0
-  let error_summary = to_string(diagnostics[0])
+  let error_summary = if override_summary != "" {
+    override_summary
+  } else {
+    to_string(diagnostics[0])
+  }
   let feedback = parse_guidance_prompt(
     {
       error_summary: error_summary,
@@ -1393,6 +1438,8 @@ fn __maybe_inject_parse_error_feedback(session_id, parsed, tool_calls, turn_opts
       error_summary: error_summary,
       has_partial_success: has_partial_success,
       parsed_call_count: parsed_count,
+      recovered_call_count: feedback_override?.recovered_call_count ?? 0,
+      recovered_batch_dropped: feedback_override != nil,
     },
   )
   // Only a full parse drop (zero calls dispatched) suppresses the no-progress
@@ -3920,18 +3967,26 @@ fn __agent_loop_run(message, session, initial_opts) {
           iteration_index,
         )
         fallback_index = fallback_outcome.fallback_index
-        let tool_calls = if fallback_outcome.triggered {
+        var tool_calls = if fallback_outcome.triggered {
           fallback_outcome.calls ?? []
         } else {
           __resolve_tool_calls(llm_result, parsed)
         }
+        let recovered_batch_drop = __drop_unsafe_recovered_text_batch(parsed, tool_calls, turn_opts)
+        tool_calls = recovered_batch_drop.tool_calls
         let recorded_assistant = if fallback_outcome.triggered && fallback_outcome.accepted {
           normalized + {tool_calls: tool_calls, native_tool_calls: tool_calls}
         } else {
           normalized
         }
         agent_session_record_assistant(session.session_id, recorded_assistant)
-        let had_parse_errors_base = __maybe_inject_parse_error_feedback(session.session_id, parsed, tool_calls, turn_opts)
+        let had_parse_errors_base = __maybe_inject_parse_error_feedback(
+          session.session_id,
+          parsed,
+          tool_calls,
+          turn_opts,
+          recovered_batch_drop.feedback,
+        )
         let had_blank_name_drop = if fallback_outcome.triggered {
           false
         } else {
