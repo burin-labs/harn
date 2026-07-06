@@ -443,6 +443,7 @@ accepts these fields:
 | `batch_partial_failure` | string | Partial failure semantics: `per_request`, `whole_batch`, or `unknown`. |
 | `batch_cancellation` | string | Cancellation support: `supported`, `not_supported`, or `unknown`. |
 | `batch_security_notes` | list of strings | Non-secret provider storage/security notes safe to surface in catalogs and receipts. |
+| `batch_operational_notes` | list of strings | Non-secret submit, retry, and rejoin constraints safe to surface in catalogs and receipts. |
 | `tool_approval_policy` | string | Approval policy story for provider-executed tools, for example `provider_or_harn`. |
 | `max_tools` | int | Cap on tool count. `harn lint` will warn if a registry exceeds the smallest cap any active provider advertises. |
 | `prompt_caching` | bool | Provider-side prompt caching is available. |
@@ -490,9 +491,11 @@ branches. `provider_capabilities(provider, model)` reports an effective
 model-specific capability row, and only reports lifecycle details when that
 effective flag is true: provider wire/input shape, published limits,
 custom-id/result ordering, partial-failure behavior, cancellation support,
-retention, and non-secret storage notes. Use batch lanes only for asynchronous
-work that does not need turn-by-turn tool feedback: offline grading,
-prompt/corpus refreshes, distillation jobs, and low-priority eval analysis.
+retention, non-secret storage notes, and non-secret operational notes such as
+submit retry safety or provider grouping constraints. Use batch lanes only for
+asynchronous work that does not need turn-by-turn tool feedback: offline
+grading, prompt/corpus refreshes, distillation jobs, and low-priority eval
+analysis.
 Live coding-agent loops still need synchronous provider calls because every
 tool result influences the next model turn. Meter-stick pass@1 gates must keep
 batch-derived judge/corpus evidence separate from live interactive agent-loop

@@ -84,6 +84,9 @@
 #   batch_security_notes:
 #                     non-secret provider storage/security notes safe to surface
 #                     in catalogs and receipts.
+#   batch_operational_notes:
+#                     non-secret submit/retry/rejoin constraints safe to surface
+#                     in catalogs and receipts.
 #   tool_approval_policy:
 #                     approval policy story for provider-executed tools.
 #   max_tools       : cap on tool-definition count the provider will accept.
@@ -272,8 +275,12 @@ batch_result_ordering = "custom_id_rejoin"
 batch_partial_failure = "per_request"
 batch_cancellation = "supported"
 batch_security_notes = [
+  "Message Batches are not eligible for Zero Data Retention.",
   "Batch data is scoped to the workspace that owns the API key.",
   "Request and response data is retained for up to 29 days unless deleted after processing.",
+]
+batch_operational_notes = [
+  "Most Message Batches complete within an hour, but callers must still budget for the published 24-hour window.",
 ]
 seed_supported = false
 frequency_penalty_supported = false
@@ -293,6 +300,10 @@ batch_cancellation = "supported"
 batch_security_notes = [
   "Batch rate limits use a separate provider pool from synchronous model calls.",
   "Output and error files can use a configurable expiration between 1 hour and 30 days.",
+]
+batch_operational_notes = [
+  "Input files must group requests for one model; Harn manifests group by provider, model, wire format, and tool format.",
+  "Use stable custom_id values to rejoin unordered output and error rows.",
 ]
 top_k_supported = false
 
@@ -334,6 +345,11 @@ batch_max_input_bytes = 2147483648
 batch_result_ordering = "custom_id_rejoin"
 batch_partial_failure = "per_request"
 batch_cancellation = "supported"
+batch_operational_notes = [
+  "Batch creation is not idempotent; persist Harn manifests and receipts before retrying provider create requests.",
+  "Context caching is supported for batch requests.",
+  "Use File API JSONL input for large gauntlets; inline requests have a smaller provider body-size cap.",
+]
 
 [provider_defaults.mistral]
 batch_wire_format = "mistral"
@@ -373,6 +389,10 @@ batch_turnaround_hours = 24
 batch_result_ordering = "custom_id_rejoin"
 batch_partial_failure = "unknown"
 batch_cancellation = "unknown"
+batch_operational_notes = [
+  "Batch support is model-specific; Harn only marks catalog rows that advertise provider batch capability.",
+  "Prompt caching can combine with eligible batch jobs for additional savings.",
+]
 
 [provider_defaults.moonshot]
 top_k_supported = false

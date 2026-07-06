@@ -295,6 +295,14 @@ fn models_batch_plan_reports_harn_live_adapter_support() {
             .is_some_and(|notes| !notes.is_empty()),
         "OpenAI batch plan should include public storage/security notes"
     );
+    assert!(
+        openai["batch"]["operational_notes"]
+            .as_array()
+            .is_some_and(|notes| notes
+                .iter()
+                .any(|note| note.as_str().unwrap_or("").contains("one model"))),
+        "OpenAI batch plan should include provider grouping constraints"
+    );
     assert_eq!(openai["batch"]["harn_live_adapter"]["submit"], true);
     assert_eq!(openai["batch"]["harn_live_adapter"]["status"], true);
     assert_eq!(openai["batch"]["harn_live_adapter"]["cancel"], true);
@@ -341,6 +349,14 @@ fn models_batch_plan_reports_harn_live_adapter_support() {
     assert_eq!(gemini["batch"]["result_ordering"], "custom_id_rejoin");
     assert_eq!(gemini["batch"]["partial_failure"], "per_request");
     assert_eq!(gemini["batch"]["cancellation"], "supported");
+    assert!(
+        gemini["batch"]["operational_notes"]
+            .as_array()
+            .is_some_and(|notes| notes
+                .iter()
+                .any(|note| note.as_str().unwrap_or("").contains("not idempotent"))),
+        "Gemini batch plan should surface create-retry idempotency risk"
+    );
     assert_eq!(gemini["batch"]["harn_live_adapter"]["submit"], true);
     assert_eq!(gemini["batch"]["harn_live_adapter"]["status"], true);
     assert_eq!(gemini["batch"]["harn_live_adapter"]["cancel"], true);
@@ -352,6 +368,14 @@ fn models_batch_plan_reports_harn_live_adapter_support() {
         .expect("fireworks batch model");
     assert_eq!(fireworks["batch"]["wire_format"], "fireworks");
     assert_eq!(fireworks["batch"]["discount_percent"], 50);
+    assert!(
+        fireworks["batch"]["operational_notes"]
+            .as_array()
+            .is_some_and(|notes| notes
+                .iter()
+                .any(|note| note.as_str().unwrap_or("").contains("model-specific"))),
+        "Fireworks batch plan should surface model-specific capability constraints"
+    );
     assert_eq!(fireworks["batch"]["harn_live_adapter"]["submit"], true);
     assert_eq!(fireworks["batch"]["harn_live_adapter"]["status"], true);
     assert_eq!(fireworks["batch"]["harn_live_adapter"]["cancel"], false);

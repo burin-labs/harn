@@ -314,6 +314,7 @@ fn __candidate(entry: dict, workload: string) -> dict {
       partial_failure: safe_string(batch_entry["partial_failure"], "unknown"),
       cancellation: safe_string(batch_entry["cancellation"], "unknown"),
       security_notes: safe_list(batch_entry["security_notes"]),
+      operational_notes: safe_list(batch_entry["operational_notes"]),
       harn_live_adapter: live_adapter,
     },
     workload: workload,
