@@ -112,7 +112,7 @@ import { agent_preset } from "std/agent/presets"
 import { with_governance } from "std/agent/governors"
 import { agent_completion_gate } from "std/agent/judge"
 import { lane_policy } from "std/agent/lanes"
-import { overlay_policy } from "std/agent/overlays"
+import { with_overlay } from "std/agent/overlays"
 
 // Start from the preset, then layer control onto it.
 var opts = agent_preset("repair", {provider: "ollama", model: "qwen3-coder", tools: repair_tools})
@@ -132,7 +132,7 @@ opts = {...opts, ...agent_completion_gate({
 // Hide tools this task can't need, and fill in a prompt nudge — both are
 // fill-nil, so they never override anything you set explicitly.
 opts = lane_policy(lane_rows, task, opts)
-opts = overlay_policy(overlay_rows, "repair", opts)
+opts = with_overlay(opts, overlay_rows, "repair")
 
 let run = agent_loop(task, opts?.system, opts)
 ```

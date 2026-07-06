@@ -393,6 +393,41 @@ fn __agent_push_system_fragment(fragments, id, body) {
   return fragments.push({id: "primary:" + id, source: "primary", body: trimmed})
 }
 
+/**
+ * __with_prompt_fragment(agent_options, fragment) folds a single prompt
+ * fragment onto `agent_options` via the per-turn
+ * `context_profile.prompt_fragments` channel (#2631) — the write-side twin of
+ * `agent_build_turn_system_fragments`, preserving any profile and fragments the
+ * caller already set. A nil `fragment` is a no-op that still normalizes a
+ * non-dict `agent_options` to `{}`. Shared by the fold family (`with_goal`,
+ * `with_overlay`) so the append shape lives in exactly one place.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn __with_prompt_fragment(agent_options, fragment) {
+  let opts = if type_of(agent_options) == "dict" {
+    agent_options
+  } else {
+    {}
+  }
+  if fragment == nil {
+    return opts
+  }
+  let profile = if type_of(opts?.context_profile) == "dict" {
+    opts.context_profile
+  } else {
+    {}
+  }
+  let existing = if type_of(profile?.prompt_fragments) == "list" {
+    profile.prompt_fragments
+  } else {
+    []
+  }
+  return opts + {context_profile: profile + {prompt_fragments: existing + [fragment]}}
+}
+
 fn __agent_context_profile_fragments(opts) {
   var fragments = []
   let profile = opts?.context_profile ?? opts?.project_context_profile ?? {}

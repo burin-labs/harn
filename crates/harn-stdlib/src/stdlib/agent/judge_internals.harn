@@ -2,8 +2,11 @@
 // (verify_completion + done_judge) and `std/agent/step_judge`. NOT
 // intended as a public surface: every export is prefixed `__judge_` and
 // the file is excluded from the docs sweep. Keep shared judge plumbing here:
-// LLM-option overrides, structured-output schema field names, and the
-// "raw_verdict -> {vetoed, feedback}" classifier.
+// LLM-option overrides, structured-output schema field names, the shared
+// checkpoint-invocation preamble, and the "raw_verdict -> {vetoed, feedback}"
+// classifier.
+import { agent_typed_output_checkpoint } from "std/agent/primitives"
+
 /**
  * Keys on `judge_cfg` that override `opts.llm_options` when present.
  * Listed once here so adding (or renaming) an LLM tuning knob is a
@@ -28,6 +31,37 @@ pub fn __judge_apply_llm_overrides(llm_opts, judge_cfg) {
     }
   }
   return out
+}
+
+/**
+ * Shared checkpoint-invocation preamble for the completion (`std/agent/judge`)
+ * and step (`std/agent/step_judge`) judges: build the per-judge `llm_opts`
+ * (base `opts.llm_options` + model/provider/schema/session/system, then the
+ * `__judge_apply_llm_overrides` tuning knobs) and time the named
+ * `agent_typed_output_checkpoint` call. Returns `{checkpoint, duration_ms}`;
+ * the callers keep their own divergent fail-open defaults and verdict shaping.
+ *
+ * @effects: [llm.call]
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn __judge_run_checkpoint(harness: Harness, judge_cfg, opts, payload, checkpoint_name, system, user, schema) {
+  let base = opts?.llm_options ?? {}
+  let llm_opts = __judge_apply_llm_overrides(
+    base
+      + {
+      model: judge_cfg?.model ?? opts?.model,
+      provider: judge_cfg?.provider ?? opts?.provider,
+      output_schema: schema,
+      session_id: payload.session_id,
+      system: system,
+    },
+    judge_cfg,
+  )
+  let started = harness.clock.monotonic_ms()
+  let checkpoint = agent_typed_output_checkpoint(checkpoint_name, user, schema, llm_opts)
+  let duration_ms = harness.clock.monotonic_ms() - started
+  return {checkpoint: checkpoint, duration_ms: duration_ms}
 }
 
 /**

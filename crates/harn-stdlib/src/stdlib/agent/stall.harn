@@ -208,6 +208,23 @@ type AgentStallWarning = {
   remediation_delivered?: bool,
 }
 
+/**
+ * Verify-state progress axis (#burin-cutover seam 1). When the host supplies a
+ * `progress_signal` callback, these track the monotone "best verification
+ * state" it reports so the no-net-progress decision can key on "verification
+ * advanced" instead of edit/tool signature deltas ("writes are not progress").
+ * Inert (all default) when no progress_signal is configured.
+ *   - verify_state_seen: has any scalar been observed yet.
+ *   - verify_state_high: high-water mark of the reported scalar.
+ *   - verify_turns_since_advance: consecutive turns whose scalar did NOT exceed
+ *     the high-water mark (i.e. the verifier has not moved).
+ *   - verify_wrote_since_advance: a workspace write landed since the verifier
+ *     last advanced — the "edit lands every turn but the verifier never moves"
+ *     signal that drives the short write-axis cut.
+ *   - verify_signature_counts: per-signature TOTAL (non-consecutive) failure
+ *     recurrence across the run — the interleaved-churn axis that the consecutive
+ *     `same_diagnostic_streak` misses; drives the hard-recurrence cut.
+ */
 type AgentStallState = {
   last_signature: string,
   streak: int,
@@ -245,21 +262,10 @@ type AgentStallState = {
 }
 
 /**
- * Verify-state progress axis (#burin-cutover seam 1). When the host supplies a
- * `progress_signal` callback, these track the monotone "best verification
- * state" it reports so the no-net-progress decision can key on "verification
- * advanced" instead of edit/tool signature deltas ("writes are not progress").
- * Inert (all default) when no progress_signal is configured.
- *   - verify_state_seen: has any scalar been observed yet.
- *   - verify_state_high: high-water mark of the reported scalar.
- *   - verify_turns_since_advance: consecutive turns whose scalar did NOT exceed
- *     the high-water mark (i.e. the verifier has not moved).
- *   - verify_wrote_since_advance: a workspace write landed since the verifier
- *     last advanced — the "edit lands every turn but the verifier never moves"
- *     signal that drives the short write-axis cut.
- *   - verify_signature_counts: per-signature TOTAL (non-consecutive) failure
- *     recurrence across the run — the interleaved-churn axis that the consecutive
- *     `same_diagnostic_streak` misses; drives the hard-recurrence cut.
+ * The result of folding one turn into the stall detectors: the updated
+ * `state`, whether detection is `enabled`, the `warning` (if any) this turn
+ * tripped, whether its feedback was deferred, the resolved `config`, and
+ * whether the run should `hard_stop`.
  */
 type AgentStallObservation = {
   state: AgentStallState,
@@ -1106,6 +1112,74 @@ fn __agent_stall_register_recovery(state: AgentStallState) -> AgentStallState {
 }
 
 /**
+ * Build an ENABLED `AgentStallObservation` from an already-folded `state`.
+ * `hard_stop` always mirrors `state.hard_stop` (the trip/recovery helpers are
+ * the sole authority on it), so callers pass the post-fold state and never
+ * re-derive the flag. The `config.enabled == false` short-circuit is the one
+ * observation that is NOT built here — it returns the untouched incoming state
+ * with `enabled: false`.
+ */
+fn __agent_stall_observation(
+  state: AgentStallState,
+  warning,
+  config: AgentStallConfig,
+  feedback_deferred: bool,
+) -> AgentStallObservation {
+  return {
+    state: state,
+    enabled: true,
+    warning: warning,
+    feedback_deferred: feedback_deferred,
+    config: config,
+    hard_stop: state.hard_stop,
+  }
+}
+
+/**
+ * Emit one diagnostic-trip warning and fold it into the observation. Shared by
+ * the three repair-overlay trips in `__agent_stall_apply_repair`
+ * (`no_net_progress_hard_cap`, `delivered_fix_not_landing`,
+ * `stuck_same_diagnostic`), which differ only in the already-`tripped` state,
+ * the pattern/count/threshold diagnostic fields, and whether the
+ * `remediation_delivered` marker is set.
+ */
+fn __agent_stall_emit_diagnostic_trip(
+  session_id: string,
+  config: AgentStallConfig,
+  tripped: AgentStallState,
+  iteration: int,
+  pattern: string,
+  count: int,
+  threshold: int,
+  defer_feedback: bool,
+  remediation_delivered = false,
+) -> AgentStallObservation {
+  var warning = __agent_stall_warning_record(
+    iteration,
+    "",
+    {},
+    tripped.last_diagnostic_signature,
+    pattern,
+    count,
+    tripped.consecutive_trips,
+    tripped.hard_stop,
+    config,
+    threshold,
+  )
+    + {
+    diagnostic_class: tripped.last_diagnostic_class,
+    diagnostic_signature: tripped.last_diagnostic_signature,
+    diagnostic_snippet: tripped.last_diagnostic_snippet,
+  }
+  if remediation_delivered {
+    warning = warning + {remediation_delivered: true}
+  }
+  let emitted = __agent_stall_maybe_emit(session_id, warning, config, tripped, defer_feedback)
+  let next_state = emitted.state + {warnings: emitted.state.warnings.push(warning)}
+  return __agent_stall_observation(next_state, warning, config, emitted.feedback_deferred ?? false)
+}
+
+/**
  * Detect a no-progress monologue turn (assistant produced text but no tool
  * call). Returns the observation when the streak crosses the threshold.
  */
@@ -1122,14 +1196,7 @@ fn __agent_stall_observe_no_progress(
   next_state = next_state + {no_progress_streak: next_state.no_progress_streak + 1}
   if next_state.no_progress_streak < config.no_progress_messages {
     next_state = __agent_stall_register_recovery(next_state)
-    return {
-      state: next_state,
-      enabled: true,
-      warning: nil,
-      feedback_deferred: false,
-      config: config,
-      hard_stop: false,
-    }
+    return __agent_stall_observation(next_state, nil, config, false)
   }
   next_state = __agent_stall_register_trip(next_state, config)
   // A turn that ended with a provider error (stop_reason=error) but emitted no
@@ -1156,14 +1223,7 @@ fn __agent_stall_observe_no_progress(
   )
   let emitted = __agent_stall_maybe_emit(session_id, warning, config, next_state, defer_feedback)
   next_state = emitted.state + {warnings: emitted.state.warnings.push(warning)}
-  return {
-    state: next_state,
-    enabled: true,
-    warning: warning,
-    feedback_deferred: emitted.feedback_deferred ?? false,
-    config: config,
-    hard_stop: next_state.hard_stop,
-  }
+  return __agent_stall_observation(next_state, warning, config, emitted.feedback_deferred ?? false)
 }
 
 /**
@@ -1371,14 +1431,12 @@ fn __agent_stall_observe_core(
   // model to "emit one well-formed tool call" when it already did, just with a
   // malformed body. Gated purely on the syntactic parse-error signal.
   if had_parse_errors {
-    return {
-      state: __agent_stall_register_recovery(__agent_stall_reset_action(state)),
-      enabled: true,
-      warning: nil,
-      feedback_deferred: false,
-      config: config,
-      hard_stop: false,
-    }
+    return __agent_stall_observation(
+      __agent_stall_register_recovery(__agent_stall_reset_action(state)),
+      nil,
+      config,
+      false,
+    )
   }
   // Soft progress-report tools (e.g. `agent_progress`) report status without
   // advancing task state, so they are excluded from the real-action stream: a
@@ -1400,14 +1458,12 @@ fn __agent_stall_observe_core(
         turn_stop_reason,
       )
     }
-    return {
-      state: __agent_stall_register_recovery(__agent_stall_reset_action(state)),
-      enabled: true,
-      warning: nil,
-      feedback_deferred: false,
-      config: config,
-      hard_stop: false,
-    }
+    return __agent_stall_observation(
+      __agent_stall_register_recovery(__agent_stall_reset_action(state)),
+      nil,
+      config,
+      false,
+    )
   }
   var next_state = state + {no_progress_streak: 0}
   var emitted_warning = nil
@@ -1446,14 +1502,7 @@ fn __agent_stall_observe_core(
       next_state = __agent_stall_register_recovery(next_state)
     }
   }
-  return {
-    state: next_state,
-    enabled: true,
-    warning: emitted_warning,
-    feedback_deferred: feedback_deferred,
-    config: config,
-    hard_stop: next_state.hard_stop,
-  }
+  return __agent_stall_observation(next_state, emitted_warning, config, feedback_deferred)
 }
 
 /**
@@ -1490,33 +1539,16 @@ fn __agent_stall_apply_repair(
     && observation.state.failing_verify_turns < config.no_net_progress_hard_cap_after
   if hard_cap_due {
     let tripped = __agent_stall_register_immediate_hard_stop(folded)
-    let warning = __agent_stall_warning_record(
+    return __agent_stall_emit_diagnostic_trip(
+      session_id,
+      config,
+      tripped,
       iteration,
-      "",
-      {},
-      tripped.last_diagnostic_signature,
       "no_net_progress_hard_cap",
       tripped.failing_verify_turns,
-      tripped.consecutive_trips,
-      true,
-      config,
       config.no_net_progress_hard_cap_after,
+      defer_feedback,
     )
-      + {
-      diagnostic_class: tripped.last_diagnostic_class,
-      diagnostic_signature: tripped.last_diagnostic_signature,
-      diagnostic_snippet: tripped.last_diagnostic_snippet,
-    }
-    let emitted = __agent_stall_maybe_emit(session_id, warning, config, tripped, defer_feedback)
-    let next_state = emitted.state + {warnings: emitted.state.warnings.push(warning)}
-    return {
-      state: next_state,
-      enabled: true,
-      warning: warning,
-      feedback_deferred: emitted.feedback_deferred ?? false,
-      config: config,
-      hard_stop: true,
-    }
   }
   // Delivered-fix trigger (#burin-cutover seam 3, HIGHEST precedence). When the
   // host supplies a `remediation_delivered` fact callback and reports that a
@@ -1543,34 +1575,17 @@ fn __agent_stall_apply_repair(
     )
     if delivered {
       let tripped = __agent_stall_register_trip(folded, config)
-      let warning = __agent_stall_warning_record(
+      return __agent_stall_emit_diagnostic_trip(
+        session_id,
+        config,
+        tripped,
         iteration,
-        "",
-        {},
-        tripped.last_diagnostic_signature,
         "delivered_fix_not_landing",
         tripped.same_diagnostic_streak,
-        tripped.consecutive_trips,
-        tripped.hard_stop,
-        config,
         STALL_DELIVERED_FIX_AFTER,
+        defer_feedback,
+        true,
       )
-        + {
-        diagnostic_class: tripped.last_diagnostic_class,
-        diagnostic_signature: tripped.last_diagnostic_signature,
-        diagnostic_snippet: tripped.last_diagnostic_snippet,
-        remediation_delivered: true,
-      }
-      let emitted = __agent_stall_maybe_emit(session_id, warning, config, tripped, defer_feedback)
-      let next_state = emitted.state + {warnings: emitted.state.warnings.push(warning)}
-      return {
-        state: next_state,
-        enabled: true,
-        warning: warning,
-        feedback_deferred: emitted.feedback_deferred ?? false,
-        config: config,
-        hard_stop: next_state.hard_stop,
-      }
     }
   }
   if !config.repair_aware {
@@ -1592,33 +1607,16 @@ fn __agent_stall_apply_repair(
     return observation + {state: folded}
   }
   let tripped = __agent_stall_register_trip(folded, config)
-  let warning = __agent_stall_warning_record(
+  return __agent_stall_emit_diagnostic_trip(
+    session_id,
+    config,
+    tripped,
     iteration,
-    "",
-    {},
-    tripped.last_diagnostic_signature,
     "stuck_same_diagnostic",
     tripped.same_diagnostic_streak,
-    tripped.consecutive_trips,
-    tripped.hard_stop,
-    config,
     config.stuck_same_diagnostic_after,
+    defer_feedback,
   )
-    + {
-    diagnostic_class: tripped.last_diagnostic_class,
-    diagnostic_signature: tripped.last_diagnostic_signature,
-    diagnostic_snippet: tripped.last_diagnostic_snippet,
-  }
-  let emitted = __agent_stall_maybe_emit(session_id, warning, config, tripped, defer_feedback)
-  let next_state = emitted.state + {warnings: emitted.state.warnings.push(warning)}
-  return {
-    state: next_state,
-    enabled: true,
-    warning: warning,
-    feedback_deferred: emitted.feedback_deferred ?? false,
-    config: config,
-    hard_stop: next_state.hard_stop,
-  }
 }
 
 /**

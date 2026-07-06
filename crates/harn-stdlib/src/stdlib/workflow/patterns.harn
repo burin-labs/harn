@@ -78,6 +78,24 @@ fn __patterns_stage_node(config, key, defaults) {
 }
 
 /**
+ * Build the standard `verify` stage node shared by every verify-bearing
+ * pattern graph (self-verifying, command-verify, verification-only). Keeps the
+ * `kind`/`mode`/`verify`/`output_contract` defaults in one place.
+ */
+fn __patterns_verify_node(cfg) {
+  return __patterns_stage_node(
+    cfg,
+    "verify",
+    {
+      kind: "verify",
+      mode: cfg?.verify_mode ?? "command",
+      verify: cfg?.verify ?? {},
+      output_contract: __patterns_output_contract(cfg?.verify_output_kind ?? "verification_result", cfg?.verify_node),
+    },
+  )
+}
+
+/**
  * Build a one-stage graph that runs an acting stage and then a verify stage.
  *
  * @effects: []
@@ -98,16 +116,7 @@ pub fn workflow_self_verifying_graph(config = nil) {
       output_contract: __patterns_output_contract(cfg?.act_output_kind ?? "draft", cfg?.act),
     },
   )
-  let verify = __patterns_stage_node(
-    cfg,
-    "verify",
-    {
-      kind: "verify",
-      mode: cfg?.verify_mode ?? "command",
-      verify: cfg?.verify ?? {},
-      output_contract: __patterns_output_contract(cfg?.verify_output_kind ?? "verification_result", cfg?.verify_node),
-    },
-  )
+  let verify = __patterns_verify_node(cfg)
   return workflow_graph(
     {
       name: cfg?.name ?? "self_verifying",
@@ -144,16 +153,7 @@ pub fn workflow_command_verify_graph(config = nil) {
       output_contract: __patterns_output_contract(cfg?.implement_output_kind ?? "draft", cfg?.implement),
     },
   )
-  let verify = __patterns_stage_node(
-    cfg,
-    "verify",
-    {
-      kind: "verify",
-      mode: cfg?.verify_mode ?? "command",
-      verify: cfg?.verify ?? {},
-      output_contract: __patterns_output_contract(cfg?.verify_output_kind ?? "verification_result", cfg?.verify_node),
-    },
-  )
+  let verify = __patterns_verify_node(cfg)
   let repair_policy = __patterns_dict(cfg?.repair_model_policy)
   let repair = __patterns_stage_node(
     cfg,
@@ -243,16 +243,7 @@ pub fn workflow_repair_stage_graph(config = nil) {
 pub fn workflow_verification_only_graph(config = nil) {
   let cfg = __patterns_dict(config)
   let verify_id = __patterns_non_empty_string(cfg?.verify_id) ?? "verify"
-  let verify = __patterns_stage_node(
-    cfg,
-    "verify",
-    {
-      kind: "verify",
-      mode: cfg?.verify_mode ?? "command",
-      verify: cfg?.verify ?? {},
-      output_contract: __patterns_output_contract(cfg?.verify_output_kind ?? "verification_result", cfg?.verify_node),
-    },
-  )
+  let verify = __patterns_verify_node(cfg)
   return workflow_graph(
     {name: cfg?.name ?? "verification_only", entry: verify_id, nodes: {[verify_id]: verify}, edges: []},
   )

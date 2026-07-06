@@ -381,6 +381,18 @@ pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Resul
         {
             return reject_policy(format!("builtin '{name}' exceeds process.exec ceiling"));
         }
+        // `__files_upload` needs a stricter workspace.read_text + network
+        // ceiling, so it stays a distinct arm ahead of the shared network arm
+        // below (its name never overlaps the network patterns, so ordering is
+        // immaterial to correctness).
+        "__files_upload"
+            if !policy_allows_capability(&policy, "workspace", "read_text")
+                || !policy_allows_side_effect(&policy, "network") =>
+        {
+            return reject_policy(
+                "builtin '__files_upload' exceeds workspace.read_text/network ceiling".to_string(),
+            );
+        }
         "http_get"
         | "http_post"
         | "http_put"
@@ -390,19 +402,7 @@ pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Resul
         | "http_request"
         | "unix_socket_json_request"
         | "__net_unix_socket_json_request"
-            if !policy_allows_side_effect(&policy, "network") =>
-        {
-            return reject_policy(format!("builtin '{name}' exceeds network ceiling"));
-        }
-        "__files_upload"
-            if !policy_allows_capability(&policy, "workspace", "read_text")
-                || !policy_allows_side_effect(&policy, "network") =>
-        {
-            return reject_policy(
-                "builtin '__files_upload' exceeds workspace.read_text/network ceiling".to_string(),
-            );
-        }
-        "http_session_request"
+        | "http_session_request"
         | "http_stream_open"
         | "http_stream_read"
         | "http_stream_close"

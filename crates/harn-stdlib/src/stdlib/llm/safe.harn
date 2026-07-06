@@ -218,17 +218,19 @@ pub fn parse_first_json(text) {
 }
 
 /**
- * Try-wrap llm_call into the canonical envelope shape:
+ * Fold the outcome of a `try { llm_call(...) }` into the canonical caller
+ * envelope:
  * {ok: true, value: <llm dict>} on success
- * {ok: false, status: <"budget_exhausted" | "exception">, error?} on error.
+ * {ok: false, status: <"budget_exhausted" | "exception">, error} on error.
  *
- * @effects: [llm.call]
+ * The underlying `error` is ALWAYS attached on the failure paths so budget /
+ * exception context is never dropped. Shared by `safe_call` and
+ * `std/llm/handlers::default_llm_caller` so the two stay byte-identical.
+ *
+ * @effects: []
  * @errors: []
  */
-pub fn safe_call(prompt, system, options) {
-  let result = try {
-    llm_call(prompt, system, options)
-  }
+pub fn __wrap_llm_result(result) {
   if !is_err(result) {
     return {ok: true, value: unwrap(result)}
   }
@@ -242,6 +244,20 @@ pub fn safe_call(prompt, system, options) {
     return {ok: false, status: "budget_exhausted", error: err}
   }
   return {ok: false, status: "exception", error: err}
+}
+
+/**
+ * Try-wrap llm_call into the canonical envelope shape:
+ * {ok: true, value: <llm dict>} on success
+ * {ok: false, status: <"budget_exhausted" | "exception">, error} on error.
+ *
+ * @effects: [llm.call]
+ * @errors: []
+ */
+pub fn safe_call(prompt, system, options) {
+  return __wrap_llm_result(try {
+    llm_call(prompt, system, options)
+  })
 }
 
 /**

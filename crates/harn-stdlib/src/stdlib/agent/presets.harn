@@ -382,7 +382,7 @@ fn __reasoning_task_for_kind(kind) {
   return "agent"
 }
 
-fn __default_budget_for_kind(kind) {
+fn __default_iteration_budget_for_kind(kind) {
   if kind == "audit" {
     return {mode: "adaptive", initial: 4, max: 12, extend_by: 2}
   }
@@ -418,7 +418,7 @@ fn __resolve_iteration_budget(kind, opts) {
     if type_of(raw) == "string" {
       // Sugar: `iteration_budget: "adaptive"` keeps the kind's defaults
       // but forces adaptive mode.
-      let defaults = __default_budget_for_kind(kind)
+      let defaults = __default_iteration_budget_for_kind(kind)
       return defaults + {mode: raw}
     }
     return raw
@@ -426,7 +426,7 @@ fn __resolve_iteration_budget(kind, opts) {
   if __has_key(opts, "max_iterations") {
     return nil
   }
-  return __default_budget_for_kind(kind)
+  return __default_iteration_budget_for_kind(kind)
 }
 
 fn __turn_policy_for_kind(kind, opts) {
