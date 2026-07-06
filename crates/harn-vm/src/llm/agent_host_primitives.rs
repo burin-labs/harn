@@ -283,33 +283,54 @@ fn agent_primitive_denied_tool(
     })
 }
 
-/// Cause-named feedback for a tool call whose arguments arrived EMPTY
-/// (`{}` or null) and failed required-parameter validation.
+/// Cause-named feedback for a tool call whose arguments failed validation
+/// because of an argument-DELIVERY fault — the model authored a real call, but
+/// what reached dispatch is not what it wrote. Two classes, both of which the
+/// generic "missing required parameter(s): path" message misdiagnoses as a
+/// model slip and sends into re-call loops:
 ///
-/// Observed live on the OpenAI-compatible native tool-call route
-/// (an IDE host bug report): 13/165 edit calls arrived with literally `{}` arguments
-/// while the model generated 549–5,056 output tokens those turns — the model
-/// authored content, but the provider boundary delivered an empty-args call.
-/// The generic "missing required parameter(s): path" message misdiagnoses
-/// that as a model slip and sends it into re-call loops. Name the actual
-/// cause instead, keyed off the turn's provider stop reason:
+/// 1. A `{"__parse_error": "..."}` carrier — the streamed-argument parser
+///    could not reassemble the call. Split on the parser diagnostic
+///    (`parse_error_carrier_feedback`): a truncation (`EOF while parsing` /
+///    `unexpected end of input`) coaches a smaller re-issue; any other parse
+///    fault coaches a clean re-issue as valid JSON.
+/// 2. EMPTY arguments (`{}` or null). Observed live on the OpenAI-compatible
+///    native tool-call route (an IDE host bug report): 13/165 edit calls
+///    arrived with literally `{}` arguments while the model generated
+///    549–5,056 output tokens those turns — the model authored content, but
+///    the provider boundary delivered an empty-args call. Keyed off the turn's
+///    provider stop reason: length truncation (`length` / `max_tokens` /
+///    `MAX_TOKENS`) coaches a smaller re-issue; anything else is a
+///    provider/template drop coaching an identical re-issue with full args.
 ///
-/// - length truncation (`length` / `max_tokens` / `MAX_TOKENS`): the
-///   arguments were cut off by the output-token limit — coach a smaller
-///   re-issue.
-/// - anything else: the provider/template dropped the arguments — coach an
-///   identical re-issue with the full arguments.
-///
-/// Returns `None` when the call's arguments were not empty, so ordinary
-/// validation failures keep the precise missing-parameter message. The
-/// `&'static str` is a machine-readable cause (`empty_arguments_truncated` /
-/// `empty_arguments_dropped`) exposed on the dispatch envelope so hosts can
+/// Returns `None` when the arguments were delivered intact (non-empty, no
+/// carrier), so ordinary validation failures keep the precise
+/// missing-parameter message. The `&'static str` is a machine-readable cause
+/// (`arguments_truncated` / `arguments_malformed` / `empty_arguments_truncated`
+/// / `empty_arguments_dropped`) exposed on the dispatch envelope so hosts can
 /// distinguish the class without string-matching the reason.
-fn empty_args_cause_named_feedback(
+fn arg_delivery_fault_feedback(
     tool_name: &str,
     raw_args: &serde_json::Value,
     stop_reason: Option<&str>,
 ) -> Option<(String, &'static str)> {
+    // A `{"__parse_error": "..."}` carrier is the streamed-argument parser's
+    // signal that it could NOT reassemble the tool call's arguments and handed
+    // dispatch a placeholder instead of what the model authored (see
+    // `parse_openai_streamed_tool_argument_values` /
+    // `parse_anthropic_streamed_tool_input`). Left alone it fails required-arg
+    // validation and reports the misdiagnosing "missing required parameter:
+    // path" — a lie, because the model DID write `path`; the stream was cut
+    // mid-value or the arguments were not valid JSON. This is the non-empty
+    // sibling of the empty-args fault below, so it is named here before the
+    // emptiness check (which the carrier object would otherwise fall through).
+    // Observed live on llamacpp qwen3.6-35b: a truncated `edit(create)` carrier
+    // spun 21 llm calls to an idle turn with no reply.
+    if let serde_json::Value::Object(map) = raw_args {
+        if let Some(parse_error) = map.get("__parse_error").and_then(|v| v.as_str()) {
+            return Some(parse_error_carrier_feedback(tool_name, parse_error));
+        }
+    }
     let args_empty = match raw_args {
         serde_json::Value::Null => true,
         serde_json::Value::Object(map) => map.is_empty(),
@@ -339,6 +360,54 @@ fn empty_args_cause_named_feedback(
             "empty_arguments_dropped",
         ))
     }
+}
+
+/// Cause-named feedback for a tool call whose arguments could not be parsed and
+/// arrived as a `{"__parse_error": "..."}` carrier. Splits on the parser
+/// diagnostic:
+///
+/// - a TRUNCATION (`EOF while parsing` / `unexpected end of input`): the
+///   streamed arguments were cut off mid-value — the model authored a valid
+///   call, but the response ended before the arguments finished. Coach a
+///   smaller re-issue, exactly like the length-truncation empty-args case; the
+///   parser diagnostic is the authoritative signal here because the provider
+///   often does NOT flag this with `finish_reason=length` (observed on
+///   llamacpp: the stream stops mid-tool-call with a clean stop reason).
+/// - anything else (unquoted keys, trailing garbage, wrong dialect): a genuine
+///   formatting fault. Coach a clean re-issue as valid JSON. This is the
+///   negative control — a malformed call is NEVER silently accepted or
+///   mislabeled as a recoverable truncation.
+fn parse_error_carrier_feedback(tool_name: &str, parse_error: &str) -> (String, &'static str) {
+    if parse_error_is_truncation(parse_error) {
+        (
+            format!(
+                "Tool '{tool_name}' arguments could NOT be parsed because the tool call was \
+                 TRUNCATED mid-stream — the arguments JSON ended before it was complete. This \
+                 is NOT a missing-parameter slip: you did author the arguments, but the \
+                 response was cut off before they finished. Re-issue the call with shorter \
+                 content, or split the change into several smaller calls so the arguments fit \
+                 in one response."
+            ),
+            "arguments_truncated",
+        )
+    } else {
+        (
+            format!(
+                "Tool '{tool_name}' arguments could NOT be parsed as valid JSON. Re-issue the \
+                 call as one complete, well-formed JSON object with the required parameters."
+            ),
+            "arguments_malformed",
+        )
+    }
+}
+
+/// True when a streamed-argument `__parse_error` message describes a buffer that
+/// ended mid-value — a cut-off stream, not a dialect error. Keys on the two
+/// diagnostics the JSON and Harn text-tool parsers emit for an incomplete tail
+/// (`serde_json`'s "EOF while parsing ..." and the text-tool "unexpected end of
+/// input"), so a truncation is recognized regardless of which parser ran last.
+fn parse_error_is_truncation(parse_error: &str) -> bool {
+    parse_error.contains("EOF while parsing") || parse_error.contains("unexpected end of input")
 }
 
 /// Execution-policy gate for one tool dispatch: the tool/capability/
@@ -1549,13 +1618,15 @@ pub(super) async fn host_agent_dispatch_tool_call(
 
     let tool_schemas = tools::collect_tool_schemas(tools, None);
     if let Err(message) = tools::validate_tool_args(&tool_name, &tool_args, &tool_schemas) {
-        // Empty-args calls (`{}` / null arguments) are a provider-boundary
-        // fault class, not a model slip — replace the misdiagnosing
-        // missing-parameter message with cause-named feedback keyed off the
-        // turn's provider stop reason (threaded in by the agent loop as
-        // `_stop_reason`). See `empty_args_cause_named_feedback`.
+        // Argument-DELIVERY faults — a `{"__parse_error": "..."}` carrier from
+        // the streamed-arg parser, or empty (`{}` / null) arguments — are a
+        // provider-boundary fault class, not a model slip. Replace the
+        // misdiagnosing missing-parameter message with cause-named feedback
+        // (keyed off the parser diagnostic and the turn's provider stop reason,
+        // threaded in by the agent loop as `_stop_reason`). See
+        // `arg_delivery_fault_feedback`.
         let turn_stop_reason = agent_primitive_option_str(options, "_stop_reason");
-        let cause_named = empty_args_cause_named_feedback(
+        let cause_named = arg_delivery_fault_feedback(
             &tool_name,
             // Re-derive the pre-normalization JSON args lazily: this failure
             // path is the only late consumer, and `call` is still in scope.
@@ -2746,12 +2817,12 @@ mod denied_tool_routing_tests {
         }
     }
 
-    use super::empty_args_cause_named_feedback;
+    use super::arg_delivery_fault_feedback;
 
     #[test]
     fn empty_args_with_length_truncation_names_the_truncation_cause() {
         let (reason, cause) =
-            empty_args_cause_named_feedback("edit", &serde_json::json!({}), Some("length"))
+            arg_delivery_fault_feedback("edit", &serde_json::json!({}), Some("length"))
                 .expect("empty args must be cause-named");
         assert_eq!(cause, "empty_arguments_truncated");
         assert!(
@@ -2768,7 +2839,7 @@ mod denied_tool_routing_tests {
         );
         // Anthropic spelling and provider casing route to the same cause.
         let (_, cause) =
-            empty_args_cause_named_feedback("edit", &serde_json::Value::Null, Some("MAX_TOKENS"))
+            arg_delivery_fault_feedback("edit", &serde_json::Value::Null, Some("MAX_TOKENS"))
                 .expect("null args must be cause-named");
         assert_eq!(cause, "empty_arguments_truncated");
     }
@@ -2777,7 +2848,7 @@ mod denied_tool_routing_tests {
     fn empty_args_with_clean_stop_names_the_provider_fault_cause() {
         for stop_reason in [Some("stop"), Some("tool_calls"), None] {
             let (reason, cause) =
-                empty_args_cause_named_feedback("edit", &serde_json::json!({}), stop_reason)
+                arg_delivery_fault_feedback("edit", &serde_json::json!({}), stop_reason)
                     .expect("empty args must be cause-named");
             assert_eq!(cause, "empty_arguments_dropped");
             assert!(
@@ -2791,10 +2862,68 @@ mod denied_tool_routing_tests {
         }
     }
 
+    // REAL captured bytes from a live llamacpp qwen3.6-35b turn
+    // (burin-examples/swift conversation 1b42844f): the model authored an
+    // `edit(action=create, content=<large file>)` call whose native
+    // `function.arguments` stream was cut mid-`content`, so the streamed-arg
+    // parser handed dispatch a `{"__parse_error": "..."}` carrier. Validation
+    // then reported "missing required parameter: path" and the model, told to
+    // "re-call with path" (which it HAD supplied), re-issued the same oversized
+    // edit and truncated again — 21 llm calls, 28 failed tool calls, idle with
+    // no visible reply. The carrier must be named as a truncation, not a slip.
+    const CAPTURED_TRUNCATION_CARRIER: &str = "Could not parse streamed tool arguments as JSON \
+        or Harn text-tool arguments: JSON error: EOF while parsing a value at line 1 column 1401; \
+        Harn text-tool error: TOOL CALL PARSE ERROR: `edit{...}` — unexpected end of input. Tool \
+        arguments must be a TypeScript object literal. Raw: {\"path\":\"Sources/SysMonCore/\
+        Providers/LiveSystemProvider.swift\",\"action\":\"create\",\"content\":\"import Foundation";
+
+    #[test]
+    fn truncated_toolcall_carrier_names_the_truncation_not_a_missing_param() {
+        let carrier = serde_json::json!({ "__parse_error": CAPTURED_TRUNCATION_CARRIER });
+        let (reason, cause) = arg_delivery_fault_feedback("edit", &carrier, Some("tool_calls"))
+            .expect("a __parse_error carrier must be cause-named, not left to the validator");
+        assert_eq!(cause, "arguments_truncated");
+        assert!(
+            reason.contains("TRUNCATED") || reason.contains("cut off"),
+            "the carrier must be named as a truncated call: {reason}"
+        );
+        assert!(
+            reason.contains("shorter") || reason.contains("split") || reason.contains("smaller"),
+            "truncation feedback must coach a smaller re-issue: {reason}"
+        );
+        assert!(
+            !reason.contains("missing required parameter"),
+            "must NOT repeat the misdiagnosing missing-parameter message: {reason}"
+        );
+    }
+
+    #[test]
+    fn malformed_toolcall_carrier_stays_a_clean_parse_error() {
+        // A genuinely malformed (non-truncation) carrier must NOT be silently
+        // accepted or mislabeled as a truncation — it stays a clean parse error
+        // coaching valid JSON. Negative control against over-permissive repair.
+        let carrier = serde_json::json!({
+            "__parse_error": "Could not parse streamed tool arguments as JSON or Harn \
+                text-tool arguments: JSON error: key must be a string at line 1 column 5. \
+                Raw input: {path: not-json @#$}"
+        });
+        let (reason, cause) = arg_delivery_fault_feedback("edit", &carrier, None)
+            .expect("a malformed carrier is still a named parse fault");
+        assert_eq!(cause, "arguments_malformed");
+        assert!(
+            !reason.contains("TRUNCATED"),
+            "a non-EOF parse error must not be labeled a truncation: {reason}"
+        );
+        assert!(
+            reason.contains("JSON"),
+            "malformed feedback must coach valid JSON: {reason}"
+        );
+    }
+
     #[test]
     fn non_empty_args_keep_the_precise_validator_message() {
         assert!(
-            empty_args_cause_named_feedback(
+            arg_delivery_fault_feedback(
                 "edit",
                 &serde_json::json!({ "content": "x" }),
                 Some("length")
