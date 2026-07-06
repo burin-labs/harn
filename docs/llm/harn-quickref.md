@@ -2136,6 +2136,26 @@ For model-facing loops, set `progress_tool: true` or pass a dict to customize
 the tool name, description, or system-prompt nudge. Call it after observable
 progress, not on a timer.
 
+`agent_input_guardrail(classifier?, options?)` from `std/agent/guardrails`
+builds the input-side bookend to `agent_completion_gate`. Spread the returned
+bundle into `agent_loop` options to run a cheap classifier before the first main
+model turn. A tripwire emits `input_guardrail_verdict`, records a zero-token
+assistant explanation, and returns `status: "input_guardrail"` with
+`stop_reason: "input_guardrail_tripwire"`.
+
+```harn
+import { agent_input_guardrail } from "std/agent/guardrails"
+
+agent_loop(task, system, base_opts + agent_input_guardrail(
+  { payload -> return cheap_policy_classifier(payload.user_message) },
+  {confidence_threshold: 0.8},
+))
+```
+
+Use `agent_input_guardrail_check(task, classifier?, options?)` when a script
+wants an explicit `{tripwire, reason, label, confidence}` preflight verdict
+instead of composing with `agent_loop`.
+
 Pass `done_judge: true` or `done_judge: {...}` to run a structured
 completion judge after a native-tool loop naturally completes or after
 the model emits `##DONE##` in a sentinel loop.

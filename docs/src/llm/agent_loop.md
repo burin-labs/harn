@@ -93,7 +93,7 @@ top-level keys before `v0.8`).
 
 | Field | Type | Description |
 |---|---|---|
-| `status` | string | Terminal state: `"done"` (natural completion), `"suspended"` (worker yielded at a cooperative suspend checkpoint), `"stuck"` (exceeded `max_nudges` consecutive text-only turns), `"budget_exhausted"` (hit `max_iterations` without any explicit break), `"verify_capped"` (a structured completion-judge veto cap was reached; see `stop_reason: "completion_judge_cap_reached"` or `"done_judge_cap_reached"`), `"provider_error"` (provider/tool-protocol request failed and was captured in `error`), `"idle"` (daemon yielded with no remaining wake source), `"watchdog"` (daemon idle-wait tripped the `idle_watchdog_attempts` limit), or `"failed"` (`require_successful_tools` not satisfied). |
+| `status` | string | Terminal state: `"done"` (natural completion), `"input_guardrail"` (a configured input guardrail tripped before the first main model turn), `"suspended"` (worker yielded at a cooperative suspend checkpoint), `"stuck"` (exceeded `max_nudges` consecutive text-only turns), `"budget_exhausted"` (hit `max_iterations` without any explicit break), `"verify_capped"` (a structured completion-judge veto cap was reached; see `stop_reason: "completion_judge_cap_reached"` or `"done_judge_cap_reached"`), `"provider_error"` (provider/tool-protocol request failed and was captured in `error`), `"idle"` (daemon yielded with no remaining wake source), `"watchdog"` (daemon idle-wait tripped the `idle_watchdog_attempts` limit), or `"failed"` (`require_successful_tools` not satisfied). |
 | `error` | dict or nil | Structured terminal failure for provider/tool-protocol failures: `{category, reason, kind, provider, model, message, phase, tool_format, after_tool_result}`. `after_tool_result` is true when the rejected model request included prior tool observations. |
 | `text` | string | Accumulated text output from all iterations |
 | `visible_text` | string | Human-visible accumulated output |
@@ -401,6 +401,7 @@ Same as `llm_call`, plus additional options:
 | `verify_completion_judge` | bool/dict | nil | Built-in structured judge for any natural stop. `true` uses defaults; a dict may set `provider`, `model`, `system`, `feedback_fallback`, and `max_invocations` (alias `max_feedback`, default `5`) to cap repeated vetoes. Once the cap is hit the judge stops firing and the loop ends with status `verify_capped` and stop_reason `completion_judge_cap_reached`; set `max_invocations: 0` to disable the cap |
 | `done_judge` | bool/dict | nil | Completion structured judge. It runs when the model naturally completes a native-tool loop or emits the done sentinel, and may veto by returning `verdict: "continue"` plus `next_step` or `reasoning`. Dict configs may include `max_invocations` (alias `max_feedback`) to terminally cap repeated vetoes, plus `cadence: {every?, when?, max_invocations?, min_iterations_before_first?}` to control when the judge is due |
 | `step_judge` | dict | nil | Per-turn structured judge that runs after an assistant turn and before tool dispatch. Dict configs may include `provider`, `model`, `on_veto` (`"replace"` or `"retain"`), `max_attempts`, `skip_when_empty`, `skip_when_stalled`, and `skip_when_iterations_remaining` (default `1`, skips when no regeneration turn remains). Skips emit `step_judge_decision` with `skipped: true` |
+| `input_guardrail` | closure | nil | Pre-loop guardrail closure. It runs before the first main model turn with `{session_id, task, user_message, messages, recent_context, provider, model}` and returns `{tripwire, reason, label?, confidence?}`. A tripwire emits `input_guardrail_verdict` and stops as `status: "input_guardrail"` / `stop_reason: "input_guardrail_tripwire"` without spending the main loop turn. Build the closure with `agent_input_guardrail(...)` from `std/agent/guardrails` |
 | `llm_transcript_dir` | string | nil | Per-loop directory for Harn's existing `llm_transcript.jsonl` sidecar. This is equivalent to scoping `HARN_LLM_TRANSCRIPT_DIR` to one agent loop and is preferred when a script needs run-specific auditable model-turn JSONL |
 | `turn_policy` | dict | nil | Turn-shape policy for action stages. Supports `require_action_or_yield: bool`, `allow_done_sentinel: bool` (default `true`; set to `false` in workflow-owned action stages so nudges stop advertising the done sentinel), and `max_prose_chars: int` |
 | `native_tool_fallback` | string | `"allow"` | Native-tool-stage policy when the provider emits text-mode `<tool_call>` content instead of native tool calls. `"allow"` preserves the current recovery path, `"allow_once"` accepts the first fallback turn then rejects later repeats with corrective feedback, and `"reject"` fails closed on the first text fallback |
@@ -949,6 +950,30 @@ agent_loop(task, system, judged_opts)
 `when: "stalled"` does not fire on ordinary completion candidates. It is the
 policy hook used by stall diagnostics so completion checks happen on a signal
 rather than a fixed "are you done?" prompt.
+
+### Input guardrail (`agent_input_guardrail`)
+
+`agent_input_guardrail(classifier?, options?)` (from `std/agent/guardrails`)
+builds the input-side bookend for `agent_completion_gate`: a cheap classifier
+that runs before the first main `agent_loop` model turn. The returned bundle
+spreads into loop options as `input_guardrail`. A tripwire records an
+`input_guardrail_verdict` event, writes a zero-token assistant explanation, and
+stops the loop with `status: "input_guardrail"` and
+`stop_reason: "input_guardrail_tripwire"`.
+
+```harn,ignore
+import { agent_input_guardrail } from "std/agent/guardrails"
+
+let guardrail_opts = agent_input_guardrail(
+  { payload -> return cheap_policy_classifier(payload.user_message) },
+  {confidence_threshold: 0.8},
+)
+agent_loop(task, system, base_opts + guardrail_opts)
+```
+
+For scripts that want an explicit preflight verdict instead of loop composition,
+use `agent_input_guardrail_check(task, classifier?, options?)`, which returns the
+same `{tripwire, reason, label, confidence}` shape.
 
 ### Completion gate (`agent_completion_gate`)
 

@@ -1248,6 +1248,34 @@ impl AgentEventSink for AcpAgentEventSink {
                     }),
                 );
             }
+            AgentEvent::InputGuardrailVerdict {
+                session_id,
+                iteration,
+                tripwire,
+                reason,
+                label,
+                confidence,
+                confidence_threshold,
+                classifier_kind,
+                model,
+                error,
+            } => {
+                self.emit_agent_event_ext(
+                    "input_guardrail_verdict",
+                    session_id,
+                    serde_json::json!({
+                        "iteration": iteration,
+                        "tripwire": tripwire,
+                        "reason": reason,
+                        "label": label,
+                        "confidence": confidence,
+                        "confidenceThreshold": confidence_threshold,
+                        "classifierKind": classifier_kind,
+                        "model": model,
+                        "error": error,
+                    }),
+                );
+            }
             AgentEvent::MissingToolCallVerdict {
                 session_id,
                 iteration,

@@ -8,6 +8,10 @@ import {
 } from "std/agent/control"
 import { agent_daemon_snapshot, agent_daemon_step } from "std/agent/daemon"
 import {
+  __agent_input_guardrail_fail_open,
+  __agent_input_guardrail_normalize,
+} from "std/agent/guardrails"
+import {
   agent_done_judge_cap,
   agent_verify_completion_judge_cap,
   agent_verify_or_continue,
@@ -3160,6 +3164,89 @@ fn __scope_classifier_fail_open(session_id, iteration, err) {
   }
 }
 
+fn __run_input_guardrail(guardrail, session, message, turn_opts, iteration_index) {
+  if guardrail == nil || iteration_index != 0 {
+    return nil
+  }
+  let iteration = iteration_index + 1
+  let messages = agent_session_messages(session.session_id)
+  let payload = {
+    session_id: session.session_id,
+    session: {id: session.session_id},
+    iteration: iteration,
+    user_message: message,
+    task: session?.task ?? message,
+    messages: messages,
+    recent_context: __scope_classifier_recent_context(messages, 3),
+    provider: turn_opts?.provider ?? "",
+    model: turn_opts?.model ?? "",
+  }
+  let outcome = try {
+    guardrail(payload)
+  }
+  let verdict = if is_err(outcome) {
+    let err = unwrap_err(outcome)
+    if __agent_error_must_propagate(err) {
+      throw err
+    }
+    __agent_input_guardrail_fail_open(err, nil, {session_id: session.session_id, iteration: iteration})
+  } else {
+    __agent_input_guardrail_normalize(
+      unwrap(outcome),
+      nil,
+      {session_id: session.session_id, iteration: iteration},
+    )
+  }
+  agent_emit_event(session.session_id, "input_guardrail_verdict", verdict)
+  return verdict
+}
+
+fn __input_guardrail_assistant_text(verdict) {
+  let reason = trim(to_string(verdict?.reason ?? ""))
+  if reason == "" {
+    return "Input guardrail stopped this request before the agent loop."
+  }
+  return "Input guardrail stopped this request before the agent loop: " + reason
+}
+
+fn __input_guardrail_record_skip_turn(session, verdict, iteration_index) {
+  let text = __input_guardrail_assistant_text(verdict)
+  agent_session_record_assistant(
+    session.session_id,
+    {
+      text: text,
+      visible_text: text,
+      provider: "harn",
+      model: "input_guardrail",
+      input_tokens: 0,
+      output_tokens: 0,
+      input_guardrail_verdict: verdict,
+    },
+  )
+  agent_emit_event(
+    session.session_id,
+    "iteration_end",
+    {
+      iteration: iteration_index + 1,
+      iteration_info: __iteration_info_payload(
+        {
+          text: text,
+          visible_text: text,
+          provider: "harn",
+          model: "input_guardrail",
+          input_tokens: 0,
+          output_tokens: 0,
+        },
+        0,
+        text,
+      )
+        + {dispatch_skipped: true, skip_reason: "input_guardrail_tripwire", input_guardrail_verdict: verdict},
+    },
+  )
+  let _ = __agent_loop_checkpoint(session.session_id, "iteration_end", {iteration: iteration_index + 1})
+  return text
+}
+
 fn __run_pre_turn_scope_classifier(classifier, session, message, turn_opts, iteration_index) {
   if classifier == nil {
     return nil
@@ -3663,6 +3750,20 @@ fn __agent_loop_run(message, session, initial_opts) {
         __agent_loop_checkpoint(session.session_id, "pre_compact", {iteration: iteration_index + 1})
         agent_autocompact_if_needed(session, turn_llm_opts)
         __agent_loop_checkpoint(session.session_id, "post_compact", {iteration: iteration_index + 1})
+        let input_guardrail_verdict = __run_input_guardrail(
+          turn_llm_opts?._input_guardrail ?? opts?._input_guardrail,
+          session,
+          message,
+          turn_llm_opts,
+          iteration_index,
+        )
+        if input_guardrail_verdict != nil && (input_guardrail_verdict.tripwire ?? false) {
+          __input_guardrail_record_skip_turn(session, input_guardrail_verdict, iteration_index)
+          iteration = iteration + 1
+          final_status = "input_guardrail"
+          stop_reason = "input_guardrail_tripwire"
+          break
+        }
         let scope_verdict = __run_pre_turn_scope_classifier(
           turn_llm_opts?._pre_turn_scope_classifier ?? opts?._pre_turn_scope_classifier,
           session,
