@@ -51,6 +51,29 @@ sends ACP `initialize`, and requires at least one auth method whose type
 resolves to `agent` or `terminal`; Harn's no-credential local attach flow now
 advertises the `none` method as `type: "agent"`.
 
+## External host install
+
+For users who want Harn before the registry entry lands, the canonical install
+channel is the Burin Homebrew tap:
+
+```bash
+brew tap burin-labs/burin
+brew install harn
+```
+
+External ACP hosts should spawn:
+
+```json
+{
+  "command": "harn",
+  "args": ["serve", "acp"],
+  "env": {}
+}
+```
+
+See [Use Harn from ACP editor hosts](../../docs/src/acp-editor-hosts.md) for
+Zed, JetBrains, Lumide, and smoke-test snippets.
+
 ## Submitting
 
 1. Re-verify locally against a fresh clone of `agentclientprotocol/registry`:

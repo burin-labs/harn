@@ -44,6 +44,7 @@
 - [Replay time-travel cookbook](./cookbooks/replay-time-travel.md)
 - [OAuth client + provider cookbook](./oauth.md)
 - [Debugging agent runs](./debugging.md)
+- [Use Harn from ACP editor hosts](./acp-editor-hosts.md)
 
 # Reference
 
